@@ -290,6 +290,354 @@ for _what, _clauses in (
                       f"({len(fake)}/9 notification-{_what} patterns "
                       f"fired for a spelling that exists nowhere)")
 
+# --- THE PROCESS-LEVEL ACTIVATION HANDLER, in all nine -------------
+# docs/tasks-s9-plan.md R1: a notification tapped after the app has
+# exited relaunches the process, and THAT process never called show, so
+# the one-shot table above is empty for the id that started it. The app
+# registers a PROCESS-LEVEL handler beside the one-shot one, in each
+# binding's own alert-registration idiom, and it receives the ID as well
+# as the outcome — a relaunched process has no registration to correlate
+# an id with.
+NOTIFICATION_ACTIVATION = [
+    ("rust", "crates/kaya/src/app.rs",
+     r"pub fn on_notification_activation\("),
+    ("python", "bindings/python/kaya/__init__.py",
+     r"^def on_notification_activation\("),
+    ("go", "bindings/go/app.go",
+     r"func \(a \*App\) OnNotificationActivation\("),
+    ("csharp", "bindings/csharp/KayaApp.cs",
+     r"public void OnNotificationActivation\("),
+    ("java", "bindings/java/dev/kaya/KayaApp.java",
+     r"public void onNotificationActivation\("),
+    ("swift", "bindings/swift/KayaApp.swift",
+     r"func onNotificationActivation\("),
+    ("haskell", "bindings/haskell/KayaApp.hs",
+     r"^onNotificationActivation ::"),
+    ("ocaml", "bindings/ocaml/kaya_app.ml",
+     r"^let on_notification_activation "),
+    ("js", "bindings/js/kaya/index.ts",
+     r"^export function onNotificationActivation\("),
+]
+
+check_notification_verb(NOTIFICATION_ACTIVATION,
+                        "process-level activation registrar")
+
+fake = []
+check_notification_verb([(lang, rel, r"on_kaya_fake_activation\(")
+                         for lang, rel, _ in NOTIFICATION_ACTIVATION],
+                        "process-level activation registrar", findings=fake)
+if len(fake) != 9:
+    selftest_exit(f"check-sugar-surface: self-test failed "
+                  f"({len(fake)}/9 activation-registrar patterns fired "
+                  f"for a spelling that exists nowhere)")
+
+# THE DISPATCH ORDER, read out of each binding's OWN notification_result
+# arm, and this is the clause with teeth: NO LANE CAN SEE IT. A binding
+# that consulted the process-level handler FIRST would answer a running
+# app's own show through the wrong handler and leave the one-shot
+# registration in the table for ever, while every scene — which registers
+# one or the other, never both — reads the same label back either way.
+# The third position matters as much: a drop nobody announced is R5's
+# defect class, and the announcement is the only thing that tells a
+# relaunched process's author that nothing was listening.
+#
+# Written out per binding rather than derived: nine languages spell "the
+# table, else the field, else say so" nine ways, and the arm's boundary
+# is the next occurrence branch in each.
+NOTIFICATION_ORDER = [
+    ("rust", "crates/kaya/src/app.rs",
+     r"Occurrence::NotificationResult \{",
+     r"Occurrence::FileDialogResult \{",
+     r"self\.notifications\.borrow_mut\(\)\.remove\(&notification\.0\)",
+     r"else if let Some\(f\) = self\.notification_activation\.borrow\(\)"
+     r"\.as_ref\(\)",
+     r"notification_dropped\(\*notification, \*outcome\)"),
+    ("python", "bindings/python/kaya/__init__.py",
+     r"^            if kind == wire\.OCC_NOTIFICATION_RESULT:",
+     r"^            if kind == wire\.OCC_FILE_DIALOG_RESULT:",
+     r"self\._notification_handlers\.pop\(ident, None\)",
+     r"activation = self\._notification_activation",
+     r"kaya: notification "),
+    # Go's arm is a METHOD, because Serve's switch has no seam a test can
+    # reach; the switch's own call to it is held below.
+    ("go", "bindings/go/app.go",
+     r"^func \(a \*App\) notificationResult\(",
+     r"^// OnNotificationActivation registers",
+     r"if fn := a\.notifications\[id\]; fn != nil \{",
+     r"\} else if act := a\.notificationActivation; act != nil \{",
+     r"kaya: notification "),
+    ("csharp", "bindings/csharp/KayaApp.cs",
+     r"else if \(kind == KayaWire\.OccKindNotificationResult\)",
+     r"else if \(kind == KayaWire\.OccKindFileDialogResult\)",
+     r"if \(notifications\.Remove\(id, out var fn\)\)",
+     r"else if \(notificationActivation is \{ \} act\)",
+     r"kaya: notification "),
+    ("java", "bindings/java/dev/kaya/KayaApp.java",
+     r"else if \(occ\.kind == KayaWire\.OCC_KIND_NOTIFICATION_RESULT\)",
+     r"else if \(occ\.kind == KayaWire\.OCC_KIND_FILE_DIALOG_RESULT\)",
+     r"handler = notifications\.remove\(occ\.id\);",
+     r"\} else if \(notificationActivation != null\) \{",
+     r"kaya: notification "),
+    ("swift", "bindings/swift/KayaApp.swift",
+     r"case \(UInt16\(KAYA_OCCURRENCE_NOTIFICATION_RESULT\), _\):",
+     r"case \(UInt16\(KAYA_OCCURRENCE_CLIPBOARD_RESULT\), _\):",
+     r"if let handler = notifications\.removeValue\(forKey: id\) \{",
+     r"\} else if let act = notificationActivation \{",
+     r"kaya: notification "),
+    ("haskell", "bindings/haskell/KayaApp.hs",
+     r"^      \| kind == W\.occKindNotificationResult -> do",
+     r"^      \| kind == W\.occKindUndone",
+     r"\(Just handler, _\) -> dispatch \(handler outcome\)",
+     r"\(Nothing, Just act\) -> dispatch \(act ident outcome\)",
+     r"kaya: notification "),
+    ("ocaml", "bindings/ocaml/kaya_app.ml",
+     r"^         else if kind = Kaya_wire\.occ_kind_notification_result then",
+     r"^         else if kind = Kaya_wire\.occ_kind_file_dialog_result then",
+     r"^            \| Some handler, _ ->",
+     r"^            \| None, Some f -> dispatch app",
+     r"kaya: notification "),
+    ("js", "bindings/js/kaya/index.ts",
+     r"if \(kind === wire\.OCC_NOTIFICATION_RESULT\) \{",
+     r"if \(kind === wire\.OCC_FILE_DIALOG_RESULT\) \{",
+     r"const handler = this\._notificationHandlers\.get\(ident\);",
+     r"const act = this\._notificationActivation;",
+     r"kaya: notification "),
+]
+
+# Go's decision lives in a method, so the SWITCH ARM that reaches it is
+# held separately: a method nothing calls is a rule nothing runs.
+GO_ARM_CALL = (r"^\t\tcase kind == occNotificationResult:\n"
+               r"\t\t\ta\.notificationResult\(id, choice\)$")
+
+
+def go_arm_calls_the_method(text):
+    return re.search(GO_ARM_CALL, text, re.M) is not None
+
+
+if not go_arm_calls_the_method(read_rel("bindings/go/app.go")):
+    print("check-sugar-surface: go's occNotificationResult switch arm no "
+          "longer calls a.notificationResult(id, choice) — the order rule "
+          "below is read out of that method, so an arm that stopped "
+          "calling it would leave the rule proven and unused")
+    status = 1
+
+_gutted, _n = sub_count(r"a\.notificationResult\(id, choice\)",
+                        "a.dispatch(func(tx *Tx) {})",
+                        read_rel("bindings/go/app.go"))
+print(f"check-sugar-surface: self-test go's switch arm stopped calling "
+      f"notificationResult, {_n} substitution(s)")
+if _n != 1 or go_arm_calls_the_method(_gutted):
+    selftest_exit("check-sugar-surface: self-test failed — a go switch arm "
+                  "that no longer calls a.notificationResult still passed "
+                  f"({_n} substitution(s))")
+
+ORDER_STEPS = ("the one-shot handler bound at the show",
+               "the process-level handler",
+               "the announced drop")
+
+
+def notification_arm(text, start, end):
+    """The notification_result arm's own text: from the line that opens
+    it to the line that opens the next occurrence branch."""
+    opened = re.search(start, text, re.M)
+    if opened is None:
+        return None
+    rest = text[opened.start():]
+    closed = re.search(end, rest, re.M)
+    return rest[:closed.start()] if closed else rest
+
+
+def notification_order_findings(text_for):
+    out = []
+    for lang, rel, start, end, *steps in NOTIFICATION_ORDER:
+        arm = notification_arm(text_for(rel), start, end)
+        if arm is None:
+            out.append(f"check-sugar-surface: {lang} has no "
+                       f"notification_result arm (wanted /{start}/ in "
+                       f"{rel})")
+            continue
+        at = []
+        for what, pattern in zip(ORDER_STEPS, steps):
+            found = re.search(pattern, arm, re.M)
+            if found is None:
+                out.append(f"check-sugar-surface: {lang}'s "
+                           f"notification_result arm never reaches {what} "
+                           f"(wanted /{pattern}/ inside the arm in {rel})")
+            at.append(None if found is None else found.start())
+        if any(a is None for a in at):
+            continue
+        for i in range(len(ORDER_STEPS) - 1):
+            if at[i] > at[i + 1]:
+                out.append(
+                    f"check-sugar-surface: {lang}'s notification_result "
+                    f"arm reaches {ORDER_STEPS[i + 1]} BEFORE "
+                    f"{ORDER_STEPS[i]} in {rel} — the ORDER is the "
+                    f"semantics (docs/tasks-s9-plan.md R1: the per-id "
+                    f"one-shot handler, retiring; else the process-level "
+                    f"one, which does not; else the drop is announced)")
+    return out
+
+
+for _msg in notification_order_findings(read_rel):
+    print(_msg)
+    status = 1
+
+# ITS WATCHED NEGATIVE, nine times: the arm's first two consultations
+# EXCHANGED in a copy of the TEXT — never on disk, so there is nothing to
+# restore and the file is re-read afterwards to prove it — with the
+# substitution count printed and the swapped binding required to be the
+# one named. Deleting a consultation would only prove the clause reads
+# presence; only a swap proves it reads ORDER.
+for _lang, _rel, _start, _end, _one, _proc, _drop in NOTIFICATION_ORDER:
+    _text = read_rel(_rel)
+    _arm = notification_arm(_text, _start, _end)
+    _one_line = _proc_line = None
+    if _arm is not None:
+        _one_line = re.search(rf"^.*?(?:{_one}).*$", _arm, re.M)
+        _proc_line = re.search(rf"^.*?(?:{_proc}).*$", _arm, re.M)
+    if _one_line is None or _proc_line is None:
+        selftest_exit(f"check-sugar-surface: self-test failed — the "
+                      f"{_lang} order negative found no pair of lines to "
+                      f"swap in {_rel}, so the clause above passed for "
+                      f"some other reason")
+    _swapped_arm = (_arm[:_one_line.start()] + _proc_line.group()
+                    + _arm[_one_line.end():_proc_line.start()]
+                    + _one_line.group() + _arm[_proc_line.end():])
+    _doctored, _n = sub_count(re.escape(_arm),
+                              _swapped_arm.replace("\\", "\\\\"), _text)
+    print(f"check-sugar-surface: self-test swapped {_lang}'s one-shot and "
+          f"process-level consultations, {_n} substitution(s)")
+    if _n != 1:
+        selftest_exit(f"check-sugar-surface: self-test failed — the "
+                      f"{_lang} order negative applied {_n} "
+                      f"substitutions, not 1")
+    _fired = [m for m in notification_order_findings(
+        lambda rel, _r=_rel, _d=_doctored: _d if rel == _r else read_rel(rel))
+        if m.startswith(f"check-sugar-surface: {_lang}'s") and "BEFORE" in m]
+    if len(_fired) != 1:
+        selftest_exit(f"check-sugar-surface: self-test failed — swapping "
+                      f"{_lang}'s one-shot and process-level "
+                      f"consultations produced {len(_fired)} order "
+                      f"findings, not 1")
+    if read_rel(_rel) != _text:
+        selftest_exit(f"check-sugar-surface: self-test failed — {_rel} "
+                      f"changed during the order negative; the "
+                      f"perturbation is a copy of the text and nothing "
+                      f"on disk")
+
+# AND THE DROP IS ONE SENTENCE, compared FLATTENED (check-verbs' rule for
+# a verdict, one surface over): nine hand-written copies of a sentence
+# drift, and this one is read by the author of a RELAUNCHED process, who
+# has no other signal at all. Rust's lives in a free function beside the
+# arm and the other eight inside it, so the slice is taken from the whole
+# file: from "kaya: notification" to the closing paren of the binding's
+# own registrar name. Every interpolation flattens to <v>, since nine
+# languages spell one hole nine ways.
+NOTIFICATION_SPELLINGS = [
+    ("rust", "crates/kaya/src/app.rs", "Messages::on_notification_activation"),
+    ("python", "bindings/python/kaya/__init__.py",
+     "kaya.on_notification_activation"),
+    ("go", "bindings/go/app.go", "App.OnNotificationActivation"),
+    ("csharp", "bindings/csharp/KayaApp.cs", "App.OnNotificationActivation"),
+    ("java", "bindings/java/dev/kaya/KayaApp.java",
+     "KayaApp.onNotificationActivation"),
+    ("swift", "bindings/swift/KayaApp.swift",
+     "KayaApp.onNotificationActivation"),
+    ("haskell", "bindings/haskell/KayaApp.hs",
+     "KayaApp.onNotificationActivation"),
+    ("ocaml", "bindings/ocaml/kaya_app.ml",
+     "Kaya_app.on_notification_activation"),
+    ("js", "bindings/js/kaya/index.ts", "kaya.onNotificationActivation"),
+]
+
+# Applied in order: the holes first (they carry backslashes and quotes of
+# their own), then the concatenation glue, then what is left of the
+# quoting.
+SENTENCE_FLATTENERS = [
+    (r"\\\([A-Za-z_][A-Za-z0-9_.]*\)", "<v>"),           # swift
+    (r"\$?\{[A-Za-z_][A-Za-z0-9_.]*\}", "<v>"),          # python/C#/JS/rust
+    (r"\{\}", "<v>"),                                    # rust, positional
+    (r"%[Ll]?[dsu]", "<v>"),                             # go/ocaml printf
+    (r'"\s*\+{1,2}\s*(?:show\s+)?[A-Za-z_][A-Za-z0-9_.()]*\s*\+{1,2}\s*"',
+     "<v>"),                                             # java/haskell
+    (r'"\s*\+{0,2}\s*"', ""),                            # adjacent literals
+]
+
+
+def notification_sentence(text, spelling):
+    """The drop sentence as the reader will see it: sliced out of the
+    source, every hole flattened to <v>."""
+    opened = text.find("kaya: notification ")
+    if opened < 0:
+        return None
+    closed = text.find(spelling + ")", opened)
+    if closed < 0:
+        return None
+    said = text[opened:closed + len(spelling) + 1]
+    for pattern, repl in SENTENCE_FLATTENERS:
+        said = re.sub(pattern, repl, said)
+    said = said.replace("\\", "").replace('"', "")
+    return re.sub(r"\s+", " ", said).strip()
+
+
+def notification_sentence_findings(text_for):
+    out, said = [], {}
+    for lang, rel, spelling in NOTIFICATION_SPELLINGS:
+        one = notification_sentence(text_for(rel), spelling)
+        if one is None:
+            out.append(f"check-sugar-surface: {lang} prints no notification "
+                       f"drop sentence naming {spelling} in {rel}")
+            continue
+        said[lang] = one.replace(spelling, "<registrar>")
+    if not out:
+        agreed = max(set(said.values()), key=list(said.values()).count)
+        for lang, one in said.items():
+            if one != agreed:
+                out.append(f"check-sugar-surface: {lang}'s notification "
+                           f"drop sentence is not the frozen one — it says "
+                           f"{one!r}, the other bindings say {agreed!r} "
+                           f"(docs/tasks-s9-plan.md R1; one sentence, nine "
+                           f"copies, compared flattened)")
+    return out
+
+
+for _msg in notification_sentence_findings(read_rel):
+    print(_msg)
+    status = 1
+
+# ITS WATCHED NEGATIVES, two shapes per binding: a WORD taken out of one
+# copy (which the flattened comparison must name), and the REGISTRAR
+# renamed in the parenthetical (which leaves the slice unfindable, the
+# other branch, and which is how a copy-paste from the neighbouring
+# binding would arrive).
+for _lang, _rel, _spelling in NOTIFICATION_SPELLINGS:
+    _text = read_rel(_rel)
+    for _what, _pattern, _repl, _wanted in (
+            ("dropped a word from its drop sentence",
+             r"bound at the show and no", "bound at the show and",
+             f"check-sugar-surface: {_lang}'s notification drop sentence"),
+            ("named another binding's registrar in its drop sentence",
+             re.escape(_spelling) + r"\)", "kaya.someOtherRegistrar)",
+             f"check-sugar-surface: {_lang} prints no notification"),
+    ):
+        _doctored, _n = sub_count(_pattern, _repl, _text)
+        print(f"check-sugar-surface: self-test {_lang} {_what}, "
+              f"{_n} substitution(s)")
+        if _n < 1:
+            selftest_exit(f"check-sugar-surface: self-test failed — the "
+                          f"{_lang} sentence negative changed nothing in "
+                          f"{_rel}")
+        _fired = [m for m in notification_sentence_findings(
+            lambda rel, _r=_rel, _d=_doctored: _d if rel == _r
+            else read_rel(rel)) if m.startswith(_wanted)]
+        if len(_fired) != 1:
+            selftest_exit(f"check-sugar-surface: self-test failed — "
+                          f"{_lang} {_what} produced {len(_fired)} "
+                          f"findings starting {_wanted!r}, not 1")
+        if read_rel(_rel) != _text:
+            selftest_exit(f"check-sugar-surface: self-test failed — {_rel} "
+                          f"changed during the sentence negative")
+
 # --- THE CAPABILITIES SURFACE, in all nine -------------------------
 # Every binding wraps `kaya_capabilities()`, or a guest derives the
 # answer from its OWN platform predicate. TWO CLAUSES, because either

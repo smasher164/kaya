@@ -297,6 +297,10 @@ public final class KayaApp {
     // grammar; many may be live at once).
     private final java.util.Map<Long, BiConsumer<Tx, Integer>> notifications =
             new java.util.HashMap<>();
+    // NOT one-shot, and not keyed at all: the process-level handler for
+    // a result whose id has none above (docs/tasks-s9-plan.md R1). A
+    // relaunched process never called show().
+    private NotificationActivationHandler notificationActivation;
 
     private final java.util.Map<Long, BiConsumer<Tx, Integer>> alerts =
             new java.util.HashMap<>();
@@ -400,6 +404,14 @@ public final class KayaApp {
      * name the copy whose bar {@link Tx#columnsAt} must re-declare. */
     public interface SortHandler {
         void accept(Tx tx, List<Object> keys, int column);
+    }
+
+    /** The process-level notification handler: the notification's id,
+     * then the outcome. The id IS part of the message — a relaunched
+     * process has no registration to correlate it with
+     * (docs/tasks-s9-plan.md R1). */
+    public interface NotificationActivationHandler {
+        void accept(Tx tx, long notification, int outcome);
     }
 
     /** A node-anchored radio group's pick handler: the stamped copy's
@@ -6444,6 +6456,18 @@ public final class KayaApp {
     }
 
     /**
+     * Register the PROCESS-LEVEL notification handler
+     * (docs/tasks-s9-plan.md R1): it receives every result whose id has
+     * no one-shot handler bound at show() — which is the whole of a
+     * process the platform RELAUNCHED for a tap, since it never called
+     * show(). It does not retire, and a one-shot handler for the same id
+     * still wins.
+     */
+    public void onNotificationActivation(NotificationActivationHandler handler) {
+        notificationActivation = handler;
+    }
+
+    /**
      * Register a click handler for a template node; it also receives
      * the stamped copy's keys, outermost first.
      */
@@ -6880,11 +6904,29 @@ public final class KayaApp {
                     dispatch(tx -> handler.accept(tx, (Integer) occ.payload));
                 }
             } else if (occ.kind == KayaWire.OCC_KIND_NOTIFICATION_RESULT) {
-                // One-shot like the alert, and the id retires with it;
-                // payload is the parsed outcome (Integer).
+                // THE ORDER IS THE SEMANTICS (docs/tasks-s9-plan.md R1),
+                // and tools/check-sugar-surface.py reads it out of this
+                // arm: the one-shot handler bound at show() first,
+                // retiring with the result; else the process-level one,
+                // which does not; else the drop is announced. payload is
+                // the parsed outcome (Integer).
                 BiConsumer<Tx, Integer> handler = notifications.remove(occ.id);
                 if (handler != null) {
                     dispatch(tx -> handler.accept(tx, (Integer) occ.payload));
+                } else if (notificationActivation != null) {
+                    NotificationActivationHandler act = notificationActivation;
+                    dispatch(tx -> act.accept(tx, occ.id, (Integer) occ.payload));
+                } else {
+                    String outcome =
+                            (Integer) occ.payload == KayaWire.NOTIFICATION_OUTCOME_ACTIVATED
+                                    ? "activated"
+                                    : "refused";
+                    System.err.println(
+                            "kaya: notification " + occ.id + " outcome "
+                                    + outcome + " reached no handler — none was "
+                                    + "bound at the show and no process-level handler "
+                                    + "is registered "
+                                    + "(KayaApp.onNotificationActivation)");
                 }
             } else if (occ.kind == KayaWire.OCC_KIND_FILE_DIALOG_RESULT) {
                 // One-shot like the alert, and the id retires with it.

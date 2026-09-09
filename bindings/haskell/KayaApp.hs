@@ -101,6 +101,7 @@ module KayaApp
     NotificationAttr (..),
     showNotification,
     cancelNotification,
+    onNotificationActivation,
     PickedFile (..),
     openPicked,
     pickFiles,
@@ -1719,6 +1720,16 @@ showNotification notification attrs handler = do
 -- cleared). No answer follows; an unknown id is ignored.
 cancelNotification :: Word64 -> Build ()
 cancelNotification notification = emitB (W.txCancelNotification notification)
+
+-- | Register the PROCESS-LEVEL notification handler
+-- (docs/tasks-s9-plan.md R1): the handler receives every result whose id
+-- has no one-shot handler bound at 'showNotification' — which is the
+-- whole of a process the platform RELAUNCHED for a tap, since it never
+-- called it. It does not retire, and a one-shot handler for the same id
+-- still wins. An App action, not a 'Build' one: it needs no transaction.
+onNotificationActivation :: App -> (Word64 -> Word32 -> IO ()) -> IO ()
+onNotificationActivation app handler =
+  writeIORef (appNotificationActivation app) (Just handler)
 
 -- | Check one accept-list entry and return it. Ids reach every
 -- platform's own registry verbatim, so they carry no spaces.
@@ -3853,6 +3864,10 @@ data App = App
     -- One-shot, keyed by the GUEST's notification id (the alert's
     -- request/result grammar; many may be live at once).
     appNotificationHandlers :: IORef (Map.Map Word64 (Word32 -> IO ())),
+    -- NOT one-shot, and not keyed at all: the process-level handler for
+    -- a result whose id has none above (docs/tasks-s9-plan.md R1). A
+    -- relaunched process never called showNotification.
+    appNotificationActivation :: IORef (Maybe (Word64 -> Word32 -> IO ())),
     -- The undo ledger's two reports, keyed by WINDOW. NOT one-shot: a
     -- user walks a history as often as they like.
     appUndone :: IORef (Map.Map Word64 (String -> UndoDelta -> IO ())),
@@ -4187,6 +4202,7 @@ newApp =
     <*> newIORef Map.empty -- appAlertHandlers
     <*> newIORef 0 -- appNextAlert
     <*> newIORef Map.empty -- appNotificationHandlers
+    <*> newIORef Nothing -- appNotificationActivation
     <*> newIORef Map.empty -- appUndone
     <*> newIORef Map.empty -- appRedone
     <*> newIORef Map.empty -- appFileDialogHandlers
@@ -4462,13 +4478,35 @@ dispatchLoop app = do
           dispatchLoop app
       | kind == W.occKindNotificationResult -> do
           -- The parser boxes the u32 outcome as VI64, the alert's own
-          -- slot. One-shot: the registration retires with the result.
+          -- slot. THE ORDER IS THE SEMANTICS (docs/tasks-s9-plan.md R1),
+          -- and tools/check-sugar-surface.py reads it out of this arm:
+          -- the one-shot handler bound at the show first, retiring with
+          -- the result; else the process-level one, which does not; else
+          -- the drop is announced.
           let outcome = case payload of
                 Just (W.VI64 o) -> fromIntegral o :: Word32
                 _ -> 0
           handlers <- readIORef (appNotificationHandlers app)
           writeIORef (appNotificationHandlers app) (Map.delete ident handlers)
-          dispatch (mapM_ ($ outcome) (Map.lookup ident handlers))
+          activation <- readIORef (appNotificationActivation app)
+          case (Map.lookup ident handlers, activation) of
+            (Just handler, _) -> dispatch (handler outcome)
+            (Nothing, Just act) -> dispatch (act ident outcome)
+            (Nothing, Nothing) -> do
+              let word =
+                    if outcome == W.notificationOutcomeActivated
+                      then "activated"
+                      else "refused"
+              hPutStrLn
+                stderr
+                ( "kaya: notification "
+                    ++ show ident
+                    ++ " outcome "
+                    ++ word
+                    ++ " reached no handler — none was bound at the show and no"
+                    ++ " process-level handler is registered"
+                    ++ " (KayaApp.onNotificationActivation)"
+                )
           dispatchLoop app
       -- The undo pair keys the per-WINDOW tables (ident is the window;
       -- the label rides as the payload). NOT one-shot. THE MODEL IS

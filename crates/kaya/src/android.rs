@@ -8,7 +8,7 @@
 
 use std::sync::mpsc;
 
-use jni::objects::{JByteArray, JString};
+use jni::objects::JByteArray;
 use jni::sys::{jint, jlong};
 use jni::NativeMethod;
 
@@ -19,7 +19,7 @@ use crate::protocol::OccSink;
 #[doc(hidden)]
 pub use jni::JNIEnv;
 #[doc(hidden)]
-pub use jni::objects::{JClass, JObject};
+pub use jni::objects::{JClass, JObject, JString};
 #[doc(hidden)]
 pub use jni::sys::jint as jint_export;
 
@@ -70,6 +70,7 @@ fn init_logging() {
 pub fn attach(
     mut env: JNIEnv,
     activity: JObject,
+    state_root: JString,
     app_main: impl FnOnce(AppCtx) + Send + 'static,
 ) -> i32 {
     init_logging();
@@ -80,6 +81,13 @@ pub fn attach(
     if !claim_attach() {
         return PRESENT_GUEST;
     }
+
+    // BEFORE THE APP THREAD, because a process the tap started has no
+    // scene in its environment and the guest reads its scene from
+    // KAYA_SELFTEST (docs/tasks-s9-plan.md R6a). Android's state root
+    // comes from the platform: HOME is not the app's files directory and
+    // only a Context knows it.
+    crate::act2::arm(read_state_root(&mut env, &state_root).as_deref());
 
     grant_measured_capabilities(&mut env, &activity);
 
@@ -131,6 +139,7 @@ extern "system" fn Java_dev_kaya_KayaRing_attach(
     mut env: JNIEnv,
     _class: JClass,
     activity: JObject,
+    state_root: JString,
 ) {
     init_logging();
     // The JVM and Go tiers attach HERE and never through `attach` above,
@@ -142,11 +151,33 @@ extern "system" fn Java_dev_kaya_KayaRing_attach(
     if !claim_attach() {
         return;
     }
+    // The `attach` above's order, one tier over.
+    crate::act2::arm(read_state_root(&mut env, &state_root).as_deref());
     grant_measured_capabilities(&mut env, &activity);
     crate::jvm::register_ring_natives(&mut env)
         .expect("kaya: registering KayaRing natives failed");
     register_present_natives(&mut env)
         .expect("kaya: registering KayaPresent natives failed");
+}
+
+/// The second act's state root as the platform handed it in
+/// (docs/tasks-s9-plan.md R6a). `None` for a null or unreadable string,
+/// which act2::arm answers with its own sentence.
+fn read_state_root(env: &mut JNIEnv, state_root: &JString) -> Option<std::path::PathBuf> {
+    if state_root.is_null() {
+        return None;
+    }
+    let text = env.get_string(state_root);
+    if env.exception_check().unwrap_or(false) {
+        let _ = env.exception_describe();
+        let _ = env.exception_clear();
+        return None;
+    }
+    let text: String = text.ok()?.into();
+    if text.is_empty() {
+        return None;
+    }
+    Some(std::path::PathBuf::from(text))
 }
 
 /// Remember what an asset read will need and cannot go and find: the
@@ -1517,8 +1548,9 @@ macro_rules! android_main {
             env: $crate::android::JNIEnv<'local>,
             _class: $crate::android::JClass<'local>,
             activity: $crate::android::JObject<'local>,
+            state_root: $crate::android::JString<'local>,
         ) -> $crate::android::jint_export {
-            $crate::android::attach(env, activity, $app)
+            $crate::android::attach(env, activity, state_root, $app)
         }
     };
 }

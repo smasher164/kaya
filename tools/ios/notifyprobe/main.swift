@@ -6,8 +6,20 @@
 // hand — tools/ios/notifyprobe/build.sh, then the xcui driver's notify_tap.
 // One line per measured fact, on stdout, which `simctl launch --console-pty`
 // carries.
+//
+// S9's question (docs/tasks-s9-plan.md §2.1) adds one more mode: does a
+// notification that FIRES while the app is terminated show a banner, and
+// does a tap on that banner relaunch the app and deliver the identifier?
+// NOTIFYPROBE_AT_SECONDS schedules instead of posting now, and
+// NOTIFYPROBE_EXIT_AFTER_POST leaves at once so the fire finds no process.
+// The log's path is DEFAULTED, never env-only: the process the system
+// relaunches inherits nothing, so a log named in the environment would be
+// written by the first launch and by no other.
+import Darwin
 import UIKit
 import UserNotifications
+
+let probeLog = NSHomeDirectory() + "/Documents/notifyprobe.log"
 
 final class ProbeDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     var window: UIWindow?
@@ -35,8 +47,17 @@ final class ProbeDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCe
     }
 
     func say(_ what: String) {
-        print("notifyprobe: \(what)")
+        let line = "[pid \(getpid())] \(what)"
+        print("notifyprobe: " + line)
         fflush(stdout)
+        let stamped = "\(Date().timeIntervalSince1970) \(line)\n"
+        if let handle = FileHandle(forWritingAtPath: probeLog) {
+            handle.seekToEndOfFile()
+            handle.write(Data(stamped.utf8))
+            try? handle.close()
+        } else {
+            try? stamped.write(toFile: probeLog, atomically: true, encoding: .utf8)
+        }
     }
 
     func measure() {
@@ -69,12 +90,26 @@ final class ProbeDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCe
         let content = UNMutableNotificationContent()
         content.title = "Call the plumber"
         content.body = "Reminder from the notify probe"
+        // S9 §2.1: a FUTURE instant, so the fire finds no process at all.
+        var trigger: UNNotificationTrigger? = nil
+        if let at = ProcessInfo.processInfo.environment["NOTIFYPROBE_AT_SECONDS"],
+            let seconds = Double(at), seconds > 0
+        {
+            trigger = UNTimeIntervalNotificationTrigger(
+                timeInterval: seconds, repeats: false)
+            say("scheduled \(seconds)s out, not posted now")
+        }
         let request = UNNotificationRequest(
-            identifier: "kaya-12", content: content, trigger: nil)
+            identifier: "kaya-12", content: content, trigger: trigger)
         let posted = Date()
         centre.add(request) { err in
             self.say(String(format: "add error=%@ in %.2fs",
                             err.map { "\($0)" } ?? "none", Date().timeIntervalSince(posted)))
+            if ProcessInfo.processInfo.environment["NOTIFYPROBE_EXIT_AFTER_POST"] != nil {
+                self.say("posted and exiting; the fire must find no process")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { exit(0) }
+                return
+            }
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { self.readBack(0) }
         }
     }

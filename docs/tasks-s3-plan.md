@@ -326,7 +326,12 @@ banner, and the frontmost app's own banner is the compact pill, published
 with an off-screen frame and hittable false while visibly on screen, gone
 in two seconds. So `notification_activate` on iOS delivers the centre's
 own activation callback with the delivered identifier, the mac arm's exact
-shape; a physical device is untested and might answer. The reproduction is
+shape; a physical device is untested and might answer. CORRECTED BY S9
+(2026-09-08): a banner over SpringBoard for an app that has EXITED does
+activate on a tap — `hittable=false` is not a refusal on that route — and
+relaunches the app with the identifier (docs/tasks-s9-plan.md §2.1); the
+carve-out stands because a banner is a five-second window no leg can depend
+on, not because the platform cannot deliver the tap. The reproduction is
 tools/ios/notifyprobe (the mac probe's twin) and the driver's `shade` verb,
 which pulls the sheet, reveals the list and reports every cell with its
 subtree. And a rule for any SpringBoard work after this: A SCREEN-COORDINATE

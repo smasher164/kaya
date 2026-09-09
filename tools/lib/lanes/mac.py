@@ -23,6 +23,8 @@ import, so every census above still imports this module for its tables
 alone.
 """
 
+import os
+import pathlib
 import re
 import shutil
 import subprocess
@@ -349,6 +351,82 @@ def stage_rust(root, stems):
         packaging_mac.bundle(root, built, staging, stem=stem,
                              accessory=True)
 CS_GUEST = "guests/csharp/bin/Debug/net10.0/kaya-guests.dll"
+
+# THE SECOND ACT'S DOOR ON THIS LANE (docs/tasks-s9-plan.md R6a).
+# macOS has no programmatic tap on a delivered notification, so the lane
+# takes the carve-out: it starts the same bundle again with
+# KAYA_LAUNCH_NOTIFICATION and the interpreter enters the centre
+# delegate's own funnel one step past the tap. tools/check-steps.py reads
+# this table against the scenes that carry a `relaunch` line.
+RELAUNCH_DOOR = {"tasks": "launch-notification"}
+# Which notification the door hands back. The scene's act one sets t1's
+# reminder, and a task's key IS its notification id (R2), so the tap the
+# runner plays is on 1.
+RELAUNCH_NOTIFICATION = {"tasks": 1}
+
+
+def act2_dir(root):
+    """`<state>/act2/<id>` as crates/kaya/src/act2.rs computes it — the
+    same state home the exclusive token and the flight recorder use, and
+    the identity manifest's `id`, through tools/ONE manifest reader."""
+    from packaging.identity import load
+    state = os.environ.get("XDG_STATE_HOME") or os.path.join(
+        os.path.expanduser("~"), ".local/state")
+    return pathlib.Path(state) / "kaya" / "act2" / load(root).id
+
+
+def clear_act2(root):
+    """A stale marker or verdict may not serve this run. The core
+    consumes the marker on read, so this covers the run that DIED before
+    its second act."""
+    d = act2_dir(root)
+    for name in ("marker", "act2.verdict"):
+        (d / name).unlink(missing_ok=True)
+
+
+def second_act(root, scene, argv, env, log):
+    """Push this lane's door and join act two's verdict (R6a). Returns 0
+    only when the second process published a green ordinary verdict into
+    `act2.verdict`; every refusal writes its own sentence into `log`."""
+    d = act2_dir(root)
+    marker, verdict = d / "marker", d / "act2.verdict"
+    notification = RELAUNCH_NOTIFICATION[scene]
+    with open(log, "a", encoding="utf-8", errors="replace") as lf:
+        if not marker.is_file():
+            lf.write(f"{scene}: act one published ACT 1 OK but left no "
+                     f"marker at {marker} — the harness's relaunch arm "
+                     f"wrote nothing, so there is no act two to run\n")
+            return 1
+        verdict.unlink(missing_ok=True)
+        lf.write(f"== act two: {RELAUNCH_DOOR[scene]} "
+                 f"notification {notification} ==\n")
+        act2_env = dict(env)
+        # THE SECOND PROCESS HAS NO SCENE IN ITS ENVIRONMENT: the marker
+        # is the only source, exactly as the platform's own relaunch
+        # would leave it (crates/kaya/src/act2.rs).
+        act2_env.pop("KAYA_SELFTEST", None)
+        act2_env.pop("KAYA_SELFTEST_SCRIPT", None)
+        act2_env["KAYA_LAUNCH_NOTIFICATION"] = str(notification)
+        proc = subprocess.Popen(["timeout", "120", *argv], cwd=root,
+                                env=act2_env, stdout=lf, stderr=lf)
+        rc = proc.wait()
+        line = (verdict.read_text(encoding="utf-8", errors="replace").strip()
+                if verdict.is_file() else "")
+        if not line:
+            lf.write(f"{scene}: act two wrote no verdict to {verdict} "
+                     f"(the second process exited {rc}) — it either never "
+                     f"adopted the marker (no KAYA_ACT2 line above) or "
+                     f"died before publishing\n")
+            return 1
+        lf.write(f"{scene}: act two verdict {line}\n")
+        return 0 if line.startswith("KAYA_SELFTEST: OK") else 1
+
+
+def act_one_ok(log_text):
+    """R6a: act one's line is distinct from the ordinary verdict by
+    construction, so a leg that ran a `relaunch` scene and printed the
+    ORDINARY one never reached the relaunch."""
+    return "KAYA_SELFTEST: ACT 1 OK" in log_text
 
 
 def leg_argv(scene, lang, hs_bin):

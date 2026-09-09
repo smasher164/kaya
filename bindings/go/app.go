@@ -146,6 +146,10 @@ type App struct {
 	// One-shot, keyed by the GUEST's notification id (the alert's
 	// grammar; many may be live at once).
 	notifications  map[uint64]func(*Tx, uint32)
+	// NOT one-shot, and not keyed at all: the process-level handler for
+	// a result whose id has none above (docs/tasks-s9-plan.md R1). A
+	// relaunched process never called Show.
+	notificationActivation func(*Tx, uint64, uint32)
 	fileDialogs    map[uint64]func(*Tx, []PickedFile)
 	clipboardReads map[uint64]func(*Tx, Representation)
 	widgetPastes   map[uint64]func(*Tx, Representation)
@@ -2423,6 +2427,43 @@ func (tx *Tx) ShowNotification(notification uint64) NotificationRef {
 // ignored.
 func (tx *Tx) CancelNotification(notification uint64) {
 	tx.emit(TxCancelNotification(notification))
+}
+
+// notificationResult is the notification_result decision, in a method of
+// its own because Serve's switch has no seam a test can reach (the ring
+// is C memory) and bindings/go/notification_test.go drives the three
+// cases through here. THE ORDER IS THE SEMANTICS
+// (docs/tasks-s9-plan.md R1) and tools/check-sugar-surface.py reads it
+// out of this body: the one-shot handler bound at Show first, retiring
+// with the result; else the process-level one, which does not; else the
+// drop is announced.
+func (a *App) notificationResult(id uint64, choice uint32) {
+	if fn := a.notifications[id]; fn != nil {
+		delete(a.notifications, id)
+		a.dispatch(func(tx *Tx) { fn(tx, choice) })
+	} else if act := a.notificationActivation; act != nil {
+		a.dispatch(func(tx *Tx) { act(tx, id, choice) })
+	} else {
+		outcome := "refused"
+		if choice == NotificationOutcomeActivated {
+			outcome = "activated"
+		}
+		fmt.Fprintf(os.Stderr,
+			"kaya: notification %d outcome %s reached no handler — "+
+				"none was bound at the show and no process-level "+
+				"handler is registered (App.OnNotificationActivation)\n",
+			id, outcome)
+	}
+}
+
+// OnNotificationActivation registers the PROCESS-LEVEL notification
+// handler (docs/tasks-s9-plan.md R1): it receives every result whose id
+// has no one-shot handler bound at Show — which is the whole of a
+// process the platform RELAUNCHED for a tap, since it never called
+// Show. It does not retire, and a one-shot handler for the same id
+// still wins.
+func (a *App) OnNotificationActivation(fn func(*Tx, uint64, uint32)) {
+	a.notificationActivation = fn
 }
 
 // NotificationRef accumulates the one atomic SHOW_NOTIFICATION record;
@@ -5029,11 +5070,7 @@ func (a *App) Serve() {
 				a.dispatch(func(tx *Tx) { fn(tx, choice) })
 			}
 		case kind == occNotificationResult:
-			// One-shot: the registration retires with the result.
-			if fn := a.notifications[id]; fn != nil {
-				delete(a.notifications, id)
-				a.dispatch(func(tx *Tx) { fn(tx, choice) })
-			}
+			a.notificationResult(id, choice)
 		case kind == occClipboardResult:
 			// One-shot. EMPTY IS THE UNIVERSAL NO and arrives as a nil
 			// Representation — denied, unfocused, absent and

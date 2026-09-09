@@ -115,13 +115,15 @@ click button@clear_reminder
 expect_no_notification 1
 set_time time_picker@reminder 09:30
 expect_ax time_picker@reminder "datetime/Reminder: 09:30"
-expect_notification 2 "Buy milk"
+# THE SAME ID AS THE POST BEFORE IT (docs/tasks-s9-plan.md R2): the id is
+# the task's own key, so a re-post replaces rather than piling up.
+expect_notification 1 "Buy milk"
 back
 expect_entries 0
-notification_activate 2
+notification_activate 1
 expect_entries 1
 expect_href label@reference "https://example.com/tasks/t1"
-expect_no_notification 2
+expect_no_notification 1
 click button@clear_reminder
 back
 expect_entries 0
@@ -187,3 +189,18 @@ expect_entries 0
 select_section 3
 expect label@anytime_count "4 anytime"
 expect label@caption[t9] "Kitchen"
+
+# S9 — THE CLOSED-APP CLICK (docs/tasks-s9-plan.md): the reminder is
+# posted, `relaunch` ends act one, and the process the platform starts on
+# the tap opens that task's details with no memory of this one. The two
+# lines after `relaunch` are act two, and they run over there.
+select_section 0
+click button@details[t1]
+expect_entries 1
+set_time time_picker@reminder 10:30
+expect_notification 1 "Buy milk"
+back
+expect_entries 0
+relaunch
+expect_entries 1
+expect_href label@reference "https://example.com/tasks/t1"

@@ -48,7 +48,7 @@ class MainActivity : ComponentActivity() {
         // libkaya_pyhost's DT_NEEDED pulls libpython3.15.so out of the
         // same jniLibs namespace.
         System.loadLibrary("kaya_pyhost")
-        KayaRing.attach(this)
+        KayaRing.attach(this, filesDir.absolutePath)
         KayaCompose.mount(this)
         // The guest runs to completion off the UI thread: extraction
         // behind a version stamp, then CPython, whose app.run() parks as

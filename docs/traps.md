@@ -10160,3 +10160,198 @@ both of its remedies, 88 tries over 3020ms. tools/guest/pkg-install.ps1
 stops ShellExperienceHost after the install; the shell restarts it on demand
 and the warm-up then wins in 65 tries.
 
+## `am force-stop` takes the notification with the process (2026-09-08)
+
+Measured on emulator-5554 with the tasks guest: after the post, `dumpsys
+notification` holds one record for dev.kaya.rusthost and the shade shows the
+"Buy milk" row; the app exits on its own verdict and the record is STILL
+there — a delivered notification is the platform's, not the process's — and
+one `am force-stop dev.kaya.rusthost` later the record is gone and so is the
+row. So a runner that wants to tap a notification after the app has exited
+cannot force-stop the app to get it there: act one of a two-act scene must
+exit CLEANLY, and a process still alive after its verdict is reported as
+that failure with the reason the runner does not force-stop it.
+
+## A watched negative anchored on a verdict's literal breaks when the verdict grows a branch (2026-09-08)
+
+tools/check-verbs.py's verb-trace negatives inserted a dump "on the pass
+path" by matching the green verdict's literal text at its log call. S9's
+second act made the green verdict TWO possible lines chosen by an `if`
+(`ACT 1 OK` or the ordinary `OK`), the literal left the log call, the
+perturbation applied 0 substitutions, and the gate reported SELF-TEST
+BROKEN on both interpreters — correctly, since an unperturbed copy proves
+nothing. Nothing had weakened; the anchor had. The entries are re-pointed
+at the verdict's own `if` (Compose's `val code = if (failures.isEmpty()) {`,
+SwiftUI's twin), which is stable whatever the verdict spells. The rule for a
+watched negative: anchor a perturbation on the STRUCTURE it perturbs, not
+on a sentence the structure prints.
+
+## A probe that greps for "error" instead of reading the exit status (2026-09-08)
+
+Building the Swift call-site probe for S9's bindings sweep, `swiftc … |
+grep -E "error"` printed nothing and the probe was recorded as built. The
+bare `swiftc` in the dev shell is a SHIM that prints `kaya: swiftc is not a
+compiler in this shell. Source tools/lib/swift-toolchain.sh and use
+kaya_swiftc` and exits 64 — no line contains the word "error", so the grep
+agreed with a compile that never happened. CLAUDE.md's "a tool not found is
+a question" and "never pipe a build through a filter in a verify loop"
+meeting in one command: the exit status is the answer, and a log filter is
+only ever a second opinion.
+
+## `adb exec-out run-as … cat <missing>` exits 0 with cat's error on the stream (2026-09-08)
+
+A poll that accepts any non-empty output as a file's content reads `cat:
+files/act2/…/act2.verdict: No such file or directory` as the answer, which
+is exactly what the first hand run of the two-act android leg printed as
+act two's verdict. The remedy is content-keyed, not code-keyed:
+tools/android/run-emulator.py's act-two poll accepts only a line beginning
+`KAYA_SELFTEST:`, and its miss census LISTS the directory rather than
+cat'ing the marker, since a cat exits 0 either way and a code-keyed
+sentence would say the same thing for both causes.
+
+## Driving the mac's notification shade from a script (2026-09-08)
+
+Two things that cost the S9 macOS relaunch measurement its time. A probe
+that will be RELAUNCHED by the system inherits no environment, so its log
+path must default — tools/mac/notifyprobe's was `NOTIFYPROBE_LOG` only, so
+the first launch wrote it and the process the OS started for the tap, the
+whole measurement, wrote nowhere; anything observed ACROSS a relaunch is
+named by the program, never by its environment. And the shade is
+ControlCenter's `Clock` menu bar item (a toggle); the rows are
+`AXSubrole = AXNotificationCenterBanner` groups in NotificationCenter's
+"Notification Center" window and `perform action "AXPress"` on one is the
+tap — found only by a RECURSIVE walk of `UI elements` in a LATER osascript
+call, since `entire contents` answers an empty list until the tree is
+built, and the tree is not built inside the call that opened the shade.
+Every press goes through the accessibility API on the ELEMENT, never a
+screen coordinate, and only on an idle host (HIDIdleTime, see the
+never-drive-the-host-UI rule).
+
+## A lane verdict needs a still crates/ (2026-09-08)
+
+The build id covers every file under crates/kaya/src, so an edit to ANY
+backend — winui/mod.rs six seconds before the check — invalidates the
+libkaya a container has just spent 73s compiling, and build-id refuses
+before the first leg, correctly. With several agents on one tree this cost
+the packaging slice three lane runs and S9 two more (validate-mac twice,
+validate-linux twice; the failures read "STALE — carries X, but core in
+this tree is Y"). The rule: before any lane run on a shared tree, call a
+FREEZE on crates/ — every agent lands its in-flight core edit, confirms its
+last write, and stays out of crates/ until the runs and the matrix are
+done; tools/, docs and the platform trees stay open. A lane started
+without the freeze is a coin flip, not a verdict.
+
+## A full-trust MSIX's LocalAppData is not redirected here (2026-09-08)
+
+The packaged tasks leg's act two, started by COM out of
+`C:\Program Files\WindowsApps\…`, wrote its verdict to the PLAIN
+`%LOCALAPPDATA%\kaya\act2\<id>\act2.verdict` and the runner read it there
+— no virtualized per-package LocalAppData on Win 11 26200 for a full-trust
+package. So one act-two path serves packaged and unpackaged alike on this
+build; a package with the file-system virtualization capability restricted
+would move it, which is the reading to take before assuming so elsewhere.
+
+## An iOS banner's button is labelled by its content, and hittable=false lands (2026-09-08)
+
+Driving a banner over SpringBoard with the XCUITest driver: the banner's
+button is labelled `now, <title>, <body>`, NOT the title, which is why a
+find by title answers nothing; and it reports `hittable=false` while a tap
+on it lands anyway — S3 had read that flag as the reason a banner could not
+be driven. On this route it is not a refusal: a notification scheduled 25s
+out for an app that had EXITED fired, showed the banner, and the tap
+relaunched the app with the identifier. The shade still activates nothing
+(docs/traps.md, "The iOS simulator's shade will not activate a
+notification"); the lanes keep the launch-argument door because a banner
+is a five-second window.
+
+## A bare portal action dies with the connection that posted it (2026-09-08)
+
+`org.freedesktop.portal.Notification`'s `default-action` is delivered two
+completely different ways depending on its NAMESPACE, and the spec says
+nothing about it. xdg-desktop-portal-gtk 1.15.3, measured on the lane's
+own image: a name starting `app.` is handed to the app's own action group
+as `org.freedesktop.Application.ActivateAction("<name>", [<target>], {})`,
+which D-Bus activation starts the app for when it has exited — while a
+BARE name is portal-scope, so the backend calls plain
+`org.freedesktop.Application.Activate([])` (carrying nothing) and the
+FRONTEND emits `ActionInvoked` unicast to the connection that posted,
+which after an exit is gone (`The name :1.2 was not provided by any
+.service files`). kaya's portal arm spelled it bare through S3, which is
+why S3 recorded "a click after the app has exited D-Bus-activates it but
+the action target reaches no one"; it is `app.`-prefixed on both routes
+now, and tools/check-gtk.py's census perturbs it back. A running app
+hears the frontend's signal either way, so no notify leg can tell the two
+spellings apart — only a relaunch can.
+
+## A D-Bus-activated process resolves its Exec arguments from the daemon's cwd (2026-09-08)
+
+tools/linux/install-desktop.py absolutized the desktop entry's PROGRAM
+and left the arguments as the leg spelled them, which was invisible while
+the leg's launcher was the program. S9 put a wrapper in front of it, and
+the tasks leg's second act — started by dbus-daemon from `/`, not by the
+runner from /work — died at `/work/tools/linux/act2-exec.sh: line 16:
+tools/linux/a11y-leg.sh: No such file or directory`, with act one having
+run the same line perfectly seconds earlier. Every word of an Exec line is
+resolved by whoever STARTS the app. `exec_line` absolutizes any argument
+the filesystem says is a relative path, and notify-leg.sh's GLib
+assertion refuses a relative WORD as well as a relative program.
+
+## A process-global ring in a unit suite needs the serial lock (2026-09-08)
+
+S9's R3 test emits a notification result with no consumer, which pushes a
+record onto the process-wide occurrence ring; a neighbouring test,
+`the_function_floor_hands_out_a_record_of_any_size`, popped it and read 24
+bytes where it wanted 8240. Both take `OUT_TABLE` now and the R3 test
+drains what it pushed. A test that touches the ring is never the only one
+that does.
+
+## `=` is an argument delimiter in a .cmd (2026-09-09)
+
+`schtasks /tr "C:\kaya\relaunch-com.cmd <leg> <clsid> <aumid> kaya=1 <id>"`
+delivers `kaya` and `1` as TWO arguments: cmd.exe splits `%1..%9` on `=`,
+`,` and `;` as well as whitespace. Every later `%n` shifts, so the door
+watched `…\kaya\act2\1\act2.verdict` (the notification id where the app id
+belonged) and called `Activate` with the launch string `kaya`, which names no
+id. Nothing failed loudly — the door reported OK and the leg waited out its
+deadline. A launch string is passed as its key and its value separately now
+and joined on the far side (tools/lib/lanes/win.py's RELAUNCH_ARG_KEY).
+
+## PowerShell variables are case-insensitive, so a local can overwrite a parameter (2026-09-09)
+
+`param([int]$Deadline = 90)` followed by `$deadline = (Get-Date).AddSeconds($Deadline)`
+assigns to THE PARAMETER, and the typed parameter refuses the DateTime:
+"Cannot convert value 9/8/2026 11:44:44 PM to type System.Int32", reported at
+the assignment with nothing about the real mistake. tools/guest/relaunch-com.ps1
+names the local `$until`.
+
+## A registry DENY ace is a worse perturbation than a doctored source (2026-09-09)
+
+Making R5's "no relaunch door" sentence print by denying SetValue+CreateSubKey
+on the activator's CLSID key failed twice and then would not come off.
+`hkcu_write_strings` compares before it writes, so a key that already said the
+right thing was a no-op and the deny never bit; with the key emptied AND
+denied, the write failed as intended, but afterwards `reg delete` answered
+"Access is denied" even from an elevated schtasks session, because a tree
+delete opens each subkey with more than DELETE. Undoing it needed
+`[Microsoft.Win32.Registry]::CurrentUser.OpenSubKey(…,
+RegistryRights::ChangePermissions)` + `RemoveAccessRuleSpecific` +
+`DeleteSubKeyTree`. The repo's own idiom — perturb a COPY of the source, print
+the substitution count, restore and verify with `shasum -c` — printed both
+branches in one build and left nothing on the machine.
+
+## COM starts a LocalServer32 in the caller's session, with a window station (2026-09-08)
+
+Measured on the VM for both routes. `CoCreateInstance` of the toast
+activator's class id from a schtasks task in session 1 started
+`C:\kaya\tasks.exe` (unpackaged, out of the library's own HKCU LocalServer32)
+and `C:\Program Files\WindowsApps\…\tasks.exe` (packaged, out of the manifest's
+`com:ExeServer`), each in SESSION 1 with a main window — a process with no
+window station cannot create a window at all. So the second act's door goes
+through schtasks like every other guest process; over ssh it would start in
+session 0 and the relaunched app would have nowhere to draw. `Activate`
+returned in 209-402ms. The proof that the ARGUMENTS arrive is external rather
+than a print the started process could not deliver: the toast was in the
+platform's own history before the door and gone after it, and only parsing
+`kaya=1` and reaching the backend's activation funnel removes it. A full-trust
+MSIX's `%LOCALAPPDATA%` is NOT redirected on this build — the packaged act two
+wrote its verdict to the plain path.

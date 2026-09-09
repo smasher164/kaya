@@ -34,7 +34,7 @@ class MainActivity : ComponentActivity() {
         }
 
         System.loadLibrary("rusthost")
-        Kaya.attach(this)
+        Kaya.attach(this, filesDir.absolutePath)
         KayaCompose.mount(this)
     }
 

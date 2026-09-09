@@ -110,6 +110,15 @@ LEGS = {
     ],
 }
 
+# THE PLATFORM'S OWN DOOR FOR A SECOND ACT (docs/tasks-s9-plan.md R6, R7),
+# per scene that carries a `relaunch`: this lane's is a real tap on the
+# notification's row in SystemUI's shade, taken once act one's process is
+# gone — the `notification_activate` verb's one hand, one act later.
+# tools/check-steps.py reads this beside the other lanes' doors; the
+# runner refuses a scene whose door it does not open, and a door named
+# for a scene with no `relaunch`.
+RELAUNCH_DOOR = {"tasks": "notify_tap"}
+
 # THE RECREATION LEGS' SCENE and the statement they cut in half:
 # `todos` because the model it re-projects is EARNED, and the cut is
 # after `expect_focused`, the last statement that reads view-local

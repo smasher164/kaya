@@ -24,6 +24,7 @@ cross-built.
 
 import pathlib
 import shutil
+import uuid
 
 try:
     from . import identity, mark
@@ -87,6 +88,36 @@ def _escape(text):
             .replace(">", "&gt;").replace('"', "&quot;"))
 
 
+# THE COM ACTIVATOR'S ARGUMENT, the same one the library writes into an
+# unpackaged LocalServer32 (crates/kaya/src/winui/mod.rs's
+# TOAST_ACTIVATED_ARG). COM appends -Embedding of its own.
+TOAST_ACTIVATED_ARG = "-ToastActivated"
+
+
+def activator_clsid(app_id, entry_point=None):
+    """THE CLASS ID A TAP ON THIS APP'S TOAST REACHES
+    (docs/tasks-s9-plan.md R4), derived and never typed: RFC 4122 version 5
+    (SHA-1, name-based) in the DNS namespace over the AUMID the process
+    posts under. UNPACKAGED (`entry_point` None) that is the declared id
+    alone; PACKAGED it is `<id>!<Application Id>` — one package carries N
+    entry points and a CLSID names ONE server, and keying the derivation
+    this way is also what stops the library's own unpackaged HKCU
+    registration shadowing the package's (both measured 2026-09-08).
+    crates/kaya/src/winui/mod.rs's `activator_clsid` is the same derivation
+    in Rust; tools/check-steps.py holds the two to one sentence and the
+    guest unit test pins both against frozen values.
+
+    Upper case and UNBRACED, which is the MSIX schema's spelling for both
+    `ToastActivatorCLSID` and `com:Class/@Id`; the registry's is braced."""
+    name = app_id if entry_point is None else f"{app_id}!{entry_point}"
+    return str(uuid.uuid5(uuid.NAMESPACE_DNS, name)).upper()
+
+
+def activator_clsid_braced(app_id, entry_point=None):
+    """The registry's and `CoCreateInstance`'s spelling of the same id."""
+    return "{" + activator_clsid(app_id, entry_point) + "}"
+
+
 def manifest(decl, exes, arch="arm64", version=VERSION, publisher=PUBLISHER):
     """AppxManifest.xml for the declaration and these entry points.
 
@@ -96,9 +127,11 @@ def manifest(decl, exes, arch="arm64", version=VERSION, publisher=PUBLISHER):
     apps = []
     for exe in exes:
         app_id = application_id(exe)
+        exe_name = pathlib.Path(exe).name
+        clsid = activator_clsid(decl.id, app_id)
         apps.append(
             f'    <Application Id="{app_id}" '
-            f'Executable="{pathlib.Path(exe).name}" '
+            f'Executable="{exe_name}" '
             f'EntryPoint="Windows.FullTrustApplication">\n'
             f'      <uap:VisualElements DisplayName="{_escape(decl.name)}"\n'
             f'          Description="{_escape(decl.name)}"\n'
@@ -110,15 +143,41 @@ def manifest(decl, exes, arch="arm64", version=VERSION, publisher=PUBLISHER):
             f'        <uap:SplashScreen '
             f'Image="{IMAGE_DIR}\\SplashScreen.png" />\n'
             f'      </uap:VisualElements>\n'
+            # THE CLOSED-APP DOOR, PACKAGED (docs/tasks-s9-plan.md R4). BOTH
+            # extensions are required and neither works alone: the desktop one
+            # tells the toast platform which class a tap on this entry point's
+            # notification goes to, the com one tells COM which exe serves that
+            # class. The library registers the same pair under HKCU when the
+            # process finds itself unpackaged.
+            f'      <Extensions>\n'
+            f'        <desktop:Extension '
+            f'Category="windows.toastNotificationActivation">\n'
+            f'          <desktop:ToastNotificationActivation '
+            f'ToastActivatorCLSID="{clsid}" />\n'
+            f'        </desktop:Extension>\n'
+            f'        <com:Extension Category="windows.comServer">\n'
+            f'          <com:ComServer>\n'
+            f'            <com:ExeServer Executable="{exe_name}" '
+            f'Arguments="{TOAST_ACTIVATED_ARG}" '
+            f'DisplayName="{_escape(decl.name)}">\n'
+            f'              <com:Class Id="{clsid}" '
+            f'DisplayName="{_escape(decl.name)}" />\n'
+            f'            </com:ExeServer>\n'
+            f'          </com:ComServer>\n'
+            f'        </com:Extension>\n'
+            f'      </Extensions>\n'
             f'    </Application>')
     return (
         '<?xml version="1.0" encoding="utf-8"?>\n'
         '<Package\n'
         '    xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"\n'
         '    xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"\n'
+        '    xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/'
+        'windows10"\n'
+        '    xmlns:com="http://schemas.microsoft.com/appx/manifest/com/windows10"\n'
         '    xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/'
         'windows10/restrictedcapabilities"\n'
-        '    IgnorableNamespaces="uap rescap">\n'
+        '    IgnorableNamespaces="uap desktop com rescap">\n'
         f'  <Identity Name="{decl.id}" Publisher="{publisher}" '
         f'Version="{version}" ProcessorArchitecture="{arch}" />\n'
         '  <Properties>\n'

@@ -47,7 +47,7 @@ class MainActivity : ComponentActivity() {
         // what makes kaya.AndroidMain's registration visible to the
         // attach below.
         System.loadLibrary("gohost")
-        KayaRing.attach(this)
+        KayaRing.attach(this, filesDir.absolutePath)
         KayaCompose.mount(this)
         KayaGo.attach(this)
     }

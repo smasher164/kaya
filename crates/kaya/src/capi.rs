@@ -1204,6 +1204,11 @@ fn state() -> &'static CState {
 pub extern "C" fn kaya_run() -> i32 {
     // The panic log, for hosts whose stderr is not durable (fault.rs).
     crate::fault::log_panics();
+    // BEFORE THE CORE STARTS: the second act's marker is the only source
+    // of the scene in a process the platform started on a tap
+    // (docs/tasks-s9-plan.md R6a).
+    #[cfg(any(feature = "harness", target_os = "macos", target_os = "ios", target_os = "android"))]
+    crate::act2::arm(None);
     // On Apple the SwiftUI interpreter runs its own presentation pump
     // over this same C API, so core_ends stays in place for it to take.
     #[cfg(any(target_os = "macos", target_os = "ios"))]
@@ -1748,8 +1753,40 @@ fn presentation_scene() -> Scene {
 static PRESENTATION_SINK: Mutex<Option<OccSink>> = Mutex::new(None);
 
 pub(crate) fn set_presentation_sink(sink: OccSink) {
-    *PRESENTATION_SINK.lock().unwrap() = Some(sink);
+    // R3 (docs/tasks-s9-plan.md): a notification result can arrive before
+    // the app thread exists, because a TAP can start the process. The
+    // ring already holds those records for a foreign guest, which reads
+    // it whenever it starts; an mpsc consumer takes them here, in order,
+    // so they are the first thing it reads. The EARLY lock is taken
+    // FIRST in both places, so an emit racing this install cannot be
+    // stranded and the two locks cannot deadlock.
+    #[cfg(any(target_os = "macos", target_os = "ios", target_os = "android"))]
+    {
+        let mut early = EARLY_NOTIFICATIONS.lock().unwrap();
+        if let OccSink::Mpsc(_) = &sink {
+            for (notification, outcome) in early.drain(..) {
+                sink.send(crate::protocol::Occurrence::NotificationResult {
+                    notification: crate::protocol::NotificationId(notification),
+                    outcome,
+                });
+            }
+        }
+        *PRESENTATION_SINK.lock().unwrap() = Some(sink);
+        return;
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "android")))]
+    {
+        *PRESENTATION_SINK.lock().unwrap() = Some(sink);
+    }
 }
+
+/// Notification results emitted before any consumer was installed
+/// (docs/tasks-s9-plan.md R3). Single delivery is structural: a process
+/// that installs an mpsc sink never reads the ring, and a process that
+/// reads the ring never installs a sink.
+#[cfg(any(target_os = "macos", target_os = "ios", target_os = "android"))]
+static EARLY_NOTIFICATIONS: Mutex<Vec<(u64, crate::protocol::NotificationOutcome)>> =
+    Mutex::new(Vec::new());
 
 /// The transaction sender feeding whatever presentation layer is running,
 /// for the Rust API's runtime-selected backends.
@@ -2353,10 +2390,14 @@ pub(crate) fn notification_resolved(
         notification: crate::protocol::NotificationId(notification),
         outcome,
     };
+    // R3: the EARLY lock first, then the sink's — set_presentation_sink
+    // takes them in the same order.
+    let mut early = EARLY_NOTIFICATIONS.lock().unwrap();
     if let Some(sink) = PRESENTATION_SINK.lock().unwrap().as_ref() {
         sink.send(occurrence);
         return;
     }
+    early.push((notification, outcome));
     state().ring.push_record(
         ring::REC_NOTIFICATION_RESULT,
         &crate::wire::notification_result_body(
@@ -3812,6 +3853,54 @@ mod tests {
         blobs().lock().unwrap().out.clear();
     }
 
+    /// R3 (docs/tasks-s9-plan.md): A TAP CAN START THE PROCESS, so the
+    /// platform's launch path answers before the app thread exists. The
+    /// result WAITS and is the first occurrence the mpsc consumer reads;
+    /// one emitted after the install is an ordinary occurrence behind it.
+    /// No lane can see this — on macOS the sink is installed before the
+    /// interpreter runs, so the ordering only ever bites the doors the
+    /// other platforms open (Android's intent, Windows' COM activation).
+    #[cfg(any(target_os = "macos", target_os = "ios", target_os = "android"))]
+    #[test]
+    fn a_notification_result_before_the_app_thread_is_read_first() {
+        let _serial = OUT_TABLE.lock().unwrap_or_else(|e| e.into_inner());
+        EARLY_NOTIFICATIONS.lock().unwrap().clear();
+        *PRESENTATION_SINK.lock().unwrap() = None;
+        // The door fires with no consumer anywhere.
+        kaya_emit_notification_result(7, wire::NOTIFICATION_OUTCOME_ACTIVATED);
+        let (tx, rx) = mpsc::channel();
+        assert!(
+            rx.try_recv().is_err(),
+            "nothing may arrive before the consumer is installed"
+        );
+        set_presentation_sink(OccSink::Mpsc(tx));
+        let read = |what: &str| match rx.try_recv() {
+            Ok(crate::protocol::Inbox::Occ(
+                crate::protocol::Occurrence::NotificationResult { notification, outcome },
+            )) => (notification.0, outcome),
+            Ok(_) => panic!("kaya: {what} was not a notification result"),
+            Err(e) => panic!("kaya: {what} never arrived ({e})"),
+        };
+        assert_eq!(
+            read("the queued result"),
+            (7, crate::protocol::NotificationOutcome::Activated)
+        );
+        // And a LATE one is an ordinary occurrence, behind it.
+        kaya_emit_notification_result(8, wire::NOTIFICATION_OUTCOME_REFUSED);
+        assert_eq!(
+            read("a result emitted after the install"),
+            (8, crate::protocol::NotificationOutcome::Refused)
+        );
+        assert!(EARLY_NOTIFICATIONS.lock().unwrap().is_empty());
+        // The early emit ALSO pushed its record onto the process-global
+        // ring, which is the foreign guest's consumer: drain it, or the
+        // next test to read the ring reads this one's.
+        while state().ring.pending_records() > 0 {
+            let _ = state().ring.wait_pop();
+        }
+        *PRESENTATION_SINK.lock().unwrap() = None;
+    }
+
     /// THE INITIAL RASTER READS THE REPORTED MODE, even though the report
     /// arrives BEFORE the scene exists — the ordering every interpreter
     /// backend has, and the one that shipped the canvas rendering light in a
@@ -3920,6 +4009,9 @@ mod tests {
     /// is the distance that matters.
     #[test]
     fn the_function_floor_hands_out_a_record_of_any_size() {
+        // The ring is process-global too: this pushes and pops it, so it
+        // takes the serial lock beside the other tests that do.
+        let _serial = OUT_TABLE.lock().unwrap_or_else(|e| e.into_inner());
         let text = "x".repeat(8 * 1024);
         let clip = crate::protocol::Representation::Text(text.clone());
         let tag = crate::wire::click_tag(5, &[]);

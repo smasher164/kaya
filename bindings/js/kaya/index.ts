@@ -1784,6 +1784,19 @@ export function cancelNotification(notification: number): void {
   records().push(wire.tx_cancel_notification(notification));
 }
 
+/** Register the PROCESS-LEVEL notification handler
+ * (docs/tasks-s9-plan.md R1): f(notification, outcome) receives every
+ * result whose id has no one-shot handler bound at the show — which is
+ * the whole of a process the platform RELAUNCHED for a tap, since it
+ * never called showNotification. NO PROMISE TWIN, unlike showAlert and
+ * showNotification: a promise settles once and this handler explicitly
+ * does not retire, so the twin would be a different semantics wearing
+ * the family's spelling. It needs no transaction; call it beside the
+ * scene declaration. */
+export function onNotificationActivation(f: (notification: number, outcome: number) => void): void {
+  app()._notificationActivation = f;
+}
+
 // ---------------------------------------------------------------- files
 
 /** One picked file: a handle to redeem, a display name, and `localPath`
@@ -3564,6 +3577,11 @@ export class App {
   /** @internal One-shot, keyed by the GUEST's notification id (the
    * alert's grammar; many may be live at once). */
   readonly _notificationHandlers = new Map<number, (outcome: number) => void>();
+  /** @internal NOT one-shot, and not keyed at all: the process-level
+   * handler for a result whose id has none above
+   * (docs/tasks-s9-plan.md R1). A relaunched process never called
+   * showNotification. */
+  _notificationActivation: ((notification: number, outcome: number) => void) | undefined;
   /** @internal */ readonly _fileDialogHandlers = new Map<number, (files: PickedFile[]) => void>();
   /** @internal */ readonly _clipboardHandlers = new Map<number, (clip: Clip | null) => void>();
   /** @internal */ readonly _menuHandlers = new Map<string, Handler>();
@@ -3892,10 +3910,26 @@ export class App {
       return;
     }
     if (kind === wire.OCC_NOTIFICATION_RESULT) {
-      // One-shot like the alert, and the id retires with it.
+      // THE ORDER IS THE SEMANTICS (docs/tasks-s9-plan.md R1), and
+      // tools/check-sugar-surface.py reads it out of this arm: the
+      // one-shot handler bound at the show first, retiring with the
+      // result; else the process-level one, which does not; else the
+      // drop is announced.
       const handler = this._notificationHandlers.get(ident);
       this._notificationHandlers.delete(ident);
-      if (handler !== undefined) this._dispatch(handler as Handler, payload);
+      if (handler !== undefined) {
+        this._dispatch(handler as Handler, payload);
+        return;
+      }
+      const act = this._notificationActivation;
+      if (act !== undefined) {
+        this._dispatch(act as Handler, ident, payload);
+        return;
+      }
+      const outcome = payload === wire.NOTIFICATION_OUTCOME_ACTIVATED ? "activated" : "refused";
+      process.stderr.write(
+        `kaya: notification ${ident} outcome ${outcome} reached no handler — none was bound at the show and no process-level handler is registered (kaya.onNotificationActivation)\n`,
+      );
       return;
     }
     if (kind === wire.OCC_FILE_DIALOG_RESULT) {

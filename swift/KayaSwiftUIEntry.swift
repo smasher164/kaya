@@ -51,6 +51,10 @@ final class KayaAppDelegate: NSObject, NSApplicationDelegate {
         if kayaCanPostNotifications() {
             UNUserNotificationCenter.current().delegate = kayaNotificationDelegate
         }
+        // THE CARVE-OUT DOOR (docs/tasks-s9-plan.md R6a): no programmatic
+        // tap exists here, so the runner starts the bundle again naming
+        // the notification and this enters the delegate's own funnel.
+        kayaDeliverLaunchNotification()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -73,6 +77,10 @@ final class KayaUIAppDelegate: UIResponder, UIApplicationDelegate {
         willFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         UNUserNotificationCenter.current().delegate = kayaNotificationDelegate
+        // The macOS arm's door, one platform over (docs/tasks-s9-plan.md
+        // R6a): the simulator's shade activates nothing, so the runner
+        // starts the app again naming the notification.
+        kayaDeliverLaunchNotification()
         return true
     }
 

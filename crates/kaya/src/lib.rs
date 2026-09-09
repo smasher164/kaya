@@ -14,6 +14,13 @@ mod canvas;
 // THAT ABORTS THE PROCESS IS THE WRONG SHAPE"); ungated — every target
 // has frames that cannot unwind.
 mod fault;
+// The second act's door-side half (docs/tasks-s9-plan.md R6a). Compiled
+// WHEREVER A HARNESS CAN RUN: behind `harness` for the Rust backends,
+// whose harness IS that feature, and always on the three interpreter
+// platforms, whose interpreter carries its own harness and whose guests
+// are therefore built without the feature.
+#[cfg(any(feature = "harness", target_os = "macos", target_os = "ios", target_os = "android"))]
+mod act2;
 #[cfg(any(target_os = "windows", target_os = "linux", test))]
 #[cfg(feature = "harness")]
 mod harness;
@@ -151,6 +158,11 @@ fn bundled_executable() -> bool {
 }
 
 pub fn run(app_main: impl FnOnce(AppCtx) + Send + 'static) -> ! {
+    // BEFORE THE APP THREAD: a process the platform started on a tap has
+    // no scene in its environment, and the guest reads its scene from
+    // KAYA_SELFTEST (docs/tasks-s9-plan.md R6a).
+    #[cfg(any(feature = "harness", target_os = "macos", target_os = "ios", target_os = "android"))]
+    act2::arm(None);
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     {
         // The runtime capability, granted BEFORE the app thread exists so

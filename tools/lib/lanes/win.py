@@ -60,6 +60,25 @@ def packaged_inner(leg):
     return f"pkg_{leg}.cmd"
 
 
+# THE SECOND ACT'S DOOR, per scene that has a `relaunch` line
+# (docs/tasks-s9-plan.md R6/R6a). Windows has no programmatic tap, so the
+# runner pushes the OS's own door one step past it: `CoCreateInstance` of the
+# COM activator's class id, which starts the exe through LocalServer32 (the
+# library's HKCU registration) or through the package's `com:ExeServer`, and
+# then calls `Activate` with the toast's launch arguments. Measured
+# 2026-09-08 on both routes.
+RELAUNCH_DOOR = {"tasks": "com-activator"}
+# The door script the runner drives (tools/guest/, shipped by the deploy).
+RELAUNCH_DOOR_SCRIPT = "relaunch-com.ps1"
+# The launch string `Activate` is handed, in the two pieces cmd.exe can carry:
+# `=` is an ARGUMENT DELIMITER in a .cmd's %1..%9, so `kaya=1` arrives as two
+# tokens and the door opens with a launch string naming no id (measured
+# 2026-09-08). The key is crates/kaya/src/winui/mod.rs's NOTIFICATION_ARG_KEY
+# and the id is the tasks guest's own for t1 (docs/tasks-s9-plan.md R2).
+RELAUNCH_ARG_KEY = "kaya"
+RELAUNCH_NOTIFICATION = 1
+
+
 def depth_scenes():
     env = os.environ.get("KAYA_WIN_DEPTH_SCENES")
     return env.split() if env else list(DEPTH_SCENES)

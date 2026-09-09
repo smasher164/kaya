@@ -782,10 +782,24 @@ if (isMainThread) {
   check("cancelNotification packs the generated record", notifyRecords.includes(JSON.stringify([...wire.tx_cancel_notification(77)])));
   check("showNotification refuses an empty title", throws(() => kaya.showNotification({ notification: 5, title: "" }), /needs a title/));
 
-  fire(wire.parse_occurrence(notificationBytes(12, 0)));
-  // The SECOND result for a retired id reaches nobody.
-  fire(wire.parse_occurrence(notificationBytes(12, 0)));
-  fire(wire.parse_occurrence(notificationBytes(99, 1)));
+  // The retired id's SECOND result is an unclaimed one, so it announces
+  // the drop (docs/tasks-s9-plan.md R1) — captured rather than left on
+  // the gate's stderr, and asserted below.
+  const captureStderr = (body: () => void): string => {
+    const said: string[] = [];
+    const stream = process.stderr as unknown as { write: (chunk: string) => boolean };
+    const real = stream.write;
+    stream.write = (chunk: string): boolean => { said.push(chunk); return true; };
+    try { body(); } finally { stream.write = real; }
+    return said.join("");
+  };
+  const retiredSaid = captureStderr(() => {
+    fire(wire.parse_occurrence(notificationBytes(12, 0)));
+    // The SECOND result for a retired id reaches nobody.
+    fire(wire.parse_occurrence(notificationBytes(12, 0)));
+    fire(wire.parse_occurrence(notificationBytes(99, 1)));
+  });
+  check("the retired id's second result announces its drop", retiredSaid.includes("kaya: notification 12 outcome activated reached no handler"));
   check("the handler fires with the activated outcome", notifySeen.some(([w, o]) => w === "a" && o === kaya.NOTIFICATION_ACTIVATED));
   check("a refused post reaches the same handler slot", notifySeen.some(([w, o]) => w === "b" && o === kaya.NOTIFICATION_REFUSED));
   check("the registration is ONE-SHOT: the second result reaches nobody", notifySeen.filter(([w]) => w === "a").length === 1);
@@ -796,6 +810,34 @@ if (isMainThread) {
   app.build(() => { promisedOutcome = kaya.showNotification({ notification: 12, title: "again" }); });
   fire(wire.parse_occurrence(notificationBytes(12, 1)));
   check("an id posted again after retirement binds a FRESH handler, and with no onResult it is a PROMISE of the outcome", (await promisedOutcome!) === kaya.NOTIFICATION_REFUSED);
+
+  // THE PROCESS-LEVEL HANDLER (docs/tasks-s9-plan.md R1). A tap on a
+  // reminder after the app has exited relaunches the process, and THAT
+  // process never called show — so the one-shot table is empty for the id
+  // that started it. Three cases, because the order is the semantics: the
+  // one-shot handler WINS where one exists, an id with none reaches the
+  // process-level handler, and that handler does NOT retire. NO PROMISE
+  // TWIN here, unlike showAlert and showNotification: a promise settles
+  // once and this handler is explicitly not one-shot.
+  const processSeen: Array<[number, number]> = [];
+  const oneShotSeen: number[] = [];
+  kaya.onNotificationActivation((n, o) => processSeen.push([n, o]));
+  app.build(() => {
+    kaya.showNotification({ notification: 21, title: "bound at the show", onResult: (o) => oneShotSeen.push(o) });
+  });
+  fire(wire.parse_occurrence(notificationBytes(21, 0)));
+  fire(wire.parse_occurrence(notificationBytes(77, 0)));
+  fire(wire.parse_occurrence(notificationBytes(78, 1)));
+  check("the one-shot handler WINS over the process-level one", oneShotSeen.length === 1 && oneShotSeen[0] === kaya.NOTIFICATION_ACTIVATED && !processSeen.some(([n]) => n === 21));
+  check("an id with no one-shot handler reaches the process-level one", processSeen.some(([n, o]) => n === 77 && o === kaya.NOTIFICATION_ACTIVATED));
+  check("the process-level handler does NOT retire", processSeen.length === 2 && processSeen[1]?.[0] === 78 && processSeen[1]?.[1] === kaya.NOTIFICATION_REFUSED && (app as unknown as { _notificationActivation: unknown })._notificationActivation !== undefined);
+
+  // AND THE DROP IS ANNOUNCED, naming the id: with neither handler
+  // registered there is nothing else to tell a relaunched process's
+  // author that nobody was listening (R1, R5).
+  (app as unknown as { _notificationActivation: unknown })._notificationActivation = undefined;
+  const droppedSaid = captureStderr(() => { fire(wire.parse_occurrence(notificationBytes(41, 1))); });
+  check("an unclaimed notification_result announces the drop, naming the id", droppedSaid.trim() === "kaya: notification 41 outcome refused reached no handler — none was bound at the show and no process-level handler is registered (kaya.onNotificationActivation)");
 
   if (failures.length > 0) {
     console.log(`kaya_app_checks: ${failures.length} FAILED`);

@@ -1571,9 +1571,13 @@ VTRACE_NEGATIVES = [
     ("the SwiftUI env var renamed", SWIFT,
      r'environment\["KAYA_VERB_TRACE"\]', 'environment["KAYA_VTRACE"]',
      "never names"),
+    # ANCHORED ON THE VERDICT'S OWN `if`, not on the green line's text:
+    # the Compose verdict spells two lines now (act one's and the ordinary
+    # one, docs/tasks-s9-plan.md R6) and a pattern keyed on the literal
+    # matched nothing, which is a self-test that proves nothing.
     ("a Compose dump on the pass path", KOTLIN,
-     r'(\n\s+)(Log\.i\("kaya", "KAYA_SELFTEST: OK)',
-     r'\1KayaVTrace.dump("green")\1\2',
+     r'(val code = if \(failures\.isEmpty\(\)\) \{\n)',
+     r'\1            KayaVTrace.dump("green")\n',
      "verb-trace dump site(s), want exactly 2"),
     ("the Rust watchdog dump moved off the fire path", HARNESS,
      r'crate::vtrace::dump\("the step ceiling fired: no verdict"\);\n',
@@ -1581,9 +1585,13 @@ VTRACE_NEGATIVES = [
     ("the Rust ring's pointer line drifted", VTRACE,
      r'appended to \{\}', "written to {}",
      "does not carry the verb-trace line shape"),
+    # ANCHORED ON THE VERDICT'S OWN `if` for the Compose entry's reason:
+    # the SwiftUI verdict spells two lines now (act one's and the ordinary
+    # one, docs/tasks-s9-plan.md R6) and the green literal moved off the
+    # print, so a pattern keyed on it matched nothing.
     ("a SwiftUI dump on the pass path (outside the crash handler)", SWIFT,
-     r'(\n\s+)(print\("KAYA_SELFTEST: OK)',
-     r'\1KayaVTrace.dump("green")\1\2',
+     r'(\n    if failures\.isEmpty \{\n)',
+     r'\1        KayaVTrace.dump("green")\n',
      "verb-trace dump site(s), want exactly 2"),
 ]
 for label, rel, pattern, repl, want in VTRACE_NEGATIVES:

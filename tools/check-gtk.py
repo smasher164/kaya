@@ -178,6 +178,24 @@ ENTRIES = (
     ("the notification's default-action target",
      'dict.insert("default-action-target", notification_target(id));',
      'dict.insert("default-action-target", id as i64);'),
+    # THE CLOSED-APP CLICK'S ONE LINK (docs/tasks-s9-plan.md R4, measured
+    # 2026-09-08): xdg-desktop-portal-gtk splits on the ACTION'S NAMESPACE
+    # — `app.` is delivered to the app's own action group over
+    # org.freedesktop.Application.ActivateAction, which D-Bus activation
+    # starts when the app has exited, while a BARE name is portal-scope and
+    # comes back only as the frontend's ActionInvoked signal to the
+    # connection that posted, which after an exit is dead. The perturbation
+    # is the spelling that SHIPPED through S3, and with it the notify legs
+    # stay green: a running app hears the signal, and only a relaunch can
+    # tell the two apart.
+    ("the notification's default action in the app's own namespace",
+     'dict.insert("default-action", format!("app.{ACTION_ACTIVATED}"));',
+     'dict.insert("default-action", ACTION_ACTIVATED.to_owned());'),
+    # R5's standing rule at the hand-over: a post whose app id nothing on
+    # the bus can start says so. Perturbed away, the drop is silent again.
+    ("the relaunch door consulted at the post",
+     "if RELAUNCH_DOOR.get() == Some(&false) {",
+     "if false {"),
     # THE SEED'S TWO LINKS, NEITHER OF WHICH ANY LEG CAN SEE (2026-09-06,
     # docs/deferred.md's `clipboard-python-wayland` WATCH). `materialize`
     # reads THE APP'S OWN formats, so a seed that returns while only the

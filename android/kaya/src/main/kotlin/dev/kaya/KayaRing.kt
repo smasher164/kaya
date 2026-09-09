@@ -10,13 +10,15 @@ import android.app.Activity
  * (docs/traps.md).
  */
 object KayaRing {
-    @JvmStatic external fun attach(activity: Activity)
+    /** `stateRoot` is `context.filesDir.absolutePath`, which arms the
+     * second act (Kaya.attach carries the reasoning). */
+    @JvmStatic external fun attach(activity: Activity, stateRoot: String)
 
     /**
      * START THE JVM GUEST, once per process (docs/deferred.md's mount
      * entry) — a later onCreate is a NO-OP, which makes recreation
      * invisible to a guest. THE SHELL'S FOUR LINES, IN ORDER:
-     * `System.loadLibrary("kaya")`, `KayaRing.attach(this)`,
+     * `System.loadLibrary("kaya")`, `KayaRing.attach(this, root)`,
      * `KayaCompose.mount(this)`, `KayaRing.startGuest(scene)`.
      */
     @JvmStatic

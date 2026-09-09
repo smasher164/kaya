@@ -6588,6 +6588,9 @@ private func kayaRunScript(_ script: String) {
     }
     print("KAYA_HARNESS: scene ready after \(Int(Date().timeIntervalSince(start) * 1000))ms")
     var stepOrdinal = 0
+    // Whether `relaunch` ended this run: the verdict says ACT 1 and the
+    // runner then pushes the platform's door (docs/tasks-s9-plan.md R6a).
+    var actOne = false
     // Whether the run already carried the core's fault into `failures`,
     // so the sweep after the loop cannot report the same one twice.
     var reportedFault = false
@@ -8168,6 +8171,21 @@ private func kayaRunScript(_ script: String) {
                 let answered = kayaAnswers()
                 DispatchQueue.main.sync { kayaNotificationActivated(nid) }
                 kayaAwaitAnswer(answered)
+            case "relaunch":
+                // ACT ONE ENDS HERE (docs/tasks-s9-plan.md R6a): the marker
+                // carries the scene and the steps after this line, the runner
+                // pushes the platform's own relaunch door, and act two runs
+                // them in the process it starts. It leaves through the SAME
+                // verdict path below — one publish, one trace dump, one exit.
+                if let why = kayaWriteActTwoMarker(
+                    ProcessInfo.processInfo.environment["KAYA_SELFTEST"] ?? "",
+                    kayaActTwoSource(script))
+                {
+                    failures.append(why)
+                    print("KAYA_HARNESS: step-failed \(why)")
+                }
+                actOne = true
+                break scriptLines
             case "expect_alert":
                 // The REAL presented dialog's title (NSAlert's messageText /
                 // the UIAlertController's title), never the request's copy — a
@@ -9496,7 +9514,13 @@ private func kayaRunScript(_ script: String) {
         Thread.sleep(forTimeInterval: 0.75)
     }
     if failures.isEmpty {
-        print("KAYA_SELFTEST: OK (\(observed.joined(separator: ", ")))")
+        let verdict =
+            actOne
+            ? "KAYA_SELFTEST: ACT 1 OK (\(observed.joined(separator: ", ")))"
+            : "KAYA_SELFTEST: OK (\(observed.joined(separator: ", ")))"
+        print(verdict)
+        // ACT TWO's verdict is a FILE as well as a line (R6a).
+        kayaWriteActTwoVerdict(verdict)
         // `exit` runs atexit handlers and stdio teardown, which a
         // wedged main thread can hold; the grace leaves anyway.
         watchdog.published(0)
@@ -9520,9 +9544,13 @@ private func kayaRunScript(_ script: String) {
     }
     // FAILURE ONLY, and BEFORE the publish: after it the watchdog may
     // end the process at any moment (crates/kaya/src/vtrace.rs).
-    KayaVTrace.dump("the verdict failed: KAYA_SELFTEST: FAILED (\(reported.joined(separator: "; ")))")
-    FileHandle.standardError.write(
-        "KAYA_SELFTEST: FAILED (\(reported.joined(separator: "; ")))\n".data(using: .utf8)!)
+    let verdict =
+        actOne
+        ? "KAYA_SELFTEST: ACT 1 FAILED (\(reported.joined(separator: "; ")))"
+        : "KAYA_SELFTEST: FAILED (\(reported.joined(separator: "; ")))"
+    KayaVTrace.dump("the verdict failed: \(verdict)")
+    FileHandle.standardError.write("\(verdict)\n".data(using: .utf8)!)
+    kayaWriteActTwoVerdict(verdict)
     watchdog.published(1)
     exit(1)
 }
@@ -13473,6 +13501,77 @@ func kayaInkMatches(_ got: String, _ want: String) -> Bool {
         }
     #endif
     return "\(mode) " + kayaSampleRGB(cg, wanted)
+}
+
+// MARK: - The second act (docs/tasks-s9-plan.md R6a)
+
+/// The script's lines after a bare `relaunch` line — the marker's second
+/// half. harness.rs's `act_two_source`, same rule.
+func kayaActTwoSource(_ script: String) -> String? {
+    var after: [String] = []
+    var found = false
+    for line in script.split(separator: "\n", omittingEmptySubsequences: false) {
+        if found {
+            after.append(String(line))
+        } else if line.trimmingCharacters(in: .whitespaces) == "relaunch" {
+            found = true
+        }
+    }
+    guard found else { return nil }
+    let text = after.joined(separator: "\n")
+    return text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : text
+}
+
+/// Leave the marker act two is adopted from, or answer why not. THE PATH
+/// IS THE CORE'S (crates/kaya/src/act2.rs): it arrives in KAYA_ACT2_DIR,
+/// and this file composes `<state>/act2/<id>` nowhere.
+func kayaWriteActTwoMarker(_ scene: String, _ steps: String?) -> String? {
+    guard let steps else {
+        return "relaunch ran with no act two: nothing follows it in this script, "
+            + "so the second process would have no steps"
+    }
+    guard let dir = ProcessInfo.processInfo.environment["KAYA_ACT2_DIR"] else {
+        return "relaunch has nowhere to leave its marker: KAYA_ACT2_DIR is unset, "
+            + "so the core could not resolve <state>/act2/<id> — it needs the app's "
+            + "declared identity"
+    }
+    let url = URL(fileURLWithPath: dir)
+    do {
+        try FileManager.default.createDirectory(
+            at: url, withIntermediateDirectories: true)
+        try "\(scene)\n\(steps)\n".write(
+            to: url.appendingPathComponent("marker"), atomically: true, encoding: .utf8)
+    } catch {
+        return "relaunch could not write its marker under \(dir): \(error)"
+    }
+    return nil
+}
+
+/// Act two writes its verdict where the runner polls for it, BESIDE
+/// stdout: the runner joins the two acts into one leg line. A no-op in
+/// every other run.
+func kayaWriteActTwoVerdict(_ verdict: String) {
+    guard let path = ProcessInfo.processInfo.environment["KAYA_ACT2_VERDICT"] else { return }
+    do {
+        try "\(verdict)\n".write(
+            to: URL(fileURLWithPath: path), atomically: true, encoding: .utf8)
+    } catch {
+        // NOT SILENT: the runner is waiting on this file and would
+        // otherwise report a timeout with no cause at all.
+        FileHandle.standardError.write(
+            Data("kaya: act two could not write \(path): \(error)\n".utf8))
+    }
+}
+
+/// The carve-out door (R6a): macOS and iOS have no programmatic tap, so
+/// the runner starts the bundle again with the notification's id and this
+/// enters the SAME funnel the centre's delegate does. Called from both
+/// entry delegates, before launching finishes.
+func kayaDeliverLaunchNotification() {
+    guard let raw = ProcessInfo.processInfo.environment["KAYA_LAUNCH_NOTIFICATION"],
+        let id = UInt64(raw.trimmingCharacters(in: .whitespaces))
+    else { return }
+    kayaNotificationActivated(id)
 }
 
 // MARK: - Local notifications (docs/tasks-s3-plan.md)

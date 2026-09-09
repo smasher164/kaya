@@ -1403,6 +1403,59 @@ def scene_script_drop(scene, verb, target, keep):
 
 
 # ------------------------------------------------------------- the leg
+def act2_dir_on(udid, bundle_id):
+    """`<Documents>/act2/<id>` inside the app's data container, which is
+    where crates/kaya/src/act2.rs computes it from $HOME on iOS."""
+    data = out_of(["xcrun", "simctl", "get_app_container", udid,
+                   bundle_id, "data"]).strip()
+    from packaging.identity import load
+    return pathlib.Path(data) / "Documents" / "act2" / load(ROOT).id
+
+
+def second_act(udid, bundle_id, name, scene, env, act_one_out, log):
+    """R6a: act one ended at `relaunch` and left the marker. Push this
+    lane's door — the simulator activates no shade cell, so the bundle is
+    launched again naming the notification — and join act two's verdict.
+    Every refusal writes its own sentence."""
+    if "KAYA_SELFTEST: ACT 1 OK" not in act_one_out:
+        print(f"run-sim: {name}: act one did not publish "
+              f'"KAYA_SELFTEST: ACT 1 OK", so the door was never pushed',
+              file=log)
+        return False
+    d = act2_dir_on(udid, bundle_id)
+    marker, verdict = d / "marker", d / "act2.verdict"
+    if not marker.is_file():
+        print(f"run-sim: {name}: act one published ACT 1 OK but left no "
+              f"marker at {marker} — there is no act two to run", file=log)
+        return False
+    verdict.unlink(missing_ok=True)
+    notification = lane.RELAUNCH_NOTIFICATION[scene]
+    print(f"== act two: {lane.RELAUNCH_DOOR[scene]} "
+          f"notification {notification} ==", file=log)
+    act2_env = dict(env)
+    # THE SECOND PROCESS HAS NO SCENE IN ITS ENVIRONMENT: the marker is
+    # the only source, exactly as a real tap would leave it.
+    act2_env.pop("SIMCTL_CHILD_KAYA_SELFTEST", None)
+    act2_env.pop("SIMCTL_CHILD_KAYA_SELFTEST_SCRIPT", None)
+    act2_env["SIMCTL_CHILD_KAYA_LAUNCH_NOTIFICATION"] = str(notification)
+    got = subprocess.run(
+        ["timeout", "120", "xcrun", "simctl", "launch", "--console-pty",
+         udid, bundle_id],
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=act2_env,
+        check=False, **TEXT)
+    print(got.stdout, file=log)
+    line = (verdict.read_text(encoding="utf-8", errors="replace").strip()
+            if verdict.is_file() else "")
+    if not line:
+        print(f"run-sim: {name}: act two wrote no verdict to {verdict} "
+              f"(the second launch exited {got.returncode}) — it either "
+              f"never adopted the marker (no KAYA_ACT2 line above) or "
+              f"died before publishing", file=log)
+        return False
+    print(f"run-sim: {name}: act two verdict {line}", file=log)
+    return line.startswith("KAYA_SELFTEST: OK")
+
+
 def run_swiftui_on(udid, slot, app, bundle_id, name, selftest, scene,
                    extra="", cut="", keep="", drop_verb="", drop_target="",
                    appearance="", log=None):
@@ -1442,6 +1495,13 @@ def run_swiftui_on(udid, slot, app, bundle_id, name, selftest, scene,
     # a name list left the search scene typing with no watcher, sixty
     # seconds of silence per leg (matrix #20, 2026-09-06; the class
     # tools/lib/scene-features.py was built for, one runner over).
+    if scene in lane.RELAUNCH_DOOR:
+        # A stale marker or verdict may not serve this run: the core
+        # consumes a marker on read, so what survives is from a run that
+        # DIED before its second act.
+        _act2 = act2_dir_on(udid, bundle_id)
+        for _name in ("marker", "act2.verdict"):
+            (_act2 / _name).unlink(missing_ok=True)
     if needs_bridge(script):
         data_container = out_of(["xcrun", "simctl", "get_app_container",
                                  udid, bundle_id, "data"]).strip()
@@ -1502,7 +1562,12 @@ def run_swiftui_on(udid, slot, app, bundle_id, name, selftest, scene,
     rec_finish(name, out)
     # NO PER-LEG SCREENSHOT: `--console-pty` returns only when the guest
     # EXITS, so any capture here photographs the home screen.
-    ok = "KAYA_SELFTEST: OK" in out
+    if scene in lane.RELAUNCH_DOOR:
+        # A `relaunch` scene publishes ACT 1 OK here and its ordinary
+        # verdict over there (docs/tasks-s9-plan.md R6a).
+        ok = second_act(udid, bundle_id, name, scene, env, out, log)
+    else:
+        ok = "KAYA_SELFTEST: OK" in out
     if not ok:
         pull_container_files(udid, bundle_id, name, log)
         if drive_log.is_file():

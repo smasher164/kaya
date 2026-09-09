@@ -1102,6 +1102,15 @@ for proto in x11 wayland; do
     # mobile lanes can run too.
     run "$proto" windowed-rust env KAYA_SELFTEST=windowed \
         "$CARGO_TARGET_DIR/debug/examples/windowed"
+    # THE CLOSED-APP CLICK'S DOOR ON THIS LANE (docs/tasks-s9-plan.md R6):
+    # the tasks scene's `relaunch` is answered by the daemon's ActionInvoked,
+    # which xdg-desktop-portal-gtk reads as the notification's `app.`-prefixed
+    # default action and turns into org.freedesktop.Application.ActivateAction
+    # on the app's own bus name — D-Bus activation then starts the app through
+    # the service file the desktop entry's arm installs. Driven by
+    # tools/linux/act2.py from inside tools/linux/notify-leg.sh, which owns
+    # the bus and the recorder; nothing here starts a process.
+    export RELAUNCH_DOOR_TASKS=portal-action
     # THE TASK MANAGER, a RUST app by design (docs/tasks-plan.md §0).
     # THROUGH a11y-leg.sh: the Details form's pickers are read by their
     # accessible names (docs/forms-plan.md §4). AND THROUGH notify-leg.sh

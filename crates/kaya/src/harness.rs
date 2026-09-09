@@ -386,6 +386,12 @@ pub enum Step {
     /// test can reach the shade, or through the backend's own activation
     /// path where it cannot (N5). An action, silent like click.
     NotificationActivate(u64),
+    /// ACT ONE ENDS HERE (docs/tasks-s9-plan.md R6a). The steps after it
+    /// go into the act-two marker, act one's verdict prints as
+    /// `KAYA_SELFTEST: ACT 1 …`, and this process exits; the runner then
+    /// pushes the platform's own relaunch door and the second process
+    /// runs the rest. At most one per scene (tools/check-steps.py).
+    Relaunch,
     ExpectFileDialog(Option<String>, Vec<String>),
     FileChoose(Option<String>),
     FileDialogGoto(String),
@@ -654,6 +660,7 @@ impl Step {
             | Step::ExpectNoNotification(..)
             | Step::ExpectNoTarget(..)
             | Step::NotificationActivate(..)
+            | Step::Relaunch
             | Step::ExpectAlerts(..)
             | Step::ExpectEntries(..)
             | Step::Back(..)
@@ -750,6 +757,7 @@ impl Step {
             Step::ExpectNotification { .. } => true,
             Step::ExpectNoNotification { .. } => true,
             Step::NotificationActivate { .. } => false,
+            Step::Relaunch => false,
             Step::ExpectAlerts { .. } => true,
             Step::ExpectEntries { .. } => true,
             Step::Back { .. } => false,
@@ -1743,6 +1751,16 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 })?;
                 Step::NotificationActivate(id)
             }
+            "relaunch" => {
+                if !rest.trim().is_empty() {
+                    return Err(format!(
+                        "relaunch takes no argument — the platform's own door is \
+                         the runner's, and the steps after this line are act two: \
+                         {line:?}"
+                    ));
+                }
+                Step::Relaunch
+            }
             "expect_file_dialog" => {
                 // `expect_file_dialog <dir> <name>...`: bare names, so
                 // the script stays identical on lanes whose temp dirs
@@ -2645,6 +2663,75 @@ fn parse_menu_state(spec: &str) -> Result<MenuState, String> {
     ))
 }
 
+/// The marker's two halves (docs/tasks-s9-plan.md R6a): line 1 is the
+/// scene, the rest are the steps after `relaunch`, verbatim.
+pub struct ActTwo {
+    scene: String,
+    steps: String,
+}
+
+/// The script's lines after a bare `relaunch` line, or `None` when the
+/// scene has none. Line-oriented on purpose: check-steps holds `relaunch`
+/// to a line of its own, so a `;`-folded transport cannot hide one.
+fn act_two_source(script: &str) -> Option<String> {
+    let mut after: Vec<&str> = Vec::new();
+    let mut found = false;
+    for line in script.split('\n') {
+        if found {
+            after.push(line);
+        } else if line.trim() == "relaunch" {
+            found = true;
+        }
+    }
+    if !found {
+        return None;
+    }
+    let text = after.join("\n");
+    (!text.trim().is_empty()).then_some(text)
+}
+
+/// Leave the marker act two is adopted from. THE PATH IS THE CORE'S
+/// (crates/kaya/src/act2.rs): it arrives in KAYA_ACT2_DIR, and no harness
+/// composes `<state>/act2/<id>` for itself.
+fn write_marker(act_two: Option<&ActTwo>) -> Result<(), String> {
+    let Some(act_two) = act_two else {
+        return Err("relaunch ran with no act two: nothing follows it in this \
+                    script, so the second process would have no steps"
+            .to_string());
+    };
+    let Some(dir) = std::env::var_os(crate::act2::ENV_DIR) else {
+        return Err(format!(
+            "relaunch has nowhere to leave its marker: {} is unset, so the core \
+             could not resolve <state>/act2/<id> — it needs the app's declared \
+             identity, and on Android the state root attach was handed",
+            crate::act2::ENV_DIR
+        ));
+    };
+    let dir = std::path::PathBuf::from(dir);
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("relaunch could not create {}: {e}", dir.display()))?;
+    let marker = dir.join(crate::act2::MARKER);
+    std::fs::write(&marker, format!("{}\n{}\n", act_two.scene, act_two.steps))
+        .map_err(|e| format!("relaunch could not write {}: {e}", marker.display()))
+}
+
+/// Act two writes its verdict where the runner polls for it, BESIDE
+/// stdout (R6a): the runner joins the two acts into one leg line.
+fn write_act_two_verdict(verdict: &str) {
+    let Some(path) = std::env::var_os(crate::act2::ENV_VERDICT) else { return };
+    let path = std::path::PathBuf::from(path);
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Err(e) = std::fs::write(&path, format!("{verdict}\n")) {
+        // NOT SILENT: the runner is waiting on this file and would
+        // otherwise report a timeout with no cause at all.
+        use std::io::Write as _;
+        let line = format!("kaya: act two could not write {}: {e}\n", path.display());
+        let _ = std::io::stderr().write_all(line.as_bytes());
+    }
+}
+
 /// Run the scene's script on its own thread against a backend's stage.
 /// Every step logs its offset from the run's start; expects accumulate,
 /// and the verdict joins their observed values.
@@ -2670,6 +2757,10 @@ pub fn spawn(scene: &str, stage: impl Stage, log: fn(&str)) {
             return;
         }
     };
+    let act_two = act_two_source(text).map(|steps| ActTwo {
+        scene: scene.to_owned(),
+        steps,
+    });
     std::thread::spawn(move || {
         // A HARNESS PANIC TERMINATES THE PROCESS: a panic here unwinds only
         // THIS thread, the UI thread keeps the process alive, and the runner
@@ -2679,7 +2770,7 @@ pub fn spawn(scene: &str, stage: impl Stage, log: fn(&str)) {
         // unread in the output file the entire time.
         let outcome =
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                run_with_log(steps, stage, Some(log))
+                run_with_log(steps, stage, Some(log), act_two)
             }));
         if outcome.is_err() {
             // Flush what the default hook wrote before leaving; an
@@ -2705,7 +2796,7 @@ pub fn spawn(scene: &str, stage: impl Stage, log: fn(&str)) {
 /// The synchronous run loop, factored out of spawn so tests can drive
 /// it with a mock stage.
 pub fn run(steps: Vec<Step>, stage: impl Stage) {
-    let _ = run_with_log(steps, stage, None);
+    let _ = run_with_log(steps, stage, None, None);
 }
 
 /// A verdict published before any step, from whatever thread called
@@ -2809,7 +2900,12 @@ fn ink_matches(got: &str, want: &str) -> bool {
 /// Returns the verdict's exit code, which the harness thread needs after
 /// `finish` in order to leave under its own verdict when nothing else can
 /// end the process (see spawn).
-fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i32 {
+fn run_with_log(
+    steps: Vec<Step>,
+    stage: impl Stage,
+    log: Option<fn(&str)>,
+    act_two: Option<ActTwo>,
+) -> i32 {
     // Watched, before any step: a fault reddens this leg instead of
     // ending the process (crates/kaya/src/fault.rs).
     crate::fault::watch();
@@ -2867,6 +2963,9 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
     }
     let mut observed = Vec::new();
     let mut failures = Vec::new();
+    // Whether `relaunch` ended this run: the verdict says ACT 1 and the
+    // runner then pushes the platform's door (docs/tasks-s9-plan.md R6a).
+    let mut act_one = false;
     // A FAULT ENDS THE RUN, carrying its sentence into the verdict list
     // rather than aborting with the failures already collected
     // (docs/deferred.md, "A GUARD THAT ABORTS THE PROCESS IS THE WRONG
@@ -2954,6 +3053,20 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                 start.elapsed().as_millis(),
                 step
             ));
+        }
+        // ACT ONE ENDS HERE, not in the dispatch below: every other verb
+        // answers with an outcome and this one ends the run
+        // (docs/tasks-s9-plan.md R6a). It leaves through the SAME verdict
+        // path below — one publish, one trace dump, one exit.
+        if matches!(step, Step::Relaunch) {
+            if let Err(why) = write_marker(act_two.as_ref()) {
+                if let Some((log, _)) = log {
+                    log(&format!("KAYA_HARNESS: step-failed {why}"));
+                }
+                failures.push(why);
+            }
+            act_one = true;
+            break;
         }
         // Actions run once, immediately; observations are bounded
         // retries (see POLL_DEADLINE): each arm builds a pass/fail
@@ -3468,6 +3581,8 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                 await_answer(answered);
                 None
             }
+            // Answered above, before the dispatch: this arm cannot run.
+            Step::Relaunch => None,
             Step::AlertChoose(choice) => {
                 // An action, silent like click: the observable is the
                 // guest's reaction to the result — the alert_result
@@ -4425,16 +4540,24 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
         }
     }
     record_linger();
-    let (code, verdict) = if failures.is_empty() {
-        (0, format!("KAYA_SELFTEST: OK ({})", observed.join(", ")))
-    } else {
-        (1, format!("KAYA_SELFTEST: FAILED ({})", failures.join("; ")))
+    let (code, verdict) = match (act_one, failures.is_empty()) {
+        (true, true) => (0, format!("KAYA_SELFTEST: ACT 1 OK ({})", observed.join(", "))),
+        (true, false) => (
+            1,
+            format!("KAYA_SELFTEST: ACT 1 FAILED ({})", failures.join("; ")),
+        ),
+        (false, true) => (0, format!("KAYA_SELFTEST: OK ({})", observed.join(", "))),
+        (false, false) => (1, format!("KAYA_SELFTEST: FAILED ({})", failures.join("; "))),
     };
     // FAILURE ONLY, and BEFORE the publish: after it the watchdog may
     // end the process at any moment (crates/kaya/src/vtrace.rs).
     if code != 0 {
         vtrace::dump(&format!("the verdict failed: {verdict}"));
     }
+    // ACT TWO's verdict is a FILE as well as a line (R6a): the runner
+    // started this process through the platform's door and reads it back
+    // from there. A no-op in every other run.
+    write_act_two_verdict(&verdict);
     // EXIT_GRACE covers `finish` itself: it prints the verdict and then
     // hops to the UI thread for the exit, and that hop wedges with the
     // rest (the linux lane's N=6000, verdict at 103.63s and no exit).
@@ -4969,6 +5092,46 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
     use std::sync::mpsc::Sender;
+
+    /// THE SPLIT THE WHOLE SECOND ACT RESTS ON (docs/tasks-s9-plan.md
+    /// R6a): line-oriented, so the three harnesses agree; anything after
+    /// the `relaunch` line is act two, verbatim, and a scene with none
+    /// answers None. check-steps holds the SHAPE this reads.
+    #[test]
+    fn act_two_is_the_lines_after_a_bare_relaunch() {
+        assert_eq!(act_two_source("expect_entries 0\nexpect_entries 1\n"), None);
+        assert_eq!(
+            act_two_source("expect_entries 0\nrelaunch\nexpect_entries 1\nback\n"),
+            Some("expect_entries 1\nback\n".to_string())
+        );
+        // Indented, and with a comment above it: the split trims.
+        assert_eq!(
+            act_two_source("# c\n  relaunch  \nexpect_entries 1"),
+            Some("expect_entries 1".to_string())
+        );
+        // A relaunch with nothing after it has no act two, which is what
+        // makes the marker's refusal reachable. A COMMENT-ONLY tail is
+        // still Some here — this split is textual, and refusing an act
+        // two with no STATEMENT is check-steps' clause, not the
+        // harness's.
+        assert_eq!(act_two_source("expect_entries 0\nrelaunch\n\n  \n"), None);
+        assert!(act_two_source("expect_entries 0\nrelaunch\n#done\n").is_some());
+    }
+
+    /// THE MARKER'S REFUSALS, both of them: no act two, and no directory
+    /// from the core. Each names what to do, because act one publishes it
+    /// as its own verdict and the runner prints it.
+    #[test]
+    fn a_marker_with_nothing_to_write_says_which_half_is_missing() {
+        let no_steps = write_marker(None).unwrap_err();
+        assert!(no_steps.contains("no act two"), "{no_steps}");
+        // KAYA_ACT2_DIR is set by the core at startup and by nothing in
+        // this suite, so this is the "the core could not resolve it" arm.
+        assert!(std::env::var_os(crate::act2::ENV_DIR).is_none());
+        let two = ActTwo { scene: "tasks".into(), steps: "expect_entries 1".into() };
+        let no_dir = write_marker(Some(&two)).unwrap_err();
+        assert!(no_dir.contains(crate::act2::ENV_DIR), "{no_dir}");
+    }
 
     #[test]
     fn scripts_parse_and_grammar_round_trips() {

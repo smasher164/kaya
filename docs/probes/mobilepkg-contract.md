@@ -212,7 +212,7 @@ and the guest is Java/Kotlin classes in the dex.
 |---|---|
 | 1. `KAYA_*` intent extras → env vars via `android.system.Os.setenv` | `MainActivity.kt:18-25` |
 | 2. `System.loadLibrary("rusthost")` | `MainActivity.kt:27` |
-| 3. `Kaya.attach(this)` → JNI `Java_dev_kaya_Kaya_attach` | `MainActivity.kt:30`; `Kaya.kt:26-27`; macro `android.rs:848-859` |
+| 3. `Kaya.attach(this, filesDir.absolutePath)` → JNI `Java_dev_kaya_Kaya_attach` | `MainActivity.kt:30`; `Kaya.kt:26-27`; macro `android.rs:848-859` |
 | 4. …which runs `android::attach`: init logging, make the occurrence channel, **spawn the `kaya-app` thread running `app_main(ctx)`**, `set_presentation_sink`, `register_present_natives`, return `PRESENT_GUEST` (=1) | `android.rs:78-95` |
 | 5. `KayaCompose.mount(this)` on the UI thread | `MainActivity.kt:31` |
 | 6. …which checks `KayaPresent.specHash()` against its baked `SPEC_HASH`, `startPump(activity)`, `activity.setContent { KayaRoot() }`, and starts the selftest if `KAYA_SELFTEST` is set | `KayaCompose.kt:842-852` |
@@ -229,7 +229,7 @@ rather than silently running milestone2 (`:158-161`).
 |---|---|
 | 1. same env-var mapping | `MainActivity.kt:16-23` |
 | 2. `System.loadLibrary("kaya")` — kaya's own cdylib, not a guest lib | `:29` |
-| 3. `KayaRing.attach(this)` → `Java_dev_kaya_KayaRing_attach`, which registers the **KayaRing** natives (jvm.rs) *and* the **KayaPresent** natives, and takes no core ends | `:30`; `android.rs:105-118`; `KayaRing.kt:16` |
+| 3. `KayaRing.attach(this, filesDir.absolutePath)` → `Java_dev_kaya_KayaRing_attach`, which registers the **KayaRing** natives (jvm.rs) *and* the **KayaPresent** natives, and takes no core ends | `:30`; `android.rs:105-118`; `KayaRing.kt:16` |
 | 4. `KayaCompose.mount(this)` — same interpreter, same pump | `:35` |
 | 5. scene selected from `System.getenv("KAYA_SELFTEST")` in a `when` | `:36-89` |
 | 6. **kaya spawns the app thread**: `KayaRing.startGuest(scene)`, once per process (it was `Thread(scene, "kaya-app").start()` in the Activity when this probe was taken; ruled 2026-08-27, docs/deferred.md's mount entry) | `:97` |

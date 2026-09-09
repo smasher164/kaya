@@ -3,6 +3,7 @@ The core is never entered: records queue and the process exits."""
 
 import dataclasses
 import datetime
+import io
 import os
 import struct
 import sys
@@ -3077,9 +3078,16 @@ _notify_occs = [
 _real_next_n = kaya.runtime.next_occurrence
 kaya.runtime.next_occurrence = (
     lambda: _notify_occs.pop(0) if _notify_occs else None)
+# The retired id's SECOND result is an unclaimed one, so it announces the
+# drop (docs/tasks-s9-plan.md R1) — captured here rather than left on the
+# gate's stderr, and asserted below.
+_retired_said = io.StringIO()
+_real_stderr = sys.stderr
+sys.stderr = _retired_said
 try:
     app_shot._dispatch_loop()
 finally:
+    sys.stderr = _real_stderr
     kaya.runtime.next_occurrence = _real_next_n
 
 check("the handler fires with the activated outcome",
@@ -3089,6 +3097,9 @@ check("a refused post reaches the same handler slot",
 check("the registration is ONE-SHOT: the second result reaches nobody",
       len([h for h in notify_seen if h[0] == "a"]) == 1)
 check("the id retires with it", 12 not in app_shot._notification_handlers)
+check("the retired id's second result announces its drop",
+      "kaya: notification 12 outcome activated reached no handler"
+      in _retired_said.getvalue())
 
 # AND THE ID IS REUSABLE once it has retired: guests own the numbers.
 reused = []
@@ -3105,5 +3116,69 @@ finally:
     kaya.runtime.next_occurrence = _real_next_n
 check("an id posted again after retirement binds a FRESH handler",
       reused == [kaya.NOTIFICATION_REFUSED])
+
+# THE PROCESS-LEVEL HANDLER (docs/tasks-s9-plan.md R1). A tap on a
+# reminder after the app has exited relaunches the process, and THAT
+# process never called show — so the one-shot table is empty for the id
+# that started it. Three cases, because the order is the semantics: the
+# one-shot handler WINS where one exists, an id with none reaches the
+# process-level handler, and that handler does NOT retire.
+app_relaunch = kaya.App()
+one_shot_seen, process_seen = [], []
+kaya.on_notification_activation(
+    lambda n, o: process_seen.append((n, o)))
+with app_relaunch.window():
+    kaya.show_notification(
+        12, title="bound at the show",
+        on_result=lambda o: one_shot_seen.append(o))
+    kaya.column()
+
+_relaunch_occs = [
+    # 12 has a one-shot handler: it wins, and the process-level one is
+    # not called at all.
+    kaya.wire.parse_occurrence(_packed_notification_result(12, 0)),
+    # 77 was never shown by this process — the relaunch case.
+    kaya.wire.parse_occurrence(_packed_notification_result(77, 0)),
+    # And again, from a second tap: the process handler does not retire.
+    kaya.wire.parse_occurrence(_packed_notification_result(78, 1)),
+]
+kaya.runtime.next_occurrence = (
+    lambda: _relaunch_occs.pop(0) if _relaunch_occs else None)
+try:
+    app_relaunch._dispatch_loop()
+finally:
+    kaya.runtime.next_occurrence = _real_next_n
+
+check("the one-shot handler WINS over the process-level one",
+      one_shot_seen == [kaya.NOTIFICATION_ACTIVATED]
+      and (12, kaya.NOTIFICATION_ACTIVATED) not in process_seen)
+check("an id with no one-shot handler reaches the process-level one",
+      (77, kaya.NOTIFICATION_ACTIVATED) in process_seen)
+check("the process-level handler does NOT retire",
+      process_seen == [(77, kaya.NOTIFICATION_ACTIVATED),
+                       (78, kaya.NOTIFICATION_REFUSED)]
+      and app_relaunch._notification_activation is not None)
+
+# AND THE DROP IS ANNOUNCED, naming the id: with neither handler
+# registered there is nothing else to tell a relaunched process's author
+# that nobody was listening (docs/tasks-s9-plan.md R1, R5).
+app_dropped = kaya.App()
+with app_dropped.window():
+    kaya.column()
+_dropped_occs = [kaya.wire.parse_occurrence(_packed_notification_result(41, 1))]
+kaya.runtime.next_occurrence = (
+    lambda: _dropped_occs.pop(0) if _dropped_occs else None)
+_said = io.StringIO()
+sys.stderr = _said
+try:
+    app_dropped._dispatch_loop()
+finally:
+    sys.stderr = _real_stderr
+    kaya.runtime.next_occurrence = _real_next_n
+check("an unclaimed notification_result announces the drop, naming the id",
+      _said.getvalue().strip() == (
+          "kaya: notification 41 outcome refused reached no handler — none "
+          "was bound at the show and no process-level handler is registered "
+          "(kaya.on_notification_activation)"))
 
 sys.exit(1 if failures else 0)

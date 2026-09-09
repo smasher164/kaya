@@ -47,8 +47,15 @@ kaya_home="$(mktemp -d)"
 export XDG_DATA_HOME="$kaya_home/share"
 export XDG_CONFIG_HOME="$kaya_home/config"
 export XDG_CACHE_HOME="$kaya_home/cache"
+# AND THE STATE HOME, for the same per-leg reason: the second act's marker
+# and verdict live at `<state>/kaya/act2/<app id>` (crates/kaya/src/act2.rs),
+# one path per APP — so the x11 and wayland tasks legs, which pool
+# concurrently, would write and poll the same two files.
+export XDG_STATE_HOME="$kaya_home/state"
+# Where the relaunched process's own output goes; see act2-exec.sh.
+export KAYA_ACT2_LOG="$kaya_home/act2.log"
 mkdir -p "$XDG_DATA_HOME/dbus-1/services" "$XDG_DATA_HOME/applications" \
-    "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$kaya_home/bin"
+    "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_STATE_HOME" "$kaya_home/bin"
 
 # A PRIVATE RUNTIME DIR, a11y-leg.sh's rule and its reason: the session's
 # sockets are derived from it, and concurrent legs sharing one dir fight
@@ -69,8 +76,13 @@ export XDG_RUNTIME_DIR="$kaya_run_dir"
 # mark in the hicolor theme into this leg's own XDG_DATA_HOME, and prints
 # the declared app id — read, never spelled (docs/tasks-s3-plan.md N4), so
 # the activation files cannot name a different app from the one that posts.
+#
+# AND THE Exec LINE IS THE LEG'S OWN LAUNCHER (docs/tasks-s9-plan.md R6),
+# behind tools/linux/act2-exec.sh, which keeps the relaunched process's
+# output: the environment a D-Bus-activated act two runs with is this
+# leg's, so KAYA_LIB and the asset root are where act one found them.
 kaya_app_id="$(python3 /work/tools/linux/install-desktop.py \
-    "$XDG_DATA_HOME" "$@")"
+    "$XDG_DATA_HOME" /work/tools/linux/act2-exec.sh "$@")"
 kaya_id_rc=$?
 if [ "$kaya_id_rc" -ne 0 ] || [ -z "$kaya_app_id" ]; then
     echo "notify-leg: the app's desktop entry could not be installed, so" \
@@ -92,12 +104,21 @@ line = info.get_commandline() if info is not None else ""
 # THE PORTAL RESOLVES THE PROGRAM, not just the file: an entry GLib loads
 # happily can still be refused with "App info not found" when its Exec is
 # relative (measured 2026-09-08).
-print("found" if line.startswith("/") else "missing")')"
+# AND THE ARGUMENTS ARE RESOLVED BY WHOEVER STARTS THE APP, which for the
+# second act is the bus daemon from `/` (docs/tasks-s9-plan.md R6).
+loose = [w for w in line.split() if "/" in w and not w.startswith("/")]
+if not line.startswith("/"):
+    print("missing")
+elif loose:
+    print("relative " + " ".join(loose))
+else:
+    print("found")')"
 if [ "$kaya_appinfo" != found ]; then
-    echo "notify-leg: GLib cannot load $kaya_app_id.desktop out of" \
-        "$XDG_DATA_HOME/applications, so the portal refuses this app's" \
-        "Register and the guest has no route to post through. The usual" \
-        "cause is an Exec line whose program is not an absolute path." >&2
+    echo "notify-leg: $kaya_app_id.desktop cannot be started from anywhere" \
+        "but this leg's own directory ($kaya_appinfo), so the portal" \
+        "refuses this app's Register, or a click after an exit starts a" \
+        "process whose first act is a file-not-found. The Exec line's" \
+        "program AND its arguments have to be absolute paths." >&2
     cat "$XDG_DATA_HOME/applications/$kaya_app_id.desktop" >&2
     rm -rf "$kaya_home"
     exit 1
@@ -125,7 +146,13 @@ kaya_dirs="${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
 if [ "$kaya_regime" = portal ]; then
     kaya_dirs="/opt/kaya-portal:$kaya_dirs"
 fi
-kaya_launch="$(XDG_DATA_DIRS="$kaya_dirs" dbus-launch --sh-syntax)"
+# KAYA_SELFTEST IS STRIPPED FROM THE ACTIVATION ENVIRONMENT (S9 R6): an
+# activated service inherits the bus daemon's environ, so act two would
+# otherwise start with act one's scene name set and run the whole scene
+# from the top instead of adopting the marker (crates/kaya/src/act2.rs
+# takes its act-two branch only when KAYA_SELFTEST is unset).
+kaya_launch="$(XDG_DATA_DIRS="$kaya_dirs" env -u KAYA_SELFTEST \
+    dbus-launch --sh-syntax)"
 eval "$kaya_launch"
 
 KAYA_NOTIFYD_NAMES="$kaya_names" python3 /work/tools/linux/notifyd.py \
@@ -178,6 +205,33 @@ echo "notify-leg: regime $kaya_regime, app id $kaya_app_id, portal version" \
 
 "$@"
 kaya_status=$?
+
+# THE SECOND ACT (docs/tasks-s9-plan.md R6): act one exited at its
+# `relaunch` line leaving a marker, and the click that follows goes through
+# the platform's own door — the daemon's ActionInvoked, which the portal
+# turns into ActivateAction on this app's bus name and D-Bus activation
+# starts. One leg, both verdicts.
+if [ -f "$XDG_STATE_HOME/kaya/act2/$kaya_app_id/marker" ]; then
+    if [ "$kaya_status" -ne 0 ]; then
+        echo "notify-leg: act one exited $kaya_status, so its second act is" \
+            "not driven — a door pushed after a failed first act would" \
+            "measure nothing." >&2
+    else
+        # 90s, inside run_one's `timeout 180` with act one's own run: a
+        # green act two answers in under a second, and a red one publishes
+        # its verdict at the harness's step ceilings — which is the answer
+        # worth waiting for, since a poll that gives up first reports a
+        # missing file where the scene had a sentence.
+        python3 /work/tools/linux/act2.py "$kaya_app_id" "$XDG_STATE_HOME" 90
+        kaya_status=$?
+    fi
+    echo "--- act two ---" >&2
+    if [ -f "$KAYA_ACT2_LOG" ]; then
+        cat "$KAYA_ACT2_LOG" >&2
+    else
+        echo "notify-leg: no act-two log at all, so nothing was started" >&2
+    fi
+fi
 
 # THE DAEMON'S RECORD RIDES THE LEG LOG: every Notify, every click and every
 # withdrawal it saw, which is where a red leg's transport is read.

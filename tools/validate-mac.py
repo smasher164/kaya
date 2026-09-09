@@ -518,7 +518,7 @@ if FOREIGN_PASTEBOARD not in (ROOT / "swift/KayaSwiftUI.swift").read_text(encodi
         f"move FOREIGN_PASTEBOARD with it")
 
 
-def _leg_worker(name, argv, env):
+def _leg_worker(name, argv, env, scene=None):
     log = LEGS_DIR / f"{name}.log"
     t0 = time.monotonic()
     if os.environ.get("KAYA_RECORD"):
@@ -554,6 +554,14 @@ def _leg_worker(name, argv, env):
             FR.sampler_stop(sampler)
         return rc
 
+    # THE SECOND ACT (docs/tasks-s9-plan.md R6a): a scene with a
+    # `relaunch` ends act one at it, and this lane's door is the
+    # carve-out — the same bundle started again naming the notification.
+    # Stale state first: the core consumes a marker on read, so what is
+    # left over is from a run that DIED before its second act.
+    second = scene is not None and scene in lane.RELAUNCH_DOOR
+    if second:
+        lane.clear_act2(ROOT)
     rc = attempt("w")
     if foreign_pasteboard_retry(rc, log.read_text(encoding="utf-8",
                                                   errors="replace")):
@@ -567,6 +575,16 @@ def _leg_worker(name, argv, env):
             lf.write(f"{name}: {FOREIGN_PASTEBOARD} — a writer outside "
                      f"the matrix; re-running the leg once\n")
         rc = attempt("a")
+    if second:
+        text = log.read_text(encoding="utf-8", errors="replace")
+        if rc != 0 or not lane.act_one_ok(text):
+            with open(log, "a", encoding="utf-8") as lf:
+                lf.write(f"{name}: act one did not publish "
+                         f"\"KAYA_SELFTEST: ACT 1 OK\" (exit {rc}), so the "
+                         f"platform's door was never pushed\n")
+            rc = rc or 1
+        else:
+            rc = lane.second_act(ROOT, scene, argv, leg_env, log)
     verdict = "PASS" if rc == 0 else "FAIL"
     secs = int(time.monotonic() - t0)
     (LEGS_DIR / f"{name}.verdict").write_text(verdict + "\n",
@@ -576,7 +594,7 @@ def _leg_worker(name, argv, env):
     FR.mac_leg(name, verdict, secs, log, scratch)
 
 
-def queue_leg(name, argv, env):
+def queue_leg(name, argv, env, scene=None):
     global status
     # THE MATRIX-WIDE TOKEN (tools/lib/exclusive.py): start nothing while
     # another lane holds it; hold it, alone, for this lane's exclusive legs.
@@ -589,7 +607,7 @@ def queue_leg(name, argv, env):
             t.join()
         _leg_names.append(name)
         with exclusive.hold("mac", name):
-            _leg_worker(name, argv, env)
+            _leg_worker(name, argv, env, scene)
         return
     if JOBS == 1 and not os.environ.get("KAYA_RECORD"):
         # STILL STREAMED — serial mode exists to watch a leg live —
@@ -621,7 +639,7 @@ def queue_leg(name, argv, env):
         FR.mac_leg(name, verdict, secs, log, scratch)
         return
     _leg_names.append(name)
-    t = threading.Thread(target=_leg_worker, args=(name, argv, env))
+    t = threading.Thread(target=_leg_worker, args=(name, argv, env, scene))
     t.start()
     _leg_threads.append(t)
     # Watchdog: a wedged pool must die loudly in minutes, not silently
@@ -786,12 +804,13 @@ for _entry in lane.ORDER:
     elif _kind == "dark_leg":
         _name, _scene, _lang = lane.DARK_LEG
         queue_leg(_name, leg_argv(_scene, _lang),
-                  leg_env(_scene, _lang, appearance="dark"))
+                  leg_env(_scene, _lang, appearance="dark"), _scene)
     else:
         _scene, _langs = _entry
         for _lang in _langs:
             queue_leg(lane.leg_name(_scene, _lang),
-                      leg_argv(_scene, _lang), leg_env(_scene, _lang))
+                      leg_argv(_scene, _lang), leg_env(_scene, _lang),
+                      _scene)
 drain()
 timing("legs")
 

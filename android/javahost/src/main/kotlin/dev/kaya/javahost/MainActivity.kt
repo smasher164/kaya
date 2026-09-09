@@ -34,7 +34,7 @@ class MainActivity : ComponentActivity() {
         }
 
         System.loadLibrary("kaya")
-        KayaRing.attach(this)
+        KayaRing.attach(this, filesDir.absolutePath)
         KayaCompose.mount(this)
         // A SCENE IS REGISTERED HERE AS SOON AS ITS GUEST EXISTS, even
         // when no leg runs it yet: whether a leg runs is the Compose

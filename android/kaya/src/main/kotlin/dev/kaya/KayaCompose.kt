@@ -6137,6 +6137,25 @@ object KayaCompose {
         return out
     }
 
+    /**
+     * The script's statements, in order, comments and blanks gone — the
+     * loop's own flattening taken once, so the `relaunch` arm can hand
+     * act two the steps after it verbatim (docs/tasks-s9-plan.md R6).
+     */
+    private fun kayaStatements(script: String): List<String> {
+        val out = ArrayList<String>()
+        for (rawLine in script.split('\n')) {
+            val trimmedLine = rawLine.trim()
+            if (trimmedLine.isEmpty() || trimmedLine.startsWith("#")) continue
+            for (raw in kayaSplitStatements(trimmedLine)) {
+                val line = raw.trim()
+                if (line.isEmpty() || line.startsWith("#")) continue
+                out.add(line)
+            }
+        }
+        return out
+    }
+
     /// How long the bounded-retry wrapper below waits between looks.
     /// Named because an arm has to know it: one that pays for an
     /// expensive diagnosis only on the final look needs the period to
@@ -6360,6 +6379,21 @@ object KayaCompose {
         KayaPresent.faultWatch()
         val observed = ArrayList<String>()
         val failures = ArrayList<String>()
+        // THE ACT SPLIT (docs/tasks-s9-plan.md R6): the steps after
+        // `relaunch` belong to the process the PLATFORM starts, so they
+        // are taken out here and the loop below ends at the arm.
+        val flat = kayaStatements(script)
+        val relaunchAt = flat.indexOf("relaunch")
+        val actTwoSteps = if (relaunchAt < 0) null else flat.drop(relaunchAt + 1)
+        val relaunches = flat.count { it == "relaunch" }
+        if (relaunches > 1) {
+            failures.add(
+                "the scene carries $relaunches `relaunch` statements — a scene has at " +
+                    "most one second act, and everything after the FIRST one is what " +
+                    "this run would have handed to the relaunched process")
+        }
+        // Set by the arm: act one is over and the marker is on disk.
+        var relaunching = false
         // THE CEILING THAT COVERS THE HOP: armed at every step below and
         // again over the exit, so this run cannot end in silence.
         val watchdog = StepWatchdog(stepCeilingMs())
@@ -6741,6 +6775,42 @@ object KayaCompose {
                                 // guest cannot buy another tap.
                                 Log.i("kaya", "KAYA_ACK: notify_tap $seq")
                                 kayaAwaitAnswer(answered)
+                            }
+                        }
+                    }
+                    "relaunch" -> {
+                        // THE END OF ACT ONE (docs/tasks-s9-plan.md R6):
+                        // this process leaves after its verdict, so the
+                        // runner's tap on the shade row opens a COLD
+                        // app — the whole point of S9.
+                        val context = activity.applicationContext
+                        val live = kayaLiveNotifications(context)
+                        val steps = actTwoSteps
+                        when {
+                            steps.isNullOrEmpty() -> failures.add(
+                                "relaunch: no step follows it, so act two is empty")
+                            live.size != 1 -> failures.add(
+                                "relaunch: this lane's door is a tap on ONE row in the " +
+                                    "notification shade and the platform holds " +
+                                    "${live.size} delivered kaya notification(s) " +
+                                    live.joinToString(", ") { "${it.first} \"${it.second}\"" })
+                            else -> {
+                                val wrote = kayaWriteActTwoMarker(steps)
+                                if (wrote != null) {
+                                    failures.add("relaunch: $wrote")
+                                } else {
+                                    // THE RUNNER'S DOOR, named with what it
+                                    // needs: uiautomator finds the shade row
+                                    // by its TEXT.
+                                    Log.i(
+                                        "kaya",
+                                        "KAYA_RELAUNCH: door notify_tap notification=" +
+                                            "${live[0].first} title=${live[0].second}",
+                                    )
+                                    observed.add(
+                                        "relaunch through notification ${live[0].first}")
+                                    relaunching = true
+                                }
                             }
                         }
                     }
@@ -9054,6 +9124,9 @@ object KayaCompose {
                 }
                 }
                 statements++
+                // ACT ONE ENDS AT ITS ARM, never at the script's end: the
+                // steps after it are the marker's now.
+                if (relaunching) break@scriptLines
                 if (statements == remountAfter) {
                     val stuck = kayaRecreate(statements, line)
                     if (stuck != null) {
@@ -9090,8 +9163,19 @@ object KayaCompose {
         if (System.getenv("KAYA_RECORD") != null || System.getenv("KAYA_HARNESS_GATE") != null) {
             Thread.sleep(750)
         }
+        // ACT ONE'S VERDICT IS ITS OWN LINE (docs/tasks-s9-plan.md R6),
+        // so a runner polling for the ordinary one does not stop on it;
+        // act two prints the ordinary one and writes it beside its marker.
         val code = if (failures.isEmpty()) {
-            Log.i("kaya", "KAYA_SELFTEST: OK (${observed.joinToString(", ")})")
+            val said = observed.joinToString(", ")
+            // BOTH SPELLINGS WRITTEN OUT: the ordinary verdict is the
+            // literal every runner and gate greps for, and act one's is
+            // deliberately not a substring of it.
+            val line =
+                if (actTwoSteps != null) "KAYA_SELFTEST: ACT 1 OK ($said)"
+                else "KAYA_SELFTEST: OK ($said)"
+            System.getenv(KAYA_ACT2_VERDICT_ENV)?.let { kayaWriteActTwoVerdict(it, line) }
+            Log.i("kaya", line)
             0
         } else {
             // THE UNMOUNTED-SCENE DIAGNOSIS (docs/traps.md): a scene
@@ -9114,9 +9198,14 @@ object KayaCompose {
                 }
             // FAILURE ONLY, and BEFORE the publish: after it the watchdog
             // may end the process at any moment (crates/kaya/src/vtrace.rs).
-            KayaVTrace.dump("the verdict failed: KAYA_SELFTEST: FAILED (${reported.joinToString("; ")})")
+            val said = reported.joinToString("; ")
+            val line =
+                if (actTwoSteps != null) "KAYA_SELFTEST: ACT 1 FAILED ($said)"
+                else "KAYA_SELFTEST: FAILED ($said)"
+            KayaVTrace.dump("the verdict failed: $line")
             KayaDiag.dump()
-            Log.e("kaya", "KAYA_SELFTEST: FAILED (${reported.joinToString("; ")})")
+            System.getenv(KAYA_ACT2_VERDICT_ENV)?.let { kayaWriteActTwoVerdict(it, line) }
+            Log.e("kaya", line)
             1
         }
         // The halt below hops to the UI thread, which is the thread that
@@ -13976,6 +14065,75 @@ class KayaNotificationAlarm : BroadcastReceiver() {
         val body = intent.getStringExtra(KAYA_NOTIFICATION_BODY_EXTRA) ?: ""
         Log.i("kaya", "KAYA_NOTIFICATION_ALARM: notification=$id title=\"$title\"")
         kayaDeliverNotification(context, id, title, body)
+    }
+}
+
+// MARK: - The second act (docs/tasks-s9-plan.md R6)
+//
+// THE CORE OWNS THE PATH (crates/kaya/src/act2.rs): it computes the
+// second act's directory at attach — on Android out of the files
+// directory the host hands in — consumes the marker and hands this
+// interpreter two environment variables. Nothing here spells the path,
+// which tools/check-steps.py holds.
+
+/** Where act one leaves its hand-off; act two's own answer file. */
+private const val KAYA_ACT2_DIR_ENV = "KAYA_ACT2_DIR"
+private const val KAYA_ACT2_VERDICT_ENV = "KAYA_ACT2_VERDICT"
+
+/** The marker's name inside that directory (act2.rs's MARKER). */
+private const val KAYA_ACT2_MARKER = "marker"
+
+/**
+ * ACT ONE'S HAND-OFF: the scene name on line 1 and the steps after
+ * `relaunch` under it. Null when it landed; otherwise the sentence that
+ * fails the step.
+ */
+private fun kayaWriteActTwoMarker(steps: List<String>): String? {
+    val scene = System.getenv("KAYA_SELFTEST")
+        ?: return "this process has no KAYA_SELFTEST, so the marker cannot name the " +
+            "scene act two must run"
+    val dir = System.getenv(KAYA_ACT2_DIR_ENV)
+        ?: return "the core exported no $KAYA_ACT2_DIR_ENV, so there is nowhere to " +
+            "leave the marker — attach is what arms the second act, and on Android it " +
+            "is handed the files directory by the host"
+    return try {
+        val home = java.io.File(dir)
+        home.mkdirs()
+        java.io.File(home, KAYA_ACT2_MARKER)
+            .writeText(scene + "\n" + steps.joinToString("\n"), Charsets.UTF_8)
+        null
+    } catch (e: java.io.IOException) {
+        "writing the marker under $dir failed: $e"
+    }
+}
+
+/** Act two's answer, beside the marker the core consumed: the same one
+ * line it printed. The runner reads this file, since the relaunched
+ * process is nobody's child. */
+private fun kayaWriteActTwoVerdict(path: String, line: String) {
+    try {
+        val file = java.io.File(path)
+        file.parentFile?.mkdirs()
+        file.writeText(line + "\n", Charsets.UTF_8)
+    } catch (e: java.io.IOException) {
+        Log.e("kaya", "KAYA_ACT2: the verdict could not be written to $path: $e")
+    }
+}
+
+/** Every delivered kaya notification as (id, title) — what the `relaunch`
+ * arm names the runner's door with, and what it prints when there is not
+ * exactly one row to tap. */
+internal fun kayaLiveNotifications(context: Context): List<Pair<Long, String>> {
+    val manager = kayaNotificationManager(context) ?: return emptyList()
+    return manager.activeNotifications.mapNotNull { live ->
+        val tag = live.tag ?: return@mapNotNull null
+        val id = tag.removePrefix("kaya-").toLongOrNull()
+        if (!tag.startsWith("kaya-") || id == null) {
+            null
+        } else {
+            id to (live.notification.extras.getCharSequence(Notification.EXTRA_TITLE)
+                ?.toString() ?: "")
+        }
     }
 }
 

@@ -106,7 +106,25 @@ if lang == "rust":
 argv = lane.leg_argv(scene, lang, lambda name: lane.hs_bin(ROOT, name))
 env = dict(os.environ)
 env.update(lane.leg_env(ROOT, scene, lang, appearance))
+# THE SECOND ACT, the lane's way (docs/tasks-s9-plan.md R6a): a scene with
+# a `relaunch` ends act one at it, and the lane's door is the carve-out.
+# tools/lib/lanes/mac.py's own functions, so a hand run and the lane push
+# the same door.
+second = scene in lane.RELAUNCH_DOOR
+if second:
+    lane.clear_act2(ROOT)
 print(f"run-leg: {scene}-{lang}: {' '.join(argv)}", flush=True)
 rc = subprocess.run(argv, cwd=ROOT, env=env).returncode
+if second:
+    log = ROOT / f"target/run-leg-{scene}-{lang}.act2.log"
+    if rc != 0:
+        print(f"run-leg: act one exited {rc}; the door was not pushed",
+              file=sys.stderr)
+    else:
+        print(f"run-leg: act two through the "
+              f"{lane.RELAUNCH_DOOR[scene]} door", flush=True)
+        rc = lane.second_act(ROOT, scene, argv, env, log)
+        sys.stdout.write(log.read_text(encoding="utf-8", errors="replace"))
+        log.unlink(missing_ok=True)
 print(f"run-leg: exit {rc}")
 sys.exit(rc)

@@ -1141,7 +1141,7 @@ def stage_suite_apk(label, apk, package, targets):
 
 
 def run_apk_on(serial, name, apk, component, script, extras,
-               remount_expect, log, rebooted=False):
+               remount_expect, two_act, log, rebooted=False):
     """One leg on one device, everything it prints going to its own
     log. The per-leg setup ORDER is load-bearing and
     tools/lib/android-leg-order.py polices it: guarded disarm of a
@@ -1222,7 +1222,8 @@ def run_apk_on(serial, name, apk, component, script, extras,
                 time.sleep(1)
             time.sleep(5)
             return run_apk_on(serial, name, apk, component, script,
-                              extras, remount_expect, log, rebooted=True)
+                              extras, remount_expect, two_act, log,
+                              rebooted=True)
         if not ready:
             print(f"run-emulator: the harness accessibility service "
                   f"never bound with a readable window on {serial}",
@@ -1233,6 +1234,12 @@ def run_apk_on(serial, name, apk, component, script, extras,
                   f"with blind eyes and report", file=log)
             print("   a picker that never came up)", file=log)
             return False
+    # A SECOND ACT STARTS FROM AN EMPTY STATE HOME: the marker act one
+    # writes is consumed on read, but a run killed between the two acts
+    # leaves both files behind and a stale verdict would answer for this
+    # run (docs/tasks-s9-plan.md R6).
+    if two_act:
+        run_as(serial, package, "rm", "-rf", ACT2_REL)
     rec_proc = None
     rec_extra = []
     if os.environ.get("KAYA_RECORD"):
@@ -1279,9 +1286,14 @@ def run_apk_on(serial, name, apk, component, script, extras,
     # 120 a red leg with five failed steps could run past the poll and be
     # written down as "no verdict" — a legible failure turned into an
     # illegible one. A green leg breaks on its verdict and pays nothing.
+    # A TWO-ACT SCENE PUBLISHES ACT ONE'S VERDICT UNDER ITS OWN WORDS
+    # (docs/tasks-s9-plan.md R6), so this poll waits for that one and the
+    # ordinary verdict below is act TWO's, out of the file.
+    verdict_pat = (r"^.*KAYA_SELFTEST: ACT 1 (?:OK|FAILED).*$" if two_act
+                   else r"^.*KAYA_SELFTEST: (?:OK|FAILED).*$")
     for _ in range(240):
         dump = kaya_logcat(serial)
-        m = re.search(r"^.*KAYA_SELFTEST: (?:OK|FAILED).*$", dump, re.M)
+        m = re.search(verdict_pat, dump, re.M)
         if m:
             out = m.group(0)
             break
@@ -1327,13 +1339,27 @@ def run_apk_on(serial, name, apk, component, script, extras,
                   f"{int((time.monotonic() - began) * 1000)}ms", file=log)
         time.sleep(0.5)
     print(out, file=log)
-    if "KAYA_SELFTEST: FAILED" in out and served:
+    if two_act:
+        act_one = out
+        out = (act_two(serial, name, package, dump, log)
+               if "KAYA_SELFTEST: ACT 1 OK" in act_one else "")
+        # ONE LEG, TWO VERDICTS: the leg is PASS only when act one left
+        # cleanly and the process the platform started answered. Act one
+        # is named by its VERDICT alone — its whole observation list is
+        # already printed above, and a scene as long as the task
+        # manager's puts a thousand characters in front of the answer
+        # this line exists to give.
+        said = re.search(r"KAYA_SELFTEST: (ACT 1 (?:OK|FAILED))", act_one)
+        print(f"{name}: two acts — "
+              f"{said.group(1) if said else '(no ACT 1 verdict)'} + "
+              f"{out or '(no ACT 2 verdict)'}", file=log)
+    if "KAYA_SELFTEST: OK" not in out and out and served:
         # The drag WATCH's instrument, beside the injections: every drag
         # event the app saw, so "drag ended none" under a matrix says which
         # target the pointer entered and where the drop landed.
         for line in re.findall(r"^.*KAYA_DRAG_EVENT: .*$", dump, re.M):
             print(f"{name}: {line.split('KAYA_DRAG_EVENT: ', 1)[1]}", file=log)
-    if "KAYA_SELFTEST: FAILED" in out:
+    if "KAYA_SELFTEST: OK" not in out and out:
         # THE THREE-LINK TRACE (docs/deferred.md's android
         # `portfolio-python` WATCH): the app dumps its ring just before
         # the verdict, so the verb's own dispatch, the widget's handler
@@ -1770,6 +1796,39 @@ for _scene in sorted({lane.scene_of(_leg) for _leg in lane.legs()}):
     script_for(_scene)
 
 
+def relaunch_count(script_text):
+    """The `relaunch` statements in a leg's script — the interpreter's own
+    flattening, one level simpler: this text is already `;`-joined and no
+    quoted string can spell a bare statement."""
+    return sum(1 for s in re.split(r"[;\n]", script_text)
+               if s.strip() == "relaunch")
+
+
+def relaunch_count_selftest():
+    """Watched on every launch, drop_block_selftest's shape: this reading
+    decides whether a leg WAITS FOR A SECOND ACT, so a count that answers
+    0 on a two-act scene runs act one and calls the leg green — the whole
+    door untested with nothing red (docs/tasks-s9-plan.md R6)."""
+    cases = (
+        ("expect_title \"t\";relaunch;expect_entries 1", 1, "the shipped shape"),
+        ("expect_title \"t\";expect_entries 0", 0, "no second act"),
+        ("a;relaunch;b;relaunch;c", 2, "two acts, which the arm refuses"),
+        ("expect label#0 \"relaunch\"", 0, "the word inside a quoted string"),
+        ("relaunch_soon;expect_entries 1", 0, "a longer verb starting with it"),
+        ("  relaunch  \n expect_entries 1", 1, "spaces and a real newline"),
+    )
+    for text, want, why in cases:
+        got = relaunch_count(text)
+        if got != want:
+            die(f"run-emulator: SELF-TEST FAIL — relaunch_count read {got} "
+                f"and not {want} for {why}")
+    print(f"run-emulator: relaunch_count agrees on {len(cases)} scripts",
+          flush=True)
+
+
+relaunch_count_selftest()
+
+
 def kaya_logcat(serial):
     return out_of(["timeout", "10", "adb", "-s", serial, "logcat", "-d",
                    "-s", "kaya:*"])
@@ -1842,6 +1901,110 @@ def tap_notification(serial, title, log):
     finally:
         adb(serial, "shell", "cmd", "statusbar", "collapse", stdout=log,
             stderr=log)
+
+
+# ------------------------------------------------------- the second act
+# THE APP'S OWN STATE HOME (docs/tasks-s9-plan.md R6): `<files>/act2/<id>`
+# under the app's private data, with `<id>` the DECLARED reverse-DNS id
+# and not the lane's package. run-as is the door — the same one the verb
+# trace comes back through, and the debug APKs are debuggable.
+ACT2_REL = f"files/act2/{DECLARED.id}"
+# How long act one's process has to be GONE after its verdict (its own
+# exit grace is 3s), and how long the relaunched process has to answer.
+ACT2_GONE_S = 20.0
+ACT2_VERDICT_S = 120.0
+
+
+def run_as(serial, package, *args):
+    """One command inside the app's private data directory, and what it
+    printed. THE EXIT CODE SAYS LITTLE: `adb exec-out run-as … cat` on a
+    missing file exits 0 with cat's own "No such file or directory" on
+    the stream (measured 2026-09-08), so every caller here reads the
+    CONTENT and the code rides along for the record."""
+    got = subprocess.run(["adb", "-s", serial, "exec-out", "run-as",
+                          package, *args], stdout=subprocess.PIPE,
+                         stderr=subprocess.DEVNULL, check=False, **TEXT)
+    return got.stdout, got.returncode
+
+
+def app_pid(serial, package):
+    return adb_out(serial, "shell", "pidof", package).strip()
+
+
+def act_two(serial, name, package, dump, log):
+    """THE PLATFORM'S OWN DOOR (docs/tasks-s9-plan.md R6, R7). Act one
+    has published its verdict and left, so the tap this makes on the
+    notification's row in the shade starts a COLD process — the tap a
+    user makes on a reminder for an app that is no longer running — and
+    the marker act one wrote is what tells that process which scene it is
+    finishing. Returns act two's verdict line, or "" with the reason
+    printed."""
+    door = re.search(r"KAYA_RELAUNCH: door notify_tap notification=(\d+) "
+                     r"title=(.*)", dump)
+    if door is None:
+        print(f"{name}: act one published ACT 1 OK and named no door — "
+              f"its log carries no KAYA_RELAUNCH line, so there is no row "
+              f"to tap", file=log)
+        return ""
+    nid, title = door.group(1), door.group(2).rstrip("\r")
+    # THE PROCESS MUST BE GONE FIRST: a tap into a live app is an
+    # onNewIntent, which is S3's warm activation and not S9's. AND
+    # `am force-stop` IS NOT THE FALLBACK — it takes the app's own
+    # notifications out of the shade with it, so the door would go with
+    # the process; a process still standing here is act one's clean exit
+    # failing, and is reported as that.
+    deadline = time.monotonic() + ACT2_GONE_S
+    pid = app_pid(serial, package)
+    while pid and time.monotonic() < deadline:
+        time.sleep(0.5)
+        pid = app_pid(serial, package)
+    if pid:
+        print(f"{name}: act one's process {pid} was still alive "
+              f"{ACT2_GONE_S:.0f}s after its verdict, so a tap now would "
+              f"reach the LIVE app; force-stop is not the fallback here "
+              f"because it cancels the app's notifications and the door "
+              f"with them", file=log)
+        return ""
+    print(f"{name}: act one's process is gone; the door is notification "
+          f"{nid} {title!r}", file=log)
+    told = tap_notification(serial, title, log)
+    print(f"{name}: door notify_tap -> {told}", file=log)
+    if not told.startswith("tapped"):
+        # NOTHING WAS TAPPED, so nothing will arrive: the poll below would
+        # spend its whole budget proving what this sentence already says.
+        return ""
+    deadline = time.monotonic() + ACT2_VERDICT_S
+    while time.monotonic() < deadline:
+        # THE ANSWER IS A VERDICT LINE, never merely output: `adb
+        # exec-out run-as … cat` exits 0 and puts cat's own "No such
+        # file or directory" on the stream, so a poll that took any
+        # non-empty text read the MISS as the answer (measured
+        # 2026-09-08, and it is what the first hand run reported).
+        text, _rc = run_as(serial, package, "cat",
+                           f"{ACT2_REL}/act2.verdict")
+        for line in text.replace("\r", "").splitlines():
+            if line.startswith("KAYA_SELFTEST:"):
+                return line.strip()
+        time.sleep(0.5)
+    # WHAT WAS MEASURED, since the causes look alike from outside: an
+    # untouched marker means no relaunched process ever read it, a
+    # consumed one means the second act started and did not finish. The
+    # DIRECTORY IS LISTED rather than the marker cat'd — a cat exits 0
+    # either way (see run_as), so a code-keyed sentence here would say
+    # the same thing for both causes.
+    listing, _rc = run_as(serial, package, "ls", ACT2_REL)
+    held = listing.replace("\r", "").split()
+    seen = ("the marker is still on disk, so nothing consumed it"
+            if "marker" in held else
+            "the marker is gone, so a process did read it")
+    print(f"{name}: no act2.verdict in {ACT2_VERDICT_S:.0f}s — {seen} "
+          f"(the directory holds {held or 'nothing'}); pid now "
+          f"{app_pid(serial, package) or 'none'}", file=log)
+    for line in re.findall(r"^.*(?:KAYA_ACT2|KAYA_NOTIFICATION_ACTIVATED"
+                           r"|KAYA_SELFTEST).*$", kaya_logcat(serial),
+                           re.M):
+        print(f"{name}: {line}", file=log)
+    return ""
 
 
 def inject_drag(serial, aim, ms, started_before, log):
@@ -2398,8 +2561,21 @@ def run_suite_legs(suite):
         # the app's own files dir — the one place run-as can read back
         # (crates/kaya/src/vtrace.rs).
         extras += ["--es", "KAYA_VERB_TRACE", f"verb-trace-{leg}.txt"]
+        # THE SCENE'S OWN SECOND ACT, and the door this lane opens for it
+        # (docs/tasks-s9-plan.md R6): a `relaunch` with no door named is
+        # a leg that would wait out its ceiling for a tap nobody makes.
+        two_act = relaunch_count(script_text) > 0
+        door = lane.RELAUNCH_DOOR.get(scene)
+        if two_act and door != "notify_tap":
+            die(f"run-emulator: {scene}.steps carries a `relaunch` and "
+                f"lanes/android.py names its door {door!r}; this runner "
+                f"opens \"notify_tap\" and nothing else")
+        if door and not two_act:
+            die(f"run-emulator: lanes/android.py names a relaunch door "
+                f"for {scene}, whose scene script has no `relaunch`")
         queue_leg(leg, selftest,
-                  (apk, component, selftest, extras, remount_expect),
+                  (apk, component, selftest, extras, remount_expect,
+                   two_act),
                   tablet=bool(flags.get("tablet")))
     drain()
     timing(f"legs-{suite}")

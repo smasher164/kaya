@@ -133,6 +133,18 @@ fn short(d: kaya::Date) -> String {
     format!("{} {} {}", DAYS[days(d).rem_euclid(7) as usize], d.day, MONTHS[(d.month - 1) as usize])
 }
 
+/// A REMINDER'S NOTIFICATION ID IS ITS TASK'S KEY (docs/tasks-s9-plan.md
+/// R2): a relaunched process has none of the old one's memory, so the id
+/// has to be derivable both ways from something that survives. Keys are
+/// minted `t1`, `t2`, …
+fn notification_id(key: &str) -> Option<u64> {
+    key.strip_prefix('t')?.parse().ok()
+}
+
+fn task_key(notification: kaya::NotificationId) -> String {
+    format!("t{}", notification.0)
+}
+
 fn today() -> kaya::Date {
     if std::env::var_os("KAYA_SELFTEST").is_some() {
         return date(2026, 9, 7);
@@ -211,9 +223,7 @@ struct App {
     order: BTreeMap<String, Vec<String>>,
     next: u32,
     detail: Option<Detail>,
-    // Each posted reminder's notification id (docs/tasks-s3-plan.md N7).
-    notifications: BTreeMap<String, u64>,
-    next_notification: u64,
+
     pending_open: Option<String>,
     can_notify: bool,
     open_project: Option<(String, kaya::Collection<Line>)>,
@@ -589,6 +599,12 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     });
     msgs.on_undone(kaya::DEFAULT_WINDOW, |_, _| Msg::Resync);
     msgs.on_redone(kaya::DEFAULT_WINDOW, |_, _| Msg::Resync);
+    // THE TAP THAT STARTED THIS PROCESS (docs/tasks-s9-plan.md R1): a
+    // reminder posted by a run that has since exited has no one-shot
+    // registration here, and its id is its task's key.
+    msgs.on_notification_activation(|notification, outcome| {
+        Msg::Reminded(task_key(notification), outcome)
+    });
 
     let mut app = App {
         today,
@@ -603,8 +619,6 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         order: BTreeMap::new(),
         next: 1,
         detail: None,
-        notifications: BTreeMap::new(),
-        next_notification: 1,
         pending_open: None,
         can_notify: kaya::capabilities().notifications,
         open_project: None,
@@ -731,7 +745,6 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             Msg::Reminder(t) => app.set_reminder(&ctx, &msgs, Some(t)),
             Msg::ClearReminder => app.set_reminder(&ctx, &msgs, None),
             Msg::Reminded(key, outcome) => {
-                app.notifications.remove(&key);
                 if outcome != kaya::NotificationOutcome::Activated || !app.tasks.contains_key(&key) {
                     continue;
                 }
@@ -1181,15 +1194,7 @@ impl App {
         if !self.can_notify {
             return;
         }
-        let id = match self.notifications.get(key) {
-            Some(id) => *id,
-            None => {
-                let id = self.next_notification;
-                self.next_notification += 1;
-                self.notifications.insert(key.to_string(), id);
-                id
-            }
-        };
+        let Some(id) = notification_id(key) else { return };
         let day = parse_date(&row.when).unwrap_or(self.today);
         let at = (days(day) * 86_400 + i64::from(t.hour) * 3_600 + i64::from(t.minute) * 60) as u64;
         let shown = tx.show_notification(id).title(&row.title).body(&short(day)).at(at).show();
@@ -1198,7 +1203,7 @@ impl App {
     }
 
     fn drop_reminder(&mut self, tx: &mut kaya::Tx, key: &str) {
-        if let Some(id) = self.notifications.remove(key) {
+        if let Some(id) = notification_id(key) {
             tx.cancel_notification(kaya::NotificationId(id));
         }
     }

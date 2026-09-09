@@ -27,6 +27,8 @@ from lanes import android as android_lane
 from lanes import ios as ios_lane
 from lanes import mac as mac_lane
 from lanes import win as win_lane
+from packaging import identity as app_identity
+from packaging import windows as win_package
 import scene_cut
 
 # Line-buffered stdout: the probes and helper scripts write to the same
@@ -1745,6 +1747,304 @@ if wired():
     status = 1
 
 
+# THE SECOND ACT (docs/tasks-s9-plan.md R6a). `relaunch` splits a scene
+# in two: act one ends there and act two runs in the process the platform
+# starts on the tap. Four things no other gate can see.
+#
+# THE SHAPE. At most one `relaunch` per scene, ALONE ON ITS LINE (all
+# three harnesses split the script at that line, so one folded into a `;`
+# statement would be parsed as a verb and never split anything), and an
+# act two that is not empty — a marker with no steps is a second process
+# with nothing to do and a runner waiting out its ceiling on a verdict
+# that never comes.
+#
+# THE DOORS. The RUNNER pushes the platform's relaunch, so every lane
+# that carries a `relaunch` scene must name its own door: the four python
+# lane modules export `RELAUNCH_DOOR = {"<scene>": "<door>"}` and
+# tools/linux/run-suites.sh carries `RELAUNCH_DOOR_<SCENE>=<door>`. A
+# lane that runs act one and pushes nothing is a leg that dies at its
+# timeout with act one green.
+#
+# ONE PATH. The core computes `<state>/act2/<id>` once
+# (crates/kaya/src/act2.rs) and hands it to whichever harness is running
+# through KAYA_ACT2_DIR and KAYA_ACT2_VERDICT. An interpreter that
+# composed its own would agree with the core until a state home moved,
+# and then the second process would consume nothing and the runner would
+# poll a file nobody writes — with every lane green on act one.
+RELAUNCH = "relaunch"
+# The env names the core exports and each harness reads; the state roots
+# it alone may spell.
+ACT2_ENV = ("KAYA_ACT2_DIR", "KAYA_ACT2_VERDICT")
+# READ COMMENT-STRIPPED, and the PROSE form `<state>/act2/<id>` is
+# deliberately not among them: that sentence is how the rule is written
+# down, in the doc comments and in the harnesses' own refusals. What is
+# refused is the COMPOSITION — the literal segment, and the state roots
+# only the core may read.
+ACT2_ROOTS = (".local/state", "XDG_STATE_HOME", "LOCALAPPDATA", '"act2"')
+
+
+def strip_comments(text):
+    """Blank `//` and `/* */` outside string literals — one reader for
+    Rust, Swift and Kotlin, which spell comments and strings alike. A
+    guard named in the prose beside its call is not a call
+    (tools/check-appearance.py learned this twice)."""
+    out, i, n = [], 0, len(text)
+    while i < n:
+        c = text[i]
+        if c == '"':
+            out.append(c)
+            i += 1
+            while i < n and text[i] != '"':
+                if text[i] == "\\" and i + 1 < n:
+                    out.append(text[i])
+                    i += 1
+                out.append(text[i])
+                i += 1
+            if i < n:
+                out.append(text[i])
+                i += 1
+            continue
+        if text.startswith("//", i):
+            j = text.find("\n", i)
+            j = n if j < 0 else j
+            out.append(" " * (j - i))
+            i = j
+            continue
+        if text.startswith("/*", i):
+            j = text.find("*/", i + 2)
+            j = n if j < 0 else j + 2
+            out.append(" " * (j - i))
+            i = j
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+ACT2_READERS = {
+    TARGET_SWIFT: ('environment["KAYA_ACT2_DIR"]',
+                   'environment["KAYA_ACT2_VERDICT"]'),
+    TARGET_KOTLIN: ('"KAYA_ACT2_DIR"', '"KAYA_ACT2_VERDICT"'),
+    TARGET_HARNESS: ("crate::act2::ENV_DIR", "crate::act2::ENV_VERDICT"),
+}
+
+
+def relaunch_scenes(step_files):
+    """(scene -> act-two statement count) and the shape findings."""
+    scenes, bad = {}, []
+    for path, text in step_files:
+        lines = text.splitlines()
+        at = []
+        for n, raw in enumerate(lines):
+            line = raw.strip()
+            if line.startswith("#"):
+                continue
+            if line == RELAUNCH:
+                at.append(n)
+            elif re.search(r"(^|;)\s*relaunch\b", line):
+                bad.append(f"{path}:{n + 1}: `relaunch` shares its line "
+                           f"with another statement. Every harness splits "
+                           f"the script at that LINE, so this one would "
+                           f"parse as a verb and split nothing: put it on "
+                           f"a line of its own")
+        if not at:
+            continue
+        if len(at) > 1:
+            bad.append(f"{path}: {len(at)} `relaunch` lines (lines "
+                       f"{', '.join(str(n + 1) for n in at)}) — a scene has "
+                       f"at most one second act, and the marker carries "
+                       f"everything after the FIRST, so the rest would run "
+                       f"in a process nobody relaunched")
+            continue
+        after = [line.strip() for line in lines[at[0] + 1:]]
+        after = [line for line in after
+                 if line and not line.startswith("#")]
+        if not after:
+            bad.append(f"{path}: `relaunch` is the last statement — act "
+                       f"two would be empty, so the second process would "
+                       f"have nothing to run and the runner would wait out "
+                       f"its ceiling for a verdict nobody writes")
+            continue
+        scenes[pathlib.Path(path).stem] = len(after)
+    return scenes, bad
+
+
+def relaunch_doors(scenes, runners, sources):
+    """Every runner carrying a `relaunch` scene names its door, and no
+    harness spells the core's path."""
+    bad = []
+    for scene in sorted(scenes):
+        for label, doors, wired in runners:
+            if scene not in wired:
+                continue
+            if scene not in doors:
+                bad.append(f'{label}: scene "{scene}" carries a '
+                           f"`relaunch` and this runner wires it, but "
+                           f"names no relaunch door. Act one exits and "
+                           f"nothing pushes the platform's own door, so "
+                           f"the leg waits out its ceiling with act one "
+                           f"green (docs/tasks-s9-plan.md R6a)")
+            elif not doors[scene]:
+                bad.append(f'{label}: scene "{scene}" is mapped to an '
+                           f"EMPTY door name — a door nobody can name is "
+                           f"a door nobody built")
+    for rel, wanted in ACT2_READERS.items():
+        text = sources[rel]
+        for name in wanted:
+            if name not in text:
+                bad.append(f"{rel} does not read {name}: the core "
+                           f"computes <state>/act2/<id> once and hands it "
+                           f"over, and a harness that stopped reading it "
+                           f"is either composing its own or has no second "
+                           f"act at all")
+        code = strip_comments(text)
+        for root in ACT2_ROOTS:
+            if root in code:
+                bad.append(f"{rel} spells {root!r}: the act-two directory "
+                           f"is the CORE's (crates/kaya/src/act2.rs) and "
+                           f"arrives in {ACT2_ENV[0]}. A second copy agrees "
+                           f"until a state home moves, and then the second "
+                           f"process consumes nothing while act one stays "
+                           f"green")
+    return bad
+
+
+# ACT ONE'S LINE IS DISTINCT FROM THE ORDINARY VERDICT, IN ALL THREE.
+# THE FALSE PASS THIS FORBIDS: every runner decides a leg by looking for
+# `KAYA_SELFTEST: OK` in the log, so a harness that spelled act one
+# `KAYA_SELFTEST: OK (ACT 1 …)` would be read as a finished green leg —
+# the door never pushed, act two never run, and the lane green. No scene
+# can fail that, because the scene's own steps all passed.
+ACT_ONE_OK = "KAYA_SELFTEST: ACT 1 OK"
+ACT_ONE_FAILED = "KAYA_SELFTEST: ACT 1 FAILED"
+ORDINARY_OK = "KAYA_SELFTEST: OK"
+
+
+def act_one_verdict(sources):
+    bad = []
+    for rel, text in sources.items():
+        for wanted in (ACT_ONE_OK, ACT_ONE_FAILED):
+            if wanted not in text:
+                bad.append(f"{rel} does not spell {wanted!r}: act one's "
+                           f"verdict is what the runner reads before it "
+                           f"pushes the platform's door, and one spelled "
+                           f"another way is a leg that stops after act one")
+        # The literal the harness prints, read out of the file: if it
+        # CONTAINS the ordinary verdict, every runner reads act one as a
+        # finished green leg.
+        for line in text.splitlines():
+            if ACT_ONE_OK in line or ACT_ONE_FAILED in line:
+                continue
+            if "ACT 1" in line and ORDINARY_OK in line:
+                bad.append(f"{rel}: {line.strip()!r} spells act one's "
+                           f"verdict so that it contains "
+                           f"{ORDINARY_OK!r} — every runner greps for "
+                           f"that, so this leg would be read as a "
+                           f"finished green run and act two would never "
+                           f"be started")
+    return bad
+
+
+LINUX_DOOR_RE = re.compile(r"RELAUNCH_DOOR_([A-Z0-9_]+)=(\S*)")
+
+
+def linux_doors(text):
+    return {scene.lower(): door
+            for scene, door in LINUX_DOOR_RE.findall(text)}
+
+
+_step_files = [(steps_rel(p), STEPS_TEXT[p]) for p in STEPS]
+_relaunch, _relaunch_bad = relaunch_scenes(_step_files)
+_act2_sources = {rel: read_rel(rel) for rel in ACT2_READERS}
+_runners = [
+    ("tools/lib/lanes/mac.py", mac_lane.RELAUNCH_DOOR,
+     mac_lane.wired_scenes()),
+    ("tools/lib/lanes/ios.py", ios_lane.RELAUNCH_DOOR,
+     ios_lane.wired_scenes()),
+    ("tools/lib/lanes/android.py", android_lane.RELAUNCH_DOOR,
+     android_lane.wired_scenes()),
+    ("tools/lib/lanes/win.py", win_lane.RELAUNCH_DOOR,
+     {win_lane.scene_lang(leg)[0] for leg in win_lane.legs()}),
+    ("tools/linux/run-suites.sh",
+     linux_doors(read_rel("tools/linux/run-suites.sh")),
+     {p.stem for p in STEPS}),
+]
+_relaunch_bad += relaunch_doors(_relaunch, _runners, _act2_sources)
+_relaunch_bad += act_one_verdict(_act2_sources)
+for _f in _relaunch_bad:
+    print(f"check-steps: {_f}", file=sys.stderr)
+    status = 1
+if not _relaunch:
+    selftest_fail("no scene carries a `relaunch` line — the second act's "
+                  "clauses read nothing and agree with everything")
+
+# WATCHED NEGATIVES, counts printed: each is a shape that would ship a
+# second act nobody runs.
+_ONE = [("tasks.steps", "expect_entries 0\nrelaunch\nexpect_entries 1\n")]
+if relaunch_scenes(_ONE)[1]:
+    selftest_fail("the real `relaunch` shape was refused")
+for _label, _files, _want in (
+        ("two relaunch lines", [("x.steps", "expect_entries 0\nrelaunch\n"
+                                 "expect_entries 1\nrelaunch\nexpect_entries 2\n")],
+         "at most one second act"),
+        ("a relaunch folded onto a `;` line",
+         [("x.steps", "expect_entries 0\nback; relaunch\nexpect_entries 1\n")],
+         "shares its line"),
+        ("an empty act two",
+         [("x.steps", "expect_entries 0\nrelaunch\n# nothing\n")],
+         "act \ntwo would be empty".replace("\n", "")),
+):
+    _out = relaunch_scenes(_files)[1]
+    if not any(_want in f for f in _out):
+        selftest_fail(f"the second act's shape clause passed {_label} "
+                      f"(wanted a finding naming {_want!r}; got {_out!r})")
+    print(f"check-steps: self-test the second act refuses {_label}, "
+          f"{len(_out)} finding(s)", file=sys.stderr)
+for _label, _runners_bad, _sources_bad, _want in (
+        ("a lane with the door withheld",
+         [("tools/lib/lanes/mac.py", {}, {"tasks"})], _act2_sources,
+         "names no relaunch door"),
+        ("a lane with an empty door name",
+         [("tools/linux/run-suites.sh", {"tasks": ""}, {"tasks"})],
+         _act2_sources, "EMPTY door name"),
+        ("an interpreter that stopped reading the core's path",
+         [], {**_act2_sources,
+              TARGET_SWIFT: _act2_sources[TARGET_SWIFT].replace(
+                  'environment["KAYA_ACT2_DIR"]', 'environment["KAYA_DIR"]')},
+         "does not read"),
+        ("an interpreter composing the state home itself",
+         [], {**_act2_sources,
+              TARGET_KOTLIN: _act2_sources[TARGET_KOTLIN]
+              + '\nval d = File(home, "act2")\n'},
+         "spells"),
+):
+    _out = relaunch_doors({"tasks": 2}, _runners_bad, _sources_bad)
+    if not any(_want in f for f in _out):
+        selftest_fail(f"the second act's door clause passed {_label} "
+                      f"(wanted a finding naming {_want!r}; got {_out!r})")
+    print(f"check-steps: self-test the second act refuses {_label}, "
+          f"{len(_out)} finding(s)", file=sys.stderr)
+for _label, _doctored, _want in (
+        ("a harness that stopped spelling act one's verdict",
+         {TARGET_HARNESS: _act2_sources[TARGET_HARNESS].replace(
+             ACT_ONE_OK, "KAYA_SELFTEST: FIRST HALF OK")},
+         "does not spell"),
+        ("act one's line spelled so a runner reads it as a green leg",
+         {TARGET_SWIFT: _act2_sources[TARGET_SWIFT].replace(
+             f'"{ACT_ONE_OK} (',
+             f'"{ORDINARY_OK} (ACT 1 ')},
+         "would be read as a"),
+):
+    _out = act_one_verdict(_doctored)
+    if not any(_want in f for f in _out):
+        selftest_fail(f"the act-one verdict clause passed {_label} "
+                      f"(wanted a finding naming {_want!r}; got {_out!r})")
+    print(f"check-steps: self-test the second act refuses {_label}, "
+          f"{len(_out)} finding(s)", file=sys.stderr)
+print(f"check-steps: the second act: {len(_relaunch)} scene(s) with a "
+      f"`relaunch`, {len(_runners)} runner(s) naming a door, "
+      f"{len(ACT2_READERS)} harness(es) reading the core's path",
+      file=sys.stderr)
+
+
 # THE ACCESSIBILITY BUS IS PART OF A LEG'S WIRING, on the one lane that
 # has to supply it (docs/traps.md: "On linux, GTK and the harness find
 # the session bus by DIFFERENT means"). tools/linux/a11y-leg.sh is what
@@ -2683,6 +2983,229 @@ for _what, _pattern, _repl, _half in (
 
 if launchers():
     status = 1
+
+# --- THE SECOND ACT'S WINDOWS DOOR (docs/tasks-s9-plan.md R6/R6a) ---------
+#
+# A scene with a `relaunch` line runs its second half in a process the OS
+# starts. Windows has no programmatic tap, so the runner opens the door COM
+# opens: CoCreateInstance of the app's toast activator class id, one step
+# past the tap. FOUR THINGS NO LEG CAN FAIL:
+#
+#   ONE DERIVATION FOR THE CLASS ID. tools/lib/packaging/windows.py writes it
+#   into the manifest and crates/kaya/src/winui/mod.rs registers it under
+#   HKCU. Disagreeing, the toast is filed under one id and the door opened on
+#   another, and the only symptom is an act two that never runs — a timeout,
+#   not a sentence.
+#
+#   A RELAUNCH LEG RUNS ALONE. Every kaya process registers the class object
+#   at launch, so a pooled neighbour would answer the door instead of the
+#   fresh process COM was asked for. That is a FLAKE, which is what no lane
+#   can see.
+#
+#   THE DOOR ASKS FOR AN OUT-OF-PROCESS SERVER. CLSCTX_LOCAL_SERVER (4) is
+#   what makes COM START the exe; any other context answers out of the
+#   caller's own process and would prove nothing while passing.
+#
+#   THE RUNNER JOINS BOTH VERDICTS. Act one's `ACT 1 OK` alone is a leg that
+#   proved half the scene, and it exits 0.
+def relaunch_lane_problems(lane_mod):
+    bad = []
+    if not lane_mod.RELAUNCH_DOOR:
+        bad.append("tools/lib/lanes/win.py: RELAUNCH_DOOR names no scene — "
+                   "the census reads nothing and agrees with everything")
+    wired = lane_mod.wired_scenes()
+    for scene, door in sorted(lane_mod.RELAUNCH_DOOR.items()):
+        if scene not in wired:
+            bad.append(
+                f"tools/lib/lanes/win.py: RELAUNCH_DOOR names {scene!r}, "
+                f"which no leg of this lane runs — a door for a scene "
+                f"nobody drives is never opened")
+            continue
+        if not door.strip():
+            bad.append(f"tools/lib/lanes/win.py: {scene!r}'s door has no name")
+        for leg in lane_mod.legs():
+            if lane_mod.scene_lang(leg)[0] == scene and not lane_mod.alone(leg):
+                bad.append(
+                    f"tools/lib/lanes/win.py: {leg} runs a scene with a "
+                    f"relaunch door and is POOLED — the door reaches "
+                    f"whichever kaya process holds the class object, and "
+                    f"every one of them registers it at launch, so a pooled "
+                    f"neighbour answers instead. Give it a block of its own.")
+    return bad
+
+
+def relaunch_door_script_problems(text):
+    """tools/guest/relaunch-com.ps1's load-bearing lines, read as CALLS with
+    the comments stripped — this file's own header explains each of them and
+    a comment is not the call (check-appearance's lesson)."""
+    code = "\n".join("" if line.lstrip().startswith("#") else line
+                     for line in text.splitlines())
+    bad = []
+    for want, why in (
+        ("53E31837-6600-4A81-9395-75CFFE746F94",
+         "names no INotificationActivationCallback IID, so it asks COM for "
+         "some other interface"),
+        ("CoCreateInstance",
+         "does not CoCreateInstance, so nothing starts the exe"),
+        ("ref iid, out p",
+         "does not pass the interface out — the C# declaration drifted"),
+        (", 4, ref iid",
+         "does not ask for CLSCTX_LOCAL_SERVER (4): any other context "
+         "answers inside this process and the leg would pass without the "
+         "OS ever starting the app"),
+        ("act2.verdict",
+         "polls no act2.verdict, so it cannot see act two's answer"),
+        ("no act-two verdict after",
+         "has no deadline sentence — a door that opened onto nothing would "
+         "end in silence"),
+        ("ACT2: ",
+         "prints no ACT2: line, which is the only thing the runner reads "
+         "the second act's verdict out of"),
+    ):
+        if want not in code:
+            bad.append(f"tools/guest/{win_lane.RELAUNCH_DOOR_SCRIPT}: {why}")
+    return bad
+
+
+def relaunch_runner_problems(text):
+    bad = []
+    for want, why in (
+        ("relaunch-com.cmd",
+         "never schedules tools/guest/relaunch-com.cmd, so no door is opened"),
+        ("KAYA_SELFTEST: ACT 1 OK",
+         "does not require act one's own verdict, so a scene that failed "
+         "before its `relaunch` line would be judged on act two alone"),
+        ("activator_clsid_braced",
+         "does not derive the class id through "
+         "tools/lib/packaging/windows.py — a second derivation is how the "
+         "toast and the door come to name two different classes"),
+        ('startswith("KAYA_SELFTEST: OK")',
+         "does not read act two's verdict, so the leg's second half decides "
+         "nothing"),
+    ):
+        if want not in text:
+            bad.append(f"tools/deploy-win.py: {why}")
+    return bad
+
+
+def relaunch_clsid_problems(rust, manifest_text, decl, entry_points):
+    """ONE DERIVATION, three readers: python's uuid5 here, the Rust file's
+    frozen table, and the manifest the generator writes."""
+    bad = []
+    unpackaged = win_package.activator_clsid_braced(decl.id)
+    if unpackaged not in rust:
+        bad.append(
+            f"crates/kaya/src/winui/mod.rs: its frozen table does not carry "
+            f"{unpackaged}, which is uuid5(DNS, {decl.id!r}) — the class the "
+            f"library registers under HKCU and the class the door opens must "
+            f"be one id")
+    for entry in entry_points:
+        braced = win_package.activator_clsid_braced(decl.id, entry)
+        if braced not in rust:
+            bad.append(
+                f"crates/kaya/src/winui/mod.rs: its frozen table does not "
+                f"carry {braced}, which is uuid5(DNS, "
+                f"'{decl.id}!{entry}') — the packaged {entry} entry point's "
+                f"activator")
+        bare = braced.strip("{}")
+        for attr in (f'ToastActivatorCLSID="{bare}"', f'com:Class Id="{bare}"'):
+            if attr not in manifest_text:
+                bad.append(
+                    f"tools/lib/packaging/windows.py: the manifest for "
+                    f"{entry} carries no {attr} — a packaged app whose "
+                    f"manifest declares neither extension has no closed-app "
+                    f"door at all, and every toast it posts still works")
+    return bad
+
+
+_decl = app_identity.load(ROOT)
+_entry_points = sorted({win_package.application_id(f"{s}.exe")
+                        for s in set(win_lane.PACKAGED_LEGS.values())})
+_manifest = win_package.manifest(
+    _decl, [f"{s}.exe" for s in sorted(set(win_lane.PACKAGED_LEGS.values()))])
+_door_text = (ROOT / "tools/guest" / win_lane.RELAUNCH_DOOR_SCRIPT).read_text(
+    encoding="utf-8")
+_runner_text = (ROOT / "tools/deploy-win.py").read_text(encoding="utf-8")
+_winui_text = (ROOT / "crates/kaya/src/winui/mod.rs").read_text(encoding="utf-8")
+
+# Watched: each clause perturbed on a COPY, the substitution count printed,
+# and the real files refused by none of them.
+for _what, _fn, _base, _pattern, _repl in (
+    ("the door's CLSCTX_LOCAL_SERVER", relaunch_door_script_problems,
+     _door_text, r", 4, ref iid", ", 1, ref iid"),
+    ("the door's deadline sentence", relaunch_door_script_problems,
+     _door_text, r"no act-two verdict after", "waited"),
+    ("the door's ACT2 line", relaunch_door_script_problems,
+     _door_text, r'"ACT2: \$line"', '"$line"'),
+    ("the runner's door", relaunch_runner_problems, _runner_text,
+     r"relaunch-com\.cmd", "relaunch-com-x.cmd"),
+    ("the runner's act-one requirement", relaunch_runner_problems,
+     _runner_text, r"KAYA_SELFTEST: ACT 1 OK", "KAYA_SELFTEST: ACT ONE OK"),
+    ("the runner's act-two read", relaunch_runner_problems, _runner_text,
+     r'startswith\("KAYA_SELFTEST: OK"\)', 'startswith("KAYA")'),
+):
+    if _fn(_base):
+        selftest_fail(f"the real file was refused before {_what} was cut")
+    _doctored, _n = sub_count(_pattern, _repl, _base)
+    print(f"check-steps: self-test {_what} cut, {_n} substitution(s)")
+    if _n != 1:
+        selftest_fail(f"the relaunch negative for {_what} perturbed nothing")
+    if not _fn(_doctored):
+        selftest_fail(f"a file with {_what} cut passed")
+
+# The class id, watched drifting in each of its three readers.
+if relaunch_clsid_problems(_winui_text, _manifest, _decl, _entry_points):
+    selftest_fail("the real derivations were refused")
+_bad_rust, _n = sub_count(
+    re.escape(win_package.activator_clsid_braced(_decl.id)),
+    "{00000000-0000-5000-8000-000000000000}", _winui_text)
+print(f"check-steps: self-test the Rust frozen unpackaged class id drifted, "
+      f"{_n} substitution(s)")
+if _n < 1:
+    selftest_fail("the Rust class-id negative perturbed nothing")
+if not relaunch_clsid_problems(_bad_rust, _manifest, _decl, _entry_points):
+    selftest_fail("a Rust file naming another class id passed")
+_bad_manifest, _n = sub_count(r"ToastActivatorCLSID", "ToastActivatorCLSSID",
+                              _manifest)
+print(f"check-steps: self-test the manifest's toast extension renamed, "
+      f"{_n} substitution(s)")
+if _n != len(_entry_points):
+    selftest_fail("the manifest negative perturbed nothing")
+if not relaunch_clsid_problems(_winui_text, _bad_manifest, _decl,
+                               _entry_points):
+    selftest_fail("a manifest with no toast activation extension passed")
+
+# The lane table: a door for a scene nobody runs, and a relaunch leg pooled.
+if relaunch_lane_problems(win_lane):
+    selftest_fail("the real win lane module was refused")
+_bad_lane, _n = sub_count(r'RELAUNCH_DOOR = \{"tasks": ',
+                          'RELAUNCH_DOOR = {"nosuchscene": ', _lane_text)
+print(f"check-steps: self-test a door for a scene no leg runs, "
+      f"{_n} substitution(s)")
+if _n != 1:
+    selftest_fail("the unwired-door negative perturbed nothing")
+if not relaunch_lane_problems(load_win_lane_from(_bad_lane)):
+    selftest_fail("a door for a scene no leg runs passed")
+_pooled_lane, _n1 = sub_count(r'    \[\n     "tasks_rust",\n    \],\n', "",
+                              _lane_text)
+_pooled_lane, _n2 = sub_count(r'(\n     "canvas_rust",\n)',
+                              '\\1     "tasks_rust",\n', _pooled_lane)
+print(f"check-steps: self-test a pooled relaunch leg, "
+      f"{_n1}+{_n2} substitution(s)")
+if _n1 != 1 or _n2 != 1:
+    selftest_fail("the pooled-relaunch negative perturbed nothing")
+if not relaunch_lane_problems(load_win_lane_from(_pooled_lane)):
+    selftest_fail("a pooled relaunch leg passed")
+
+for _problem in (relaunch_lane_problems(win_lane)
+                 + relaunch_door_script_problems(_door_text)
+                 + relaunch_runner_problems(_runner_text)
+                 + relaunch_clsid_problems(_winui_text, _manifest, _decl,
+                                           _entry_points)):
+    print(f"check-steps: {_problem}", file=sys.stderr)
+    status = 1
+print(f"check-steps: {len(win_lane.RELAUNCH_DOOR)} windows relaunch door(s), "
+      f"class ids derived once for {len(_entry_points) + 1} identities")
 
 
 # EVERY JS LAUNCHER HAS ONE SHAPE: CRLF (cmd.exe reads a lone LF as part

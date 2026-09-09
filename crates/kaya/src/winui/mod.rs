@@ -20817,6 +20817,22 @@ fn register_unpackaged_identity(declaration: &crate::scene::Declaration) -> Resu
 /// a declared id with no registry key of its own, and the toast it posts is in
 /// the platform's history a moment later.
 fn notification_ready() -> bool {
+    // THE CLOSED-APP DOOR, taken at launch in EVERY process, packaged or not
+    // (docs/tasks-s9-plan.md R4): the class object so a process COM started
+    // for a tap can be handed it, and — unpackaged — the two registry values
+    // that tell COM which exe to start when none is running. FIRST, before
+    // the identity read below can return: a process with no declaration has
+    // no door either, and that is the branch of the sentence that would
+    // otherwise never print. Its failure is not this function's verdict —
+    // an app that cannot be relaunched can still post.
+    match activator() {
+        Ok(braced) => eprintln!("kaya: winui serves toast activations as {braced}"),
+        Err(_) => {
+            if let Some(why) = relaunch_door_missing() {
+                eprintln!("kaya: winui has no toast activator — {why}");
+            }
+        }
+    }
     let declaration = match crate::scene::declared_identity() {
         Ok(declaration) => declaration,
         Err(why) => {
@@ -20985,6 +21001,17 @@ fn notification_post(spec: &crate::protocol::NotificationSpec) -> Result<(), Str
     } else {
         notification_schedule(spec)
     };
+    // THE STANDING RULE (docs/tasks-s9-plan.md R5): a backend that knows the
+    // platform will drop what it was handed says so AT THE HAND-OVER.
+    if posted.is_ok() {
+        if let Some(why) = relaunch_door_missing() {
+            eprintln!(
+                "KAYA_DIAG notification {} posted with no relaunch door: a tap after exit \
+                 lands nowhere — {why}",
+                spec.notification.0
+            );
+        }
+    }
     posted.map_err(|e| {
         format!(
             "{} failed: {:#010x} {}",
@@ -21075,16 +21102,258 @@ fn notification_miss_census(id: u64, seen: &[String]) {
     );
 }
 
+// --- The COM toast activator (docs/tasks-s9-plan.md R4/R5) ----------------
+//
+// THE ONE DOOR A CLOSED APP HAS ON THIS PLATFORM, ruled 2026-09-08: the exe
+// is an out-of-process COM server for INotificationActivationCallback, so a
+// tap on a toast the app posted before it exited starts the exe again and
+// hands it the toast's own launch arguments. Protocol activation was refused
+// as URL-only and the App SDK's route as a per-machine package
+// (docs/tasks-s3-plan.md's Windows amendment).
 
+use windows::Win32::UI::Notifications::{
+    INotificationActivationCallback, INotificationActivationCallback_Impl,
+    NOTIFICATION_USER_INPUT_DATA,
+};
 
+/// The argument COM's command line carries, so a process can tell a toast
+/// activation from an ordinary launch. The packaged manifest's
+/// `com:ExeServer` names the same one (tools/lib/packaging/windows.py).
+const TOAST_ACTIVATED_ARG: &str = "-ToastActivated";
 
+/// RFC 4122's DNS namespace, the base of the version-5 derivation below.
+const UUID_NAMESPACE_DNS: [u8; 16] = [
+    0x6b, 0xa7, 0xb8, 0x10, 0x9d, 0xad, 0x11, 0xd1, 0x80, 0xb4, 0x00, 0xc0, 0x4f, 0xd4, 0x30, 0xc8,
+];
 
+/// SHA-1 through the platform's own provider — `BCRYPT_SHA1_ALG_HANDLE` is a
+/// pseudo-handle, so there is no algorithm provider to open or close.
+fn sha1(bytes: &[u8]) -> Result<[u8; 20], String> {
+    use windows::Win32::Security::Cryptography::{BCryptHash, BCRYPT_SHA1_ALG_HANDLE};
+    let mut digest = [0u8; 20];
+    let status = unsafe { BCryptHash(BCRYPT_SHA1_ALG_HANDLE, None, bytes, &mut digest) };
+    if status.0 != 0 {
+        return Err(format!("BCryptHash(SHA1) answered {:#010x}", status.0 as u32));
+    }
+    Ok(digest)
+}
 
+/// THE NAME THE CLASS ID IS DERIVED FROM: the AUMID this process's toasts are
+/// filed under. UNPACKAGED that is the declared reverse-DNS id; PACKAGED it is
+/// `<id>!<Application Id>`, because one MSIX may carry several entry points
+/// (tools/lib/packaging/windows.py's "ONE PACKAGE, ONE IDENTITY, N ENTRY
+/// POINTS") while a CLSID names ONE server — and because keying the two
+/// runtime situations apart is what stops an unpackaged app's own HKCU
+/// registration shadowing the package's.
+fn activator_name() -> Result<String, String> {
+    let id = declared_app_id()?;
+    if !packaged() {
+        return Ok(id);
+    }
+    Ok(format!("{id}!{}", packaged_application_id()?))
+}
 
+/// The `<Application Id>` this packaged process was started as, out of
+/// `<PackageFamilyName>!<Application Id>`.
+fn packaged_application_id() -> Result<String, String> {
+    use windows::Win32::Storage::Packaging::Appx::GetCurrentApplicationUserModelId;
+    let mut len: u32 = 0;
+    let _ = unsafe { GetCurrentApplicationUserModelId(&mut len, None) };
+    if len == 0 {
+        return Err("GetCurrentApplicationUserModelId asked for no buffer".to_owned());
+    }
+    let mut buffer = vec![0u16; len as usize];
+    let answer =
+        unsafe { GetCurrentApplicationUserModelId(&mut len, Some(windows_core::PWSTR(buffer.as_mut_ptr()))) };
+    if answer.is_err() {
+        return Err(format!("GetCurrentApplicationUserModelId answered {answer:?}"));
+    }
+    let aumid: String = String::from_utf16_lossy(
+        &buffer[..buffer.iter().position(|u| *u == 0).unwrap_or(buffer.len())],
+    );
+    match aumid.split_once('!') {
+        Some((_family, app)) => Ok(app.to_owned()),
+        None => Err(format!("this package's AUMID {aumid:?} names no application")),
+    }
+}
 
+/// THE CLASS ID, DERIVED AND NEVER TYPED: RFC 4122 version 5 (SHA-1,
+/// name-based) in the DNS namespace over `activator_name()`.
+/// tools/lib/packaging/windows.py's `activator_clsid` is the same derivation
+/// in `uuid.uuid5` for the manifest, and tools/check-steps.py holds the two
+/// to one sentence; the guest unit test pins both against a frozen value.
+fn activator_clsid() -> Result<windows_core::GUID, String> {
+    activator_clsid_for(&activator_name()?)
+}
 
+fn activator_clsid_for(name: &str) -> Result<windows_core::GUID, String> {
+    let mut input = UUID_NAMESPACE_DNS.to_vec();
+    input.extend_from_slice(name.as_bytes());
+    let digest = sha1(&input)?;
+    let mut b = [0u8; 16];
+    b.copy_from_slice(&digest[..16]);
+    b[6] = (b[6] & 0x0f) | 0x50;
+    b[8] = (b[8] & 0x3f) | 0x80;
+    Ok(windows_core::GUID {
+        data1: u32::from_be_bytes([b[0], b[1], b[2], b[3]]),
+        data2: u16::from_be_bytes([b[4], b[5]]),
+        data3: u16::from_be_bytes([b[6], b[7]]),
+        data4: [b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]],
+    })
+}
 
+/// The registry's spelling of a class id — braced and upper case, which is
+/// the form under `HKCU\Software\Classes\CLSID` and in `CustomActivator`.
+fn guid_braced(guid: &windows_core::GUID) -> String {
+    format!(
+        "{{{:08X}-{:04X}-{:04X}-{:02X}{:02X}-{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}}}",
+        guid.data1,
+        guid.data2,
+        guid.data3,
+        guid.data4[0],
+        guid.data4[1],
+        guid.data4[2],
+        guid.data4[3],
+        guid.data4[4],
+        guid.data4[5],
+        guid.data4[6],
+        guid.data4[7],
+    )
+}
 
+/// The object COM hands the shell. Its whole job is to turn the toast's
+/// launch string back into the id the guest posted under.
+#[windows_core::implement(INotificationActivationCallback)]
+struct KayaToastActivator;
+
+impl INotificationActivationCallback_Impl for KayaToastActivator_Impl {
+    fn Activate(
+        &self,
+        app_user_model_id: &windows_core::PCWSTR,
+        invoked_args: &windows_core::PCWSTR,
+        _data: *const NOTIFICATION_USER_INPUT_DATA,
+        _count: u32,
+    ) -> windows_core::Result<()> {
+        let args = unsafe { invoked_args.to_string() }.unwrap_or_default();
+        let aumid = unsafe { app_user_model_id.to_string() }.unwrap_or_default();
+        match notification_id_in_argument(&args) {
+            // ONE ACTIVATION PATH: the funnel the toast's own `Activated`
+            // handler and the harness's `notification_activate` also enter.
+            // The sink may not exist yet — a process COM started for this
+            // call has no app thread — and `notification_answer` queues it.
+            Some(id) => notification_activated(id),
+            None => eprintln!(
+                "KAYA_DIAG toast activation for app id {aumid:?} carried the launch string \
+                 {args:?}, which names no `{NOTIFICATION_ARG_KEY}=<id>` — nothing to hand the app"
+            ),
+        }
+        Ok(())
+    }
+}
+
+/// The factory COM asks for the object above. `LockServer` is a no-op: this
+/// process is an app that also answers activations, not a server that exits
+/// when the last client goes.
+#[windows_core::implement(windows::Win32::System::Com::IClassFactory)]
+struct KayaToastActivatorFactory;
+
+impl windows::Win32::System::Com::IClassFactory_Impl for KayaToastActivatorFactory_Impl {
+    fn CreateInstance(
+        &self,
+        outer: windows_core::Ref<windows_core::IUnknown>,
+        iid: *const windows_core::GUID,
+        object: *mut *mut c_void,
+    ) -> windows_core::Result<()> {
+        if !outer.is_null() {
+            return Err(windows::Win32::Foundation::CLASS_E_NOAGGREGATION.into());
+        }
+        let activator: INotificationActivationCallback = KayaToastActivator.into();
+        unsafe { activator.query(iid, object).ok() }
+    }
+
+    fn LockServer(&self, _lock: windows_core::BOOL) -> windows_core::Result<()> {
+        Ok(())
+    }
+}
+
+/// The CLSID's `LocalServer32` and the AppUserModelId key's
+/// `CustomActivator` — the two values that send a tap on this app's toast to
+/// this exe. UNPACKAGED ONLY: a packaged process's activator is the
+/// manifest's, and its HKCU is virtualized anyway (docs/packaging-plan.md
+/// P3). Idempotent, `hkcu_write_strings`' rule.
+fn register_unpackaged_activator(id: &str, braced: &str) -> Result<bool, String> {
+    let exe = std::env::current_exe()
+        .map_err(|e| format!("this process has no executable path: {e}"))?;
+    let command = format!("\"{}\" {TOAST_ACTIVATED_ARG}", exe.display());
+    let mut wrote = hkcu_write_strings(
+        &format!("Software\\Classes\\CLSID\\{braced}\\LocalServer32"),
+        &[("", command.as_str())],
+    )?;
+    wrote |= hkcu_write_strings(&aumid_key_path(id), &[("CustomActivator", braced)])?;
+    Ok(wrote)
+}
+
+/// The door's state, decided once: the braced class id when the activator is
+/// live, or the reason it is not.
+static ACTIVATOR: OnceLock<Result<String, String>> = OnceLock::new();
+
+fn activator() -> &'static Result<String, String> {
+    ACTIVATOR.get_or_init(activator_install)
+}
+
+/// ON THE APARTMENT, which is an MTA, so the class object outlives the call
+/// that registered it and COM may hand it to any thread. The cookie is
+/// dropped deliberately: the registration ends with the process, and
+/// `CoRegisterClassObject` holds its own reference to the factory.
+fn activator_install() -> Result<String, String> {
+    use windows::Win32::System::Com::{
+        CoRegisterClassObject, IClassFactory, CLSCTX_LOCAL_SERVER, REGCLS_MULTIPLEUSE,
+    };
+    let clsid = activator_clsid()?;
+    let braced = guid_braced(&clsid);
+    if !packaged() {
+        register_unpackaged_activator(&declared_app_id()?, &braced)?;
+    }
+    let factory: IClassFactory = KayaToastActivatorFactory.into();
+    unsafe { CoRegisterClassObject(&clsid, &factory, CLSCTX_LOCAL_SERVER, REGCLS_MULTIPLEUSE) }
+        .map_err(|e| {
+            format!(
+                "CoRegisterClassObject({braced}) failed: {:#010x} {}",
+                e.code().0 as u32,
+                e.message()
+            )
+        })?;
+    Ok(braced)
+}
+
+/// WHY A TAP AFTER EXIT WOULD LAND NOWHERE, or `None` when the door is live.
+/// Takes both readings as arguments so the guest unit test drives every
+/// branch — a why-not whose branches nobody has watched print is a guess
+/// (CLAUDE.md invariant 3; tools/check-diagnostics.py reads it by name).
+fn relaunch_door_why_not(door: Result<&str, &str>, id: Result<&str, &str>) -> Option<String> {
+    let why = match (door, id) {
+        (Ok(_), _) => return None,
+        (Err(why), Ok(id)) => format!(
+            "this app files its toasts under the app id {id:?} and its COM activator is not \
+             live: {why}"
+        ),
+        (Err(why), Err(no_id)) => format!(
+            "this process has no declared identity to register an activator for ({no_id}), and \
+             the registration reported {why}"
+        ),
+    };
+    Some(why)
+}
+
+/// The two readings, taken here so the sentence above stays a pure function.
+fn relaunch_door_missing() -> Option<String> {
+    let door = activator();
+    let id = declared_app_id();
+    relaunch_door_why_not(
+        door.as_ref().map(String::as_str).map_err(String::as_str),
+        id.as_ref().map(String::as_str).map_err(String::as_str),
+    )
+}
 
 #[cfg(test)]
 mod tests {
@@ -21158,6 +21427,105 @@ mod tests {
         if let Ok(base) = std::env::var("LOCALAPPDATA") {
             let _ = std::fs::remove_dir_all(std::path::Path::new(&base).join("kaya").join(id));
         }
+    }
+
+    /// THE CLASS ID IS A STANDARD DERIVATION, not a private one: RFC 4122
+    /// version 5 in the DNS namespace. The `example.com` vector is the one
+    /// every uuid5 implementation answers, so a wrong namespace, a wrong
+    /// byte order or a wrong version nibble fails here and not in a
+    /// four-hour round trip to the shell. The two kaya names are the ones
+    /// tools/lib/packaging/windows.py writes into the manifest with
+    /// `uuid.uuid5`; tools/check-steps.py holds the two derivations equal.
+    #[test]
+    fn the_activator_class_id_is_a_version_5_uuid_over_the_app_id() {
+        for (name, want) in [
+            ("example.com", "{CFBFF0D1-9375-5685-968C-48CE8B15AE17}"),
+            ("dev.kaya.aurora.notes", "{E92B7311-E2B0-5787-BCEA-7DD6B24F166B}"),
+            ("dev.kaya.aurora.notes!tasks", "{F551B7DB-A161-5AD2-8EC8-01F75612ED21}"),
+            ("dev.kaya.aurora.notes!notify", "{5842037E-4000-58FD-A2C6-2787A3331A2C}"),
+        ] {
+            let guid = activator_clsid_for(name).expect("the derivation");
+            assert_eq!(guid_braced(&guid), want, "uuid5(DNS, {name:?})");
+        }
+    }
+
+    /// THE UNPACKAGED ACTIVATOR REGISTRATION (docs/tasks-s9-plan.md R4), read
+    /// back off the machine that has a registry. NO LANE CAN SEE THE WRITE
+    /// ITSELF: what it changes is whether COM can start this exe for a tap,
+    /// and the S9 leg's act two would fail with one sentence about a missing
+    /// verdict file — this names the value that was wrong instead.
+    #[test]
+    fn the_unpackaged_activator_registers_its_class_and_its_custom_activator() {
+        let id = "dev.kaya.aurora.notes.activatortest";
+        let braced = guid_braced(&activator_clsid_for(id).expect("the derivation"));
+        let clsid_key = format!("Software\\Classes\\CLSID\\{braced}");
+        reg_delete_tree(&clsid_key);
+        reg_delete_tree(&aumid_key_path(id));
+
+        let wrote = register_unpackaged_activator(id, &braced).expect("the registration");
+        assert!(wrote, "the first registration writes both values");
+        let server = hkcu_string(&format!("{clsid_key}\\LocalServer32"), "")
+            .expect("LocalServer32's default value");
+        let exe = std::env::current_exe().expect("this test's own exe");
+        assert_eq!(
+            server,
+            format!("\"{}\" -ToastActivated", exe.display()),
+            "COM starts the server off this command line"
+        );
+        assert_eq!(
+            hkcu_string(&aumid_key_path(id), "CustomActivator").as_deref(),
+            Some(braced.as_str()),
+            "the shell reads the class to activate off the app id's key"
+        );
+
+        // IDEMPOTENT: the second launch of an app compares and writes nothing.
+        assert!(
+            !register_unpackaged_activator(id, &braced).expect("the second registration"),
+            "a registration that already says this writes nothing"
+        );
+        // AND A MOVED EXE IS STILL WRITTEN — an "idempotence" that never wrote
+        // again would leave COM starting a path that no longer exists.
+        let moved = format!("{{{}}}", "11111111-2222-3333-4444-555555555555");
+        assert!(
+            register_unpackaged_activator(id, &moved).expect("the moved registration"),
+            "a class id that differs from the key is written"
+        );
+        assert_eq!(
+            hkcu_string(&aumid_key_path(id), "CustomActivator").as_deref(),
+            Some(moved.as_str())
+        );
+
+        reg_delete_tree(&clsid_key);
+        reg_delete_tree(&format!("Software\\Classes\\CLSID\\{moved}"));
+        reg_delete_tree(&aumid_key_path(id));
+    }
+
+    /// BOTH BRANCHES OF THE WHY-NOT, MADE TO PRINT (CLAUDE.md invariant 3).
+    /// A branch nobody has seen print is a guess about a state nobody has
+    /// reached, and this sentence is what a reader will chase when a tap
+    /// after exit lands nowhere.
+    #[test]
+    fn the_relaunch_door_why_not_names_what_it_measured_in_every_branch() {
+        assert_eq!(relaunch_door_why_not(Ok("{G}"), Ok("dev.kaya.aurora.notes")), None);
+        let no_door = relaunch_door_why_not(
+            Err("CoRegisterClassObject({G}) failed: 0x80040154 not registered"),
+            Ok("dev.kaya.aurora.notes"),
+        )
+        .expect("a registered app whose class object did not take");
+        eprintln!("KAYA_DIAG notification 1 posted with no relaunch door: a tap after exit \
+                   lands nowhere — {no_door}");
+        assert!(no_door.contains("dev.kaya.aurora.notes"), "{no_door}");
+        assert!(no_door.contains("0x80040154"), "{no_door}");
+        let no_id = relaunch_door_why_not(
+            Err("this process has no executable path"),
+            Err("guests/assets/identity.toml was not found"),
+        )
+        .expect("a process with no declaration");
+        eprintln!("KAYA_DIAG notification 1 posted with no relaunch door: a tap after exit \
+                   lands nowhere — {no_id}");
+        assert!(no_id.contains("identity.toml"), "{no_id}");
+        assert!(no_id.contains("no executable path"), "{no_id}");
+        assert_ne!(no_door, no_id, "one sentence for two causes is the defect");
     }
 
     /// THE DEFERRED RE-STAMP PUTS EVERY CHILD ON THE TRACK THE EAGER ONE DID,

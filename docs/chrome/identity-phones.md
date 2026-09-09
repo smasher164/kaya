@@ -57,7 +57,7 @@ Pins, read from the module build files:
 - The Activity is a bare `ComponentActivity`
   (`android/rusthost/src/main/kotlin/dev/kaya/rusthost/MainActivity.kt`)
   that maps `KAYA_*` intent extras to env, loads the guest .so, and
-  calls `Kaya.attach(this)` + `KayaCompose.mount(this)`. It touches no
+  calls `Kaya.attach(this, filesDir.absolutePath)` + `KayaCompose.mount(this)`. It touches no
   identity API.
 - **No `setTaskDescription`, no `TaskDescription`, no `android:icon`
   anywhere in the tree** (grep over `*.kt *.swift *.sh *.xml *.plist

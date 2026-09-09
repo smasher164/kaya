@@ -681,6 +681,10 @@ sealed class KayaApp
     // One-shot, keyed by the GUEST's notification id (the alert's
     // grammar; many may be live at once).
     internal readonly Dictionary<ulong, Action<Tx, uint>> notifications = new();
+    // NOT one-shot, and not keyed at all: the process-level handler for
+    // a result whose id has none above (docs/tasks-s9-plan.md R1). A
+    // relaunched process never called ShowNotification.
+    internal Action<Tx, ulong, uint>? notificationActivation;
     // BOTH DIALOG KINDS LIVE HERE: a save request answers on the
     // picker's grammar out of the picker's id space (docs/save-plan.md
     // D2), narrowed to "one or none" at Tx.SaveFile.
@@ -909,6 +913,15 @@ sealed class KayaApp
     }
 
     public void OnClick(Widget w, Action<Tx> handler) => widgetHandlers[w.Id] = handler;
+
+    /// <summary>Register the PROCESS-LEVEL notification handler
+    /// (docs/tasks-s9-plan.md R1): it receives every result whose id has
+    /// no one-shot handler bound at ShowNotification — which is the
+    /// whole of a process the platform RELAUNCHED for a tap, since it
+    /// never called ShowNotification. It does not retire, and a one-shot
+    /// handler for the same id still wins.</summary>
+    public void OnNotificationActivation(Action<Tx, ulong, uint> handler) =>
+        notificationActivation = handler;
 
     /// <summary>Register the table's header-click handler at its For —
     /// the handler receives the 0-based column of a sort REQUEST:
@@ -1259,10 +1272,27 @@ sealed class KayaApp
             }
             else if (kind == KayaWire.OccKindNotificationResult)
             {
-                // One-shot like the alert, and the id retires with it;
-                // payload is the parsed u32 outcome.
+                // THE ORDER IS THE SEMANTICS (docs/tasks-s9-plan.md R1),
+                // and tools/check-sugar-surface.py reads it out of this
+                // arm: the one-shot handler bound at the show first,
+                // retiring with the result; else the process-level one,
+                // which does not; else the drop is announced. payload is
+                // the parsed u32 outcome.
+                uint outcome = payload is uint o ? o : 0;
                 if (notifications.Remove(id, out var fn))
-                    Dispatch(tx => fn(tx, payload is uint o ? o : 0));
+                    Dispatch(tx => fn(tx, outcome));
+                else if (notificationActivation is { } act)
+                    Dispatch(tx => act(tx, id, outcome));
+                else
+                {
+                    string word = outcome == KayaWire.NotificationOutcomeActivated
+                        ? "activated" : "refused";
+                    Console.Error.WriteLine(
+                        $"kaya: notification {id} outcome {word} reached no "
+                        + "handler — none was bound at the show and no "
+                        + "process-level handler is registered "
+                        + "(App.OnNotificationActivation)");
+                }
             }
             else if (kind == KayaWire.OccKindFileDialogResult)
             {

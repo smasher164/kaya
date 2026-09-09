@@ -1613,6 +1613,17 @@ def cancel_notification(notification):
     _records().append(wire.tx_cancel_notification(int(notification)))
 
 
+def on_notification_activation(f):
+    """Register the PROCESS-LEVEL notification handler
+    (docs/tasks-s9-plan.md R1): f(notification, outcome) receives every
+    result whose id has no one-shot handler bound at the show — which is
+    the whole of a process the platform RELAUNCHED for a tap, since it
+    never called show. It does not retire, and a one-shot handler for
+    the same id still wins. Needs no transaction; call it beside the
+    scene declaration."""
+    _app._notification_activation = f
+
+
 class _ColumnsTrace:
     """columns()'s wrapper over the for-statement tracer. The header
     declaration is emitted when the template CLOSES: the core validates
@@ -3963,6 +3974,10 @@ class App:
         # One-shot, keyed by the GUEST's notification id (the alert's
         # grammar; many may be live at once).
         self._notification_handlers = {}
+        # NOT one-shot, and not keyed at all: the process-level handler
+        # for a result whose id has none above (docs/tasks-s9-plan.md
+        # R1). A relaunched process never called show.
+        self._notification_activation = None
         self._file_dialog_handlers = {}
         # One-shot, keyed by request id (the alert's grammar).
         self._clipboard_handlers = {}
@@ -4360,11 +4375,30 @@ class App:
                     self._dispatch(handler, payload)
                 continue
             if kind == wire.OCC_NOTIFICATION_RESULT:
-                # One-shot: the registration retires with the result.
+                # THE ORDER IS THE SEMANTICS (docs/tasks-s9-plan.md R1),
+                # and tools/check-sugar-surface.py reads it out of this
+                # arm: the one-shot handler bound at the show first,
+                # retiring with the result; else the process-level one,
+                # which does not; else the drop is announced.
+                # payload is the parsed u32 outcome.
                 handler = self._notification_handlers.pop(ident, None)
                 if handler is not None:
-                    # payload is the parsed u32 outcome.
                     self._dispatch(handler, payload)
+                    continue
+                activation = self._notification_activation
+                if activation is not None:
+                    self._dispatch(activation, ident, payload)
+                    continue
+                outcome = ("activated"
+                           if payload == wire.NOTIFICATION_OUTCOME_ACTIVATED
+                           else "refused")
+                print(
+                    f"kaya: notification {ident} outcome {outcome} reached "
+                    "no handler — none was bound at the show and no "
+                    "process-level handler is registered "
+                    "(kaya.on_notification_activation)",
+                    file=sys.stderr,
+                )
                 continue
             if kind == wire.OCC_FILE_DIALOG_RESULT:
                 # One-shot. payload is the decoder's list of (handle,

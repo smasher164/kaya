@@ -45,6 +45,7 @@ import time
 import os
 
 from lanes import win as lane
+from packaging import identity as app_identity
 from packaging import windows as win_package
 import exclusive
 import flightrec_lane
@@ -828,6 +829,7 @@ def deploy_artifacts():
                ROOT / "tools/guest/flightrec.ps1",
                ROOT / "tools/guest/pkg-install.ps1",
                ROOT / "tools/guest/pkg-run.ps1",
+               ROOT / "tools/guest/relaunch-com.ps1",
                ROOT / "tools/guest/dnd-witness.ps1"])
 
 
@@ -1529,6 +1531,9 @@ def run_probe(spec):
 # INSTALLED THROUGH schtasks /it, never over ssh: deployment initializes the
 # Process Lifetime Manager, which session 0 has none of, and the refusal is a
 # bare 0x80070005 (measured 2026-09-08; docs/traps.md).
+PACKAGE_FAMILY = []
+
+
 def package_rust_guests():
     scenes = sorted(set(lane.PACKAGED_LEGS.values()))
     staging = ROOT / "target/win-package"
@@ -1544,6 +1549,14 @@ def package_rust_guests():
         die("deploy-win: the package install never finished — "
             "tools/guest/pkg-install.ps1 wrote no PKGINSTALLDONE")
     out = run_ssh_out("cmd /c type C:\\kaya\\out_pkginstall.txt") or ""
+    # THE FAMILY NAME IS THE INSTALL'S OWN REPORT, never computed here: it is
+    # a hash of the publisher and nothing on this side may claim to know it.
+    # The second act's door needs it to name the packaged AUMID and to reach a
+    # package-redirected LocalAppData (docs/tasks-s9-plan.md R6).
+    for line in out.splitlines():
+        family = line.partition("pkg-install: family ")[2].strip()
+        if family:
+            PACKAGE_FAMILY.append(family)
     if "pkg-install: OK" not in out:
         print("deploy-win: the MSIX did not install, so every packaged leg "
               "would run", file=sys.stderr)
@@ -1594,6 +1607,70 @@ def _release_slot(slot):
         # presses the taskbar (docs/traps.md: TWO OF THE SIX WINDOW TILES).
         _slots.sort()
         _slots_lock.notify()
+
+
+# THE SECOND ACT (docs/tasks-s9-plan.md R6). Act one exited at its `relaunch`
+# line having left a marker in the app's own state directory; nothing on
+# Windows can drive a real tap, so the runner pushes the OS's own door ONE
+# STEP PAST one — CoCreateInstance of the app's toast activator class id,
+# which starts the exe through the library's HKCU LocalServer32 (unpackaged)
+# or the package's com:ExeServer (packaged) and then calls Activate with the
+# toast's launch string. Both routes measured 2026-09-08: the process COM
+# starts is in the CALLER's session, which is why the door goes through
+# schtasks like every other guest process and not over ssh.
+#
+# THE DOOR SCRIPT POLLS the verdict act two writes beside its marker, because
+# a process COM started has no stdout anyone can read.
+def second_act(name, out, log):
+    scene = lane.scene_lang(name)[0]
+    door = lane.RELAUNCH_DOOR[scene]
+    if "KAYA_SELFTEST: ACT 1 OK" not in out:
+        print(f"{name}: FAIL — act one never reached its `relaunch` line, so "
+              f"the {door} door had nothing to relaunch for. Act one's "
+              f"verdict is above; the second act was not attempted.", file=log)
+        return False
+    decl = app_identity.load(ROOT)
+    packaged = name in lane.PACKAGED_LEGS
+    family = PACKAGE_FAMILY[0] if PACKAGE_FAMILY else ""
+    if packaged and not family:
+        print(f"{name}: FAIL — the package phase reported no family name, so "
+              f"the packaged AUMID cannot be named", file=log)
+        return False
+    # ONE DERIVATION, tools/lib/packaging/windows.py's, shared with the
+    # manifest and with crates/kaya/src/winui/mod.rs's Rust half.
+    clsid = win_package.activator_clsid_braced(
+        decl.id, scene if packaged else None)
+    aumid = f"{family}!{scene}" if packaged else decl.id
+    outfile = f"out_{name}-act2.txt"
+    # "-" is the .cmd's spelling for "unpackaged": schtasks /tr cannot carry
+    # an empty positional argument.
+    family_arg = family or "-"
+    run_ssh(f"del C:\\kaya\\{outfile} 2>nul & schtasks /create /tn "
+            f'kaya_{name}_act2 /tr "C:\\kaya\\relaunch-com.cmd {name} '
+            f'{clsid} {aumid} {lane.RELAUNCH_ARG_KEY} '
+            f'{lane.RELAUNCH_NOTIFICATION} {decl.id} {family_arg}" /sc once '
+            f"/st 00:00 /it /rl highest /f >nul && schtasks /run /tn "
+            f"kaya_{name}_act2 >nul", log=log)
+    text = ""
+    for _ in range(60):
+        text = run_ssh_out(f"cmd /c type C:\\kaya\\{outfile}", log=log) or ""
+        if "RELAUNCHDONE" in text:
+            break
+        time.sleep(2)
+    print(text, file=log)
+    verdict = ""
+    for line in text.splitlines():
+        if line.startswith("ACT2: "):
+            verdict = line[len("ACT2: "):].strip()
+    if "RELAUNCHDONE" not in text:
+        print(f"{name}: FAIL — the {door} door wrote no RELAUNCHDONE in 120s; "
+              f"tools/guest/relaunch-com.ps1 itself did not finish", file=log)
+        return False
+    ok = verdict.startswith("KAYA_SELFTEST: OK")
+    print(f"{name}: ACT 1 OK, ACT 2 "
+          f"{'OK' if ok else 'FAILED'} through the {door} door — "
+          f"{verdict or 'no act-two verdict'}", file=log)
+    return ok
 
 
 def run_one_suite(name, slot, log):
@@ -1675,6 +1752,11 @@ def run_one_suite(name, slot, log):
                       f"than retrying", file=log)
         return False
     print(out, file=log)
+    # A SCENE WITH A `relaunch` LINE IS TWO ACTS AND ONE LEG
+    # (docs/tasks-s9-plan.md R6): act one's verdict is the one just read, and
+    # the rest of the scene runs in a process the OS starts.
+    if lane.scene_lang(name)[0] in lane.RELAUNCH_DOOR:
+        return second_act(name, out, log)
     # The verdict TEXT is the authority and the exit code only
     # corroborates it: WinUI's window-Closed handler overwrote a failing
     # run's exit code with 0, so a scene that printed FAILED exited 0.

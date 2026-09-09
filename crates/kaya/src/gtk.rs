@@ -11570,6 +11570,31 @@ fn name_has_owner(conn: &gio::DBusConnection, name: &str) -> bool {
     .unwrap_or(false)
 }
 
+/// Whether the bus can START this name — the half of a relaunch door the
+/// route decision cannot see (docs/tasks-s9-plan.md R5). Both activation
+/// files are the packaging arm's (tools/lib/packaging/linux.py); an app
+/// installed with the desktop entry alone registers, posts, and has
+/// nothing for `ActivateAction` to start once it has exited.
+fn name_is_activatable(conn: &gio::DBusConnection, name: &str) -> bool {
+    conn.call_sync(
+        Some("org.freedesktop.DBus"),
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "ListActivatableNames",
+        None,
+        None,
+        gio::DBusCallFlags::NONE,
+        NOTIFY_TIMEOUT_MS,
+        gio::Cancellable::NONE,
+    )
+    .ok()
+    .and_then(|reply| reply.child_value(0).get::<Vec<String>>())
+    .is_some_and(|names| names.iter().any(|held| held == name))
+}
+
+/// Set by the route decision; read at every post (R5).
+static RELAUNCH_DOOR: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+
 /// THE ONE DECISION, taken once: the capability bit and every post read
 /// it, so what a guest is told and what it walks into cannot disagree.
 /// Synchronous and cheap on purpose — `kaya::run` takes it before the app
@@ -11594,6 +11619,10 @@ fn notification_route() -> Option<NotifyRoute> {
         } else {
             None
         };
+        let _ = RELAUNCH_DOOR.set(match (&bus, &id) {
+            (Some(conn), Some(id)) => name_is_activatable(conn, id),
+            _ => false,
+        });
         // THE FOUR THINGS THE DECISION WAS MADE OF, under the harness only:
         // a capability that reads false has four possible causes and the
         // guest's own word for it ("cannot post") tells them apart for
@@ -11735,21 +11764,15 @@ fn withdraw_notification(id: u64) {
 
 /// The record the desktop is asked to hold: the guest's title and body,
 /// and the action a click activates us with — the kaya id as its target,
-/// which is what comes back through the portal's `ActionInvoked` and
-/// through GNOME's `ActivateAction`.
-fn notification_body(route: NotifyRoute, id: u64, title: &str, body: &str) -> glib::Variant {
+/// which is what comes back as `ActivateAction` on both routes.
+fn notification_body(id: u64, title: &str, body: &str) -> glib::Variant {
     let dict = glib::VariantDict::new(None);
     dict.insert("title", title);
     dict.insert("body", body);
-    // GNOME's interface takes the app's own action namespace; the portal
-    // takes the bare action name it will hand back to us.
-    dict.insert(
-        "default-action",
-        match route {
-            NotifyRoute::Portal => ACTION_ACTIVATED.to_owned(),
-            NotifyRoute::Gnome => format!("app.{ACTION_ACTIVATED}"),
-        },
-    );
+    // THE APP'S OWN NAMESPACE ON BOTH ROUTES (docs/tasks-s9-plan.md R4;
+    // docs/traps.md, "A bare portal action dies with the connection that
+    // posted it"). A bare name here is what made S3 read `Activate` alone.
+    dict.insert("default-action", format!("app.{ACTION_ACTIVATED}"));
     dict.insert("default-action-target", notification_target(id));
     dict.end()
 }
@@ -11760,7 +11783,7 @@ fn deliver_notification(sink: OccSink, id: u64, title: String, body: String) {
         return;
     };
     let ident = notification_id_string(id);
-    let record = notification_body(route, id, &title, &body);
+    let record = notification_body(id, &title, &body);
     let (name, path, interface, args) = match route {
         NotifyRoute::Portal => (
             PORTAL_NAME,
@@ -11919,6 +11942,15 @@ fn post_notification(sink: OccSink, spec: crate::protocol::NotificationSpec) {
         answer_notification(&sink, id, crate::protocol::NotificationOutcome::Refused);
         return;
     }
+    // THE STANDING RULE, at the hand-over (docs/tasks-s9-plan.md R5).
+    if RELAUNCH_DOOR.get() == Some(&false) {
+        kaya_diag!(
+            "KAYA_DIAG notification {id} posted with no relaunch door: a tap after exit \
+             lands nowhere — {} is not among this session bus's activatable names, so \
+             org.freedesktop.Application.ActivateAction has nothing to start",
+            app_identity_id().unwrap_or_else(|| "<no declared id>".to_owned())
+        );
+    }
     if let Ok(mut posted) = POSTED.lock() {
         posted.insert(
             id,
@@ -11953,10 +11985,12 @@ thread_local! {
         const { RefCell::new(None) };
 }
 
-/// The two ways a click reaches this process, installed once at startup:
-/// the portal's `ActionInvoked` signal, and — for GNOME's interface and
-/// for the scheduler's timer — the GApplication actions the desktop
-/// invokes over `org.freedesktop.Application`.
+/// The doors a click reaches this process by, installed BEFORE the main
+/// loop: the GApplication actions the desktop invokes over
+/// `org.freedesktop.Application` — which is the door on both routes and
+/// in both processes since S9 (docs/tasks-s9-plan.md R4) — and the
+/// portal's own `ActionInvoked`, which a backend that reads the
+/// app-namespaced action as portal-scope would answer with instead.
 fn install_notification_routes(app: &gtk4::Application, sink: OccSink) {
     let activated = gio::SimpleAction::new(ACTION_ACTIVATED, Some(glib::VariantTy::STRING));
     let clicked = sink.clone();
@@ -11978,9 +12012,9 @@ fn install_notification_routes(app: &gtk4::Application, sink: OccSink) {
         return;
     }
     let Some(conn) = session_bus() else { return };
-    // THE PORTAL HANDS THE ID BACK: measured 2026-09-07,
-    // `ActionInvoked('kaya-12', 'notify-activated', [<int64 12>])` — the
-    // freedesktop hop below it carries neither.
+    // The identifier rides the signal's first argument, as it rides the
+    // action's parameter (docs/traps.md, "A bare portal action dies with
+    // the connection that posted it").
     let subscription = conn.subscribe_to_signal(
         Some(PORTAL_NAME),
         Some(PORTAL_NOTIFICATION),
@@ -12115,6 +12149,14 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
         builder = builder.application_id(&id);
     }
     let app = builder.build();
+
+    // THE CLICK'S DOORS BEFORE THE LOOP (docs/tasks-s9-plan.md R4): a
+    // process the desktop started on a tap is entered through
+    // `org.freedesktop.Application.ActivateAction`, which GApplication
+    // dispatches against the action map — not through `activate`. On the
+    // core's own sink, since a rust-native backend answers where its guest
+    // listens and never through capi's presentation slot.
+    install_notification_routes(&app, occ_tx.clone());
 
     // activate can fire more than once; the core is set up once.
     let ends = Rc::new(RefCell::new(Some((occ_tx, tx_rx))));
@@ -12483,12 +12525,6 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 app: Some(app.clone()),
             });
         });
-
-        // The click's two doors and the scheduler's action
-        // (docs/tasks-s3-plan.md N1, N2), on the core's own sink: a
-        // rust-native backend answers on the sink its guest listens to,
-        // never capi's presentation slot.
-        install_notification_routes(app, occ_tx.clone());
 
         // The first transaction may already be queued; drain now.
         drain_transactions();

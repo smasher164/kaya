@@ -3767,6 +3767,20 @@ pub struct Messages<M> {
     section_selected: RefCell<HashMap<u64, Box<dyn Fn() -> M>>>,
     alerts: RefCell<HashMap<u64, Box<dyn Fn(AlertChoice) -> M>>>,
     notifications: RefCell<HashMap<u64, Box<dyn Fn(crate::protocol::NotificationOutcome) -> M>>>,
+    /// PROCESS-LEVEL and persistent (docs/tasks-s9-plan.md R1): a process
+    /// the platform started on a tap never called show, so no one-shot
+    /// registration for that id can exist.
+    #[allow(clippy::type_complexity)]
+    notification_activation: RefCell<
+        Option<
+            Box<
+                dyn Fn(
+                    crate::protocol::NotificationId,
+                    crate::protocol::NotificationOutcome,
+                ) -> M,
+            >,
+        >,
+    >,
     /// Per-dialog, one-shot like an alert: the registration retires with
     /// the one result, so no guest ever inspects a dialog id.
     dialogs: RefCell<HashMap<u64, Box<dyn Fn(Vec<crate::protocol::PickedFile>) -> M>>>,
@@ -3793,6 +3807,29 @@ pub struct Messages<M> {
 
 type Mapper<M> = Box<dyn Fn(&Occurrence) -> Option<M>>;
 
+/// A notification result nobody claimed (docs/tasks-s9-plan.md R1). ONE
+/// WRITE, like gtk.rs's kaya_diag: an eprintln issues a write per format
+/// fragment and another thread's line lands inside it. The other eight
+/// bindings print this sentence with their own registrar's name in the
+/// parentheses.
+fn notification_dropped(
+    notification: crate::protocol::NotificationId,
+    outcome: crate::protocol::NotificationOutcome,
+) {
+    use std::io::Write as _;
+    let outcome = match outcome {
+        crate::protocol::NotificationOutcome::Activated => "activated",
+        crate::protocol::NotificationOutcome::Refused => "refused",
+    };
+    let line = format!(
+        "kaya: notification {} outcome {outcome} reached no handler — none was \
+bound at the show and no process-level handler is registered \
+(Messages::on_notification_activation)\n",
+        notification.0
+    );
+    let _ = std::io::stderr().write_all(line.as_bytes());
+}
+
 impl<M> Default for Messages<M> {
     fn default() -> Self {
         Self::new()
@@ -3812,6 +3849,7 @@ impl<M> Messages<M> {
             section_selected: RefCell::new(HashMap::new()),
             alerts: RefCell::new(HashMap::new()),
             notifications: RefCell::new(HashMap::new()),
+            notification_activation: RefCell::new(None),
             dialogs: RefCell::new(HashMap::new()),
             clip_reads: RefCell::new(HashMap::new()),
             undone: RefCell::new(HashMap::new()),
@@ -4183,6 +4221,22 @@ impl<M> Messages<M> {
         self.notifications.borrow_mut().insert(notification.0, Box::new(f));
     }
 
+    /// Bind the PROCESS-LEVEL activation handler (docs/tasks-s9-plan.md
+    /// R1): the user opened a notification this process never posted,
+    /// which is what a tap on a reminder after the app exited is. The
+    /// per-id registration above wins where one exists; this is
+    /// persistent, and the id is the app's own, so the app maps it back.
+    pub fn on_notification_activation(
+        &self,
+        f: impl Fn(
+            crate::protocol::NotificationId,
+            crate::protocol::NotificationOutcome,
+        ) -> M
+        + 'static,
+    ) {
+        *self.notification_activation.borrow_mut() = Some(Box::new(f));
+    }
+
     /// Bind the one-shot result handler to a file-dialog request. Cancel
     /// arrives as an EMPTY list — no platform can confirm an empty
     /// selection, so it needs no sentinel.
@@ -4417,7 +4471,18 @@ impl<M> Messages<M> {
                     self.alerts.borrow_mut().remove(&alert.0).map(|f| f(*choice))
                 }
                 Occurrence::NotificationResult { notification, outcome } => {
-                    self.notifications.borrow_mut().remove(&notification.0).map(|f| f(*outcome))
+                    // The one-shot registration first (retiring), the
+                    // process-level handler next, an announced drop last
+                    // (docs/tasks-s9-plan.md R1).
+                    let bound = self.notifications.borrow_mut().remove(&notification.0);
+                    if let Some(f) = bound {
+                        Some(f(*outcome))
+                    } else if let Some(f) = self.notification_activation.borrow().as_ref() {
+                        Some(f(*notification, *outcome))
+                    } else {
+                        notification_dropped(*notification, *outcome);
+                        None
+                    }
                 }
                 Occurrence::FileDialogResult { dialog, files } => {
                     // One-shot, exactly as the alert: the registration

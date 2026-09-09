@@ -144,6 +144,17 @@ MODS = {
 
 SUITES = ("swift", "go", "python", "rust-swiftui")
 
+# THE SECOND ACT'S DOOR ON THIS LANE (docs/tasks-s9-plan.md R6a). The
+# simulator's shade activates no notification by any route
+# (docs/traps.md), so the lane takes the mac arm's carve-out: the same
+# bundle launched again with KAYA_LAUNCH_NOTIFICATION, which the
+# interpreter delivers through the centre delegate's own funnel.
+# tools/check-steps.py reads this against the scenes carrying `relaunch`.
+RELAUNCH_DOOR = {"tasks": "launch-notification"}
+# Which notification the door hands back: the scene's act one sets t1's
+# reminder, and a task's key IS its notification id (R2).
+RELAUNCH_NOTIFICATION = {"tasks": 1}
+
 # THE LEGS THAT RUN AS THE ONLY INPUT-DRIVING LEG ON THE HOST (tools/lib/
 # exclusive.py): the save sheet under a matrix (docs/deferred.md, the two
 # save-swiftui WATCHes) and the picker leg whose bridge starved.

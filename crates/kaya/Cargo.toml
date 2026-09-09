@@ -104,6 +104,14 @@ windows = { version = "0.62", features = [
     # is where Windows looks for an unpackaged app's name and icon, and
     # without it the shell draws no toast for the app.
     "Win32_System_Registry",
+    # THE CLOSED-APP CLICK'S ONE DOOR (docs/tasks-s9-plan.md R4):
+    # INotificationActivationCallback is what a toast's launch arguments
+    # reach once the posting process is gone.
+    "Win32_UI_Notifications",
+    # SHA-1 for the activator's class id, which is a version-5 UUID over the
+    # AUMID (winui/mod.rs, activator_clsid). The PLATFORM's own hash, so no
+    # crypto is hand-rolled and no crate joins the tree for sixteen bytes.
+    "Win32_Security_Cryptography",
 ] }
 windows-numerics = "0.3"
 windows-collections = "0.3"

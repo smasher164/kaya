@@ -1485,6 +1485,10 @@ final class KayaApp {
     // One-shot, keyed by the GUEST's notification id (the alert's
     // request/result grammar; many may be live at once).
     private var notifications: [UInt64: (KayaAppTx, UInt32) throws -> Void] = [:]
+    // NOT one-shot, and not keyed at all: the process-level handler for
+    // a result whose id has none above (docs/tasks-s9-plan.md R1). A
+    // relaunched process never called showNotification.
+    private var notificationActivation: ((KayaAppTx, UInt64, UInt32) throws -> Void)?
     private var fileDialogs: [UInt64: (KayaAppTx, [KayaPickedFile]) throws -> Void] = [:]
     // Clipboard reads: one-shot, keyed by request id, on the alert's
     // request/result grammar.
@@ -1972,6 +1976,18 @@ final class KayaApp {
         notifications[notification] = handler
     }
 
+    /// Register the PROCESS-LEVEL notification handler
+    /// (docs/tasks-s9-plan.md R1): it receives every result whose id has
+    /// no one-shot handler bound at showNotification — which is the
+    /// whole of a process the platform RELAUNCHED for a tap, since it
+    /// never called showNotification. It does not retire, and a one-shot
+    /// handler for the same id still wins.
+    func onNotificationActivation(
+        _ handler: @escaping (KayaAppTx, UInt64, UInt32) throws -> Void
+    ) {
+        notificationActivation = handler
+    }
+
     func allocAlert() -> UInt64 {
         nextAlert += 1
         return nextAlert
@@ -2261,10 +2277,24 @@ final class KayaApp {
                     dispatch { try build { tx in try handler(tx, choice) } }
                 }
             case (UInt16(KAYA_OCCURRENCE_NOTIFICATION_RESULT), _):
-                // One-shot like the alert, and the id retires with it;
-                // the outcome rides the same u32 slot the choice does.
+                // THE ORDER IS THE SEMANTICS (docs/tasks-s9-plan.md R1),
+                // and tools/check-sugar-surface.py reads it out of this
+                // arm: the one-shot handler bound at the show first,
+                // retiring with the result; else the process-level one,
+                // which does not; else the drop is announced. The
+                // outcome rides the same u32 slot the choice does.
                 if let handler = notifications.removeValue(forKey: id) {
                     dispatch { try build { tx in try handler(tx, choice) } }
+                } else if let act = notificationActivation {
+                    dispatch { try build { tx in try act(tx, id, choice) } }
+                } else {
+                    let outcome = choice == UInt32(KAYA_NOTIFICATION_OUTCOME_ACTIVATED)
+                        ? "activated" : "refused"
+                    FileHandle.standardError.write(Data((
+                        "kaya: notification \(id) outcome \(outcome) reached no "
+                        + "handler — none was bound at the show and no "
+                        + "process-level handler is registered "
+                        + "(KayaApp.onNotificationActivation)\n").utf8))
                 }
             case (UInt16(KAYA_OCCURRENCE_CLIPBOARD_RESULT), _):
                 // One-shot. EMPTY IS THE UNIVERSAL NO and arrives as

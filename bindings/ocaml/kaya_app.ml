@@ -206,6 +206,10 @@ type app = {
   (* One-shot, keyed by the GUEST's notification id (the alert's
      request/result grammar; many may be live at once). *)
   notification_handlers : (int64, int -> unit) Hashtbl.t;
+  (* NOT one-shot, and not keyed at all: the process-level handler for a
+     result whose id has none above (docs/tasks-s9-plan.md R1). A
+     relaunched process never called show_notification. *)
+  mutable notification_activation : (int64 -> int -> unit) option;
   file_dialog_handlers : (int64, picked_file list -> unit) Hashtbl.t;
   mutable next_file_dialog : int64;
   (* Clipboard reads share the alert's request/result grammar and so
@@ -335,6 +339,7 @@ let create () =
     alert_handlers = Hashtbl.create 8;
     next_alert = 0L;
     notification_handlers = Hashtbl.create 8;
+    notification_activation = None;
     file_dialog_handlers = Hashtbl.create 4;
     next_file_dialog = 0L;
     clipboard_handlers = Hashtbl.create 4;
@@ -1972,6 +1977,14 @@ let show_notification ?(title = "") ?(body = "") ?(at = 0L) ?on_result
    cleared). No answer follows; an unknown id is ignored. *)
 let cancel_notification notification =
   emit (the_tx ()) (Kaya_wire.tx_cancel_notification notification)
+
+(* Register the PROCESS-LEVEL notification handler
+   (docs/tasks-s9-plan.md R1): [~f notification outcome] receives every
+   result whose id has no one-shot handler bound at the show — which is
+   the whole of a process the platform RELAUNCHED for a tap, since it
+   never called [show_notification]. It does not retire, and a one-shot
+   handler for the same id still wins. Needs no transaction. *)
+let on_notification_activation app ~f = app.notification_activation <- Some f
 
 (* The filters encoding, written ONCE because two requests carry it:
    alternating label and space-separated extensions. *)
@@ -3973,13 +3986,35 @@ let dispatch_loop app =
                dispatch app (fun () -> handler (Int64.to_int c))
            | _ -> ())
          else if kind = Kaya_wire.occ_kind_notification_result then
-           (* One-shot like the alert, and the id retires with it; the
-              outcome rides the same u32 slot the choice does. *)
-           (match (Hashtbl.find_opt app.notification_handlers id, payload) with
-           | Some handler, Some (Kaya_wire.I64 outcome) ->
-               Hashtbl.remove app.notification_handlers id;
-               dispatch app (fun () -> handler (Int64.to_int outcome))
-           | _ -> ())
+           (* THE ORDER IS THE SEMANTICS (docs/tasks-s9-plan.md R1), and
+              tools/check-sugar-surface.py reads it out of this arm: the
+              one-shot handler bound at the show first, retiring with the
+              result; else the process-level one, which does not; else
+              the drop is announced. The outcome rides the same u32 slot
+              the choice does. *)
+           (let outcome =
+              match payload with
+              | Some (Kaya_wire.I64 o) -> Int64.to_int o
+              | _ -> 0
+            in
+            match
+              ( Hashtbl.find_opt app.notification_handlers id,
+                app.notification_activation )
+            with
+            | Some handler, _ ->
+                Hashtbl.remove app.notification_handlers id;
+                dispatch app (fun () -> handler outcome)
+            | None, Some f -> dispatch app (fun () -> f id outcome)
+            | None, None ->
+                prerr_endline
+                  (Printf.sprintf
+                     "kaya: notification %Ld outcome %s reached no handler — \
+                      none was bound at the show and no process-level handler \
+                      is registered (Kaya_app.on_notification_activation)"
+                     id
+                     (if outcome = Kaya_wire.notification_outcome_activated then
+                        "activated"
+                      else "refused")))
          else if kind = Kaya_wire.occ_kind_file_dialog_result then
            (* One-shot like the alert, and the id retires with it. The
               parser flattens three values per file into the values

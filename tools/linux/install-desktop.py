@@ -32,7 +32,15 @@ from packaging.identity import load  # noqa: E402
 
 
 def exec_line(argv):
-    """The guest command with an absolute program."""
+    """The guest command with an absolute program AND absolute arguments.
+
+    THE ARGUMENTS TOO, since S9 (docs/tasks-s9-plan.md R6): a relative one
+    is resolved against the cwd of whoever STARTS the app, and a D-Bus
+    activation is started by the bus daemon from `/`, not by the leg from
+    /work. Measured 2026-09-08 — the tasks leg's act two died at
+    `tools/linux/a11y-leg.sh: No such file or directory` while act one,
+    started by the runner, had run the same line perfectly.
+    """
     argv = list(argv)
     if not os.path.isabs(argv[0]):
         # NOT `shutil.which` ALONE: a name with a slash in it is checked
@@ -46,6 +54,11 @@ def exec_line(argv):
             f"install-desktop: {argv[0]} is not an absolute path that "
             f"exists, so the desktop entry's Exec would name a program "
             f"the portal cannot resolve")
+    # AN ARGUMENT IS A PATH WHEN THE FILESYSTEM SAYS SO: a scene name, a
+    # flag or a guest's own word stays exactly as the leg spelled it.
+    argv[1:] = [os.path.abspath(word)
+                if not os.path.isabs(word) and os.path.exists(word) else word
+                for word in argv[1:]]
     return " ".join(argv)
 
 
