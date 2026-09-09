@@ -11765,6 +11765,11 @@ KEY: tasks S3, show_notification, cancel_notification, notification_result, noti
   - The eight bindings' sugar, check-sugar-surface's rows, check-verbs green on Compose; N4's `tx.app_identity()` no-argument form; the task manager posting at the reminder's time (N7).
 - MEASURED: a headless banner request burns the bundle id (docs/traps.md); the maintainer's machine carries a burned `dev.kaya.aurora` from the first run and needs it re-enabled in System Settings › Notifications before the mac lane's notify leg can pass there.
 
+## NEXT — S9: the closed-app click on every platform (rulings TAKEN 2026-09-08)
+
+KEY: S9, closed-app click, COM activator, toastNotificationActivation, INotificationActivationCallback, relaunch with the id, silent drop rule
+- The slice after packaging part 1: a notification tapped after the app has exited relaunches it and opens the task. Per platform: macOS and iOS through the centre's delegate on relaunch (standard, unmeasured); Android through the notification's intent (proven early — an alarm fired into an exited process and the tap relaunched it); Linux by re-reading the portal's pending activation at startup, since the ActionInvoked broadcast reaches no process that was not subscribed (measured); Windows through a COM ACTIVATOR — RULED 2026-09-08 (Akhil): the one door that carries the tap, each button's arguments and typed text, registered under HKCU at launch when unpackaged (beside the identity key) and declared in the manifest's windows.toastNotificationActivation extension when packaged; protocol activation refused as URL-only, the App SDK route refused as a per-machine package. THE STANDING RULE that came with it: a backend that knows the platform will drop what it was handed says so at the hand-over (the X11 icon cost one reading because the lowering printed the size it passed), so until the activator lands every Windows post prints that a tap after exit has nowhere to land, and that sentence joins tools/check-diagnostics.py's census.
+
 ## LEAK — the windows lane's flight-recorder sampler outlives the lane (measured twice 2026-09-08)
 
 KEY: flightrec.ps1, -Mode sample, ALL.stop, sampler leak, windows lane exit path

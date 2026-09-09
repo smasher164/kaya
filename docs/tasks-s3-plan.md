@@ -470,6 +470,17 @@ about a past time.
   PACKAGING DOES NOT ANSWER IT (measured 2026-09-08, docs/packaging-plan.md
   §3.4): a packaged kaya app resolves the same framework packages and the 2.x
   family has no Singleton, so the ruling stands as written.
+  RULED 2026-09-08 (Akhil, in conversation): THE COM ACTIVATOR. It is the one
+  door that carries everything — the tap, each button's own arguments, text
+  typed into the toast — and it works unpackaged (the class id registered
+  under HKCU at launch, beside the identity key the library already writes)
+  and packaged (the same class id declared in the manifest's
+  windows.toastNotificationActivation extension); protocol activation was
+  refused as a URL-only door and the App SDK route as a per-machine package.
+  AND A STANDING RULE with it: a backend that knows the platform will drop what
+  it was handed SAYS SO at the hand-over — until the activator lands, every
+  Windows post prints that a tap after exit has nowhere to land, and the
+  sentence joins the why-not census. The question as it stood:
   RULING OWED (Akhil): a click on a CLOSED app (S9's Windows piece) needs
   either the App SDK route with the Main+Singleton runtime packages deployed
   on every machine that runs a kaya app, or protocol activation of a
