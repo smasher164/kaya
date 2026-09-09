@@ -25,7 +25,13 @@ back through the platform's own record.
   (Application Support/<id> on macOS, the Documents directory on iOS, the
   files directory on Android — handed in at attach the way the state root
   is — `$XDG_DATA_HOME/<id>` on Linux, `%LOCALAPPDATA%\<id>` on Windows),
-  and the guest reads and writes what it likes there in its own format.
+  and the guest keeps its data there THE STANDARD WAY: a SQLite database,
+  through the language's own binding (rusqlite, Python's sqlite3,
+  database/sql, Microsoft.Data.Sqlite, sqlite-jdbc, GRDB, the OCaml and
+  Haskell bindings, better-sqlite3) — the maintainer's question, 2026-09-09:
+  SQLite is what every platform ships and every cross-platform framework
+  reaches for, and a kaya database API in nine bindings would be a worse SQL
+  than any of them, so kaya answers the directory and nothing else.
   SETTINGS are small and typed, so they go in kaya's PREFERENCES STORE: a
   key-value record of strings, integers, floats and booleans under the
   app's id, one API in nine bindings. RECOMMEND. (The alternative, one
@@ -79,11 +85,12 @@ back through the platform's own record.
   three-case proof of `on_notification_activation`'s dispatch order beside
   their exercisers, since S4's binding sweep is in those files anyway.
   RECOMMEND.
-- **P7. The tasks app.** The model becomes the app's document under
-  `app_data_dir()` in a line-oriented text the guest owns (one task per
-  line, the fields the seed already has), written on every mutation after
+- **P7. The tasks app.** The model becomes a SQLite database under
+  `app_data_dir()` through rusqlite with the engine compiled in (so every
+  lane and both phones carry the same one), one table for tasks with the
+  fields the seed has and one for projects, written on every mutation after
   the transaction commits and read at startup before the seed — the seed
-  only when no document exists; the three settings and the appearance
+  only when the database does not exist yet; the three settings and the appearance
   choice go in the preferences store and are read at startup; the primary
   window's frame is remembered by P4. The scene: add a task, change a
   setting, choose Dark, resize the window, `relaunch launch`, then read
@@ -104,6 +111,10 @@ back through the platform's own record.
 4. The Android files directory at attach versus a `Context` read later:
    the state root is handed in already; the data directory rides the same
    parameter or a second one.
+5. The compiled-in SQLite (rusqlite's `bundled`) under the Windows
+   cross-build (cargo-xwin, a C compile through clang-cl) and the Android
+   NDK build, and its cost to the linux container's core build; the
+   fallback is the platform's own libsqlite3 where it exists.
 
 ## §3 — Build order
 
