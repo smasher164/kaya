@@ -298,22 +298,27 @@ ENTRIES = (
     ("an aux window's sidebar band re-read on resize",
      "watch_sidebar_width(&aux, window.0);",
      "watch_sidebar_width(&aux, 0);"),
-    # THE PLAIN ROLE'S WEIGHT (docs/deferred.md, the bold-labels POLISH
-    # entry of the same day). Adwaita draws EVERY button's label bold, so
-    # without this class the LOW rung sits at the other two roles' weight —
-    # and no observable anywhere reads a weight, on any backend. The role
-    # constant is perturbed to one a button never receives, so the class is
-    # simply never added.
-    ("the plain role's regular weight",
-     "                    if role == i64::from(crate::wire::ROLE_PLAIN) {\n"
-     "                        button.add_css_class(PLAIN_WEIGHT_CLASS);",
-     "                    if role == i64::from(crate::wire::ROLE_HEADING) {\n"
-     "                        button.add_css_class(PLAIN_WEIGHT_CLASS);"),
-    # A style class GTK does not know is INERT — no parse error, no
-    # warning, the label just stays bold.
-    ("the weight class is libadwaita's own",
-     'const PLAIN_WEIGHT_CLASS: &str = "body";',
-     'const PLAIN_WEIGHT_CLASS: &str = "kaya-body";'),
+    # THE LABEL WEIGHTS ARE KAYA'S (the maintainer's ruling of 2026-09-09,
+    # docs/deferred.md's bold-labels POLISH entry). NO OBSERVABLE ON ANY
+    # BACKEND READS A WEIGHT, so all three of these are invisible to every
+    # lane — and a SELECTOR that matches nothing is valid CSS: no parse
+    # error, no warning from `parsing-error`, the labels simply stay at
+    # Adwaita's bold. Each perturbation is a rule that still loads.
+    ("every button label at the regular weight",
+     "button, button label { font-weight: normal; }",
+     "button.kaya-plain, button.kaya-plain label { font-weight: normal; }"),
+    ("the header title at the regular weight",
+     "headerbar label.title, windowtitle label.title "
+     "{ font-weight: normal; }",
+     "headerbar label.subtitle, windowtitle label.subtitle "
+     "{ font-weight: normal; }"),
+    # A sheet loaded and added BELOW libadwaita's own (THEME, 200) loses
+    # every declaration in it and raises nothing.
+    ("the weight sheet added above libadwaita's own",
+     "                &weight_css,\n"
+     "                gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,",
+     "                &weight_css,\n"
+     "                gtk4::STYLE_PROVIDER_PRIORITY_FALLBACK,"),
 )
 
 

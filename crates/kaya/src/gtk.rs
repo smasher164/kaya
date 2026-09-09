@@ -1980,10 +1980,20 @@ struct GtkLabeledRow {
 /// surface (docs/forms-plan.md §3).
 const BOXED_LIST_CLASS: &str = "boxed-list";
 
-/// libadwaita's own body typography (400 at 1rem), worn by the `plain`
-/// role's button so the low rung is not at Adwaita's bold button weight
-/// (docs/deferred.md, the bold-labels POLISH entry).
-const PLAIN_WEIGHT_CLASS: &str = "body";
+/// THE LABEL WEIGHTS ARE KAYA'S, NOT GNOME'S (the maintainer's ruling,
+/// 2026-09-09, on the S4 review page): Adwaita draws every button's label
+/// bold and libadwaita's `.title` draws the header-bar title bold, and the
+/// other four backends draw both regular. ONE RULE at APPLICATION priority,
+/// beside the `:root { font-family }` one — the button arm reaches the label
+/// as well as the button because Adwaita's own weight is inherited, and the
+/// title arm is scoped to the header bar so libadwaita's `.title` typography
+/// class keeps its weight anywhere else. `.heading` is untouched: that is
+/// kaya's OWN heading role and is meant to be bold (docs/deferred.md, the
+/// bold-labels POLISH entry).
+const WEIGHT_CSS: &str = "\
+button, button label { font-weight: normal; }
+headerbar label.title, windowtitle label.title { font-weight: normal; }
+";
 
 /// The table's column gap — the one number every synthesized tier
 /// spells (docs/tables-plan.md decision 6; SwiftUI and Compose say 24
@@ -10764,21 +10774,11 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     button.remove_css_class("destructive-action");
                     button.remove_css_class("suggested-action");
                     button.remove_css_class("flat");
-                    // THE PLAIN ROLE'S WEIGHT: Adwaita draws EVERY button's
-                    // label bold, so `.flat` alone left the low rung at the
-                    // other two roles' weight. `.body` is libadwaita's own
-                    // typography class (400 at 1rem), the `.heading`/
-                    // `.caption` tier one control over (docs/deferred.md,
-                    // the bold-labels POLISH entry).
-                    button.remove_css_class(PLAIN_WEIGHT_CLASS);
                     button.add_css_class(match role {
                         1 => "destructive-action",
                         2 => "suggested-action",
                         _ => "flat",
                     });
-                    if role == i64::from(crate::wire::ROLE_PLAIN) {
-                        button.add_css_class(PLAIN_WEIGHT_CLASS);
-                    }
                 }
                 // THE HEADING ROLE IS TWO FACTS AT ONCE: the platform's
                 // heading TEXT STYLE and its heading ACCESSIBLE role.
@@ -12600,6 +12600,10 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
         let badge_css = gtk4::CssProvider::new();
         watch_css_errors(&badge_css, &css_error);
         load_kaya_css(&badge_css, "section badge", BADGE_CSS, &css_error);
+        // The label weights, static for the same reason.
+        let weight_css = gtk4::CssProvider::new();
+        watch_css_errors(&weight_css, &css_error);
+        load_kaya_css(&weight_css, "label weights", WEIGHT_CSS, &css_error);
         if let Some(display) = gtk4::gdk::Display::default() {
             gtk4::style_context_add_provider_for_display(
                 &display,
@@ -12634,6 +12638,11 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
             gtk4::style_context_add_provider_for_display(
                 &display,
                 &badge_css,
+                gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
+            );
+            gtk4::style_context_add_provider_for_display(
+                &display,
+                &weight_css,
                 gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
             );
         }
