@@ -109,6 +109,59 @@ alike (measured facts in §2).
 
 ## 2. Unknowns, each with the measurement that settles it
 
+MEASURED 2026-09-09 (a probes agent, notes under the session's tmp; the
+traps are docs/traps.md's five app-links entries of that date). Five of
+six answered YES with the mechanisms below; web links skipped for want of
+a served domain.
+
+1. **macOS: YES.** LaunchServices delivers to an accessory, ad-hoc-signed,
+   un-ranked bundle: warm 55 ms, cold 146 ms (21 ms into the process,
+   before `didFinishLaunching`, `windows=0`). THE DOOR IS THE RAW APPLE
+   EVENT (`kAEGetURL` in `applicationWillFinishLaunching`): SwiftUI's
+   `WindowGroup` opens a NEW WINDOW per link through `.onOpenURL`, and with
+   it present the delegate's `application(_:open:)` gets an empty array.
+2. **Windows: YES.** `start "" "<scheme>://…"` starts a second process every
+   time; `GetActivatedEventArgs().Kind()` is Protocol with the URI byte for
+   byte; `RedirectActivationToAsync` reaches the owner's `Activated` in 1-9
+   ms and the redirector may exit as soon as the call returns; no message
+   pump needed on either side; the apartment changes only who completes
+   the async action. The activated process is a child of the calling cmd
+   and inherits its environment, so the lane's door can carry
+   XDG_STATE_HOME itself; the URL cannot ride a `%1`.
+3. **Android: YES.** `onNewIntent` on the same instance ~10 ms after
+   `am start -a VIEW -d`, brought forward, URI intact, no prompt; cold on
+   `onCreate`'s intent in 38 ms. `getIntent()` inside `onNewIntent` is the
+   OLD intent until `setIntent`, and the activity's `KAYA_*` env mapping in
+   `onCreate` never runs on a warm single-task start (both to be handled in
+   the arm).
+4. **Linux: YES.** Warm reaches the running instance's `open` signal over
+   `org.freedesktop.Application.Open` in 2-6 ms; cold is D-Bus activation
+   in 44-49 ms with `activate` firing BEFORE `open` (kaya must not use
+   `--gapplication-service`; the early queue covers it). `gio open` needs
+   `DBusActivatable=true` AND the `.service` file; `xdg-open` is not the
+   door (absent from the image, and it blocks for the app's lifetime).
+5. **iOS: YES, with one change to the lane's door.** `simctl openurl` raises
+   a SpringBoard `Open in "<app>"?` alert the first time, exits 0 and
+   delivers nothing; one `sb_tap Open` through the lane's XCUITest driver is
+   remembered per device and survives reinstalls. Then cold ≈ 720 ms (after
+   the root view appeared) and warm 101 ms; `.onOpenURL` is the ONLY door
+   that fires. `UIApplication.open` of the app's own scheme is unprompted.
+6. **Web links: SKIPPED** — a served HTTPS domain is needed; the generated
+   entitlement, `autoVerify` filter and `windows.appUriHandler` are checked
+   by shape and the ledger says so.
+
+What the five say together: cold delivery beats the scene on macOS and
+Windows and loses to it on iOS and Linux, so L2's early queue is
+load-bearing; every platform is single-instance for links by a different
+mechanism (macOS routes to the FIRST-launched of two direct-exec'd copies;
+Windows only because the redirector asks; Linux through the bus name);
+only iOS asks the user anything, once per device; and `open_link`'s
+round trip is 49 ms on macOS (leaving the accessory guest frontmost),
+21 ms on iOS and 2-6 ms on Linux.
+
+The original questions, kept for the record:
+
+
 1. **macOS accessory apps and `kAEGetURL`.** Kaya's guests run with the
    `.accessory` activation policy; whether LaunchServices delivers a
    scheme's Apple event to an accessory process (and to a bundle with no

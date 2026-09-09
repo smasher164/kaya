@@ -10511,6 +10511,110 @@ two resizes, KAYA_SELFTEST: OK). A resize capture must come from a FRESH
 window: resize in act one, let kaya's window memory carry the frame, and
 photograph act two.
 
+## A SwiftUI WindowGroup opens a NEW WINDOW for every URL, and the delegate then gets an empty array (2026-09-09)
+
+Measured with the app-links probe (docs/app-links-plan.md §2.1): a bundle
+in kaya's own shape — SwiftUI `App`, `@NSApplicationDelegateAdaptor`,
+accessory policy — received a scheme URL three times in one process and
+finished with three windows, each link building a fresh root in a fresh
+NSWindow with `.onOpenURL` firing on the NEW root; with `.onOpenURL`
+present, `application(_:open:)` fires right after it with `urls=[]`, so a
+delegate-only arm reads a link as no link. The one door that neither
+spawns a window nor loses the URL is `NSAppleEventManager`'s
+`kInternetEventClass`/`kAEGetURL` handler installed in
+`applicationWillFinishLaunching`: it takes the event before AppKit
+converts it, and cold it fires 21 ms into the process, before
+`applicationDidFinishLaunching` and before any window exists. iOS is the
+OPPOSITE: `.onOpenURL` is the only door that fires there —
+`launchOptions[.url]` is always empty and `application(_:open:options:)`
+never runs — so the arm is an `#if os(macOS)` pair, not one shared line.
+LaunchServices delivers to an accessory, ad-hoc-signed, un-ranked bundle
+outside /Applications (warm 55 ms, cold 146 ms); with two direct-exec'd
+copies of one bundle alive the FIRST-launched wins and the second sees
+nothing; an `lsregister -f` keys on the bundle PATH and survives a
+rebuild at the same path.
+
+## `xcrun simctl openurl` raises a SpringBoard confirmation the first time, and reports nothing when it does (2026-09-09)
+
+`simctl openurl <udid> <scheme>://…` exits 0, prints nothing, and the app
+is never started: the log shows `lsd … Found application … to handle url
+scheme` then `Error fetching bundle record for scheme approval …
+Code=-10814`, and SpringBoard puts up `Open in "<app>"?` with Cancel and
+Open — the caller is CoreSimulatorBridge, which has no bundle record, so
+LaunchServices asks. Every unanswered call queues ANOTHER alert. Tap it
+once with the lane's own driver (`sb_tap Open`, tools/ios/xcuidrive) and
+the approval is remembered for that device — it survived a warm open, two
+cold ones and an uninstall + reinstall of the same bundle id. An app
+opening its OWN scheme with `UIApplication.shared.open` is never asked.
+Then cold is ~720 ms (after the root view appeared) and warm 101 ms.
+
+## `getIntent()` after `onNewIntent` is the LAUNCH intent, not the new one (2026-09-09)
+
+An activity that receives `onNewIntent` keeps handing back its ORIGINAL
+launch intent from `getIntent()` until it calls `setIntent(intent)`:
+measured on a `singleTask` probe (API 35), a warm `am start` with three
+extras arrived at `onNewIntent` with all three on the PARAMETER while
+`getIntent()` read `extras={<none>}`; a VIEW link reads the same way. And
+once `setIntent` HAS been called, `getIntent()` keeps answering it at
+every later `onResume`, so an arm routing off `getIntent()` on resume
+re-opens the same link whenever the app comes forward — the notification
+arm consumes its extra to answer once, and a link arm needs the same
+one-shot. Beside it: `System.identityHashCode(this)` is comparable only
+inside one process (a fresh heap lays the first object at the same
+address across a force-stop); logcat's pid column tells processes apart.
+The measured door: `onNewIntent` on the same instance ~10 ms after
+`am start -a VIEW -d`, task brought forward, no prompt, no `-c BROWSABLE`
+needed; cold on `onCreate`'s intent in 38 ms. And `MainActivity.onCreate`'s
+`KAYA_*` -> `Os.setenv` mapping never runs on a warm `singleTask` start.
+
+## `gio open` reaches a running app only through the name it is activatable under (2026-09-09)
+
+A desktop entry needs three things before a scheme URL reaches the app,
+and each fails differently: `MimeType=x-scheme-handler/<scheme>;` and `%u`
+on `Exec` make it a candidate; `DBusActivatable=true` makes GLib call
+`org.freedesktop.Application.Open` on the app's own bus name instead of
+spawning (with it a warm URL reaches the running pid in 2-6 ms and no
+second process exists; without it GIO spawns a second process that
+forwards over `org.gtk.Application.Open` and exits ~3 ms later); and the
+D-Bus SERVICE FILE is the half only the COLD case needs — with
+`DBusActivatable=true` and no `.service`, every warm assertion passes and
+`gio open` with nothing running exits 2 (`The name <id> was not provided
+by any .service files`): a green lane and a dead launcher.
+tools/lib/packaging/linux.py writes both halves; a staging that writes one
+is the shape to refuse. A COLD D-Bus activation ACTIVATES BEFORE IT
+OPENS (`startup, activate, open`, argv empty of the URI, cold in 44-49
+ms) — GLib's `--gapplication-service` switch would suppress that
+`activate`, and kaya must NOT use it because gtk.rs builds its core
+inside `connect_activate`; the link always arrives after the default
+scene was asked for, which is what the early queue is for. `xdg-open` is
+not in the image and, installed, ignores `DBusActivatable`, runs the `%u`
+spawn route and BLOCKS for the app's whole lifetime (6.153 s against a 6 s
+app). And a pipe on the door is a pipe on the app: `gio open` with
+`capture_output=True` measured 45 s for a 10 ms call.
+
+## The Windows App SDK's protocol registration is three keys and its unregistration is not (2026-09-09)
+
+`ActivationRegistrationManager.RegisterForProtocolActivation` writes
+`HKCU\Software\Classes\<scheme>` (the `URL Protocol` marker, no command),
+a generated ProgId `HKCU\Software\Classes\App.<16 hex>.Protocol` whose
+`shell\open\command` is `<exe> "----ms-protocol:%1"`, and
+`HKCU\Software\Microsoft\WindowsAppRuntimeApplications\App.<16 hex>\
+Capabilties\UrlAssociations\<scheme>` (the SDK's own misspelling).
+`UnregisterForProtocolActivation` answers Ok, removes the ProgId and the
+association value, and LEAVES `Classes\<scheme>` standing. A REDIRECTED
+ACTIVATION IS DELIVERED BEFORE THE CALLER CAN WAIT FOR IT: the key owner's
+`AppInstance.Activated` fires on a WinRT thread (no message loop needed,
+1-9 ms), while the `IAsyncAction` `RedirectActivationToAsync` returns
+completes on a pool thread in an MTA and through the message queue in an
+STA — a caller blocking in `WaitForSingleObject` never sees it and
+`GetResults()` answers E_ILLEGAL_METHOD_CALL with the URI already
+delivered; the redirecting process may exit the instant the call
+RETURNS. `start "" "<scheme>://…"` starts a new process every time
+(8/8), a direct child of the calling cmd with its environment — unlike
+the COM door's LocalServer32 — so a link door can set the leg's variables
+in its own .cmd; the URL cannot be a `%1` there (`=` splits, `&` is an
+operator).
+
 ## `=` is an argument delimiter in a .cmd (2026-09-09)
 
 `schtasks /tr "C:\kaya\relaunch-com.cmd <leg> <clsid> <aumid> kaya=1 <id>"`
