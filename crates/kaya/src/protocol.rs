@@ -1432,10 +1432,11 @@ pub enum Prop {
 /// the total, min 180, max 280), Apple's NavigationSplitView behaves the same
 /// way, and Material gives the list a preferred width.
 #[cfg_attr(
-    // WinUI only: libadwaita sizes its own sidebar from the rule this
-    // function encodes, while TwoPaneView's default is two EQUAL panes.
+    // WinUI, because TwoPaneView's default is two EQUAL panes; and GTK for
+    // the `sidebar` presentation's own row list, which has no widget behind
+    // it to apply libadwaita's band (the two-pane arm gets it for free).
     // The tests exercise it everywhere.
-    not(any(target_os = "windows", test)),
+    not(any(target_os = "windows", target_os = "linux", test)),
     allow(dead_code)
 )]
 pub(crate) fn leading_pane_width(total: f64) -> f64 {

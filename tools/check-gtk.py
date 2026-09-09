@@ -272,6 +272,48 @@ ENTRIES = (
      "    glib::timeout_add_local_once(std::time::Duration::from_millis(250), "
      "move || {\n"
      "        ARMED.with_borrow_mut(|armed| armed.remove(&window));"),
+    # THE SIDEBAR'S WIDTH BAND (docs/deferred.md, the sidebar POLISH entry
+    # of 2026-09-09). NO SCENE CAN SEE ANY OF THE FOUR: the `sidebar`
+    # presentation's pane is kaya's own row list, no observable reads its
+    # width, and the pane simply measures the titles again — 119px of 960
+    # against libadwaita's 240, which is how it shipped as the narrowest of
+    # the five lanes. The perturbation is the UNCLAMPED fraction, which is
+    # the SAME 240 at the app's declared width and wrong at both ends.
+    ("the sidebar band read from libadwaita's own rule",
+     "let band = crate::protocol::leading_pane_width(f64::from(total));",
+     "let band = f64::from(total) * 0.25;"),
+    # Applied under window 0: right for the primary, silent for an aux
+    # window's sidebar, which is the one tools/scenes/sections.steps builds.
+    ("the band applied to the window whose chrome was rebuilt",
+     "    refresh_section_rows(core, window);\n"
+     "    apply_sidebar_width(core, window);",
+     "    refresh_section_rows(core, window);\n"
+     "    apply_sidebar_width(core, 0);"),
+    # The band is a FRACTION, so it is re-read on resize; wired under an id
+    # this process does not hold, the sidebar stops growing with the window
+    # and the startup width stands forever.
+    ("the primary's sidebar band re-read on resize",
+     "watch_sidebar_width(window.upcast_ref::<gtk4::Window>(), 0);",
+     "watch_sidebar_width(window.upcast_ref::<gtk4::Window>(), 1);"),
+    ("an aux window's sidebar band re-read on resize",
+     "watch_sidebar_width(&aux, window.0);",
+     "watch_sidebar_width(&aux, 0);"),
+    # THE PLAIN ROLE'S WEIGHT (docs/deferred.md, the bold-labels POLISH
+    # entry of the same day). Adwaita draws EVERY button's label bold, so
+    # without this class the LOW rung sits at the other two roles' weight —
+    # and no observable anywhere reads a weight, on any backend. The role
+    # constant is perturbed to one a button never receives, so the class is
+    # simply never added.
+    ("the plain role's regular weight",
+     "                    if role == i64::from(crate::wire::ROLE_PLAIN) {\n"
+     "                        button.add_css_class(PLAIN_WEIGHT_CLASS);",
+     "                    if role == i64::from(crate::wire::ROLE_HEADING) {\n"
+     "                        button.add_css_class(PLAIN_WEIGHT_CLASS);"),
+    # A style class GTK does not know is INERT — no parse error, no
+    # warning, the label just stays bold.
+    ("the weight class is libadwaita's own",
+     'const PLAIN_WEIGHT_CLASS: &str = "body";',
+     'const PLAIN_WEIGHT_CLASS: &str = "kaya-body";'),
 )
 
 

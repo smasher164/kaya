@@ -1980,6 +1980,11 @@ struct GtkLabeledRow {
 /// surface (docs/forms-plan.md §3).
 const BOXED_LIST_CLASS: &str = "boxed-list";
 
+/// libadwaita's own body typography (400 at 1rem), worn by the `plain`
+/// role's button so the low rung is not at Adwaita's bold button weight
+/// (docs/deferred.md, the bold-labels POLISH entry).
+const PLAIN_WEIGHT_CLASS: &str = "body";
+
 /// The table's column gap — the one number every synthesized tier
 /// spells (docs/tables-plan.md decision 6; SwiftUI and Compose say 24
 /// too). The ROW gap is the For container's own spacing.
@@ -5053,6 +5058,7 @@ fn refresh_sections(core: &mut CoreState, window: u64) {
     // And a rebuilt sidebar has no rows at all yet (docs/tasks-s2-plan.md T2)
     // — the same reason, one arm over.
     refresh_section_rows(core, window);
+    apply_sidebar_width(core, window);
 }
 
 /// The sections half of the semantic icon (docs/styling-plan.md D6): each
@@ -5163,6 +5169,50 @@ fn section_of_row(row: &gtk4::ListBoxRow) -> Option<u64> {
 /// This window's sidebar row list, or None when the bar arm rendered.
 fn sidebar_list(core: &CoreState, window: u64) -> Option<gtk4::ListBox> {
     core.section_lists.get(&window).and_then(|c| c.borrow().clone())
+}
+
+/// THE SIDEBAR'S WIDTH BAND. The `sidebar` presentation's pane is kaya's own
+/// row list, so nothing sizes it — it measured whatever the titles measured,
+/// 119px of 960 (docs/deferred.md, the sidebar POLISH entry).
+/// AdwNavigationSplitView's own rule is protocol::leading_pane_width — a
+/// quarter of the window, clamped to 180..280 — which is where those numbers
+/// came from and what the two-pane arm above gets from the widget for free. A
+/// natural width WIDER than the band still wins, exactly as a sidebar's own
+/// minimum beats libadwaita's.
+fn apply_sidebar_width(core: &CoreState, window: u64) {
+    use gtk4::prelude::{GtkWindowExt, WidgetExt};
+    let Some(list) = sidebar_list(core, window) else { return };
+    let Some(top) = gtk_window_read(core, window) else { return };
+    let (total, _) = top.default_size();
+    if total <= 0 {
+        return;
+    }
+    let band = crate::protocol::leading_pane_width(f64::from(total));
+    list.set_width_request(band.round() as i32);
+}
+
+/// The band is a FRACTION, so it is re-read on every resize —
+/// schedule_window_metrics' shape, since the notify can fire inside
+/// resize_window's on_main with CORE borrowed.
+fn schedule_sidebar_width(window: u64) {
+    glib::idle_add_local_once(move || {
+        CORE.with(|slot| {
+            let Ok(core) = slot.try_borrow() else {
+                glib::timeout_add_local_once(std::time::Duration::from_millis(8), move || {
+                    schedule_sidebar_width(window)
+                });
+                return;
+            };
+            let Some(core) = core.as_ref() else { return };
+            apply_sidebar_width(core, window);
+        });
+    });
+}
+
+/// The width notify, on any toplevel this backend holds — watch_frame's peer.
+fn watch_sidebar_width(window: &gtk4::Window, id: u64) {
+    use gtk4::prelude::GtkWindowExt;
+    window.connect_default_width_notify(move |_| schedule_sidebar_width(id));
 }
 
 /// The row standing for a section, by its stamp.
@@ -9474,6 +9524,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 .default_height(aux_h)
                 .build();
             watch_frame(&aux, window.0);
+            watch_sidebar_width(&aux, window.0);
             // A NEW WINDOW WITH NO TITLE WEARS THE APP'S NAME
             // (docs/app-identity-plan.md I9). Written into `window_titles`
             // too, because that map is what navigation fallbacks restore from.
@@ -10713,11 +10764,21 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     button.remove_css_class("destructive-action");
                     button.remove_css_class("suggested-action");
                     button.remove_css_class("flat");
+                    // THE PLAIN ROLE'S WEIGHT: Adwaita draws EVERY button's
+                    // label bold, so `.flat` alone left the low rung at the
+                    // other two roles' weight. `.body` is libadwaita's own
+                    // typography class (400 at 1rem), the `.heading`/
+                    // `.caption` tier one control over (docs/deferred.md,
+                    // the bold-labels POLISH entry).
+                    button.remove_css_class(PLAIN_WEIGHT_CLASS);
                     button.add_css_class(match role {
                         1 => "destructive-action",
                         2 => "suggested-action",
                         _ => "flat",
                     });
+                    if role == i64::from(crate::wire::ROLE_PLAIN) {
+                        button.add_css_class(PLAIN_WEIGHT_CLASS);
+                    }
                 }
                 // THE HEADING ROLE IS TWO FACTS AT ONCE: the platform's
                 // heading TEXT STYLE and its heading ACCESSIBLE role.
@@ -12496,6 +12557,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
             window.connect_default_height_notify(|_| schedule_window_metrics());
             schedule_window_metrics();
             watch_frame(window.upcast_ref::<gtk4::Window>(), 0);
+            watch_sidebar_width(window.upcast_ref::<gtk4::Window>(), 0);
         }
         // The normalized root inset: 16 units INSIDE the root, via the CSS box
         // (padding sits inside the allocation, so the root still fills its

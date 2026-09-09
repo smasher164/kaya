@@ -10501,6 +10501,16 @@ and lands in the same suite. The act-two marker moves with it, which is
 also what keeps `tasks` and `taskspersist` — two relaunch scenes of one
 app — from consuming each other's marker in the pool.
 
+## A bare-Xvfb root grab does not repaint a live `resize_window` (2026-09-09)
+
+In the lane's image with no window manager, after `resize_window 1400x700`
+the header bar and frame redraw at the new size and the content area
+photographs BLANK, while the harness's own reads of the same tree pass in
+the same run (`expect label@inbox_count` and `expect_section` green after
+two resizes, KAYA_SELFTEST: OK). A resize capture must come from a FRESH
+window: resize in act one, let kaya's window memory carry the frame, and
+photograph act two.
+
 ## `=` is an argument delimiter in a .cmd (2026-09-09)
 
 `schtasks /tr "C:\kaya\relaunch-com.cmd <leg> <clsid> <aumid> kaya=1 <id>"`
