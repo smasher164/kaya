@@ -290,7 +290,12 @@ BUDGETS = {
     # for 202s (android's drags, iOS's saves) and held its own seven legs
     # for 26s on matrix #23 (750s against 700, WindowServer at 52% beside
     # it); 674s the matrix before, 452s on a quiet host. Re-read likewise.
-    "linux": 1100,
+    # 1250 since 2026-09-10: the roster is 765 legs and the four app-links
+    # matrices read 1038, 1046, 1046 and 1201 against 1100 — the last with
+    # the host at load 78 five minutes in (core-build 189s against 125s the
+    # matrix before, legs 988 against 903), a slowdown of every phase by
+    # the same factor, which is load and not kind. 1250 is 1.04x over it.
+    "linux": 1250,
     # 600 since 2026-09-02: the roster grew 201 -> 239 legs with the JS
     # column and the four quiet matrices since read 498, 442, 488 and
     # 559s. 600 is 1.2x over that band's top. 950 since 2026-09-03: the

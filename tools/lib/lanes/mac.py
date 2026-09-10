@@ -438,15 +438,6 @@ def relaunched_pid(app):
     return int(got[0]) if got else None
 
 
-def layer0_windows(winlist, pid):
-    """How many ORDINARY on-screen windows that pid owns. layer 0 is the
-    document layer — a menu-bar extra or a panel is not the app's window
-    (tools/mac/flightrec-winlist.swift prints the layer)."""
-    out = subprocess.run([winlist, str(pid)], capture_output=True,
-                         text=True, check=False).stdout
-    return [l for l in out.splitlines() if " layer=0 " in l]
-
-
 def open_link_door(root, app, url, act2_env, verdict, lf, seconds=120):
     """THE COLD DOOR ON THIS LANE: `open` hands the URL to
     LaunchServices, which starts the bundle and delivers it as an Apple
@@ -483,50 +474,49 @@ def open_link_door(root, app, url, act2_env, verdict, lf, seconds=120):
     # MODEL, so they publish OK for a process that never put anything on
     # screen — which is exactly what a URL launch did until 2026-09-09:
     # the NSWindow was built and registered and never composited, and a
-    # user tapping a link with the app closed got nothing. Sampled in the
-    # SAME loop that joins the verdict, because the second process lives
-    # about a second.
-    from flightrec_lane import winlist_bin
-    winlist = winlist_bin(root)
-    if not winlist:
-        lf.write("the link door cannot check for a window: the macOS "
-                 "window list (tools/mac/flightrec-winlist.swift) would "
-                 "not build, so whether act two ever drew anything is "
-                 "unknown and this refuses rather than guess\n")
-        return 1
+    # user tapping a link with the app closed got nothing. THE APP'S OWN
+    # WINDOW-SERVER READ is the witness (swift/KayaSwiftUI.swift's
+    # `windowserver` diag, `.optionAll` so any Space counts): polling the
+    # process table missed a second act that lives a second (matrix #5),
+    # and the on-screen list is Space-scoped (docs/traps.md, 2026-09-10).
     deadline = time.monotonic() + seconds
-    pid_seen, windows = None, []
     line = ""
     while time.monotonic() < deadline:
-        if not windows:
-            pid = relaunched_pid(app)
-            if pid:
-                pid_seen = pid
-                windows = layer0_windows(winlist, pid)
         if verdict.is_file():
             line = verdict.read_text(encoding="utf-8",
                                      errors="replace").strip()
-            # NOT `break` ON THE VERDICT ALONE: act two publishes in about
-            # 200ms and the window composites at about 520ms, so leaving
-            # here would read "no window" on a run that draws one a beat
-            # later. Keep looking while the process is alive.
-            if line and (windows or pid_seen and not relaunched_pid(app)):
+            if line:
                 break
         time.sleep(0.1)
     if not line:
         lf.write(f"act two wrote no verdict within {seconds}s of the link "
                  f"door\n")
         return 1
-    if not windows:
+    lf.flush()
+    report = ""
+    grace = time.monotonic() + 3.0
+    while time.monotonic() < grace:
+        text = log_path(lf).read_text(encoding="utf-8", errors="replace")
+        found = [l for l in text.splitlines()
+                 if "windowserver wid=0 " in l and "act two" not in l]
+        if found:
+            report = found[-1]
+            break
+        time.sleep(0.1)
+    # `vis=true` is the witness: AppKit registers the window with the server
+    # before any order (`listed` is true either way, measured), while a window
+    # never ordered on screen keeps isVisible false; `onscreen` is Space-scoped
+    # and only recorded.
+    if "vis=true" not in report or "listed=true" not in report:
         lf.write(
-            f"act two published its verdict with NO WINDOW ON SCREEN: pid "
-            f"{pid_seen if pid_seen else '(never seen)'} owned 0 layer-0 "
-            f"windows for its whole life, so the link started a process "
-            f"that drew nothing a user could see. Every observation in "
-            f"act two reads the model, which is why the verdict is green "
-            f"({line})\n")
+            f"act two published its verdict with NO WINDOW ON SCREEN: the "
+            f"window server "
+            f"{'never listed the primary window' if not report else 'answered ' + report.strip()}"
+            f", so the link started a process that drew nothing a user could "
+            f"see. Every observation in act two reads the model, which is "
+            f"why the verdict is green ({line})\n")
         return 1
-    lf.write(f"act two window: {windows[0]}\n")
+    lf.write(f"act two window: {report.strip()}\n")
     return 0
 
 

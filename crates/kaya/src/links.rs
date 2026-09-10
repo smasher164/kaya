@@ -21,6 +21,10 @@ enum Seg {
     Literal(String),
     /// `{name}`, capturing one non-empty segment under that name.
     Capture(String),
+    /// `*`, the whole pattern: the catch-all, matched LAST whatever order
+    /// it was declared in, whose one param `url` is the URL as delivered
+    /// (docs/app-links-plan.md §4).
+    Wildcard,
 }
 
 struct Route {
@@ -113,6 +117,7 @@ fn same_shape(a: &[Seg], b: &[Seg]) -> bool {
         && a.iter().zip(b).all(|(x, y)| match (x, y) {
             (Seg::Literal(x), Seg::Literal(y)) => x == y,
             (Seg::Capture(_), Seg::Capture(_)) => true,
+            (Seg::Wildcard, Seg::Wildcard) => true,
             _ => false,
         })
 }
@@ -123,8 +128,18 @@ fn parse_pattern(pattern: &str) -> Result<Vec<Seg>, String> {
                     the scheme, and an empty pattern names none"
             .to_string());
     }
+    if pattern == "*" {
+        return Ok(vec![Seg::Wildcard]);
+    }
     let mut segs = Vec::new();
     for raw in pattern.split('/') {
+        if raw == "*" {
+            return Err(format!(
+                "malformed at segment \"*\": the catch-all is the WHOLE pattern \
+                 \"*\" or nothing — it takes every URL no other route did, so it \
+                 cannot sit inside a path (\"{pattern}\")"
+            ));
+        }
         if raw.is_empty() {
             return Err(format!(
                 "empty in one of its segments (\"{pattern}\" splits on \"/\" \
@@ -237,7 +252,7 @@ fn match_url(url: &str) -> (u64, Vec<(String, String)>) {
         .rev()
         .collect();
     let routes = ROUTES.lock().unwrap_or_else(|e| e.into_inner());
-    for route in routes.iter() {
+    for route in routes.iter().filter(|r| r.segs != [Seg::Wildcard]) {
         let Some(mut params) = match_segments(&route.segs, &segments) else { continue };
         // THE QUERY JOINS THE PARAMS, and a CAPTURE WINS A CLASH: the
         // pattern is the app's own statement about the URL and the query
@@ -248,6 +263,11 @@ fn match_url(url: &str) -> (u64, Vec<(String, String)>) {
             }
         }
         return (route.id, params);
+    }
+    // THE CATCH-ALL LAST, whatever order it was declared in: a `*` declared
+    // first must not shadow the routes the app spelled out.
+    if let Some(any) = routes.iter().find(|r| r.segs == [Seg::Wildcard]) {
+        return (any.id, vec![("url".to_string(), url.to_string())]);
     }
     (0, Vec::new())
 }
@@ -272,6 +292,8 @@ fn match_segments(segs: &[Seg], segments: &[&str]) -> Option<Vec<(String, String
                 }
                 params.push((name.clone(), percent_decode(got)));
             }
+            // Never here: match_url keeps the catch-all out of this pass.
+            Seg::Wildcard => return None,
         }
     }
     Some(params)
@@ -477,6 +499,34 @@ mod tests {
         assert_eq!(split_url(&url), Some(("tasks/t1", "a=1")));
         let url = format!("{scheme}://tasks/t1");
         assert_eq!(split_url(&url), Some(("tasks/t1", "")));
+    }
+
+    #[test]
+    fn a_wildcard_route_takes_what_no_other_route_did_and_is_matched_last() {
+        // Declared FIRST on purpose: order must not let it shadow the rest.
+        with_routes(&[(9, "*"), (1, "task/{key}"), (2, "{section}")], || {
+            assert_eq!(params("task/t2").0, 1);
+            assert_eq!(params("today").0, 2);
+            let (route, got) = params("nothing/here?x=1");
+            assert_eq!(route, 9);
+            assert_eq!(
+                got,
+                vec![("url".to_string(), format!("{}://nothing/here?x=1", scheme()))]
+            );
+            // A scheme this app never claimed is still nobody's.
+            assert_eq!(match_url("other://nothing/here").0, 0);
+        })
+    }
+
+    #[test]
+    fn a_wildcard_inside_a_path_or_declared_twice_is_refused() {
+        let _guard = TEST.lock().unwrap_or_else(|e| e.into_inner());
+        ROUTES.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        assert!(try_declare(1, "task/*").unwrap_err().starts_with("malformed at segment \"*\""));
+        assert!(try_declare(1, "*/x").unwrap_err().starts_with("malformed at segment \"*\""));
+        try_declare(1, "*").expect("one catch-all stands");
+        assert!(try_declare(2, "*").unwrap_err().starts_with("already declared (route 1"));
+        ROUTES.lock().unwrap_or_else(|e| e.into_inner()).clear();
     }
 
     #[test]

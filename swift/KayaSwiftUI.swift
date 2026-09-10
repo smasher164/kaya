@@ -3732,14 +3732,47 @@ var kayaTearingDown: Set<UInt64> = []
                 // `isVisible` guard leaves the plain path — already on
                 // screen by AppKit's own doing — untouched.
                 DispatchQueue.main.async {
-                    guard !window.isVisible else { return }
-                    window.orderFrontRegardless()
-                    kayaDiag(
-                        "windowshow wid=\(windowId) num=\(window.windowNumber) "
-                            + "vis=\(window.isVisible)")
+                    if !window.isVisible {
+                        window.orderFrontRegardless()
+                        kayaDiag(
+                            "windowshow wid=\(windowId) num=\(window.windowNumber) "
+                                + "vis=\(window.isVisible)")
+                    }
+                    // THE WINDOW SERVER'S OWN ANSWER, one turn after the
+                    // order committed: `listed` is whether this window
+                    // number exists in CGWindowList at all (any Space),
+                    // which a never-ordered window does not, and it is
+                    // what the mac link door reads instead of polling the
+                    // process table (docs/traps.md, 2026-09-10).
+                    DispatchQueue.main.async {
+                        kayaWindowServerReport(window, wid: windowId)
+                    }
                 }
             }
         }
+    }
+
+    /// `KAYA_DIAG windowserver wid=<id> num=<n> vis=<bool> listed=<bool>
+    /// onscreen=<bool> layer=<n>`: the window server's view of this window on ANY Space
+    /// (`.optionAll`), so a user's Space switch cannot read as "no window"
+    /// the way the on-screen list does; `onscreen` is the current Space.
+    func kayaWindowServerReport(_ window: NSWindow, wid: UInt64) {
+        let num = window.windowNumber
+        var listed = false, onscreen = false, layer = -1
+        if let all = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID)
+            as? [[String: Any]]
+        {
+            for w in all where (w[kCGWindowNumber as String] as? Int) == num {
+                listed = true
+                onscreen = (w[kCGWindowIsOnscreen as String] as? Bool) ?? false
+                layer = (w[kCGWindowLayer as String] as? Int) ?? -1
+                break
+            }
+        }
+        // `vis` is the flag the defect leaves false (a window never ordered
+        // on screen); `listed` alone does not tell, since AppKit registers a
+        // window with the server before any order (measured 2026-09-10).
+        kayaDiag("windowserver wid=\(wid) num=\(num) vis=\(window.isVisible) listed=\(listed) onscreen=\(onscreen) layer=\(layer)")
     }
 
     // MARK: - Window memory (docs/tasks-s4-plan.md P4)

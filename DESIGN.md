@@ -2680,7 +2680,9 @@ sentence, so no binding parses a pattern or spells a reason — one author,
 nine bindings, zero parsers. A link arrives whether the app was running
 or was started by it (the early queue delivers one that lands before the
 app thread exists), and a URL no route took is announced by the core
-naming the patterns it tried; no binding answers it. THE SCHEME DEFAULTS
+naming the patterns it tried — unless the app declared the catch-all
+`*`, a route matched last whose one parameter is the URL, which is how an
+app answers every other link without a second registrar. THE SCHEME DEFAULTS
 TO THE DECLARED ID (a reverse-DNS string is a valid scheme and unique by
 construction), so the manifest needs nothing new; `[links] scheme`
 overrides it and `[links] hosts` declares web links, which the build

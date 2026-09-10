@@ -10782,6 +10782,30 @@ exactly the blindness it exists for. `winlist_bin` is a module-level
 function in tools/lib/flightrec_lane.py now, since constructing a
 recorder opens a run.
 
+## CGWindowList's on-screen list is scoped to the current Space (2026-09-10)
+
+The mac link door's window guard read `0 layer-0 windows for its whole
+life` on a matrix leg whose own diag said `windowshow … vis=true`, at a
+minute the maintainer was working on another Space; a hand run the same
+hour read the same 0 from CGWindowList while the accessibility tree
+counted 1. `CGWindowListCopyWindowInfo(.optionOnScreenOnly)` lists the
+CURRENT Space, so a window the user's Space switch left behind reads as
+no window, indistinguishable from one never ordered. The accessibility
+tree is not Space-scoped, but polling any reader from OUTSIDE missed a
+second act that lives a second under a loaded host (matrix #5 read `pid
+never seen`). THE WITNESS IS THE APP'S OWN, one main-queue turn after the
+deferred order: `KAYA_DIAG windowserver wid=0 num=… vis=… listed=…
+onscreen=…` — `listed` is whether the window number exists in
+CGWindowList's `.optionAll` (any Space) and it is TRUE EITHER WAY, since
+AppKit registers a window with the server before any order (measured:
+the order withheld still lists), while `vis` (isVisible) is what a window
+never ordered keeps false; `onscreen` is the current Space and only
+recorded. The mac link door reads that line from act two's log after the
+verdict and refuses unless `vis=true` and `listed=true` — watched with
+the order withheld (`vis=false`, refused, exit 1) and green restored. A
+shot by window id still needs the window on the current Space, which is
+why the review captures are taken by hand.
+
 ## `=` is an argument delimiter in a .cmd (2026-09-09)
 
 `schtasks /tr "C:\kaya\relaunch-com.cmd <leg> <clsid> <aumid> kaya=1 <id>"`

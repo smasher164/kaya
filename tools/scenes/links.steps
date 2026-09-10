@@ -27,6 +27,9 @@ expect_section "Today"
 open_link "dev.kaya.aurora.notes://task/nope"
 expect_section "Inbox"
 expect label@link_note "no task named nope"
+open_link "dev.kaya.aurora.notes://nothing/here"
+expect_section "Inbox"
+expect label@link_note "no route for dev.kaya.aurora.notes://nothing/here"
 
 # THE COLD DOOR. Everything after this line is act two, in the process
 # the platform starts on the link.

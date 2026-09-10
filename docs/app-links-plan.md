@@ -254,6 +254,13 @@ opening the task on all five.
   that wants to answer an unmatched link needs `on_link_miss`, the
   `on_notification_activation` shape taking the URL — additive, no wire
   change, and out of this slice.
+  THE CATCH-ALL (2026-09-10, on the maintainer's question): `*` as the
+  WHOLE pattern is a route matched LAST whatever order it was declared in,
+  whose one param `url` is the URL as delivered — the unmatched-link
+  registrar without a new registrar, through the `link` every binding has;
+  `*` inside a path and a second `*` are refused at the declaration. With
+  one declared the core announces no miss for the app's own scheme; a
+  scheme the app never claimed is still nobody's.
 - **One internal door in the core.** Every backend hands a URL to
   `crate::links::opened(url: &str)` — thread-safe, queued when no app
   thread exists yet and delivered first (S9's early queue, one more kind)

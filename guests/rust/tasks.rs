@@ -275,6 +275,8 @@ enum Msg {
     /// An app link named a section by name; an unknown name is dropped
     /// with the same note.
     LinkSection(String),
+    /// A link no declared route took (the `*` route): the URL itself.
+    LinkMiss(String),
     Project(usize),
     Delete,
     DetailPopped,
@@ -709,6 +711,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     msgs.link("{section}", |p| {
         Msg::LinkSection(p.get("section").unwrap_or_default().to_owned())
     });
+    msgs.link("*", |p| Msg::LinkMiss(p.get("url").unwrap_or_default().to_owned()));
     let today = today();
 
     // THE SETTINGS, BEFORE THE FIRST BUILD (docs/tasks-s4-plan.md P7):
@@ -1124,6 +1127,15 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     tx.select_section(section);
                 });
                 app.active = section;
+            }
+            // A LINK NO ROUTE TOOK: Inbox, and the note names the URL.
+            Msg::LinkMiss(url) => {
+                let note = format!("no route for {url}");
+                ctx.apply(|tx| {
+                    tx.write(app.link_note, note);
+                    tx.select_section(INBOX);
+                });
+                app.active = INBOX;
             }
             Msg::Project(index) => {
                 let Some(key) = app.detail.as_ref().map(|d| d.key.clone()) else { continue };
