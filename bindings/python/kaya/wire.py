@@ -10,7 +10,7 @@ value types.
 import struct
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x605e18f72b2af791
+SPEC_HASH = 0x1960b216df673c1f
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -251,6 +251,7 @@ TX_SET_DROP_TARGET = 50
 TX_SET_REORDERABLE = 51
 TX_SHOW_NOTIFICATION = 52
 TX_CANCEL_NOTIFICATION = 53
+TX_DECLARE_LINK_ROUTE = 54
 APPLY_CREATE = 1
 APPLY_SET_PROP = 2
 APPLY_ADD_CHILD = 3
@@ -318,6 +319,7 @@ OCC_DATE_CHANGED = 24
 OCC_TIME_CHANGED = 25
 OCC_VALUE_COMMITTED = 26
 OCC_NOTIFICATION_RESULT = 27
+OCC_LINK_OPENED = 28
 
 
 def _pad(b):
@@ -598,6 +600,10 @@ def tx_show_notification(notification, at, title, body):
 def tx_cancel_notification(notification):
     """Withdraw a pending or delivered notification by id (a reminder that was cleared). No answer follows; an unknown id is ignored."""
     return record(TX_CANCEL_NOTIFICATION, struct.pack("<Q", notification))
+
+def tx_declare_link_route(route, pattern):
+    """Declare one app-link route (docs/app-links-plan.md §4): `route` is the app's own id for it, `pattern` a Str. The MATCH HAPPENS ONCE, IN THE CORE — the patterns come here so a URL the platform hands over is turned into a route and its captures by one matcher rather than by nine. The grammar: segments split on `/`, a literal segment matches itself, `{name}` captures one segment. REFUSED AT THE DECLARATION, a fault like every other declaration refusal: an empty pattern, an empty segment, a brace a segment never closes, and a pattern already declared. Routes are declared at startup, before or inside the app's first transaction: the core matches a link that STARTED the process once that transaction lands."""
+    return record(TX_DECLARE_LINK_ROUTE, struct.pack("<Q", route) + _enc.value(pattern))
 
 
 def tx_set_text(widget_id, text):
@@ -1388,7 +1394,7 @@ def parse_occurrence(buf):
     value for OCC_VALUE_CHANGED, None otherwise.
     """
     _size, kind, _flags = struct.unpack_from("<IHH", buf, 0)
-    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT):
+    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED):
         return kind, None, [], None
     if kind == OCC_ALERT_RESULT:
         # A request's one answer: id + the u32 code.
@@ -1408,6 +1414,16 @@ def parse_occurrence(buf):
             local_path, at = parse_value(buf, at)
             files.append((handle, name, local_path))
         return kind, dialog, [], files
+    if kind == OCC_LINK_OPENED:
+        route = struct.unpack_from("<Q", buf, 8)[0]
+        url, at = parse_value(buf, 16)
+        count = struct.unpack_from("<I", buf, at)[0]
+        at += 8  # past the values count and its reserved word
+        flat = [url]
+        for _ in range(count):
+            v, at = parse_value(buf, at)
+            flat.append(v)
+        return kind, route, [], flat
     if kind == OCC_CLIPBOARD_RESULT:
         (request,) = struct.unpack_from("<Q", buf, 8)
         clip, values, _at = parse_clip(buf, 16)

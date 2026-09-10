@@ -1,0 +1,41 @@
+# App links (docs/app-links-plan.md L5): a URL the platform hands this
+# app, warm and cold, on the task manager. The scheme is the DEFAULT one
+# — guests/assets/identity.toml declares no `[links]` table, so the app
+# owns `<declared id>://…` and every lane drives that (§4).
+#
+# `open_link` asks the PLATFORM to open the URL from inside this process,
+# so the delivery comes back through the door a user's tap takes, with no
+# runner involvement. `relaunch link` is the COLD door: act one ends, and
+# the runner starts the app THROUGH the platform with the URL, so the two
+# lines after it run in a process that was started by the link.
+expect_title "tasks"
+
+# A task link opens that task's details. The reference href is the
+# per-task observable tasks.steps already reads.
+open_link "dev.kaya.aurora.notes://task/t2"
+expect_entries 1
+expect_href label@reference "https://example.com/tasks/t2"
+back
+expect_entries 0
+
+# A section link selects the section by name.
+open_link "dev.kaya.aurora.notes://today"
+expect_section "Today"
+
+# A key no task carries opens Inbox and SAYS the link named nothing —
+# the standing rule that nothing is dropped in silence (L4).
+open_link "dev.kaya.aurora.notes://task/nope"
+expect_section "Inbox"
+expect label@link_note "no task named nope"
+
+# THE COLD DOOR. Everything after this line is act two, in the process
+# the platform starts on the link.
+relaunch link "dev.kaya.aurora.notes://task/t1"
+# A BEAT BEFORE THE ASSERTIONS, because act two is what a COLD tap looks
+# like and the platform needs one: the window composites ~520ms after the
+# launch while these two steps finish in ~200ms, so without this the
+# process publishes and leaves before anything is drawn — green, with
+# nothing on screen (docs/app-links-plan.md L5, measured 2026-09-09).
+settle 800
+expect_entries 1
+expect_href label@reference "https://example.com/tasks/t1"

@@ -35,8 +35,8 @@ has its own door:
 
 | platform | declaring the scheme | how the URL arrives | starting it by hand |
 |---|---|---|---|
-| macOS | `CFBundleURLTypes` in Info.plist | an Apple event (`kAEGetURL`) to the running app, or at launch; SwiftUI's `onOpenURL` | `open kaya://task/t1` |
-| iOS | the same plist key | `scene(_:openURLContexts:)` running, `connectionOptions.urlContexts` at launch; SwiftUI's `onOpenURL` | `xcrun simctl openurl <udid> kaya://task/t1` |
+| macOS | `CFBundleURLTypes` in Info.plist | TWO doors (built 2026-09-09, docs/traps.md): `application(_:open:)` on the delegate for a URL LAUNCH, the raw `kAEGetURL` handler installed in `applicationDidFinishLaunching` for a link into the RUNNING app; and the window is ORDERED ON SCREEN one turn after it registers, since a URL launch never composites it on its own (docs/traps.md) | `open -a <the .app> kaya://task/t1` (targeted — every kaya bundle claims the scheme) |
+| iOS | the same plist key | SwiftUI's `onOpenURL`, the only door that fires (measured) | `xcrun simctl openurl <udid> kaya://task/t1`, after the device's one-time approval and with the leg's bundle the SOLE claimant on that device |
 | Android | an `<intent-filter>` with `VIEW`, `BROWSABLE`, `DEFAULT` and `<data android:scheme="kaya">` | the activity's launch intent, or `onNewIntent` when the activity is `singleTask` | `am start -a android.intent.action.VIEW -d kaya://task/t1` |
 | Linux | `MimeType=x-scheme-handler/kaya;` and `%u` on the desktop entry's `Exec` | GApplication's `open` signal (D-Bus `Open` on the activatable name, so the running instance gets it) | `gio open kaya://task/t1` |
 | Windows | unpackaged: `ActivationRegistrationManager.RegisterForProtocolActivation` at launch (HKCU registry, per user); packaged: the manifest's `windows.protocol` extension | `AppInstance.GetCurrent().GetActivatedEventArgs()` of kind `Protocol` — in a NEW process every time | `start kaya://task/t1` (ShellExecute) |
@@ -62,18 +62,26 @@ alike (measured facts in §2).
   the `autoVerify` filter, the `windows.appUriHandler` extension) and NOT
   DRIVEN BY ANY LANE, since verification needs a served domain; §2 names
   the one-time hand measurement. RECOMMEND.
-- **L2. One registration, the URL as a string.** `Messages::on_open_link(f)`
-  where `f: Fn(&str) -> M`, S9's `on_notification_activation` shape:
-  process-level, it does not retire, it receives every link whether the
-  process was running or was started by it, and a link that arrives before
-  the app thread exists waits in the early queue and is delivered first
-  (S9's R3, one more occurrence kind). Kaya hands the URL over UNPARSED:
-  every language has a URL parser and Apple's own guidance is that the app
-  validates every parameter, so a kaya `Link` struct in nine bindings
-  would be a second parser nobody asked for. A link with no registration is
-  announced, the standing silent-drop rule: `kaya: link <url> reached no
-  handler — no process-level handler is registered
-  (Messages::on_open_link)`, one sentence in nine. RECOMMEND.
+- **L2. Declared routes, matched once in the core.** TAKEN AS AMENDED by
+  the maintainer ("the ultimate surface is declaring the route that
+  corresponds to a window"): the app declares a pattern on the handler it
+  already has — Rust `Messages::link("task/{key}", |params| Msg)` and each
+  language's idiom for the other eight — and the core matches every
+  incoming URL against the declared patterns ONCE, handing the handler its
+  captures as the language's string map. The core, not the app, parses:
+  the pattern rides the wire on a `declare_link_route` record, a malformed
+  or repeated one FAULTS at apply with the whole sentence (where every
+  other declaration refusal lands), and no binding parses a pattern or
+  spells a reason word — one author, nine bindings, zero parsers. A link
+  arrives whether the process was running or was started by it; one that
+  arrives before the app thread exists waits in the early queue and is
+  delivered first (S9's R3, one more occurrence kind). A URL no route took
+  is delivered as route 0 and ANNOUNCED by the core on stderr naming the
+  patterns it tried — the standing silent-drop rule — and no binding
+  answers it in this slice (an `on_link_miss` registrar in the
+  `on_notification_activation` shape is the additive way to, if ever
+  wanted). The original proposal, an unparsed URL string handed to one
+  process-level `on_open_link`, was withdrawn on the maintainer's question.
 - **L3. A kaya app is single-instance on every platform.** A link tapped
   while the app runs reaches the RUNNING process. macOS and Linux do that
   natively (LaunchServices; GApplication's bus name, which S9's door already
@@ -234,8 +242,18 @@ opening the task on all five.
   params (a capture wins a name clash), the fragment is dropped. The
   binding sugar is `Messages::link("task/{key}", |params| Msg)` in Rust
   and each language's idiom for the other eight; a duplicate pattern or a
-  malformed one (an empty segment, an unclosed brace) is refused at the
-  declaration with a sentence the bindings mirror.
+  malformed one (an empty segment, an unclosed brace) FAULTS in the core
+  when the record applies, which is where every other declaration refusal
+  lands (a collection already bound to a For, a role already claimed) and
+  is why no binding parses a pattern or spells a reason word — one author,
+  nine bindings, zero parsers (amended 2026-09-09, after a ruling that had
+  put a validator on the C floor and a copy of the prose in each binding).
+  ROUTE 0 HAS NO REGISTRAR IN THIS SLICE: a URL no route took is announced
+  by the core and delivered as route 0, and every binding stays silent on
+  it, since `link` is the only registrar and its ids start at 1. An app
+  that wants to answer an unmatched link needs `on_link_miss`, the
+  `on_notification_activation` shape taking the URL — additive, no wire
+  change, and out of this slice.
 - **One internal door in the core.** Every backend hands a URL to
   `crate::links::opened(url: &str)` — thread-safe, queued when no app
   thread exists yet and delivered first (S9's early queue, one more kind)

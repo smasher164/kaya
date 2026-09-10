@@ -73,6 +73,9 @@ RUST_SCENES = [
     # WHAT SURVIVES A RELAUNCH (docs/tasks-s4-plan.md §4): the same
     # example under taskspersist.steps, act two through the PLAIN door.
     "taskspersist",
+    # APP LINKS (docs/app-links-plan.md L5): the same example again,
+    # warm through UIApplication.open and cold through `simctl openurl`.
+    "links",
 ]
 
 # The iPad legs, queued right after their phone sibling: the phone pool is
@@ -167,7 +170,13 @@ RELAUNCH_DOOR = {"tasks": "launch-notification",
                  # launch` of the same bundle, nothing pending and nothing
                  # added to the environment — the marker in the app's own
                  # Documents is the second process's only signal.
-                 "taskspersist": "launch"}
+                 "taskspersist": "launch",
+                 # THE LINK DOOR (docs/app-links-plan.md L5): `simctl
+                 # openurl`, which raises a SpringBoard confirmation the
+                 # first time on a device and delivers nothing until it is
+                 # answered (docs/traps.md) — run-sim answers it through
+                 # the lane's own driver.
+                 "links": "link"}
 # Which notification the door hands back: the scene's act one sets t1's
 # reminder, and a task's key IS its notification id (R2).
 RELAUNCH_NOTIFICATION = {"tasks": 1}
@@ -186,7 +195,8 @@ def swift_scene(entry):
 
 # Scene -> the cargo example it builds, where the two differ: a scene
 # selects a SCRIPT, never an app.
-RUST_EXAMPLE = {"listdetail": "split", "taskspersist": "tasks"}
+RUST_EXAMPLE = {"listdetail": "split", "taskspersist": "tasks",
+                "links": "tasks"}
 
 
 def rust_example(scene):

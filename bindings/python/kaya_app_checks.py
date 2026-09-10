@@ -3181,6 +3181,152 @@ check("an unclaimed notification_result announces the drop, naming the id",
           "was bound at the show and no process-level handler is registered "
           "(kaya.on_notification_activation)"))
 
+# --- APP LINKS (docs/app-links-plan.md §4) ---------------------------
+# A ROUTE is declared with link(pattern, handler); the CORE matches a URL
+# once and hands back the route id with the captures. Four things no lane
+# can see: the record's BYTES, the ids the counter mints, the ORDER the
+# declaration ships in, and the two drops.
+#
+# NOTHING HERE READS A PATTERN. The core is the one parser and the one
+# author of every declaration refusal, and it faults at apply — so a bad
+# pattern is not a binding-side raise to assert, and
+# tools/check-sugar-surface.py refuses a reason spelled in any binding.
+app_link = kaya.App()
+kaya.link("task/{key}", lambda p: None)
+kaya.link("{section}", lambda p: None)
+check("link parks the generated record, and mints route ids from 1",
+      app_link._pending_records == [
+          kaya.wire.tx_declare_link_route(1, "task/{key}"),
+          kaya.wire.tx_declare_link_route(2, "{section}")])
+check("link needs no transaction and opens none",
+      kaya._tx is None)
+
+_link_refused_type = False
+try:
+    kaya.link(42, lambda p: None)
+except TypeError:
+    _link_refused_type = True
+check("link refuses a pattern that is not a str (the one check a dynamic "
+      "language cannot leave to the core)", _link_refused_type)
+
+# THE PARKED DECLARATIONS LEAD THE NEXT TRANSACTION, and that is the
+# semantics: the core matches the link that STARTED the process the
+# moment the first transaction lands, so a route that shipped after the
+# scene's own records would miss the cold door. No scene can read the
+# order back — the core applies both in one batch either way.
+_link_shipped = []
+_real_submit_link = kaya.runtime.submit
+kaya.runtime.submit = lambda *records: _link_shipped.append(records)
+try:
+    with app_link.window():
+        kaya.column()
+    # A route declared INSIDE a transaction rides that transaction, and
+    # still leads it.
+    with app_link.build():
+        kaya.link("note/{key}", lambda p: None)
+        kaya.create_window(1900)
+finally:
+    kaya.runtime.submit = _real_submit_link
+
+check("the parked declarations lead the transaction that ships them",
+      len(_link_shipped) == 2
+      and _link_shipped[0][:2] == (
+          kaya.wire.tx_declare_link_route(1, "task/{key}"),
+          kaya.wire.tx_declare_link_route(2, "{section}"))
+      and len(_link_shipped[0]) > 2)
+check("and the pending list is empty afterwards",
+      app_link._pending_records == [])
+check("a route declared INSIDE a transaction rides it, at its head",
+      len(_link_shipped) == 2
+      and _link_shipped[1][0] == kaya.wire.tx_declare_link_route(
+          3, "note/{key}")
+      and len(_link_shipped[1]) > 1)
+
+# THE DECODER, FROM BYTES: route, then the url as one Str value, then a
+# u32 count and its reserved word, then count Str values read in PAIRS.
+# crates/kaya/src/wire.rs's link_opened_body is the encoder.
+def _packed_link_opened(route, url, params):
+    body = struct.pack("<Q", route)
+    body += kaya.wire._enc.value(url)
+    body += struct.pack("<II", len(params) * 2, 0)
+    for name, value in params:
+        body += kaya.wire._enc.value(name)
+        body += kaya.wire._enc.value(value)
+    return struct.pack("<IHH", 8 + len(body),
+                       kaya.wire.OCC_LINK_OPENED, 0) + body
+
+
+check("a packed link_opened decodes to its route and one flat run",
+      kaya.wire.parse_occurrence(_packed_link_opened(
+          7, "dev.kaya.aurora.notes://task/t2?focus=notes",
+          [("key", "t2"), ("focus", "notes")]))
+      == (kaya.wire.OCC_LINK_OPENED, 7, [],
+          ["dev.kaya.aurora.notes://task/t2?focus=notes",
+           "key", "t2", "focus", "notes"]))
+check("route 0 decodes with the url alone, and NO key path",
+      kaya.wire.parse_occurrence(_packed_link_opened(
+          0, "dev.kaya.aurora.notes://nope", []))
+      == (kaya.wire.OCC_LINK_OPENED, 0, [],
+          ["dev.kaya.aurora.notes://nope"]))
+
+# THE DISPATCH: by route id, NOT one-shot, and the two drops.
+app_links = kaya.App()
+_link_seen = []
+kaya.link("task/{key}", lambda p: _link_seen.append(("task", p)))
+kaya.link("{section}", lambda p: _link_seen.append(("section", p)))
+with app_links.window():
+    kaya.column()
+
+_link_occs = [
+    kaya.wire.parse_occurrence(_packed_link_opened(
+        1, "dev.kaya.aurora.notes://task/t2?focus=notes",
+        [("key", "t2"), ("focus", "notes")])),
+    # NOT one-shot: the same route answers again.
+    kaya.wire.parse_occurrence(_packed_link_opened(
+        1, "dev.kaya.aurora.notes://task/t1", [("key", "t1")])),
+    kaya.wire.parse_occurrence(_packed_link_opened(
+        2, "dev.kaya.aurora.notes://today", [("section", "today")])),
+    # A route this process never declared reaches NO handler.
+    kaya.wire.parse_occurrence(_packed_link_opened(
+        9, "dev.kaya.aurora.notes://task/t2", [("key", "t2")])),
+    # And route 0 — a URL no route took — reaches no handler either.
+    kaya.wire.parse_occurrence(_packed_link_opened(
+        0, "dev.kaya.aurora.notes://nope", [])),
+]
+kaya.runtime.next_occurrence = (
+    lambda: _link_occs.pop(0) if _link_occs else None)
+_link_said = io.StringIO()
+sys.stderr = _link_said
+try:
+    app_links._dispatch_loop()
+finally:
+    sys.stderr = _real_stderr
+    kaya.runtime.next_occurrence = _real_next_n
+
+check("a link reaches the handler its route declared, with the captures",
+      _link_seen[0] == ("task", {"key": "t2", "focus": "notes"}))
+check("the query's pairs join the params",
+      "focus" in _link_seen[0][1])
+check("the registration does NOT retire",
+      _link_seen[1] == ("task", {"key": "t1"}))
+check("a second route dispatches to its own handler",
+      _link_seen[2] == ("section", {"section": "today"}))
+check("a route this process never declared reaches nothing",
+      len(_link_seen) == 3)
+
+# TWO DROPS WITH DISJOINT CAUSES. A route that MATCHED and reached no
+# handler is this binding's to announce, naming its own registrar; route
+# 0 is a URL NO ROUTE TOOK, which the core already announced naming every
+# declared pattern, so the binding says nothing — two lines for one event
+# teaches a reader to distrust both.
+_link_lines = [l for l in _link_said.getvalue().splitlines() if l.strip()]
+check("an unknown route announces the drop, naming the url and the route",
+      _link_lines == [
+          "kaya: link dev.kaya.aurora.notes://task/t2 matched route 9 and "
+          "reached no handler — none is registered for it (kaya.link)"])
+check("route 0 is delivered and SILENT — the core announced that miss",
+      not any("nope" in l for l in _link_lines))
+
 # THE PREFERENCES STORE AND THE DATA DIRECTORY (docs/tasks-s4-plan.md
 # P1/P2/P3), through the REAL FLOOR: everything above queues records and
 # never enters the core, but a pref call reaches the platform's own store

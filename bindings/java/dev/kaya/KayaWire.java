@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0x605e18f72b2af791L;
+    public static final long SPEC_HASH = 0x1960b216df673c1fL;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -253,6 +253,7 @@ public final class KayaWire {
     public static final short TX_KIND_SET_REORDERABLE = 51;
     public static final short TX_KIND_SHOW_NOTIFICATION = 52;
     public static final short TX_KIND_CANCEL_NOTIFICATION = 53;
+    public static final short TX_KIND_DECLARE_LINK_ROUTE = 54;
     public static final short APPLY_KIND_CREATE = 1;
     public static final short APPLY_KIND_SET_PROP = 2;
     public static final short APPLY_KIND_ADD_CHILD = 3;
@@ -320,6 +321,7 @@ public final class KayaWire {
     public static final short OCC_KIND_TIME_CHANGED = 25;
     public static final short OCC_KIND_VALUE_COMMITTED = 26;
     public static final short OCC_KIND_NOTIFICATION_RESULT = 27;
+    public static final short OCC_KIND_LINK_OPENED = 28;
 
     /** A blob value: the u64 handle from kaya_blob_register, consumed
      * by the next submit; the bytes never ride the record stream. */
@@ -901,6 +903,14 @@ public final class KayaWire {
     public static byte[] txCancelNotification(long notification) {
         Enc b = begin(TX_KIND_CANCEL_NOTIFICATION);
         b.putLong(notification);
+        return finish(b);
+    }
+
+    /** Declare one app-link route (docs/app-links-plan.md §4): `route` is the app's own id for it, `pattern` a Str. The MATCH HAPPENS ONCE, IN THE CORE — the patterns come here so a URL the platform hands over is turned into a route and its captures by one matcher rather than by nine. The grammar: segments split on `/`, a literal segment matches itself, `{name}` captures one segment. REFUSED AT THE DECLARATION, a fault like every other declaration refusal: an empty pattern, an empty segment, a brace a segment never closes, and a pattern already declared. Routes are declared at startup, before or inside the app's first transaction: the core matches a link that STARTED the process once that transaction lands. */
+    public static byte[] txDeclareLinkRoute(long route, Object pattern) {
+        Enc b = begin(TX_KIND_DECLARE_LINK_ROUTE);
+        b.putLong(route);
+        encodeValue(b, pattern);
         return finish(b);
     }
 
@@ -2245,7 +2255,7 @@ public final class KayaWire {
     public static Occ parseOccurrence(byte[] rec) {
         ByteBuffer b = ByteBuffer.wrap(rec).order(ByteOrder.LITTLE_ENDIAN);
         short kind = b.getShort(4);
-        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED && kind != OCC_KIND_FILE_DIALOG_RESULT && kind != OCC_KIND_CLIPBOARD_RESULT && kind != OCC_KIND_PASTED && kind != OCC_KIND_UNDONE && kind != OCC_KIND_REDONE && kind != OCC_KIND_SORT_REQUESTED && kind != OCC_KIND_DRAW_REQUESTED && kind != OCC_KIND_TICK && kind != OCC_KIND_DROPPED && kind != OCC_KIND_DRAG_ENDED && kind != OCC_KIND_DATE_CHANGED && kind != OCC_KIND_TIME_CHANGED && kind != OCC_KIND_VALUE_COMMITTED && kind != OCC_KIND_NOTIFICATION_RESULT) {
+        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED && kind != OCC_KIND_FILE_DIALOG_RESULT && kind != OCC_KIND_CLIPBOARD_RESULT && kind != OCC_KIND_PASTED && kind != OCC_KIND_UNDONE && kind != OCC_KIND_REDONE && kind != OCC_KIND_SORT_REQUESTED && kind != OCC_KIND_DRAW_REQUESTED && kind != OCC_KIND_TICK && kind != OCC_KIND_DROPPED && kind != OCC_KIND_DRAG_ENDED && kind != OCC_KIND_DATE_CHANGED && kind != OCC_KIND_TIME_CHANGED && kind != OCC_KIND_VALUE_COMMITTED && kind != OCC_KIND_NOTIFICATION_RESULT && kind != OCC_KIND_LINK_OPENED) {
             return null;
         }
         long id = b.getLong(8);
@@ -2284,6 +2294,17 @@ public final class KayaWire {
                         (Long) parts[0], (String) parts[1], (String) parts[2]));
             }
             return new Occ(kind, id, java.util.List.of(), files);
+        }
+        if (kind == OCC_KIND_LINK_OPENED) {
+            int[] cursor = new int[] {16};
+            java.util.List<Object> flat = new java.util.ArrayList<>();
+            flat.add(parseValue(rec, b, cursor));
+            int count = b.getInt(cursor[0]);
+            cursor[0] += 8; // past the values count and its reserved word
+            for (int i = 0; i < count; i++) {
+                flat.add(parseValue(rec, b, cursor));
+            }
+            return new Occ(kind, id, java.util.List.of(), flat);
         }
         if (kind == OCC_KIND_CLIPBOARD_RESULT) {
             return new Occ(kind, id, java.util.List.of(),

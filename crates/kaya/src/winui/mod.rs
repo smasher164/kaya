@@ -14008,7 +14008,14 @@ fn bootstrap_shutdown() {
     }
 }
 
+/// ONCE PER PROCESS: `links_startup` needs the framework in the package graph
+/// before `run_core` does, and MddBootstrapInitialize2 pairs with a shutdown.
 fn bootstrap_windows_app_runtime() {
+    static ONCE: OnceLock<()> = OnceLock::new();
+    ONCE.get_or_init(bootstrap_windows_app_runtime_once);
+}
+
+fn bootstrap_windows_app_runtime_once() {
     // A PACKAGED PROCESS ALREADY HAS THE RUNTIME, in its package graph, and
     // the bootstrapper refuses to run in one: MddBootstrapInitialize2 answers
     // 0x80070032, ERROR_NOT_SUPPORTED (measured 2026-09-08). What puts the
@@ -18947,6 +18954,21 @@ impl crate::harness::Stage for WinUiStage {
     fn activate_notification(&self, notification: u64) {
         on_notify(move || notification_activated(notification));
     }
+
+    /// THE PLATFORM'S OWN OPEN, FROM INSIDE THE PROCESS (docs/app-links-plan.md
+    /// L5): the shell starts a second process for the URL, that process finds
+    /// this one holding the single-instance key and redirects its activation
+    /// here, and the link arrives through `Activated` — the same door a user's
+    /// tap takes. It is also what proves L3 on this platform, since a lane
+    /// cannot otherwise see that the second process redirected rather than
+    /// opened a window of its own.
+    fn open_link(&self, url: &str) {
+        let url = url.to_owned();
+        match on_notify(move || shell_open(&url)) {
+            Some(Ok(())) | None => {}
+            Some(Err(why)) => eprintln!("kaya: winui could not open the link — {why}"),
+        }
+    }
     fn alert_title(&self, window: u64) -> Option<String> {
         Self::on_ui_read(move |core| {
             let Some(live) = core.live_alert.as_ref() else {
@@ -21667,6 +21689,345 @@ fn relaunch_door_missing() -> Option<String> {
     )
 }
 
+// ---- App links (docs/app-links-plan.md §4's Windows row) ----------------
+//
+// EVERY ACTIVATION STARTS A NEW PROCESS on this platform, which is what makes
+// the Windows arm differ in kind from the other four: `start "<scheme>://…"`
+// runs the registered command, the started process reads its own activation
+// arguments, and single instance is something the app ASKS FOR — the process
+// that does not hold the key hands its activation to the one that does and
+// exits. All of it measured on the VM 2026-09-09 (docs/traps.md's app-links
+// entries; the probe's own log is in the session's notes): delivery in 8 of 8
+// activations, 1-9 ms from the redirect call to the owner's handler, no
+// message pump needed in either process, and the cold door is the SAME door —
+// with nothing running, the started process is the owner and reads the URI out
+// of its own launch arguments 29 ms in.
+
+use bindings::Microsoft::Windows::AppLifecycle::{
+    ActivationRegistrationManager, AppActivationArguments, AppInstance, ExtendedActivationKind,
+};
+use bindings::Windows::ApplicationModel::Activation::IProtocolActivatedEventArgs;
+
+/// The App SDK's own verb, which is how the ProgId's command line spells the
+/// URL: `<exe> "----ms-protocol:%1"`, four hyphens. Read only by the why-not
+/// below — the URI itself comes from `GetActivatedEventArgs`, never from argv.
+const PROTOCOL_ARGUMENT_PREFIX: &str = "----ms-protocol:";
+
+/// The keyed instance, kept for the life of the process: `Activated` is an
+/// event ON THIS OBJECT, and dropping the last reference to it would take the
+/// subscription with it.
+struct SharedAppInstance(AppInstance);
+unsafe impl Send for SharedAppInstance {}
+unsafe impl Sync for SharedAppInstance {}
+static LINK_INSTANCE: OnceLock<SharedAppInstance> = OnceLock::new();
+
+/// WHAT A PROTOCOL ACTIVATION'S COMMAND LINE LOOKS LIKE, so a process that was
+/// plainly started can be told from one the shell started for a link. A pure
+/// function over argv because that is the only way its branches can be watched
+/// (CLAUDE.md invariant 3); the guest unit test drives both.
+fn protocol_argument(argv: &[String]) -> Option<&str> {
+    argv.iter()
+        .skip(1)
+        .find_map(|arg| arg.strip_prefix(PROTOCOL_ARGUMENT_PREFIX))
+        .filter(|url| !url.is_empty())
+}
+
+/// WHY THIS PROCESS HAS NO LINK TO HAND THE APP, or `None` when it does. Both
+/// readings are arguments so every branch is drivable (invariant 3;
+/// tools/check-diagnostics.py reads this by name). The discriminating fact is
+/// the command line: the shell starts a protocol activation with the App SDK's
+/// own `----ms-protocol:<url>` argument, so a process that HAS one and whose
+/// activation arguments still say Launch is a different fault from a process
+/// nobody started for a link.
+fn link_activation_why_not(kind: Result<i32, &str>, argument: Option<&str>) -> Option<String> {
+    let why = match (kind, argument) {
+        (Ok(k), _) if k == ExtendedActivationKind::Protocol.0 => return None,
+        (Ok(k), Some(url)) => format!(
+            "this process was started with {PROTOCOL_ARGUMENT_PREFIX}{url} and \
+             GetActivatedEventArgs answered kind {k}, not Protocol \
+             ({}) — the App SDK did not recognise its own activation",
+            ExtendedActivationKind::Protocol.0
+        ),
+        (Ok(k), None) => format!(
+            "this process was started with no {PROTOCOL_ARGUMENT_PREFIX} argument and its \
+             activation kind is {k} — nothing asked it to open a link"
+        ),
+        (Err(why), Some(url)) => format!(
+            "this process was started with {PROTOCOL_ARGUMENT_PREFIX}{url}, so a link WAS \
+             delivered, and GetActivatedEventArgs failed: {why}"
+        ),
+        (Err(why), None) => format!(
+            "GetActivatedEventArgs failed ({why}) and this process was started with no \
+             {PROTOCOL_ARGUMENT_PREFIX} argument, so there may have been no link at all"
+        ),
+    };
+    Some(why)
+}
+
+/// The URI out of an activation, or the sentence saying why there is none.
+fn activation_url(args: &AppActivationArguments) -> Result<String, String> {
+    let kind = args.Kind().map(|k| k.0).map_err(|e| e.message());
+    if kind.as_ref().copied() != Ok(ExtendedActivationKind::Protocol.0) {
+        return Err(link_activation_why_not(
+            kind.as_ref().copied().map_err(String::as_str),
+            protocol_argument(&std::env::args().collect::<Vec<_>>()).map(str::to_owned).as_deref(),
+        )
+        .expect("the Protocol arm returned above"));
+    }
+    let data = args.Data().map_err(|e| format!("its Data() failed: {}", e.message()))?;
+    let protocol: IProtocolActivatedEventArgs = data
+        .cast()
+        .map_err(|e| format!("its Data() is no IProtocolActivatedEventArgs: {}", e.message()))?;
+    let uri = protocol
+        .Uri()
+        .map_err(|e| format!("its Uri() failed: {}", e.message()))?;
+    uri.RawUri()
+        .map(|raw| raw.to_string())
+        .map_err(|e| format!("its RawUri() failed: {}", e.message()))
+}
+
+/// THE UNPACKAGED PROTOCOL REGISTRATION (docs/app-links-plan.md L1), beside
+/// the identity key S3 writes and for the same reason: it is the one
+/// registration a build cannot make. Idempotent by the SDK's own design —
+/// every call rewrites the generated ProgId's command with the CURRENT exe
+/// path, which is what makes it safe for a lane that rebuilds the exe under
+/// one path. A PACKAGED process registers nothing: the manifest's
+/// `windows.protocol` extension is its declaration
+/// (tools/lib/packaging/windows.py).
+fn register_unpackaged_protocol(scheme: &str, declaration: &crate::scene::Declaration) -> Result<(), String> {
+    let logo = mark_under_local_app_data(&declaration.id, &declaration.icon)
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    ActivationRegistrationManager::RegisterForProtocolActivation(
+        &HSTRING::from(scheme),
+        &HSTRING::from(logo.as_str()),
+        &HSTRING::from(declaration.name.as_str()),
+        // Empty means THIS executable, which is the only answer a library
+        // running inside somebody else's host process can give.
+        &HSTRING::new(),
+    )
+    .map_err(|e| {
+        format!(
+            "RegisterForProtocolActivation({scheme:?}) failed: {:#010x} {}",
+            e.code().0 as u32,
+            e.message()
+        )
+    })
+}
+
+/// THE LINK DOOR AT LAUNCH, and the single-instance redirect that has to
+/// happen before anything else this process does (crates/kaya/src/lib.rs and
+/// capi.rs call this first, ahead of `act2::arm`: a redirecting process that
+/// ran arm() would clear the scratch stores of the process it is redirecting
+/// TO, or eat its act-two marker, and exit before either could be noticed).
+///
+/// NOTHING IS REGISTERED HERE. A process started plainly reads its activation
+/// kind, finds `Launch`, and leaves — no scheme claimed, no instance key
+/// taken. The claim is made by [`links_declared`] when the app declares its
+/// first route, which is what stops an app that answers no link from owning
+/// the user's scheme (and what keeps this lane's 239 legs, all of them the
+/// same declared id, out of each other's way).
+///
+/// NEVER RETURNS in the redirect case. Idempotent otherwise.
+pub(crate) fn links_startup() {
+    static ONCE: OnceLock<()> = OnceLock::new();
+    ONCE.get_or_init(links_startup_once);
+}
+
+fn links_startup_once() {
+    // The AppLifecycle statics need the framework in this process's package
+    // graph, so the bootstrap comes first — `run_core` calls the same
+    // idempotent function again a moment later.
+    bootstrap_windows_app_runtime();
+    const COINIT_APARTMENTTHREADED: u32 = 0x2;
+    unsafe { CoInitializeEx(std::ptr::null(), COINIT_APARTMENTTHREADED) };
+
+    let args = match AppInstance::GetCurrent().and_then(|current| current.GetActivatedEventArgs()) {
+        Ok(args) => args,
+        Err(e) => {
+            eprintln!(
+                "kaya: winui could not read this process's activation arguments: {} — a link \
+                 this process was started for would reach nothing",
+                e.message()
+            );
+            return;
+        }
+    };
+    let url = match activation_url(&args) {
+        Ok(url) => url,
+        // A PLAIN LAUNCH IS THE ORDINARY CASE and says nothing: the sentence
+        // the why-not composed is for a reader who came here BECAUSE a link
+        // went missing, and is printed by the diagnostic's own callers.
+        Err(_) => return,
+    };
+
+    // SINGLE INSTANCE (L3), keyed on the declared id: this process was started
+    // FOR a link, so it either hands it to the app that is already running or
+    // becomes that app itself.
+    let Some(keyed) = become_owner() else { return };
+    if !keyed.IsCurrent().unwrap_or(false) {
+        let owner = keyed.ProcessId().unwrap_or(0);
+        eprintln!(
+            "kaya: winui redirects {url} to the running app (pid {owner}) and exits"
+        );
+        // MEASURED 2026-09-09: the owner's handler has already run by the time
+        // this returns (8 of 8 activations), and the returned IAsyncAction is
+        // a different matter — in an STA its completion rides the apartment's
+        // message queue, so waiting for it here would hang a process that is
+        // meant to be invisible. Exit at the return, never before it.
+        match keyed.RedirectActivationToAsync(&args) {
+            Ok(_action) => {}
+            Err(e) => eprintln!(
+                "kaya: winui could not redirect {url} to pid {owner}: {} — the link reaches \
+                 neither process",
+                e.message()
+            ),
+        }
+        crate::exit_hard(0);
+    }
+
+    // THE COLD DOOR IS THE SAME DOOR: with nothing running, the process the
+    // shell started IS the owner and its own activation carries the URL. The
+    // core queues it — no app thread exists yet (L2's early queue).
+    crate::links::opened(&url);
+}
+
+/// THE APP DECLARED ITS FIRST LINK ROUTE (crates/kaya/src/links.rs's
+/// `flush_early`, the end of the first applied batch), so this process claims
+/// the scheme and takes the single-instance key. NOT AT LAUNCH: Windows is the
+/// one platform where answering a scheme is something a process registers for
+/// itself, so an app that declares no route registers nothing and every other
+/// guest on this machine is left alone.
+pub(crate) fn links_declared() {
+    static ONCE: OnceLock<()> = OnceLock::new();
+    ONCE.get_or_init(|| {
+        // ON THE APARTMENT: this runs at the end of an applied batch, which is
+        // the XAML thread — an ASTA, where a WinRT static call may not block
+        // (`on_async`'s note). The notification apartment is this process's
+        // one MTA.
+        on_notify(links_declared_on_apartment);
+    });
+}
+
+fn links_declared_on_apartment() {
+    let declaration = match crate::scene::declared_identity() {
+        Ok(declaration) => declaration,
+        Err(why) => {
+            // The core's own sentence, which names the file and the key: with
+            // no declared id there is no scheme to claim and no key to hold.
+            eprintln!("kaya: winui claims no link scheme — {why}");
+            return;
+        }
+    };
+    let scheme = crate::links::scheme();
+    if packaged() {
+        // The package IS the declaration (docs/packaging-plan.md P3): the
+        // manifest's `windows.protocol` extension claims the scheme, and an
+        // HKCU registration of our own would shadow it.
+    } else {
+        match register_unpackaged_protocol(&scheme, &declaration) {
+            Ok(()) => eprintln!("kaya: winui answers {scheme}:// for this executable"),
+            Err(why) => eprintln!(
+                "kaya: winui could not claim the link scheme — {why}. A link with this scheme \
+                 will open no app at all."
+            ),
+        }
+    }
+    become_owner();
+}
+
+/// The single-instance key and the event every later activation arrives on,
+/// taken ONCE however this process got here. `None` is a process that could
+/// not take the key — it still runs, but a link tapped while it does would
+/// start a second copy instead of reaching it.
+fn become_owner() -> Option<&'static AppInstance> {
+    static OWNER: OnceLock<Option<SharedAppInstance>> = OnceLock::new();
+    OWNER
+        .get_or_init(|| {
+            let id = crate::scene::declared_id()?;
+            let keyed = match AppInstance::FindOrRegisterForKey(&HSTRING::from(id.as_str())) {
+                Ok(keyed) => keyed,
+                Err(e) => {
+                    eprintln!(
+                        "kaya: winui could not take the single-instance key {id:?}: {} — a link \
+                         tapped while this app runs would start a SECOND copy",
+                        e.message()
+                    );
+                    return None;
+                }
+            };
+            // THE OWNER'S EVENT. Every later activation arrives here — on a
+            // WinRT/RPC thread, never the subscribing one (measured: an owner
+            // asleep with no message pump still received it), so the handler
+            // may only hand the URL to the core's door and return.
+            let subscribed = keyed.Activated(&bindings::Windows::Foundation::EventHandler::<
+                AppActivationArguments,
+            >::new(|_sender, args: windows_core::Ref<'_, AppActivationArguments>| {
+                match args.as_ref().map(activation_url) {
+                    Some(Ok(url)) => crate::links::opened(&url),
+                    Some(Err(why)) => eprintln!("kaya: winui was activated with no link — {why}"),
+                    None => eprintln!("kaya: winui was activated with null arguments"),
+                }
+                Ok(())
+            }));
+            if let Err(e) = &subscribed {
+                eprintln!(
+                    "kaya: winui could not subscribe to activations: {} — a link tapped while \
+                     this app runs would reach nothing",
+                    e.message()
+                );
+            }
+            Some(SharedAppInstance(keyed))
+        })
+        .as_ref()
+        .map(|held| &held.0)
+}
+
+#[link(name = "shell32")]
+unsafe extern "system" {
+    /// The platform's own open, which is what `open_link` asks for: the shell
+    /// starts a new process for the URL, that process finds this one holding
+    /// the key and redirects to it. Declared here rather than taken from the
+    /// `windows` crate because its projected signature drags
+    /// Win32_UI_WindowsAndMessaging in for SHOW_WINDOW_CMD alone.
+    fn ShellExecuteW(
+        hwnd: isize,
+        operation: *const u16,
+        file: *const u16,
+        parameters: *const u16,
+        directory: *const u16,
+        show: i32,
+    ) -> isize;
+}
+
+/// `open_link`'s platform half. Runs on the notification apartment because it
+/// is this process's one COM-initialized MTA: the harness thread initializes
+/// no apartment at all and the XAML thread is an ASTA.
+fn shell_open(url: &str) -> Result<(), String> {
+    const SW_SHOWNORMAL: i32 = 1;
+    // ShellExecuteW answers an HINSTANCE-shaped error code: anything at or
+    // below 32 is a failure, and the number is the whole diagnosis.
+    let operation = wide_z("open");
+    let file = wide_z(url);
+    let answer = unsafe {
+        ShellExecuteW(
+            0,
+            operation.as_ptr(),
+            file.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            SW_SHOWNORMAL,
+        )
+    };
+    if answer > 32 {
+        return Ok(());
+    }
+    Err(format!(
+        "ShellExecuteW(open, {url:?}) answered {answer} — 2 is ERROR_FILE_NOT_FOUND and 31 \
+         SE_ERR_NOASSOC, both of which mean no application claims this URL's scheme"
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -21838,6 +22199,277 @@ mod tests {
         assert!(no_id.contains("identity.toml"), "{no_id}");
         assert!(no_id.contains("no executable path"), "{no_id}");
         assert_ne!(no_door, no_id, "one sentence for two causes is the defect");
+    }
+
+    /// The HKCU subkeys of a key, for the one cleanup that cannot be named:
+    /// the App SDK derives a ProgId `App.<16 hex>` from the executable and
+    /// nothing on this side may claim to know the hash.
+    fn hkcu_subkeys(key: &str) -> Vec<String> {
+        use windows::Win32::System::Registry::{
+            RegCloseKey, RegEnumKeyExW, RegOpenKeyExW, HKEY, HKEY_CURRENT_USER, KEY_READ,
+        };
+        let mut handle = HKEY::default();
+        let opened = unsafe {
+            RegOpenKeyExW(
+                HKEY_CURRENT_USER,
+                windows_core::PCWSTR(wide_z(key).as_ptr()),
+                None,
+                KEY_READ,
+                &mut handle,
+            )
+        };
+        if opened.is_err() {
+            return Vec::new();
+        }
+        let mut names = Vec::new();
+        let mut index = 0u32;
+        loop {
+            let mut buffer = [0u16; 256];
+            let mut len = buffer.len() as u32;
+            let read = unsafe {
+                RegEnumKeyExW(
+                    handle,
+                    index,
+                    Some(windows_core::PWSTR(buffer.as_mut_ptr())),
+                    &mut len,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+            };
+            if read.is_err() {
+                break;
+            }
+            names.push(String::from_utf16_lossy(&buffer[..len as usize]));
+            index += 1;
+        }
+        let _ = unsafe { RegCloseKey(handle) };
+        names
+    }
+
+    /// THE SCHEME RULE, READ BACK OFF A REAL REGISTRY (docs/app-links-plan.md
+    /// §4): the scheme defaults to the DECLARED ID, which is a reverse-DNS
+    /// string — legal per RFC 3986 and what Google's own OAuth schemes are,
+    /// but the one thing about it no lane can prove is that Windows accepts
+    /// the dots. NO SCENE CAN SEE THIS EITHER: a lane drives the scheme it
+    /// registered, so a backend that silently mangled the scheme would open
+    /// its own links perfectly and no one else's.
+    ///
+    /// It also pins the leftover the lane's own cleanup exists for
+    /// (docs/traps.md): `UnregisterForProtocolActivation` answers `Ok` and
+    /// leaves `HKCU\Software\Classes\<scheme>` standing, so the scheme still
+    /// reads as claimed with nothing behind it.
+    #[test]
+    fn the_link_registration_claims_the_dotted_scheme_and_unregistering_leaves_it() {
+        bootstrap_windows_app_runtime();
+        let scheme = "dev.kaya.aurora.notes.linktest";
+        let declaration = crate::scene::Declaration {
+            name: "Aurora Notes Link Test".to_owned(),
+            icon: b"\x89PNG\r\n\x1a\nkaya-link-test".to_vec(),
+            id: scheme.to_owned(),
+        };
+        let scheme_key = format!("Software\\Classes\\{scheme}");
+        const RUNTIME_APPS: &str = "Software\\Microsoft\\WindowsAppRuntimeApplications";
+        reg_delete_tree(&scheme_key);
+
+        register_unpackaged_protocol(scheme, &declaration).expect("the registration");
+        assert_eq!(
+            hkcu_string(&scheme_key, "").as_deref(),
+            Some(format!("URL:{scheme}").as_str()),
+            "the dotted scheme is claimed under its own class key"
+        );
+        assert!(
+            hkcu_string(&scheme_key, "URL Protocol").is_some(),
+            "the URL Protocol marker is what makes the shell treat it as a scheme"
+        );
+        // THE GENERATED PROGID, found the only way there is: the SDK derives
+        // `App.<16 hex>` from this executable and ties the two together here.
+        let exe = std::env::current_exe().expect("this test's own exe");
+        let mine: Vec<String> = hkcu_subkeys(RUNTIME_APPS)
+            .into_iter()
+            .filter(|app| {
+                hkcu_string(
+                    &format!("{RUNTIME_APPS}\\{app}\\Capabilties\\UrlAssociations"),
+                    scheme,
+                )
+                .is_some()
+            })
+            .collect();
+        assert_eq!(
+            mine.len(),
+            1,
+            "one registration writes one application entry, not {mine:?}"
+        );
+        let progid = hkcu_string(
+            &format!("{RUNTIME_APPS}\\{}\\Capabilties\\UrlAssociations", mine[0]),
+            scheme,
+        )
+        .expect("the association names its ProgId");
+        // THE EXE PATH IS WRITTEN UNQUOTED (measured here on the guest
+        // 2026-09-09, and by the probe before it): an app installed under a
+        // path with a space would have a command line the shell splits.
+        assert_eq!(
+            hkcu_string(&format!("Software\\Classes\\{progid}\\shell\\open\\command"), "")
+                .as_deref(),
+            Some(
+                format!("{} \"{PROTOCOL_ARGUMENT_PREFIX}%1\"", exe.display()).as_str()
+            ),
+            "the shell starts THIS executable with the SDK's own protocol verb"
+        );
+
+        ActivationRegistrationManager::UnregisterForProtocolActivation(
+            &HSTRING::from(scheme),
+            &HSTRING::new(),
+        )
+        .expect("the unregistration");
+        assert!(
+            hkcu_string(&scheme_key, "URL Protocol").is_some(),
+            "the SDK's unregister LEAVES the scheme claimed — the lane deletes this key itself"
+        );
+
+        reg_delete_tree(&scheme_key);
+        reg_delete_tree(&format!("Software\\Classes\\{progid}"));
+        reg_delete_tree(&format!("{RUNTIME_APPS}\\{}", mine[0]));
+        assert!(
+            hkcu_string(&scheme_key, "URL Protocol").is_none(),
+            "this test leaves the machine as it found it"
+        );
+    }
+
+    /// THE APP SDK'S OWN COMMAND LINE, parsed. The URI itself always comes
+    /// from `GetActivatedEventArgs`; this is read only by the why-not below,
+    /// which is the one thing that can tell "nobody asked for a link" from
+    /// "a link was delivered and the SDK did not see it".
+    #[test]
+    fn the_protocol_argument_is_read_out_of_the_app_sdks_own_command_line() {
+        let started = |args: &[&str]| {
+            protocol_argument(&args.iter().map(|a| (*a).to_owned()).collect::<Vec<_>>())
+                .map(str::to_owned)
+        };
+        assert_eq!(
+            started(&[
+                "tasks.exe",
+                "----ms-protocol:dev.kaya.aurora.notes://task/t1?from=probe&n=1"
+            ])
+            .as_deref(),
+            Some("dev.kaya.aurora.notes://task/t1?from=probe&n=1"),
+            "the query rides the one argument, `&` and all"
+        );
+        assert_eq!(started(&["tasks.exe"]), None, "a plain launch names no link");
+        assert_eq!(
+            started(&["tasks.exe", "-ToastActivated", "-Embedding"]),
+            None,
+            "the toast door's arguments are not a link"
+        );
+        assert_eq!(
+            started(&["tasks.exe", "----ms-protocol:"]),
+            None,
+            "an empty URL is no URL"
+        );
+        // THE PREFIX IS FOUR HYPHENS, which is the SDK's own spelling and the
+        // easiest thing in this file to typo into three.
+        assert_eq!(
+            started(&["tasks.exe", "---ms-protocol:dev.kaya.aurora.notes://today"]),
+            None
+        );
+    }
+
+    /// AN APP THAT DECLARES NO LINK ROUTE CLAIMS NOTHING, and a launch that
+    /// is not a link leaves before it could. NO LEG CAN STATE THIS RULE and
+    /// the one that would break it costs a whole matrix: every guest in this
+    /// tree declares the SAME id, and on Windows both halves of the door are
+    /// per-user singletons — `RegisterForProtocolActivation` is
+    /// last-writer-wins, and `FindOrRegisterForKey` makes the second process
+    /// of ONE EXECUTABLE redirect and exit. The key is scoped per exe
+    /// (measured 2026-09-09), so a claim taken at launch would take five of
+    /// every six pooled legs that share python.exe, node.exe, java.exe or
+    /// dotnet.exe out at startup, and the lane would say so in HRESULTs.
+    /// Read out of this file's own source, `every_link_of_the_report_loop`'s
+    /// shape.
+    #[test]
+    fn a_launch_that_is_not_a_link_claims_no_scheme_and_takes_no_key() {
+        const SRC: &str = include_str!("mod.rs");
+
+        fn body(name: &str) -> &'static str {
+            let head = format!("\nfn {name}(");
+            let start = SRC.find(&head).unwrap_or_else(|| panic!("no top-level fn {name}"));
+            let end = SRC[start + 1..].find("\n}\n").expect("unterminated fn") + start + 1;
+            &SRC[start..end]
+        }
+
+        let startup = body("links_startup_once");
+        assert!(
+            !startup.contains("register_unpackaged_protocol"),
+            "links_startup_once claims the scheme at launch: every guest on this \
+             machine declares one id, so the LAST one launched would own the \
+             user's scheme and the link door would open somebody else"
+        );
+        let leaves = startup
+            .find("Err(_) => return")
+            .expect("links_startup_once no longer leaves early for a plain launch");
+        let claims = startup
+            .find("become_owner()")
+            .expect("links_startup_once no longer takes the instance key at all");
+        assert!(
+            leaves < claims,
+            "links_startup_once takes the single-instance key BEFORE it has \
+             established that this process was started for a link — a plain \
+             launch would then join a key every other guest of this app shares, \
+             and the second process of one executable redirects and exits"
+        );
+        assert!(
+            startup[claims..].contains("crate::exit_hard(0)"),
+            "the redirect arm no longer exits: a process that handed its \
+             activation over must not go on to build a scene"
+        );
+
+        let declared = body("links_declared_on_apartment");
+        for call in ["register_unpackaged_protocol", "become_owner()"] {
+            assert!(
+                declared.contains(call),
+                "links_declared_on_apartment no longer calls `{call}` — the \
+                 claim rides the app's FIRST DECLARED ROUTE, and an app whose \
+                 routes are declared with nothing registered answers no link \
+                 at all"
+            );
+        }
+        assert!(
+            declared.contains("if packaged()"),
+            "links_declared_on_apartment registers whether or not this process \
+             is packaged: a packaged process's declaration is the manifest's \
+             `windows.protocol` extension and its HKCU is virtualized, so an \
+             HKCU registration of its own would shadow it"
+        );
+        println!("link claim order held: launch leaves at {leaves}, claims at {claims}");
+    }
+
+    /// EVERY BRANCH OF THE LINK WHY-NOT, MADE TO PRINT (invariant 3;
+    /// tools/check-diagnostics.py reads it by name). The four states are real:
+    /// a plain launch, a link the SDK did not recognise, a failed read with a
+    /// link on the command line, and a failed read with none.
+    #[test]
+    fn the_link_activation_why_not_names_what_it_measured_in_every_branch() {
+        let protocol = ExtendedActivationKind::Protocol.0;
+        assert_eq!(link_activation_why_not(Ok(protocol), None), None);
+        let url = "dev.kaya.aurora.notes://task/t1";
+        let mut said = Vec::new();
+        for (kind, argument) in [
+            (Ok(0), Some(url)),
+            (Ok(0), None),
+            (Err("RPC_E_DISCONNECTED"), Some(url)),
+            (Err("RPC_E_DISCONNECTED"), None),
+        ] {
+            let why = link_activation_why_not(kind, argument).expect("not a Protocol activation");
+            eprintln!("KAYA_DIAG winui was activated with no link — {why}");
+            said.push(why);
+        }
+        assert!(said[0].contains(url) && said[0].contains("not Protocol"), "{}", said[0]);
+        assert!(said[1].contains("nothing asked it"), "{}", said[1]);
+        assert!(said[2].contains("a link WAS") && said[2].contains("RPC_E_DISCONNECTED"), "{}", said[2]);
+        assert!(said[3].contains("no link at all"), "{}", said[3]);
+        let unique: std::collections::BTreeSet<&String> = said.iter().collect();
+        assert_eq!(unique.len(), said.len(), "one sentence for two causes is the defect");
     }
 
     /// THE DEFERRED RE-STAMP PUTS EVERY CHILD ON THE TRACK THE EAGER ONE DID,

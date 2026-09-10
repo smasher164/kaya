@@ -34,6 +34,34 @@ def _flightrec(root):
     return str(pathlib.Path(root) / "tools" / "lib" / "flightrec.py")
 
 
+def winlist_bin(root):
+    """The macOS window-list binary, built on demand to a content-hashed
+    path; None when it cannot be built.
+
+    MODULE-LEVEL because a caller may need the window list WITHOUT a
+    recorder: constructing a LaneRecorder opens a flight-recorder run,
+    and tools/lib/lanes/mac.py's link door only wants to ask whether the
+    relaunched process owns a window (docs/app-links-plan.md L5). One
+    copy of the rule, two callers.
+    """
+    root = pathlib.Path(root)
+    src = root / "tools/mac/flightrec-winlist.swift"
+    if not src.is_file():
+        return None
+    digest = hashlib.sha256(src.read_bytes()).hexdigest()[:12]
+    binp = root / f"target/tools/flightrec-winlist-{digest}"
+    if binp.is_file():
+        return str(binp)
+    (root / "target/tools").mkdir(parents=True, exist_ok=True)
+    got = subprocess.run(
+        ["bash", "-c",
+         'source "$1/tools/lib/swift-toolchain.sh" && '
+         'kaya_swiftc -O -o "$2" "$3"',
+         "_", str(root), str(binp), str(src)],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+    return str(binp) if got.returncode == 0 and binp.is_file() else None
+
+
 class LaneRecorder:
     """One lane run's recorder. Generic half here; windows half below."""
 
@@ -623,24 +651,7 @@ class MacRecorder(LaneRecorder):
         if self._winlist_tried:
             return self._winlist
         self._winlist_tried = True
-        src = self.root / "tools/mac/flightrec-winlist.swift"
-        if not src.is_file():
-            return None
-        digest = hashlib.sha256(src.read_bytes()).hexdigest()[:12]
-        binp = self.root / f"target/tools/flightrec-winlist-{digest}"
-        if binp.is_file():
-            self._winlist = str(binp)
-            return self._winlist
-        (self.root / "target/tools").mkdir(parents=True, exist_ok=True)
-        got = subprocess.run(
-            ["bash", "-c",
-             'source "$1/tools/lib/swift-toolchain.sh" && '
-             'kaya_swiftc -O -o "$2" "$3"',
-             "_", str(self.root), str(binp), str(src)],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            check=False)
-        if got.returncode == 0 and binp.is_file():
-            self._winlist = str(binp)
+        self._winlist = winlist_bin(self.root)
         return self._winlist
 
     def shot_pid(self, pid, dest, at=None):

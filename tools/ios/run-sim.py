@@ -388,9 +388,21 @@ def make_bundle(name, bundle_id, executable_path, identity=""):
               "        <key>UIImageName</key>\n"
               f"        <string>{LAUNCH_IMAGE_NAME}</string>\n"
               "    </dict>")
+    # THE APP-LINK SCHEME, from tools/ONE manifest reader (L1). NOT
+    # opt-in like the identity block: a scheme has no wire half and no
+    # observation to make vacuous, and every bundle in this lane is the
+    # same app.
+    declared = app_identity.load(ROOT)
+    url_types = ("<array><dict>\n"
+                 "        <key>CFBundleURLName</key>\n"
+                 f"        <string>{declared.id}.link</string>\n"
+                 "        <key>CFBundleURLSchemes</key>\n"
+                 f"        <array><string>{declared.scheme}</string></array>\n"
+                 "    </dict></array>")
     (app / "Info.plist").write_text(
         tpl.replace("@EXECUTABLE@", name).replace("@BUNDLE_ID@", bundle_id)
            .replace("@NAME@", name).replace("@IDENTITY@", block)
+           .replace("@URLTYPES@", url_types)
            .replace("@LAUNCH@", launch),
         encoding="utf-8")
     # PARSED BACK, because the template is TEXT and a plist iOS cannot
@@ -1420,11 +1432,103 @@ def act2_dir_on(udid, bundle_id):
     return pathlib.Path(data) / "Documents" / "act2" / load(ROOT).id
 
 
+def relaunch_url(text):
+    """The URL act one printed beside its door (docs/app-links-plan.md
+    L5), or "". Read from the LINE, not from the scene: what this pushes
+    has to be what act one actually reached."""
+    marker = "KAYA_RELAUNCH: door link url="
+    for line in text.splitlines():
+        if line.startswith(marker):
+            return line[len(marker):].strip()
+    return ""
+
+
+def sole_claimant(udid, bundle_id, log):
+    """EVERY kaya bundle on this device claims the SAME scheme — it
+    defaults to the declared id — and `simctl openurl` takes no bundle
+    argument, so with two claimants installed the pick is the platform's
+    and a link can be delivered to the wrong app with nothing saying so.
+    Each leg installs its own bundle, so uninstalling the others costs
+    nothing; one leg runs on a device at a time (the pool claims it)."""
+    bundles = kaya_installed_apps(udid)
+    if bundles is None:
+        return False
+    for other in bundles:
+        if other == bundle_id:
+            continue
+        if run(["timeout", "60", "xcrun", "simctl", "uninstall", udid,
+                other], stdout=log, stderr=log).returncode != 0:
+            print(f"run-sim: could not uninstall {other} from {udid}, so "
+                  f"two apps claim this scheme and the link's destination "
+                  f"is the platform's pick", file=log)
+            return False
+    return True
+
+
+def link_door(udid, bundle_id, name, url, verdict, log, seconds=120):
+    """Open `url` on the device and join act two's verdict.
+
+    THE FIRST `openurl` ON A DEVICE RAISES A SpringBoard CONFIRMATION and
+    delivers NOTHING while it stands — simctl exits 0 and says nothing
+    (docs/traps.md, 2026-09-09): the caller is CoreSimulatorBridge, which
+    has no bundle record, so LaunchServices asks the user. The lane's own
+    driver answers it once and the approval is remembered for that
+    device, so this asks, looks for the alert, taps it and asks again.
+    The leg is already the SOLE CLAIMANT of the scheme (run_swiftui_on
+    made it one before act one), so `openurl`, which takes no bundle
+    argument, has only this app to resolve to.
+    """
+    def ask():
+        return run(["timeout", "60", "xcrun", "simctl", "openurl", udid,
+                    url], stdout=log, stderr=log).returncode
+
+    if ask() != 0:
+        print(f"run-sim: {name}: `simctl openurl {url}` failed on {udid}",
+              file=log)
+        return False
+    ok, body = xcuidrive(udid, "sb_find Open")
+    if ok:
+        print(f"run-sim: {name}: SpringBoard asked to confirm this "
+              f"scheme ({body.strip()}); answering it once — the approval "
+              f"is remembered for {udid}", file=log)
+        tapped, why = xcuidrive(udid, "sb_tap Open")
+        if not tapped:
+            print(f"run-sim: {name}: could not answer SpringBoard's "
+                  f"confirmation: {why}", file=log)
+            return False
+        # THE ASK THAT RAISED THE ALERT DELIVERED NOTHING, so the door is
+        # pushed again now that the approval stands.
+        if ask() != 0:
+            print(f"run-sim: {name}: the second `simctl openurl` failed "
+                  f"on {udid}", file=log)
+            return False
+        still, body = xcuidrive(udid, "sb_find Open")
+        if still:
+            print(f"run-sim: {name}: SpringBoard is STILL asking after "
+                  f"the tap ({body.strip()}), so nothing was delivered "
+                  f"and every later openurl queues another alert",
+                  file=log)
+            return False
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        line = (verdict.read_text(encoding="utf-8", errors="replace").strip()
+                if verdict.is_file() else "")
+        if line:
+            print(f"run-sim: {name}: act two verdict {line}", file=log)
+            return line.startswith("KAYA_SELFTEST: OK")
+        time.sleep(0.2)
+    print(f"run-sim: {name}: act two wrote no verdict to {verdict} within "
+          f"{seconds}s of the link door — the app either never started or "
+          f"never adopted the marker", file=log)
+    return False
+
+
 def second_act(udid, bundle_id, name, scene, env, act_one_out, log):
     """R6a: act one ended at `relaunch` and left the marker. Push this
-    lane's door — the simulator activates no shade cell, so the bundle is
-    launched again naming the notification — and join act two's verdict.
-    Every refusal writes its own sentence."""
+    lane's door and join act two's verdict — the notification carve-out
+    (the simulator activates no shade cell, so the bundle is launched
+    again naming it), the PLAIN launch, or the LINK door. Every refusal
+    writes its own sentence."""
     if "KAYA_SELFTEST: ACT 1 OK" not in act_one_out:
         print(f"run-sim: {name}: act one did not publish "
               f'"KAYA_SELFTEST: ACT 1 OK", so the door was never pushed',
@@ -1443,6 +1547,20 @@ def second_act(udid, bundle_id, name, scene, env, act_one_out, log):
     # the only source, exactly as a real tap would leave it.
     act2_env.pop("SIMCTL_CHILD_KAYA_SELFTEST", None)
     act2_env.pop("SIMCTL_CHILD_KAYA_SELFTEST_SCRIPT", None)
+    if door == "link":
+        # THE LINK DOOR (docs/app-links-plan.md L5): the platform opens
+        # the URL and STARTS the app with it, which is the door a tap
+        # takes. Its own arm because `simctl openurl` returns as soon as
+        # it has asked — there is no launch to wait on — so the verdict
+        # FILE is what this joins.
+        url = relaunch_url(act_one_out)
+        if not url:
+            print(f"run-sim: {name}: act one printed no "
+                  f"`KAYA_RELAUNCH: door link url=` line, so there is no "
+                  f"URL to push the platform's door with", file=log)
+            return False
+        print(f"== act two: {door} {url} ==", file=log)
+        return link_door(udid, bundle_id, name, url, verdict, log)
     if door == "launch":
         # THE PLAIN DOOR (docs/tasks-s4-plan.md P5): the bundle again,
         # nothing pending, nothing added.
@@ -1486,6 +1604,14 @@ def run_swiftui_on(udid, slot, app, bundle_id, name, selftest, scene,
         return False
     run(["xcrun", "simctl", "install", udid, str(app)],
         stdout=log, stderr=log)
+    # THE LINK SCENE RUNS AS THE ONLY CLAIMANT OF ITS SCHEME, from act
+    # one on: `UIApplication.open` of the app's own scheme resolves
+    # through LaunchServices like anyone else's, and with a second kaya
+    # bundle installed the warm link went to the platform's pick and this
+    # app saw nothing (measured 2026-09-09: `expect_entries 1` read 0).
+    if lane.RELAUNCH_DOOR.get(scene) == "link" and not sole_claimant(
+            udid, bundle_id, log):
+        return False
     container = out_of(["xcrun", "simctl", "get_app_container", udid,
                         bundle_id, "app"]).strip()
     rec_start(name, slot)

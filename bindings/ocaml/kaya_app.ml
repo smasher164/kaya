@@ -308,6 +308,15 @@ type app = {
      result whose id has none above (docs/tasks-s9-plan.md R1). A
      relaunched process never called show_notification. *)
   mutable notification_activation : (int64 -> int -> unit) option;
+  (* NOT one-shot either: a route declared by [link] answers every URL
+     that matches it, for the life of the process
+     (docs/app-links-plan.md §4), and the core owns the pattern table —
+     nothing is kept here but the handler. *)
+  link_handlers : (int64, (string * string) list -> unit) Hashtbl.t;
+  mutable next_link_route : int64;
+  (* [link] may be called before the first transaction, so its record
+     waits here for one (the transaction drains it head-first). *)
+  mutable pending_routes : string list;
   file_dialog_handlers : (int64, picked_file list -> unit) Hashtbl.t;
   mutable next_file_dialog : int64;
   (* Clipboard reads share the alert's request/result grammar and so
@@ -438,6 +447,9 @@ let create () =
     next_alert = 0L;
     notification_handlers = Hashtbl.create 8;
     notification_activation = None;
+    link_handlers = Hashtbl.create 4;
+    next_link_route = 0L;
+    pending_routes = [];
     file_dialog_handlers = Hashtbl.create 4;
     next_file_dialog = 0L;
     clipboard_handlers = Hashtbl.create 4;
@@ -613,6 +625,11 @@ let build app (program : unit -> 'a) =
             :: List.rev tx.records
         | None -> List.rev tx.records
       in
+      (* The pending link-route declarations go FIRST, in declaration
+         order (docs/app-links-plan.md §4; Rust's PENDING_ROUTES drained
+         head-first by Tx::commit is the shape). *)
+      let records = app.pending_routes @ records in
+      app.pending_routes <- [];
       if records <> [] then Kaya_runtime.submit records;
       result
   | exception e ->
@@ -2120,6 +2137,54 @@ let notification_result app id outcome =
             else "refused"))
 
 let on_notification_activation app ~f = app.notification_activation <- Some f
+
+(* Declare a link ROUTE and the handler that answers it
+   (docs/app-links-plan.md §4): [link app ~pattern:"task/{key}" ~f]
+   matches [<scheme>://task/t1] and calls [f [ ("key", "t1") ]].
+   Segments split on ['/'], [{name}] captures one segment, a literal
+   segment matches itself; the query's pairs join the params and a
+   capture wins a name clash. THE PARAMS ARE AN ASSOCIATION LIST, the
+   shape OCaml already reads a query string into.
+
+   PROCESS-LEVEL, [on_notification_activation]'s shape: it does not
+   retire and it needs no transaction — declared before the first one the
+   record waits and rides the head of it, declared inside a handler it
+   rides that handler's. A URL that arrives before the app thread exists
+   is delivered first, and one no route matched is announced by the core
+   and reaches nothing here.
+
+   NOTHING HERE READS THE PATTERN. The core is the one parser and the one
+   author of every refusal — an empty pattern, an empty segment, a
+   malformed one, a duplicate — and it faults at apply with the whole
+   sentence, where every other declaration refusal in kaya lands
+   (tools/check-sugar-surface.py refuses a reason spelled here). *)
+let link app ~pattern ~f =
+  let route = Int64.add app.next_link_route 1L in
+  app.next_link_route <- route;
+  Hashtbl.replace app.link_handlers route f;
+  app.pending_routes <-
+    app.pending_routes
+    @ [ Kaya_wire.tx_declare_link_route route (Kaya_wire.Str pattern) ]
+
+(* The link_opened decision, in a function of its own because the ring
+   loop's branch has no seam a test can reach (the ring is C memory) —
+   [notification_result] for the same reason, and
+   bindings/ocaml/checks/notify_order_check.ml drives the cases through
+   here. TWO DROPS WITH DISJOINT CAUSES (docs/app-links-plan.md §4):
+   route 0 is a URL NO ROUTE TOOK, which the core announced naming every
+   declared pattern, so it is silent here; a route that matched and
+   reached no handler is this binding's to announce, naming its own
+   registrar. *)
+let link_opened app route url params =
+  match Hashtbl.find_opt app.link_handlers route with
+  | Some handler -> dispatch app (fun () -> handler params)
+  | None ->
+      if route <> 0L then
+        prerr_endline
+          (Printf.sprintf
+             "kaya: link %s matched route %Ld and reached no handler — \
+              none is registered for it (Kaya_app.link)"
+             url route)
 
 (* The filters encoding, written ONCE because two requests carry it:
    alternating label and space-separated extensions. *)
@@ -4119,6 +4184,19 @@ let dispatch_loop app =
            | Some handler, Some (Kaya_wire.I64 c) ->
                Hashtbl.remove app.alert_handlers id;
                dispatch app (fun () -> handler (Int64.to_int c))
+           | _ -> ())
+         else if kind = Kaya_wire.occ_kind_link_opened then
+           (* id is the ROUTE the core matched (docs/app-links-plan.md
+              §4), and NOT one-shot. The parser flattens the URL and the
+              captured pairs into the values slot, so they are regrouped
+              in twos after the URL. *)
+           let rec regroup = function
+             | Kaya_wire.Str name :: Kaya_wire.Str value :: rest ->
+                 (name, value) :: regroup rest
+             | _ -> []
+           in
+           (match keys with
+           | Kaya_wire.Str url :: pairs -> link_opened app id url (regroup pairs)
            | _ -> ())
          else if kind = Kaya_wire.occ_kind_notification_result then
            (* The outcome rides the same u32 slot the choice does. *)

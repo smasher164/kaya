@@ -272,7 +272,11 @@ BUDGETS = {
     # after Android overlapping the tails, every lane log kept) and set
     # ~1.1x over the band: mac 854-932, linux 948-1012, windows 938-1099,
     # ios 911-957, android 770-852, the sweep 193-214.
-    "mac": 1000,
+    # 1100 since 2026-09-09 (app links): the roster grew 439 -> 440 with a
+    # second two-act leg (links, ~35s through open -a) and the S4/app-links
+    # matrices read 984, 839 and 1014 against 1000; 1100 is 1.08x over the
+    # top, every leg green.
+    "mac": 1100,
     # 600 since 2026-09-01: the ninth binding took the roster 604 -> 684
     # legs (one js leg per python leg on both protocols); the first
     # contended matrix after read 459s. 700 since 2026-09-04: the roster
@@ -310,8 +314,13 @@ BUDGETS = {
     # (suites 1035; five-minute load 78, the VM's qemu at 113%) with every
     # leg green, and the sum of the 270 pooled leg times was 2166s (median
     # 6s, p90 16s, max 32s). 1200 is 1.05x over the pair; to be re-read on
-    # the next quiet matrices.
-    "windows": 1200,
+    # the next quiet matrices. 1350 since 2026-09-09 (app links): the roster
+    # grew 276 -> 277 and the ONE-TIME phases grew in kind — the cross-build
+    # carries the App SDK's AppLifecycle bindings (build 3 -> 97), the
+    # guest's unit phase runs 31 tests with the redirect's (5 -> 60), deploy
+    # 26 -> 43 — while the suites read 1027 against the previous 1035; the
+    # first matrix read 1296. 1350 is 1.04x over it.
+    "windows": 1350,
     # 600 since 2026-09-01: the lane ran 113 legs from 2026-08-31, five
     # accepted matrices measuring 452-491s. 600 is 1.22x over that band's
     # top. HELD at 600 on 2026-09-03 with the roster at 116 (the dnd leg
@@ -326,7 +335,12 @@ BUDGETS = {
     # 840 since 2026-09-06: the four exclusive legs empty the pool and run alone
     # (93s held, 89s waiting to hold, 24s admitting on matrix #22, 749s
     # against 640); 608s without them the same day. Re-read likewise.
-    "ios": 1050,
+    # 1150 since 2026-09-09 (app links): the roster grew 133 -> 134 with the
+    # links leg, whose device preflight uninstalls every other kaya bundle
+    # (the sole-claimant rule) and answers SpringBoard's one-time alert
+    # through the driver; the matrices read 984, 855 and 1058 against 1050.
+    # 1150 is 1.09x over the top, every leg green.
+    "ios": 1150,
     # 310 since 2026-08-20: the pool-degradation trap's remedy is a COLD
     # BOOT (docs/traps.md), and a reboot run carries ~60-90s of emulator
     # startup a warm-pool ceiling read as an anomaly; a measured cold-boot
@@ -349,8 +363,14 @@ BUDGETS = {
     # matrix; four wide it read 151s standalone and 341s from t0 under
     # every lane's builds (matrix #24, the launch this file no longer
     # runs). 300 since 2026-09-07: three matrices after Android, four wide,
-    # read 193, 214 and 210.
-    "gates": 300,
+    # read 193, 214 and 210. 500 since 2026-09-09: the sweep grew in kind
+    # twice in one day — check-window-memory (a compiled SwiftUI probe,
+    # 35s under the sweep), check-abort's baked C#/OCaml/Haskell negatives
+    # (41 -> 121s), check-sugar-surface's prefs and link clauses (77s),
+    # check-app-identity's plist clause (41s) — and the two S4 matrices read
+    # 242 and 455 (the four-wide sweep's slowest gate, check-table-tier at
+    # 213s, beside three other swift compiles). 500 is 1.1x over the pair.
+    "gates": 500,
 }
 
 if MODE == "parallel":

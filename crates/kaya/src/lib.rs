@@ -33,6 +33,10 @@ mod prefs;
 mod prefs_android;
 #[cfg_attr(not(any(target_os = "linux", target_os = "windows")), allow(dead_code))]
 mod prefs_keyfile;
+// App links (docs/app-links-plan.md §4): the route table, the one
+// matcher, and the door every platform arm hands a URL to. Ungated —
+// every target has a door.
+mod links;
 mod protocol;
 mod ring;
 // The row-windowing band machine (docs/virtualization-plan.md §1-§2).
@@ -173,6 +177,13 @@ pub fn run(app_main: impl FnOnce(AppCtx) + Send + 'static) -> ! {
     // BEFORE THE APP THREAD: a process the platform started on a tap has
     // no scene in its environment, and the guest reads its scene from
     // KAYA_SELFTEST (docs/tasks-s9-plan.md R6a).
+    // BEFORE act2::arm: on Windows every activation starts a NEW process,
+    // and the one that is not the single-instance owner redirects and
+    // exits here — arm() in the redirector would either wipe the running
+    // act one's scratch or consume the marker that belongs to the process
+    // being redirected to (docs/app-links-plan.md §4, the Windows row).
+    #[cfg(target_os = "windows")]
+    backend::links_startup();
     #[cfg(any(feature = "harness", target_os = "macos", target_os = "ios", target_os = "android"))]
     act2::arm(None);
     #[cfg(any(target_os = "macos", target_os = "ios"))]
@@ -212,6 +223,9 @@ pub fn run(app_main: impl FnOnce(AppCtx) + Send + 'static) -> ! {
             .name("kaya-app".into())
             .spawn(move || app_main(ctx))
             .expect("failed to spawn the app thread");
+        // Where a link the platform hands over is delivered: this guest's
+        // own channel, not the ring (crates/kaya/src/links.rs).
+        links::set_sink(protocol::OccSink::Mpsc(occ_tx.clone()));
         std::process::exit(backend::run_core(protocol::OccSink::Mpsc(occ_tx), tx_rx))
     }
 

@@ -78,6 +78,12 @@ object KayaPresent {
      * kaya_emit_notification_result's JNI spelling. */
     @JvmStatic external fun emitNotificationResult(notification: Long, outcome: Int)
 
+    /** A URL the platform delivered to this app
+     * (docs/app-links-plan.md §4), handed over UNPARSED: the core owns
+     * the route matching, the queue for a link that beats the app thread
+     * and the announced miss. crate::links::opened's JNI spelling. */
+    @JvmStatic external fun linkOpened(url: String)
+
     /** The runtime capability bits this host has MEASURED
      * (KAYA_CAP_NOTIFICATIONS), granted once the platform has answered —
      * a permission the user grants mid-run moves them.

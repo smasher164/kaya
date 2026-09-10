@@ -794,6 +794,15 @@ sealed class KayaApp
     // a result whose id has none above (docs/tasks-s9-plan.md R1). A
     // relaunched process never called ShowNotification.
     internal Action<Tx, ulong, uint>? notificationActivation;
+    // NOT one-shot either: a route declared by Link answers every URL
+    // that matches it, for the life of the process
+    // (docs/app-links-plan.md §4), and the core owns the pattern table —
+    // nothing is kept here but the handler.
+    internal readonly Dictionary<ulong, Action<Tx, IReadOnlyDictionary<string, string>>> links = new();
+    internal ulong nextLinkRoute;
+    // Link may be called before the first transaction, so its record
+    // waits here for one (Tx.SubmitIfAny drains it head-first).
+    internal readonly List<byte[]> pendingRecords = new();
     // BOTH DIALOG KINDS LIVE HERE: a save request answers on the
     // picker's grammar out of the picker's id space (docs/save-plan.md
     // D2), narrowed to "one or none" at Tx.SaveFile.
@@ -1031,6 +1040,67 @@ sealed class KayaApp
     /// handler for the same id still wins.</summary>
     public void OnNotificationActivation(Action<Tx, ulong, uint> handler) =>
         notificationActivation = handler;
+
+    /// <summary>Declare a link ROUTE and the handler that answers it
+    /// (docs/app-links-plan.md §4): Link("task/{key}", f) matches
+    /// &lt;scheme&gt;://task/t1 and calls f with {"key": "t1"}. Segments
+    /// split on `/`, {name} captures one segment, a literal segment
+    /// matches itself; the query's pairs join the params and a capture
+    /// wins a name clash.
+    ///
+    /// PROCESS-LEVEL, OnNotificationActivation's shape: it does not
+    /// retire and it needs no transaction — declared before the first
+    /// one the record waits and rides the head of it, declared inside a
+    /// handler it rides that handler's. A URL that arrives before the
+    /// app thread exists is delivered first, and one no route matched is
+    /// announced by the core and reaches nothing here.
+    ///
+    /// <para>NOTHING HERE READS THE PATTERN. The core is the one parser
+    /// and the one author of every refusal — an empty pattern, an empty
+    /// segment, a malformed one, a duplicate — and it faults at apply
+    /// with the whole sentence, where every other declaration refusal in
+    /// kaya lands (tools/check-sugar-surface.py refuses a reason spelled
+    /// here).</para></summary>
+    public void Link(string pattern, Action<Tx, IReadOnlyDictionary<string, string>> handler)
+    {
+        ulong route = ++nextLinkRoute;
+        links[route] = handler;
+        pendingRecords.Add(KayaWire.TxDeclareLinkRoute(route, pattern));
+    }
+
+    /// The link_opened payload's captured pairs, as the map a Link
+    /// handler receives. The URL rides beside them and the handler does
+    /// not take it (docs/app-links-plan.md §4: kaya matches once, in the
+    /// core, and hands over the captures).
+    /// The payload is ONE FLAT RUN of Str values: the url, then the
+    /// params in name/value pairs (KayaWire's arm).
+    static IReadOnlyDictionary<string, string> LinkParamsOf(object payload)
+    {
+        var captured = new Dictionary<string, string>();
+        if (payload is List<object> flat)
+            for (int i = 1; i + 1 < flat.Count; i += 2)
+                captured[(string)flat[i]] = (string)flat[i + 1];
+        return captured;
+    }
+
+    /// The URL as delivered, for the drop sentence alone.
+    static string LinkUrlOf(object payload) =>
+        payload is List<object> flat && flat.Count > 0 ? (string)flat[0] : "";
+
+    /// The link_opened decision, in a method of its own because the ring
+    /// loop's switch has no seam a runnable proof can reach (the ring is
+    /// raw memory) — NotificationResult for the same reason, and
+    /// guests/csharp/NotifyOrderCheck.cs drives it.
+    internal void LinkOpened(ulong route, string url,
+                            IReadOnlyDictionary<string, string> captured)
+    {
+        if (links.TryGetValue(route, out var fn))
+            Dispatch(tx => fn(tx, captured));
+        else if (route != 0)
+            System.Console.Error.WriteLine(
+                $"kaya: link {url} matched route {route} and reached no "
+                + "handler — none is registered for it (App.Link)");
+    }
 
     /// <summary>Register the table's header-click handler at its For —
     /// the handler receives the 0-based column of a sort REQUEST:
@@ -1379,6 +1449,16 @@ sealed class KayaApp
                 if (alerts.Remove(id, out var fn))
                     Dispatch(tx => fn(tx, payload is uint c ? c : 0));
             }
+            else if (kind == KayaWire.OccKindLinkOpened)
+            {
+                // id is the ROUTE the core matched
+                // (docs/app-links-plan.md §4), and NOT one-shot. TWO
+                // DROPS WITH DISJOINT CAUSES: route 0 is a URL NO ROUTE
+                // TOOK, which the core announced naming every declared
+                // pattern, so it is silent here; a route that matched
+                // and reached no handler is this binding's to announce.
+                LinkOpened(id, LinkUrlOf(payload), LinkParamsOf(payload));
+            }
             else if (kind == KayaWire.OccKindNotificationResult)
             {
                 NotificationResult(id, payload is uint o ? o : 0);
@@ -1596,11 +1676,22 @@ sealed class Tx
             list.Add(recompute);
         }
         pendingSignalDeps.Clear();
+        // The pending link-route declarations go FIRST, in declaration
+        // order (docs/app-links-plan.md §4; Rust's PENDING_ROUTES
+        // drained head-first by Tx::commit is the shape). THE RAW FIELD
+        // IS ONLY READ HERE — the declarations take their own list and
+        // the transaction's records are copied INTO it, never the other
+        // way round, so the two uses tools/check-tx-liveness.py counts
+        // stay the submit's Count and ToArray.
         // `records` and not `Records`: the submit is the transaction's
         // own last act, and routing it through the liveness property
         // would make the guard trip on the very call that closes it.
+        var whole = new List<byte[]>(App.pendingRecords);
+        App.pendingRecords.Clear();
         if (records.Count > 0)
-            Kaya.Submit(records.ToArray());
+            whole.AddRange(records.ToArray());
+        if (whole.Count > 0)
+            Kaya.Submit(whole.ToArray());
     }
 
     internal void Rollback()

@@ -1981,7 +1981,8 @@ def act_two(serial, name, package, component, dump, log):
     tap = re.search(r"KAYA_RELAUNCH: door notify_tap notification=(\d+) "
                     r"title=(.*)", dump)
     plain = "KAYA_RELAUNCH: door launch" in dump
-    if tap is None and not plain:
+    link = re.search(r"KAYA_RELAUNCH: door link url=(\S+)", dump)
+    if tap is None and not plain and link is None:
         print(f"{name}: act one published ACT 1 OK and named no door — "
               f"its log carries no KAYA_RELAUNCH line, so there is nothing "
               f"to open", file=log)
@@ -2007,20 +2008,42 @@ def act_two(serial, name, package, component, dump, log):
               f"because it cancels the app's notifications and the tap "
               f"door with them", file=log)
         return ""
-    if plain:
+    if plain or link:
         # THE PLAIN DOOR (docs/tasks-s4-plan.md P5): the same package
         # started with NO extras and nothing pending, which is what a
-        # user's tap on the launcher icon is. force-stop after the wait
-        # above — the process is already gone, and this drops the task
-        # record so the start below cannot bring a stale task forward
-        # with the previous leg's intent extras on it.
-        print(f"{name}: act one's process is gone; the door is a plain "
-              f"launch of {component}", file=log)
+        # user's tap on the launcher icon is. THE LINK DOOR
+        # (docs/app-links-plan.md L5) is the same act boundary with the
+        # URL in place of the component — what `am start -a VIEW -d`
+        # does, which is what a tap on a link does. Neither carries an
+        # extra, so both second acts read their scene off the marker.
+        # force-stop after the wait above — the process is already gone,
+        # and this drops the task record so the start below cannot bring
+        # a stale task forward with the previous leg's intent extras on
+        # it; on the link door that matters more, since `singleTask`
+        # exists to reuse a task.
+        if link:
+            url = link.group(1).rstrip("\r")
+            # `-p` NARROWS THE IMPLICIT INTENT TO THIS PACKAGE, and it
+            # has to: the scheme is the app's DECLARED ID, every host
+            # APK on this emulator claims it, and a bare `am start -a
+            # VIEW -d` then starts ResolverActivity — the chooser, with
+            # act two never launched (measured 2026-09-09,
+            # docs/traps.md). The filter is still what resolves it.
+            start = ["am", "start", "-W", "-a",
+                     "android.intent.action.VIEW", "-d", f"'{url}'",
+                     "-p", package]
+            told = f"link {url}"
+        else:
+            start = ["am", "start", "-W", "-n", component]
+            told = f"plain launch of {component}"
+        print(f"{name}: act one's process is gone; the door is a {told}",
+              file=log)
         adb(serial, "shell", "am", "force-stop", package, stdout=log,
             stderr=log)
-        started = adb(serial, "shell", "am", "start", "-W", "-n", component,
+        started = adb(serial, "shell", *start,
                       stdout=subprocess.DEVNULL, stderr=log).returncode
-        print(f"{name}: door launch -> am start exit {started}", file=log)
+        print(f"{name}: door {'link' if link else 'launch'} -> am start "
+              f"exit {started}", file=log)
         if started != 0:
             return ""
     else:
@@ -2176,6 +2199,31 @@ def apk_icon_verify(apk):
     return True
 
 
+def build_tool(name, why):
+    """A build-tools binary, or None with the reason printed.
+
+    The version is READ from the module that pins it, in minsdk_of's
+    shape: retyping it here would go stale the day the nix SDK moves and
+    the caller would then blame what it was reading."""
+    pin = ROOT / "android/kaya/build.gradle.kts"
+    m = re.search(r'buildToolsVersion\s*=\s*"([^"]+)"',
+                  pin.read_text(encoding="utf-8"))
+    if m is None:
+        print(f"run-emulator: {pin} pins no buildToolsVersion, so {name} "
+              f"cannot be resolved", file=sys.stderr)
+        print(f"  and {why} cannot be read back", file=sys.stderr)
+        return None
+    tool = pathlib.Path(os.environ.get("ANDROID_HOME", "")) \
+        / "build-tools" / m.group(1) / name
+    if not tool.is_file():
+        print(f"run-emulator: {tool} is not there, so {why}",
+              file=sys.stderr)
+        print("  cannot be read back — it lives in the compiled package "
+              "and in no file of the tree", file=sys.stderr)
+        return None
+    return tool
+
+
 def apk_launch_verify(apk):
     """THE LAUNCH SLOT'S TWO HALVES INSIDE THE APK gradle just wrote,
     against guests/assets/identity.toml (docs/tasks-s2-plan.md T4) —
@@ -2205,25 +2253,8 @@ def apk_launch_verify(apk):
               file=sys.stderr)
         print(f"  packaged ({entry}): {packaged}", file=sys.stderr)
         return False
-    # The build-tools version is READ from the module that pins it, in
-    # minsdk_of's shape: retyping it here would go stale the day the
-    # nix SDK moves and the gate would then blame the colour.
-    pin = ROOT / "android/kaya/build.gradle.kts"
-    m = re.search(r'buildToolsVersion\s*=\s*"([^"]+)"',
-                  pin.read_text(encoding="utf-8"))
-    if m is None:
-        print(f"run-emulator: {pin} pins no buildToolsVersion, so "
-              f"aapt2 cannot be", file=sys.stderr)
-        print("  resolved and the launch colour inside the APK cannot "
-              "be read back", file=sys.stderr)
-        return False
-    aapt2 = pathlib.Path(os.environ.get("ANDROID_HOME", "")) \
-        / "build-tools" / m.group(1) / "aapt2"
-    if not aapt2.is_file():
-        print(f"run-emulator: {aapt2} is not there, so the launch "
-              f"colour inside {apk}", file=sys.stderr)
-        print("  cannot be read back — it lives in the resource table "
-              "and in no file", file=sys.stderr)
+    aapt2 = build_tool("aapt2", f"the launch colour inside {apk}")
+    if aapt2 is None:
         return False
     table = out_of([str(aapt2), "dump", "resources", str(apk)],
                    stderr=subprocess.STDOUT)
@@ -2244,6 +2275,171 @@ def apk_launch_verify(apk):
         print(f"  {KAYA_IDENTITY_MANIFEST} declares {LAUNCH_BG} "
               f"({want}).", file=sys.stderr)
         return False
+    return True
+
+
+# The compiled manifest nests by indentation, 4 per element and +2 for an
+# element's own attributes, so a block is its header's indent and every
+# deeper line under it.
+def xmltree_blocks(text, name):
+    out, header, body = [], None, []
+    for line in text.split("\n"):
+        stripped = line.lstrip()
+        indent = len(line) - len(stripped)
+        if header is not None and stripped and indent <= header:
+            out.append("\n".join(body))
+            header, body = None, []
+        if stripped.startswith(f"E: {name} "):
+            header, body = indent, [line]
+        elif header is not None:
+            body.append(line)
+    if header is not None:
+        out.append("\n".join(body))
+    return out
+
+
+def xmltree_attr(block, name):
+    """One attribute's value, NORMALIZED. aapt2 prints an enum as plain
+    decimal (`launchMode(0x0101001d)=2`) and other values as hex, so a
+    reader that matched one spelling reported a correct APK as broken —
+    measured 2026-09-09, on the first run of this check."""
+    m = re.search(rf":{name}\(0x[0-9a-f]+\)=(\S+)", block)
+    return None if m is None else m.group(1)
+
+
+def link_declaration(tree, package, want):
+    """The app-link door inside a COMPILED manifest: [] when it is there,
+    otherwise the failures. Pure, so the reader itself is watched."""
+    errs = []
+    activity = [a for a in xmltree_blocks(tree, "activity")
+                if f'"{package}.MainActivity"' in a]
+    if len(activity) != 1:
+        return [f"the compiled manifest holds {len(activity)} activity "
+                f"named {package}.MainActivity — the app-link filter is "
+                f"declared on it, and aapt2 read none (or more than one)"]
+    activity = activity[0]
+    # singleTask is launchMode 2, read as a NUMBER: see xmltree_attr.
+    mode = xmltree_attr(activity, "launchMode")
+    if mode is None or int(mode, 0) != 2:
+        errs.append(f"{package}.MainActivity is launchMode "
+                    f"{mode or 'unset'} and not singleTask (2) in the "
+                    f"COMPILED manifest, so a link tapped while it runs "
+                    f"would stack a second activity")
+    view = [f for f in xmltree_blocks(activity, "intent-filter")
+            if "android.intent.action.VIEW" in f]
+    if not view:
+        errs.append(f"{package}.MainActivity carries no VIEW "
+                    f"intent-filter, so this package resolves no app link "
+                    f"at all")
+        return errs
+    got = re.findall(r':scheme\(0x[0-9a-f]+\)="([^"]*)"', view[0])
+    if got != [want]:
+        errs.append(f"the VIEW filter claims {got} and the declaration "
+                    f"says {want!r} (tools/lib/packaging/android.py's "
+                    f"link_scheme; the manifest placeholder is "
+                    f"android/build.gradle.kts's kayaLinkScheme)")
+    for category in ("android.intent.category.DEFAULT",
+                     "android.intent.category.BROWSABLE"):
+        if category not in view[0]:
+            errs.append(f"the VIEW filter declares no {category} — an "
+                        f"implicit intent is matched against DEFAULT and "
+                        f"a followed link carries BROWSABLE")
+    return errs
+
+
+def link_declaration_selftest():
+    """Watched on every launch: the reader above decides whether an APK
+    ships an app-link door at all, and its FIRST draft matched
+    `launchMode` only in hex and reported a correct package as broken."""
+    good = (
+        '          E: activity (line=73)\n'
+        '            A: android:name(0x01010003)="p.MainActivity" (Raw: "p.MainActivity")\n'
+        '            A: android:exported(0x01010010)=true\n'
+        '            A: android:launchMode(0x0101001d)=2\n'
+        '              E: intent-filter (line=77)\n'
+        '                  E: action (line=78)\n'
+        '                    A: android:name(0x01010003)="android.intent.action.MAIN"\n'
+        '              E: intent-filter (line=82)\n'
+        '                  E: action (line=83)\n'
+        '                    A: android:name(0x01010003)="android.intent.action.VIEW"\n'
+        '                  E: category (line=85)\n'
+        '                    A: android:name(0x01010003)="android.intent.category.DEFAULT"\n'
+        '                  E: category (line=86)\n'
+        '                    A: android:name(0x01010003)="android.intent.category.BROWSABLE"\n'
+        '                  E: data (line=88)\n'
+        '                    A: android:scheme(0x01010027)="s.c" (Raw: "s.c")\n'
+        '          E: service (line=98)\n'
+        '            A: android:name(0x01010003)="dev.kaya.KayaHarnessAccessibility"\n'
+    )
+    if link_declaration(good, "p", "s.c"):
+        die(f"run-emulator: SELF-TEST FAIL — link_declaration refused a "
+            f"correct manifest: {link_declaration(good, 'p', 's.c')}")
+    # The hex spelling must read as singleTask too, since that is the one
+    # the first draft assumed and no APK here spells.
+    if link_declaration(good.replace("=2\n", "=0x00000002\n"), "p", "s.c"):
+        die("run-emulator: SELF-TEST FAIL — link_declaration refused a "
+            "hex-spelled launchMode")
+    cases = (
+        ("the launch mode gone", good.replace(
+            "            A: android:launchMode(0x0101001d)=2\n", ""),
+         "singleTask"),
+        ("standard instead of singleTask",
+         good.replace("launchMode(0x0101001d)=2", "launchMode(0x0101001d)=0"),
+         "singleTask"),
+        ("the VIEW filter gone",
+         good.replace("android.intent.action.VIEW", "android.intent.action.SEND"),
+         "no VIEW intent-filter"),
+        ("BROWSABLE gone",
+         good.replace("android.intent.category.BROWSABLE",
+                      "android.intent.category.APP_BROWSER"),
+         "BROWSABLE"),
+        ("an unsubstituted placeholder",
+         good.replace('scheme(0x01010027)="s.c"',
+                      'scheme(0x01010027)="${kayaLinkScheme}"'),
+         "claims"),
+        ("no activity by that name", good.replace("p.MainActivity", "q.Other"),
+         "holds 0 activity"),
+    )
+    for label, doctored, needle in cases:
+        if doctored == good:
+            die(f"run-emulator: SELF-TEST BROKEN — the link negative "
+                f"{label!r} changed nothing")
+        errs = link_declaration(doctored, "p", "s.c")
+        if not any(needle in e for e in errs):
+            die(f"run-emulator: SELF-TEST FAIL — link_declaration passed "
+                f"{label} (wanted {needle!r}; got {errs})")
+    print(f"run-emulator: link_declaration refuses {len(cases)} doctored "
+          f"manifests and accepts both launchMode spellings", flush=True)
+
+
+link_declaration_selftest()
+
+
+def apk_link_verify(apk, package):
+    """THE APP-LINK DOOR INSIDE THE APK gradle just wrote
+    (docs/app-links-plan.md §4), beside apk_icon_verify and
+    apk_launch_verify and for their reason: the manifest in the tree is
+    the SOURCE, and what a device resolves is the MERGED, compiled one.
+    A placeholder that never substituted, a manifest merge that dropped
+    the filter, an activity that lost its launch mode — each ships an APK
+    whose only witness is a links leg, and three of the four suites run
+    none.
+
+    The compiled manifest is read with aapt2, which is the only route to
+    it: the entry inside the package is binary XML and carries no text."""
+    aapt2 = build_tool("aapt2", "the app-link filter inside the APK")
+    if aapt2 is None:
+        return False
+    tree = out_of([str(aapt2), "dump", "xmltree", str(apk),
+                   "--file", "AndroidManifest.xml"],
+                  stderr=subprocess.STDOUT)
+    want = packaging_android.link_scheme(ROOT)
+    errs = link_declaration(tree, package, want)
+    for e in errs:
+        print(f"run-emulator: {apk}: {e}", file=sys.stderr)
+    if errs:
+        return False
+    print(f"links: {package} claims {want}:// with launchMode=singleTask")
     return True
 
 
@@ -2584,6 +2780,8 @@ def build_suite(suite):
         return False
     if not apk_launch_verify(apk):
         return False
+    if not apk_link_verify(apk, package):
+        return False
     if not apk_assets_verify(apk):
         return False
     if suite != "compose":
@@ -2697,10 +2895,11 @@ def run_suite_legs(suite):
         # a leg that would wait out its ceiling for a tap nobody makes.
         two_act = relaunch_count(script_text) > 0
         door = lane.RELAUNCH_DOOR.get(scene)
-        if two_act and door not in ("notify_tap", "launch"):
+        if two_act and door not in ("notify_tap", "launch", "link"):
             die(f"run-emulator: {scene}.steps carries a `relaunch` and "
                 f"lanes/android.py names its door {door!r}; this runner "
-                f"opens \"notify_tap\" and \"launch\" and nothing else")
+                f"opens \"notify_tap\", \"launch\" and \"link\" and nothing "
+                f"else")
         if door and not two_act:
             die(f"run-emulator: lanes/android.py names a relaunch door "
                 f"for {scene}, whose scene script has no `relaunch`")

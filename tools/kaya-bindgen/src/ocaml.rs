@@ -506,6 +506,23 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("      done;");
     c.line("      Some (kind, Int64.of_int id, List.rev !out, None, None, None, [])");
     c.line("    end");
+    // The URL and the params FLATTENED into the VALUES slot — this
+    // binding's own file-dialog shape, where the flat run already lives
+    // — url first, then name/value pairs (python.rs carries the
+    // reasoning).
+    c.line("    else if kind = occ_kind_link_opened");
+    c.line("    then begin");
+    c.line("      let url, at = parse_value byte 16 in");
+    c.line("      let count = u32_at byte at in");
+    c.line("      let at = ref (at + 8) in");
+    c.line("      let out = ref [ url ] in");
+    c.line("      for _ = 1 to count do");
+    c.line("        let v, next = parse_value byte !at in");
+    c.line("        out := v :: !out;");
+    c.line("        at := next");
+    c.line("      done;");
+    c.line("      Some (kind, Int64.of_int id, List.rev !out, None, None, None, [])");
+    c.line("    end");
     // Its own arm: the generic tail would take the CLIP KIND for a path
     // length and read the values header as a key.
     for name in crate::clip_answer_occurrence_names(spec) {

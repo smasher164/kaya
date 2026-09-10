@@ -263,6 +263,11 @@ kaya_exclusive_selftest linux
 # (docs/tasks-s4-plan.md P5): the sentences a taskspersist leg dies with
 # are the ones the next reader chases.
 python3 /work/tools/linux/persist-leg.py --self-test || exit 1
+# THE LINK DOOR'S REFUSALS, and the STAGING refusals no leg can see
+# (docs/app-links-plan.md §4): an entry claiming a scheme with no `%u`,
+# an activatable entry with no service file, and a service file carrying
+# `--gapplication-service` all pass every warm assertion on this lane.
+python3 /work/tools/linux/link-leg.py --self-test || exit 1
 # THE LEGS THAT RUN AS THE ONLY INPUT-DRIVING LEG ON THE HOST (tools/lib/
 # exclusive.py): kaya's own x11 drag in the witness legs, three sightings
 # under a matrix (docs/deferred.md), and the wayland pastes.
@@ -1132,6 +1137,19 @@ for proto in x11 wayland; do
     export RELAUNCH_DOOR_TASKSPERSIST=launch
     run "$proto" taskspersist-rust env KAYA_SELFTEST=taskspersist \
         python3 tools/linux/persist-leg.py \
+        "$CARGO_TARGET_DIR/debug/examples/tasks"
+    # THE APP LINK SCENE (docs/app-links-plan.md §4), the SAME guest under
+    # its own scene: act one opens links WARM through
+    # `g_app_info_launch_default_for_uri` from inside the process, and the
+    # door for act two is `gio open` with nothing running — D-Bus
+    # activation through the service file the desktop entry's arm
+    # installs, 44-49ms, measured 2026-09-09. NOT `xdg-open`: it is absent
+    # from this image, ignores DBusActivatable, and blocks for the whole
+    # lifetime of the app it starts. tools/linux/link-leg.py owns the XDG
+    # home, the registration and the bus.
+    export RELAUNCH_DOOR_LINKS=link
+    run "$proto" links-rust env KAYA_SELFTEST=links \
+        python3 tools/linux/link-leg.py \
         "$CARGO_TARGET_DIR/debug/examples/tasks"
     # THE NOTIFICATION SCENE (docs/tasks-s3-plan.md §5), ONCE PER ROUTE the
     # ruled floor allows — the portal, and GNOME's own org.gtk.Notifications

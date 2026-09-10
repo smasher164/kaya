@@ -386,6 +386,11 @@ pub enum Step {
     /// test can reach the shade, or through the backend's own activation
     /// path where it cannot (N5). An action, silent like click.
     NotificationActivate(u64),
+    /// Ask the PLATFORM to open this URL from inside the process — the
+    /// same door a user's tap takes, so the WARM delivery is measured
+    /// through the real machinery with no runner involvement
+    /// (docs/app-links-plan.md L5). An ACTION with an answer.
+    OpenLink(String),
     /// ACT ONE ENDS HERE (docs/tasks-s9-plan.md R6a). The steps after it
     /// go into the act-two marker, act one's verdict prints as
     /// `KAYA_SELFTEST: ACT 1 …`, and this process exits; the runner then
@@ -396,7 +401,10 @@ pub enum Step {
     /// `relaunch` is the notification door and `relaunch launch` the
     /// plain one — the runner starts the same artifact the way a user
     /// would, with nothing pending. `None` is the bare form.
-    Relaunch(Option<String>),
+    /// THE DOOR IS THE ARGUMENT, and `link` carries one of its own: the
+    /// URL the runner asks the platform to start this app with
+    /// (docs/app-links-plan.md L5).
+    Relaunch(Option<String>, Option<String>),
     /// The PLATFORM's own preference store for this process's domain
     /// holds this key with this value, compared as the string form
     /// (`true`/`false`, `{}` Display) — a fresh read, never the core's
@@ -673,6 +681,7 @@ impl Step {
             | Step::ExpectNoNotification(..)
             | Step::ExpectNoTarget(..)
             | Step::NotificationActivate(..)
+            | Step::OpenLink(..)
             | Step::Relaunch(..)
             | Step::ExpectPref(..)
             | Step::ExpectNoPref(..)
@@ -772,6 +781,7 @@ impl Step {
             Step::ExpectNotification { .. } => true,
             Step::ExpectNoNotification { .. } => true,
             Step::NotificationActivate { .. } => false,
+            Step::OpenLink { .. } => false,
             Step::Relaunch(..) => false,
             Step::ExpectPref { .. } => true,
             Step::ExpectNoPref { .. } => true,
@@ -1091,6 +1101,14 @@ pub trait Stage: Send + 'static {
     /// Activate a delivered notification: the shade's real tap where a test
     /// reaches it, the backend's own activation path where it cannot.
     fn activate_notification(&self, notification: u64);
+    /// Ask the PLATFORM to open this URL from inside the process — the
+    /// door a user's tap takes, so the warm delivery is measured through
+    /// the real machinery (docs/app-links-plan.md L5). NARROW IT TO THIS
+    /// APP: every kaya guest claims the same scheme (it defaults to the
+    /// declared id) and a lane keeps many installed, so the platform's
+    /// default handler is an undefined pick and a green-looking open with
+    /// no delivery (measured 2026-09-09).
+    fn open_link(&self, url: &str);
     /// What the live file picker is REALLY showing: the directory it is
     /// pointed at, and the file names its list actually contains — read
     /// from the platform panel, never from the request. None when no
@@ -1350,6 +1368,10 @@ fn split_statements(line: &str) -> Vec<&str> {
 /// (docs/tasks-s4-plan.md P5), beside the bare form's notification one.
 /// tools/check-steps.py holds the same word from the scene side.
 pub(crate) const PLAIN_DOOR: &str = "launch";
+/// The LINK door, whose one quoted argument is the URL
+/// (docs/app-links-plan.md L5). tools/check-steps.py holds the same word
+/// and the same shape from the scene side.
+pub(crate) const LINK_DOOR: &str = "link";
 
 pub fn parse(script: &str) -> Result<Vec<Step>, String> {
     let mut steps = Vec::new();
@@ -1773,6 +1795,7 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 })?;
                 Step::NotificationActivate(id)
             }
+            "open_link" => Step::OpenLink(parse_string(rest)?),
             "relaunch" => {
                 // ONE OPTIONAL ARGUMENT, THE DOOR (docs/tasks-s4-plan.md
                 // P5): bare is the notification door, `launch` the plain
@@ -1782,16 +1805,24 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 // this function's `"<word>" =>` arms as the grammar, and a
                 // door spelled that way would be demanded of both
                 // interpreters as a VERB.
-                let door = rest.trim();
+                let rest = rest.trim();
+                let (door, arg) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
+                let arg = arg.trim();
                 if door.is_empty() {
-                    Step::Relaunch(None)
-                } else if door == PLAIN_DOOR {
-                    Step::Relaunch(Some(door.to_owned()))
+                    Step::Relaunch(None, None)
+                } else if door == PLAIN_DOOR && arg.is_empty() {
+                    Step::Relaunch(Some(door.to_owned()), None)
+                } else if door == LINK_DOOR {
+                    // THE ONE DOOR WITH AN ARGUMENT: the URL the runner
+                    // asks the platform to start this app with
+                    // (docs/app-links-plan.md L5).
+                    Step::Relaunch(Some(door.to_owned()), Some(parse_string(arg)?))
                 } else {
                     return Err(format!(
-                        "relaunch takes no argument (the notification door) or \
+                        "relaunch takes no argument (the notification door), \
                          `{PLAIN_DOOR}` (the plain one — the runner starts the same \
-                         artifact the way a user would), not {door:?}: {line:?}"
+                         artifact the way a user would) or `{LINK_DOOR} \"<url>\"` \
+                         (the platform starts it with that link), not {rest:?}: {line:?}"
                     ));
                 }
             }
@@ -3113,11 +3144,19 @@ fn run_with_log(
         // answers with an outcome and this one ends the run
         // (docs/tasks-s9-plan.md R6a). It leaves through the SAME verdict
         // path below — one publish, one trace dump, one exit.
-        if let Step::Relaunch(door) = step {
+        if let Step::Relaunch(door, arg) = step {
             // THE DOOR ON THE RECORD, one line every runner greps
             // (docs/tasks-s4-plan.md P5): a scene whose act two never ran
             // is read from this line and the lane's RELAUNCH_DOOR table.
-            let line = format!("KAYA_RELAUNCH: door {}", door.as_deref().unwrap_or("notification"));
+            // The link door's URL rides it, and the runner reads it from
+            // here rather than re-parsing the scene.
+            let line = match arg {
+                Some(url) => format!(
+                    "KAYA_RELAUNCH: door {} url={url}",
+                    door.as_deref().unwrap_or("notification")
+                ),
+                None => format!("KAYA_RELAUNCH: door {}", door.as_deref().unwrap_or("notification")),
+            };
             println!("{line}");
             if let Some((log, _)) = log {
                 log(&line);
@@ -3641,6 +3680,15 @@ fn run_with_log(
                 await_quiet();
                 let answered = crate::scene::answers();
                 stage.activate_notification(*id);
+                await_answer(answered);
+                None
+            }
+            Step::OpenLink(url) => {
+                await_quiet();
+                let answered = crate::scene::answers();
+                vtrace::note("open_link", format_args!("-> stage.open_link {url}"));
+                stage.open_link(url);
+                vtrace::note("open_link", format_args!("<- stage.open_link {url}"));
                 await_answer(answered);
                 None
             }
@@ -5676,6 +5724,7 @@ mod tests {
             None
         }
         fn activate_notification(&self, _notification: u64) {}
+        fn open_link(&self, _url: &str) {}
         /// A picker that ANSWERS A FIXED NUMBER OF READS and is then
         /// gone: every dialog verb's postcondition is that the panel
         /// leaves, so a mock that answers forever could only walk the
@@ -6609,6 +6658,7 @@ mod tests {
             None
         }
         fn activate_notification(&self, _notification: u64) {}
+        fn open_link(&self, _url: &str) {}
         fn file_dialog_state(&self) -> Option<(String, Vec<String>)> {
             None
         }
@@ -6882,6 +6932,7 @@ mod tests {
             None
         }
         fn activate_notification(&self, _notification: u64) {}
+        fn open_link(&self, _url: &str) {}
         fn file_dialog_state(&self) -> Option<(String, Vec<String>)> {
             None
         }

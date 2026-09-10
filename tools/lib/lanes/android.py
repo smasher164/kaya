@@ -75,6 +75,10 @@ LEGS = {
         # The notification conformance scene: rust-only for now, so it
         # rides the compose suite alone (docs/tasks-s3-plan.md §5).
         "notify-compose",
+        # A URL that opens the app on the thing it names
+        # (docs/app-links-plan.md L5): the same tasks guest, warm through
+        # the app's own startActivity and cold through `am start -a VIEW`.
+        "links-compose",
     ],
     "jvm": [
         "jvm", "a11y-jvm", "entry-jvm",
@@ -120,7 +124,11 @@ LEGS = {
 # tools/check-steps.py reads this beside the other lanes' doors; the
 # runner refuses a scene whose door it does not open, and a door named
 # for a scene with no `relaunch`.
-RELAUNCH_DOOR = {"tasks": "notify_tap", "taskspersist": "launch"}
+RELAUNCH_DOOR = {"tasks": "notify_tap", "taskspersist": "launch",
+                 # The cold link door: `am start -a VIEW -d <url>`,
+                 # narrowed to this package (docs/app-links-plan.md
+                 # §4; docs/traps.md on the chooser).
+                 "links": "link"}
 
 # THE RECREATION LEGS' SCENE and the statement they cut in half:
 # `todos` because the model it re-projects is EARNED, and the cut is

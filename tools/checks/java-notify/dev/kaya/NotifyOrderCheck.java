@@ -94,6 +94,63 @@ public final class NotifyOrderCheck {
         System.out.println("notify-order: OK — the one-shot wins, an unknown id "
                 + "reaches the process handler, it does not retire, and an "
                 + "unclaimed result announces its drop");
+
+        // The SAME app: ONE PER PROCESS is a latch (BuildOnceCheck), and
+        // the link tables are independent of the notification ones.
+        links(app);
+    }
+
+    /**
+     * THE APP-LINK ROUTES (docs/app-links-plan.md §4). Four things no lane
+     * can see: the declaration's BYTES, the ids the counter mints, the
+     * dispatch by route id, and the two drops — a route that matched and
+     * reached no handler says so, route 0 says nothing because the CORE
+     * already announced that miss naming every declared pattern. NOTHING
+     * HERE READS A PATTERN: the core is the one parser and the one author
+     * of every declaration refusal, and it faults at apply.
+     */
+    private static void links(KayaApp app) {
+        List<String> seen = new ArrayList<>();
+        app.link("task/{key}", (tx, params) -> seen.add("task:" + params.get("key")));
+        app.link("{section}", (tx, params) -> seen.add("section:" + params.get("section")));
+
+        // CASE 1: the declaration is the generated record, parked, and the
+        // ids come from the binding's own counter starting at 1.
+        check(app.pendingRecords.size() == 2
+                        && java.util.Arrays.equals(app.pendingRecords.get(0),
+                                KayaWire.txDeclareLinkRoute(1, "task/{key}"))
+                        && java.util.Arrays.equals(app.pendingRecords.get(1),
+                                KayaWire.txDeclareLinkRoute(2, "{section}")),
+                "link did not park the generated records, or minted the wrong ids");
+
+        // CASE 2: a link on a declared route reaches its handler with the
+        // captures, and the registration does NOT retire.
+        app.linkOpened(1, "dev.kaya.aurora.notes://task/t2", java.util.Map.of("key", "t2"));
+        app.linkOpened(1, "dev.kaya.aurora.notes://task/t1", java.util.Map.of("key", "t1"));
+        app.linkOpened(2, "dev.kaya.aurora.notes://today", java.util.Map.of("section", "today"));
+        check(seen.equals(List.of("task:t2", "task:t1", "section:today")),
+                "a link did not reach its route's handler with the captures, or the registration retired");
+
+        // CASE 3 and CASE 4: the two drops.
+        ByteArrayOutputStream said = new ByteArrayOutputStream();
+        PrintStream real = System.err;
+        System.setErr(new PrintStream(said, true, StandardCharsets.UTF_8));
+        try {
+            app.linkOpened(9, "dev.kaya.aurora.notes://task/t2", java.util.Map.of());
+            app.linkOpened(0, "dev.kaya.aurora.notes://nope", java.util.Map.of());
+        } finally {
+            System.setErr(real);
+        }
+        check(seen.size() == 3, "a route this process never declared reached a handler");
+        String want = "kaya: link dev.kaya.aurora.notes://task/t2 matched route 9 and"
+                + " reached no handler — none is registered for it (KayaApp.link)";
+        String got = said.toString(StandardCharsets.UTF_8).trim();
+        check(got.equals(want),
+                "the link drop was announced as \"" + got + "\", wanted \"" + want + "\"");
+
+        System.out.println("link-route: OK — the declaration parks the generated "
+                + "record, the dispatch is by route id and does not retire, an "
+                + "unknown route announces its drop, and route 0 is silent");
     }
 
     private NotifyOrderCheck() {}

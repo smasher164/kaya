@@ -23,8 +23,11 @@ STEPS = [
     ([":kaya:testDebugUnitTest"],
      "check-compose: FAIL (the kaya module's host-JVM tests fail — the "
      "scheme wall is KayaColorSchemesTest)"),
+    # :pyhost joined 2026-09-09 with the app-link doors: its MainActivity
+    # is Kotlin like the other three and was the one no gate compiled, so
+    # a shell-only edit reached the lane uncompiled.
     ([":rusthost:compileDebugKotlin", ":javahost:compileDebugKotlin",
-      ":gohost:compileDebugKotlin"],
+      ":gohost:compileDebugKotlin", ":pyhost:compileDebugKotlin"],
      "check-compose: FAIL (an Android app module does not compile)"),
     # :gohost is absent here and only here: its guest is Go, in a
     # .so, and it carries no Java of its own for javac to see.

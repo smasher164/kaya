@@ -896,6 +896,7 @@ def deploy_artifacts():
                ROOT / "tools/guest/pkg-run.ps1",
                ROOT / "tools/guest/relaunch-com.ps1",
                ROOT / "tools/guest/relaunch-launch.ps1",
+               ROOT / "tools/guest/relaunch-link.ps1",
                ROOT / "tools/guest/notify-ready.ps1",
                ROOT / "tools/guest/dnd-witness.ps1"])
 
@@ -1557,6 +1558,12 @@ def rec_suite_stop():
 def run_guest_oneshot(script, outfile, marker):
     """Run a shipped one-shot guest script via schtasks and print the
     file it writes once its done-marker appears."""
+    # THE OLD ANSWER GOES FIRST: this polls for a marker in a file the
+    # script rewrites, and a file left by an EARLIER run already carries it —
+    # the poll then returns the previous run's verdict, on the spot, with the
+    # current one still starting (watched 2026-09-09, a package install read
+    # as failed while the real one was succeeding behind it).
+    must_ssh(f'cmd /c "del C:\\kaya\\{outfile} 2>nul & exit /b 0"')
     must_ssh(f"schtasks /create /tn kaya_oneshot /tr C:\\kaya\\{script} "
              f"/sc once /st 00:00 /it /rl highest /f >nul && schtasks /run "
              f"/tn kaya_oneshot >nul")
@@ -1605,8 +1612,17 @@ def package_rust_guests():
     scenes = sorted(set(lane.PACKAGED_LEGS.values()))
     staging = ROOT / "target/win-package"
     print(f"== packaging {', '.join(scenes)} as one MSIX ==", flush=True)
+    # THIS PACKAGE CLAIMS NO URL SCHEME, and the reason is MEASURED
+    # (docs/app-links-plan.md L1; tools/check-staging.py holds it). This guest
+    # holds the app TWICE — installed as an MSIX and sitting unpackaged in
+    # C:\kaya — which no user's machine does, and when both claim the declared
+    # scheme the PACKAGED one wins: with the packaged claim installed,
+    # links_rust's three warm links reached the package instead of the running
+    # guest and act one read `entries 0, wanted 1` (2026-09-09). The lane
+    # drives the UNPACKAGED door, so the package leaves the scheme alone. A
+    # real kaya app ships ONE package with ONE entry point and names it here.
     win_package.stage(ROOT, [TARGET / f"examples/{s}.exe" for s in scenes],
-                      staging)
+                      staging, links_entry=None)
     must_ssh('cmd /c "if exist C:\\kaya\\pkgstage rmdir /s /q '
              'C:\\kaya\\pkgstage"')
     if scp_dir_to(staging, "C:/kaya/pkgstage") != 0:
@@ -1727,13 +1743,44 @@ def act2_answer(name, door, outfile, log):
 # (tools/guest/relaunch-launch.ps1 carries the rest).
 def plain_door(name, scene, log):
     decl = app_identity.load(ROOT)
-    exe = f"{lane.RELAUNCH_LAUNCH_EXE.get(scene, scene)}.exe"
+    exe = f"{lane.RELAUNCH_EXE.get(scene, scene)}.exe"
     outfile = f"out_{name}-act2.txt"
     run_ssh(f"del C:\\kaya\\{outfile} 2>nul & schtasks /create /tn "
             f'kaya_{name}_act2 /tr "C:\\kaya\\relaunch-launch.cmd {name} '
             f'{exe} {decl.id}" /sc once /st 00:00 /it /rl highest /f >nul '
             f"&& schtasks /run /tn kaya_{name}_act2 >nul", log=log)
     return act2_answer(name, "launch", outfile, log)
+
+
+# THE LINK DOOR (docs/app-links-plan.md L5): the runner asks the SHELL to open
+# the URL act one printed, and Windows starts the app through the protocol
+# registration the app made for ITSELF at launch (crates/kaya/src/winui/mod.rs's
+# links_declared). The started process reads the URL out of its own activation
+# arguments — the cold door and the warm door are one door on this platform.
+#
+# THE URL RIDES A FILE, never a schtasks argument: `=` is an argument delimiter
+# in a .cmd's %1..%9 and `&` is a cmd operator, so a link with a query arrives
+# as two tokens or runs the rest of the line (measured 2026-09-09). It is
+# scp'd rather than echoed for the same reason one step further out.
+def link_door(name, scene, url, log):
+    decl = app_identity.load(ROOT)
+    exe = f"{lane.RELAUNCH_EXE.get(scene, scene)}.exe"
+    outfile = f"out_{name}-act2.txt"
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".txt",
+                                     delete=False) as f:
+        f.write(url)
+        local = f.name
+    rc = scp_to([local], f"C:/kaya/legs/{name}/relaunch-url.txt", log=log)
+    os.unlink(local)
+    if rc != 0:
+        print(f"{name}: FAIL — the link {url} could not be put on the guest, "
+              f"so the door has nothing to open", file=log)
+        return False
+    run_ssh(f"del C:\\kaya\\{outfile} 2>nul & schtasks /create /tn "
+            f'kaya_{name}_act2 /tr "C:\\kaya\\relaunch-link.cmd {name} '
+            f'{exe} {decl.id}" /sc once /st 00:00 /it /rl highest /f >nul '
+            f"&& schtasks /run /tn kaya_{name}_act2 >nul", log=log)
+    return act2_answer(name, "link", outfile, log)
 
 
 def second_act(name, out, log):
@@ -1746,18 +1793,31 @@ def second_act(name, out, log):
         return False
     # THE DOOR ACT ONE ASKED FOR against the one this lane pushes. The
     # harness prints `KAYA_RELAUNCH: door <name>` at the `relaunch` line and
-    # the plain door's word is the scene's own, so a leg wired to the wrong
-    # door here waits out its ceiling naming no cause.
-    if door == "launch" and "KAYA_RELAUNCH: door launch" not in out:
-        asked = [ln.strip() for ln in out.splitlines()
-                 if ln.strip().startswith("KAYA_RELAUNCH:")]
+    # the plain and link doors' words are the scene's own, so a leg wired to
+    # the wrong door here waits out its ceiling naming no cause.
+    asked = [ln.strip() for ln in out.splitlines()
+             if ln.strip().startswith("KAYA_RELAUNCH:")]
+    if door in ("launch", "link") and f"KAYA_RELAUNCH: door {door}" not in out:
         print(f"{name}: FAIL — act one never printed `KAYA_RELAUNCH: door "
-              f"launch`, so this lane's plain door is not the one the scene "
+              f"{door}`, so this lane's {door} door is not the one the scene "
               f"asked for. What it printed: "
               f"{asked or ['no KAYA_RELAUNCH line at all']}", file=log)
         return False
     if door == "launch":
         return plain_door(name, scene, log)
+    if door == "link":
+        # THE URL COMES OFF ACT ONE'S OWN LINE, never re-parsed out of the
+        # scene: the harness printed what it was given, so the door opens the
+        # link the scene asked for even when the two disagree.
+        key = "KAYA_RELAUNCH: door link url="
+        url = next((ln[len(key):].strip() for ln in reversed(asked)
+                    if ln.startswith(key)), "")
+        if not url:
+            print(f"{name}: FAIL — act one named the link door but no "
+                  f"`url=`, so there is nothing to open. What it printed: "
+                  f"{asked}", file=log)
+            return False
+        return link_door(name, scene, url, log)
     decl = app_identity.load(ROOT)
     packaged = name in lane.PACKAGED_LEGS
     family = PACKAGE_FAMILY[0] if PACKAGE_FAMILY else ""

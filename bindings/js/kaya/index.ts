@@ -202,7 +202,16 @@ function commitImplicit(): void {
   _tx = null;
   _journal = null;
   _implicit = false;
-  if (recs.length > 0) runtime.submit(recs);
+  ship(recs);
+}
+
+/** Submit one transaction, the pending link-route declarations ahead of
+ * it, in declaration order (docs/app-links-plan.md §4; Rust's
+ * PENDING_ROUTES drained head-first by Tx::commit is the shape). */
+function ship(recs: Uint8Array[]): void {
+  const pending = app()._pendingRecords;
+  const all = pending.length > 0 ? [...pending.splice(0), ...recs] : recs;
+  if (all.length > 0) runtime.submit(all);
 }
 
 function journalOnce(key: unknown, restore: () => void): void {
@@ -1795,6 +1804,34 @@ export function cancelNotification(notification: number): void {
  * scene declaration. */
 export function onNotificationActivation(f: (notification: number, outcome: number) => void): void {
   app()._notificationActivation = f;
+}
+
+/** Declare a link ROUTE and the handler that answers it
+ * (docs/app-links-plan.md §4): `kaya.link("task/{key}", f)` matches
+ * `<scheme>://task/t1` and calls `f({ key: "t1" })`. Segments split on
+ * `/`, `{name}` captures one segment, a literal segment matches itself;
+ * the query's pairs join the params and a capture wins a name clash.
+ * The params are a PLAIN OBJECT, the shape JS already reads a query
+ * string into, rather than a Map.
+ *
+ * PROCESS-LEVEL, onNotificationActivation's shape: it does not retire
+ * and it needs no transaction — declared before the first one the record
+ * waits and rides the head of it, declared inside a handler it rides
+ * that handler's, and it never opens the implicit one. A URL that
+ * arrives before the app thread exists is delivered first, and one no
+ * route matched is announced by the core and reaches nothing here.
+ *
+ * NOTHING HERE READS THE PATTERN. The core is the one parser and the one
+ * author of every refusal — an empty pattern, an empty segment, a
+ * malformed one, a duplicate — and it faults at apply with the whole
+ * sentence, where every other declaration refusal in kaya lands
+ * (tools/check-sugar-surface.py refuses a reason spelled here). */
+export function link(pattern: string, f: (params: Record<string, string>) => void): void {
+  if (typeof pattern !== "string") throw new Error("kaya: link() takes a route pattern as a string (\"task/{key}\")");
+  const a = app();
+  const route = a._next("link_route");
+  a._linkHandlers.set(route, f);
+  a._pendingRecords.push(wire.tx_declare_link_route(route, pattern));
 }
 
 // ---------------------------------------------------------------- files
@@ -3610,7 +3647,7 @@ function runScope(
           const recs = _tx!;
           _tx = null;
           _journal = null;
-          if (recs.length > 0) runtime.submit(recs);
+          ship(recs);
         }
       }
     }
@@ -3653,7 +3690,7 @@ function runScope(
     } else {
       const root = pendingRoot();
       if (kind === "window" && root !== null) recs.push(wire.tx_mount(surface, root.id));
-      if (recs.length > 0) runtime.submit(recs);
+      ship(recs);
     }
   }
 }
@@ -3664,7 +3701,7 @@ export type BarMenuOptions = MenuOptions & { window?: number };
 export type BarRadioGroupOptions = RadioGroupOptions & { window?: number };
 
 export class App {
-  private readonly _counters: Record<string, number> = { signal: 0, widget: 0, collection: 0, alert: 0, menu_item: 0, file_dialog: 0, clipboard: 0 };
+  private readonly _counters: Record<string, number> = { signal: 0, widget: 0, collection: 0, alert: 0, menu_item: 0, file_dialog: 0, clipboard: 0, link_route: 0 };
   /** @internal */ readonly _widgetHandlers = new Map<string, Handler>();
   /** @internal */ readonly _nodeHandlers = new Map<string, Handler>();
   /** @internal */ readonly _nodeOwners = new Map<number, Collection<unknown, unknown>>();
@@ -3678,6 +3715,15 @@ export class App {
    * (docs/tasks-s9-plan.md R1). A relaunched process never called
    * showNotification. */
   _notificationActivation: ((notification: number, outcome: number) => void) | undefined;
+  /** @internal NOT one-shot either: a route declared by link() answers
+   * every URL that matches it, for the life of the process
+   * (docs/app-links-plan.md §4), and the core owns the pattern table —
+   * nothing is kept here but the handler. */
+  readonly _linkHandlers = new Map<number, (params: Record<string, string>) => void>();
+  /** @internal link() may be called before the first transaction, so its
+   * record waits here for one — ship() drains it head-first, and it
+   * never opens the implicit transaction (docs/app-links-plan.md §4). */
+  readonly _pendingRecords: Uint8Array[] = [];
   /** @internal */ readonly _fileDialogHandlers = new Map<number, (files: PickedFile[]) => void>();
   /** @internal */ readonly _clipboardHandlers = new Map<number, (clip: Clip | null) => void>();
   /** @internal */ readonly _menuHandlers = new Map<string, Handler>();
@@ -4003,6 +4049,30 @@ export class App {
       const handler = this._alertHandlers.get(ident);
       this._alertHandlers.delete(ident);
       if (handler !== undefined) this._dispatch(handler as Handler, payload);
+      return;
+    }
+    if (kind === wire.OCC_LINK_OPENED) {
+      // ident is the ROUTE the core matched (docs/app-links-plan.md
+      // §4), and NOT one-shot. TWO DROPS WITH DISJOINT CAUSES: route 0
+      // is a URL NO ROUTE TOOK, which the core announced naming every
+      // declared pattern, so it is silent here — two lines for one
+      // event teaches a reader to distrust both, and this slice has no
+      // registrar for a miss; a route that matched and reached no
+      // handler is this binding's to announce, naming its registrar.
+      // The payload is ONE FLAT RUN of Str values: the url, then the
+      // params in name/value pairs (wire.ts's arm).
+      const flat = payload as string[];
+      const url = flat[0] ?? "";
+      const handler = this._linkHandlers.get(ident);
+      if (handler !== undefined) {
+        const params: Record<string, string> = {};
+        for (let i = 1; i + 1 < flat.length; i += 2) params[flat[i]!] = flat[i + 1]!;
+        this._dispatch(handler as Handler, params);
+      } else if (ident !== 0) {
+        process.stderr.write(
+          `kaya: link ${url} matched route ${ident} and reached no handler — none is registered for it (kaya.link)\n`,
+        );
+      }
       return;
     }
     if (kind === wire.OCC_NOTIFICATION_RESULT) {

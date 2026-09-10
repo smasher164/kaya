@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0x605e18f72b2af791;
+    public const ulong SpecHash = 0x1960b216df673c1f;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -252,6 +252,7 @@ static class KayaWire
     public const ushort TxKindSetReorderable = 51;
     public const ushort TxKindShowNotification = 52;
     public const ushort TxKindCancelNotification = 53;
+    public const ushort TxKindDeclareLinkRoute = 54;
     public const ushort ApplyKindCreate = 1;
     public const ushort ApplyKindSetProp = 2;
     public const ushort ApplyKindAddChild = 3;
@@ -319,6 +320,7 @@ static class KayaWire
     public const ushort OccKindTimeChanged = 25;
     public const ushort OccKindValueCommitted = 26;
     public const ushort OccKindNotificationResult = 27;
+    public const ushort OccKindLinkOpened = 28;
 
     /// A blob value: the u64 handle from kaya_blob_register, consumed
     /// by the next submit; the bytes never ride the record stream.
@@ -927,6 +929,15 @@ static class KayaWire
         var w = Begin(out var stream);
         w.Write(notification);
         return Finish(stream, w, TxKindCancelNotification);
+    }
+
+    /// Declare one app-link route (docs/app-links-plan.md §4): `route` is the app's own id for it, `pattern` a Str. The MATCH HAPPENS ONCE, IN THE CORE — the patterns come here so a URL the platform hands over is turned into a route and its captures by one matcher rather than by nine. The grammar: segments split on `/`, a literal segment matches itself, `{name}` captures one segment. REFUSED AT THE DECLARATION, a fault like every other declaration refusal: an empty pattern, an empty segment, a brace a segment never closes, and a pattern already declared. Routes are declared at startup, before or inside the app's first transaction: the core matches a link that STARTED the process once that transaction lands.
+    public static byte[] TxDeclareLinkRoute(ulong route, object pattern)
+    {
+        var w = Begin(out var stream);
+        w.Write(route);
+        EncodeValue(w, pattern);
+        return Finish(stream, w, TxKindDeclareLinkRoute);
     }
 
     /// A civil date as the wire's I64: year * 10000 + month * 100 + day.
@@ -2223,7 +2234,7 @@ static class KayaWire
         keys = new List<object>();
         payload = null;
         kind = BitConverter.ToUInt16(rec, 4);
-        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged && kind != OccKindFileDialogResult && kind != OccKindClipboardResult && kind != OccKindPasted && kind != OccKindUndone && kind != OccKindRedone && kind != OccKindSortRequested && kind != OccKindDrawRequested && kind != OccKindTick && kind != OccKindDropped && kind != OccKindDragEnded && kind != OccKindDateChanged && kind != OccKindTimeChanged && kind != OccKindValueCommitted && kind != OccKindNotificationResult)
+        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged && kind != OccKindFileDialogResult && kind != OccKindClipboardResult && kind != OccKindPasted && kind != OccKindUndone && kind != OccKindRedone && kind != OccKindSortRequested && kind != OccKindDrawRequested && kind != OccKindTick && kind != OccKindDropped && kind != OccKindDragEnded && kind != OccKindDateChanged && kind != OccKindTimeChanged && kind != OccKindValueCommitted && kind != OccKindNotificationResult && kind != OccKindLinkOpened)
             return false;
         id = BitConverter.ToUInt64(rec, 8);
         if (kind == OccKindAlertResult)
@@ -2263,6 +2274,16 @@ static class KayaWire
                     (string)(parts[2] ?? "")));
             }
             payload = files;
+            return true;
+        }
+        if (kind == OccKindLinkOpened)
+        {
+            int urlLen = (int)BitConverter.ToUInt32(rec, 20);
+            var flat = new List<object>();
+            flat.Add(Encoding.UTF8.GetString(rec, 24, urlLen));
+            flat.AddRange(ParseRepresentation(
+                rec, 24 + ((urlLen + 7) & ~7), out int _linkEnd));
+            payload = flat;
             return true;
         }
         if (kind == OccKindClipboardResult)

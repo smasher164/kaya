@@ -2666,6 +2666,40 @@ artifact started the way a user would, no notification) measure
 persistence, and `expect_pref` reads the platform's own store back rather
 than the core's memory.
 
+## App links (docs/app-links-plan.md, built 2026-09-09)
+
+A URL the platform hands to the app instead of a browser opens the app
+on the thing it names. THE APP DECLARES ROUTES, NOTHING ELSE: a pattern on
+the handler it already has — `link("task/{key}", |params| Msg)` in Rust
+and each language's idiom for the other eight — and the core matches
+every incoming URL against the declared patterns ONCE, handing the
+handler its captures as the language's string map; the handler then does
+what a click does. The pattern rides the wire on a `declare_link_route`
+record and a malformed or repeated one faults at apply with the whole
+sentence, so no binding parses a pattern or spells a reason — one author,
+nine bindings, zero parsers. A link arrives whether the app was running
+or was started by it (the early queue delivers one that lands before the
+app thread exists), and a URL no route took is announced by the core
+naming the patterns it tried; no binding answers it. THE SCHEME DEFAULTS
+TO THE DECLARED ID (a reverse-DNS string is a valid scheme and unique by
+construction), so the manifest needs nothing new; `[links] scheme`
+overrides it and `[links] hosts` declares web links, which the build
+generates into every artifact and no lane drives, since verification
+needs a served domain. Each platform's door is its own: two on macOS (the
+delegate for a launch, the raw Apple event for a running app), `onOpenURL`
+on iOS, the single-task activity's intent on Android, GApplication's
+`open` over D-Bus on Linux, and on Windows the App SDK's protocol
+activation with the instance redirection — where an app that declares no
+route claims no scheme and takes no instance key, because every kaya app
+claims the same scheme and a pooled lane runs many at once. That last
+fact is the one every lane had to meet: a scheme claimed by more than one
+installed app resolves silently to a chooser or a pick, so each lane
+targets its own guest (the bundle on macOS, the package on Android, the
+leg's own desktop entry on Linux, the sole claimant on iOS, the leg's exe
+read back on Windows). The harness drives both halves: `open_link`
+through the platform's own open from inside the process, and
+`relaunch link` through the cold door every lane can push.
+
 ## Accessibility (the universal props, landed 2026-07-25)
 
 Native widgets ARE the accessibility tree (see the Accessibility case

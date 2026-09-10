@@ -14,6 +14,17 @@ func check(_ ok: Bool, _ what: String) {
     }
 }
 
+// THE LINK DROP'S CHILD, branched BEFORE anything else runs: it is read
+// through a pipe, and a child that also ran the notification section
+// would echo that section's verdict into the parent's own output.
+if ProcessInfo.processInfo.environment["KAYA_LINK_DROP"] != nil {
+    let bare = KayaApp()
+    bare.link("task/{key}") { _, _ in }
+    bare.linkOpened(9, "dev.kaya.aurora.notes://task/t2", [:])
+    bare.linkOpened(0, "dev.kaya.aurora.notes://nope", [:])
+    exit(0)
+}
+
 let app = KayaApp()
 var oneShot: [UInt32] = []
 var process: [(UInt64, UInt32)] = []
@@ -73,3 +84,52 @@ check(said.trimmingCharacters(in: .whitespacesAndNewlines) == want,
 print("notify-order: OK — the one-shot wins, an unknown id reaches the "
       + "process handler, it does not retire, and an unclaimed result "
       + "announces its drop")
+
+// THE APP-LINK ROUTES (docs/app-links-plan.md §4). Four things no lane can
+// see: the declaration's BYTES, the ids the counter mints, the dispatch by
+// route id, and the two drops — a route that matched and reached no
+// handler says so, route 0 says nothing because the CORE already announced
+// that miss naming every declared pattern. NOTHING HERE READS A PATTERN:
+// the core is the one parser and the one author of every declaration
+// refusal, and it faults at apply.
+let linkApp = KayaApp()
+var linkSeen: [(String, String)] = []
+linkApp.link("task/{key}") { _, params in linkSeen.append(("task", params["key"] ?? "")) }
+linkApp.link("{section}") { _, params in linkSeen.append(("section", params["section"] ?? "")) }
+
+// CASE 1: the declaration is the generated record, parked, and the ids
+// come from the binding's own counter starting at 1.
+var wanted = KayaTx()
+wanted.declareLinkRoute(1, .str("task/{key}"))
+wanted.declareLinkRoute(2, .str("{section}"))
+check(linkApp.pendingRoutes.bytes == wanted.bytes,
+      "link did not park the generated records, or minted the wrong ids")
+
+// CASE 2: a link on a declared route reaches its handler with the
+// captures, and the registration does NOT retire.
+linkApp.linkOpened(1, "dev.kaya.aurora.notes://task/t2", ["key": "t2"])
+linkApp.linkOpened(1, "dev.kaya.aurora.notes://task/t1", ["key": "t1"])
+linkApp.linkOpened(2, "dev.kaya.aurora.notes://today", ["section": "today"])
+check(linkSeen.count == 3 && linkSeen[0] == ("task", "t2")
+      && linkSeen[1] == ("task", "t1") && linkSeen[2] == ("section", "today"),
+      "a link did not reach its route's handler with the captures, or the registration retired: \(linkSeen)")
+
+// CASE 3 and CASE 4: the two drops, read back from the child branch at
+// the top of this file, the way the notification drop above is.
+let linkChild = Process()
+linkChild.executableURL = URL(fileURLWithPath: CommandLine.arguments[0])
+linkChild.environment = ProcessInfo.processInfo.environment.merging(
+    ["KAYA_LINK_DROP": "1"]) { _, new in new }
+let linkPipe = Pipe()
+linkChild.standardError = linkPipe
+try! linkChild.run()
+let linkSaid = String(decoding: linkPipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+linkChild.waitUntilExit()
+let linkWant = "kaya: link dev.kaya.aurora.notes://task/t2 matched route 9 and "
+    + "reached no handler — none is registered for it (KayaApp.link)"
+check(linkSaid.trimmingCharacters(in: .whitespacesAndNewlines) == linkWant,
+      "the link drop was announced as \"\(linkSaid.trimmingCharacters(in: .whitespacesAndNewlines))\", wanted \"\(linkWant)\"")
+
+print("link-route: OK — the declaration parks the generated record, the "
+      + "dispatch is by route id and does not retire, an unknown route "
+      + "announces its drop, and route 0 is silent")

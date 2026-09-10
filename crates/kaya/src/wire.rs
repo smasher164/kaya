@@ -94,6 +94,9 @@ pub(crate) const TX_SET_DROP_TARGET: u16 = 50;
 pub(crate) const TX_SET_REORDERABLE: u16 = 51;
 pub(crate) const TX_SHOW_NOTIFICATION: u16 = 52;
 pub(crate) const TX_CANCEL_NOTIFICATION: u16 = 53;
+/// One app-link route (docs/app-links-plan.md §4); crate::links holds
+/// the table and does the one match.
+pub(crate) const TX_DECLARE_LINK_ROUTE: u16 = 54;
 /// The size-class vocabulary a breakpoint speaks (ruled 2026-08-31,
 /// docs/adaptive-layout-plan.md D3): the guest names the CLASS, never a
 /// width. `compact` is the only class a binding can spell today.
@@ -1510,6 +1513,11 @@ pub fn decode_transaction_with_blobs(
             TX_CANCEL_NOTIFICATION => {
                 TxOp::CancelNotification(crate::protocol::NotificationId(r.u64()))
             }
+            TX_DECLARE_LINK_ROUTE => {
+                let route = r.u64();
+                let pattern = alert_str(r.value(), "pattern");
+                TxOp::DeclareLinkRoute { route, pattern }
+            }
             TX_SHOW_FILE_DIALOG => {
                 let window = WindowId(r.u64());
                 let dialog = crate::protocol::FileDialogId(r.u64());
@@ -1701,6 +1709,23 @@ pub(crate) fn notification_result_body(
     let mut b = [0u8; 16];
     b[..8].copy_from_slice(&notification.0.to_le_bytes());
     b[8..12].copy_from_slice(&notification_outcome_raw(outcome).to_le_bytes());
+    b
+}
+
+/// A link's arrival on the wire: route id, the URL as one Str value, then
+/// the params as a flat Values list read in PAIRS (name, value).
+pub(crate) fn link_opened_body(route: u64, url: &str, params: &[(String, String)]) -> Vec<u8> {
+    let mut b = Vec::new();
+    b.extend_from_slice(&route.to_le_bytes());
+    let mut blobs = Vec::new();
+    write_value(&mut b, &Value::Str(url.to_owned()), &mut blobs);
+    b.extend_from_slice(&((params.len() * 2) as u32).to_le_bytes());
+    b.extend_from_slice(&0u32.to_le_bytes());
+    for (name, value) in params {
+        write_value(&mut b, &Value::Str(name.clone()), &mut blobs);
+        write_value(&mut b, &Value::Str(value.clone()), &mut blobs);
+    }
+    debug_assert!(blobs.is_empty(), "a link carries only strings");
     b
 }
 
@@ -3047,6 +3072,12 @@ impl Writer {
             TxOp::CancelNotification(id) => self.record(TX_CANCEL_NOTIFICATION, |b, _blobs| {
                 b.extend_from_slice(&id.0.to_le_bytes());
             }),
+            TxOp::DeclareLinkRoute { route, pattern } => {
+                self.record(TX_DECLARE_LINK_ROUTE, |b, blobs| {
+                    b.extend_from_slice(&route.to_le_bytes());
+                    write_value(b, &Value::Str(pattern.clone()), blobs);
+                })
+            }
             TxOp::ShowFileDialog(spec) => self.record(TX_SHOW_FILE_DIALOG, |b, blobs| {
                 b.extend_from_slice(&spec.window.0.to_le_bytes());
                 b.extend_from_slice(&spec.dialog.0.to_le_bytes());
@@ -3735,6 +3766,66 @@ fn write_value(b: &mut Vec<u8>, value: &Value, blobs: &mut Vec<Arc<[u8]>>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A LINK'S BODY IS READ BACK THE WAY THE NINE GENERATED READERS READ
+    /// IT (docs/app-links-plan.md §4). `gen-bindings --check` compares the
+    /// generator with what it wrote and DECODES NOTHING, so a reader that
+    /// misreads a shaped record is invisible to the whole sweep — which is
+    /// exactly what happened here: link_opened landed with no branch, fell
+    /// into the generic click tail, and the URL Value's TYPE WORD was read
+    /// as a key-path length (measured 2026-09-09). This walks the record
+    /// with the readers' own offsets: route at 8, the URL as one Str Value
+    /// at 16, then a count-prefixed Values block of name/value pairs.
+    #[test]
+    fn a_link_body_reads_back_at_the_offsets_the_bindings_use() {
+        let params = vec![
+            ("key".to_string(), "t2".to_string()),
+            ("focus".to_string(), "notes".to_string()),
+        ];
+        let url = "dev.kaya.aurora.notes://task/t2?focus=notes";
+        let body = link_opened_body(7, url, &params);
+        // The record as the ring frames it: { u32 size; u16 kind; u16 flags }.
+        let mut rec = Vec::new();
+        rec.extend_from_slice(&((HEADER_SIZE + body.len()) as u32).to_le_bytes());
+        rec.extend_from_slice(&crate::ring::REC_LINK_OPENED.to_le_bytes());
+        rec.extend_from_slice(&0u16.to_le_bytes());
+        rec.extend_from_slice(&body);
+
+        let u32_at = |at: usize| u32::from_le_bytes(rec[at..at + 4].try_into().unwrap());
+        let u64_at = |at: usize| u64::from_le_bytes(rec[at..at + 8].try_into().unwrap());
+        // A Str value at `at`: its text and the offset past its padding.
+        let str_at = |at: usize| -> (String, usize) {
+            assert_eq!(u32_at(at), VALUE_STR, "a link carries only strings");
+            let len = u32_at(at + 4) as usize;
+            let text = String::from_utf8(rec[at + 8..at + 8 + len].to_vec()).unwrap();
+            (text, at + 8 + len.next_multiple_of(8))
+        };
+
+        assert_eq!(u64_at(8), 7, "the route sits at 8");
+        let (read_url, at) = str_at(16);
+        assert_eq!(read_url, url);
+        let count = u32_at(at) as usize;
+        assert_eq!(count, params.len() * 2, "the params ride as PAIRS");
+        assert_eq!(u32_at(at + 4), 0, "the Values block's reserved word");
+        let mut at = at + 8;
+        let mut read = Vec::new();
+        for _ in 0..count / 2 {
+            let (name, next) = str_at(at);
+            let (value, next) = str_at(next);
+            read.push((name, value));
+            at = next;
+        }
+        assert_eq!(read, params);
+        assert_eq!(at, rec.len(), "nothing follows the params");
+
+        // AND THE EMPTY CASE, which is route 0's shape: no params at all.
+        let body = link_opened_body(0, "kaya://nope", &[]);
+        assert_eq!(
+            u32::from_le_bytes(body[body.len() - 8..body.len() - 4].try_into().unwrap()),
+            0,
+            "an empty params block is a zero count, not an absent block"
+        );
+    }
 
     /// Every record kind survives the encode/decode round trip, and EVERY
     /// SPEC RECORD MUST HAVE A DECODE ARM — checked against this file's own

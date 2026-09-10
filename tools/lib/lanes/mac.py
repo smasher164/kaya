@@ -29,6 +29,7 @@ import re
 import shutil
 import subprocess
 import threading
+import time
 
 # THE scene list: the mechanical per-scene surfaces derive from it —
 # the cargo --example flags, the rust-guest staging, build_swift's
@@ -64,7 +65,8 @@ LANGS = ("rust", "python", "go", "csharp", "ocaml", "haskell", "swift",
 # differ: the listdetail legs run split's guests (a scene selects a
 # SCRIPT, never an app). editor/portfolio/varied are single-language
 # apps whose launchers already name the right artifact.
-GUEST_STEM = {"listdetail": "split", "taskspersist": "tasks"}
+GUEST_STEM = {"listdetail": "split", "taskspersist": "tasks",
+              "links": "tasks"}
 
 # The dark half of expect_ink's frozen string, one leg instead of a
 # lane re-run (tools/check-appearance.py holds the leg here): canvas's
@@ -83,7 +85,10 @@ HAND_QUEUED = {"editor": "go", "portfolio": "python", "varied": "python",
                # The task manager's second scene (docs/tasks-s4-plan.md
                # §4): the same rust example under another script, so it
                # derives no --example of its own.
-               "taskspersist": "rust"}
+               "taskspersist": "rust",
+               # The app-links scene: the same rust example under a third
+               # script (docs/app-links-plan.md L5).
+               "links": "rust"}
 
 # The queue, in run order. Entries:
 #   (scene, (lang, ...))    a group: script export + one leg per lang
@@ -169,6 +174,13 @@ ORDER = [
     # door. Alone between drains — act one leaves a marker in the state
     # home and act two is a second process of the same bundle.
     ("taskspersist", ("rust",)),
+    ("drain",),
+    # APP LINKS (docs/app-links-plan.md L5): the tasks guest a third
+    # time, warm through NSWorkspace and cold through `open`. Alone
+    # between drains — act two is a second process of the same bundle,
+    # and LaunchServices routes a scheme to ONE of the registered
+    # claimants.
+    ("links", ("rust",)),
     ("drain",),
     ("adaptive", LANGS),
     ("drain",),
@@ -368,7 +380,11 @@ CS_GUEST = "guests/csharp/bin/Debug/net10.0/kaya-guests.dll"
 # KAYA_LAUNCH_NOTIFICATION and the interpreter enters the centre
 # delegate's own funnel one step past the tap. tools/check-steps.py reads
 # this table against the scenes that carry a `relaunch` line.
-RELAUNCH_DOOR = {"tasks": "launch-notification", "taskspersist": "launch"}
+RELAUNCH_DOOR = {"tasks": "launch-notification", "taskspersist": "launch",
+                 # THE LINK DOOR (docs/app-links-plan.md L5): `open` hands
+                 # the URL to LaunchServices, which starts the bundle and
+                 # delivers it as an Apple event 21 ms in.
+                 "links": "link"}
 # Which notification the door hands back. The scene's act one sets t1's
 # reminder, and a task's key IS its notification id (R2), so the tap the
 # runner plays is on 1.
@@ -403,6 +419,124 @@ def plain_launch(argv, env, root, lf):
                             stdout=lf, stderr=lf).wait()
 
 
+def relaunch_url(text):
+    """The URL act one printed beside its door (docs/app-links-plan.md
+    L5), or "". Read from the LINE rather than from the scene: what the
+    door pushes has to be what act one actually reached."""
+    for line in text.splitlines():
+        marker = "KAYA_RELAUNCH: door link url="
+        if line.startswith(marker):
+            return line[len(marker):].strip()
+    return ""
+
+
+def relaunched_pid(app):
+    """The pid of the process the platform started from `app`'s bundle."""
+    got = subprocess.run(
+        ["pgrep", "-f", f"{app}/Contents/MacOS/"],
+        capture_output=True, text=True, check=False).stdout.split()
+    return int(got[0]) if got else None
+
+
+def layer0_windows(winlist, pid):
+    """How many ORDINARY on-screen windows that pid owns. layer 0 is the
+    document layer — a menu-bar extra or a panel is not the app's window
+    (tools/mac/flightrec-winlist.swift prints the layer)."""
+    out = subprocess.run([winlist, str(pid)], capture_output=True,
+                         text=True, check=False).stdout
+    return [l for l in out.splitlines() if " layer=0 " in l]
+
+
+def open_link_door(root, app, url, act2_env, verdict, lf, seconds=120):
+    """THE COLD DOOR ON THIS LANE: `open` hands the URL to
+    LaunchServices, which starts the bundle and delivers it as an Apple
+    event 21 ms in, before any window exists (docs/traps.md, 2026-09-09).
+
+    TARGETED AT THE BUNDLE with `-a`, never the bare URL: every kaya
+    guest claims the same scheme — it defaults to the declared id — and
+    this lane keeps several .app wrappers registered, so an untargeted
+    open is an undefined pick among them and delivers to the wrong one
+    with nothing saying so (measured 2026-09-09).
+
+    `open` returns as soon as the app is launched, so the verdict FILE is
+    what this waits on; a process LaunchServices starts inherits nothing
+    from here, which is what the `--env` flags are for.
+    """
+    argv = ["open"]
+    for key in ("XDG_STATE_HOME", "KAYA_SWIFTUI_LIB", "KAYA_LIB",
+                "KAYA_VERB_TRACE", "KAYA_APPEARANCE"):
+        if act2_env.get(key):
+            argv += ["--env", f"{key}={act2_env[key]}"]
+    argv += ["--stdout", str(log_path(lf)), "--stderr", str(log_path(lf)),
+             "-a", str(app), url]
+    lf.write(f"== act two: link {url} through {' '.join(argv[:1])} "
+             f"-a {app} ==\n")
+    lf.flush()
+    done = subprocess.run(argv, cwd=root, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", check=False)
+    if done.returncode != 0:
+        lf.write(f"open exited {done.returncode}: "
+                 f"{done.stderr.strip() or done.stdout.strip()}\n")
+        return done.returncode
+    # THE WINDOW A USER WOULD SEE, WATCHED WHILE THE PROCESS IS ALIVE
+    # (docs/app-links-plan.md L5). Act two's own observations all read the
+    # MODEL, so they publish OK for a process that never put anything on
+    # screen — which is exactly what a URL launch did until 2026-09-09:
+    # the NSWindow was built and registered and never composited, and a
+    # user tapping a link with the app closed got nothing. Sampled in the
+    # SAME loop that joins the verdict, because the second process lives
+    # about a second.
+    from flightrec_lane import winlist_bin
+    winlist = winlist_bin(root)
+    if not winlist:
+        lf.write("the link door cannot check for a window: the macOS "
+                 "window list (tools/mac/flightrec-winlist.swift) would "
+                 "not build, so whether act two ever drew anything is "
+                 "unknown and this refuses rather than guess\n")
+        return 1
+    deadline = time.monotonic() + seconds
+    pid_seen, windows = None, []
+    line = ""
+    while time.monotonic() < deadline:
+        if not windows:
+            pid = relaunched_pid(app)
+            if pid:
+                pid_seen = pid
+                windows = layer0_windows(winlist, pid)
+        if verdict.is_file():
+            line = verdict.read_text(encoding="utf-8",
+                                     errors="replace").strip()
+            # NOT `break` ON THE VERDICT ALONE: act two publishes in about
+            # 200ms and the window composites at about 520ms, so leaving
+            # here would read "no window" on a run that draws one a beat
+            # later. Keep looking while the process is alive.
+            if line and (windows or pid_seen and not relaunched_pid(app)):
+                break
+        time.sleep(0.1)
+    if not line:
+        lf.write(f"act two wrote no verdict within {seconds}s of the link "
+                 f"door\n")
+        return 1
+    if not windows:
+        lf.write(
+            f"act two published its verdict with NO WINDOW ON SCREEN: pid "
+            f"{pid_seen if pid_seen else '(never seen)'} owned 0 layer-0 "
+            f"windows for its whole life, so the link started a process "
+            f"that drew nothing a user could see. Every observation in "
+            f"act two reads the model, which is why the verdict is green "
+            f"({line})\n")
+        return 1
+    lf.write(f"act two window: {windows[0]}\n")
+    return 0
+
+
+def log_path(lf):
+    """The open file's own path — `open --stdout` takes a PATH, and the
+    second process is not this one's child, so its output cannot be
+    inherited."""
+    return pathlib.Path(lf.name)
+
+
 def second_act(root, scene, argv, env, log, launch=None):
     """Push this lane's door and join act two's verdict (R6a). Returns 0
     only when the second process published a green ordinary verdict into
@@ -431,6 +565,28 @@ def second_act(root, scene, argv, env, log, launch=None):
         # would leave it (crates/kaya/src/act2.rs).
         act2_env.pop("KAYA_SELFTEST", None)
         act2_env.pop("KAYA_SELFTEST_SCRIPT", None)
+        if door == "link":
+            # THE LINK DOOR (docs/app-links-plan.md L5). The RECORDING
+            # launcher is deliberately not used: LaunchServices starts
+            # the process, so there is no pid for the suite recorder to
+            # register and act two's tile would be empty either way.
+            url = relaunch_url(
+                pathlib.Path(log).read_text(encoding="utf-8", errors="replace"))
+            if not url:
+                lf.write(f"{scene}: act one printed no "
+                         f"`KAYA_RELAUNCH: door link url=` line, so this "
+                         f"runner has no URL to push the platform's door "
+                         f"with\n")
+                return 1
+            stem = guest_stem(scene)
+            app = root / RUST_GUESTS / f"{stem}.app"
+            rc = open_link_door(root, app, url, act2_env, verdict, lf)
+            if rc != 0:
+                return rc
+            line = (verdict.read_text(encoding="utf-8", errors="replace")
+                    .strip())
+            lf.write(f"{scene}: act two verdict {line}\n")
+            return 0 if line.startswith("KAYA_SELFTEST: OK") else 1
         if door == "launch":
             lf.write(f"== act two: {door} ==\n")
         else:

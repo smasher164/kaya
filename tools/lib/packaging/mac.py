@@ -61,6 +61,22 @@ def write_icns(source, dest, scratch):
             f"application icon with nothing saying so")
 
 
+def url_types(declared):
+    """THE APP-LINK SCHEME, out of the declaration (docs/app-links-plan.md
+    L1): `CFBundleURLTypes` is what makes LaunchServices hand this bundle
+    a `<scheme>://…` URL at all. The scheme comes from the manifest's one
+    rule — `[links] scheme`, defaulting to the declared id — so this is
+    never a second spelling. The iOS arm writes the same key.
+    """
+    return ('  <key>CFBundleURLTypes</key>\n'
+            '  <array><dict>\n'
+            f'    <key>CFBundleURLName</key><string>{declared.id}.link'
+            '</string>\n'
+            '    <key>CFBundleURLSchemes</key>\n'
+            f'    <array><string>{declared.scheme}</string></array>\n'
+            '  </dict></array>\n')
+
+
 def info_plist(declared, executable, accessory):
     """The plist, every value out of the declaration."""
     ui_element = ("  <key>LSUIElement</key><true/>\n" if accessory else "")
@@ -77,6 +93,7 @@ def info_plist(declared, executable, accessory):
             '  <key>CFBundlePackageType</key><string>APPL</string>\n'
             '  <key>CFBundleShortVersionString</key><string>0.0</string>\n'
             + ui_element
+            + url_types(declared)
             + '</dict>\n</plist>\n')
 
 

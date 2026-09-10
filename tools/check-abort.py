@@ -37,9 +37,10 @@ def fail(name, log):
 
 
 def step(name, argv, log, *, env=ENV, cwd=ROOT, echo=None):
-    """`echo` is a prefix whose lines are printed on SUCCESS too: the
-    notification-order arms each publish a verdict, and a run that says
-    nothing cannot be told from one that skipped them."""
+    """`echo` is a prefix (or a tuple of them) whose lines are printed
+    on SUCCESS too: the notification-order and link-route arms each
+    publish a verdict, and a run that says nothing cannot be told from
+    one that skipped them."""
     with log.open("w", encoding="utf-8") as out:
         run = subprocess.run(argv, cwd=cwd, env=env, stdout=out,
                              stderr=subprocess.STDOUT, check=False)
@@ -95,7 +96,7 @@ with scratch_dir("check-abort-") as tmp:
           "-Xlinker", "-rpath", "-Xlinker", str(ROOT / "target/debug")],
          tmp / "swift-notify.log", env=NO_XCODE)
     step("swift-notify", [str(tmp / "swift-notify")],
-         tmp / "swift-notify.log", echo="notify-order:")
+         tmp / "swift-notify.log", echo=("notify-order:", "link-route:"))
 
     # ITS WATCHED NEGATIVE: the ORDER SWAPPED in a COPY of the binding —
     # the process-level handler consulted before the one-shot one — with
@@ -147,6 +148,55 @@ with scratch_dir("check-abort-") as tmp:
         print(swapped_said, file=sys.stderr)
         sys.exit(1)
 
+    # THE LINK HALF'S WATCHED NEGATIVE, the same copy trick one rule over:
+    # ROUTE 0 MADE TO SPEAK. Two drops with disjoint causes
+    # (docs/app-links-plan.md §4) — a route that MATCHED and reached no
+    # handler is the binding's to announce, while route 0 is a URL NO
+    # ROUTE TOOK, which the core already announced on stderr naming every
+    # declared pattern. NO LANE CAN SEE THE SECOND LINE: a scene reads the
+    # same screen back either way, and a reader who meets two sentences
+    # for one event learns to distrust both. Removing the guard must turn
+    # the exerciser red on its OWN sentence, not merely nonzero.
+    spoke = tmp / "swift-route-zero-src"
+    spoke.mkdir()
+    for src in sorted(glob.glob(str(ROOT / "bindings/swift/*.swift"))):
+        (spoke / os.path.basename(src)).write_bytes(
+            pathlib.Path(src).read_bytes())
+    loud = spoke / "KayaApp.swift"
+    loud.write_text(
+        g.doctor("swift link negative let route 0 announce a drop of its own",
+                 loud.read_text(encoding="utf-8"),
+                 r"\} else if route != 0 \{", "} else {"),
+        encoding="utf-8")
+    step("swift-route-zero-build",
+         [swiftc, *sdk_args, "-o", str(tmp / "swift-route-zero"),
+          *sorted(glob.glob(str(spoke / "*.swift"))),
+          str(ROOT / "tools/checks/swift-notify/main.swift"),
+          "-import-objc-header", "crates/kaya/include/kaya.h",
+          "-I", "crates/kaya/include",
+          "-L", "target/debug", "-lkaya",
+          "-Xlinker", "-rpath", "-Xlinker", str(ROOT / "target/debug")],
+         tmp / "swift-route-zero.log", env=NO_XCODE)
+    with (tmp / "swift-route-zero-run.log").open("w", encoding="utf-8") as out:
+        zero_run = subprocess.run(
+            [str(tmp / "swift-route-zero")], cwd=ROOT, env=ENV,
+            stdout=out, stderr=subprocess.STDOUT, check=False)
+    zero_said = (tmp / "swift-route-zero-run.log").read_text(
+        encoding="utf-8", errors="replace")
+    if zero_run.returncode == 0:
+        print("check-abort: SELF-TEST FAIL — the swift link-route exerciser "
+              "PASSED against a binding that announces route 0 as well, so "
+              "it is not exercising the two drops", file=sys.stderr)
+        sys.exit(1)
+    if "the link drop was announced as" not in zero_said:
+        print("check-abort: SELF-TEST FAIL — the route-0 swift copy failed, "
+              "but NOT on the drop sentence. What it printed:",
+              file=sys.stderr)
+        print(zero_said, file=sys.stderr)
+        sys.exit(1)
+    print("check-abort: self-test swift link-route negative refused, by its "
+          "own sentence")
+
     # Built UNCONDITIONALLY, like every arm here: an `[ -f ]` guard ran a
     # dll older than the edited binding and called it green (2026-08-22,
     # invariant 4). dotnet's incremental build makes it cheap.
@@ -160,7 +210,7 @@ with scratch_dir("check-abort-") as tmp:
     step("csharp-notify",
          ["dotnet", "exec", "guests/csharp/bin/Debug/net10.0/kaya-guests.dll"],
          tmp / "cs-notify.log", env=dict(ENV, KAYA_CHECK="notify"),
-         echo="notify-order:")
+         echo=("notify-order:", "link-route:"))
 
     # Pure JVM against the ring stub — no natives, so mutating
     # transactions always abort (AbortCheck.java's header has the shape).
@@ -187,7 +237,7 @@ with scratch_dir("check-abort-") as tmp:
     step("ocaml-notify",
          ["dune", "exec", "--root", ".",
           "bindings/ocaml/checks/notify_order_check.exe"],
-         tmp / "ml-notify.log", echo="notify-order:")
+         tmp / "ml-notify.log", echo=("notify-order:", "link-route:"))
 
     # A PRIVATE build tree, never the shared dist-newstyle: the repo is
     # mounted into the linux container, so wiping the shared one destroys
@@ -219,7 +269,7 @@ with scratch_dir("check-abort-") as tmp:
          f"--builddir={hs_dist}", "-v0"], cwd=ROOT / "guests/haskell",
         stdout=subprocess.PIPE, text=True, check=False)
     step("haskell-notify", [where_notify.stdout.strip()],
-         tmp / "hs-notify.log", echo="notify-order:")
+         tmp / "hs-notify.log", echo=("notify-order:", "link-route:"))
 
     # The Build/Tpl monad wall, pinned by a must-not-compile fixture. The
     # TYPE error is demanded: a syntax error must not pass as "didn't

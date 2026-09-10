@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x605e18f72b2af791
+specHash = 0x1960b216df673c1f
 
 valueBool :: Word32
 valueBool = 1
@@ -502,6 +502,8 @@ txKindShowNotification :: Word16
 txKindShowNotification = 52
 txKindCancelNotification :: Word16
 txKindCancelNotification = 53
+txKindDeclareLinkRoute :: Word16
+txKindDeclareLinkRoute = 54
 applyKindCreate :: Word16
 applyKindCreate = 1
 applyKindSetProp :: Word16
@@ -636,6 +638,8 @@ occKindValueCommitted :: Word16
 occKindValueCommitted = 26
 occKindNotificationResult :: Word16
 occKindNotificationResult = 27
+occKindLinkOpened :: Word16
+occKindLinkOpened = 28
 
 -- Values self-pad to 8: they concatenate inside record bodies.
 encodeValue :: Value -> Builder
@@ -879,6 +883,10 @@ txShowNotification notification at title body = wireRecord txKindShowNotificatio
 -- Withdraw a pending or delivered notification by id (a reminder that was cleared). No answer follows; an unknown id is ignored.
 txCancelNotification :: Word64 -> Builder
 txCancelNotification notification = wireRecord txKindCancelNotification (word64LE notification)
+
+-- Declare one app-link route (docs/app-links-plan.md §4): `route` is the app's own id for it, `pattern` a Str. The MATCH HAPPENS ONCE, IN THE CORE — the patterns come here so a URL the platform hands over is turned into a route and its captures by one matcher rather than by nine. The grammar: segments split on `/`, a literal segment matches itself, `{name}` captures one segment. REFUSED AT THE DECLARATION, a fault like every other declaration refusal: an empty pattern, an empty segment, a brace a segment never closes, and a pattern already declared. Routes are declared at startup, before or inside the app's first transaction: the core matches a link that STARTED the process once that transaction lands.
+txDeclareLinkRoute :: Word64 -> Value -> Builder
+txDeclareLinkRoute route pattern = wireRecord txKindDeclareLinkRoute (word64LE route <> encodeValue pattern)
 
 -- A civil date as the wire's I64: year * 10000 + month * 100 + day.
 packDate :: Int -> Int -> Int -> Int64
@@ -1893,7 +1901,7 @@ parseOccurrence ::
   IO (Maybe (Word16, Word64, [Value], Maybe Value, Maybe ClipValues, Maybe DropValues, [Value]))
 parseOccurrence redeem rec = do
   kind <- peekByteOff rec 4 :: IO Word16
-  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult && kind /= occKindClipboardResult && kind /= occKindPasted && kind /= occKindUndone && kind /= occKindRedone && kind /= occKindSortRequested && kind /= occKindDrawRequested && kind /= occKindTick && kind /= occKindDropped && kind /= occKindDragEnded && kind /= occKindDateChanged && kind /= occKindTimeChanged && kind /= occKindValueCommitted && kind /= occKindNotificationResult
+  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult && kind /= occKindClipboardResult && kind /= occKindPasted && kind /= occKindUndone && kind /= occKindRedone && kind /= occKindSortRequested && kind /= occKindDrawRequested && kind /= occKindTick && kind /= occKindDropped && kind /= occKindDragEnded && kind /= occKindDateChanged && kind /= occKindTimeChanged && kind /= occKindValueCommitted && kind /= occKindNotificationResult && kind /= occKindLinkOpened
     then return Nothing
     else do
       ident <- peekByteOff rec 8 :: IO Word64
@@ -1919,6 +1927,16 @@ parseOccurrence redeem rec = do
                 readValues (n - 1 :: Int) next (v : acc)
           vals <- readValues (fromIntegral count * 3) 32 []
           return (Just (kind, ident, vals, Nothing, Nothing, Nothing, []))
+      else if kind == occKindLinkOpened
+        then do
+          (url, urlEnd) <- parseValue rec 16
+          pcount <- peekByteOff rec urlEnd :: IO Word32
+          let readPairs 0 _ acc = return (reverse acc)
+              readPairs n at acc = do
+                (v, next) <- parseValue rec at
+                readPairs (n - 1 :: Int) next (v : acc)
+          pairs <- readPairs (fromIntegral pcount) (urlEnd + 8) []
+          return (Just (kind, ident, url : pairs, Nothing, Nothing, Nothing, []))
       else if kind == occKindClipboardResult
         then do
           (clip, _) <- parseClip redeem rec 16

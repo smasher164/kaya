@@ -848,6 +848,105 @@ if (isMainThread) {
   const droppedSaid = captureStderr(() => { fire(wire.parse_occurrence(notificationBytes(41, 1))); });
   check("an unclaimed notification_result announces the drop, naming the id", droppedSaid.trim() === "kaya: notification 41 outcome refused reached no handler — none was bound at the show and no process-level handler is registered (kaya.onNotificationActivation)");
 
+  // ------------------------------------------------- app links (§4)
+  // A ROUTE is declared with link(pattern, handler); the CORE matches a
+  // URL once and hands back the route id with the captures. Four things
+  // no lane can see: the record's BYTES, the ids the counter mints, the
+  // ORDER the declaration ships in, and the two drops.
+  //
+  // NOTHING HERE READS A PATTERN. The core is the one parser and the one
+  // author of every declaration refusal, and it faults at apply — so a
+  // bad pattern is not a binding-side throw to assert, and
+  // tools/check-sugar-surface.py refuses a reason spelled in any binding.
+  const linkBytes = (route: number, url: string, params: Array<[string, string]>): Uint8Array => {
+    const strValue = (text: string): Uint8Array => {
+      const utf8 = new TextEncoder().encode(text);
+      const padded = (utf8.length + 7) & ~7;
+      const out = new Uint8Array(8 + padded);
+      const dv = new DataView(out.buffer);
+      dv.setUint32(0, 4 /* VALUE_STR */, true);
+      dv.setUint32(4, utf8.length, true);
+      out.set(utf8, 8);
+      return out;
+    };
+    const parts: Uint8Array[] = [strValue(url)];
+    const count = new Uint8Array(8);
+    new DataView(count.buffer).setUint32(0, params.length * 2, true);
+    parts.push(count);
+    for (const [name, value] of params) { parts.push(strValue(name)); parts.push(strValue(value)); }
+    const bodyLen = 8 + parts.reduce((n, p) => n + p.length, 0);
+    const rec = new Uint8Array(8 + bodyLen);
+    const view = new DataView(rec.buffer);
+    view.setUint32(0, rec.length, true);
+    view.setUint16(4, wire.OCC_LINK_OPENED, true);
+    view.setBigUint64(8, BigInt(route), true);
+    let at = 16;
+    for (const part of parts) { rec.set(part, at); at += part.length; }
+    return rec;
+  };
+
+  const linkApp = app as unknown as { _pendingRecords: Uint8Array[]; _linkHandlers: Map<number, unknown> };
+  const linkSeen: Array<[string, Record<string, string>]> = [];
+  shipped.length = 0;
+  kaya.link("task/{key}", (p) => linkSeen.push(["task", p]));
+  kaya.link("{section}", (p) => linkSeen.push(["section", p]));
+  check("link parks the generated record, and mints route ids from 1",
+    linkApp._pendingRecords.length === 2
+    && JSON.stringify([...linkApp._pendingRecords[0]!]) === JSON.stringify([...wire.tx_declare_link_route(1, "task/{key}")])
+    && JSON.stringify([...linkApp._pendingRecords[1]!]) === JSON.stringify([...wire.tx_declare_link_route(2, "{section}")]));
+  check("link needs no transaction and opens none — not even the implicit one", shipped.length === 0);
+  check("link refuses a pattern that is not a string (the one check a dynamic language cannot leave to the core)",
+    throws(() => kaya.link(42 as unknown as string, () => {}), /route pattern as a string/));
+
+  // THE PARKED DECLARATIONS LEAD THE NEXT TRANSACTION, and that is the
+  // semantics: the core matches the link that STARTED the process the
+  // moment the first transaction lands, so a route that shipped after
+  // the scene's own records would miss the cold door. No scene can read
+  // the order back — the core applies both in one batch either way.
+  app.build(() => { kaya.createWindow(1900); });
+  check("the parked declarations lead the transaction that ships them",
+    shipped.length === 1 && shipped[0]!.length > 2
+    && JSON.stringify([...shipped[0]![0]!]) === JSON.stringify([...wire.tx_declare_link_route(1, "task/{key}")])
+    && JSON.stringify([...shipped[0]![1]!]) === JSON.stringify([...wire.tx_declare_link_route(2, "{section}")]));
+  check("and the pending list is empty afterwards", linkApp._pendingRecords.length === 0);
+  shipped.length = 0;
+  app.build(() => { kaya.link("note/{key}", () => {}); kaya.createWindow(1901); });
+  check("a route declared INSIDE a transaction rides it, at its head",
+    shipped.length === 1 && shipped[0]!.length > 1
+    && JSON.stringify([...shipped[0]![0]!]) === JSON.stringify([...wire.tx_declare_link_route(3, "note/{key}")]));
+
+  // THE DECODER, FROM BYTES: route, the url as one Str value, a u32
+  // count and its reserved word, then count Str values read in PAIRS.
+  const opened = wire.parse_occurrence(linkBytes(7, "dev.kaya.aurora.notes://task/t2?focus=notes", [["key", "t2"], ["focus", "notes"]]));
+  check("a packed link_opened decodes to its route and one flat run",
+    opened.kind === wire.OCC_LINK_OPENED && opened.id === 7 && opened.keys.length === 0
+    && JSON.stringify(opened.payload) === JSON.stringify(["dev.kaya.aurora.notes://task/t2?focus=notes", "key", "t2", "focus", "notes"]));
+  const missed = wire.parse_occurrence(linkBytes(0, "dev.kaya.aurora.notes://nope", []));
+  check("route 0 decodes with the url alone, and NO key path",
+    missed.id === 0 && missed.keys.length === 0 && JSON.stringify(missed.payload) === JSON.stringify(["dev.kaya.aurora.notes://nope"]));
+
+  // THE DISPATCH: by route id, NOT one-shot, and the two drops.
+  fire(wire.parse_occurrence(linkBytes(1, "dev.kaya.aurora.notes://task/t2?focus=notes", [["key", "t2"], ["focus", "notes"]])));
+  fire(wire.parse_occurrence(linkBytes(1, "dev.kaya.aurora.notes://task/t1", [["key", "t1"]])));
+  fire(wire.parse_occurrence(linkBytes(2, "dev.kaya.aurora.notes://today", [["section", "today"]])));
+  check("a link reaches the handler its route declared, with the captures",
+    linkSeen[0]?.[0] === "task" && linkSeen[0]?.[1]!["key"] === "t2");
+  check("the query's pairs join the params", linkSeen[0]?.[1]!["focus"] === "notes");
+  check("the registration does NOT retire", linkSeen[1]?.[1]!["key"] === "t1");
+  check("a second route dispatches to its own handler", linkSeen[2]?.[0] === "section" && linkSeen[2]?.[1]!["section"] === "today");
+
+  // TWO DROPS WITH DISJOINT CAUSES. A route that MATCHED and reached no
+  // handler is this binding's to announce, naming its own registrar;
+  // route 0 is a URL NO ROUTE TOOK, which the core already announced
+  // naming every declared pattern, so the binding says nothing — two
+  // lines for one event teaches a reader to distrust both.
+  const linkDropped = captureStderr(() => { fire(wire.parse_occurrence(linkBytes(9, "dev.kaya.aurora.notes://task/t2", [["key", "t2"]]))); });
+  check("a route this process never declared reaches nothing", linkSeen.length === 3);
+  check("and announces the drop, naming the url and the route",
+    linkDropped.trim() === "kaya: link dev.kaya.aurora.notes://task/t2 matched route 9 and reached no handler — none is registered for it (kaya.link)");
+  const zeroSaid = captureStderr(() => { fire(wire.parse_occurrence(linkBytes(0, "dev.kaya.aurora.notes://nope", []))); });
+  check("route 0 is delivered and SILENT — the core announced that miss", zeroSaid.trim() === "" && linkSeen.length === 3);
+
   // THE PREFERENCES STORE AND THE DATA DIRECTORY (docs/tasks-s4-plan.md
   // P1/P2/P3), through the REAL FLOOR: everything above queues records
   // and never enters the core, but a pref call reaches the platform's own

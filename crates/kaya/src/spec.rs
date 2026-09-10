@@ -1467,6 +1467,25 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   reminder that was cleared). No answer follows; an unknown \
                   id is ignored.",
         },
+        Record {
+            kind: 54,
+            name: "declare_link_route",
+            fields: &[f("route", FieldTy::U64), f("pattern", FieldTy::Value)],
+            payload: None,
+            doc: "Declare one app-link route (docs/app-links-plan.md §4): \
+                  `route` is the app's own id for it, `pattern` a Str. The \
+                  MATCH HAPPENS ONCE, IN THE CORE — the patterns come here \
+                  so a URL the platform hands over is turned into a route \
+                  and its captures by one matcher rather than by nine. \
+                  The grammar: segments split on `/`, a literal segment \
+                  matches itself, `{name}` captures one segment. REFUSED AT \
+                  THE DECLARATION, a fault like every other declaration \
+                  refusal: an empty pattern, an empty segment, a brace a \
+                  segment never closes, and a pattern already declared. \
+                  Routes are declared at startup, before or inside the \
+                  app's first transaction: the core matches a link that \
+                  STARTED the process once that transaction lands.",
+        },
     ],
     apply: &[
         Record {
@@ -2662,6 +2681,32 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   remember it). Dismissal is not an outcome: two platforms \
                   never report it. The id retires here.",
         },
+        Record {
+            kind: 28,
+            name: "link_opened",
+            fields: &[
+                f("route", FieldTy::U64),
+                f("url", FieldTy::Value),
+                f("params", FieldTy::Values),
+            ],
+            payload: None,
+            doc: "The platform handed this app a URL (docs/app-links-plan.md \
+                  §4). `route` is the DECLARED id of the pattern that \
+                  matched — 0 when none did, and then `params` is empty and \
+                  the core has already ANNOUNCED the miss on stderr naming \
+                  the URL and every pattern it tried (the standing \
+                  silent-drop rule). `url` is the URL as the platform \
+                  delivered it, unparsed. `params` is a flat list of Str \
+                  values read in PAIRS, name then value — the grouping-is-the-encoding \
+                  shape file_dialog_result reads in threes: the pattern's \
+                  captures first, then the query's own pairs, and a capture \
+                  WINS a name clash. The fragment is dropped.\n\n\
+                  ONE OCCURRENCE FOR BOTH DOORS: a link that reached a \
+                  RUNNING process and a link that STARTED one arrive here \
+                  the same way — the second waits in the core's early queue \
+                  and is delivered first, once the app's first transaction \
+                  has landed and its routes are declared.",
+        },
     ],
     enums: &[
         EnumSpec {
@@ -3174,6 +3219,7 @@ mod tests {
             ("set_reorderable", wire::TX_SET_REORDERABLE),
             ("show_notification", wire::TX_SHOW_NOTIFICATION),
             ("cancel_notification", wire::TX_CANCEL_NOTIFICATION),
+            ("declare_link_route", wire::TX_DECLARE_LINK_ROUTE),
         ];
         assert_eq!(pins.len(), SPEC.tx.len());
         for (name, kind) in pins {
@@ -3263,6 +3309,7 @@ mod tests {
                 ("time_changed", crate::ring::REC_TIME_CHANGED),
                 ("value_committed", crate::ring::REC_VALUE_COMMITTED),
                 ("notification_result", crate::ring::REC_NOTIFICATION_RESULT),
+                ("link_opened", crate::ring::REC_LINK_OPENED),
             ]
         );
     }

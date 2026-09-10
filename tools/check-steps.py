@@ -1777,6 +1777,12 @@ RELAUNCH = "relaunch"
 # artifact the way a user would, with nothing pending. Held here so the
 # grammar and the three harnesses' parsers cannot drift apart.
 RELAUNCH_DOORS = {"launch"}
+# THE ONE DOOR WITH AN ARGUMENT (docs/app-links-plan.md L5): `relaunch
+# link "<url>"` — the runner starts the app THROUGH the platform with
+# that URL, and act one prints it on the `KAYA_RELAUNCH:` line for the
+# runner to read. Held here so the grammar and the three harnesses'
+# parsers cannot drift apart.
+RELAUNCH_DOOR_WITH_URL = "link"
 # The env names the core exports and each harness reads; the state roots
 # it alone may spell.
 ACT2_ENV = ("KAYA_ACT2_DIR", "KAYA_ACT2_VERDICT")
@@ -1832,6 +1838,33 @@ ACT2_READERS = {
 }
 
 
+def relaunch_shape(words, line):
+    """Why this `relaunch` line is malformed, or None.
+
+    Three shapes and no fourth: bare (the notification door), one of
+    RELAUNCH_DOORS (the plain one), and `link "<url>"` — the only door
+    that carries an argument, and the URL must be QUOTED, since the
+    three harnesses read it back with their quoted-string readers.
+    """
+    if len(words) == 1:
+        return None
+    door = words[1]
+    if door == RELAUNCH_DOOR_WITH_URL:
+        rest = line.split(None, 2)[2] if len(words) > 2 else ""
+        if not (rest.startswith('"') and rest.endswith('"') and len(rest) > 2):
+            return (f"`relaunch {RELAUNCH_DOOR_WITH_URL}` takes ONE quoted "
+                    f"URL — the runner hands it to the platform and act one "
+                    f"prints it on its `KAYA_RELAUNCH:` line — not "
+                    f"{line!r}")
+        return None
+    if len(words) > 2 or door not in RELAUNCH_DOORS:
+        return (f"`relaunch` takes no argument (the notification door), "
+                f"one of {sorted(RELAUNCH_DOORS)} (the plain one) or "
+                f"`{RELAUNCH_DOOR_WITH_URL} \"<url>\"` (the platform "
+                f"starts the app with that link), not {line!r}")
+    return None
+
+
 def relaunch_scenes(step_files):
     """(scene -> act-two statement count) and the shape findings."""
     scenes, bad = {}, []
@@ -1848,12 +1881,9 @@ def relaunch_scenes(step_files):
             # harnesses split the script on the same first-word rule.
             words = line.split()
             if words[:1] == [RELAUNCH]:
-                if len(words) > 2 or (len(words) == 2
-                                      and words[1] not in RELAUNCH_DOORS):
-                    bad.append(f"{path}:{n + 1}: `relaunch` takes no "
-                               f"argument (the notification door) or one "
-                               f"of {sorted(RELAUNCH_DOORS)} (the plain "
-                               f"one), not {line!r}")
+                why = relaunch_shape(words, line)
+                if why:
+                    bad.append(f"{path}:{n + 1}: {why}")
                     continue
                 at.append(n)
             elif re.search(r"(^|;)\s*relaunch\b", line):
@@ -3928,6 +3958,60 @@ IOS_LANE_TEXT = read_rel("tools/lib/lanes/ios.py")
 EXPORT_PROBE = read_rel("tools/ios/exportprobe/main.swift")
 
 
+def link_door_ios(text):
+    """THE LINK LEG IS THE SOLE CLAIMANT OF ITS SCHEME, AND SPRINGBOARD'S
+    ONE QUESTION IS ANSWERED (docs/app-links-plan.md L5; docs/traps.md,
+    2026-09-09). Both halves fail SILENTLY on the device:
+
+    Every kaya bundle declares the SAME scheme — it defaults to the
+    declared id — and neither door takes a bundle argument, so with a
+    second claimant installed `UIApplication.open` and `simctl openurl`
+    resolve to the platform's pick and this app is handed nothing. That
+    was measured: the links leg's own act one read `entries 0` where the
+    scene wanted 1.
+
+    And the first `openurl` on a device raises `Open in "<app>"?`, exits
+    0, prints nothing and delivers nothing; every unanswered call queues
+    another alert. The lane's own driver answers it once.
+
+    Findings, never a skip: a reader that cannot see the functions says
+    so.
+    """
+    bad = []
+    for fn in ("sole_claimant", "link_door"):
+        if f"def {fn}(" not in text:
+            bad.append(f"tools/ios/run-sim.py: no `{fn}` to read — the "
+                       f"link door's sweep and its SpringBoard answer "
+                       f"are what keep a link from reaching another "
+                       f"app's process with nothing saying so")
+    if bad:
+        return bad
+    if 'RELAUNCH_DOOR.get(scene) == "link"' not in text \
+            or "sole_claimant(" not in text.split("def link_door(")[0]:
+        bad.append("tools/ios/run-sim.py: nothing makes a link leg the "
+                   "SOLE CLAIMANT before act one — `UIApplication.open` "
+                   "of the app's own scheme resolves through "
+                   "LaunchServices like anyone else's, and a second kaya "
+                   "bundle takes the link (measured 2026-09-09)")
+    door = text.split("def link_door(")[1].split("\ndef ")[0]
+    for want, why in (
+            ('ok, body = xcuidrive(udid, "sb_find Open")',
+             "never looks for SpringBoard's confirmation, which delivers "
+             "NOTHING while it stands and exits 0"),
+            ('"sb_tap Open"', "never answers SpringBoard's confirmation"),
+            ('still, body = xcuidrive(udid, "sb_find Open")',
+             "does not check that the alert is GONE after the tap — "
+             "every unanswered openurl queues another"),
+    ):
+        if want not in door:
+            bad.append(f"tools/ios/run-sim.py: link_door {why}")
+    if door.count("ask()") < 2:
+        bad.append("tools/ios/run-sim.py: link_door pushes the door once "
+                   "— the call that RAISED the alert delivered nothing, "
+                   "so the door has to be pushed again after the tap")
+    return bad
+
+
 def ios_applied(hits, label, want=1):
     print(f"check-steps: iOS self-test {label} applied {hits} "
           f"substitution(s)")
@@ -3968,6 +4052,38 @@ def picker_selftest(runner_text, want, label,
         selftest_fail(f"{label} failed for another reason: "
                       + "\n".join(out))
 
+
+# THE LINK DOOR'S TWO SILENT HALVES (link_door_ios above), on the real
+# file first and then on three doctored copies.
+_link_bad = link_door_ios(RUN_SIM)
+if _link_bad:
+    print("\n".join(_link_bad), file=sys.stderr)
+    status = 1
+print("check-steps: the iOS link door: sole claimant before act one, "
+      "SpringBoard's one question answered")
+
+_doc, _hits = sub_count(r'RELAUNCH_DOOR\.get\(scene\) == "link"',
+                        'RELAUNCH_DOOR.get(scene) == "nosuchdoor"',
+                        RUN_SIM)
+ios_applied(_hits, "the link leg's sole-claimant sweep")
+if not any("SOLE CLAIMANT" in b for b in link_door_ios(_doc)):
+    selftest_fail("a link leg that shares its scheme with every other "
+                  "kaya bundle passed")
+
+_doc, _hits = sub_count(r'ok, body = xcuidrive\(udid, "sb_find Open"\)',
+                        "ok, body = (False, \"\")", RUN_SIM)
+ios_applied(_hits, "the SpringBoard confirmation lookup")
+if not any("never looks for SpringBoard" in b
+           for b in link_door_ios(_doc)):
+    selftest_fail("a link door blind to SpringBoard's confirmation "
+                  "passed")
+
+_doc, _hits = sub_count(r'        still, body = xcuidrive\(udid, "sb_find Open"\)\n',
+                        "        still = False\n", RUN_SIM)
+ios_applied(_hits, "the post-tap alert check")
+if not any("GONE after the tap" in b for b in link_door_ios(_doc)):
+    selftest_fail("a link door that never checks the alert is gone "
+                  "passed")
 
 # A clipboard leg moved onto the lockless pad must fail...
 doc, hits = sub_count(r"(?m)^PAD_EXTRAS = \{\n",
@@ -4081,7 +4197,12 @@ picker_selftest(doc, "does not use bounded simctl uninstalls and "
                      "verify",
                 "a cleanup that deletes a whole simulator")
 
-doc, hits = sub_count(r'"uninstall", udid,', '"uninstall", "booted",',
+# ANCHORED ON picker_cleanup's OWN CALL: the link leg's sole-claimant
+# sweep spells a second bounded uninstall a few lines below (its own
+# clause), and an unanchored perturbation would apply to both and prove
+# nothing about either.
+doc, hits = sub_count(r'"uninstall", udid,\n                bundle\]',
+                      '"uninstall", "booted",\n                bundle]',
                       RUN_SIM)
 ios_applied(hits, "the bounded per-device uninstall")
 picker_selftest(doc, "does not use bounded simctl uninstalls and "

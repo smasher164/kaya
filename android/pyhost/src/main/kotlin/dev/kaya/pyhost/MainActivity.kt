@@ -7,6 +7,7 @@ import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import dev.kaya.KayaCompose
+import dev.kaya.KayaEnv
 import dev.kaya.KayaPy
 import dev.kaya.KayaRing
 import java.io.File
@@ -29,18 +30,9 @@ class MainActivity : ComponentActivity() {
         installSplashScreen()
         super.onCreate(savedInstanceState)
 
-        // KAYA_* intent extras into libc's live environ BEFORE the
-        // interpreter starts: CPython snapshots environ at init, so
-        // os.environ sees these (unlike Go's runtime.envs, which reads
-        // a process entry a loaded library never gets).
-        intent.extras?.let { extras ->
-            for (key in extras.keySet()) {
-                if (key.startsWith("KAYA_")) {
-                    @Suppress("DEPRECATION")
-                    Os.setenv(key, extras.get(key).toString(), true)
-                }
-            }
-        }
+        // The KAYA_* extras into the live environment (KayaEnv, which
+        // says why it is called from BOTH doors).
+        KayaEnv.fromIntent(intent)
         // Python needs TMPDIR; Android sets it only from API 33.
         Os.setenv("TMPDIR", cacheDir.toString(), false)
 
@@ -106,15 +98,21 @@ class MainActivity : ComponentActivity() {
         return root
     }
 
-    // A TAP ON A DELIVERED NOTIFICATION reaches a running app here
-    // (docs/tasks-s3-plan.md §3): the content PendingIntent is addressed
-    // to this component with SINGLE_TOP, so the platform delivers the
-    // id as a new intent rather than re-creating the Activity. A COLD
-    // launch by tap is read by KayaCompose.mount off `getIntent()`.
+    // EVERY WARM ARRIVAL COMES THROUGH HERE, since the activity is
+    // `launchMode="singleTask"` for app links: a tapped notification
+    // (docs/tasks-s3-plan.md §3), a tapped link (docs/app-links-plan.md
+    // §4) and a plain explicit start with extras all land on this one
+    // door. `setIntent` FIRST — `getIntent()` answers the LAUNCH intent
+    // until it is called (docs/traps.md, measured on the probe) — then
+    // the env extras, then the two one-shot readers, each of which drops
+    // an intent that is not its own. The COLD halves are read by
+    // KayaCompose.mount off the activity's own intent.
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        KayaEnv.fromIntent(intent)
         KayaCompose.notificationIntent(intent)
+        KayaCompose.linkIntent(intent)
     }
 
     override fun dispatchKeyShortcutEvent(event: KeyEvent): Boolean =

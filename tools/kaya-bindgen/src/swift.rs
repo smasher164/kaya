@@ -620,6 +620,19 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("            }");
     c.line("            return (kind, id, [], nil, files, nil, nil, [])");
     c.line("        }");
+    // The URL and the params FLATTENED into the TAIL — the slot that
+    // already carries "the values after the key path" — url first, then
+    // name/value pairs (python.rs carries the reasoning).
+    c.line("        if kind == UInt16(KAYA_OCCURRENCE_LINK_OPENED) {");
+    c.line("            let urlLen = Int(raw.loadUnaligned(fromByteOffset: 20, as: UInt32.self))");
+    c.line("            let url = String(decoding: raw[24..<(24 + urlLen)], as: UTF8.self)");
+    c.line("            let parts = kayaParseRepresentation(raw, 24 + ((urlLen + 7) & ~7)).parts");
+    c.line("            var flat: [KayaValue] = [.str(url)]");
+    c.line("            for part in parts {");
+    c.line("                if case .str(let s) = part { flat.append(.str(s)) }");
+    c.line("            }");
+    c.line("            return (kind, id, [], nil, [], nil, nil, flat)");
+    c.line("        }");
     // Its own arm: the generic tail would take the CLIP KIND for a path
     // length and read the values header as a key.
     for name in crate::clip_answer_occurrence_names(spec) {

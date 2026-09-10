@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0x605e18f72b2af791n;
+export const SPEC_HASH = 0x1960b216df673c1fn;
 
 export const VALUE_BOOL = 1;
 export const VALUE_I64 = 2;
@@ -248,6 +248,7 @@ export const TX_SET_DROP_TARGET = 50;
 export const TX_SET_REORDERABLE = 51;
 export const TX_SHOW_NOTIFICATION = 52;
 export const TX_CANCEL_NOTIFICATION = 53;
+export const TX_DECLARE_LINK_ROUTE = 54;
 export const APPLY_CREATE = 1;
 export const APPLY_SET_PROP = 2;
 export const APPLY_ADD_CHILD = 3;
@@ -315,6 +316,7 @@ export const OCC_DATE_CHANGED = 24;
 export const OCC_TIME_CHANGED = 25;
 export const OCC_VALUE_COMMITTED = 26;
 export const OCC_NOTIFICATION_RESULT = 27;
+export const OCC_LINK_OPENED = 28;
 
 const text_encoder = new TextEncoder();
 const text_decoder = new TextDecoder("utf-8", { fatal: true });
@@ -683,6 +685,11 @@ export function tx_show_notification(notification: number, at: number, title: Wi
 /** Withdraw a pending or delivered notification by id (a reminder that was cleared). No answer follows; an unknown id is ignored. */
 export function tx_cancel_notification(notification: number): Uint8Array {
   return record(TX_CANCEL_NOTIFICATION, cat(u64(notification)));
+}
+
+/** Declare one app-link route (docs/app-links-plan.md §4): `route` is the app's own id for it, `pattern` a Str. The MATCH HAPPENS ONCE, IN THE CORE — the patterns come here so a URL the platform hands over is turned into a route and its captures by one matcher rather than by nine. The grammar: segments split on `/`, a literal segment matches itself, `{name}` captures one segment. REFUSED AT THE DECLARATION, a fault like every other declaration refusal: an empty pattern, an empty segment, a brace a segment never closes, and a pattern already declared. Routes are declared at startup, before or inside the app's first transaction: the core matches a link that STARTED the process once that transaction lands. */
+export function tx_declare_link_route(route: number, pattern: WireValue): Uint8Array {
+  return record(TX_DECLARE_LINK_ROUTE, cat(u64(route), enc.value(pattern)));
 }
 
 /** A civil date as the wire's I64: year * 10000 + month * 100 + day. */
@@ -1513,7 +1520,7 @@ export function parse_occurrence(buf: Uint8Array): Occurrence {
   const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   const size = view.getUint32(0, true);
   const kind = view.getUint16(4, true);
-  if (![OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT].includes(kind)) return { kind, id: null, keys: [], payload: null };
+  if (![OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED].includes(kind)) return { kind, id: null, keys: [], payload: null };
   if (kind === OCC_ALERT_RESULT) {
     // A request's one answer: id + the u32 code.
     return { kind, id: read_u64(buf, 8), keys: [], payload: read_u32(buf, 16) };
@@ -1535,6 +1542,20 @@ export function parse_occurrence(buf: Uint8Array): Occurrence {
       files.push([handle as number, name as string, local_path as string]);
     }
     return { kind, id: dialog, keys: [], payload: files };
+  }
+  if (kind === OCC_LINK_OPENED) {
+    const route = read_u64(buf, 8);
+    let v: Decoded;
+    let at: number;
+    [v, at] = parse_value(buf, 16);
+    const flat: Decoded[] = [v];
+    const count = read_u32(buf, at);
+    at += 8; // past the values count and its reserved word
+    for (let i = 0; i < count; i++) {
+      [v, at] = parse_value(buf, at);
+      flat.push(v);
+    }
+    return { kind, id: route, keys: [], payload: flat };
   }
   if (kind === OCC_CLIPBOARD_RESULT) {
     const request = read_u64(buf, 8);

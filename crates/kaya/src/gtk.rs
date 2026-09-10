@@ -1981,19 +1981,84 @@ struct GtkLabeledRow {
 const BOXED_LIST_CLASS: &str = "boxed-list";
 
 /// THE LABEL WEIGHTS ARE KAYA'S, NOT GNOME'S (the maintainer's ruling,
-/// 2026-09-09, on the S4 review page): Adwaita draws every button's label
-/// bold and libadwaita's `.title` draws the header-bar title bold, and the
-/// other four backends draw both regular. ONE RULE at APPLICATION priority,
-/// beside the `:root { font-family }` one — the button arm reaches the label
-/// as well as the button because Adwaita's own weight is inherited, and the
-/// title arm is scoped to the header bar so libadwaita's `.title` typography
-/// class keeps its weight anywhere else. `.heading` is untouched: that is
-/// kaya's OWN heading role and is meant to be bold (docs/deferred.md, the
+/// 2026-09-09, on the S4 review page, AMENDED the same day): Adwaita draws
+/// every button's label bold and libadwaita's `.title` draws the header-bar
+/// title bold, and the other four backends draw the buttons medium and the
+/// title SEMIBOLD. ONE RULE at APPLICATION priority, beside the
+/// `:root { font-family }` one — the button arm reaches the label as well as
+/// the button because Adwaita's own weight is inherited, and the title arm is
+/// scoped to the header bar so libadwaita's `.title` typography class keeps
+/// its weight anywhere else.
+///
+/// THESE ARE WISHES, NOT WEIGHTS. They are what kaya asks for; what it ends
+/// up asking a particular font for is `weight_css_for`'s answer, because a
+/// weight the app's own variable font has no NAMED INSTANCE for does not
+/// fall back — it ABORTS the process (docs/traps.md, docs/deferred.md's
 /// bold-labels POLISH entry).
-const WEIGHT_CSS: &str = "\
-button, button label { font-weight: normal; }
-headerbar label.title, windowtitle label.title { font-weight: normal; }
-";
+const WEIGHT_WISHES: &[(&str, u16)] = &[
+    ("button, button label", 500),
+    ("headerbar label.title, windowtitle label.title", 600),
+    ("label.heading", 500),
+];
+
+/// The weight sheet kaya actually installs: every wish above at the nearest
+/// weight the app's brand font really carries, or at the wish itself when no
+/// variable brand font is in play (a static family fuzzy-matches, so the
+/// wish is safe there).
+///
+/// WHY THE CLAMP EXISTS, measured 2026-09-09: fontconfig enumerates a
+/// variable font's NAMED INSTANCES, never its continuous axis, so a CSS
+/// `font-weight` that matches no instance fails the match and pango aborts
+/// inside layout — `pango_fc_font_map_get_face: assertion failed: (res ==
+/// FcResultMatch)` — with no verdict and no window. The vendored
+/// guests/assets/fonts/sora-wght.ttf carries 100/200/300/400/600/700/800 and
+/// no Medium, so the ruled 500 killed all sixteen `typeface` legs of one
+/// matrix. Editing the font is refused by its OFL reserved name, and a
+/// user's own font could lack any weight, so the fix lives here.
+fn weight_css_for(instances: Option<&[u16]>) -> String {
+    let mut css = String::new();
+    for (selector, wish) in WEIGHT_WISHES {
+        let weight = match instances {
+            Some(have) => nearest_weight(*wish, have),
+            None => *wish,
+        };
+        css.push_str(&format!("{selector} {{ font-weight: {weight}; }}\n"));
+    }
+    css
+}
+
+/// The nearest named instance to a wish, TIES TO THE HEAVIER — a wish that
+/// sits exactly between two faces reads as the emphasis it asked for rather
+/// than one rung below it (Sora's 500 becomes 600, not 400).
+fn nearest_weight(wish: u16, instances: &[u16]) -> u16 {
+    instances
+        .iter()
+        .copied()
+        .min_by_key(|have| (have.abs_diff(wish), std::cmp::Reverse(*have)))
+        .unwrap_or(wish)
+}
+
+/// A font file's `wght` NAMED INSTANCES, ascending. `None` when the bytes are
+/// not a font this process can read, carry no `fvar`, or vary on no weight
+/// axis — every one of which means "nothing here constrains the wish".
+///
+/// skrifa AND NOT A HAND-ROLLED fvar WALK: it is already this crate's font
+/// parser (the canvas outlines with it), so the tree keeps ONE, and its
+/// readers are bounds-checked over untrusted bytes the app handed in.
+fn wght_named_instances(bytes: &[u8]) -> Option<Vec<u16>> {
+    use skrifa::MetadataProvider;
+    let font = skrifa::raw::FontRef::new(bytes).ok()?;
+    let axis = font.axes().iter().position(|axis| axis.tag() == skrifa::Tag::new(b"wght"))?;
+    let mut found: Vec<u16> = font
+        .named_instances()
+        .iter()
+        .filter_map(|instance| instance.user_coords().nth(axis))
+        .map(|coord| coord.round().clamp(1.0, 1000.0) as u16)
+        .collect();
+    found.sort_unstable();
+    found.dedup();
+    (!found.is_empty()).then_some(found)
+}
 
 /// The table's column gap — the one number every synthesized tier
 /// spells (docs/tables-plan.md decision 6; SwiftUI and Compose say 24
@@ -3404,6 +3469,10 @@ struct CoreState {
     /// appearance notify handler, so a `font-family` parked there would vanish
     /// the first time the session flipped light/dark, with no error anywhere.
     typeface_css: gtk4::CssProvider,
+    /// The label weights. ITS OWN PROVIDER AND KEPT, unlike the other static
+    /// sheets: the weights depend on the brand font's named instances, so a
+    /// SetTypeface carrying font bytes rewrites it (see `weight_css_for`).
+    weight_css: gtk4::CssProvider,
     /// The family THIS platform asked for (the `linux` row of the request, or
     /// its default), kept because the read needs BOTH numbers: a resolved
     /// family that is not the request means either "the rule applied and
@@ -10200,6 +10269,29 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 &typeface_css_for(&family),
                 &core.css_error,
             );
+            // AND THE WEIGHTS WITH IT: kaya's own sheet asks this font only
+            // for weights it has a named instance for, or it aborts inside
+            // pango's layout (weight_css_for). Re-lowered on EVERY request,
+            // so a later one carrying no font puts the wishes back.
+            let instances =
+                request.font.as_ref().and_then(|blob| wght_named_instances(&blob.0));
+            if let Some(have) = &instances {
+                kaya_diag!(
+                    "KAYA_DIAG brand typeface: {family:?} carries named weights {have:?}; \
+                     kaya's sheet asks for {}",
+                    WEIGHT_WISHES
+                        .iter()
+                        .map(|(_, wish)| nearest_weight(*wish, have).to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+            }
+            load_kaya_css(
+                &core.weight_css,
+                "label weights",
+                &weight_css_for(instances.as_deref()),
+                &core.css_error,
+            );
         }
         ApplyOp::SetBrand { accent } => {
             // libadwaita's documented app override, written into kaya's own
@@ -12362,6 +12454,91 @@ fn recorder_held() -> Vec<(String, String, String, String)> {
 }
 
 #[cfg(test)]
+mod weight_tests {
+    use super::{WEIGHT_WISHES, nearest_weight, weight_css_for, wght_named_instances};
+
+    #[test]
+    fn gtk_weights_clamp_to_the_brand_font_named_instances() {
+        // THE REAL VENDORED BYTES, through the core's own resolver — the
+        // reserved default face IS guests/assets/fonts/sora-wght.ttf,
+        // compiled in (crates/kaya/src/assets.rs). Never a second
+        // `include_bytes!` of that path: the resolution rule lives in one
+        // place (tools/check-assets.py's C3) and a fixture would measure a
+        // font the `typeface` scene does not ship.
+        let sora = crate::assets::font_bytes("").expect("the reserved default face");
+        // MEASURED, not assumed: Sora varies on `wght` from 100 to 800 and
+        // names seven instances, with NO Medium. fontconfig enumerates these
+        // and nothing between them.
+        let have = wght_named_instances(&sora).expect("sora is a wght variable font");
+        assert_eq!(have, vec![100, 200, 300, 400, 600, 700, 800]);
+
+        // The gap the abort came out of, and the tie rule: exactly between
+        // 400 and 600, kaya asks for the HEAVIER.
+        assert_eq!(nearest_weight(500, &have), 600);
+        // A weight the font has is left alone, heavy or light.
+        assert_eq!(nearest_weight(600, &have), 600);
+        assert_eq!(nearest_weight(700, &have), 700);
+        assert_eq!(nearest_weight(100, &have), 100);
+        // Not a tie: 450 is nearer 400 than 600, so the tie rule does not
+        // fire and the answer is the lighter face.
+        assert_eq!(nearest_weight(450, &have), 400);
+
+        // The sheet the process installs against this font names only
+        // instances it carries — the whole guard, end to end.
+        let sheet = weight_css_for(Some(&have));
+        assert!(sheet.contains("button, button label { font-weight: 600; }"), "{sheet}");
+        assert!(
+            sheet.contains(
+                "headerbar label.title, windowtitle label.title { font-weight: 600; }"
+            ),
+            "{sheet}"
+        );
+        assert!(sheet.contains("label.heading { font-weight: 600; }"), "{sheet}");
+        for line in sheet.lines() {
+            let weight: u16 = line
+                .rsplit_once("font-weight: ")
+                .and_then(|(_, rest)| rest.trim_end_matches(" }").trim_end_matches(';').parse().ok())
+                .unwrap_or_else(|| panic!("every rule names a number: {line}"));
+            assert!(have.contains(&weight), "{weight} is not a named instance: {line}");
+        }
+    }
+
+    #[test]
+    fn gtk_weights_stand_at_the_wish_with_no_variable_brand_font() {
+        // A real sfnt this process can parse that simply has no `fvar`
+        // (numTables = 0), the bytes of no font at all, and the empty blob:
+        // three different ways to have nothing to clamp against, one answer.
+        let bare: Vec<u8> = [0x00, 0x01, 0x00, 0x00u8]
+            .iter()
+            .chain([0u8; 8].iter())
+            .copied()
+            .collect();
+        for (what, bytes) in
+            [("no fvar", bare.as_slice()), ("not a font", b"kaya".as_slice()), ("empty", b"")]
+        {
+            assert!(wght_named_instances(bytes).is_none(), "{what} constrains nothing");
+        }
+        let sheet = weight_css_for(None);
+        for (selector, wish) in WEIGHT_WISHES {
+            assert!(
+                sheet.contains(&format!("{selector} {{ font-weight: {wish}; }}")),
+                "the wish stands: {sheet}"
+            );
+        }
+        // And the wishes ARE the ruled ones, so a silent re-ruling of the
+        // sheet cannot pass this test unnoticed.
+        assert_eq!(
+            WEIGHT_WISHES,
+            &[
+                ("button, button label", 500),
+                ("headerbar label.title, windowtitle label.title", 600),
+                ("label.heading", 500),
+            ]
+        );
+    }
+}
+
+#[cfg(test)]
 mod frame_tests {
     use super::{
         FrameMemory, clamp_frame, frame_line, frame_remembered, parse_frame,
@@ -12497,13 +12674,41 @@ fn request_exit(code: i32) {
     });
 }
 
+/// The URL's door on this backend (docs/app-links-plan.md §4). `gio open`
+/// reaches a RUNNING instance as `org.freedesktop.Application.Open` on the
+/// app's own bus name in 2-6 ms, and reaches a stopped one through D-Bus
+/// activation in 44-49 ms — measured 2026-09-09, both delivering the URI
+/// byte for byte through GFile, query and fragment intact, so nothing here
+/// re-encodes anything.
+///
+/// A COLD activation runs `startup, activate, open`: a D-Bus service file
+/// carries no field code, so the process starts with empty argv,
+/// `g_application_run()` activates, and the queued `Open` lands a fraction
+/// of a millisecond later. That is the order this backend needs — the
+/// whole core is built inside `connect_activate` below — and it is why the
+/// service file must never gain `--gapplication-service`, which suppresses
+/// `activate` entirely (tools/lib/packaging/linux.py refuses it). The link
+/// therefore always arrives with the default scene already asked for,
+/// which is what crate::links's early queue is for.
+fn install_link_route(app: &gtk4::Application) {
+    app.connect_open(|_, files, _hint| {
+        for file in files {
+            crate::links::opened(&file.uri());
+        }
+    });
+}
+
 /// The main-thread half, independent of who owns the app thread. Returns
 /// the exit code; the host process decides how to exit.
 pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
     // THE APP'S OWN ID, out of the one declaration (docs/tasks-s3-plan.md
     // N4): the name the desktop attributes a window to AND the name it
     // remembers a notification under, so a click can D-Bus-activate us.
-    let mut builder = gtk4::Application::builder();
+    // AND THE LINK DOOR'S FLAG (docs/app-links-plan.md §4): a
+    // GApplication built with FLAGS_NONE has no `open` signal to receive a
+    // URL on at all, and org.freedesktop.Application.Open is refused
+    // before any arm of ours could run.
+    let mut builder = gtk4::Application::builder().flags(gio::ApplicationFlags::HANDLES_OPEN);
     if let Some(id) = app_identity_id() {
         builder = builder.application_id(&id);
     }
@@ -12516,6 +12721,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
     // core's own sink, since a rust-native backend answers where its guest
     // listens and never through capi's presentation slot.
     install_notification_routes(&app, occ_tx.clone());
+    install_link_route(&app);
 
     // activate can fire more than once; the core is set up once.
     let ends = Rc::new(RefCell::new(Some((occ_tx, tx_rx))));
@@ -12600,10 +12806,12 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
         let badge_css = gtk4::CssProvider::new();
         watch_css_errors(&badge_css, &css_error);
         load_kaya_css(&badge_css, "section badge", BADGE_CSS, &css_error);
-        // The label weights, static for the same reason.
+        // The label weights, at the WISH until a brand font says otherwise
+        // (weight_css_for). Kept in CoreState, not handed to the display and
+        // forgotten, because a SetTypeface with font bytes rewrites it.
         let weight_css = gtk4::CssProvider::new();
         watch_css_errors(&weight_css, &css_error);
-        load_kaya_css(&weight_css, "label weights", WEIGHT_CSS, &css_error);
+        load_kaya_css(&weight_css, "label weights", &weight_css_for(None), &css_error);
         if let Some(display) = gtk4::gdk::Display::default() {
             gtk4::style_context_add_provider_for_display(
                 &display,
@@ -12814,6 +13022,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 brand,
                 brand_css,
                 typeface_css,
+                weight_css,
                 typeface_request: None,
                 #[cfg(feature = "harness")]
                 typeface_said: RefCell::new(None),
@@ -15914,6 +16123,49 @@ impl crate::harness::Stage for GtkStage {
             );
         }
     }
+    /// The warm door, from inside the process: this app's OWN desktop
+    /// entry launched with the URI, which GLib turns into
+    /// `org.freedesktop.Application.Open` on our bus name because the
+    /// entry the generator writes carries `DBusActivatable=true` — the
+    /// same method call `gio open` makes, 2-6 ms (measured 2026-09-09).
+    ///
+    /// OUR ENTRY AND NOT THE DEFAULT HANDLER: every kaya guest claims the
+    /// same scheme (it defaults to the declared id), so on a machine with
+    /// two of them installed the default is an undefined pick and the
+    /// verb would open somebody else with rc 0. The COLD door is what
+    /// measures the registration — `gio open` there does resolve through
+    /// mimeapps.list — so nothing is lost by pinning this half.
+    fn open_link(&self, url: &str) {
+        let url = url.to_owned();
+        Self::on_main(move |_core| {
+            let entry = app_identity_id().map(|id| format!("{id}.desktop"));
+            let mine = entry.as_ref().and_then(|entry| {
+                gio::AppInfo::all()
+                    .into_iter()
+                    .find(|info| info.id().as_deref() == Some(entry.as_str()))
+            });
+            let launched = match (&entry, &mine) {
+                (_, Some(info)) => info.launch_uris(&[&url], gio::AppLaunchContext::NONE),
+                // NOT A SILENT FALLBACK: the sentence says which door was
+                // taken and why, because the two answer differently only
+                // when another app claims the scheme.
+                (entry, None) => {
+                    kaya_diag!(
+                        "KAYA_DIAG open_link {url}: no {} among the {} entries this \
+                         XDG_DATA_HOME registers, so the platform's DEFAULT handler for \
+                         the scheme is asked instead",
+                        entry.as_deref().unwrap_or("<app with no declared id>"),
+                        gio::AppInfo::all().len()
+                    );
+                    gio::AppInfo::launch_default_for_uri(&url, gio::AppLaunchContext::NONE)
+                }
+            };
+            if let Err(why) = launched {
+                kaya_diag!("KAYA_DIAG open_link {url}: {why}");
+            }
+        })
+    }
+
     fn alert_title(&self, window: u64) -> Option<String> {
         Self::on_main(move |core| {
             let live = core.live_alert.borrow();

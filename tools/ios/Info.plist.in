@@ -84,6 +84,14 @@
     <array>
         <string>UIInterfaceOrientationPortrait</string>
     </array>
+    <!-- THE APP-LINK SCHEME (docs/app-links-plan.md L1): without this key
+         iOS hands `<scheme>://...` to nobody, and `simctl openurl` exits 0
+         having delivered nothing. The scheme is the manifest's one rule -
+         `[links] scheme`, defaulting to the declared id - read through
+         tools/lib/packaging/identity.py, never retyped here. The macOS
+         bundle writes the same key from the same reader. -->
+    <key>CFBundleURLTypes</key>
+    @URLTYPES@
     <!-- THE LAUNCH SLOT (docs/tasks-s2-plan.md T4): what iOS draws
          between the tap and the first frame. BOTH KEYS NAME ASSET-CATALOG
          ENTRIES, and only one of them has a loose-file fallback —

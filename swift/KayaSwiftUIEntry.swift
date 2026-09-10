@@ -18,7 +18,16 @@ struct KayaApp: App {
     #endif
     var body: some Scene {
         WindowGroup {
-            KayaRoot()
+            #if os(macOS)
+                KayaRoot()
+            #else
+                // iOS IS THE OPPOSITE OF macOS (docs/traps.md, 2026-09-09):
+                // `.onOpenURL` is the ONLY door that fires here —
+                // `launchOptions[.url]` is always empty and
+                // `application(_:open:options:)` never runs — and a link
+                // reuses the one scene rather than building a second.
+                KayaRoot().onOpenURL { KayaHost.linkOpened($0.absoluteString) }
+            #endif
         }
         // Auxiliary surfaces: data-driven windows keyed by the kaya window id.
         // Never opened by the system — only the mount arm presents one; phones
@@ -57,7 +66,26 @@ final class KayaAppDelegate: NSObject, NSApplicationDelegate {
         kayaDeliverLaunchNotification()
     }
 
+    /// THE COLD LINK DOOR (docs/app-links-plan.md §4). A process
+    /// LaunchServices starts to OPEN A URL takes this path, and it must:
+    /// the raw kAEGetURL handler below is installed only once launching
+    /// has FINISHED, because a handler installed in
+    /// `applicationWillFinishLaunching` swallows the launch event and
+    /// SwiftUI's WindowGroup then opens NO WINDOW AT ALL — no root, no
+    /// interpreter pump, no harness, the app thread building its scene
+    /// into a window nobody ever draws (measured 2026-09-09, both halves
+    /// watched). `.onOpenURL` is not the answer either: it opens a second
+    /// window per link (docs/traps.md).
+    func application(_ application: NSApplication, open urls: [URL]) {
+        kayaDiag("link deleg urls=\(urls.map { $0.absoluteString })")
+        for url in urls { KayaHost.linkOpened(url.absoluteString) }
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // THE WARM LINK DOOR, INSTALLED HERE AND NOT EARLIER (see the
+        // arm above): from now on a link reaching this running process is
+        // taken before AppKit converts it, so no window is added for it.
+        kayaInstallLinkDoor()
         // PIXEL-PROOF RUNS ONLY (KAYA_ACTIVATE=1): AppKit renders an inactive
         // app's chrome grey, and macOS 14's cooperative activation ignores
         // another process's activate call, so the app must ask for itself.
@@ -111,3 +139,4 @@ public func kayaSwiftUIRun(_ api: UnsafePointer<KayaHostApi>) -> Int32 {
     KayaApp.main() // takes over the calling (main) thread; does not return
     return 0
 }
+

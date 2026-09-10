@@ -6,6 +6,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.UiModeManager
+import android.content.ActivityNotFoundException
 import android.content.BroadcastReceiver
 import android.content.ClipData
 import android.content.ClipDescription
@@ -1279,7 +1280,7 @@ object KayaCompose {
     // but only the runtime assert catches a stale compiled APK against
     // a new libkaya. ULong because the fingerprint's high bit is fair
     // game and a Kotlin Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0x605e18f72b2af791uL
+    private const val SPEC_HASH: ULong = 0x1960b216df673c1fuL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -1880,6 +1881,11 @@ object KayaCompose {
         // Read here, after startPump, so the occurrence has somewhere to
         // go; a warm tap arrives at the Activity's onNewIntent instead.
         notificationIntent(activity.intent)
+        // A COLD LAUNCH BY LINK, the same intent one field over
+        // (docs/app-links-plan.md §4): the URI rode in on the Activity's
+        // own intent, 38ms ahead of onCreate on the probe. After
+        // startPump for the notification arm's reason.
+        linkIntent(activity.intent)
         kayaParkedActivation?.let { parked ->
             kayaParkedActivation = null
             kayaNotificationActivated(parked)
@@ -1964,6 +1970,28 @@ object KayaCompose {
         }
         kayaNotificationActivated(id)
     }
+
+    /**
+     * A URL THE PLATFORM DELIVERED TO THIS APP (docs/app-links-plan.md
+     * §4): `onNewIntent` while the app is up, and [mount] off the
+     * activity's own intent for a cold launch. Handed over UNPARSED — the
+     * core owns the route matching, the queue for a link that beats the
+     * app thread, and the announced miss — so nothing is parked here.
+     */
+    @JvmStatic
+    fun linkIntent(intent: Intent?) {
+        if (intent == null) return
+        val url = kayaTakeLink({ intent.data?.toString() }, { intent.data = null })
+            ?: return
+        Log.i("kaya", "KAYA_LINK_OPENED: url=$url")
+        kayaLinksDelivered += 1
+        KayaPresent.linkOpened(url)
+    }
+
+    /** Links handed to the core, which `open_link` waits on — the
+     * platform's round trip is not this process's own act. */
+    @Volatile
+    private var kayaLinksDelivered = 0
 
     private fun kayaNotificationActivated(id: Long) {
         val context = mountedActivity?.applicationContext
@@ -3308,6 +3336,24 @@ object KayaCompose {
         return "no activation reached this process in 20000ms — the runner " +
             "expands the shade off the KAYA_REQUEST line, finds the row by its " +
             "title and taps it; activations=$kayaNotificationActivations"
+    }
+
+    /**
+     * The platform's round trip back into this process after `open_link`
+     * asked it to open the app's own scheme — measured at ~10ms warm on
+     * the probe. Null when a link landed; otherwise ONE sentence carrying
+     * the counter, which is all this can see: a URL that resolved to
+     * SOMETHING ELSE and a URL that resolved to nothing both read as no
+     * arrival here, and `startActivity` already refused the second.
+     */
+    private fun kayaAwaitLinkDelivery(before: Int): String? {
+        val deadline = System.nanoTime() + LINK_DELIVERY_MS * 1_000_000
+        while (System.nanoTime() < deadline) {
+            if (kayaLinksDelivered != before) return null
+            Thread.sleep(RETRY_PERIOD_MS)
+        }
+        return "the platform delivered no link back to this process in " +
+            "${LINK_DELIVERY_MS}ms; links=$kayaLinksDelivered"
     }
 
     /**
@@ -6176,6 +6222,11 @@ object KayaCompose {
     private const val DRAG_INJECT_MS = 1500
     private const val DRAG_ACK_MS = 20_000L
 
+    /** How long `open_link` waits for the platform to route the URL back
+     * into this process (docs/app-links-plan.md §2 measured ~10ms warm;
+     * this covers a loaded emulator, not the ordinary case). */
+    private const val LINK_DELIVERY_MS = 20_000L
+
     /** The request sequence, so the runner never runs one line twice. */
     private var kayaDragRequests = 0
     private const val RETRY_PERIOD_NS = RETRY_PERIOD_MS * 1_000_000
@@ -6812,6 +6863,44 @@ object KayaCompose {
                             }
                         }
                     }
+                    "open_link" -> {
+                        // THE PLATFORM'S OWN DOOR, ASKED FROM INSIDE THE
+                        // PROCESS (docs/app-links-plan.md L5): the VIEW
+                        // intent resolves through this app's own manifest
+                        // filter and comes back to this singleTask
+                        // activity's onNewIntent, so warm delivery is
+                        // measured through the door a user's tap takes
+                        // with no runner involved.
+                        // NARROWED TO THIS PACKAGE, AND IT HAS TO BE: the
+                        // scheme is the app's DECLARED ID, so all four
+                        // host APKs on one emulator claim the same one,
+                        // and a bare implicit VIEW then resolves to
+                        // ResolverActivity — the chooser lands on top,
+                        // `startActivity` still returns normally and no
+                        // link ever reaches the app (measured 2026-09-09,
+                        // docs/traps.md). setPackage narrows the
+                        // CANDIDATES; the filter still has to match, so
+                        // this door is the real one.
+                        val url = quoted(parts.drop(1))
+                        kayaAwaitQuiet()
+                        val answered = kayaBatches
+                        val delivered = kayaLinksDelivered
+                        val refused = onUi(activity) {
+                            try {
+                                activity.startActivity(
+                                    Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                                        .setPackage(activity.packageName))
+                                null
+                            } catch (e: ActivityNotFoundException) {
+                                "this package answers no ACTION_VIEW for it " +
+                                    "(${e.message}); the manifest filter claims the " +
+                                    "declared scheme"
+                            }
+                        }
+                        val off = refused ?: kayaAwaitLinkDelivery(delivered)
+                        if (off != null) failures.add("open_link $url: $off")
+                        else kayaAwaitAnswer(answered)
+                    }
                     "relaunch" -> {
                         // THE END OF ACT ONE (docs/tasks-s9-plan.md R6):
                         // this process leaves after its verdict, so the
@@ -6819,19 +6908,28 @@ object KayaCompose {
                         // point of S9. WHICH DOOR IS THE ARGUMENT
                         // (docs/tasks-s4-plan.md P5): none is the tap on
                         // the shade row, `launch` is the app started
-                        // again with nothing pending.
+                        // again with nothing pending, `link` is the URL
+                        // opened against a process that is gone
+                        // (docs/app-links-plan.md L5), and its argument
+                        // is the URL the runner hands the platform.
                         val door = parts.getOrNull(1) ?: "notify_tap"
+                        val linkUrl = if (door == "link") quoted(parts.drop(2)) else ""
                         val context = activity.applicationContext
                         val live =
                             if (door == "notify_tap") kayaLiveNotifications(context)
                             else emptyList()
                         val steps = actTwoSteps
                         when {
-                            door != "notify_tap" && door != "launch" -> failures.add(
-                                "relaunch $door: no harness opens a door by that name — " +
-                                    "`relaunch` is the notification's row in the shade and " +
-                                    "`relaunch launch` is the app started the way a user " +
-                                    "starts it")
+                            door != "notify_tap" && door != "launch" && door != "link" ->
+                                failures.add(
+                                    "relaunch $door: no harness opens a door by that name " +
+                                        "— `relaunch` is the notification's row in the " +
+                                        "shade, `relaunch launch` is the app started the " +
+                                        "way a user starts it, and `relaunch link \"<url>\"` " +
+                                        "is that URL opened against a process that is gone")
+                            door == "link" && linkUrl.isEmpty() -> failures.add(
+                                "relaunch link: the door takes the URL to open as its own " +
+                                    "argument, and this statement names none")
                             steps.isNullOrEmpty() -> failures.add(
                                 "relaunch: no step follows it, so act two is empty")
                             door == "notify_tap" && live.size != 1 -> failures.add(
@@ -6850,13 +6948,21 @@ object KayaCompose {
                                     // nothing but the word.
                                     Log.i(
                                         "kaya",
-                                        if (door == "launch") "KAYA_RELAUNCH: door launch"
-                                        else "KAYA_RELAUNCH: door notify_tap notification=" +
-                                            "${live[0].first} title=${live[0].second}",
+                                        when (door) {
+                                            "launch" -> "KAYA_RELAUNCH: door launch"
+                                            "link" -> "KAYA_RELAUNCH: door link url=$linkUrl"
+                                            else -> "KAYA_RELAUNCH: door notify_tap " +
+                                                "notification=${live[0].first} " +
+                                                "title=${live[0].second}"
+                                        },
                                     )
                                     observed.add(
-                                        if (door == "launch") "relaunch through a plain launch"
-                                        else "relaunch through notification ${live[0].first}")
+                                        when (door) {
+                                            "launch" -> "relaunch through a plain launch"
+                                            "link" -> "relaunch through the link $linkUrl"
+                                            else -> "relaunch through notification " +
+                                                "${live[0].first}"
+                                        })
                                     relaunching = true
                                 }
                             }
@@ -14219,6 +14325,30 @@ fun kayaSpelledSlider(value: Double): String {
     var s = String.format(java.util.Locale.ROOT, "%.6f", rounded).trimEnd('0').trimEnd('.')
     if (s.isEmpty() || s == "-" || s == "-0") s = "0"
     return s
+}
+
+// ---- app links (docs/app-links-plan.md) -------------------------------------
+
+/**
+ * THE ONE-SHOT READ of a delivered intent's URL, TOP-LEVEL AND PURE so
+ * the host JVM can drive it (KayaLinkIntentTest): the intent is behind
+ * the two lambdas because an Intent on a plain JVM is a stub that throws,
+ * and this sits outside [KayaCompose] because that object's own
+ * initializer wants a Looper.
+ *
+ * Two measured facts shape it (docs/traps.md, the app-links entries of
+ * 2026-09-09). A plain launch and a launcher tap BOTH arrive at
+ * `onNewIntent` with no data, so "an intent arrived" is not "a link
+ * arrived". And once `setIntent` has run, `getIntent()` keeps handing the
+ * same intent back at every later resume — so the URL is CLEARED as it is
+ * read, the notification arm's `removeExtra` one field over, or the app
+ * re-opens the same link every time it comes forward.
+ */
+internal fun kayaTakeLink(read: () -> String?, clear: () -> Unit): String? {
+    val url = read()
+    if (url.isNullOrEmpty()) return null
+    clear()
+    return url
 }
 
 // ---- the slider (docs/slider-plan.md) ---------------------------------------

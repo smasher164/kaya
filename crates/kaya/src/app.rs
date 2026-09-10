@@ -9,6 +9,7 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::marker::PhantomData;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
@@ -3190,7 +3191,12 @@ impl<'a> Tx<'a> {
             self.ctx.derived.borrow_mut().entry(collection).or_default().push(derived);
         }
         self.committed = true;
-        let ops = std::mem::take(&mut self.ops);
+        let mut ops = take_pending_routes();
+        if ops.is_empty() {
+            ops = std::mem::take(&mut self.ops);
+        } else {
+            ops.append(&mut self.ops);
+        }
         if self.ctx.transactions.send(ops).is_ok() {
             #[cfg(any(
                 target_os = "macos",
@@ -3912,6 +3918,10 @@ pub struct Messages<M> {
     /// times as the user likes, and the ledger is per window.
     undone: RefCell<HashMap<u64, Box<dyn Fn(String, crate::protocol::UndoDelta) -> M>>>,
     redone: RefCell<HashMap<u64, Box<dyn Fn(String, crate::protocol::UndoDelta) -> M>>>,
+    /// Per-route and PERSISTENT (docs/app-links-plan.md L2): the process
+    /// receives every link whether it was running or was started by one,
+    /// and a route never retires. Keyed by the route id the core matched.
+    links: RefCell<HashMap<u64, Box<dyn Fn(&LinkParams) -> M>>>,
     /// THE CANVAS'S DRAWING-AS-A-FUNCTION-OF-SIZE (docs/canvas-plan.md
     /// §3.2.1). Not a Mapper: these produce a DRAWING, not a message, so
     /// [`Messages::next`] answers them itself and keeps looping rather
@@ -3947,6 +3957,66 @@ bound at the show and no process-level handler is registered \
     let _ = std::io::stderr().write_all(line.as_bytes());
 }
 
+/// A link the CORE matched that reached no handler here — unreachable in
+/// normal use, since a route exists only because `Messages::link`
+/// registered one, and the other eight bindings print this sentence with
+/// their own registrar's name. Route 0 is the core's to announce.
+fn link_unhandled(url: &str, route: u64) {
+    use std::io::Write as _;
+    let line = format!(
+        "kaya: link {url} matched route {route} and reached no handler — none is \
+registered for it (Messages::link)\n"
+    );
+    let _ = std::io::stderr().write_all(line.as_bytes());
+}
+
+/// A matched link's params: the pattern's captures, then the query's own
+/// pairs, a capture winning a name clash (docs/app-links-plan.md §4). The
+/// URL itself is not re-parsed here — the core matched it once.
+pub struct LinkParams {
+    url: String,
+    pairs: Vec<(String, String)>,
+}
+
+impl LinkParams {
+    /// The value the pattern or the query gave this name, or `None`.
+    pub fn get(&self, name: &str) -> Option<&str> {
+        self.pairs
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, v)| v.as_str())
+    }
+
+    /// The URL as the platform delivered it — validate every parameter
+    /// against your own model, which is Apple's own guidance and the
+    /// reason kaya hands the string over unchanged.
+    pub fn url(&self) -> &str {
+        &self.url
+    }
+
+    /// Every name the link carried, captures first, in the order the core
+    /// built them.
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.pairs.iter().map(|(n, v)| (n.as_str(), v.as_str()))
+    }
+}
+
+/// Route declarations waiting for a transaction to ride
+/// (docs/app-links-plan.md §4). [`Messages::link`] is not a wire call —
+/// the declaration is one — so it parks the record here and the next
+/// [`Tx::commit`] carries it. THE APP THREAD IS ONE THREAD, so the only
+/// contention is a Poster's, which also commits on the app thread.
+static PENDING_ROUTES: Mutex<Vec<crate::protocol::TxOp>> = Mutex::new(Vec::new());
+static NEXT_ROUTE: AtomicU64 = AtomicU64::new(1);
+
+/// Drained by [`Tx::commit`], HEAD-FIRST: the core declares the routes
+/// before it applies anything else in the batch, and its end-of-batch
+/// flush then matches whatever link started the process.
+fn take_pending_routes() -> Vec<crate::protocol::TxOp> {
+    let mut pending = PENDING_ROUTES.lock().unwrap_or_else(|e| e.into_inner());
+    std::mem::take(&mut *pending)
+}
+
 impl<M> Default for Messages<M> {
     fn default() -> Self {
         Self::new()
@@ -3971,6 +4041,7 @@ impl<M> Messages<M> {
             clip_reads: RefCell::new(HashMap::new()),
             undone: RefCell::new(HashMap::new()),
             redone: RefCell::new(HashMap::new()),
+            links: RefCell::new(HashMap::new()),
             draws: RefCell::new(HashMap::new()),
         }
     }
@@ -4354,6 +4425,28 @@ impl<M> Messages<M> {
         *self.notification_activation.borrow_mut() = Some(Box::new(f));
     }
 
+    /// Bind a handler to one APP-LINK ROUTE (docs/app-links-plan.md L2):
+    /// `kaya://task/{key}` reaching this process — running, or started by
+    /// the link itself — answers with the app's own message, the captures
+    /// and the query in hand.
+    ///
+    /// DECLARE ROUTES AT STARTUP, before or inside the app's first
+    /// transaction: the declaration rides that transaction, and the core
+    /// matches a link that STARTED the process the moment it lands. A
+    /// malformed or repeated pattern faults at the declaration.
+    /// Process-level and persistent — a route never retires.
+    pub fn link(&self, pattern: &str, f: impl Fn(&LinkParams) -> M + 'static) {
+        let route = NEXT_ROUTE.fetch_add(1, Ordering::Relaxed);
+        self.links.borrow_mut().insert(route, Box::new(f));
+        PENDING_ROUTES
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(crate::protocol::TxOp::DeclareLinkRoute {
+                route,
+                pattern: pattern.to_owned(),
+            });
+    }
+
     /// Bind the one-shot result handler to a file-dialog request. Cancel
     /// arrives as an EMPTY list — no platform can confirm an empty
     /// selection, so it needs no sentinel.
@@ -4599,6 +4692,22 @@ impl<M> Messages<M> {
                     } else {
                         notification_dropped(*notification, *outcome);
                         None
+                    }
+                }
+                Occurrence::LinkOpened { route, url, params } => {
+                    // NOT one-shot: a route is process-level and never
+                    // retires. Route 0 is a URL no route took, and the
+                    // CORE has already announced it (crates/kaya/src/
+                    // links.rs) — one sentence, not one per binding.
+                    let params = LinkParams { url: url.clone(), pairs: params.clone() };
+                    match self.links.borrow().get(route) {
+                        Some(f) => Some(f(&params)),
+                        None => {
+                            if *route != 0 {
+                                link_unhandled(url, *route);
+                            }
+                            None
+                        }
                     }
                 }
                 Occurrence::FileDialogResult { dialog, files } => {
@@ -7786,6 +7895,7 @@ mod tests {
                     | Occurrence::InstanceDrawRequested { .. }
                     | Occurrence::Tick { .. }
                     | Occurrence::InstanceTick { .. } => {}
+                    Occurrence::LinkOpened { .. } => {}
                     Occurrence::Shutdown => break,
                 }
             }

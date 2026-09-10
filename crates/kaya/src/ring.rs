@@ -58,6 +58,7 @@ pub(crate) const REC_DATE_CHANGED: u16 = 24;
 pub(crate) const REC_TIME_CHANGED: u16 = 25;
 pub(crate) const REC_VALUE_COMMITTED: u16 = 26;
 pub(crate) const REC_NOTIFICATION_RESULT: u16 = 27;
+pub(crate) const REC_LINK_OPENED: u16 = 28;
 
 /// Wire framing of every record, exported through the C header so direct
 /// consumers cast a pointer instead of bit-twiddling. Little-endian;

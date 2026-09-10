@@ -10615,6 +10615,173 @@ the COM door's LocalServer32 — so a link door can set the leg's variables
 in its own .cmd; the URL cannot be a `%1` there (`=` splits, `&` is an
 operator).
 
+## A kAEGetURL handler installed in applicationWillFinishLaunching leaves a macOS URL LAUNCH with no window at all (2026-09-09)
+
+Measured with the mac links leg, three watched runs on one tree: the
+handler installed early + `open -a tasks.app <url>` printed the core's
+`KAYA_ACT2:` line and NOTHING ELSE — no root, no interpreter pump, no
+harness, no verdict in 120 s, `sample` showing the app thread parked in
+`Messages::next` with its scene built; the same build with no URL, and
+the build with no handler + the URL, both opened the window. The
+swallowed launch event is the cause: AppKit never completes its open
+bookkeeping and SwiftUI's WindowGroup opens no default window;
+`.handlesExternalEvents(matching: ["*"])` does not restore it. THE SHAPE
+THAT WORKS IS TWO DOORS: `application(_:open:)` on the delegate is the
+COLD door (kaya has no `.onOpenURL` on macOS, so the delegate gets the
+real URLs and the launch bookkeeping completes; delivery 9 ms after the
+root appeared), and the raw kAEGetURL handler installed in
+`applicationDidFinishLaunching` is the WARM one (it takes the event
+before AppKit converts it, so no second window). Mutually exclusive per
+event by construction. This amends the probes' entry above, which had the
+early handler as the one door. Nothing static can see it; the mac links
+leg's act two is the wall.
+
+## An app opening its OWN scheme is resolved by LaunchServices like anyone else's, and every kaya bundle claims the same one (2026-09-09)
+
+The scheme defaults to the declared id, so every guest bundle on an iOS
+device claims it; the lane's devices carry every earlier leg's bundle,
+and the links leg's act one read `entries 0` where the scene wanted 1 —
+`UIApplication.shared.open` of the app's own scheme went to the
+platform's pick (the probe had measured it unprompted with ONE claimant
+installed). iOS has no target argument, so exclusivity is the only lever:
+the links leg makes its bundle the SOLE claimant before act one
+(uninstall every other dev.kaya.* on that device; each leg installs its
+own and the pool runs one leg per device), held by a check-steps clause.
+Android narrows both doors by package (`setPackage` in-process,
+`am start … -p` from the runner — still through the filter, unlike `-n`,
+which bypasses it), because a scheme claimed by more than one installed
+app resolves SILENTLY to the chooser: `resolve-activity` answers
+`com.android.internal.app.ResolverActivity`, `am start` reports ok with
+the chooser on top, and an in-process `startActivity` returns normally
+with no `onNewIntent` ever — a green-looking verb whose link never
+arrived. macOS targets the bundle with `open -a <app> <url>`. Linux's
+per-leg XDG home resolves to the leg's own entry even with a rival entry
+staged beside it (measured), and the door verifies the started pid's
+`/proc/<pid>/exe`.
+THE ONE GUARD SENTENCE, since the same question has four answers across
+five lanes (Linux: the rival never runs, because `[Default Applications]`
+names one entry and gio consults nothing else; iOS: the rival TAKES it,
+the app's own scheme included; macOS: undefined, so both doors name the
+bundle — `open -a` cold, `NSWorkspace.open(withApplicationAt:)` warm;
+Android and Windows: narrowed by construction): EVERY DOOR NAMES THE APP
+IT MEANS, and where the API has no place to put the name, the leg makes
+itself the only answer. The two lanes that look safe are safe for reasons
+a refactor can remove, which is why Linux keeps its exe check.
+
+## Windows: the App SDK's instance key is scoped per executable, a packaged claim beats an unpackaged one, and a wrong claimant eats the act-two marker (2026-09-09)
+
+Five measured on the VM. (1) `AppInstance.FindOrRegisterForKey` is
+scoped PER EXECUTABLE, not per key string: notify.exe run with the SDK's
+`----ms-protocol:` argument while tasks.exe held the same key read
+`IsCurrent = true` and printed the announced miss instead of redirecting
+— so a second claimant breaks the warm door as well as the cold one.
+(2) A PACKAGED claim beats the unpackaged one: with `<uap:Protocol>` on
+the packaged tasks entry AND the unpackaged guest registering the same
+scheme, every warm link went to the package and act one read
+`entries 0`; the lane's MSIX claims no scheme now (check-staging N2d).
+(3) One package may claim a scheme ONCE — `makeappx pack` refuses two
+entry points claiming it (`duplicate key for the unique Identity
+Constraint 'Extension_Protocol'`), and the DOTTED scheme is accepted.
+(4) `RegisterForProtocolActivation` writes the exe path UNQUOTED into
+the ProgId command, so an install path with a space breaks it (a guest
+unit test pins it). (5) A wrong claimant that starts EATS the act-two
+marker (it runs act2::arm with no KAYA_SELFTEST), so the leg cannot be
+retried — the door reads back which process the shell started and
+refuses by name. THE RULE THE SLICE ADDED: an app that declares no link
+route claims no scheme and takes no instance key, since every guest in
+this tree declares one id and the pooled legs sharing python.exe,
+node.exe, java.exe and dotnet.exe would otherwise have five of six
+redirect-and-exit at startup; `links_startup()` reads only the
+activation kind, `links_declared()` claims on the first route.
+
+## gen-bindings --check decodes nothing (2026-09-09)
+
+The generator's check compares the generator against what it wrote, so
+a record shape the reader template has no branch for regenerates green
+in all nine readers and dies at the first hand-packed record:
+`link_opened` was in the python reader's accepted-kinds tuple with no
+branch, fell to the generic click tail, and read the URL's type tag as a
+key-path length (`ValueError: unknown value type 779511140`). The wall is
+a round-trip unit test in the core suite for every occurrence whose
+payload is not the generic shape
+(`wire::tests::a_link_body_reads_back_at_the_offsets_the_bindings_use`),
+and the shape ruled for this record is a FLAT RUN — id = route, keys
+empty, the URL at the head of the payload, the params in pairs after —
+because Go, Java, C# and Swift would each have needed a new named type
+for a pair list in the generated file.
+
+## fontconfig matches a variable font's NAMED INSTANCES, not its axis, and a weight with no instance aborts the process (2026-09-09)
+
+The first app-links matrix killed all sixteen typeface legs on the linux
+lane: `KAYA_HARNESS: +50ms ExpectTypeface("Sora")` then
+`Pango:ERROR: pango_fc_font_map_get_face: assertion failed: (res ==
+FcResultMatch)` and an abort — no verdict, no window. The maintainer's
+GTK weight rule asked buttons and the heading role for `font-weight:
+500`; guests/assets/fonts/sora-wght.ttf carries a continuous wght axis
+100..800 but named instances only at 100, 200, 300, 400, 600, 700, 800
+(read two ways: fontTools' `ttx -t fvar` on the host, a pure-struct
+fvar walk in the gate). 500 is INSIDE the axis and that is the trap:
+fontconfig enumerates named instances, a pattern at 500 matches no
+face, and Pango asserts in layout rather than falling back. Isolated in
+five build-and-run cycles (both 500 rules abort, the 600 rule does not,
+all withheld is fine), and it was invisible to the weights work because
+typeface is the one scene that sets a vendored variable font and the
+work was validated on tasks, sections, a11y and styling. THE FIX IS IN
+KAYA, NOT THE FONT: the OFL's reserved name forbids modifying Sora, and
+a user's own brand font could lack any weight. gtk.rs holds WISHES and
+lowers them onto what the brand font really carries — `wght_named_
+instances(bytes)` through skrifa (already the crate's font parser),
+`nearest_weight(wish, have)` with ties to the heavier, the sheet
+re-lowered on every SetTypeface and the wish restored when a request
+carries no file; on Sora the sheet asks 600, 600, 600 and the resolved
+descriptions read `Sora Semi-Bold`. The guard is in two halves:
+check-assets C12 (swept: the ruled wishes, the clamp wired, the sheet's
+priority, every literal `font-weight:` a named instance of every
+vendored variable font, seven watched negatives) and check-gtk's
+container half (`gtk::weight_tests` over the real bytes). The other
+three backends ask for weights SYMBOLICALLY (SemiBold, .semibold,
+FontWeight.Bold) and never a number, which is why the same 500 left
+every other lane green. A second `include_bytes!` of the font in a test
+was refused by check-assets' one-resolver clause on the spot;
+`crate::assets::font_bytes("")` is the route.
+
+## A macOS URL launch registers the window and never composites it — and a harness that reads the model cannot see that (2026-09-09)
+
+Found by the coordinator with `open --env … -a tasks.app <url>` by hand:
+the process lived, the links leg's act two read entries 1 and the href
+and published OK, and CGWindowList answered `0 window(s)` for the pid's
+whole life — a user who tapped a link with the app closed would get
+nothing. Three readers to keep a Space artifact out: every app-side
+property is identical on a plain launch and a URL launch (`vis=true
+hidden=false active=false policy=1 space=true alpha=1.0 frame=…`), while
+CGWindowList reads 0 vs 1 AND the accessibility tree, which is not
+Space-scoped, reads 0 vs 1. SwiftUI builds and registers the
+WindowGroup's NSWindow on an external-event launch and never orders it
+on screen, and nothing in kaya's register path did either (only the
+`KAYA_WINDOW_FRONT` hand knob). THE FIX IS DEFERRED, and that is the
+part that matters: `orderFrontRegardless()` inside `viewDidMoveToWindow`
+sets isVisible and composites NOTHING — the window is not committed
+until the turn ends — so the order is one main-queue turn later,
+guarded on `!isVisible` so a plain launch is untouched, and
+`orderFrontRegardless` rather than `activate` because the guests are
+`.accessory`. FIXING IT CRASHED THE APP: `-[KayaWindowDelegate
+windowWillOrderOnScreen:]: unrecognized selector` — the delegate proxy
+vouches for the original delegate's selectors in `responds(to:)`,
+NSWindow reads that ONCE at setDelegate to register observers, and the
+original was held WEAK, so once SwiftUI's delegate died the forwarding
+target was nil and the first ordering terminated the process; a proxy
+that answers for another object keeps it alive (strong now, no cycle).
+The window composites at 0.52 s and act two had published at 0.2 s, so
+links.steps' act two opens with `settle 800`, which is what a cold tap
+looks like anyway. THE GUARD sits where the lane walks: the mac link
+door refuses the verdict unless the relaunched pid owns a layer-0
+window in the flight recorder's window list, sampled in the loop that
+joins the verdict — watched by perturbing the order to `orderOut(nil)`,
+the scene still publishing OK while the guard went red, which is
+exactly the blindness it exists for. `winlist_bin` is a module-level
+function in tools/lib/flightrec_lane.py now, since constructing a
+recorder opens a run.
+
 ## `=` is an argument delimiter in a .cmd (2026-09-09)
 
 `schtasks /tr "C:\kaya\relaunch-com.cmd <leg> <clsid> <aumid> kaya=1 <id>"`

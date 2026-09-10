@@ -185,6 +185,10 @@ fn app(ctx: kaya::AppCtx) {
         Ok("search") => search::app(ctx),
         Ok("tasks") => tasks::app(ctx),
         Ok("taskspersist") => tasks::app(ctx),
+        // The same app again: an app link opens the screen it names, and
+        // the routes are declared on the handlers the tasks app already
+        // has (docs/app-links-plan.md L4).
+        Ok("links") => tasks::app(ctx),
         Ok("notify") => notify::app(ctx),
         // WHICH ROUTE THE CORE TAKES IS THE RUNNER'S CHOICE: this leg
         // arrives with a KAYA_ASSET_DIR and resolves through a directory.

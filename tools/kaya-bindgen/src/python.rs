@@ -463,6 +463,24 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("            local_path, at = parse_value(buf, at)");
     c.line("            files.append((handle, name, local_path))");
     c.line("        return kind, dialog, [], files");
+    // A LINK'S URL AND ITS PARAMS, flattened into the PAYLOAD the way
+    // the file dialog's threes are: the URL first, then the params in
+    // PAIRS (name, value), and the app layer regroups. The KEYS SLOT
+    // STAYS EMPTY — it is where a stamped copy's key path lives, and a
+    // link is anchored to no widget at all. Its own arm
+    // for the file dialog's reason — the generic tail would take the
+    // URL Value's TYPE WORD for a key-path length and start reading
+    // eight bytes into the URL's own payload (measured 2026-09-09).
+    c.line("    if kind == OCC_LINK_OPENED:");
+    c.line("        route = struct.unpack_from(\"<Q\", buf, 8)[0]");
+    c.line("        url, at = parse_value(buf, 16)");
+    c.line("        count = struct.unpack_from(\"<I\", buf, at)[0]");
+    c.line("        at += 8  # past the values count and its reserved word");
+    c.line("        flat = [url]");
+    c.line("        for _ in range(count):");
+    c.line("            v, at = parse_value(buf, at)");
+    c.line("            flat.append(v)");
+    c.line("        return kind, route, [], flat");
     // Its own arm: the generic tail would take the CLIP KIND for a path
     // length and read the values header as a key.
     for name in crate::clip_answer_occurrence_names(spec) {

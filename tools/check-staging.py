@@ -16,6 +16,10 @@ import importlib.util
 import re
 import shutil
 
+sys.path.insert(0, str(ROOT / "tools" / "lib"))
+from packaging import identity as app_identity  # noqa: E402
+from packaging import windows as win_package  # noqa: E402
+
 gate = Gate("check-staging")
 
 
@@ -319,6 +323,63 @@ def check(root):
              "so `list` cannot tell THIS lane's sampler from a "
              "neighbour's and the wait has nothing to wait on")
 
+    # --- THE PACKAGE MAY NOT CLAIM A SCHEME THE LANE'S UNPACKAGED DOOR
+    # DRIVES (docs/app-links-plan.md L1). MEASURED 2026-09-09, both
+    # directions: with the packaged `windows.protocol` claim installed AND
+    # the unpackaged guest registering the same scheme at launch, all three
+    # of links_rust's warm links went to the PACKAGE and act one read
+    # `entries 0, wanted 1`; with the claim withheld the leg passes. This
+    # guest holds the app TWICE, which no user's machine does, so the claim
+    # belongs to the copy whose door the lane actually drives. NO LEG CAN
+    # SEE THE RULE — only the leg that would then fail, ten minutes into a
+    # matrix, with a link that opened somebody else.
+    if any(door == "link" for door in win_lane.RELAUNCH_DOOR.values()):
+        deploy = (root / "tools/deploy-win.py").read_text(encoding="utf-8")
+        call = re.search(r"win_package\.stage\((?:[^()]|\([^()]*\))*\)",
+                         deploy)
+        if call is None:
+            fail("tools/deploy-win.py makes no win_package.stage(...) call, "
+                 "so nothing here can say what its MSIX claims — and this "
+                 "lane drives an UNPACKAGED link door")
+        elif "links_entry=None" not in call.group(0):
+            fail("tools/deploy-win.py's win_package.stage(...) does not pass "
+                 "links_entry=None, so the MSIX would claim the declared URL "
+                 "scheme while this lane also drives it UNPACKAGED. Measured "
+                 "2026-09-09: the packaged claim WINS and every warm link "
+                 "reaches the package instead of the running guest, with the "
+                 "leg reading `entries 0, wanted 1` and nothing naming the "
+                 "cause")
+
+    # The generator's own half, called both ways: an entry that was named
+    # claims the declared scheme exactly once, and a package told of none
+    # claims nothing. A package may claim a scheme ONCE — makeappx refuses
+    # a second with `is a duplicate key for the unique Identity Constraint
+    # 'Extension_Protocol'` (measured on the VM 2026-09-09) — so the
+    # generator may not guess an entry either.
+    # THE REAL TREE'S declaration: windows.py is not in the shadow set, so
+    # this half is a property of the generator rather than of a copy.
+    decl = app_identity.load(ROOT)
+    exes = ["notify.exe", "tasks.exe"]
+    named = win_package.manifest(decl, exes, links_entry="tasks")
+    none = win_package.manifest(decl, exes, links_entry=None)
+    claim = f'<uap:Protocol Name="{decl.scheme}">'
+    if named.count(claim) != 1:
+        fail(f"tools/lib/packaging/windows.py wrote {named.count(claim)} "
+             f"{claim} elements for a package told entry 'tasks' claims the "
+             f"scheme — one package may claim a scheme exactly once, and "
+             f"makeappx refuses the manifest outright for a second")
+    if none.count("windows.protocol") != 0:
+        fail("tools/lib/packaging/windows.py claims a URL scheme for a "
+             "package told no entry claims one — `links_entry=None` is how "
+             "a machine that already holds another claimant asks for "
+             "nothing")
+    # ONCE, on the real tree: the shadows run this same clause and their
+    # answer is the same module's.
+    if pathlib.Path(root) == ROOT:
+        print(f"check-staging: the MSIX generator claims the declared scheme "
+              f"{named.count(claim)} time(s) for a named entry and "
+              f"{none.count('windows.protocol')} for none")
+
     return findings
 
 
@@ -389,6 +450,14 @@ negative(
     r"split\.ts", "ghostts.ts",
     "ghostts is not a shipped JS guest",
     "N2c (a JS launcher naming a .ts the deploy never stages)")
+
+negative(
+    "N2d", "let the MSIX claim the scheme the lane drives unpackaged",
+    "tools/deploy-win.py",
+    r"links_entry=None", 'links_entry="tasks"',
+    "does not pass links_entry=None",
+    "N2d (a package claiming the URL scheme this lane's unpackaged link "
+    "door drives)")
 
 negative(
     "N3", "pointed a leg at a missing guest", "tools/lib/lanes/mac.py",

@@ -26,6 +26,10 @@ ASSET_ROOT = "guests/assets/"
 # nothing it does not recognise, so a flat id fails on two platforms and
 # nowhere else (docs/tasks-s3-plan.md N4).
 REVERSE_DNS = re.compile(r"[a-z][a-z0-9-]*(\.[a-z0-9][a-z0-9-]*){1,}")
+# RFC 3986's scheme: ALPHA *( ALPHA / DIGIT / "+" / "-" / "." ). A
+# reverse-DNS id matches it, which is what lets `[links] scheme` default
+# to the declared id (docs/app-links-plan.md §4).
+LINK_SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*")
 
 
 class Undeclared(SystemExit):
@@ -41,13 +45,22 @@ class Identity:
     """The declaration, resolved against one tree."""
 
     def __init__(self, root, name, icon, app_id, launch_background,
-                 launch_image):
+                 launch_image, scheme, hosts):
         self.root = pathlib.Path(root)
         self.name = name
         self.icon = icon
         self.id = app_id
         self.launch_background = launch_background
         self.launch_image = launch_image
+        # `[links] scheme`, or the declared id (docs/app-links-plan.md
+        # L1): resolved here so no consumer has to know the default.
+        self.scheme = scheme
+        # `[links] hosts`, the web links this app claims — EMPTY unless
+        # declared, since a web link needs a served HTTPS domain to
+        # verify against and no lane has one (L6). The mac and iOS
+        # bundles' CFBundleURLTypes and associated-domains entitlement
+        # are written from these two together.
+        self.hosts = hosts
 
     @property
     def icon_path(self):
@@ -67,7 +80,8 @@ class Identity:
         return (f"Identity(name={self.name!r}, icon={self.icon!r}, "
                 f"id={self.id!r}, launch_background="
                 f"{self.launch_background!r}, "
-                f"launch_image={self.launch_image!r})")
+                f"launch_image={self.launch_image!r}, "
+                f"scheme={self.scheme!r}, hosts={self.hosts!r})")
 
 
 def load(root):
@@ -149,4 +163,45 @@ def load(root):
             f"kaya: {rel} names the launch image \"{launch_image}\", "
             f"which is not a file in this tree (leave `image` out to take "
             f"the declared icon)")
-    return Identity(root, name, icon, app_id, background, launch_image)
+    # THE LINK SCHEME, WHICH DEFAULTS TO THE DECLARED ID
+    # (docs/app-links-plan.md L1, §4). A reverse-DNS string is a valid URL
+    # scheme by RFC 3986 and unique by construction, so an app that
+    # declares no `[links]` table still owns `<id>://…`. The other two
+    # readers of this rule are crates/kaya/src/links.rs `scheme()` (the
+    # running app) and android/build.gradle.kts (the APK build, which
+    # runs before any python); tools/check-jni.py holds this one and
+    # gradle's to the same decisions and the same answers.
+    links = table.get("links")
+    scheme = None
+    if links is not None:
+        if not isinstance(links, dict):
+            raise Undeclared(
+                f"kaya: {rel} declares `links` as something other than a "
+                f"table — `[links]` holds the app's `scheme` and its web "
+                f"`hosts`")
+        scheme = links.get("scheme")
+        if scheme is not None:
+            if not isinstance(scheme, str) or not scheme.strip():
+                raise Undeclared(
+                    f"kaya: {rel} declares an empty `[links] scheme`; "
+                    f"leave it out to take the declared id, which is a "
+                    f"valid URL scheme on its own")
+            if not re.fullmatch(LINK_SCHEME, scheme):
+                raise Undeclared(
+                    f"kaya: {rel} declares `[links] scheme = {scheme!r}`, "
+                    f"which is not a URL scheme — RFC 3986 wants a letter "
+                    f"and then letters, digits, `+`, `-` or `.`. Every "
+                    f"package's registration claims this string, and a "
+                    f"malformed one claims nothing at all")
+    hosts = []
+    if links is not None:
+        hosts = links.get("hosts", [])
+        if not isinstance(hosts, list) or not all(
+                isinstance(h, str) and h.strip() for h in hosts):
+            raise Undeclared(
+                f"kaya: {rel} declares `[links] hosts = {hosts!r}` — it is "
+                f"a list of domain names the app claims web links for "
+                f"(docs/app-links-plan.md L1), and every entry must be a "
+                f"non-empty string")
+    return Identity(root, name, icon, app_id, background, launch_image,
+                    scheme or app_id, hosts)

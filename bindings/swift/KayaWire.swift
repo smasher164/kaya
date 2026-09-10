@@ -18,7 +18,7 @@ enum KayaValue: Hashable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0x605e18f72b2af791
+let kayaSpecHash: UInt64 = 0x1960b216df673c1f
 
 /// A civil date as the wire's I64: year * 10000 + month * 100 + day.
 func kayaPackDate(_ year: Int, _ month: Int, _ day: Int) -> Int64 {
@@ -592,6 +592,14 @@ struct KayaTx {
     mutating func cancelNotification(_ notification: UInt64) {
         let kayaAt = self.begin(UInt16(KAYA_TX_CANCEL_NOTIFICATION))
         self.u64(notification)
+        self.end(kayaAt)
+    }
+
+    /// Declare one app-link route (docs/app-links-plan.md §4): `route` is the app's own id for it, `pattern` a Str. The MATCH HAPPENS ONCE, IN THE CORE — the patterns come here so a URL the platform hands over is turned into a route and its captures by one matcher rather than by nine. The grammar: segments split on `/`, a literal segment matches itself, `{name}` captures one segment. REFUSED AT THE DECLARATION, a fault like every other declaration refusal: an empty pattern, an empty segment, a brace a segment never closes, and a pattern already declared. Routes are declared at startup, before or inside the app's first transaction: the core matches a link that STARTED the process once that transaction lands.
+    mutating func declareLinkRoute(_ route: UInt64, _ pattern: KayaValue) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_DECLARE_LINK_ROUTE))
+        self.u64(route)
+        self.value(pattern)
         self.end(kayaAt)
     }
 
@@ -2211,6 +2219,7 @@ func kayaParseOccurrence(_ rec: [UInt8]) -> KayaOccurrence? {
             || kind == UInt16(KAYA_OCCURRENCE_TIME_CHANGED)
             || kind == UInt16(KAYA_OCCURRENCE_VALUE_COMMITTED)
             || kind == UInt16(KAYA_OCCURRENCE_NOTIFICATION_RESULT)
+            || kind == UInt16(KAYA_OCCURRENCE_LINK_OPENED)
         else { return nil }
         let id = raw.loadUnaligned(fromByteOffset: 8, as: UInt64.self)
         if kind == UInt16(KAYA_OCCURRENCE_ALERT_RESULT) {
@@ -2249,6 +2258,16 @@ func kayaParseOccurrence(_ rec: [UInt8]) -> KayaOccurrence? {
                     handle: UInt64(handle), name: name, localPath: localPath))
             }
             return (kind, id, [], nil, files, nil, nil, [])
+        }
+        if kind == UInt16(KAYA_OCCURRENCE_LINK_OPENED) {
+            let urlLen = Int(raw.loadUnaligned(fromByteOffset: 20, as: UInt32.self))
+            let url = String(decoding: raw[24..<(24 + urlLen)], as: UTF8.self)
+            let parts = kayaParseRepresentation(raw, 24 + ((urlLen + 7) & ~7)).parts
+            var flat: [KayaValue] = [.str(url)]
+            for part in parts {
+                if case .str(let s) = part { flat.append(.str(s)) }
+            }
+            return (kind, id, [], nil, [], nil, nil, flat)
         }
         if kind == UInt16(KAYA_OCCURRENCE_CLIPBOARD_RESULT) {
             let (clip, _) = kayaParseClip(raw, 16)

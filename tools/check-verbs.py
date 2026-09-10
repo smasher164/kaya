@@ -1795,6 +1795,11 @@ ACTION_VERBS = (
     "shortcut", "compose",
     "file_dialog_goto", "file_dialog_name", "clipboard_seed",
     "context_open", "scroll_to_row",
+    # THE LINK, WHICH THE PLATFORM ROUTES BACK (docs/app-links-plan.md
+    # L5): the verb asks the platform to open the URL and the app answers
+    # it through `link_opened`, so the answer-wait is the real one — the
+    # step after it reads a screen the link pushed.
+    "open_link",
 )
 
 # A VERB THE GUEST IS NEVER ASKED ABOUT HAS NO ANSWER TO WAIT FOR.

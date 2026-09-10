@@ -520,6 +520,28 @@ fn main() {
         "Windows.UI.Notifications.ToastNotification".to_string(),
         "Windows.Data.Xml.Dom.XmlDocument".to_string(),
         "Windows.Data.Xml.Dom.IXmlDocumentIO".to_string(),
+        // APP LINKS (docs/app-links-plan.md §4's Windows row). Every
+        // activation on Windows starts a NEW PROCESS, so the arm needs the
+        // App SDK's AppLifecycle namespace: the protocol registration an
+        // unpackaged exe writes for itself, the single-instance key, the
+        // activation arguments both the launched and the redirected process
+        // read, and the owner's `Activated` event. The event's delegate is
+        // `Windows.Foundation.EventHandler` (filtered above) — without it
+        // bindgen writes `Activated: usize` and drops the add-handler with no
+        // error at all (docs/traps.md, measured 2026-09-09).
+        // `RedirectActivationToAsync` returns an IAsyncAction, which bindgen's
+        // built-in references already map to the windows-future crate: naming
+        // it (or AsyncActionCompletedHandler or AsyncStatus) here emits a
+        // SECOND copy that collides with it.
+        "Microsoft.Windows.AppLifecycle.AppInstance".to_string(),
+        "Microsoft.Windows.AppLifecycle.ActivationRegistrationManager".to_string(),
+        "Microsoft.Windows.AppLifecycle.ExtendedActivationKind".to_string(),
+        "Microsoft.Windows.AppLifecycle.AppActivationArguments".to_string(),
+        "Windows.ApplicationModel.Activation.IProtocolActivatedEventArgs".to_string(),
+        "Windows.ApplicationModel.Activation.IActivatedEventArgs".to_string(),
+        "Windows.ApplicationModel.Activation.ActivationKind".to_string(),
+        "Windows.ApplicationModel.Activation.ApplicationExecutionState".to_string(),
+        "Windows.ApplicationModel.Activation.ILaunchActivatedEventArgs".to_string(),
     ];
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     windows_bindgen::bindgen(args);

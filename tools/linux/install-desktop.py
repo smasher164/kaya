@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Install the app's desktop entry and icon theme (packaging-plan P5).
 
-    tools/linux/install-desktop.py <xdg-data-home> <guest> [args...]
+    tools/linux/install-desktop.py [--config-home <dir>] <xdg-data-home> \
+        <guest> [args...]
 
 Runs INSIDE the linux container, beside notifyd.py and schedrec.py, so
 it carries no dev-shell guard: the container is not the nix shell. What
@@ -63,11 +64,23 @@ def exec_line(argv):
 
 
 def main(argv):
+    # `--config-home` adds the scheme registration mimeapps.list, which
+    # lives under the CONFIG root and is what `gio open` resolves a
+    # `<scheme>://` URL through (docs/app-links-plan.md §4). Only the
+    # links leg asks for it; the notify and persist legs push doors that
+    # need no scheme.
+    config_home = None
+    if argv[:1] == ["--config-home"]:
+        if len(argv) < 2:
+            raise SystemExit("install-desktop: --config-home takes a "
+                             "directory")
+        config_home, argv = argv[1], argv[2:]
     if len(argv) < 2:
         raise SystemExit(
-            "usage: install-desktop.py <xdg-data-home> <guest> [args...]")
+            "usage: install-desktop.py [--config-home <dir>] "
+            "<xdg-data-home> <guest> [args...]")
     data_home = pathlib.Path(argv[0])
-    written = linux.stage(ROOT, exec_line(argv[1:]), data_home)
+    written = linux.stage(ROOT, exec_line(argv[1:]), data_home, config_home)
     print(f"install-desktop: {len(written)} files under {data_home}",
           file=sys.stderr)
     print(load(ROOT).id)

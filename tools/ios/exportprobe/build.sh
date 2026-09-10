@@ -45,7 +45,11 @@ out = (text.replace("@EXECUTABLE@", "KayaExportProbe")
            .replace("@BUNDLE_ID@", "dev.kaya.exportpreflight")
            .replace("@NAME@", "KayaExportProbe")
            .replace("@IDENTITY@", "")
-           .replace("@LAUNCH@", "<dict/>"))
+           .replace("@LAUNCH@", "<dict/>")
+           # The probe claims NO scheme: it is not a kaya app and two
+           # claimants make a link's destination the platform's pick
+           # (docs/app-links-plan.md L5).
+           .replace("@URLTYPES@", "<array/>"))
 # The template is TEXT: a placeholder nobody substituted ships a plist the
 # simulator refuses to install with no reason printed (2026-09-07, @LAUNCH@).
 try:
@@ -53,7 +57,7 @@ try:
 except Exception as exc:
     sys.exit(f"exportprobe: the rendered Info.plist does not parse ({exc}); "
              f"a template placeholder was left unsubstituted")
-left = [tok for tok in ("@EXECUTABLE@", "@BUNDLE_ID@", "@NAME@", "@IDENTITY@", "@LAUNCH@") if tok in out]
+left = [tok for tok in ("@EXECUTABLE@", "@BUNDLE_ID@", "@NAME@", "@IDENTITY@", "@LAUNCH@", "@URLTYPES@") if tok in out]
 if left:
     sys.exit(f"exportprobe: Info.plist.in placeholders left unsubstituted: {left}")
 print(out, end="")

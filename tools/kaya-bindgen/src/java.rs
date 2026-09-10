@@ -783,6 +783,19 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("            }");
     c.line("            return new Occ(kind, id, java.util.List.of(), files);");
     c.line("        }");
+    // The URL and the params FLATTENED into the payload, url first,
+    // then name/value pairs (python.rs carries the reasoning).
+    c.line("        if (kind == OCC_KIND_LINK_OPENED) {");
+    c.line("            int[] cursor = new int[] {16};");
+    c.line("            java.util.List<Object> flat = new java.util.ArrayList<>();");
+    c.line("            flat.add(parseValue(rec, b, cursor));");
+    c.line("            int count = b.getInt(cursor[0]);");
+    c.line("            cursor[0] += 8; // past the values count and its reserved word");
+    c.line("            for (int i = 0; i < count; i++) {");
+    c.line("                flat.add(parseValue(rec, b, cursor));");
+    c.line("            }");
+    c.line("            return new Occ(kind, id, java.util.List.of(), flat);");
+    c.line("        }");
     // Its own arm: the generic tail would take the CLIP KIND for a path
     // length and read the values header as a key.
     for name in crate::clip_answer_occurrence_names(spec) {

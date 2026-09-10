@@ -16,7 +16,7 @@ against this module's own answer right after.
 import pathlib
 import shutil
 
-from . import mark
+from . import identity, mark
 from .identity import load
 
 # The resource name gradle's manifest points at, and the entry
@@ -46,6 +46,38 @@ def rendered(root):
              f"mipmap-{bucket}-{QUALIFIER_API}",
              mark.resample(source, px))
             for bucket, px in DENSITIES]
+
+
+# THE LINK SCHEME'S RULE (docs/app-links-plan.md §4), whose readers are
+# THREE by necessity: crates/kaya/src/links.rs `scheme()` for the running
+# app, android/build.gradle.kts for the APK build — which reads the
+# manifest before any python has run — and this one for every packaging
+# step. tools/check-jni.py's link census holds this one and gradle's to
+# the same four decisions AND to the same answer on three inputs.
+LINK_TABLE = "links"
+LINK_KEY = "scheme"
+LINK_DEFAULT_KEY = "id"
+# RFC 3986: ALPHA *( ALPHA / DIGIT / "+" / "-" / "." ). A reverse-DNS id
+# matches, which is what makes the default work with nothing declared.
+# The literal gradle's own Regex must spell, held equal by check-jni.
+LINK_SCHEME_PATTERN = "^" + identity.LINK_SCHEME.pattern + "$"
+
+
+def link_scheme(root):
+    """The URL scheme this APK's VIEW filter claims.
+
+    ONE ANSWER for both sides again: android/build.gradle.kts computes
+    the same string for its `kayaLinkScheme` manifest placeholder, and
+    tools/android/run-emulator.py's `apk_link_verify` reads what the
+    package actually carries back against this. The scheme DEFAULTS TO
+    THE DECLARED ID — a reverse-DNS string is a valid URL scheme by RFC
+    3986 and unique by construction — so an app declares nothing and
+    still owns `<id>://…`; `[links] scheme` is the override.
+    """
+    # THROUGH THE SHARED READER, never a second parse of the manifest
+    # (tools/check-app-identity.py C9): the override, the default and the
+    # refusals are all identity.py's, resolved before this sees them.
+    return load(root).scheme
 
 
 def apk_entries(root):

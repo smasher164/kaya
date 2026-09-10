@@ -74,15 +74,30 @@ def packaged_inner(leg):
 # only thing that says a second act exists. The word is the scene's own:
 # `relaunch launch` makes the harness print `KAYA_RELAUNCH: door launch`,
 # which the runner requires before it pushes anything.
-RELAUNCH_DOOR = {"tasks": "com-activator", "taskspersist": "launch"}
+#
+# THE LINK DOOR (docs/app-links-plan.md L5) is a third: the runner asks the
+# SHELL to open the URL act one printed, and Windows starts the process
+# through the protocol registration the app wrote for itself at launch. The
+# URL rides a FILE rather than a `%1` — `=` is an argument delimiter in a
+# .cmd's %1..%9 and `&` is a cmd operator, so a link with a query cannot be
+# a positional argument (measured 2026-09-09) — and the door's own .cmd sets
+# the leg's XDG_STATE_HOME, since the activated process is a DIRECT CHILD of
+# the calling cmd and inherits its environment (measured the same day; the COM
+# door needs relaunch-com.ps1's user-environment trick because a LocalServer32
+# is started by the COM service instead).
+RELAUNCH_DOOR = {"tasks": "com-activator", "taskspersist": "launch",
+                 "links": "link"}
 # The door scripts the runner drives (tools/guest/, shipped by the deploy),
 # one per door.
 RELAUNCH_DOOR_SCRIPT = "relaunch-com.ps1"
 RELAUNCH_LAUNCH_SCRIPT = "relaunch-launch.ps1"
-# The exe the plain door starts for a scene whose guest is another scene's
-# (taskspersist runs the tasks app under its own scene name, exactly as the
-# linux lane does).
-RELAUNCH_LAUNCH_EXE = {"taskspersist": "tasks"}
+RELAUNCH_LINK_SCRIPT = "relaunch-link.ps1"
+# The exe a door names for a scene whose guest is another scene's (taskspersist
+# and links both run the tasks app under their own scene name, exactly as the
+# linux lane does). The plain door STARTS it; the link door only names it, to
+# say whether it is on this guest at all and to stop the process the shell
+# started.
+RELAUNCH_EXE = {"taskspersist": "tasks", "links": "tasks"}
 # The launch string `Activate` is handed, in the two pieces cmd.exe can carry:
 # `=` is an ARGUMENT DELIMITER in a .cmd's %1..%9, so `kaya=1` arrives as two
 # tokens and the door opens with a launch string naming no id (measured
@@ -259,6 +274,15 @@ ORDER = [
     # back out of a second process.
     [
      "taskspersist_rust",
+    ],
+    # WHAT A LINK OPENS (docs/app-links-plan.md L5), the tasks guest again
+    # under its own scene: ALONE for the relaunch reason above and one more
+    # this platform has by itself — every activation starts a NEW PROCESS that
+    # asks who holds the single-instance key, and every kaya process on this
+    # guest registers that key under the SAME declared id, so a pooled
+    # neighbour would be handed this leg's link.
+    [
+     "links_rust",
     ],
     # dnd_rust ALONE: the `drag` verb moves the REAL MOUSE across the
     # desktop and presses it (docs/dnd-plan.md D10 — there is no

@@ -113,6 +113,8 @@
 
 #define KAYA_OCCURRENCE_NOTIFICATION_RESULT 27
 
+#define KAYA_OCCURRENCE_LINK_OPENED 28
+
 /**
  * Transaction record kinds (guest -> core, via kaya_submit). Layouts,
  * after the common 8-byte header, little-endian, 8-aligned:
@@ -335,6 +337,12 @@
 #define KAYA_TX_SHOW_NOTIFICATION 52
 
 #define KAYA_TX_CANCEL_NOTIFICATION 53
+
+/**
+ * One app-link route (docs/app-links-plan.md §4): { u64 route; Str
+ * pattern }. The core keeps the table and does the one match.
+ */
+#define KAYA_TX_DECLARE_LINK_ROUTE 54
 
 /**
  * The size-class vocabulary (wire::SIZE_CLASS_*): what a breakpoint's
@@ -1225,6 +1233,12 @@ typedef struct KayaHostApi {
    */
   void (*emit_notification_result)(uint64_t, uint32_t);
   /**
+   * A URL the platform handed this app (docs/app-links-plan.md §4):
+   * the raw kAEGetURL Apple event on macOS, `.onOpenURL` on iOS. The
+   * interpreter parses nothing — the core matches the route.
+   */
+  void (*link_opened)(const char*);
+  /**
    * The runtime capability bits this host measured (KAYA_CAP_NOTIFICATIONS
    * when the process is a bundle that can post), granted before the
    * guest's first read.
@@ -1840,6 +1854,18 @@ void kaya_emit_pasted(const uint8_t *tag, uintptr_t tag_len, const struct KayaRe
  * by construction and panics loudly if one appears.
  */
 void kaya_emit_alert_result(uint64_t alert, uint32_t choice);
+
+/**
+ * THE PLATFORM HANDED THIS APP A URL (docs/app-links-plan.md §4). The
+ * ONE entry every platform arm takes: the core matches it against the
+ * declared routes and emits `link_opened`, queueing it when the app's
+ * routes are not declared yet. Exported on every platform — a URL is a
+ * URL, and Android's activity arm reaches this through jvm.rs.
+ *
+ * # Safety
+ * `url` must be a NUL-terminated UTF-8 string for the call's duration.
+ */
+void kaya_link_opened(const char *url);
 
 /**
  * Presentation side: a notification's one answer — a NOTIFICATION_OUTCOME

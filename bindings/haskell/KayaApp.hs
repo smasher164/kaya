@@ -106,6 +106,11 @@ module KayaApp
     cancelNotification,
     onNotificationActivation,
     notificationResult,
+    link,
+    linkOpened,
+    -- Exported for guests/haskell's link-route check, which reads the
+    -- parked declaration's bytes back before any transaction runs.
+    appPendingRoutes,
     PickedFile (..),
     openPicked,
     pickFiles,
@@ -1850,6 +1855,59 @@ cancelNotification notification = emitB (W.txCancelNotification notification)
 onNotificationActivation :: App -> (Word64 -> Word32 -> IO ()) -> IO ()
 onNotificationActivation app handler =
   writeIORef (appNotificationActivation app) (Just handler)
+
+-- | Declare a link ROUTE and the handler that answers it
+-- (docs/app-links-plan.md §4): @link app \"task\/{key}\" f@ matches
+-- @\<scheme\>:\/\/task\/t1@ and calls f with
+-- @Map.fromList [(\"key\", \"t1\")]@. Segments split on @\/@, @{name}@
+-- captures one segment, a literal segment matches itself; the query's
+-- pairs join the params and a capture wins a name clash.
+--
+-- PROCESS-LEVEL, 'onNotificationActivation''s shape and an App action
+-- for the same reason: it does not retire and it needs no transaction —
+-- declared before the first one the record waits and rides the head of
+-- it, declared inside a handler it rides that handler's. A URL that
+-- arrives before the app thread exists is delivered first, and one no
+-- route matched is announced by the core and reaches nothing here.
+--
+-- NOTHING HERE READS THE PATTERN. The core is the one parser and the one
+-- author of every refusal — an empty pattern, an empty segment, a
+-- malformed one, a duplicate — and it faults at apply with the whole
+-- sentence, where every other declaration refusal in kaya lands
+-- (tools\/check-sugar-surface.py refuses a reason spelled here).
+link :: App -> String -> (Map.Map String String -> IO ()) -> IO ()
+link app pattern handler = do
+  taken <- readIORef (appNextLinkRoute app)
+  let route = taken + 1
+  writeIORef (appNextLinkRoute app) route
+  modifyIORef' (appLinkHandlers app) (Map.insert route handler)
+  modifyIORef' (appPendingRoutes app) (++ [W.txDeclareLinkRoute route (W.VStr pattern)])
+
+-- | The link_opened decision, in a function of its own because the ring
+-- loop's branch has no seam a test can reach (the ring is C memory) —
+-- 'notificationResult' for the same reason, and guests\/haskell's
+-- @kaya-notify-order-check@ drives the cases through here. TWO DROPS
+-- WITH DISJOINT CAUSES (docs\/app-links-plan.md §4): route 0 is a URL NO
+-- ROUTE TOOK, which the core announced naming every declared pattern, so
+-- it is silent here; a route that matched and reached no handler is this
+-- binding's to announce, naming its own registrar.
+linkOpened :: App -> Word64 -> String -> Map.Map String String -> IO ()
+linkOpened app route url params = do
+  handlers <- readIORef (appLinkHandlers app)
+  case Map.lookup route handlers of
+    Just handler -> dispatch (handler params)
+    Nothing
+      | route == 0 -> return ()
+      | otherwise ->
+          hPutStrLn
+            stderr
+            ( "kaya: link "
+                ++ url
+                ++ " matched route "
+                ++ show route
+                ++ " and reached no handler — none is registered for it"
+                ++ " (KayaApp.link)"
+            )
 
 -- | Check one accept-list entry and return it. Ids reach every
 -- platform's own registry verbatim, so they carry no spaces.
@@ -3988,6 +4046,15 @@ data App = App
     -- a result whose id has none above (docs/tasks-s9-plan.md R1). A
     -- relaunched process never called showNotification.
     appNotificationActivation :: IORef (Maybe (Word64 -> Word32 -> IO ())),
+    -- NOT one-shot either: a route declared by 'link' answers every URL
+    -- that matches it, for the life of the process
+    -- (docs/app-links-plan.md §4), and the core owns the pattern table —
+    -- nothing is kept here but the handler.
+    appLinkHandlers :: IORef (Map.Map Word64 (Map.Map String String -> IO ())),
+    appNextLinkRoute :: IORef Word64,
+    -- 'link' may be called before the first transaction, so its record
+    -- waits here for one ('buildTx' drains it head-first).
+    appPendingRoutes :: IORef [Builder],
     -- The undo ledger's two reports, keyed by WINDOW. NOT one-shot: a
     -- user walks a history as often as they like.
     appUndone :: IORef (Map.Map Word64 (String -> UndoDelta -> IO ())),
@@ -4076,7 +4143,12 @@ buildTx app (Build f) = do
   -- submit; a Build that threw never reaches here, abandoning them
   -- with its records.
   mapM_ (register app) (reverse (bPending s))
-  kayaSubmit [records]
+  -- The pending link-route declarations go FIRST, in declaration order
+  -- (docs/app-links-plan.md §4; Rust's PENDING_ROUTES drained head-first
+  -- by Tx::commit is the shape).
+  routes <- readIORef (appPendingRoutes app)
+  writeIORef (appPendingRoutes app) []
+  kayaSubmit (routes ++ [records])
   return a
 
 register :: App -> Pending -> IO ()
@@ -4323,6 +4395,9 @@ newApp =
     <*> newIORef 0 -- appNextAlert
     <*> newIORef Map.empty -- appNotificationHandlers
     <*> newIORef Nothing -- appNotificationActivation
+    <*> newIORef Map.empty -- appLinkHandlers
+    <*> newIORef 0 -- appNextLinkRoute
+    <*> newIORef [] -- appPendingRoutes
     <*> newIORef Map.empty -- appUndone
     <*> newIORef Map.empty -- appRedone
     <*> newIORef Map.empty -- appFileDialogHandlers
@@ -4595,6 +4670,19 @@ dispatchLoop app = do
           handlers <- readIORef (appAlertHandlers app)
           writeIORef (appAlertHandlers app) (Map.delete ident handlers)
           dispatch (mapM_ ($ choice) (Map.lookup ident handlers))
+          dispatchLoop app
+      | kind == W.occKindLinkOpened -> do
+          -- ident is the ROUTE the core matched
+          -- (docs/app-links-plan.md §4), and NOT one-shot. The parser
+          -- flattens the URL and the captured pairs into the values
+          -- slot, so they are regrouped in twos after the URL.
+          let pairs (W.VStr name : W.VStr value : rest) =
+                (name, value) : pairs rest
+              pairs _ = []
+          case keys of
+            (W.VStr url : rest) ->
+              linkOpened app ident url (Map.fromList (pairs rest))
+            _ -> return ()
           dispatchLoop app
       | kind == W.occKindNotificationResult -> do
           -- The parser boxes the u32 outcome as VI64, the alert's own slot.

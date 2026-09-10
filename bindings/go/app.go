@@ -254,6 +254,15 @@ type App struct {
 	// a result whose id has none above (docs/tasks-s9-plan.md R1). A
 	// relaunched process never called Show.
 	notificationActivation func(*Tx, uint64, uint32)
+	// NOT one-shot either: a route declared by Link answers every URL
+	// that matches it, for the life of the process
+	// (docs/app-links-plan.md §4), and the core owns the pattern table —
+	// nothing is kept here but the handler.
+	links         map[uint64]func(*Tx, map[string]string)
+	nextLinkRoute uint64
+	// Link may be called before the first transaction, so its record
+	// waits here for one (Build drains it head-first).
+	pendingRecords [][]byte
 	fileDialogs    map[uint64]func(*Tx, []PickedFile)
 	clipboardReads map[uint64]func(*Tx, Representation)
 	widgetPastes   map[uint64]func(*Tx, Representation)
@@ -328,6 +337,7 @@ func NewApp() *App {
 		nodeSorts:      make(map[uint64]func(*Tx, []any, uint32)),
 		alerts:         make(map[uint64]func(*Tx, uint32)),
 		notifications:  make(map[uint64]func(*Tx, uint32)),
+		links:          make(map[uint64]func(*Tx, map[string]string)),
 		fileDialogs:    make(map[uint64]func(*Tx, []PickedFile)),
 		clipboardReads: make(map[uint64]func(*Tx, Representation)),
 		widgetPastes:   make(map[uint64]func(*Tx, Representation)),
@@ -670,8 +680,13 @@ func (a *App) Build(fn func(*Tx)) {
 	for _, p := range tx.pendingDerived {
 		a.derived[p.coll] = append(a.derived[p.coll], p.recompute)
 	}
-	if len(tx.records) > 0 {
-		Submit(tx.records...)
+	// The pending link-route declarations go FIRST, in declaration order
+	// (docs/app-links-plan.md §4; Rust's PENDING_ROUTES drained
+	// head-first by Tx::commit is the shape).
+	records := append(a.pendingRecords, tx.records...)
+	a.pendingRecords = nil
+	if len(records) > 0 {
+		Submit(records...)
 	}
 }
 
@@ -2568,6 +2583,73 @@ func (a *App) notificationResult(id uint64, choice uint32) {
 // still wins.
 func (a *App) OnNotificationActivation(fn func(*Tx, uint64, uint32)) {
 	a.notificationActivation = fn
+}
+
+// Link declares a link ROUTE and the handler that answers it
+// (docs/app-links-plan.md §4): Link("task/{key}", f) matches
+// <scheme>://task/t1 and calls f with map[string]string{"key": "t1"}.
+// Segments split on `/`, {name} captures one segment, a literal segment
+// matches itself; the query's pairs join the params and a capture wins a
+// name clash.
+//
+// PROCESS-LEVEL, OnNotificationActivation's shape: it does not retire
+// and it needs no transaction — declared before the first one the record
+// waits and rides the head of it, declared inside a handler it rides
+// that handler's. A URL that arrives before the app goroutine exists is
+// delivered first, and one no route matched is announced by the core and
+// reaches nothing here.
+//
+// NOTHING HERE READS THE PATTERN. The core is the one parser and the one
+// author of every refusal — an empty pattern, an empty segment, a
+// malformed one, a duplicate — and it faults at apply with the whole
+// sentence, where every other declaration refusal in kaya lands
+// (tools/check-sugar-surface.py refuses a reason spelled here).
+func (a *App) Link(pattern string, fn func(*Tx, map[string]string)) {
+	a.nextLinkRoute++
+	route := a.nextLinkRoute
+	a.links[route] = fn
+	a.pendingRecords = append(a.pendingRecords, TxDeclareLinkRoute(route, pattern))
+}
+
+// linkURLOf is the URL as delivered, for the drop sentence alone: a Link
+// handler receives the captures, since kaya matches once, in the core
+// (docs/app-links-plan.md §4).
+func linkURLOf(payload any) string {
+	flat, _ := payload.([]any)
+	if len(flat) == 0 {
+		return ""
+	}
+	url, _ := flat[0].(string)
+	return url
+}
+
+// linkParamsOf reads the link_opened payload's captured pairs into the
+// map a Link handler receives.
+// The payload is ONE FLAT RUN of Str values: the url, then the params in
+// name/value pairs (kaya_wire.go's arm).
+func linkParamsOf(payload any) map[string]string {
+	params := make(map[string]string)
+	flat, _ := payload.([]any)
+	for i := 1; i+1 < len(flat); i += 2 {
+		name, _ := flat[i].(string)
+		value, _ := flat[i+1].(string)
+		params[name] = value
+	}
+	return params
+}
+
+// linkOpened is the link_opened decision, in a method of its own because
+// Serve's switch has no seam a test can reach (the ring is C memory) —
+// App.notificationResult for the same reason, and
+// bindings/go/notification_test.go drives it.
+func (a *App) linkOpened(route uint64, url string, params map[string]string) {
+	if fn := a.links[route]; fn != nil {
+		a.dispatch(func(tx *Tx) { fn(tx, params) })
+	} else if route != 0 {
+		fmt.Fprintf(os.Stderr,
+			"kaya: link %s matched route %d and reached no handler — "+
+				"none is registered for it (App.Link)\n", url, route)
+	}
 }
 
 // NotificationRef accumulates the one atomic SHOW_NOTIFICATION record;
@@ -5181,6 +5263,8 @@ func (a *App) Serve() {
 				delete(a.alerts, id)
 				a.dispatch(func(tx *Tx) { fn(tx, choice) })
 			}
+		case kind == occLinkOpened:
+			a.linkOpened(id, linkURLOf(payload), linkParamsOf(payload))
 		case kind == occNotificationResult:
 			a.notificationResult(id, choice)
 		case kind == occClipboardResult:

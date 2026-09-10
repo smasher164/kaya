@@ -555,6 +555,11 @@ pub enum Occurrence {
     /// A notification's one answer: activated by the user, or refused
     /// by the platform. The id retires with it.
     NotificationResult { notification: NotificationId, outcome: NotificationOutcome },
+    /// The platform handed this app a URL (docs/app-links-plan.md §4).
+    /// `route` is the declared route that matched, 0 for none — the core
+    /// announced that miss before this was sent. Params are the pattern's
+    /// captures then the query's pairs, a capture winning a clash.
+    LinkOpened { route: u64, url: String, params: Vec<(String, String)> },
     /// The user's back affordance popped an entry natively —
     /// informational and post-fact. A programmatic pop_entry does not
     /// echo here: its caller already knows.
@@ -1657,6 +1662,10 @@ pub enum TxOp {
     ShowNotification(NotificationSpec),
     /// Withdraw a pending or delivered notification by id.
     CancelNotification(NotificationId),
+    /// Declare one app-link route (docs/app-links-plan.md §4). The core
+    /// keeps the table and does the one match; a malformed or repeated
+    /// pattern faults here, like every other declaration refusal.
+    DeclareLinkRoute { route: u64, pattern: String },
     /// Request the platform's file picker over a live window: the
     /// alert's grammar exactly, answered by one FileDialogResult. One
     /// dialog may be live per process.
@@ -2166,6 +2175,12 @@ impl OccSink {
                     ring.push_record(
                         crate::ring::REC_NOTIFICATION_RESULT,
                         &crate::wire::notification_result_body(notification, outcome),
+                    );
+                }
+                Occurrence::LinkOpened { route, url, params } => {
+                    ring.push_record(
+                        crate::ring::REC_LINK_OPENED,
+                        &crate::wire::link_opened_body(route, &url, &params),
                     );
                 }
                 Occurrence::EntryPopped { entry } => {

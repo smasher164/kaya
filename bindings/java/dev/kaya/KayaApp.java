@@ -301,6 +301,16 @@ public final class KayaApp {
     // a result whose id has none above (docs/tasks-s9-plan.md R1). A
     // relaunched process never called show().
     private NotificationActivationHandler notificationActivation;
+    // NOT one-shot either: a route declared by link() answers every URL
+    // that matches it, for the life of the process
+    // (docs/app-links-plan.md §4), and the core owns the pattern table —
+    // nothing is kept here but the handler.
+    private final java.util.Map<Long, LinkHandler> links = new java.util.HashMap<>();
+    private long nextLinkRoute;
+    // link() may be called before the first transaction, so its record
+    // waits here for one (Tx.submit drains it head-first). Package
+    // scope, not private: tools/checks/java-notify reads the bytes back.
+    final java.util.List<byte[]> pendingRecords = new java.util.ArrayList<>();
 
     private final java.util.Map<Long, BiConsumer<Tx, Integer>> alerts =
             new java.util.HashMap<>();
@@ -412,6 +422,13 @@ public final class KayaApp {
      * (docs/tasks-s9-plan.md R1). */
     public interface NotificationActivationHandler {
         void accept(Tx tx, long notification, int outcome);
+    }
+
+    /** A link route's handler: the captures the core read out of the
+     * URL, by name (docs/app-links-plan.md §4). The URL itself is not
+     * handed over — kaya matches once, in the core. */
+    public interface LinkHandler {
+        void accept(Tx tx, java.util.Map<String, String> params);
     }
 
     /** A node-anchored radio group's pick handler: the stamped copy's
@@ -3883,6 +3900,15 @@ public final class KayaApp {
                 derived.computeIfAbsent(entry.getKey(), k -> new ArrayList<>()).add(entry.getValue());
             }
             pendingDerived.clear();
+            // The pending link-route declarations go FIRST, in
+            // declaration order (docs/app-links-plan.md §4; Rust's
+            // PENDING_ROUTES drained head-first by Tx::commit is the
+            // shape). Ahead of the undo marker too: the marker leads the
+            // BATCH, which is assembled below.
+            if (!pendingRecords.isEmpty()) {
+                records.addAll(0, pendingRecords);
+                pendingRecords.clear();
+            }
             if (undoGroup != null) {
                 // THE MARKER LEADS THE BATCH. A transaction is a bare
                 // list with no header, so per-transaction metadata has
@@ -6623,6 +6649,80 @@ public final class KayaApp {
     }
 
     /**
+     * Declare a link ROUTE and the handler that answers it
+     * (docs/app-links-plan.md §4): {@code link("task/{key}", f)} matches
+     * {@code <scheme>://task/t1} and calls f with {@code {"key": "t1"}}.
+     * Segments split on {@code /}, {@code {name}} captures one segment, a
+     * literal segment matches itself; the query's pairs join the params
+     * and a capture wins a name clash.
+     *
+     * <p>PROCESS-LEVEL, onNotificationActivation's shape: it does not
+     * retire and it needs no transaction — declared before the first one
+     * the record waits and rides the head of it, declared inside a
+     * handler it rides that handler's. A URL that arrives before the app
+     * thread exists is delivered first, and one no route matched is
+     * announced by the core and reaches nothing here.
+     *
+     * <p>NOTHING HERE READS THE PATTERN. The core is the one parser and
+     * the one author of every refusal — an empty pattern, an empty
+     * segment, a malformed one, a duplicate — and it faults at apply
+     * with the whole sentence, where every other declaration refusal in
+     * kaya lands (tools/check-sugar-surface.py refuses a reason spelled
+     * here).
+     */
+    public void link(String pattern, LinkHandler handler) {
+        long route = ++nextLinkRoute;
+        links.put(route, handler);
+        pendingRecords.add(KayaWire.txDeclareLinkRoute(route, pattern));
+    }
+
+    /**
+     * The link_opened payload's captured pairs, as the map a link
+     * handler receives.
+     */
+    /** The URL as delivered, for the drop sentence alone. */
+    private static String linkUrlOf(Object payload) {
+        if (payload instanceof java.util.List<?> flat && !flat.isEmpty()) {
+            return (String) flat.get(0);
+        }
+        return "";
+    }
+
+    /** The payload is ONE FLAT RUN of Str values: the url, then the
+     * params in name/value pairs (KayaWire's arm). */
+    private static java.util.Map<String, String> linkParamsOf(Object payload) {
+        java.util.Map<String, String> captured = new java.util.LinkedHashMap<>();
+        if (payload instanceof java.util.List<?> flat) {
+            for (int i = 1; i + 1 < flat.size(); i += 2) {
+                captured.put((String) flat.get(i), (String) flat.get(i + 1));
+            }
+        }
+        return captured;
+    }
+
+    /**
+     * The link_opened decision, in a method of its own because the ring
+     * loop's switch has no seam a runnable proof can reach (the ring is
+     * raw memory) — notificationResult for the same reason, and
+     * tools/checks/java-notify's NotifyOrderCheck drives it.
+     */
+    void linkOpened(long route, String url, java.util.Map<String, String> params) {
+        LinkHandler handler = links.get(route);
+        if (handler != null) {
+            dispatch(tx -> handler.accept(tx, params));
+        } else if (route != 0) {
+            // TWO DROPS WITH DISJOINT CAUSES: route 0 is a URL NO
+            // ROUTE TOOK, which the core announced naming every declared
+            // pattern, so it is silent here; a route that matched and
+            // reached no handler is this binding's to announce.
+            System.err.println(
+                    "kaya: link " + url + " matched route " + route
+                            + " and reached no handler — none is registered"
+                            + " for it (KayaApp.link)");
+        }
+    }
+
+    /**
      * Register a click handler for a template node; it also receives
      * the stamped copy's keys, outermost first.
      */
@@ -7058,6 +7158,10 @@ public final class KayaApp {
                 if (handler != null) {
                     dispatch(tx -> handler.accept(tx, (Integer) occ.payload));
                 }
+            } else if (occ.kind == KayaWire.OCC_KIND_LINK_OPENED) {
+                // occ.id is the ROUTE the core matched
+                // (docs/app-links-plan.md §4), and NOT one-shot.
+                linkOpened(occ.id, linkUrlOf(occ.payload), linkParamsOf(occ.payload));
             } else if (occ.kind == KayaWire.OCC_KIND_NOTIFICATION_RESULT) {
                 notificationResult(occ.id, (Integer) occ.payload);
             } else if (occ.kind == KayaWire.OCC_KIND_FILE_DIALOG_RESULT) {

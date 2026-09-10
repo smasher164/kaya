@@ -166,6 +166,68 @@ pub(crate) fn declared_identity() -> Result<Declaration, String> {
     Ok(Declaration { name, icon, id })
 }
 
+/// THE `[links]` TABLE (docs/app-links-plan.md L1, §4): the scheme the
+/// app owns and the web hosts it claims, both optional. `manifest_value`
+/// answers TOP-LEVEL keys only — it stops at the first `[` — so a table
+/// needs its own reader rather than a second parser.
+fn manifest_table_line(text: &str, table: &str, key: &str) -> Option<String> {
+    let mut inside = false;
+    for raw in text.lines() {
+        let line = raw.trim();
+        if line.starts_with('#') {
+            continue;
+        }
+        if line.starts_with('[') {
+            inside = line == format!("[{table}]");
+            continue;
+        }
+        if !inside {
+            continue;
+        }
+        let Some((lhs, rhs)) = line.split_once('=') else { continue };
+        if lhs.trim() == key {
+            return Some(rhs.trim().to_owned());
+        }
+    }
+    None
+}
+
+fn unquote(rest: &str) -> Option<String> {
+    let quoted = rest.strip_prefix('"')?;
+    let end = quoted.find('"')?;
+    Some(quoted[..end].to_owned())
+}
+
+/// `([links] scheme, [links] hosts)`, cached. The DEFAULT lives in
+/// crates/kaya/src/links.rs (the declared id) and in
+/// tools/lib/packaging/identity.py for the build — one rule, read twice
+/// on purpose, held equal by tools/check-app-identity.py.
+pub(crate) fn declared_links() -> (Option<String>, Vec<String>) {
+    static LINKS: std::sync::OnceLock<(Option<String>, Vec<String>)> = std::sync::OnceLock::new();
+    LINKS
+        .get_or_init(|| {
+            let Ok(bytes) = crate::assets::read(IDENTITY_MANIFEST) else {
+                return (None, Vec::new());
+            };
+            let Ok(text) = String::from_utf8(bytes) else { return (None, Vec::new()) };
+            let scheme = manifest_table_line(&text, "links", "scheme")
+                .and_then(|rest| unquote(&rest))
+                .filter(|v| !v.is_empty());
+            let hosts = manifest_table_line(&text, "links", "hosts")
+                .map(|rest| {
+                    rest.trim_start_matches('[')
+                        .trim_end_matches(']')
+                        .split(',')
+                        .filter_map(|item| unquote(item.trim()))
+                        .filter(|v| !v.is_empty())
+                        .collect()
+                })
+                .unwrap_or_default();
+            (scheme, hosts)
+        })
+        .clone()
+}
+
 /// The declared id ALONE, cached, and without the icon read
 /// `declared_identity` pays for: the preference domain, the app data
 /// directory and the act-two directory all key on it, and the first two
@@ -541,6 +603,7 @@ fn undo_verdict(op: &TxOp) -> UndoVerdict {
         TxOp::ShowAlert(_) => UndoVerdict::Refused("show_alert"),
         TxOp::ShowNotification(_) => UndoVerdict::Refused("show_notification"),
         TxOp::CancelNotification(_) => UndoVerdict::Refused("cancel_notification"),
+        TxOp::DeclareLinkRoute { .. } => UndoVerdict::Refused("declare_link_route"),
         TxOp::ShowFileDialog(_) => UndoVerdict::Refused("show_file_dialog"),
         TxOp::ShowSaveDialog(_) => UndoVerdict::Refused("show_save_dialog"),
         TxOp::SetBrandAccent { .. } => UndoVerdict::Refused("set_brand_accent"),
@@ -2392,6 +2455,12 @@ impl Scene {
                 TxOp::CancelNotification(id) => {
                     out.push(ApplyOp::CancelNotification(id));
                 }
+                TxOp::DeclareLinkRoute { route, pattern } => {
+                    // NOTHING REACHES THE BACKENDS: the route table is the
+                    // core's, and the platform arms hand it URLs
+                    // (crates/kaya/src/links.rs).
+                    crate::links::declare(route, &pattern);
+                }
                 TxOp::ShowFileDialog(spec) => {
                     assert!(
                         spec.window == crate::protocol::DEFAULT_WINDOW
@@ -3625,6 +3694,11 @@ impl Scene {
         // on the widgets.
         #[cfg(feature = "harness")]
         ANSWERS.fetch_add(1, Ordering::Release);
+        // THE APP'S ROUTES ARE DECLARED (docs/app-links-plan.md §4): a
+        // link the platform handed over before the app thread existed
+        // waited for this, and is delivered first. Idempotent past the
+        // first batch.
+        crate::links::flush_early();
         out
     }
 

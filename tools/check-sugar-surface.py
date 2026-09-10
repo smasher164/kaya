@@ -676,6 +676,332 @@ for _lang, _rel, _spelling in NOTIFICATION_SPELLINGS:
             selftest_exit(f"check-sugar-surface: self-test failed — {_rel} "
                           f"changed during the sentence negative")
 
+# --- THE APP-LINK SURFACE, in all nine -----------------------------
+# docs/app-links-plan.md §4: `link(pattern, handler)` declares a ROUTE
+# and the handler that answers it, on the app-level registrar beside
+# on_notification_activation. NEITHER SWEEP ABOVE SEES IT — a route is
+# not a KIND and not a WINDOW PROP — while TX 54 and occurrence 28 reach
+# every binding through the generator whether or not a guest can spell
+# either, which is how Python once shipped unable to declare list_detail.
+LINK_REGISTRAR = [
+    ("rust", "crates/kaya/src/app.rs", r"pub fn link\("),
+    ("python", "bindings/python/kaya/__init__.py", r"^def link\("),
+    ("go", "bindings/go/app.go", r"^func \(a \*App\) Link\("),
+    ("csharp", "bindings/csharp/KayaApp.cs", r"public void Link\("),
+    ("java", "bindings/java/dev/kaya/KayaApp.java", r"public void link\("),
+    ("swift", "bindings/swift/KayaApp.swift", r"^    func link\("),
+    ("haskell", "bindings/haskell/KayaApp.hs", r"^link ::"),
+    ("ocaml", "bindings/ocaml/kaya_app.ml", r"^let link app "),
+    ("js", "bindings/js/kaya/index.ts", r"^export function link\("),
+]
+
+# THE DECLARATION RIDES A TRANSACTION, and never opens one: link() may be
+# called before the app's first build, so the record waits in a per-app
+# pending list that the next submit drains HEAD-FIRST (Rust's
+# PENDING_ROUTES drained by Tx::commit is the shape). NO LANE CAN SEE THE
+# ORDER: the core applies a declaration and a mount in one batch either
+# way, and the scene reads the same screen back — but a route declared
+# AFTER the first transaction misses the cold door, since the core
+# matches the link that STARTED the process the moment that batch lands.
+LINK_PENDING = [
+    ("rust", "crates/kaya/src/app.rs", r"PENDING_ROUTES"),
+    ("python", "bindings/python/kaya/__init__.py",
+     r"_pending_records\.append\(wire\.tx_declare_link_route\("),
+    ("go", "bindings/go/app.go",
+     r"a\.pendingRecords = append\(a\.pendingRecords, TxDeclareLinkRoute\("),
+    ("csharp", "bindings/csharp/KayaApp.cs",
+     r"pendingRecords\.Add\(KayaWire\.TxDeclareLinkRoute\("),
+    ("java", "bindings/java/dev/kaya/KayaApp.java",
+     r"pendingRecords\.add\(KayaWire\.txDeclareLinkRoute\("),
+    ("swift", "bindings/swift/KayaApp.swift",
+     r"pendingRoutes\.declareLinkRoute\("),
+    ("haskell", "bindings/haskell/KayaApp.hs",
+     r"appPendingRoutes app\) \(\+\+ \[W\.txDeclareLinkRoute"),
+    ("ocaml", "bindings/ocaml/kaya_app.ml",
+     r"Kaya_wire\.tx_declare_link_route route"),
+    ("js", "bindings/js/kaya/index.ts",
+     r"_pendingRecords\.push\(wire\.tx_declare_link_route\("),
+]
+
+# THE DISPATCH IS BY ROUTE ID, out of each binding's own decision — the
+# route the core matched keys the table the registrar filled. Written out
+# per binding rather than derived: nine languages spell "look the id up
+# and call it" nine ways.
+LINK_DISPATCH = [
+    ("rust", "crates/kaya/src/app.rs",
+     r"match self\.links\.borrow\(\)\.get\(route\)"),
+    ("python", "bindings/python/kaya/__init__.py",
+     r"self\._link_handlers\.get\(ident\)"),
+    ("go", "bindings/go/app.go", r"if fn := a\.links\[route\]; fn != nil \{"),
+    ("csharp", "bindings/csharp/KayaApp.cs",
+     r"links\.TryGetValue\(route, out var fn\)"),
+    ("java", "bindings/java/dev/kaya/KayaApp.java",
+     r"LinkHandler handler = links\.get\(route\);"),
+    ("swift", "bindings/swift/KayaApp.swift",
+     r"if let handler = links\[route\] \{"),
+    ("haskell", "bindings/haskell/KayaApp.hs",
+     r"case Map\.lookup route handlers of"),
+    ("ocaml", "bindings/ocaml/kaya_app.ml",
+     r"Hashtbl\.find_opt app\.link_handlers route"),
+    ("js", "bindings/js/kaya/index.ts",
+     r"this\._linkHandlers\.get\(ident\)"),
+]
+
+for _what, _clauses in (("registrar", LINK_REGISTRAR),
+                        ("pending declaration record", LINK_PENDING),
+                        ("dispatch by route id", LINK_DISPATCH)):
+    for _lang, _rel, _pattern in _clauses:
+        if not grep_file(_pattern, _rel):
+            print(f"check-sugar-surface: {_lang} has no link {_what} "
+                  f"(wanted /{_pattern}/ in {_rel}; "
+                  f"docs/app-links-plan.md §4)")
+            status = 1
+
+# THE BUILT-IN NEGATIVE: a spelling that exists nowhere must fail in all
+# nine, three times over, or the patterns have rotted into rules that can
+# only pass.
+for _what, _clauses in (("registrar", LINK_REGISTRAR),
+                        ("pending declaration record", LINK_PENDING),
+                        ("dispatch by route id", LINK_DISPATCH)):
+    _fake = [lang for lang, rel, _ in _clauses
+             if not grep_file(r"kayaFakeLinkSpelling\(", rel)]
+    if len(_fake) != 9:
+        selftest_exit(f"check-sugar-surface: self-test failed "
+                      f"({len(_fake)}/9 link-{_what} patterns fired for a "
+                      f"spelling that exists nowhere)")
+
+# SIX BINDINGS KEEP THE DECISION IN A METHOD, the notification arm's
+# shape one occurrence over: the ring is raw memory in all six and the
+# switch has no seam a runnable proof can reach, so the decision is a
+# method and the ARM THAT CALLS IT is held separately — a method nothing
+# calls is a rule nothing runs.
+# (lang, file, the arm's call, the perturbation that removes it).
+LINK_ARM_CALLS = [
+    ("go", "bindings/go/app.go",
+     r"^\t\tcase kind == occLinkOpened:\n(?:.*\n)?\t\t\ta\.linkOpened\(",
+     r"a\.linkOpened\(", "a.dispatch(func(tx *Tx) {}); _ = "),
+    ("csharp", "bindings/csharp/KayaApp.cs",
+     r"^            else if \(kind == KayaWire\.OccKindLinkOpened\)\n"
+     r"(?:.*\n)*?                LinkOpened\(",
+     r"                LinkOpened\(", "                Dispatch(tx => { }); NotLinkOpened("),
+    ("java", "bindings/java/dev/kaya/KayaApp.java",
+     r"^            \} else if \(occ\.kind == KayaWire\.OCC_KIND_LINK_OPENED\) \{\n"
+     r"(?:.*\n)*?                linkOpened\(",
+     r"                linkOpened\(", "                dispatch(tx -> { }); notLinkOpened("),
+    ("swift", "bindings/swift/KayaApp.swift",
+     r"^            case \(UInt16\(KAYA_OCCURRENCE_LINK_OPENED\), _\):\n"
+     r"(?:.*\n)*?                linkOpened\(",
+     r"                linkOpened\(", "                notLinkOpened("),
+    ("ocaml", "bindings/ocaml/kaya_app.ml",
+     r"^         else if kind = Kaya_wire\.occ_kind_link_opened then\n"
+     r"(?:.*\n)*?           \| Kaya_wire\.Str url :: pairs -> link_opened app ",
+     r"-> link_opened app ", "-> not_link_opened app "),
+    ("haskell", "bindings/haskell/KayaApp.hs",
+     r"^      \| kind == W\.occKindLinkOpened -> do\n"
+     r"(?:.*\n)*?              linkOpened app ",
+     r"              linkOpened app ", "              notLinkOpened app "),
+]
+
+
+def link_arm_calls_the_method(lang, text):
+    for name, _rel, pattern, _pat, _repl in LINK_ARM_CALLS:
+        if name == lang:
+            return re.search(pattern, text, re.M) is not None
+    raise KeyError(lang)
+
+
+_link_arm_neg = []
+for _lang, _rel, _pattern, _pat, _repl in LINK_ARM_CALLS:
+    _text = read_rel(_rel)
+    if not link_arm_calls_the_method(_lang, _text):
+        print(f"check-sugar-surface: {_lang}'s link_opened switch arm no "
+              f"longer calls its decision method — the dispatch rule is "
+              f"read out of that method, so an arm that stopped calling "
+              f"it would leave the rule proven and unused ({_rel})")
+        status = 1
+    _gutted, _n = sub_count(_pat, _repl, _text)
+    _link_arm_neg.append(f" {_lang}={_n}")
+    if _n < 1 or link_arm_calls_the_method(_lang, _gutted):
+        selftest_exit(f"check-sugar-surface: self-test failed — a {_lang} "
+                      f"switch arm that no longer calls its link decision "
+                      f"method still passed ({_n} substitution(s))")
+print("check-sugar-surface: link arm-call perturbations applied:"
+      + "".join(_link_arm_neg))
+
+# THE DROP IS ONE SENTENCE, compared FLATTENED, in nine copies — the
+# notification drop's clause one occurrence over, and the same reason: a
+# route that MATCHED and reached no handler is the BINDING's to announce,
+# and nine hand-written copies drift. TWO DROPS WITH DISJOINT CAUSES: a
+# URL NO ROUTE TOOK arrives as route 0 and the CORE announced it already,
+# naming every declared pattern, so no binding says a word about it —
+# two lines for one event teaches a reader to distrust both.
+LINK_SPELLINGS = [
+    ("rust", "crates/kaya/src/app.rs", "Messages::link"),
+    ("python", "bindings/python/kaya/__init__.py", "kaya.link"),
+    ("go", "bindings/go/app.go", "App.Link"),
+    ("csharp", "bindings/csharp/KayaApp.cs", "App.Link"),
+    ("java", "bindings/java/dev/kaya/KayaApp.java", "KayaApp.link"),
+    ("swift", "bindings/swift/KayaApp.swift", "KayaApp.link"),
+    ("haskell", "bindings/haskell/KayaApp.hs", "KayaApp.link"),
+    ("ocaml", "bindings/ocaml/kaya_app.ml", "Kaya_app.link"),
+    ("js", "bindings/js/kaya/index.ts", "kaya.link"),
+]
+
+
+# The prefs clause's flatteners, spelled here because it is further down
+# the file: go's %q and rust's {key:?} on top of the notification set.
+LINK_FLATTENERS = [
+    (r"\$?\{[A-Za-z_][A-Za-z0-9_.]*(?::[^}]*)?\}", "<v>"),
+    (r"%q", "<v>"),
+] + SENTENCE_FLATTENERS
+
+
+def link_sentence(text, spelling):
+    """The drop sentence as the reader will see it, every hole
+    flattened to <v>."""
+    opened = text.find("kaya: link ")
+    if opened < 0:
+        return None
+    closed = text.find(spelling + ")", opened)
+    if closed < 0:
+        return None
+    said = text[opened:closed + len(spelling) + 1]
+    for pattern, repl in LINK_FLATTENERS:
+        said = re.sub(pattern, repl, said)
+    said = said.replace("\\", "").replace('"', "")
+    return re.sub(r"\s+", " ", said).strip()
+
+
+def link_sentence_findings(text_for=None):
+    text_for = read_rel if text_for is None else text_for
+    out, said = [], {}
+    for lang, rel, spelling in LINK_SPELLINGS:
+        one = link_sentence(text_for(rel), spelling)
+        if one is None:
+            out.append(f"check-sugar-surface: {lang} prints no link drop "
+                       f"sentence naming {spelling} in {rel}")
+            continue
+        said[lang] = one.replace(spelling, "<registrar>")
+    if not out:
+        agreed = max(set(said.values()), key=list(said.values()).count)
+        for lang, one in said.items():
+            if one != agreed:
+                out.append(f"check-sugar-surface: {lang}'s link drop "
+                           f"sentence is not the frozen one — it says "
+                           f"{one!r}, the other bindings say {agreed!r} "
+                           f"(docs/app-links-plan.md §4; one sentence, "
+                           f"nine copies, compared flattened)")
+    return out
+
+
+for _msg in link_sentence_findings():
+    print(_msg)
+    status = 1
+
+# ITS WATCHED NEGATIVES, the notification pair's two shapes: a WORD taken
+# out of one copy (which the flattened comparison must name), and the
+# REGISTRAR renamed in the parenthetical (which leaves the slice
+# unfindable — how a copy-paste from the neighbouring binding arrives).
+_link_said = []
+for _lang, _rel, _spelling in LINK_SPELLINGS:
+    _text = read_rel(_rel)
+    if link_sentence(_text, _spelling) is None:
+        continue
+    for _what, _pattern, _repl, _wanted in (
+            ("dropped a word from its link drop sentence",
+             r"matched route ", "matched ",
+             f"{_lang}'s link drop sentence is not the frozen one"),
+            ("named another binding's registrar in its link drop sentence",
+             re.escape(_spelling) + r"\)", "kaya.someOtherRegistrar)",
+             f"{_lang} prints no link drop sentence"),
+    ):
+        _doctored, _n = sub_count(_pattern, _repl, _text)
+        _link_said.append(f" {_lang}={_n}")
+        if _n < 1:
+            selftest_exit(f"check-sugar-surface: self-test failed — the "
+                          f"{_lang} link-sentence negative changed nothing "
+                          f"in {_rel}")
+        _fired = [m for m in link_sentence_findings(
+            lambda rel, _r=_rel, _d=_doctored: _d if rel == _r
+            else read_rel(rel)) if _wanted in m]
+        if len(_fired) != 1:
+            selftest_exit(f"check-sugar-surface: self-test failed — "
+                          f"{_lang} {_what} produced {len(_fired)} findings "
+                          f"naming it, not 1")
+        if read_rel(_rel) != _text:
+            selftest_exit(f"check-sugar-surface: self-test failed — {_rel} "
+                          f"changed during the link-sentence negative")
+print("check-sugar-surface: link-sentence perturbations applied:"
+      + "".join(_link_said))
+
+# AND THE DECLARATION REFUSALS ARE THE CORE'S ALONE, which is the clause
+# with teeth and the opposite of what a mirrored sentence would need
+# (ruled 2026-09-09, after the round trip recorded in the plan): a
+# pattern rides `declare_link_route` unread by any binding, and
+# crates/kaya/src/links.rs faults with the whole sentence at apply, where
+# every other declaration refusal in kaya lands. So a binding that grew
+# its own parser would drift from the core's grammar in silence — no
+# scene declares a bad route, and the eight copies would all still
+# "pass". check-assets' one-resolver census is the shape: the sentence's
+# opening may appear in exactly one file.
+LINK_REFUSAL_AUTHOR = "crates/kaya/src/links.rs"
+# Spelled in two pieces so THIS FILE is not a hit in its own census (the
+# watched negative below plants the sentence in a copy of the python
+# binding, and the joined string must not sit on disk here).
+LINK_REFUSAL_OPENER = "kaya: link " "route"
+LINK_SOURCE_SUFFIXES = (".rs", ".py", ".ts", ".go", ".cs", ".java",
+                        ".swift", ".ml", ".hs", ".kt", ".c", ".h")
+_link_reason_files, _link_walked = [], 0
+# `--others --exclude-standard` beside the cached list: a mid-slice tree
+# carries the new file the sentence lives in, and a census that read only
+# what is committed would report the author missing on the very day it
+# lands.
+for _line in subprocess.run(
+        ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
+        cwd=ROOT, text=True, stdout=subprocess.PIPE,
+        check=True).stdout.splitlines():
+    if not _line.endswith(LINK_SOURCE_SUFFIXES):
+        continue
+    _link_walked += 1
+    try:
+        if LINK_REFUSAL_OPENER in (ROOT / _line).read_text(encoding="utf-8"):
+            _link_reason_files.append(_line)
+    except (OSError, UnicodeDecodeError):
+        continue
+if _link_walked < 200:
+    selftest_exit(f"check-sugar-surface: the link-refusal census read "
+                  f"{_link_walked} source files, which is too few to have "
+                  f"read the bindings — a census that reads nothing agrees "
+                  f"with everything")
+for _rel in _link_reason_files:
+    if _rel != LINK_REFUSAL_AUTHOR:
+        print(f"check-sugar-surface: {_rel} spells a link-route refusal "
+              f"— {LINK_REFUSAL_AUTHOR} is the ONE author of those words, "
+              f"and a binding that grew its own parser would drift from "
+              f"the core's grammar in silence (docs/app-links-plan.md §4)")
+        status = 1
+if LINK_REFUSAL_AUTHOR not in _link_reason_files:
+    print(f"check-sugar-surface: {LINK_REFUSAL_AUTHOR} no longer spells "
+          f"the link-route refusal at all — the census below is then "
+          f"satisfied by a tree with no refusal anywhere")
+    status = 1
+print(f"check-sugar-surface: link-refusal census read {_link_walked} "
+      f"source files, {len(_link_reason_files)} spelling the sentence")
+
+# ITS WATCHED NEGATIVE: a binding doctored to spell one must be named.
+_forged = read_rel("bindings/python/kaya/__init__.py")
+_forged, _n = sub_count(
+    r"    NOTHING HERE READS THE PATTERN\.",
+    "    raise ValueError(f'" + LINK_REFUSAL_OPENER
+    + ' "{pattern}" is empty\')\n'
+    "    NOTHING HERE READS THE PATTERN.", _forged)
+print(f"check-sugar-surface: self-test python spelled a link-route "
+      f"refusal of its own, {_n} substitution(s)")
+if _n != 1 or LINK_REFUSAL_OPENER not in _forged:
+    selftest_exit("check-sugar-surface: self-test failed — the "
+                  "link-refusal negative did not plant a refusal in the "
+                  "python binding")
+
 # --- THE CAPABILITIES SURFACE, in all nine -------------------------
 # Every binding wraps `kaya_capabilities()`, or a guest derives the
 # answer from its OWN platform predicate. TWO CLAUSES, because either

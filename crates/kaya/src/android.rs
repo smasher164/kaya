@@ -623,6 +623,12 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 sig: "(JI)V".into(),
                 fn_ptr: present_emit_notification_result as *mut _,
             },
+            // App links (docs/app-links-plan.md §4).
+            NativeMethod {
+                name: "linkOpened".into(),
+                sig: "(Ljava/lang/String;)V".into(),
+                fn_ptr: present_link_opened as *mut _,
+            },
             NativeMethod {
                 name: "grantCapabilities".into(),
                 sig: "(J)V".into(),
@@ -1228,6 +1234,25 @@ extern "system" fn present_emit_notification_result(
     outcome: jint,
 ) {
     crate::capi::kaya_emit_notification_result(notification as u64, outcome as u32);
+}
+
+/// KayaPresent.linkOpened: a URL the platform delivered to this app
+/// (docs/app-links-plan.md §4) — the activity's own intent on a cold
+/// launch, `onNewIntent` warm. THIS ARM PARSES NOTHING: the core matches
+/// it against the declared routes, queues it when the app thread does not
+/// exist yet, and announces a miss.
+extern "system" fn present_link_opened(mut env: JNIEnv, _class: JClass, url: JString) {
+    if url.is_null() {
+        return;
+    }
+    let Ok(text) = env.get_string(&url) else {
+        if env.exception_check().unwrap_or(false) {
+            let _ = env.exception_clear();
+        }
+        return;
+    };
+    let text: String = text.into();
+    crate::links::opened(&text);
 }
 
 /// KayaPresent.grantCapabilities: the runtime bits this host measured,

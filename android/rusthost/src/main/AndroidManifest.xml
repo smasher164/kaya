@@ -34,12 +34,29 @@
         android:icon="@mipmap/kaya_mark"
         android:label="${kayaAppLabel}"
         android:theme="@style/Theme.Kaya.Launch">
+        <!-- APP LINKS (docs/app-links-plan.md L3, §4). `singleTask` so a
+             link tapped while this app runs re-enters the LIVE activity
+             through onNewIntent instead of stacking a second one; the
+             VIEW filter claims the declared scheme, which is the
+             placeholder android/build.gradle.kts reads out of
+             guests/assets/identity.toml (a literal here would be one more
+             copy of a value declared once). THE LAUNCH MODE HAS A PRICE
+             THE SHELL PAYS: a warm explicit start now arrives at
+             onNewIntent, so the KAYA_* env mapping runs from both doors
+             (KayaEnv.fromIntent; tools/check-jni.py's manifest census). -->
         <activity
             android:name=".MainActivity"
-            android:exported="true">
+            android:exported="true"
+            android:launchMode="singleTask">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="${kayaLinkScheme}" />
             </intent-filter>
         </activity>
         <!-- THE HARNESS'S EYES OUTSIDE THIS APP: DocumentsUI is a

@@ -92,6 +92,12 @@ import struct
 import tomllib
 import zlib
 
+# THE ONE READER, for C14's half of the scheme rule: this gate is on C9's
+# exempt list and parses the manifest itself for the icon clauses, but the
+# `[links] scheme` DEFAULT is a rule, not a value, and a second copy of a
+# rule is what C9 exists to stop.
+from packaging import identity as app_identity
+
 g = Gate("check-app-identity")
 
 MANIFEST = "guests/assets/identity.toml"
@@ -846,6 +852,74 @@ def check(root):
                 f"the packaging step, and this gate is only its static "
                 f"half")
 
+    # C14, THE APP-LINK SCHEME (docs/app-links-plan.md L1). The two
+    # Apple plists are the ONLY reason LaunchServices hands this app a
+    # `<scheme>://…` URL at all, and the scheme has ONE rule — the
+    # manifest's `[links] scheme`, defaulting to the declared id
+    # (tools/lib/packaging/identity.py's `scheme`). A plist that spells a
+    # scheme of its own is an app the platform starts for a URL nobody
+    # links to, and nothing at run time can see the disagreement: the
+    # lane's own link opens fine under whichever string both halves
+    # happen to share.
+    declared_scheme = None
+    try:
+        declared_scheme = app_identity.load(root).scheme
+    except app_identity.Undeclared as exc:
+        bad.append(str(exc))
+    mac_rel = "tools/lib/packaging/mac.py"
+    mac_path = root / mac_rel
+    if not mac_path.is_file():
+        bad.append(f"{mac_rel}: is gone, so nothing writes the macOS "
+                   f"bundle's Info.plist")
+    else:
+        mac = mac_path.read_text(encoding="utf-8")
+        # THE EMITTED MARKUP, not the word: the prose beside the arm
+        # names the key too, and a clause satisfied by its own comment
+        # is the shape check-appearance learned twice.
+        if "<key>CFBundleURLTypes</key>" not in mac or not re.search(
+                r"url_types\(declared\)", mac):
+            bad.append(
+                f"{mac_rel}: writes no CFBundleURLTypes into the plist — "
+                f"a macOS bundle without it is handed no URL of any "
+                f"scheme, and the whole app-link door is dead with every "
+                f"scene green")
+        if "declared.scheme" not in mac:
+            bad.append(
+                f"{mac_rel}: does not write `declared.scheme` — the "
+                f"scheme is the manifest's one rule and this is the "
+                f"BUILD's copy of it")
+        if declared_scheme and re.search(
+                r"<string>" + re.escape(declared_scheme) + "</string>", mac):
+            bad.append(
+                f"{mac_rel}: spells the scheme \"{declared_scheme}\" as a "
+                f"literal — it is derived from {MANIFEST}, and a literal "
+                f"agrees with the declaration only until one of them "
+                f"moves")
+    ios_tpl = root / "tools/ios/Info.plist.in"
+    if ios_tpl.is_file():
+        tpl = ios_tpl.read_text(encoding="utf-8")
+        if "<key>CFBundleURLTypes</key>" not in tpl:
+            bad.append(
+                "tools/ios/Info.plist.in: declares no CFBundleURLTypes "
+                "— `simctl openurl` then exits 0 having delivered "
+                "nothing, which is the silent failure this key exists "
+                "to prevent (docs/traps.md)")
+        elif "@URLTYPES@" not in tpl:
+            bad.append(
+                f"tools/ios/Info.plist.in: CFBundleURLTypes is not the "
+                f"build's to fill — the scheme comes from {MANIFEST} "
+                f"through tools/lib/packaging/identity.py, never from "
+                f"this template's own text")
+    if ios_path.is_file():
+        ios = ios_path.read_text(encoding="utf-8")
+        if "declared.scheme" not in ios and "@URLTYPES@" in (
+                ios_tpl.read_text(encoding="utf-8") if ios_tpl.is_file()
+                else ""):
+            bad.append(
+                f"{ios_rel}: substitutes @URLTYPES@ without reading "
+                f"`declared.scheme` — the iOS bundle's scheme has to be "
+                f"the same one rule the macOS bundle writes")
+
     # C7, THE ANDROID SLOT. One theme in the library, named by every
     # app module's manifest, and the call that takes the app back off it.
     theme_rel = "android/kaya/src/main/res/values/themes.xml"
@@ -1282,6 +1356,32 @@ doctor_shadow("the emptied UILaunchScreen", s, "tools/ios/Info.plist.in",
 g.negative("an iOS bundle whose launch screen is the system's plain "
            "ground", lambda p=s: check(p), want="EMPTY UILaunchScreen")
 
+# N28 — the macOS bundle stops declaring a URL type at all. Nothing at
+# run time can see it: every scene is green and the app is simply never
+# handed a link (docs/app-links-plan.md L1).
+s = fresh("nourltypes")
+doctor_shadow("the removed macOS CFBundleURLTypes", s,
+              "tools/lib/packaging/mac.py",
+              r"'  <key>CFBundleURLTypes</key>\\n'", "''")
+g.negative("a macOS bundle that claims no scheme", lambda p=s: check(p),
+           want="writes no CFBundleURLTypes")
+
+# N29 — the scheme retyped into the macOS plist as a literal, which
+# agrees with the declaration exactly until one of them moves.
+s = fresh("literalscheme")
+doctor_shadow("the retyped macOS scheme", s,
+              "tools/lib/packaging/mac.py",
+              r"\{declared\.scheme\}", "dev.kaya.aurora.notes")
+g.negative("a macOS bundle spelling the scheme itself",
+           lambda p=s: check(p), want="as a literal")
+
+# N30 — the iOS template's scheme stops being the build's to fill.
+s = fresh("frozenurltypes")
+doctor_shadow("the frozen iOS URL types", s, "tools/ios/Info.plist.in",
+              r"@URLTYPES@", "<array/>")
+g.negative("an iOS template that spells its own URL types",
+           lambda p=s: check(p), want="not the build's to fill")
+
 # N15 — the theme keeps the colour and loses the picture.
 s = fresh("noicon")
 doctor_shadow("the dropped splash icon", s,
@@ -1382,7 +1482,7 @@ for _n, _tool in enumerate(sorted(ONE_GENERATOR)):
     g.negative(f"a second copy of {_tool!r} outside the arms",
                lambda p=s: check(p), want="belongs to one arm alone")
 
-g.negatives_ran(27)
+g.negatives_ran(30)
 
 # The vacuity floor rule 5 asks for: the census below walks these six
 # roots, and a walk that found almost nothing agrees with everything.

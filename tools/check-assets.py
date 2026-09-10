@@ -35,12 +35,18 @@ dev_shell_or_die()
 #                   into scratch to compare, the ledger netting to the
 #                   guest's BOOK, the history ending on it, and the
 #                   scene's frozen lines re-derived from the artifact.
+#   C12 THE WEIGHTS every weight kaya asks a vendored VARIABLE font for
+#                   is a named instance of it: the GTK sheet's wishes go
+#                   through weight_css_for's clamp, and any literal left
+#                   is one every such font carries. A miss is not a
+#                   fallback — pango aborts the process.
 # NO FIXTURE ANYWHERE: every negative doctors a shadow of the REAL tree
 # (CLAUDE.md invariant 3: the wayland seat guard passed vacuously twice).
 
 import ast as ast_mod
 import os
 import re
+import struct
 import shutil
 import subprocess
 import tempfile
@@ -178,6 +184,154 @@ APK_PREFIX_SITES = {
         re.compile(r"""^APK_ASSET_PREFIX = "([A-Za-z0-9._-]+)"$""",
                    re.MULTILINE),
 }
+
+
+# ------------------------------------------------------------------ C12
+# EVERY WEIGHT KAYA ASKS A VENDORED VARIABLE FONT FOR IS ONE IT HAS.
+# Measured 2026-09-09: fontconfig enumerates a variable font's NAMED
+# INSTANCES, never its continuous axis, so a CSS `font-weight` matching no
+# instance fails the match and pango ABORTS the process inside layout —
+# `pango_fc_font_map_get_face: assertion failed: (res == FcResultMatch)` —
+# with no verdict and no window. guests/assets/fonts/sora-wght.ttf carries
+# 100/200/300/400/600/700/800 and NO Medium, so a ruled `font-weight: 500`
+# killed all sixteen `typeface` legs of one matrix.
+#
+# THE REMEDY IS A CLAMP IN THE BACKEND, not a number in a stylesheet: the
+# font is OFL with a reserved name and a user's own font could lack any
+# weight. So gtk.rs holds WISHES and lowers them through `weight_css_for`,
+# which rewrites each to the nearest named instance of the brand font's own
+# bytes. This clause holds BOTH halves — the clamp is wired, and any weight
+# still written as a literal is one every vendored variable font carries.
+#
+# IT LIVES HERE AND NOT IN check-gtk.py BECAUSE check-gtk IS EXCLUDED FROM
+# THE GATE SWEEP (it needs docker), so a clause there is one someone must
+# remember to run — which is how this shipped. check-assets already owns
+# guests/assets and already walks the font family. check-gtk keeps the
+# RUNTIME half: gtk::weight_tests, over these same bytes, in the container.
+GTK = "crates/kaya/src/gtk.rs"
+FONT_FAMILY = "fonts"
+# A literal weight in a stylesheet; `{...}` is an interpolation and is
+# counted separately, because what it holds is the clamp's business.
+CSS_WEIGHT = re.compile(r"font-weight:\s*(\{?[A-Za-z0-9_]+\}?)\s*;")
+# The two keywords CSS resolves to a number. `lighter`/`bolder` are
+# relative to the inherited value and cannot be resolved by reading one
+# file, so they are refused by name rather than skipped.
+KEYWORD_WEIGHTS = {"normal": 400, "bold": 700}
+
+# The clamp, wired. Each is a callsite no text census elsewhere can see,
+# and each perturbation below is a change that reads as correct.
+CLAMP_WIRING = (
+    # THE RULING ITSELF, all three rows in one needle so a silently
+    # re-ruled weight reddens here: no observable on any backend reads a
+    # font weight, on any platform, so nothing else in the tree can.
+    ("the ruled wishes",
+     'const WEIGHT_WISHES: &[(&str, u16)] = &[\n'
+     '    ("button, button label", 500),\n'
+     '    ("headerbar label.title, windowtitle label.title", 600),\n'
+     '    ("label.heading", 500),\n'
+     '];'),
+    # A sheet added BELOW libadwaita's own (THEME, 200) loses every
+    # declaration in it and raises nothing at all.
+    ("the sheet added above libadwaita's own",
+     "                &weight_css,\n"
+     "                gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,"),
+    ("the startup sheet lowered through the clamp",
+     'load_kaya_css(&weight_css, "label weights", &weight_css_for(None), '
+     '&css_error);'),
+    ("the brand font's own instances read off its bytes",
+     "request.font.as_ref().and_then(|blob| wght_named_instances(&blob.0))"),
+    ("the sheet re-lowered when a brand typeface arrives",
+     "&weight_css_for(instances.as_deref()),"),
+    ("each wish taken to the nearest instance",
+     "Some(have) => nearest_weight(*wish, have),"),
+    ("the tie broken toward the heavier face",
+     "(have.abs_diff(wish), std::cmp::Reverse(*have))"),
+)
+
+
+def named_instance_weights(blob):
+    """The `wght` values of a font's NAMED INSTANCES, or None when the file
+    is not a variable font with a weight axis. Pure `struct`: the dev shell
+    carries no fontTools and a gate may not grow a dependency."""
+    if len(blob) < 12:
+        return None
+    count = struct.unpack_from(">H", blob, 4)[0]
+    tables = {}
+    for i in range(count):
+        if 12 + 16 * i + 16 > len(blob):
+            return None
+        tag, _sum, off, length = struct.unpack_from(">4sIII", blob, 12 + 16 * i)
+        tables[tag.decode("latin1")] = (off, length)
+    if "fvar" not in tables:
+        return None
+    base = tables["fvar"][0]
+    if base + 16 > len(blob):
+        return None
+    axes_off, _pad, axis_count, axis_size, inst_count, inst_size = \
+        struct.unpack_from(">HHHHHH", blob, base + 4)
+    axis_index = None
+    for i in range(axis_count):
+        tag = struct.unpack_from(">4s", blob, base + axes_off + i * axis_size)[0]
+        if tag == b"wght":
+            axis_index = i
+    if axis_index is None:
+        return None
+    first = base + axes_off + axis_count * axis_size
+    found = set()
+    for i in range(inst_count):
+        coords = struct.unpack_from(f">{axis_count}i", blob,
+                                    first + i * inst_size + 4)
+        found.add(round(coords[axis_index] / 65536))
+    return sorted(found)
+
+
+def variable_fonts(root):
+    """Every vendored variable font, with the weights it really has."""
+    out = []
+    family = pathlib.Path(root) / ASSET_ROOT / FONT_FAMILY
+    for path in sorted(family.glob("*.ttf")):
+        weights = named_instance_weights(path.read_bytes())
+        if weights is not None:
+            rel = path.relative_to(pathlib.Path(root)).as_posix()
+            out.append((rel, weights))
+    return out
+
+
+def weight_findings(path, text, fonts):
+    """One sentence per literal naming a weight some vendored variable font
+    does not carry, plus the count of the interpolated ones (which the
+    clamp owns and CLAMP_WIRING holds)."""
+    bad = []
+    interpolated = 0
+    for raw in sorted(set(CSS_WEIGHT.findall(text))):
+        if raw.startswith("{"):
+            interpolated += 1
+            continue
+        if raw.isdigit():
+            asked = int(raw)
+        elif raw in KEYWORD_WEIGHTS:
+            asked = KEYWORD_WEIGHTS[raw]
+        else:
+            bad.append(
+                f"{path}: `font-weight: {raw}` is relative to the inherited "
+                f"weight, so nothing here can tell which face it resolves "
+                f"to — name the number instead, or lower it through the "
+                f"clamp")
+            continue
+        for font, weights in fonts:
+            if asked not in weights:
+                bad.append(
+                    f"{path}: `font-weight: {raw}` is written as a LITERAL "
+                    f"and names a weight {font} does not carry. Its named "
+                    f"instances are {weights}, and fontconfig enumerates "
+                    f"THOSE, not the continuous axis — so on any scene that "
+                    f"sets this font as its root family the match fails and "
+                    f"pango ABORTS the process "
+                    f"(`pango_fc_font_map_get_face: assertion failed: (res "
+                    f"== FcResultMatch)`), with no verdict and no window. "
+                    f"Lower it through weight_css_for's clamp as the label "
+                    f"weights are, or ask for one of {weights}")
+    return bad, interpolated
 
 
 def check(root):
@@ -821,6 +975,40 @@ def check(root):
                                f"line the data asks for is:\n"
                                f"    {line}")
 
+    # ------------------------------------------------------------- C12
+    fonts = variable_fonts(root)
+    if not fonts:
+        bad.append(f"no variable font under {ASSET_ROOT}/{FONT_FAMILY} "
+                   f"could be read, so the weight clause checked nothing "
+                   f"and would pass any stylesheet at all — a census that "
+                   f"reads no font agrees with everything")
+    for font, weights in fonts:
+        out.append(f"{font} carries named weights {weights}")
+    gtk_path = pathlib.Path(root) / GTK
+    if not gtk_path.is_file():
+        bad.append(f"{GTK} is not in the tree — this clause reads the GTK "
+                   f"backend's stylesheets and cannot say anything without "
+                   f"it")
+    elif fonts:
+        gtk_text = gtk_path.read_text(encoding="utf-8")
+        for label, needle in CLAMP_WIRING:
+            seen = gtk_text.count(needle)
+            if seen != 1:
+                bad.append(
+                    f"{GTK}: {label} appears {seen} time(s), wanted "
+                    f"exactly 1 (`{needle}`). The label weights are WISHES "
+                    f"lowered through weight_css_for against the brand "
+                    f"font's own named instances; with that path broken "
+                    f"the sheet asks for a weight the font may not have "
+                    f"and pango aborts every leg of the scene that sets "
+                    f"it — which no other gate, and no lane but that "
+                    f"scene's, can see")
+        found, interpolated = weight_findings(GTK, gtk_text, fonts)
+        bad.extend(found)
+        out.append(f"{GTK}: {interpolated} interpolated font-weight(s) "
+                   f"through the clamp, every literal one a named "
+                   f"instance of {len(fonts)} vendored variable font(s)")
+
     return out, bad
 
 
@@ -1162,7 +1350,77 @@ doctor_shadow("N29's renamed CHART_DAYS", s,
 refused(s, "no longer spells CHART_DAYS",
         "N29 (a chart census with no window)")
 
-g.negatives_ran(30)
+# N30 — C12: THE CLAMP REMOVED. The wish goes straight through, and on
+# Sora that is a `font-weight: 500` no named instance answers: pango
+# aborts inside layout and every leg of the `typeface` scene dies with no
+# verdict at all. The sheet still reads exactly as its author meant it to.
+s = fresh("n30")
+doctor_shadow("N30's removed clamp", s, GTK,
+              r"Some\(have\) => nearest_weight\(\*wish, have\),",
+              "Some(_have) => *wish,")
+refused(s, "each wish taken to the nearest instance appears 0 time(s)",
+        "N30 (the clamp removed)")
+
+# N31 — C12: THE TIE BROKEN THE OTHER WAY. 500 lands on 400 instead of
+# 600, so kaya's medium reads one rung LIGHTER than its regular text and
+# nothing anywhere is red — the pixels are the only witness.
+s = fresh("n31")
+doctor_shadow("N31's inverted tie", s, GTK,
+              r"\(have\.abs_diff\(wish\), std::cmp::Reverse\(\*have\)\)",
+              "(have.abs_diff(wish), *have)")
+refused(s, "the tie broken toward the heavier face appears 0 time(s)",
+        "N31 (the tie broken toward the lighter face)")
+
+# N32 — C12: A WISHED WEIGHT WRITTEN STRAIGHT INTO THE PROVIDER, which is
+# the shape the defect actually shipped in. Two clauses catch it: the
+# re-lowering callsite is gone, and the literal is a weight Sora lacks.
+s = fresh("n32")
+doctor_shadow("N32's hand-written sheet", s, GTK,
+              r"&weight_css_for\(instances\.as_deref\(\)\),",
+              '"button, button label { font-weight: 500; }\\n",')
+refused(s, "is written as a LITERAL and names a weight",
+        "N32 (a wished weight written straight into the provider)")
+
+# N33 — C12: the startup install stops going through the clamp, so a
+# brand font that arrives LATE is honoured and one that never arrives
+# leaves the wish standing — half the guard, and the half no scene reaches.
+s = fresh("n33")
+doctor_shadow("N33's raw startup sheet", s, GTK,
+              r'load_kaya_css\(&weight_css, "label weights", '
+              r'&weight_css_for\(None\), &css_error\);',
+              'load_kaya_css(&weight_css, "label weights", "", &css_error);')
+refused(s, "the startup sheet lowered through the clamp appears 0 time(s)",
+        "N33 (the startup sheet not lowered through the clamp)")
+
+# N34 — C12: the vacuity floor. With no readable variable font the clause
+# would pass any stylesheet, so it refuses a verdict instead.
+s = fresh("n34")
+(s / "guests/assets/fonts/sora-wght.ttf").write_bytes(b"not a font")
+refused(s, "a census that reads no font agrees with everything",
+        "N34 (no vendored variable font to check against)")
+
+# N35 — C12: a wish silently RE-RULED. The title drops back to regular and
+# every lane stays green, because no observable on any backend reads a
+# weight — the review page's pixels were the only witness the first time.
+s = fresh("n35")
+doctor_shadow("N35's re-ruled title wish", s, GTK,
+              r'\("headerbar label\.title, windowtitle label\.title", 600\),',
+              '("headerbar label.title, windowtitle label.title", 400),')
+refused(s, "the ruled wishes appears 0 time(s)",
+        "N35 (a wish re-ruled with no ruling)")
+
+# N36 — C12: the sheet installed below libadwaita's own priority, so every
+# rule in it loses to the theme and nothing is red anywhere.
+s = fresh("n36")
+doctor_shadow("N36's demoted sheet", s, GTK,
+              r"&weight_css,\n                "
+              r"gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,",
+              "&weight_css,\n                "
+              "gtk4::STYLE_PROVIDER_PRIORITY_FALLBACK,")
+refused(s, "the sheet added above libadwaita's own appears 0 time(s)",
+        "N36 (the weight sheet below the theme's priority)")
+
+g.negatives_ran(37)
 
 # The vacuity floor rule 5 asks for, over the census the checker walks.
 g.counted("files under the asset root",

@@ -189,6 +189,16 @@ _recording = False  # inside window(): mirror reads would freeze branches
 _journal = None  # per-transaction mirror undo, run if the tx is abandoned
 
 
+def _ship(records):
+    """Submit one transaction, the pending link-route declarations ahead
+    of it, in declaration order (docs/app-links-plan.md §4; Rust's
+    PENDING_ROUTES drained head-first by Tx::commit is the shape)."""
+    pending, _app._pending_records = _app._pending_records, []
+    records = pending + list(records)
+    if records:
+        runtime.submit(*records)
+
+
 def _records():
     if _tx is None:
         raise RuntimeError(
@@ -1623,6 +1633,37 @@ def on_notification_activation(f):
     the same id still wins. Needs no transaction; call it beside the
     scene declaration."""
     _app._notification_activation = f
+
+
+def link(pattern, f):
+    """Declare a link ROUTE and the handler that answers it
+    (docs/app-links-plan.md §4): `kaya.link("task/{key}", f)` matches
+    `<scheme>://task/t1` and calls `f({"key": "t1"})`. Segments split on
+    `/`, `{name}` captures one segment, a literal segment matches
+    itself; the query's pairs join the params and a capture wins a name
+    clash.
+
+    PROCESS-LEVEL, `on_notification_activation`'s shape: it does not
+    retire and it needs no transaction — declared before the first one
+    the record waits and rides the head of it, declared inside a handler
+    it rides that handler's. A URL that arrives before the app thread
+    exists is delivered first, and one no route matched is announced by
+    the core and reaches nothing here.
+
+    NOTHING HERE READS THE PATTERN. The core is the one parser and the
+    one author of every refusal — an empty pattern, an empty segment, a
+    malformed one, a duplicate — and it faults at apply with the whole
+    sentence, where every other declaration refusal in kaya lands
+    (tools/check-sugar-surface.py refuses a reason spelled here). The
+    one check below is the one a dynamic language cannot avoid."""
+    if not isinstance(pattern, str):
+        raise TypeError(
+            f"kaya: link() takes a route pattern as str ('task/{{key}}'), "
+            f"not {type(pattern).__name__}")
+    app = _app
+    route = app._next("link_route")
+    app._link_handlers[route] = f
+    app._pending_records.append(wire.tx_declare_link_route(route, pattern))
 
 
 class _ColumnsTrace:
@@ -4018,8 +4059,7 @@ class _TxScope:
             if not self._nested:
                 records, _tx = _tx, None
                 _journal = None
-                if records:
-                    runtime.submit(*records)
+                _ship(records)
             return False
         global _tpl_depth
         _recording = False
@@ -4056,8 +4096,7 @@ class _TxScope:
             # A props-only body is legal (the sections shape) — nothing
             # mounts, nothing errors.
             records.append(wire.tx_mount(self._window, _pending_root.id))
-        if records:
-            runtime.submit(*records)
+        _ship(records)
         return False
 
 
@@ -4068,7 +4107,7 @@ class App:
         # Binding conventions).
         self._counters = {"signal": 0, "widget": 0, "collection": 0,
                           "alert": 0, "menu_item": 0, "file_dialog": 0,
-                          "clipboard": 0}
+                          "clipboard": 0, "link_route": 0}
         # The wire routes by path_len, not by number, so two dicts.
         self._widget_handlers = {}
         self._alert_handlers = {}
@@ -4079,6 +4118,14 @@ class App:
         # for a result whose id has none above (docs/tasks-s9-plan.md
         # R1). A relaunched process never called show.
         self._notification_activation = None
+        # NOT one-shot either: a route declared by link() answers every
+        # URL that matches it, for the life of the process
+        # (docs/app-links-plan.md §4), and the core owns the pattern
+        # table — nothing is kept here but the handler.
+        self._link_handlers = {}
+        # link() may be called before the first transaction, so its
+        # record waits here for one (_ship drains it head-first).
+        self._pending_records = []
         self._file_dialog_handlers = {}
         # One-shot, keyed by request id (the alert's grammar).
         self._clipboard_handlers = {}
@@ -4482,6 +4529,31 @@ class App:
                 if handler is not None:
                     # payload is the parsed u32 choice.
                     self._dispatch(handler, payload)
+                continue
+            if kind == wire.OCC_LINK_OPENED:
+                # ident is the ROUTE the core matched
+                # (docs/app-links-plan.md §4), and NOT one-shot. TWO
+                # DROPS WITH DISJOINT CAUSES: route 0 is a URL NO ROUTE
+                # TOOK, which the core announced naming every declared
+                # pattern, so it is silent here — two lines for one
+                # event teaches a reader to distrust both, and this
+                # slice has no registrar for a miss; a route that
+                # matched and reached no handler is this binding's to
+                # announce, naming its own registrar.
+                # The payload is ONE FLAT RUN of Str values: the url,
+                # then the params in name/value pairs (wire.py's arm).
+                url = payload[0] if payload else ""
+                handler = self._link_handlers.get(ident)
+                if handler is not None:
+                    self._dispatch(handler, dict(
+                        zip(payload[1::2], payload[2::2])))
+                elif ident != 0:
+                    print(
+                        f"kaya: link {url} matched route {ident} and "
+                        "reached no handler — none is registered for it "
+                        "(kaya.link)",
+                        file=sys.stderr,
+                    )
                 continue
             if kind == wire.OCC_NOTIFICATION_RESULT:
                 # THE ORDER IS THE SEMANTICS (docs/tasks-s9-plan.md R1),

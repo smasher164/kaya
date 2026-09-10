@@ -9,7 +9,7 @@ import UserNotifications
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0x605e18f72b2af791
+let kayaSpecHash: UInt64 = 0x1960b216df673c1f
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -3689,6 +3689,55 @@ var kayaTearingDown: Set<UInt64> = []
                 // dismissed and re-opened, which comes back with a FRESH
                 // NSWindow — would silently lose it.
                 kayaApplyWindowDirty(windowId)
+                // AND THEN IT IS PUT ON SCREEN, which SwiftUI does NOT do
+                // on a URL LAUNCH (docs/app-links-plan.md L5; measured
+                // 2026-09-09). A process the platform starts to open a
+                // link gets its WindowGroup NSWindow built and registered
+                // — it is in NSApp.windows — and never ordered on screen:
+                // `vis=false` at the root's appear and CGWindowList
+                // answering `0 window(s)` for that pid for the whole life
+                // of the process, while a plain launch of the same bundle
+                // is `layer=0` on screen. A user tapping a link with the
+                // app closed saw nothing; the harness could not see it
+                // either, because every observation reads the MODEL.
+                //
+                // ORDER FRONT WITHOUT ACTIVATING: these guests are
+                // `.accessory` so a suite steals nobody's keyboard, and
+                // `orderFrontRegardless` shows the window while leaving
+                // the active app alone. Guarded on `isVisible`, so the
+                // plain path — already on screen by AppKit's own doing —
+                // is untouched.
+                // AND THEN IT IS PUT ON SCREEN, ON THE NEXT MAIN-QUEUE
+                // TURN. SwiftUI does not order the WindowGroup's window on
+                // a URL LAUNCH (docs/app-links-plan.md L5, measured
+                // 2026-09-09): a process the platform starts to open a link
+                // builds and registers the NSWindow — it is in
+                // NSApp.windows — and never composites it. CGWindowList AND
+                // the accessibility tree both answer 0 windows for that pid
+                // for the whole life of the process, while a plain launch of
+                // the same bundle is layer=0 on screen with every app-side
+                // property identical (vis, frame, alpha, space, policy). A
+                // user tapping a link with the app closed saw nothing, and
+                // no scene could see it because every observation reads the
+                // MODEL.
+                //
+                // ONE TURN LATER, NOT HERE: this runs inside
+                // viewDidMoveToWindow, and ordering the window then flips
+                // `isVisible` while compositing NOTHING — measured, 0
+                // windows in both readers with vis=true. The window is not
+                // committed until the turn ends.
+                //
+                // ORDER FRONT WITHOUT ACTIVATING: these guests are
+                // `.accessory` so a suite steals nobody's keyboard, and the
+                // `isVisible` guard leaves the plain path — already on
+                // screen by AppKit's own doing — untouched.
+                DispatchQueue.main.async {
+                    guard !window.isVisible else { return }
+                    window.orderFrontRegardless()
+                    kayaDiag(
+                        "windowshow wid=\(windowId) num=\(window.windowNumber) "
+                            + "vis=\(window.isVisible)")
+                }
             }
         }
     }
@@ -3861,7 +3910,22 @@ var kayaTearingDown: Set<UInt64> = []
 
     final class KayaWindowDelegate: NSObject, NSWindowDelegate {
         let windowId: UInt64
-        weak var original: (any NSWindowDelegate)?
+        /// STRONG, not weak (measured 2026-09-09). This proxy VOUCHES for
+        /// the original's selectors in `responds(to:)`, and NSWindow reads
+        /// that ONCE at `setDelegate:` to register the delegate as an
+        /// observer of the notifications it implements. If the original is
+        /// then deallocated, `forwardingTarget(for:)` answers nil and the
+        /// next such notification is an unrecognized selector that
+        /// TERMINATES THE APP:
+        ///
+        ///   -[KayaWindowDelegate windowWillOrderOnScreen:]:
+        ///       unrecognized selector sent to instance
+        ///
+        /// reached from `_reallyDoOrderWindow` the first time anything
+        /// orders the window on screen. A proxy that answers for another
+        /// object has to keep that object alive. No cycle: the original is
+        /// SwiftUI's own delegate and does not refer back here.
+        var original: (any NSWindowDelegate)?
 
         func windowDidResize(_ notification: Notification) {
             if let window = notification.object as? NSWindow {
@@ -3942,6 +4006,12 @@ enum KayaHost {
 
     static func emitNotificationResult(_ notification: UInt64, _ outcome: UInt32) {
         api.emit_notification_result(notification, outcome)
+    }
+
+    /// A URL the platform handed this app (docs/app-links-plan.md §4).
+    /// The interpreter parses NOTHING — the core owns the one matcher.
+    static func linkOpened(_ url: String) {
+        url.withCString { api.link_opened($0) }
     }
 
     /// The user's back affordance popped an entry natively — the
@@ -8392,6 +8462,21 @@ private func kayaRunScript(_ script: String) {
                 let answered = kayaAnswers()
                 DispatchQueue.main.sync { kayaNotificationActivated(nid) }
                 kayaAwaitAnswer(answered)
+            case "open_link":
+                // ASK THE PLATFORM, FROM INSIDE THIS PROCESS
+                // (docs/app-links-plan.md L5): the URL comes back through the
+                // door a user's tap takes — the raw Apple event on macOS,
+                // `.onOpenURL` on iOS — with no runner involved. NARROWED TO
+                // THIS APP on macOS: every kaya guest claims the same scheme
+                // (it defaults to the declared id) and the lane keeps many
+                // bundles registered, so the default handler is an undefined
+                // pick and a green-looking open that delivers nothing
+                // (measured 2026-09-09).
+                let url = kayaQuoted(Array(parts[1...]))
+                kayaAwaitQuiet()
+                let answered = kayaAnswers()
+                DispatchQueue.main.sync { kayaOpenLink(url) }
+                kayaAwaitAnswer(answered)
             case "relaunch":
                 // ACT ONE ENDS HERE (docs/tasks-s9-plan.md R6a): the marker
                 // carries the scene and the steps after this line, the runner
@@ -8402,7 +8487,15 @@ private func kayaRunScript(_ script: String) {
                 // THE DOOR IS THE OPTIONAL ARGUMENT (docs/tasks-s4-plan.md P5):
                 // bare is the notification door, `launch` the plain one. One
                 // line, the same in all three harnesses.
-                print("KAYA_RELAUNCH: door \(parts.count > 1 ? String(parts[1]) : "notification")")
+                // THE LINK DOOR CARRIES ITS URL ON THE SAME LINE: the runner
+                // reads it from here rather than re-parsing the scene.
+                let door = parts.count > 1 ? String(parts[1]) : "notification"
+                if door == "link" {
+                    let url = kayaQuoted(Array(parts[2...]))
+                    print("KAYA_RELAUNCH: door \(door) url=\(url)")
+                } else {
+                    print("KAYA_RELAUNCH: door \(door)")
+                }
                 // THE DEBOUNCE'S ONE HOLE (P4): this process leaves in a
                 // moment, so a movement inside the window would never be
                 // written and the second act would restore a stale frame.
@@ -13865,6 +13958,63 @@ func kayaDeliverLaunchNotification() {
         let id = UInt64(raw.trimmingCharacters(in: .whitespaces))
     else { return }
     kayaNotificationActivated(id)
+}
+
+// MARK: - App links (docs/app-links-plan.md §4)
+
+#if os(macOS)
+    /// THE WARM macOS DOOR IS THE RAW APPLE EVENT, not `.onOpenURL`
+    /// (docs/traps.md, 2026-09-09): SwiftUI's `WindowGroup` opens a NEW
+    /// WINDOW per link through `.onOpenURL`, and with that modifier
+    /// present `application(_:open:)` gets an EMPTY array. This handler
+    /// takes the event before AppKit converts it, so a warm link adds no
+    /// window — and it is installed only once launching has FINISHED,
+    /// because installed earlier it swallows the LAUNCH event and the
+    /// WindowGroup then opens no window at all (KayaSwiftUIEntry.swift).
+    final class KayaLinkDoor: NSObject {
+        @objc func handleGetURL(
+            _ event: NSAppleEventDescriptor, withReply reply: NSAppleEventDescriptor
+        ) {
+            guard let url = event.paramDescriptor(forKeyword: keyDirectObject)?.stringValue
+            else { return }
+            KayaHost.linkOpened(url)
+        }
+    }
+
+    let kayaLinkDoor = KayaLinkDoor()
+
+    func kayaInstallLinkDoor() {
+        NSAppleEventManager.shared().setEventHandler(
+            kayaLinkDoor,
+            andSelector: #selector(KayaLinkDoor.handleGetURL(_:withReply:)),
+            forEventClass: AEEventClass(kInternetEventClass),
+            andEventID: AEEventID(kAEGetURL))
+    }
+#endif
+
+/// `open_link`'s half: ask the PLATFORM to open this URL from inside the
+/// process, so it comes back through the door a user's tap takes.
+///
+/// NARROWED TO THIS BUNDLE on macOS (measured 2026-09-09): every kaya
+/// guest claims the same scheme — it defaults to the declared id — and a
+/// lane keeps many .app wrappers registered, so LaunchServices' pick
+/// among them is undefined and an untargeted open is green with no
+/// delivery. iOS needs no narrowing: an app opening its OWN scheme is
+/// resolved to itself and is never asked to confirm.
+func kayaOpenLink(_ url: String) {
+    guard let target = URL(string: url) else { return }
+    #if os(macOS)
+        let configuration = NSWorkspace.OpenConfiguration()
+        // NOT A SECOND INSTANCE: the running app is the one that must
+        // receive it, which is L3's single-instance statement on this
+        // platform.
+        configuration.createsNewApplicationInstance = false
+        NSWorkspace.shared.open(
+            [target], withApplicationAt: Bundle.main.bundleURL,
+            configuration: configuration, completionHandler: nil)
+    #else
+        UIApplication.shared.open(target)
+    #endif
 }
 
 // MARK: - Local notifications (docs/tasks-s3-plan.md)

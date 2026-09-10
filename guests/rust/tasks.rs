@@ -268,6 +268,13 @@ enum Msg {
     Reminder(kaya::Time),
     ClearReminder,
     Reminded(String, kaya::NotificationOutcome),
+    /// An app link named a task (docs/app-links-plan.md L4): the key is
+    /// the pattern's one capture. A key no task carries opens Inbox and
+    /// SAYS so, rather than dropping in silence.
+    LinkTask(String),
+    /// An app link named a section by name; an unknown name is dropped
+    /// with the same note.
+    LinkSection(String),
     Project(usize),
     Delete,
     DetailPopped,
@@ -420,6 +427,9 @@ struct App {
     hidden: BTreeMap<String, (List, TaskRow)>,
     counts: BTreeMap<List, kaya::SignalId>,
     today_badge: kaya::SignalId,
+    /// What the last app link did when it named nothing (L4). Empty
+    /// otherwise, and cleared by the next link that lands.
+    link_note: kaya::SignalId,
     projects: BTreeMap<String, String>,
     order: BTreeMap<String, Vec<String>>,
     next: u32,
@@ -692,6 +702,13 @@ impl App {
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::new();
+    // THE APP LINKS, BEFORE THE FIRST TRANSACTION (docs/app-links-plan.md
+    // §4): the declarations ride its head, so a link that STARTED this
+    // process is matched the moment that batch lands.
+    msgs.link("task/{key}", |p| Msg::LinkTask(p.get("key").unwrap_or_default().to_owned()));
+    msgs.link("{section}", |p| {
+        Msg::LinkSection(p.get("section").unwrap_or_default().to_owned())
+    });
     let today = today();
 
     // THE SETTINGS, BEFORE THE FIRST BUILD (docs/tasks-s4-plan.md P7):
@@ -708,7 +725,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     let loaded = store.as_ref().map(|s| s.load()).unwrap_or_default();
     let seed_wanted = store.as_ref().is_none_or(|s| s.fresh);
 
-    let (lists, projects_coll, quick, counts, today_badge) = ctx.apply(|tx| {
+    let (lists, projects_coll, quick, counts, today_badge, link_note) = ctx.apply(|tx| {
         tx.window(kaya::DEFAULT_WINDOW)
             .title("tasks")
             // A desktop default that fits the details screen (GTK's own
@@ -745,6 +762,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         let mut counts = BTreeMap::new();
         let mut quick = kaya::WidgetId(0);
         let today_badge = tx.signal(0.0);
+        let link_note = tx.signal("");
         for (list, window, name, symbol) in sections {
             let mut declared = tx.add_section(window).title(name).symbol(symbol);
             if list == List::Today {
@@ -781,6 +799,11 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                         .id();
                     msgs.on_change(find, move |q| Msg::Search(list, q));
                     tx.caption(count).a11y_id(count_id).id();
+                    if list == List::Inbox {
+                        // WHAT AN APP LINK DID WHEN IT NAMED NOTHING
+                        // (docs/app-links-plan.md L4): empty otherwise.
+                        tx.caption(link_note).a11y_id("link_note").id();
+                    }
                     if list == List::Inbox {
                         tx.row(|tx| {
                             quick = tx.entry().a11y_id("quick").grow(1.0).id();
@@ -845,7 +868,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             })
             .id();
         tx.mount_in(projects_section, projects_root);
-        (lists, projects_coll, quick, counts, today_badge)
+        (lists, projects_coll, quick, counts, today_badge, link_note)
     });
     msgs.on_undone(kaya::DEFAULT_WINDOW, |_, _| Msg::Resync);
     msgs.on_redone(kaya::DEFAULT_WINDOW, |_, _| Msg::Resync);
@@ -865,6 +888,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         hidden: BTreeMap::new(),
         counts,
         today_badge,
+        link_note,
         projects: BTreeMap::new(),
         order: BTreeMap::new(),
         next: 1,
@@ -1053,6 +1077,53 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     }
                     None => open_details(&mut app, &ctx, &msgs, key),
                 }
+            }
+            // A LINK NAMED A TASK (docs/app-links-plan.md L4). The
+            // Reminded arm's shape one door over: a details screen
+            // already open is popped first and reopened on the new key.
+            Msg::LinkTask(key) => {
+                if !app.tasks.contains_key(&key) {
+                    let note = format!("no task named {key}");
+                    ctx.apply(|tx| {
+                        tx.write(app.link_note, note);
+                        tx.select_section(INBOX);
+                    });
+                    // A programmatic selection is configuration and never
+                    // echoes, so the app moves its own mark.
+                    app.active = INBOX;
+                    continue;
+                }
+                ctx.apply(|tx| tx.write(app.link_note, ""));
+                match app.detail.as_ref() {
+                    Some(d) if d.key == key => {}
+                    Some(d) => {
+                        let section = d.section;
+                        app.pending_open = Some(key);
+                        ctx.apply(|tx| tx.pop_entry_in(section));
+                    }
+                    None => open_details(&mut app, &ctx, &msgs, key),
+                }
+            }
+            // A LINK NAMED A SECTION, by the name the section carries.
+            Msg::LinkSection(name) => {
+                let wanted = match name.as_str() {
+                    "inbox" => Some(INBOX),
+                    "today" => Some(TODAY),
+                    "upcoming" => Some(UPCOMING),
+                    "anytime" => Some(ANYTIME),
+                    "projects" => Some(PROJECTS),
+                    _ => None,
+                };
+                let Some(section) = wanted else {
+                    let note = format!("no section named {name}");
+                    ctx.apply(|tx| tx.write(app.link_note, note));
+                    continue;
+                };
+                ctx.apply(|tx| {
+                    tx.write(app.link_note, "");
+                    tx.select_section(section);
+                });
+                app.active = section;
             }
             Msg::Project(index) => {
                 let Some(key) = app.detail.as_ref().map(|d| d.key.clone()) else { continue };

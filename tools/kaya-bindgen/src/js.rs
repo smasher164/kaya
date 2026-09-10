@@ -523,6 +523,22 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("    }");
     c.line("    return { kind, id: dialog, keys: [], payload: files };");
     c.line("  }");
+    // The URL and the params FLATTENED into the payload, url first,
+    // then name/value pairs (python.rs carries the reasoning).
+    c.line("  if (kind === OCC_LINK_OPENED) {");
+    c.line("    const route = read_u64(buf, 8);");
+    c.line("    let v: Decoded;");
+    c.line("    let at: number;");
+    c.line("    [v, at] = parse_value(buf, 16);");
+    c.line("    const flat: Decoded[] = [v];");
+    c.line("    const count = read_u32(buf, at);");
+    c.line("    at += 8; // past the values count and its reserved word");
+    c.line("    for (let i = 0; i < count; i++) {");
+    c.line("      [v, at] = parse_value(buf, at);");
+    c.line("      flat.push(v);");
+    c.line("    }");
+    c.line("    return { kind, id: route, keys: [], payload: flat };");
+    c.line("  }");
     for name in crate::clip_answer_occurrence_names(spec) {
         c.line(&format!("  if (kind === OCC_{}) {{", name.to_uppercase()));
         c.line("    const request = read_u64(buf, 8);");

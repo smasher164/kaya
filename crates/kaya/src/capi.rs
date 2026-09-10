@@ -91,6 +91,7 @@ pub const KAYA_OCCURRENCE_DATE_CHANGED: u16 = 24;
 pub const KAYA_OCCURRENCE_TIME_CHANGED: u16 = 25;
 pub const KAYA_OCCURRENCE_VALUE_COMMITTED: u16 = 26;
 pub const KAYA_OCCURRENCE_NOTIFICATION_RESULT: u16 = 27;
+pub const KAYA_OCCURRENCE_LINK_OPENED: u16 = 28;
 const _: () = assert!(
     KAYA_OCCURRENCE_PAD == ring::REC_PAD
         && KAYA_OCCURRENCE_BUTTON_CLICKED == ring::REC_BUTTON_CLICKED
@@ -120,6 +121,7 @@ const _: () = assert!(
         && KAYA_OCCURRENCE_TIME_CHANGED == ring::REC_TIME_CHANGED
         && KAYA_OCCURRENCE_VALUE_COMMITTED == ring::REC_VALUE_COMMITTED
         && KAYA_OCCURRENCE_NOTIFICATION_RESULT == ring::REC_NOTIFICATION_RESULT
+        && KAYA_OCCURRENCE_LINK_OPENED == ring::REC_LINK_OPENED
 );
 
 /// Transaction record kinds (guest -> core, via kaya_submit). Layouts,
@@ -284,6 +286,10 @@ pub const KAYA_TX_SHOW_NOTIFICATION: u16 = 52;
 pub const KAYA_TX_CANCEL_NOTIFICATION: u16 = 53;
 const _: () = assert!(KAYA_TX_SHOW_NOTIFICATION == wire::TX_SHOW_NOTIFICATION);
 const _: () = assert!(KAYA_TX_CANCEL_NOTIFICATION == wire::TX_CANCEL_NOTIFICATION);
+/// One app-link route (docs/app-links-plan.md §4): { u64 route; Str
+/// pattern }. The core keeps the table and does the one match.
+pub const KAYA_TX_DECLARE_LINK_ROUTE: u16 = 54;
+const _: () = assert!(KAYA_TX_DECLARE_LINK_ROUTE == wire::TX_DECLARE_LINK_ROUTE);
 /// The size-class vocabulary (wire::SIZE_CLASS_*): what a breakpoint's
 /// `size_class` value and kaya_window_metrics' `size_class` argument
 /// speak. COMPACT is the only class a breakpoint may name today; NONE is
@@ -908,7 +914,7 @@ const _: () = assert!(
 // Completeness for the occurrence exports (docs/traps.md): a new spec
 // occurrence trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::SPEC.occurrence.len() == 27,
+    crate::spec::SPEC.occurrence.len() == 28,
     "spec occurrences grew: export the new KAYA_OCCURRENCE_* above, extend the pin, and \
      bump this count"
 );
@@ -1209,6 +1215,11 @@ pub extern "C" fn kaya_run() -> i32 {
     // BEFORE THE CORE STARTS: the second act's marker is the only source
     // of the scene in a process the platform started on a tap
     // (docs/tasks-s9-plan.md R6a).
+    // BEFORE act2::arm, for the reason lib.rs's `run` states: a Windows
+    // activation that is not the single-instance owner redirects and
+    // exits here (docs/app-links-plan.md §4).
+    #[cfg(target_os = "windows")]
+    crate::backend::links_startup();
     #[cfg(any(feature = "harness", target_os = "macos", target_os = "ios", target_os = "android"))]
     crate::act2::arm(None);
     // On Apple the SwiftUI interpreter runs its own presentation pump
@@ -1241,7 +1252,13 @@ pub extern "C" fn kaya_run() -> i32 {
 // kaya_next_commands; only the Rust-native backends' kaya_run arm
 // takes them here.
 pub(crate) fn take_core_ends() -> Option<(OccSink, Receiver<Transaction>)> {
-    state().core_ends.lock().unwrap().take()
+    let ends = state().core_ends.lock().unwrap().take();
+    if let Some((sink, _)) = ends.as_ref() {
+        // A FOREIGN guest reads the ring, so that is where its links go;
+        // a Rust guest registered its own mpsc first and keeps it.
+        crate::links::set_sink_unless_set(sink.clone());
+    }
+    ends
 }
 
 /// The occurrence ring's raw layout, for the JVM tier (jvm.rs's KayaRing
@@ -1926,6 +1943,9 @@ fn presentation_scene() -> Scene {
 static PRESENTATION_SINK: Mutex<Option<OccSink>> = Mutex::new(None);
 
 pub(crate) fn set_presentation_sink(sink: OccSink) {
+    // A link takes the same channel a notification result does
+    // (crates/kaya/src/links.rs).
+    crate::links::set_sink(sink.clone());
     // R3 (docs/tasks-s9-plan.md): a notification result can arrive before
     // the app thread exists, because a TAP can start the process. The
     // ring already holds those records for a foreign guest, which reads
@@ -3099,6 +3119,37 @@ pub extern "C" fn kaya_emit_alert_result(alert: u64, choice: u32) {
         );
     }
 }
+/// THE PLATFORM HANDED THIS APP A URL (docs/app-links-plan.md §4). The
+/// ONE entry every platform arm takes: the core matches it against the
+/// declared routes and emits `link_opened`, queueing it when the app's
+/// routes are not declared yet. Exported on every platform — a URL is a
+/// URL, and Android's activity arm reaches this through jvm.rs.
+///
+/// # Safety
+/// `url` must be a NUL-terminated UTF-8 string for the call's duration.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_link_opened(url: *const std::os::raw::c_char) {
+    if url.is_null() {
+        return;
+    }
+    let url = unsafe { std::ffi::CStr::from_ptr(url) };
+    match url.to_str() {
+        Ok(url) => crate::links::opened(url),
+        Err(_) => {
+            use std::io::Write as _;
+            // A DIAGNOSTIC MAY ONLY PRINT WHAT IT MEASURED: the bytes are
+            // all this can see, so it prints them rather than guessing at
+            // which platform mangled them.
+            let line = format!(
+                "kaya: the platform handed this app a link that is not UTF-8 \
+({:?}), so no route could be matched against it\n",
+                url.to_bytes()
+            );
+            let _ = std::io::stderr().write_all(line.as_bytes());
+        }
+    }
+}
+
 /// Presentation side: a notification's one answer — a NOTIFICATION_OUTCOME
 /// value (activated by the user, or refused by the platform). Exported on
 /// every platform; answerable only on the interpreter platforms, the
@@ -4345,6 +4396,7 @@ mod tests {
             ("set_reorderable", KAYA_TX_SET_REORDERABLE),
             ("show_notification", KAYA_TX_SHOW_NOTIFICATION),
             ("cancel_notification", KAYA_TX_CANCEL_NOTIFICATION),
+            ("declare_link_route", KAYA_TX_DECLARE_LINK_ROUTE),
         ];
         let apply = [
             ("create", KAYA_APPLY_CREATE),

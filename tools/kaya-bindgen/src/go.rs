@@ -631,6 +631,21 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("\t\t}");
     c.line("\t\treturn kind, id, nil, files, true");
     c.line("\t}");
+    // The URL and the params FLATTENED into the payload, url first,
+    // then name/value pairs (python.rs carries the reasoning).
+    c.line("\tif kind == occLinkOpened {");
+    c.line("\t\turl, at := parseValue(rec, 16)");
+    c.line("\t\tcount := int(binary.LittleEndian.Uint32(rec[at:]))");
+    c.line("\t\tat += 8 // past the values count and its reserved word");
+    c.line("\t\tflat := make([]any, 0, count+1)");
+    c.line("\t\tflat = append(flat, url)");
+    c.line("\t\tfor i := 0; i < count; i++ {");
+    c.line("\t\t\tvar v any");
+    c.line("\t\t\tv, at = parseValue(rec, at)");
+    c.line("\t\t\tflat = append(flat, v)");
+    c.line("\t\t}");
+    c.line("\t\treturn kind, id, nil, flat, true");
+    c.line("\t}");
     // Its own arm: the generic tail would take the CLIP KIND for a path
     // length and read the values header as a key.
     for name in crate::clip_answer_occurrence_names(spec) {

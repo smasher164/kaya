@@ -298,27 +298,29 @@ ENTRIES = (
     ("an aux window's sidebar band re-read on resize",
      "watch_sidebar_width(&aux, window.0);",
      "watch_sidebar_width(&aux, 0);"),
-    # THE LABEL WEIGHTS ARE KAYA'S (the maintainer's ruling of 2026-09-09,
-    # docs/deferred.md's bold-labels POLISH entry). NO OBSERVABLE ON ANY
-    # BACKEND READS A WEIGHT, so all three of these are invisible to every
-    # lane — and a SELECTOR that matches nothing is valid CSS: no parse
-    # error, no warning from `parsing-error`, the labels simply stay at
-    # Adwaita's bold. Each perturbation is a rule that still loads.
-    ("every button label at the regular weight",
-     "button, button label { font-weight: normal; }",
-     "button.kaya-plain, button.kaya-plain label { font-weight: normal; }"),
-    ("the header title at the regular weight",
-     "headerbar label.title, windowtitle label.title "
-     "{ font-weight: normal; }",
-     "headerbar label.subtitle, windowtitle label.subtitle "
-     "{ font-weight: normal; }"),
-    # A sheet loaded and added BELOW libadwaita's own (THEME, 200) loses
-    # every declaration in it and raises nothing.
-    ("the weight sheet added above libadwaita's own",
-     "                &weight_css,\n"
-     "                gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,",
-     "                &weight_css,\n"
-     "                gtk4::STYLE_PROVIDER_PRIORITY_FALLBACK,"),
+    # THE LABEL WEIGHTS ARE NOT HELD HERE. Their static half — the ruled
+    # wishes, the clamp that lowers them onto the brand font's own named
+    # instances, the sheet's priority, and every literal weight left in this
+    # file — is tools/check-assets.py's C12, because THIS GATE IS EXCLUDED
+    # FROM THE SWEEP (it needs docker) and a clause nobody runs is how the
+    # aborting `font-weight: 500` shipped. What stays here is the half only
+    # a compiler and a real font can answer: gtk::weight_tests, below.
+    # THE LINK DOOR'S THREE LINKS (docs/app-links-plan.md §4). The first
+    # two ARE driven by tools/scenes/links.steps and stand here as the
+    # callsite pins a scene cannot be; the last two are what NO lane can
+    # see. The URL kaya's own scenes carry has no query, so a backend that
+    # tidied the URI on the way in stays green on every leg of every lane
+    # and loses every parameter a real link carries — measured intact
+    # through GFile 2026-09-09, query and fragment both. And `open_link`
+    # exists to prove the PLATFORM routes a URL back into this process:
+    # an arm that called the core's own door instead would satisfy the
+    # scene byte for byte while measuring nothing at all about the door.
+    ("the open signal the application flags admit",
+     "gtk4::Application::builder().flags(gio::ApplicationFlags::HANDLES_OPEN)",
+     "gtk4::Application::builder()"),
+    ("the URL handed over as GLib delivered it",
+     "crate::links::opened(&file.uri());",
+     "crate::links::opened(file.uri().split('?').next().unwrap_or_default());"),
 )
 
 
@@ -417,6 +419,10 @@ PY
             gtk::frame_tests::gtk_frame_memory_beats_the_declaration_and_yields_to_a_resize \\
         && run_exact_test \\
             gtk::notify_tests::gtk_notification_timer_parameter_parses_as_the_action_declares \\
+        && run_exact_test \\
+            gtk::weight_tests::gtk_weights_clamp_to_the_brand_font_named_instances \\
+        && run_exact_test \\
+            gtk::weight_tests::gtk_weights_stand_at_the_wish_with_no_variable_brand_font \\
         && if run_exact_test gtk::flex::tests::check_gtk_zero_test_selftest \\
             >/dev/null 2>&1; then
                 echo "check-gtk: zero-test self-test was accepted" >&2

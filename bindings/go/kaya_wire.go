@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x605e18f72b2af791
+	SpecHash uint64 = 0x1960b216df673c1f
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -254,6 +254,7 @@ const (
 	txSetReorderable = 51
 	txShowNotification = 52
 	txCancelNotification = 53
+	txDeclareLinkRoute = 54
 	applyCreate = 1
 	applySetProp = 2
 	applyAddChild = 3
@@ -321,6 +322,7 @@ const (
 	occTimeChanged = 25
 	occValueCommitted = 26
 	occNotificationResult = 27
+	occLinkOpened = 28
 )
 
 func pad8(b []byte) []byte {
@@ -883,6 +885,14 @@ func TxShowNotification(notification uint64, at uint64, title any, body any) []b
 func TxCancelNotification(notification uint64) []byte {
 	b := beginRecord(txCancelNotification)
 	b = binary.LittleEndian.AppendUint64(b, notification)
+	return endRecord(b)
+}
+
+// TxDeclareLinkRoute: Declare one app-link route (docs/app-links-plan.md §4): `route` is the app's own id for it, `pattern` a Str. The MATCH HAPPENS ONCE, IN THE CORE — the patterns come here so a URL the platform hands over is turned into a route and its captures by one matcher rather than by nine. The grammar: segments split on `/`, a literal segment matches itself, `{name}` captures one segment. REFUSED AT THE DECLARATION, a fault like every other declaration refusal: an empty pattern, an empty segment, a brace a segment never closes, and a pattern already declared. Routes are declared at startup, before or inside the app's first transaction: the core matches a link that STARTED the process once that transaction lands.
+func TxDeclareLinkRoute(route uint64, pattern any) []byte {
+	b := beginRecord(txDeclareLinkRoute)
+	b = binary.LittleEndian.AppendUint64(b, route)
+	b = encodeValue(b, pattern)
 	return endRecord(b)
 }
 
@@ -2494,7 +2504,7 @@ func parseValue(rec []byte, at int) (any, int) {
 // false for pad/unknown records.
 func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload any, ok bool) {
 	kind = binary.LittleEndian.Uint16(rec[4:])
-	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected && kind != occMenuActivated && kind != occMenuToggled && kind != occMenuValueChanged && kind != occFileDialogResult && kind != occClipboardResult && kind != occPasted && kind != occUndone && kind != occRedone && kind != occSortRequested && kind != occDrawRequested && kind != occTick && kind != occDropped && kind != occDragEnded && kind != occDateChanged && kind != occTimeChanged && kind != occValueCommitted && kind != occNotificationResult {
+	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected && kind != occMenuActivated && kind != occMenuToggled && kind != occMenuValueChanged && kind != occFileDialogResult && kind != occClipboardResult && kind != occPasted && kind != occUndone && kind != occRedone && kind != occSortRequested && kind != occDrawRequested && kind != occTick && kind != occDropped && kind != occDragEnded && kind != occDateChanged && kind != occTimeChanged && kind != occValueCommitted && kind != occNotificationResult && kind != occLinkOpened {
 		return 0, 0, nil, nil, false
 	}
 	id = binary.LittleEndian.Uint64(rec[8:])
@@ -2532,6 +2542,19 @@ func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload an
 				Handle: uint64(handle), Name: name, LocalPath: localPath})
 		}
 		return kind, id, nil, files, true
+	}
+	if kind == occLinkOpened {
+		url, at := parseValue(rec, 16)
+		count := int(binary.LittleEndian.Uint32(rec[at:]))
+		at += 8 // past the values count and its reserved word
+		flat := make([]any, 0, count+1)
+		flat = append(flat, url)
+		for i := 0; i < count; i++ {
+			var v any
+			v, at = parseValue(rec, at)
+			flat = append(flat, v)
+		}
+		return kind, id, nil, flat, true
 	}
 	if kind == occClipboardResult {
 		clip, _ := parseClip(rec, 16)

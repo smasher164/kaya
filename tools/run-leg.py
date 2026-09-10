@@ -114,17 +114,34 @@ second = scene in lane.RELAUNCH_DOOR
 if second:
     lane.clear_act2(ROOT, env)
 print(f"run-leg: {scene}-{lang}: {' '.join(argv)}", flush=True)
-rc = subprocess.run(argv, cwd=ROOT, env=env).returncode
+log = ROOT / f"target/run-leg-{scene}-{lang}.log"
 if second:
-    log = ROOT / f"target/run-leg-{scene}-{lang}.act2.log"
+    # ACT ONE'S OUTPUT ON DISK AS WELL AS ON SCREEN: the link door reads
+    # the URL off act one's own `KAYA_RELAUNCH:` line (the lane does the
+    # same), and a hand run must push the door the lane pushes.
+    log.parent.mkdir(parents=True, exist_ok=True)
+    with open(log, "w", encoding="utf-8", errors="replace") as lf:
+        proc = subprocess.Popen(argv, cwd=ROOT, env=env,
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, text=True,
+                                encoding="utf-8", errors="replace")
+        for line in proc.stdout:
+            sys.stdout.write(line)
+            sys.stdout.flush()
+            lf.write(line)
+        rc = proc.wait()
+else:
+    rc = subprocess.run(argv, cwd=ROOT, env=env).returncode
+if second:
     if rc != 0:
         print(f"run-leg: act one exited {rc}; the door was not pushed",
               file=sys.stderr)
     else:
         print(f"run-leg: act two through the "
               f"{lane.RELAUNCH_DOOR[scene]} door", flush=True)
+        before = len(log.read_text(encoding="utf-8", errors="replace"))
         rc = lane.second_act(ROOT, scene, argv, env, log)
-        sys.stdout.write(log.read_text(encoding="utf-8", errors="replace"))
-        log.unlink(missing_ok=True)
+        sys.stdout.write(
+            log.read_text(encoding="utf-8", errors="replace")[before:])
 print(f"run-leg: exit {rc}")
 sys.exit(rc)

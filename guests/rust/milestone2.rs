@@ -131,6 +131,8 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             | Occurrence::InstanceDrawRequested { .. }
             | Occurrence::Tick { .. }
             | Occurrence::InstanceTick { .. } => {}
+            // No link route is declared here.
+            Occurrence::LinkOpened { .. } => {}
             Occurrence::Shutdown => break,
         }
     }

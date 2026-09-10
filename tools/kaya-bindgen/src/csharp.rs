@@ -616,6 +616,18 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("            payload = files;");
     c.line("            return true;");
     c.line("        }");
+    // The URL and the params FLATTENED into the payload, url first,
+    // then name/value pairs (python.rs carries the reasoning).
+    c.line("        if (kind == OccKindLinkOpened)");
+    c.line("        {");
+    c.line("            int urlLen = (int)BitConverter.ToUInt32(rec, 20);");
+    c.line("            var flat = new List<object>();");
+    c.line("            flat.Add(Encoding.UTF8.GetString(rec, 24, urlLen));");
+    c.line("            flat.AddRange(ParseRepresentation(");
+    c.line("                rec, 24 + ((urlLen + 7) & ~7), out int _linkEnd));");
+    c.line("            payload = flat;");
+    c.line("            return true;");
+    c.line("        }");
     // Its own arm: the generic tail would take the CLIP KIND for a path
     // length and read the values header as a key.
     for name in crate::clip_answer_occurrence_names(spec) {

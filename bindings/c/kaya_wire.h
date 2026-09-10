@@ -199,7 +199,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     }
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0x605e18f72b2af791ULL
+#define KAYA_SPEC_HASH 0x1960b216df673c1fULL
 
 
 /* Create a signal holding `initial`. */
@@ -680,6 +680,14 @@ static inline void kaya_tx_show_notification(KayaTx *tx, uint64_t notification, 
 static inline void kaya_tx_cancel_notification(KayaTx *tx, uint64_t notification) {
     size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_CANCEL_NOTIFICATION);
     kaya_wire_u64(tx, notification);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* Declare one app-link route (docs/app-links-plan.md §4): `route` is the app's own id for it, `pattern` a Str. The MATCH HAPPENS ONCE, IN THE CORE — the patterns come here so a URL the platform hands over is turned into a route and its captures by one matcher rather than by nine. The grammar: segments split on `/`, a literal segment matches itself, `{name}` captures one segment. REFUSED AT THE DECLARATION, a fault like every other declaration refusal: an empty pattern, an empty segment, a brace a segment never closes, and a pattern already declared. Routes are declared at startup, before or inside the app's first transaction: the core matches a link that STARTED the process once that transaction lands. */
+static inline void kaya_tx_declare_link_route(KayaTx *tx, uint64_t route, KayaVal pattern) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_DECLARE_LINK_ROUTE);
+    kaya_wire_u64(tx, route);
+    kaya_wire_value(tx, pattern);
     kaya_wire_end(tx, kaya_at);
 }
 

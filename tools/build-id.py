@@ -90,7 +90,9 @@ GATES = {
     "check-harness-ceiling": ["crates", "swift", "android", "tools/checks"],
     "check-file-modes": ["crates", "bindings", "swift", "android"],
     "check-go-env": ["bindings", "guests"],
-    "check-jni": ["crates", "android/kaya/src", "bindings/java-desktop"],
+    "check-jni": ["crates", "android/kaya/src", "bindings/java-desktop",
+                  "android/build.gradle.kts", "tools/lib/packaging/identity.py",
+                  "tools/lib/packaging/android.py", "guests/assets/identity.toml"],
     # docs/: a stub is sanctioned only while its ledger entry is unstruck.
     "check-stubs": ["crates", "swift", "android", "docs"],
     # bindings/: its spec-stamp clauses read the tree's own KAYA_SPEC_HASH

@@ -18,6 +18,11 @@ data class KayaIdentity(
     val icon: File,
     val launchBackground: String,
     val launchIcon: File,
+    /** The URL scheme this APK's intent filter claims
+     * (docs/app-links-plan.md §4): `[links] scheme`, or the declared
+     * reverse-DNS id, which is a valid scheme by RFC 3986 and unique by
+     * construction. */
+    val linkScheme: String,
     /** Where it was all declared, so a refusal below can name it once. */
     val manifest: File,
 )
@@ -73,8 +78,9 @@ fun kayaReadIdentity(repoRoot: File): KayaIdentity {
     val launch = table("launch")
     fun value(key: String): String =
         root[key] ?: throw GradleException(
-            "kaya: ${manifest.path} declares no `$key` — the APK reads both `name` " +
-                "and `icon` from it, and half a declaration is not one."
+            "kaya: ${manifest.path} declares no `$key` — the APK reads `name`, " +
+                "`icon` and (for the link scheme) `id` from it, and half a " +
+                "declaration is not one."
         )
     val name = value("name")
     if (name.isBlank()) {
@@ -116,7 +122,24 @@ fun kayaReadIdentity(repoRoot: File): KayaIdentity {
                 "is not there."
         )
     }
-    return KayaIdentity(name, icon, background, launchIcon, manifest)
+    // THE SCHEME DEFAULTS TO THE DECLARED ID (docs/app-links-plan.md §4):
+    // a reverse-DNS string is a valid URL scheme by RFC 3986 and unique by
+    // construction, so an app declares nothing and still owns
+    // `dev.kaya.aurora.notes://…`. `[links] scheme` is the override.
+    // Placed as a manifest placeholder for the label's reason — a scheme
+    // hand-typed into four manifests is "one mark, five files" again.
+    val links = table("links")
+    val scheme = links["scheme"] ?: value("id")
+    if (!Regex("^[A-Za-z][A-Za-z0-9+.-]*$").matches(scheme)) {
+        throw GradleException(
+            "kaya: ${manifest.path} declares the link scheme \"$scheme\", which is " +
+                "not a URL scheme — RFC 3986 wants a letter and then letters, " +
+                "digits, `+`, `-` or `.`. The APK's intent filter claims this " +
+                "string and a malformed one claims nothing at all " +
+                "(docs/app-links-plan.md §4)."
+        )
+    }
+    return KayaIdentity(name, icon, background, launchIcon, scheme, manifest)
 }
 
 val kayaIdentity = kayaReadIdentity(rootDir.parentFile)
@@ -201,6 +224,10 @@ subprojects {
         extensions.configure<com.android.build.api.dsl.ApplicationExtension>("android") {
             defaultConfig {
                 manifestPlaceholders["kayaAppLabel"] = kayaIdentity.name
+                // The app-link scheme every host manifest's VIEW filter
+                // claims (docs/app-links-plan.md §4; tools/check-jni.py's
+                // manifest census holds the four manifests to it).
+                manifestPlaceholders["kayaLinkScheme"] = kayaIdentity.linkScheme
             }
             sourceSets.getByName("main").res.srcDir(generatedRes)
             sourceSets.getByName("main").assets.srcDir(generatedAssets)

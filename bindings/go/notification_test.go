@@ -8,6 +8,7 @@ package kaya
 // arm calls and tools/check-sugar-surface.py holds it to calling.
 
 import (
+	"bytes"
 	"io"
 	"os"
 	"strings"
@@ -111,5 +112,97 @@ func TestAnUnclaimedNotificationResultAnnouncesTheDrop(t *testing.T) {
 		"registered (App.OnNotificationActivation)"
 	if strings.TrimSpace(said) != want {
 		t.Fatalf("the drop was announced as %q, wanted %q", strings.TrimSpace(said), want)
+	}
+}
+
+// THE APP-LINK ROUTES (docs/app-links-plan.md §4). Four cases no lane can
+// see: the declaration's BYTES, the ids the counter mints, the dispatch
+// by route id, and the two drops — a route that matched and reached no
+// handler says so, route 0 says nothing because the CORE already
+// announced that miss naming every declared pattern.
+func TestALinkRouteParksTheGeneratedRecordAndMintsFromOne(t *testing.T) {
+	app := NewApp()
+	app.Link("task/{key}", func(tx *Tx, params map[string]string) {})
+	app.Link("{section}", func(tx *Tx, params map[string]string) {})
+	if len(app.pendingRecords) != 2 {
+		t.Fatalf("two declarations parked %d records", len(app.pendingRecords))
+	}
+	want := [][]byte{
+		TxDeclareLinkRoute(1, "task/{key}"),
+		TxDeclareLinkRoute(2, "{section}"),
+	}
+	for i, rec := range want {
+		if !bytes.Equal(app.pendingRecords[i], rec) {
+			t.Fatalf("parked record %d is not the generated one: %x, wanted %x",
+				i, app.pendingRecords[i], rec)
+		}
+	}
+}
+
+// AND THE PARKED DECLARATIONS LEAD THE NEXT TRANSACTION. A route declared
+// after the app's first transaction misses the COLD door — the core
+// matches the link that started the process the moment that batch lands —
+// so the order is the semantics and no scene can read it back.
+func TestParkedLinkRoutesLeadTheNextTransaction(t *testing.T) {
+	app := NewApp()
+	app.Link("task/{key}", func(tx *Tx, params map[string]string) {})
+	app.Build(func(tx *Tx) { tx.CreateWindow(1) })
+	if len(app.pendingRecords) != 0 {
+		t.Fatalf("the transaction left %d declarations parked", len(app.pendingRecords))
+	}
+	// A second one declared with no transaction open parks again.
+	app.Link("{section}", func(tx *Tx, params map[string]string) {})
+	if len(app.pendingRecords) != 1 {
+		t.Fatalf("a later declaration parked %d records", len(app.pendingRecords))
+	}
+}
+
+func TestALinkOpenedReachesItsRouteHandlerWithTheParams(t *testing.T) {
+	app := NewApp()
+	var seen []map[string]string
+	app.Link("task/{key}", func(tx *Tx, params map[string]string) {
+		seen = append(seen, params)
+	})
+	app.linkOpened(1, "dev.kaya.aurora.notes://task/t2",
+		map[string]string{"key": "t2"})
+	if len(seen) != 1 || seen[0]["key"] != "t2" {
+		t.Fatalf("the route handler did not answer with its captures: %v", seen)
+	}
+	// NOT one-shot: a second link on the same route answers again.
+	app.linkOpened(1, "dev.kaya.aurora.notes://task/t3",
+		map[string]string{"key": "t3"})
+	if len(seen) != 2 || seen[1]["key"] != "t3" {
+		t.Fatalf("the route registration retired: %v", seen)
+	}
+}
+
+func TestAnUnknownRouteReachesNoHandlerAndSaysSo(t *testing.T) {
+	app := NewApp()
+	var seen int
+	app.Link("task/{key}", func(tx *Tx, params map[string]string) { seen++ })
+	said := saidOnStderr(t, func() {
+		app.linkOpened(9, "dev.kaya.aurora.notes://task/t2", nil)
+	})
+	if seen != 0 {
+		t.Fatalf("a route this process never declared reached a handler")
+	}
+	want := "kaya: link dev.kaya.aurora.notes://task/t2 matched route 9 and " +
+		"reached no handler — none is registered for it (App.Link)"
+	if strings.TrimSpace(said) != want {
+		t.Fatalf("the drop was announced as %q, wanted %q", strings.TrimSpace(said), want)
+	}
+}
+
+// ROUTE 0 IS THE OTHER DROP, and it is SILENT: a URL no route took is the
+// CORE's to announce, naming every declared pattern, and two lines for
+// one event teaches a reader to distrust both.
+func TestRouteZeroIsDeliveredAndSilent(t *testing.T) {
+	app := NewApp()
+	app.Link("task/{key}", func(tx *Tx, params map[string]string) {})
+	said := saidOnStderr(t, func() {
+		app.linkOpened(0, "dev.kaya.aurora.notes://nope", nil)
+	})
+	if strings.TrimSpace(said) != "" {
+		t.Fatalf("route 0 was announced by the binding as well: %q", said)
 	}
 }

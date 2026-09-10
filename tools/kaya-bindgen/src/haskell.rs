@@ -507,6 +507,20 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("                readValues (n - 1 :: Int) next (v : acc)");
     c.line("          vals <- readValues (fromIntegral count * 3) 32 []");
     c.line("          return (Just (kind, ident, vals, Nothing, Nothing, Nothing, []))");
+    // The URL and the params FLATTENED into the VALUES slot — this
+    // binding's own file-dialog shape, where the flat run already lives
+    // — url first, then name/value pairs (python.rs carries the
+    // reasoning).
+    c.line("      else if kind == occKindLinkOpened");
+    c.line("        then do");
+    c.line("          (url, urlEnd) <- parseValue rec 16");
+    c.line("          pcount <- peekByteOff rec urlEnd :: IO Word32");
+    c.line("          let readPairs 0 _ acc = return (reverse acc)");
+    c.line("              readPairs n at acc = do");
+    c.line("                (v, next) <- parseValue rec at");
+    c.line("                readPairs (n - 1 :: Int) next (v : acc)");
+    c.line("          pairs <- readPairs (fromIntegral pcount) (urlEnd + 8) []");
+    c.line("          return (Just (kind, ident, url : pairs, Nothing, Nothing, Nothing, []))");
     for name in crate::clip_answer_occurrence_names(spec) {
         c.line(&format!(
             "      else if kind == occKind{}",

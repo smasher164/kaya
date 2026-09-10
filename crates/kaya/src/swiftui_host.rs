@@ -140,6 +140,10 @@ pub struct KayaHostApi {
     /// A notification's one answer (a NOTIFICATION_OUTCOME value):
     /// activated by the user, or refused by the platform.
     pub emit_notification_result: extern "C" fn(u64, u32),
+    /// A URL the platform handed this app (docs/app-links-plan.md §4):
+    /// the raw kAEGetURL Apple event on macOS, `.onOpenURL` on iOS. The
+    /// interpreter parses nothing — the core matches the route.
+    pub link_opened: unsafe extern "C" fn(*const std::os::raw::c_char),
     /// The runtime capability bits this host measured (KAYA_CAP_NOTIFICATIONS
     /// when the process is a bundle that can post), granted before the
     /// guest's first read.
@@ -343,8 +347,21 @@ fn loader_said() -> String {
 /// Load the SwiftUI backend and enter its run loop on the calling
 /// (main) thread. Returns the exit code if the loop ever returns.
 pub(crate) fn run() -> i32 {
-    let path = std::env::var("KAYA_SWIFTUI_LIB")
-        .unwrap_or_else(|_| "libkaya_swiftui.dylib".to_string());
+    // BESIDE THE EXECUTABLE WHEN NOBODY SAYS OTHERWISE: a bundle carries
+    // its own copy, and a process the PLATFORM started — a link opening
+    // the app (docs/app-links-plan.md L5), a tap on a notification —
+    // inherits no environment at all, so the lane's KAYA_SWIFTUI_LIB is
+    // not there to read. The bare name is the last resort.
+    let path = std::env::var("KAYA_SWIFTUI_LIB").ok().unwrap_or_else(|| {
+        let beside = std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent().map(|d| d.join("libkaya_swiftui.dylib")))
+            .filter(|p| p.is_file());
+        match beside {
+            Some(p) => p.to_string_lossy().into_owned(),
+            None => "libkaya_swiftui.dylib".to_string(),
+        }
+    });
     let cpath = CString::new(path.clone()).unwrap();
     let handle = unsafe { dlopen(cpath.as_ptr(), RTLD_NOW) };
     if handle.is_null() {
@@ -395,6 +412,7 @@ pub(crate) fn run() -> i32 {
         emit_window_closed: crate::capi::kaya_emit_window_closed,
         emit_alert_result: crate::capi::kaya_emit_alert_result,
         emit_notification_result: crate::capi::kaya_emit_notification_result,
+        link_opened: crate::capi::kaya_link_opened,
         grant_capabilities: crate::capi::kaya_grant_capabilities,
         capabilities: crate::capi::kaya_capabilities,
         emit_file_dialog_result: crate::capi::kaya_emit_file_dialog_result,

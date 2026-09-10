@@ -2,12 +2,12 @@ package dev.kaya.javahost
 
 import android.content.Intent
 import android.os.Bundle
-import android.system.Os
 import android.util.Log
 import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import dev.kaya.KayaCompose
+import dev.kaya.KayaEnv
 import dev.kaya.KayaRing
 import dev.kaya.guests.*
 
@@ -22,16 +22,9 @@ class MainActivity : ComponentActivity() {
         installSplashScreen()
         super.onCreate(savedInstanceState)
 
-        // Map KAYA_* intent extras to environment variables (rusthost's
-        // shell carries the reasoning).
-        intent.extras?.let { extras ->
-            for (key in extras.keySet()) {
-                if (key.startsWith("KAYA_")) {
-                    @Suppress("DEPRECATION")
-                    Os.setenv(key, extras.get(key).toString(), true)
-                }
-            }
-        }
+        // The KAYA_* extras into the live environment (KayaEnv, which
+        // says why it is called from BOTH doors).
+        KayaEnv.fromIntent(intent)
 
         System.loadLibrary("kaya")
         KayaRing.attach(this, filesDir.absolutePath)
@@ -79,7 +72,7 @@ class MainActivity : ComponentActivity() {
             "styling" -> Styling::app
             // The asset root arrives from outside: the leg pushes it and
             // names it in KAYA_ASSET_DIR, which reaches the core through
-            // the Os.setenv loop above.
+            // KayaEnv.fromIntent above.
             "typeface" -> Typeface::app
             "toolbar" -> Toolbar::app
             "table" -> Table::app
@@ -109,15 +102,21 @@ class MainActivity : ComponentActivity() {
         KayaRing.startGuest(scene)
     }
 
-    // A TAP ON A DELIVERED NOTIFICATION reaches a running app here
-    // (docs/tasks-s3-plan.md §3): the content PendingIntent is addressed
-    // to this component with SINGLE_TOP, so the platform delivers the
-    // id as a new intent rather than re-creating the Activity. A COLD
-    // launch by tap is read by KayaCompose.mount off `getIntent()`.
+    // EVERY WARM ARRIVAL COMES THROUGH HERE, since the activity is
+    // `launchMode="singleTask"` for app links: a tapped notification
+    // (docs/tasks-s3-plan.md §3), a tapped link (docs/app-links-plan.md
+    // §4) and a plain explicit start with extras all land on this one
+    // door. `setIntent` FIRST — `getIntent()` answers the LAUNCH intent
+    // until it is called (docs/traps.md, measured on the probe) — then
+    // the env extras, then the two one-shot readers, each of which drops
+    // an intent that is not its own. The COLD halves are read by
+    // KayaCompose.mount off the activity's own intent.
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        KayaEnv.fromIntent(intent)
         KayaCompose.notificationIntent(intent)
+        KayaCompose.linkIntent(intent)
     }
 
     override fun dispatchKeyShortcutEvent(event: KeyEvent): Boolean =

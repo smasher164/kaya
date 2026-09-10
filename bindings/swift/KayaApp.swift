@@ -733,6 +733,27 @@ struct KayaDropped {
     let clip: KayaRepresentation?
 }
 
+/// A link_opened occurrence's tail is ONE FLAT RUN of Str values: the
+/// url, then the captured pairs (KayaWire's arm). The handler receives
+/// the captures alone — kaya matches once, in the core
+/// (docs/app-links-plan.md §4) — and the url is for the drop sentence.
+func kayaLinkUrl(_ tail: [KayaValue]) -> String {
+    if let first = tail.first, case .str(let url) = first { return url }
+    return ""
+}
+
+func kayaLinkParams(_ tail: [KayaValue]) -> [String: String] {
+    var captured: [String: String] = [:]
+    var i = 1
+    while i + 1 < tail.count {
+        if case .str(let name) = tail[i], case .str(let value) = tail[i + 1] {
+            captured[name] = value
+        }
+        i += 2
+    }
+    return captured
+}
+
 /// The drag_op word, or nil for a cancelled or refused drag.
 func kayaOperation(_ mask: UInt32) -> KayaOp? {
     KayaOp(rawValue: mask)
@@ -1656,6 +1677,16 @@ final class KayaApp {
     // a result whose id has none above (docs/tasks-s9-plan.md R1). A
     // relaunched process never called showNotification.
     private var notificationActivation: ((KayaAppTx, UInt64, UInt32) throws -> Void)?
+    // NOT one-shot either: a route declared by link answers every URL
+    // that matches it, for the life of the process
+    // (docs/app-links-plan.md §4), and the core owns the pattern table —
+    // nothing is kept here but the handler.
+    private var links: [UInt64: (KayaAppTx, [String: String]) throws -> Void] = [:]
+    private var nextLinkRoute: UInt64 = 0
+    // link may be called before the first transaction, so its record
+    // waits here for one (submitIfAny drains it head-first). Module
+    // scope, not private: tools/checks/swift-notify reads the bytes back.
+    var pendingRoutes = KayaTx()
     private var fileDialogs: [UInt64: (KayaAppTx, [KayaPickedFile]) throws -> Void] = [:]
     // Clipboard reads: one-shot, keyed by request id, on the alert's
     // request/result grammar.
@@ -2155,6 +2186,62 @@ final class KayaApp {
         notificationActivation = handler
     }
 
+    /// Declare a link ROUTE and the handler that answers it
+    /// (docs/app-links-plan.md §4): `link("task/{key}", f)` matches
+    /// `<scheme>://task/t1` and calls f with `["key": "t1"]`. Segments
+    /// split on `/`, `{name}` captures one segment, a literal segment
+    /// matches itself; the query's pairs join the params and a capture
+    /// wins a name clash.
+    ///
+    /// PROCESS-LEVEL, `onNotificationActivation`'s shape: it does not
+    /// retire and it needs no transaction — declared before the first
+    /// one the record waits and rides the head of it, declared inside a
+    /// handler it rides that handler's. A URL that arrives before the
+    /// app thread exists is delivered first, and one no route matched is
+    /// announced by the core and reaches nothing here.
+    ///
+    /// NOTHING HERE READS THE PATTERN. The core is the one parser and
+    /// the one author of every refusal — an empty pattern, an empty
+    /// segment, a malformed one, a duplicate — and it faults at apply
+    /// with the whole sentence, where every other declaration refusal in
+    /// kaya lands (tools/check-sugar-surface.py refuses a reason spelled
+    /// here).
+    func link(
+        _ pattern: String,
+        _ handler: @escaping (KayaAppTx, [String: String]) throws -> Void
+    ) {
+        nextLinkRoute += 1
+        links[nextLinkRoute] = handler
+        pendingRoutes.declareLinkRoute(nextLinkRoute, .str(pattern))
+    }
+
+    /// The pending route declarations, taken and cleared: they lead the
+    /// next transaction's bytes.
+    func takePendingRoutes() -> Data {
+        let bytes = pendingRoutes.bytes
+        pendingRoutes = KayaTx()
+        return bytes
+    }
+
+    /// The link_opened decision, in a method of its own because the ring
+    /// loop's switch has no seam a test can reach (the ring is C memory)
+    /// — `notificationResult` for the same reason, and
+    /// tools/checks/swift-notify drives the cases through here. TWO DROPS
+    /// WITH DISJOINT CAUSES (docs/app-links-plan.md §4): route 0 is a URL
+    /// NO ROUTE TOOK, which the core announced naming every declared
+    /// pattern, so it is silent here; a route that matched and reached no
+    /// handler is this binding's to announce, naming its own registrar.
+    func linkOpened(_ route: UInt64, _ url: String, _ params: [String: String]) {
+        if let handler = links[route] {
+            dispatch { try build { tx in try handler(tx, params) } }
+        } else if route != 0 {
+            FileHandle.standardError.write(Data((
+                "kaya: link \(url) matched route \(route) and reached no "
+                + "handler — none is registered for it "
+                + "(KayaApp.link)\n").utf8))
+        }
+    }
+
     func allocAlert() -> UInt64 {
         nextAlert += 1
         return nextAlert
@@ -2443,6 +2530,10 @@ final class KayaApp {
                 if let handler = alerts.removeValue(forKey: id) {
                     dispatch { try build { tx in try handler(tx, choice) } }
                 }
+            case (UInt16(KAYA_OCCURRENCE_LINK_OPENED), _):
+                // id is the ROUTE the core matched
+                // (docs/app-links-plan.md §4), and NOT one-shot.
+                linkOpened(id, kayaLinkUrl(tail), kayaLinkParams(tail))
             case (UInt16(KAYA_OCCURRENCE_NOTIFICATION_RESULT), _):
                 notificationResult(id, choice)
             case (UInt16(KAYA_OCCURRENCE_CLIPBOARD_RESULT), _):
@@ -2695,11 +2786,17 @@ final class KayaAppTx {
         for (id, recompute) in pendingDerived {
             app.derived[id, default: []].append(recompute)
         }
+        // The pending link-route declarations go FIRST, in declaration
+        // order (docs/app-links-plan.md §4; Rust's PENDING_ROUTES
+        // drained head-first by Tx::commit is the shape).
         // `storage` and not `tx`: the submit is the transaction's own
         // last act, and routing it through the liveness property would
         // make the guard trip on the very call that closes it.
-        if !storage.bytes.isEmpty {
-            storage.submit()
+        let routes = app.takePendingRoutes()
+        if !routes.isEmpty || !storage.bytes.isEmpty {
+            var whole = KayaTx()
+            whole.bytes = routes + storage.bytes
+            whole.submit()
         }
     }
 

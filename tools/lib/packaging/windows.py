@@ -118,12 +118,46 @@ def activator_clsid_braced(app_id, entry_point=None):
     return "{" + activator_clsid(app_id, entry_point) + "}"
 
 
-def manifest(decl, exes, arch="arm64", version=VERSION, publisher=PUBLISHER):
+def protocol_extension(decl, mine):
+    """THE LINK DOOR, PACKAGED (docs/app-links-plan.md L1). A packaged process
+    registers NOTHING at run time — its HKCU is virtualized and this element is
+    its whole declaration, which is why crates/kaya/src/winui/mod.rs's
+    `links_declared` skips its own registration when `packaged()`.
+
+    ONE PACKAGE MAY CLAIM A SCHEME ONCE, measured on the VM 2026-09-09: with
+    the extension on both of this lane's entry points, `makeappx pack` refuses
+    the manifest with `'dev.kaya.aurora.notes' is a duplicate key for the
+    unique Identity Constraint 'Extension_Protocol'` — the constraint is over
+    the whole Package, not the Application. The DOTTED scheme itself is
+    accepted (the schema complained about the duplicate and not about the
+    dots), which is what L1's default needed. A real kaya app has ONE entry
+    point and never meets this; the lane packages several scenes as one app,
+    so the claim goes on the entry `manifest()` was told is the link's."""
+    if not mine:
+        return ""
+    return (f'        <uap:Extension Category="windows.protocol">\n'
+            f'          <uap:Protocol Name="{_escape(decl.scheme)}">\n'
+            f'            <uap:Logo>{IMAGE_DIR}\\Square44x44Logo.png</uap:Logo>\n'
+            f'            <uap:DisplayName>{_escape(decl.name)}</uap:DisplayName>\n'
+            f'          </uap:Protocol>\n'
+            f'        </uap:Extension>\n')
+
+
+def manifest(decl, exes, arch="arm64", version=VERSION, publisher=PUBLISHER,
+             links_entry=None):
     """AppxManifest.xml for the declaration and these entry points.
 
     Nothing here is typed twice: the name, the id and the launch
     background all come from `identity.load`, and the logo file names are
-    the ones `stage()` writes."""
+    the ones `stage()` writes.
+
+    `links_entry` is the `<Application Id>` that claims the declared URL
+    scheme, and NAMING IT IS THE CALLER'S JOB: a package may claim a scheme
+    exactly once (`protocol_extension`'s measurement), so there is no entry a
+    multi-entry package could be guessed to mean. `None` claims nothing, which
+    is what a machine that already holds another claimant wants
+    (tools/deploy-win.py's package phase says why this lane is one)."""
+    exes = list(exes)
     apps = []
     for exe in exes:
         app_id = application_id(exe)
@@ -165,8 +199,9 @@ def manifest(decl, exes, arch="arm64", version=VERSION, publisher=PUBLISHER):
             f'            </com:ExeServer>\n'
             f'          </com:ComServer>\n'
             f'        </com:Extension>\n'
-            f'      </Extensions>\n'
-            f'    </Application>')
+            + protocol_extension(decl, app_id == links_entry)
+            + '      </Extensions>\n'
+            '    </Application>')
     return (
         '<?xml version="1.0" encoding="utf-8"?>\n'
         '<Package\n'
@@ -249,7 +284,7 @@ def default_beside(root, arch, lib=None):
 
 
 def stage(root, exes, out, arch="arm64", beside=None, assets=True,
-          lib=None):
+          lib=None, links_entry=None):
     """Write the whole package layout under `out` and return it.
 
     `exes` are the entry points, copied in beside each other; `beside`
@@ -284,5 +319,6 @@ def stage(root, exes, out, arch="arm64", beside=None, assets=True,
     if assets:
         shutil.copytree(pathlib.Path(root) / "guests/assets", out / "assets")
     (out / MANIFEST_NAME).write_text(
-        manifest(decl, exes, arch=arch), encoding="utf-8")
+        manifest(decl, exes, arch=arch, links_entry=links_entry),
+        encoding="utf-8")
     return out

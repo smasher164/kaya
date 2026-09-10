@@ -30,7 +30,7 @@ type drop_values = {
 }
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0x605e18f72b2af791L
+let spec_hash = 0x1960b216df673c1fL
 
 let value_bool = 1
 let value_i64 = 2
@@ -270,6 +270,7 @@ let tx_kind_set_drop_target = 50
 let tx_kind_set_reorderable = 51
 let tx_kind_show_notification = 52
 let tx_kind_cancel_notification = 53
+let tx_kind_declare_link_route = 54
 let apply_kind_create = 1
 let apply_kind_set_prop = 2
 let apply_kind_add_child = 3
@@ -337,6 +338,7 @@ let occ_kind_date_changed = 24
 let occ_kind_time_changed = 25
 let occ_kind_value_committed = 26
 let occ_kind_notification_result = 27
+let occ_kind_link_opened = 28
 
 let pad8 b =
   while Buffer.length b mod 8 <> 0 do
@@ -768,6 +770,12 @@ let tx_show_notification notification at title body =
 let tx_cancel_notification notification =
   finish tx_kind_cancel_notification (fun b ->
       Buffer.add_int64_le b notification)
+
+(* Declare one app-link route (docs/app-links-plan.md §4): `route` is the app's own id for it, `pattern` a Str. The MATCH HAPPENS ONCE, IN THE CORE — the patterns come here so a URL the platform hands over is turned into a route and its captures by one matcher rather than by nine. The grammar: segments split on `/`, a literal segment matches itself, `{name}` captures one segment. REFUSED AT THE DECLARATION, a fault like every other declaration refusal: an empty pattern, an empty segment, a brace a segment never closes, and a pattern already declared. Routes are declared at startup, before or inside the app's first transaction: the core matches a link that STARTED the process once that transaction lands. *)
+let tx_declare_link_route route pattern =
+  finish tx_kind_declare_link_route (fun b ->
+      Buffer.add_int64_le b route;
+      encode_value b pattern)
 
 (* A civil date as the wire's I64: year * 10000 + month * 100 + day. *)
 let pack_date year month day =
@@ -2075,7 +2083,7 @@ let parse_clip byte at =
    value), None for clicks. None for pad/unknown kinds. *)
 let parse_occurrence byte =
   let kind = u16_at byte 4 in
-  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed && kind <> occ_kind_toggled && kind <> occ_kind_value_changed && kind <> occ_kind_close_requested && kind <> occ_kind_window_closed && kind <> occ_kind_alert_result && kind <> occ_kind_entry_popped && kind <> occ_kind_back_requested && kind <> occ_kind_section_selected && kind <> occ_kind_menu_activated && kind <> occ_kind_menu_toggled && kind <> occ_kind_menu_value_changed && kind <> occ_kind_file_dialog_result && kind <> occ_kind_clipboard_result && kind <> occ_kind_pasted && kind <> occ_kind_undone && kind <> occ_kind_redone && kind <> occ_kind_sort_requested && kind <> occ_kind_draw_requested && kind <> occ_kind_tick && kind <> occ_kind_dropped && kind <> occ_kind_drag_ended && kind <> occ_kind_date_changed && kind <> occ_kind_time_changed && kind <> occ_kind_value_committed && kind <> occ_kind_notification_result then None
+  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed && kind <> occ_kind_toggled && kind <> occ_kind_value_changed && kind <> occ_kind_close_requested && kind <> occ_kind_window_closed && kind <> occ_kind_alert_result && kind <> occ_kind_entry_popped && kind <> occ_kind_back_requested && kind <> occ_kind_section_selected && kind <> occ_kind_menu_activated && kind <> occ_kind_menu_toggled && kind <> occ_kind_menu_value_changed && kind <> occ_kind_file_dialog_result && kind <> occ_kind_clipboard_result && kind <> occ_kind_pasted && kind <> occ_kind_undone && kind <> occ_kind_redone && kind <> occ_kind_sort_requested && kind <> occ_kind_draw_requested && kind <> occ_kind_tick && kind <> occ_kind_dropped && kind <> occ_kind_drag_ended && kind <> occ_kind_date_changed && kind <> occ_kind_time_changed && kind <> occ_kind_value_committed && kind <> occ_kind_notification_result && kind <> occ_kind_link_opened then None
   else begin
     (* ids are guest-allocated and small; the low u32 is the story. *)
     let id = u32_at byte 8 in
@@ -2096,6 +2104,19 @@ let parse_occurrence byte =
       let at = ref 32 in
       let out = ref [] in
       for _ = 1 to count * 3 do
+        let v, next = parse_value byte !at in
+        out := v :: !out;
+        at := next
+      done;
+      Some (kind, Int64.of_int id, List.rev !out, None, None, None, [])
+    end
+    else if kind = occ_kind_link_opened
+    then begin
+      let url, at = parse_value byte 16 in
+      let count = u32_at byte at in
+      let at = ref (at + 8) in
+      let out = ref [ url ] in
+      for _ = 1 to count do
         let v, next = parse_value byte !at in
         out := v :: !out;
         at := next
