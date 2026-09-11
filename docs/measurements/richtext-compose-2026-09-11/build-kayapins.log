@@ -1,0 +1,219 @@
+warning: Git tree '/Users/akhilindurti/Projects/kaya' is dirty
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.14.4/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:mergeDebugNativeDebugMetadata NO-SOURCE
+> Task :app:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :app:generateDebugResValues UP-TO-DATE
+> Task :app:mapDebugSourceSetPaths UP-TO-DATE
+> Task :app:checkDebugAarMetadata FAILED
+> Task :app:generateDebugResources
+
+[Incubating] Problems report is available at: file:///Users/akhilindurti/.claude/jobs/87aed9b4/tmp/richtext/probes/compose/proj/build/reports/problems/problems-report.html
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:checkDebugAarMetadata'.
+> A failure occurred while executing com.android.build.gradle.internal.tasks.CheckAarMetadataWorkAction
+   > 16 issues were found when checking AAR metadata:
+     
+       1.  Dependency 'androidx.compose.animation:animation-core-android:1.12.1' requires libraries and applications that
+           depend on it to compile against version 37 or later of the
+           Android APIs.
+     
+           :app is currently compiled against android-35.
+     
+           Also, the maximum recommended compile SDK version for Android Gradle
+           plugin 8.7.3 is 35.
+     
+           Recommended action: Update this project's version of the Android Gradle
+           plugin to one that supports 37, then update this project to use
+           compileSdk of at least 37.
+     
+           Note that updating a library or application's compileSdk (which
+           allows newer APIs to be used) can be done separately from updating
+           targetSdk (which opts the app in to new runtime behavior) and
+           minSdk (which determines which devices the app can be installed
+           on).
+     
+       2.  Dependency 'androidx.compose.animation:animation-core-android:1.12.1' requires Android Gradle plugin 9.1.0 or higher.
+     
+           This build currently uses Android Gradle plugin 8.7.3.
+     
+       3.  Dependency 'androidx.compose.animation:animation-android:1.12.1' requires libraries and applications that
+           depend on it to compile against version 37 or later of the
+           Android APIs.
+     
+           :app is currently compiled against android-35.
+     
+           Also, the maximum recommended compile SDK version for Android Gradle
+           plugin 8.7.3 is 35.
+     
+           Recommended action: Update this project's version of the Android Gradle
+           plugin to one that supports 37, then update this project to use
+           compileSdk of at least 37.
+     
+           Note that updating a library or application's compileSdk (which
+           allows newer APIs to be used) can be done separately from updating
+           targetSdk (which opts the app in to new runtime behavior) and
+           minSdk (which determines which devices the app can be installed
+           on).
+     
+       4.  Dependency 'androidx.compose.animation:animation-android:1.12.1' requires Android Gradle plugin 9.1.0 or higher.
+     
+           This build currently uses Android Gradle plugin 8.7.3.
+     
+       5.  Dependency 'androidx.compose.foundation:foundation-layout-android:1.12.1' requires libraries and applications that
+           depend on it to compile against version 37 or later of the
+           Android APIs.
+     
+           :app is currently compiled against android-35.
+     
+           Also, the maximum recommended compile SDK version for Android Gradle
+           plugin 8.7.3 is 35.
+     
+           Recommended action: Update this project's version of the Android Gradle
+           plugin to one that supports 37, then update this project to use
+           compileSdk of at least 37.
+     
+           Note that updating a library or application's compileSdk (which
+           allows newer APIs to be used) can be done separately from updating
+           targetSdk (which opts the app in to new runtime behavior) and
+           minSdk (which determines which devices the app can be installed
+           on).
+     
+       6.  Dependency 'androidx.compose.foundation:foundation-layout-android:1.12.1' requires Android Gradle plugin 9.1.0 or higher.
+     
+           This build currently uses Android Gradle plugin 8.7.3.
+     
+       7.  Dependency 'androidx.compose.foundation:foundation-android:1.12.1' requires libraries and applications that
+           depend on it to compile against version 37 or later of the
+           Android APIs.
+     
+           :app is currently compiled against android-35.
+     
+           Also, the maximum recommended compile SDK version for Android Gradle
+           plugin 8.7.3 is 35.
+     
+           Recommended action: Update this project's version of the Android Gradle
+           plugin to one that supports 37, then update this project to use
+           compileSdk of at least 37.
+     
+           Note that updating a library or application's compileSdk (which
+           allows newer APIs to be used) can be done separately from updating
+           targetSdk (which opts the app in to new runtime behavior) and
+           minSdk (which determines which devices the app can be installed
+           on).
+     
+       8.  Dependency 'androidx.compose.foundation:foundation-android:1.12.1' requires Android Gradle plugin 9.1.0 or higher.
+     
+           This build currently uses Android Gradle plugin 8.7.3.
+     
+       9.  Dependency 'androidx.compose.ui:ui-graphics-android:1.12.1' requires libraries and applications that
+           depend on it to compile against version 37 or later of the
+           Android APIs.
+     
+           :app is currently compiled against android-35.
+     
+           Also, the maximum recommended compile SDK version for Android Gradle
+           plugin 8.7.3 is 35.
+     
+           Recommended action: Update this project's version of the Android Gradle
+           plugin to one that supports 37, then update this project to use
+           compileSdk of at least 37.
+     
+           Note that updating a library or application's compileSdk (which
+           allows newer APIs to be used) can be done separately from updating
+           targetSdk (which opts the app in to new runtime behavior) and
+           minSdk (which determines which devices the app can be installed
+           on).
+     
+      10.  Dependency 'androidx.compose.ui:ui-graphics-android:1.12.1' requires Android Gradle plugin 9.1.0 or higher.
+     
+           This build currently uses Android Gradle plugin 8.7.3.
+     
+      11.  Dependency 'androidx.compose.ui:ui-text-android:1.12.1' requires libraries and applications that
+           depend on it to compile against version 37 or later of the
+           Android APIs.
+     
+           :app is currently compiled against android-35.
+     
+           Also, the maximum recommended compile SDK version for Android Gradle
+           plugin 8.7.3 is 35.
+     
+           Recommended action: Update this project's version of the Android Gradle
+           plugin to one that supports 37, then update this project to use
+           compileSdk of at least 37.
+     
+           Note that updating a library or application's compileSdk (which
+           allows newer APIs to be used) can be done separately from updating
+           targetSdk (which opts the app in to new runtime behavior) and
+           minSdk (which determines which devices the app can be installed
+           on).
+     
+      12.  Dependency 'androidx.compose.ui:ui-text-android:1.12.1' requires Android Gradle plugin 9.1.0 or higher.
+     
+           This build currently uses Android Gradle plugin 8.7.3.
+     
+      13.  Dependency 'androidx.compose.ui:ui-android:1.12.1' requires libraries and applications that
+           depend on it to compile against version 37 or later of the
+           Android APIs.
+     
+           :app is currently compiled against android-35.
+     
+           Also, the maximum recommended compile SDK version for Android Gradle
+           plugin 8.7.3 is 35.
+     
+           Recommended action: Update this project's version of the Android Gradle
+           plugin to one that supports 37, then update this project to use
+           compileSdk of at least 37.
+     
+           Note that updating a library or application's compileSdk (which
+           allows newer APIs to be used) can be done separately from updating
+           targetSdk (which opts the app in to new runtime behavior) and
+           minSdk (which determines which devices the app can be installed
+           on).
+     
+      14.  Dependency 'androidx.compose.ui:ui-android:1.12.1' requires Android Gradle plugin 9.1.0 or higher.
+     
+           This build currently uses Android Gradle plugin 8.7.3.
+     
+      15.  Dependency 'androidx.compose.runtime:runtime-saveable-android:1.12.1' requires libraries and applications that
+           depend on it to compile against version 37 or later of the
+           Android APIs.
+     
+           :app is currently compiled against android-35.
+     
+           Also, the maximum recommended compile SDK version for Android Gradle
+           plugin 8.7.3 is 35.
+     
+           Recommended action: Update this project's version of the Android Gradle
+           plugin to one that supports 37, then update this project to use
+           compileSdk of at least 37.
+     
+           Note that updating a library or application's compileSdk (which
+           allows newer APIs to be used) can be done separately from updating
+           targetSdk (which opts the app in to new runtime behavior) and
+           minSdk (which determines which devices the app can be installed
+           on).
+     
+      16.  Dependency 'androidx.compose.runtime:runtime-saveable-android:1.12.1' requires Android Gradle plugin 9.1.0 or higher.
+     
+           This build currently uses Android Gradle plugin 8.7.3.
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+> Get more help at https://help.gradle.org.
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 9.0.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/8.14.4/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD FAILED in 3s
+4 actionable tasks: 2 executed, 2 up-to-date
