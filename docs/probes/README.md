@@ -50,3 +50,9 @@ alive, so these are the originals rather than replays:
   their source, the five GTK options priced, and the linux lane's measured
   GPU situation (llvmpipe present, no Vulkan ICD); the record behind
   docs/canvas-gpu-plan.md, with one wrong inference flagged at its head.
+- `richtext-platforms-2026-09-11.md` and `richtext-crdt-2026-09-11.md`:
+  the rich text design pass's two surveys — what each platform's rich
+  text control can express and how it reports edits (the capability and
+  delta tables, the marker hazard, the six unmeasured points), and the
+  Rust CRDT crates' edit shapes, units and bindings with the widget
+  protocol they need; the record behind docs/rich-text-plan.md.

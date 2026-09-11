@@ -1,0 +1,199 @@
+# Rich text — the design pass (rulings PROPOSED 2026-09-11)
+
+The maintainer's ask, 2026-09-11: rich text editing, in the text editor
+the tree already has (docs/editor-plan.md) as a pane or a toggle, toward
+a CRDT-backed notes app one day. That last clause shapes everything
+below: the document must be able to belong to the app, so the widget
+must speak in edits, not in whole strings. Two surveys are the record:
+docs/probes/richtext-platforms-2026-09-11.md (what each platform's
+control can express and how it reports edits) and
+docs/probes/richtext-crdt-2026-09-11.md (the Rust CRDT crates' edit
+shapes, units and bindings, and the widget protocol they need). Every
+number and claim here points at one of them or at a file in the tree.
+
+## 0. The mechanism, from zero
+
+**What rich text is, to a program.** A string plus ATTRIBUTE RUNS: "bytes
+12 to 20 are bold, bytes 30 to 41 are a link to this URL". Block
+structure is a second layer over paragraphs: "this paragraph is a
+heading, that one a quote, those three a list". Every platform stores
+it that way underneath, whatever it calls it: an NSAttributedString on
+macOS and iOS, named tags over a buffer on GTK, the Text Object Model's
+character and paragraph formats on Windows, span styles over a
+TextFieldState on Compose.
+
+**Who owns the document.** kaya's textarea today is UNCONTROLLED toward
+the app: the widget owns its text, `text_changed` carries the whole new
+string after each user edit, and a property write never echoes
+(crates/kaya/src/spec.rs, `text_changed`). That is the right contract for
+a form field and the wrong one for a document an app owns: a CRDT
+merges EDITS ("replace bytes 12 to 15 with `foo`"), and handing it two
+whole strings to diff loses the information the edit carried and every
+concurrent-edit guarantee with it. So rich text needs a second channel
+beside the fold: the edit itself, addressed, with its attributes.
+
+**What kaya already has under it.** The 2026-08-06 foundation put a
+rich-capable control under every textarea, pinned to plain text with
+every rich opinion switched off and watched (docs/textarea-foundation-plan.md).
+The ranges milestone added `highlight_ranges`, `select_range` and
+`reveal_range` in ONE offset unit, UTF-8 bytes into the widget's text,
+validated at one chokepoint in the core and converted per backend
+there (docs/ranges-units.md). The undo milestone split undo into a
+native text tier and a core-owned app tier (docs/undo-plan.md D1). The
+editor app (guests/go/editor) is the consumer.
+
+**What the platform survey found, condensed.** Inline styles are native
+on all five: bold, italic, underline, strikethrough, monospace, colour.
+Links are native on Apple and Windows, absent from GTK's tag model
+(synthesized: a tag plus a side table) and unproven on Compose's
+editable field. Block structure is where the platforms disagree:
+alignment and indent are native everywhere; a HEADING is native
+nowhere (every platform spells it as font size plus weight); quotes and
+code blocks exist nowhere; LISTS exist on Apple and Windows with the
+marker generated OUTSIDE the character stream, and nowhere on GTK and
+Compose, where a marker would be characters INSIDE the buffer. Same
+document, different byte offsets: that marker asymmetry is the one
+thing that would break kaya's offset contract, and it is ruled below
+before any list ships. Compose grew first-party inline styling on an
+editable field in foundation 1.12 (stable 1.12.1, September 2026,
+experimental API), which costs kaya a pin bump from 1.7.5.
+
+**How edits are reported**, which decides whether kaya can publish
+deltas: GTK and Compose hand over complete deltas (the replaced range
+and the inserted text); macOS and iOS give the edited range and the
+length change from the storage delegate, complete after one
+subtraction against the pre-edit string; Windows gives NOTHING but a
+boolean "content is changing". So the uniform source of the delta is
+the core's own text mirror, which it keeps already (`field_text` in
+crates/kaya/src/scene.rs, kept current for the ranges' validation):
+diff the mirror against the new text, and use the platform's channel
+only to corroborate and to say when an IME composition is live.
+
+**What the CRDT survey found, condensed.** Three maintained Rust rich
+text CRDTs: automerge 0.11 (Peritext marks, expand chosen per mark
+call, emits addressed patches, UTF-8 by default), loro 1.16 (Peritext,
+expand per style key document-wide, emits Quill-style deltas, a UTF-8
+twin on every mutation), yrs 0.27 (Yjs's runs-and-attributes model, no
+expand choice, bytes by default). No CRDT has bindings in all nine
+guests, and OCaml and Haskell have none from anybody, so no CRDT type
+may appear in kaya's API: the widget hands the app EDITS and the app
+decides what sits behind them. All three take an addressed edit
+verbatim, and all three default to kaya's ruled unit, so nothing
+converts. Their undo is local-peer and forward (a new change, never a
+rollback), which collides with kaya's native undo tier: the platform
+stack would revert text the document never moved.
+
+## 1. Rulings proposed
+
+| # | ruling | recommendation |
+| --- | --- | --- |
+| R1 | **The contract is HYBRID: the textarea stays uncontrolled for typing, and every user edit is ALSO published addressed.** `text_changed` keeps carrying the plain text exactly as today, so no existing app sees a new byte. Beside it, on a textarea declared `rich`, the widget publishes `text_edited { start, end, inserted, runs, source }` for every user edit and `text_formatted { start, end, name, value }` for every toolbar act, and takes `set_rich_text(spans)` (the whole document, a configuration write, echoes nothing) and `apply_edit(start, end, inserted, runs)` (an incremental write that keeps the selection and echoes nothing). Five messages; the round trip is a scene: send an edit in, read the same shape back. THE BINDINGS KEEP THE MIRROR: each binding folds the edits into a `Document` value the app reads, the way signal mirrors work today, so an app that never wants deltas reads one document and an app with a CRDT feeds the deltas through. No wire read anywhere. | TAKE |
+| R2 | **Attribute runs travel in the ruled unit** — UTF-8 byte offsets, both ends on a code-point boundary, the grapheme carve-out as stated — validated at the same chokepoint the ranges use and converted per backend in the core. Identity conversion for automerge (`Utf8CodeUnit`, its default), yrs (`OffsetKind::Bytes`, its default) and loro's `_utf8` family. | TAKE |
+| R3 | **The v1 vocabulary is what synthesizes UNIFORMLY or is native everywhere.** Inline: `bold`, `italic`, `underline`, `strike`, `code`, `link(url)`. Block, one kind per paragraph: `body`, `heading` 1-3, `quote`, `code_block`. A heading is font size plus weight on every platform anyway, a quote is indent plus a rule and a code block a monospace face plus a ground, all drawn by the backend with NOTHING added to the text, so the bytes stay identical. OUT of v1: colours (a semantic-role question, the canvas palette's shape, its own slice), alignment (no consumer), and LISTS, under one rule stated now for when they come: **kaya's block model owns list semantics and no marker is ever in the guest-visible text**; the GTK and Compose arms draw markers their buffers never hold. Links are a synthesized tier on GTK (a tag plus a side table keyed by run) and measured on Compose before the arm is written. | TAKE, with lists and colour deferred by name |
+| R4 | **The core derives every delta from its own mirror**, uniformly on five platforms, and the platform's channel corroborates: where a backend reports a range (four of five), a disagreement with the diff is a diagnostic sentence that names both; where it reports nothing (WinUI), the diff is the delta. `source` says `user`, `ime_commit`, `paste`, `native_undo` or `drop`, which closes docs/undo-plan.md A6 (a native undo indistinguishable from typing) for rich widgets. | TAKE |
+| R5 | **A remote edit arriving mid-composition is QUEUED, not refused, and a caret at the edit's start ends AFTER the inserted text.** `select_range` refuses during an IME composition because honouring it commits the user's marked text (docs/ranges-plan.md D4); a refused `apply_edit` would instead DROP a collaborator's edit, which is data loss the other way. So the core holds the edit until the composition ends (which `text_changed` announces anyway) and applies it then, transforming the local selection as the survey's rule states: unchanged before the edit, shifted after it, and a caret exactly at the start moves past the insertion (yrs's and automerge's `After` association). | TAKE; the association is a stated carve-out like the grapheme one |
+| R6 | **The native undo tier is opt-out per widget, and an app that owns the document says so.** docs/undo-plan.md A7 already names the lever; this rules its spelling: `own_undo()` on a rich textarea (a prop) turns the native stack off on that widget (`allowsUndo`, `enable-undo`, `UndoLimit 0`, the Compose undo state — the rich controls can all be told, where the plain TextBox could not), D7's history reset applies to `set_rich_text` and never to `apply_edit`, and D6's routing takes the app's `can_undo`/`can_redo` props for that widget so Edit>Undo reaches the app's own undo (a CRDT's, or the app's) instead of a stack that has been switched off. The core's own log (D3-D5) is untouched: a document the app owns never became core signals. | TAKE; amends a ratified table, so it is the maintainer's word |
+| R7 | **Compose takes the first-party path**: foundation 1.12's `addStyle`/`removeStyle`/`getSpanStyles` on the editable buffer, behind its experimental flag, with the pin bump measured on the android lane first (build, the 143 legs, the three unmeasured points in §3). A synthesized tier (an output transformation over the plain buffer) stays the fallback if the measurement says no. | TAKE |
+| R8 | **Labels get the same inline vocabulary as a second slice.** The roadmap's rich-text row was about labels (a markup subset on label text). One document type serves both: a `rich` label renders the inline runs read-only through AttributedString, Pango attributes, RichTextBlock and AnnotatedString. After the textarea's depth, not before. | TAKE, sequenced after |
+| R9 | **The harness reads the CORE's document, never the platform's.** `expect_runs <target> "<runs>"` compares the mirror's attribute runs byte for byte on five lanes (the canvas hash's shape); `format <target> <name> <start> <end>` toggles as the user would; `type` and `select_range` already exist; `expect_edit "<last text_edited>"` reads the occurrence. What the PLATFORM holds is verified per backend in check-verbs' gate shape (a read-back at a range, tri-state for a mixed range as Windows answers it), not in a shared scene, because five read-backs answer five ways. The AX words a rich run adds (`heading`, `link`) join the closed word set only after each platform's screen reader is measured saying them. | TAKE |
+
+## 2. The protocol, in the spec's terms
+
+Four records and one prop, spec-first (invariant 7), generated into nine
+bindings by the existing generator with `highlight_ranges`' count-plus-
+Values shape for runs:
+
+- prop `rich` (window prop family, textarea only): the widget accepts
+  and publishes attributed content; off, nothing below exists and the
+  rich opinions stay pinned as today.
+- TX `set_rich_text { widget, spans }` — spans as `(text, attrs)` pairs;
+  a configuration write: resets the native undo history under D7 where
+  the native tier is on, echoes nothing.
+- TX `apply_edit { widget, start, end, inserted, runs }` — the app's or
+  a collaborator's edit; keeps the selection by R5's rule; queued
+  during a composition; echoes nothing; never resets undo.
+- occurrence `text_edited { widget, start, end, inserted, runs, source }`
+  — offsets into the text BEFORE the edit; `runs` cover `inserted` only.
+- occurrence `text_formatted { widget, start, end, name, value }` — a
+  toolbar act over a range; `value` absent means removed. Bold pressed
+  on a collapsed caret is widget-local pending state and becomes the
+  `runs` of the next `text_edited`, not an occurrence of its own.
+
+The block kinds ride as an attribute named `block` on the runs that
+span whole paragraphs, so one run model carries both layers and the
+validator has one shape to check (a `block` run must start and end on
+paragraph boundaries; refused otherwise, naming the byte).
+
+The sugar, one shape in nine (the sweep verdict is do, in all nine):
+a `Document` value (text plus runs) each binding keeps current from the
+edits; `textarea.rich()`; `on_edit(|edit| ..)` and `on_format(..)`
+beside `on_text_changed`; `set_document(doc)` and `apply(edit)`; a
+`Run`/`Edit` record with the language's idiom for the attribute value.
+No CRDT anywhere in it: an app with automerge calls
+`splice_text(start, end - start, inserted)` from the edit and
+`mark(...)` per run; one with loro `delete_utf8`/`insert_utf8`; one
+with yrs `remove_range`/`insert_with_attributes`. The expand rule for
+marks is the CRDT's and the app's; kaya carries no flag for it.
+
+## 3. What is measured before any arm is written (the unknowns)
+
+Each is half a day on its own lane, its record under docs/measurements,
+and the ruling above that depends on it is named:
+
+1. **GTK's undo scope**: whether `GtkTextBuffer`'s history records
+   `apply-tag`/`remove-tag`. If not, the native tier is incomplete for
+   rich text on Linux and R6's off switch is the only honest state
+   there. (R6)
+2. **Compose, three points**: a `LinkAnnotation` on editable
+   `TextFieldState` content; whether `addStyle`/`removeStyle` appear in
+   `TextFieldBuffer.changes`; the pin bump to foundation 1.12 building
+   and the lane green. (R3, R7)
+3. **RichEditBox unpinned**: the undeletable final paragraph mark
+   returns when the plain-text pin comes off, and kaya's
+   `StoryLength - 1` arithmetic was derived under the pin. (R2, R4)
+4. **The screen readers**: what each of the five announces for bold, a
+   link and a heading, so the AX words can be added to the closed set
+   rather than assumed. (R9)
+5. **Native undo suppression per platform** for R6's off switch:
+   `allowsUndo`, `enable-undo`, `UndoLimit`, Compose's undo state, each
+   watched actually holding.
+6. **loro's emitted delta unit**, a 60-line probe, before anything is
+   said about loro in a binding's example. (R2)
+7. **The diff-derived delta against the native channel**, on the four
+   platforms that report one: the diagnostic in R4 has to be made to
+   print before it is trusted (invariant 3).
+
+## 4. Sequencing
+
+Depth then breadth, the standing pattern:
+
+1. **Probes** (§3), on their lanes, records landed. About three days
+   across the five lanes, in parallel.
+2. **Depth on the mac**: the spec records and the prop, the core's
+   mirror growing runs and the diff-derived delta at the ranges'
+   chokepoint, the Rust sugar and `Document`, the NSTextView arm
+   unpinned for the v1 vocabulary only (every other opinion stays
+   pinned and watched), the editor's rich toggle (a toolbar switch:
+   plain or rich, one buffer), and `richtext.steps` asserting runs, an
+   edit round trip, a format act and the queue rule. Cost L.
+3. **Breadth**: iOS (the same file), GTK (tags, the link side table,
+   the drawn block kinds), WinUI (TOM formats, the diff as the only
+   delta), Compose (the 1.12 path); the eight bindings' sugar; the
+   sweep's rows in check-sugar-surface and check-verbs; the matrix.
+   Cost XL across five, each arm its own measurement first.
+4. **Undo amendments** (R6): the off switch, D6's app answer, the
+   editor asserting both routes. Cost M.
+5. **Labels** (R8). Cost M.
+
+## 5. What this plan does not do
+
+- It does not put a CRDT, a delta format or a markup language on the
+  wire. Interchange (Markdown, HTML, RTF) is the app's, and a helper
+  in a binding is a later convenience, not a kaya concept.
+- It does not ship lists or colours in v1; both are named with the rule
+  they will come under.
+- It does not add a wire read. The mirror is the binding's, as every
+  other mirror is.
+- It does not adopt SwiftUI's iOS 26 attributed TextEditor: kaya's
+  floor is iOS 16, and the NSTextView/UITextView path underneath is the
+  foundation already paid for.
