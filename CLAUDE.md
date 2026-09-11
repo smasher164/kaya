@@ -658,7 +658,11 @@ in docs/deferred.md.
    whose f32 arithmetic is where an FMA contraction could differ between
    microarchitectures; docs/measurements/canvas-vello-determinism-2026-09-10.txt
    measured the u8 pipeline byte-exact across scalar, NEON and AVX2 and
-   across ISAs). Five more watched negatives, counts printed),
+   across ISAs), and since 2026-09-11 the SCREEN raster's threads BY
+   SIZE (`screen_threads(pixels)` over `SCREEN_THREADS_ABOVE`, the
+   measured crossover on a kept context) — a screen raster hard-coded
+   back to one thread is green on every lane and puts a phone's heavy
+   frame over budget. Six more watched negatives, counts printed),
    `tools/check-appearance.py` (THE APPEARANCE OVERRIDE IS INERT UNLESS
    ASKED FOR, AND HONEST WHEN IT IS. `KAYA_APPEARANCE=light|dark` makes ONE
    PROCESS adopt an appearance through each platform's own supported

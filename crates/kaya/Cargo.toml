@@ -24,9 +24,10 @@ kaya-derive = { path = "../kaya-derive" }
 # which is what makes the byte-hash observable possible — a buffer whose
 # pixels depend on a GPU driver is one no scene can freeze. A dependency
 # here is never cited from memory (§4.1's archived-crate near-miss).
-# `multithreading` is deliberately OFF until slice 2 measures it
-# (docs/measurements/canvas-vello-determinism-2026-09-10.txt).
-vello_cpu = { version = "0.2.0", default-features = false, features = ["std", "u8_pipeline"] }
+# `multithreading` since 2026-09-11: the SCREEN raster takes workers above
+# canvas::SCREEN_THREADS_ABOVE on a context it keeps
+# (docs/measurements/canvas-gpu-timing-2026-09-10.txt and its iPhone twin).
+vello_cpu = { version = "0.2.0", default-features = false, features = ["std", "u8_pipeline", "multithreading"] }
 # `Level::fallback()`, the scalar level the CANONICAL raster is pinned to,
 # is behind this feature; features unify, so naming it here is what puts
 # it on vello_cpu's re-exported `Level` (tools/check-canvas-blit.py).

@@ -53,12 +53,41 @@ pub(crate) const CANONICAL_MODE: Mode = Mode::Light;
 pub(crate) const CANONICAL_SETTINGS: RenderSettings =
     RenderSettings { level: Level::fallback(), num_threads: 0 };
 
-/// The SCREEN raster's settings: the host's own SIMD level. Threads stay
-/// at 0 until slice 2 measures them — vello_cpu builds a thread pool per
-/// context, and at kaya's sizes that pool cost more than it saved
-/// (docs/measurements/canvas-vello-determinism-2026-09-10.txt).
-fn screen_settings() -> RenderSettings {
-    RenderSettings { level: Level::new(), num_threads: 0 }
+/// The pixel count above which the SCREEN raster takes worker threads:
+/// the measured crossover with the context reused
+/// (docs/measurements/canvas-gpu-timing-2026-09-10.txt and its iPhone
+/// twin — below it the pool costs more than it saves, above it 5-8
+/// workers are 1.7-2.5x faster and a phone's heavy frame goes from over
+/// budget to half of it). Held by tools/check-canvas-blit.py.
+pub(crate) const SCREEN_THREADS_ABOVE: usize = 1_000_000;
+
+fn screen_threads(pixels: usize) -> u16 {
+    if pixels < SCREEN_THREADS_ABOVE {
+        return 0;
+    }
+    let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
+    cores.saturating_sub(1).min(8) as u16
+}
+
+/// The SCREEN raster's settings: the host's own SIMD level, threads by
+/// size. Never the canonical raster's (docs/canvas-gpu-plan.md G2).
+fn screen_settings(pixels: usize) -> RenderSettings {
+    RenderSettings { level: Level::new(), num_threads: screen_threads(pixels) }
+}
+
+/// Which context a raster draws through: a FRESH one for the canonical
+/// raster, whose settings are the pin; the SCREEN one, kept per thread
+/// and resized in place, so its worker pool is built once and its
+/// buffers are reused (the pool per context is what made threads slower
+/// than one at small sizes).
+enum Context {
+    Fresh,
+    Screen,
+}
+
+thread_local! {
+    static SCREEN_CONTEXT: std::cell::RefCell<Option<(u16, RenderContext)>> =
+        const { std::cell::RefCell::new(None) };
 }
 
 /// Joins, caps and the miter limit are NOT in the op vocabulary
@@ -490,19 +519,60 @@ pub fn fit(viewbox: (f64, f64), track: (f64, f64)) -> Fit {
 /// A canvas at its natural size passes `drawing.viewbox` and gets k = 1
 /// with no margin.
 pub fn rasterize(drawing: &Drawing, track: (f64, f64), p: Presentation) -> Raster {
-    raster(drawing, track, p, screen_settings())
+    let (width, height) = raster_size(track, p);
+    raster(drawing, track, p, screen_settings(width as usize * height as usize), Context::Screen)
 }
 
-fn raster(drawing: &Drawing, track: (f64, f64), p: Presentation, settings: RenderSettings) -> Raster {
+fn raster_size(track: (f64, f64), p: Presentation) -> (u32, u32) {
     let (t_w, t_h) = track;
-    let width = ((t_w * p.scale).round() as i64).clamp(0, 16384) as u32;
-    let height = ((t_h * p.scale).round() as i64).clamp(0, 16384) as u32;
+    (
+        ((t_w * p.scale).round() as i64).clamp(0, 16384) as u32,
+        ((t_h * p.scale).round() as i64).clamp(0, 16384) as u32,
+    )
+}
+
+fn raster(
+    drawing: &Drawing,
+    track: (f64, f64),
+    p: Presentation,
+    settings: RenderSettings,
+    context: Context,
+) -> Raster {
+    let (width, height) = raster_size(track, p);
     if width == 0 || height == 0 {
         return Raster { width: 0, height: 0, scale: p.scale, pixels: Vec::new() };
     }
     let (w16, h16) = (width as u16, height as u16);
-    let mut ctx = RenderContext::new_with(w16, h16, settings);
+    let pixels = match context {
+        Context::Fresh => {
+            let mut ctx = RenderContext::new_with(w16, h16, settings);
+            draw(&mut ctx, drawing, track, p);
+            finish(&mut ctx, w16, h16)
+        }
+        Context::Screen => SCREEN_CONTEXT.with(|slot| {
+            let mut slot = slot.borrow_mut();
+            let rebuild = match slot.as_ref() {
+                Some((threads, _)) => *threads != settings.num_threads,
+                None => true,
+            };
+            if rebuild {
+                *slot = Some((settings.num_threads, RenderContext::new_with(w16, h16, settings)));
+            }
+            let (_, ctx) = slot.as_mut().expect("just built or kept");
+            if ctx.width() != w16 || ctx.height() != h16 {
+                ctx.reset_and_resize(w16, h16);
+            } else {
+                ctx.reset();
+            }
+            draw(ctx, drawing, track, p);
+            finish(ctx, w16, h16)
+        }),
+    };
+    Raster { width, height, scale: p.scale, pixels }
+}
 
+/// The op walk into one context, fitted and scaled.
+fn draw(ctx: &mut RenderContext, drawing: &Drawing, track: (f64, f64), p: Presentation) {
     let Fit { k, ox, oy } = fit(drawing.viewbox, track);
     let s = k * p.scale;
     let (dx, dy) = (ox * p.scale, oy * p.scale);
@@ -565,12 +635,17 @@ fn raster(drawing: &Drawing, track: (f64, f64), p: Presentation, settings: Rende
         }
     }
 
+}
+
+/// The context's picture, as the premultiplied RGBA8 bytes every backend
+/// blits.
+fn finish(ctx: &mut RenderContext, w16: u16, h16: u16) -> Vec<u8> {
     ctx.flush();
-    let mut pixels = vec![0u8; width as usize * height as usize * 4];
+    let mut pixels = vec![0u8; usize::from(w16) * usize::from(h16) * 4];
     let target = PixmapMut::new(w16, h16, &mut pixels)
         .expect("the buffer is exactly width * height * 4 bytes");
     ctx.render(target, &mut Resources::new());
-    Raster { width, height, scale: p.scale, pixels }
+    pixels
 }
 
 /// The canonical raster and the two legible reads, all three from ONE
@@ -581,6 +656,7 @@ pub fn probe(drawing: &Drawing) -> Probe {
         drawing.viewbox,
         Presentation { scale: CANONICAL_SCALE, mode: CANONICAL_MODE },
         CANONICAL_SETTINGS,
+        Context::Fresh,
     );
     Probe { hash: hash(&raster), ops: drawing.op_count(), ink: ink(&raster) }
 }
@@ -808,6 +884,33 @@ impl OutlinePen for GlyphSink {
 
 #[cfg(test)]
 mod tests {
+
+    /// THE SCREEN RASTER'S THREADS BY SIZE, and the kept context drawing
+    /// what a fresh one draws (docs/canvas-gpu-plan.md §11; the crossover
+    /// is docs/measurements/canvas-gpu-timing-2026-09-10.txt's).
+    #[test]
+    fn the_screen_raster_takes_threads_by_size_on_a_context_it_keeps() {
+        let _serial = crate::assets::serially();
+        assert_eq!(screen_threads(SCREEN_THREADS_ABOVE - 1), 0, "below the crossover: one thread");
+        let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
+        assert_eq!(
+            screen_threads(SCREEN_THREADS_ABOVE),
+            cores.saturating_sub(1).min(8) as u16,
+            "at the crossover: the host's workers, capped at eight"
+        );
+        let d = validate((300.0, 120.0), &scene_chart()).expect("the scene's stream validates");
+        // Small, large (threaded), then small again: the kept context is
+        // resized and rebuilt across the three, and every picture must
+        // equal a fresh context's at the same settings.
+        for track in [(300.0, 120.0), (1600.0, 1000.0), (300.0, 120.0)] {
+            let p = Presentation { scale: 1.0, mode: Mode::Light };
+            let kept = rasterize(&d, track, p);
+            let (w, h) = raster_size(track, p);
+            let fresh = raster(&d, track, p, screen_settings(w as usize * h as usize), Context::Fresh);
+            assert_eq!(kept.pixels, fresh.pixels, "the kept context at {track:?} drew a different picture");
+        }
+        assert!(SCREEN_CONTEXT.with(|s| s.borrow().is_some()), "the screen context is kept between rasters");
+    }
     use super::*;
 
     fn op(code: i64) -> Value {

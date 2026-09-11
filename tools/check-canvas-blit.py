@@ -464,18 +464,21 @@ def check_canonical(canvas, cargo):
     pm = re.search(r"pub fn probe\(drawing: &Drawing\) -> Probe \{(.*?)\n\}",
                    body, re.S)
     if pm is None or "CANONICAL_SETTINGS" not in pm.group(1) \
-            or "screen_settings" in pm.group(1):
+            or "Context::Fresh" not in pm.group(1) \
+            or "screen_settings" in pm.group(1) or "Context::Screen" in pm.group(1):
         bad.append(f"{canvas}: probe() does not raster with "
                    f"CANONICAL_SETTINGS — the hash the scenes freeze would "
                    f"be taken at whatever the screen uses; {why}")
     rm = re.search(r"pub fn rasterize\(drawing: &Drawing, track: \(f64, "
                    r"f64\), p: Presentation\) -> Raster \{(.*?)\n\}",
                    body, re.S)
-    if rm is None or "screen_settings()" not in rm.group(1):
+    if rm is None or "screen_settings(" not in rm.group(1) \
+            or "Context::Screen" not in rm.group(1):
         bad.append(f"{canvas}: rasterize(), the screen raster, no longer "
-                   f"takes screen_settings() — the two rasters are meant "
-                   f"to differ in exactly that argument")
-    sm = re.search(r"fn screen_settings\(\) -> RenderSettings \{(.*?)\n\}",
+                   f"takes screen_settings() through the kept context — the "
+                   f"two rasters are meant to differ in exactly those "
+                   f"arguments")
+    sm = re.search(r"fn screen_settings\(pixels: usize\) -> RenderSettings \{(.*?)\n\}",
                    body, re.S)
     if sm is None or re.search(r"level:\s*Level::new\(\)", sm.group(1)) is None:
         bad.append(f"{canvas}: the screen raster's level is no longer "
@@ -483,6 +486,20 @@ def check_canonical(canvas, cargo):
                    f"the screen draws with the host's own SIMD, and a "
                    f"screen pinned to the scalar path pays for a guarantee "
                    f"nothing reads")
+    # THE THREADS BY SIZE: a screen raster hard-coded back to one thread
+    # is green on every lane (no lane measures a frame) and puts a
+    # phone's heavy frame back over budget (19.5ms on one thread against
+    # 9.5 on five, docs/measurements/canvas-gpu-timing-iphone-2026-09-10.txt).
+    threads_rule = r"num_threads:\s*screen_threads\(pixels\)"
+    if sm is not None and re.search(threads_rule, sm.group(1)) is None:
+        bad.append(f"{canvas}: the screen raster no longer switches threads "
+                   f"on by size — screen_settings() must take "
+                   f"screen_threads(pixels), the measured rule")
+    tm = re.search(r"fn screen_threads\(pixels: usize\) -> u16 \{(.*?)\n\}", body, re.S)
+    if tm is None or "SCREEN_THREADS_ABOVE" not in tm.group(1):
+        bad.append(f"{canvas}: screen_threads() no longer reads "
+                   f"SCREEN_THREADS_ABOVE — the crossover is a measured "
+                   f"number with a record, not a literal in a branch")
     if "OptimizeQuality" in body:
         bad.append(f"{canvas}: names OptimizeQuality — the f32 pipeline, "
                    f"whose arithmetic is where an FMA contraction could "
@@ -703,14 +720,17 @@ def negatives():
                lambda p=s: check_canonical(str(p), CARGO),
                want="canonical num_threads is no longer")
     s = g.perturb("N6c (probe() rastering with the screen settings)", CANVAS,
-                  r"CANONICAL_SETTINGS,\n    \);",
-                  "screen_settings(),\n    );", flags=re.S)
+                  r"CANONICAL_SETTINGS,\n        Context::Fresh,\n    \);",
+                  "screen_settings(0),\n        Context::Fresh,\n    );", flags=re.S)
     g.negative("a probe that hashes the screen raster's settings",
                lambda p=s: check_canonical(str(p), CARGO),
                want="probe() does not raster with CANONICAL_SETTINGS")
+    screen_line = (r"RenderSettings \{ level: Level::new\(\), "
+                   r"num_threads: screen_threads\(pixels\) \}")
     s = g.perturb("N6d (the screen raster pinned to the scalar level)", CANVAS,
-                  r"RenderSettings \{ level: Level::new\(\), num_threads: 0 \}",
-                  "RenderSettings { level: Level::fallback(), num_threads: 0 }",
+                  screen_line,
+                  "RenderSettings { level: Level::fallback(), "
+                  "num_threads: screen_threads(pixels) }",
                   flags=re.S)
     g.negative("a screen raster on the scalar level",
                lambda p=s: check_canonical(str(p), CARGO),
@@ -724,8 +744,14 @@ def negatives():
     g.negative("a render on the f32 pipeline",
                lambda p=s: check_canonical(str(p), CARGO),
                want="names OptimizeQuality")
+    s = g.perturb("N6f (the screen raster hard-coded back to one thread)", CANVAS,
+                  screen_line,
+                  "RenderSettings { level: Level::new(), num_threads: 0 }", flags=re.S)
+    g.negative("a screen raster that never takes threads",
+               lambda p=s: check_canonical(str(p), CARGO),
+               want="no longer switches threads on by size")
 
-    g.negatives_ran(23)
+    g.negatives_ran(24)
 
 
 negatives()

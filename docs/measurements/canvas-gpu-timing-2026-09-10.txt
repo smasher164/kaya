@@ -62,6 +62,8 @@ measured pixel count, `multithreading` enabled on the vello_cpu
 dependency. The canonical raster stays scalar and single-threaded
 (G2). That is a small slice of its own; nothing in this record needs a
 ruling.
+BUILT 2026-09-11: crates/kaya/src/canvas.rs, `Context::Screen`, with the
+crossover at one megapixel (`SCREEN_THREADS_ABOVE`).
 
 THE TOLERANCE NUMBERS, FOR THE RECORD
 -------------------------------------

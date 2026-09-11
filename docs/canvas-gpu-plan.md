@@ -401,9 +401,10 @@ is always there, since the canonical raster never leaves it.
   which is how the probe was known to measure kaya's pipeline and not a
   neighbour. The probe source is beside the record.
 - **The swap**: crates/kaya/Cargo.toml carries vello_cpu 0.2.0 (std and
-  the u8 pipeline; `multithreading` off until slice 2 measures it, since
-  the crate builds a thread pool per context and at kaya's sizes that
-  pool cost more than it saved) and names fearless_simd's
+  the u8 pipeline; `multithreading` off in this slice, since the crate
+  builds a thread pool per context and at kaya's sizes that pool cost
+  more than it saved — on since 2026-09-11 with the context kept, §11)
+  and names fearless_simd's
   `force_support_fallback` feature, which is where `Level::fallback()`
   lives. crates/kaya/src/canvas.rs rasterizes through `RenderContext`
   onto kurbo paths: `CANONICAL_SETTINGS` (scalar, one thread) for
@@ -480,8 +481,13 @@ classic vello is measured again.
 
 What survives from slice 2 is the threads: above about a megapixel, 8
 workers on a reused context are 1.7-2.5x faster than one, and their
-bytes equal the single-threaded bytes in every cell measured. The
-remaining work is a small slice of its own — a RenderContext kept per
-thread and resized rather than rebuilt, threads switched on above a
-measured pixel count, `multithreading` enabled on the dependency — with
-the canonical raster staying scalar and single-threaded under G2.
+bytes equal the single-threaded bytes in every cell measured. BUILT
+2026-09-11: the screen raster draws through a context kept per thread
+and resized in place (`Context::Screen` in crates/kaya/src/canvas.rs),
+takes `screen_threads(pixels)` workers above `SCREEN_THREADS_ABOVE`
+(one megapixel, the measured crossover) and one below, with
+`multithreading` on the dependency; the canonical raster stays scalar,
+single-threaded and on a fresh context under G2, and check-canvas-blit's
+clause 6 holds the threads rule beside the pin (a sixth watched
+negative). A unit test draws small, large and small again through the
+kept context and holds every picture equal to a fresh context's.
