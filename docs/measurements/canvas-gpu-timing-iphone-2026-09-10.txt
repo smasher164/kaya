@@ -1,0 +1,115 @@
+THE SAME PROBE ON A PHONE-CLASS CORE: iPhone 17 Pro (A19 Pro), 2026-09-10
+measured with tools/ios/gpuprobe/build.py, the app built, signed, installed
+and launched on the maintainer's paired phone through devicectl; the report
+is the app's own, copied back from its data container. The measurement
+docs/measurements/canvas-gpu-timing-2026-09-10.txt said it was owed.
+
+THE HOST
+--------
+iPhone 17 Pro, iOS 26.6.1, 6 hardware threads (vello_cpu's multithreaded
+dispatcher takes 5 workers by its own rule), Level::new() = NEON, the
+Apple A19 Pro GPU through Metal. The first launch aborted before any
+measurement: wgpu's default limit table asks 16 inter-stage shader
+variables and this adapter allows 15, so the device request failed —
+both requests ask for the adapter's own limits now, and a refusal is
+written into the report before the panic.
+
+THE READING, AGAINST THE MAC
+----------------------------
+The CPU columns slowed by 1.3-2x (five slower workers instead of eight),
+the GPU columns stayed where they were, and the crossover the mac record
+predicted appeared in ONE place:
+
+    scene, phone size 1200x2400      vello_cpu 5T   hybrid burst   classic burst
+    portfolio chart                       0.30ms         0.58ms          0.59ms
+    text page                             0.81           1.40            0.79
+    2000 octagons                         1.13           1.55            0.56   <- the GPU wins, 2x
+    10 big fills                          0.37           0.66            0.47
+    50 big fills                          0.81           1.04            1.25
+    200 big fills                         2.46           3.57            3.28
+    800 big fills                         9.50          14.83           (blank frame: overflow)
+
+Classic vello, the all-GPU renderer, beats the phone's five cores on the
+one scene made of many small paths — 2,000 antialiased octagons, 0.56ms
+pipelined against 1.13ms — which is what moving path flattening off the
+CPU is for. It loses on every fill-heavy scene up to 200 full-screen
+fills, and at 800 it drew nothing (its default bump buffers overflowed,
+as on the mac). The hybrid loses everywhere, for the mac's reason: its
+CPU half (10ms of strips at 800 fills) is the bottleneck.
+
+THE BUDGET, WHICH IS WHAT THE RULING RESTS ON
+---------------------------------------------
+vello_cpu on five phone threads draws every scene inside the 16.7ms
+frame: 800 full-screen translucent fills in 9.5ms (19.5ms on one
+thread, so THREADS ARE NOT OPTIONAL ON THE PHONE for a heavy canvas —
+the ledger's threads slice is the one that keeps this true), 2,000
+octagons in 1.1ms, the chart in 0.3ms. So the standing ruling (no GPU
+display path) holds on the phone as a matter of budget, and the
+refinement is written down: an all-GPU renderer wins on path-count-heavy
+frames on a phone, by about 2x at 2,000 paths, and a canvas that draws
+tens of thousands of small paths per frame is where classic vello would
+be measured again — with its overflow handling on, which its default
+build lacks.
+
+The single-frame `wait` on the phone is 1.27ms (1.52 on the mac), the
+same fixed Metal round trip; readback at phone size adds 2.4ms to a
+hybrid frame (4.00 against 1.56 on the chart), noticeably more than on
+the mac's unified memory path.
+
+THE REPORT, VERBATIM
+--------------------
+kaya gpuprobe: ios aarch64 (6 threads available)
+== timing ==
+host: 6 threads available; vello_cpu MT uses 5; Level::new() = Neon(Neon { neon: Neon { _private: () } }); GPU adapter "Apple A19 Pro GPU" via Metal
+
+drawing                    track                pixels    cpu 1T    cpu MT  gpu render gpu+readback     build   hybrid vs cpu bytes
+portfolio chart (214 ops)  native                50400     0.08ms     0.11ms       1.51ms        1.55ms     0.10ms   1640 px differ (3.25%), max delta 1
+portfolio chart (214 ops)  desk 1600x1000      1600000     0.44ms     0.27ms       1.58ms        2.11ms     0.17ms   16712 px differ (1.04%), max delta 2
+portfolio chart (214 ops)  phone 1200x2400     2880000     0.45ms     0.30ms       1.56ms        4.00ms     0.15ms   12134 px differ (0.42%), max delta 2
+
+text page (34 ops)         native               120000     0.74ms     0.56ms       2.14ms        2.24ms     0.73ms   14481 px differ (12.07%), max delta 1
+text page (34 ops)         desk 1600x1000      1600000     1.62ms     0.80ms       2.71ms        4.50ms     1.25ms   54327 px differ (3.40%), max delta 1
+text page (34 ops)         phone 1200x2400     2880000     1.54ms     0.81ms       2.52ms        4.60ms     1.11ms   44596 px differ (1.55%), max delta 1
+
+2000 octagons (20006 ops)  native               400000     1.18ms     0.60ms       2.34ms        2.46ms     0.84ms   66701 px differ (16.68%), max delta 5
+2000 octagons (20006 ops)  desk 1600x1000      1600000     2.00ms     0.95ms       2.82ms        4.57ms     1.18ms   183464 px differ (11.47%), max delta 4
+2000 octagons (20006 ops)  phone 1200x2400     2880000     1.78ms     0.91ms       3.95ms        4.91ms     1.09ms   122589 px differ (4.26%), max delta 4
+
+== breakdown ==
+BREAKDOWN of one vello_hybrid frame, median of 15 after 3 warm-ups; then a burst of 20 frames with ONE wait at the end
+drawing                    track               strips    encode    submit      wait       frame |    burst/frame   cpu MT ref
+portfolio chart (214 ops)  native              0.10ms    0.10ms    0.03ms    1.30ms      1.52ms |         0.33ms       0.11ms
+portfolio chart (214 ops)  phone 1200x2400     0.15ms    0.10ms    0.03ms    1.27ms      1.55ms |         0.58ms       0.32ms
+text page (34 ops)         native              0.74ms    0.08ms    0.02ms    1.29ms      2.14ms |         0.92ms       0.52ms
+text page (34 ops)         phone 1200x2400     1.15ms    0.14ms    0.02ms    1.27ms      2.59ms |         1.40ms       0.78ms
+2000 octagons (20006 ops)  native              0.85ms    0.20ms    0.03ms    1.27ms      2.35ms |         1.18ms       0.61ms
+2000 octagons (20006 ops)  phone 1200x2400     1.12ms    0.27ms    0.03ms    2.55ms      3.98ms |         1.55ms       0.91ms
+== fills ==
+FILL-HEAVY FRAMES at phone size 1200x2400 (2.88 Mpx) and desk 1600x1000; median of 15 after 3 warm-ups; burst = 20 frames in flight, one wait
+drawing          track               cpu 1T    cpu MT   gpu frame  gpu burst/fr strips (cpu)
+10 big fills     phone 1200x2400     0.64ms    0.37ms      1.54ms        0.66ms       0.13ms
+10 big fills     desk 1600x1000      0.55ms    0.33ms      1.56ms        0.57ms       0.14ms
+50 big fills     phone 1200x2400     1.48ms    0.81ms      3.42ms        1.04ms       0.59ms
+50 big fills     desk 1600x1000      1.34ms    0.75ms      2.15ms        0.94ms       0.57ms
+200 big fills    phone 1200x2400     4.87ms    2.46ms      7.27ms        3.57ms       2.42ms
+200 big fills    desk 1600x1000      4.58ms    2.35ms      8.27ms        3.31ms       2.23ms
+800 big fills    phone 1200x2400    19.53ms    9.50ms     22.35ms       14.83ms      10.01ms
+800 big fills    desk 1600x1000     18.84ms    9.16ms     21.49ms       13.94ms       9.15ms
+== classic ==
+CLASSIC VELLO 0.10.0 (all-GPU compute) on "Apple A19 Pro GPU" via Metal: median of 15 after 3 warm-ups; burst = 20 frames submitted, one wait; against vello_cpu on 5 threads
+drawing            track               cpu MT encode(cpu) classic frame classic burst  vs cpu px   
+portfolio chart (214 ops) native              0.12ms      0.04ms        1.49ms        0.46ms   3883 differ (7.7%), max delta 223
+portfolio chart (214 ops) phone 1200x2400     0.31ms      0.04ms        1.45ms        0.59ms   19014 differ (0.7%), max delta 210
+text page (34 ops) native              0.56ms      0.45ms        1.92ms        0.78ms   16555 differ (13.8%), max delta 47
+text page (34 ops) phone 1200x2400     0.83ms      0.44ms        3.13ms        0.79ms   54703 differ (1.9%), max delta 60
+2000 octagons (20006 ops) native              0.61ms      0.26ms        1.71ms        0.57ms   69980 differ (17.5%), max delta 4
+2000 octagons (20006 ops) phone 1200x2400     1.13ms      0.25ms        1.66ms        0.56ms   129406 differ (4.5%), max delta 216
+10 big fills       phone 1200x2400     0.38ms      0.00ms        1.41ms        0.47ms   251787 differ (8.7%), max delta 234
+10 big fills       desk 1600x1000      0.34ms      0.00ms        1.39ms        0.53ms   268071 differ (16.8%), max delta 3
+50 big fills       phone 1200x2400     0.84ms      0.02ms        2.73ms        1.25ms   302961 differ (10.5%), max delta 234
+50 big fills       desk 1600x1000      0.73ms      0.02ms        2.73ms        1.26ms   348419 differ (21.8%), max delta 3
+200 big fills      phone 1200x2400     2.52ms      0.02ms        3.95ms        3.28ms   410904 differ (14.3%), max delta 234
+200 big fills      desk 1600x1000      2.42ms      0.01ms        5.21ms        4.49ms   278333 differ (17.4%), max delta 3
+800 big fills      phone 1200x2400     9.78ms      0.06ms        1.51ms        0.41ms   1639714 differ (56.9%), max delta 255
+800 big fills      desk 1600x1000      9.53ms      0.06ms        1.50ms        0.42ms   1600000 differ (100.0%), max delta 255
+== done ==

@@ -245,3 +245,9 @@ silent failure at the scale where they might. What is still owed is
 the phone-class core (§15.3's caution): a slower CPU moves the CPU
 columns, the GPU columns stay, and the crossover is a measurement on
 that core.
+
+THE PHONE-CLASS CORE WAS MEASURED THE SAME NIGHT:
+docs/measurements/canvas-gpu-timing-iphone-2026-09-10.txt (iPhone 17 Pro,
+through tools/ios/gpuprobe/build.py). The probe source of record is the
+tool's crate, tools/ios/gpuprobe/probe/src/lib.rs; the .rs beside this
+file is the mac-only draft it grew from.

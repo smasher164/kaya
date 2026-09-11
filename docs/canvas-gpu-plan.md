@@ -469,8 +469,14 @@ and it beats the hybrid everywhere, and it still loses to vello_cpu on
 8 threads on every valid scene (one row within 0.2ms), with a ~0.5ms
 per-frame pipeline floor even pipelined; at 800 full-screen fills its
 default bump buffers overflowed and it drew nothing, silently, the
-failure the research named. The ruling stands, and what is still owed
-is the same probe on a phone-class core.
+failure the research named. The phone-class core was measured the same night
+(docs/measurements/canvas-gpu-timing-iphone-2026-09-10.txt, an iPhone 17
+Pro through tools/ios/gpuprobe/build.py): five phone threads keep every
+scene inside the frame budget, 800 full-screen fills at 9.5ms, so the
+ruling stands as a matter of budget — with one refinement on the record:
+the all-GPU renderer beats the phone's cores 2x on the many-small-paths
+scene, so a canvas drawing tens of thousands of paths per frame is where
+classic vello is measured again.
 
 What survives from slice 2 is the threads: above about a megapixel, 8
 workers on a reused context are 1.7-2.5x faster than one, and their

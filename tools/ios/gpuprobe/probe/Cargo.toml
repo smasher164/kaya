@@ -1,0 +1,25 @@
+[package]
+name = "kaya_gpuprobe"
+version = "0.1.0"
+edition = "2021"
+
+# ITS OWN WORKSPACE, so wgpu and the two GPU renderers never enter libkaya's
+# graph (docs/canvas-gpu-plan.md §11: the GPU path measured out). The three
+# raster crates are pinned to what libkaya carries.
+[workspace]
+
+[lib]
+crate-type = ["rlib", "staticlib"]
+
+[dependencies]
+vello_cpu = { version = "=0.2.0", default-features = false, features = ["std", "u8_pipeline", "multithreading"] }
+vello_hybrid = { version = "=0.2.0" }
+vello = "=0.10.0"
+fearless_simd = { version = "=0.4.0", default-features = false, features = ["std", "force_support_fallback"] }
+wgpu = "=29.0.3"
+pollster = "0.4.0"
+harfrust = "=0.13.3"
+skrifa = "=0.46.2"
+
+[profile.release]
+debug = false
