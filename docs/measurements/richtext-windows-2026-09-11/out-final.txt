@@ -1,0 +1,189 @@
+12:38:31.294 probe Main entered
+12:38:31.495 probe OnLaunched; merged dictionaries=1
+12:38:31.589 probe window activated hwnd=d204c6 pid=12116
+12:38:33.822 MaxUnitCount=1073741823
+12:38:33.822 == M1 the final EOP: StoryLength against GetText, pinned vs rich ==
+12:38:33.828   PINNED set="" | None="\r" len=1 | AdjustCrlf="" len=0 | AllowFinalEop="\r" len=1 | NoHidden="" len=0 | AdjustCrlf|NoHidden="" len=0 | AdjustCrlf|AllowFinalEop="\r" len=1 | UseCrlf="" len=0 | UseObjectText="" len=0 | StoryLength(GetRange(0,0))=1 Selection.StoryLength=1 | GetRange(0,MaxUnitCount).EndPosition=1 GetRange(0,int.MaxValue).EndPosition=1 | StoryLength-1==len(None)? False | StoryLength-1==len(AdjustCrlf)? True
+12:38:33.830   RICH   set="" | None="\r" len=1 | AdjustCrlf="" len=0 | AllowFinalEop="\r" len=1 | NoHidden="" len=0 | AdjustCrlf|NoHidden="" len=0 | AdjustCrlf|AllowFinalEop="\r" len=1 | UseCrlf="" len=0 | UseObjectText="" len=0 | StoryLength(GetRange(0,0))=1 Selection.StoryLength=1 | GetRange(0,MaxUnitCount).EndPosition=1 GetRange(0,int.MaxValue).EndPosition=1 | StoryLength-1==len(None)? False | StoryLength-1==len(AdjustCrlf)? True
+12:38:33.832   PINNED set="abc" | None="abc\r" len=4 | AdjustCrlf="abc" len=3 | AllowFinalEop="abc\r" len=4 | NoHidden="abc" len=3 | AdjustCrlf|NoHidden="abc" len=3 | AdjustCrlf|AllowFinalEop="abc\r" len=4 | UseCrlf="abc" len=3 | UseObjectText="abc" len=3 | StoryLength(GetRange(0,0))=4 Selection.StoryLength=4 | GetRange(0,MaxUnitCount).EndPosition=4 GetRange(0,int.MaxValue).EndPosition=4 | StoryLength-1==len(None)? False | StoryLength-1==len(AdjustCrlf)? True
+12:38:33.833   RICH   set="abc" | None="abc\r" len=4 | AdjustCrlf="abc" len=3 | AllowFinalEop="abc\r" len=4 | NoHidden="abc" len=3 | AdjustCrlf|NoHidden="abc" len=3 | AdjustCrlf|AllowFinalEop="abc\r" len=4 | UseCrlf="abc" len=3 | UseObjectText="abc" len=3 | StoryLength(GetRange(0,0))=4 Selection.StoryLength=4 | GetRange(0,MaxUnitCount).EndPosition=4 GetRange(0,int.MaxValue).EndPosition=4 | StoryLength-1==len(None)? False | StoryLength-1==len(AdjustCrlf)? True
+12:38:33.834   PINNED set="abc\r" | None="abc\r\r" len=5 | AdjustCrlf="abc\r" len=4 | AllowFinalEop="abc\r\r" len=5 | NoHidden="abc\r" len=4 | AdjustCrlf|NoHidden="abc\r" len=4 | AdjustCrlf|AllowFinalEop="abc\r\r" len=5 | UseCrlf="abc\r\n" len=5 | UseObjectText="abc\r" len=4 | StoryLength(GetRange(0,0))=5 Selection.StoryLength=5 | GetRange(0,MaxUnitCount).EndPosition=5 GetRange(0,int.MaxValue).EndPosition=5 | StoryLength-1==len(None)? False | StoryLength-1==len(AdjustCrlf)? True
+12:38:33.834   RICH   set="abc\r" | None="abc\r\r" len=5 | AdjustCrlf="abc\r" len=4 | AllowFinalEop="abc\r\r" len=5 | NoHidden="abc\r" len=4 | AdjustCrlf|NoHidden="abc\r" len=4 | AdjustCrlf|AllowFinalEop="abc\r\r" len=5 | UseCrlf="abc\r\n" len=5 | UseObjectText="abc\r" len=4 | StoryLength(GetRange(0,0))=5 Selection.StoryLength=5 | GetRange(0,MaxUnitCount).EndPosition=5 GetRange(0,int.MaxValue).EndPosition=5 | StoryLength-1==len(None)? False | StoryLength-1==len(AdjustCrlf)? True
+12:38:33.835   PINNED set="abc\rdef" | None="abc\rdef\r" len=8 | AdjustCrlf="abc\rdef" len=7 | AllowFinalEop="abc\rdef\r" len=8 | NoHidden="abc\rdef" len=7 | AdjustCrlf|NoHidden="abc\rdef" len=7 | AdjustCrlf|AllowFinalEop="abc\rdef\r" len=8 | UseCrlf="abc\r\ndef" len=8 | UseObjectText="abc\rdef" len=7 | StoryLength(GetRange(0,0))=8 Selection.StoryLength=8 | GetRange(0,MaxUnitCount).EndPosition=8 GetRange(0,int.MaxValue).EndPosition=8 | StoryLength-1==len(None)? False | StoryLength-1==len(AdjustCrlf)? True
+12:38:33.835   RICH   set="abc\rdef" | None="abc\rdef\r" len=8 | AdjustCrlf="abc\rdef" len=7 | AllowFinalEop="abc\rdef\r" len=8 | NoHidden="abc\rdef" len=7 | AdjustCrlf|NoHidden="abc\rdef" len=7 | AdjustCrlf|AllowFinalEop="abc\rdef\r" len=8 | UseCrlf="abc\r\ndef" len=8 | UseObjectText="abc\rdef" len=7 | StoryLength(GetRange(0,0))=8 Selection.StoryLength=8 | GetRange(0,MaxUnitCount).EndPosition=8 GetRange(0,int.MaxValue).EndPosition=8 | StoryLength-1==len(None)? False | StoryLength-1==len(AdjustCrlf)? True
+12:38:33.836   PINNED set="a\nb" | None="a\rb\r" len=4 | AdjustCrlf="a\rb" len=3 | AllowFinalEop="a\rb\r" len=4 | NoHidden="a\rb" len=3 | AdjustCrlf|NoHidden="a\rb" len=3 | AdjustCrlf|AllowFinalEop="a\rb\r" len=4 | UseCrlf="a\r\nb" len=4 | UseObjectText="a\rb" len=3 | StoryLength(GetRange(0,0))=4 Selection.StoryLength=4 | GetRange(0,MaxUnitCount).EndPosition=4 GetRange(0,int.MaxValue).EndPosition=4 | StoryLength-1==len(None)? False | StoryLength-1==len(AdjustCrlf)? True
+12:38:33.837   RICH   set="a\nb" | None="a\rb\r" len=4 | AdjustCrlf="a\rb" len=3 | AllowFinalEop="a\rb\r" len=4 | NoHidden="a\rb" len=3 | AdjustCrlf|NoHidden="a\rb" len=3 | AdjustCrlf|AllowFinalEop="a\rb\r" len=4 | UseCrlf="a\r\nb" len=4 | UseObjectText="a\rb" len=3 | StoryLength(GetRange(0,0))=4 Selection.StoryLength=4 | GetRange(0,MaxUnitCount).EndPosition=4 GetRange(0,int.MaxValue).EndPosition=4 | StoryLength-1==len(None)? False | StoryLength-1==len(AdjustCrlf)? True
+12:38:33.837 == M1b is the PINNED control still a rich control underneath? ==
+12:38:33.840   PINNED after a programmatic Bold On over (0,2): bold(0,2)=On(1) bold(2,3)=Off(0) bold(0,3)=Undefined(3)
+12:38:33.841   PINNED GetText(FormatRtf) length=226 head="{\rtf1\fbidis\ansi\ansicpg1252\deff0\nouicompat\deflang1033{\fonttbl{\f0\fnil Segoe UI Variable;}}\r\n{\colortbl ;\red0\green0\blue0;}\r\n{\*\generator Riched20 3.2.0000}\viewkind4\uc1 \r\n\pard\tx720\cf1\b\f0\fs21 ab\b0 c\par"
+12:38:33.841   PINNED GetText(None) after the bold="abc\r" StoryLength=4
+12:38:33.841 == M2 unit arithmetic ==
+12:38:33.845   source "h\u00e9llo \ud83d\udc4b \u4e16\u754c" utf16units=11 utf8bytes=18 codepoints=10 (text elements)
+12:38:33.845   GetText(None)="h\u00e9llo \ud83d\udc4b \u4e16\u754c\r" len=12 codes=[0068 00e9 006c 006c 006f 0020 d83d dc4b 0020 4e16 754c 000d] StoryLength=12 roundTripEqual=False
+12:38:33.846     cp 0 -> range(0,1) len=1 text="h" codes=[0068] | source unit "h" codes=[0068] utf8ByteOffsetOfUnit=0
+12:38:33.846     cp 1 -> range(1,2) len=1 text="\u00e9" codes=[00e9] | source unit "\u00e9" codes=[00e9] utf8ByteOffsetOfUnit=1
+12:38:33.846     cp 2 -> range(2,3) len=1 text="l" codes=[006c] | source unit "l" codes=[006c] utf8ByteOffsetOfUnit=3
+12:38:33.846     cp 3 -> range(3,4) len=1 text="l" codes=[006c] | source unit "l" codes=[006c] utf8ByteOffsetOfUnit=4
+12:38:33.846     cp 4 -> range(4,5) len=1 text="o" codes=[006f] | source unit "o" codes=[006f] utf8ByteOffsetOfUnit=5
+12:38:33.847     cp 5 -> range(5,6) len=1 text=" " codes=[0020] | source unit " " codes=[0020] utf8ByteOffsetOfUnit=6
+12:38:33.847     cp 6 -> range(6,8) len=2 text="\ud83d\udc4b" codes=[d83d dc4b] | source unit "\ud83d" codes=[d83d] utf8ByteOffsetOfUnit=7
+12:38:33.847     cp 7 -> range(6,8) len=2 text="\ud83d\udc4b" codes=[d83d dc4b] | source unit "\udc4b" codes=[dc4b] utf8ByteOffsetOfUnit=10
+12:38:33.847     cp 8 -> range(8,9) len=1 text=" " codes=[0020] | source unit " " codes=[0020] utf8ByteOffsetOfUnit=11
+12:38:33.847     cp 9 -> range(9,10) len=1 text="\u4e16" codes=[4e16] | source unit "\u4e16" codes=[4e16] utf8ByteOffsetOfUnit=12
+12:38:33.847     cp 10 -> range(10,11) len=1 text="\u754c" codes=[754c] | source unit "\u754c" codes=[754c] utf8ByteOffsetOfUnit=15
+12:38:33.847     cp 11 -> range(11,12) len=1 text="\r" codes=[000d] | source unit "<past source>" codes=[003c 0070 0061 0073 0074 0020 0073 006f 0075 0072 0063 0065 003e] utf8ByteOffsetOfUnit=18
+12:38:33.847   split high surrogate at cp 6: range(6,8) text="\ud83d\udc4b" codes=[d83d dc4b]
+12:38:33.847   whole pair (6,8): text="\ud83d\udc4b" codes=[d83d dc4b]
+12:38:33.847   GetRange(-5,9999) clamps to (0,12) len=12
+12:38:33.848   SetRange(6,7) -> (6,8) text="\ud83d\udc4b"
+12:38:33.848   SetRange(7,8) -> (6,8) text="\ud83d\udc4b"
+12:38:33.969   Selection.SetRange(6,7) -> (6,8) text="\ud83d\udc4b"
+12:38:33.969   GetRange(0,7) [end splits the pair] -> (0,8) text="h\u00e9llo \ud83d\udc4b"
+12:38:33.969 == M3 undo suppression (R6) ==
+12:38:34.355   -- M3a UndoLimit = 0, then typed text and Ctrl+Z --
+12:38:34.356   UndoLimit read back = 0 CanUndo=False CanRedo=False
+12:38:34.951   after typing: "seedXYZ\r" CanUndo=False
+12:38:35.353   after Ctrl+Z: "seedXYZ\r" unchanged=True
+12:38:35.560   after a PROGRAMMATIC doc.Undo(): text="seedXYZ\r" CanUndo=False
+12:38:35.561   -- M3b UndoLimit = 0 and a FORMAT change --
+12:38:35.769   after Selection.CharacterFormat.Bold=On: bold(0,6)=On(1) CanUndo=False
+12:38:36.173   after Ctrl+Z: bold(0,6)=On(1) text="formatme\r" CanUndo=False
+12:38:36.173   -- M3c can UndoLimit be raised again at runtime? --
+12:38:36.174   UndoLimit read back = 100
+12:38:37.118   after typing with the limit raised: "baseQRS\r" CanUndo=True
+12:38:37.523   after Ctrl+Z: "base\r" undoDidSomething=True
+12:38:37.524   -- M3c2 does UndoLimit = 0 CLEAR a stack that already has entries? --
+12:38:37.524   CanUndo before the limit drops = True
+12:38:37.524   CanUndo after UndoLimit=0 = False; raising it back to 100
+12:38:37.524   CanUndo after raising it again = False
+12:38:37.524   -- M3d0 is a FORMAT change undoable AT ALL (limit 100)? --
+12:38:37.726   clean start: text="group \r" bold(0,5)=Off(0) CanUndo=True
+12:38:37.990   after Bold On: bold(0,5)=On(1) CanUndo=True
+12:38:38.299   after doc.Undo(): bold(0,5)=Off(0) text="group \r" CanUndo=True
+12:38:38.299   -- M3d BeginUndoGroup around an insert AND a format --
+12:38:38.510   before the group: "group \r" bold(0,5)=Off(0) CanUndo=True
+12:38:38.777   after the group: "group INS\r" bold(0,5)=On(1) CanUndo=True
+12:38:39.083   after ONE doc.Undo(): text="group \r" bold(0,5)=Off(0) CanUndo=True
+12:38:39.405   after a SECOND doc.Undo(): text="group \r" bold(0,5)=Off(0)
+12:38:39.405   -- M3e UndoLimit=0 against the control's OWN Ctrl+B accelerator --
+12:38:39.795   BEFORE Ctrl+B: bold(0,5)=Off(0) focusIsRich=True DisabledFormattingAccelerators=None
+12:38:40.152   after a REAL Ctrl+B on the unpinned control: bold(0,5)=On(1) CanUndo=False
+12:38:40.564   after Ctrl+Z: bold(0,5)=On(1)
+12:38:40.564 == M4 edit reporting (R4) ==
+12:38:41.093   -- M4a ONE keystroke 'x' at the end --
+12:38:41.600   events: 145:SelectionChanging start=4 len=0 | 146:TextChanging IsContentChanging=True | 147:SelectionChanged start=4 end=4 | 148:TextChanged text="abcx\r"
+12:38:41.600   text now "abcx\r"
+12:38:41.600   -- M4b a Ctrl+V paste of plain text "PQ" --
+12:38:42.519   events: 149:Paste(handled=False) [NOT cancelled] | 150:SelectionChanging start=6 len=0 | 151:TextChanging IsContentChanging=True | 152:SelectionChanged start=6 end=6 | 153:TextChanged text="abcxPQ\r"
+12:38:42.519   text now "abcxPQ\r"
+12:38:42.520   -- M4c a PROGRAMMATIC SetText --
+12:38:43.028   events: 154:SelectionChanging start=0 len=0 | 155:TextChanging IsContentChanging=True | 156:SelectionChanged start=0 end=0 | 157:TextChanged text="programmatic\r"
+12:38:43.028   -- M4d an ATTRIBUTE-ONLY change, ONE apply (the live object) --
+12:38:43.638   events: 158:TextChanging IsContentChanging=False | 159:TextChanged text="programmatic\r"
+12:38:43.639   bold(0,4)=On(1)
+12:38:43.639   -- M4d2 the SAME change through the assign-back route --
+12:38:44.242   events: 160:TextChanging IsContentChanging=False | 161:TextChanging IsContentChanging=False | 162:TextChanged text="programmatic\r" | 163:TextChanged text="programmatic\r"
+12:38:44.242   bold(4,8)=On(1)
+12:38:44.242   -- M4d3 a PARAGRAPH-format change (alignment) --
+12:38:44.850   events: 164:TextChanging IsContentChanging=False | 165:TextChanged text="programmatic\r"
+12:38:44.851   -- M4d4 a format change that changes NOTHING (Bold On again) --
+12:38:45.458   events: 166:TextChanging IsContentChanging=False | 167:TextChanged text="programmatic\r"
+12:38:45.462   -- M4e a programmatic SELECTION move, nothing else --
+12:38:46.480   events: 172:SelectionChanging start=2 len=3 | 173:SelectionChanged start=2 end=5
+12:38:46.481   -- M4f a real BACKSPACE --
+12:38:47.192   events: 176:SelectionChanging start=11 len=0 | 177:TextChanging IsContentChanging=True | 178:SelectionChanged start=11 end=11 | 179:TextChanged text="programmati\r"
+12:38:47.193   text now "programmati\r"
+12:38:47.193 == M5 read-back: the tri-state, and Link ==
+12:38:47.360   after Normalize: bold(0,10)=Off(0) name(0,10)="Segoe UI Variable" size(0,10)=14
+12:38:47.567   bold over (0,5) only:
+12:38:47.568     bold(0,5)  [fully bold]  = On(1)
+12:38:47.568     bold(5,10) [fully plain] = Off(0)
+12:38:47.568     bold(0,10) [mixed]       = Undefined(3)
+12:38:47.568     bold(4,6)  [straddling]  = Undefined(3)
+12:38:47.569     bold(0,0)  [collapsed, bold half]  = On(1)
+12:38:47.569     bold(7,7)  [collapsed, plain half] = Off(0)
+12:38:47.569     bold(5,5)  [collapsed, on the seam] = On(1)
+12:38:47.722   with italic over (2,8) as well:
+12:38:47.723     italic(0,5)=Undefined(3) italic(2,8)=On(1) italic(0,10)=Undefined(3)
+12:38:47.724     underline(0,10)=None strike(0,10)=Off(0) weight(0,5)=700 weight(5,10)=400 weight(0,10)=-9999999
+12:38:47.889     mixed NAME and SIZE: name(0,5)="Consolas" name(5,10)="Courier New" name(0,10)="Courier New" size(0,5)=12 size(5,10)=24 size(0,10)=-9999999 weight(0,10)=-9999999 underline(0,5)=Single underline(0,10)=Undefined
+12:38:47.890     TextConstants.UndefinedFloatValue=-9999999 UndefinedInt32Value=-9999999
+12:38:47.891   -- M5b ITextRange.Link: run 1 found the URL going INTO the story --
+12:38:48.040     before the link: StoryLength=17 | None="see example here\r" len=17 | AdjustCrlf="see example here" len=16 | AllowFinalEop="see example here\r" len=17 | NoHidden="see example here" len=16 | AdjustCrlf|NoHidden="see example here" len=16 | AdjustCrlf|AllowFinalEop="see example here\r" len=17 | UseCrlf="see example here" len=16 | UseObjectText="see example here" len=16
+12:38:48.041     the range to link: (4,11) text="example"
+12:38:48.298     AFTER Link=: StoryLength=49 | None="see HYPERLINK \"https://example.com/\"example here\r" len=49 | AdjustCrlf="see HYPERLINK \"https://example.com/\"example here" len=48 | AllowFinalEop="see HYPERLINK \"https://example.com/\"example here\r" len=49 | NoHidden="see example here" len=16 | AdjustCrlf|NoHidden="see example here" len=16 | AdjustCrlf|AllowFinalEop="see HYPERLINK \"https://example.com/\"example here\r" len=49 | UseCrlf="see HYPERLINK \"https://example.com/\"example here" len=48 | UseObjectText="see HYPERLINK \"https://example.com/\"example here" len=48
+12:38:48.299     the range now: (4,43) text="HYPERLINK \"https://example.com/\"example" Link="\"https://example.com/\"" LinkType=FriendlyLinkAddress
+12:38:48.300     per-character:
+      cp 0 "s" hidden=Off(0) linkType=NotALink link=""
+      cp 1 "e" hidden=Off(0) linkType=NotALink link=""
+      cp 2 "e" hidden=Off(0) linkType=NotALink link=""
+      cp 3 " " hidden=Off(0) linkType=NotALink link=""
+      cp 4 "H" hidden=On(1) linkType=FriendlyLinkAddress link="\"https://example.com/\""
+      cp 5 "Y" hidden=On(1) linkType=FriendlyLinkAddress link="\"https://example.com/\""
+      cp 6 "P" hidden=On(1) linkType=FriendlyLinkAddress link="\"https://example.com/\""
+      cp 7 "E" hidden=On(1) linkType=FriendlyLinkAddress link="\"https://example.com/\""
+      cp 8 "R" hidden=On(1) linkType=FriendlyLinkAddress link="\"https://example.com/\""
+      cp 9 "L" hidden=On(1) linkType=FriendlyLinkAddress link="\"https://example.com/\""
+      cp 10 "I" hidden=On(1) linkType=FriendlyLinkAddress link="\"https://example.com/\""
+      cp 11 "N" hidden=On(1) linkType=FriendlyLinkAddress link="\"https://example.com/\""
+      cp 12 "K" hidden=On(1) linkType=FriendlyLinkAddress link="\"https://example.com/\""
+      cp 13 " " hidden=On(1) linkType=FriendlyLinkAddress link="\"https://example.com/\""
+      cp 14 "\"" hidden=On(1) linkType=FriendlyLinkAddress link="\"https://example.com/\""
+      cp 15 "h" hidden=On(1) linkType=FriendlyLinkAddress link="\"https://example.com/\""
+      cp 16 "t" hidden=On(1) linkType=FriendlyLinkAddress link="\"https://example.com/\""
+      cp 17 "t" hidden=On(1) linkType=FriendlyLinkAddress link="\"https://example.com/\""
+      cp 18 "p" hidden=On(1) linkType=FriendlyLinkAddress link="\"https://example.com/\""
+      cp 19 "s" hidden=On(1) linkType=FriendlyLinkAddress link="\"https://example.com/\""
+      cp 20 ":" hidden=On(1) linkType=FriendlyLinkAddress link="\"https://example.com/\""
+      cp 21 "/" hidden=On(1) linkType=FriendlyLinkAddress link="\"https://example.com/\""
+      cp 22 "/" hidden=On(1) linkType=FriendlyLinkAddress link="\"https://example.com/\""
+      cp 23 "e" hidden=On(1) linkType=FriendlyLinkAddress link="\"https://example.com/\""
+      cp 24 "x" hidden=On(1) linkType=FriendlyLinkAddress link="\"https://example.com/\""
+      cp 25 "a" hidden=On(1) linkType=FriendlyLinkAddress link="\"https://example.com/\""
+      cp 26 "m" hidden=On(1) linkType=FriendlyLinkAddress link="\"https://example.com/\""
+      cp 27 "p" hidden=On(1) linkType=FriendlyLinkAddress link="\"https://example.com/\""
+      cp 28 "l" hidden=On(1) linkType=FriendlyLinkAddress link="\"https://example.com/\""
+      cp 29 "e" hidden=On(1) linkType=FriendlyLinkAddress link="\"https://example.com/\""
+      cp 30 "." hidden=On(1) linkType=FriendlyLinkAddress link="\"https://example.com/\""
+      cp 31 "c" hidden=On(1) linkType=FriendlyLinkAddress link="\"https://example.com/\""
+      cp 32 "o" hidden=On(1) linkType=FriendlyLinkAddress link="\"https://example.com/\""
+      cp 33 "m" hidden=On(1) linkType=FriendlyLinkAddress link="\"https://example.com/\""
+      cp 34 "/" hidden=On(1) linkType=FriendlyLinkAddress link="\"https://example.com/\""
+      cp 35 "\"" hidden=On(1) linkType=FriendlyLinkAddress link="\"https://example.com/\""
+      cp 36 "e" hidden=Off(0) linkType=FriendlyLinkName link="\"https://example.com/\""
+      cp 37 "x" hidden=Off(0) linkType=FriendlyLinkName link="\"https://example.com/\""
+      cp 38 "a" hidden=Off(0) linkType=FriendlyLinkName link="\"https://example.com/\""
+      cp 39 "m" hidden=Off(0) linkType=FriendlyLinkName link="\"https://example.com/\""
+      cp 40 "p" hidden=Off(0) linkType=FriendlyLinkName link="\"https://example.com/\""
+      cp 41 "l" hidden=Off(0) linkType=FriendlyLinkName link="\"https://example.com/\""
+      cp 42 "e" hidden=Off(0) linkType=FriendlyLinkName link="\"https://example.com/\""
+      cp 43 " " hidden=Off(0) linkType=NotALink link=""
+      cp 44 "h" hidden=Off(0) linkType=NotALink link=""
+      cp 45 "e" hidden=Off(0) linkType=NotALink link=""
+      cp 46 "r" hidden=Off(0) linkType=NotALink link=""
+      cp 47 "e" hidden=Off(0) linkType=NotALink link=""
+      cp 48 "\r" hidden=Off(0) linkType=NotALink link=""
+12:38:48.301     selection over the whole story: text="see HYPERLINK \"https://example.com/\"example here\r"
+12:38:48.301     Link removal: setting Link="" ...
+12:38:48.560     after removal: StoryLength=17 | None="see example here\r" len=17 | AdjustCrlf="see example here" len=16 | AllowFinalEop="see example here\r" len=17 | NoHidden="see example here" len=16 | AdjustCrlf|NoHidden="see example here" len=16 | AdjustCrlf|AllowFinalEop="see example here\r" len=17 | UseCrlf="see example here" len=16 | UseObjectText="see example here" len=16
+12:38:48.568     BARE form (no quotes) THREW ArgumentException: Value does not fall within the expected range.
+12:38:48.569     a NON-link range: Link="" LinkType=NotALink
+12:38:48.830     RTF-set link: StoryLength=50 | None="see HYPERLINK \"https://example.com/\"example here\r\r" len=50 | AdjustCrlf="see HYPERLINK \"https://example.com/\"example here\r" len=49 | AllowFinalEop="see HYPERLINK \"https://example.com/\"example here\r\r" len=50 | NoHidden="see example here\r" len=17 | AdjustCrlf|NoHidden="see example here\r" len=17 | AdjustCrlf|AllowFinalEop="see HYPERLINK \"https://example.com/\"example here\r\r" len=50 | UseCrlf="see HYPERLINK \"https://example.com/\"example here\r\n" len=50 | UseObjectText="see HYPERLINK \"https://example.com/\"example here\r" len=49
+12:38:48.831     per-character: 0"s"/h=0/lt=NotALink 1"e"/h=0/lt=NotALink 2"e"/h=0/lt=NotALink 3" "/h=0/lt=NotALink 4"H"/h=1/lt=FriendlyLinkAddress 5"Y"/h=1/lt=FriendlyLinkAddress 6"P"/h=1/lt=FriendlyLinkAddress 7"E"/h=1/lt=FriendlyLinkAddress 8"R"/h=1/lt=FriendlyLinkAddress 9"L"/h=1/lt=FriendlyLinkAddress 10"I"/h=1/lt=FriendlyLinkAddress 11"N"/h=1/lt=FriendlyLinkAddress 12"K"/h=1/lt=FriendlyLinkAddress 13" "/h=1/lt=FriendlyLinkAddress 14"\""/h=1/lt=FriendlyLinkAddress 15"h"/h=1/lt=FriendlyLinkAddress 16"t"/h=1/lt=FriendlyLinkAddress 17"t"/h=1/lt=FriendlyLinkAddress 18"p"/h=1/lt=FriendlyLinkAddress 19"s"/h=1/lt=FriendlyLinkAddress 20":"/h=1/lt=FriendlyLinkAddress 21"/"/h=1/lt=FriendlyLinkAddress 22"/"/h=1/lt=FriendlyLinkAddress 23"e"/h=1/lt=FriendlyLinkAddress 24"x"/h=1/lt=FriendlyLinkAddress 25"a"/h=1/lt=FriendlyLinkAddress 26"m"/h=1/lt=FriendlyLinkAddress 27"p"/h=1/lt=FriendlyLinkAddress 28"l"/h=1/lt=FriendlyLinkAddress 29"e"/h=1/lt=FriendlyLinkAddress 30"."/h=1/lt=FriendlyLinkAddress 31"c"/h=1/lt=FriendlyLinkAddress 32"o"/h=1/lt=FriendlyLinkAddress 33"m"/h=1/lt=FriendlyLinkAddress 34"/"/h=1/lt=FriendlyLinkAddress 35"\""/h=1/lt=FriendlyLinkAddress 36"e"/h=0/lt=FriendlyLinkName 37"x"/h=0/lt=FriendlyLinkName 38"a"/h=0/lt=FriendlyLinkName 39"m"/h=0/lt=FriendlyLinkName 40"p"/h=0/lt=FriendlyLinkName 41"l"/h=0/lt=FriendlyLinkName 42"e"/h=0/lt=FriendlyLinkName 43" "/h=0/lt=NotALink 44"h"/h=0/lt=NotALink 45"e"/h=0/lt=NotALink 46"r"/h=0/lt=NotALink 47"e"/h=0/lt=NotALink 48"\r"/h=0/lt=NotALink 49"\r"/h=0/lt=NotALink
+12:38:48.831 == M6 the UIA specimen ==
+12:38:49.336   specimen StoryLength=117 | None="plain run\rbold run\ritalic run\runder run\rstrike run\rmono run\rHYPERLINK \"https://example.com/kaya\"link run\rheading run\r" len=117 | AdjustCrlf="plain run\rbold run\ritalic run\runder run\rstrike run\rmono run\rHYPERLINK \"https://example.com/kaya\"link run\rheading run" len=116 | AllowFinalEop="plain run\rbold run\ritalic run\runder run\rstrike run\rmono run\rHYPERLINK \"https://example.com/kaya\"link run\rheading run\r" len=117 | NoHidden="plain run\rbold run\ritalic run\runder run\rstrike run\rmono run\rlink run\rheading run" len=80 | AdjustCrlf|NoHidden="plain run\rbold run\ritalic run\runder run\rstrike run\rmono run\rlink run\rheading run" len=80 | AdjustCrlf|AllowFinalEop="plain run\rbold run\ritalic run\runder run\rstrike run\rmono run\rHYPERLINK \"https://example.com/kaya\"link run\rheading run\r" len=117 | UseCrlf="plain run\r\nbold run\r\nitalic run\r\nunder run\r\nstrike run\r\nmono run\r\nHYPERLINK \"https://example.com/kaya\"link run\r\nheading run" len=123 | UseObjectText="plain run\rbold run\ritalic run\runder run\rstrike run\rmono run\rHYPERLINK \"https://example.com/kaya\"link run\rheading run" len=116
+12:38:49.337   plain run cp(0,9) bold=Off(0) italic=Off(0) underline=None strike=Off(0) name="Segoe UI Variable" size=14 weight=400 hidden=Off(0) link="" linkType=NotALink
+12:38:49.338   bold run cp(10,18) bold=On(1) italic=Off(0) underline=None strike=Off(0) name="Segoe UI Variable" size=14 weight=700 hidden=Off(0) link="" linkType=NotALink
+12:38:49.338   italic run cp(19,29) bold=Off(0) italic=On(1) underline=None strike=Off(0) name="Segoe UI Variable" size=14 weight=400 hidden=Off(0) link="" linkType=NotALink
+12:38:49.338   under run cp(30,39) bold=Off(0) italic=Off(0) underline=Single strike=Off(0) name="Segoe UI Variable" size=14 weight=400 hidden=Off(0) link="" linkType=NotALink
+12:38:49.338   strike run cp(40,50) bold=Off(0) italic=Off(0) underline=None strike=On(1) name="Segoe UI Variable" size=14 weight=400 hidden=Off(0) link="" linkType=NotALink
+12:38:49.339   mono run cp(51,59) bold=Off(0) italic=Off(0) underline=None strike=Off(0) name="Consolas" size=14 weight=400 hidden=Off(0) link="" linkType=NotALink
+12:38:49.339   link run cp(96,104) bold=Off(0) italic=Off(0) underline=None strike=Off(0) name="Segoe UI Variable" size=14 weight=400 hidden=Off(0) link="\"https://example.com/kaya\"" linkType=FriendlyLinkAddress
+12:38:49.339   heading run cp(105,116) bold=On(1) italic=Off(0) underline=None strike=Off(0) name="Segoe UI Variable" size=24 weight=700 hidden=Off(0) link="" linkType=NotALink
+12:38:49.340 == M7 the PROVIDER side, by NUMERIC attribute id ==
+12:38:49.340   (the managed UIA client has no identifier for Link/StyleId/StyleName, so those ids are asked here, in process, through ITextRangeProvider)
+12:38:49.344   no ITextProvider on the RichEditBox peer
+12:38:49.621   shot C:\kaya\richtext-probe\specimen.bmp 520x220
+12:38:49.622 READY-FOR-UIA
+12:38:51.630 uia_done seen
+12:38:51.630 PROBEDONE

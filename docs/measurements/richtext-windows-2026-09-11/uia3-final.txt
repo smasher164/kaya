@@ -1,0 +1,35 @@
+uia3: probe pid=12116
+uia3: window name="kaya rich probe" class=WinUIDesktopWin32WindowClass
+uia3: descendants=12
+    type=50033 id="" name="" class=Microsoft.UI.Content.DesktopChildSiteBridge
+    type=50033 id="" name="" class=InputSiteWindowClass
+    type=50004 id="pinnedProbe" name="" class=RichEditBox
+    type=50004 id="richProbe" name="" class=RichEditBox
+    type=50005 id="" name="link run" class=
+    type=50014 id="VerticalScrollBar" name="Vertical" class=ScrollBar
+    type=50037 id="" name="" class=
+    type=50010 id="MenuBar" name="System" class=
+    type=50011 id="" name="System" class=
+    type=50000 id="" name="Minimize" class=
+    type=50000 id="" name="Maximize" class=
+    type=50000 id="" name="Close" class=
+uia3: edit controlType=50004 class=RichEditBox localized="edit"
+uia3: DocumentRange=[plain run\rbold run\ritalic run\runder run\rstrike run\rmono run\rlink run\rheading run]
+  plain run [plain run] FontName=Segoe UI Variable FontSize=14 FontWeight=400 ForegroundColor=0 IsHidden=False IsItalic=False StrikethroughStyle=0 UnderlineStyle=0 AnnotationTypes=Mixed StyleName=NotSupported StyleId=NotSupported Link=NotSupported IsActive=NotSupported CaretPosition=NotSupported
+      children: none
+  bold run [bold run] FontName=Segoe UI Variable FontSize=14 FontWeight=700 ForegroundColor=0 IsHidden=False IsItalic=False StrikethroughStyle=0 UnderlineStyle=0 AnnotationTypes=NotSupported StyleName=NotSupported StyleId=NotSupported Link=NotSupported IsActive=NotSupported CaretPosition=NotSupported
+      children: none
+  italic run [italic run] FontName=Segoe UI Variable FontSize=14 FontWeight=400 ForegroundColor=0 IsHidden=False IsItalic=True StrikethroughStyle=0 UnderlineStyle=0 AnnotationTypes=NotSupported StyleName=NotSupported StyleId=NotSupported Link=NotSupported IsActive=NotSupported CaretPosition=NotSupported
+      children: none
+  under run [under run] FontName=Segoe UI Variable FontSize=14 FontWeight=400 ForegroundColor=0 IsHidden=False IsItalic=False StrikethroughStyle=0 UnderlineStyle=1 AnnotationTypes=NotSupported StyleName=NotSupported StyleId=NotSupported Link=NotSupported IsActive=NotSupported CaretPosition=NotSupported
+      children: none
+  strike run [strike run] FontName=Segoe UI Variable FontSize=14 FontWeight=400 ForegroundColor=0 IsHidden=False IsItalic=False StrikethroughStyle=1 UnderlineStyle=0 AnnotationTypes=NotSupported StyleName=NotSupported StyleId=NotSupported Link=NotSupported IsActive=NotSupported CaretPosition=NotSupported
+      children: none
+  mono run [mono run] FontName=Consolas FontSize=14 FontWeight=400 ForegroundColor=0 IsHidden=False IsItalic=False StrikethroughStyle=0 UnderlineStyle=0 AnnotationTypes=NotSupported StyleName=NotSupported StyleId=NotSupported Link=NotSupported IsActive=NotSupported CaretPosition=NotSupported
+      children: none
+  link run [link run] FontName=Segoe UI Variable FontSize=14 FontWeight=400 ForegroundColor=0 IsHidden=False IsItalic=False StrikethroughStyle=0 UnderlineStyle=0 AnnotationTypes=NotSupported StyleName=NotSupported StyleId=NotSupported Link=NotSupported IsActive=NotSupported CaretPosition=NotSupported
+      child: controlType=50005 localized="link" name="link run"
+  heading run [heading run] FontName=Segoe UI Variable FontSize=24 FontWeight=700 ForegroundColor=0 IsHidden=False IsItalic=False StrikethroughStyle=0 UnderlineStyle=0 AnnotationTypes=NotSupported StyleName=NotSupported StyleId=NotSupported Link=NotSupported IsActive=NotSupported CaretPosition=NotSupported
+      children: none
+  WHOLE DOCUMENT FontName=Mixed FontSize=Mixed FontWeight=Mixed ForegroundColor=0 IsHidden=Mixed IsItalic=Mixed StrikethroughStyle=Mixed UnderlineStyle=Mixed AnnotationTypes=Mixed StyleName=NotSupported StyleId=NotSupported Link=NotSupported IsActive=NotSupported CaretPosition=NotSupported
+uia3 done

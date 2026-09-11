@@ -96,7 +96,7 @@ stack would revert text the document never moved.
 | --- | --- | --- |
 | R1 | **The contract is HYBRID: the textarea stays uncontrolled for typing, and every user edit is ALSO published addressed.** `text_changed` keeps carrying the plain text exactly as today, so no existing app sees a new byte. Beside it, on a textarea declared `rich`, the widget publishes `text_edited { start, end, inserted, runs, source }` for every user edit and `text_formatted { start, end, name, value }` for every toolbar act, and takes `set_rich_text(spans)` (the whole document, a configuration write, echoes nothing) and `apply_edit(start, end, inserted, runs)` (an incremental write that keeps the selection and echoes nothing). Five messages; the round trip is a scene: send an edit in, read the same shape back. THE BINDINGS KEEP THE MIRROR: each binding folds the edits into a `Document` value the app reads, the way signal mirrors work today, so an app that never wants deltas reads one document and an app with a CRDT feeds the deltas through. No wire read anywhere. | TAKEN 2026-09-11 |
 | R2 | **Attribute runs travel in the ruled unit** — UTF-8 byte offsets, both ends on a code-point boundary, the grapheme carve-out as stated — validated at the same chokepoint the ranges use and converted per backend in the core. Identity conversion for automerge (`Utf8CodeUnit`, its default), yrs (`OffsetKind::Bytes`, its default) and loro's `_utf8` family. | TAKEN 2026-09-11 |
-| R3 | **The v1 vocabulary is what synthesizes UNIFORMLY or is native everywhere.** Inline: `bold`, `italic`, `underline`, `strike`, `code`, `link(url)`. Block, one kind per paragraph: `body`, `heading` 1-3, `quote`, `code_block`. A heading is font size plus weight on every platform anyway, a quote is indent plus a rule and a code block a monospace face plus a ground, all drawn by the backend with NOTHING added to the text, so the bytes stay identical. OUT of v1: colours (a semantic-role question, the canvas palette's shape, its own slice), alignment (no consumer), and LISTS, under one rule stated now for when they come: **kaya's block model owns list semantics and no marker is ever in the guest-visible text**; the GTK and Compose arms draw markers their buffers never hold. Links are a synthesized tier on GTK (a tag plus a side table keyed by run) and measured on Compose before the arm is written. | TAKEN 2026-09-11, lists and colour deferred by name |
+| R3 | **The v1 vocabulary is what synthesizes UNIFORMLY or is native everywhere.** Inline: `bold`, `italic`, `underline`, `strike`, `code`, `link(url)`. Block, one kind per paragraph: `body`, `heading` 1-3, `quote`, `code_block`. A heading is font size plus weight on every platform anyway, a quote is indent plus a rule and a code block a monospace face plus a ground, all drawn by the backend with NOTHING added to the text, so the bytes stay identical. OUT of v1: colours (a semantic-role question, the canvas palette's shape, its own slice), alignment (no consumer), and LISTS, under one rule stated now for when they come: **kaya's block model owns list semantics and no marker is ever in the guest-visible text**; the GTK and Compose arms draw markers their buffers never hold. Links are a synthesized tier on GTK (a tag plus a side table keyed by run) and measured on Compose before the arm is written. AMENDED BY THE WINDOWS PROBE the same day: Windows joins the synthesized tier — `ITextRange.Link` inserts a hidden HYPERLINK field into the character stream, so a native link is text the guest never sees and TOM offsets count it (docs/measurements/richtext-windows-2026-09-11.md); the WinUI arm draws the link (underline and colour through CharacterFormat) and keeps the URL beside the run, activated by a hit test. | TAKEN 2026-09-11, lists and colour deferred by name; links synthesized on GTK and Windows |
 | R4 | **The core derives every delta from its own mirror**, uniformly on five platforms, and the platform's channel corroborates: where a backend reports a range (four of five), a disagreement with the diff is a diagnostic sentence that names both; where it reports nothing (WinUI), the diff is the delta. `source` says `user`, `ime_commit`, `paste`, `native_undo` or `drop`, which closes docs/undo-plan.md A6 (a native undo indistinguishable from typing) for rich widgets. | TAKEN 2026-09-11 |
 | R5 | **A remote edit arriving mid-composition is QUEUED, not refused, and a caret at the edit's start ends AFTER the inserted text.** `select_range` refuses during an IME composition because honouring it commits the user's marked text (docs/ranges-plan.md D4); a refused `apply_edit` would instead DROP a collaborator's edit, which is data loss the other way. So the core holds the edit until the composition ends (which `text_changed` announces anyway) and applies it then, transforming the local selection as the survey's rule states: unchanged before the edit, shifted after it, and a caret exactly at the start moves past the insertion (yrs's and automerge's `After` association). | TAKEN 2026-09-11; the association is a stated carve-out like the grapheme one |
 | R6 | **The native undo tier is opt-out per widget, and an app that owns the document says so.** docs/undo-plan.md A7 already names the lever; this rules its spelling: `own_undo()` on a rich textarea (a prop) turns the native stack off on that widget (`allowsUndo`, `enable-undo`, `UndoLimit 0`, the Compose undo state — the rich controls can all be told, where the plain TextBox could not), D7's history reset applies to `set_rich_text` and never to `apply_edit`, and D6's routing takes the app's `can_undo`/`can_redo` props for that widget so Edit>Undo reaches the app's own undo (a CRDT's, or the app's) instead of a stack that has been switched off. The core's own log (D3-D5) is untouched: a document the app owns never became core signals. | TAKEN 2026-09-11 (amends docs/undo-plan.md D1/D6/D7 by the maintainer's word) |
@@ -151,6 +151,12 @@ and the ruling above that depends on it is named:
    `apply-tag`/`remove-tag`. If not, the native tier is incomplete for
    rich text on Linux and R6's off switch is the only honest state
    there. (R6)
+   MEASURED 2026-09-11: it records none, and a tag applied with its
+   insert is DESTROYED by an undo-then-redo with no error, so the off
+   switch is mandatory on Linux; `enable-undo = FALSE` is complete and
+   togglable at runtime (docs/measurements/richtext-gtk-2026-09-11.md).
+   AT-SPI carries the five inline traits with ranges and has no link or
+   heading word at all. `insert-text`'s length is already bytes.
 2. **Compose, three points**: a `LinkAnnotation` on editable
    `TextFieldState` content; whether `addStyle`/`removeStyle` appear in
    `TextFieldBuffer.changes`; the pin bump to foundation 1.12 building
@@ -158,14 +164,41 @@ and the ruling above that depends on it is named:
 3. **RichEditBox unpinned**: the undeletable final paragraph mark
    returns when the plain-text pin comes off, and kaya's
    `StoryLength - 1` arithmetic was derived under the pin. (R2, R4)
+   MEASURED 2026-09-11: the control was never in a plain-text MODE (the
+   pin sets three opinions on a model that is rich either way), so
+   pinned and unpinned read byte-identically and the arithmetic
+   survives — as long as every `GetText` carries `AdjustCrlf` (and
+   `NoHidden` once links exist), which wants one chokepoint helper in
+   the WinUI arm. A split surrogate pair snaps OUTWARD at every TOM door.
+   `UndoLimit = 0` is a complete off switch; the events cannot name an
+   edit's source (a programmatic SetText looks like a keystroke), which
+   is R4's diff again; read-back is a true tri-state; UIA exposes
+   weight, italic, underline, strikethrough and font name per run, a
+   link as a Hyperlink child, and nothing for a heading.
 4. **The screen readers**: what each of the five announces for bold, a
    link and a heading, so the AX words can be added to the closed set
    rather than assumed. (R9)
+   MEASURED 2026-09-11 as what a client can FETCH (no screen reader was
+   enabled): underline and strike are booleans on Apple and attributes
+   on GTK and UIA; bold, italic and code are font identity everywhere; a
+   link is an AXLink element on macOS, a bare token on iOS, a Hyperlink
+   child on Windows and nothing on GTK; a heading exists on iOS only
+   when written. So R9 mints no new AX word in v1.
 5. **Native undo suppression per platform** for R6's off switch:
    `allowsUndo`, `enable-undo`, `UndoLimit`, Compose's undo state, each
    watched actually holding.
+   MEASURED 2026-09-11 on four: macOS `allowsUndo = false` complete
+   (and a change straight on the storage registers nothing, so
+   apply_edit is suppressed for free); iOS `undoManager.
+   disableUndoRegistration()` per view, the nil override being a decoy;
+   GTK `enable-undo = FALSE`; Windows `UndoLimit = 0` (dropping it
+   destroys the stack). Compose: see the android record.
 6. **loro's emitted delta unit**, a 60-line probe, before anything is
    said about loro in a binding's example. (R2)
+   MEASURED 2026-09-11: unicode scalars on the read side, bytes on the
+   write side (no `unmark_utf8`), so a loro bridge converts reads
+   through `convert_pos`; its expand rule governs only insertions that
+   happen-after a mark (docs/measurements/richtext-loro-2026-09-11.md).
 7. **The diff-derived delta against the native channel**, on the four
    platforms that report one: the diagnostic in R4 has to be made to
    print before it is trusted (invariant 3).

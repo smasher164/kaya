@@ -1,0 +1,72 @@
+uia.ps1 start 12:38:31.516 psversion=5.1.26100.9444
+uia.ps1: ready.txt seen
+uia.ps1: probe pid=12116
+uia.ps1: window name="kaya rich probe" class=WinUIDesktopWin32WindowClass controlType=ControlType.Window
+
+== U0 the element a screen reader lands on ==
+  controlType=ControlType.Edit localized="edit" name="" class=RichEditBox id="richProbe" keyboardFocusable=True isPassword=False
+  supported patterns: TextPatternIdentifiers.Pattern, ScrollItemPatternIdentifiers.Pattern
+  SupportedTextSelection=Single
+  DocumentRange.GetText(-1)=[plain run\rbold run\ritalic run\runder run\rstrike run\rmono run\rlink run\rheading run]
+  attribute StyleName -> <the managed client has no identifier for it>
+  attribute StyleId -> <the managed client has no identifier for it>
+  attribute Link -> <the managed client has no identifier for it>
+  attribute AnnotationTypes -> <the managed client has no identifier for it>
+  attribute CaretPosition -> <the managed client has no identifier for it>
+
+== U1 the runs, found by text and read attribute by attribute ==
+  plain run [plain run] FontWeight=400 IsItalic=False UnderlineStyle=None StrikethroughStyle=None FontName=Segoe UI Variable FontSize=14 ForegroundColor=0 BackgroundColor=16777215 IsHidden=False IsReadOnly=False BulletStyle=None HorizontalTextAlignment=Left IndentationLeading=0 OutlineStyles=None OverlineStyle=NotSupported StrikethroughColor=NotSupported UnderlineColor=NotSupported StyleName=<no identifier> StyleId=<no identifier> Link=<no identifier> AnnotationTypes=<no identifier> CaretPosition=<no identifier>
+      range children: none
+  bold run [bold run] FontWeight=700 IsItalic=False UnderlineStyle=None StrikethroughStyle=None FontName=Segoe UI Variable FontSize=14 ForegroundColor=0 BackgroundColor=16777215 IsHidden=False IsReadOnly=False BulletStyle=None HorizontalTextAlignment=Left IndentationLeading=0 OutlineStyles=None OverlineStyle=NotSupported StrikethroughColor=NotSupported UnderlineColor=NotSupported StyleName=<no identifier> StyleId=<no identifier> Link=<no identifier> AnnotationTypes=<no identifier> CaretPosition=<no identifier>
+      range children: none
+  italic run [italic run] FontWeight=400 IsItalic=True UnderlineStyle=None StrikethroughStyle=None FontName=Segoe UI Variable FontSize=14 ForegroundColor=0 BackgroundColor=16777215 IsHidden=False IsReadOnly=False BulletStyle=None HorizontalTextAlignment=Left IndentationLeading=0 OutlineStyles=None OverlineStyle=NotSupported StrikethroughColor=NotSupported UnderlineColor=NotSupported StyleName=<no identifier> StyleId=<no identifier> Link=<no identifier> AnnotationTypes=<no identifier> CaretPosition=<no identifier>
+      range children: none
+  under run [under run] FontWeight=400 IsItalic=False UnderlineStyle=Single StrikethroughStyle=None FontName=Segoe UI Variable FontSize=14 ForegroundColor=0 BackgroundColor=16777215 IsHidden=False IsReadOnly=False BulletStyle=None HorizontalTextAlignment=Left IndentationLeading=0 OutlineStyles=None OverlineStyle=NotSupported StrikethroughColor=NotSupported UnderlineColor=0 StyleName=<no identifier> StyleId=<no identifier> Link=<no identifier> AnnotationTypes=<no identifier> CaretPosition=<no identifier>
+      range children: none
+  strike run [strike run] FontWeight=400 IsItalic=False UnderlineStyle=None StrikethroughStyle=Single FontName=Segoe UI Variable FontSize=14 ForegroundColor=0 BackgroundColor=16777215 IsHidden=False IsReadOnly=False BulletStyle=None HorizontalTextAlignment=Left IndentationLeading=0 OutlineStyles=None OverlineStyle=NotSupported StrikethroughColor=0 UnderlineColor=NotSupported StyleName=<no identifier> StyleId=<no identifier> Link=<no identifier> AnnotationTypes=<no identifier> CaretPosition=<no identifier>
+      range children: none
+  mono run [mono run] FontWeight=400 IsItalic=False UnderlineStyle=None StrikethroughStyle=None FontName=Consolas FontSize=14 ForegroundColor=0 BackgroundColor=16777215 IsHidden=False IsReadOnly=False BulletStyle=None HorizontalTextAlignment=Left IndentationLeading=0 OutlineStyles=None OverlineStyle=NotSupported StrikethroughColor=NotSupported UnderlineColor=NotSupported StyleName=<no identifier> StyleId=<no identifier> Link=<no identifier> AnnotationTypes=<no identifier> CaretPosition=<no identifier>
+      range children: none
+  link run [link run] FontWeight=400 IsItalic=False UnderlineStyle=None StrikethroughStyle=None FontName=Segoe UI Variable FontSize=14 ForegroundColor=0 BackgroundColor=16777215 IsHidden=False IsReadOnly=False BulletStyle=None HorizontalTextAlignment=Left IndentationLeading=0 OutlineStyles=None OverlineStyle=NotSupported StrikethroughColor=NotSupported UnderlineColor=NotSupported StyleName=<no identifier> StyleId=<no identifier> Link=<no identifier> AnnotationTypes=<no identifier> CaretPosition=<no identifier>
+      range child: type=ControlType.Hyperlink name="link run" class=
+  heading run [heading run] FontWeight=700 IsItalic=False UnderlineStyle=None StrikethroughStyle=None FontName=Segoe UI Variable FontSize=24 ForegroundColor=0 BackgroundColor=16777215 IsHidden=False IsReadOnly=False BulletStyle=None HorizontalTextAlignment=Left IndentationLeading=0 OutlineStyles=None OverlineStyle=NotSupported StrikethroughColor=NotSupported UnderlineColor=NotSupported StyleName=<no identifier> StyleId=<no identifier> Link=<no identifier> AnnotationTypes=<no identifier> CaretPosition=<no identifier>
+      range children: none
+
+== U2 the whole document as ONE range (what a mixed read answers) ==
+  document FontWeight=Mixed IsItalic=Mixed UnderlineStyle=Mixed StrikethroughStyle=Mixed FontName=Mixed FontSize=Mixed ForegroundColor=0 BackgroundColor=16777215 IsHidden=Mixed IsReadOnly=False BulletStyle=None HorizontalTextAlignment=Left IndentationLeading=0 OutlineStyles=None OverlineStyle=NotSupported StrikethroughColor=Mixed UnderlineColor=Mixed StyleName=<no identifier> StyleId=<no identifier> Link=<no identifier> AnnotationTypes=<no identifier> CaretPosition=<no identifier>
+  DocumentRange.GetChildren() count=1
+    child: type=ControlType.Hyperlink name="link run" class=
+
+== U3 the FORMAT-unit walk, which is how a screen reader finds run boundaries ==
+  run 0 [plain run] FontWeight=400 IsItalic=False UnderlineStyle=None StrikethroughStyle=None FontName=Segoe UI Variable FontSize=14 IsHidden=False Link=<no identifier>
+  run 1 [\r] FontWeight=400 IsItalic=False UnderlineStyle=None StrikethroughStyle=None FontName=Segoe UI Variable FontSize=14 IsHidden=False Link=<no identifier>
+  run 2 [bold run] FontWeight=700 IsItalic=False UnderlineStyle=None StrikethroughStyle=None FontName=Segoe UI Variable FontSize=14 IsHidden=False Link=<no identifier>
+  run 3 [\r] FontWeight=400 IsItalic=False UnderlineStyle=None StrikethroughStyle=None FontName=Segoe UI Variable FontSize=14 IsHidden=False Link=<no identifier>
+  run 4 [italic run] FontWeight=400 IsItalic=True UnderlineStyle=None StrikethroughStyle=None FontName=Segoe UI Variable FontSize=14 IsHidden=False Link=<no identifier>
+  run 5 [\r] FontWeight=400 IsItalic=False UnderlineStyle=None StrikethroughStyle=None FontName=Segoe UI Variable FontSize=14 IsHidden=False Link=<no identifier>
+  run 6 [under run] FontWeight=400 IsItalic=False UnderlineStyle=Single StrikethroughStyle=None FontName=Segoe UI Variable FontSize=14 IsHidden=False Link=<no identifier>
+  run 7 [\r] FontWeight=400 IsItalic=False UnderlineStyle=None StrikethroughStyle=None FontName=Segoe UI Variable FontSize=14 IsHidden=False Link=<no identifier>
+  run 8 [strike run] FontWeight=400 IsItalic=False UnderlineStyle=None StrikethroughStyle=Single FontName=Segoe UI Variable FontSize=14 IsHidden=False Link=<no identifier>
+  run 9 [\r] FontWeight=400 IsItalic=False UnderlineStyle=None StrikethroughStyle=None FontName=Segoe UI Variable FontSize=14 IsHidden=False Link=<no identifier>
+  run 10 [mono run] FontWeight=400 IsItalic=False UnderlineStyle=None StrikethroughStyle=None FontName=Consolas FontSize=14 IsHidden=False Link=<no identifier>
+  run 11 [\r] FontWeight=400 IsItalic=False UnderlineStyle=None StrikethroughStyle=None FontName=Segoe UI Variable FontSize=14 IsHidden=False Link=<no identifier>
+  run 12 [link run] FontWeight=400 IsItalic=False UnderlineStyle=None StrikethroughStyle=None FontName=Segoe UI Variable FontSize=14 IsHidden=False Link=<no identifier>
+  run 13 [\r] FontWeight=400 IsItalic=False UnderlineStyle=None StrikethroughStyle=None FontName=Segoe UI Variable FontSize=14 IsHidden=False Link=<no identifier>
+  run 14 [heading run] FontWeight=700 IsItalic=False UnderlineStyle=None StrikethroughStyle=None FontName=Segoe UI Variable FontSize=24 IsHidden=False Link=<no identifier>
+  run 15 [] FontWeight=700 IsItalic=False UnderlineStyle=None StrikethroughStyle=None FontName=Segoe UI Variable FontSize=24 IsHidden=False Link=<no identifier>
+  format walk ended after 16 runs (Move returned 0)
+
+== U4 the element subtree (a Hyperlink child would show here) ==
+  descendants of the window: 6
+    type=ControlType.Pane id="" name="" class=Microsoft.UI.Content.DesktopChildSiteBridge
+    type=ControlType.Pane id="" name="" class=InputSiteWindowClass
+    type=ControlType.Edit id="pinnedProbe" name="" class=RichEditBox
+    type=ControlType.Edit id="richProbe" name="" class=RichEditBox
+    type=ControlType.Hyperlink id="" name="link run" class=
+    type=ControlType.ScrollBar id="VerticalScrollBar" name="Vertical" class=ScrollBar
+
+== U5 the caret's own range ==
+  GetSelection() ranges=1
+    selection []
+
+uia.ps1 done

@@ -233,7 +233,7 @@ declared range lands one position early, and nothing says so.** This is
 the "ships silently" case of this milestone on linux, and it is
 independent of Unicode.
 
-### windows (RichEditBox / TOM, per the foundation milestone)
+### windows (RichEditBox / TOM — AMENDED 2026-09-11: every TOM door snaps a split surrogate pair OUTWARD, measured in docs/measurements/richtext-windows-2026-09-11.md; the paragraph below records the earlier reading)
 
 **Unit: UTF-16 code units** ("character positions", cp). The TOM
 reference is explicit that a cp can land inside a surrogate pair —
