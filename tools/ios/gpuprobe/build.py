@@ -24,7 +24,7 @@ import shutil
 import subprocess
 import tempfile
 
-HERE = pathlib.Path(__file__).resolve().parent
+HERE = ROOT / "tools/ios/gpuprobe"
 CRATE = HERE / "probe"
 args = sys.argv[1:]
 out = None
@@ -145,7 +145,8 @@ try:
     if not device:
         run(xcrun + ["devicectl", "list", "devices", "--json-output",
                      str(work / "devices.json")], env=env, stdout=subprocess.DEVNULL)
-        devices = json.loads((work / "devices.json").read_text(encoding="utf-8"))["result"]["devices"]
+        listed = json.loads((work / "devices.json").read_text(encoding="utf-8"))
+        devices = listed["result"]["devices"]
         live = [d for d in devices
                 if d.get("connectionProperties", {}).get("tunnelState") != "unavailable"]
         if len(live) != 1:
