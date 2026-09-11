@@ -4444,6 +4444,20 @@ impl Scene {
                 continue;
             }
             let changed = self.field_text.get(&id).map(String::as_str) != Some(text.as_str());
+            // A plain text write on a `rich` textarea is a whole-document
+            // write with no runs (docs/rich-text-plan.md §8): the mirror
+            // follows it, or the next diff would be against a text the
+            // widget no longer holds.
+            if resets {
+                if let Some(doc) = self.rich.get_mut(&id) {
+                    if doc.text != text {
+                        doc.text = text.clone();
+                        doc.runs.clear();
+                        doc.queued.clear();
+                        doc.selection = TextRange::new(0, 0);
+                    }
+                }
+            }
             self.field_text.insert(id, text);
             if changed && resets {
                 self.close_episodes_on(id);
@@ -13394,6 +13408,27 @@ mod tests {
             scene.note_text_formatted(textarea, TextRange::new(4, 7), "block", Some("body"));
         assert_eq!(published.map(|(_, _, v)| v), Some(None));
         assert_eq!(scene.rich_runs_string(textarea).as_deref(), Some(""));
+    }
+
+    /// docs/rich-text-plan.md §8: a plain set_text on a rich textarea is a
+    /// whole-document write with no runs; the mirror follows it.
+    #[test]
+    fn a_plain_text_write_resets_a_rich_mirror() {
+        let mut scene = Scene::new();
+        scene.apply(rich_editor("Héllo world"));
+        let textarea = WidgetId(1);
+        scene.apply(vec![set_document("Héllo world", vec![run(0, 6, "bold", "true")])]);
+        assert_eq!(scene.rich_runs_string(textarea).as_deref(), Some("0:6 bold"));
+        scene.apply(vec![TxOp::SetProperty {
+            widget: textarea,
+            prop: Prop::Text,
+            value: crate::protocol::PropValue::Const(Value::Str("plain again".into())),
+        }]);
+        assert_eq!(scene.rich_text(textarea), Some("plain again"));
+        assert_eq!(scene.rich_runs_string(textarea).as_deref(), Some(""));
+        // The next user edit diffs against the NEW text.
+        let edit = scene.note_rich_text(textarea, "plain again!").unwrap();
+        assert_eq!((edit.range.start, edit.range.stop, edit.inserted.as_str()), (11, 11, "!"));
     }
 
     /// docs/rich-text-plan.md R9: the harness reads the core's spelling —
