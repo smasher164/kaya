@@ -1,0 +1,35 @@
+PROBE mode=undo iOS=26.5 device=kaya-sim-2
+PROBE fixture textLayoutManager = TextKit2
+PROBE fixture textStorage class = NSConcreteTextStorage
+PROBE fixture isFirstResponder = true
+PROBE == R6 undo on UITextView ==
+PROBE view.undoManager = Optional(ObjectIdentifier(0x0000000101cc3bf0)) class=_UITextUndoManager
+PROBE window.undoManager = Optional(ObjectIdentifier(0x0000000101cc3b80))
+PROBE same object = false
+PROBE isFirstResponder = true
+PROBE -- typed: string="hello world!" canUndo=true
+PROBE    after undo(): string="hello world"
+PROBE -- attribute-only through textStorage, NO begin/endEditing
+PROBE    font at 0 = .SFUI-Semibold/15.0[bold] canUndo=false
+PROBE    after undo(): font at 0 = .SFUI-Semibold/15.0[bold]
+PROBE -- attribute-only INSIDE beginEditing/endEditing
+PROBE    font at 0 = .SFUI-Semibold/15.0[bold] canUndo=false
+PROBE    after undo(): font at 0 = .SFUI-Semibold/15.0[bold]
+PROBE -- toggleBoldface: (UIKit's own formatting command)
+PROBE    font at 0 = .SFUI-Semibold/15.0[bold] canUndo=true name=Bold
+PROBE    after undo(): font at 0 = .SFUI-Regular/15.0 string="hello world"
+PROBE -- POSITIVE CONTROL for the suppression test: typing DOES register
+PROBE    typed: canUndo=true (must be true or the negative below proves nothing)
+PROBE -- SUPPRESSION CANDIDATE 1: override undoManager to nil on the view
+PROBE    view.undoManager = nil
+PROBE    typed with the override: string="hello worldZ" text still editable=true
+PROBE    view.undoManager?.canUndo=false
+PROBE    window.undoManager?.canUndo=false (the chain above)
+PROBE    with the override lifted, view.undoManager = Optional(ObjectIdentifier(0x0000000101cc3bf0)) canUndo=true
+PROBE    text after lifting = "hello worldZ"
+PROBE -- SUPPRESSION CANDIDATE 2: UndoManager.disableUndoRegistration() around the edits
+PROBE    string="hello worldD" canUndo=false
+PROBE -- SUPPRESSION CANDIDATE 3: levelsOfUndo = 1 then removeAllActions (the WinUI UndoLimit shape)
+PROBE    levelsOfUndo=1: canUndo=true
+PROBE DONE undo
+dev.kaya.richtextprobe: 64297

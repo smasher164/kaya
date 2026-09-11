@@ -1,0 +1,121 @@
+PROBE mode=ax iOS=26.5 device=kaya-sim-2
+PROBE fixture textLayoutManager = TextKit2
+PROBE fixture textStorage class = NSConcreteTextStorage
+PROBE fixture isFirstResponder = true
+PROBE AX automation enabled via _AXSSetAutomationEnabled(true)
+2026-09-11 12:33:45.701 RichTextProbe[65379:154539540] void * _Nullable NSMapGet(NSMapTable * _Nonnull, const void * _Nullable): map table argument is NULL
+objc[65379]: Class UIAccessibilityLoaderWebShared is implemented in both /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/AccessibilityBundles/WebCore.axbundle/WebCore (0x106bb0310) and /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/AccessibilityBundles/WebKit.axbundle/WebKit (0x11073c398). This may cause spurious casting failures and mysterious crashes. One of the duplicates must be removed or renamed.
+PROBE == R9 accessibility of the attributed text, in process ==
+PROBE automation already enabled at launch; UIAccessibility.isVoiceOverRunning = false
+PROBE runs of the document: length=57 string="Heading one\nplain bold italic under strike mono link end\n"
+PROBE   [0,11) "Heading one" -> NSFont=.SFUI-Semibold/26.0[bold]
+PROBE   [11,18) "\nplain " -> NSFont=.SFUI-Regular/15.0
+PROBE   [18,22) "bold" -> NSFont=.SFUI-Semibold/15.0[bold]
+PROBE   [22,23) " " -> NSFont=.SFUI-Regular/15.0
+PROBE   [23,29) "italic" -> NSFont=.SFUI-RegularItalic/15.0[italic]
+PROBE   [29,30) " " -> NSFont=.SFUI-Regular/15.0
+PROBE   [30,35) "under" -> NSFont=.SFUI-Regular/15.0 NSUnderline=1
+PROBE   [35,36) " " -> NSFont=.SFUI-Regular/15.0
+PROBE   [36,42) "strike" -> NSFont=.SFUI-Regular/15.0 NSStrikethrough=1
+PROBE   [42,43) " " -> NSFont=.SFUI-Regular/15.0
+PROBE   [43,47) "mono" -> NSFont=.AppleSystemUIFontMonospaced-Regular/15.0[monoSpace]
+PROBE   [47,48) " " -> NSFont=.SFUI-Regular/15.0
+PROBE   [48,52) "link" -> NSFont=.SFUI-Regular/15.0 NSLink=URL(https://kaya.dev/probe)
+PROBE   [52,53) " " -> NSFont=.SFUI-Regular/15.0
+PROBE   [53,56) "end" -> NSColor=rgba(1.00,0.22,0.24,1.00) NSFont=.SFUI-Regular/15.0
+PROBE   [56,57) "\n" -> NSFont=.SFUI-Regular/15.0
+PROBE accessibilityTraits = 140737490714624
+PROBE accessibilityLabel = nil
+PROBE accessibilityValue = "Heading one\nplain bold italic under strike mono link end\n"
+PROBE accessibilityAttributedValue length = 57
+PROBE   run [0,11) "Heading one" -> NSFont=.SFUI-Semibold/26.0[bold]
+PROBE   run [11,18) "\nplain " -> NSFont=.SFUI-Regular/15.0
+PROBE   run [18,22) "bold" -> NSFont=.SFUI-Semibold/15.0[bold]
+PROBE   run [22,23) " " -> NSFont=.SFUI-Regular/15.0
+PROBE   run [23,29) "italic" -> NSFont=.SFUI-RegularItalic/15.0[italic]
+PROBE   run [29,30) " " -> NSFont=.SFUI-Regular/15.0
+PROBE   run [30,35) "under" -> NSFont=.SFUI-Regular/15.0 NSUnderline=1
+PROBE   run [35,36) " " -> NSFont=.SFUI-Regular/15.0
+PROBE   run [36,42) "strike" -> NSFont=.SFUI-Regular/15.0 NSStrikethrough=1
+PROBE   run [42,43) " " -> NSFont=.SFUI-Regular/15.0
+PROBE   run [43,47) "mono" -> NSFont=.AppleSystemUIFontMonospaced-Regular/15.0[monoSpace]
+PROBE   run [47,48) " " -> NSFont=.SFUI-Regular/15.0
+PROBE   run [48,52) "link" -> NSFont=.SFUI-Regular/15.0 UIAccessibilityTokenLink=1
+PROBE   run [52,53) " " -> NSFont=.SFUI-Regular/15.0
+PROBE   run [53,56) "end" -> NSColor=__NSCFType NSFont=.SFUI-Regular/15.0
+PROBE   run [56,57) "\n" -> NSFont=.SFUI-Regular/15.0
+PROBE -- the UIAccessibility keys, declared by hand on a copy
+PROBE   run [0,11) "Heading one" keys=["NSFont", "UIAccessibilityTextAttributeHeadingLevel"]
+PROBE   run [11,18) "\nplain " keys=["NSFont"]
+PROBE   run [18,22) "bold" keys=["NSFont"]
+PROBE   run [22,23) " " keys=["NSFont"]
+PROBE   run [23,29) "italic" keys=["NSFont"]
+PROBE   run [29,30) " " keys=["NSFont"]
+PROBE   run [30,35) "under" keys=["NSFont", "NSUnderline"]
+PROBE   run [35,36) " " keys=["NSFont"]
+PROBE   run [36,42) "strike" keys=["NSFont", "NSStrikethrough"]
+PROBE   run [42,43) " " keys=["NSFont"]
+PROBE   run [43,47) "mono" keys=["NSFont", "UIAccessibilitySpeechAttributeTextualContext"]
+PROBE   run [47,48) " " keys=["NSFont"]
+PROBE   run [48,52) "link" keys=["NSFont", "UIAccessibilityTokenLink"]
+PROBE   run [52,53) " " keys=["NSFont"]
+PROBE   run [53,56) "end" keys=["NSColor", "NSFont"]
+PROBE   run [56,57) "\n" keys=["NSFont"]
+PROBE UIAccessibilityTextAttributeHeadingLevel = UIAccessibilityTextAttributeHeadingLevel
+PROBE UIAccessibilityTextAttributeContext = UIAccessibilityTextAttributeContext
+PROBE UIAccessibilityTextAttributeCustom = UIAccessibilityTextAttributeCustom
+PROBE UIAccessibility.isVoiceOverRunning = false
+PROBE accessibilityElementCount = 9223372036854775807
+PROBE isAccessibilityElement = true
+PROBE -- the element tree under the text view, as the automation runtime sees it
+PROBE   NoUndoTextView isElement=true traits=140737490714624 label=nil value="Heading one\nplain bold italic under strike mono link end\n"
+PROBE   attributedValue length=57:
+PROBE     run [0,11) "Heading one" keys=["NSFont", "UIAccessibilityTextAttributeHeadingLevel"] -> NSFont=.SFUI-Semibold/26.0[bold] UIAccessibilityTextAttributeHeadingLevel=1
+PROBE     run [11,18) "\nplain " keys=["NSFont"] -> NSFont=.SFUI-Regular/15.0
+PROBE     run [18,22) "bold" keys=["NSFont"] -> NSFont=.SFUI-Semibold/15.0[bold]
+PROBE     run [22,23) " " keys=["NSFont"] -> NSFont=.SFUI-Regular/15.0
+PROBE     run [23,29) "italic" keys=["NSFont"] -> NSFont=.SFUI-RegularItalic/15.0[italic]
+PROBE     run [29,30) " " keys=["NSFont"] -> NSFont=.SFUI-Regular/15.0
+PROBE     run [30,35) "under" keys=["NSFont", "NSUnderline"] -> NSFont=.SFUI-Regular/15.0 NSUnderline=1
+PROBE     run [35,36) " " keys=["NSFont"] -> NSFont=.SFUI-Regular/15.0
+PROBE     run [36,42) "strike" keys=["NSFont", "NSStrikethrough"] -> NSFont=.SFUI-Regular/15.0 NSStrikethrough=1
+PROBE     run [42,43) " " keys=["NSFont"] -> NSFont=.SFUI-Regular/15.0
+PROBE     run [43,47) "mono" keys=["NSFont", "UIAccessibilitySpeechAttributeTextualContext"] -> NSFont=.AppleSystemUIFontMonospaced-Regular/15.0[monoSpace] UIAccessibilitySpeechAttributeTextualContext="AXSSVoiceOverTextualContextSourceCode"
+PROBE     run [47,48) " " keys=["NSFont"] -> NSFont=.SFUI-Regular/15.0
+PROBE     run [48,52) "link" keys=["NSFont", "UIAccessibilityTokenLink"] -> NSFont=.SFUI-Regular/15.0 UIAccessibilityTokenLink=1
+PROBE     run [52,53) " " keys=["NSFont"] -> NSFont=.SFUI-Regular/15.0
+PROBE     run [53,56) "end" keys=["NSColor", "NSFont"] -> NSColor=__NSCFType NSFont=.SFUI-Regular/15.0
+PROBE     run [56,57) "\n" keys=["NSFont"] -> NSFont=.SFUI-Regular/15.0
+PROBE     _UITextLayoutView isElement=false traits=0 label=nil value=""
+PROBE     _UITextContainerView isElement=false traits=0 label=nil value=""
+PROBE       _UITextLayoutCanvasView isElement=false traits=0 label=nil value=""
+PROBE         UIView isElement=false traits=0 label=nil value=""
+PROBE           _UITextSelectionHighlightView isElement=false traits=0 label=nil value=""
+PROBE             _UITextSelectionRangeView isElement=false traits=0 label=nil value=""
+PROBE           _UITextUnderlineView isElement=false traits=0 label=nil value=""
+PROBE             _UITextSelectionRangeView isElement=false traits=0 label=nil value=""
+PROBE           _UITextCursorTrailingGlowView isElement=false traits=0 label=nil value=""
+PROBE             _UIShapeView isElement=false traits=0 label=nil value=""
+PROBE         _UITextLayoutFragmentView isElement=false traits=0 label=nil value=""
+PROBE         _UITextLayoutFragmentView isElement=false traits=0 label=nil value=""
+PROBE     _UIScrollViewScrollIndicator isElement=false traits=4096 label=Optional("Vertical scroll bar, 1 page") value="0%"
+PROBE       UIView isElement=false traits=0 label=nil value=""
+PROBE     _UIScrollViewScrollIndicator isElement=false traits=4096 label=Optional("Horizontal scroll bar, 1 page") value="0%"
+PROBE       UIView isElement=false traits=0 label=nil value=""
+PROBE     UIStandardTextCursorView isElement=false traits=0 label=nil value=""
+PROBE       UIView isElement=false traits=0 label=nil value=""
+PROBE     _UITextSelectionRangeAdjustmentContainerView isElement=false traits=0 label=nil value=""
+PROBE       _UITextSelectionLollipopView isElement=false traits=0 label=nil value=""
+PROBE         UIView isElement=false traits=0 label=nil value=""
+PROBE         UIView isElement=false traits=0 label=nil value=""
+PROBE       _UITextSelectionLollipopView isElement=false traits=0 label=nil value=""
+PROBE         UIView isElement=false traits=0 label=nil value=""
+PROBE         UIView isElement=false traits=0 label=nil value=""
+PROBE     _UICursorAccessoryHostView isElement=false traits=0 label=nil value=""
+PROBE       _UICursorAccessoryView isElement=false traits=0 label=nil value=""
+PROBE         _UIVisualEffectContentView isElement=false traits=0 label=nil value=""
+PROBE           UIView isElement=false traits=0 label=nil value=""
+PROBE             UIView isElement=false traits=0 label=nil value=""
+PROBE UIAccessibilityTraitLink raw = 2, Header = 65536
+PROBE DONE ax
+dev.kaya.richtextprobe: 65379

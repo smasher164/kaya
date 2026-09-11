@@ -1,0 +1,98 @@
+PROBE fixture textStorage.delegate before = nil
+PROBE fixture textStorage class = NSConcreteTextStorage
+PROBE fixture textLayoutManager = TextKit2
+PROBE fixture window.isKeyWindow=false NSApp.isActive=false
+PROBE fixture firstResponder=Optional(<NSTextView: 0x1043e25f0>
+    Frame = {{0.00, 0.00}, {440.00, 300.00}}, Bounds = {{0.00, 0.00}, {440.00, 300.00}}
+    Horizontally resizable: NO, Vertically resizable: YES
+    MinSize = {420.00, 300.00}, MaxSize = {440.00, 300.00}
+)
+PROBE mode=rtf macOS=Version 26.6.2 (Build 25G83)
+PROBE == RTF paste with the rich opinions unpinned ==
+PROBE runs of the RTF source: length=83 string="plain red Times bold italic under strike link list\nbullet paragraph\nquote paragraph"
+PROBE   [0,5) "plain" -> NSBackgroundColor=sRGB(1.00,0.80,0.00,1.00) NSFont=.AppleSystemUIFont/13.0
+PROBE   [5,6) " " -> NSFont=.AppleSystemUIFont/13.0
+PROBE   [6,9) "red" -> NSColor=sRGB(1.00,0.22,0.24,1.00) NSFont=.AppleSystemUIFont/13.0
+PROBE   [9,10) " " -> NSFont=.AppleSystemUIFont/13.0
+PROBE   [10,15) "Times" -> NSFont=TimesNewRomanPSMT/22.0
+PROBE   [15,16) " " -> NSFont=.AppleSystemUIFont/13.0
+PROBE   [16,20) "bold" -> NSFont=.SFNS-Bold/13.0[bold]
+PROBE   [20,21) " " -> NSFont=.AppleSystemUIFont/13.0
+PROBE   [21,27) "italic" -> NSFont=.SFNS-RegularItalic/13.0[italic]
+PROBE   [27,28) " " -> NSFont=.AppleSystemUIFont/13.0
+PROBE   [28,33) "under" -> NSFont=.AppleSystemUIFont/13.0 NSUnderline=1
+PROBE   [33,34) " " -> NSFont=.AppleSystemUIFont/13.0
+PROBE   [34,40) "strike" -> NSFont=.AppleSystemUIFont/13.0 NSStrikethrough=1
+PROBE   [40,41) " " -> NSFont=.AppleSystemUIFont/13.0
+PROBE   [41,45) "link" -> NSFont=.AppleSystemUIFont/13.0 NSLink=URL(https://kaya.dev/probe)
+PROBE   [45,51) " list\n" -> NSFont=.AppleSystemUIFont/13.0
+PROBE   [51,67) "bullet paragraph" -> NSFont=.AppleSystemUIFont/13.0 NSParagraphStyle=NSParagraphStyle(align=1 headIndent=36.0 firstLineHeadIndent=18.0 textLists=["{disc}"])
+PROBE   [67,68) "\n" -> NSFont=.AppleSystemUIFont/13.0
+PROBE   [68,83) "quote paragraph" -> NSFont=.AppleSystemUIFont/13.0 NSParagraphStyle=NSParagraphStyle(align=2 headIndent=48.0 firstLineHeadIndent=48.0)
+PROBE rtf bytes = 1415
+PROBE -- isRichText=false importsGraphics=false (kaya today)
+PROBE   readablePasteboardTypes: 8 types, first 8 = ["NSStringPboardType", "NeXT Rich Text Format v1.0 pasteboard type", "NeXT RTFD pasteboard type", "Apple HTML pasteboard type", "WebURLsWithTitlesPboardType", "public.url", "Apple URL pasteboard type", "NSFilenamesPboardType"]
+PROBE   readSelection returned true
+PROBE runs of isRichText=false importsGraphics=false (kaya today): length=83 string="plain red Times bold italic under strike link list\nbullet paragraph\nquote paragraph"
+PROBE   [0,83) "plain red Times bold italic under strike link list\nbullet paragraph\nquote paragraph" -> NSColor=sRGB(0.00,0.00,0.00,1.00) NSFont=.AppleSystemUIFont/13.0
+PROBE -- isRichText=true  importsGraphics=false (v1 candidate)
+PROBE   readablePasteboardTypes: 8 types, first 8 = ["NeXT Rich Text Format v1.0 pasteboard type", "NeXT RTFD pasteboard type", "Apple HTML pasteboard type", "WebURLsWithTitlesPboardType", "public.url", "Apple URL pasteboard type", "NSStringPboardType", "NSFilenamesPboardType"]
+PROBE   readSelection returned true
+PROBE runs of isRichText=true  importsGraphics=false (v1 candidate): length=83 string="plain red Times bold italic under strike link list\nbullet paragraph\nquote paragraph"
+PROBE   [0,5) "plain" -> NSBackgroundColor=sRGB(1.00,0.80,0.00,1.00) NSFont=HelveticaNeue/13.0 NSParagraphStyle=NSParagraphStyle(align=0 headIndent=0.0 firstLineHeadIndent=0.0)
+PROBE   [5,6) " " -> NSFont=HelveticaNeue/13.0 NSParagraphStyle=NSParagraphStyle(align=0 headIndent=0.0 firstLineHeadIndent=0.0)
+PROBE   [6,9) "red" -> NSColor=sRGB(1.00,0.22,0.24,1.00) NSFont=HelveticaNeue/13.0 NSParagraphStyle=NSParagraphStyle(align=0 headIndent=0.0 firstLineHeadIndent=0.0)
+PROBE   [9,10) " " -> NSFont=HelveticaNeue/13.0 NSParagraphStyle=NSParagraphStyle(align=0 headIndent=0.0 firstLineHeadIndent=0.0)
+PROBE   [10,15) "Times" -> NSFont=TimesNewRomanPSMT/22.0 NSParagraphStyle=NSParagraphStyle(align=0 headIndent=0.0 firstLineHeadIndent=0.0)
+PROBE   [15,16) " " -> NSFont=HelveticaNeue/13.0 NSParagraphStyle=NSParagraphStyle(align=0 headIndent=0.0 firstLineHeadIndent=0.0)
+PROBE   [16,20) "bold" -> NSFont=HelveticaNeue-Bold/13.0[bold] NSParagraphStyle=NSParagraphStyle(align=0 headIndent=0.0 firstLineHeadIndent=0.0)
+PROBE   [20,21) " " -> NSFont=HelveticaNeue/13.0 NSParagraphStyle=NSParagraphStyle(align=0 headIndent=0.0 firstLineHeadIndent=0.0)
+PROBE   [21,27) "italic" -> NSFont=HelveticaNeue-Italic/13.0[italic] NSParagraphStyle=NSParagraphStyle(align=0 headIndent=0.0 firstLineHeadIndent=0.0)
+PROBE   [27,28) " " -> NSFont=HelveticaNeue/13.0 NSParagraphStyle=NSParagraphStyle(align=0 headIndent=0.0 firstLineHeadIndent=0.0)
+PROBE   [28,33) "under" -> NSFont=HelveticaNeue/13.0 NSParagraphStyle=NSParagraphStyle(align=0 headIndent=0.0 firstLineHeadIndent=0.0) NSUnderline=1
+PROBE   [33,34) " " -> NSFont=HelveticaNeue/13.0 NSParagraphStyle=NSParagraphStyle(align=0 headIndent=0.0 firstLineHeadIndent=0.0)
+PROBE   [34,40) "strike" -> NSFont=HelveticaNeue/13.0 NSParagraphStyle=NSParagraphStyle(align=0 headIndent=0.0 firstLineHeadIndent=0.0) NSStrikethrough=1 NSStrikethroughColor=sRGB(0.00,0.00,0.00,1.00)
+PROBE   [40,41) " " -> NSFont=HelveticaNeue/13.0 NSParagraphStyle=NSParagraphStyle(align=0 headIndent=0.0 firstLineHeadIndent=0.0)
+PROBE   [41,45) "link" -> NSFont=HelveticaNeue/13.0 NSLink=URL(https://kaya.dev/probe) NSParagraphStyle=NSParagraphStyle(align=0 headIndent=0.0 firstLineHeadIndent=0.0)
+PROBE   [45,51) " list\n" -> NSFont=HelveticaNeue/13.0 NSParagraphStyle=NSParagraphStyle(align=0 headIndent=0.0 firstLineHeadIndent=0.0)
+PROBE   [51,68) "bullet paragraph\n" -> NSFont=HelveticaNeue/13.0 NSParagraphStyle=NSParagraphStyle(align=1 headIndent=36.0 firstLineHeadIndent=18.0 textLists=["{disc}"])
+PROBE   [68,83) "quote paragraph" -> NSFont=HelveticaNeue/13.0 NSParagraphStyle=NSParagraphStyle(align=2 headIndent=48.0 firstLineHeadIndent=48.0)
+PROBE -- isRichText=true  importsGraphics=true  (everything)
+PROBE   readablePasteboardTypes: 195 types, first 8 = ["NeXT RTFD pasteboard type", "NeXT Rich Text Format v1.0 pasteboard type", "Apple HTML pasteboard type", "NSFilenamesPboardType", "CorePasteboardFlavorType 0x6D6F6F76", "Apple PDF pasteboard type", "NeXT TIFF v4.0 pasteboard type", "Apple PICT pasteboard type"]
+PROBE   readSelection returned true
+PROBE runs of isRichText=true  importsGraphics=true  (everything): length=83 string="plain red Times bold italic under strike link list\nbullet paragraph\nquote paragraph"
+PROBE   [0,5) "plain" -> NSBackgroundColor=sRGB(1.00,0.80,0.00,1.00) NSFont=HelveticaNeue/13.0 NSParagraphStyle=NSParagraphStyle(align=0 headIndent=0.0 firstLineHeadIndent=0.0)
+PROBE   [5,6) " " -> NSFont=HelveticaNeue/13.0 NSParagraphStyle=NSParagraphStyle(align=0 headIndent=0.0 firstLineHeadIndent=0.0)
+PROBE   [6,9) "red" -> NSColor=sRGB(1.00,0.22,0.24,1.00) NSFont=HelveticaNeue/13.0 NSParagraphStyle=NSParagraphStyle(align=0 headIndent=0.0 firstLineHeadIndent=0.0)
+PROBE   [9,10) " " -> NSFont=HelveticaNeue/13.0 NSParagraphStyle=NSParagraphStyle(align=0 headIndent=0.0 firstLineHeadIndent=0.0)
+PROBE   [10,15) "Times" -> NSFont=TimesNewRomanPSMT/22.0 NSParagraphStyle=NSParagraphStyle(align=0 headIndent=0.0 firstLineHeadIndent=0.0)
+PROBE   [15,16) " " -> NSFont=HelveticaNeue/13.0 NSParagraphStyle=NSParagraphStyle(align=0 headIndent=0.0 firstLineHeadIndent=0.0)
+PROBE   [16,20) "bold" -> NSFont=HelveticaNeue-Bold/13.0[bold] NSParagraphStyle=NSParagraphStyle(align=0 headIndent=0.0 firstLineHeadIndent=0.0)
+PROBE   [20,21) " " -> NSFont=HelveticaNeue/13.0 NSParagraphStyle=NSParagraphStyle(align=0 headIndent=0.0 firstLineHeadIndent=0.0)
+PROBE   [21,27) "italic" -> NSFont=HelveticaNeue-Italic/13.0[italic] NSParagraphStyle=NSParagraphStyle(align=0 headIndent=0.0 firstLineHeadIndent=0.0)
+PROBE   [27,28) " " -> NSFont=HelveticaNeue/13.0 NSParagraphStyle=NSParagraphStyle(align=0 headIndent=0.0 firstLineHeadIndent=0.0)
+PROBE   [28,33) "under" -> NSFont=HelveticaNeue/13.0 NSParagraphStyle=NSParagraphStyle(align=0 headIndent=0.0 firstLineHeadIndent=0.0) NSUnderline=1
+PROBE   [33,34) " " -> NSFont=HelveticaNeue/13.0 NSParagraphStyle=NSParagraphStyle(align=0 headIndent=0.0 firstLineHeadIndent=0.0)
+PROBE   [34,40) "strike" -> NSFont=HelveticaNeue/13.0 NSParagraphStyle=NSParagraphStyle(align=0 headIndent=0.0 firstLineHeadIndent=0.0) NSStrikethrough=1 NSStrikethroughColor=sRGB(0.00,0.00,0.00,1.00)
+PROBE   [40,41) " " -> NSFont=HelveticaNeue/13.0 NSParagraphStyle=NSParagraphStyle(align=0 headIndent=0.0 firstLineHeadIndent=0.0)
+PROBE   [41,45) "link" -> NSFont=HelveticaNeue/13.0 NSLink=URL(https://kaya.dev/probe) NSParagraphStyle=NSParagraphStyle(align=0 headIndent=0.0 firstLineHeadIndent=0.0)
+PROBE   [45,51) " list\n" -> NSFont=HelveticaNeue/13.0 NSParagraphStyle=NSParagraphStyle(align=0 headIndent=0.0 firstLineHeadIndent=0.0)
+PROBE   [51,68) "bullet paragraph\n" -> NSFont=HelveticaNeue/13.0 NSParagraphStyle=NSParagraphStyle(align=1 headIndent=36.0 firstLineHeadIndent=18.0 textLists=["{disc}"])
+PROBE   [68,83) "quote paragraph" -> NSFont=HelveticaNeue/13.0 NSParagraphStyle=NSParagraphStyle(align=2 headIndent=48.0 firstLineHeadIndent=48.0)
+PROBE == RTFD with an image attachment ==
+2026-09-11 12:25:57.954 macprobe[62509:154482974] CGImageDestinationFinalize failed for output type 'public.png'
+PROBE -- isRichText=true importsGraphics=false
+PROBE   readSelection returned true
+PROBE   string = "before  after" (U+FFFC present = false)
+PROBE   NSString length = 13, utf8 = 13
+PROBE runs of rtfd isRichText=true importsGraphics=false: length=13 string="before  after"
+PROBE   [0,13) "before  after" -> NSFont=Helvetica/12.0 NSParagraphStyle=NSParagraphStyle(align=0 headIndent=0.0 firstLineHeadIndent=0.0)
+PROBE -- isRichText=true importsGraphics=true
+PROBE   readSelection returned true
+PROBE   string = "before \u{FFFC} after" (U+FFFC present = true)
+PROBE   NSString length = 14, utf8 = 16
+PROBE runs of rtfd isRichText=true importsGraphics=true: length=14 string="before \u{FFFC} after"
+PROBE   [0,7) "before " -> NSFont=Helvetica/12.0 NSParagraphStyle=NSParagraphStyle(align=0 headIndent=0.0 firstLineHeadIndent=0.0)
+PROBE   [7,8) "\u{FFFC}" -> NSAttachment=NSTextAttachment NSFont=Helvetica/12.0 NSParagraphStyle=NSParagraphStyle(align=0 headIndent=0.0 firstLineHeadIndent=0.0)
+PROBE   [8,14) " after" -> NSFont=Helvetica/12.0 NSParagraphStyle=NSParagraphStyle(align=0 headIndent=0.0 firstLineHeadIndent=0.0)
+PROBE DONE rtf

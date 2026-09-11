@@ -1,0 +1,124 @@
+PROBE mode=edits iOS=26.5 device=kaya-sim-2
+PROBE fixture textLayoutManager = TextKit2
+PROBE fixture textStorage class = NSConcreteTextStorage
+PROBE fixture isFirstResponder = true
+PROBE == R4 edit reporting on UITextView ==
+PROBE allowsEditingTextAttributes (default) = false
+PROBE --- action typed character (insertText, UIKeyInput's own path)
+PROBE   pre="hello world" post="helloX world"
+PROBE   did mask=editedAttributes|editedCharacters editedRange={5,1} changeInLength=1
+PROBE     -> replaced pre-range {5,0} with "X"
+PROBE   did mask=editedAttributes editedRange={0,12} changeInLength=0
+PROBE   fold MATCHES the post-edit string
+PROBE   minimal diff: replace {5,0} with "X"
+PROBE   reported vs minimal: reported {5,0} EQUALS minimal {5,0}
+PROBE   textViewDidChange fired 1x
+PROBE --- action typed character at the end
+PROBE   pre="helloX world" post="helloX world!"
+PROBE   did mask=editedAttributes|editedCharacters editedRange={12,1} changeInLength=1
+PROBE     -> replaced pre-range {12,0} with "!"
+PROBE   fold MATCHES the post-edit string
+PROBE   minimal diff: replace {12,0} with "!"
+PROBE   reported vs minimal: reported {12,0} EQUALS minimal {12,0}
+PROBE   textViewDidChange fired 1x
+PROBE --- action backspace (deleteBackward)
+PROBE   pre="helloX world!" post="helloX world"
+PROBE   did mask=editedAttributes|editedCharacters editedRange={12,0} changeInLength=-1
+PROBE     -> replaced pre-range {12,1} with ""
+PROBE   fold MATCHES the post-edit string
+PROBE   minimal diff: replace {12,1} with ""
+PROBE   reported vs minimal: reported {12,1} EQUALS minimal {12,1}
+PROBE   textViewDidChange fired 1x
+PROBE --- action selection replaced by typing
+PROBE   pre="helloX world" post="HIX world"
+PROBE   did mask=editedAttributes|editedCharacters editedRange={0,2} changeInLength=-3
+PROBE     -> replaced pre-range {0,5} with "HI"
+PROBE   fold MATCHES the post-edit string
+PROBE   minimal diff: replace {0,5} with "HI"
+PROBE   reported vs minimal: reported {0,5} EQUALS minimal {0,5}
+PROBE   textViewDidChange fired 1x
+PROBE --- action paste of plain text (UIResponder.paste, the real path)
+PROBE   pre="hello world" post="hello world"
+PROBE   fold MATCHES the post-edit string
+PROBE   minimal diff: replace {11,0} with ""
+PROBE   textViewDidChange fired 0x
+PROBE rtf bytes = 1344
+PROBE --- action paste of RTF with allowsEditingTextAttributes=false
+PROBE   pre="hello world" post="hello world"
+PROBE   fold MATCHES the post-edit string
+PROBE   minimal diff: replace {11,0} with ""
+PROBE   textViewDidChange fired 0x
+PROBE runs of after the RTF paste, allowsEditingTextAttributes=false: length=11 string="hello world"
+PROBE   [0,11) "hello world" -> NSColor=rgba(0.00,0.00,0.00,1.00) NSFont=.SFUI-Regular/15.0 NSParagraphStyle=NSParagraphStyle(align=4 headIndent=0.0)
+PROBE --- action paste of RTF with allowsEditingTextAttributes=true
+PROBE   pre="hello world" post="hello world"
+PROBE   fold MATCHES the post-edit string
+PROBE   minimal diff: replace {11,0} with ""
+PROBE   textViewDidChange fired 0x
+PROBE runs of after the RTF paste, allowsEditingTextAttributes=true: length=11 string="hello world"
+PROBE   [0,11) "hello world" -> NSColor=rgba(0.00,0.00,0.00,1.00) NSFont=.SFUI-Regular/15.0 NSParagraphStyle=NSParagraphStyle(align=4 headIndent=0.0)
+PROBE --- action programmatic replaceCharacters on the storage
+PROBE   pre="hello world" post="HOWDY world"
+PROBE   did mask=editedCharacters editedRange={0,5} changeInLength=0
+PROBE     -> replaced pre-range {0,5} with "HOWDY"
+PROBE   fold MATCHES the post-edit string
+PROBE   minimal diff: replace {0,5} with "HOWDY"
+PROBE   reported vs minimal: reported {0,5} EQUALS minimal {0,5}
+PROBE   textViewDidChange fired 0x
+PROBE --- action programmatic view.text = (kaya's own push)
+PROBE   pre="hello world" post="goodbye world"
+PROBE   did mask=editedAttributes|editedCharacters editedRange={0,13} changeInLength=2
+PROBE     -> replaced pre-range {0,11} with "goodbye world"
+PROBE   fold MATCHES the post-edit string
+PROBE   minimal diff: replace {0,5} with "goodbye"
+PROBE   reported vs minimal: reported {0,11} IS WIDER THAN minimal {0,5}
+PROBE   textViewDidChange fired 0x
+PROBE --- action attribute-only addAttribute (no beginEditing)
+PROBE   pre="hello world" post="hello world"
+PROBE   did mask=editedAttributes editedRange={0,5} changeInLength=0
+PROBE   fold MATCHES the post-edit string
+PROBE   minimal diff: replace {11,0} with ""
+PROBE   textViewDidChange fired 0x
+PROBE --- action attribute-only inside beginEditing/endEditing
+PROBE   pre="hello world" post="hello world"
+PROBE   did mask=editedAttributes editedRange={0,11} changeInLength=0
+PROBE   fold MATCHES the post-edit string
+PROBE   minimal diff: replace {11,0} with ""
+PROBE   textViewDidChange fired 0x
+PROBE --- action toggleBoldface: (UIKit's OWN toolbar Bold)
+PROBE   pre="hello world" post="hello world"
+PROBE   did mask=editedAttributes editedRange={0,5} changeInLength=0
+PROBE   fold MATCHES the post-edit string
+PROBE   minimal diff: replace {11,0} with ""
+PROBE   textViewDidChange fired 1x
+PROBE   font at 0 after toggleBoldface = .SFUI-Semibold/15.0[bold]
+PROBE == IME: marked text on UITextView ==
+PROBE --- action setMarkedText (composition begins)
+PROBE   pre="abc" post="abc\u{306B}\u{307B}\u{3093}"
+PROBE   did mask=editedAttributes|editedCharacters editedRange={3,3} changeInLength=3
+PROBE     -> replaced pre-range {3,0} with "\u{306B}\u{307B}\u{3093}"
+PROBE   fold MATCHES the post-edit string
+PROBE   minimal diff: replace {3,0} with "\u{306B}\u{307B}\u{3093}"
+PROBE   reported vs minimal: reported {3,0} EQUALS minimal {3,0}
+PROBE   textViewDidChange fired 1x
+PROBE   markedTextRange present = true
+PROBE --- action setMarkedText again (composition grows)
+PROBE   pre="abc\u{306B}\u{307B}\u{3093}" post="abc\u{306B}\u{307B}\u{3093}\u{3054}"
+PROBE   did mask=editedAttributes|editedCharacters editedRange={3,4} changeInLength=1
+PROBE     -> replaced pre-range {3,3} with "\u{306B}\u{307B}\u{3093}\u{3054}"
+PROBE   fold MATCHES the post-edit string
+PROBE   minimal diff: replace {6,0} with "\u{3054}"
+PROBE   reported vs minimal: reported {3,3} IS WIDER THAN minimal {6,0}
+PROBE   textViewDidChange fired 1x
+PROBE --- action insertText (composition commits)
+PROBE   pre="abc\u{306B}\u{307B}\u{3093}\u{3054}" post="abc\u{65E5}\u{672C}\u{8A9E}"
+PROBE   did mask=editedAttributes|editedCharacters editedRange={3,3} changeInLength=-1
+PROBE     -> replaced pre-range {3,4} with "\u{65E5}\u{672C}\u{8A9E}"
+PROBE   fold MATCHES the post-edit string
+PROBE   minimal diff: replace {3,4} with "\u{65E5}\u{672C}\u{8A9E}"
+PROBE   reported vs minimal: reported {3,4} EQUALS minimal {3,4}
+PROBE   textViewDidChange fired 1x
+PROBE   markedTextRange after commit = false
+PROBE   multi-byte: NSString length=6 utf8=12
+PROBE DONE edits
+dev.kaya.richtextprobe: 64073

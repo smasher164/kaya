@@ -1,0 +1,41 @@
+PROBE fixture textStorage.delegate before = nil
+PROBE fixture textStorage class = NSConcreteTextStorage
+PROBE fixture textLayoutManager = TextKit2
+PROBE fixture window.isKeyWindow=false NSApp.isActive=false
+PROBE fixture firstResponder=Optional(<NSTextView: 0x1032f5960>
+    Frame = {{0.00, 0.00}, {440.00, 300.00}}, Bounds = {{0.00, 0.00}, {440.00, 300.00}}
+    Horizontally resizable: NO, Vertically resizable: YES
+    MinSize = {420.00, 300.00}, MaxSize = {440.00, 300.00}
+)
+PROBE mode=typing macOS=Version 26.6.2 (Build 25G83)
+PROBE == typing attributes: does a run extend? ==
+PROBE runs of before: length=11 string="hello world"
+PROBE   [0,5) "hello" -> NSColor=sRGB(0.00,0.00,0.00,1.00) NSFont=.SFNS-Bold/13.0[bold]
+PROBE   [5,6) " " -> NSColor=sRGB(0.00,0.00,0.00,1.00) NSFont=.AppleSystemUIFont/13.0
+PROBE   [6,11) "world" -> NSColor=sRGB(0.00,0.00,0.00,1.00) NSFont=.AppleSystemUIFont/13.0 NSLink=URL(https://kaya.dev/probe) NSUnderline=1
+PROBE caret at 3 (inside the bold run): typingAttributes -> NSColor=sRGB(0.00,0.00,0.00,1.00) NSFont=.SFNS-Bold/13.0[bold]
+PROBE caret at 5 (at the END of the bold run): typingAttributes -> NSColor=sRGB(0.00,0.00,0.00,1.00) NSFont=.SFNS-Bold/13.0[bold]
+PROBE caret at 0 (at the START of the bold run): typingAttributes -> NSColor=sRGB(0.00,0.00,0.00,1.00) NSFont=.SFNS-Bold/13.0[bold]
+PROBE caret at 8 (inside the link run): typingAttributes -> NSColor=sRGB(0.00,0.00,0.00,1.00) NSFont=.AppleSystemUIFont/13.0 NSLink=URL(https://kaya.dev/probe) NSUnderline=1
+PROBE caret at 11 (at the END of the link run): typingAttributes -> NSColor=sRGB(0.00,0.00,0.00,1.00) NSFont=.AppleSystemUIFont/13.0 NSUnderline=1
+PROBE caret at 6 (at the START of the link run): typingAttributes -> NSColor=sRGB(0.00,0.00,0.00,1.00) NSFont=.AppleSystemUIFont/13.0
+PROBE -- typing at the end of the bold run
+PROBE   inserted at 5; font there = .SFNS-Bold/13.0[bold]
+PROBE -- typing at the end of the link run
+PROBE   (link ends at 12; computed 12)
+PROBE   inserted at 12; link there = nil underlineStyle = 1
+PROBE runs of after: length=13 string="helloB worldL"
+PROBE   [0,6) "helloB" -> NSColor=sRGB(0.00,0.00,0.00,1.00) NSFont=.SFNS-Bold/13.0[bold]
+PROBE   [6,7) " " -> NSColor=sRGB(0.00,0.00,0.00,1.00) NSFont=.AppleSystemUIFont/13.0
+PROBE   [7,12) "world" -> NSColor=sRGB(0.00,0.00,0.00,1.00) NSFont=.AppleSystemUIFont/13.0 NSLink=URL(https://kaya.dev/probe) NSUnderline=1
+PROBE   [12,13) "L" -> NSColor=sRGB(0.00,0.00,0.00,1.00) NSFont=.AppleSystemUIFont/13.0 NSUnderline=1
+PROBE -- typing INSIDE the link run
+PROBE   inserted at 8; link there = https://kaya.dev/probe
+PROBE -- a pinned (isRichText=false) view: does an attribute survive typing at all?
+PROBE   typingAttributes with isRichText=false -> NSColor=sRGB(0.00,0.00,0.00,1.00) NSFont=.SFNS-Bold/13.0[bold] NSLink=URL(https://kaya.dev/probe)
+PROBE   font at 5 = .SFNS-Bold/13.0[bold]
+PROBE runs of pinned after typing: length=12 string="helloP world"
+PROBE   [0,5) "hello" -> NSColor=sRGB(0.00,0.00,0.00,1.00) NSFont=.SFNS-Bold/13.0[bold]
+PROBE   [5,6) "P" -> NSColor=sRGB(0.00,0.00,0.00,1.00) NSFont=.SFNS-Bold/13.0[bold] NSLink=URL(https://kaya.dev/probe)
+PROBE   [6,12) " world" -> NSColor=sRGB(0.00,0.00,0.00,1.00) NSFont=.SFNS-Bold/13.0[bold]
+PROBE DONE typing

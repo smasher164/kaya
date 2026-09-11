@@ -1,0 +1,154 @@
+PROBE fixture textStorage.delegate before = nil
+PROBE fixture textStorage class = NSConcreteTextStorage
+PROBE fixture textLayoutManager = TextKit2
+PROBE fixture window.isKeyWindow=false NSApp.isActive=false
+PROBE fixture firstResponder=Optional(<NSTextView: 0x100bb5780>
+    Frame = {{0.00, 0.00}, {440.00, 300.00}}, Bounds = {{0.00, 0.00}, {440.00, 300.00}}
+    Horizontally resizable: NO, Vertically resizable: YES
+    MinSize = {420.00, 300.00}, MaxSize = {440.00, 300.00}
+)
+PROBE mode=edits macOS=Version 26.6.2 (Build 25G83)
+PROBE == R4 edit reporting, the pinned (plain-text) control ==
+PROBE --- action typed character (insertText, the path a key event ends in)
+PROBE   pre="hello world" post="helloX world"
+PROBE   shouldChangeTextIn {5,0} replacement="X"
+PROBE   did mask=editedAttributes|editedCharacters editedRange={5,7} changeInLength=1
+PROBE     -> replaced pre-range {5,6} with "X world"
+PROBE   fold MATCHES the post-edit string
+PROBE   minimal diff: replace {5,0} with "X"
+PROBE   reported vs minimal: reported {5,6} IS WIDER THAN minimal {5,0}
+PROBE   textDidChange fired 1x, textViewDidChangeSelection 2x
+PROBE --- action typed character at the end
+PROBE   pre="helloX world" post="helloX! world"
+PROBE   shouldChangeTextIn {6,0} replacement="!"
+PROBE   did mask=editedAttributes|editedCharacters editedRange={6,7} changeInLength=1
+PROBE     -> replaced pre-range {6,6} with "! world"
+PROBE   fold MATCHES the post-edit string
+PROBE   minimal diff: replace {6,0} with "!"
+PROBE   reported vs minimal: reported {6,6} IS WIDER THAN minimal {6,0}
+PROBE   textDidChange fired 1x, textViewDidChangeSelection 1x
+PROBE --- action backspace (deleteBackward:)
+PROBE   pre="helloX! world" post="helloX world"
+PROBE   shouldChangeTextIn {6,1} replacement=""
+PROBE   did mask=editedCharacters editedRange={6,0} changeInLength=-1
+PROBE     -> replaced pre-range {6,1} with ""
+PROBE   fold MATCHES the post-edit string
+PROBE   minimal diff: replace {6,1} with ""
+PROBE   reported vs minimal: reported {6,1} EQUALS minimal {6,1}
+PROBE   textDidChange fired 1x, textViewDidChangeSelection 1x
+PROBE --- action selection replaced by typing
+PROBE   pre="helloX world" post="HIX world"
+PROBE   shouldChangeTextIn {0,5} replacement="HI"
+PROBE   did mask=editedAttributes|editedCharacters editedRange={0,9} changeInLength=-3
+PROBE     -> replaced pre-range {0,12} with "HIX world"
+PROBE   fold MATCHES the post-edit string
+PROBE   minimal diff: replace {0,5} with "HI"
+PROBE   reported vs minimal: reported {0,12} IS WIDER THAN minimal {0,5}
+PROBE   textDidChange fired 1x, textViewDidChangeSelection 2x
+PROBE   readSelection returned true
+PROBE --- action paste of plain text (readSelection from a private pasteboard)
+PROBE   pre="hello world" post="helloPASTED world"
+PROBE   shouldChangeTextIn {5,0} replacement="PASTED"
+PROBE   did mask=editedAttributes|editedCharacters editedRange={5,6} changeInLength=6
+PROBE     -> replaced pre-range {5,0} with "PASTED"
+PROBE   fold MATCHES the post-edit string
+PROBE   minimal diff: replace {5,0} with "PASTED"
+PROBE   reported vs minimal: reported {5,0} EQUALS minimal {5,0}
+PROBE   textDidChange fired 1x, textViewDidChangeSelection 2x
+PROBE   readSelection returned true
+PROBE --- action paste of RTF while PINNED (isRichText=false)
+PROBE   pre="hello world" post="helloplain red Times bold italic under strike link list world"
+PROBE   shouldChangeTextIn {5,0} replacement="plain red Times bold italic under strike link list"
+PROBE   did mask=editedAttributes|editedCharacters editedRange={5,50} changeInLength=50
+PROBE     -> replaced pre-range {5,0} with "plain red Times bold italic under strike link list"
+PROBE   fold MATCHES the post-edit string
+PROBE   minimal diff: replace {5,0} with "plain red Times bold italic under strike link list"
+PROBE   reported vs minimal: reported {5,0} EQUALS minimal {5,0}
+PROBE   textDidChange fired 1x, textViewDidChangeSelection 2x
+PROBE   storage after the pinned RTF paste:
+PROBE runs of pinned paste: length=61 string="helloplain red Times bold italic under strike link list world"
+PROBE   [0,61) "helloplain red Times bold italic under strike link list world" -> NSColor=sRGB(0.00,0.00,0.00,1.00) NSFont=.AppleSystemUIFont/13.0 NSParagraphStyle=NSParagraphStyle(align=4 headIndent=0.0 firstLineHeadIndent=0.0)
+PROBE   readSelection returned true
+PROBE --- action paste of RTF while UNPINNED (isRichText=true, importsGraphics=false)
+PROBE   pre="hello world" post="helloplain red Times bold italic under strike link list world"
+PROBE   shouldChangeTextIn {5,0} replacement="plain red Times bold italic under strike link list"
+PROBE   did mask=editedAttributes|editedCharacters editedRange={5,56} changeInLength=50
+PROBE     -> replaced pre-range {5,6} with "plain red Times bold italic under strike link list world"
+PROBE   fold MATCHES the post-edit string
+PROBE   minimal diff: replace {5,0} with "plain red Times bold italic under strike link list"
+PROBE   reported vs minimal: reported {5,6} IS WIDER THAN minimal {5,0}
+PROBE   textDidChange fired 1x, textViewDidChangeSelection 2x
+PROBE --- action programmatic replaceCharacters on the storage
+PROBE   pre="hello world" post="HOWDY world"
+PROBE   did mask=editedCharacters editedRange={0,5} changeInLength=0
+PROBE     -> replaced pre-range {0,5} with "HOWDY"
+PROBE   fold MATCHES the post-edit string
+PROBE   minimal diff: replace {0,5} with "HOWDY"
+PROBE   reported vs minimal: reported {0,5} EQUALS minimal {0,5}
+PROBE   textDidChange fired 0x, textViewDidChangeSelection 1x
+PROBE --- action programmatic view.string = (kaya's own push)
+PROBE   pre="hello world" post="goodbye world"
+PROBE   did mask=editedCharacters editedRange={0,13} changeInLength=2
+PROBE     -> replaced pre-range {0,11} with "goodbye world"
+PROBE   fold MATCHES the post-edit string
+PROBE   minimal diff: replace {0,5} with "goodbye"
+PROBE   reported vs minimal: reported {0,11} IS WIDER THAN minimal {0,5}
+PROBE   textDidChange fired 0x, textViewDidChangeSelection 1x
+PROBE --- action attribute-only addAttribute (no beginEditing)
+PROBE   pre="hello world" post="hello world"
+PROBE   did mask=editedAttributes editedRange={0,5} changeInLength=0
+PROBE   fold MATCHES the post-edit string
+PROBE   minimal diff: replace {11,0} with ""
+PROBE   textDidChange fired 0x, textViewDidChangeSelection 0x
+PROBE --- action attribute-only inside beginEditing/endEditing
+PROBE   pre="hello world" post="hello world"
+PROBE   did mask=editedAttributes editedRange={0,11} changeInLength=0
+PROBE   fold MATCHES the post-edit string
+PROBE   minimal diff: replace {11,0} with ""
+PROBE   textDidChange fired 0x, textViewDidChangeSelection 0x
+PROBE   shouldChangeText returned true
+PROBE --- action attribute-only through shouldChangeText(nil)/didChangeText (the toolbar path)
+PROBE   pre="hello world" post="hello world"
+PROBE   shouldChangeTextIn {0,5} replacement=nil
+PROBE   did mask=editedAttributes editedRange={0,5} changeInLength=0
+PROBE   fold MATCHES the post-edit string
+PROBE   minimal diff: replace {11,0} with ""
+PROBE   textDidChange fired 1x, textViewDidChangeSelection 0x
+PROBE == IME: marked text through NSTextInputClient ==
+PROBE   view.inputContext keyboard input sources = ["com.apple.keylayout.US"]
+PROBE   NSTextInputContext.current = nil
+PROBE   NOT switching the input source: NSTextInputContext.selectedKeyboardInputSource drives TSM,
+PROBE   which is host-wide while an app is active. setMarkedText IS the method a Japanese IME calls.
+PROBE --- action setMarkedText (composition begins)
+PROBE   pre="abc" post="abc\u{306B}\u{307B}\u{3093}"
+PROBE   shouldChangeTextIn {3,0} replacement="\u{306B}\u{307B}\u{3093}"
+PROBE   did mask=editedAttributes|editedCharacters editedRange={3,3} changeInLength=3
+PROBE     -> replaced pre-range {3,0} with "\u{306B}\u{307B}\u{3093}"
+PROBE   did mask=editedAttributes editedRange={3,3} changeInLength=0
+PROBE   fold MATCHES the post-edit string
+PROBE   minimal diff: replace {3,0} with "\u{306B}\u{307B}\u{3093}"
+PROBE   reported vs minimal: reported {3,0} EQUALS minimal {3,0}
+PROBE   textDidChange fired 0x, textViewDidChangeSelection 3x
+PROBE   hasMarkedText=true markedRange={3,3}
+PROBE --- action setMarkedText again (composition grows)
+PROBE   pre="abc\u{306B}\u{307B}\u{3093}" post="abc\u{306B}\u{307B}\u{3093}\u{3054}"
+PROBE   shouldChangeTextIn {3,3} replacement="\u{306B}\u{307B}\u{3093}\u{3054}"
+PROBE   did mask=editedCharacters editedRange={3,4} changeInLength=1
+PROBE     -> replaced pre-range {3,3} with "\u{306B}\u{307B}\u{3093}\u{3054}"
+PROBE   did mask=editedAttributes editedRange={3,4} changeInLength=0
+PROBE   fold MATCHES the post-edit string
+PROBE   minimal diff: replace {6,0} with "\u{3054}"
+PROBE   reported vs minimal: reported {3,3} IS WIDER THAN minimal {6,0}
+PROBE   textDidChange fired 0x, textViewDidChangeSelection 2x
+PROBE --- action insertText (composition commits)
+PROBE   pre="abc\u{306B}\u{307B}\u{3093}\u{3054}" post="abc\u{65E5}\u{672C}\u{8A9E}"
+PROBE   shouldChangeTextIn {3,4} replacement="\u{65E5}\u{672C}\u{8A9E}"
+PROBE   did mask=editedAttributes|editedCharacters editedRange={3,3} changeInLength=-1
+PROBE     -> replaced pre-range {3,4} with "\u{65E5}\u{672C}\u{8A9E}"
+PROBE   fold MATCHES the post-edit string
+PROBE   minimal diff: replace {3,4} with "\u{65E5}\u{672C}\u{8A9E}"
+PROBE   reported vs minimal: reported {3,4} EQUALS minimal {3,4}
+PROBE   textDidChange fired 1x, textViewDidChangeSelection 1x
+PROBE   hasMarkedText after commit=false
+PROBE   multi-byte check: NSString length=6 utf8=12
+PROBE DONE edits

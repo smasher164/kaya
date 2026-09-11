@@ -1,0 +1,28 @@
+AX AXIsProcessTrusted = true
+AX found role=AXTextArea identifier=richtext-probe
+AX attribute names = ["AXChildren", "AXChildrenInNavigationOrder", "AXDescription", "AXFocused", "AXFrame", "AXHelp", "AXIdentifier", "AXInsertionPointLineNumber", "AXNumberOfCharacters", "AXParent", "AXPosition", "AXRole", "AXRoleDescription", "AXSelectedText", "AXSelectedTextRange", "AXSelectedTextRanges", "AXSharedCharacterRange", "AXSharedTextUIElements", "AXSize", "AXTextInputMarkedRange", "AXTopLevelUIElement", "AXValue", "AXVisibleCharacterRange", "AXWindow"]
+AX parameterized names = ["AXAttributedStringForRange", "AXBoundsForRange", "AXLineForIndex", "AXRTFForRange", "AXRangeForIndex", "AXRangeForLine", "AXRangeForPosition", "AXReplaceRangeWithText", "AXSharedTextElementForIndex", "AXStringForRange", "AXStyleRangeForIndex"]
+AX AXValue = "Heading one\nplain bold italic under strike mono link end\n"
+AX AXNumberOfCharacters = 57
+AX AXAttributedStringForRange rc = 0
+AX attributed length = 57
+AX   run [0,11) "Heading one" -> AXATextAlignmentValue=0 AXFont={AXFontFamily=".AppleSystemUIFont" AXFontName=".AppleSystemUIFontBold" AXFontSize=24 AXVisibleName="System Font Bold"}
+AX   run [11,18) "\nplain " -> AXATextAlignmentValue=0 AXFont={AXFontFamily=".AppleSystemUIFont" AXFontName=".AppleSystemUIFont" AXFontSize=13 AXVisibleName="System Font Regular"}
+AX   run [18,22) "bold" -> AXATextAlignmentValue=0 AXFont={AXFontFamily=".AppleSystemUIFont" AXFontName=".SFNS-Bold" AXFontSize=13 AXVisibleName="System Font Emphasized"}
+AX   run [22,23) " " -> AXATextAlignmentValue=0 AXFont={AXFontFamily=".AppleSystemUIFont" AXFontName=".AppleSystemUIFont" AXFontSize=13 AXVisibleName="System Font Regular"}
+AX   run [23,29) "italic" -> AXATextAlignmentValue=0 AXFont={AXFontFamily=".AppleSystemUIFont" AXFontName=".SFNS-RegularItalic" AXFontSize=13 AXVisibleName="System Font Italic"}
+AX   run [29,30) " " -> AXATextAlignmentValue=0 AXFont={AXFontFamily=".AppleSystemUIFont" AXFontName=".AppleSystemUIFont" AXFontSize=13 AXVisibleName="System Font Regular"}
+AX   run [30,35) "under" -> AXATextAlignmentValue=0 AXFont={AXFontFamily=".AppleSystemUIFont" AXFontName=".AppleSystemUIFont" AXFontSize=13 AXVisibleName="System Font Regular"} AXUnderline=1
+AX   run [35,36) " " -> AXATextAlignmentValue=0 AXFont={AXFontFamily=".AppleSystemUIFont" AXFontName=".AppleSystemUIFont" AXFontSize=13 AXVisibleName="System Font Regular"}
+AX   run [36,42) "strike" -> AXATextAlignmentValue=0 AXFont={AXFontFamily=".AppleSystemUIFont" AXFontName=".AppleSystemUIFont" AXFontSize=13 AXVisibleName="System Font Regular"} AXStrikethrough=1
+AX   run [42,43) " " -> AXATextAlignmentValue=0 AXFont={AXFontFamily=".AppleSystemUIFont" AXFontName=".AppleSystemUIFont" AXFontSize=13 AXVisibleName="System Font Regular"}
+AX   run [43,47) "mono" -> AXATextAlignmentValue=0 AXFont={AXFontFamily=".AppleSystemUIFontMonospaced" AXFontName=".AppleSystemUIFontMonospaced-Regular" AXFontSize=13 AXVisibleName=".SF NS Mono Light Regular"}
+AX   run [47,48) " " -> AXATextAlignmentValue=0 AXFont={AXFontFamily=".AppleSystemUIFont" AXFontName=".AppleSystemUIFont" AXFontSize=13 AXVisibleName="System Font Regular"}
+AX   run [48,52) "link" -> AXATextAlignmentValue=0 AXFont={AXFontFamily=".AppleSystemUIFont" AXFontName=".AppleSystemUIFont" AXFontSize=13 AXVisibleName="System Font Regular"} AXLink=AXUIElement(role=AXLink url=Optional(https://kaya.dev/probe))
+AX   run [52,53) " " -> AXATextAlignmentValue=0 AXFont={AXFontFamily=".AppleSystemUIFont" AXFontName=".AppleSystemUIFont" AXFontSize=13 AXVisibleName="System Font Regular"}
+AX   run [53,56) "end" -> AXATextAlignmentValue=0 AXFont={AXFontFamily=".AppleSystemUIFont" AXFontName=".AppleSystemUIFont" AXFontSize=13 AXVisibleName="System Font Regular"} AXForegroundColor=sRGB(1.00,0.32,0.30)
+AX   run [56,57) "\n" -> AXATextAlignmentValue=0 AXFont={AXFontFamily=".AppleSystemUIFont" AXFontName=".AppleSystemUIFont" AXFontSize=13 AXVisibleName="System Font Regular"}
+AX AXLinks attribute absent
+AX text area children = ["AXLink"]
+AX   AXLink child url=Optional(https://kaya.dev/probe)
+AX DONE

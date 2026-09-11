@@ -1,0 +1,29 @@
+PROBE mode=undo2 iOS=26.5 device=kaya-sim-2
+PROBE fixture textLayoutManager = TextKit2
+PROBE fixture textStorage class = NSConcreteTextStorage
+PROBE fixture isFirstResponder = true
+2026-09-11 12:35:06.644 RichTextProbe[65726:154543877] void * _Nullable NSMapGet(NSMapTable * _Nonnull, const void * _Nullable): map table argument is NULL
+PROBE == R6 follow-up: is the nil override a suppression or only a hiding? ==
+PROBE -- A: override to nil, type, lift, then UNDO
+PROBE    stack empty before: canUndo=false
+PROBE    typed under the override: string="hello worldZ" view.undoManager=nil
+PROBE    lifted: canUndo=true name=Typing
+PROBE    after undo(): string="hello world"
+PROBE    VERDICT: the override is a HIDING ONLY — registration continued
+PROBE -- B: disableUndoRegistration, then a first-responder cycle
+PROBE    typed while disabled: canUndo=false
+objc[65726]: Class UIAccessibilityLoaderWebShared is implemented in both /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/AccessibilityBundles/WebCore.axbundle/WebCore (0x115a30310) and /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/AccessibilityBundles/WebKit.axbundle/WebKit (0x113a10398). This may cause spurious casting failures and mysterious crashes. One of the duplicates must be removed or renamed.
+PROBE    manager identity before=Optional(ObjectIdentifier(0x0000000109992c30)) after the cycle=Optional(ObjectIdentifier(0x0000000109992c30)) same=true
+PROBE    isUndoRegistrationEnabled after the cycle = false
+PROBE    typed after the cycle: string="hello worldDE" canUndo=false
+PROBE -- C: removeAllActions after every edit (the brute force)
+PROBE    string="hello worldabc" canUndo=false
+PROBE -- D: does a fresh UITextView start with registration enabled?
+PROBE    fresh.undoManager=present class=_UITextUndoManager enabled=true
+PROBE    typed: canUndo=true
+PROBE -- E: does disableUndoRegistration also cover UIKit's OWN formatting command?
+PROBE    font at 0 = .SFUI-Semibold/15.0[bold] canUndo=false
+PROBE    POSITIVE CONTROL: the same act with registration ENABLED
+PROBE    font at 0 = .SFUI-Semibold/15.0[bold] canUndo=true
+PROBE DONE undo2
+dev.kaya.richtextprobe: 65726

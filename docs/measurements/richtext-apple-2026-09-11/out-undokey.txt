@@ -1,0 +1,63 @@
+PROBE fixture textStorage.delegate before = nil
+PROBE fixture textStorage class = NSConcreteTextStorage
+PROBE fixture textLayoutManager = TextKit2
+PROBE fixture window.isKeyWindow=false NSApp.isActive=false
+PROBE fixture firstResponder=Optional(<NSTextView: 0x102845960>
+    Frame = {{0.00, 0.00}, {440.00, 300.00}}, Bounds = {{0.00, 0.00}, {440.00, 300.00}}
+    Horizontally resizable: NO, Vertically resizable: YES
+    MinSize = {420.00, 300.00}, MaxSize = {440.00, 300.00}
+)
+PROBE mode=undokey macOS=Version 26.6.2 (Build 25G83)
+PROBE activated: isKeyWindow=true NSApp.isActive=true
+PROBE == R6 undo scope and suppression ==
+PROBE view.undoManager is Optional(ObjectIdentifier(0x0000000a17340620))
+PROBE window.undoManager is Optional(ObjectIdentifier(0x0000000a17340620))
+PROBE same object = true
+PROBE -- allowsUndo=true, typed text
+PROBE   after typing: canUndo=true string="hello world!"
+PROBE   after undo():  string="hello world"
+PROBE -- allowsUndo=true, ATTRIBUTE-ONLY through shouldChangeText(nil)/didChangeText
+PROBE   shouldChangeText(nil) returned true; font at 0 = .SFNS-Bold/13.0[bold]
+PROBE   canUndo=true undoActionName=
+PROBE   after undo(): font at 0 = .AppleSystemUIFont/13.0 string="hello world"
+PROBE   canRedo=true
+PROBE   after redo(): font at 0 = .SFNS-Bold/13.0[bold]
+PROBE -- allowsUndo=true, attribute change WITHOUT shouldChangeText/didChangeText
+PROBE   canUndo=false
+PROBE -- allowsUndo=true, setTextColor: (an AppKit rich-text action)
+PROBE   canUndo=false undoActionName=
+PROBE   after undo(): foregroundColor at 0 = Catalog color: System systemRedColor
+PROBE -- POSITIVE CONTROL: Cmd-Z with allowsUndo=TRUE, the same three channels
+PROBE   typed: string="hello worldK" canUndo=true
+PROBE   [control, allowsUndo=true] isKeyWindow=true NSApp.isActive=true firstResponderIsView=true
+PROBE   [control, allowsUndo=true] view.tryToPerform(undo:) -> true; string="hello world"
+PROBE   [control, allowsUndo=true] view.performKeyEquivalent -> false; string="hello world"
+PROBE   [control, allowsUndo=true] mainMenu.performKeyEquivalent -> true; string="hello world"
+PROBE   [control, allowsUndo=true] NSApp.sendEvent(Cmd-Z); string="hello world"
+PROBE   [control, allowsUndo=true] NSApp.sendAction(undo:) -> true; string="hello world"
+PROBE   [control, allowsUndo=true] text moved=true font moved=false (.SFNS-Bold/13.0[bold] -> .SFNS-Bold/13.0[bold])
+PROBE   CONTROL VERDICT: Cmd-Z DOES reach the view in this fixture
+PROBE -- flipping allowsUndo to FALSE at runtime
+PROBE   text after the flip = "hello world" unchanged=true
+PROBE   view.undoManager still = nil
+PROBE   typed with allowsUndo=false: string="hello worldZ" view.undoManager?.canUndo=false
+PROBE   and the WINDOW's manager: present canUndo=false (the chain above the view)
+PROBE   attribute act with allowsUndo=false: shouldChangeText=true view.undoManager?.canUndo=false window canUndo=false
+PROBE -- Cmd-Z with allowsUndo=false, three channels, none of them the host UI
+PROBE   [allowsUndo=false] isKeyWindow=true NSApp.isActive=true firstResponderIsView=true
+PROBE   [allowsUndo=false] view.tryToPerform(undo:) -> true; string="hello worldZ"
+PROBE   [allowsUndo=false] view.performKeyEquivalent -> false; string="hello worldZ"
+PROBE   [allowsUndo=false] mainMenu.performKeyEquivalent -> true; string="hello worldZ"
+PROBE   [allowsUndo=false] NSApp.sendEvent(Cmd-Z); string="hello worldZ"
+PROBE   [allowsUndo=false] NSApp.sendAction(undo:) -> true; string="hello worldZ"
+PROBE   [allowsUndo=false] text moved=false font moved=false (.SFNS-Bold/13.0[bold] -> .SFNS-Bold/13.0[bold])
+PROBE -- flipping allowsUndo back to TRUE
+PROBE   text after the flip back = "hello worldZ" unchanged=true
+PROBE   view.undoManager back to Optional(ObjectIdentifier(0x0000000a17340620))
+PROBE   typed: string="hello worldZQ" canUndo=true
+PROBE   after undo(): string="hello worldZ"
+PROBE -- per-view: a SECOND text view in the same window with allowsUndo=false
+PROBE   view2.undoManager identity = nil
+PROBE   view2 typed with allowsUndo=false: canUndo=false string="second2"
+PROBE   view1 typed with allowsUndo=true:  canUndo=true string="hello worldZ1"
+PROBE DONE undokey

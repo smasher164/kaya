@@ -1,0 +1,27 @@
+PROBE mode=typing iOS=26.5 device=kaya-sim-2
+PROBE fixture textLayoutManager = TextKit2
+PROBE fixture textStorage class = NSConcreteTextStorage
+PROBE fixture isFirstResponder = true
+PROBE == typing attributes on UITextView ==
+PROBE runs of before: length=11 string="hello world"
+PROBE   [0,5) "hello" -> NSColor=rgba(0.00,0.00,0.00,1.00) NSFont=.SFUI-Semibold/15.0[bold] NSParagraphStyle=NSParagraphStyle(align=4 headIndent=0.0)
+PROBE   [5,6) " " -> NSColor=rgba(0.00,0.00,0.00,1.00) NSFont=.SFUI-Regular/15.0 NSParagraphStyle=NSParagraphStyle(align=4 headIndent=0.0)
+PROBE   [6,11) "world" -> NSColor=rgba(0.00,0.00,0.00,1.00) NSFont=.SFUI-Regular/15.0 NSLink=URL(https://kaya.dev/probe) NSParagraphStyle=NSParagraphStyle(align=4 headIndent=0.0) NSUnderline=1
+PROBE caret at 3 (inside the bold run): typingAttributes -> NSColor=rgba(0.00,0.00,0.00,1.00) NSFont=.SFUI-Semibold/15.0[bold] NSParagraphStyle=NSParagraphStyle(align=4 headIndent=0.0)
+PROBE caret at 5 (at the END of the bold run): typingAttributes -> NSColor=rgba(0.00,0.00,0.00,1.00) NSFont=.SFUI-Semibold/15.0[bold] NSParagraphStyle=NSParagraphStyle(align=4 headIndent=0.0)
+PROBE caret at 0 (at the START of the bold run): typingAttributes -> NSColor=rgba(0.00,0.00,0.00,1.00) NSFont=.SFUI-Semibold/15.0[bold] NSParagraphStyle=NSParagraphStyle(align=4 headIndent=0.0)
+PROBE caret at 8 (inside the link run): typingAttributes -> NSColor=rgba(0.00,0.00,0.00,1.00) NSFont=.SFUI-Regular/15.0 NSLink=URL(https://kaya.dev/probe) NSParagraphStyle=NSParagraphStyle(align=4 headIndent=0.0) NSUnderline=1
+PROBE caret at 11 (at the END of the link run): typingAttributes -> NSColor=rgba(0.00,0.00,0.00,1.00) NSFont=.SFUI-Regular/15.0 NSLink=URL(https://kaya.dev/probe) NSParagraphStyle=NSParagraphStyle(align=4 headIndent=0.0) NSUnderline=1
+PROBE caret at 6 (at the START of the link run): typingAttributes -> NSColor=rgba(0.00,0.00,0.00,1.00) NSFont=.SFUI-Regular/15.0 NSParagraphStyle=NSParagraphStyle(align=4 headIndent=0.0)
+PROBE -- typing at the end of the bold run
+PROBE    font at 5 = .SFUI-Semibold/15.0[bold]
+PROBE -- typing at the end of the link run (index 12)
+PROBE    link at 12 = https://kaya.dev/probe underline = 1
+PROBE runs of after: length=13 string="helloB worldL"
+PROBE   [0,6) "helloB" -> NSColor=rgba(0.00,0.00,0.00,1.00) NSFont=.SFUI-Semibold/15.0[bold] NSParagraphStyle=NSParagraphStyle(align=4 headIndent=0.0)
+PROBE   [6,7) " " -> NSColor=rgba(0.00,0.00,0.00,1.00) NSFont=.SFUI-Regular/15.0 NSParagraphStyle=NSParagraphStyle(align=4 headIndent=0.0)
+PROBE   [7,13) "worldL" -> NSColor=rgba(0.00,0.00,0.00,1.00) NSFont=.SFUI-Regular/15.0 NSLink=URL(https://kaya.dev/probe) NSParagraphStyle=NSParagraphStyle(align=4 headIndent=0.0) NSUnderline=1
+PROBE -- typing INSIDE the link run
+PROBE    link at 8 = https://kaya.dev/probe
+PROBE DONE typing
+dev.kaya.richtextprobe: 64303

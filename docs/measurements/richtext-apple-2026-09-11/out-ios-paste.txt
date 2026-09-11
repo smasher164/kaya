@@ -1,0 +1,59 @@
+PROBE mode=paste iOS=26.5 device=kaya-sim-2
+PROBE fixture textLayoutManager = TextKit2
+PROBE fixture textStorage class = NSConcreteTextStorage
+PROBE fixture isFirstResponder = true
+PROBE == paste, measured asynchronously ==
+PROBE -- plain text, allowsEditingTextAttributes=false
+PROBE   pasteboard: numberOfItems=1 hasStrings=true types=["public.utf8-plain-text"]
+PROBE   [plain text, allowsEditingTextAttributes=false] allowsEditingTextAttributes=false
+PROBE   [plain text, allowsEditingTextAttributes=false] pasteConfiguration = []
+PROBE   [plain text, allowsEditingTextAttributes=false] canPerformAction(paste:) = true
+PROBE   pre="hello world" post="hello PASTED world"
+PROBE   did mask=editedAttributes|editedCharacters editedRange={5,13} changeInLength=7
+PROBE     -> replaced pre-range {5,6} with " PASTED world"
+PROBE   textViewDidChange fired 1x
+PROBE runs of plain text, allowsEditingTextAttributes=false: length=18 string="hello PASTED world"
+PROBE   [0,18) "hello PASTED world" -> NSColor=rgba(0.00,0.00,0.00,1.00) NSFont=.SFUI-Regular/15.0 NSParagraphStyle=NSParagraphStyle(align=4 headIndent=0.0)
+PROBE -- RTF, allowsEditingTextAttributes=false
+PROBE   pasteboard: numberOfItems=1 hasStrings=true types=["public.rtf"]
+PROBE   [RTF, allowsEditingTextAttributes=false] allowsEditingTextAttributes=false
+PROBE   [RTF, allowsEditingTextAttributes=false] pasteConfiguration = []
+PROBE   [RTF, allowsEditingTextAttributes=false] canPerformAction(paste:) = true
+PROBE   pre="hello world" post="hello plain red Times bold italic under strike link\nbullet paragraph world"
+PROBE   did mask=editedAttributes|editedCharacters editedRange={5,69} changeInLength=63
+PROBE     -> replaced pre-range {5,6} with " plain red Times bold italic under strike link\nbullet paragraph world"
+PROBE   textViewDidChange fired 1x
+PROBE runs of RTF, allowsEditingTextAttributes=false: length=74 string="hello plain red Times bold italic under strike link\nbullet paragraph world"
+PROBE   [0,52) "hello plain red Times bold italic under strike link\n" -> NSColor=rgba(0.00,0.00,0.00,1.00) NSFont=.SFUI-Regular/15.0 NSParagraphStyle=NSParagraphStyle(align=4 headIndent=0.0)
+PROBE   [52,74) "bullet paragraph world" -> NSColor=rgba(0.00,0.00,0.00,1.00) NSFont=.SFUI-Regular/15.0 NSParagraphStyle=NSParagraphStyle(align=4 headIndent=0.0)
+PROBE -- RTF, allowsEditingTextAttributes=true
+PROBE   pasteboard: numberOfItems=1 hasStrings=true types=["public.rtf"]
+PROBE   [RTF, allowsEditingTextAttributes=true] allowsEditingTextAttributes=true
+PROBE   [RTF, allowsEditingTextAttributes=true] pasteConfiguration = []
+PROBE   [RTF, allowsEditingTextAttributes=true] canPerformAction(paste:) = true
+PROBE   pre="hello world" post="hello plain red Times bold italic under strike link\nbullet paragraph world"
+PROBE   did mask=editedAttributes|editedCharacters editedRange={5,69} changeInLength=63
+PROBE     -> replaced pre-range {5,6} with " plain red Times bold italic under strike link\nbullet paragraph world"
+PROBE   textViewDidChange fired 1x
+PROBE runs of RTF, allowsEditingTextAttributes=true: length=74 string="hello plain red Times bold italic under strike link\nbullet paragraph world"
+PROBE   [0,5) "hello" -> NSColor=rgba(0.00,0.00,0.00,1.00) NSFont=.SFUI-Regular/15.0 NSParagraphStyle=NSParagraphStyle(align=4 headIndent=0.0)
+PROBE   [5,11) " plain" -> NSBackgroundColor=rgba(1.00,0.80,0.00,1.00) NSFont=.SFUI-Regular/15.0 NSParagraphStyle=NSParagraphStyle(align=4 headIndent=0.0)
+PROBE   [11,12) " " -> NSFont=.SFUI-Regular/15.0 NSParagraphStyle=NSParagraphStyle(align=4 headIndent=0.0)
+PROBE   [12,15) "red" -> NSColor=rgba(1.00,0.22,0.24,1.00) NSFont=.SFUI-Regular/15.0 NSParagraphStyle=NSParagraphStyle(align=4 headIndent=0.0)
+PROBE   [15,16) " " -> NSFont=.SFUI-Regular/15.0 NSParagraphStyle=NSParagraphStyle(align=4 headIndent=0.0)
+PROBE   [16,21) "Times" -> NSFont=TimesNewRomanPSMT/24.0 NSParagraphStyle=NSParagraphStyle(align=4 headIndent=0.0)
+PROBE   [21,22) " " -> NSFont=.SFUI-Regular/15.0 NSParagraphStyle=NSParagraphStyle(align=4 headIndent=0.0)
+PROBE   [22,26) "bold" -> NSFont=.SFUI-Semibold/15.0[bold] NSParagraphStyle=NSParagraphStyle(align=4 headIndent=0.0)
+PROBE   [26,27) " " -> NSFont=.SFUI-Regular/15.0 NSParagraphStyle=NSParagraphStyle(align=4 headIndent=0.0)
+PROBE   [27,33) "italic" -> NSFont=.SFUI-RegularItalic/15.0[italic] NSParagraphStyle=NSParagraphStyle(align=4 headIndent=0.0)
+PROBE   [33,34) " " -> NSFont=.SFUI-Regular/15.0 NSParagraphStyle=NSParagraphStyle(align=4 headIndent=0.0)
+PROBE   [34,39) "under" -> NSFont=.SFUI-Regular/15.0 NSParagraphStyle=NSParagraphStyle(align=4 headIndent=0.0) NSUnderline=1
+PROBE   [39,40) " " -> NSFont=.SFUI-Regular/15.0 NSParagraphStyle=NSParagraphStyle(align=4 headIndent=0.0)
+PROBE   [40,46) "strike" -> NSFont=.SFUI-Regular/15.0 NSParagraphStyle=NSParagraphStyle(align=4 headIndent=0.0) NSStrikethrough=1 NSStrikethroughColor=rgba(0.00,0.00,0.00,1.00)
+PROBE   [46,47) " " -> NSFont=.SFUI-Regular/15.0 NSParagraphStyle=NSParagraphStyle(align=4 headIndent=0.0)
+PROBE   [47,51) "link" -> NSFont=.SFUI-Regular/15.0 NSLink=URL(https://kaya.dev/probe) NSParagraphStyle=NSParagraphStyle(align=4 headIndent=0.0)
+PROBE   [51,52) "\n" -> NSFont=.SFUI-Regular/15.0 NSParagraphStyle=NSParagraphStyle(align=4 headIndent=0.0)
+PROBE   [52,68) "bullet paragraph" -> NSFont=.SFUI-Regular/15.0 NSParagraphStyle=NSParagraphStyle(align=1 headIndent=36.0 textLists=["{disc}"])
+PROBE   [68,74) " world" -> NSColor=rgba(0.00,0.00,0.00,1.00) NSFont=.SFUI-Regular/15.0 NSParagraphStyle=NSParagraphStyle(align=1 headIndent=36.0 textLists=["{disc}"])
+PROBE DONE paste
+dev.kaya.richtextprobe: 64648
