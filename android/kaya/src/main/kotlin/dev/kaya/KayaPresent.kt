@@ -417,4 +417,61 @@ object KayaPresent {
         text: String,
         canUndo: Boolean,
     )
+
+    // ---- Rich text (docs/rich-text-plan.md R4/R5/R9) ---------------
+    //
+    // EVERY OFFSET HERE IS A UTF-8 BYTE OFFSET, the protocol's unit, while
+    // the apply records arrive in UTF-16 code units — the core converts on
+    // the way down and this side converts on the way up
+    // (docs/ranges-units.md §7).
+
+    /** An input-method composition began or ended; ending one lowers the
+     *  apply_edits R5 held. kaya_text_composing's JNI spelling. */
+    @JvmStatic external fun textComposing(widget: Long, live: Boolean)
+
+    /** A typing attribute armed over a collapsed caret, spent by the next
+     *  insertion. kaya_text_pending's JNI spelling. */
+    @JvmStatic external fun textPending(
+        widget: Long,
+        name: String,
+        value: String,
+        on: Boolean,
+    )
+
+    /** What provoked the next report (KAYA_EDIT_SOURCE_*); one-shot.
+     *  kaya_text_edit_source's JNI spelling. */
+    @JvmStatic external fun textEditSource(widget: Long, source: Int)
+
+    /** The range this backend says it edited, reported just before the
+     *  text so the core can corroborate its own diff; one-shot.
+     *  kaya_text_reported_edit's JNI spelling. */
+    @JvmStatic external fun textReportedEdit(
+        widget: Long,
+        start: Long,
+        end: Long,
+        insertedLen: Long,
+    )
+
+    /** Where this rich textarea's selection is now — the only way the core
+     *  knows. kaya_text_selection's JNI spelling. */
+    @JvmStatic external fun textSelection(widget: Long, start: Long, end: Long)
+
+    /** The user (or the app's own act) formatted a range.
+     *  kaya_text_formatted's JNI spelling. */
+    @JvmStatic external fun textFormatted(
+        tag: ByteArray,
+        start: Long,
+        end: Long,
+        name: String,
+        value: String,
+        removed: Boolean,
+    )
+
+    /** HARNESS SIDE: the CORE's runs for a rich textarea in the harness's
+     *  spelling, or "" (R9). kaya_text_runs' JNI spelling. */
+    @JvmStatic external fun textRuns(widget: Long): String
+
+    /** HARNESS SIDE: the last text_edited the core published for the
+     *  widget. kaya_text_last_edit's JNI spelling. */
+    @JvmStatic external fun textLastEdit(widget: Long): String
 }

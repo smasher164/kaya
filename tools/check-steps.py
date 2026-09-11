@@ -1273,6 +1273,105 @@ tall_doctored = winui_text.replace("SetMinTallModeHeight",
 if not tall_lint(tall_doctored, "-"):
     selftest_fail("a TwoPaneView without the Tall kill passed")
 
+
+# A TOM LINK IS HIDDEN TEXT INSIDE THE STORY (docs/traps.md 2026-09-11;
+# docs/measurements/richtext-windows-2026-09-11.md §5). `ITextRange::Link`
+# does not attach a URL to a run — it inserts `HYPERLINK "url"` into the
+# character stream as hidden characters, 32 of them for one short URL, and
+# TOM's cp offsets count them while the guest's bytes do not. NO LANE CAN
+# SEE IT: the drawn link looks right, `GetText(NoHidden)` reads right, and
+# every offset past that link is silently wrong. So the rich arm draws a
+# link and keeps its URL in the run table, and the story is read through
+# ONE door with `AdjustCrlf | NoHidden` baked in — the identity
+# `StoryLength - 1 == len(GetText(...))` holds only for that flag pair and
+# only while nothing hidden is in the story.
+def winui_hidden_text_lint(text, path):
+    bad = []
+    for call in ("SetLink(", ".Link()"):
+        if call in text:
+            bad.append(f"{path}: calls {call} — ITextRange::Link INSERTS "
+                       f"hidden HYPERLINK text into the story and every cp "
+                       f"offset after it counts characters the guest cannot "
+                       f"see (docs/traps.md 2026-09-11). A kaya link is DRAWN "
+                       f"(underline plus the link colour through "
+                       f"CharacterFormat) with the URL in the arm's run "
+                       f"table.")
+    read = "TextGetOptions::AdjustCrlf | TextGetOptions::NoHidden"
+    reads = text.count(read)
+    if reads != 1:
+        bad.append(f"{path}: spells {read!r} {reads} time(s), want exactly 1 "
+                   f"— the story has ONE read door and the flag pair is what "
+                   f"drops the undeletable final paragraph mark and any "
+                   f"hidden run")
+    # ONE CHOKEPOINT, and it is Editable::text: any other GetText forgets a
+    # flag and is off by one with no error anywhere.
+    calls = text.count(".GetText(")
+    if calls != 1:
+        bad.append(f"{path}: makes {calls} TOM GetText call(s), want exactly "
+                   f"1 — every read of a textarea's story goes through "
+                   f"Editable::text, whose flags are the invariant")
+    door = text.find("fn text(&self)")
+    after = text.find("fn set_text(&self")
+    at = text.find(read)
+    if door < 0 or after < 0:
+        bad.append(f"{path}: Editable::text / Editable::set_text moved, so "
+                   f"this clause can no longer say where the read lives")
+    elif reads == 1 and not door < at < after:
+        bad.append(f"{path}: the {read!r} read is not inside Editable::text "
+                   f"— the door is the invariant, not the flags")
+    return bad
+
+
+hidden_out = winui_hidden_text_lint(winui_text,
+                                    "crates/kaya/src/winui/mod.rs")
+if hidden_out:
+    print("\n".join(hidden_out), file=sys.stderr)
+    status = 1
+# Four watched negatives on doctored copies, each count printed.
+_h1, _n = sub_count(
+    r"(?m)^fn rich_is_on\(",
+    "fn rich_link(r: &str) {\\n    let _ = r.SetLink();\\n}\\n"
+    "fn rich_is_on(", winui_text)
+print(f"check-steps: hidden-text self-test a SetLink call spliced in, "
+      f"{_n} substitution(s)")
+if _n != 1 or not winui_hidden_text_lint(_h1, "-"):
+    selftest_fail("a winui SetLink call passed")
+_h2, _n = sub_count(
+    r"(?m)^fn rich_is_on\(",
+    "fn rich_url(r: &str) {\\n    let _ = r.Link();\\n}\\n"
+    "fn rich_is_on(", winui_text)
+print(f"check-steps: hidden-text self-test a Link read spliced in, "
+      f"{_n} substitution(s)")
+if _n != 1 or not winui_hidden_text_lint(_h2, "-"):
+    selftest_fail("a winui ITextRange::Link read passed")
+_h3, _n = sub_count(r" \| TextGetOptions::NoHidden", "", winui_text)
+print(f"check-steps: hidden-text self-test the NoHidden flag dropped, "
+      f"{_n} substitution(s)")
+if _n != 1 or not winui_hidden_text_lint(_h3, "-"):
+    selftest_fail("a winui story read without NoHidden passed")
+_h4, _n = sub_count(r"(?m)^fn rich_is_on\(",
+                    'fn rich_second_read(d: &Doc) {\n'
+                    '    let _ = d.GetText(TextGetOptions::None);\n'
+                    '}\nfn rich_is_on(', winui_text)
+print(f"check-steps: hidden-text self-test a second GetText spliced in, "
+      f"{_n} substitution(s)")
+if _n != 1 or not winui_hidden_text_lint(_h4, "-"):
+    selftest_fail("a second winui GetText call passed")
+_h5, _n = sub_count(
+    r"TextGetOptions::AdjustCrlf \| TextGetOptions::NoHidden",
+    "TextGetOptions::AdjustCrlf", winui_text)
+_h5, _n2 = sub_count(
+    r"(?m)^fn rich_is_on\(",
+    "// TextGetOptions::AdjustCrlf | TextGetOptions::NoHidden\n"
+    "fn rich_is_on(", _h5)
+print(f"check-steps: hidden-text self-test the read moved out of "
+      f"Editable::text, {_n + _n2} substitution(s)")
+if _n != 1 or _n2 != 1 or not winui_hidden_text_lint(_h5, "-"):
+    selftest_fail("a winui story read outside Editable::text passed")
+print("check-steps: the winui story has one read door "
+      f"({winui_text.count('.GetText(')} GetText call) and no "
+      f"ITextRange::Link")
+
 stage_out = linux_stage_lint([(steps_rel(p), STEPS_TEXT[p])
                               for p in STEPS])
 if stage_out:

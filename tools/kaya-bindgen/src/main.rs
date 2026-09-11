@@ -6,7 +6,7 @@
 
 use std::fmt::Write as _;
 
-use kaya::spec::{Field, ProtocolSpec, Record, SPEC};
+use kaya::spec::{Field, FieldTy, ProtocolSpec, Record, SPEC};
 
 mod c;
 mod csharp;
@@ -537,8 +537,22 @@ pub(crate) fn is_padding(f: &Field) -> bool {
     f.name == "reserved"
 }
 
+/// A tx record's PAYLOAD (spec.rs `payload: Some(PropKind::Str)`) is one
+/// trailing Str value after the fields, exactly as wire.rs's TxOp::SetRichText
+/// encoder writes it; every emitter takes it as a last `text` parameter
+/// (docs/rich-text-plan.md §7 — the first tx records with a payload).
+pub(crate) static PAYLOAD_FIELD: Field = Field { name: "text", ty: FieldTy::Value };
+
+pub(crate) fn tx_fields(rec: &Record) -> Vec<&'static Field> {
+    let mut out: Vec<&'static Field> = rec.fields.iter().collect();
+    if rec.payload.is_some() {
+        out.push(&PAYLOAD_FIELD);
+    }
+    out
+}
+
 pub(crate) fn record_params(rec: &Record) -> Vec<&'static Field> {
-    rec.fields.iter().filter(|f| !is_padding(f)).collect()
+    tx_fields(rec).into_iter().filter(|f| !is_padding(f)).collect()
 }
 
 #[cfg(test)]

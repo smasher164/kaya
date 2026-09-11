@@ -968,18 +968,19 @@ static class KayaWire
     }
 
     /// The WHOLE attributed document of a `rich` textarea (docs/rich-text-plan.md R1): the text as the payload, and `runs` holding 4*`count` values read in FOURS — I64 start, I64 end, Str name, Str value — each run one attribute over one range in UTF-8 BYTE offsets into that text, validated at the ranges' chokepoint (docs/ranges-units.md §7) and allowed to overlap (bold and italic over one range are two runs). A CONFIGURATION WRITE: it echoes nothing, and it resets the widget's native undo history where that tier is on (docs/undo-plan.md D7). The vocabulary is wire::RICH_ATTRS; a `block` run must start and end on paragraph boundaries. Refused on a textarea that is not `rich`.
-    public static byte[] TxSetRichText(ulong widgetId, uint count, object[] runs)
+    public static byte[] TxSetRichText(ulong widgetId, uint count, object[] runs, object text)
     {
         var w = Begin(out var stream);
         w.Write(widgetId);
         w.Write(count);
         w.Write(0u);
         EncodeValues(w, runs);
+        EncodeValue(w, text);
         return Finish(stream, w, TxKindSetRichText);
     }
 
     /// ONE edit into a `rich` textarea, the app's own or a collaborator's (docs/rich-text-plan.md R1, R5): replace `start..end` (UTF-8 byte offsets into the widget's current text, validated as a range is) with the payload text, whose attribute runs are `runs` in fours as set_rich_text's, with offsets RELATIVE to the inserted text. Keeps the selection: unchanged before the edit, shifted after it, a caret at `start` ending AFTER the insertion. Echoes nothing and never resets undo. QUEUED while an input-method composition is live and applied when it ends, since a refusal would drop a collaborator's edit.
-    public static byte[] TxApplyEdit(ulong widgetId, ulong start, ulong stop, uint count, object[] runs)
+    public static byte[] TxApplyEdit(ulong widgetId, ulong start, ulong stop, uint count, object[] runs, object text)
     {
         var w = Begin(out var stream);
         w.Write(widgetId);
@@ -988,6 +989,7 @@ static class KayaWire
         w.Write(count);
         w.Write(0u);
         EncodeValues(w, runs);
+        EncodeValue(w, text);
         return Finish(stream, w, TxKindApplyEdit);
     }
 

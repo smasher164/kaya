@@ -754,6 +754,58 @@ func kayaLinkParams(_ tail: [KayaValue]) -> [String: String] {
     return captured
 }
 
+/// A text_edited tail (KayaWire's arm): source, start, stop, the inserted
+/// text, then four values per run. The sugar's `KayaEdit` carries no
+/// source — the core's occurrence does, and the harness reads it there
+/// (docs/rich-text-plan.md §7).
+func kayaEditFromTail(_ tail: [KayaValue]) -> KayaEdit {
+    var edit = KayaEdit()
+    guard tail.count >= 4 else { return edit }
+    if case .i64(let start) = tail[1] { edit.start = Int(start) }
+    if case .i64(let stop) = tail[2] { edit.end = Int(stop) }
+    if case .str(let inserted) = tail[3] { edit.inserted = inserted }
+    edit.runs = kayaRunsFromValues(Array(tail[4...]))
+    return edit
+}
+
+/// A text_formatted tail: removed, start, stop, name, value.
+func kayaFormatFromTail(_ tail: [KayaValue]) -> KayaFormat {
+    var act = KayaFormat(start: 0, end: 0, name: "", value: nil)
+    guard tail.count >= 5 else { return act }
+    var removed = false
+    if case .i64(let flag) = tail[0] { removed = flag != 0 }
+    if case .i64(let start) = tail[1] { act.start = Int(start) }
+    if case .i64(let stop) = tail[2] { act.end = Int(stop) }
+    if case .str(let name) = tail[3] { act.name = name }
+    if case .str(let value) = tail[4], !removed { act.value = value }
+    return act
+}
+
+/// The same four, on the way down.
+func kayaRunValues(_ runs: [KayaRun]) -> [KayaValue] {
+    runs.flatMap { run -> [KayaValue] in
+        [.i64(Int64(run.start)), .i64(Int64(run.end)), .str(run.name), .str(run.value)]
+    }
+}
+
+/// Four values per run — start, end, name, value — as the wire carries
+/// them in both occurrences and both writes.
+func kayaRunsFromValues(_ flat: [KayaValue]) -> [KayaRun] {
+    var runs: [KayaRun] = []
+    var i = 0
+    while i + 3 < flat.count {
+        guard case .i64(let start) = flat[i], case .i64(let end) = flat[i + 1],
+            case .str(let name) = flat[i + 2], case .str(let value) = flat[i + 3]
+        else {
+            i += 4
+            continue
+        }
+        runs.append(KayaRun(start: Int(start), end: Int(end), name: name, value: value))
+        i += 4
+    }
+    return runs
+}
+
 /// The drag_op word, or nil for a cancelled or refused drag.
 func kayaOperation(_ mask: UInt32) -> KayaOp? {
     KayaOp(rawValue: mask)
@@ -1558,6 +1610,146 @@ struct KayaPrefs {
     }
 }
 
+// --- Rich text (docs/rich-text-plan.md R1) ---------------------------
+// EVERY OFFSET IS A UTF-8 BYTE OFFSET into the widget's text
+// (docs/ranges-units.md §7), so these take `Range<Int>` and never a
+// `String.Index`: a run's ends are the core's, not Foundation's.
+
+/// One attribute over one span; `value` is "true" for the flags, a URL
+/// for `link`, a kind for `block`.
+struct KayaRun: Equatable {
+    var start: Int
+    var end: Int
+    var name: String
+    var value: String
+}
+
+/// One paragraph kind; drawn, never stored (docs/rich-text-plan.md R3).
+enum KayaBlock: String {
+    case body
+    case heading1
+    case heading2
+    case heading3
+    case quote
+    case codeBlock = "code_block"
+
+    var name: String { rawValue }
+}
+
+/// A `rich` textarea's text and runs, kept current by the binding from
+/// the edits it delivers.
+struct KayaDocument: Equatable {
+    var text: String = ""
+    var runs: [KayaRun] = []
+
+    init(_ text: String = "") {
+        self.text = text
+    }
+
+    func mark(_ range: Range<Int>, _ name: String, _ value: String) -> KayaDocument {
+        var next = self
+        next.runs.append(KayaRun(start: range.lowerBound, end: range.upperBound,
+                                 name: name, value: value))
+        return next
+    }
+
+    func bold(_ range: Range<Int>) -> KayaDocument { mark(range, "bold", "true") }
+    func italic(_ range: Range<Int>) -> KayaDocument { mark(range, "italic", "true") }
+    func underline(_ range: Range<Int>) -> KayaDocument { mark(range, "underline", "true") }
+    func strike(_ range: Range<Int>) -> KayaDocument { mark(range, "strike", "true") }
+    func code(_ range: Range<Int>) -> KayaDocument { mark(range, "code", "true") }
+    func link(_ range: Range<Int>, _ url: String) -> KayaDocument { mark(range, "link", url) }
+
+    /// A paragraph's kind; the range covers whole paragraphs or is refused.
+    func block(_ range: Range<Int>, _ kind: KayaBlock) -> KayaDocument {
+        mark(range, "block", kind.name)
+    }
+
+    func attr(at byte: Int, _ name: String) -> String? {
+        runs.first { $0.name == name && $0.start <= byte && byte < $0.end }?.value
+    }
+}
+
+/// Replace `start..<end` with `inserted`, whose `runs` carry offsets
+/// RELATIVE to the inserted text.
+struct KayaEdit: Equatable {
+    var start: Int = 0
+    var end: Int = 0
+    var inserted: String = ""
+    var runs: [KayaRun] = []
+
+    static func insert(at: Int, _ text: String) -> KayaEdit {
+        KayaEdit(start: at, end: at, inserted: text, runs: [])
+    }
+
+    static func delete(_ range: Range<Int>) -> KayaEdit {
+        KayaEdit(start: range.lowerBound, end: range.upperBound, inserted: "", runs: [])
+    }
+
+    static func replace(_ range: Range<Int>, _ text: String) -> KayaEdit {
+        KayaEdit(start: range.lowerBound, end: range.upperBound, inserted: text, runs: [])
+    }
+
+    /// One attribute over the INSERTED text's own offsets.
+    func mark(_ range: Range<Int>, _ name: String, _ value: String) -> KayaEdit {
+        var next = self
+        next.runs.append(KayaRun(start: range.lowerBound, end: range.upperBound,
+                                 name: name, value: value))
+        return next
+    }
+}
+
+/// A toolbar act over a range; `value` nil is the attribute taken off.
+struct KayaFormat: Equatable {
+    var start: Int
+    var end: Int
+    var name: String
+    var value: String?
+}
+
+/// The core's normal form (crates/kaya/src/scene.rs, `RichDoc::normalize`),
+/// so the mirror and the core's document spell one string.
+func kayaNormalizeRuns(_ runs: [KayaRun]) -> [KayaRun] {
+    var out: [KayaRun] = []
+    for name in Set(runs.map(\.name)).sorted() {
+        var painted: [KayaRun] = []
+        for run in runs where run.name == name {
+            if run.start >= run.end { continue }
+            var kept: [KayaRun] = []
+            for old in painted {
+                if old.end <= run.start || old.start >= run.end {
+                    kept.append(old)
+                    continue
+                }
+                if old.start < run.start {
+                    var head = old
+                    head.end = run.start
+                    kept.append(head)
+                }
+                if old.end > run.end {
+                    var tail = old
+                    tail.start = run.end
+                    kept.append(tail)
+                }
+            }
+            kept.append(run)
+            painted = kept
+        }
+        painted.sort { $0.start < $1.start }
+        var merged: [KayaRun] = []
+        for run in painted {
+            if let last = merged.last, last.end == run.start, last.value == run.value {
+                merged[merged.count - 1].end = run.end
+            } else {
+                merged.append(run)
+            }
+        }
+        out.append(contentsOf: merged)
+    }
+    out.sort { ($0.start, $0.name) < ($1.start, $1.name) }
+    return out
+}
+
 final class KayaApp {
     /// The notification_result decision, in a method of its own because
     /// the ring loop's switch has no seam a test can reach (the ring is
@@ -1691,6 +1883,12 @@ final class KayaApp {
     // Clipboard reads: one-shot, keyed by request id, on the alert's
     // request/result grammar.
     private var clipboardReads: [UInt64: (KayaAppTx, KayaRepresentation?) throws -> Void] = [:]
+    // The rich mirror, one Document per `rich` textarea
+    // (docs/rich-text-plan.md R1): folded from the two occurrences here
+    // and from the app's own set_document/apply_edit as they are SENT.
+    private var documents: [UInt64: KayaDocument] = [:]
+    private var widgetEdits: [UInt64: (KayaAppTx, KayaEdit) throws -> Void] = [:]
+    private var widgetFormats: [UInt64: (KayaAppTx, KayaFormat) throws -> Void] = [:]
     private var widgetPastes: [UInt64: (KayaAppTx, KayaRepresentation) throws -> Void] = [:]
     private var nodePastes: [UInt64: (KayaAppTx, [KayaValue], KayaRepresentation) throws -> Void] = [:]
     private var widgetDrops: [UInt64: (KayaAppTx, KayaDropped) throws -> Void] = [:]
@@ -2052,6 +2250,102 @@ final class KayaApp {
         _ n: KayaNodeHandle, _ handler: @escaping (KayaAppTx, [KayaValue], String) throws -> Void
     ) {
         nodeChanges[n.id] = handler
+    }
+
+    /// One addressed user edit of a `rich` textarea; `onChange` still
+    /// fires beside it (docs/rich-text-plan.md R1).
+    func onEdit(_ w: KayaWidget, _ handler: @escaping (KayaAppTx, KayaEdit) throws -> Void) {
+        widgetEdits[w.id] = handler
+    }
+
+    /// The user formatted a range; a format over a collapsed caret is
+    /// pending state and arrives as the next edit's runs, never here.
+    func onFormat(_ w: KayaWidget, _ handler: @escaping (KayaAppTx, KayaFormat) throws -> Void) {
+        widgetFormats[w.id] = handler
+    }
+
+    /// The folded document of a `rich` textarea; empty until the first
+    /// edit or write.
+    func document(_ w: KayaWidget) -> KayaDocument {
+        documents[w.id] ?? KayaDocument()
+    }
+
+    /// Seed from a write, so a read after `setDocument` answers it.
+    fileprivate func seedDocument(_ widget: UInt64, _ document: KayaDocument) {
+        documents[widget] = document
+    }
+
+    /// One delivered edit, folded by the core's own rules
+    /// (crates/kaya/src/app.rs, `absorb_edit`).
+    fileprivate func absorbEdit(
+        _ widget: UInt64, _ start: Int, _ end: Int, _ inserted: String, _ runs: [KayaRun]
+    ) {
+        var doc = documents[widget] ?? KayaDocument()
+        var bytes = Array(doc.text.utf8)
+        let boundary = { (at: Int) in at == bytes.count || bytes[at] & 0xC0 != 0x80 }
+        if start < 0 || start > end || end > bytes.count || !boundary(start) || !boundary(end) {
+            // A mirror out of step with the core would splice garbage.
+            doc.text = inserted
+            doc.runs = runs
+            documents[widget] = doc
+            return
+        }
+        let insertedBytes = Array(inserted.utf8)
+        let shift = insertedBytes.count - (end - start)
+        var next: [KayaRun] = []
+        for run in doc.runs {
+            if run.start < start {
+                var head = run
+                head.end = min(run.end, start)
+                next.append(head)
+            }
+            if run.end > end {
+                var tail = run
+                tail.start = max(run.start, end) + shift
+                tail.end = run.end + shift
+                next.append(tail)
+            }
+        }
+        for run in runs {
+            var moved = run
+            moved.start += start
+            moved.end += start
+            next.append(moved)
+        }
+        bytes.replaceSubrange(start..<end, with: insertedBytes)
+        doc.text = String(decoding: bytes, as: UTF8.self)
+        doc.runs = kayaNormalizeRuns(next)
+        documents[widget] = doc
+    }
+
+    /// One delivered format act, the core's `absorb_format`.
+    fileprivate func absorbFormat(
+        _ widget: UInt64, _ start: Int, _ end: Int, _ name: String, _ value: String?
+    ) {
+        var doc = documents[widget] ?? KayaDocument()
+        if start >= end { return }
+        var next: [KayaRun] = []
+        for run in doc.runs {
+            if run.name != name || run.end <= start || run.start >= end {
+                next.append(run)
+                continue
+            }
+            if run.start < start {
+                var head = run
+                head.end = start
+                next.append(head)
+            }
+            if run.end > end {
+                var tail = run
+                tail.start = end
+                next.append(tail)
+            }
+        }
+        if let value {
+            next.append(KayaRun(start: start, end: end, name: name, value: value))
+        }
+        doc.runs = kayaNormalizeRuns(next)
+        documents[widget] = doc
     }
 
     /// Register a toggle handler for a live checkbox: the box owns its
@@ -2452,6 +2746,21 @@ final class KayaApp {
             case (UInt16(KAYA_OCCURRENCE_TEXT_CHANGED), false):
                 if let handler = nodeChanges[id] {
                     dispatch { try build { tx in try handler(tx, keys, text ?? "") } }
+                }
+            // THE MIRROR IS FOLDED BEFORE THE HANDLER RUNS, so a handler
+            // reading `document` sees the edit it was told about
+            // (docs/rich-text-plan.md R1).
+            case (UInt16(KAYA_OCCURRENCE_TEXT_EDITED), _):
+                let edit = kayaEditFromTail(tail)
+                absorbEdit(id, edit.start, edit.end, edit.inserted, edit.runs)
+                if let handler = widgetEdits[id] {
+                    dispatch { try build { tx in try handler(tx, edit) } }
+                }
+            case (UInt16(KAYA_OCCURRENCE_TEXT_FORMATTED), _):
+                let act = kayaFormatFromTail(tail)
+                absorbFormat(id, act.start, act.end, act.name, act.value)
+                if let handler = widgetFormats[id] {
+                    dispatch { try build { tx in try handler(tx, act) } }
                 }
             case (UInt16(KAYA_OCCURRENCE_TOGGLED), true):
                 if let handler = widgetToggles[id] {
@@ -3116,6 +3425,53 @@ final class KayaAppTx {
         tx.revealRange(w.id, start, stop)
     }
 
+    // --- Rich text (docs/rich-text-plan.md R1) ----------------------
+
+    /// This textarea carries attribute runs: `setDocument`, `applyEdit`,
+    /// `KayaApp.onEdit`.
+    func setRich(_ w: KayaWidget, _ on: Bool = true) {
+        tx.setRich(w.id, on)
+    }
+
+    /// Replace a `rich` textarea's whole document: echoes nothing and,
+    /// like `setText`, spends the native undo history
+    /// (docs/undo-plan.md D7).
+    func setDocument(_ w: KayaWidget, _ document: KayaDocument) {
+        app.seedDocument(w.id, document)
+        tx.setRichText(w.id, UInt32(document.runs.count),
+                       kayaRunValues(document.runs), .str(document.text))
+    }
+
+    /// One edit into a `rich` textarea: echoes nothing, never resets
+    /// undo, and is held rather than refused mid-composition
+    /// (docs/rich-text-plan.md R5). THE MIRROR TAKES IT AS IT IS SENT,
+    /// so the app's document is ahead of the widget's until a live
+    /// composition ends (§7).
+    func applyEdit(_ w: KayaWidget, _ edit: KayaEdit) {
+        app.absorbEdit(w.id, edit.start, edit.end, edit.inserted, edit.runs)
+        tx.applyEdit(w.id, UInt64(edit.start), UInt64(edit.end), UInt32(edit.runs.count),
+                     kayaRunValues(edit.runs), .str(edit.inserted))
+    }
+
+    /// Format the widget's CURRENT SELECTION through its own act — what
+    /// a toolbar button sends; the widget answers through
+    /// `KayaApp.onFormat`. Over a collapsed selection the attribute is
+    /// armed for the next keystroke instead. `value` is "true" for a
+    /// flag, the URL for `link`.
+    func format(_ w: KayaWidget, _ name: String, _ value: String) {
+        tx.formatText(w.id, 0, [.str(name), .str(value)])
+    }
+
+    /// Take an attribute off the widget's current selection.
+    func unformat(_ w: KayaWidget, _ name: String) {
+        tx.formatText(w.id, 1, [.str(name), .str("")])
+    }
+
+    /// Make the selection's paragraphs `kind`; `.body` clears.
+    func setBlock(_ w: KayaWidget, _ kind: KayaBlock) {
+        format(w, "block", kind.name)
+    }
+
     /// A `Range<Int>` as the wire's two unsigned offsets. `Range` already
     /// guarantees lower <= upper; checking the lower bound HERE names kaya
     /// instead of letting `UInt64.init` trap with "Negative value is not
@@ -3156,12 +3512,20 @@ final class KayaAppTx {
     }
 
     /// A multi-line text editor, on the entry's uncontrolled contract.
+    /// `rich:` adds the attribute-run channel (docs/rich-text-plan.md R1):
+    /// `onEdit:` and `onFormat:` answer only on one.
     func textarea(
         onChange: ((KayaAppTx, String) throws -> Void)? = nil,
+        rich: Bool = false,
+        onEdit: ((KayaAppTx, KayaEdit) throws -> Void)? = nil,
+        onFormat: ((KayaAppTx, KayaFormat) throws -> Void)? = nil,
         grow: Double? = nil
     ) -> KayaWidget {
         let w = widget(UInt32(KAYA_KIND_TEXTAREA))
         if let onChange { app.onChange(w, onChange) }
+        if rich { setRich(w, true) }
+        if let onEdit { app.onEdit(w, onEdit) }
+        if let onFormat { app.onFormat(w, onFormat) }
         if let grow { setGrow(w, grow) }
         return w
     }

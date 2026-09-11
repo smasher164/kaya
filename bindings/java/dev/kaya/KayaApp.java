@@ -276,6 +276,11 @@ public final class KayaApp {
     final Map<Long, MenuSelectHandler> menuSelectedNode = new HashMap<>();
     private final Map<Long, BiConsumer<Tx, List<Object>>> nodeHandlers = new HashMap<>();
     private final Map<Long, BiConsumer<Tx, String>> widgetChanges = new HashMap<>();
+    // A rich textarea's addressed edits and toolbar acts, plus the
+    // mirror both fold into (docs/rich-text-plan.md R1).
+    private final Map<Long, BiConsumer<Tx, Edit>> widgetEdits = new HashMap<>();
+    private final Map<Long, BiConsumer<Tx, Format>> widgetFormats = new HashMap<>();
+    private final Map<Long, Document> documents = new HashMap<>();
     private final Map<Long, ChangeHandler> nodeChanges = new HashMap<>();
     private final Map<Long, BiConsumer<Tx, Boolean>> widgetToggles = new HashMap<>();
     private final Map<Long, BiConsumer<Tx, Double>> widgetValues = new HashMap<>();
@@ -2723,6 +2728,19 @@ public final class KayaApp {
             return this;
         }
 
+        /** This textarea carries attribute runs: Tx.setDocument,
+         * Tx.applyEdit, KayaApp.onEdit (docs/rich-text-plan.md R1). Same
+         * discipline as {@link #grow}. */
+        public Widget rich() {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: rich on a widget outside its build transaction"
+                    + " — declare it where the textarea is made");
+            }
+            tx.emit(KayaWire.txSetRich(id, true));
+            return this;
+        }
+
         /** This widget's accessibility hint at construction. */
         public Widget a11yHint(String hint) {
             if (tx == null || tx.closed) {
@@ -3060,6 +3078,228 @@ public final class KayaApp {
         @Override
         public String toString() {
             return start + ":" + stop;
+        }
+    }
+
+    /** One paragraph kind; drawn, never stored
+     * (docs/rich-text-plan.md R3). It rides as the {@code block}
+     * attribute's value. */
+    public enum Block {
+        BODY("body"),
+        HEADING1("heading1"),
+        HEADING2("heading2"),
+        HEADING3("heading3"),
+        QUOTE("quote"),
+        CODE_BLOCK("code_block");
+
+        final String kind;
+
+        Block(String kind) {
+            this.kind = kind;
+        }
+    }
+
+    /** One attribute over one span, in TextRange's unit (UTF-8 bytes):
+     * {@code value} is "true" for the flags, a URL for a link, a
+     * {@link Block}'s own spelling for a block. */
+    public record TextRun(long start, long stop, String name, String value) {}
+
+    /** A toolbar act over a range; a null {@code value} is the attribute
+     * taken off. */
+    public record Format(long start, long stop, String name, String value) {}
+
+    /**
+     * A {@code rich} textarea's text and runs, kept current by the
+     * binding from every edit it delivers (docs/rich-text-plan.md R1).
+     * Read the app's copy with {@link KayaApp#document}.
+     */
+    public static final class Document {
+        String content;
+        final List<TextRun> marks = new ArrayList<>();
+
+        public Document(String text) {
+            this.content = text;
+        }
+
+        Document(String text, List<TextRun> runs) {
+            this.content = text;
+            this.marks.addAll(runs);
+        }
+
+        public String text() {
+            return content;
+        }
+
+        public List<TextRun> runs() {
+            return java.util.Collections.unmodifiableList(marks);
+        }
+
+        /** Paint one attribute over one range. Every chain method below
+         * is this one with a name and a value filled in. */
+        public Document mark(TextRange range, String name, String value) {
+            marks.add(new TextRun(range.start, range.stop, name, value));
+            return this;
+        }
+
+        public Document bold(TextRange range) {
+            return mark(range, "bold", "true");
+        }
+
+        public Document italic(TextRange range) {
+            return mark(range, "italic", "true");
+        }
+
+        public Document underline(TextRange range) {
+            return mark(range, "underline", "true");
+        }
+
+        public Document strike(TextRange range) {
+            return mark(range, "strike", "true");
+        }
+
+        public Document code(TextRange range) {
+            return mark(range, "code", "true");
+        }
+
+        public Document link(TextRange range, String url) {
+            return mark(range, "link", url);
+        }
+
+        /** A range's paragraphs; it covers whole paragraphs or the core
+         * refuses it, naming the byte. */
+        public Document block(TextRange range, Block kind) {
+            return mark(range, "block", kind.kind);
+        }
+
+        /** The attribute covering one UTF-8 byte offset, or null. */
+        public String attrAt(long byteOffset, String name) {
+            for (TextRun run : marks) {
+                if (run.name().equals(name) && run.start() <= byteOffset
+                        && byteOffset < run.stop()) {
+                    return run.value();
+                }
+            }
+            return null;
+        }
+
+        /**
+         * The core's normal form (crates/kaya/src/scene.rs,
+         * RichDoc::normalize), so the mirror and the core's spell the
+         * same string: one entry per (range, attribute), disjoint per
+         * attribute, a later run winning, adjacent-and-equal merged,
+         * ordered by start then name.
+         */
+        static List<TextRun> normalize(List<TextRun> runs) {
+            List<String> names = new ArrayList<>();
+            for (TextRun run : runs) {
+                if (!names.contains(run.name())) {
+                    names.add(run.name());
+                }
+            }
+            java.util.Collections.sort(names);
+            List<TextRun> one = new ArrayList<>();
+            for (String name : names) {
+                List<TextRun> painted = new ArrayList<>();
+                for (TextRun run : runs) {
+                    if (!run.name().equals(name) || run.start() >= run.stop()) {
+                        continue;
+                    }
+                    List<TextRun> kept = new ArrayList<>();
+                    for (TextRun old : painted) {
+                        if (old.stop() <= run.start() || old.start() >= run.stop()) {
+                            kept.add(old);
+                            continue;
+                        }
+                        if (old.start() < run.start()) {
+                            kept.add(new TextRun(old.start(), run.start(), old.name(),
+                                    old.value()));
+                        }
+                        if (old.stop() > run.stop()) {
+                            kept.add(new TextRun(run.stop(), old.stop(), old.name(),
+                                    old.value()));
+                        }
+                    }
+                    kept.add(run);
+                    painted = kept;
+                }
+                // List.sort is stable, so equal starts keep the paint order.
+                painted.sort(java.util.Comparator.comparingLong(TextRun::start));
+                for (TextRun run : painted) {
+                    TextRun last = one.isEmpty() ? null : one.get(one.size() - 1);
+                    if (last != null && last.name().equals(name) && last.stop() == run.start()
+                            && last.value().equals(run.value())) {
+                        one.set(one.size() - 1,
+                                new TextRun(last.start(), run.stop(), name, last.value()));
+                        continue;
+                    }
+                    one.add(run);
+                }
+            }
+            one.sort(java.util.Comparator.comparingLong(TextRun::start)
+                    .thenComparing(TextRun::name));
+            return one;
+        }
+    }
+
+    /**
+     * Replace {@code start..stop} with {@code inserted}, whose runs carry
+     * offsets RELATIVE to the inserted text.
+     */
+    public static final class Edit {
+        final long start;
+        final long stop;
+        final String inserted;
+        final List<TextRun> marks = new ArrayList<>();
+
+        Edit(long start, long stop, String inserted, List<TextRun> runs) {
+            this.start = start;
+            this.stop = stop;
+            this.inserted = inserted;
+            if (runs != null) {
+                this.marks.addAll(runs);
+            }
+        }
+
+        /** Put text at one offset; {@code at} is a caret, so a range with
+         * a width is refused naming both ends ({@link #replace} is the
+         * verb for that). */
+        public static Edit insert(TextRange at, String text) {
+            if (at.start != at.stop) {
+                throw new IllegalArgumentException(
+                        "kaya: Edit.insert takes a caret and got " + at.start + ".." + at.stop
+                        + " — Edit.replace swaps a range for text");
+            }
+            return new Edit(at.start, at.stop, text, null);
+        }
+
+        public static Edit delete(TextRange range) {
+            return new Edit(range.start, range.stop, "", null);
+        }
+
+        public static Edit replace(TextRange range, String text) {
+            return new Edit(range.start, range.stop, text, null);
+        }
+
+        /** One attribute over the INSERTED text's own offsets. */
+        public Edit mark(TextRange range, String name, String value) {
+            marks.add(new TextRun(range.start, range.stop, name, value));
+            return this;
+        }
+
+        public long start() {
+            return start;
+        }
+
+        public long stop() {
+            return stop;
+        }
+
+        public String inserted() {
+            return inserted;
+        }
+
+        public List<TextRun> runs() {
+            return java.util.Collections.unmodifiableList(marks);
         }
     }
 
@@ -4812,6 +5052,65 @@ public final class KayaApp {
          */
         public void revealRange(Widget w, TextRange range) {
             emit(KayaWire.txRevealRange(w.id, range.start, range.stop));
+        }
+
+        /**
+         * Replace a {@code rich} textarea's whole document: it echoes
+         * nothing and, like {@link #setText}, spends the native undo
+         * history (docs/undo-plan.md D7).
+         */
+        public void setDocument(Widget w, Document document) {
+            seedDocument(w.id, document);
+            emit(KayaWire.txSetRichText(w.id, document.marks.size(),
+                    flatRuns(document.marks), document.content));
+        }
+
+        /**
+         * One edit into a {@code rich} textarea: it echoes nothing, never
+         * resets undo, and is held rather than refused mid-composition
+         * (docs/rich-text-plan.md R5). The app's own Document takes it
+         * HERE, while the widget and the core's mirror take it when the
+         * composition ends (docs/rich-text-plan.md §7).
+         */
+        public void applyEdit(Widget w, Edit edit) {
+            absorbEdit(w.id, edit.start, edit.stop, edit.inserted, edit.marks);
+            emit(KayaWire.txApplyEdit(w.id, edit.start, edit.stop, edit.marks.size(),
+                    flatRuns(edit.marks), edit.inserted));
+        }
+
+        /**
+         * Format the widget's CURRENT SELECTION through its own act —
+         * what a toolbar button sends; the widget answers through
+         * {@link KayaApp#onFormat} (docs/rich-text-plan.md R1). Over a
+         * collapsed selection the attribute is armed for the next
+         * keystroke instead. {@code value} is "true" for a flag, the URL
+         * for link.
+         */
+        public void format(Widget w, String name, String value) {
+            emit(KayaWire.txFormatText(w.id, 0, new Object[] { name, value }));
+        }
+
+        /** Take an attribute off the widget's current selection. */
+        public void unformat(Widget w, String name) {
+            emit(KayaWire.txFormatText(w.id, 1, new Object[] { name, "" }));
+        }
+
+        /** Make the selection's paragraphs {@code kind};
+         * {@link Block#BODY} clears. */
+        public void setBlock(Widget w, Block kind) {
+            format(w, "block", kind.kind);
+        }
+
+        private Object[] flatRuns(List<TextRun> runs) {
+            Object[] flat = new Object[runs.size() * 4];
+            for (int i = 0; i < runs.size(); i++) {
+                TextRun run = runs.get(i);
+                flat[i * 4] = run.start();
+                flat[i * 4 + 1] = run.stop();
+                flat[i * 4 + 2] = run.name();
+                flat[i * 4 + 3] = run.value();
+            }
+            return flat;
         }
 
         public Collection collection() {
@@ -6739,6 +7038,160 @@ public final class KayaApp {
     }
 
     /**
+     * Register a handler for one addressed user edit of a {@code rich}
+     * textarea; {@link #onChange} still fires beside it
+     * (docs/rich-text-plan.md R1).
+     */
+    public void onEdit(Widget w, BiConsumer<Tx, Edit> handler) {
+        widgetEdits.put(w.id, handler);
+    }
+
+    /**
+     * Register a handler for the user formatting a range. A format over
+     * a COLLAPSED caret is pending state and arrives as the next edit's
+     * runs, never here.
+     */
+    public void onFormat(Widget w, BiConsumer<Tx, Format> handler) {
+        widgetFormats.put(w.id, handler);
+    }
+
+    /**
+     * This app's copy of a rich textarea's content, folded from every
+     * edit and format the core delivered; empty until the first of them
+     * or the first Tx.setDocument.
+     */
+    public Document document(Widget w) {
+        Document doc = documents.get(w.id);
+        return doc == null ? new Document("") : new Document(doc.content, doc.marks);
+    }
+
+    private void seedDocument(long widget, Document document) {
+        documents.put(widget, new Document(document.content, document.marks));
+    }
+
+    /** One delivered edit, folded by the core's own rules
+     * (crates/kaya/src/app.rs, AppCtx::absorb_edit). THE SPLICE IS IN
+     * UTF-8 BYTES, which a Java String is not: the offsets are the
+     * core's (docs/ranges-units.md), so the text is cut as bytes and
+     * decoded back. */
+    private void absorbEdit(long widget, long start, long stop, String inserted,
+            List<TextRun> runs) {
+        Document doc = documents.computeIfAbsent(widget, id -> new Document(""));
+        byte[] was = doc.content.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        byte[] put = inserted.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        if (start < 0 || start > stop || stop > was.length
+                || !boundary(was, start) || !boundary(was, stop)) {
+            // A mirror out of step with the core would splice a character
+            // in half.
+            documents.put(widget, new Document(inserted, runs));
+            return;
+        }
+        long shift = put.length - (stop - start);
+        List<TextRun> next = new ArrayList<>();
+        for (TextRun run : doc.marks) {
+            if (run.start() < start) {
+                next.add(new TextRun(run.start(), Math.min(run.stop(), start), run.name(),
+                        run.value()));
+            }
+            if (run.stop() > stop) {
+                next.add(new TextRun(Math.max(run.start(), stop) + shift, run.stop() + shift,
+                        run.name(), run.value()));
+            }
+        }
+        for (TextRun run : runs) {
+            next.add(new TextRun(run.start() + start, run.stop() + start, run.name(),
+                    run.value()));
+        }
+        byte[] merged = new byte[was.length - (int) (stop - start) + put.length];
+        System.arraycopy(was, 0, merged, 0, (int) start);
+        System.arraycopy(put, 0, merged, (int) start, put.length);
+        System.arraycopy(was, (int) stop, merged, (int) start + put.length,
+                was.length - (int) stop);
+        doc.content = new String(merged, java.nio.charset.StandardCharsets.UTF_8);
+        doc.marks.clear();
+        doc.marks.addAll(Document.normalize(next));
+    }
+
+    /** A UTF-8 offset is a character boundary unless it lands on a
+     * continuation byte. */
+    private static boolean boundary(byte[] utf8, long at) {
+        return at == utf8.length || (utf8[(int) at] & 0xC0) != 0x80;
+    }
+
+    /** One delivered format: put the attribute over the range or take it
+     * off, clipping THIS attribute's runs (AppCtx::absorb_format). */
+    private void absorbFormat(long widget, Format act) {
+        if (act.start() >= act.stop()) {
+            return;
+        }
+        Document doc = documents.computeIfAbsent(widget, id -> new Document(""));
+        List<TextRun> next = new ArrayList<>();
+        for (TextRun run : doc.marks) {
+            if (!run.name().equals(act.name()) || run.stop() <= act.start()
+                    || run.start() >= act.stop()) {
+                next.add(run);
+                continue;
+            }
+            if (run.start() < act.start()) {
+                next.add(new TextRun(run.start(), act.start(), run.name(), run.value()));
+            }
+            if (run.stop() > act.stop()) {
+                next.add(new TextRun(act.stop(), run.stop(), run.name(), run.value()));
+            }
+        }
+        if (act.value() != null) {
+            next.add(new TextRun(act.start(), act.stop(), act.name(), act.value()));
+        }
+        doc.marks.clear();
+        doc.marks.addAll(Document.normalize(next));
+    }
+
+    /**
+     * text_edited's decoded values (KayaWire.parseOccurrence) cut into
+     * the app-facing record; a tail that does not say what the record
+     * declares is the core disagreeing with this binding, so it refuses
+     * naming what it read.
+     */
+    private static Edit editOf(Object payload) {
+        List<?> tail = payload instanceof List<?> l ? l : null;
+        if (tail == null || tail.size() < 4 || (tail.size() - 4) % 4 != 0) {
+            throw new IllegalStateException("kaya: a text_edited carries "
+                    + (tail == null ? "nothing" : tail.size())
+                    + " values, want 4 plus four per run");
+        }
+        List<TextRun> runs = new ArrayList<>();
+        for (int at = 4; at < tail.size(); at += 4) {
+            runs.add(runOf(tail, at));
+        }
+        return new Edit((Long) tail.get(1), (Long) tail.get(2),
+                (String) tail.get(3), runs);
+    }
+
+    private static Format formatOf(Object payload) {
+        List<?> tail = payload instanceof List<?> l ? l : null;
+        if (tail == null || tail.size() != 5) {
+            throw new IllegalStateException("kaya: a text_formatted carries "
+                    + (tail == null ? "nothing" : tail.size()) + " values, want 5");
+        }
+        boolean removed = tail.get(0) instanceof Integer r && r != 0;
+        return new Format((Long) tail.get(1), (Long) tail.get(2), (String) tail.get(3),
+                removed ? null : (String) tail.get(4));
+    }
+
+    private static TextRun runOf(List<?> tail, int at) {
+        if (!(tail.get(at) instanceof Long start) || !(tail.get(at + 1) instanceof Long stop)) {
+            throw new IllegalStateException("kaya: a run's offsets are a "
+                    + describe(tail.get(at)) + " and a " + describe(tail.get(at + 1))
+                    + ", want two I64");
+        }
+        return new TextRun(start, stop, (String) tail.get(at + 2), (String) tail.get(at + 3));
+    }
+
+    private static String describe(Object v) {
+        return v == null ? "null" : v.getClass().getSimpleName();
+    }
+
+    /**
      * Register a change handler for a template entry; it also receives
      * the stamped copy's keys, outermost first.
      */
@@ -7044,6 +7497,28 @@ public final class KayaApp {
                 if (handler != null) {
                     dispatch(tx -> {
                         handler.accept(tx, occ.keys, (String) occ.payload);
+                    });
+                }
+            // THE MIRROR FOLLOWS FIRST, and unconditionally — before the
+            // handler lookup, so a rich textarea nobody registered for
+            // still keeps its document in step
+            // (docs/rich-text-plan.md R1).
+            } else if (occ.kind == KayaWire.OCC_KIND_TEXT_EDITED) {
+                Edit edit = editOf(occ.payload);
+                absorbEdit(occ.id, edit.start, edit.stop, edit.inserted, edit.marks);
+                BiConsumer<Tx, Edit> handler = widgetEdits.get(occ.id);
+                if (handler != null && occ.keys.isEmpty()) {
+                    dispatch(tx -> {
+                        handler.accept(tx, edit);
+                    });
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_TEXT_FORMATTED) {
+                Format act = formatOf(occ.payload);
+                absorbFormat(occ.id, act);
+                BiConsumer<Tx, Format> handler = widgetFormats.get(occ.id);
+                if (handler != null && occ.keys.isEmpty()) {
+                    dispatch(tx -> {
+                        handler.accept(tx, act);
                     });
                 }
             } else if (occ.kind == KayaWire.OCC_KIND_TOGGLED && occ.keys.isEmpty()) {

@@ -591,6 +591,15 @@ export class Handle {
     return this;
   }
 
+  /** This textarea carries ATTRIBUTE RUNS (docs/rich-text-plan.md R1):
+   * setDocument, applyEdit, format, and the onEdit/onFormat deltas. Off,
+   * none of that exists and the widget is the plain uncontrolled field.
+   * Chains. */
+  rich(on = true): this {
+    records().push(wire.tx_set_rich(this.id, Boolean(on)));
+    return this;
+  }
+
   /** THE GRID THAT FITS (docs/layout-knobs-plan.md §3): as many columns
    * as fit this grid's width at `minWidth` DIP each, sharing the extra.
    * An explicit `columnsWhen` still wins while its class holds. Chains. */
@@ -823,6 +832,69 @@ export class Widget extends Handle {
     const [start, stop] = textRange("revealRange", span);
     records().push(wire.tx_reveal_range(this.id, start, stop));
     return this;
+  }
+
+  // The rich document surface (docs/rich-text-plan.md R1); `rich()`
+  // declares the widget and carries no _live guard, since a template
+  // declares it too.
+
+  /** Replace this `rich` textarea's WHOLE document — text and runs in one
+   * write. A CONFIGURATION WRITE: it echoes nothing and, like setText, it
+   * spends the field's native undo history (docs/undo-plan.md D7). The
+   * app's own Document is seeded from it. */
+  setDocument(document: Document): this {
+    this._live("setDocument()");
+    app()._seedDocument(this.id, document);
+    records().push(wire.tx_set_rich_text(this.id, document.runs.length, flatRuns(document.runs), document.text));
+    return this;
+  }
+
+  /** One edit into this `rich` textarea — the app's own or a
+   * collaborator's: replace `start..end` with the edit's text and its
+   * runs, the selection kept by R5's rule. Echoes nothing, never resets
+   * undo, and is HELD rather than refused while an input method is
+   * composing. THE APP'S DOCUMENT TAKES IT AS IT IS SENT, while the widget
+   * and the core's mirror take it when the composition ends
+   * (docs/rich-text-plan.md §7). */
+  applyEdit(edit: Edit): this {
+    this._live("applyEdit()");
+    app()._absorbEdit(this.id, edit.start, edit.end, edit.inserted, edit.runs);
+    records().push(wire.tx_apply_edit(this.id, edit.start, edit.end, edit.runs.length, flatRuns(edit.runs), edit.inserted));
+    return this;
+  }
+
+  /** Format this `rich` textarea's CURRENT SELECTION through the widget's
+   * own act — what a toolbar button sends. Over a collapsed selection the
+   * attribute is armed for the next keystroke instead and nothing is
+   * answered until it; the widget reports the range it formatted to
+   * `onFormat`, which is how the document moves. */
+  format(name: string, value = "true"): this {
+    this._live("format()");
+    records().push(wire.tx_format_text(this.id, 0, [String(name), textValue("format value", value)]));
+    return this;
+  }
+
+  /** Take an attribute off this textarea's current selection. */
+  unformat(name: string): this {
+    this._live("unformat()");
+    records().push(wire.tx_format_text(this.id, 1, [String(name), ""]));
+    return this;
+  }
+
+  /** Make the selection's whole paragraphs `kind` (kaya.Block); `body`
+   * clears. */
+  setBlock(kind: BlockName): this {
+    return this.format("block", blockValue(kind));
+  }
+
+  /** This `rich` textarea's document, as this binding has folded it from
+   * the deltas (docs/rich-text-plan.md R1) — a copy, so writing to it
+   * moves nothing. Empty until the first write or edit. */
+  document(): Document {
+    if (this.isNode) {
+      throw new Error("kaya: document() on a template node — a rich document belongs to ONE live widget, and a stamped copy's deltas arrive with the row's keys (docs/rich-text-plan.md R1)");
+    }
+    return app()._document(this.id);
   }
 
   /** This widget's flex weight within its row/column (the dynamic path;
@@ -2109,6 +2181,196 @@ export type UndoDelta = {
   orders: [coll: number, path: wire.Decoded[], keys: wire.Decoded[]][];
 };
 
+// ------------------------------------------------------------ rich text
+// A `rich` textarea's document surface (docs/rich-text-plan.md R1): the
+// app reads ONE Document this binding keeps current from the deltas.
+
+/** One paragraph kind, carried as the `block` attribute's value
+ * (docs/rich-text-plan.md R3): drawn by the backend, never stored, so the
+ * bytes an app and a backend count are the same bytes. */
+export const Block = Object.freeze({
+  BODY: "body",
+  HEADING1: "heading1",
+  HEADING2: "heading2",
+  HEADING3: "heading3",
+  QUOTE: "quote",
+  CODE_BLOCK: "code_block",
+} as const);
+export type BlockName = (typeof Block)[keyof typeof Block];
+const BLOCK_NAMES: readonly string[] = Object.values(Block);
+
+function blockValue(kind: unknown): BlockName {
+  if (typeof kind !== "string") {
+    throw new TypeError(`kaya: a block kind is one of ${JSON.stringify(BLOCK_NAMES)}, not ${runtime.describe(kind)} (docs/rich-text-plan.md R3)`);
+  }
+  if (!BLOCK_NAMES.includes(kind)) {
+    throw new Error(`kaya: ${JSON.stringify(kind)} is not a block kind — one of ${JSON.stringify(BLOCK_NAMES)} (docs/rich-text-plan.md R3)`);
+  }
+  return kind as BlockName;
+}
+
+/** One attribute over one span, in kaya's unit — UTF-8 BYTE offsets
+ * (docs/ranges-units.md §7). `value` is "true" for the flags, a URL for a
+ * link, a kind for a block. */
+export type Run = { start: number; end: number; name: string; value: string };
+
+/** A toolbar act over a range; `value` null is the attribute taken off. */
+export type Format = { start: number; end: number; name: string; value: string | null };
+
+/** A `rich` textarea's text and runs, kept current by the binding from
+ * the deltas it delivers (docs/rich-text-plan.md R1). The marks CHAIN:
+ * `new kaya.Document(text).bold([0, 6])`; a range is a [start, stop] pair
+ * of UTF-8 byte offsets, as everywhere else in this binding. */
+export class Document {
+  text: string;
+  runs: Run[];
+
+  constructor(text = "", runs: readonly Run[] = []) {
+    this.text = textValue("Document text", text);
+    this.runs = runs.map((r) => ({ ...r }));
+  }
+
+  /** One attribute over one range. Returns the document. */
+  mark(span: readonly [number, number], name: string, value: string): this {
+    const [start, stop] = textRange("Document.mark", span);
+    this.runs.push({ start, end: stop, name: String(name), value: textValue("a run's value", value) });
+    return this;
+  }
+
+  bold(span: readonly [number, number]): this {
+    return this.mark(span, "bold", "true");
+  }
+
+  italic(span: readonly [number, number]): this {
+    return this.mark(span, "italic", "true");
+  }
+
+  underline(span: readonly [number, number]): this {
+    return this.mark(span, "underline", "true");
+  }
+
+  strike(span: readonly [number, number]): this {
+    return this.mark(span, "strike", "true");
+  }
+
+  code(span: readonly [number, number]): this {
+    return this.mark(span, "code", "true");
+  }
+
+  link(span: readonly [number, number], url: string): this {
+    return this.mark(span, "link", url);
+  }
+
+  /** A paragraph's kind; the range covers whole paragraphs or the core
+   * refuses it, naming the byte. */
+  block(span: readonly [number, number], kind: BlockName): this {
+    return this.mark(span, "block", blockValue(kind));
+  }
+
+  /** The value `name` carries at a byte offset, or null. */
+  attrAt(byte: number, name: string): string | null {
+    for (const run of this.runs) {
+      if (run.name === name && run.start <= byte && byte < run.end) return run.value;
+    }
+    return null;
+  }
+}
+
+/** Replace `start..end` with `inserted`, whose `runs` carry offsets
+ * RELATIVE to the inserted text (docs/rich-text-plan.md R1). */
+export class Edit {
+  start: number;
+  end: number;
+  inserted: string;
+  runs: Run[];
+
+  constructor(start: number, end: number, inserted = "", runs: readonly Run[] = []) {
+    this.start = start;
+    this.end = end;
+    this.inserted = textValue("Edit text", inserted);
+    this.runs = runs.map((r) => ({ ...r }));
+  }
+
+  static insert(at: number, text: string): Edit {
+    return new Edit(at, at, text);
+  }
+
+  static delete(span: readonly [number, number]): Edit {
+    const [start, stop] = textRange("Edit.delete", span);
+    return new Edit(start, stop, "");
+  }
+
+  static replace(span: readonly [number, number], text: string): Edit {
+    const [start, stop] = textRange("Edit.replace", span);
+    return new Edit(start, stop, text);
+  }
+
+  /** One attribute over the INSERTED text's own offsets. Returns the
+   * edit. */
+  mark(span: readonly [number, number], name: string, value: string): this {
+    const [start, stop] = textRange("Edit.mark", span);
+    this.runs.push({ start, end: stop, name: String(name), value: textValue("a run's value", value) });
+    return this;
+  }
+}
+
+/** The core's normal form (crates/kaya/src/scene.rs, RichDoc::normalize),
+ * so the mirror and the core's document spell one string. */
+function normalizeRuns(runs: readonly Run[]): Run[] {
+  const out: Run[] = [];
+  for (const name of [...new Set(runs.map((r) => r.name))].sort()) {
+    let painted: Run[] = [];
+    for (const run of runs.filter((r) => r.name === name)) {
+      if (run.start >= run.end) continue;
+      const kept: Run[] = [];
+      for (const old of painted) {
+        if (old.end <= run.start || old.start >= run.end) {
+          kept.push(old);
+          continue;
+        }
+        if (old.start < run.start) kept.push({ ...old, end: run.start });
+        if (old.end > run.end) kept.push({ ...old, start: run.end });
+      }
+      kept.push({ ...run });
+      painted = kept;
+    }
+    painted.sort((a, b) => a.start - b.start);
+    const merged: Run[] = [];
+    for (const run of painted) {
+      const last = merged[merged.length - 1];
+      if (last !== undefined && last.end === run.start && last.value === run.value) last.end = run.end;
+      else merged.push({ ...run });
+    }
+    out.push(...merged);
+  }
+  out.sort((a, b) => a.start - b.start || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  return out;
+}
+
+/** The decoder's flat run tail, read in FOURS. */
+function runsFrom(flat: readonly wire.Decoded[]): Run[] {
+  const runs: Run[] = [];
+  for (let i = 0; i + 3 < flat.length; i += 4) {
+    runs.push({ start: flat[i] as number, end: flat[i + 1] as number, name: flat[i + 2] as string, value: flat[i + 3] as string });
+  }
+  return runs;
+}
+
+/** `runsFrom`'s inverse: the wire's four values per run. */
+function flatRuns(runs: readonly Run[]): wire.WireValue[] {
+  const flat: wire.WireValue[] = [];
+  for (const run of runs) flat.push(new I64(run.start), new I64(run.end), run.name, run.value);
+  return flat;
+}
+
+/** Whether a byte offset falls on a code-point boundary (Rust's
+ * str::is_char_boundary, in the unit the wire counts): past the end is
+ * not one. */
+function onBoundary(data: Buffer, at: number): boolean {
+  if (at > data.length) return false;
+  return at === data.length || (data[at]! & 0xc0) !== 0x80;
+}
+
 /** Join an accept list: the closed kinds by name plus any custom ids,
  * space separated — ids carry NO SPACES. */
 function acceptList(kinds: readonly string[]): string {
@@ -3316,13 +3578,24 @@ export function entry(opts: TextInputOptions = {}): Widget {
   return handle;
 }
 
+export type TextAreaOptions = TextInputOptions & { rich?: boolean; onEdit?: Handler; onFormat?: Handler };
+
 /** A multi-line text editor: the entry's contract over the platform's
- * real multi-line editor. */
-export function textarea(opts: TextInputOptions = {}): Widget {
+ * real multi-line editor.
+ *
+ * `rich: true` adds the attributed surface (docs/rich-text-plan.md R1):
+ * setDocument, applyEdit, format/unformat/setBlock, the document() this
+ * binding folds, and the two deltas — onEdit(edit) for every user edit,
+ * addressed, beside the whole-text onChange, and onFormat(act) for a
+ * toolbar act over a range. */
+export function textarea(opts: TextAreaOptions = {}): Widget {
   const handle = widget(wire.KIND_TEXTAREA);
   if (opts.text !== undefined) records().push(wire.tx_set_text(handle.id, textValue("textarea text", opts.text)));
+  if (opts.rich === true) handle.rich(true);
   if (opts.placeholder !== undefined) handle.placeholder(opts.placeholder);
   if (opts.onChange !== undefined) app()._register(handle, wire.OCC_TEXT_CHANGED, opts.onChange);
+  if (opts.onEdit !== undefined) app()._register(handle, wire.OCC_TEXT_EDITED, opts.onEdit);
+  if (opts.onFormat !== undefined) app()._register(handle, wire.OCC_TEXT_FORMATTED, opts.onFormat);
   setGrow(handle, opts);
   return handle;
 }
@@ -3737,6 +4010,11 @@ export class App {
   /** @internal */ readonly _collections = new Map<number, Collection<unknown, unknown>>();
   /** @internal */ readonly _signals = new Map<number, Signal<unknown>>();
   /** @internal */ readonly _drawHandlers = new Map<number, [Widget, (d: Draw, size: Size, time: number) => void]>();
+  /** @internal The rich mirror, by LIVE widget id
+   * (docs/rich-text-plan.md R1). Outside the rollback journal, as the
+   * Rust binding's is: an edge the widget and the core have taken is not
+   * the app's to undo. */
+  readonly _documents = new Map<number, Document>();
   private _posted: [Handler, unknown[]][] = [];
   private _drainScheduled = false;
   private _shutdown: (() => void) | null = null;
@@ -4000,6 +4278,73 @@ export class App {
     }
   }
 
+  // The rich mirror's three doors (docs/rich-text-plan.md R1): the
+  // widget's own deltas, folded by the core's rules
+  // (crates/kaya/src/app.rs, absorbEdit/absorbFormat), and the seed a
+  // setDocument write leaves.
+
+  /** @internal */
+  _document(widget: number): Document {
+    const doc = this._documents.get(widget);
+    return doc === undefined ? new Document() : new Document(doc.text, doc.runs);
+  }
+
+  /** @internal */
+  _seedDocument(widget: number, document: Document): void {
+    this._documents.set(widget, new Document(document.text, document.runs));
+  }
+
+  /** @internal One edit folded in: runs before it keep, runs after it
+   * shift, a run the edit falls inside is cut, and the inserted text's
+   * own runs land relative to the edit. */
+  _absorbEdit(widget: number, start: number, stop: number, inserted: string, runs: readonly Run[]): void {
+    let doc = this._documents.get(widget);
+    if (doc === undefined) {
+      doc = new Document();
+      this._documents.set(widget, doc);
+    }
+    const data = Buffer.from(doc.text, "utf8");
+    const added = Buffer.from(inserted, "utf8");
+    if (stop > data.length || !onBoundary(data, start) || !onBoundary(data, stop)) {
+      // A mirror out of step with the core takes the edit whole rather
+      // than splicing at an offset that means nothing here.
+      doc.text = inserted;
+      doc.runs = runs.map((r) => ({ ...r }));
+      return;
+    }
+    const shift = added.length - (stop - start);
+    const next: Run[] = [];
+    for (const run of doc.runs) {
+      if (run.start < start) next.push({ ...run, end: Math.min(run.end, start) });
+      if (run.end > stop) next.push({ ...run, start: Math.max(run.start, stop) + shift, end: run.end + shift });
+    }
+    for (const run of runs) next.push({ ...run, start: run.start + start, end: run.end + start });
+    doc.text = Buffer.concat([data.subarray(0, start), added, data.subarray(stop)]).toString("utf8");
+    doc.runs = normalizeRuns(next);
+  }
+
+  /** @internal One toolbar act folded in: the attribute put over the
+   * range or taken off it, clipping THIS attribute's runs and no other. */
+  _absorbFormat(widget: number, start: number, stop: number, name: string, value: string | null): void {
+    let doc = this._documents.get(widget);
+    if (doc === undefined) {
+      doc = new Document();
+      this._documents.set(widget, doc);
+    }
+    if (start >= stop) return;
+    const next: Run[] = [];
+    for (const run of doc.runs) {
+      if (run.name !== name || run.end <= start || run.start >= stop) {
+        next.push(run);
+        continue;
+      }
+      if (run.start < start) next.push({ ...run, end: start });
+      if (run.end > stop) next.push({ ...run, start: stop });
+    }
+    if (value !== null) next.push({ start, end: stop, name, value });
+    doc.runs = normalizeRuns(next);
+  }
+
   /** Run everything posted, each as its own transaction, in order. The
    * batch is taken BEFORE any of it runs, so a callable that posts again
    * lands in the NEXT batch. */
@@ -4123,6 +4468,27 @@ export class App {
     }
     if (kind === wire.OCC_DRAW_REQUESTED || kind === wire.OCC_TICK) {
       this._answerCanvas(ident, kind, payload as wire.Decoded[]);
+      return;
+    }
+    if (kind === wire.OCC_TEXT_EDITED || kind === wire.OCC_TEXT_FORMATTED) {
+      // THE DOCUMENT FOLLOWS FIRST AND WITHOUT A HANDLER, as an undo's
+      // mirrors do (docs/rich-text-plan.md R1): an app that registered
+      // neither delta still reads a current document(). A STAMPED copy
+      // carries no document — the mirror is keyed by live widget, as the
+      // core's is.
+      const flat = payload as wire.Decoded[];
+      let arg: Edit | Format;
+      if (kind === wire.OCC_TEXT_EDITED) {
+        const runs = runsFrom(flat.slice(4));
+        arg = new Edit(flat[1] as number, flat[2] as number, flat[3] as string, runs);
+        if (keys.length === 0) this._absorbEdit(ident, arg.start, arg.end, arg.inserted, runs);
+      } else {
+        const [removed, start, stop, name, value] = flat as [number, number, number, string, string];
+        arg = { start, end: stop, name, value: removed !== 0 ? null : value };
+        if (keys.length === 0) this._absorbFormat(ident, start, stop, name, arg.value);
+      }
+      const handler = keys.length > 0 ? this._nodeHandlers.get(menuKey(kind, ident)) : this._widgetHandlers.get(menuKey(kind, ident));
+      if (handler !== undefined) this._dispatch(handler, ...this._rowArgs(ident, keys as Key[]), arg);
       return;
     }
     if (kind === wire.OCC_MENU_ACTIVATED || kind === wire.OCC_MENU_TOGGLED || kind === wire.OCC_MENU_VALUE_CHANGED) {

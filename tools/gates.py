@@ -58,6 +58,10 @@ GATES = [
      "sub-second; hashing an input set would cost more than the run it "
      "would skip"),
     ("check-targets", ["tools/check-targets.py"], True, ""),
+    # The generated Windows bindings against their generator; cargo's own
+    # incremental no-op is the cache, and the compare is milliseconds.
+    ("check-winui-bindings", ["tools/check-winui-bindings.py"], False,
+     "cargo caches the generator build itself; the compare is milliseconds"),
     ("check-shell", ["tools/check-shell.py"], True, ""),
     # check-shell's opposite number: the gate bodies are python now
     # (docs/deferred.md's 2026-08-27 ruling), which retires the `$?` class

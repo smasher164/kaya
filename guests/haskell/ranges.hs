@@ -11,8 +11,8 @@ import KayaApp
 import KayaWire (Value (..))
 
 -- Frozen — 813 bytes, byte-identical to every other guest's copy.
-document :: String
-document =
+docSource :: String
+docSource =
   intercalate
     "\n"
     [ "line 00: 日本語 preface",
@@ -81,7 +81,7 @@ findAll haystack pattern = go 0 (utf8 haystack)
 main :: IO ()
 main = kayaMain $ \app -> do
   -- The offsets index this copy; Build is pure, so the fold is an IORef.
-  docRef <- newIORef document
+  docRef <- newIORef docSource
 
   buildTx app $ do
     window 0 [WTitle "ranges"]
@@ -98,7 +98,7 @@ main = kayaMain $ \app -> do
             submitTx app (writeSignal status (VStr "0 matches"))
         )
         [A11yId "doc", A11yLabel "Document"]
-    setText editor document
+    setText editor docSource
 
     root <-
       column

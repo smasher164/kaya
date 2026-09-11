@@ -8,6 +8,7 @@ import (
 	"iter"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -231,6 +232,11 @@ type App struct {
 	nodeHandlers   map[uint64]func(*Tx, []any)
 	widgetChanges  map[uint64]func(*Tx, string)
 	nodeChanges    map[uint64]func(*Tx, []any, string)
+	// A rich textarea's addressed edits and toolbar acts, plus the
+	// mirror both fold into (docs/rich-text-plan.md R1).
+	widgetEdits    map[uint64]func(*Tx, Edit)
+	widgetFormats  map[uint64]func(*Tx, Format)
+	documents      map[uint64]Document
 	widgetToggles  map[uint64]func(*Tx, bool)
 	widgetValues   map[uint64]func(*Tx, float64)
 	nodeValues     map[uint64]func(*Tx, []any, float64)
@@ -354,6 +360,9 @@ func NewApp() *App {
 		nodeHandlers:   make(map[uint64]func(*Tx, []any)),
 		widgetChanges:  make(map[uint64]func(*Tx, string)),
 		nodeChanges:    make(map[uint64]func(*Tx, []any, string)),
+		widgetEdits:    make(map[uint64]func(*Tx, Edit)),
+		widgetFormats:  make(map[uint64]func(*Tx, Format)),
+		documents:      make(map[uint64]Document),
 		widgetToggles:  make(map[uint64]func(*Tx, bool)),
 		widgetValues:   make(map[uint64]func(*Tx, float64)),
 		nodeValues:     make(map[uint64]func(*Tx, []any, float64)),
@@ -1257,6 +1266,248 @@ func (tx *Tx) SelectRange(w Widget, r TextRange) {
 func (tx *Tx) RevealRange(w Widget, r TextRange) {
 	r.check("RevealRange", w)
 	tx.emit(TxRevealRange(w.id, uint64(r.Start), uint64(r.End)))
+}
+
+// Block is one paragraph kind, drawn and never stored
+// (docs/rich-text-plan.md R3). It rides as the `block` attribute's value.
+type Block string
+
+const (
+	Body      Block = "body"
+	Heading1  Block = "heading1"
+	Heading2  Block = "heading2"
+	Heading3  Block = "heading3"
+	Quote     Block = "quote"
+	CodeBlock Block = "code_block"
+)
+
+// TextRun is one attribute over one span, in TextRange's unit: Value is
+// "true" for the flags, a URL for a link, a Block's own spelling for a
+// block. NOT `Run`, which is this package's entry point.
+type TextRun struct {
+	Start, End int
+	Name       string
+	Value      string
+}
+
+// Document is a rich textarea's text and runs, kept current by the
+// binding from every edit it delivers (docs/rich-text-plan.md R1). Read
+// the app's copy with App.Document.
+type Document struct {
+	Text string
+	Runs []TextRun
+}
+
+// NewDocument starts a document; the Mark chain paints its attributes.
+func NewDocument(text string) Document {
+	return Document{Text: text}
+}
+
+// Mark paints one attribute over one byte range. Every chain method
+// below is this one with a name and a value filled in.
+func (d Document) Mark(start, end int, name, value string) Document {
+	runs := make([]TextRun, len(d.Runs), len(d.Runs)+1)
+	copy(runs, d.Runs)
+	d.Runs = append(runs, TextRun{Start: start, End: end, Name: name, Value: value})
+	return d
+}
+
+func (d Document) Bold(start, end int) Document {
+	return d.Mark(start, end, "bold", "true")
+}
+
+func (d Document) Italic(start, end int) Document {
+	return d.Mark(start, end, "italic", "true")
+}
+
+func (d Document) Underline(start, end int) Document {
+	return d.Mark(start, end, "underline", "true")
+}
+
+func (d Document) Strike(start, end int) Document {
+	return d.Mark(start, end, "strike", "true")
+}
+
+func (d Document) Code(start, end int) Document {
+	return d.Mark(start, end, "code", "true")
+}
+
+func (d Document) Link(start, end int, url string) Document {
+	return d.Mark(start, end, "link", url)
+}
+
+// Block makes a range's paragraphs kind; the range covers whole
+// paragraphs or the core refuses it, naming the byte.
+func (d Document) Block(start, end int, kind Block) Document {
+	return d.Mark(start, end, "block", string(kind))
+}
+
+// AttrAt answers the attribute covering one byte offset, and whether
+// there was one.
+func (d Document) AttrAt(at int, name string) (string, bool) {
+	for _, run := range d.Runs {
+		if run.Name == name && run.Start <= at && at < run.End {
+			return run.Value, true
+		}
+	}
+	return "", false
+}
+
+// normalizeRuns is the core's normal form (crates/kaya/src/scene.rs,
+// RichDoc::normalize), so the mirror and the core's spell the same
+// string: one entry per (range, attribute), disjoint per attribute, a
+// later run winning, adjacent-and-equal merged, ordered by start then
+// name.
+func normalizeRuns(runs []TextRun) []TextRun {
+	names := make([]string, 0, len(runs))
+	seen := map[string]bool{}
+	for _, run := range runs {
+		if !seen[run.Name] {
+			seen[run.Name] = true
+			names = append(names, run.Name)
+		}
+	}
+	slices.Sort(names)
+	var out []TextRun
+	for _, name := range names {
+		var painted []TextRun
+		for _, run := range runs {
+			if run.Name != name || run.Start >= run.End {
+				continue
+			}
+			var kept []TextRun
+			for _, old := range painted {
+				if old.End <= run.Start || old.Start >= run.End {
+					kept = append(kept, old)
+					continue
+				}
+				if old.Start < run.Start {
+					cut := old
+					cut.End = run.Start
+					kept = append(kept, cut)
+				}
+				if old.End > run.End {
+					cut := old
+					cut.Start = run.End
+					kept = append(kept, cut)
+				}
+			}
+			painted = append(kept, run)
+		}
+		slices.SortStableFunc(painted, func(a, b TextRun) int { return a.Start - b.Start })
+		var merged []TextRun
+		for _, run := range painted {
+			if n := len(merged); n > 0 && merged[n-1].End == run.Start &&
+				merged[n-1].Value == run.Value {
+				merged[n-1].End = run.End
+				continue
+			}
+			merged = append(merged, run)
+		}
+		out = append(out, merged...)
+	}
+	slices.SortStableFunc(out, func(a, b TextRun) int {
+		if a.Start != b.Start {
+			return a.Start - b.Start
+		}
+		return strings.Compare(a.Name, b.Name)
+	})
+	return out
+}
+
+// Edit replaces Start..End with Inserted, whose Runs carry offsets
+// RELATIVE to the inserted text.
+type Edit struct {
+	Start, End int
+	Inserted   string
+	Runs       []TextRun
+}
+
+// Insert puts text at one byte offset.
+func Insert(at int, text string) Edit {
+	return Edit{Start: at, End: at, Inserted: text}
+}
+
+// Delete takes a byte range out.
+func Delete(start, end int) Edit {
+	return Edit{Start: start, End: end}
+}
+
+// Replace swaps a byte range for text.
+func Replace(start, end int, text string) Edit {
+	return Edit{Start: start, End: end, Inserted: text}
+}
+
+// Mark paints one attribute over the INSERTED text's own offsets.
+func (e Edit) Mark(start, end int, name, value string) Edit {
+	runs := make([]TextRun, len(e.Runs), len(e.Runs)+1)
+	copy(runs, e.Runs)
+	e.Runs = append(runs, TextRun{Start: start, End: end, Name: name, Value: value})
+	return e
+}
+
+// Format is a toolbar act over a range; Removed is the attribute taken
+// off, and Value is empty then. Go has no option type, which is the only
+// thing that differs from the other bindings here.
+type Format struct {
+	Start, End int
+	Name       string
+	Value      string
+	Removed    bool
+}
+
+// Rich declares this textarea attributed: Tx.SetDocument, Tx.ApplyEdit,
+// App.OnEdit, App.OnFormat (docs/rich-text-plan.md R1).
+func (w Widget) Rich() Widget {
+	w.tx.emit(TxSetRich(w.id, true))
+	return w
+}
+
+// SetDocument replaces a rich textarea's whole content: it echoes
+// nothing and, like SetText, spends the native undo history
+// (docs/undo-plan.md D7).
+func (tx *Tx) SetDocument(w Widget, doc Document) {
+	tx.app.seedDocument(w.id, doc)
+	flat := make([]any, 0, 4*len(doc.Runs))
+	for _, run := range doc.Runs {
+		TextRange{Start: run.Start, End: run.End}.check("SetDocument", w)
+		flat = append(flat, int64(run.Start), int64(run.End), run.Name, run.Value)
+	}
+	tx.emit(TxSetRichText(w.id, uint32(len(doc.Runs)), flat, doc.Text))
+}
+
+// ApplyEdit sends one edit into a rich textarea: it echoes nothing,
+// never resets undo, and is held rather than refused mid-composition
+// (docs/rich-text-plan.md R5). The app's own Document takes it HERE,
+// while the widget and the core's mirror take it when the composition
+// ends (docs/rich-text-plan.md §7).
+func (tx *Tx) ApplyEdit(w Widget, e Edit) {
+	TextRange{Start: e.Start, End: e.End}.check("ApplyEdit", w)
+	tx.app.absorbEdit(w.id, e.Start, e.End, e.Inserted, e.Runs)
+	flat := make([]any, 0, 4*len(e.Runs))
+	for _, run := range e.Runs {
+		flat = append(flat, int64(run.Start), int64(run.End), run.Name, run.Value)
+	}
+	tx.emit(TxApplyEdit(w.id, uint64(e.Start), uint64(e.End), uint32(len(e.Runs)), flat, e.Inserted))
+}
+
+// Format formats the widget's CURRENT SELECTION through its own act —
+// what a toolbar button sends; the widget answers through App.OnFormat
+// (docs/rich-text-plan.md R1). Over a collapsed selection the attribute
+// is armed for the next keystroke instead. value is "true" for a flag,
+// the URL for link.
+func (tx *Tx) Format(w Widget, name, value string) {
+	tx.emit(TxFormatText(w.id, 0, []any{name, value}))
+}
+
+// Unformat takes an attribute off the widget's current selection.
+func (tx *Tx) Unformat(w Widget, name string) {
+	tx.emit(TxFormatText(w.id, 1, []any{name, ""}))
+}
+
+// SetBlock makes the selection's paragraphs kind; Body clears.
+func (tx *Tx) SetBlock(w Widget, kind Block) {
+	tx.Format(w, "block", string(kind))
 }
 
 // Construction sugar: containers take their body as a closure and parent
@@ -5002,6 +5253,146 @@ func (a *App) OnChangeNode(n Node, fn func(*Tx, []any, string)) {
 	a.nodeChanges[n.id] = fn
 }
 
+// OnEdit registers a handler for one addressed user edit of a rich
+// textarea; OnChange still fires beside it
+// (docs/rich-text-plan.md R1).
+func (a *App) OnEdit(w Widget, fn func(*Tx, Edit)) {
+	a.widgetEdits[w.id] = fn
+}
+
+// OnFormat registers a handler for the user formatting a range. A
+// format over a COLLAPSED caret is pending state and arrives as the next
+// edit's runs, never here.
+func (a *App) OnFormat(w Widget, fn func(*Tx, Format)) {
+	a.widgetFormats[w.id] = fn
+}
+
+// Document is this app's copy of a rich textarea's content, folded from
+// every edit and format the core delivered; empty until the first of
+// them or the first Tx.SetDocument.
+func (a *App) Document(w Widget) Document {
+	doc := a.documents[w.id]
+	doc.Runs = slices.Clone(doc.Runs)
+	return doc
+}
+
+func (a *App) seedDocument(widget uint64, doc Document) {
+	a.documents[widget] = doc
+}
+
+// absorbEdit folds one delivered edit by the core's own rules
+// (crates/kaya/src/app.rs, AppCtx::absorb_edit).
+func (a *App) absorbEdit(widget uint64, start, end int, inserted string, runs []TextRun) {
+	doc := a.documents[widget]
+	if start < 0 || start > end || end > len(doc.Text) ||
+		!utf8Boundary(doc.Text, start) || !utf8Boundary(doc.Text, end) {
+		// A mirror out of step with the core would slice a character in half.
+		a.documents[widget] = Document{Text: inserted, Runs: slices.Clone(runs)}
+		return
+	}
+	shift := len(inserted) - (end - start)
+	var next []TextRun
+	for _, run := range doc.Runs {
+		if run.Start < start {
+			next = append(next, TextRun{Start: run.Start, End: min(run.End, start),
+				Name: run.Name, Value: run.Value})
+		}
+		if run.End > end {
+			next = append(next, TextRun{Start: max(run.Start, end) + shift,
+				End: run.End + shift, Name: run.Name, Value: run.Value})
+		}
+	}
+	for _, run := range runs {
+		next = append(next, TextRun{Start: run.Start + start, End: run.End + start,
+			Name: run.Name, Value: run.Value})
+	}
+	doc.Text = doc.Text[:start] + inserted + doc.Text[end:]
+	doc.Runs = normalizeRuns(next)
+	a.documents[widget] = doc
+}
+
+// utf8Boundary: an offset is a character boundary unless it lands on a
+// continuation byte.
+func utf8Boundary(s string, at int) bool {
+	return at == len(s) || s[at]&0xC0 != 0x80
+}
+
+// absorbFormat puts one attribute over a range, or takes it off,
+// clipping that attribute's runs (AppCtx::absorb_format).
+func (a *App) absorbFormat(widget uint64, start, end int, name, value string, removed bool) {
+	if start >= end {
+		return
+	}
+	doc := a.documents[widget]
+	var next []TextRun
+	for _, run := range doc.Runs {
+		if run.Name != name || run.End <= start || run.Start >= end {
+			next = append(next, run)
+			continue
+		}
+		if run.Start < start {
+			cut := run
+			cut.End = start
+			next = append(next, cut)
+		}
+		if run.End > end {
+			cut := run
+			cut.Start = end
+			next = append(next, cut)
+		}
+	}
+	if !removed {
+		next = append(next, TextRun{Start: start, End: end, Name: name, Value: value})
+	}
+	doc.Runs = normalizeRuns(next)
+	a.documents[widget] = doc
+}
+
+// editOf and formatOf cut the decoded payloads
+// (kaya_wire.go's occTextEdited / occTextFormatted arms) into the
+// app-facing records; a tail that does not say what the record declares
+// is the core disagreeing with this binding, so it refuses naming what
+// it read.
+func editOf(tail []any) Edit {
+	if len(tail) < 4 || (len(tail)-4)%4 != 0 {
+		panic(fmt.Sprintf("kaya: a text_edited carries %d values, want 4 plus four per run",
+			len(tail)))
+	}
+	e := Edit{Start: int(tail[1].(uint64)), End: int(tail[2].(uint64))}
+	e.Inserted, _ = tail[3].(string)
+	for at := 4; at < len(tail); at += 4 {
+		e.Runs = append(e.Runs, runOf(tail[at:at+4]))
+	}
+	return e
+}
+
+func formatOf(tail []any) Format {
+	if len(tail) != 5 {
+		panic(fmt.Sprintf("kaya: a text_formatted carries %d values, want 5", len(tail)))
+	}
+	name, _ := tail[3].(string)
+	value, _ := tail[4].(string)
+	return Format{
+		Start:   int(tail[1].(uint64)),
+		End:     int(tail[2].(uint64)),
+		Name:    name,
+		Value:   value,
+		Removed: tail[0].(uint32) != 0,
+	}
+}
+
+func runOf(four []any) TextRun {
+	start, ok := four[0].(int64)
+	end, alsoOk := four[1].(int64)
+	if !ok || !alsoOk {
+		panic(fmt.Sprintf("kaya: a run's offsets are a %T and a %T, want two int64",
+			four[0], four[1]))
+	}
+	name, _ := four[2].(string)
+	value, _ := four[3].(string)
+	return TextRun{Start: int(start), End: int(end), Name: name, Value: value}
+}
+
 // OnValueChanged registers a handler for a live slider's moves, or a
 // select's picks (same record, the index as a float64).
 func (a *App) OnValueChanged(w Widget, fn func(*Tx, float64)) {
@@ -5178,6 +5569,21 @@ func (a *App) Serve() {
 		case kind == occTextChanged:
 			if fn := a.nodeChanges[id]; fn != nil {
 				a.dispatch(func(tx *Tx) { fn(tx, keys, text) })
+			}
+		// THE MIRROR FOLLOWS FIRST, and unconditionally — before the
+		// handler lookup, so a rich textarea nobody registered for still
+		// keeps its document in step (docs/rich-text-plan.md R1).
+		case kind == occTextEdited:
+			edit := editOf(tail)
+			a.absorbEdit(id, edit.Start, edit.End, edit.Inserted, edit.Runs)
+			if fn := a.widgetEdits[id]; fn != nil && len(keys) == 0 {
+				a.dispatch(func(tx *Tx) { fn(tx, edit) })
+			}
+		case kind == occTextFormatted:
+			act := formatOf(tail)
+			a.absorbFormat(id, act.Start, act.End, act.Name, act.Value, act.Removed)
+			if fn := a.widgetFormats[id]; fn != nil && len(keys) == 0 {
+				a.dispatch(func(tx *Tx) { fn(tx, act) })
 			}
 		case kind == occToggled && len(keys) == 0:
 			if fn := a.widgetToggles[id]; fn != nil {

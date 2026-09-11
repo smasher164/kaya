@@ -43,7 +43,7 @@ EXCLUSIVE = {"dnd_rust", "dnd_python", "dnd_js", "dnd_go", "dnd_csharp", "dnd_ja
 # deploy-win twin of validate-mac's DEPTH_SCENES. The gates read
 # THIS default; the runner calls depth_scenes(), which honours the
 # KAYA_WIN_DEPTH_SCENES override the lane uses for one-off slices.
-DEPTH_SCENES = ["windowed", "canvas", "sizepolicy", "tasks", "notify"]
+DEPTH_SCENES = ["windowed", "canvas", "sizepolicy", "tasks", "notify", "richtext"]
 
 # THE PACKAGED LEGS (docs/packaging-plan.md P3): the SAME Rust guests, run
 # out of an installed MSIX instead of out of C:\kaya, because a kaya app is
@@ -326,6 +326,12 @@ ORDER = [
     # would put a composition in someone else's control.
     [
      "ranges_rust",
+    ],
+    # richtext_rust ALONE, ranges' two reasons exactly: it types and it
+    # composes (docs/rich-text-plan.md §4). RUST-ONLY while the eight
+    # bindings' sugar is the parallel worktree — hence the DEPTH_SCENES row.
+    [
+     "richtext_rust",
     ],
     # EACH search LEG ALONE, ranges' reason exactly: its `type` verb puts
     # REAL KEYSTROKES on the system input queue and foregrounds the guest to

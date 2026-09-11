@@ -6,7 +6,7 @@
 
 use kaya::spec::{FieldTy, ProtocolSpec};
 
-use crate::{Ctx, PropKind, is_padding, prop_variants, record_params, window_prop_variants};
+use crate::{Ctx, PropKind, is_padding, prop_variants, record_params, tx_fields, window_prop_variants};
 
 /// Names spec identifiers must avoid: this emitter's helpers, plus the
 /// JavaScript reserved words a parameter would collide with.
@@ -215,7 +215,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line(&format!("/** {} */", r.doc.replace('\n', " ").replace("*/", "* /")));
         c.line(&format!("export function tx_{}({}): Uint8Array {{", r.name, sig.join(", ")));
         let mut parts: Vec<String> = Vec::new();
-        for f in r.fields {
+        for f in tx_fields(r) {
             parts.push(match f.ty {
                 FieldTy::U32 if is_padding(f) => "u32(0)".into(),
                 FieldTy::U32 => format!("u32({})", f.name),

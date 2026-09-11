@@ -76,6 +76,9 @@ RUST_SCENES = [
     # APP LINKS (docs/app-links-plan.md L5): the same example again,
     # warm through UIApplication.open and cold through `simctl openurl`.
     "links",
+    # RICH TEXT (docs/rich-text-plan.md §4): rust-only until the bindings'
+    # sugar sweep lands, as `ranges` was.
+    "richtext",
 ]
 
 # The iPad legs, queued right after their phone sibling: the phone pool is

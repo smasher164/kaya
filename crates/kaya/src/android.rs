@@ -68,12 +68,45 @@ fn claim_attach() -> bool {
 }
 
 fn init_logging() {
-    android_logger::init_once(
-        android_logger::Config::default()
-            .with_max_level(log::LevelFilter::Info)
-            .with_tag("kaya"),
-    );
-    log_panics::init();
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        android_logger::init_once(
+            android_logger::Config::default()
+                .with_max_level(log::LevelFilter::Info)
+                .with_tag("kaya"),
+        );
+        log_panics::init();
+        forward_stderr_to_logcat();
+    });
+}
+
+/// docs/traps.md 2026-09-11: an app process's stderr is /dev/null, so every
+/// `KAYA_DIAG` the core prints reached nobody on five devices. fd 2 becomes a
+/// pipe whose reader logs each line under the `kaya` tag; the android lane
+/// holds the bridge live (tools/android/run-emulator.py's core-diag census).
+fn forward_stderr_to_logcat() {
+    let mut fds = [0i32; 2];
+    // SAFETY: pipe/dup2/close on descriptors this process owns; the read end
+    // is handed to exactly one File below.
+    unsafe {
+        if libc::pipe(fds.as_mut_ptr()) != 0 || libc::dup2(fds[1], 2) < 0 {
+            return;
+        }
+        libc::close(fds[1]);
+    }
+    let read_end = fds[0];
+    let spawned = std::thread::Builder::new().name("kaya-stderr".into()).spawn(move || {
+        use std::io::{BufRead, BufReader};
+        use std::os::fd::FromRawFd;
+        // SAFETY: the read end is owned here and nowhere else.
+        let file = unsafe { std::fs::File::from_raw_fd(read_end) };
+        for line in BufReader::new(file).lines().map_while(Result::ok) {
+            log::info!(target: "kaya", "{line}");
+        }
+    });
+    if spawned.is_err() {
+        log::warn!(target: "kaya", "the stderr bridge thread did not start; core diagnostics stay silent");
+    }
 }
 
 /// Android's attach: the shell Activity calls Kaya.attach(this) from
@@ -813,6 +846,47 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 sig: "(JJLjava/lang/String;Z)V".into(),
                 fn_ptr: present_note_native_undo as *mut _,
             },
+            // Rich text (docs/rich-text-plan.md R4/R5/R9).
+            NativeMethod {
+                name: "textComposing".into(),
+                sig: "(JZ)V".into(),
+                fn_ptr: present_text_composing as *mut _,
+            },
+            NativeMethod {
+                name: "textPending".into(),
+                sig: "(JLjava/lang/String;Ljava/lang/String;Z)V".into(),
+                fn_ptr: present_text_pending as *mut _,
+            },
+            NativeMethod {
+                name: "textEditSource".into(),
+                sig: "(JI)V".into(),
+                fn_ptr: present_text_edit_source as *mut _,
+            },
+            NativeMethod {
+                name: "textReportedEdit".into(),
+                sig: "(JJJJ)V".into(),
+                fn_ptr: present_text_reported_edit as *mut _,
+            },
+            NativeMethod {
+                name: "textSelection".into(),
+                sig: "(JJJ)V".into(),
+                fn_ptr: present_text_selection as *mut _,
+            },
+            NativeMethod {
+                name: "textFormatted".into(),
+                sig: "([BJJLjava/lang/String;Ljava/lang/String;Z)V".into(),
+                fn_ptr: present_text_formatted as *mut _,
+            },
+            NativeMethod {
+                name: "textRuns".into(),
+                sig: "(J)Ljava/lang/String;".into(),
+                fn_ptr: present_text_runs as *mut _,
+            },
+            NativeMethod {
+                name: "textLastEdit".into(),
+                sig: "(J)Ljava/lang/String;".into(),
+                fn_ptr: present_text_last_edit as *mut _,
+            },
         ],
     )
 }
@@ -1022,6 +1096,154 @@ extern "system" fn present_note_native_undo(
             u8::from(can_undo != 0),
         )
     };
+}
+
+// --- Rich text, the presentation side and the two harness reads ------
+//
+// OFFSETS CROSS IN UTF-8 BYTES (docs/rich-text-plan.md R2); the apply
+// records go the other way in UTF-16 code units and the Kotlin arm
+// converts. Every entry below is one capi call and nothing else.
+
+extern "system" fn present_text_composing(
+    _env: JNIEnv,
+    _class: JClass,
+    widget: jlong,
+    live: jni::sys::jboolean,
+) {
+    crate::capi::kaya_text_composing(widget as u64, u8::from(live != 0));
+}
+
+extern "system" fn present_text_pending(
+    mut env: JNIEnv,
+    _class: JClass,
+    widget: jlong,
+    name: JString,
+    value: JString,
+    on: jni::sys::jboolean,
+) {
+    let name: String = env
+        .get_string(&name)
+        .expect("kaya: reading a pending attribute's name failed")
+        .into();
+    let value: String = env
+        .get_string(&value)
+        .expect("kaya: reading a pending attribute's value failed")
+        .into();
+    unsafe {
+        crate::capi::kaya_text_pending(
+            widget as u64,
+            name.as_ptr(),
+            name.len(),
+            value.as_ptr(),
+            value.len(),
+            u8::from(on != 0),
+        )
+    };
+}
+
+extern "system" fn present_text_edit_source(
+    _env: JNIEnv,
+    _class: JClass,
+    widget: jlong,
+    source: jint,
+) {
+    crate::capi::kaya_text_edit_source(widget as u64, source as u32);
+}
+
+extern "system" fn present_text_reported_edit(
+    _env: JNIEnv,
+    _class: JClass,
+    widget: jlong,
+    start: jlong,
+    end: jlong,
+    inserted_len: jlong,
+) {
+    crate::capi::kaya_text_reported_edit(
+        widget as u64,
+        start as u64,
+        end as u64,
+        inserted_len as u64,
+    );
+}
+
+extern "system" fn present_text_selection(
+    _env: JNIEnv,
+    _class: JClass,
+    widget: jlong,
+    start: jlong,
+    end: jlong,
+) {
+    crate::capi::kaya_text_selection(widget as u64, start as u64, end as u64);
+}
+
+extern "system" fn present_text_formatted(
+    mut env: JNIEnv,
+    _class: JClass,
+    tag: JByteArray,
+    start: jlong,
+    end: jlong,
+    name: JString,
+    value: JString,
+    removed: jni::sys::jboolean,
+) {
+    let bytes = env
+        .convert_byte_array(&tag)
+        .expect("kaya: reading the formatted textarea's tag failed");
+    let name: String = env
+        .get_string(&name)
+        .expect("kaya: reading a formatted attribute's name failed")
+        .into();
+    let value: String = env
+        .get_string(&value)
+        .expect("kaya: reading a formatted attribute's value failed")
+        .into();
+    unsafe {
+        crate::capi::kaya_text_formatted(
+            bytes.as_ptr(),
+            bytes.len(),
+            start as u64,
+            end as u64,
+            name.as_ptr(),
+            name.len(),
+            value.as_ptr(),
+            value.len(),
+            u8::from(removed != 0),
+        )
+    };
+}
+
+/// The harness reads answer through a buffer the core fills; 64 KiB is
+/// kaya_text_runs' own contract on the other two harnesses.
+fn present_text_answer<'a>(
+    env: JNIEnv<'a>,
+    read: impl FnOnce(&mut [u8]) -> usize,
+) -> jni::sys::jstring {
+    let mut buf = [0u8; 65536];
+    let wrote = read(&mut buf);
+    let answer = std::str::from_utf8(&buf[..wrote]).unwrap_or("");
+    env.new_string(answer)
+        .expect("kaya: handing a rich text read back to the JVM failed")
+        .into_raw()
+}
+
+extern "system" fn present_text_runs<'a>(
+    env: JNIEnv<'a>,
+    _class: JClass,
+    widget: jlong,
+) -> jni::sys::jstring {
+    present_text_answer(env, |buf| unsafe {
+        crate::capi::kaya_text_runs(widget as u64, buf.as_mut_ptr(), buf.len())
+    })
+}
+
+extern "system" fn present_text_last_edit<'a>(
+    env: JNIEnv<'a>,
+    _class: JClass,
+    widget: jlong,
+) -> jni::sys::jstring {
+    present_text_answer(env, |buf| unsafe {
+        crate::capi::kaya_text_last_edit(widget as u64, buf.as_mut_ptr(), buf.len())
+    })
 }
 
 // --- Row windowing (docs/virtualization-plan.md §3) ------------------

@@ -39,8 +39,10 @@ SCENES="background stall milestone2 entry search gallery todos reorder feed grow
 # on the bindings sweep (docs/dnd-plan.md §4, §5 step 6); `sliders` waits
 # on the eight other bindings' `step`/`tick_spacing`/`on_commit` spelling
 # (docs/slider-plan.md §4, docs/deferred.md's sliders entry); `notify`
-# waits on the bindings sweep too (docs/tasks-s3-plan.md §6 step 3).
-DEPTH_SCENES="windowed canvas sizepolicy dnd tooltips tasks notify"
+# waits on the bindings sweep too (docs/tasks-s3-plan.md §6 step 3);
+# `richtext` waits on the eight other bindings' Document/Edit/Format
+# spelling (docs/rich-text-plan.md §4 step 3).
+DEPTH_SCENES="windowed canvas sizepolicy dnd tooltips tasks notify richtext"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 
@@ -1524,6 +1526,12 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh "$(hs_bin ranges)"
     run "$proto" ranges-java env KAYA_SELFTEST=ranges KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
+    # THE RICH TEXT SCENE (docs/rich-text-plan.md R9). Rust alone until the
+    # eight other bindings spell Document/Edit/Format. Pooled beside undo
+    # and ranges, whose `type` and `compose` it shares; no a11y-leg.sh —
+    # every read it makes is the CORE's document, not the bus.
+    run "$proto" richtext-rust env KAYA_SELFTEST=richtext \
+        "$CARGO_TARGET_DIR/debug/examples/richtext"
     # THE TEXT EDITOR (docs/editor-plan.md). GO ALONE by the plan's
     # choice, so there is no rust example and `editor` is in neither
     # SCENES nor DEPTH_SCENES (both derive a `cargo build --example`).

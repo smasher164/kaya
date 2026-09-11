@@ -5,8 +5,34 @@
 //! docs/traps.md: windows-bindgen type filters do not pull referenced
 //! types transitively. Each comment says what its entry unlocks.
 
+const BINDINGS: &str = "../../crates/kaya/src/winui/bindings.rs";
+
+/// `--check [--against <file>]`: generate into a scratch file and compare it
+/// with the committed bindings (default BINDINGS), touching nothing under
+/// crates/; exit 1 naming the staleness. tools/check-winui-bindings.py runs
+/// it, since a filter line added and never regenerated was invisible before
+/// (docs/traps.md 2026-09-11).
 fn main() {
     let sdk = "../../third_party/winappsdk";
+    let argv: Vec<String> = std::env::args().skip(1).collect();
+    let check = argv.iter().any(|a| a == "--check");
+    let against = argv
+        .iter()
+        .position(|a| a == "--against")
+        .and_then(|i| argv.get(i + 1).cloned())
+        .unwrap_or_else(|| BINDINGS.to_string());
+    if !std::path::Path::new(sdk).is_dir() {
+        eprintln!("winui-bindgen: {sdk} is missing — run tools/fetch-winappsdk.sh first");
+        std::process::exit(2);
+    }
+    let out: String = if check {
+        std::env::temp_dir()
+            .join(format!("kaya-winui-bindings-check-{}.rs", std::process::id()))
+            .to_string_lossy()
+            .into_owned()
+    } else {
+        BINDINGS.to_string()
+    };
     let args = vec![
         "--in".to_string(),
         "default".to_string(),
@@ -27,7 +53,7 @@ fn main() {
         "--in".to_string(),
         format!("{sdk}/Microsoft.WindowsAppSDK.Foundation-2.1.0/extracted/metadata"),
         "--out".to_string(),
-        "../../crates/kaya/src/winui/bindings.rs".to_string(),
+        out.clone(),
         "--filter".to_string(),
         "Microsoft.UI.Xaml.Application".to_string(),
         "Microsoft.UI.Xaml.ApplicationInitializationCallback".to_string(),
@@ -92,6 +118,15 @@ fn main() {
         //     unpainted run reads #00000001).
         //   Windows.Foundation.Rect — GetRect's out parameter.
         "Microsoft.UI.Text.ITextCharacterFormat".to_string(),
+        // RICH TEXT (docs/rich-text-plan.md §4, the WinUI arm): without
+        // these two enums windows-bindgen leaves Bold/Italic/Strikethrough
+        // (FormatEffect) and Underline (UnderlineType) as DEAD VTABLE PADS on
+        // ITextCharacterFormat, so four of the seven inline attributes have
+        // no spelling at all. ITextParagraphFormat is the block layer's —
+        // a quote's LeftIndent — and unlocks ITextRange.ParagraphFormat.
+        "Microsoft.UI.Text.FormatEffect".to_string(),
+        "Microsoft.UI.Text.UnderlineType".to_string(),
+        "Microsoft.UI.Text.ITextParagraphFormat".to_string(),
         "Microsoft.UI.Text.PointOptions".to_string(),
         "Microsoft.UI.Text.TextConstants".to_string(),
         "Windows.Foundation.Rect".to_string(),
@@ -544,10 +579,33 @@ fn main() {
         "Windows.ApplicationModel.Activation.ILaunchActivatedEventArgs".to_string(),
     ];
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
-    windows_bindgen::bindgen(args);
-    fix_array_proxy_paths();
-    fix_observable_vector_paths();
-    println!("generated crates/kaya/src/winui/bindings.rs");
+    // The returned Warnings are windows-bindgen's own notes about the metadata,
+    // not failures; a refusal panics inside the call.
+    let _warnings = windows_bindgen::bindgen(args);
+    fix_array_proxy_paths(&out);
+    fix_observable_vector_paths(&out);
+    if !check {
+        println!("generated crates/kaya/src/winui/bindings.rs");
+        return;
+    }
+    let fresh = std::fs::read(&out).expect("the scratch bindings were just generated");
+    let _ = std::fs::remove_file(&out);
+    let committed = std::fs::read(&against).unwrap_or_default();
+    if fresh != committed {
+        let differing = fresh
+            .iter()
+            .zip(committed.iter())
+            .filter(|(a, b)| a != b)
+            .count()
+            + fresh.len().abs_diff(committed.len());
+        eprintln!(
+            "winui-bindgen: {against} is STALE against tools/winui-bindgen — {differing} \
+             byte(s) differ from what the generator emits now; run `cargo run --locked` \
+             in tools/winui-bindgen and commit the result"
+        );
+        std::process::exit(1);
+    }
+    println!("winui-bindgen: {against} matches the generator ({} bytes)", fresh.len());
 }
 
 /// ItemCollection (ComboBox.Items) has IObservableVector as its DEFAULT
@@ -556,8 +614,7 @@ fn main() {
 /// pinned 0.3 ships only the plain vector/iterable types. The references
 /// list is first-match-wins with the built-ins inserted at the front, so
 /// no --reference override can carve the two observable types out.
-fn fix_observable_vector_paths() {
-    let path = "../../crates/kaya/src/winui/bindings.rs";
+fn fix_observable_vector_paths(path: &str) {
     let src = std::fs::read_to_string(path).expect("bindings.rs was just generated");
     if !src.contains("windows_collections::IObservableVector")
         && !src.contains("windows_collections::VectorChangedEventHandler")
@@ -585,8 +642,7 @@ fn fix_observable_vector_paths() {
 /// (..).as_array()` in the IPropertyValue vtable shims (pulled in by the
 /// IReference filter), but windows-core 0.62.2 keeps that type at
 /// `imp::array_proxy` with a Deref-to-Array API.
-fn fix_array_proxy_paths() {
-    let path = "../../crates/kaya/src/winui/bindings.rs";
+fn fix_array_proxy_paths(path: &str) {
     let src = std::fs::read_to_string(path).expect("bindings.rs was just generated");
     if !src.contains("windows_core::ArrayProxy") {
         return;

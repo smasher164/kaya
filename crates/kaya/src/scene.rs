@@ -1366,6 +1366,7 @@ impl RichDoc {
     /// Per attribute: disjoint, sorted, never adjacent-and-equal, a later
     /// run winning over an earlier one.
     fn normalize(&mut self) {
+        self.runs.retain(|r| !(r.name == "block" && r.value == "body"));
         let names: BTreeSet<String> = self.runs.iter().map(|r| r.name.clone()).collect();
         let mut out: Vec<TextRun> = Vec::new();
         for name in names {
@@ -4733,17 +4734,17 @@ impl Scene {
         let text = doc.text.clone();
         check_range(&text, widget, "text_formatted", range);
         check_attr_name(widget, "text_formatted", name);
-        if name == "block" {
-            let value = value.unwrap_or_else(|| {
-                panic!(
-                    "kaya: text_formatted on {widget:?}: a block attribute cannot be \
-                     removed — every paragraph has a kind, and {:?} is what taking one \
-                     off means",
-                    "body"
-                )
-            });
-            check_block_value(widget, "text_formatted", value);
-        }
+        // A paragraph going back to body IS the block attribute taken off:
+        // `body` is never a run (normalize drops it), so the two spellings an
+        // arm can report are one act (docs/rich-text-plan.md §7).
+        let value = match (name, value) {
+            ("block", Some("body")) => None,
+            ("block", Some(kind)) => {
+                check_block_value(widget, "text_formatted", kind);
+                Some(kind)
+            }
+            (_, v) => v,
+        };
         if range.start == range.stop {
             return None;
         }
@@ -13372,6 +13373,29 @@ mod tests {
     }
 
     /// The normal form `normalize` keeps, in R9's compare shape.
+    /// docs/rich-text-plan.md §7: a paragraph going back to body is the
+    /// block attribute taken off — reported as `body` or as a removal, one
+    /// act — and `body` is never a run.
+    #[test]
+    fn a_block_going_back_to_body_is_the_attribute_taken_off() {
+        let mut scene = Scene::new();
+        scene.apply(rich_editor("one\ntwo"));
+        let textarea = WidgetId(1);
+        scene.apply(vec![set_document(
+            "one\ntwo",
+            vec![run(0, 3, "block", "heading1"), run(4, 7, "block", "body")],
+        )]);
+        assert_eq!(scene.rich_runs_string(textarea).as_deref(), Some("0:3 block=heading1"));
+        let published = scene.note_text_formatted(textarea, TextRange::new(0, 3), "block", None);
+        assert_eq!(published.map(|(_, _, v)| v), Some(None));
+        assert_eq!(scene.rich_runs_string(textarea).as_deref(), Some(""));
+        scene.note_text_formatted(textarea, TextRange::new(4, 7), "block", Some("quote"));
+        let published =
+            scene.note_text_formatted(textarea, TextRange::new(4, 7), "block", Some("body"));
+        assert_eq!(published.map(|(_, _, v)| v), Some(None));
+        assert_eq!(scene.rich_runs_string(textarea).as_deref(), Some(""));
+    }
+
     /// docs/rich-text-plan.md R9: the harness reads the core's spelling —
     /// bytes, normal order, a flag by its name alone, an edit in angle
     /// brackets with its source word.

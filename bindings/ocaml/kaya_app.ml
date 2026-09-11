@@ -252,6 +252,55 @@ type dropped = {
   clip : representation option;
 }
 
+(* --- Rich text (docs/rich-text-plan.md R1) --------------------------
+   EVERY OFFSET IS A UTF-8 BYTE OFFSET into the widget's text
+   (docs/ranges-units.md §7), and OCaml's [string] IS a byte sequence, so
+   this binding converts nothing. A RANGE IS THE RANGES SUGAR'S PAIR,
+   [(start, stop)], half-open. *)
+
+(* One attribute over one span; [r_value] is "true" for the flags, a URL
+   for [link], a kind for [block]. *)
+type run = { r_start : int; r_stop : int; r_name : string; r_value : string }
+
+(* A [rich] textarea's text and runs, kept current by the binding from
+   the edits it delivers. *)
+type document = { d_text : string; d_runs : run list }
+
+(* Replace [e_start..e_stop] with [e_inserted], whose runs carry offsets
+   RELATIVE to the inserted text. *)
+type edit = {
+  e_start : int;
+  e_stop : int;
+  e_inserted : string;
+  e_runs : run list;
+}
+
+(* A toolbar act over a range; [f_value = None] is the attribute taken
+   off. *)
+type format_act = {
+  f_start : int;
+  f_stop : int;
+  f_name : string;
+  f_value : string option;
+}
+
+(* One paragraph kind; drawn, never stored (docs/rich-text-plan.md R3). *)
+type block =
+  | Body
+  | Heading1
+  | Heading2
+  | Heading3
+  | Quote
+  | Code_block
+
+let block_name = function
+  | Body -> "body"
+  | Heading1 -> "heading1"
+  | Heading2 -> "heading2"
+  | Heading3 -> "heading3"
+  | Quote -> "quote"
+  | Code_block -> "code_block"
+
 type app = {
   (* Work handed over by other threads, waiting to run as transactions
      on the app thread. THE ONLY FIELD HERE TOUCHED FROM ANOTHER
@@ -286,6 +335,12 @@ type app = {
   node_handlers : (int64, Kaya_wire.value list -> unit) Hashtbl.t;
   widget_changes : (int64, string -> unit) Hashtbl.t;
   node_changes : (int64, Kaya_wire.value list -> string -> unit) Hashtbl.t;
+  (* The rich mirror, one document per [rich] textarea
+     (docs/rich-text-plan.md R1): folded from the two occurrences and
+     from the app's own [set_document]/[apply_edit] as they are SENT. *)
+  documents : (int64, document) Hashtbl.t;
+  widget_edits : (int64, edit -> unit) Hashtbl.t;
+  widget_formats : (int64, format_act -> unit) Hashtbl.t;
   widget_toggles : (int64, bool -> unit) Hashtbl.t;
   widget_values : (int64, float -> unit) Hashtbl.t;
   (* The pickers' committed values arrive as the packed I64; the sugar
@@ -433,6 +488,9 @@ let create () =
     node_handlers = Hashtbl.create 8;
     widget_changes = Hashtbl.create 8;
     node_changes = Hashtbl.create 8;
+    documents = Hashtbl.create 8;
+    widget_edits = Hashtbl.create 8;
+    widget_formats = Hashtbl.create 8;
     widget_toggles = Hashtbl.create 8;
     widget_values = Hashtbl.create 8;
     widget_dates = Hashtbl.create 8;
@@ -1005,6 +1063,248 @@ let reveal_range (Widget id) (start, stop) =
   emit (the_tx ())
     (Kaya_wire.tx_reveal_range id (Int64.of_int start) (Int64.of_int stop))
 
+(* --- Rich text: the document, its edits, the widget's own acts ------
+   (docs/rich-text-plan.md R1). The offsets are the ranges' own unit. *)
+
+module Document = struct
+  type t = document
+
+  let create text = { d_text = text; d_runs = [] }
+
+  (* THE DOCUMENT COMES LAST, so a declaration reads as a pipeline:
+     [Document.create doc |> Document.bold (0, 6) |> ...]. *)
+  let mark (start, stop) name value doc =
+    {
+      doc with
+      d_runs =
+        doc.d_runs
+        @ [ { r_start = start; r_stop = stop; r_name = name; r_value = value } ];
+    }
+
+  let bold range doc = mark range "bold" "true" doc
+  let italic range doc = mark range "italic" "true" doc
+  let underline range doc = mark range "underline" "true" doc
+  let strike range doc = mark range "strike" "true" doc
+  let code range doc = mark range "code" "true" doc
+  let link range url doc = mark range "link" url doc
+
+  (* A paragraph's kind; the range covers whole paragraphs or is refused. *)
+  let block range kind doc = mark range "block" (block_name kind) doc
+
+  let attr_at doc byte name =
+    Option.map
+      (fun r -> r.r_value)
+      (List.find_opt
+         (fun r -> r.r_name = name && r.r_start <= byte && byte < r.r_stop)
+         doc.d_runs)
+end
+
+module Edit = struct
+  type t = edit
+
+  let insert at text = { e_start = at; e_stop = at; e_inserted = text; e_runs = [] }
+
+  let delete (start, stop) =
+    { e_start = start; e_stop = stop; e_inserted = ""; e_runs = [] }
+
+  let replace (start, stop) text =
+    { e_start = start; e_stop = stop; e_inserted = text; e_runs = [] }
+
+  (* One attribute over the INSERTED text's own offsets. *)
+  let mark (start, stop) name value e =
+    {
+      e with
+      e_runs =
+        e.e_runs
+        @ [ { r_start = start; r_stop = stop; r_name = name; r_value = value } ];
+    }
+end
+
+(* Four values per run — start, stop, name, value — the shape both
+   writes and both occurrences carry. *)
+let run_values runs =
+  List.concat_map
+    (fun r ->
+      [
+        Kaya_wire.I64 (Int64.of_int r.r_start);
+        Kaya_wire.I64 (Int64.of_int r.r_stop);
+        Kaya_wire.Str r.r_name;
+        Kaya_wire.Str r.r_value;
+      ])
+    runs
+
+let rec runs_of_values = function
+  | Kaya_wire.I64 start :: Kaya_wire.I64 stop :: Kaya_wire.Str name
+    :: Kaya_wire.Str value :: rest ->
+      {
+        r_start = Int64.to_int start;
+        r_stop = Int64.to_int stop;
+        r_name = name;
+        r_value = value;
+      }
+      :: runs_of_values rest
+  | _ -> []
+
+(* The core's normal form (crates/kaya/src/scene.rs, [RichDoc::normalize]),
+   so the mirror and the core's document spell one string. *)
+let normalize_runs runs =
+  let names = List.sort_uniq compare (List.map (fun r -> r.r_name) runs) in
+  let per_name name =
+    let painted =
+      List.fold_left
+        (fun painted run ->
+          if run.r_start >= run.r_stop then painted
+          else
+            List.concat_map
+              (fun old ->
+                if old.r_stop <= run.r_start || old.r_start >= run.r_stop then [ old ]
+                else
+                  (if old.r_start < run.r_start then [ { old with r_stop = run.r_start } ]
+                   else [])
+                  @
+                  if old.r_stop > run.r_stop then [ { old with r_start = run.r_stop } ]
+                  else [])
+              painted
+            @ [ run ])
+        []
+        (List.filter (fun r -> r.r_name = name) runs)
+    in
+    let sorted =
+      List.stable_sort (fun a b -> compare a.r_start b.r_start) painted
+    in
+    List.rev
+      (List.fold_left
+         (fun merged run ->
+           match merged with
+           | last :: rest when last.r_stop = run.r_start && last.r_value = run.r_value
+             ->
+               { last with r_stop = run.r_stop } :: rest
+           | _ -> run :: merged)
+         [] sorted)
+  in
+  List.stable_sort
+    (fun a b -> compare (a.r_start, a.r_name) (b.r_start, b.r_name))
+    (List.concat_map per_name names)
+
+let the_document app id =
+  match Hashtbl.find_opt app.documents id with
+  | Some doc -> doc
+  | None -> { d_text = ""; d_runs = [] }
+
+(* One delivered edit, folded by the core's own rules
+   (crates/kaya/src/app.rs, [absorb_edit]). *)
+let absorb_edit app id (start, stop) inserted runs =
+  let doc = the_document app id in
+  let len = String.length doc.d_text in
+  let boundary at =
+    at = len || Char.code doc.d_text.[at] land 0xc0 <> 0x80
+  in
+  if start < 0 || start > stop || stop > len || not (boundary start)
+     || not (boundary stop)
+  then
+    (* A mirror out of step with the core would splice garbage. *)
+    Hashtbl.replace app.documents id { d_text = inserted; d_runs = runs }
+  else begin
+    let shift = String.length inserted - (stop - start) in
+    let kept =
+      List.concat_map
+        (fun run ->
+          (if run.r_start < start then [ { run with r_stop = min run.r_stop start } ]
+           else [])
+          @
+          if run.r_stop > stop then
+            [
+              {
+                run with
+                r_start = max run.r_start stop + shift;
+                r_stop = run.r_stop + shift;
+              };
+            ]
+          else [])
+        doc.d_runs
+    in
+    let landed =
+      List.map
+        (fun run ->
+          { run with r_start = run.r_start + start; r_stop = run.r_stop + start })
+        runs
+    in
+    let text =
+      String.sub doc.d_text 0 start ^ inserted
+      ^ String.sub doc.d_text stop (len - stop)
+    in
+    Hashtbl.replace app.documents id
+      { d_text = text; d_runs = normalize_runs (kept @ landed) }
+  end
+
+(* One delivered format act, the core's [absorb_format]. *)
+let absorb_format app id (start, stop) name value =
+  let doc = the_document app id in
+  if start < stop then begin
+    let kept =
+      List.concat_map
+        (fun run ->
+          if run.r_name <> name || run.r_stop <= start || run.r_start >= stop then
+            [ run ]
+          else
+            (if run.r_start < start then [ { run with r_stop = start } ] else [])
+            @ if run.r_stop > stop then [ { run with r_start = stop } ] else [])
+        doc.d_runs
+    in
+    let painted =
+      match value with
+      | Some v ->
+          kept @ [ { r_start = start; r_stop = stop; r_name = name; r_value = v } ]
+      | None -> kept
+    in
+    Hashtbl.replace app.documents id
+      { doc with d_runs = normalize_runs painted }
+  end
+
+(* The folded document of a [rich] textarea; empty until the first edit
+   or write. Reads the ambient transaction, as [items] does. *)
+let document (Widget id) = the_document (the_tx ()).app id
+
+(* This textarea carries attribute runs: [set_document], [apply_edit],
+   [~on_edit]. *)
+let set_rich (Widget id) on = emit (the_tx ()) (Kaya_wire.tx_set_rich id on)
+
+(* Replace a [rich] textarea's whole document: echoes nothing and, like
+   [set_text], spends the native undo history (docs/undo-plan.md D7). *)
+let set_document (Widget id) doc =
+  let tx = the_tx () in
+  Hashtbl.replace tx.app.documents id doc;
+  emit tx
+    (Kaya_wire.tx_set_rich_text id (List.length doc.d_runs) (run_values doc.d_runs)
+       (Kaya_wire.Str doc.d_text))
+
+(* One edit into a [rich] textarea: echoes nothing, never resets undo,
+   and is held rather than refused mid-composition (R5). THE MIRROR TAKES
+   IT AS IT IS SENT, so the app's document is ahead of the widget's until
+   a live composition ends (docs/rich-text-plan.md §7). *)
+let apply_edit (Widget id) e =
+  let tx = the_tx () in
+  absorb_edit tx.app id (e.e_start, e.e_stop) e.e_inserted e.e_runs;
+  emit tx
+    (Kaya_wire.tx_apply_edit id (Int64.of_int e.e_start) (Int64.of_int e.e_stop)
+       (List.length e.e_runs) (run_values e.e_runs) (Kaya_wire.Str e.e_inserted))
+
+(* Format the widget's CURRENT SELECTION through its own act — what a
+   toolbar button sends; the widget answers through [~on_format]. Over a
+   collapsed selection the attribute is armed for the next keystroke
+   instead. [value] is "true" for a flag, the URL for [link]. *)
+let format (Widget id) name value =
+  emit (the_tx ())
+    (Kaya_wire.tx_format_text id 0 [ Kaya_wire.Str name; Kaya_wire.Str value ])
+
+(* Take an attribute off the widget's current selection. *)
+let unformat (Widget id) name =
+  emit (the_tx ())
+    (Kaya_wire.tx_format_text id 1 [ Kaya_wire.Str name; Kaya_wire.Str "" ])
+
+(* Make the selection's paragraphs [kind]; [Body] clears. *)
+let set_block widget kind = format widget "block" (block_name kind)
+
 let add_child (Widget parent) (Widget child) =
   let tx = the_tx () in
   emit tx (Kaya_wire.tx_add_child parent child)
@@ -1029,8 +1329,10 @@ let button ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help
   w
 
 (* A multi-line text editor: the entry's uncontrolled contract over
-   the platform's real multi-line editor. *)
-let textarea ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?placeholder ?placeholder_bind ?on_change () =
+   the platform's real multi-line editor. [~rich:true] adds the
+   attribute-run channel (docs/rich-text-plan.md R1); [~on_edit] and
+   [~on_format] answer only on one. *)
+let textarea ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?placeholder ?placeholder_bind ?on_change ?rich ?on_edit ?on_format () =
   let tx = the_tx () in
   let w = widget Kaya_wire.kind_textarea in
   Option.iter (fun g -> set_grow w g) grow;
@@ -1038,11 +1340,13 @@ let textarea ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?he
   set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind w;
   Option.iter (fun v -> set_placeholder w v) placeholder;
   Option.iter (fun s -> bind_placeholder w s) placeholder_bind;
+  Option.iter (fun v -> set_rich w v) rich;
+  let (Widget id) = w in
   (match on_change with
-  | Some handler ->
-      let (Widget id) = w in
-      Hashtbl.replace tx.app.widget_changes id handler
+  | Some handler -> Hashtbl.replace tx.app.widget_changes id handler
   | None -> ());
+  Option.iter (Hashtbl.replace tx.app.widget_edits id) on_edit;
+  Option.iter (Hashtbl.replace tx.app.widget_formats id) on_format;
   w
 
 let label ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?role ?href ?href_bind ?text ?bind () =
@@ -3792,6 +4096,18 @@ let on_change app (Widget id) (handler : string -> unit) =
 let on_change_node app (Node id) (handler : Kaya_wire.value list -> string -> unit) =
   Hashtbl.replace app.node_changes id handler
 
+(* One addressed user edit of a [rich] textarea (docs/rich-text-plan.md
+   R1); [~on_change] still fires beside it. The registration twin of
+   [textarea ~on_edit], for a handler that reads the widget's own
+   [document] and so cannot be written before the widget exists. *)
+let on_edit app (Widget id) (handler : edit -> unit) =
+  Hashtbl.replace app.widget_edits id handler
+
+(* The user formatted a range; a format over a collapsed caret is
+   pending state and arrives as the next edit's runs, never here. *)
+let on_format app (Widget id) (handler : format_act -> unit) =
+  Hashtbl.replace app.widget_formats id handler
+
 (* Register a toggle handler for a live checkbox: the box owns its
    checked bit and reports each flip here; the app folds it into its
    own state. *)
@@ -4079,6 +4395,44 @@ let dispatch_loop app =
                    dispatch app (fun () -> handler keys (Int64.to_int column))
                | None -> ())
            | _ -> ())
+         else if kind = Kaya_wire.occ_kind_text_edited then
+           (* THE MIRROR IS FOLDED BEFORE THE HANDLER RUNS, so a handler
+              reading [document] sees the edit it was told about
+              (docs/rich-text-plan.md R1). The tail is source, start,
+              stop, the inserted text, then four values per run. *)
+           match tail with
+           | _source :: Kaya_wire.I64 start :: Kaya_wire.I64 stop
+             :: Kaya_wire.Str inserted :: values ->
+               let e =
+                 {
+                   e_start = Int64.to_int start;
+                   e_stop = Int64.to_int stop;
+                   e_inserted = inserted;
+                   e_runs = runs_of_values values;
+                 }
+               in
+               absorb_edit app id (e.e_start, e.e_stop) e.e_inserted e.e_runs;
+               (match Hashtbl.find_opt app.widget_edits id with
+               | Some handler -> dispatch app (fun () -> handler e)
+               | None -> ())
+           | _ -> ()
+         else if kind = Kaya_wire.occ_kind_text_formatted then
+           match tail with
+           | Kaya_wire.I64 removed :: Kaya_wire.I64 start :: Kaya_wire.I64 stop
+             :: Kaya_wire.Str name :: Kaya_wire.Str value :: _ ->
+               let act =
+                 {
+                   f_start = Int64.to_int start;
+                   f_stop = Int64.to_int stop;
+                   f_name = name;
+                   f_value = (if removed = 0L then Some value else None);
+                 }
+               in
+               absorb_format app id (act.f_start, act.f_stop) act.f_name act.f_value;
+               (match Hashtbl.find_opt app.widget_formats id with
+               | Some handler -> dispatch app (fun () -> handler act)
+               | None -> ())
+           | _ -> ()
          else if kind = Kaya_wire.occ_kind_text_changed then
            match (payload, keys) with
            | Some (Kaya_wire.Str text), [] ->

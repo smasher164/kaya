@@ -11066,3 +11066,98 @@ away. The patterns are chosen by the file's suffix now (`COMMENTS_BY_SUFFIX`)
 and self-test N11 keeps the shape. A blanker for one language must not be
 handed another language's delimiters — `(*`, `{-`, `--` and `#` all occur
 in Rust, and `*/` occurs in a Haskell operator section.
+
+## The binding generator dropped a tx record's payload (2026-09-11)
+
+`set_rich_text` and `apply_edit` are the first TX records with
+`payload: Some(PropKind::Str)`, and tools/kaya-bindgen's nine emitters built a
+tx writer from `rec.fields` alone — so every generated
+`tx_set_rich_text(widget_id, count, runs)` had no text parameter, and the only
+record a binding could produce was one the core refuses at decode ("declares N
+runs but carries M values" when the text was smuggled into `runs`). Rust never
+noticed because it hand-writes its encoder (wire.rs `TxOp::SetRichText`), and
+the depth step ran on Rust alone; the first breadth agent to wire
+`set_document` in Python found it. The generator appends the payload as one
+trailing `text` Value parameter now (`tx_fields`/`PAYLOAD_FIELD` in
+tools/kaya-bindgen/src/main.rs) and all nine wire files carry it. A record
+shape the reference binding spells by hand is a shape the generator has never
+been asked for.
+
+## A DEPTH STUB line outlived its stub, silently (2026-09-11)
+
+tools/lib/stub-ledger.py held one direction only: a stub declaration with no
+OPEN ledger line was refused, while an open line whose declaration had gone
+was never read — so the search field's three stub lines sat open for five
+days after the breadth slice struck the entry's headline, and the four
+richtext arms went stub-free with their lines still open. The audit reads the
+other direction now (an open `DEPTH STUB: <scene> on <backend>` no backend
+declares is a headline nobody struck, invariant 9) with two self-tests.
+
+## An Android app's stderr is /dev/null, so every core diagnostic reached nobody (2026-09-11)
+
+The core's `KAYA_DIAG` sentences — the metrics latch, the rich edit
+corroboration, every why-not printed with `eprintln!` — go to fd 2, and an
+Android app process has fd 2 open on /dev/null: the Compose arm's agent fired
+R4's corroboration with a deliberately wrong offset on five devices and saw
+nothing in logcat, while the Kotlin harness's own diagnostics (written through
+`Log`) were all there. Every diagnostic branch the core had been "made to
+print" was, on that lane, made to print into a hole. crates/kaya/src/android.rs
+now dups fd 2 onto a pipe read by a thread that logs each line under the
+`kaya` tag (`forward_stderr_to_logcat`), and tools/android/run-emulator.py
+refuses a lane on which no leg's logcat carried the core's own metrics line —
+the bridge dying again would otherwise be as silent as it was.
+
+## A TOM selection-format write re-raises SelectionChanged, and the loop looks like lag (2026-09-11)
+
+`ITextSelection::SetCharacterFormat` on a COLLAPSED selection raises the
+RichEditBox's `SelectionChanged` again. The WinUI rich text arm's first draft
+re-armed the caret's typing format from that event — the natural place, since
+TOM re-derives a collapsed selection's format from the character before the
+caret on every move — and spun: 29,500 SelectionChanged and 24,500 re-arms
+against 80 TextChanged in one 23-second leg. Not a hang: every harness poll
+answered and the field held the right text; the one symptom was the
+keystroke's own `TextChanged` arriving twenty seconds late, so `expect_edit`
+failed on the PREVIOUS edit and the `expect_runs` two steps later passed. A
+verdict naming a stale edit beside a green assertion reads like a harness bug
+and is an event loop in the backend. Nothing is written back to the control
+from SelectionChanged now; the collapsed `format` act writes the selection's
+format once, from the apply path (crates/kaya/src/winui/mod.rs,
+docs/measurements/richtext-windows-2026-09-11.md for TOM's own pending rule).
+
+## The generated Haskell wire reader took one Char per byte (2026-09-11)
+
+`KayaWire.hs`'s value reader built a `VStr` with `map (chr . fromIntegral)
+bytes` while every encoder writes `stringUtf8`, so a non-ASCII string that
+came in and went back out was double-encoded — and nothing had noticed since
+the binding's birth, because no guest round-trips non-ASCII text through
+Haskell: the ranges guest's CJK line goes OUT only, and a Latin-1 mis-read
+keeps byte offsets right by accident (one Char per byte). The sugar agent
+found it wiring the rich mirror and decoded at the door; the generator
+emits `wireUtf8` into the wire module now (tools/kaya-bindgen/src/haskell.rs)
+and the door is gone. No gate holds it yet: the wall is the first shared
+scene whose guest echoes a non-ASCII wire string into a label, recorded on
+the ledger's rich text entry.
+
+## UIKit rebuilds typingAttributes with its own keys only (2026-09-11)
+
+`UITextView.typingAttributes` is re-derived from the character before the
+caret on every selection change and carries ONLY UIKit's keys (NSFont,
+NSColor, NSParagraphStyle, NSUnderline, NSLink); a custom key never survives,
+where AppKit carries the whole dictionary. The iOS rich text arm's first run
+passed its leg while the `expect_runs` corroboration printed twice — the typed
+character carried no `kaya.rich.block` — so the arm re-derives kaya's keys
+itself at every re-derivation point, the core's own `typed_runs` rule
+(docs/measurements/richtext-apple-2026-09-11.md §4 for the link half; the
+breadth notes of 2026-09-11 for the instrument). And `UITextView.font`
+answers the SELECTION's font on attributed content, so a base ramp read off
+the view scaled a quote 1.35× inside a heading; both arms take the body ramp
+from `kayaPlatformFont(.body)`, never the view.
+
+## `remove_all_tags` on a shared GtkTextBuffer (2026-09-11)
+
+The GTK highlight arm cleared its decoration with `remove_all_tags`, under a
+comment saying it was safe because kaya created exactly one tag on the
+buffer. A rich textarea wears every attribute as a tag on the same buffer, so
+a declared highlight set would have stripped the whole document's formatting
+with no observable moving (the highlight scene has no rich field). It removes
+the highlight tag BY NAME now; the corroboration read is the guard.

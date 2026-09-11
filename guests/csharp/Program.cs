@@ -58,6 +58,7 @@ static class Program
             case "dirty": DirtyScene.Run(); break;
             case "dnd": DndScene.Run(); break;
             case "ranges": RangesScene.Run(); break;
+            case "richtext": RichTextScene.Run(); break;
             case "grow": GrowScene.Run(); break;
             case "layout": LayoutScene.Run(); break;
             case "styling": StylingScene.Run(); break;

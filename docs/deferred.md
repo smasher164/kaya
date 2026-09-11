@@ -12324,9 +12324,9 @@ the mac and iOS lanes with the Rust guest alone. The three other backends
 hold the scene's legs off through the depth-stub convention until their
 arms exist:
 
-- DEPTH STUB: search on gtk (GtkSearchEntry, `search-delay` 0, S7's SEARCH_BOX role)
-- DEPTH STUB: search on winui (AutoSuggestBox with QueryIcon Find measured for an empty flyout first, the TextBox-plus-glyph fallback)
-- DEPTH STUB: search on compose (BasicTextField through KayaTextField with the Search leading icon, kaya's clear button, ImeAction.Search, no capitalization)
+- ~~**DEPTH STUB: search on gtk**~~ — LANDED 2026-09-06 with the breadth slice (GtkSearchEntry, `search-delay` 0, S7's SEARCH_BOX role)
+- ~~**DEPTH STUB: search on winui**~~ — LANDED 2026-09-06 with the breadth slice (AutoSuggestBox with QueryIcon Find measured for an empty flyout first, the TextBox-plus-glyph fallback)
+- ~~**DEPTH STUB: search on compose**~~ — LANDED 2026-09-06 with the breadth slice (BasicTextField through KayaTextField with the Search leading icon, kaya's clear button, ImeAction.Search, no capitalization)
 
 The breadth slice also carries: `search()` and `placeholder` in both
 construction zones of the eight other bindings (check-sugar-surface's kind
@@ -12348,14 +12348,16 @@ caret transform, D7 for `set_rich_text` alone, six C entries, the Rust
 sugar (`rich()`, `Document`, `Edit`, `Format`, `set_document`,
 `apply_edit`, `format`/`unformat`/`set_block`, `on_edit`, `on_format`,
 `ctx.document`), the nine generated parsers' arms, and the harness's
-`format`, `expect_runs` and `expect_edit` (docs/rich-text-plan.md §7). Every backend refuses the two apply records
+`format`, `expect_runs` and `expect_edit` (docs/rich-text-plan.md §7).
+Pushed as 2ec2748c; the matrix on that tree ALL PASS on all five lanes and
+58 gates, 1,760 legs in 1336s. Every backend refuses the two apply records
 through its depth stub until its arm lands:
 
 - ~~**DEPTH STUB: richtext on swiftui/macos**~~ — LANDED 2026-09-11: the NSTextView arm (the storage unpinned for `isRichText` alone, kaya's own attribute keys with the display derived from them, the corroboration and selection reports, the composition and paste sources, pending typing attributes), the `format_text` record, and the `format`/`expect_runs`/`expect_edit` verbs; `allowsUndo` as R6's lever is the undo step's.
-- **DEPTH STUB: richtext on swiftui/ios** — the same file, right after the mac: UITextView's `typingAttributes` cleared of a link at a run's end (docs/traps.md 2026-09-11), `disableUndoRegistration` as R6's lever.
-- **DEPTH STUB: richtext on gtk** — GtkTextTags for the inline runs, a side table for links, the block kinds drawn; `enable-undo = FALSE` as R6's lever (docs/measurements/richtext-gtk-2026-09-11.md).
-- **DEPTH STUB: richtext on winui** — TOM character formats with links drawn rather than inserted (the hidden HYPERLINK text, docs/traps.md 2026-09-11), the diff as the only delta, `UndoLimit 0` as R6's lever.
-- **DEPTH STUB: richtext on compose** — foundation 1.11.4 with the mirror driving the display through the output transformation, links drawn and hit-tested by the arm, `clearHistory()` after every commit (R7 as amended).
+- ~~**DEPTH STUB: richtext on swiftui/ios**~~ — LANDED 2026-09-11: the same file's iOS branches, with UIKit's `typingAttributes` rebuilt by the arm (UIKit drops every custom key on a selection change, docs/traps.md 2026-09-11) and marked text held out of the report; the scene green on the simulator four runs in a row.
+- ~~**DEPTH STUB: richtext on gtk**~~ — LANDED 2026-09-11: one GtkTextTag per kaya attribute value (the tag is the key, the display derived from it), links in a side table, reports on insert-text/delete-range/mark-set/preedit-changed/paste-clipboard; the scene green on x11 and wayland.
+- ~~**DEPTH STUB: richtext on winui**~~ — LANDED 2026-09-11: TOM character and paragraph formats over the arm's own byte run table (the bindgen filter widened for FormatEffect, UnderlineType and ITextParagraphFormat), links drawn with the URL beside the run and never `SetLink`, the diff as the only delta, tools/check-steps.py's hidden-text lint; the scene green on the VM in 2s with no corroboration disagreement.
+- ~~**DEPTH STUB: richtext on compose**~~ — LANDED 2026-09-11: foundation 1.11.4 (one line after the BOM; AGP, Gradle, compileSdk untouched), the mirror driving the display through the output transformation, links drawn and hit-tested by the arm, `clearHistory()` after every commit; the scene green on the emulator first run, every observation the mac's byte for byte.
 
 Open beside the arms, from the root's own notes: no backend reports the
 SELECTION to the core yet, so R5's transform runs against the last
@@ -12367,6 +12369,22 @@ template constructor; the eight other bindings carry the wire tier and no
 sugar, and no gate demands it — check-sugar-surface's prop census reads
 window and template props only, so the breadth slice adds a widget-prop
 clause there. Labels are R8's slice, after the textarea's.
+
+Found by the Compose arm (2026-09-11, breadth): a PLAIN textarea on Compose
+reports every composing keystroke as `text_changed` — the field's
+snapshotFlow sees the marked text — while the mac's `setMarkedText`
+notifies no delegate and no textarea there reports marked text; no scene
+sees it (ranges.steps asserts only the caret after `compose`). The rich
+arm suppresses it for `rich` fields, which R5 requires; widening the
+suppression to plain fields on every backend is a uniform-semantics
+divergence (invariant 1) to close with its own scene step, not this
+slice's. KEY: marked text, composing, text_changed, snapshotFlow.
+
+Also from the breadth: the generated Haskell wire reader mis-decoded every
+non-ASCII Str until 2026-09-11 (docs/traps.md) and no scene could see it —
+no shared scene echoes a non-ASCII wire string through a guest's label.
+One such step in a shared scene is the wall to add. KEY: wireUtf8, Haskell
+decoder, non-ASCII round trip.
 
 ## RULING WANTED — a lost dialog answers the app as a cancel; should the app be able to tell the two apart? (recorded 2026-09-06)
 KEY: lost dialog, KAYA_DIALOG_LOST, file_dialog_result reason, cancelled versus lost, DIALOG_RESULT_BUDGET_MS, dialog occurrence

@@ -5,7 +5,7 @@
 -- and a transaction is their concatenation.
 module KayaWire where
 
-import Data.Bits (complement, (.&.))
+import Data.Bits (complement, shiftL, (.&.), (.|.))
 import qualified Data.ByteString as BS
 import Data.ByteString.Builder
 import qualified Data.ByteString.Lazy as BL
@@ -943,12 +943,12 @@ txDeclareLinkRoute :: Word64 -> Value -> Builder
 txDeclareLinkRoute route pattern = wireRecord txKindDeclareLinkRoute (word64LE route <> encodeValue pattern)
 
 -- The WHOLE attributed document of a `rich` textarea (docs/rich-text-plan.md R1): the text as the payload, and `runs` holding 4*`count` values read in FOURS — I64 start, I64 end, Str name, Str value — each run one attribute over one range in UTF-8 BYTE offsets into that text, validated at the ranges' chokepoint (docs/ranges-units.md §7) and allowed to overlap (bold and italic over one range are two runs). A CONFIGURATION WRITE: it echoes nothing, and it resets the widget's native undo history where that tier is on (docs/undo-plan.md D7). The vocabulary is wire::RICH_ATTRS; a `block` run must start and end on paragraph boundaries. Refused on a textarea that is not `rich`.
-txSetRichText :: Word64 -> Word32 -> [Value] -> Builder
-txSetRichText widgetId count runs = wireRecord txKindSetRichText (word64LE widgetId <> word32LE count <> word32LE 0 <> encodeValues runs)
+txSetRichText :: Word64 -> Word32 -> [Value] -> Value -> Builder
+txSetRichText widgetId count runs text = wireRecord txKindSetRichText (word64LE widgetId <> word32LE count <> word32LE 0 <> encodeValues runs <> encodeValue text)
 
 -- ONE edit into a `rich` textarea, the app's own or a collaborator's (docs/rich-text-plan.md R1, R5): replace `start..end` (UTF-8 byte offsets into the widget's current text, validated as a range is) with the payload text, whose attribute runs are `runs` in fours as set_rich_text's, with offsets RELATIVE to the inserted text. Keeps the selection: unchanged before the edit, shifted after it, a caret at `start` ending AFTER the insertion. Echoes nothing and never resets undo. QUEUED while an input-method composition is live and applied when it ends, since a refusal would drop a collaborator's edit.
-txApplyEdit :: Word64 -> Word64 -> Word64 -> Word32 -> [Value] -> Builder
-txApplyEdit widgetId start stop count runs = wireRecord txKindApplyEdit (word64LE widgetId <> word64LE start <> word64LE stop <> word32LE count <> word32LE 0 <> encodeValues runs)
+txApplyEdit :: Word64 -> Word64 -> Word64 -> Word32 -> [Value] -> Value -> Builder
+txApplyEdit widgetId start stop count runs text = wireRecord txKindApplyEdit (word64LE widgetId <> word64LE start <> word64LE stop <> word32LE count <> word32LE 0 <> encodeValues runs <> encodeValue text)
 
 -- Format a `rich` textarea's CURRENT SELECTION through the widget's own act — what an app's toolbar button sends (docs/rich-text-plan.md R1): `attr` is two Str values, name then value; `removed` 1 takes the attribute off. The widget answers with text_formatted over the range it formatted, which is how the mirror moves; a collapsed selection arms the typing attribute and answers nothing until the next edit. A `block` act covers the selection's whole paragraphs, and `block` with value `body` removes. Refused on a textarea that is not `rich` and for a name outside wire::RICH_ATTRS.
 txFormatText :: Word64 -> Word32 -> [Value] -> Builder
@@ -1783,6 +1783,24 @@ shortcutNamedKeys = ["enter", "escape", "delete", "left", "right", "up", "down",
 -- empty tokens, repeated modifiers, aliases (ctrl/cmd/option), and
 -- unknown or multiple or missing keys. POLICY stays at the core,
 -- validated on the canonical spelling and never rewritten.
+wireUtf8 :: [Word8] -> String
+wireUtf8 [] = []
+wireUtf8 (b : rest)
+  | b < 0x80 = chr (fromIntegral b) : wireUtf8 rest
+  | b .&. 0xe0 == 0xc0, (x : more) <- rest =
+      chr (((fromIntegral b .&. 0x1f) `shiftL` 6) .|. cont x) : wireUtf8 more
+  | b .&. 0xf0 == 0xe0, (x : y : more) <- rest =
+      chr (((fromIntegral b .&. 0x0f) `shiftL` 12) .|. (cont x `shiftL` 6) .|. cont y)
+        : wireUtf8 more
+  | b .&. 0xf8 == 0xf0, (x : y : z : more) <- rest =
+      chr (((fromIntegral b .&. 0x07) `shiftL` 18) .|. (cont x `shiftL` 12)
+           .|. (cont y `shiftL` 6) .|. cont z)
+        : wireUtf8 more
+  | otherwise = wireUtf8 rest
+  where
+    cont :: Word8 -> Int
+    cont w = fromIntegral w .&. 0x3f
+
 canonicalizeShortcut :: String -> String
 canonicalizeShortcut spelling
   | null spelling = error "kaya: shortcut is empty"
@@ -1915,7 +1933,7 @@ parseValue rec at = do
                   else do
                     bytes <- peekArray (fromIntegral vlen)
                       (rec `plusPtr` (at + 8)) :: IO [Word8]
-                    return (VStr (map (chr . fromIntegral) bytes))
+                    return (VStr (wireUtf8 bytes))
   return (v, next)
 
 -- | One representation as the decoder hands it over: the clip

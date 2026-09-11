@@ -35,6 +35,7 @@ import (
 	"dev.kaya/guests/go/radio"
 	"dev.kaya/guests/go/ranges"
 	"dev.kaya/guests/go/reorder"
+	"dev.kaya/guests/go/richtext"
 	"dev.kaya/guests/go/save"
 	"dev.kaya/guests/go/scroll"
 	"dev.kaya/guests/go/search"
@@ -93,6 +94,7 @@ var scenes = map[string]func() *kaya.App{
 	"progress":   progress.App,
 	"radio":      radio.App,
 	"ranges":     ranges.App,
+	"richtext":   richtext.App,
 	"reorder":    reorder.App,
 	"table":      table.App,
 	"save":       save.App,

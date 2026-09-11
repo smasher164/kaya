@@ -5,7 +5,7 @@
 
 use kaya::spec::{FieldTy, ProtocolSpec, Record};
 
-use crate::{Ctx, is_padding, prop_variants, record_params, window_prop_variants};
+use crate::{Ctx, is_padding, prop_variants, record_params, tx_fields, window_prop_variants};
 
 pub const RESERVED: &[&str] = &[
     "encode_value", "encode_values", "encode_variant_schemas", "finish", "parse_value", "parse_occurrence", "parse_representation",
@@ -767,7 +767,7 @@ fn emit_packer(c: &mut Ctx, r: &Record) {
     c.line(&format!("let tx_{} {} =", r.name, args));
     c.line(&format!("  finish tx_kind_{} (fun b ->", r.name));
     let mut lines: Vec<String> = Vec::new();
-    for f in r.fields {
+    for f in tx_fields(r) {
         lines.push(match f.ty {
             FieldTy::U32 if is_padding(f) => "      Buffer.add_int32_le b 0l".into(),
             FieldTy::U32 => format!("      Buffer.add_int32_le b (Int32.of_int {})", f.name),

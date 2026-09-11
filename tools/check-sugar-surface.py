@@ -2745,6 +2745,338 @@ if not dnd_ok:
     status = 1
 
 
+# --- THE RICH TEXT SURFACE, in all nine ------------------------------
+# docs/rich-text-plan.md R1 and §7. `rich` IS A WIDGET PROP, and the prop
+# census below reads WINDOW props and TEMPLATE props only, so nothing else
+# in this file would demand the other eight bindings' rich sugar — the
+# table surface's shape one prop family over (a table is not a KIND; a
+# widget prop is not a WINDOW prop). FIVE PARTS, written out per binding
+# because nine languages spell a prop, a type, a handler, a write and a
+# mirror read nine ways and no casing rule derives them: `rich` on a
+# textarea in the LIVE zone; the Block/Document/Run/Edit/Format types;
+# `on_edit` and `on_format` where the binding's own click handler is
+# registered; the writes set_document, apply_edit and format WITH unformat
+# and set_block beside them; and the mirror read `document(widget)`, which
+# is the half R1 exists for — an app that never wants deltas reads one
+# Document.
+#
+# THE THREE WRITES ARE NOT ONE SPELLING: `set_block` is `format` under the
+# `block` attribute and `unformat` is the same TX with no value, so a
+# binding that shipped `format` alone leaves an app hand-writing kaya's
+# attribute names to take a mark off or to make a paragraph a heading.
+# RED BY DESIGN while any arm is missing (CLAUDE.md, sequencing): the
+# mac depth step landed the Rust reference alone and the other eight
+# followed the same day, 2026-09-11.
+RICH_FILES = dict(SLIDER_FILES)
+
+# THE TYPE NAMES, written out per binding because four of them do not use
+# kaya's own word: Go CANNOT — `Run` is that package's ENTRY POINT, and
+# bindings/go/app.go says so at the declaration — OCaml cannot call an act
+# `format`, which is the language's own printf type (`('a, 'b, 'c) format`),
+# C#'s `Block` is taken by its Document's painter
+# (`public Document Block(TextRange, BlockKind)`), and the three curly
+# bindings name the run record after the wire's own (`TextRun`). A row
+# loosened to match either name would stop saying which one the binding
+# ships.
+RICH_TYPE_NAMES = {
+    "Run": {"go": "TextRun", "csharp": "TextRun", "java": "TextRun"},
+    "Block": {"csharp": "BlockKind"},
+    "Format": {"ocaml": "format_act"},
+}
+
+# AND ONE WRITE NAME: Haskell exports the toolbar act under the name of the
+# wire record it sends (`format_text`, so `formatText`), where the other
+# eight spell it `format`.
+RICH_WRITE_NAMES = {"format": {"haskell": "formatText"}}
+
+
+def rich_findings(what, rows, text_for=read_rel):
+    """One part of the rich surface over nine bindings. `text_for` is the
+    reader, so the negatives below drive THIS census rather than a
+    re-typed copy of it."""
+    out = []
+    for lang, rel, pattern in rows:
+        try:
+            text = text_for(rel)
+        except OSError:
+            out.append(f"check-sugar-surface: {lang} has no sugar for the "
+                       f"rich textarea's '{what}': {rel} is gone, so the "
+                       f"census read nothing there")
+            continue
+        if not grep_e(pattern, text):
+            out.append(f"check-sugar-surface: {lang} has no sugar for the "
+                       f"rich textarea's '{what}' (wanted /{pattern}/ in "
+                       f"{rel})")
+    return out
+
+
+def rich_prop_rows(snake, pascal, camel):
+    """The LIVE-ZONE prop, four shapes: chained on Rust's, Go's and Java's
+    widget, an argument on C#'s and Swift's textarea constructor, a
+    keyword, labelled argument or option on Python's, OCaml's and JS's,
+    and a GADT attribute on Haskell's."""
+    F = RICH_FILES
+    return [
+        ("rust", F["rust"], rf"pub fn {snake}\(self\) -> Self"),
+        ("python", F["python"], rf"def textarea\([^)]*\b{snake}="),
+        ("go", F["go"], rf"func \(w Widget\) {pascal}\("),
+        ("csharp", F["csharp"],
+         rf"public Widget Textarea\([\s\S]{{0,200}}?bool {camel}\b"),
+        ("java", F["java"], rf"public Widget {camel}\("),
+        # AN ARGUMENT ON THE CONSTRUCTOR, where this binding's slider
+        # props ride — and it names the KIND, which a chained prop
+        # cannot: `rich` is the textarea's alone.
+        ("swift", F["swift"],
+         rf"func textarea\([\s\S]{{0,300}}?{camel}: Bool"),
+        # A GADT ATTRIBUTE, where this binding's slider props stand.
+        ("haskell", F["haskell"], rf"^  {pascal} :: Bool -> Attr 'LeafW"),
+        # The labelled argument on the LIVE constructor; `module Tpl`'s own
+        # `textarea` is indented, which the line anchor refuses.
+        ("ocaml", F["ocaml"], rf"^let textarea [\s\S]{{0,600}}?\?{snake}\b"),
+        ("js", F["js"], rf"TextAreaOptions = [^\n]*\b{camel}\?:"),
+    ]
+
+
+def rich_type_rows(snake, pascal, camel):
+    """The values an app reads and builds, in each binding's own
+    declaration idiom — a struct, a class, a record, a data type, a frozen
+    object, an alias. Swift prefixes its types `Kaya` and OCaml lower-cases
+    them, which the rows carry; anything else a binding must call its own
+    is in RICH_TYPE_NAMES above."""
+    F = RICH_FILES
+    named = RICH_TYPE_NAMES.get(pascal, {})
+
+    def nm(lang, default):
+        return named.get(lang, default)
+
+    return [
+        ("rust", F["rust"],
+         rf"^pub (struct|enum|type) {nm('rust', pascal)}\b"),
+        ("python", F["python"], rf"^class {nm('python', pascal)}\b"),
+        ("go", F["go"], rf"^type {nm('go', pascal)}\b"),
+        ("csharp", F["csharp"], rf"\b(struct|class|record|interface|enum) "
+                                rf"{nm('csharp', pascal)}\b"),
+        ("java", F["java"], rf"\b(record|class|interface|enum) "
+                            rf"{nm('java', pascal)}[ (<{{]"),
+        ("swift", F["swift"], rf"\b(struct|enum|class|typealias) "
+                              rf"Kaya{nm('swift', pascal)}\b"),
+        ("haskell", F["haskell"],
+         rf"^(data|newtype|type) {nm('haskell', pascal)}\b"),
+        ("ocaml", F["ocaml"], rf"^(type|and) {nm('ocaml', snake)}\b"),
+        # A class for the two an app BUILDS, a frozen object for the
+        # block vocabulary, a type alias for a run.
+        ("js", F["js"],
+         rf"^export (type|interface|class|const) {nm('js', pascal)}\b"),
+    ]
+
+
+def rich_handler_rows(snake, pascal, camel):
+    """Where the binding's OWN click handler is registered (the 2026-08-24
+    ruling): app-registered in six, and on the textarea's own declaration
+    in the two whose handlers ride the constructor (python's keyword, JS's
+    options type)."""
+    F = RICH_FILES
+    return [
+        ("rust", F["rust"], rf"pub fn {snake}\(&self, w: WidgetId"),
+        ("python", F["python"], rf"def textarea\([^)]*\b{snake}="),
+        ("go", F["go"], rf"func \(a \*App\) {pascal}\(w Widget"),
+        ("csharp", F["csharp"], rf"public void {pascal}\(Widget w"),
+        ("java", F["java"], rf"public void {camel}\(Widget w"),
+        ("swift", F["swift"],
+         rf"func {camel}\([\s\S]{{0,40}}_ w: KayaWidget"),
+        ("haskell", F["haskell"], rf"^ {{0,2}}{camel} :: App -> "),
+        ("ocaml", F["ocaml"], rf"^let {snake} app \(Widget id\)"),
+        ("js", F["js"], rf"TextAreaOptions = [^\n]*\b{camel}\?:"),
+    ]
+
+
+def rich_write_rows(snake, pascal, camel):
+    """A widget-addressed write, the text-range verbs' shape one surface
+    over: a transaction method on the seven, a method on the handle in the
+    two ambient bindings."""
+    F = RICH_FILES
+    named = RICH_WRITE_NAMES.get(snake, {})
+
+    def nm(lang, default):
+        return named.get(lang, default)
+
+    return [
+        ("rust", F["rust"],
+         rf"pub fn {nm('rust', snake)}\(&mut self, widget: WidgetId"),
+        ("python", F["python"], rf"def {nm('python', snake)}\(self"),
+        ("go", F["go"], rf"func \(tx \*Tx\) {nm('go', pascal)}\("),
+        ("csharp", F["csharp"], rf"public void {nm('csharp', pascal)}\("),
+        ("java", F["java"], rf"public void {nm('java', camel)}\("),
+        ("swift", F["swift"], rf"func {nm('swift', camel)}\("),
+        ("haskell", F["haskell"], rf"^[ \t]*{nm('haskell', camel)} ::"),
+        ("ocaml", F["ocaml"], rf"^let {nm('ocaml', snake)} "),
+        ("js", F["js"], rf"^  {nm('js', camel)}\("),
+    ]
+
+
+def rich_document_rows(snake, pascal, camel):
+    """The mirror READ — the binding's own fold, addressed by widget. Not
+    a transaction verb: it answers a value, which is why each row names
+    what it is asked with as well as the name."""
+    F = RICH_FILES
+    return [
+        ("rust", F["rust"], rf"pub fn {snake}\(&self, widget: WidgetId\)"),
+        ("python", F["python"], rf"def {snake}\(self\)"),
+        ("go", F["go"], rf"func \(a \*App\) {pascal}\(w Widget\)"),
+        ("csharp", F["csharp"], rf"public [A-Za-z]+ {pascal}\(Widget w"),
+        ("java", F["java"], rf"public [A-Za-z]+ {camel}\(Widget w"),
+        ("swift", F["swift"], rf"func {camel}\(_ w: KayaWidget"),
+        ("haskell", F["haskell"], rf"^{camel} :: App -> Widget -> IO "),
+        ("ocaml", F["ocaml"], rf"^let {snake} \(Widget id\)"),
+        ("js", F["js"], rf"^  {camel}\(\)"),
+    ]
+
+
+# The whole surface, one row per part. The names ride beside the builder
+# because the negatives below rename them away.
+RICH_PARTS = [
+    ("rich", rich_prop_rows, ("rich", "Rich", "rich")),
+    ("Block", rich_type_rows, ("block", "Block", "block")),
+    ("Document", rich_type_rows, ("document", "Document", "document")),
+    ("Run", rich_type_rows, ("run", "Run", "run")),
+    ("Edit", rich_type_rows, ("edit", "Edit", "edit")),
+    ("Format", rich_type_rows, ("format", "Format", "format")),
+    ("on_edit", rich_handler_rows, ("on_edit", "OnEdit", "onEdit")),
+    ("on_format", rich_handler_rows, ("on_format", "OnFormat", "onFormat")),
+    ("set_document", rich_write_rows,
+     ("set_document", "SetDocument", "setDocument")),
+    ("apply_edit", rich_write_rows,
+     ("apply_edit", "ApplyEdit", "applyEdit")),
+    ("format", rich_write_rows, ("format", "Format", "format")),
+    ("unformat", rich_write_rows, ("unformat", "Unformat", "unformat")),
+    ("set_block", rich_write_rows, ("set_block", "SetBlock", "setBlock")),
+    ("document", rich_document_rows, ("document", "Document", "document")),
+]
+
+rich_seen = {lang: 0 for lang in RICH_FILES}
+for _what, _rows_of, _names in RICH_PARTS:
+    _rows = _rows_of(*_names)
+    for _msg in rich_findings(_what, _rows):
+        print(_msg)
+        status = 1
+    for _lang, _rel, _pattern in _rows:
+        if grep_e(_pattern, read_rel(_rel)):
+            rich_seen[_lang] += 1
+print(f"check-sugar-surface: rich surface census ({len(RICH_PARTS)} "
+      f"parts): "
+      + ", ".join(f"{lang} {n}/{len(RICH_PARTS)}"
+                  for lang, n in rich_seen.items()))
+# THE READER'S OWN FLOOR: Rust is the reference these patterns were
+# calibrated against and it landed with the depth step, so a rust column
+# of ZERO is a reader that opened the wrong file or patterns that have
+# rotted — a census that reads nothing agrees with everything. It cannot
+# tell those two causes apart and says so rather than picking one.
+if rich_seen["rust"] == 0:
+    selftest_exit(f"check-sugar-surface: the rich census matched NOTHING in "
+                  f"the reference binding ({RICH_FILES['rust']}) — either "
+                  f"the sugar is gone from that file or every pattern above "
+                  f"has rotted; this reader cannot tell those apart, and a "
+                  f"census that reads nothing agrees with everything")
+if rich_seen["rust"] < len(RICH_PARTS):
+    print(f"check-sugar-surface: the rich patterns are calibrated against "
+          f"the REFERENCE binding and it satisfies only "
+          f"{rich_seen['rust']}/{len(RICH_PARTS)} of them (the parts are "
+          f"named above) — the other eight columns cannot be read until "
+          f"crates/kaya/src/app.rs does")
+    status = 1
+
+# THEIR BUILT-IN NEGATIVES, the table and size-policy discipline: a part
+# spelled NOWHERE must fail in all nine, or the patterns have rotted into
+# rules that can only pass.
+rich_fakes = []
+for _fake_what, _fake_rows_of, _fake_names in (
+        ("rich", rich_prop_rows,
+         ("kaya_fake_rich", "KayaFakeRich", "kayaFakeRich")),
+        ("type", rich_type_rows,
+         ("kaya_fake_doc", "KayaFakeDoc", "kayaFakeDoc")),
+        ("handler", rich_handler_rows,
+         ("on_kaya_fake", "OnKayaFake", "onKayaFake")),
+        ("write", rich_write_rows,
+         ("kaya_fake_write", "KayaFakeWrite", "kayaFakeWrite")),
+        ("mirror read", rich_document_rows,
+         ("kaya_fake_mirror", "KayaFakeMirror", "kayaFakeMirror")),
+):
+    fake = rich_findings(_fake_what, _fake_rows_of(*_fake_names))
+    rich_fake = sum(1 for m in fake if "has no sugar for the rich" in m)
+    rich_fakes.append(f"{_fake_what} {rich_fake}/9")
+    if rich_fake != 9:
+        selftest_exit(f"check-sugar-surface: self-test failed "
+                      f"({rich_fake}/9 rich '{_fake_what}' patterns fired "
+                      f"for a spelling that exists nowhere)")
+
+
+def rich_rename(text, pattern, names):
+    """The clause's OWN matches with the spelling renamed away, in a copy
+    of the text — never on disk, so there is nothing to restore. EVERY
+    match, not the first: a binding with two overloads would otherwise go
+    on satisfying the pattern through the one left alone."""
+    fakes = {names[0]: "kaya_fake_spelling", names[1]: "KayaFakeSpelling",
+             names[2]: "kayaFakeSpelling"}
+    out, at, applied = [], 0, 0
+    for found in re.finditer(pattern, text, re.M):
+        said = found.group(0)
+        for real in sorted(fakes, key=len, reverse=True):
+            said, n = sub_count(re.escape(real), fakes[real], said)
+            applied += n
+        out.append(text[at:found.start()])
+        out.append(said)
+        at = found.end()
+    out.append(text[at:])
+    return "".join(out), applied
+
+
+# THE WATCHED NEGATIVES, EVERY PART AND GROWING BY THEMSELVES: each binding
+# whose spelling is ON THE TREE has it renamed away in a copy of the text
+# and the census must name that binding and no other. A binding still
+# missing a part is ALREADY red above — its finding is printed there — so it
+# takes no negative until its arm lands, and the counts printed per part say
+# which bindings were watched, so no binding can be silently exempted.
+# RENAMING rather than deleting is what proves the clause reads the
+# SPELLING: a deletion also shortens the file.
+rich_negatives = 0
+for _what, _rows_of, _names in RICH_PARTS:
+    _rows = _rows_of(*_names)
+    _counts = []
+    for _lang, _rel, _pattern in _rows:
+        _text = read_rel(_rel)
+        if not grep_e(_pattern, _text):
+            continue
+        _doctored, _n = rich_rename(_text, _pattern, _names)
+        _counts.append(f"{_lang}={_n}")
+        if _n < 1:
+            selftest_exit(f"check-sugar-surface: self-test failed — the "
+                          f"{_lang} '{_what}' negative perturbed NOTHING "
+                          f"in {_rel}")
+        _fired = [m for m in rich_findings(
+            _what, _rows,
+            text_for=lambda rel, _r=_rel, _d=_doctored: (
+                _d if rel == _r else read_rel(rel)))
+            if m.startswith(f"check-sugar-surface: {_lang} has no sugar")]
+        if len(_fired) != 1:
+            selftest_exit(f"check-sugar-surface: self-test failed — "
+                          f"renaming {_lang}'s '{_what}' spelling produced "
+                          f"{len(_fired)} findings for {_lang}, not 1")
+        if (ROOT / _rel).read_text(encoding="utf-8") != _text:
+            selftest_exit(f"check-sugar-surface: self-test failed — {_rel} "
+                          f"changed on disk during the '{_what}' negative; "
+                          f"the perturbation is a copy of the text")
+        rich_negatives += 1
+    print(f"check-sugar-surface: rich rename negatives, '{_what}': "
+          + (" ".join(_counts) if _counts
+             else "none — no binding spells it yet"))
+rich_landed = sum(1 for n in rich_seen.values() if n == len(RICH_PARTS))
+print("check-sugar-surface: rich surface watched: "
+      + ", ".join(rich_fakes)
+      + f", {rich_negatives} renamed-spelling negative(s) over "
+        f"{len(RICH_PARTS)} parts, "
+      f"{rich_landed}/9 bindings complete")
+
+
 # The built-in negative: a kind that exists nowhere must fail in every
 # binding, or the patterns themselves have rotted. Collected rather than
 # printed, so the fake's failures die with the list — and NO STATUS
@@ -4642,6 +4974,27 @@ def prop_probe():
         lines.append(f"{name}=applied:{len(pairs)} rc:{r.returncode} "
                      f"named:{want in r.stdout}")
 
+    def probe_starved(name, path, opener, want):
+        """probe with EVERY member of one class shifted out of the member
+        column, for the floor clause: a fixed list of members goes stale
+        the moment the class grows."""
+        src = read_rel(path)
+        at = src.find(opener)
+        if at < 0:
+            lines.append(f"{name}=SELFTEST-BROKEN(no {opener!r} in {path})")
+            return
+        stop = src.find("\n}\n", at)
+        body, n = sub_count(r"^  (?=[a-zA-Z][A-Za-z0-9]*\()", "    ",
+                            src[at:stop], flags=re.M)
+        print(f"check-sugar-surface: {name} shifted {n} member(s) out of "
+              f"{opener!r}'s member column")
+        if n < 20:
+            lines.append(f"{name}=SELFTEST-BROKEN(shifted {n}, wanted 20+)")
+            return
+        r = tpl_over({path: src[:at] + body + src[stop:]})
+        lines.append(f"{name}=starved rc:{r.returncode} "
+                     f"named:{want in r.stdout}")
+
     probe("d1", "bindings/ocaml/kaya_app.ml",
           "    let set_role (Node id) r = emit (the_tx ()) "
           "(Kaya_wire.tx_set_role id (role_wire r))\n",
@@ -4670,15 +5023,13 @@ def prop_probe():
           "cannot find js's template zone for the prop census")
     # d7 — THE REFUSE-FLOOR ITSELF. THE PERTURBATION IS AN INDENT, not a
     # rename: a renamed member is still a member the reader counts, so
-    # only shifting declarations out of the member column starves it.
-    probe_many("d7", JS, [
-        ("  onPaste(fn: Handler): this {",
-         "    onPaste(fn: Handler): this {"),
-        ("  draw(...args: [...Key[], (d: Draw) => void]): void {",
-         "    draw(...args: [...Key[], (d: Draw) => void]): void {"),
-        ("  accepts(...kinds: string[]): this {",
-         "    accepts(...kinds: string[]): this {"),
-    ], "js's prop reader found only 19 members")
+    # only shifting declarations out of the member column starves it. And
+    # it shifts EVERY member rather than three by name, because the class
+    # GROWS — the rich text surface added seven in one day (2026-09-11)
+    # and three named members stopped reaching the floor, which left this
+    # negative passing for the wrong reason.
+    probe_starved("d7", JS, "export class Handle {",
+                  "js's prop reader found only")
     return "\n".join(lines)
 
 
@@ -4689,7 +5040,7 @@ d3=applied:1 rc:1 named:True
 d4=applied:1 rc:1 named:True
 d5=applied:1 rc:1 named:True
 d6=applied:1 rc:1 named:True
-d7=applied:3 rc:1 named:True"""
+d7=starved rc:1 named:True"""
 if prop != WANT_PROP:
     print("check-sugar-surface: SELF-TEST FAIL (the template PROP "
           "census did not catch a perturbation it must catch). "

@@ -121,6 +121,39 @@ module KayaApp
     highlightRanges,
     selectRange,
     revealRange,
+    -- Rich text (docs\/rich-text-plan.md R1): the document, its edits and
+    -- the widget's own acts.
+    Run (..),
+    Document (..),
+    Edit (..),
+    Format (..),
+    Block (..),
+    blockName,
+    documentOf,
+    mark,
+    bold,
+    italic,
+    underline,
+    strike,
+    code,
+    -- `link` is the app-links route declarator; a run's is suffixed, the
+    -- way `focusWidget` is.
+    linkRun,
+    blockRun,
+    attrAt,
+    insertEdit,
+    deleteEdit,
+    replaceEdit,
+    markEdit,
+    setRich,
+    setDocument,
+    applyEdit,
+    formatText,
+    unformat,
+    setBlock,
+    document,
+    onEdit,
+    onFormat,
     setText,
     bindText,
     bindA11yId,
@@ -350,10 +383,12 @@ where
 
 import Control.Concurrent (ThreadId, forkIO, myThreadId, newEmptyMVar, putMVar, takeMVar)
 import Control.Concurrent.MVar (MVar, modifyMVar, modifyMVar_, newMVar)
-import Data.Bits ((.&.))
+import Data.Bits (shiftL, (.&.), (.|.))
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BC
-import Data.ByteString.Builder (Builder)
+import Data.ByteString.Builder (Builder, stringUtf8, toLazyByteString)
+import qualified Data.ByteString.Lazy as BL
+import Data.Char (chr, ord)
 import Data.Int (Int64)
 import Data.IORef
 import Data.List (elemIndex)
@@ -365,7 +400,7 @@ import qualified Data.List as List
 import Data.Proxy (Proxy (..))
 import Data.Time.Calendar (Day, fromGregorian, toGregorian)
 import Data.Time.LocalTime (TimeOfDay (..))
-import Data.Word (Word32, Word64)
+import Data.Word (Word32, Word64, Word8)
 import GHC.Generics
 import System.Exit (ExitCode (..), exitSuccess, exitWith)
 
@@ -2239,6 +2274,314 @@ revealRange :: Widget -> (Int, Int) -> Build ()
 revealRange (Widget n) (start, stop) =
   emitB (W.txRevealRange n (fromIntegral start) (fromIntegral stop))
 
+-- --- Rich text (docs\/rich-text-plan.md R1) -------------------------
+-- EVERY OFFSET IS A UTF-8 BYTE OFFSET into the widget's text
+-- (docs\/ranges-units.md §7), and a range is the ranges sugar's
+-- @(start, stop)@ pair. A Haskell 'String' is CHARACTERS, so the mirror
+-- splices in the byte domain and decodes back.
+
+-- | One attribute over one span; 'runValue' is @\"true\"@ for the flags,
+-- a URL for @link@, a kind for @block@.
+data Run = Run
+  { runStart :: !Int,
+    runEnd :: !Int,
+    runName :: !String,
+    runValue :: !String
+  }
+  deriving (Eq, Show)
+
+-- | A @rich@ textarea's text and runs, kept current by the binding from
+-- the edits it delivers.
+data Document = Document
+  { docText :: !String,
+    docRuns :: ![Run]
+  }
+  deriving (Eq, Show)
+
+-- | Replace @editStart..editEnd@ with 'editInserted', whose runs carry
+-- offsets RELATIVE to the inserted text.
+data Edit = Edit
+  { editStart :: !Int,
+    editEnd :: !Int,
+    editInserted :: !String,
+    editRuns :: ![Run]
+  }
+  deriving (Eq, Show)
+
+-- | A toolbar act over a range; 'formatValue' 'Nothing' is the attribute
+-- taken off.
+data Format = Format
+  { formatStart :: !Int,
+    formatEnd :: !Int,
+    formatName :: !String,
+    formatValue :: !(Maybe String)
+  }
+  deriving (Eq, Show)
+
+-- | One paragraph kind; drawn, never stored (docs\/rich-text-plan.md R3).
+data Block = Body | Heading1 | Heading2 | Heading3 | Quote | CodeBlock
+  deriving (Eq, Show)
+
+blockName :: Block -> String
+blockName b = case b of
+  Body -> "body"
+  Heading1 -> "heading1"
+  Heading2 -> "heading2"
+  Heading3 -> "heading3"
+  Quote -> "quote"
+  CodeBlock -> "code_block"
+
+-- | A document with no runs yet, to mark up.
+documentOf :: String -> Document
+documentOf text = Document text []
+
+-- THE DOCUMENT COMES LAST, so a declaration composes:
+-- @blockRun (13, 24) Heading2 . bold (0, 6) $ documentOf text@.
+
+mark :: (Int, Int) -> String -> String -> Document -> Document
+mark (start, stop) name value doc =
+  doc {docRuns = docRuns doc ++ [Run start stop name value]}
+
+bold, italic, underline, strike, code :: (Int, Int) -> Document -> Document
+bold range = mark range "bold" "true"
+italic range = mark range "italic" "true"
+underline range = mark range "underline" "true"
+strike range = mark range "strike" "true"
+code range = mark range "code" "true"
+
+-- | A run's link; 'link' itself declares an app-link route.
+linkRun :: (Int, Int) -> String -> Document -> Document
+linkRun range url = mark range "link" url
+
+-- | A paragraph's kind; the range covers whole paragraphs or is refused.
+blockRun :: (Int, Int) -> Block -> Document -> Document
+blockRun range kind = mark range "block" (blockName kind)
+
+attrAt :: Document -> Int -> String -> Maybe String
+attrAt doc byte name =
+  runValue
+    <$> listToMaybe
+      [ r
+        | r <- docRuns doc,
+          runName r == name,
+          runStart r <= byte,
+          byte < runEnd r
+      ]
+
+insertEdit :: Int -> String -> Edit
+insertEdit at text = Edit at at text []
+
+deleteEdit :: (Int, Int) -> Edit
+deleteEdit (start, stop) = Edit start stop "" []
+
+replaceEdit :: (Int, Int) -> String -> Edit
+replaceEdit (start, stop) text = Edit start stop text []
+
+-- | One attribute over the INSERTED text's own offsets.
+markEdit :: (Int, Int) -> String -> String -> Edit -> Edit
+markEdit (start, stop) name value e =
+  e {editRuns = editRuns e ++ [Run start stop name value]}
+
+-- Four values per run — start, end, name, value — the shape both writes
+-- and both occurrences carry.
+runValues :: [Run] -> [W.Value]
+runValues =
+  concatMap
+    ( \r ->
+        [ W.VI64 (fromIntegral (runStart r)),
+          W.VI64 (fromIntegral (runEnd r)),
+          W.VStr (runName r),
+          W.VStr (runValue r)
+        ]
+    )
+
+runsOfValues :: [W.Value] -> [Run]
+runsOfValues (W.VI64 start : W.VI64 stop : W.VStr name : W.VStr value : rest) =
+  Run (fromIntegral start) (fromIntegral stop) name value
+    : runsOfValues rest
+runsOfValues _ = []
+
+-- Byte offsets are the core's (docs/ranges-units.md); the wire module
+-- decodes inbound Strs itself (docs/traps.md 2026-09-11).
+
+utf8Bytes :: String -> [Word8]
+utf8Bytes s = BS.unpack (BL.toStrict (toLazyByteString (stringUtf8 s)))
+
+utf8Chars :: [Word8] -> String
+utf8Chars [] = []
+utf8Chars (b : rest)
+  | b < 0x80 = chr (fromIntegral b) : utf8Chars rest
+  | b >= 0xf0, (x : y : z : more) <- rest =
+      chr (((fromIntegral b .&. 0x07) `shiftL` 18) .|. cont x 12 .|. cont y 6 .|. cont z 0)
+        : utf8Chars more
+  | b >= 0xe0, (x : y : more) <- rest =
+      chr (((fromIntegral b .&. 0x0f) `shiftL` 12) .|. cont x 6 .|. cont y 0) : utf8Chars more
+  | b >= 0xc0, (x : more) <- rest =
+      chr (((fromIntegral b .&. 0x1f) `shiftL` 6) .|. cont x 0) : utf8Chars more
+  | otherwise = utf8Chars rest
+  where
+    cont w s = (fromIntegral w .&. 0x3f) `shiftL` s
+
+-- | The core's normal form (crates\/kaya\/src\/scene.rs,
+-- @RichDoc::normalize@), so the mirror and the core's document spell one
+-- string.
+normalizeRuns :: [Run] -> [Run]
+normalizeRuns runs =
+  List.sortOn (\r -> (runStart r, runName r)) (concatMap perName names)
+  where
+    names = List.sort (List.nub (map runName runs))
+    perName name =
+      merge (List.sortOn runStart (foldl paint [] (filter ((== name) . runName) runs)))
+    paint painted run
+      | runStart run >= runEnd run = painted
+      | otherwise = concatMap (cut run) painted ++ [run]
+    cut run old
+      | runEnd old <= runStart run || runStart old >= runEnd run = [old]
+      | otherwise =
+          [old {runEnd = runStart run} | runStart old < runStart run]
+            ++ [old {runStart = runEnd run} | runEnd old > runEnd run]
+    merge [] = []
+    merge (r : rest) = go r rest
+      where
+        go acc [] = [acc]
+        go acc (next : more)
+          | runEnd acc == runStart next && runValue acc == runValue next =
+              go acc {runEnd = runEnd next} more
+          | otherwise = acc : go next more
+
+-- | The folded document of a @rich@ textarea; empty until the first edit
+-- or write.
+document :: App -> Widget -> IO Document
+document app (Widget n) =
+  Map.findWithDefault (documentOf "") n <$> readIORef (appDocuments app)
+
+-- One delivered edit, folded by the core's own rules
+-- (crates/kaya/src/app.rs, @absorb_edit@).
+absorbEdit :: App -> Word64 -> Edit -> IO ()
+absorbEdit app n e = modifyIORef' (appDocuments app) (Map.alter fold n)
+  where
+    fold held =
+      let doc = fromMaybe (documentOf "") held
+          bytes = utf8Bytes (docText doc)
+          len = length bytes
+          ins = utf8Bytes (editInserted e)
+          start = editStart e
+          stop = editEnd e
+          boundary at = at == len || (bytes !! at) .&. 0xc0 /= 0x80
+          shift = length ins - (stop - start)
+          kept =
+            concatMap
+              ( \r ->
+                  [r {runEnd = min (runEnd r) start} | runStart r < start]
+                    ++ [ r
+                           { runStart = max (runStart r) stop + shift,
+                             runEnd = runEnd r + shift
+                           }
+                         | runEnd r > stop
+                       ]
+              )
+              (docRuns doc)
+          landed =
+            map (\r -> r {runStart = runStart r + start, runEnd = runEnd r + start}) (editRuns e)
+       in Just $
+            if start < 0 || start > stop || stop > len || not (boundary start)
+              || not (boundary stop)
+              then -- A mirror out of step with the core would splice garbage.
+                Document (editInserted e) (editRuns e)
+              else
+                Document
+                  (utf8Chars (take start bytes ++ ins ++ drop stop bytes))
+                  (normalizeRuns (kept ++ landed))
+
+-- One delivered format act, the core's @absorb_format@.
+absorbFormat :: App -> Word64 -> Format -> IO ()
+absorbFormat app n act
+  | formatStart act >= formatEnd act = return ()
+  | otherwise = modifyIORef' (appDocuments app) (Map.alter fold n)
+  where
+    (start, stop, name) = (formatStart act, formatEnd act, formatName act)
+    fold held =
+      let doc = fromMaybe (documentOf "") held
+          kept =
+            concatMap
+              ( \r ->
+                  if runName r /= name || runEnd r <= start || runStart r >= stop
+                    then [r]
+                    else
+                      [r {runEnd = start} | runStart r < start]
+                        ++ [r {runStart = stop} | runEnd r > stop]
+              )
+              (docRuns doc)
+          painted = case formatValue act of
+            Just v -> kept ++ [Run start stop name v]
+            Nothing -> kept
+       in Just doc {docRuns = normalizeRuns painted}
+
+-- | This textarea carries attribute runs: 'setDocument', 'applyEdit',
+-- 'onEdit'.
+setRich :: Widget -> Bool -> Build ()
+setRich (Widget n) on = emitB (W.txSetRich n on)
+
+-- | Replace a @rich@ textarea's whole document: echoes nothing and, like
+-- 'setText', spends the native undo history (docs\/undo-plan.md D7).
+--
+-- THE MIRROR IS THE APP'S STATE, so this takes the 'App': the seed rides
+-- the record's own IO, which 'buildTx' runs as it serializes the batch.
+setDocument :: App -> Widget -> Document -> Build ()
+setDocument app (Widget n) doc = emitBIO $ do
+  modifyIORef' (appDocuments app) (Map.insert n doc)
+  return
+    ( W.txSetRichText
+        n
+        (fromIntegral (length (docRuns doc)))
+        (runValues (docRuns doc))
+        (W.VStr (docText doc))
+    )
+
+-- | One edit into a @rich@ textarea: echoes nothing, never resets undo,
+-- and is held rather than refused mid-composition (R5). THE MIRROR TAKES
+-- IT AS IT IS SENT, so the app's document is ahead of the widget's until
+-- a live composition ends (docs\/rich-text-plan.md §7).
+applyEdit :: App -> Widget -> Edit -> Build ()
+applyEdit app (Widget n) e = emitBIO $ do
+  absorbEdit app n e
+  return
+    ( W.txApplyEdit
+        n
+        (fromIntegral (editStart e))
+        (fromIntegral (editEnd e))
+        (fromIntegral (length (editRuns e)))
+        (runValues (editRuns e))
+        (W.VStr (editInserted e))
+    )
+
+-- | Format the widget's CURRENT SELECTION through its own act — what a
+-- toolbar button sends; the widget answers through 'onFormat'. Over a
+-- collapsed selection the attribute is armed for the next keystroke
+-- instead. The value is @\"true\"@ for a flag, the URL for @link@.
+formatText :: Widget -> String -> String -> Build ()
+formatText (Widget n) name value =
+  emitB (W.txFormatText n 0 [W.VStr name, W.VStr value])
+
+-- | Take an attribute off the widget's current selection.
+unformat :: Widget -> String -> Build ()
+unformat (Widget n) name = emitB (W.txFormatText n 1 [W.VStr name, W.VStr ""])
+
+-- | Make the selection's paragraphs @kind@; 'Body' clears.
+setBlock :: Widget -> Block -> Build ()
+setBlock w kind = formatText w "block" (blockName kind)
+
+-- | One addressed user edit of a @rich@ textarea; a change handler still
+-- fires beside it (docs\/rich-text-plan.md R1). App-registered, the way
+-- 'onDraw' is: the handler reads the widget's own 'document'.
+onEdit :: App -> Widget -> (Edit -> IO ()) -> IO ()
+onEdit app (Widget n) f = modifyIORef' (appWidgetEdits app) (Map.insert n f)
+
+-- | The user formatted a range; a format over a collapsed caret is
+-- pending state and arrives as the next edit's runs, never here.
+onFormat :: App -> Widget -> (Format -> IO ()) -> IO ()
+onFormat app (Widget n) f = modifyIORef' (appWidgetFormats app) (Map.insert n f)
+
 -- | Write a live widget's text: seed an editor's document, re-caption a
 -- label. LIVE WIDGETS ONLY — the same write on a template Node is the
 -- floor spelling 'setTextProp' (docs\/tpl-props-plan.md F3).
@@ -2500,6 +2843,10 @@ data Attr (c :: WClass) where
   -- are: one short sentence saying what the control is or does. A
   -- 'String' or a 'Signal'.
   Help :: LiveStrSource s => s -> Attr c
+  -- | This textarea carries attribute runs (docs\/rich-text-plan.md R1):
+  -- 'setDocument', 'applyEdit', 'onEdit'. Textarea only; the root
+  -- refuses it elsewhere.
+  Rich :: Bool -> Attr 'LeafW
   -- | The PROMPT this field shows while its text is empty
   -- (docs\/search-plan.md S3). Entry, textarea and search only; the root
   -- refuses it elsewhere, and an empty one by name.
@@ -2548,6 +2895,7 @@ applyAttr (A11yId i) w = liveStr setA11yId bindA11yId w i
 applyAttr (A11yLabel l) w = liveStr setA11yLabel bindA11yLabel w l
 applyAttr (A11yHint h) w = liveStr setA11yHint bindA11yHint w h
 applyAttr (Help h) w = liveStr setHelp bindHelp w h
+applyAttr (Rich on) w = setRich w on
 applyAttr (Placeholder p) w = liveStr setPlaceholder bindPlaceholder w p
 applyAttr (Href u) w = liveStr setHref bindHref w u
 applyAttr (MinDate d) (Widget n) =
@@ -4014,6 +4362,12 @@ data App = App
     appNodeHandlers :: IORef (Map.Map Word64 ([W.Value] -> IO ())),
     appWidgetChanges :: IORef (Map.Map Word64 (String -> IO ())),
     appNodeChanges :: IORef (Map.Map Word64 ([W.Value] -> String -> IO ())),
+    -- The rich mirror, one Document per @rich@ textarea
+    -- (docs/rich-text-plan.md R1): folded from the two occurrences here
+    -- and from the app's own setDocument/applyEdit as they are SENT.
+    appDocuments :: IORef (Map.Map Word64 Document),
+    appWidgetEdits :: IORef (Map.Map Word64 (Edit -> IO ())),
+    appWidgetFormats :: IORef (Map.Map Word64 (Format -> IO ())),
     appWidgetToggles :: IORef (Map.Map Word64 (Bool -> IO ())),
     appNodeToggles :: IORef (Map.Map Word64 ([W.Value] -> Bool -> IO ())),
     appWidgetValues :: IORef (Map.Map Word64 (Double -> IO ())),
@@ -4376,6 +4730,9 @@ newApp =
     <*> newIORef Map.empty -- appNodeHandlers
     <*> newIORef Map.empty -- appWidgetChanges
     <*> newIORef Map.empty -- appNodeChanges
+    <*> newIORef Map.empty -- appDocuments
+    <*> newIORef Map.empty -- appWidgetEdits
+    <*> newIORef Map.empty -- appWidgetFormats
     <*> newIORef Map.empty -- appWidgetToggles
     <*> newIORef Map.empty -- appNodeToggles
     <*> newIORef Map.empty -- appWidgetValues
@@ -4499,6 +4856,38 @@ dispatchLoop app = do
             _ -> do
               handlers <- readIORef (appNodeSorts app)
               dispatch (mapM_ (\h -> h keys column) (Map.lookup ident handlers))
+          dispatchLoop app
+      -- THE MIRROR IS FOLDED BEFORE THE HANDLER RUNS, so a handler
+      -- reading 'document' sees the edit it was told about
+      -- (docs/rich-text-plan.md R1). The tail is source, start, stop, the
+      -- inserted text, then four values per run.
+      | kind == W.occKindTextEdited -> do
+          case askTail of
+            (_source : W.VI64 start : W.VI64 stop : W.VStr inserted : values) -> do
+              let e =
+                    Edit
+                      (fromIntegral start)
+                      (fromIntegral stop)
+                      inserted
+                      (runsOfValues values)
+              absorbEdit app ident e
+              handlers <- readIORef (appWidgetEdits app)
+              dispatch (mapM_ ($ e) (Map.lookup ident handlers))
+            _ -> return ()
+          dispatchLoop app
+      | kind == W.occKindTextFormatted -> do
+          case askTail of
+            (W.VI64 removed : W.VI64 start : W.VI64 stop : W.VStr name : W.VStr value : _) -> do
+              let act =
+                    Format
+                      (fromIntegral start)
+                      (fromIntegral stop)
+                      name
+                      (if removed == 0 then Just value else Nothing)
+              absorbFormat app ident act
+              handlers <- readIORef (appWidgetFormats app)
+              dispatch (mapM_ ($ act) (Map.lookup ident handlers))
+            _ -> return ()
           dispatchLoop app
       | kind == W.occKindTextChanged -> do
           let content = case payload of Just (W.VStr s) -> s; _ -> ""

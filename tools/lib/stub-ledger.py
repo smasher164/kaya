@@ -59,6 +59,15 @@ def open_marker(ledger_text: str, scene: str, token: str) -> bool:
     return marker(scene, token).search(strip_closed(ledger_text)) is not None
 
 
+OPEN_LINE = re.compile(
+    r"DEPTH\s+STUB:\s*[`*]*([a-z0-9_]+)[`*]*\s+on\s+[`*]*([a-z]+(?:/[a-z]+)?)[`*]*")
+
+
+def open_markers(ledger_text: str) -> set:
+    """Every (scene, token) the ledger still holds OPEN."""
+    return set(OPEN_LINE.findall(strip_closed(ledger_text)))
+
+
 def declarations(text: str, platform: str):
     """(scene, line number) for every depth stub this backend declares
     that belongs to `platform` ("" = the file serves one platform)."""
@@ -126,6 +135,7 @@ def audit(root: pathlib.Path) -> list:
                    f"checked against it")
         return bad
 
+    declared = set()
     for backend, token, platform in BACKENDS:
         path = root / backend
         if not path.exists():
@@ -134,6 +144,7 @@ def audit(root: pathlib.Path) -> list:
             continue
         text = path.read_text()
         for scene, n in declarations(text, platform):
+            declared.add((scene, token))
             if not open_marker(ledger, scene, token):
                 bad.append(
                     f"{backend}:{n} declares a depth stub on \"{scene}\" that "
@@ -145,6 +156,15 @@ def audit(root: pathlib.Path) -> list:
                     f"backend has not got there yet, and what closes it.\n"
                     f"  Strike it through (`~~...~~`) when the stub goes, not "
                     f"before: a closed entry sanctions nothing")
+    # THE OTHER DIRECTION (docs/deferred.md's invariant 9): an OPEN line whose
+    # declaration is gone is a headline nobody struck — the next reader
+    # believes the arm is still owed. Strike it WITH the landing.
+    for scene, token in sorted(open_markers(ledger) - declared):
+        bad.append(
+            f"{LEDGER} holds `DEPTH STUB: {scene} on {token}` OPEN, but no "
+            f"backend declares that stub any more — the arm landed and the "
+            f"line was never struck. Strike it with its resolution "
+            f"(`~~**DEPTH STUB: {scene} on {token}**~~ — LANDED <date>: ...`)")
     return bad
 
 
@@ -212,7 +232,18 @@ def main() -> int:
             'fn y() -> ! { crate::depth_stub("scroll") }\n')
         (fake / LEDGER).write_text("# ledger\n\n" + open_entry)
         hidden = audit(fake)
+        # ...and an OPEN entry whose declaration is GONE: the arm landed and
+        # nobody struck the line (invariant 9's other direction).
+        (fake / "crates/kaya/src/elsewhere.rs").unlink()
+        (fake / "crates/kaya/src/gtk.rs").write_text("fn x() {}\n")
+        (fake / LEDGER).write_text("# ledger\n\n" + open_entry)
+        stale = audit(fake)
+        (fake / LEDGER).write_text("# ledger\n\n" + closed)
+        struck_gone = audit(fake)
     loop_checks = [
+        (len(stale) == 1 and "never struck" in stale[0],
+         "an open entry whose stub is gone was not reported"),
+        (struck_gone == [], "a struck entry with its stub gone was reported"),
         (len(untracked) == 1 and 'on "scroll"' in untracked[0],
          "an untracked stub was not reported by audit()"),
         (tracked == [], "a tracked stub was reported by audit()"),

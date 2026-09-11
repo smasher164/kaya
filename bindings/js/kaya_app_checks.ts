@@ -1059,6 +1059,227 @@ if (isMainThread) {
       prefs.getBool("s4_bool", false) === false,
   );
 
+  // --------------------------------------------------------- rich text
+  // THE BINDING'S DOCUMENT IS THE CORE'S, FOLDED (docs/rich-text-plan.md
+  // R1): the same deltas the widget publishes, folded by the core's own
+  // rules (crates/kaya/src/scene.rs RichDoc::normalize,
+  // crates/kaya/src/app.rs absorb_edit/absorb_format), so the app's
+  // Document and the core's `expect_runs` spell one string.
+  // tools/scenes/richtext.steps compares the two on every lane; these are
+  // the rules under it, driven from packed occurrence bytes.
+  const richChecks: string[] = [];
+  function richCheck(name: string, ok: boolean): void {
+    richChecks.push(name);
+    check(name, ok);
+  }
+  function spell(runs: readonly K.Run[]): string {
+    return runs.map((r) => (r.value === "true" ? `${r.start}:${r.end} ${r.name}` : `${r.start}:${r.end} ${r.name}=${r.value}`)).join("|");
+  }
+  function frameOcc(kind: number, parts: Uint8Array[]): Uint8Array {
+    const body = parts.reduce((n, p) => n + p.length, 0);
+    const out = new Uint8Array(8 + body + ((8 - (body % 8)) % 8));
+    const ov = new DataView(out.buffer);
+    ov.setUint32(0, out.length, true);
+    ov.setUint16(4, kind, true);
+    let at = 8;
+    for (const p of parts) {
+      out.set(p, at);
+      at += p.length;
+    }
+    return out;
+  }
+  /** The occurrence's own layout (crates/kaya/src/wire.rs): the click tag
+   * with the SOURCE in its reserved word, the range, the runs in FOURS,
+   * then the inserted text as a bare value. */
+  function packEdited(ident: number, start: number, stop: number, inserted: string, runs: readonly K.Run[], keys: K.Key[] = []): Uint8Array {
+    const tag = new Uint8Array(16);
+    const tv = new DataView(tag.buffer);
+    tv.setBigUint64(0, BigInt(ident), true);
+    tv.setUint32(8, keys.length, true);
+    tv.setUint32(12, 0, true); // source: user
+    const range = new Uint8Array(24);
+    const rv = new DataView(range.buffer);
+    rv.setBigUint64(0, BigInt(start), true);
+    rv.setBigUint64(8, BigInt(stop), true);
+    rv.setUint32(16, runs.length, true);
+    const flat: W.WireValue[] = [];
+    for (const r of runs) flat.push(new wire.I64(r.start), new wire.I64(r.end), r.name, r.value);
+    const countHead = new Uint8Array(8);
+    new DataView(countHead.buffer).setUint32(0, flat.length, true);
+    return frameOcc(wire.OCC_TEXT_EDITED, [tag, ...keys.map((k) => valueBytes(keyOf(k))), range, countHead, ...flat.map(valueBytes), valueBytes(inserted)]);
+  }
+  /** The same tag with REMOVED in the reserved word, the range, and the
+   * attribute as a name/value pair. */
+  function packFormatted(ident: number, removed: number, start: number, stop: number, name: string, value: string): Uint8Array {
+    const tag = new Uint8Array(16);
+    const tv = new DataView(tag.buffer);
+    tv.setBigUint64(0, BigInt(ident), true);
+    tv.setUint32(8, 0, true);
+    tv.setUint32(12, removed, true);
+    const range = new Uint8Array(16);
+    const rv = new DataView(range.buffer);
+    rv.setBigUint64(0, BigInt(start), true);
+    rv.setBigUint64(8, BigInt(stop), true);
+    return frameOcc(wire.OCC_TEXT_FORMATTED, [tag, range, valueBytes(name), valueBytes(value)]);
+  }
+
+  const edits: K.Edit[] = [];
+  const formats: K.Format[] = [];
+  let editor!: K.Widget;
+  let plain!: K.Widget;
+  let quietEditor!: K.Widget;
+  let rowEditor!: K.Widget;
+  const rowSeen: [K.Key, K.Edit][] = [];
+  shipped.length = 0;
+  app.window({ windowId: 2600 }, () => {
+    kaya.column(() => {
+      editor = kaya.textarea({ rich: true, onEdit: (e: K.Edit) => edits.push(e), onFormat: (f: K.Format) => formats.push(f) });
+      plain = kaya.textarea();
+      quietEditor = kaya.textarea({ rich: true });
+      for (const item of items) {
+        rowEditor = kaya.textarea({ rich: true, onEdit: (row: K.RowHandle<string>, e: K.Edit) => rowSeen.push([row.key, e]) });
+        kaya.label({ bind: item });
+      }
+    });
+  });
+  const declared = shipped.flat();
+  const sameBytes = (a: Uint8Array, b: Uint8Array): boolean => a.length === b.length && a.every((v, i) => v === b[i]);
+  richCheck(
+    "a rich textarea declares the prop, a plain one does not",
+    declared.some((r) => sameBytes(r, wire.tx_set_rich(editor.id, true))) && !declared.some((r) => sameBytes(r, wire.tx_set_rich(plain.id, true))),
+  );
+  richCheck("the document is empty before any write or delta", editor.document().text === "" && editor.document().runs.length === 0);
+
+  // THE DECLARATION seeds the mirror, so a read after the write answers it.
+  const DOC = "Héllo world\nSecond line";
+  app.build(() => {
+    editor.setDocument(new kaya.Document(DOC).bold([0, 6]).link([7, 12], "https://kaya.dev").block([13, 24], kaya.Block.HEADING2));
+  });
+  richCheck(
+    "setDocument seeds the app's own Document",
+    editor.document().text === DOC && spell(editor.document().runs) === "0:6 bold|7:12 link=https://kaya.dev|13:24 block=heading2",
+  );
+  richCheck("document() is a COPY: writing to it moves no mirror", (editor.document().runs.splice(0), editor.document().runs.length === 3));
+  richCheck(
+    "attrAt answers the attribute under a byte, and null off it",
+    editor.document().attrAt(3, "bold") === "true" && editor.document().attrAt(9, "link") === "https://kaya.dev" && editor.document().attrAt(3, "italic") === null,
+  );
+
+  // THE APP'S OWN EDIT IS FOLDED AS IT IS SENT (docs/rich-text-plan.md
+  // §7): the widget and the core take it when a composition ends, the app
+  // at once.
+  app.build(() => {
+    editor.applyEdit(kaya.Edit.insert(6, ", big").mark([2, 5], "italic", "true"));
+  });
+  richCheck(
+    "applyEdit folds into the app's Document AS IT SENDS",
+    editor.document().text === "Héllo, big world\nSecond line" &&
+      spell(editor.document().runs) === "0:6 bold|8:11 italic|12:17 link=https://kaya.dev|18:29 block=heading2",
+  );
+  richCheck(
+    "THE OFFSETS ARE BYTES: the é puts the split one past its UTF-16 place",
+    Buffer.from(DOC, "utf8").length === 24 && DOC.length === 23 && editor.document().attrAt(5, "bold") === "true",
+  );
+
+  // A DELIVERED FORMAT: the attribute over the range, then off it.
+  fire(wire.parse_occurrence(packFormatted(editor.id, 0, 12, 17, "underline", "true")));
+  richCheck(
+    "a delivered text_formatted puts the attribute over the range",
+    spell(editor.document().runs) === "0:6 bold|8:11 italic|12:17 link=https://kaya.dev|12:17 underline|18:29 block=heading2",
+  );
+  richCheck("onFormat hears the act, `value` carrying it", JSON.stringify(formats[formats.length - 1]) === JSON.stringify({ start: 12, end: 17, name: "underline", value: "true" }));
+  fire(wire.parse_occurrence(packFormatted(editor.id, 1, 12, 17, "underline", "")));
+  richCheck(
+    "a REMOVAL takes it off and `value` is null",
+    spell(editor.document().runs) === "0:6 bold|8:11 italic|12:17 link=https://kaya.dev|18:29 block=heading2" && formats[formats.length - 1]!.value === null,
+  );
+
+  // A REMOVAL CLIPS ONE ATTRIBUTE'S RUNS AND NO OTHER, at the range's
+  // edges; putting it back merges the three adjacent equal runs.
+  fire(wire.parse_occurrence(packFormatted(editor.id, 1, 2, 4, "bold", "")));
+  richCheck(
+    "a removal CUTS the run it falls inside, keeping both ends",
+    spell(editor.document().runs) === "0:2 bold|4:6 bold|8:11 italic|12:17 link=https://kaya.dev|18:29 block=heading2",
+  );
+  fire(wire.parse_occurrence(packFormatted(editor.id, 0, 2, 4, "bold", "true")));
+  richCheck(
+    "putting it back MERGES the three adjacent equal runs into one",
+    spell(editor.document().runs) === "0:6 bold|8:11 italic|12:17 link=https://kaya.dev|18:29 block=heading2",
+  );
+
+  // A DELIVERED EDIT: runs before it keep, runs after it shift, the
+  // inserted text's own runs land relative to the edit — and two adjacent
+  // equal runs merge (the typed byte joining the paragraph it inherited).
+  fire(wire.parse_occurrence(packEdited(editor.id, 29, 29, "x", [{ start: 0, end: 1, name: "block", value: "heading2" }])));
+  richCheck(
+    "a delivered edit shifts what follows and MERGES the inherited run",
+    spell(editor.document().runs) === "0:6 bold|8:11 italic|12:17 link=https://kaya.dev|18:30 block=heading2",
+  );
+  const lastEdit = edits[edits.length - 1]!;
+  richCheck(
+    "onEdit hears the addressed edit, its runs relative to the inserted text",
+    lastEdit.start === 29 && lastEdit.end === 29 && lastEdit.inserted === "x" && JSON.stringify(lastEdit.runs) === JSON.stringify([{ start: 0, end: 1, name: "block", value: "heading2" }]),
+  );
+
+  // THE FOLD FOLLOWS WITHOUT A HANDLER, as an undo's mirrors do: this
+  // textarea registered neither delta.
+  fire(wire.parse_occurrence(packEdited(quietEditor.id, 0, 0, "hi", [{ start: 0, end: 2, name: "bold", value: "true" }])));
+  richCheck("the document follows with NO handler registered", quietEditor.document().text === "hi" && spell(quietEditor.document().runs) === "0:2 bold");
+
+  // A LATER RUN WINS over an earlier one of the same attribute, which is
+  // how an overlapping declaration normalizes (scene.rs's paint order).
+  const later = new kaya.Document("0123456789");
+  later.runs = [
+    { start: 0, end: 9, name: "bold", value: "true" },
+    { start: 2, end: 4, name: "bold", value: "false" },
+  ];
+  app.build(() => {
+    quietEditor.setDocument(later);
+    quietEditor.applyEdit(new kaya.Edit(0, 0, ""));
+  });
+  richCheck("a LATER run of one attribute paints over an earlier one", spell(quietEditor.document().runs) === "0:2 bold|2:4 bold=false|4:9 bold");
+  app.build(() => {
+    quietEditor.setDocument(new kaya.Document("abcd", [
+      { start: 0, end: 4, name: "italic", value: "true" },
+      { start: 0, end: 4, name: "bold", value: "true" },
+      { start: 3, end: 3, name: "code", value: "true" },
+    ]));
+    quietEditor.applyEdit(new kaya.Edit(0, 0, ""));
+  });
+  richCheck("two attributes over one range are TWO runs, ordered by name, and an empty run is dropped", spell(quietEditor.document().runs) === "0:4 bold|0:4 italic");
+
+  // THE BLOCK VOCABULARY IS CLOSED at the binding, by name: the core
+  // refuses it too, but a guest that misspells a kind hears the kinds
+  // here (and tsc refuses the literal outright).
+  richCheck(
+    "a misspelled block kind is refused, naming the kinds",
+    throws(() => new kaya.Document("x").block([0, 1], "heading4" as K.BlockName), /heading4[\s\S]*code_block/),
+  );
+  richCheck("kaya.Block's names are the values the wire carries", kaya.Block.HEADING1 === "heading1" && kaya.Block.CODE_BLOCK === "code_block");
+
+  // A STAMPED COPY CARRIES NO DOCUMENT: the mirror is keyed by LIVE
+  // widget, as the core's is, and the delta still reaches the row's
+  // handler with the row in hand.
+  const documents = (app as unknown as { _documents: Map<number, K.Document> })._documents;
+  fire(wire.parse_occurrence(packEdited(rowEditor.id, 0, 0, "hi", [], ["z"])));
+  richCheck("a stamped copy's edit reaches the row's handler with its key", rowSeen.length === 1 && rowSeen[0]![0] === "z" && rowSeen[0]![1].inserted === "hi");
+  richCheck("and NO document is folded for it — the mirror is live widgets", !documents.has(rowEditor.id));
+  richCheck(
+    "document() on a template node is refused, naming the live widget rule",
+    throws(() => {
+      app.window({ windowId: 2601 }, () => {
+        kaya.column(() => {
+          for (const item of items) {
+            kaya.label({ bind: item });
+            kaya.textarea({ rich: true }).document();
+          }
+        });
+      });
+    }, /template node/),
+  );
+
+  console.log(`rich text: ${richChecks.length} checks over the fold, driven from packed occurrence bytes through App._onOccurrence`);
+
   if (failures.length > 0) {
     console.log(`kaya_app_checks: ${failures.length} FAILED`);
     process.exit(1);

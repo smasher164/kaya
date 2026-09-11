@@ -511,6 +511,14 @@ class _Handle:
         _records().append(wire.tx_set_fill(self.id, bool(on)))
         return self
 
+    def rich(self, on=True):
+        """This textarea carries ATTRIBUTE RUNS (docs/rich-text-plan.md
+        R1): `set_document`, `apply_edit`, `format`, and the `on_edit`
+        and `on_format` deltas. Off, none of that exists and the widget
+        is the plain uncontrolled field. Returns the handle."""
+        _records().append(wire.tx_set_rich(self.id, bool(on)))
+        return self
+
     def columns_auto(self, min_width):
         """THE GRID THAT FITS (docs/layout-knobs-plan.md §3): as many
         columns as fit this grid's width at `min_width` DIP each, sharing
@@ -760,6 +768,69 @@ class Widget(_Handle):
         not put the scroll position back."""
         start, stop = _text_range("reveal_range", span)
         _records().append(wire.tx_reveal_range(self.id, start, stop))
+
+    # The rich document surface (docs/rich-text-plan.md R1); `rich()`
+    # declares the widget and is on _Handle, since a template declares it
+    # too.
+
+    def set_document(self, document):
+        """Replace this `rich` textarea's WHOLE document — text and runs
+        in one write.
+
+        A CONFIGURATION WRITE: it echoes nothing and, like `set_text`, it
+        spends the field's native undo history (docs/undo-plan.md D7).
+        The app's own Document is seeded from it, so a `document()` read
+        after this answers what was written. Returns the widget."""
+        _app._seed_document(self.id, document)
+        _records().append(wire.tx_set_rich_text(
+            self.id, len(document.runs), _flat_runs(document.runs),
+            document.text))
+        return self
+
+    def apply_edit(self, edit):
+        """One edit into this `rich` textarea — the app's own or a
+        collaborator's: replace `start..end` with the edit's text and its
+        runs, the selection kept by R5's rule.
+
+        Echoes nothing, never resets undo, and is HELD rather than refused
+        while an input method is composing. THE APP'S DOCUMENT TAKES IT AS
+        IT IS SENT, while the widget and the core's mirror take it when the
+        composition ends (docs/rich-text-plan.md §7). Returns the widget."""
+        _app._absorb_edit(self.id, edit.start, edit.end, edit.inserted,
+                          edit.runs)
+        _records().append(wire.tx_apply_edit(
+            self.id, edit.start, edit.end, len(edit.runs),
+            _flat_runs(edit.runs), edit.inserted))
+        return self
+
+    def format(self, name, value="true"):
+        """Format this `rich` textarea's CURRENT SELECTION through the
+        widget's own act — what a toolbar button sends.
+
+        Over a collapsed selection the attribute is armed for the next
+        keystroke instead and nothing is answered until it. The widget
+        reports the range it formatted to `on_format`, which is how the
+        document moves. Returns the widget."""
+        _records().append(wire.tx_format_text(
+            self.id, 0, [str(name), _text_value("format value", value)]))
+        return self
+
+    def unformat(self, name):
+        """Take an attribute off this textarea's current selection.
+        Returns the widget."""
+        _records().append(wire.tx_format_text(self.id, 1, [str(name), ""]))
+        return self
+
+    def set_block(self, kind):
+        """Make the selection's whole paragraphs `kind` (kaya.Block;
+        plain names accepted). `body` clears. Returns the widget."""
+        return self.format("block", _block_value(kind))
+
+    def document(self):
+        """This `rich` textarea's document, as this binding has folded it
+        from the deltas (docs/rich-text-plan.md R1) — a copy, so writing
+        to it moves nothing. Empty until the first write or edit."""
+        return _app._document(self.id)
 
     def grow(self, weight):
         """Set this widget's flex weight within its row/column: 0 is
@@ -2031,6 +2102,239 @@ class UndoDelta:
     def __repr__(self):
         return (f"UndoDelta(signals={self.signals!r}, texts={self.texts!r}, "
                 f"entries={self.entries!r}, orders={self.orders!r})")
+
+
+class Block:
+    """One paragraph kind, carried as the `block` attribute's value
+    (docs/rich-text-plan.md R3): drawn by the backend, never stored, so
+    the bytes an app and a backend count are the same bytes. Plain names
+    accepted too — `set_block("heading1")`."""
+
+    BODY = "body"
+    HEADING1 = "heading1"
+    HEADING2 = "heading2"
+    HEADING3 = "heading3"
+    QUOTE = "quote"
+    CODE_BLOCK = "code_block"
+
+
+_BLOCK_NAMES = ("body", "heading1", "heading2", "heading3", "quote",
+                "code_block")
+
+
+def _block_value(kind):
+    name = str(kind)
+    if name not in _BLOCK_NAMES:
+        raise ValueError(
+            f"kaya: {kind!r} is not a block kind — one of "
+            f"{list(_BLOCK_NAMES)} (docs/rich-text-plan.md R3)")
+    return name
+
+
+class Run:
+    """One attribute over one span, in kaya's unit — UTF-8 BYTE offsets
+    (docs/ranges-units.md §7). `value` is "true" for the flags, a URL for
+    a link, a kind for a block."""
+
+    __slots__ = ("start", "end", "name", "value")
+
+    def __init__(self, start, end, name, value):
+        self.start = int(start)
+        self.end = int(end)
+        self.name = str(name)
+        self.value = str(value)
+
+    def __eq__(self, other):
+        return (isinstance(other, Run)
+                and (self.start, self.end, self.name, self.value)
+                == (other.start, other.end, other.name, other.value))
+
+    def __hash__(self):
+        return hash((self.start, self.end, self.name, self.value))
+
+    def __repr__(self):
+        return (f"Run(start={self.start!r}, end={self.end!r}, "
+                f"name={self.name!r}, value={self.value!r})")
+
+
+class Document:
+    """A `rich` textarea's text and runs, kept current by the binding
+    from the deltas it delivers (docs/rich-text-plan.md R1).
+
+    The marks CHAIN: `kaya.Document(text).bold(range(0, 6))`. A range is
+    `range(start, stop)` or a (start, stop) pair of UTF-8 byte offsets,
+    as everywhere else in this binding.
+    """
+
+    __slots__ = ("text", "runs")
+
+    def __init__(self, text="", runs=None):
+        self.text = _text_value("Document text", text)
+        self.runs = list(runs) if runs else []
+
+    def mark(self, span, name, value):
+        """One attribute over one range. Returns the document."""
+        start, stop = _text_range("Document.mark", span)
+        self.runs.append(Run(start, stop, name, value))
+        return self
+
+    def bold(self, span):
+        return self.mark(span, "bold", "true")
+
+    def italic(self, span):
+        return self.mark(span, "italic", "true")
+
+    def underline(self, span):
+        return self.mark(span, "underline", "true")
+
+    def strike(self, span):
+        return self.mark(span, "strike", "true")
+
+    def code(self, span):
+        return self.mark(span, "code", "true")
+
+    def link(self, span, url):
+        return self.mark(span, "link", url)
+
+    def block(self, span, kind):
+        """A paragraph's kind; the range covers whole paragraphs or the
+        core refuses it, naming the byte."""
+        return self.mark(span, "block", _block_value(kind))
+
+    def attr_at(self, byte, name):
+        """The value `name` carries at a byte offset, or None."""
+        for run in self.runs:
+            if run.name == name and run.start <= byte < run.end:
+                return run.value
+        return None
+
+    def __eq__(self, other):
+        return (isinstance(other, Document)
+                and self.text == other.text and self.runs == other.runs)
+
+    def __repr__(self):
+        return f"Document(text={self.text!r}, runs={self.runs!r})"
+
+
+class Edit:
+    """Replace `start..end` with `inserted`, whose `runs` carry offsets
+    RELATIVE to the inserted text (docs/rich-text-plan.md R1)."""
+
+    __slots__ = ("start", "end", "inserted", "runs")
+
+    def __init__(self, start, end, inserted="", runs=None):
+        self.start = int(start)
+        self.end = int(end)
+        self.inserted = _text_value("Edit text", inserted)
+        self.runs = list(runs) if runs else []
+
+    @classmethod
+    def insert(cls, at, text):
+        return cls(at, at, text)
+
+    @classmethod
+    def delete(cls, span):
+        start, stop = _text_range("Edit.delete", span)
+        return cls(start, stop, "")
+
+    @classmethod
+    def replace(cls, span, text):
+        start, stop = _text_range("Edit.replace", span)
+        return cls(start, stop, text)
+
+    def mark(self, span, name, value):
+        """One attribute over the INSERTED text's own offsets. Returns
+        the edit."""
+        start, stop = _text_range("Edit.mark", span)
+        self.runs.append(Run(start, stop, name, value))
+        return self
+
+    def __eq__(self, other):
+        return (isinstance(other, Edit)
+                and (self.start, self.end, self.inserted, self.runs)
+                == (other.start, other.end, other.inserted, other.runs))
+
+    def __repr__(self):
+        return (f"Edit(start={self.start!r}, end={self.end!r}, "
+                f"inserted={self.inserted!r}, runs={self.runs!r})")
+
+
+class Format:
+    """A toolbar act over a range; `value` None is the attribute taken
+    off (docs/rich-text-plan.md R1)."""
+
+    __slots__ = ("start", "end", "name", "value")
+
+    def __init__(self, start, end, name, value):
+        self.start = int(start)
+        self.end = int(end)
+        self.name = str(name)
+        self.value = None if value is None else str(value)
+
+    def __eq__(self, other):
+        return (isinstance(other, Format)
+                and (self.start, self.end, self.name, self.value)
+                == (other.start, other.end, other.name, other.value))
+
+    def __repr__(self):
+        return (f"Format(start={self.start!r}, end={self.end!r}, "
+                f"name={self.name!r}, value={self.value!r})")
+
+
+def _normalize_runs(runs):
+    """The core's normal form (crates/kaya/src/scene.rs, RichDoc::
+    normalize), so the mirror and the core's document spell one string."""
+    out = []
+    for name in sorted({run.name for run in runs}):
+        painted = []
+        for run in [r for r in runs if r.name == name]:
+            if run.start >= run.end:
+                continue
+            kept = []
+            for old in painted:
+                if old.end <= run.start or old.start >= run.end:
+                    kept.append(old)
+                    continue
+                if old.start < run.start:
+                    kept.append(Run(old.start, run.start, old.name, old.value))
+                if old.end > run.end:
+                    kept.append(Run(run.end, old.end, old.name, old.value))
+            kept.append(Run(run.start, run.end, run.name, run.value))
+            painted = kept
+        painted.sort(key=lambda r: r.start)
+        merged = []
+        for run in painted:
+            if merged and merged[-1].end == run.start \
+                    and merged[-1].value == run.value:
+                merged[-1].end = run.end
+            else:
+                merged.append(Run(run.start, run.end, run.name, run.value))
+        out += merged
+    out.sort(key=lambda r: (r.start, r.name))
+    return out
+
+
+def _runs_from(flat):
+    """The decoder's flat run tail, read in FOURS."""
+    return [Run(flat[i], flat[i + 1], flat[i + 2], flat[i + 3])
+            for i in range(0, len(flat), 4)]
+
+
+def _flat_runs(runs):
+    """`_runs_from`'s inverse: the wire's four values per run."""
+    flat = []
+    for run in runs:
+        flat += [run.start, run.end, run.name, run.value]
+    return flat
+
+
+def _on_boundary(data, at):
+    """Whether a byte offset falls on a code-point boundary of `data`
+    (Rust's str::is_char_boundary, in the unit the wire counts): past the
+    end is not one."""
+    if at > len(data):
+        return False
+    return at == len(data) or (data[at] & 0xC0) != 0x80
 
 
 def _accept_list(kinds):
@@ -3534,16 +3838,29 @@ def entry(text=None, on_change=None, grow=None, placeholder=None):
     return handle
 
 
-def textarea(text=None, on_change=None, grow=None, placeholder=None):
+def textarea(text=None, on_change=None, grow=None, placeholder=None,
+             rich=False, on_edit=None, on_format=None):
     """A multi-line text editor: the entry's uncontrolled contract over
-    the platform's real multi-line editor."""
+    the platform's real multi-line editor.
+
+    `rich=True` adds the attributed surface (docs/rich-text-plan.md R1):
+    `set_document`, `apply_edit`, `format`/`unformat`/`set_block`, the
+    `document()` this binding folds, and the two deltas — `on_edit(edit)`
+    for every user edit, addressed, beside the whole-text `on_change`, and
+    `on_format(act)` for a toolbar act over a range."""
     handle = _widget(wire.KIND_TEXTAREA)
     if text is not None:
         _records().append(wire.tx_set_text(handle.id, _text_value("textarea text", text)))
+    if rich:
+        handle.rich(True)
     if placeholder is not None:
         handle.placeholder(placeholder)
     if on_change is not None:
         _app._register(handle, wire.OCC_TEXT_CHANGED, on_change)
+    if on_edit is not None:
+        _app._register(handle, wire.OCC_TEXT_EDITED, on_edit)
+    if on_format is not None:
+        _app._register(handle, wire.OCC_TEXT_FORMATTED, on_format)
     _set_grow(handle, grow)
     return handle
 
@@ -4150,6 +4467,10 @@ class App:
         # state: they answer the ask with a drawing the guest never sees
         # (docs/canvas-plan.md §3.2.1).
         self._draw_handlers = {}
+        # The rich mirror, by LIVE widget id (docs/rich-text-plan.md R1).
+        # Outside the rollback journal, as the Rust binding's is: an edge
+        # the widget and the core have taken is not the app's to undo.
+        self._documents = {}
         # THE ONLY STATE HERE TOUCHED FROM ANOTHER THREAD, and the only
         # reason App carries a lock.
         self._post_lock = threading.Lock()
@@ -4467,6 +4788,71 @@ class App:
                 if key in table:
                     table[key] = table.pop(key)
 
+    # The rich mirror's three doors (docs/rich-text-plan.md R1): the
+    # widget's own deltas, folded by the core's rules
+    # (crates/kaya/src/app.rs, absorb_edit/absorb_format), and the seed a
+    # set_document write leaves.
+
+    def _document(self, widget):
+        doc = self._documents.get(widget)
+        if doc is None:
+            return Document()
+        return Document(doc.text, [Run(r.start, r.end, r.name, r.value)
+                                   for r in doc.runs])
+
+    def _seed_document(self, widget, document):
+        self._documents[widget] = Document(
+            document.text,
+            [Run(r.start, r.end, r.name, r.value) for r in document.runs])
+
+    def _absorb_edit(self, widget, start, stop, inserted, runs):
+        """One edit folded in: runs before it keep, runs after it shift,
+        a run the edit falls inside is cut, and the inserted text's own
+        runs land relative to the edit."""
+        doc = self._documents.setdefault(widget, Document())
+        data = doc.text.encode("utf-8")
+        added = inserted.encode("utf-8")
+        if stop > len(data) or not _on_boundary(data, start) \
+                or not _on_boundary(data, stop):
+            # A mirror out of step with the core takes the edit whole
+            # rather than splicing at an offset that means nothing here.
+            doc.text = inserted
+            doc.runs = [Run(r.start, r.end, r.name, r.value) for r in runs]
+            return
+        shift = len(added) - (stop - start)
+        nxt = []
+        for run in doc.runs:
+            if run.start < start:
+                nxt.append(Run(run.start, min(run.end, start), run.name,
+                               run.value))
+            if run.end > stop:
+                nxt.append(Run(max(run.start, stop) + shift, run.end + shift,
+                               run.name, run.value))
+        for run in runs:
+            nxt.append(Run(run.start + start, run.end + start, run.name,
+                           run.value))
+        doc.text = (data[:start] + added + data[stop:]).decode("utf-8")
+        doc.runs = _normalize_runs(nxt)
+
+    def _absorb_format(self, widget, start, stop, name, value):
+        """One toolbar act folded in: the attribute put over the range or
+        taken off it, clipping THIS attribute's runs and no other."""
+        doc = self._documents.setdefault(widget, Document())
+        if start >= stop:
+            return
+        nxt = []
+        for run in doc.runs:
+            if run.name != name or run.end <= start or run.start >= stop:
+                nxt.append(run)
+                continue
+            if run.start < start:
+                nxt.append(Run(run.start, start, run.name, run.value))
+            if run.end > stop:
+                nxt.append(Run(stop, run.end, run.name, run.value))
+        if value is not None:
+            nxt.append(Run(start, stop, name, value))
+        doc.runs = _normalize_runs(nxt)
+
     def _drain_posted(self):
         """Run everything posted, each as its own transaction, in order.
 
@@ -4615,6 +5001,30 @@ class App:
                 # empty: the core asks only LIVE canvases in this slice
                 # (docs/deferred.md).
                 self._answer_canvas(ident, kind, payload)
+                continue
+            if kind in (wire.OCC_TEXT_EDITED, wire.OCC_TEXT_FORMATTED):
+                # THE DOCUMENT FOLLOWS FIRST AND WITHOUT A HANDLER, as an
+                # undo's mirrors do (docs/rich-text-plan.md R1): an app
+                # that registered neither delta still reads a current
+                # `document()`. A STAMPED copy carries no document —
+                # the mirror is keyed by live widget, as the core's is.
+                if kind == wire.OCC_TEXT_EDITED:
+                    _source, start, stop, inserted = payload[:4]
+                    runs = _runs_from(payload[4:])
+                    arg = Edit(start, stop, inserted, runs)
+                    if not keys:
+                        self._absorb_edit(ident, start, stop, inserted, runs)
+                else:
+                    removed, start, stop, name, value = payload
+                    arg = Format(start, stop, name,
+                                 None if removed else value)
+                    if not keys:
+                        self._absorb_format(ident, start, stop, name,
+                                            arg.value)
+                table = self._node_handlers if keys else self._widget_handlers
+                handler = table.get((kind, ident))
+                if handler is not None:
+                    self._dispatch(handler, *keys, arg)
                 continue
             if kind in (wire.OCC_MENU_ACTIVATED, wire.OCC_MENU_TOGGLED,
                         wire.OCC_MENU_VALUE_CHANGED):

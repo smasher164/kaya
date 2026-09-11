@@ -202,6 +202,202 @@ readonly struct TextRange
     }
 }
 
+/// One paragraph kind; drawn, never stored (docs/rich-text-plan.md R3).
+enum BlockKind { Body, Heading1, Heading2, Heading3, Quote, CodeBlock }
+
+static class BlockKinds
+{
+    /// The `block` attribute's value for a kind.
+    internal static string Name(this BlockKind kind) => kind switch
+    {
+        BlockKind.Body => "body",
+        BlockKind.Heading1 => "heading1",
+        BlockKind.Heading2 => "heading2",
+        BlockKind.Heading3 => "heading3",
+        BlockKind.Quote => "quote",
+        BlockKind.CodeBlock => "code_block",
+        _ => throw new ArgumentOutOfRangeException(
+            nameof(kind), $"kaya: {kind} is no block kind"),
+    };
+}
+
+/// One attribute over one span, in TextRange's unit (UTF-8 bytes):
+/// Value is "true" for the flags, a URL for a link, a BlockKind's own
+/// spelling for a block.
+readonly record struct TextRun(long Start, long Stop, string Name, string Value);
+
+/// A toolbar act over a range; Value null is the attribute taken off.
+readonly record struct Format(long Start, long Stop, string Name, string Value);
+
+/// A `rich` textarea's text and runs, kept current by the binding from
+/// every edit it delivers (docs/rich-text-plan.md R1). Read the app's
+/// copy with KayaApp.Document.
+sealed class Document
+{
+    internal readonly List<TextRun> Marks = new List<TextRun>();
+
+    public Document(string text) => Text = text;
+
+    internal Document(string text, List<TextRun> runs)
+    {
+        Text = text;
+        Marks = runs;
+    }
+
+    public string Text { get; internal set; }
+
+    public IReadOnlyList<TextRun> Runs => Marks;
+
+    /// Paint one attribute over one range. Every chain method below is
+    /// this one with a name and a value filled in.
+    public Document Mark(TextRange range, string name, string value)
+    {
+        Marks.Add(new TextRun((long)range.Start, (long)range.Stop, name, value));
+        return this;
+    }
+
+    public Document Bold(TextRange range) => Mark(range, "bold", "true");
+
+    public Document Italic(TextRange range) => Mark(range, "italic", "true");
+
+    public Document Underline(TextRange range) => Mark(range, "underline", "true");
+
+    public Document Strike(TextRange range) => Mark(range, "strike", "true");
+
+    public Document Code(TextRange range) => Mark(range, "code", "true");
+
+    public Document Link(TextRange range, string url) => Mark(range, "link", url);
+
+    /// A range's paragraphs; it covers whole paragraphs or the core
+    /// refuses it, naming the byte.
+    public Document Block(TextRange range, BlockKind kind) =>
+        Mark(range, "block", kind.Name());
+
+    /// The attribute covering one UTF-8 byte offset, or null.
+    public string AttrAt(long byteOffset, string name)
+    {
+        foreach (TextRun run in Marks)
+            if (run.Name == name && run.Start <= byteOffset && byteOffset < run.Stop)
+                return run.Value;
+        return null;
+    }
+
+    /// The core's normal form (crates/kaya/src/scene.rs,
+    /// RichDoc::normalize), so the mirror and the core's spell the same
+    /// string: one entry per (range, attribute), disjoint per attribute,
+    /// a later run winning, adjacent-and-equal merged, ordered by start
+    /// then name.
+    internal static List<TextRun> Normalize(List<TextRun> runs)
+    {
+        var names = new List<string>();
+        foreach (TextRun run in runs)
+            if (!names.Contains(run.Name))
+                names.Add(run.Name);
+        names.Sort(string.CompareOrdinal);
+        var one = new List<TextRun>();
+        foreach (string name in names)
+        {
+            var painted = new List<TextRun>();
+            foreach (TextRun run in runs)
+            {
+                if (run.Name != name || run.Start >= run.Stop) continue;
+                var kept = new List<TextRun>();
+                foreach (TextRun old in painted)
+                {
+                    if (old.Stop <= run.Start || old.Start >= run.Stop)
+                    {
+                        kept.Add(old);
+                        continue;
+                    }
+                    if (old.Start < run.Start) kept.Add(old with { Stop = run.Start });
+                    if (old.Stop > run.Stop) kept.Add(old with { Start = run.Stop });
+                }
+                kept.Add(run);
+                painted = kept;
+            }
+            foreach (TextRun run in Ordered(painted, (a, b) => a.Start.CompareTo(b.Start)))
+            {
+                if (one.Count > 0 && one[one.Count - 1].Name == name
+                    && one[one.Count - 1].Stop == run.Start
+                    && one[one.Count - 1].Value == run.Value)
+                {
+                    one[one.Count - 1] = one[one.Count - 1] with { Stop = run.Stop };
+                    continue;
+                }
+                one.Add(run);
+            }
+        }
+        return Ordered(one, (a, b) =>
+        {
+            int by = a.Start.CompareTo(b.Start);
+            return by != 0 ? by : string.CompareOrdinal(a.Name, b.Name);
+        });
+    }
+
+    /// List.Sort is UNSTABLE, so the index carries the paint order into
+    /// every tie rather than leaving it to the comparer.
+    static List<TextRun> Ordered(List<TextRun> runs, Comparison<TextRun> by)
+    {
+        var index = new int[runs.Count];
+        for (int i = 0; i < index.Length; i++) index[i] = i;
+        Array.Sort(index, (a, b) =>
+        {
+            int cmp = by(runs[a], runs[b]);
+            return cmp != 0 ? cmp : a.CompareTo(b);
+        });
+        var sorted = new List<TextRun>(runs.Count);
+        foreach (int i in index) sorted.Add(runs[i]);
+        return sorted;
+    }
+}
+
+/// Replace Start..Stop with Inserted, whose Runs carry offsets RELATIVE
+/// to the inserted text.
+sealed class Edit
+{
+    internal readonly List<TextRun> Marks = new List<TextRun>();
+
+    internal Edit(long start, long stop, string inserted, List<TextRun> runs)
+    {
+        Start = start;
+        Stop = stop;
+        Inserted = inserted;
+        if (runs != null) Marks = runs;
+    }
+
+    public long Start { get; }
+
+    public long Stop { get; }
+
+    public string Inserted { get; }
+
+    public IReadOnlyList<TextRun> Runs => Marks;
+
+    /// Put text at one offset; `at` is a caret, so a range with a width
+    /// is refused naming both ends (Replace is the verb for that).
+    public static Edit Insert(TextRange at, string text)
+    {
+        if (at.Start != at.Stop)
+            throw new ArgumentException(
+                $"kaya: Edit.Insert takes a caret and got {at.Start}..{at.Stop} — "
+                    + "Edit.Replace swaps a range for text", nameof(at));
+        return new Edit((long)at.Start, (long)at.Stop, text, null);
+    }
+
+    public static Edit Delete(TextRange range) =>
+        new Edit((long)range.Start, (long)range.Stop, "", null);
+
+    public static Edit Replace(TextRange range, string text) =>
+        new Edit((long)range.Start, (long)range.Stop, text, null);
+
+    /// One attribute over the INSERTED text's own offsets.
+    public Edit Mark(TextRange range, string name, string value)
+    {
+        Marks.Add(new TextRun((long)range.Start, (long)range.Stop, name, value));
+        return this;
+    }
+}
+
 /// A template node: a blueprint entry, stamped per collection entry.
 /// Never on screen by itself; clicks on its copies arrive with the
 /// copy's key path.
@@ -764,6 +960,11 @@ sealed class KayaApp
     readonly Dictionary<ulong, Action<Tx, List<object>>> nodeHandlers = new();
     readonly Dictionary<ulong, Action<Tx, string>> widgetChanges = new();
     readonly Dictionary<ulong, Action<Tx, List<object>, string>> nodeChanges = new();
+    // A rich textarea's addressed edits and toolbar acts, plus the
+    // mirror both fold into (docs/rich-text-plan.md R1).
+    readonly Dictionary<ulong, Action<Tx, Edit>> widgetEdits = new();
+    readonly Dictionary<ulong, Action<Tx, Format>> widgetFormats = new();
+    readonly Dictionary<ulong, Document> documents = new();
     readonly Dictionary<ulong, Action<Tx, bool>> widgetToggles = new();
     readonly Dictionary<ulong, Action<Tx, double>> widgetValues = new();
     readonly Dictionary<ulong, Action<Tx, List<object>, bool>> nodeToggles = new();
@@ -1124,6 +1325,99 @@ sealed class KayaApp
     /// text and reports each edit here. There is no read-back.
     public void OnChange(Widget w, Action<Tx, string> handler) => widgetChanges[w.Id] = handler;
 
+    /// One addressed user edit of a `rich` textarea; OnChange still
+    /// fires beside it (docs/rich-text-plan.md R1).
+    public void OnEdit(Widget w, Action<Tx, Edit> handler) => widgetEdits[w.Id] = handler;
+
+    /// The user formatted a range. A format over a COLLAPSED caret is
+    /// pending state and arrives as the next edit's runs, never here.
+    public void OnFormat(Widget w, Action<Tx, Format> handler) => widgetFormats[w.Id] = handler;
+
+    /// This app's copy of a rich textarea's content, folded from every
+    /// edit and format the core delivered; empty until the first of them
+    /// or the first Tx.SetDocument.
+    public Document Document(Widget w) =>
+        documents.TryGetValue(w.Id, out var doc)
+            ? new global::Document(doc.Text, new List<TextRun>(doc.Marks))
+            : new global::Document("");
+
+    internal void SeedDocument(ulong widget, Document document) =>
+        documents[widget] = new global::Document(document.Text,
+            new List<TextRun>(document.Marks));
+
+    /// One delivered edit, folded by the core's own rules
+    /// (crates/kaya/src/app.rs, AppCtx::absorb_edit). THE SPLICE IS IN
+    /// UTF-8 BYTES, which a .NET string is not: the offsets are the
+    /// core's (docs/ranges-units.md), so the text is cut as bytes and
+    /// decoded back.
+    internal void AbsorbEdit(ulong widget, long start, long stop, string inserted,
+        List<TextRun> runs)
+    {
+        if (!documents.TryGetValue(widget, out var doc))
+            documents[widget] = doc = new global::Document("");
+        byte[] was = System.Text.Encoding.UTF8.GetBytes(doc.Text);
+        byte[] put = System.Text.Encoding.UTF8.GetBytes(inserted);
+        if (start < 0 || start > stop || stop > was.Length
+            || !Boundary(was, start) || !Boundary(was, stop))
+        {
+            // A mirror out of step with the core would splice a character
+            // in half.
+            documents[widget] = new global::Document(inserted, new List<TextRun>(runs));
+            return;
+        }
+        long shift = put.Length - (stop - start);
+        var next = new List<TextRun>();
+        foreach (TextRun run in doc.Marks)
+        {
+            if (run.Start < start)
+                next.Add(run with { Stop = Math.Min(run.Stop, start) });
+            if (run.Stop > stop)
+                next.Add(run with
+                {
+                    Start = Math.Max(run.Start, stop) + shift,
+                    Stop = run.Stop + shift,
+                });
+        }
+        foreach (TextRun run in runs)
+            next.Add(run with { Start = run.Start + start, Stop = run.Stop + start });
+        var merged = new byte[was.Length - (stop - start) + put.Length];
+        Array.Copy(was, 0, merged, 0, start);
+        Array.Copy(put, 0, merged, start, put.Length);
+        Array.Copy(was, stop, merged, start + put.Length, was.Length - stop);
+        doc.Text = System.Text.Encoding.UTF8.GetString(merged);
+        doc.Marks.Clear();
+        doc.Marks.AddRange(global::Document.Normalize(next));
+    }
+
+    /// A UTF-8 offset is a character boundary unless it lands on a
+    /// continuation byte.
+    static bool Boundary(byte[] utf8, long at) =>
+        at == utf8.Length || (utf8[at] & 0xC0) != 0x80;
+
+    /// One delivered format: put the attribute over the range or take it
+    /// off, clipping THIS attribute's runs (AppCtx::absorb_format).
+    internal void AbsorbFormat(ulong widget, Format act)
+    {
+        if (act.Start >= act.Stop) return;
+        if (!documents.TryGetValue(widget, out var doc))
+            documents[widget] = doc = new global::Document("");
+        var next = new List<TextRun>();
+        foreach (TextRun run in doc.Marks)
+        {
+            if (run.Name != act.Name || run.Stop <= act.Start || run.Start >= act.Stop)
+            {
+                next.Add(run);
+                continue;
+            }
+            if (run.Start < act.Start) next.Add(run with { Stop = act.Start });
+            if (run.Stop > act.Stop) next.Add(run with { Start = act.Stop });
+        }
+        if (act.Value != null)
+            next.Add(new TextRun(act.Start, act.Stop, act.Name, act.Value));
+        doc.Marks.Clear();
+        doc.Marks.AddRange(global::Document.Normalize(next));
+    }
+
     /// Register a change handler for a template entry; it also receives
     /// the stamped copy's keys, outermost first.
     public void OnChange(Node n, Action<Tx, List<object>, string> handler) =>
@@ -1293,6 +1587,46 @@ sealed class KayaApp
                 + $"value {at} of {ask.Count} is {got}");
     }
 
+    /// text_edited's decoded values (KayaWire.ParseOccurrence) cut into
+    /// the app-facing record; a tail that does not say what the record
+    /// declares is the core disagreeing with this binding, so it refuses
+    /// naming what it read.
+    static Edit EditOf(List<object> tail)
+    {
+        if (tail == null || tail.Count < 4 || (tail.Count - 4) % 4 != 0)
+            throw new InvalidOperationException(
+                "kaya: a text_edited carries "
+                    + (tail == null ? "nothing" : tail.Count.ToString())
+                    + " values, want 4 plus four per run");
+        var runs = new List<TextRun>();
+        for (int at = 4; at < tail.Count; at += 4)
+            runs.Add(RunOf(tail, at));
+        return new Edit((long)(ulong)tail[1], (long)(ulong)tail[2],
+            tail[3] as string ?? "", runs);
+    }
+
+    static Format FormatOf(List<object> tail)
+    {
+        if (tail == null || tail.Count != 5)
+            throw new InvalidOperationException(
+                "kaya: a text_formatted carries "
+                    + (tail == null ? "nothing" : tail.Count.ToString())
+                    + " values, want 5");
+        bool removed = tail[0] is uint r && r != 0;
+        return new Format((long)(ulong)tail[1], (long)(ulong)tail[2],
+            tail[3] as string ?? "", removed ? null : tail[4] as string ?? "");
+    }
+
+    static TextRun RunOf(List<object> tail, int at)
+    {
+        if (tail[at] is not long start || tail[at + 1] is not long stop)
+            throw new InvalidOperationException(
+                $"kaya: a run's offsets are a {tail[at]?.GetType().Name ?? "null"} and a "
+                    + $"{tail[at + 1]?.GetType().Name ?? "null"}, want two I64");
+        return new TextRun(start, stop, tail[at + 2] as string ?? "",
+            tail[at + 3] as string ?? "");
+    }
+
     void DispatchLoop()
     {
         ClaimAppThread();
@@ -1356,6 +1690,24 @@ sealed class KayaApp
             {
                 if (nodeChanges.TryGetValue(id, out var fn))
                     Dispatch(tx => fn(tx, keys, text));
+            }
+            // THE MIRROR FOLLOWS FIRST, and unconditionally — before the
+            // handler lookup, so a rich textarea nobody registered for
+            // still keeps its document in step
+            // (docs/rich-text-plan.md R1).
+            else if (kind == KayaWire.OccKindTextEdited)
+            {
+                Edit edit = EditOf(payload as List<object>);
+                AbsorbEdit(id, edit.Start, edit.Stop, edit.Inserted, edit.Marks);
+                if (keys.Count == 0 && widgetEdits.TryGetValue(id, out var fn))
+                    Dispatch(tx => fn(tx, edit));
+            }
+            else if (kind == KayaWire.OccKindTextFormatted)
+            {
+                Format act = FormatOf(payload as List<object>);
+                AbsorbFormat(id, act);
+                if (keys.Count == 0 && widgetFormats.TryGetValue(id, out var fn))
+                    Dispatch(tx => fn(tx, act));
             }
             else if (kind == KayaWire.OccKindToggled && keys.Count == 0)
             {
@@ -2064,6 +2416,59 @@ sealed class Tx
     public void RevealRange(Widget w, TextRange range) =>
         Records.Add(KayaWire.TxRevealRange(w.Id, range.Start, range.Stop));
 
+    /// Replace a `rich` textarea's whole document: it echoes nothing
+    /// and, like SetText, spends the native undo history
+    /// (docs/undo-plan.md D7).
+    public void SetDocument(Widget w, Document document)
+    {
+        App.SeedDocument(w.Id, document);
+        var flat = new List<object>();
+        foreach (TextRun run in document.Runs)
+        {
+            flat.Add(run.Start);
+            flat.Add(run.Stop);
+            flat.Add(run.Name);
+            flat.Add(run.Value);
+        }
+        Records.Add(KayaWire.TxSetRichText(
+            w.Id, (uint)document.Runs.Count, flat.ToArray(), document.Text));
+    }
+
+    /// One edit into a `rich` textarea: it echoes nothing, never resets
+    /// undo, and is held rather than refused mid-composition
+    /// (docs/rich-text-plan.md R5). The app's own Document takes it
+    /// HERE, while the widget and the core's mirror take it when the
+    /// composition ends (docs/rich-text-plan.md §7).
+    public void ApplyEdit(Widget w, Edit edit)
+    {
+        App.AbsorbEdit(w.Id, edit.Start, edit.Stop, edit.Inserted, edit.Marks);
+        var flat = new List<object>();
+        foreach (TextRun run in edit.Runs)
+        {
+            flat.Add(run.Start);
+            flat.Add(run.Stop);
+            flat.Add(run.Name);
+            flat.Add(run.Value);
+        }
+        Records.Add(KayaWire.TxApplyEdit(w.Id, (ulong)edit.Start, (ulong)edit.Stop,
+            (uint)edit.Runs.Count, flat.ToArray(), edit.Inserted));
+    }
+
+    /// Format the widget's CURRENT SELECTION through its own act — what
+    /// a toolbar button sends; the widget answers through
+    /// KayaApp.OnFormat (docs/rich-text-plan.md R1). Over a collapsed
+    /// selection the attribute is armed for the next keystroke instead.
+    /// `value` is "true" for a flag, the URL for link.
+    public void Format(Widget w, string name, string value) =>
+        Records.Add(KayaWire.TxFormatText(w.Id, 0, new object[] { name, value }));
+
+    /// Take an attribute off the widget's current selection.
+    public void Unformat(Widget w, string name) =>
+        Records.Add(KayaWire.TxFormatText(w.Id, 1, new object[] { name, "" }));
+
+    /// Make the selection's paragraphs `kind`; BlockKind.Body clears.
+    public void SetBlock(Widget w, BlockKind kind) => Format(w, "block", kind.Name());
+
     // --- Construction sugar: everything lowers eagerly to the same
     // records — children first, then the container, then the AddChilds.
 
@@ -2090,12 +2495,16 @@ sealed class Tx
     }
 
     /// A multi-line text editor: the entry's uncontrolled contract
-    /// over the platform's real multi-line editor.
-    public Widget Textarea(Action<Tx, string> onChange = null, double? grow = null)
+    /// over the platform's real multi-line editor. `rich: true` makes it
+    /// carry attribute runs — SetDocument, ApplyEdit, KayaApp.OnEdit
+    /// (docs/rich-text-plan.md R1).
+    public Widget Textarea(Action<Tx, string> onChange = null, double? grow = null,
+        bool rich = false)
     {
         var w = Widget(KayaWire.KindTextarea);
         if (onChange != null) App.OnChange(w, onChange);
         if (grow is double g) SetGrow(w, g);
+        if (rich) Records.Add(KayaWire.TxSetRich(w.Id, true));
         return w;
     }
 

@@ -35,6 +35,14 @@ click button#4
 expect label#0 "format 0:17 block=heading1"
 expect_runs textarea#0 "0:17 block=heading1|8:11 italic|12:17 link=https://kaya.dev|18:29 block=heading2"
 expect label#1 "0:17 block=heading1|8:11 italic|12:17 link=https://kaya.dev|18:29 block=heading2"
+# A PARAGRAPH GOING BACK TO BODY is the block attribute taken off, on every
+# lane one way (docs/rich-text-plan.md §7): no `block=body` run anywhere.
+format textarea#0 0:17 block off
+expect label#0 "format 0:17 block=off"
+expect_runs textarea#0 "8:11 italic|12:17 link=https://kaya.dev|18:29 block=heading2"
+expect label#1 "8:11 italic|12:17 link=https://kaya.dev|18:29 block=heading2"
+click button#4
+expect_runs textarea#0 "0:17 block=heading1|8:11 italic|12:17 link=https://kaya.dev|18:29 block=heading2"
 # TYPING INHERITS (R4): `type` appends at the end, inside the second
 # paragraph, so the typed byte carries its block and nothing else — the
 # core derives that from its mirror, and the app's document agrees. One

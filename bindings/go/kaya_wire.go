@@ -924,17 +924,18 @@ func TxDeclareLinkRoute(route uint64, pattern any) []byte {
 }
 
 // TxSetRichText: The WHOLE attributed document of a `rich` textarea (docs/rich-text-plan.md R1): the text as the payload, and `runs` holding 4*`count` values read in FOURS — I64 start, I64 end, Str name, Str value — each run one attribute over one range in UTF-8 BYTE offsets into that text, validated at the ranges' chokepoint (docs/ranges-units.md §7) and allowed to overlap (bold and italic over one range are two runs). A CONFIGURATION WRITE: it echoes nothing, and it resets the widget's native undo history where that tier is on (docs/undo-plan.md D7). The vocabulary is wire::RICH_ATTRS; a `block` run must start and end on paragraph boundaries. Refused on a textarea that is not `rich`.
-func TxSetRichText(widgetId uint64, count uint32, runs []any) []byte {
+func TxSetRichText(widgetId uint64, count uint32, runs []any, text any) []byte {
 	b := beginRecord(txSetRichText)
 	b = binary.LittleEndian.AppendUint64(b, widgetId)
 	b = binary.LittleEndian.AppendUint32(b, count)
 	b = binary.LittleEndian.AppendUint32(b, 0)
 	b = encodeValues(b, runs)
+	b = encodeValue(b, text)
 	return endRecord(b)
 }
 
 // TxApplyEdit: ONE edit into a `rich` textarea, the app's own or a collaborator's (docs/rich-text-plan.md R1, R5): replace `start..end` (UTF-8 byte offsets into the widget's current text, validated as a range is) with the payload text, whose attribute runs are `runs` in fours as set_rich_text's, with offsets RELATIVE to the inserted text. Keeps the selection: unchanged before the edit, shifted after it, a caret at `start` ending AFTER the insertion. Echoes nothing and never resets undo. QUEUED while an input-method composition is live and applied when it ends, since a refusal would drop a collaborator's edit.
-func TxApplyEdit(widgetId uint64, start uint64, stop uint64, count uint32, runs []any) []byte {
+func TxApplyEdit(widgetId uint64, start uint64, stop uint64, count uint32, runs []any, text any) []byte {
 	b := beginRecord(txApplyEdit)
 	b = binary.LittleEndian.AppendUint64(b, widgetId)
 	b = binary.LittleEndian.AppendUint64(b, start)
@@ -942,6 +943,7 @@ func TxApplyEdit(widgetId uint64, start uint64, stop uint64, count uint32, runs 
 	b = binary.LittleEndian.AppendUint32(b, count)
 	b = binary.LittleEndian.AppendUint32(b, 0)
 	b = encodeValues(b, runs)
+	b = encodeValue(b, text)
 	return endRecord(b)
 }
 

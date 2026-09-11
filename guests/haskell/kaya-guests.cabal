@@ -178,6 +178,11 @@ executable ranges
   main-is: ranges.hs
   build-depends: kaya-guests
 
+executable richtext
+  import: shared
+  main-is: richtext.hs
+  build-depends: kaya-guests
+
 executable sections
   import: shared
   main-is: sections.hs

@@ -79,6 +79,11 @@ LEGS = {
         # (docs/app-links-plan.md L5): the same tasks guest, warm through
         # the app's own startActivity and cold through `am start -a VIEW`.
         "links-compose",
+        # The rich text scene (docs/rich-text-plan.md R9): rust-only for
+        # now — no python, go or jvm guest spells a Document yet — so it
+        # rides the compose suite alone, and it is an IME_SCENES member,
+        # which is what puts the helper keyboard under its `compose` step.
+        "richtext-compose",
     ],
     "jvm": [
         "jvm", "a11y-jvm", "entry-jvm",

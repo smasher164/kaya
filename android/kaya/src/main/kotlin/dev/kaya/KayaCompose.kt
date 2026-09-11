@@ -44,6 +44,9 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.draganddrop.dragAndDropSource
 import androidx.compose.foundation.draganddrop.dragAndDropTarget
 import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.gestures.ScrollableDefaults
 import androidx.compose.foundation.gestures.ScrollableState
 import androidx.compose.foundation.gestures.scrollBy
@@ -193,6 +196,7 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
@@ -255,6 +259,8 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import java.nio.ByteBuffer
@@ -369,6 +375,35 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     val textState by lazy(LazyThreadSafetyMode.NONE) {
         androidx.compose.foundation.text.input.TextFieldState("")
     }
+
+    /** docs/rich-text-plan.md R1: the widget publishes attributed content. */
+    var rich = false
+
+    /**
+     * THE ARM'S OWN MIRROR of the document's runs, UTF-16 units — foundation
+     * 1.11.4's `addStyle` is display-only and tracks nothing across an edit
+     * (docs/measurements/richtext-compose-2026-09-11.md §2 F1/F2), so every
+     * remap is kaya's and the display is derived from this on each change.
+     */
+    var richRuns: List<KayaRichRun> = emptyList()
+
+    /** Bumped whenever [richRuns] moves; the OutputTransformation is
+     * remembered on it, so a run change re-derives the display. */
+    var richSeq by mutableStateOf(0)
+
+    /** A composition this field reported live (its end is the collector's). */
+    var richComposing = false
+
+    /** Armed over a collapsed caret, spent by the next insertion — Compose
+     * drops a zero-length `addStyle` silently, so pending is kaya's state
+     * here (docs/measurements/richtext-compose-2026-09-11.md §2 E2.8). */
+    val richPendingOn = LinkedHashMap<String, String>()
+    val richPendingOff = LinkedHashSet<String>()
+
+    /** The range the InputTransformation saw a user edit take, in UTF-8
+     * BYTES, for R4's corroboration alone — the DELTA itself is derived
+     * from this arm's own mirror, as the core derives its own. One-shot. */
+    var richReported: Triple<Int, Int, Int>? = null
     // The accessibility identifier and label (universal props). The
     // identifier is never spoken — it lowers to Modifier.testTag, which
     // is what surfaces as the automation key — while the label IS what
@@ -1688,11 +1723,11 @@ object KayaCompose {
     private const val BLOCK_HEADING3 = 3L
     private const val BLOCK_QUOTE = 4L
     private const val BLOCK_CODE_BLOCK = 5L
-    private const val EDIT_SOURCE_USER = 0L
-    private const val EDIT_SOURCE_IME_COMMIT = 1L
-    private const val EDIT_SOURCE_PASTE = 2L
-    private const val EDIT_SOURCE_NATIVE_UNDO = 3L
-    private const val EDIT_SOURCE_DROP = 4L
+    internal const val EDIT_SOURCE_USER = 0L
+    internal const val EDIT_SOURCE_IME_COMMIT = 1L
+    internal const val EDIT_SOURCE_PASTE = 2L
+    internal const val EDIT_SOURCE_NATIVE_UNDO = 3L
+    internal const val EDIT_SOURCE_DROP = 4L
 
     /**
      * Named once so check-detekt sees them used, as CANVAS_VOCABULARY is
@@ -1735,6 +1770,9 @@ object KayaCompose {
      */
     @JvmStatic
     private var mountedActivity: ComponentActivity? = null
+
+    /** The activity a rich link is followed from (kayaOpenLink). */
+    internal fun activityForLink(): ComponentActivity? = mountedActivity
 
     /**
      * THE BUILD-ONCE LATCH (docs/deferred.md's mount entry). Android
@@ -2307,6 +2345,11 @@ object KayaCompose {
                             KayaSceneModel.nodes[id]!!.placeholder = readString(b)
                         PROP_HREF ->
                             KayaSceneModel.nodes[id]!!.href = readString(b)
+                        // docs/rich-text-plan.md R1: with it off nothing
+                        // below the prop exists and every rich opinion
+                        // stays pinned as today.
+                        PROP_RICH ->
+                            KayaSceneModel.nodes[id]!!.rich = readBool(b)
                         PROP_WRAP ->
                             KayaSceneModel.nodes[id]!!.wrap = readBool(b)
                         PROP_COLUMNS ->
@@ -2452,9 +2495,48 @@ object KayaCompose {
                     val accepting = readString(b)
                     kayaAnswerClipboardRead(request, accepting)
                 }
-                APPLY_SET_RICH_TEXT, APPLY_APPLY_EDIT, APPLY_FORMAT_TEXT ->
-                    // docs/rich-text-plan.md §4: this backend's breadth step.
-                    depthStub("richtext")
+                APPLY_SET_RICH_TEXT -> {
+                    // { u64 id; runs; Str text } — runs in fours, already
+                    // UTF-16 code units (docs/ranges-units.md §7).
+                    val rid = b.long
+                    val rruns = readRuns(b)
+                    val rtext = readString(b)
+                    val rnode = KayaSceneModel.nodes[rid]
+                        ?: error("kaya: set_rich_text on an unknown widget $rid")
+                    kayaRichSetDocument(rnode, rtext, rruns)
+                }
+                APPLY_APPLY_EDIT -> {
+                    // { u64 id; u64 start; u64 stop; u64 sel_start;
+                    //   u64 sel_stop; runs; Str inserted } — the core's own
+                    // post-edit selection (docs/rich-text-plan.md R5).
+                    val eid = b.long
+                    val estart = b.long.toInt()
+                    val estop = b.long.toInt()
+                    val eselStart = b.long.toInt()
+                    val eselStop = b.long.toInt()
+                    val eruns = readRuns(b)
+                    val einserted = readString(b)
+                    val enode = KayaSceneModel.nodes[eid]
+                        ?: error("kaya: apply_edit on an unknown widget $eid")
+                    kayaRichApplyEdit(
+                        enode, estart, estop, einserted, eruns, eselStart, eselStop)
+                }
+                APPLY_FORMAT_TEXT -> {
+                    // { u64 id; u32 removed; u32 reserved; u32 count;
+                    //   u32 reserved; Str name; Str value }
+                    val fid = b.long
+                    val fremoved = b.int != 0
+                    b.int // reserved
+                    b.int // slots
+                    b.int // reserved
+                    val fname = readString(b)
+                    val fvalue = readString(b)
+                    val fnode = KayaSceneModel.nodes[fid]
+                        ?: error("kaya: format_text on an unknown widget $fid")
+                    kayaFormatSelection(fnode, fname, fvalue, fremoved)?.let {
+                        Log.i("kaya", "KAYA_DIAG format_text refused: $it")
+                    }
+                }
                 APPLY_HIGHLIGHT_RANGES -> {
                     // { u64 widget_id; u32 count; u32 reserved } then a
                     // Values block of 2*count I64s, read IN PAIRS, in
@@ -3155,6 +3237,28 @@ object KayaCompose {
         b.int // len
         check(type == VALUE_BOOL) { "kaya: expected a bool value, got type $type" }
         return b.get() != 0.toByte()
+    }
+
+    /**
+     * The rich-text run block (crates/kaya/src/wire.rs write_native_runs):
+     * `{ u32 count; u32 reserved; u32 values; u32 reserved }` then `count`
+     * fours of (I64 start, I64 end, Str name, Str value), in UTF-16 code
+     * units because the core converted on the way down.
+     */
+    private fun readRuns(b: ByteBuffer): List<KayaRichRun> {
+        val count = b.int
+        b.int // reserved
+        b.int // slots — 4 per run
+        b.int // reserved
+        val out = ArrayList<KayaRichRun>(count)
+        repeat(count) {
+            val start = readI64(b).toInt()
+            val end = readI64(b).toInt()
+            val name = readString(b)
+            val value = readString(b)
+            out.add(KayaRichRun(start, end, name, value))
+        }
+        return out
     }
 
     private fun readBlobHandle(b: ByteBuffer): Long {
@@ -4688,7 +4792,18 @@ object KayaCompose {
                     // undoable (docs/undo-plan.md §1.4 names this site),
                     // so this costs granularity, not history.
                     val pasted = kayaClipboardPlainText() ?: return true
+                    val before = node.text
                     kayaWriteText(node, kayaLf(node.text + pasted))
+                    if (node.rich) {
+                        // docs/rich-text-plan.md R4: the source, named before
+                        // the report. The PLATFORM'S own toolbar paste takes
+                        // the field's input path instead and is
+                        // indistinguishable from typing there, so it arrives
+                        // as `user`.
+                        kayaRichUserEdit(node, before, node.text)
+                        KayaPresent.textEditSource(
+                            node.id, KayaCompose.EDIT_SOURCE_PASTE.toInt())
+                    }
                     KayaPresent.emitTextChanged(
                         node.tag, node.text, KayaSceneModel.focusedId == node.id, false)
                     return true
@@ -5086,6 +5201,53 @@ object KayaCompose {
         if (viewport <= 0) return "<no viewport>"
         return if (top >= scroll.value && bottom <= scroll.value + viewport) "visible"
         else "offscreen"
+    }
+
+    /**
+     * `format <target> <start:end> <name>[=<value>] [off]`: the range is
+     * BYTES, selected on the state and then handed to the widget's own act
+     * (docs/rich-text-plan.md R9). null, or what refused. UI thread.
+     */
+    private fun kayaFormatVerb(parts: List<String>): String? {
+        if (parts.size < 4) return "wants a target, a start:end range and an attribute"
+        val node = kayaTextTarget(parts[1]) ?: return "no such target ${parts[1]}"
+        val bounds = parts[2].split(":")
+        val s = bounds.getOrNull(0)?.toIntOrNull()
+        val e = bounds.getOrNull(1)?.toIntOrNull()
+        if (bounds.size != 2 || s == null || e == null) {
+            return "${parts[2]} is not a start:end range"
+        }
+        val text = node.textState.text.toString()
+        val start = kayaUtf16Offset(text, s)
+        val end = kayaUtf16Offset(text, e)
+        if (start < 0 || end < 0 || start > end) {
+            return "${parts[2]} is not on a character boundary of the " +
+                "${text.toByteArray(Charsets.UTF_8).size}-byte text"
+        }
+        val attr = parts[3]
+        val off = parts.size > 4 && parts[4] == "off"
+        val split = attr.indexOf('=')
+        val name = if (split < 0) attr else attr.substring(0, split)
+        val value = if (split < 0) "true" else attr.substring(split + 1)
+        node.textState.edit {
+            selection = androidx.compose.ui.text.TextRange(start, end)
+        }
+        return kayaFormatSelection(node, name, value, off)
+    }
+
+    /**
+     * `expect_runs` / `expect_edit`: the core's answer and, for the runs,
+     * what the ARM'S OWN table says beside it — null when they agree or
+     * while a composition is live, since the marked text is the widget's
+     * alone and the two are legitimately apart until it commits.
+     */
+    private fun kayaRichRead(parts: List<String>): Pair<String, String?> {
+        val node = kayaTextTarget(parts[1]) ?: return Pair("<no such target>", null)
+        if (parts[0] == "expect_edit") return Pair(KayaPresent.textLastEdit(node.id), null)
+        val core = KayaPresent.textRuns(node.id)
+        if (node.textState.composition != null) return Pair(core, null)
+        val mine = kayaRichSpelling(node.textState.text.toString(), node.richRuns)
+        return Pair(core, if (mine == core) null else mine)
     }
 
     /**
@@ -8190,9 +8352,34 @@ object KayaCompose {
                         if (got == want) observed.add("${parts[2]} $want")
                         else failures.add("${parts[2]} is $got, wanted $want")
                     }
-                    "format", "expect_runs", "expect_edit" ->
-                        // docs/rich-text-plan.md §4: this backend's breadth step.
-                        depthStub("richtext")
+                    "format" -> {
+                        // `format <target> <start:end> <name>[=<value>] [off]`
+                        // in BYTES (docs/rich-text-plan.md R9): select the
+                        // range and take the WIDGET'S OWN act, the same
+                        // function format_text lowers to, so the widget
+                        // reports exactly as it does for a user.
+                        kayaAwaitQuiet()
+                        val answered = kayaBatches
+                        val trouble = onUi(activity) { kayaFormatVerb(parts) }
+                        if (trouble != null) failures.add("format: $trouble")
+                        else kayaAwaitAnswer(answered)
+                    }
+                    "expect_runs", "expect_edit" -> {
+                        // THE CORE'S DOCUMENT, spelled by the core (R9); the
+                        // arm's OWN table is read beside it and a
+                        // disagreement is a KAYA_DIAG naming both — R9's
+                        // per-backend half.
+                        val want = quoted(parts.drop(2))
+                        val read = onUi(activity) { kayaRichRead(parts) }
+                        val word = if (parts[0] == "expect_runs") "runs" else "edit"
+                        // A widget disagreeing with the core FAILS the read
+                        // (docs/rich-text-plan.md §7): the sentence carries both.
+                        val got =
+                            if (read.second != null) "${read.first} — but the widget holds \"${read.second}\""
+                            else read.first
+                        if (got == want) observed.add("$word \"$want\"")
+                        else failures.add("$word \"$got\", wanted \"$want\"")
+                    }
                     "compose" -> {
                         // The state a user is in mid-word with an IME,
                         // which no other verb reaches: `type` is
@@ -9466,9 +9653,9 @@ private fun kayaLf(s: String): String =
 /**
  * EVERY TOUCH OF `undoState`, in one place, so the file's experimental
  * opt-in stays one annotation at the smallest scope covering it:
- * `undoState` and its five members are the ONLY
- * `@ExperimentalFoundationApi` surface this file uses at foundation
- * 1.7.5.
+ * `undoState` and its five members, and the input buffer's `changes`
+ * (kayaRichInputTransformation), are the `@ExperimentalFoundationApi`
+ * surface this file uses at foundation 1.11.4.
  */
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 private object KayaUndoState {
@@ -9642,6 +9829,502 @@ internal fun kayaRangeBox(node: KayaNode, range: KayaRange): Pair<Int, Int>? {
     val b = layout.getBoundingBox(last)
     return Pair(minOf(a.top, b.top).toInt(), maxOf(a.bottom, b.bottom).toInt())
 }
+
+// ---- Rich text, the Compose arm (docs/rich-text-plan.md R7 as amended) --
+//
+// THE CORE OWNS THE DOCUMENT AND THIS ARM MIRRORS IT. foundation 1.11.4's
+// `addStyle` is legal only inside an OutputTransformation and is display
+// only — a run does not follow the text across an edit — so the table
+// below IS the styling and every offset is remapped here
+// (docs/measurements/richtext-compose-2026-09-11.md §1, §2).
+// Offsets are UTF-16 code units, the unit the core converts to for this
+// backend (crates/kaya/src/scene.rs native_offset); a report goes up in
+// UTF-8 bytes.
+
+/** One attribute run as the arm holds it: UTF-16 units, the spec's name,
+ * the value ("true" for a flag). */
+data class KayaRichRun(
+    val start: Int,
+    val end: Int,
+    val name: String,
+    val value: String,
+)
+
+/** The v1 vocabulary (docs/rich-text-plan.md R3). */
+internal val KAYA_RICH_NAMES =
+    listOf("bold", "italic", "underline", "strike", "code", "link", "block")
+
+/**
+ * Per attribute: disjoint, sorted, never adjacent-and-equal, a later run
+ * winning over an earlier one — `RichDoc::normalize`'s normal form, so the
+ * arm's spelling and the core's can be compared byte for byte.
+ */
+internal fun kayaRichNormalize(runs: List<KayaRichRun>): List<KayaRichRun> {
+    val out = ArrayList<KayaRichRun>(runs.size)
+    for (name in runs.map { it.name }.distinct().sorted()) {
+        var painted = ArrayList<KayaRichRun>()
+        for (run in runs.filter { it.name == name }) {
+            if (run.start >= run.end) continue
+            val kept = ArrayList<KayaRichRun>(painted.size + 2)
+            for (old in painted) {
+                if (old.end <= run.start || old.start >= run.end) {
+                    kept.add(old)
+                    continue
+                }
+                if (old.start < run.start) kept.add(old.copy(end = run.start))
+                if (old.end > run.end) kept.add(old.copy(start = run.end))
+            }
+            kept.add(run)
+            painted = kept
+        }
+        painted.sortBy { it.start }
+        val merged = ArrayList<KayaRichRun>(painted.size)
+        for (run in painted) {
+            val last = merged.lastOrNull()
+            if (last != null && last.end == run.start && last.value == run.value) {
+                merged[merged.size - 1] = last.copy(end = run.end)
+            } else {
+                merged.add(run)
+            }
+        }
+        out.addAll(merged)
+    }
+    out.sortWith(compareBy({ it.start }, { it.name }))
+    return out
+}
+
+/** `RichDoc::splice`: runs before the edit stay, runs after it shift, a run
+ * the edit falls inside is cut, the inserted runs land at its start. */
+internal fun kayaRichSplice(
+    runs: List<KayaRichRun>,
+    start: Int,
+    end: Int,
+    insertedLength: Int,
+    inserted: List<KayaRichRun>,
+): List<KayaRichRun> {
+    val shift = insertedLength - (end - start)
+    val next = ArrayList<KayaRichRun>(runs.size + inserted.size)
+    for (run in runs) {
+        if (run.start < start) next.add(run.copy(end = minOf(run.end, start)))
+        if (run.end > end) {
+            next.add(run.copy(start = maxOf(run.start, end) + shift, end = run.end + shift))
+        }
+    }
+    for (run in inserted) {
+        next.add(run.copy(start = run.start + start, end = run.end + start))
+    }
+    return kayaRichNormalize(next)
+}
+
+/** `RichDoc::format`: put `value` on `start..end` for `name`; null takes it off. */
+internal fun kayaRichFormat(
+    runs: List<KayaRichRun>,
+    start: Int,
+    end: Int,
+    name: String,
+    value: String?,
+): List<KayaRichRun> {
+    if (start >= end) return runs
+    val next = ArrayList<KayaRichRun>(runs.size + 2)
+    for (run in runs) {
+        if (run.name != name || run.end <= start || run.start >= end) {
+            next.add(run)
+            continue
+        }
+        if (run.start < start) next.add(run.copy(end = start))
+        if (run.end > end) next.add(run.copy(start = end))
+    }
+    if (value != null) next.add(KayaRichRun(start, end, name, value))
+    return kayaRichNormalize(next)
+}
+
+/** The attributes covering one UTF-16 index. */
+internal fun kayaRichAttrsAt(runs: List<KayaRichRun>, at: Int): LinkedHashMap<String, String> {
+    val out = LinkedHashMap<String, String>()
+    for (name in KAYA_RICH_NAMES) {
+        runs.firstOrNull { it.name == name && it.start <= at && at < it.end }
+            ?.let { out[name] = it.value }
+    }
+    return out
+}
+
+/**
+ * The inheritance rule (docs/rich-text-plan.md R4), the core's `typed_runs`
+ * one unit over: typed text takes the character before it, except `link`;
+ * armed typing attributes win. The CORE's copy is the authority and this
+ * one only decides what the user SEES — `expect_runs` prints both when
+ * they disagree.
+ */
+internal fun kayaRichTypedRuns(node: KayaNode, start: Int, insertedLength: Int):
+    List<KayaRichRun> {
+    if (insertedLength <= 0) return emptyList()
+    val text = node.textState.text
+    // The character before the caret, never half a surrogate pair.
+    val before =
+        if (start <= 0) -1
+        else if (start - 2 >= 0 && Character.isLowSurrogate(text[start - 1])) start - 2
+        else start - 1
+    val attrs = if (before < 0) LinkedHashMap() else kayaRichAttrsAt(node.richRuns, before)
+    attrs.remove("link")
+    attrs.putAll(node.richPendingOn)
+    for (name in node.richPendingOff) attrs.remove(name)
+    return attrs.map { (name, value) -> KayaRichRun(0, insertedLength, name, value) }
+}
+
+/**
+ * The harness's spelling of the arm's own runs, in the core's unit and
+ * order: `start:end name[=value]`, `|`-joined (`Scene::rich_runs_string`).
+ * An offset that splits a character is NAMED, never coerced.
+ */
+internal fun kayaRichSpelling(text: String, runs: List<KayaRichRun>): String =
+    runs.joinToString("|") { run ->
+        val from = kayaByteOffset(text, run.start)
+        val to = kayaByteOffset(text, run.end)
+        when {
+            from < 0 || to < 0 -> "split@${run.start}:${run.end}"
+            run.value == "true" -> "$from:$to ${run.name}"
+            else -> "$from:$to ${run.name}=${run.value}"
+        }
+    }
+
+/** The paragraph `range` sits in, WITHOUT its trailing newline — a block
+ * act's extent (docs/rich-text-plan.md R3, the mac arm's own rule). */
+internal fun kayaRichParagraph(text: String, start: Int, stop: Int): Pair<Int, Int> {
+    val from = text.lastIndexOf('\n', (start - 1).coerceAtLeast(0))
+        .let { if (it < 0 || start == 0) 0 else it + 1 }
+    var to = text.indexOf('\n', stop)
+    if (to < 0) to = text.length
+    return Pair(from, to)
+}
+
+/** The colours the display derives from kaya's keys, read where a
+ * CompositionLocal can be read and handed to the transformation. */
+internal data class KayaRichPalette(val link: Color, val quote: Color)
+
+/** The run table cut into maximal segments of constant attributes — the
+ * mac arm's `enumerateAttributes`, which is what keeps two decorations on
+ * one character from overwriting each other. */
+internal fun kayaRichSegments(
+    runs: List<KayaRichRun>,
+    length: Int,
+): List<Triple<Int, Int, Map<String, String>>> {
+    if (length <= 0) return emptyList()
+    val edges = sortedSetOf(0, length)
+    for (run in runs) {
+        if (run.start in 1 until length) edges.add(run.start)
+        if (run.end in 1 until length) edges.add(run.end)
+    }
+    val bounds = edges.toList()
+    val out = ArrayList<Triple<Int, Int, Map<String, String>>>(bounds.size)
+    for (i in 0 until bounds.size - 1) {
+        val attrs = kayaRichAttrsAt(runs, bounds[i])
+        if (attrs.isNotEmpty()) out.add(Triple(bounds[i], bounds[i + 1], attrs))
+    }
+    return out
+}
+
+/** One segment's character style, derived from kaya's own keys — a
+ * read-back never guesses a name from a font (docs/rich-text-plan.md §7).
+ * Heading sizes are `em`, so they stay relative to the field's own style. */
+internal fun kayaRichSpanStyle(
+    attrs: Map<String, String>,
+    palette: KayaRichPalette,
+): SpanStyle {
+    val block = attrs["block"] ?: "body"
+    val heading = block == "heading1" || block == "heading2" || block == "heading3"
+    val bold = attrs.containsKey("bold") || heading
+    val mono = attrs.containsKey("code") || block == "code_block"
+    val decorations = ArrayList<TextDecoration>(2)
+    if (attrs.containsKey("underline") || attrs.containsKey("link")) {
+        decorations.add(TextDecoration.Underline)
+    }
+    if (attrs.containsKey("strike")) decorations.add(TextDecoration.LineThrough)
+    return SpanStyle(
+        color = when {
+            attrs.containsKey("link") -> palette.link
+            block == "quote" -> palette.quote
+            else -> Color.Unspecified
+        },
+        fontSize = when (block) {
+            "heading1" -> 1.6.em
+            "heading2" -> 1.35.em
+            "heading3" -> 1.15.em
+            else -> androidx.compose.ui.unit.TextUnit.Unspecified
+        },
+        fontWeight = if (bold) FontWeight.Bold else null,
+        fontStyle = if (attrs.containsKey("italic")) FontStyle.Italic else null,
+        fontFamily = if (mono) FontFamily.Monospace else null,
+        textDecoration =
+            if (decorations.isEmpty()) null else TextDecoration.combine(decorations),
+    )
+}
+
+/**
+ * THE DISPLAY (docs/rich-text-plan.md R7): the arm's runs drawn through the
+ * field's own OutputTransformation, the only door foundation 1.11.4 opens.
+ * NOTHING OF IT REACHES ACCESSIBILITY and there is no arm that could send
+ * it: an editable field's semantics text is a span-free SpannableString
+ * whatever the styles say, measured through the real node provider
+ * (docs/measurements/richtext-compose-2026-09-11.md §6). R9 mints no AX
+ * word here.
+ * A LINK IS A LOOK HERE — `LinkAnnotation` in an editable field renders
+ * nothing and clicks nothing on this and every foundation version measured
+ * (docs/measurements/richtext-compose-2026-09-11.md §4) — so the colour and
+ * the underline are the drawing and [kayaRichLinkAt] is the hit test.
+ */
+internal fun kayaRichTransformation(
+    runs: List<KayaRichRun>,
+    palette: KayaRichPalette,
+): androidx.compose.foundation.text.input.OutputTransformation =
+    androidx.compose.foundation.text.input.OutputTransformation {
+        // Clamped against the OUTPUT buffer: the table follows the text one
+        // frame behind, so a run may name an offset this buffer has not.
+        for ((from, to, attrs) in kayaRichSegments(runs, length)) {
+            if (from >= length) continue
+            val stop = minOf(to, length)
+            if (stop <= from) continue
+            addStyle(kayaRichSpanStyle(attrs, palette), from, stop)
+            if (attrs["block"] == "quote") {
+                addStyle(
+                    androidx.compose.ui.text.ParagraphStyle(
+                        textIndent = androidx.compose.ui.text.style.TextIndent(
+                            KAYA_RICH_QUOTE_INDENT, KAYA_RICH_QUOTE_INDENT)),
+                    from,
+                    stop)
+            }
+        }
+    }
+
+/** A quote's indent, the mac arm's 20 points in this platform's unit. */
+private val KAYA_RICH_QUOTE_INDENT = 20.sp
+
+/** A quote's dimmed ground, the mac arm's secondary label one platform
+ * over. */
+internal const val KAYA_RICH_QUOTE_ALPHA = 0.7f
+
+/** One read of the field, all three facts the collector needs from the
+ * same snapshot: a caret move changes no text and would otherwise wake
+ * nothing. */
+internal data class KayaTextRead(
+    val text: String,
+    val composing: Boolean,
+    val selection: androidx.compose.ui.text.TextRange,
+)
+
+/**
+ * Follow a rich run's link: the platform's own browser door, which is what
+ * a `role link` label already reaches through Compose's LinkAnnotation and
+ * what the mac's AppKit default does. A device with nothing to answer it
+ * is a diagnostic, never a crash.
+ */
+internal fun kayaOpenLink(url: String) {
+    val activity = KayaCompose.activityForLink() ?: return
+    try {
+        activity.startActivity(
+            android.content.Intent(
+                android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)))
+    } catch (e: android.content.ActivityNotFoundException) {
+        Log.i("kaya", "KAYA_DIAG link $url: nothing answers ACTION_VIEW (${e.message})")
+    }
+}
+
+/**
+ * The URL a tap at [position] lands on, or null — kaya's own hit test,
+ * because the platform draws no link in an editable field. The layout is
+ * the text's, so the viewport's own scroll is added back.
+ */
+internal fun kayaRichLinkAt(node: KayaNode, position: androidx.compose.ui.geometry.Offset):
+    String? {
+    if (!node.rich || node.richRuns.none { it.name == "link" }) return null
+    val layout = kayaTextLayouts[node.id]?.invoke() ?: return null
+    val at = layout.getOffsetForPosition(
+        androidx.compose.ui.geometry.Offset(
+            position.x, position.y + node.scrollState.value))
+    return node.richRuns.firstOrNull {
+        it.name == "link" && it.start <= at && at < it.end
+    }?.value
+}
+
+/**
+ * THE WIDGET'S OWN FORMATTING ACT over its current selection — the path an
+ * app's format_text and the harness's `format` share (docs/rich-text-plan.md
+ * R1, R9). A collapsed selection arms the typing attribute instead; a block
+ * act covers the selection's whole paragraphs. null, or what refused.
+ *
+ * NO TYPING-ATTRIBUTE WRITE follows a ranged act, unlike the mac's: this
+ * arm derives inheritance from the run table at the moment of insertion
+ * (the core's own rule), so the character before the caret already carries
+ * what the act just applied.
+ */
+internal fun kayaFormatSelection(
+    node: KayaNode,
+    name: String,
+    value: String,
+    removed: Boolean,
+): String? {
+    if (!node.rich) return "widget ${node.id} is not a rich textarea"
+    if (!KAYA_RICH_NAMES.contains(name)) return "$name is not a rich attribute"
+    if (node.textState.composition != null) {
+        return "an input-method composition is live on widget ${node.id}"
+    }
+    val text = node.textState.text.toString()
+    val off = removed || (name == "block" && value == "body")
+    val selection = node.textState.selection
+    var from = minOf(selection.start, selection.end)
+    var to = maxOf(selection.start, selection.end)
+    if (name == "block") {
+        val paragraph = kayaRichParagraph(text, from, to)
+        from = paragraph.first
+        to = paragraph.second
+    }
+    if (from == to) {
+        if (off) {
+            node.richPendingOn.remove(name)
+            node.richPendingOff.add(name)
+        } else {
+            node.richPendingOff.remove(name)
+            node.richPendingOn[name] = value
+        }
+        KayaPresent.textPending(node.id, name, value, !off)
+        return null
+    }
+    val start = kayaByteOffset(text, from)
+    val end = kayaByteOffset(text, to)
+    if (start < 0 || end < 0) return "the selection is not on a character boundary"
+    node.richRuns = kayaRichFormat(node.richRuns, from, to, name, if (off) null else value)
+    node.richSeq += 1
+    KayaPresent.textFormatted(
+        node.tag, start.toLong(), end.toLong(), name, value, off)
+    return null
+}
+
+/**
+ * set_rich_text: the whole content in one write. D7's history reset rides
+ * [kayaWriteText] exactly as set_text's does; nothing echoes.
+ */
+internal fun kayaRichSetDocument(node: KayaNode, text: String, runs: List<KayaRichRun>) {
+    node.richRuns = kayaRichNormalize(runs)
+    node.richPendingOn.clear()
+    node.richPendingOff.clear()
+    kayaWriteText(node, kayaLf(text))
+    node.richSeq += 1
+}
+
+/**
+ * apply_edit: the app's or a collaborator's edit, with the selection the
+ * core answered (R5). MEASURED DEVIATION FROM D7
+ * (docs/measurements/richtext-compose-2026-09-11.md §5): a programmatic
+ * `edit {}` ADDS an undo entry on this backend, and an undo of a rich
+ * field's entry can destroy formatting, so the history is cleared after
+ * the commit — R6's off switch is spelled `clearHistory()` here.
+ */
+internal fun kayaRichApplyEdit(
+    node: KayaNode,
+    start: Int,
+    stop: Int,
+    inserted: String,
+    runs: List<KayaRichRun>,
+    selStart: Int,
+    selStop: Int,
+) {
+    val held = node.textState.text.toString()
+    if (start < 0 || start > stop || stop > held.length) {
+        Log.i(
+            "kaya",
+            "KAYA_DIAG apply_edit refused: $start..$stop is past the ${held.length} " +
+                "units widget ${node.id} holds")
+        return
+    }
+    node.richRuns = kayaRichSplice(node.richRuns, start, stop, inserted.length, runs)
+    // The model moves FIRST, or the field's collector reports kaya's own
+    // write back as a user edit (kayaWriteText's rule).
+    val next = held.replaceRange(start, stop, inserted)
+    node.text = kayaLf(next)
+    val end = next.length
+    node.textState.edit {
+        replace(start, stop, inserted)
+        selection = androidx.compose.ui.text.TextRange(
+            selStart.coerceIn(0, end), selStop.coerceIn(0, end))
+    }
+    KayaUndoState.clearHistory(node)
+    node.richSeq += 1
+}
+
+/** Whether `at` falls between the halves of a surrogate pair. */
+private fun kayaSplitsPair(text: String, at: Int): Boolean =
+    at in 1 until text.length &&
+        Character.isHighSurrogate(text[at - 1]) &&
+        Character.isLowSurrogate(text[at])
+
+/**
+ * THE ONE ADDRESSED EDIT between two strings — `derive_edit`'s twin in
+ * UTF-16: common prefix, then common suffix, each backed off a split
+ * surrogate pair. The arm derives its own delta for the same reason the
+ * core does (docs/rich-text-plan.md R4): a commit's own reported range is
+ * addressed against marked text neither mirror ever saw.
+ */
+internal fun kayaRichDerive(before: String, after: String): Triple<Int, Int, Int> {
+    var prefix = 0
+    val limit = minOf(before.length, after.length)
+    while (prefix < limit && before[prefix] == after[prefix]) prefix += 1
+    while (prefix > 0 && (kayaSplitsPair(before, prefix) || kayaSplitsPair(after, prefix))) {
+        prefix -= 1
+    }
+    var suffix = 0
+    val room = minOf(before.length - prefix, after.length - prefix)
+    while (suffix < room &&
+        before[before.length - 1 - suffix] == after[after.length - 1 - suffix]
+    ) {
+        suffix += 1
+    }
+    while (suffix > 0 && (
+            kayaSplitsPair(before, before.length - suffix) ||
+                kayaSplitsPair(after, after.length - suffix))
+    ) {
+        suffix -= 1
+    }
+    return Triple(prefix, before.length - suffix, after.length - suffix - prefix)
+}
+
+/**
+ * A USER EDIT reached the field: the arm's table follows it under the
+ * inheritance rule, so what the user SEES agrees with the core's mirror.
+ * `expect_runs` prints both when they do not.
+ */
+internal fun kayaRichUserEdit(node: KayaNode, before: String, after: String) {
+    if (before == after) return
+    val (start, stop, insertedLength) = kayaRichDerive(before, after)
+    val runs = kayaRichTypedRuns(node, start, insertedLength)
+    node.richRuns = kayaRichSplice(node.richRuns, start, stop, insertedLength, runs)
+    if (insertedLength > 0) {
+        node.richPendingOn.clear()
+        node.richPendingOff.clear()
+    }
+    node.richSeq += 1
+}
+
+/**
+ * R4's CORROBORATION CHANNEL: the range this backend says a user edit
+ * took, recorded here and reported just before the text. ONE CHANGE ONLY
+ * — a multi-change commit's span is not a range this arm measured, and a
+ * diagnostic may only print what it measured (CLAUDE.md invariant 3).
+ */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+internal fun kayaRichInputTransformation(node: KayaNode):
+    androidx.compose.foundation.text.input.InputTransformation =
+    androidx.compose.foundation.text.input.InputTransformation {
+        node.richReported = null
+        if (changes.changeCount != 1) return@InputTransformation
+        val was = changes.getOriginalRange(0)
+        val now = changes.getRange(0)
+        val before = originalText.toString()
+        val start = kayaByteOffset(before, was.min)
+        val end = kayaByteOffset(before, was.max)
+        if (start < 0 || end < 0) return@InputTransformation
+        val inserted = asCharSequence().subSequence(now.min, now.max)
+            .toString().toByteArray(Charsets.UTF_8).size
+        node.richReported = Triple(start, end, inserted)
+    }
 
 /**
  * A1 (docs/undo-plan.md §3): a core undo group committed, so the focused
@@ -12015,28 +12698,94 @@ fun KayaTextField(
 ) {
     val focusRequester = remember { FocusRequester() }
     val interaction = remember { MutableInteractionSource() }
+    // THE RICH DISPLAY (docs/rich-text-plan.md R7 as amended): the arm's
+    // own run table drawn through the field's OutputTransformation, which
+    // is foundation 1.11.4's only styling door. Rebuilt when the table
+    // moves; the palette is read HERE because a CompositionLocal can only
+    // be read in a composable and the transformation runs outside one.
+    val palette = KayaRichPalette(
+        link = MaterialTheme.colorScheme.primary,
+        quote = LocalContentColor.current.copy(alpha = KAYA_RICH_QUOTE_ALPHA))
+    val richSeq = node.richSeq
+    val output = remember(node, node.rich, richSeq, palette) {
+        if (node.rich) kayaRichTransformation(node.richRuns, palette) else null
+    }
+    val input = remember(node, node.rich) {
+        if (node.rich) kayaRichInputTransformation(node) else null
+    }
     // ONE COLLECTOR PER NODE, keyed by the node itself: a destroy and
     // re-create at the same id would otherwise keep observing a state
-    // nobody reads.
+    // nobody reads. THE SELECTION AND THE COMPOSING REGION RIDE THE SAME
+    // READ, since a caret move changes no text and would otherwise wake
+    // nothing (docs/rich-text-plan.md R4/R5).
     LaunchedEffect(node) {
-        snapshotFlow { node.textState.text.toString() }.collect { raw ->
-            val value = kayaLf(raw)
+        snapshotFlow {
+            KayaTextRead(
+                node.textState.text.toString(),
+                node.textState.composition != null,
+                node.textState.selection)
+        }.collect { read ->
+            // R5: a composition is the WIDGET'S ALONE — marked text reaches
+            // neither the core's mirror nor the app, which is what the mac
+            // gets for free (setMarkedText notifies no delegate). A plain
+            // field on this backend still reports it; only a `rich` one is
+            // held to the rule.
+            val commit = node.rich && node.richComposing && !read.composing
+            if (node.rich && read.composing && !node.richComposing) {
+                node.richComposing = true
+                KayaPresent.textComposing(node.id, true)
+            }
+            if (node.rich && !read.composing) {
+                val from = kayaByteOffset(read.text, read.selection.min)
+                val to = kayaByteOffset(read.text, read.selection.max)
+                if (from >= 0 && to >= 0) {
+                    KayaPresent.textSelection(node.id, from.toLong(), to.toLong())
+                }
+            }
+            if (node.rich && read.composing) return@collect
+            val value = kayaLf(read.text)
             // The echo of kaya's own write: the model already says this.
-            if (value == node.text) return@collect
-            node.text = value
-            // Q2's LEDGER-QUIET bracket (docs/undo-plan.md §3a): if this
-            // edit is the echo of a native undo THIS BACKEND ROUTED, the
-            // change was already reported to the ledger once, with the
-            // sample taken at the moment it was true. The app still hears
-            // it — the field is uncontrolled and the app's model must
-            // follow — and only the banking is suppressed.
-            val quiet = kayaTakeNativeUndoEcho(node.id, value)
-            KayaPresent.emitTextChanged(
-                node.tag, value, KayaSceneModel.focusedId == node.id, quiet)
+            if (value != node.text) {
+                val before = node.text
+                node.text = value
+                // Q2's LEDGER-QUIET bracket (docs/undo-plan.md §3a): if this
+                // edit is the echo of a native undo THIS BACKEND ROUTED, the
+                // change was already reported to the ledger once, with the
+                // sample taken at the moment it was true. The app still hears
+                // it — the field is uncontrolled and the app's model must
+                // follow — and only the banking is suppressed.
+                val quiet = kayaTakeNativeUndoEcho(node.id, value)
+                if (node.rich) {
+                    kayaRichUserEdit(node, before, value)
+                    // A COMMIT'S OWN RANGE addresses marked text no mirror
+                    // ever saw, so it corroborates nothing and is dropped.
+                    val reported = node.richReported
+                    node.richReported = null
+                    if (!commit && reported != null) {
+                        KayaPresent.textReportedEdit(
+                            node.id, reported.first.toLong(),
+                            reported.second.toLong(), reported.third.toLong())
+                    }
+                    when {
+                        commit -> KayaPresent.textEditSource(
+                            node.id, KayaCompose.EDIT_SOURCE_IME_COMMIT.toInt())
+                        quiet -> KayaPresent.textEditSource(
+                            node.id, KayaCompose.EDIT_SOURCE_NATIVE_UNDO.toInt())
+                    }
+                }
+                KayaPresent.emitTextChanged(
+                    node.tag, value, KayaSceneModel.focusedId == node.id, quiet)
+            }
+            if (commit) {
+                node.richComposing = false
+                KayaPresent.textComposing(node.id, false)
+            }
         }
     }
     BasicTextField(
         state = node.textState,
+        inputTransformation = input,
+        outputTransformation = output,
         // THE TEXTAREA IS A BOUNDED EDITOR WITH ITS OWN VIEWPORT, as
         // every other backend's already is. `MultiLine(minHeightInLines)`
         // leaves the maximum at Int.MAX_VALUE, so a 40-line document
@@ -12189,6 +12938,26 @@ private fun KayaHighlightLayer(node: KayaNode, inner: @Composable () -> Unit) {
     androidx.compose.foundation.layout.Box(
         propagateMinConstraints = true,
         modifier = Modifier
+            // KAYA'S OWN LINK DOOR (docs/rich-text-plan.md R7 as amended):
+            // an editable field renders and clicks no LinkAnnotation on any
+            // measured foundation version, so a tap that lands inside a link
+            // run is taken HERE, on the INITIAL pass so the field never sees
+            // it, and every other tap falls through to the caret untouched.
+            .pointerInput(node) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(
+                        requireUnconsumed = false,
+                        pass = androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+                    val url = kayaRichLinkAt(node, down.position)
+                        ?: return@awaitEachGesture
+                    down.consume()
+                    val up = waitForUpOrCancellation(
+                        androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+                        ?: return@awaitEachGesture
+                    up.consume()
+                    kayaOpenLink(url)
+                }
+            }
             // The viewport's rectangle in the window, for the paint
             // witness. This box IS the scrolling viewport — measured
             // 2026-08-06: 96px tall around a 644px layout — so it is

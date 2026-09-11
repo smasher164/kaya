@@ -5,7 +5,7 @@
 
 use kaya::spec::{FieldTy, ProtocolSpec};
 
-use crate::{Ctx, is_padding, prop_variants, record_params};
+use crate::{Ctx, is_padding, prop_variants, record_params, tx_fields};
 
 /// C keywords plus this header's own identifiers.
 pub const RESERVED: &[&str] = &[
@@ -254,7 +254,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             "    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_{});",
             r.name.to_uppercase()
         ));
-        for f in r.fields {
+        for f in tx_fields(r) {
             c.line(&match f.ty {
                 FieldTy::U32 if is_padding(f) => "    kaya_wire_u32(tx, 0);".into(),
                 FieldTy::U32 => format!("    kaya_wire_u32(tx, {});", f.name),

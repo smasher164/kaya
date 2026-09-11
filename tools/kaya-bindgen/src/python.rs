@@ -3,7 +3,7 @@
 
 use kaya::spec::{FieldTy, ProtocolSpec};
 
-use crate::{Ctx, PropKind, is_padding, prop_variants, record_params, window_prop_variants};
+use crate::{Ctx, PropKind, is_padding, prop_variants, record_params, tx_fields, window_prop_variants};
 
 /// Names spec identifiers must avoid: this emitter's helpers, plus
 /// Python's keywords and builtins a parameter would shadow.
@@ -140,7 +140,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line(&format!("def tx_{}({}):", r.name, names.join(", ")));
         c.line(&format!("    \"\"\"{}\"\"\"", r.doc.replace('\n', " ")));
         let mut parts: Vec<String> = Vec::new();
-        for f in r.fields {
+        for f in tx_fields(r) {
             parts.push(match f.ty {
                 FieldTy::U32 if is_padding(f) => "struct.pack(\"<I\", 0)".into(),
                 FieldTy::U32 => format!("struct.pack(\"<I\", {})", f.name),

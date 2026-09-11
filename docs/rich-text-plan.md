@@ -296,12 +296,79 @@ and are recorded here for the review:
   and the core's mirror take it when the composition ends, so the two are
   the edit's length apart until then; the scene asserts exactly that.
 
+- **`body` is the block attribute taken off, and never a run.** The WinUI
+  agent found `set_block(editor, Block::Body)` aborting the core on every
+  backend that mirrors the mac: the arm reported the act as a removal and
+  the core refused a `block` with no value. The core now reads a `block`
+  act with `body` or with no value as one act — the block runs over the
+  range go — and `normalize` drops any `block=body` run a declaration
+  carries, so a paragraph's body kind is the absence of a run on every
+  lane; the scene pins it with a `block off` step.
+
 Open after this step, beside the platform arms: the `Edit` the Rust sugar
 hands an app carries no `source` (the core's text_edited does; the harness
 reads it); `own_undo` (R6) is the undo step's and the mac's native undo
 stack stays on under a rich textarea until then; and the editor's rich
 toggle (§4 step 2) moves to the breadth step, since guests/go/editor needs
 the Go sugar first.
+
+## 8. The breadth, as it landed (2026-09-11, the same day)
+
+Eight agents in parallel, each on its own files, folded by the coordinator
+(the notes are the job's record; what a future session needs is here and
+in docs/traps.md). Every arm answers tools/scenes/richtext.steps byte for
+byte, every binding's richtext guest prints the Rust guest's labels, and
+`expect_runs` on every runner FAILS when the widget's own runs disagree
+with the core's document, naming both — the corroboration is a wall now,
+not a diagnostic.
+
+- **iOS**: UIKit rebuilds `typingAttributes` with its own keys only, so the
+  arm re-derives kaya's keys at every re-derivation point by the core's
+  `typed_runs` rule; `textViewDidChange` returns early on marked text for
+  rich nodes (UITextView notifies during a composition, NSTextView does
+  not); both Apple arms take the body ramp from `kayaPlatformFont(.body)`,
+  never the view's font, which answers the selection's.
+- **GTK**: one GtkTextTag per attribute value, named so the tag is the key
+  (`kaya-rich-bold`, `kaya-rich-block-heading2`, `kaya-rich-link-<n>` with
+  the URL in a side table); the display derived from the tag; inheritance
+  applied by the arm inside `insert-text`'s after-phase since GTK does not
+  extend a tag at a run's end; preedit never reaches text_changed (it lives
+  in the IM context, not the buffer); `body` is the attribute taken off.
+- **WinUI**: TOM character and paragraph formats as the display over the
+  arm's own byte run table as the truth; links drawn, never `SetLink`
+  (check-steps' hidden-text lint); no reported edit, the core's diff is the
+  delta; `SetCharacterFormat` on a collapsed selection re-raises
+  SelectionChanged, so nothing writes back to the control from that event
+  (docs/traps.md); the bindgen filter widened for FormatEffect,
+  UnderlineType and ITextParagraphFormat, held by check-winui-bindings.
+- **Compose**: foundation 1.11.4 is one line after the BOM; the mirror
+  drives the display through the field's OutputTransformation; links are a
+  look plus kaya's own hit test on the pointer's initial pass; heading
+  sizes in `em`; pending attributes are kaya's state (a zero-length
+  addStyle is dropped by Compose); `clearHistory()` after every commit
+  including apply_edit (D7 cannot be honoured there, measured); a plain
+  Compose field still reports marked text (ledger).
+- **The eight bindings**: the Rust surface in each idiom. Ambient bindings
+  (Python, JS, OCaml) put the writes on the widget as their other verbs are;
+  registry-family bindings (C#, Java, Swift, Haskell) register `on_edit`
+  and `on_format` on the app; Go's run record is `TextRun` (the package's
+  `Run` is its entry point), OCaml's act is `format_act` (`format` is the
+  printf type), C#'s kind is `BlockKind`; Haskell's `Rich` is a GADT
+  attribute with `formatText` as its act. Every binding folds delivered
+  edits and its own `apply_edit` into `document(widget)` with the core's
+  splice and normal form. tools/check-sugar-surface.py holds fourteen parts
+  in all nine.
+- **The generator**: a tx record's payload is one trailing `text` parameter
+  in all nine wire files (docs/traps.md), and the Haskell wire reader
+  decodes UTF-8 (`wireUtf8`).
+
+Open after the breadth: the marked-text divergence on plain Compose fields;
+a shared scene step that round-trips non-ASCII text through a guest's label
+(the Haskell decoder's wall); the template zone (`rich` is a live-zone
+spelling; JS refuses `document()` on a template node in its own words, no
+gate holds the other eight); `own_undo` (R6); labels (R8); the editor's
+rich toggle, now that the Go sugar exists; and the five rulings on the
+review page.
 
 ## 5. What this plan does not do
 

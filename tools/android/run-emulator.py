@@ -301,6 +301,15 @@ def drag_duration_selftest():
 drag_duration_selftest()
 
 
+# docs/traps.md 2026-09-11: the core's stderr reaches logcat through a
+# bridge (crates/kaya/src/android.rs forward_stderr_to_logcat), and a bridge
+# that died would be as silent as the hole it replaced — so the lane counts
+# the legs whose logcat carried the core's own metrics line and refuses at
+# its end when none did.
+CORE_DIAG = {"legs": 0, "seen": 0}
+CORE_DIAG_LINE = "KAYA_DIAG core metrics"
+
+
 def adb(serial, *args, **kw):
     return run(["adb", "-s", serial, *args], **kw)
 
@@ -1338,6 +1347,10 @@ def run_apk_on(serial, name, apk, component, script, extras,
                   f"{' '.join(aim)} {spelled} -> {told} in "
                   f"{int((time.monotonic() - began) * 1000)}ms", file=log)
         time.sleep(0.5)
+    if out:
+        CORE_DIAG["legs"] += 1
+        if CORE_DIAG_LINE in dump:
+            CORE_DIAG["seen"] += 1
     print(out, file=log)
     if two_act:
         act_one = out
@@ -2936,6 +2949,14 @@ if ONLY and _selected == 0:
 exclusive.summary("android")
 if ONLY:
     print(f"run-emulator: filtered run — KAYA_ONLY={ONLY}, {_selected} leg(s)")
+print(f"run-emulator: the core's own diagnostics reached logcat on "
+      f"{CORE_DIAG['seen']} of {CORE_DIAG['legs']} answered leg(s)")
+if CORE_DIAG["legs"] and not CORE_DIAG["seen"]:
+    print(f"run-emulator: FAIL — no leg's logcat carried `{CORE_DIAG_LINE}`: the "
+          f"core's stderr bridge (crates/kaya/src/android.rs) is dead and every "
+          f"KAYA_DIAG on this lane went to /dev/null again (docs/traps.md "
+          f"2026-09-11)")
+    status = 1
 if status == 0:
     print("run-emulator: ALL PASS")
 else:

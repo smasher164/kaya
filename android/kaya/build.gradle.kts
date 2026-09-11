@@ -49,6 +49,13 @@ dependencies {
     // Theme.Kaya.Launch's own comment says what happens without it).
     api("androidx.core:core-splashscreen:1.0.1")
     implementation(platform("androidx.compose:compose-bom:2024.10.01"))
+    // THE RICH-TEXT PIN (docs/rich-text-plan.md R7 as amended;
+    // docs/measurements/richtext-compose-2026-09-11.md §1): the BOM
+    // above supplies foundation 1.7.5, which has no `addStyle` at all.
+    // 1.11.4 is the highest foundation that builds on kaya's AGP,
+    // Kotlin, Gradle and compileSdk exactly as they stand; 1.12's
+    // tracked tier is a toolchain migration and is not taken.
+    implementation("androidx.compose.foundation:foundation:1.11.4")
     implementation("androidx.compose.material3:material3")
     // Material 3 adaptive versions separately from the BOM above, so
     // these are written out (which is also what check-pins wants). The

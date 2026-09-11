@@ -549,6 +549,24 @@ pub mod Microsoft {
             }
         }
         pub mod Text {
+            #[repr(transparent)]
+            #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+            pub struct FormatEffect(pub i32);
+            impl FormatEffect {
+                pub const Off: Self = Self(0i32);
+                pub const On: Self = Self(1i32);
+                pub const Toggle: Self = Self(2i32);
+                pub const Undefined: Self = Self(3i32);
+            }
+            impl windows_core::TypeKind for FormatEffect {
+                type TypeKind = windows_core::CopyType;
+            }
+            impl windows_core::RuntimeType for FormatEffect {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::from_slice(
+                        b"enum(Microsoft.UI.Text.FormatEffect;i4)",
+                    );
+            }
             windows_core::imp::define_interface!(
                 ITextCharacterFormat,
                 ITextCharacterFormat_Vtbl,
@@ -564,6 +582,27 @@ pub mod Microsoft {
                 windows_core::IInspectable
             );
             impl ITextCharacterFormat {
+                pub fn AllCaps(&self) -> windows_core::Result<FormatEffect> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).AllCaps)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn SetAllCaps(&self, value: FormatEffect) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetAllCaps)(
+                            windows_core::Interface::as_raw(this),
+                            value,
+                        )
+                        .ok()
+                    }
+                }
                 pub fn BackgroundColor(
                     &self,
                 ) -> windows_core::Result<super::super::super::Windows::UI::Color> {
@@ -590,6 +629,27 @@ pub mod Microsoft {
                         .ok()
                     }
                 }
+                pub fn Bold(&self) -> windows_core::Result<FormatEffect> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Bold)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn SetBold(&self, value: FormatEffect) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetBold)(
+                            windows_core::Interface::as_raw(this),
+                            value,
+                        )
+                        .ok()
+                    }
+                }
                 pub fn ForegroundColor(
                     &self,
                 ) -> windows_core::Result<super::super::super::Windows::UI::Color> {
@@ -610,6 +670,48 @@ pub mod Microsoft {
                     let this = self;
                     unsafe {
                         (windows_core::Interface::vtable(this).SetForegroundColor)(
+                            windows_core::Interface::as_raw(this),
+                            value,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn Hidden(&self) -> windows_core::Result<FormatEffect> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Hidden)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn SetHidden(&self, value: FormatEffect) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetHidden)(
+                            windows_core::Interface::as_raw(this),
+                            value,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn Italic(&self) -> windows_core::Result<FormatEffect> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Italic)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn SetItalic(&self, value: FormatEffect) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetItalic)(
                             windows_core::Interface::as_raw(this),
                             value,
                         )
@@ -682,6 +784,27 @@ pub mod Microsoft {
                         .ok()
                     }
                 }
+                pub fn Outline(&self) -> windows_core::Result<FormatEffect> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Outline)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn SetOutline(&self, value: FormatEffect) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetOutline)(
+                            windows_core::Interface::as_raw(this),
+                            value,
+                        )
+                        .ok()
+                    }
+                }
                 pub fn Position(&self) -> windows_core::Result<f32> {
                     let this = self;
                     unsafe {
@@ -697,6 +820,27 @@ pub mod Microsoft {
                     let this = self;
                     unsafe {
                         (windows_core::Interface::vtable(this).SetPosition)(
+                            windows_core::Interface::as_raw(this),
+                            value,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn ProtectedText(&self) -> windows_core::Result<FormatEffect> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).ProtectedText)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn SetProtectedText(&self, value: FormatEffect) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetProtectedText)(
                             windows_core::Interface::as_raw(this),
                             value,
                         )
@@ -724,6 +868,27 @@ pub mod Microsoft {
                         .ok()
                     }
                 }
+                pub fn SmallCaps(&self) -> windows_core::Result<FormatEffect> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).SmallCaps)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn SetSmallCaps(&self, value: FormatEffect) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetSmallCaps)(
+                            windows_core::Interface::as_raw(this),
+                            value,
+                        )
+                        .ok()
+                    }
+                }
                 pub fn Spacing(&self) -> windows_core::Result<f32> {
                     let this = self;
                     unsafe {
@@ -739,6 +904,90 @@ pub mod Microsoft {
                     let this = self;
                     unsafe {
                         (windows_core::Interface::vtable(this).SetSpacing)(
+                            windows_core::Interface::as_raw(this),
+                            value,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn Strikethrough(&self) -> windows_core::Result<FormatEffect> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Strikethrough)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn SetStrikethrough(&self, value: FormatEffect) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetStrikethrough)(
+                            windows_core::Interface::as_raw(this),
+                            value,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn Subscript(&self) -> windows_core::Result<FormatEffect> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Subscript)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn SetSubscript(&self, value: FormatEffect) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetSubscript)(
+                            windows_core::Interface::as_raw(this),
+                            value,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn Superscript(&self) -> windows_core::Result<FormatEffect> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Superscript)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn SetSuperscript(&self, value: FormatEffect) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetSuperscript)(
+                            windows_core::Interface::as_raw(this),
+                            value,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn Underline(&self) -> windows_core::Result<UnderlineType> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Underline)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn SetUnderline(&self, value: UnderlineType) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetUnderline)(
                             windows_core::Interface::as_raw(this),
                             value,
                         )
@@ -810,6 +1059,8 @@ pub mod Microsoft {
                 const NAME: &'static str = "Microsoft.UI.Text.ITextCharacterFormat";
             }
             pub trait ITextCharacterFormat_Impl: windows_core::IUnknownImpl {
+                fn AllCaps(&self) -> windows_core::Result<FormatEffect>;
+                fn SetAllCaps(&self, value: FormatEffect) -> windows_core::Result<()>;
                 fn BackgroundColor(
                     &self,
                 ) -> windows_core::Result<super::super::super::Windows::UI::Color>;
@@ -817,6 +1068,8 @@ pub mod Microsoft {
                     &self,
                     value: &super::super::super::Windows::UI::Color,
                 ) -> windows_core::Result<()>;
+                fn Bold(&self) -> windows_core::Result<FormatEffect>;
+                fn SetBold(&self, value: FormatEffect) -> windows_core::Result<()>;
                 fn ForegroundColor(
                     &self,
                 ) -> windows_core::Result<super::super::super::Windows::UI::Color>;
@@ -824,6 +1077,10 @@ pub mod Microsoft {
                     &self,
                     value: &super::super::super::Windows::UI::Color,
                 ) -> windows_core::Result<()>;
+                fn Hidden(&self) -> windows_core::Result<FormatEffect>;
+                fn SetHidden(&self, value: FormatEffect) -> windows_core::Result<()>;
+                fn Italic(&self) -> windows_core::Result<FormatEffect>;
+                fn SetItalic(&self, value: FormatEffect) -> windows_core::Result<()>;
                 fn Kerning(&self) -> windows_core::Result<f32>;
                 fn SetKerning(&self, value: f32) -> windows_core::Result<()>;
                 fn LanguageTag(&self) -> windows_core::Result<windows_core::HSTRING>;
@@ -831,12 +1088,26 @@ pub mod Microsoft {
                     -> windows_core::Result<()>;
                 fn Name(&self) -> windows_core::Result<windows_core::HSTRING>;
                 fn SetName(&self, value: &windows_core::HSTRING) -> windows_core::Result<()>;
+                fn Outline(&self) -> windows_core::Result<FormatEffect>;
+                fn SetOutline(&self, value: FormatEffect) -> windows_core::Result<()>;
                 fn Position(&self) -> windows_core::Result<f32>;
                 fn SetPosition(&self, value: f32) -> windows_core::Result<()>;
+                fn ProtectedText(&self) -> windows_core::Result<FormatEffect>;
+                fn SetProtectedText(&self, value: FormatEffect) -> windows_core::Result<()>;
                 fn Size(&self) -> windows_core::Result<f32>;
                 fn SetSize(&self, value: f32) -> windows_core::Result<()>;
+                fn SmallCaps(&self) -> windows_core::Result<FormatEffect>;
+                fn SetSmallCaps(&self, value: FormatEffect) -> windows_core::Result<()>;
                 fn Spacing(&self) -> windows_core::Result<f32>;
                 fn SetSpacing(&self, value: f32) -> windows_core::Result<()>;
+                fn Strikethrough(&self) -> windows_core::Result<FormatEffect>;
+                fn SetStrikethrough(&self, value: FormatEffect) -> windows_core::Result<()>;
+                fn Subscript(&self) -> windows_core::Result<FormatEffect>;
+                fn SetSubscript(&self, value: FormatEffect) -> windows_core::Result<()>;
+                fn Superscript(&self) -> windows_core::Result<FormatEffect>;
+                fn SetSuperscript(&self, value: FormatEffect) -> windows_core::Result<()>;
+                fn Underline(&self) -> windows_core::Result<UnderlineType>;
+                fn SetUnderline(&self, value: UnderlineType) -> windows_core::Result<()>;
                 fn Weight(&self) -> windows_core::Result<i32>;
                 fn SetWeight(&self, value: i32) -> windows_core::Result<()>;
                 fn SetClone(
@@ -852,6 +1123,38 @@ pub mod Microsoft {
             impl ITextCharacterFormat_Vtbl {
                 pub const fn new<Identity: ITextCharacterFormat_Impl, const OFFSET: isize>() -> Self
                 {
+                    unsafe extern "system" fn AllCaps<
+                        Identity: ITextCharacterFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut FormatEffect,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match ITextCharacterFormat_Impl::AllCaps(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn SetAllCaps<
+                        Identity: ITextCharacterFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        value: FormatEffect,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            ITextCharacterFormat_Impl::SetAllCaps(this, value).into()
+                        }
+                    }
                     unsafe extern "system" fn BackgroundColor<
                         Identity: ITextCharacterFormat_Impl,
                         const OFFSET: isize,
@@ -888,6 +1191,38 @@ pub mod Microsoft {
                             .into()
                         }
                     }
+                    unsafe extern "system" fn Bold<
+                        Identity: ITextCharacterFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut FormatEffect,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match ITextCharacterFormat_Impl::Bold(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn SetBold<
+                        Identity: ITextCharacterFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        value: FormatEffect,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            ITextCharacterFormat_Impl::SetBold(this, value).into()
+                        }
+                    }
                     unsafe extern "system" fn ForegroundColor<
                         Identity: ITextCharacterFormat_Impl,
                         const OFFSET: isize,
@@ -922,6 +1257,70 @@ pub mod Microsoft {
                                 core::mem::transmute(&value),
                             )
                             .into()
+                        }
+                    }
+                    unsafe extern "system" fn Hidden<
+                        Identity: ITextCharacterFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut FormatEffect,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match ITextCharacterFormat_Impl::Hidden(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn SetHidden<
+                        Identity: ITextCharacterFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        value: FormatEffect,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            ITextCharacterFormat_Impl::SetHidden(this, value).into()
+                        }
+                    }
+                    unsafe extern "system" fn Italic<
+                        Identity: ITextCharacterFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut FormatEffect,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match ITextCharacterFormat_Impl::Italic(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn SetItalic<
+                        Identity: ITextCharacterFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        value: FormatEffect,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            ITextCharacterFormat_Impl::SetItalic(this, value).into()
                         }
                     }
                     unsafe extern "system" fn Kerning<
@@ -1027,6 +1426,38 @@ pub mod Microsoft {
                                 .into()
                         }
                     }
+                    unsafe extern "system" fn Outline<
+                        Identity: ITextCharacterFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut FormatEffect,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match ITextCharacterFormat_Impl::Outline(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn SetOutline<
+                        Identity: ITextCharacterFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        value: FormatEffect,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            ITextCharacterFormat_Impl::SetOutline(this, value).into()
+                        }
+                    }
                     unsafe extern "system" fn Position<
                         Identity: ITextCharacterFormat_Impl,
                         const OFFSET: isize,
@@ -1057,6 +1488,38 @@ pub mod Microsoft {
                             let this: &Identity =
                                 &*((this as *const *const ()).offset(OFFSET) as *const Identity);
                             ITextCharacterFormat_Impl::SetPosition(this, value).into()
+                        }
+                    }
+                    unsafe extern "system" fn ProtectedText<
+                        Identity: ITextCharacterFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut FormatEffect,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match ITextCharacterFormat_Impl::ProtectedText(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn SetProtectedText<
+                        Identity: ITextCharacterFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        value: FormatEffect,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            ITextCharacterFormat_Impl::SetProtectedText(this, value).into()
                         }
                     }
                     unsafe extern "system" fn Size<
@@ -1091,6 +1554,38 @@ pub mod Microsoft {
                             ITextCharacterFormat_Impl::SetSize(this, value).into()
                         }
                     }
+                    unsafe extern "system" fn SmallCaps<
+                        Identity: ITextCharacterFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut FormatEffect,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match ITextCharacterFormat_Impl::SmallCaps(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn SetSmallCaps<
+                        Identity: ITextCharacterFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        value: FormatEffect,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            ITextCharacterFormat_Impl::SetSmallCaps(this, value).into()
+                        }
+                    }
                     unsafe extern "system" fn Spacing<
                         Identity: ITextCharacterFormat_Impl,
                         const OFFSET: isize,
@@ -1121,6 +1616,134 @@ pub mod Microsoft {
                             let this: &Identity =
                                 &*((this as *const *const ()).offset(OFFSET) as *const Identity);
                             ITextCharacterFormat_Impl::SetSpacing(this, value).into()
+                        }
+                    }
+                    unsafe extern "system" fn Strikethrough<
+                        Identity: ITextCharacterFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut FormatEffect,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match ITextCharacterFormat_Impl::Strikethrough(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn SetStrikethrough<
+                        Identity: ITextCharacterFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        value: FormatEffect,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            ITextCharacterFormat_Impl::SetStrikethrough(this, value).into()
+                        }
+                    }
+                    unsafe extern "system" fn Subscript<
+                        Identity: ITextCharacterFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut FormatEffect,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match ITextCharacterFormat_Impl::Subscript(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn SetSubscript<
+                        Identity: ITextCharacterFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        value: FormatEffect,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            ITextCharacterFormat_Impl::SetSubscript(this, value).into()
+                        }
+                    }
+                    unsafe extern "system" fn Superscript<
+                        Identity: ITextCharacterFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut FormatEffect,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match ITextCharacterFormat_Impl::Superscript(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn SetSuperscript<
+                        Identity: ITextCharacterFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        value: FormatEffect,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            ITextCharacterFormat_Impl::SetSuperscript(this, value).into()
+                        }
+                    }
+                    unsafe extern "system" fn Underline<
+                        Identity: ITextCharacterFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut UnderlineType,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match ITextCharacterFormat_Impl::Underline(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn SetUnderline<
+                        Identity: ITextCharacterFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        value: UnderlineType,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            ITextCharacterFormat_Impl::SetUnderline(this, value).into()
                         }
                     }
                     unsafe extern "system" fn Weight<
@@ -1221,22 +1844,22 @@ pub mod Microsoft {
                             ITextCharacterFormat,
                             OFFSET,
                         >(),
-                        AllCaps: 0,
-                        SetAllCaps: 0,
+                        AllCaps: AllCaps::<Identity, OFFSET>,
+                        SetAllCaps: SetAllCaps::<Identity, OFFSET>,
                         BackgroundColor: BackgroundColor::<Identity, OFFSET>,
                         SetBackgroundColor: SetBackgroundColor::<Identity, OFFSET>,
-                        Bold: 0,
-                        SetBold: 0,
+                        Bold: Bold::<Identity, OFFSET>,
+                        SetBold: SetBold::<Identity, OFFSET>,
                         FontStretch: 0,
                         SetFontStretch: 0,
                         FontStyle: 0,
                         SetFontStyle: 0,
                         ForegroundColor: ForegroundColor::<Identity, OFFSET>,
                         SetForegroundColor: SetForegroundColor::<Identity, OFFSET>,
-                        Hidden: 0,
-                        SetHidden: 0,
-                        Italic: 0,
-                        SetItalic: 0,
+                        Hidden: Hidden::<Identity, OFFSET>,
+                        SetHidden: SetHidden::<Identity, OFFSET>,
+                        Italic: Italic::<Identity, OFFSET>,
+                        SetItalic: SetItalic::<Identity, OFFSET>,
                         Kerning: Kerning::<Identity, OFFSET>,
                         SetKerning: SetKerning::<Identity, OFFSET>,
                         LanguageTag: LanguageTag::<Identity, OFFSET>,
@@ -1244,28 +1867,28 @@ pub mod Microsoft {
                         LinkType: 0,
                         Name: Name::<Identity, OFFSET>,
                         SetName: SetName::<Identity, OFFSET>,
-                        Outline: 0,
-                        SetOutline: 0,
+                        Outline: Outline::<Identity, OFFSET>,
+                        SetOutline: SetOutline::<Identity, OFFSET>,
                         Position: Position::<Identity, OFFSET>,
                         SetPosition: SetPosition::<Identity, OFFSET>,
-                        ProtectedText: 0,
-                        SetProtectedText: 0,
+                        ProtectedText: ProtectedText::<Identity, OFFSET>,
+                        SetProtectedText: SetProtectedText::<Identity, OFFSET>,
                         Size: Size::<Identity, OFFSET>,
                         SetSize: SetSize::<Identity, OFFSET>,
-                        SmallCaps: 0,
-                        SetSmallCaps: 0,
+                        SmallCaps: SmallCaps::<Identity, OFFSET>,
+                        SetSmallCaps: SetSmallCaps::<Identity, OFFSET>,
                         Spacing: Spacing::<Identity, OFFSET>,
                         SetSpacing: SetSpacing::<Identity, OFFSET>,
-                        Strikethrough: 0,
-                        SetStrikethrough: 0,
-                        Subscript: 0,
-                        SetSubscript: 0,
-                        Superscript: 0,
-                        SetSuperscript: 0,
+                        Strikethrough: Strikethrough::<Identity, OFFSET>,
+                        SetStrikethrough: SetStrikethrough::<Identity, OFFSET>,
+                        Subscript: Subscript::<Identity, OFFSET>,
+                        SetSubscript: SetSubscript::<Identity, OFFSET>,
+                        Superscript: Superscript::<Identity, OFFSET>,
+                        SetSuperscript: SetSuperscript::<Identity, OFFSET>,
                         TextScript: 0,
                         SetTextScript: 0,
-                        Underline: 0,
-                        SetUnderline: 0,
+                        Underline: Underline::<Identity, OFFSET>,
+                        SetUnderline: SetUnderline::<Identity, OFFSET>,
                         Weight: Weight::<Identity, OFFSET>,
                         SetWeight: SetWeight::<Identity, OFFSET>,
                         SetClone: SetClone::<Identity, OFFSET>,
@@ -1281,8 +1904,14 @@ pub mod Microsoft {
             #[doc(hidden)]
             pub struct ITextCharacterFormat_Vtbl {
                 pub base__: windows_core::IInspectable_Vtbl,
-                AllCaps: usize,
-                SetAllCaps: usize,
+                pub AllCaps: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut FormatEffect,
+                ) -> windows_core::HRESULT,
+                pub SetAllCaps: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    FormatEffect,
+                ) -> windows_core::HRESULT,
                 pub BackgroundColor: unsafe extern "system" fn(
                     *mut core::ffi::c_void,
                     *mut super::super::super::Windows::UI::Color,
@@ -1293,8 +1922,14 @@ pub mod Microsoft {
                     super::super::super::Windows::UI::Color,
                 )
                     -> windows_core::HRESULT,
-                Bold: usize,
-                SetBold: usize,
+                pub Bold: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut FormatEffect,
+                ) -> windows_core::HRESULT,
+                pub SetBold: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    FormatEffect,
+                ) -> windows_core::HRESULT,
                 FontStretch: usize,
                 SetFontStretch: usize,
                 FontStyle: usize,
@@ -1309,10 +1944,22 @@ pub mod Microsoft {
                     super::super::super::Windows::UI::Color,
                 )
                     -> windows_core::HRESULT,
-                Hidden: usize,
-                SetHidden: usize,
-                Italic: usize,
-                SetItalic: usize,
+                pub Hidden: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut FormatEffect,
+                ) -> windows_core::HRESULT,
+                pub SetHidden: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    FormatEffect,
+                ) -> windows_core::HRESULT,
+                pub Italic: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut FormatEffect,
+                ) -> windows_core::HRESULT,
+                pub SetItalic: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    FormatEffect,
+                ) -> windows_core::HRESULT,
                 pub Kerning: unsafe extern "system" fn(
                     *mut core::ffi::c_void,
                     *mut f32,
@@ -1338,40 +1985,91 @@ pub mod Microsoft {
                     *mut core::ffi::c_void,
                     *mut core::ffi::c_void,
                 ) -> windows_core::HRESULT,
-                Outline: usize,
-                SetOutline: usize,
+                pub Outline: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut FormatEffect,
+                ) -> windows_core::HRESULT,
+                pub SetOutline: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    FormatEffect,
+                ) -> windows_core::HRESULT,
                 pub Position: unsafe extern "system" fn(
                     *mut core::ffi::c_void,
                     *mut f32,
                 ) -> windows_core::HRESULT,
                 pub SetPosition:
                     unsafe extern "system" fn(*mut core::ffi::c_void, f32) -> windows_core::HRESULT,
-                ProtectedText: usize,
-                SetProtectedText: usize,
+                pub ProtectedText: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut FormatEffect,
+                )
+                    -> windows_core::HRESULT,
+                pub SetProtectedText: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    FormatEffect,
+                )
+                    -> windows_core::HRESULT,
                 pub Size: unsafe extern "system" fn(
                     *mut core::ffi::c_void,
                     *mut f32,
                 ) -> windows_core::HRESULT,
                 pub SetSize:
                     unsafe extern "system" fn(*mut core::ffi::c_void, f32) -> windows_core::HRESULT,
-                SmallCaps: usize,
-                SetSmallCaps: usize,
+                pub SmallCaps: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut FormatEffect,
+                ) -> windows_core::HRESULT,
+                pub SetSmallCaps: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    FormatEffect,
+                )
+                    -> windows_core::HRESULT,
                 pub Spacing: unsafe extern "system" fn(
                     *mut core::ffi::c_void,
                     *mut f32,
                 ) -> windows_core::HRESULT,
                 pub SetSpacing:
                     unsafe extern "system" fn(*mut core::ffi::c_void, f32) -> windows_core::HRESULT,
-                Strikethrough: usize,
-                SetStrikethrough: usize,
-                Subscript: usize,
-                SetSubscript: usize,
-                Superscript: usize,
-                SetSuperscript: usize,
+                pub Strikethrough: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut FormatEffect,
+                )
+                    -> windows_core::HRESULT,
+                pub SetStrikethrough: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    FormatEffect,
+                )
+                    -> windows_core::HRESULT,
+                pub Subscript: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut FormatEffect,
+                ) -> windows_core::HRESULT,
+                pub SetSubscript: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    FormatEffect,
+                )
+                    -> windows_core::HRESULT,
+                pub Superscript: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut FormatEffect,
+                )
+                    -> windows_core::HRESULT,
+                pub SetSuperscript: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    FormatEffect,
+                )
+                    -> windows_core::HRESULT,
                 TextScript: usize,
                 SetTextScript: usize,
-                Underline: usize,
-                SetUnderline: usize,
+                pub Underline: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut UnderlineType,
+                ) -> windows_core::HRESULT,
+                pub SetUnderline: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    UnderlineType,
+                )
+                    -> windows_core::HRESULT,
                 pub Weight: unsafe extern "system" fn(
                     *mut core::ffi::c_void,
                     *mut i32,
@@ -1504,7 +2202,11 @@ pub mod Microsoft {
                     *mut *mut core::ffi::c_void,
                 )
                     -> windows_core::HRESULT,
-                GetDefaultParagraphFormat: usize,
+                pub GetDefaultParagraphFormat: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
                 pub GetRange: unsafe extern "system" fn(
                     *mut core::ffi::c_void,
                     i32,
@@ -1542,7 +2244,11 @@ pub mod Microsoft {
                     *mut core::ffi::c_void,
                 )
                     -> windows_core::HRESULT,
-                SetDefaultParagraphFormat: usize,
+                pub SetDefaultParagraphFormat: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
                 pub SetText: unsafe extern "system" fn(
                     *mut core::ffi::c_void,
                     TextSetOptions,
@@ -1596,6 +2302,1221 @@ pub mod Microsoft {
                     *mut core::ffi::c_void,
                     *mut core::ffi::c_void,
                 ) -> windows_core::HRESULT,
+            }
+            windows_core::imp::define_interface!(
+                ITextParagraphFormat,
+                ITextParagraphFormat_Vtbl,
+                0x219b6cdf_0d0b_5701_b8a1_6c906b3ebbe1
+            );
+            impl windows_core::RuntimeType for ITextParagraphFormat {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            windows_core::imp::interface_hierarchy!(
+                ITextParagraphFormat,
+                windows_core::IUnknown,
+                windows_core::IInspectable
+            );
+            impl ITextParagraphFormat {
+                pub fn FirstLineIndent(&self) -> windows_core::Result<f32> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).FirstLineIndent)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn KeepTogether(&self) -> windows_core::Result<FormatEffect> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).KeepTogether)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn SetKeepTogether(&self, value: FormatEffect) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetKeepTogether)(
+                            windows_core::Interface::as_raw(this),
+                            value,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn KeepWithNext(&self) -> windows_core::Result<FormatEffect> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).KeepWithNext)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn SetKeepWithNext(&self, value: FormatEffect) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetKeepWithNext)(
+                            windows_core::Interface::as_raw(this),
+                            value,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn LeftIndent(&self) -> windows_core::Result<f32> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).LeftIndent)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn LineSpacing(&self) -> windows_core::Result<f32> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).LineSpacing)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn ListLevelIndex(&self) -> windows_core::Result<i32> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).ListLevelIndex)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn SetListLevelIndex(&self, value: i32) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetListLevelIndex)(
+                            windows_core::Interface::as_raw(this),
+                            value,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn ListStart(&self) -> windows_core::Result<i32> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).ListStart)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn SetListStart(&self, value: i32) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetListStart)(
+                            windows_core::Interface::as_raw(this),
+                            value,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn ListTab(&self) -> windows_core::Result<f32> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).ListTab)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn SetListTab(&self, value: f32) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetListTab)(
+                            windows_core::Interface::as_raw(this),
+                            value,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn NoLineNumber(&self) -> windows_core::Result<FormatEffect> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).NoLineNumber)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn SetNoLineNumber(&self, value: FormatEffect) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetNoLineNumber)(
+                            windows_core::Interface::as_raw(this),
+                            value,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn PageBreakBefore(&self) -> windows_core::Result<FormatEffect> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).PageBreakBefore)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn SetPageBreakBefore(&self, value: FormatEffect) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetPageBreakBefore)(
+                            windows_core::Interface::as_raw(this),
+                            value,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn RightIndent(&self) -> windows_core::Result<f32> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).RightIndent)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn SetRightIndent(&self, value: f32) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetRightIndent)(
+                            windows_core::Interface::as_raw(this),
+                            value,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn RightToLeft(&self) -> windows_core::Result<FormatEffect> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).RightToLeft)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn SetRightToLeft(&self, value: FormatEffect) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetRightToLeft)(
+                            windows_core::Interface::as_raw(this),
+                            value,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn SpaceAfter(&self) -> windows_core::Result<f32> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).SpaceAfter)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn SetSpaceAfter(&self, value: f32) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetSpaceAfter)(
+                            windows_core::Interface::as_raw(this),
+                            value,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn SpaceBefore(&self) -> windows_core::Result<f32> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).SpaceBefore)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn SetSpaceBefore(&self, value: f32) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetSpaceBefore)(
+                            windows_core::Interface::as_raw(this),
+                            value,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn WidowControl(&self) -> windows_core::Result<FormatEffect> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).WidowControl)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn SetWidowControl(&self, value: FormatEffect) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetWidowControl)(
+                            windows_core::Interface::as_raw(this),
+                            value,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn TabCount(&self) -> windows_core::Result<i32> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).TabCount)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn ClearAllTabs(&self) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).ClearAllTabs)(
+                            windows_core::Interface::as_raw(this),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn DeleteTab(&self, position: f32) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).DeleteTab)(
+                            windows_core::Interface::as_raw(this),
+                            position,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn GetClone(&self) -> windows_core::Result<ITextParagraphFormat> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).GetClone)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
+                pub fn IsEqual<P0>(&self, format: P0) -> windows_core::Result<bool>
+                where
+                    P0: windows_core::Param<ITextParagraphFormat>,
+                {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).IsEqual)(
+                            windows_core::Interface::as_raw(this),
+                            format.param().abi(),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn SetClone<P0>(&self, format: P0) -> windows_core::Result<()>
+                where
+                    P0: windows_core::Param<ITextParagraphFormat>,
+                {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetClone)(
+                            windows_core::Interface::as_raw(this),
+                            format.param().abi(),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn SetIndents(
+                    &self,
+                    start: f32,
+                    left: f32,
+                    right: f32,
+                ) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetIndents)(
+                            windows_core::Interface::as_raw(this),
+                            start,
+                            left,
+                            right,
+                        )
+                        .ok()
+                    }
+                }
+            }
+            impl windows_core::RuntimeName for ITextParagraphFormat {
+                const NAME: &'static str = "Microsoft.UI.Text.ITextParagraphFormat";
+            }
+            pub trait ITextParagraphFormat_Impl: windows_core::IUnknownImpl {
+                fn FirstLineIndent(&self) -> windows_core::Result<f32>;
+                fn KeepTogether(&self) -> windows_core::Result<FormatEffect>;
+                fn SetKeepTogether(&self, value: FormatEffect) -> windows_core::Result<()>;
+                fn KeepWithNext(&self) -> windows_core::Result<FormatEffect>;
+                fn SetKeepWithNext(&self, value: FormatEffect) -> windows_core::Result<()>;
+                fn LeftIndent(&self) -> windows_core::Result<f32>;
+                fn LineSpacing(&self) -> windows_core::Result<f32>;
+                fn ListLevelIndex(&self) -> windows_core::Result<i32>;
+                fn SetListLevelIndex(&self, value: i32) -> windows_core::Result<()>;
+                fn ListStart(&self) -> windows_core::Result<i32>;
+                fn SetListStart(&self, value: i32) -> windows_core::Result<()>;
+                fn ListTab(&self) -> windows_core::Result<f32>;
+                fn SetListTab(&self, value: f32) -> windows_core::Result<()>;
+                fn NoLineNumber(&self) -> windows_core::Result<FormatEffect>;
+                fn SetNoLineNumber(&self, value: FormatEffect) -> windows_core::Result<()>;
+                fn PageBreakBefore(&self) -> windows_core::Result<FormatEffect>;
+                fn SetPageBreakBefore(&self, value: FormatEffect) -> windows_core::Result<()>;
+                fn RightIndent(&self) -> windows_core::Result<f32>;
+                fn SetRightIndent(&self, value: f32) -> windows_core::Result<()>;
+                fn RightToLeft(&self) -> windows_core::Result<FormatEffect>;
+                fn SetRightToLeft(&self, value: FormatEffect) -> windows_core::Result<()>;
+                fn SpaceAfter(&self) -> windows_core::Result<f32>;
+                fn SetSpaceAfter(&self, value: f32) -> windows_core::Result<()>;
+                fn SpaceBefore(&self) -> windows_core::Result<f32>;
+                fn SetSpaceBefore(&self, value: f32) -> windows_core::Result<()>;
+                fn WidowControl(&self) -> windows_core::Result<FormatEffect>;
+                fn SetWidowControl(&self, value: FormatEffect) -> windows_core::Result<()>;
+                fn TabCount(&self) -> windows_core::Result<i32>;
+                fn ClearAllTabs(&self) -> windows_core::Result<()>;
+                fn DeleteTab(&self, position: f32) -> windows_core::Result<()>;
+                fn GetClone(&self) -> windows_core::Result<ITextParagraphFormat>;
+                fn IsEqual(
+                    &self,
+                    format: windows_core::Ref<'_, ITextParagraphFormat>,
+                ) -> windows_core::Result<bool>;
+                fn SetClone(
+                    &self,
+                    format: windows_core::Ref<'_, ITextParagraphFormat>,
+                ) -> windows_core::Result<()>;
+                fn SetIndents(&self, start: f32, left: f32, right: f32)
+                    -> windows_core::Result<()>;
+            }
+            impl ITextParagraphFormat_Vtbl {
+                pub const fn new<Identity: ITextParagraphFormat_Impl, const OFFSET: isize>() -> Self
+                {
+                    unsafe extern "system" fn FirstLineIndent<
+                        Identity: ITextParagraphFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut f32,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match ITextParagraphFormat_Impl::FirstLineIndent(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn KeepTogether<
+                        Identity: ITextParagraphFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut FormatEffect,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match ITextParagraphFormat_Impl::KeepTogether(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn SetKeepTogether<
+                        Identity: ITextParagraphFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        value: FormatEffect,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            ITextParagraphFormat_Impl::SetKeepTogether(this, value).into()
+                        }
+                    }
+                    unsafe extern "system" fn KeepWithNext<
+                        Identity: ITextParagraphFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut FormatEffect,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match ITextParagraphFormat_Impl::KeepWithNext(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn SetKeepWithNext<
+                        Identity: ITextParagraphFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        value: FormatEffect,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            ITextParagraphFormat_Impl::SetKeepWithNext(this, value).into()
+                        }
+                    }
+                    unsafe extern "system" fn LeftIndent<
+                        Identity: ITextParagraphFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut f32,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match ITextParagraphFormat_Impl::LeftIndent(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn LineSpacing<
+                        Identity: ITextParagraphFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut f32,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match ITextParagraphFormat_Impl::LineSpacing(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn ListLevelIndex<
+                        Identity: ITextParagraphFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut i32,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match ITextParagraphFormat_Impl::ListLevelIndex(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn SetListLevelIndex<
+                        Identity: ITextParagraphFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        value: i32,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            ITextParagraphFormat_Impl::SetListLevelIndex(this, value).into()
+                        }
+                    }
+                    unsafe extern "system" fn ListStart<
+                        Identity: ITextParagraphFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut i32,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match ITextParagraphFormat_Impl::ListStart(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn SetListStart<
+                        Identity: ITextParagraphFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        value: i32,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            ITextParagraphFormat_Impl::SetListStart(this, value).into()
+                        }
+                    }
+                    unsafe extern "system" fn ListTab<
+                        Identity: ITextParagraphFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut f32,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match ITextParagraphFormat_Impl::ListTab(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn SetListTab<
+                        Identity: ITextParagraphFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        value: f32,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            ITextParagraphFormat_Impl::SetListTab(this, value).into()
+                        }
+                    }
+                    unsafe extern "system" fn NoLineNumber<
+                        Identity: ITextParagraphFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut FormatEffect,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match ITextParagraphFormat_Impl::NoLineNumber(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn SetNoLineNumber<
+                        Identity: ITextParagraphFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        value: FormatEffect,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            ITextParagraphFormat_Impl::SetNoLineNumber(this, value).into()
+                        }
+                    }
+                    unsafe extern "system" fn PageBreakBefore<
+                        Identity: ITextParagraphFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut FormatEffect,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match ITextParagraphFormat_Impl::PageBreakBefore(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn SetPageBreakBefore<
+                        Identity: ITextParagraphFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        value: FormatEffect,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            ITextParagraphFormat_Impl::SetPageBreakBefore(this, value).into()
+                        }
+                    }
+                    unsafe extern "system" fn RightIndent<
+                        Identity: ITextParagraphFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut f32,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match ITextParagraphFormat_Impl::RightIndent(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn SetRightIndent<
+                        Identity: ITextParagraphFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        value: f32,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            ITextParagraphFormat_Impl::SetRightIndent(this, value).into()
+                        }
+                    }
+                    unsafe extern "system" fn RightToLeft<
+                        Identity: ITextParagraphFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut FormatEffect,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match ITextParagraphFormat_Impl::RightToLeft(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn SetRightToLeft<
+                        Identity: ITextParagraphFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        value: FormatEffect,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            ITextParagraphFormat_Impl::SetRightToLeft(this, value).into()
+                        }
+                    }
+                    unsafe extern "system" fn SpaceAfter<
+                        Identity: ITextParagraphFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut f32,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match ITextParagraphFormat_Impl::SpaceAfter(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn SetSpaceAfter<
+                        Identity: ITextParagraphFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        value: f32,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            ITextParagraphFormat_Impl::SetSpaceAfter(this, value).into()
+                        }
+                    }
+                    unsafe extern "system" fn SpaceBefore<
+                        Identity: ITextParagraphFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut f32,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match ITextParagraphFormat_Impl::SpaceBefore(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn SetSpaceBefore<
+                        Identity: ITextParagraphFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        value: f32,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            ITextParagraphFormat_Impl::SetSpaceBefore(this, value).into()
+                        }
+                    }
+                    unsafe extern "system" fn WidowControl<
+                        Identity: ITextParagraphFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut FormatEffect,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match ITextParagraphFormat_Impl::WidowControl(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn SetWidowControl<
+                        Identity: ITextParagraphFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        value: FormatEffect,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            ITextParagraphFormat_Impl::SetWidowControl(this, value).into()
+                        }
+                    }
+                    unsafe extern "system" fn TabCount<
+                        Identity: ITextParagraphFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut i32,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match ITextParagraphFormat_Impl::TabCount(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn ClearAllTabs<
+                        Identity: ITextParagraphFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            ITextParagraphFormat_Impl::ClearAllTabs(this).into()
+                        }
+                    }
+                    unsafe extern "system" fn DeleteTab<
+                        Identity: ITextParagraphFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        position: f32,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            ITextParagraphFormat_Impl::DeleteTab(this, position).into()
+                        }
+                    }
+                    unsafe extern "system" fn GetClone<
+                        Identity: ITextParagraphFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut *mut core::ffi::c_void,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match ITextParagraphFormat_Impl::GetClone(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    core::mem::forget(ok__);
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn IsEqual<
+                        Identity: ITextParagraphFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        format: *mut core::ffi::c_void,
+                        result__: *mut bool,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match ITextParagraphFormat_Impl::IsEqual(
+                                this,
+                                core::mem::transmute_copy(&format),
+                            ) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn SetClone<
+                        Identity: ITextParagraphFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        format: *mut core::ffi::c_void,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            ITextParagraphFormat_Impl::SetClone(
+                                this,
+                                core::mem::transmute_copy(&format),
+                            )
+                            .into()
+                        }
+                    }
+                    unsafe extern "system" fn SetIndents<
+                        Identity: ITextParagraphFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        start: f32,
+                        left: f32,
+                        right: f32,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            ITextParagraphFormat_Impl::SetIndents(this, start, left, right).into()
+                        }
+                    }
+                    Self {
+                        base__: windows_core::IInspectable_Vtbl::new::<
+                            Identity,
+                            ITextParagraphFormat,
+                            OFFSET,
+                        >(),
+                        Alignment: 0,
+                        SetAlignment: 0,
+                        FirstLineIndent: FirstLineIndent::<Identity, OFFSET>,
+                        KeepTogether: KeepTogether::<Identity, OFFSET>,
+                        SetKeepTogether: SetKeepTogether::<Identity, OFFSET>,
+                        KeepWithNext: KeepWithNext::<Identity, OFFSET>,
+                        SetKeepWithNext: SetKeepWithNext::<Identity, OFFSET>,
+                        LeftIndent: LeftIndent::<Identity, OFFSET>,
+                        LineSpacing: LineSpacing::<Identity, OFFSET>,
+                        LineSpacingRule: 0,
+                        ListAlignment: 0,
+                        SetListAlignment: 0,
+                        ListLevelIndex: ListLevelIndex::<Identity, OFFSET>,
+                        SetListLevelIndex: SetListLevelIndex::<Identity, OFFSET>,
+                        ListStart: ListStart::<Identity, OFFSET>,
+                        SetListStart: SetListStart::<Identity, OFFSET>,
+                        ListStyle: 0,
+                        SetListStyle: 0,
+                        ListTab: ListTab::<Identity, OFFSET>,
+                        SetListTab: SetListTab::<Identity, OFFSET>,
+                        ListType: 0,
+                        SetListType: 0,
+                        NoLineNumber: NoLineNumber::<Identity, OFFSET>,
+                        SetNoLineNumber: SetNoLineNumber::<Identity, OFFSET>,
+                        PageBreakBefore: PageBreakBefore::<Identity, OFFSET>,
+                        SetPageBreakBefore: SetPageBreakBefore::<Identity, OFFSET>,
+                        RightIndent: RightIndent::<Identity, OFFSET>,
+                        SetRightIndent: SetRightIndent::<Identity, OFFSET>,
+                        RightToLeft: RightToLeft::<Identity, OFFSET>,
+                        SetRightToLeft: SetRightToLeft::<Identity, OFFSET>,
+                        Style: 0,
+                        SetStyle: 0,
+                        SpaceAfter: SpaceAfter::<Identity, OFFSET>,
+                        SetSpaceAfter: SetSpaceAfter::<Identity, OFFSET>,
+                        SpaceBefore: SpaceBefore::<Identity, OFFSET>,
+                        SetSpaceBefore: SetSpaceBefore::<Identity, OFFSET>,
+                        WidowControl: WidowControl::<Identity, OFFSET>,
+                        SetWidowControl: SetWidowControl::<Identity, OFFSET>,
+                        TabCount: TabCount::<Identity, OFFSET>,
+                        AddTab: 0,
+                        ClearAllTabs: ClearAllTabs::<Identity, OFFSET>,
+                        DeleteTab: DeleteTab::<Identity, OFFSET>,
+                        GetClone: GetClone::<Identity, OFFSET>,
+                        GetTab: 0,
+                        IsEqual: IsEqual::<Identity, OFFSET>,
+                        SetClone: SetClone::<Identity, OFFSET>,
+                        SetIndents: SetIndents::<Identity, OFFSET>,
+                        SetLineSpacing: 0,
+                    }
+                }
+                pub fn matches(iid: &windows_core::GUID) -> bool {
+                    iid == &<ITextParagraphFormat as windows_core::Interface>::IID
+                }
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct ITextParagraphFormat_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                Alignment: usize,
+                SetAlignment: usize,
+                pub FirstLineIndent: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut f32,
+                )
+                    -> windows_core::HRESULT,
+                pub KeepTogether: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut FormatEffect,
+                )
+                    -> windows_core::HRESULT,
+                pub SetKeepTogether: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    FormatEffect,
+                )
+                    -> windows_core::HRESULT,
+                pub KeepWithNext: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut FormatEffect,
+                )
+                    -> windows_core::HRESULT,
+                pub SetKeepWithNext: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    FormatEffect,
+                )
+                    -> windows_core::HRESULT,
+                pub LeftIndent: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut f32,
+                ) -> windows_core::HRESULT,
+                pub LineSpacing: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut f32,
+                )
+                    -> windows_core::HRESULT,
+                LineSpacingRule: usize,
+                ListAlignment: usize,
+                SetListAlignment: usize,
+                pub ListLevelIndex: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut i32,
+                )
+                    -> windows_core::HRESULT,
+                pub SetListLevelIndex:
+                    unsafe extern "system" fn(*mut core::ffi::c_void, i32) -> windows_core::HRESULT,
+                pub ListStart: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut i32,
+                ) -> windows_core::HRESULT,
+                pub SetListStart:
+                    unsafe extern "system" fn(*mut core::ffi::c_void, i32) -> windows_core::HRESULT,
+                ListStyle: usize,
+                SetListStyle: usize,
+                pub ListTab: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut f32,
+                ) -> windows_core::HRESULT,
+                pub SetListTab:
+                    unsafe extern "system" fn(*mut core::ffi::c_void, f32) -> windows_core::HRESULT,
+                ListType: usize,
+                SetListType: usize,
+                pub NoLineNumber: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut FormatEffect,
+                )
+                    -> windows_core::HRESULT,
+                pub SetNoLineNumber: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    FormatEffect,
+                )
+                    -> windows_core::HRESULT,
+                pub PageBreakBefore: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut FormatEffect,
+                )
+                    -> windows_core::HRESULT,
+                pub SetPageBreakBefore: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    FormatEffect,
+                )
+                    -> windows_core::HRESULT,
+                pub RightIndent: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut f32,
+                )
+                    -> windows_core::HRESULT,
+                pub SetRightIndent:
+                    unsafe extern "system" fn(*mut core::ffi::c_void, f32) -> windows_core::HRESULT,
+                pub RightToLeft: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut FormatEffect,
+                )
+                    -> windows_core::HRESULT,
+                pub SetRightToLeft: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    FormatEffect,
+                )
+                    -> windows_core::HRESULT,
+                Style: usize,
+                SetStyle: usize,
+                pub SpaceAfter: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut f32,
+                ) -> windows_core::HRESULT,
+                pub SetSpaceAfter:
+                    unsafe extern "system" fn(*mut core::ffi::c_void, f32) -> windows_core::HRESULT,
+                pub SpaceBefore: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut f32,
+                )
+                    -> windows_core::HRESULT,
+                pub SetSpaceBefore:
+                    unsafe extern "system" fn(*mut core::ffi::c_void, f32) -> windows_core::HRESULT,
+                pub WidowControl: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut FormatEffect,
+                )
+                    -> windows_core::HRESULT,
+                pub SetWidowControl: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    FormatEffect,
+                )
+                    -> windows_core::HRESULT,
+                pub TabCount: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut i32,
+                ) -> windows_core::HRESULT,
+                AddTab: usize,
+                pub ClearAllTabs:
+                    unsafe extern "system" fn(*mut core::ffi::c_void) -> windows_core::HRESULT,
+                pub DeleteTab:
+                    unsafe extern "system" fn(*mut core::ffi::c_void, f32) -> windows_core::HRESULT,
+                pub GetClone: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+                GetTab: usize,
+                pub IsEqual: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    *mut bool,
+                ) -> windows_core::HRESULT,
+                pub SetClone: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+                pub SetIndents: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    f32,
+                    f32,
+                    f32,
+                ) -> windows_core::HRESULT,
+                SetLineSpacing: usize,
             }
             windows_core::imp::define_interface!(
                 ITextRange,
@@ -1730,6 +3651,30 @@ pub mod Microsoft {
                         (windows_core::Interface::vtable(this).SetLink)(
                             windows_core::Interface::as_raw(this),
                             core::mem::transmute_copy(value),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn ParagraphFormat(&self) -> windows_core::Result<ITextParagraphFormat> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).ParagraphFormat)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
+                pub fn SetParagraphFormat<P0>(&self, value: P0) -> windows_core::Result<()>
+                where
+                    P0: windows_core::Param<ITextParagraphFormat>,
+                {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetParagraphFormat)(
+                            windows_core::Interface::as_raw(this),
+                            value.param().abi(),
                         )
                         .ok()
                     }
@@ -2068,6 +4013,11 @@ pub mod Microsoft {
                 fn Length(&self) -> windows_core::Result<i32>;
                 fn Link(&self) -> windows_core::Result<windows_core::HSTRING>;
                 fn SetLink(&self, value: &windows_core::HSTRING) -> windows_core::Result<()>;
+                fn ParagraphFormat(&self) -> windows_core::Result<ITextParagraphFormat>;
+                fn SetParagraphFormat(
+                    &self,
+                    value: windows_core::Ref<'_, ITextParagraphFormat>,
+                ) -> windows_core::Result<()>;
                 fn StartPosition(&self) -> windows_core::Result<i32>;
                 fn SetStartPosition(&self, value: i32) -> windows_core::Result<()>;
                 fn StoryLength(&self) -> windows_core::Result<i32>;
@@ -2332,6 +4282,43 @@ pub mod Microsoft {
                             let this: &Identity =
                                 &*((this as *const *const ()).offset(OFFSET) as *const Identity);
                             ITextRange_Impl::SetLink(this, core::mem::transmute(&value)).into()
+                        }
+                    }
+                    unsafe extern "system" fn ParagraphFormat<
+                        Identity: ITextRange_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut *mut core::ffi::c_void,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match ITextRange_Impl::ParagraphFormat(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    core::mem::forget(ok__);
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn SetParagraphFormat<
+                        Identity: ITextRange_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        value: *mut core::ffi::c_void,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            ITextRange_Impl::SetParagraphFormat(
+                                this,
+                                core::mem::transmute_copy(&value),
+                            )
+                            .into()
                         }
                     }
                     unsafe extern "system" fn StartPosition<
@@ -2759,8 +4746,8 @@ pub mod Microsoft {
                         Length: Length::<Identity, OFFSET>,
                         Link: Link::<Identity, OFFSET>,
                         SetLink: SetLink::<Identity, OFFSET>,
-                        ParagraphFormat: 0,
-                        SetParagraphFormat: 0,
+                        ParagraphFormat: ParagraphFormat::<Identity, OFFSET>,
+                        SetParagraphFormat: SetParagraphFormat::<Identity, OFFSET>,
                         StartPosition: StartPosition::<Identity, OFFSET>,
                         SetStartPosition: SetStartPosition::<Identity, OFFSET>,
                         StoryLength: StoryLength::<Identity, OFFSET>,
@@ -2855,8 +4842,16 @@ pub mod Microsoft {
                     *mut core::ffi::c_void,
                     *mut core::ffi::c_void,
                 ) -> windows_core::HRESULT,
-                ParagraphFormat: usize,
-                SetParagraphFormat: usize,
+                pub ParagraphFormat: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
+                pub SetParagraphFormat: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
                 pub StartPosition: unsafe extern "system" fn(
                     *mut core::ffi::c_void,
                     *mut i32,
@@ -3120,6 +5115,30 @@ pub mod Microsoft {
                         (windows_core::Interface::vtable(this).SetLink)(
                             windows_core::Interface::as_raw(this),
                             core::mem::transmute_copy(value),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn ParagraphFormat(&self) -> windows_core::Result<ITextParagraphFormat> {
+                    let this = &windows_core::Interface::cast::<ITextRange>(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).ParagraphFormat)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
+                pub fn SetParagraphFormat<P0>(&self, value: P0) -> windows_core::Result<()>
+                where
+                    P0: windows_core::Param<ITextParagraphFormat>,
+                {
+                    let this = &windows_core::Interface::cast::<ITextRange>(self)?;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetParagraphFormat)(
+                            windows_core::Interface::as_raw(this),
+                            value.param().abi(),
                         )
                         .ok()
                     }
@@ -3712,6 +5731,19 @@ pub mod Microsoft {
                         .and_then(|| windows_core::Type::from_abi(result__))
                     }
                 }
+                pub fn GetDefaultParagraphFormat(
+                    &self,
+                ) -> windows_core::Result<ITextParagraphFormat> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).GetDefaultParagraphFormat)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
                 pub fn GetRange(
                     &self,
                     startposition: i32,
@@ -3817,6 +5849,19 @@ pub mod Microsoft {
                     let this = self;
                     unsafe {
                         (windows_core::Interface::vtable(this).SetDefaultCharacterFormat)(
+                            windows_core::Interface::as_raw(this),
+                            value.param().abi(),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn SetDefaultParagraphFormat<P0>(&self, value: P0) -> windows_core::Result<()>
+                where
+                    P0: windows_core::Param<ITextParagraphFormat>,
+                {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetDefaultParagraphFormat)(
                             windows_core::Interface::as_raw(this),
                             value.param().abi(),
                         )
@@ -4131,6 +6176,40 @@ pub mod Microsoft {
                 fn not(self) -> Self {
                     Self(self.0.not())
                 }
+            }
+            #[repr(transparent)]
+            #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+            pub struct UnderlineType(pub i32);
+            impl UnderlineType {
+                pub const Undefined: Self = Self(0i32);
+                pub const None: Self = Self(1i32);
+                pub const Single: Self = Self(2i32);
+                pub const Words: Self = Self(3i32);
+                pub const Double: Self = Self(4i32);
+                pub const Dotted: Self = Self(5i32);
+                pub const Dash: Self = Self(6i32);
+                pub const DashDot: Self = Self(7i32);
+                pub const DashDotDot: Self = Self(8i32);
+                pub const Wave: Self = Self(9i32);
+                pub const Thick: Self = Self(10i32);
+                pub const Thin: Self = Self(11i32);
+                pub const DoubleWave: Self = Self(12i32);
+                pub const HeavyWave: Self = Self(13i32);
+                pub const LongDash: Self = Self(14i32);
+                pub const ThickDash: Self = Self(15i32);
+                pub const ThickDashDot: Self = Self(16i32);
+                pub const ThickDashDotDot: Self = Self(17i32);
+                pub const ThickDotted: Self = Self(18i32);
+                pub const ThickLongDash: Self = Self(19i32);
+            }
+            impl windows_core::TypeKind for UnderlineType {
+                type TypeKind = windows_core::CopyType;
+            }
+            impl windows_core::RuntimeType for UnderlineType {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::from_slice(
+                        b"enum(Microsoft.UI.Text.UnderlineType;i4)",
+                    );
             }
         }
         pub mod Windowing {

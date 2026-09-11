@@ -3469,4 +3469,240 @@ check("the checks leave nothing of their own behind",
       and _prefs.get_f64("s4_float", -1.0) == -1.0
       and _prefs.get_bool("s4_bool", False) is False)
 
+# ------------------------------------------------------------- rich text
+# THE BINDING'S DOCUMENT IS THE CORE'S, FOLDED (docs/rich-text-plan.md R1):
+# the same deltas the widget publishes, folded by the core's own rules
+# (crates/kaya/src/scene.rs RichDoc::normalize, crates/kaya/src/app.rs
+# absorb_edit/absorb_format), so the app's Document and the core's
+# `expect_runs` spell one string. tools/scenes/richtext.steps compares the
+# two on every lane; these are the rules under it, driven from bytes.
+_rich_checks = []
+
+
+def rich_check(name, ok):
+    _rich_checks.append(name)
+    check(name, ok)
+
+
+def _spell(runs):
+    return "|".join(
+        f"{r.start}:{r.end} {r.name}" if r.value == "true"
+        else f"{r.start}:{r.end} {r.name}={r.value}" for r in runs)
+
+
+def _packed_text_edited(ident, source, start, stop, inserted, runs, keys=()):
+    """The occurrence's own layout (crates/kaya/src/wire.rs): the click
+    tag with the SOURCE in its reserved word, the range, the runs in
+    FOURS, then the inserted text as a bare value."""
+    body = struct.pack("<QII", ident, len(keys), source)
+    for key in keys:
+        body += kaya.wire._enc.value(key)
+    flat = []
+    for run in runs:
+        flat += [run.start, run.end, run.name, run.value]
+    body += struct.pack("<QQII", start, stop, len(runs), 0)
+    body += kaya.wire._enc.values(flat) + kaya.wire._enc.value(inserted)
+    return struct.pack("<IHH", 8 + len(body),
+                       kaya.wire.OCC_TEXT_EDITED, 0) + body
+
+
+def _packed_text_formatted(ident, removed, start, stop, name, value, keys=()):
+    """The same tag with REMOVED in the reserved word, the range, and the
+    attribute as a name/value pair."""
+    body = struct.pack("<QII", ident, len(keys), removed)
+    for key in keys:
+        body += kaya.wire._enc.value(key)
+    body += struct.pack("<QQ", start, stop)
+    body += kaya.wire._enc.value(name) + kaya.wire._enc.value(value)
+    return struct.pack("<IHH", 8 + len(body),
+                       kaya.wire.OCC_TEXT_FORMATTED, 0) + body
+
+
+_rich_records = []
+_real_ship = kaya.runtime.submit
+kaya.runtime.submit = lambda *recs: _rich_records.extend(recs)
+
+_rich_app = kaya.App()
+_edits, _formats = [], []
+with _rich_app.window(2600):
+    with kaya.column():
+        _editor = kaya.textarea(rich=True, on_edit=_edits.append,
+                                on_format=_formats.append)
+        _plain = kaya.textarea()
+
+
+def _deliver(*packed):
+    """Through the REAL dispatch loop, which is where the fold sits."""
+    queue = [kaya.wire.parse_occurrence(p) for p in packed]
+    real = kaya.runtime.next_occurrence
+    kaya.runtime.next_occurrence = lambda: queue.pop(0) if queue else None
+    try:
+        _rich_app._dispatch_loop()
+    finally:
+        kaya.runtime.next_occurrence = real
+
+
+rich_check("a rich textarea declares the prop, a plain one does not",
+           kaya.wire.tx_set_rich(_editor.id, True) in _rich_records
+           and kaya.wire.tx_set_rich(_plain.id, True) not in _rich_records)
+rich_check("the document is empty before any write or delta",
+           _editor.document() == kaya.Document())
+
+# THE DECLARATION seeds the mirror, so a read after the write answers it.
+_DOC = "Héllo world\nSecond line"
+with _rich_app.build():
+    _editor.set_document(kaya.Document(_DOC)
+                         .bold(range(0, 6))
+                         .link(range(7, 12), "https://kaya.dev")
+                         .block(range(13, 24), kaya.Block.HEADING2))
+rich_check("set_document seeds the app's own Document",
+           _editor.document().text == _DOC
+           and _spell(_editor.document().runs)
+           == "0:6 bold|7:12 link=https://kaya.dev|13:24 block=heading2")
+rich_check("document() is a COPY: writing to it moves no mirror",
+           (_editor.document().runs.clear() or True)
+           and len(_editor.document().runs) == 3)
+rich_check("attr_at answers the attribute under a byte, and None off it",
+           _editor.document().attr_at(3, "bold") == "true"
+           and _editor.document().attr_at(9, "link") == "https://kaya.dev"
+           and _editor.document().attr_at(3, "italic") is None)
+
+# THE APP'S OWN EDIT IS FOLDED AS IT IS SENT (docs/rich-text-plan.md §7):
+# the widget and the core take it when a composition ends, the app at once.
+with _rich_app.build():
+    _editor.apply_edit(kaya.Edit.insert(6, ", big")
+                       .mark(range(2, 5), "italic", "true"))
+rich_check("apply_edit folds into the app's Document AS IT SENDS",
+           _editor.document().text == "Héllo, big world\nSecond line"
+           and _spell(_editor.document().runs)
+           == "0:6 bold|8:11 italic|12:17 link=https://kaya.dev"
+              "|18:29 block=heading2")
+rich_check("THE OFFSETS ARE BYTES: the é puts the split one past its "
+           "UTF-16 place",
+           len(_DOC.encode()) == 24 and len(_DOC) == 23
+           and _editor.document().attr_at(5, "bold") == "true")
+
+# A DELIVERED FORMAT: the attribute over the range, then off it.
+_deliver(_packed_text_formatted(_editor.id, 0, 12, 17, "underline", "true"))
+rich_check("a delivered text_formatted puts the attribute over the range",
+           _spell(_editor.document().runs)
+           == "0:6 bold|8:11 italic|12:17 link=https://kaya.dev"
+              "|12:17 underline|18:29 block=heading2")
+rich_check("on_format hears the act, `value` carrying it",
+           _formats[-1] == kaya.Format(12, 17, "underline", "true"))
+_deliver(_packed_text_formatted(_editor.id, 1, 12, 17, "underline", ""))
+rich_check("a REMOVAL takes it off and `value` is None",
+           _spell(_editor.document().runs)
+           == "0:6 bold|8:11 italic|12:17 link=https://kaya.dev"
+              "|18:29 block=heading2"
+           and _formats[-1].value is None)
+
+# A REMOVAL CLIPS ONE ATTRIBUTE'S RUNS AND NO OTHER, at the range's edges.
+_deliver(_packed_text_formatted(_editor.id, 1, 2, 4, "bold", ""))
+rich_check("a removal CUTS the run it falls inside, keeping both ends",
+           _spell(_editor.document().runs)
+           == "0:2 bold|4:6 bold|8:11 italic|12:17 link=https://kaya.dev"
+              "|18:29 block=heading2")
+_deliver(_packed_text_formatted(_editor.id, 0, 2, 4, "bold", "true"))
+rich_check("putting it back MERGES the three adjacent equal runs into one",
+           _spell(_editor.document().runs)
+           == "0:6 bold|8:11 italic|12:17 link=https://kaya.dev"
+              "|18:29 block=heading2")
+
+# A DELIVERED EDIT: runs before it keep, runs after it shift, the inserted
+# text's own runs land relative to the edit — and two adjacent equal runs
+# merge (the typed byte joining the paragraph it inherited).
+_deliver(_packed_text_edited(_editor.id, 0, 29, 29, "x",
+                             [kaya.Run(0, 1, "block", "heading2")]))
+rich_check("a delivered edit shifts what follows and MERGES the inherited "
+           "run",
+           _spell(_editor.document().runs)
+           == "0:6 bold|8:11 italic|12:17 link=https://kaya.dev"
+              "|18:30 block=heading2")
+rich_check("on_edit hears the addressed edit, its runs relative to the "
+           "inserted text",
+           _edits[-1] == kaya.Edit(29, 29, "x",
+                                   [kaya.Run(0, 1, "block", "heading2")]))
+
+# THE FOLD FOLLOWS WITHOUT A HANDLER, as an undo's mirrors do: this
+# textarea registered neither delta.
+_quiet_app = kaya.App()
+with _quiet_app.window(2601):
+    with kaya.column():
+        _quiet = kaya.textarea(rich=True)
+_quiet_records = []
+kaya.runtime.submit = lambda *recs: _quiet_records.extend(recs)
+_queue = [kaya.wire.parse_occurrence(
+    _packed_text_edited(_quiet.id, 0, 0, 0, "hi", [kaya.Run(0, 2, "bold", "true")]))]
+_real_next_rich = kaya.runtime.next_occurrence
+kaya.runtime.next_occurrence = (
+    lambda: _queue.pop(0) if _queue else None)
+try:
+    _quiet_app._dispatch_loop()
+finally:
+    kaya.runtime.next_occurrence = _real_next_rich
+rich_check("the document follows with NO handler registered",
+           _quiet.document().text == "hi"
+           and _spell(_quiet.document().runs) == "0:2 bold")
+
+# A LATER RUN WINS over an earlier one of the same attribute, which is how
+# an overlapping declaration normalizes (scene.rs's paint order).
+_later = kaya.Document("0123456789")
+_later.runs = [kaya.Run(0, 9, "bold", "true"), kaya.Run(2, 4, "bold", "false")]
+rich_check("a LATER run of one attribute paints over an earlier one",
+           _spell(kaya._normalize_runs(_later.runs))
+           == "0:2 bold|2:4 bold=false|4:9 bold")
+rich_check("two attributes over one range are TWO runs, ordered by name",
+           _spell(kaya._normalize_runs(
+               [kaya.Run(0, 4, "italic", "true"),
+                kaya.Run(0, 4, "bold", "true")]))
+           == "0:4 bold|0:4 italic")
+rich_check("an empty run is dropped, never stored",
+           kaya._normalize_runs([kaya.Run(3, 3, "bold", "true")]) == [])
+
+# THE BLOCK VOCABULARY IS CLOSED at the binding, by name: the core refuses
+# it too, but a guest that misspells a kind hears the kinds here.
+_block_said = ""
+try:
+    kaya.Document("x").block(range(0, 1), "heading4")
+except ValueError as e:
+    _block_said = str(e)
+rich_check("a misspelled block kind is refused, naming the kinds",
+           "heading4" in _block_said and "code_block" in _block_said)
+rich_check("set_block takes a plain name as well as kaya.Block",
+           kaya.Block.HEADING1 == "heading1")
+
+# A STAMPED COPY CARRIES NO DOCUMENT: the mirror is keyed by LIVE widget,
+# as the core's is, and the delta still reaches the row's handler.
+_row_app = kaya.App()
+_row_seen = []
+_rows = None
+with _row_app.window(2602):
+    _rows = kaya.collection()
+    _rows.insert("a", "alpha")
+    with kaya.column():
+        with kaya.for_each(_rows) as _el:
+            _row_editor = kaya.textarea(rich=True,
+                                        on_edit=lambda key, edit:
+                                        _row_seen.append((key, edit)))
+            kaya.label(bind=_el)
+kaya.runtime.submit = lambda *recs: None
+_queue = [kaya.wire.parse_occurrence(
+    _packed_text_edited(_row_editor.id, 0, 0, 0, "hi", [], keys=("a",)))]
+kaya.runtime.next_occurrence = (
+    lambda: _queue.pop(0) if _queue else None)
+try:
+    _row_app._dispatch_loop()
+finally:
+    kaya.runtime.next_occurrence = _real_next_rich
+    kaya.runtime.submit = _real_ship
+rich_check("a stamped copy's edit reaches the row's handler with its key",
+           len(_row_seen) == 1 and _row_seen[0][0] == "a"
+           and _row_seen[0][1].inserted == "hi")
+rich_check("and NO document is folded for it — the mirror is live widgets",
+           _row_app._documents == {})
+
+print(f"rich text: {len(_rich_checks)} checks over the fold, driven from "
+      f"packed occurrence bytes through App._dispatch_loop")
+
 sys.exit(1 if failures else 0)

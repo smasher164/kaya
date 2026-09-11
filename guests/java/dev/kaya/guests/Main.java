@@ -131,6 +131,9 @@ public final class Main {
             case "ranges":
                 app = Ranges::app;
                 break;
+            case "richtext":
+                app = RichText::app;
+                break;
             case "styling":
                 app = Styling::app;
                 break;

@@ -5,7 +5,7 @@
 
 use kaya::spec::{FieldTy, ProtocolSpec, Record};
 
-use crate::{Ctx, is_padding, prop_variants, record_params, window_prop_variants};
+use crate::{Ctx, is_padding, prop_variants, record_params, tx_fields, window_prop_variants};
 
 pub const RESERVED: &[&str] = &[
     "abstract", "assert", "boolean", "break", "byte", "case", "catch", "char", "class", "const",
@@ -1107,7 +1107,7 @@ fn emit_packer(c: &mut Ctx, r: &Record) {
         "        Enc b = begin(TX_KIND_{});",
         r.name.to_uppercase()
     ));
-    for f in r.fields {
+    for f in tx_fields(r) {
         c.line(&match f.ty {
             FieldTy::U32 if is_padding(f) => "        b.putInt(0);".into(),
             FieldTy::U32 => format!("        b.putInt({});", camel(f.name)),

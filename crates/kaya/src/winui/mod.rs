@@ -13,7 +13,7 @@ mod order;
 use order::{track_of, ChildOrder};
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::ffi::c_void;
 use std::sync::mpsc::Receiver;
 use std::sync::OnceLock;
@@ -52,7 +52,10 @@ use bindings::Microsoft::UI::Xaml::Controls::{
 // The RichEdit text object model: the textarea's text, undo stack and
 // clipboard verbs live on a document object, and the text ranges ride it
 // (docs/textarea-foundation-plan.md, the windows arm; docs/ranges-plan.md D1).
-use bindings::Microsoft::UI::Text::{PointOptions, TextConstants, TextGetOptions, TextSetOptions};
+use bindings::Microsoft::UI::Text::{
+    FormatEffect, ITextCharacterFormat, ITextParagraphFormat, PointOptions, TextConstants,
+    TextGetOptions, TextSetOptions, UnderlineType,
+};
 use bindings::Windows::Foundation::{Point, TypedEventHandler};
 // The caption title's two text properties are vtable pads in this
 // backend's bindings, so the one element that needs them is parsed from
@@ -102,7 +105,7 @@ use bindings::Windows::Foundation::EventHandler;
 
 use crate::protocol::{
     ApplyOp, CommandKind, MenuAttachment, MenuItemId, MenuItemKind, MenuProp, OccSink, Occurrence,
-    Path, Prop, Transaction, Value, WidgetId, WidgetKind, WindowId, WindowProp,
+    Path, Prop, TextRun, Transaction, Value, WidgetId, WidgetKind, WindowId, WindowProp,
     purge_context_natives,
 };
 use crate::scene::Scene;
@@ -256,6 +259,9 @@ impl Editable {
     /// `AdjustCrlf` IS A PIN: without it the story's trailing paragraph mark
     /// reads back as a newline the guest never wrote, breaking invariant 6
     /// (docs/probes/range-probe-windows.md; docs/textarea-foundation-plan.md).
+    /// `NoHidden` IS THE SECOND HALF (docs/traps.md 2026-09-11: A TOM link is
+    /// hidden text inside the story): the visible text is what every kaya
+    /// offset counts, and this is the ONE door the story is read through.
     fn text(&self) -> windows_core::Result<String> {
         match self {
             Editable::Entry(field) => Ok(field.Text()?.to_string()),
@@ -263,7 +269,7 @@ impl Editable {
                 let mut out = HSTRING::new();
                 field
                     .TextDocument()?
-                    .GetText(TextGetOptions::AdjustCrlf, &mut out)?;
+                    .GetText(TextGetOptions::AdjustCrlf | TextGetOptions::NoHidden, &mut out)?;
                 Ok(out.to_string())
             }
         }
@@ -9440,7 +9446,7 @@ fn search_clear(field: &TextBox) -> windows_core::Result<bool> {
 /// pins are not properties: `AdjustCrlf` (`Editable::text`) and
 /// `TextSetOptions::None` (`Editable::set_text`). Spell-check and text
 /// prediction are NOT pinned — the entry carries the same defaults.
-fn pin_plain_text(field: &RichEditBox) -> windows_core::Result<()> {
+fn pin_plain_text(field: &RichEditBox, widget: u64) -> windows_core::Result<()> {
     field.SetClipboardCopyFormat(RichEditClipboardFormat::PlainText)?;
     field.SetDisabledFormattingAccelerators(DisabledFormattingAccelerators::All)?;
     let pasting = Editable::Textarea(field.clone());
@@ -9449,6 +9455,17 @@ fn pin_plain_text(field: &RichEditBox) -> windows_core::Result<()> {
         // paste here is the RichEdit engine's, which takes RTF.
         if let Some(args) = args.as_ref() {
             args.SetHandled(true)?;
+        }
+        // docs/rich-text-plan.md R4: what provoked the report that follows.
+        // One-shot, and armed BEFORE the insertion, since TextChanged is
+        // raised a runloop turn later.
+        if rich_is_on(widget) {
+            rich_scene("naming a paste", move |core| {
+                core.scene.set_text_edit_source(
+                    WidgetId(widget),
+                    crate::wire::EDIT_SOURCE_PASTE as u32,
+                );
+            });
         }
         // Then paste what the entry would have pasted. INLINE, and through a
         // range rather than through the live selection — see `selection_range`.
@@ -9627,7 +9644,6 @@ fn painted_runs(field: &RichEditBox, units: i32) -> windows_core::Result<Vec<(i3
 /// A UTF-16 code-unit offset as a UTF-8 byte offset into the same text,
 /// or None when it splits a character — which can only mean something
 /// handed the platform an offset the core would have refused.
-#[cfg(feature = "harness")]
 fn byte_offset(text: &str, utf16: i32) -> Option<usize> {
     if utf16 < 0 {
         return None;
@@ -9642,10 +9658,9 @@ fn byte_offset(text: &str, utf16: i32) -> Option<usize> {
     (units == utf16 as usize).then_some(text.len())
 }
 
-/// The inverse, for the one verb that arrives carrying byte offsets:
-/// `expect_revealed` asks whether a range is on screen, so the range has
-/// to be in the control's unit before the control can be asked.
-#[cfg(feature = "harness")]
+/// The inverse, for what arrives carrying byte offsets: `expect_revealed`
+/// asks whether a range is on screen, and the rich arm's own reports and
+/// reads cross the same boundary (docs/rich-text-plan.md R2).
 fn utf16_offset(text: &str, byte: usize) -> Option<i32> {
     if byte > text.len() || !text.is_char_boundary(byte) {
         return None;
@@ -9702,6 +9717,603 @@ fn template_scroll(field: &RichEditBox) -> windows_core::Result<ScrollViewer> {
              cannot scroll cannot reveal a range (docs/ranges-plan.md D1)",
         )
     })
+}
+
+
+// ---- Rich text (docs/rich-text-plan.md §4, the WinUI arm) ------------
+//
+// THE LINK IS DRAWN AND NEVER `ITextRange::Link` (docs/traps.md 2026-09-11: A
+// TOM link is hidden text inside the story): the URL rides the run table
+// below, every read of the story carries `NoHidden` (`Editable::text`), and
+// TOM's cp offsets therefore count exactly the characters the guest's bytes
+// count. The tier's other rule: this backend's events carry no edit range, so
+// the core's diff IS the delta (R4) and nothing here calls
+// kaya_text_reported_edit.
+
+thread_local! {
+    /// The widget's OWN attribute runs, in UTF-8 BYTES over the visible text:
+    /// the truth for read-back, for the display derivation and for
+    /// `expect_runs`' corroboration (docs/rich-text-plan.md R1/R9). An entry
+    /// exists exactly while the textarea is declared `rich`.
+    static RICH_RUNS: RefCell<HashMap<u64, Vec<TextRun>>> = RefCell::new(HashMap::new());
+    /// Typing attributes armed over a collapsed caret. TOM applies the
+    /// collapsed SELECTION's CharacterFormat to typed text by itself
+    /// (measured 2026-09-11) and re-derives that format from the character
+    /// before the caret whenever the caret moves, so this record is what
+    /// re-arms them — the mac's pendingOn/pendingOff, one platform over.
+    static RICH_PENDING: RefCell<HashMap<u64, (BTreeMap<String, String>, BTreeSet<String>)>> =
+        RefCell::new(HashMap::new());
+}
+
+fn rich_is_on(widget: u64) -> bool {
+    RICH_RUNS.with_borrow(|table| table.contains_key(&widget))
+}
+
+fn rich_table(widget: u64) -> Vec<TextRun> {
+    RICH_RUNS.with_borrow(|table| table.get(&widget).cloned().unwrap_or_default())
+}
+
+/// A run's own display face, when kaya says `code`.
+const RICH_MONOSPACE: &str = "Consolas";
+
+/// A drawn link's colour, the flattened equivalent of the mac arm's
+/// `NSColor.linkColor`: TOM takes a `Color` value and this backend's bindings
+/// carry no `SolidColorBrush`, so the accent text stops are written out rather
+/// than looked up (`HIGHLIGHT_BACKGROUND` above took the same shape).
+const RICH_LINK_LIGHT: bindings::Windows::UI::Color =
+    bindings::Windows::UI::Color { A: 255, R: 0x00, G: 0x5F, B: 0xB8 };
+const RICH_LINK_DARK: bindings::Windows::UI::Color =
+    bindings::Windows::UI::Color { A: 255, R: 0x60, G: 0xCD, B: 0xFF };
+
+/// A quote's indent, in TOM's points — the mac arm's `headIndent` number.
+const RICH_QUOTE_INDENT: f32 = 20.0;
+
+/// The baseline the derived display is a multiple of: the document's own
+/// default character format, which is what an unformatted run already wears.
+fn rich_base(field: &RichEditBox) -> windows_core::Result<(f32, String)> {
+    let format = field.TextDocument()?.GetDefaultCharacterFormat()?;
+    let size = format.Size().unwrap_or(0.0);
+    let size = if size > 0.0 { size } else { 12.0 };
+    let name = format.Name().map(|n| n.to_string()).unwrap_or_default();
+    let name = if name.is_empty() {
+        field
+            .FontFamily()
+            .and_then(|family| family.Source())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|_| "Segoe UI".to_string())
+    } else {
+        name
+    };
+    Ok((size, name))
+}
+
+fn rich_link_colour(field: &RichEditBox) -> bindings::Windows::UI::Color {
+    match field.ActualTheme() {
+        Ok(ElementTheme::Dark) => RICH_LINK_DARK,
+        _ => RICH_LINK_LIGHT,
+    }
+}
+
+/// The attributes covering one byte, last run winning — the core's `attrs_at`
+/// (crates/kaya/src/scene.rs).
+fn rich_attrs_at(runs: &[TextRun], byte: usize) -> BTreeMap<String, String> {
+    let mut out = BTreeMap::new();
+    for run in runs {
+        if (run.start as usize) <= byte && byte < run.end as usize {
+            out.insert(run.name.clone(), run.value.clone());
+        }
+    }
+    out
+}
+
+/// `expect_runs`' spelling, so the arm's table and the core's mirror compare as
+/// one string (crates/kaya/src/scene.rs `spell_runs`).
+fn rich_spelling(runs: &[TextRun]) -> String {
+    runs.iter()
+        .map(|run| {
+            if run.value == "true" {
+                format!("{}:{} {}", run.start, run.end, run.name)
+            } else {
+                format!("{}:{} {}={}", run.start, run.end, run.name, run.value)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
+/// Per attribute: disjoint, sorted, never adjacent-and-equal, a later run
+/// winning — the core's `RichDoc::normalize`, independently, because a table
+/// derived from the core's answer could never disagree with it and the
+/// corroboration would read green on any bug (docs/rich-text-plan.md R9).
+fn rich_normalize(runs: Vec<TextRun>) -> Vec<TextRun> {
+    let names: BTreeSet<String> = runs.iter().map(|r| r.name.clone()).collect();
+    let mut out: Vec<TextRun> = Vec::new();
+    for name in names {
+        let mut painted: Vec<TextRun> = Vec::new();
+        for run in runs.iter().filter(|r| r.name == name) {
+            if run.start >= run.end {
+                continue;
+            }
+            let mut kept: Vec<TextRun> = Vec::new();
+            for old in painted.drain(..) {
+                if old.end <= run.start || old.start >= run.end {
+                    kept.push(old);
+                    continue;
+                }
+                if old.start < run.start {
+                    kept.push(TextRun { end: run.start, ..old.clone() });
+                }
+                if old.end > run.end {
+                    kept.push(TextRun { start: run.end, ..old.clone() });
+                }
+            }
+            kept.push(run.clone());
+            painted = kept;
+        }
+        painted.sort_by_key(|r| r.start);
+        let mut merged: Vec<TextRun> = Vec::new();
+        for run in painted {
+            match merged.last_mut() {
+                Some(last) if last.end == run.start && last.value == run.value => {
+                    last.end = run.end;
+                }
+                _ => merged.push(run),
+            }
+        }
+        out.extend(merged);
+    }
+    out.sort_by(|a, b| (a.start, &a.name).cmp(&(b.start, &b.name)));
+    out
+}
+
+/// The core's splice: runs before the edit stay, runs after it shift, a run the
+/// edit falls inside is cut, the inserted runs land relative to the edit's
+/// start (`RichDoc::splice`).
+fn rich_splice(
+    runs: &[TextRun], start: usize, end: usize, inserted_len: usize, inserted: &[TextRun],
+) -> Vec<TextRun> {
+    let shift = inserted_len as i64 - (end - start) as i64;
+    let moved = |offset: u64| -> u64 { (offset as i64 + shift) as u64 };
+    let mut next: Vec<TextRun> = Vec::with_capacity(runs.len() + inserted.len());
+    for run in runs {
+        if (run.start as usize) < start {
+            next.push(TextRun { start: run.start, end: run.end.min(start as u64), ..run.clone() });
+        }
+        if (run.end as usize) > end {
+            next.push(TextRun {
+                start: moved(run.start.max(end as u64)),
+                end: moved(run.end),
+                ..run.clone()
+            });
+        }
+    }
+    for run in inserted {
+        next.push(TextRun {
+            start: run.start + start as u64,
+            end: run.end + start as u64,
+            ..run.clone()
+        });
+    }
+    rich_normalize(next)
+}
+
+/// The core's `RichDoc::format`: one attribute over one span, None removing.
+fn rich_format_runs(
+    runs: &[TextRun], start: usize, end: usize, name: &str, value: Option<&str>,
+) -> Vec<TextRun> {
+    if start >= end {
+        return runs.to_vec();
+    }
+    let mut next: Vec<TextRun> = Vec::with_capacity(runs.len() + 2);
+    for run in runs {
+        if run.name != name || (run.end as usize) <= start || run.start as usize >= end {
+            next.push(run.clone());
+            continue;
+        }
+        if (run.start as usize) < start {
+            next.push(TextRun { end: start as u64, ..run.clone() });
+        }
+        if (run.end as usize) > end {
+            next.push(TextRun { start: end as u64, ..run.clone() });
+        }
+    }
+    if let Some(value) = value {
+        next.push(TextRun {
+            start: start as u64,
+            end: end as u64,
+            name: name.to_owned(),
+            value: value.to_owned(),
+        });
+    }
+    rich_normalize(next)
+}
+
+/// The selection's whole paragraphs WITHOUT the trailing newline — a `block`
+/// act's span (docs/rich-text-plan.md §7, the mac arm's `paragraphRange`).
+fn rich_paragraph_bounds(text: &str, start: usize, end: usize) -> (usize, usize) {
+    let from = text[..start].rfind('\n').map(|at| at + 1).unwrap_or(0);
+    let mut to = text[end..].find('\n').map(|at| end + at + 1).unwrap_or(text.len());
+    if to > from && text.as_bytes()[to - 1] == b'\n' {
+        to -= 1;
+    }
+    (from, to)
+}
+
+/// ONE ATTRIBUTE SET, WRITTEN AS TOM FORMATS. Every property kaya derives is
+/// written on every call, present or not, so a run that LOST an attribute
+/// loses its drawing too; nothing else on the format moves — the highlight
+/// ground stays `set_background`'s.
+fn rich_write_format(
+    character: &ITextCharacterFormat, paragraph: Option<&ITextParagraphFormat>,
+    attrs: &BTreeMap<String, String>, base_size: f32, base_face: &str,
+    link: bindings::Windows::UI::Color,
+) -> windows_core::Result<()> {
+    let has = |name: &str| attrs.contains_key(name);
+    let block = attrs.get("block").map(String::as_str).unwrap_or("body");
+    let mut bold = has("bold");
+    let mut size = base_size;
+    match block {
+        "heading1" => {
+            size = (base_size * 1.6).round();
+            bold = true;
+        }
+        "heading2" => {
+            size = (base_size * 1.35).round();
+            bold = true;
+        }
+        "heading3" => {
+            size = (base_size * 1.15).round();
+            bold = true;
+        }
+        _ => {}
+    }
+    let monospace = has("code") || block == "code_block";
+    let linked = attrs.contains_key("link");
+    let effect = |on: bool| if on { FormatEffect::On } else { FormatEffect::Off };
+    character.SetBold(effect(bold))?;
+    character.SetItalic(effect(has("italic")))?;
+    character.SetStrikethrough(effect(has("strike")))?;
+    character.SetUnderline(if has("underline") || linked {
+        UnderlineType::Single
+    } else {
+        UnderlineType::None
+    })?;
+    character.SetSize(size)?;
+    character.SetName(&HSTRING::from(if monospace { RICH_MONOSPACE } else { base_face }))?;
+    character.SetForegroundColor(if linked { link } else { TextConstants::AutoColor()? })?;
+    if let Some(paragraph) = paragraph {
+        // The block layer's only paragraph property in v1: a heading is size
+        // plus weight and a code block a face, both character formats.
+        let indent = if block == "quote" { RICH_QUOTE_INDENT } else { 0.0 };
+        paragraph.SetIndents(0.0, indent, 0.0)?;
+    }
+    Ok(())
+}
+
+/// THE DISPLAY, DERIVED FROM THE TABLE over `from..to` (bytes). A read-back
+/// never guesses a name from a font, so this is the only direction the two
+/// travel in (docs/rich-text-plan.md R1).
+fn rich_restyle(
+    field: &RichEditBox, text: &str, runs: &[TextRun], from: usize, to: usize,
+) -> windows_core::Result<()> {
+    if from >= to {
+        return Ok(());
+    }
+    let (base_size, base_face) = rich_base(field)?;
+    let link = rich_link_colour(field);
+    let mut edges: Vec<usize> = vec![from, to];
+    for run in runs {
+        for edge in [run.start as usize, run.end as usize] {
+            if edge > from && edge < to {
+                edges.push(edge);
+            }
+        }
+    }
+    edges.sort_unstable();
+    edges.dedup();
+    let doc = field.TextDocument()?;
+    // Batched for the reason `paint_highlights` is: one visible step rather
+    // than a flash per segment.
+    doc.BatchDisplayUpdates()?;
+    let painted = (|| -> windows_core::Result<()> {
+        for pair in edges.windows(2) {
+            let (a, b) = (pair[0], pair[1]);
+            let (Some(start), Some(stop)) = (utf16_offset(text, a), utf16_offset(text, b)) else {
+                continue;
+            };
+            let range = doc.GetRange(start, stop)?;
+            let attrs = rich_attrs_at(runs, a);
+            let character = range.CharacterFormat()?;
+            let paragraph = range.ParagraphFormat()?;
+            rich_write_format(
+                &character, Some(&paragraph), &attrs, base_size, &base_face, link,
+            )?;
+            // ASSIGNED BACK as `set_background` assigns: the probe measured the
+            // object live (docs/measurements/richtext-windows-2026-09-11.md §4)
+            // and this file's older comment calls it a snapshot, so the write
+            // that cannot silently no-op under either reading is both.
+            range.SetCharacterFormat(&character)?;
+            range.SetParagraphFormat(&paragraph)?;
+        }
+        Ok(())
+    })();
+    // ALWAYS, even on the failure above: an unmatched BatchDisplayUpdates leaves
+    // the control's rendering suspended for the rest of the process.
+    doc.ApplyDisplayUpdates()?;
+    painted
+}
+
+/// THE TYPING ATTRIBUTES A COLLAPSED CARET CARRIES: the byte before it, never a
+/// link (docs/rich-text-plan.md R4 — typing at a link's end never extends it),
+/// with the armed pending set over them. Written on the SELECTION, which is
+/// what TOM applies to typed text; the `ITextSelection` trap (docs/traps.md
+/// 2026-08-06) is about mutating the DOCUMENT through it, never its format.
+fn rich_arm_typing(field: &RichEditBox, widget: u64, caret: usize) -> windows_core::Result<()> {
+    let runs = rich_table(widget);
+    let mut attrs = if caret == 0 { BTreeMap::new() } else { rich_attrs_at(&runs, caret - 1) };
+    attrs.remove("link");
+    RICH_PENDING.with_borrow(|pending| {
+        if let Some((on, off)) = pending.get(&widget) {
+            for (name, value) in on {
+                attrs.insert(name.clone(), value.clone());
+            }
+            for name in off {
+                attrs.remove(name);
+            }
+        }
+    });
+    let (base_size, base_face) = rich_base(field)?;
+    let link = rich_link_colour(field);
+    let selection = field.TextDocument()?.Selection()?;
+    let character = selection.CharacterFormat()?;
+    rich_write_format(&character, None, &attrs, base_size, &base_face, link)?;
+    selection.SetCharacterFormat(&character)
+}
+
+/// The scene, from a CONTROL EVENT HANDLER, where `CORE.with_borrow_mut`
+/// ABORTS on a live borrow: `compose` runs TSF's edit session inside
+/// `on_ui`'s borrow, so `TextCompositionStarted` is raised under one. A
+/// refused borrow is DEFERRED onto the dispatcher rather than dropped.
+fn rich_scene(what: &'static str, f: impl FnOnce(&mut CoreState) + Send + 'static) {
+    let taken = CORE.with(|slot| match slot.try_borrow_mut() {
+        Ok(mut borrowed) => match borrowed.as_mut() {
+            Some(core) => {
+                f(core);
+                None
+            }
+            None => Some(None),
+        },
+        Err(_) => Some(Some(f)),
+    });
+    let Some(deferred) = taken else { return };
+    let Some(f) = deferred else { return };
+    let Some(dispatcher) = DISPATCHER.get() else {
+        eprintln!("kaya: winui {what}: no dispatcher to defer to");
+        return;
+    };
+    let cell = std::sync::Mutex::new(Some(f));
+    let handler = DispatcherQueueHandler::new(move || {
+        if let Some(f) = cell.lock().unwrap().take() {
+            CORE.with_borrow_mut(|core| {
+                if let Some(core) = core.as_mut() {
+                    f(core);
+                }
+            });
+        }
+        Ok(())
+    });
+    let _ = dispatcher.0.TryEnqueue(&handler);
+}
+
+/// A USER EDIT, ADDRESSED. The core diffs its own mirror (R4) and answers the
+/// one edit; the table takes the same splice independently and the display
+/// follows it, which is how a link stops at the byte it ended on.
+fn rich_note_edit(
+    widget: u64, field: &RichEditBox, text: &str,
+) -> Option<crate::scene::RichEdit> {
+    if !rich_is_on(widget) {
+        return None;
+    }
+    let edit = CORE.with_borrow_mut(|core| {
+        let core = core.as_mut()?;
+        core.scene.note_rich_text(WidgetId(widget), text)
+    })?;
+    rich_take_edit(widget, field, text, &edit);
+    Some(edit)
+}
+
+/// The table and the display, moved by one published edit — the half the
+/// composition's commit shares, where the core is already borrowed.
+fn rich_take_edit(widget: u64, field: &RichEditBox, text: &str, edit: &crate::scene::RichEdit) {
+    let start = edit.range.start as usize;
+    let end = edit.range.stop as usize;
+    let spliced = rich_splice(&rich_table(widget), start, end, edit.inserted.len(), &edit.runs);
+    RICH_RUNS.with_borrow_mut(|table| {
+        table.insert(widget, spliced.clone());
+    });
+    if !edit.inserted.is_empty() {
+        RICH_PENDING.with_borrow_mut(|pending| {
+            pending.remove(&widget);
+        });
+    }
+    if let Err(e) = rich_restyle(field, text, &spliced, start, start + edit.inserted.len()) {
+        eprintln!("kaya: winui could not draw an edit's runs: {}", e.message());
+    }
+}
+
+/// The edits R5 held through a composition, lowered now that it has ended.
+fn deliver_rich_ops(core: &mut CoreState, ops: Vec<ApplyOp>) {
+    for op in ops {
+        if let Err(e) = apply(core, op) {
+            eprintln!("kaya: winui could not apply a held edit: {}", e.message());
+        }
+    }
+}
+
+/// THE WIDGET'S OWN FORMATTING ACT over its current selection — the one path
+/// `format_text` and the harness's `format` share (docs/rich-text-plan.md R1,
+/// R9). A collapsed selection arms the typing attribute instead; a `block` act
+/// covers the selection's whole paragraphs. None, or what refused.
+fn rich_format_selection(
+    core: &mut CoreState, widget: u64, name: &str, value: &str, removed: bool,
+) -> Option<String> {
+    let Some(field) = textarea_by_id(core, widget) else {
+        return Some(format!("widget {widget} is not a live textarea"));
+    };
+    if !rich_is_on(widget) {
+        return Some(format!("widget {widget} is not a rich textarea"));
+    }
+    if !crate::wire::RICH_ATTRS.iter().any(|(_, word)| *word == name) {
+        return Some(format!("{name:?} is not a kaya attribute"));
+    }
+    if COMPOSING.with_borrow(|live| live.contains(&widget)) {
+        return Some(format!("an input-method composition is live on widget {widget}"));
+    }
+    let acted = (|| -> windows_core::Result<Result<(), String>> {
+        let text = lf(Editable::Textarea(field.clone()).text()?);
+        let selection = field.TextDocument()?.Selection()?;
+        let (from, to) = (selection.StartPosition()?, selection.EndPosition()?);
+        let (Some(mut start), Some(mut end)) = (byte_offset(&text, from), byte_offset(&text, to))
+        else {
+            return Ok(Err("the selection is not on a character boundary".to_string()));
+        };
+        if name == "block" {
+            (start, end) = rich_paragraph_bounds(&text, start, end);
+        }
+        // `body` IS the removal: every paragraph has a kind and taking one off
+        // means this one (the mac arm's rule, docs/rich-text-plan.md §7).
+        let off = removed || (name == "block" && value == "body");
+        if start == end {
+            RICH_PENDING.with_borrow_mut(|pending| {
+                let (on, gone) = pending.entry(widget).or_default();
+                if off {
+                    on.remove(name);
+                    gone.insert(name.to_owned());
+                } else {
+                    gone.remove(name);
+                    on.insert(name.to_owned(), value.to_owned());
+                }
+            });
+            core.scene.set_text_pending(WidgetId(widget), name, value, !off);
+            rich_arm_typing(&field, widget, start)?;
+            return Ok(Ok(()));
+        }
+        let want = (!off).then_some(value);
+        let runs = rich_format_runs(&rich_table(widget), start, end, name, want);
+        RICH_RUNS.with_borrow_mut(|table| {
+            table.insert(widget, runs.clone());
+        });
+        rich_restyle(&field, &text, &runs, start, end)?;
+        let range = crate::protocol::TextRange::new(start as u64, end as u64);
+        if let Some((range, name, value)) =
+            core.scene.note_text_formatted(WidgetId(widget), range, name, want)
+        {
+            let tag = core
+                .entry_tags
+                .get(&widget)
+                .cloned()
+                .unwrap_or_else(|| crate::wire::click_tag(widget, &[]));
+            core.occurrences.send(crate::wire::decode_text_formatted_tag(
+                &tag,
+                range,
+                &name,
+                value.as_deref(),
+            ));
+        }
+        Ok(Ok(()))
+    })();
+    match acted {
+        Ok(Ok(())) => None,
+        Ok(Err(refused)) => Some(refused),
+        Err(e) => Some(format!("the control refused the act: {}", e.message())),
+    }
+}
+
+/// set_rich_text: the whole content, runs in this backend's native unit
+/// (UTF-16 code units, `crates/kaya/src/scene.rs` native_offset). Echoes
+/// nothing and resets the native history, as a text write does (D7).
+fn rich_set_document(
+    core: &mut CoreState, widget: u64, text: &str, runs: &[crate::protocol::NativeRun],
+) -> windows_core::Result<()> {
+    let Some(field) = textarea_by_id(core, widget) else {
+        return Ok(());
+    };
+    let editable = Editable::Textarea(field.clone());
+    if lf(editable.text()?) != text {
+        if let Some(swallow) = core.entry_swallow.get(&widget) {
+            swallow.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        editable.set_text(text)?;
+        clear_native_undo(&editable);
+    }
+    core.banked_text.insert(widget, text.to_owned());
+    let table = rich_normalize(rich_native_runs(text, runs));
+    RICH_RUNS.with_borrow_mut(|map| {
+        map.insert(widget, table.clone());
+    });
+    RICH_PENDING.with_borrow_mut(|pending| {
+        pending.remove(&widget);
+    });
+    rich_restyle(&field, text, &table, 0, text.len())
+}
+
+/// apply_edit: `range` and `runs` arrive in cp, the table keeps bytes.
+fn rich_apply_edit(
+    core: &mut CoreState, widget: u64, range: crate::protocol::NativeRange, inserted: &str,
+    runs: &[crate::protocol::NativeRun], selection: crate::protocol::NativeRange,
+) -> windows_core::Result<()> {
+    let Some(field) = textarea_by_id(core, widget) else {
+        return Ok(());
+    };
+    let editable = Editable::Textarea(field.clone());
+    let before = lf(editable.text()?);
+    let (Some(start), Some(stop)) = (
+        byte_offset(&before, range.start as i32),
+        byte_offset(&before, range.stop as i32),
+    ) else {
+        eprintln!(
+            "kaya: winui apply_edit refused: {}..{} is not on a character boundary of the \
+             {}-byte text widget {widget} holds",
+            range.start,
+            range.stop,
+            before.len()
+        );
+        return Ok(());
+    };
+    if let Some(swallow) = core.entry_swallow.get(&widget) {
+        swallow.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+    let doc = field.TextDocument()?;
+    // A story stores every break as a bare CR (`lf`'s inverse), and CR and LF
+    // are one unit each, so the offsets above are unmoved by the swap.
+    doc.GetRange(range.start as i32, range.stop as i32)?
+        .SetText(&HSTRING::from(inserted.replace('\n', "\r")))?;
+    doc.Selection()?
+        .SetRange(selection.start as i32, selection.stop as i32)?;
+    let after = lf(editable.text()?);
+    core.banked_text.insert(widget, after.clone());
+    let added = rich_native_runs(inserted, runs);
+    let table = rich_splice(&rich_table(widget), start, stop, inserted.len(), &added);
+    RICH_RUNS.with_borrow_mut(|map| {
+        map.insert(widget, table.clone());
+    });
+    rich_restyle(&field, &after, &table, start, start + inserted.len())
+}
+
+/// Native runs (cp) as the table's own (bytes), against the text they cover.
+fn rich_native_runs(text: &str, runs: &[crate::protocol::NativeRun]) -> Vec<TextRun> {
+    runs.iter()
+        .filter_map(|run| {
+            let start = byte_offset(text, run.start as i32)?;
+            let end = byte_offset(text, run.end as i32)?;
+            Some(TextRun {
+                start: start as u64,
+                end: end as u64,
+                name: run.name.clone(),
+                value: run.value.clone(),
+            })
+        })
+        .collect()
 }
 
 /// THE HARNESS'S COMPOSITION, THROUGH THE TEXT SERVICES FRAMEWORK.
@@ -10238,6 +10850,12 @@ fn native_walk(core: &mut CoreState, redo: bool) {
     }
     let text = lf(field.text().unwrap_or_default());
     let can_undo = field.can_undo().unwrap_or(false);
+    // docs/rich-text-plan.md R4: a native undo is an edit the document hears,
+    // and this is the one party that knows it was one (undo-plan A6).
+    if rich_is_on(id) {
+        core.scene
+            .set_text_edit_source(WidgetId(id), crate::wire::EDIT_SOURCE_NATIVE_UNDO as u32);
+    }
     // The bracket goes in BEFORE anything can arrive (the raise is a
     // runloop turn away, but the order is not this code's to assume).
     core.ledger_quiet.insert(id, text.clone());
@@ -10328,6 +10946,12 @@ fn perform_clipboard_role(core: &mut CoreState, role: &str) -> bool {
             };
             let accepts = core.accepts.get(&id).cloned().unwrap_or_default();
             if accepts.is_empty() {
+                // The same one-shot the control's own Paste event arms
+                // (pin_plain_text): this route bypasses that event.
+                if rich_is_on(id) {
+                    core.scene
+                        .set_text_edit_source(WidgetId(id), crate::wire::EDIT_SOURCE_PASTE as u32);
+                }
                 if let Some(field) = editable_by_id(core, id) {
                     let _ = field.paste_from_clipboard();
                 }
@@ -11993,7 +12617,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     // document). 240x96 is the third spelling of the
                     // SwiftUI and GTK arms' size.
                     field.SetHeight(96.0)?;
-                    pin_plain_text(&field)?;
+                    pin_plain_text(&field, id.0)?;
                     let sink = core.occurrences.clone();
                     let tag = tag.expect("textareas carry a tag");
                     let handler_tag = tag.clone();
@@ -12025,6 +12649,16 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         {
                             return Ok(());
                         }
+                        // MARKED TEXT IS THE WIDGET'S ALONE (the contract,
+                        // docs/rich-text-plan.md R5): TSF writes a composition
+                        // into this store, so the only place it can be held
+                        // back is here. The commit reports from
+                        // TextCompositionEnded.
+                        if rich_is_on(bank_id)
+                            && COMPOSING.with_borrow(|live| live.contains(&bank_id))
+                        {
+                            return Ok(());
+                        }
                         let text = lf(field_for_handler.text()?);
                         // The ledger sees it BEFORE the app does (§3),
                         // and THIS control is why its no-change guard
@@ -12032,7 +12666,20 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         // TextChanged here, so `highlight_ranges` would
                         // otherwise report an edit the document never had.
                         if bank_text_changed(bank_id, &text) {
+                            // R4: this backend's events carry no range, so the
+                            // core's diff IS the delta and the arm's own table
+                            // takes the same splice.
+                            let edit = rich_note_edit(bank_id, &ranges_field, &text);
                             sink.send_text_tag(&handler_tag, &text);
+                            if let Some(edit) = edit {
+                                sink.send(crate::wire::decode_text_edited_tag(
+                                    &handler_tag,
+                                    edit.source,
+                                    edit.range,
+                                    &edit.inserted,
+                                    &edit.runs,
+                                ));
+                            }
                         }
                         Ok(())
                     });
@@ -12049,13 +12696,92 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         TextCompositionStartedEventArgs,
                     >::new(move |_, _| {
                         COMPOSING.with_borrow_mut(|live| live.insert(composing_id));
+                        if rich_is_on(composing_id) {
+                            rich_scene("reporting a composition", move |core| {
+                                let held =
+                                    core.scene.set_text_composing(WidgetId(composing_id), true);
+                                deliver_rich_ops(core, held);
+                            });
+                        }
                         Ok(())
                     }))?;
+                    let commit_field = field.clone();
+                    let commit_tag = tag.clone();
+                    let commit_sink = core.occurrences.clone();
                     field.TextCompositionEnded(&TypedEventHandler::<
                         RichEditBox,
                         TextCompositionEndedEventArgs,
                     >::new(move |_, _| {
                         COMPOSING.with_borrow_mut(|live| live.remove(&composing_id));
+                        if !rich_is_on(composing_id) {
+                            return Ok(());
+                        }
+                        // THE COMMIT IS ONE EDIT, named before it is reported
+                        // and the composition ended after it (the contract).
+                        // A report that finds nothing new leaves the source
+                        // armed for the TextChanged still in flight.
+                        let field = commit_field.clone();
+                        let tag = commit_tag.clone();
+                        let sink = commit_sink.clone();
+                        rich_scene("committing a composition", move |core| {
+                            core.scene.set_text_edit_source(
+                                WidgetId(composing_id),
+                                crate::wire::EDIT_SOURCE_IME_COMMIT as u32,
+                            );
+                            let text = match Editable::Textarea(field.clone()).text() {
+                                Ok(text) => lf(text),
+                                Err(_) => return,
+                            };
+                            if bank_text_changed_on(core, composing_id, &text) {
+                                if let Some(edit) =
+                                    core.scene.note_rich_text(WidgetId(composing_id), &text)
+                                {
+                                    rich_take_edit(composing_id, &field, &text, &edit);
+                                    sink.send_text_tag(&tag, &text);
+                                    sink.send(crate::wire::decode_text_edited_tag(
+                                        &tag,
+                                        edit.source,
+                                        edit.range,
+                                        &edit.inserted,
+                                        &edit.runs,
+                                    ));
+                                }
+                            }
+                            let held =
+                                core.scene.set_text_composing(WidgetId(composing_id), false);
+                            deliver_rich_ops(core, held);
+                        });
+                        Ok(())
+                    }))?;
+                    // R5's other half: the core hears every selection move.
+                    // NOTHING IS WRITTEN BACK FROM HERE — an
+                    // ITextSelection::SetCharacterFormat re-raises this event,
+                    // so re-arming the typing attributes in it spins: measured
+                    // 2026-09-11 on this leg, 29,500 raises against 80
+                    // TextChanged, and the keystroke's own report arrived ~20s
+                    // late (docs/rich-text-plan.md §4, the WinUI arm).
+                    let selection_field = field.clone();
+                    field.SelectionChanged(&RoutedEventHandler::new(move |_, _| {
+                        if !rich_is_on(composing_id) {
+                            return Ok(());
+                        }
+                        let field = selection_field.clone();
+                        let text = lf(Editable::Textarea(field.clone()).text()?);
+                        let selection = field.TextDocument()?.Selection()?;
+                        let (from, to) =
+                            (selection.StartPosition()?, selection.EndPosition()?);
+                        let (Some(start), Some(stop)) =
+                            (byte_offset(&text, from), byte_offset(&text, to))
+                        else {
+                            return Ok(());
+                        };
+                        rich_scene("reporting a text selection", move |core| {
+                            core.scene.set_text_selection(
+                                WidgetId(composing_id),
+                                start as u64,
+                                stop as u64,
+                            );
+                        });
                         Ok(())
                     }))?;
                     // Same focus-handoff refresh as the entry (paste
@@ -12758,11 +13484,20 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
         // offsets in these ops are already UTF-16 code units — the core
         // converted them against the text it validated them on — so
         // nothing below counts a character.
-        // docs/rich-text-plan.md §4: this backend's breadth step.
-        ApplyOp::SetRichText { .. }
-            | ApplyOp::ApplyEdit { .. }
-            | ApplyOp::FormatText { .. } => {
-            crate::depth_stub("richtext")
+        // docs/rich-text-plan.md §4, the WinUI arm: the runs arrive in cp
+        // like every other offset here; the arm's own table keeps bytes.
+        ApplyOp::SetRichText { id, text, runs } => {
+            rich_set_document(core, id.0, &text, &runs)?;
+        }
+        ApplyOp::ApplyEdit { id, range, inserted, runs, selection } => {
+            rich_apply_edit(core, id.0, range, &inserted, &runs, selection)?;
+        }
+        ApplyOp::FormatText { id, name, value } => {
+            let removed = value.is_none();
+            let word = value.unwrap_or_default();
+            if let Some(trouble) = rich_format_selection(core, id.0, &name, &word, removed) {
+                eprintln!("kaya: winui format_text refused: {trouble}");
+            }
         }
         ApplyOp::HighlightRanges { id, ranges } => {
             let Some(field) = textarea_by_id(core, id.0) else {
@@ -13140,6 +13875,22 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         clear_native_undo(&field);
                     }
                     core.banked_text.insert(id.0, s.clone());
+                }
+                // docs/rich-text-plan.md R1: the attributed surface exists only
+                // where the widget asked for it, and the table's own entry is
+                // what says so to every handler below.
+                (NativeWidget::Textarea(field), Prop::Rich, Value::Bool(on)) => {
+                    let field = field.clone();
+                    if on {
+                        RICH_RUNS.with_borrow_mut(|table| {
+                            table.entry(id.0).or_default();
+                        });
+                    } else {
+                        RICH_RUNS.with_borrow_mut(|table| table.remove(&id.0));
+                        RICH_PENDING.with_borrow_mut(|pending| pending.remove(&id.0));
+                        let text = lf(Editable::Textarea(field.clone()).text()?);
+                        rich_restyle(&field, &text, &[], 0, text.len())?;
+                    }
                 }
                 (NativeWidget::Checkbox { caption, switch, .. }, Prop::Text, Value::Str(s)) => {
                     caption.SetText(&HSTRING::from(&s))?;
@@ -16719,27 +17470,74 @@ impl crate::harness::Stage for WinUiStage {
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
-    /// AN INPUT METHOD'S COMPOSITION, STARTED THROUGH THE INPUT METHOD'S OWN
-    /// MACHINERY (docs/ranges-plan.md D4). Windows has no "insert marked text"
-    /// call — a composition belongs to the Text Services Framework — so this
-    /// does what a text service does (`tsf_compose`). Inserting the text and
-    /// calling it a composition is the very state D4's refusal must
-    /// distinguish it from.
+    /// THE WIDGET'S OWN ACT over a byte range (docs/rich-text-plan.md R9):
+    /// select, then take the path `format_text` takes, so the widget reports
+    /// exactly as it does for a user.
     fn format(
-        &self, _: crate::harness::Target, _: crate::harness::TextRange, _: &str, _: &str, _: bool,
+        &self, t: crate::harness::Target, range: crate::harness::TextRange, name: &str,
+        value: &str, off: bool,
     ) {
-        crate::depth_stub("richtext")
+        let (name, value) = (name.to_owned(), value.to_owned());
+        let trouble = Self::on_ui_mut(move |core| {
+            let Some(i) = crate::harness::try_resolve(t.index, core.textareas.len()) else {
+                return Ok(Some("no such target".to_string()));
+            };
+            let field = core.textareas[i].clone();
+            let widget = core.textarea_ids[i];
+            let text = lf(Editable::Textarea(field.clone()).text()?);
+            let (Some(start), Some(stop)) = (
+                utf16_offset(&text, range.start as usize),
+                utf16_offset(&text, range.stop as usize),
+            ) else {
+                return Ok(Some(format!(
+                    "{}:{} is not on a character boundary of the {}-byte text",
+                    range.start,
+                    range.stop,
+                    text.len()
+                )));
+            };
+            field.TextDocument()?.Selection()?.SetRange(start, stop)?;
+            // The selection report the SelectionChanged raise would make, made
+            // here too: that raise is asynchronous and the act below reads the
+            // selection immediately.
+            core.scene.set_text_selection(WidgetId(widget), range.start, range.stop);
+            Ok(rich_format_selection(core, widget, &name, &value, off))
+        });
+        if let Some(trouble) = trouble {
+            eprintln!("kaya: format {t:?}: {trouble}");
+        }
     }
 
+    /// THE CORE'S DOCUMENT, spelled by the core (R9) — with the WIDGET'S own
+    /// table read beside it, and a KAYA_DIAG naming both when they disagree.
+    /// The two are kept by independent code, which is the only reason the
+    /// comparison can fail.
     fn rich_runs(&self, t: crate::harness::Target) -> String {
-        Self::on_ui_read(move |core| {
+        let (answer, held) = Self::on_ui_read(move |core| {
             let Some(i) = crate::harness::try_resolve(t.index, core.textareas.len()) else {
-                return Ok("<no such target>".to_string());
+                return Ok(("<no such target>".to_string(), None));
             };
-            let id = crate::protocol::WidgetId(core.textarea_ids[i]);
-            Ok(core.scene.rich_runs_string(id).unwrap_or_else(|| "<no rich document>".to_string()))
+            let widget = core.textarea_ids[i];
+            let core_says = core
+                .scene
+                .rich_runs_string(crate::protocol::WidgetId(widget))
+                .unwrap_or_else(|| "<no rich document>".to_string());
+            // Not while a composition is live: the marked text is the widget's
+            // alone until it commits (R5), so the two legitimately differ.
+            if COMPOSING.with_borrow(|live| live.contains(&widget)) || !rich_is_on(widget) {
+                return Ok((core_says, None));
+            }
+            let mine = rich_spelling(&rich_table(widget));
+            let held = (mine != core_says).then_some(mine);
+            Ok((core_says, held))
         })
-        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
+        .unwrap_or_else(|e| (format!("<unreadable: {e}>"), None));
+        if let Some(held) = held {
+            // A widget disagreeing with the core FAILS the read
+            // (docs/rich-text-plan.md §7): the sentence carries both.
+            return format!("{answer} — but the widget holds {held:?}");
+        }
+        answer
     }
 
     fn last_edit(&self, t: crate::harness::Target) -> String {
@@ -16786,6 +17584,16 @@ impl crate::harness::Stage for WinUiStage {
             if Self::on_ui_read(move |_| Ok(COMPOSING.with_borrow(|live| live.contains(&id))))
                 .unwrap_or(false)
             {
+                // R5's premise, stated by the verb as well as by the event:
+                // TextCompositionStarted is raised INSIDE the borrow this
+                // verb's own hop holds, so its report is deferred and the
+                // apply_edit that follows must not race it. Idempotent.
+                Self::on_ui_mut(move |core| {
+                    if rich_is_on(id) {
+                        core.scene.set_text_composing(WidgetId(id), true);
+                    }
+                    Ok(())
+                });
                 return;
             }
             std::thread::sleep(std::time::Duration::from_millis(5));

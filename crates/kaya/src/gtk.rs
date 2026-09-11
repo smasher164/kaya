@@ -444,6 +444,379 @@ fn guest_byte_of(buffer_text: &str, buffer_chars: i32) -> u64 {
     bytes
 }
 
+/// RICH TEXT, THE GTK ARM (docs/rich-text-plan.md R3, §7): one GtkTextTag per
+/// kaya attribute VALUE, named so the tag IS the key — a read-back enumerates
+/// tags and never guesses a name from a font. GtkTextTag carries no link
+/// property, so a link's URL lives in `CoreState::rich_links` keyed by the
+/// tag's own name (docs/measurements/richtext-gtk-2026-09-11.md §5).
+const RICH_PREFIX: &str = "kaya-rich-";
+const RICH_BLOCK_PREFIX: &str = "kaya-rich-block-";
+const RICH_LINK_PREFIX: &str = "kaya-rich-link-";
+
+/// Typing attributes armed over a collapsed caret and spent by the next
+/// insertion (docs/rich-text-plan.md R4). Held as the TAG names the arm will
+/// apply, so the closure that inherits them needs no link table.
+#[derive(Default)]
+struct RichPending {
+    on: Vec<String>,
+    off: std::collections::BTreeSet<String>,
+}
+
+/// The kaya attribute a tag stands for; None for every tag that is not
+/// kaya's (the highlight tag among them).
+fn rich_tag_attr_name(tag_name: &str) -> Option<String> {
+    let rest = tag_name.strip_prefix(RICH_PREFIX)?;
+    if rest.starts_with("block-") {
+        return Some("block".to_owned());
+    }
+    if rest.starts_with("link-") {
+        return Some("link".to_owned());
+    }
+    Some(rest.to_owned())
+}
+
+/// The (name, value) a tag stands for; a link's value comes out of the side
+/// table, since GtkTextTag has nowhere to keep it.
+fn rich_attr_of(tag_name: &str, links: &HashMap<String, String>) -> Option<(String, String)> {
+    let name = rich_tag_attr_name(tag_name)?;
+    let rest = tag_name.strip_prefix(RICH_PREFIX)?;
+    match name.as_str() {
+        "block" => Some((name, rest["block-".len()..].to_owned())),
+        "link" => Some((name, links.get(tag_name)?.clone())),
+        _ => Some((name, "true".to_owned())),
+    }
+}
+
+/// The tag this buffer wears for `name=value`, minted with the display
+/// properties DERIVED from the key — never the other way round.
+fn rich_tag(
+    buffer: &gtk4::TextBuffer, links: &mut HashMap<String, String>, name: &str, value: &str,
+) -> gtk4::TextTag {
+    use gtk4::prelude::{TextBufferExt, TextTagExt};
+    let tag_name = match name {
+        "block" => format!("{RICH_BLOCK_PREFIX}{value}"),
+        "link" => match links.iter().find(|(_, url)| url.as_str() == value) {
+            Some((existing, _)) => existing.clone(),
+            None => {
+                let minted = format!("{RICH_LINK_PREFIX}{}", links.len());
+                links.insert(minted.clone(), value.to_owned());
+                minted
+            }
+        },
+        other => format!("{RICH_PREFIX}{other}"),
+    };
+    let table = buffer.tag_table();
+    if let Some(tag) = table.lookup(&tag_name) {
+        return tag;
+    }
+    let tag = gtk4::TextTag::new(Some(&tag_name));
+    match name {
+        "bold" => tag.set_weight(700),
+        "italic" => tag.set_style(gtk4::pango::Style::Italic),
+        "underline" => tag.set_underline(gtk4::pango::Underline::Single),
+        "strike" => tag.set_strikethrough(true),
+        "code" => tag.set_family(Some("monospace")),
+        "link" => {
+            tag.set_underline(gtk4::pango::Underline::Single);
+            tag.set_foreground(Some("#1c71d8"));
+        }
+        // A heading is size plus weight on every platform (R3); the three
+        // multipliers are the mac arm's own.
+        "block" => match value {
+            "heading1" => {
+                tag.set_scale(1.6);
+                tag.set_weight(700);
+            }
+            "heading2" => {
+                tag.set_scale(1.35);
+                tag.set_weight(700);
+            }
+            "heading3" => {
+                tag.set_scale(1.15);
+                tag.set_weight(700);
+            }
+            "quote" => {
+                tag.set_left_margin(20);
+                tag.set_indent(0);
+            }
+            "code_block" => tag.set_family(Some("monospace")),
+            // `body` draws nothing and still wears a tag: the mirror
+            // spells it as a run, so the read-back has to find one.
+            _ => {}
+        },
+        _ => {}
+    }
+    table.add(&tag);
+    tag
+}
+
+/// Every kaya rich tag this buffer knows, tag and name.
+fn rich_tags(buffer: &gtk4::TextBuffer) -> Vec<(gtk4::TextTag, String)> {
+    use gtk4::prelude::{TextBufferExt, TextTagExt};
+    let mut out = Vec::new();
+    buffer.tag_table().foreach(|tag| {
+        if let Some(name) = tag.name() {
+            if name.starts_with(RICH_PREFIX) {
+                out.push((tag.clone(), name.to_string()));
+            }
+        }
+    });
+    out
+}
+
+/// The runs the BUFFER holds, in the core's own spelling (`Scene::
+/// rich_runs_string`): `start:stop name[=value]` in guest BYTES, `|`-joined,
+/// by start then name, a flag's `true` spelled by its name alone. This is the
+/// corroboration half of R9 — the platform's answer beside the core's.
+fn buffer_rich_runs(buffer: &gtk4::TextBuffer, links: &HashMap<String, String>) -> String {
+    use gtk4::prelude::TextBufferExt;
+    let raw = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).to_string();
+    let mut runs: Vec<(u64, String, String)> = Vec::new();
+    for (tag, tag_name) in rich_tags(buffer) {
+        let Some((name, value)) = rich_attr_of(&tag_name, links) else {
+            continue;
+        };
+        let mut spans: Vec<(i32, i32)> = Vec::new();
+        let mut it = buffer.start_iter();
+        let mut open = if it.has_tag(&tag) { Some(0) } else { None };
+        while it.forward_to_tag_toggle(Some(&tag)) {
+            let at = it.offset();
+            match open.take() {
+                Some(from) => spans.push((from, at)),
+                None => open = Some(at),
+            }
+        }
+        if let Some(from) = open {
+            spans.push((from, buffer.end_iter().offset()));
+        }
+        for (from, to) in spans {
+            let (s, e) = (guest_byte_of(&raw, from), guest_byte_of(&raw, to));
+            let spelling = if value == "true" {
+                format!("{s}:{e} {name}")
+            } else {
+                format!("{s}:{e} {name}={value}")
+            };
+            runs.push((s, name.clone(), spelling));
+        }
+    }
+    runs.sort_by(|a, b| (a.0, &a.1).cmp(&(b.0, &b.1)));
+    runs.into_iter().map(|(_, _, spelling)| spelling).collect::<Vec<_>>().join("|")
+}
+
+/// Put `runs` (guest CHARACTER offsets, the unit the core converts to for this
+/// backend) on the buffer, replacing whatever the range wore.
+fn set_rich_runs(
+    buffer: &gtk4::TextBuffer, links: &mut HashMap<String, String>, raw: &str,
+    from: i32, to: i32, runs: &[crate::protocol::NativeRun], base: i32,
+) {
+    use gtk4::prelude::TextBufferExt;
+    let (start, stop) = (buffer.iter_at_offset(from), buffer.iter_at_offset(to));
+    for (tag, _) in rich_tags(buffer) {
+        buffer.remove_tag(&tag, &start, &stop);
+    }
+    for run in runs {
+        let tag = rich_tag(buffer, links, &run.name, &run.value);
+        let s = buffer.iter_at_offset(base + buffer_offset(raw, run.start));
+        let e = buffer.iter_at_offset(base + buffer_offset(raw, run.end));
+        buffer.apply_tag(&tag, &s, &e);
+    }
+}
+
+/// TYPING INHERITS (docs/rich-text-plan.md R4), which GTK does not do at a
+/// run's toggle and does WRONGLY for a link inside one (tag gravity, measured
+/// P1.7): the inserted range is restated as the character before it wears it,
+/// minus `link`, plus whatever a collapsed `format` armed. The pending set is
+/// spent here, as in the core.
+fn inherit_rich_tags(
+    buffer: &gtk4::TextBuffer, pending: &std::rc::Rc<RefCell<HashMap<u64, RichPending>>>,
+    id: u64, at: i32, len: i32,
+) {
+    use gtk4::prelude::TextBufferExt;
+    let start = buffer.iter_at_offset(at);
+    let end = buffer.iter_at_offset(at + len);
+    let armed = pending.borrow_mut().remove(&id).unwrap_or_default();
+    let mut want: Vec<gtk4::TextTag> = Vec::new();
+    if at > 0 {
+        let before = buffer.iter_at_offset(at - 1);
+        for (tag, name) in rich_tags(buffer) {
+            if !before.has_tag(&tag) || name.starts_with(RICH_LINK_PREFIX) {
+                continue;
+            }
+            if rich_tag_attr_name(&name).is_some_and(|a| armed.off.contains(&a)) {
+                continue;
+            }
+            want.push(tag);
+        }
+    }
+    for name in &armed.on {
+        if let Some(tag) = buffer.tag_table().lookup(name) {
+            want.push(tag);
+        }
+    }
+    for (tag, _) in rich_tags(buffer) {
+        buffer.remove_tag(&tag, &start, &end);
+    }
+    for tag in want {
+        buffer.apply_tag(&tag, &start, &end);
+    }
+}
+
+/// The rich delta, off the same report `text_changed` carries
+/// (docs/rich-text-plan.md R4). DEFERRED for `bank_text_changed`'s reason: a
+/// `changed` raised by `CommandKind::Clear` runs with CORE already borrowed,
+/// and a nested borrow is a panic. The backend's own measured range travels
+/// with it, so the corroboration still compares the pre-edit reading.
+fn publish_rich_edit(
+    tag: Vec<u8>, text: String, reported: Option<(u64, u64, u64)>, source: Option<u32>,
+) {
+    glib::idle_add_local_once(move || {
+        CORE.with_borrow_mut(|core| {
+            let Some(core) = core.as_mut() else { return };
+            let Some(field) = core.scene.text_field_of_tag(&tag) else {
+                return;
+            };
+            if let Some((start, end, inserted)) = reported {
+                core.scene.set_reported_edit(field, start, end, inserted);
+            }
+            if let Some(source) = source {
+                core.scene.set_text_edit_source(field, source);
+            }
+            if let Some(edit) = core.scene.note_rich_text(field, &text) {
+                core.occurrences.send(crate::wire::decode_text_edited_tag(
+                    &tag,
+                    edit.source,
+                    edit.range,
+                    &edit.inserted,
+                    &edit.runs,
+                ));
+            }
+        });
+    });
+}
+
+/// A composition began or ended; ending one lowers what R5 held. Deferred for
+/// publish_rich_edit's reason — `preedit-changed` fires inside the harness's
+/// own `on_main`, which holds CORE.
+fn note_composing(id: u64, live: bool) {
+    glib::idle_add_local_once(move || {
+        CORE.with_borrow_mut(|core| {
+            let Some(core) = core.as_mut() else { return };
+            for op in core.scene.set_text_composing(WidgetId(id), live) {
+                apply(core, op);
+            }
+        });
+    });
+}
+
+/// Where this rich textarea's selection is now, in guest bytes (R5's
+/// transform is the core's). Deferred: `mark-set` fires inside the
+/// `select_range` apply.
+fn note_rich_selection(id: u64, start: u64, end: u64) {
+    glib::idle_add_local_once(move || {
+        CORE.with_borrow_mut(|core| {
+            let Some(core) = core.as_mut() else { return };
+            core.scene.set_text_selection(WidgetId(id), start, end);
+        });
+    });
+}
+
+/// The widget's own formatting act over its CURRENT selection — the path
+/// `format_text` and the harness's `format` verb share
+/// (docs/rich-text-plan.md §7). A collapsed selection arms the typing
+/// attribute instead; a `block` act covers the selection's whole paragraphs
+/// WITHOUT the trailing newline. None, or what refused.
+fn rich_format_selection(
+    core: &mut CoreState, id: WidgetId, name: &str, value: &str, removed: bool,
+) -> Option<String> {
+    use gtk4::prelude::TextBufferExt;
+    let buffer = match core.widgets.get(&id) {
+        Some(NativeWidget::Textarea(_, view)) => view.buffer(),
+        _ => return Some(format!("widget {} is no textarea", id.0)),
+    };
+    if !core.rich.borrow().contains(&id.0) {
+        return Some(format!("widget {} is not a rich textarea", id.0));
+    }
+    if core.preedit.borrow().get(&id.0).is_some_and(|p| !p.is_empty()) {
+        return Some(format!("an input-method composition is live on widget {}", id.0));
+    }
+    // `body` is the block attribute taken off (docs/rich-text-plan.md §7).
+    let removed = removed || (name == "block" && value == "body");
+    let (mut start, mut stop) = match buffer.selection_bounds() {
+        Some((a, z)) => (a, z),
+        None => (
+            buffer.iter_at_mark(&buffer.get_insert()),
+            buffer.iter_at_mark(&buffer.get_insert()),
+        ),
+    };
+    if name == "block" {
+        let (first, last) = (start.line(), stop.line());
+        start = buffer.iter_at_line(first).unwrap_or_else(|| buffer.start_iter());
+        stop = match buffer.iter_at_line(last + 1) {
+            Some(mut next) => {
+                next.backward_char();
+                next
+            }
+            None => buffer.end_iter(),
+        };
+    }
+    let (from, to) = (start.offset(), stop.offset());
+    let pending = core.rich_pending.clone();
+    if from == to {
+        pending
+            .borrow_mut()
+            .entry(id.0)
+            .or_default()
+            .on
+            .retain(|tag| rich_tag_attr_name(tag).as_deref() != Some(name));
+        if removed {
+            pending.borrow_mut().entry(id.0).or_default().off.insert(name.to_owned());
+        } else {
+            let links = core.rich_links.entry(id.0).or_default();
+            let armed = rich_tag(&buffer, links, name, value)
+                .name()
+                .map(|n| n.to_string());
+            let mut map = pending.borrow_mut();
+            let slot = map.entry(id.0).or_default();
+            slot.off.remove(name);
+            if let Some(armed) = armed {
+                slot.on.push(armed);
+            }
+        }
+        core.scene.set_text_pending(id, name, value, !removed);
+        return None;
+    }
+    let raw = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).to_string();
+    // ONE VALUE PER ATTRIBUTE over the range: every other tag of this
+    // attribute comes off first, which is also how a removal is spelled.
+    for (tag, tag_name) in rich_tags(&buffer) {
+        if rich_tag_attr_name(&tag_name).as_deref() == Some(name) {
+            buffer.remove_tag(&tag, &start, &stop);
+        }
+    }
+    if !removed {
+        let links = core.rich_links.entry(id.0).or_default();
+        let tag = rich_tag(&buffer, links, name, value);
+        buffer.apply_tag(&tag, &start, &stop);
+    }
+    let range = crate::protocol::TextRange::new(
+        guest_byte_of(&raw, from),
+        guest_byte_of(&raw, to),
+    );
+    let published =
+        core.scene.note_text_formatted(id, range, name, (!removed).then_some(value));
+    if let Some((range, name, value)) = published {
+        if let Some(tag) = core.widget_tags.get(&id.0).cloned() {
+            core.occurrences.send(crate::wire::decode_text_formatted_tag(
+                &tag,
+                range,
+                &name,
+                value.as_deref(),
+            ));
+        }
+    }
+    None
+}
+
 /// D2's drop, in the buffer's own `changed` handler — the one place on this
 /// backend that cannot be late. A COMPARE rather than a blanket drop:
 /// `apply_tag` fires no `changed` (measured — 20 full re-declare cycles
@@ -3350,6 +3723,15 @@ struct CoreState {
     /// the LAYOUT and never puts it in the buffer (measured — `char_count`
     /// stayed at 4 with a live preedit).
     preedit: std::rc::Rc<RefCell<HashMap<u64, String>>>,
+    /// The textareas `rich` is on for (docs/rich-text-plan.md R1); the buffer
+    /// handlers read it to stay off every plain field.
+    rich: std::rc::Rc<RefCell<std::collections::HashSet<u64>>>,
+    /// Per rich textarea, the URL behind each link TAG — GtkTextTag has no
+    /// link property, so the synthesized tier keeps it beside the tag
+    /// (docs/measurements/richtext-gtk-2026-09-11.md §5).
+    rich_links: HashMap<u64, HashMap<String, String>>,
+    /// Per rich textarea, the typing attributes armed over a collapsed caret.
+    rich_pending: std::rc::Rc<RefCell<HashMap<u64, RichPending>>>,
     /// Indeterminate bars pulse on a shared ticker (GTK's activity mode is
     /// pulse-driven, not a property); membership here IS the flag the
     /// observation reads.
@@ -9012,25 +9394,153 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     // (which GTK does unconditionally, measured), it arrives
                     // here empty.
                     let composing = core.preedit.clone();
+                    let rich_composing = core.rich.clone();
                     view.connect_preedit_changed(move |_, preedit| {
-                        let mut map = composing.borrow_mut();
-                        if preedit.is_empty() {
-                            map.remove(&wid);
-                        } else {
-                            map.insert(wid, preedit.to_owned());
+                        let was = {
+                            let mut map = composing.borrow_mut();
+                            let was = map.contains_key(&wid);
+                            if preedit.is_empty() {
+                                map.remove(&wid);
+                            } else {
+                                map.insert(wid, preedit.to_owned());
+                            }
+                            was
+                        };
+                        // R5's queue turns on the EDGES only, and GTK has no
+                        // preedit-start/end on the view — `preedit-changed`
+                        // with an empty string IS the end (the kaya IM emits
+                        // both; a real one resets through the same path).
+                        let live = !preedit.is_empty();
+                        if live != was && rich_composing.borrow().contains(&wid) {
+                            note_composing(wid, live);
                         }
                     });
+                    // A PASTE NAMES ITSELF (R4). GTK4's paste is async, so the
+                    // one-shot outlives this signal and is spent by the
+                    // insertion's own report.
+                    let paste_source = std::rc::Rc::new(std::cell::Cell::new(None::<u32>));
+                    let rich_paste = core.rich.clone();
+                    let pasted = paste_source.clone();
+                    view.connect_paste_clipboard(move |_| {
+                        if rich_paste.borrow().contains(&wid) {
+                            pasted.set(Some(crate::wire::EDIT_SOURCE_PASTE as u32));
+                        }
+                    });
+                    // THE RANGE THIS BACKEND SAYS IT IS ABOUT TO EDIT, measured
+                    // BEFORE the change lands and carried to the core with the
+                    // report (R4's corroboration). `insert-text`'s own `len` is
+                    // already UTF-8 bytes; only the POSITION converts.
+                    let reported = std::rc::Rc::new(std::cell::Cell::new(None::<(u64, u64, u64)>));
+                    // Where the inserted characters went, for the inheritance
+                    // pass in `changed` — GTK offers no after-phase connector
+                    // for `insert-text`, and `changed` is the next thing that
+                    // runs with the text already in.
+                    let inserted_at = std::rc::Rc::new(std::cell::Cell::new(None::<(i32, i32)>));
+                    let rich_edit = core.rich.clone();
+                    {
+                        let quiet = quiet.clone();
+                        let rich = rich_edit.clone();
+                        let reported = reported.clone();
+                        let inserted_at = inserted_at.clone();
+                        buffer.connect_insert_text(move |b, iter, text| {
+                            if quiet.get() || !rich.borrow().contains(&wid) {
+                                return;
+                            }
+                            let raw = b
+                                .text(&b.start_iter(), &b.end_iter(), false)
+                                .to_string();
+                            let at = guest_byte_of(&raw, iter.offset());
+                            let bytes = lf(text.to_owned()).len() as u64;
+                            reported.set(Some((at, at, bytes)));
+                            inserted_at
+                                .set(Some((iter.offset(), text.chars().count() as i32)));
+                        });
+                    }
+                    {
+                        let quiet = quiet.clone();
+                        let rich = rich_edit.clone();
+                        let reported = reported.clone();
+                        buffer.connect_delete_range(move |b, start, end| {
+                            if quiet.get() || !rich.borrow().contains(&wid) {
+                                return;
+                            }
+                            let raw = b
+                                .text(&b.start_iter(), &b.end_iter(), false)
+                                .to_string();
+                            reported.set(Some((
+                                guest_byte_of(&raw, start.offset()),
+                                guest_byte_of(&raw, end.offset()),
+                                0,
+                            )));
+                        });
+                    }
+                    // THE SELECTION, on every move (R5's transform is the
+                    // core's, and this is the only way it hears).
+                    {
+                        let rich = rich_edit.clone();
+                        buffer.connect_mark_set(move |b, _, mark| {
+                            let name = mark.name();
+                            if !matches!(
+                                name.as_deref(),
+                                Some("insert") | Some("selection_bound")
+                            ) || !rich.borrow().contains(&wid)
+                            {
+                                return;
+                            }
+                            let raw = b
+                                .text(&b.start_iter(), &b.end_iter(), false)
+                                .to_string();
+                            let (from, to) = match b.selection_bounds() {
+                                Some((a, z)) => (a.offset(), z.offset()),
+                                None => {
+                                    let it = b.iter_at_mark(&b.get_insert());
+                                    (it.offset(), it.offset())
+                                }
+                            };
+                            note_rich_selection(
+                                wid,
+                                guest_byte_of(&raw, from),
+                                guest_byte_of(&raw, to),
+                            );
+                        });
+                    }
                     let declared = core.highlight_text.clone();
+                    let rich_pending = core.rich_pending.clone();
                     buffer.connect_changed(move |b| {
                         // D2 FIRST, and unconditionally — before the quiet
                         // gate, because a programmatic write invalidates a
                         // declared set exactly as a keystroke does.
                         drop_stale_highlights(&declared, wid, b);
                         if !quiet.get() {
+                            // Read ONCE, in the block that reports the edit
+                            // (tools/check-native-undo.py).
+                            let routed_undo = ledger_quiet.get();
+                            let is_rich = rich_edit.borrow().contains(&wid);
+                            if is_rich {
+                                if let Some((at, len)) = inserted_at.take() {
+                                    inherit_rich_tags(b, &rich_pending, wid, at, len);
+                                }
+                            }
                             let text =
                                 lf(b.text(&b.start_iter(), &b.end_iter(), false).to_string());
                             sink.send_text_tag(&tag, &text);
-                            if !ledger_quiet.get() {
+                            if is_rich {
+                                // A native undo this backend routed is an edit
+                                // the document hears, under its own source
+                                // (R4, docs/undo-plan.md A6).
+                                let source = if routed_undo {
+                                    Some(crate::wire::EDIT_SOURCE_NATIVE_UNDO as u32)
+                                } else {
+                                    paste_source.take()
+                                };
+                                publish_rich_edit(
+                                    tag.clone(),
+                                    text.clone(),
+                                    reported.take(),
+                                    source,
+                                );
+                            }
+                            if !routed_undo {
                                 let focused =
                                     weak_view.upgrade().is_some_and(|v| widget_focused(&v));
                                 dirty.borrow_mut().insert(wid);
@@ -10072,11 +10582,62 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
         // against the text it validated the byte offsets against (scene.rs
         // `native_offset`) — so there is no Unicode arithmetic below and
         // there must never be.
-        // docs/rich-text-plan.md §4: this backend's breadth step.
-        ApplyOp::SetRichText { .. }
-            | ApplyOp::ApplyEdit { .. }
-            | ApplyOp::FormatText { .. } => {
-            crate::depth_stub("richtext")
+        // THE WHOLE DOCUMENT (docs/rich-text-plan.md R1): text and runs in one
+        // write, echoing nothing, and D7's history reset exactly as set_text's.
+        ApplyOp::SetRichText { id, text, runs } => {
+            let buffer = match core.widgets.get(&id) {
+                Some(NativeWidget::Textarea(_, view)) => view.buffer(),
+                _ => return,
+            };
+            let previous =
+                lf(buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).to_string());
+            core.apply_quiet.set(true);
+            buffer.set_text(&text);
+            core.apply_quiet.set(false);
+            let raw = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).to_string();
+            let end = buffer.char_count();
+            // A whole-document write starts a fresh link table: the tags stay
+            // in the buffer's table but nothing addresses the old URLs.
+            core.rich_links.remove(&id.0);
+            core.rich_pending.borrow_mut().remove(&id.0);
+            let links = core.rich_links.entry(id.0).or_default();
+            set_rich_runs(&buffer, links, &raw, 0, end, &runs, 0);
+            note_quiet_text_write(core, id, &previous, &text);
+        }
+        // ONE EDIT, with the core's own post-edit selection (R5). Never a
+        // history reset, and nothing echoes.
+        ApplyOp::ApplyEdit { id, range, inserted, runs, selection } => {
+            let buffer = match core.widgets.get(&id) {
+                Some(NativeWidget::Textarea(_, view)) => view.buffer(),
+                _ => return,
+            };
+            let raw = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).to_string();
+            let from = buffer_offset(&raw, range.start);
+            let to = buffer_offset(&raw, range.stop);
+            core.apply_quiet.set(true);
+            let mut start = buffer.iter_at_offset(from);
+            let mut stop = buffer.iter_at_offset(to);
+            buffer.delete(&mut start, &mut stop);
+            let mut at = buffer.iter_at_offset(from);
+            buffer.insert(&mut at, &inserted);
+            core.apply_quiet.set(false);
+            let width = inserted.chars().count() as i32;
+            let links = core.rich_links.entry(id.0).or_default();
+            // The runs address `inserted`, so the conversion walks IT.
+            set_rich_runs(&buffer, links, &inserted, from, from + width, &runs, from);
+            let after = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).to_string();
+            let ins = buffer.iter_at_offset(buffer_offset(&after, selection.start));
+            let bound = buffer.iter_at_offset(buffer_offset(&after, selection.stop));
+            buffer.select_range(&ins, &bound);
+        }
+        // The widget's own act over its CURRENT selection — the path the
+        // harness's `format` verb shares (docs/rich-text-plan.md §7).
+        ApplyOp::FormatText { id, name, value } => {
+            let removed = value.is_none();
+            let value = value.unwrap_or_default();
+            if let Some(why) = rich_format_selection(core, id, &name, &value, removed) {
+                kaya_diag!("KAYA_DIAG format_text refused: {why}");
+            }
         }
         ApplyOp::HighlightRanges { id, ranges } => {
             let Some(NativeWidget::Textarea(_, view)) = core.widgets.get(&id) else {
@@ -10088,10 +10649,13 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             // was never told about.
             let raw = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).to_string();
             // DECLARATIVE: the set REPLACES the previous one, and an empty
-            // list is the clear. `remove_all_tags` is safe to aim at the
-            // whole buffer because kaya creates exactly one tag on it.
-            buffer.remove_all_tags(&buffer.start_iter(), &buffer.end_iter());
+            // list is the clear. THE HIGHLIGHT TAG ALONE, never
+            // `remove_all_tags`: a `rich` textarea wears kaya's attribute
+            // tags on the same buffer (docs/rich-text-plan.md R3), and a
+            // blanket clear would strip the document's formatting with no
+            // observation anywhere moving.
             let tag = highlight_tag(&buffer);
+            buffer.remove_tag(&tag, &buffer.start_iter(), &buffer.end_iter());
             for range in &ranges {
                 // THE UNIT ASSERTION. GTK is the one backend whose native unit
                 // differs from everyone else's: a byte offset that reached
@@ -10703,6 +11267,18 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     });
                     label.set_text(&s);
                     sync_textarea_prompt(view, label);
+                }
+                // docs/rich-text-plan.md R1: with `rich` off nothing below the
+                // prop exists, so the buffer's handlers read this set rather
+                // than reporting a document every plain field has not got.
+                // R6's `enable-undo` lever is the undo step's.
+                (NativeWidget::Textarea(..), Prop::Rich, Value::Bool(on)) => {
+                    if on {
+                        core.rich.borrow_mut().insert(id.0);
+                    } else {
+                        core.rich.borrow_mut().remove(&id.0);
+                        core.rich_pending.borrow_mut().remove(&id.0);
+                    }
                 }
                 (NativeWidget::Textarea(_, view), Prop::Text, Value::Str(s)) => {
                     let buffer = view.buffer();
@@ -13122,6 +13698,9 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 native_dirty: std::rc::Rc::new(RefCell::new(std::collections::HashSet::new())),
                 highlight_text: std::rc::Rc::new(RefCell::new(HashMap::new())),
                 preedit: std::rc::Rc::new(RefCell::new(HashMap::new())),
+                rich: std::rc::Rc::new(RefCell::new(std::collections::HashSet::new())),
+                rich_links: HashMap::new(),
+                rich_pending: std::rc::Rc::new(RefCell::new(HashMap::new())),
                 indeterminate: std::rc::Rc::new(RefCell::new(std::collections::HashSet::new())),
                 columns: Vec::new(),
                 #[cfg(feature = "harness")]
@@ -13718,24 +14297,74 @@ impl crate::harness::Stage for GtkStage {
         }
     }
 
-    /// Start a real input-method composition in the textarea. THE ONLY DOOR
-    /// GTK LEAVES OPEN: `gtk_im_context_set_preedit` does not exist and the
-    /// preedit never enters the buffer, so kaya BECOMES the input method for
-    /// the duration and everything downstream is the platform's — including
-    /// the RESET on any programmatic cursor or selection move, which is the
-    /// D4 hazard this scene proves.
+    /// `format <target> <start:end> <name>[=<value>] [off]` in BYTES
+    /// (docs/rich-text-plan.md R9): select the range, then take the widget's
+    /// OWN act — the same function `format_text` lowers to, so the widget
+    /// reports exactly as it does for a user.
     fn format(
-        &self, _: crate::harness::Target, _: crate::harness::TextRange, _: &str, _: &str, _: bool,
+        &self, target: crate::harness::Target, range: crate::harness::TextRange, name: &str,
+        value: &str, off: bool,
     ) {
-        crate::depth_stub("richtext")
+        let name = name.to_owned();
+        let value = value.to_owned();
+        Self::on_main_mut(move |core| {
+            let Some(id) = rich_target_id(core, target) else {
+                kaya_diag!("KAYA_DIAG format refused: <no such target>");
+                return;
+            };
+            let buffer = match core.widgets.get(&id) {
+                Some(NativeWidget::Textarea(_, view)) => view.buffer(),
+                _ => return,
+            };
+            // BEFORE THE SELECT, not after: a programmatic selection move
+            // resets GTK's IM context unconditionally (the D4 hazard), so a
+            // refusal taken later would already have cancelled the user's
+            // marked text.
+            if core.preedit.borrow().get(&id.0).is_some_and(|p| !p.is_empty()) {
+                kaya_diag!(
+                    "KAYA_DIAG format refused: an input-method composition is live on \
+                     widget {}",
+                    id.0
+                );
+                return;
+            }
+            let raw = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).to_string();
+            let ins = buffer.iter_at_offset(buffer_offset_of_byte(&raw, range.start));
+            let bound = buffer.iter_at_offset(buffer_offset_of_byte(&raw, range.stop));
+            buffer.select_range(&ins, &bound);
+            if let Some(why) = rich_format_selection(core, id, &name, &value, off) {
+                kaya_diag!("KAYA_DIAG format refused: {why}");
+            }
+        });
     }
 
+    /// THE CORE'S DOCUMENT (R9), with the WIDGET's own runs read beside it: a
+    /// disagreement is a KAYA_DIAG naming both, which is R9's per-backend
+    /// half. Not while a composition is live — the marked text is the
+    /// widget's alone until it commits (R5).
     fn rich_runs(&self, target: crate::harness::Target) -> String {
         Self::on_main(move |core| match rich_target_id(core, target) {
-            Some(id) => core
-                .scene
-                .rich_runs_string(id)
-                .unwrap_or_else(|| "<no rich document>".to_owned()),
+            Some(id) => {
+                let answer = core
+                    .scene
+                    .rich_runs_string(id)
+                    .unwrap_or_else(|| "<no rich document>".to_owned());
+                let composing =
+                    core.preedit.borrow().get(&id.0).is_some_and(|p| !p.is_empty());
+                if !composing {
+                    if let Some(NativeWidget::Textarea(_, view)) = core.widgets.get(&id) {
+                        let empty = HashMap::new();
+                        let links = core.rich_links.get(&id.0).unwrap_or(&empty);
+                        let held = buffer_rich_runs(&view.buffer(), links);
+                        if held != answer {
+                            // A widget disagreeing with the core FAILS the read
+                            // (docs/rich-text-plan.md §7): the sentence carries both.
+                            return format!("{answer} — but the widget holds {held:?}");
+                        }
+                    }
+                }
+                answer
+            }
             None => "<no such target>".to_owned(),
         })
     }
@@ -13750,6 +14379,12 @@ impl crate::harness::Stage for GtkStage {
         })
     }
 
+    /// Start a real input-method composition in the textarea. THE ONLY DOOR
+    /// GTK LEAVES OPEN: `gtk_im_context_set_preedit` does not exist and the
+    /// preedit never enters the buffer, so kaya BECOMES the input method for
+    /// the duration and everything downstream is the platform's — including
+    /// the RESET on any programmatic cursor or selection move, which is the
+    /// D4 hazard this scene proves.
     fn compose(&self, target: crate::harness::Target, text: &str) {
         let text = text.to_owned();
         let marked = text.clone();
@@ -17363,11 +17998,8 @@ fn css_inset_of(widget: &gtk4::Widget) -> String {
     }
 }
 
-/// The widget a `kind#index` target names, from the per-kind registry
-/// every other verb resolves through — creation order, which is what
-/// `kind#index` means.
-#[cfg(all(feature = "harness", target_os = "linux"))]
 /// The widget id behind a textarea target, for the reads that ask the core.
+#[cfg(all(feature = "harness", target_os = "linux"))]
 fn rich_target_id(
     core: &CoreState, target: crate::harness::Target,
 ) -> Option<crate::protocol::WidgetId> {
@@ -17378,6 +18010,10 @@ fn rich_target_id(
     core.widgets.iter().find(|(_, w)| w.control() == widget).map(|(id, _)| *id)
 }
 
+/// The widget a `kind#index` target names, from the per-kind registry
+/// every other verb resolves through — creation order, which is what
+/// `kind#index` means.
+#[cfg(all(feature = "harness", target_os = "linux"))]
 fn target_widget(core: &CoreState, target: crate::harness::Target) -> Option<gtk4::Widget> {
     use crate::harness::{try_resolve, TargetKind as K};
     use gtk4::prelude::Cast;

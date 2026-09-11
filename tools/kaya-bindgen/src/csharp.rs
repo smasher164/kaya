@@ -3,7 +3,7 @@
 
 use kaya::spec::{FieldTy, ProtocolSpec, Record};
 
-use crate::{Ctx, is_padding, prop_variants, record_params, window_prop_variants};
+use crate::{Ctx, is_padding, prop_variants, record_params, tx_fields, window_prop_variants};
 
 pub const RESERVED: &[&str] = &[
     "abstract", "as", "base", "bool", "break", "byte", "case", "catch", "char", "checked",
@@ -882,7 +882,7 @@ fn emit_packer(c: &mut Ctx, r: &Record) {
     ));
     c.line("    {");
     c.line("        var w = Begin(out var stream);");
-    for f in r.fields {
+    for f in tx_fields(r) {
         c.line(&match f.ty {
             FieldTy::U32 if is_padding(f) => "        w.Write(0u);".into(),
             FieldTy::U32 => format!("        w.Write({});", camel(f.name)),

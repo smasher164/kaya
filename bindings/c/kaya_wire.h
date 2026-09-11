@@ -692,17 +692,18 @@ static inline void kaya_tx_declare_link_route(KayaTx *tx, uint64_t route, KayaVa
 }
 
 /* The WHOLE attributed document of a `rich` textarea (docs/rich-text-plan.md R1): the text as the payload, and `runs` holding 4*`count` values read in FOURS — I64 start, I64 end, Str name, Str value — each run one attribute over one range in UTF-8 BYTE offsets into that text, validated at the ranges' chokepoint (docs/ranges-units.md §7) and allowed to overlap (bold and italic over one range are two runs). A CONFIGURATION WRITE: it echoes nothing, and it resets the widget's native undo history where that tier is on (docs/undo-plan.md D7). The vocabulary is wire::RICH_ATTRS; a `block` run must start and end on paragraph boundaries. Refused on a textarea that is not `rich`. */
-static inline void kaya_tx_set_rich_text(KayaTx *tx, uint64_t widget_id, uint32_t count, const KayaVal *runs, uint32_t runs_len) {
+static inline void kaya_tx_set_rich_text(KayaTx *tx, uint64_t widget_id, uint32_t count, const KayaVal *runs, uint32_t runs_len, KayaVal text) {
     size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_RICH_TEXT);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, count);
     kaya_wire_u32(tx, 0);
     kaya_wire_values(tx, runs, runs_len);
+    kaya_wire_value(tx, text);
     kaya_wire_end(tx, kaya_at);
 }
 
 /* ONE edit into a `rich` textarea, the app's own or a collaborator's (docs/rich-text-plan.md R1, R5): replace `start..end` (UTF-8 byte offsets into the widget's current text, validated as a range is) with the payload text, whose attribute runs are `runs` in fours as set_rich_text's, with offsets RELATIVE to the inserted text. Keeps the selection: unchanged before the edit, shifted after it, a caret at `start` ending AFTER the insertion. Echoes nothing and never resets undo. QUEUED while an input-method composition is live and applied when it ends, since a refusal would drop a collaborator's edit. */
-static inline void kaya_tx_apply_edit(KayaTx *tx, uint64_t widget_id, uint64_t start, uint64_t stop, uint32_t count, const KayaVal *runs, uint32_t runs_len) {
+static inline void kaya_tx_apply_edit(KayaTx *tx, uint64_t widget_id, uint64_t start, uint64_t stop, uint32_t count, const KayaVal *runs, uint32_t runs_len, KayaVal text) {
     size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_APPLY_EDIT);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u64(tx, start);
@@ -710,6 +711,7 @@ static inline void kaya_tx_apply_edit(KayaTx *tx, uint64_t widget_id, uint64_t s
     kaya_wire_u32(tx, count);
     kaya_wire_u32(tx, 0);
     kaya_wire_values(tx, runs, runs_len);
+    kaya_wire_value(tx, text);
     kaya_wire_end(tx, kaya_at);
 }
 

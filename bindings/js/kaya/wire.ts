@@ -720,13 +720,13 @@ export function tx_declare_link_route(route: number, pattern: WireValue): Uint8A
 }
 
 /** The WHOLE attributed document of a `rich` textarea (docs/rich-text-plan.md R1): the text as the payload, and `runs` holding 4*`count` values read in FOURS — I64 start, I64 end, Str name, Str value — each run one attribute over one range in UTF-8 BYTE offsets into that text, validated at the ranges' chokepoint (docs/ranges-units.md §7) and allowed to overlap (bold and italic over one range are two runs). A CONFIGURATION WRITE: it echoes nothing, and it resets the widget's native undo history where that tier is on (docs/undo-plan.md D7). The vocabulary is wire::RICH_ATTRS; a `block` run must start and end on paragraph boundaries. Refused on a textarea that is not `rich`. */
-export function tx_set_rich_text(widget_id: number, count: number, runs: readonly WireValue[]): Uint8Array {
-  return record(TX_SET_RICH_TEXT, cat(u64(widget_id), u32(count), u32(0), enc.values(runs)));
+export function tx_set_rich_text(widget_id: number, count: number, runs: readonly WireValue[], text: WireValue): Uint8Array {
+  return record(TX_SET_RICH_TEXT, cat(u64(widget_id), u32(count), u32(0), enc.values(runs), enc.value(text)));
 }
 
 /** ONE edit into a `rich` textarea, the app's own or a collaborator's (docs/rich-text-plan.md R1, R5): replace `start..end` (UTF-8 byte offsets into the widget's current text, validated as a range is) with the payload text, whose attribute runs are `runs` in fours as set_rich_text's, with offsets RELATIVE to the inserted text. Keeps the selection: unchanged before the edit, shifted after it, a caret at `start` ending AFTER the insertion. Echoes nothing and never resets undo. QUEUED while an input-method composition is live and applied when it ends, since a refusal would drop a collaborator's edit. */
-export function tx_apply_edit(widget_id: number, start: number, stop: number, count: number, runs: readonly WireValue[]): Uint8Array {
-  return record(TX_APPLY_EDIT, cat(u64(widget_id), u64(start), u64(stop), u32(count), u32(0), enc.values(runs)));
+export function tx_apply_edit(widget_id: number, start: number, stop: number, count: number, runs: readonly WireValue[], text: WireValue): Uint8Array {
+  return record(TX_APPLY_EDIT, cat(u64(widget_id), u64(start), u64(stop), u32(count), u32(0), enc.values(runs), enc.value(text)));
 }
 
 /** Format a `rich` textarea's CURRENT SELECTION through the widget's own act — what an app's toolbar button sends (docs/rich-text-plan.md R1): `attr` is two Str values, name then value; `removed` 1 takes the attribute off. The widget answers with text_formatted over the range it formatted, which is how the mirror moves; a collapsed selection arms the typing attribute and answers nothing until the next edit. A `block` act covers the selection's whole paragraphs, and `block` with value `body` removes. Refused on a textarea that is not `rich` and for a name outside wire::RICH_ATTRS. */

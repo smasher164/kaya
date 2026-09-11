@@ -4,7 +4,7 @@
 
 use kaya::spec::{FieldTy, ProtocolSpec, Record};
 
-use crate::{Ctx, is_padding, prop_variants, record_params, window_prop_variants};
+use crate::{Ctx, is_padding, prop_variants, record_params, tx_fields, window_prop_variants};
 
 pub const RESERVED: &[&str] = &[
     "encodeValue", "encodeValues", "encodeVariantSchemas", "wireRecord", "parseValue", "parseOccurrence",
@@ -46,7 +46,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("-- and a transaction is their concatenation.");
     c.line("module KayaWire where");
     c.line("");
-    c.line("import Data.Bits (complement, (.&.))");
+    c.line("import Data.Bits (complement, shiftL, (.&.), (.|.))");
     c.line("import qualified Data.ByteString as BS");
     c.line("import Data.ByteString.Builder");
     c.line("import qualified Data.ByteString.Lazy as BL");
@@ -301,6 +301,26 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("-- empty tokens, repeated modifiers, aliases (ctrl/cmd/option), and");
     c.line("-- unknown or multiple or missing keys. POLICY stays at the core,");
     c.line("-- validated on the canonical spelling and never rewritten.");
+    // docs/traps.md 2026-09-11: the encoder writes UTF-8 (stringUtf8) and the
+    // reader once took one Char per byte.
+    c.line("wireUtf8 :: [Word8] -> String");
+    c.line("wireUtf8 [] = []");
+    c.line("wireUtf8 (b : rest)");
+    c.line("  | b < 0x80 = chr (fromIntegral b) : wireUtf8 rest");
+    c.line("  | b .&. 0xe0 == 0xc0, (x : more) <- rest =");
+    c.line("      chr (((fromIntegral b .&. 0x1f) `shiftL` 6) .|. cont x) : wireUtf8 more");
+    c.line("  | b .&. 0xf0 == 0xe0, (x : y : more) <- rest =");
+    c.line("      chr (((fromIntegral b .&. 0x0f) `shiftL` 12) .|. (cont x `shiftL` 6) .|. cont y)");
+    c.line("        : wireUtf8 more");
+    c.line("  | b .&. 0xf8 == 0xf0, (x : y : z : more) <- rest =");
+    c.line("      chr (((fromIntegral b .&. 0x07) `shiftL` 18) .|. (cont x `shiftL` 12)");
+    c.line("           .|. (cont y `shiftL` 6) .|. cont z)");
+    c.line("        : wireUtf8 more");
+    c.line("  | otherwise = wireUtf8 rest");
+    c.line("  where");
+    c.line("    cont :: Word8 -> Int");
+    c.line("    cont w = fromIntegral w .&. 0x3f");
+    c.line("");
     c.line("canonicalizeShortcut :: String -> String");
     c.line("canonicalizeShortcut spelling");
     c.line("  | null spelling = error \"kaya: shortcut is empty\"");
@@ -394,7 +414,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("                  else do");
     c.line("                    bytes <- peekArray (fromIntegral vlen)");
     c.line("                      (rec `plusPtr` (at + 8)) :: IO [Word8]");
-    c.line("                    return (VStr (map (chr . fromIntegral) bytes))");
+    c.line("                    return (VStr (wireUtf8 bytes))");
     c.line("  return (v, next)");
     c.line("");
     // A blob in an OCCURRENCE is a table handle, not the apply
@@ -751,7 +771,7 @@ fn emit_packer(c: &mut Ctx, r: &Record) {
     c.line(&format!("-- {}", r.doc.replace('\n', " ")));
     c.line(&format!("tx{} :: {sig}Builder", pascal(r.name)));
     let mut body: Vec<String> = Vec::new();
-    for f in r.fields {
+    for f in tx_fields(r) {
         body.push(match f.ty {
             FieldTy::U32 if is_padding(f) => "word32LE 0".into(),
             FieldTy::U32 => format!("word32LE {}", camel(f.name)),
