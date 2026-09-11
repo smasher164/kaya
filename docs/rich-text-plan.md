@@ -197,3 +197,18 @@ Depth then breadth, the standing pattern:
 - It does not adopt SwiftUI's iOS 26 attributed TextEditor: kaya's
   floor is iOS 16, and the NSTextView/UITextView path underneath is the
   foundation already paid for.
+
+## 6. The automerge benchmark, measured the same day
+
+The maintainer named automerge the benchmark, so the protocol was
+driven against it before any arm: tools/richtext/automerge-probe, its
+record docs/measurements/richtext-automerge-2026-09-11.txt. A model of
+the mirror beside an automerge 0.11 document in kaya's unit, through
+local typing and toolbar acts, multi-byte text, two peers editing
+concurrently and merging, and the caret transform with automerge's own
+cursor as the oracle: every check agreed, offsets never converted,
+automerge's three text patches map one to one onto `apply_edit` and
+format, and a bridged edit costs 0.024ms when the app reads the
+splice's own patch (0.63ms when it walks the document instead, which is
+the note for a binding's bridge). R1, R2 and R5 stand as measured; what
+remains to measure is the platforms (§3).

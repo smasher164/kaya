@@ -1,0 +1,93 @@
+THE AUTOMERGE BENCHMARK: docs/rich-text-plan.md's PROTOCOL DRIVEN AGAINST automerge 0.11.0
+measured 2026-09-11, on the maintainer's question ("how well this would
+integrate with something like automerge. That's probably the benchmark.")
+tools/richtext/automerge-probe, `cargo run --release`
+
+WHAT WAS BUILT
+--------------
+A model of kaya's rich mirror — the text plus per-byte attributes, with
+the widget's inheritance rule stated once (typed text inherits the
+inline attributes of the byte before it, except a link, which never
+grows by typing) — driven by the plan's messages: `text_edited` and
+`text_formatted` up, `apply_edit` and format down. Beside it an
+automerge document built with TextEncoding::Utf8CodeUnit, kaya's ruled
+unit, and a bridge an app would write: a local edit becomes
+`splice_text(pos, del, text)` with the patch log on, the splice's own
+patch says what automerge's expand rules put on the inserted text, and
+the bridge marks or unmarks whatever differs from the widget's runs
+(expand policy the app's: After for inline styles, None for links).
+Automerge's patches after a merge — SpliceText, DeleteSeq, Mark — become
+apply_edit and format messages applied to the mirror, and the local
+caret is transformed by R5's rule while automerge's own Cursor is the
+oracle. After every step the mirror's text and runs are compared with
+automerge's spans().
+
+THE RESULT: EVERY CHECK AGREED
+------------------------------
+    == automerge 0.11.0, TextEncoding::Utf8CodeUnit, against kaya's mirror model ==
+    OK   typed: text "Hello world" runs []
+    OK   bold world: text "Hello world" runs [Run { start: 6, end: 11, attrs: {"bold": "true"} }]
+    OK   typed at the bold end (inherits): text "Hello world again" runs [Run { start: 6, end: 17, attrs: {"bold": "true"} }]
+    OK   typed with bold off (unmark reconciles expand): text "Hello world again!" runs [Run { start: 6, end: 17, attrs: {"bold": "true"} }]
+    OK   typed at the link end (does not inherit): text "Hello? world again!" runs [Run { start: 0, end: 5, attrs: {"link": "https://kaya.dev"} }, Run { start: 7, end: 18, attrs: {"bold": "true"} }]
+    OK   deleted across a run boundary: text "Hello? again!" runs [Run { start: 0, end: 5, attrs: {"link": "https://kaya.dev"} }, Run { start: 6, end: 12, attrs: {"bold": "true"} }]
+    OK   link removed on part of its run: text "Hello? again!" runs [Run { start: 3, end: 5, attrs: {"link": "https://kaya.dev"} }, Run { start: 6, end: 12, attrs: {"bold": "true"} }]
+    OK   multi-byte bold on the emoji: text "héllo 👋 世界 e\u{301}" runs [Run { start: 7, end: 11, attrs: {"bold": "true"} }]
+    OK   multi-byte typed after the emoji (inherits bold): text "héllo 👋🎉 世界 e\u{301}" runs [Run { start: 7, end: 15, attrs: {"bold": "true"} }]
+         a mark splitting 'é' (byte 1..2): automerge says None (kaya refuses it before lowering)
+         A took: apply_edit insert @4 "very "
+         A took: format 16..19 italic=Some("true")
+    OK   A after merging B: text "The very quick brown fox jumps" runs [Run { start: 4, end: 14, attrs: {"bold": "true"} }, Run { start: 16, end: 19, attrs: {"italic": "true"} }]
+    OK   caret transform: kaya 14, automerge's cursor 14
+    OK   B after merging A: text "The very quick brown fox jumps" runs [Run { start: 4, end: 14, attrs: {"bold": "true"} }, Run { start: 16, end: 19, attrs: {"italic": "true"} }]
+         peers agree: true
+    OK   remote insert at the caret: text "aXYZb", kaya caret 4, automerge cursor (MoveCursor::After) 4
+         cost on a 52 KB document with 40 bold runs: bridged edit (splice + reconcile from its own patch) 0.024ms; splice alone 0.023ms; one spans() walk 0.673ms
+         after 4000 edits the texts agree: true
+    == EVERY CHECK AGREED ==
+
+READ ACROSS
+-----------
+- OFFSETS ARE IDENTITY. Every position kaya's mirror holds went into
+  splice_text and mark unchanged, multi-byte text included (é, an
+  emoji, CJK, a combining mark), and every position automerge's
+  patches carried came back unchanged. Nothing converts, as the survey
+  said (docs/probes/richtext-crdt-2026-09-11.md).
+- THE ADDRESSED EDIT IS THE RIGHT SHAPE. Three of automerge's patch
+  actions map one to one onto the plan's messages: SpliceText is an
+  apply_edit with the inserted text's marks as its runs, DeleteSeq an
+  apply_edit with nothing inserted, Mark a format. No delta walk, no
+  synthesis.
+- TWO PEERS CONVERGE THROUGH KAYA'S MESSAGES. A bolded "quick" and
+  typed " jumps"; B inserted "very " before "quick" and italicized
+  "fox"; after each merged the other, both mirrors read the same text
+  and runs, and both equalled automerge's spans.
+- THE CARET RULE IS AUTOMERGE'S. R5's transform (unchanged before the
+  edit, shifted after it, a caret at the edit's start ends after the
+  insertion) matched automerge's Cursor with MoveCursor::After, its
+  documented default, in both the concurrent-merge case and the
+  insertion landing exactly at the caret.
+- THE INHERITANCE RECONCILE COSTS NOTHING when read from the splice's
+  own patch: 0.024ms per bridged edit on a 52 KB document with forty
+  bold runs against 0.023ms for a bare splice. Read through a spans()
+  walk instead, as the first draft did, it was 0.633ms — the whole
+  document's runs per keystroke. A binding's bridge reads the patch.
+- ONE THING IS THE APP'S, AND THE PROBE SHOWS WHY KAYA CARRIES NO EXPAND
+  FLAG: B's concurrent insertion of "very " at the START of A's bold
+  range came out bold under ExpandMark::After (the marked characters'
+  anchors and the inserted text resolve on the CRDT's side, not the
+  widget's). An app that wants Peritext's exact boundary behaviour
+  picks the expand per mark; kaya's mirror follows the document.
+- AUTOMERGE ACCEPTS A MARK THAT SPLITS A CODE POINT: a bold on bytes 1..2
+  of "héllo" was taken without error. kaya's one-chokepoint validator
+  (docs/ranges-units.md §7) refuses that range before it is lowered,
+  so an app behind kaya never sends one; the wall is kaya's.
+
+WHAT THIS DOES NOT SAY
+----------------------
+It is a model of the mirror, not the core: the widget arms (typing
+attributes on NSTextView and the others) are what will make the
+inheritance rule true on a platform, and §3 of the plan measures them.
+loro and yrs are unmeasured here; the survey says their defaults are the
+same unit, and a 60-line probe on loro's emitted delta unit is still
+owed before anything is said about loro in an example.

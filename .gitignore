@@ -7,6 +7,7 @@ tools/kaya-bindgen/target
 tools/win/dialogprobe/target
 tools/win/clipprobe/target
 tools/ios/gpuprobe/probe/target
+tools/richtext/automerge-probe/target
 # Android probe/helper gradle debris (the original clipprobe commit
 # tracked its build tree by mistake; kept out from here on).
 tools/android/clipprobe/.gradle

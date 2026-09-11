@@ -1,0 +1,12 @@
+[package]
+name = "kaya_automerge_probe"
+version = "0.1.0"
+edition = "2021"
+
+# ITS OWN WORKSPACE: automerge never enters libkaya's graph
+# (docs/rich-text-plan.md: no CRDT anywhere in kaya's API). This probe
+# drives the plan's five-message protocol against the benchmark CRDT.
+[workspace]
+
+[dependencies]
+automerge = "=0.11.0"
