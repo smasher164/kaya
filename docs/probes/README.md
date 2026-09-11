@@ -45,3 +45,8 @@ alive, so these are the originals rather than replays:
   binding; docs/js-plan.md §5.
 - `dnd-2026-09-02-apple.md`, `-android-toolkits.md`, `-gtk-winui.md`: the
   drag-and-drop platform surveys behind docs/dnd-plan.md.
+- `canvas-gpu-research-2026-09-10.md`: vello_cpu, vello_hybrid/vello_gpu,
+  wgpu's surface targets per platform, GSK 4.18's two renderers read off
+  their source, the five GTK options priced, and the linux lane's measured
+  GPU situation (llvmpipe present, no Vulkan ICD); the record behind
+  docs/canvas-gpu-plan.md, with one wrong inference flagged at its head.
