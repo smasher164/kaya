@@ -477,6 +477,14 @@ undo systems processed the same chord and JavaFX's internal undo
 state went null; the fix was consuming the key event. An app that
 owns a field's document needs to say so.
 
+RULED 2026-09-11 (docs/rich-text-plan.md R6): the spelling is the
+`own_undo` prop on a rich textarea, which turns the native stack off on
+that widget through each platform's measured lever (`allowsUndo`,
+`disableUndoRegistration`, `enable-undo`, `UndoLimit 0`, `clearHistory`
+per commit); D7's reset then applies to `set_rich_text` and never to
+`apply_edit`, and D6's routing takes that widget's app-declared
+`can_undo`/`can_redo` through A4's query.
+
 ### A8 — TESTABILITY (the invariant-1 obligation)
 
 The delegated tier was unobservable when this was written: no harness

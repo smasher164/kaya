@@ -10971,3 +10971,84 @@ platform's own history before the door and gone after it, and only parsing
 `kaya=1` and reaching the backend's activation funnel removes it. A full-trust
 MSIX's `%LOCALAPPDATA%` is NOT redirected on this build — the packaged act two
 wrote its verdict to the plain path.
+
+## GtkTextBuffer's undo restores text and forgets its tags (2026-09-11)
+
+A tagged run on GTK's undo stack does not survive a round trip: undo and
+redo of a user action that inserted text AND tagged it brings the text back
+untagged, and even the action that only applied a tag is not recorded, so
+Cmd-Z after a bold is a no-op while Cmd-Z after typing inside the bold
+returns plain text. The whole native tier is lossy for rich text, which is
+why the rich textarea turns it off rather than repairing it: `enable-undo =
+FALSE` is a complete off switch, togglable at run time, that leaves a later
+`text.undo` action a no-op (docs/measurements/richtext-gtk-2026-09-11.md
+§P1). The buffer's insert-text signal already reports its length in BYTES,
+so the GTK arm needs no unit conversion; AT-SPI has no link or heading
+attribute to read, so those two are unanswerable through accessibility on
+that lane.
+
+## On iOS a link run swallows what is typed after it; on macOS it does not (2026-09-11)
+
+`UITextView` carries the `.link` attribute in `typingAttributes` when the
+caret sits at the end of a link run, so the next character joins the link;
+`NSTextView` drops it (docs/measurements/richtext-apple-2026-09-11.md §4).
+One document, two platforms, two answers — the iOS arm clears the link out
+of `typingAttributes` at a run's end so the mirror rule (typing at a run's
+end extends bold and never a link) holds on both. The same record has the
+undo levers: `allowsUndo = false` on macOS empties the view's `undoManager`
+entirely (every channel — the menu, the key equivalent, `sendAction` —
+finds nothing); iOS has no `allowsUndo`, attribute writes through
+`textStorage` are not undoable there anyway, and the lever is
+`undoManager.disableUndoRegistration()` on the view's own manager, which
+needs a first-responder cycle to take. Accessibility exposes a link two
+ways on the two platforms: an `AXLink` element carrying `AXURL` on macOS,
+`UIAccessibilityTokenLink = 1` with the URL dropped on iOS.
+
+## A TOM link is hidden text inside the story (2026-09-11)
+
+`ITextRange.Link` on the RichEditBox does not attach a URL to a run; it
+inserts ` HYPERLINK "https://…"` as HIDDEN characters ahead of the linked
+text, and `StoryLength`, `GetText(None)` and every cp arithmetic count
+them (49 characters for a 16-character sentence,
+docs/measurements/richtext-windows-2026-09-11.md §5). Read the document
+with `TextGetOptions.NoHidden` and address it with offsets converted over
+the visible text, or a link three words in shifts every later run. Two
+more from the same record: a cp landing on the second half of a
+surrogate pair is SNAPPED OUTWARD by `SetRange` (the ranges chokepoint
+must refuse the split before the arm sees it, docs/ranges-units.md), and
+`UndoLimit = 0` is the off switch but a ONE-WAY one — dropping it from
+100 to 0 destroys the stack that was there, and raising it back starts
+empty.
+
+## Compose foundation 1.12 is a toolchain, not a version (2026-09-11)
+
+The 1.12.1 aar's metadata demands compileSdk 37 and AGP 9.1; AGP 9 needs
+Gradle 9.7 and refuses the standalone Kotlin plugin, and the `android-37`
+platform is not in the nix SDK — so the "pin bump" that would buy the
+tracked `addStyle` API is a migration of the whole android toolchain
+(docs/measurements/richtext-compose-2026-09-11.md §1). Foundation 1.11.4
+builds on the pins as they stand. Independent of version: a link in an
+EDITABLE `BasicTextField` renders and taps nothing (it works on read-only
+text), the undo state has no off switch and a programmatic `edit {}` adds
+an entry — `clearHistory()` after every commit is the lever — and the
+editable tier exposes no formatting to accessibility.
+
+## loro's deltas count unicode scalars while its writers take bytes (2026-09-11)
+
+`LoroText::insert` takes an index in unicode scalars, `insert_utf8` in
+bytes, and the `TextDelta` events it emits count SCALARS on the local and
+the remote side alike, so a bridge that fed kaya's byte offsets into the
+event stream would land every edit past the first non-ASCII character in
+the wrong place (docs/measurements/richtext-loro-2026-09-11.md). There is
+no `unmark_utf8`, `expand` governs only inserts that happen after the
+mark, and an unconfigured style key is refused. automerge, measured the
+same day, takes `TextEncoding::Utf8CodeUnit` at construction and speaks
+bytes on both sides, which is why the plan's benchmark is automerge.
+
+## A backtick inside a double-quoted commit message is a command (2026-09-11)
+
+`git commit -m "… posts itself to \`changes\` as …"` ran `changes`, printed
+`command not found` AFTER the commit had been made, and left the message
+with a hole where the word was — pushed before the line was read
+(d51001a2). Every narrative message goes through a file: `git commit -q -F
+<path>`, where nothing is interpolated.
