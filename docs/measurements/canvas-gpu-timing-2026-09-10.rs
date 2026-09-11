@@ -310,7 +310,86 @@ fn fills() {
     }
 }
 
+/// Classic vello (the all-GPU compute renderer, `vello` 0.10.0): a Scene
+/// walked with the same ops, rendered with render_to_texture.
+struct ClassicTarget { scene: vello::Scene }
+impl Target for ClassicTarget {
+    fn fill(&mut self, p: &BezPath, c: AlphaColor<Srgb>) { self.scene.fill(Fill::NonZero, vello::kurbo::Affine::IDENTITY, c, None, p); }
+    fn stroke(&mut self, p: &BezPath, c: AlphaColor<Srgb>, w: f64) { self.scene.stroke(&Stroke::new(w).with_caps(Cap::Butt).with_join(Join::Miter).with_miter_limit(4.0), vello::kurbo::Affine::IDENTITY, c, None, p); }
+}
+
+fn gpu_for_classic() -> Gpu {
+    let instance = wgpu::Instance::default();
+    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::HighPerformance, force_fallback_adapter: false, compatible_surface: None })).expect("adapter");
+    let info = adapter.get_info();
+    let wanted = wgpu::Features::CLEAR_TEXTURE | wgpu::Features::PIPELINE_CACHE;
+    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor { label: Some("classic"), required_features: adapter.features() & wanted, required_limits: wgpu::Limits::default(), ..Default::default() })).expect("device");
+    Gpu { device, queue, adapter_name: info.name, backend: format!("{:?}", info.backend) }
+}
+
+fn readback(g: &Gpu, texture: &wgpu::Texture, w: u16, h: u16) -> Vec<u8> {
+    let bytes_per_row = (u32::from(w) * 4).next_multiple_of(256);
+    let buffer = g.device.create_buffer(&wgpu::BufferDescriptor { label: None, size: u64::from(bytes_per_row) * u64::from(h), usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ, mapped_at_creation: false });
+    let mut encoder = g.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+    encoder.copy_texture_to_buffer(
+        wgpu::TexelCopyTextureInfo { texture, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+        wgpu::TexelCopyBufferInfo { buffer: &buffer, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(bytes_per_row), rows_per_image: None } },
+        wgpu::Extent3d { width: w.into(), height: h.into(), depth_or_array_layers: 1 });
+    g.queue.submit([encoder.finish()]);
+    let slice = buffer.slice(..); slice.map_async(wgpu::MapMode::Read, |r| r.unwrap());
+    g.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    let mut out = vec![0u8; usize::from(w) * usize::from(h) * 4];
+    { let data = slice.get_mapped_range(); let row = usize::from(w) * 4; for y in 0..usize::from(h) { out[y * row..(y + 1) * row].copy_from_slice(&data[y * bytes_per_row as usize..y * bytes_per_row as usize + row]); } }
+    buffer.unmap(); out
+}
+
+fn classic() {
+    let g = gpu_for_classic();
+    let threads = (std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1).saturating_sub(1)).min(8) as u16;
+    println!("CLASSIC VELLO 0.10.0 (all-GPU compute) on {:?} via {}: median of 15 after 3 warm-ups; burst = 20 frames submitted, one wait; against vello_cpu on {threads} threads", g.adapter_name, g.backend);
+    println!("{:<18} {:<16} {:>9} {:>11} {:>13} {:>13} {:>10}   {}", "drawing", "track", "cpu MT", "encode(cpu)", "classic frame", "classic burst", "vs cpu px", "");
+    let mut renderer = vello::Renderer::new(&g.device, vello::RendererOptions { use_cpu: false, antialiasing_support: vello::AaSupport::area_only(), num_init_threads: std::num::NonZeroUsize::new(1), ..Default::default() }).expect("renderer");
+    let mut drawings: Vec<Drawing> = vec![portfolio_chart(), text_page(), octagons()];
+    for n in [10usize, 50, 200, 800] { drawings.push(big_fills(n)); }
+    for d in &drawings {
+        let tracks: Vec<(&str, (f64, f64))> = if d.name.contains("big fills") { vec![("phone 1200x2400", (1200.0, 2400.0)), ("desk 1600x1000", (1600.0, 1000.0))] } else { vec![("native", d.viewbox), ("phone 1200x2400", (1200.0, 2400.0))] };
+        for (tname, track) in tracks {
+            let (w, h) = (track.0 as u16, track.1 as u16);
+            let pixels = usize::from(w) * usize::from(h);
+            let mut ctxm = RenderContext::new_with(w, h, RenderSettings { level: Level::new(), num_threads: threads });
+            let mut bufm = vec![0u8; pixels * 4]; let mut tm = Vec::new();
+            for i in 0..18 { let t = Instant::now(); ctxm.reset(); walk(d, track, &mut ctxm); ctxm.flush(); ctxm.render(PixmapMut::new(w, h, &mut bufm).unwrap(), &mut Resources::new()); if i >= 3 { tm.push(t.elapsed().as_secs_f64() * 1000.0); } }
+            let texture = g.device.create_texture(&wgpu::TextureDescriptor { label: None, size: wgpu::Extent3d { width: w.into(), height: h.into(), depth_or_array_layers: 1 }, mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2, format: wgpu::TextureFormat::Rgba8Unorm, usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC, view_formats: &[] });
+            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            let params = vello::RenderParams { base_color: vello::peniko::Color::TRANSPARENT, width: w.into(), height: h.into(), antialiasing_method: vello::AaConfig::Area };
+            let mut target = ClassicTarget { scene: vello::Scene::new() };
+            let mut tf = Vec::new(); let mut te = Vec::new();
+            for i in 0..18 {
+                let t0 = Instant::now(); target.scene.reset(); walk(d, track, &mut target); let e = t0.elapsed().as_secs_f64() * 1000.0;
+                renderer.render_to_texture(&g.device, &g.queue, &target.scene, &view, &params).expect("render");
+                g.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+                if i >= 3 { tf.push(t0.elapsed().as_secs_f64() * 1000.0); te.push(e); }
+            }
+            let tb = Instant::now();
+            for _ in 0..20 { target.scene.reset(); walk(d, track, &mut target); renderer.render_to_texture(&g.device, &g.queue, &target.scene, &view, &params).expect("render"); }
+            g.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+            let burst = tb.elapsed().as_secs_f64() * 1000.0 / 20.0;
+            let bytes = readback(&g, &texture, w, h);
+            let (differing, max, pct) = diff(&bufm, &bytes);
+            if let Ok(dir) = std::env::var("DUMP") {
+                let stem = format!("{}-{}", d.name.replace(' ', "_"), tname.split(' ').next().unwrap());
+                for (tag, r) in [("cpu", &bufm), ("classic", &bytes)] {
+                    let mut out = u32::from(w).to_le_bytes().to_vec(); out.extend_from_slice(&u32::from(h).to_le_bytes()); out.extend_from_slice(r);
+                    std::fs::write(format!("{dir}/{stem}-{tag}.rgba"), out).unwrap();
+                }
+            }
+            println!("{:<18} {:<16} {:>7.2}ms {:>9.2}ms {:>11.2}ms {:>11.2}ms   {differing} differ ({pct:.1}%), max delta {max}", d.name, tname, median(tm), median(te), median(tf), burst);
+        }
+    }
+}
+
 fn main() {
+    if std::env::args().nth(1).as_deref() == Some("classic") { classic(); return; }
     if std::env::args().nth(1).as_deref() == Some("breakdown") { breakdown(); return; }
     if std::env::args().nth(1).as_deref() == Some("fills") { fills(); return; }
     let threads = (std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1).saturating_sub(1)).min(8) as u16;

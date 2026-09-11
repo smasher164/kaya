@@ -179,3 +179,69 @@ efficiency cores are slower and fewer, so the CPU's frame at 800 fills
 is more like 12-15ms there by the plan's own scaling caution — inside
 budget, and still ahead of a hybrid whose CPU half doubles with it.
 Measure on a phone-class core before believing the ratio.
+
+CLASSIC VELLO, THE ALL-GPU COMPUTE RENDERER (vello 0.10.0)
+----------------------------------------------------------
+Taken on the maintainer's request ("it looks like it's still updated").
+The same op streams walked into a classic `vello::Scene` and rendered
+with `render_to_texture` into an Rgba8Unorm STORAGE_BINDING texture
+(AaConfig::Area, base colour transparent, the renderer built once with
+`num_init_threads: 1`); `classic frame` joins each frame with a device
+poll, `classic burst` is 20 frames submitted with one wait; the same
+wgpu 29 / Metal device, the M5 Pro. `encode(cpu)` is the CPU side of a
+classic frame: appending the path data to the scene, and nothing else.
+
+    drawing            track               cpu MT encode(cpu) classic frame classic burst  vs cpu px   
+    portfolio chart (214 ops) native              0.15ms      0.05ms        1.56ms        0.57ms   3860 differ (7.7%), max delta 223
+    portfolio chart (214 ops) phone 1200x2400     0.22ms      0.05ms        1.52ms        0.46ms   18943 differ (0.7%), max delta 210
+    text page (34 ops) native              0.56ms      0.44ms        2.00ms        0.77ms   16557 differ (13.8%), max delta 47
+    text page (34 ops) phone 1200x2400     0.75ms      0.44ms        1.98ms        0.79ms   54704 differ (1.9%), max delta 60
+    2000 octagons (20006 ops) native              0.77ms      0.24ms        1.76ms        0.60ms   69980 differ (17.5%), max delta 4
+    2000 octagons (20006 ops) phone 1200x2400     0.87ms      0.24ms        1.76ms        0.60ms   129417 differ (4.5%), max delta 216
+    10 big fills       phone 1200x2400     0.35ms      0.00ms        1.46ms        0.52ms   251787 differ (8.7%), max delta 234
+    10 big fills       desk 1600x1000      0.34ms      0.00ms        1.48ms        0.61ms   268071 differ (16.8%), max delta 3
+    50 big fills       phone 1200x2400     0.56ms      0.00ms        1.47ms        0.62ms   302961 differ (10.5%), max delta 234
+    50 big fills       desk 1600x1000      0.52ms      0.00ms        1.48ms        0.87ms   348419 differ (21.8%), max delta 3
+    200 big fills      phone 1200x2400     1.40ms      0.01ms        2.77ms        2.03ms   411050 differ (14.3%), max delta 234
+    200 big fills      desk 1600x1000      1.34ms      0.02ms        4.13ms        2.65ms   278333 differ (17.4%), max delta 3
+    800 big fills      phone 1200x2400     5.01ms      0.05ms        1.58ms        0.47ms   1639714 differ (56.9%), max delta 255
+    800 big fills      desk 1600x1000      4.78ms      0.06ms        1.58ms        0.49ms   1600000 differ (100.0%), max delta 255
+
+THE 800-FILL ROWS ARE NOT RENDERS. Classic vello sizes its GPU bump
+buffers up front and, when a frame overflows them, draws NOTHING and
+returns Ok: the alpha census of both 800-fill frames is 1.000 at zero
+against the CPU's 0.998 opaque (desk) and 0.554 (phone), and the "frame"
+is faster than 200 fills because the fine stage ran over an empty bin
+list. The re-render on overflow ("robust dynamic memory",
+src/lib.rs `let robust = cfg!(feature = "debug_layers")`) is compiled
+in only under the debug_layers feature in 0.10.0. That is the silent
+failure mode the research named, measured on the fourth scene this
+probe tried. The 10-200 rows are real renders (alpha census equal to
+the CPU's to three places; the max-delta-234 pixels on the phone rows
+are the translucent fill over the transparent letterbox margin, where
+classic's output carries colour above alpha and the CPU's premultiplied
+buffer does not — a format difference outside the drawn ground, not a
+picture difference; the desk rows, with no margin, agree to 3).
+
+WHAT THE VALID ROWS SAY. The CPU side of a classic frame is nearly
+nothing (0.00-0.44ms, the text page's share being kaya's own glyph
+outlining), which is what "everything on the GPU" buys, and the
+all-GPU renderer is faster than the hybrid at every scene (burst
+0.46-0.87ms against 0.42-1.61ms; 200 fills 2.0 against 3.9). It still
+does not beat vello_cpu on 8 threads on any valid row: 0.57 vs 0.15ms
+on the chart, 0.60 vs 0.77 on the octagons (its one win, by 0.17ms),
+2.04 vs 1.44 on 200 full-screen fills at phone size. The joined frame
+has the same 1.5ms floor as the hybrid (the Metal round trip), and the
+burst floor of ~0.5ms is the compute pipeline's own per-frame cost
+(fourteen dispatches, buffer clears, the fine pass) that no scene size
+removes. At the one scale where the GPU's fine stage would have pulled
+ahead of eight cores, the renderer's default buffers overflowed and it
+drew nothing.
+
+So on this host the standing answer holds for the all-GPU renderer
+too, for a different reason than the hybrid's: not a CPU half that
+scales, but a fixed pipeline cost that the scenes never outgrow, and a
+silent failure at the scale where they might. What is still owed is
+the phone-class core (§15.3's caution): a slower CPU moves the CPU
+columns, the GPU columns stay, and the crossover is a measurement on
+that core.

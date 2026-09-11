@@ -463,6 +463,15 @@ third of the budget on threads, and the trigger for revisiting is a
 canvas that misses that budget on a phone-class core, which is a
 measurement rather than a feeling.
 
+Classic vello, the all-GPU compute renderer, was measured too, at the
+maintainer's request (the same record): its CPU side is nearly nothing
+and it beats the hybrid everywhere, and it still loses to vello_cpu on
+8 threads on every valid scene (one row within 0.2ms), with a ~0.5ms
+per-frame pipeline floor even pipelined; at 800 full-screen fills its
+default bump buffers overflowed and it drew nothing, silently, the
+failure the research named. The ruling stands, and what is still owed
+is the same probe on a phone-class core.
+
 What survives from slice 2 is the threads: above about a megapixel, 8
 workers on a reused context are 1.7-2.5x faster than one, and their
 bytes equal the single-threaded bytes in every cell measured. The
