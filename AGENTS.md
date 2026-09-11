@@ -631,7 +631,9 @@ in docs/deferred.md.
    only at its definition and in the one list that keeps the compiler
    from calling them unused. Beside it the PIXEL FORMAT each backend
    declares, by name — GTK's R8g8b8a8Premultiplied and Android's
-   ARGB_8888 are tiny-skia's layout verbatim, SwiftUI says so with
+   ARGB_8888 are the core's premultiplied RGBA8 layout verbatim (tiny-skia's
+   and vello_cpu's alike, which is why the swap touched no blit arm),
+   SwiftUI says so with
    premultipliedLast|byteOrder32Big, and WinUI is the ONE arm that
    swizzles — because the scene catches a channel swap only at a probe
    point whose colour is ASYMMETRIC, and a scene sampling greys would
@@ -643,7 +645,20 @@ in docs/deferred.md.
    Eleven watched negatives on doctored copies, counts printed; two of them
    caught the gate's own first draft, whose comment-stripping shifted
    every line number and whose block reader stopped at the first bracket
-   it found rather than the one at the block's indent),
+   it found rather than the one at the block's indent).
+   AND THE CANONICAL RASTER'S SETTINGS SINCE 2026-09-10, the vello_cpu
+   swap (docs/canvas-gpu-plan.md G2): the hash the scenes freeze is taken
+   at `CANONICAL_SETTINGS`, the scalar SIMD level and one thread, while
+   the screen raster runs the host's own level — a raster that quietly
+   moved the hash onto `Level::new()` goes green on five aarch64 lanes
+   and red on the first x86_64 one, months later, and no scene can tell
+   the two apart. The clause reads canvas.rs comment-stripped: the pinned
+   constant's two fields, `probe()` passing it, `rasterize()` passing the
+   screen settings, and the u8 pipeline alone (no `OptimizeQuality`,
+   whose f32 arithmetic is where an FMA contraction could differ between
+   microarchitectures; docs/measurements/canvas-vello-determinism-2026-09-10.txt
+   measured the u8 pipeline byte-exact across scalar, NEON and AVX2 and
+   across ISAs). Five more watched negatives, counts printed),
    `tools/check-appearance.py` (THE APPEARANCE OVERRIDE IS INERT UNLESS
    ASKED FOR, AND HONEST WHEN IT IS. `KAYA_APPEARANCE=light|dark` makes ONE
    PROCESS adopt an appearance through each platform's own supported

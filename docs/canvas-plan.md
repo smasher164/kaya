@@ -44,8 +44,8 @@ came out of the second research round and reshaped everything above it.
 | # | ruling | status |
 | --- | --- | --- |
 | 1 | **The core rasterizes; backends blit.** kaya draws its own command list into a pixel buffer and hands the buffer to the backend, which puts it on screen through the image machinery it already has. Lowering the op list into four native drawing APIs is DEAD. | RULED 2026-08-26 |
-| 2 | **The rasterizer is a pinned implementation detail behind the wire.** tiny-skia today; `vello_cpu` is explicitly revisitable when it stabilizes, as a one-crate swap with zero binding churn. GPU rendering for this buffer is refused ON PRINCIPLE. | RULED 2026-08-26 |
-| 3 | **Text is in v1.** No v1/v2 split (the no-staged-work rule): charts need tick labels from the first one, and labels-as-widgets-at-tick-positions is awkward. ONE shaping engine in the core — harfrust shapes, skrifa/read-fonts outline, tiny-skia fills the paths (§4.1). | RULED 2026-08-26; stack named and then corrected against the archived-crate wave the same day |
+| 2 | **The rasterizer is a pinned implementation detail behind the wire.** tiny-skia today; `vello_cpu` is explicitly revisitable when it stabilizes, as a one-crate swap with zero binding churn. GPU rendering for this buffer is refused ON PRINCIPLE. | RULED 2026-08-26; AMENDED 2026-09-10 (docs/canvas-gpu-plan.md G1-G3): the swap was made — vello_cpu 0.2.0 rasterizes, the canonical raster pinned at the scalar level (docs/measurements/canvas-vello-determinism-2026-09-10.txt) — and the refusal now covers the CANONICAL raster alone; a GPU DISPLAY path is ruled in, gated on slice 2's measurement |
+| 3 | **Text is in v1.** No v1/v2 split (the no-staged-work rule): charts need tick labels from the first one, and labels-as-widgets-at-tick-positions is awkward. ONE shaping engine in the core — harfrust shapes, skrifa/read-fonts outline, the rasterizer fills the paths (§4.1). | RULED 2026-08-26; stack named and then corrected against the archived-crate wave the same day; the path filler is vello_cpu since 2026-09-10 and the shaping half did not move |
 | 4 | **Fonts are assets, through the one resolver.** A text op names a font asset; unspecified means the reserved name `kaya/default-font`, which the resolver answers from bytes EMBEDDED in libkaya (the vendored Sora). The `kaya/` prefix is refused in app packages. | RULED 2026-08-26 |
 | 5 | **The ops travel as ordinary tagged values** — the `set_column_headers` record shape — so the generator does the eight-language work. Packed bytes stay a measured-need escalation. | RULED 2026-08-26 (menu Q2) |
 | 6 | **The scene's primary observable is a byte-hash of the raster** at the canonical scale with the canonical palette, identical on every platform. Ink bounds as fractions and sampled solid fills stay as the human-legible secondary checks; looks stay the captures' business. | RULED 2026-08-26 (menu Q3, rebuilt) |
@@ -187,7 +187,16 @@ rule or carried into §11's measure-at-implementation list.
 
 ### §1.4 The rasterizer is an implementation detail, and it is pinned
 
-**tiny-skia today.** It is "an absolute minimal, CPU only, 2D rendering
+**AMENDED 2026-09-10: vello_cpu 0.2.0 is the rasterizer** (docs/canvas-gpu-plan.md
+G1/G2, the swap made the same day). The paragraphs below are the August
+record and hold for everything but the crate's name: the swap was the
+one-crate change they priced, the §7 hashes moved once, and the GPU
+refusal now names the CANONICAL raster alone — the display path is
+slice 2 and 3 of that plan. The measurement that opened it:
+docs/measurements/canvas-vello-determinism-2026-09-10.txt, byte-exact
+across the scalar, NEON and AVX2 levels, thread counts and both ISAs.
+
+**tiny-skia until 2026-09-10.** It is "an absolute minimal, CPU only, 2D rendering
 library for the Rust ecosystem" whose own claim is the one this design
 needs: "Unless there is a bug, tiny-skia must produce exactly the same
 results as Skia." It is a port of Skia's raster pipeline rather than a

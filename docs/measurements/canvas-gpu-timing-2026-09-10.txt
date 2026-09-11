@@ -1,0 +1,99 @@
+THE GPU PATH AGAINST THREADED VELLO_CPU, AT KAYA'S SIZES
+measured 2026-09-10, opening docs/canvas-gpu-plan.md's slice 2 (ruling G3)
+the obligation: "if the GPU is not decisively ahead of threaded vello_cpu
+at those sizes, slice 2 stops here and the record says so"
+
+THE RESULT: THE GPU LOSES AT EVERY SIZE, AND SLICE 2 STOPS
+-----------------------------------------------------------
+Median of 15 frames after 3 warm-ups, release build, the mac host calm
+(load under 8 at the run), one RenderContext / Scene reused across
+frames so no thread pool or pipeline is paid per frame:
+
+    host: 18 threads available; vello_cpu MT uses 8; Level::new() = Neon(Neon { neon: Neon { _private: () } }); GPU adapter "Apple M5 Pro" via Metal
+    drawing                    track                pixels    cpu 1T    cpu MT  gpu render gpu+readback     build   hybrid vs cpu bytes
+    portfolio chart (214 ops)  native                50400     0.08ms     0.23ms       1.61ms        1.63ms     0.11ms   1640 px differ (3.25%), max delta 1
+    portfolio chart (214 ops)  desk 1600x1000      1600000     0.42ms     0.25ms       1.63ms        2.06ms     0.18ms   16712 px differ (1.04%), max delta 2
+    portfolio chart (214 ops)  phone 1200x2400     2880000     0.46ms     0.24ms       1.58ms        2.61ms     0.15ms   12134 px differ (0.42%), max delta 2
+    text page (34 ops)         native               120000     0.70ms     0.64ms       2.08ms        2.22ms     0.66ms   14481 px differ (12.07%), max delta 1
+    text page (34 ops)         desk 1600x1000      1600000     1.69ms     0.84ms       3.17ms        3.53ms     1.47ms   54327 px differ (3.40%), max delta 1
+    text page (34 ops)         phone 1200x2400     2880000     1.55ms     0.77ms       2.67ms        3.66ms     1.16ms   44596 px differ (1.55%), max delta 1
+    2000 octagons (20006 ops)  native               400000     1.20ms     0.69ms       2.35ms        2.50ms     0.83ms   66701 px differ (16.68%), max delta 5
+    2000 octagons (20006 ops)  desk 1600x1000      1600000     2.16ms     0.85ms       3.08ms        3.63ms     1.15ms   183464 px differ (11.47%), max delta 4
+    2000 octagons (20006 ops)  phone 1200x2400     2880000     1.95ms     0.88ms       2.92ms        3.67ms     1.04ms   122589 px differ (4.26%), max delta 4
+
+Read across a row: `cpu MT` (vello_cpu on 8 worker threads, the context
+reused) is the fastest column at every size from 1.6 megapixels up, and
+`cpu 1T` is the fastest below that; `gpu render` (vello_hybrid 0.2.0 on
+wgpu 29 / Metal, no readback, the frame joined with a device poll) is
+3-7x slower than cpu MT and slower than cpu 1T at every size but one
+(the 2000 octagons on the desk, where the GPU render alone is 3.08ms
+against 2.16ms single-threaded and 0.85ms threaded); `gpu+readback`
+adds the copy_texture_to_buffer + map_async + de-pad and is the number a
+canvas that hands bytes to a blit arm would pay. The `build` column is
+the CPU half of the hybrid frame (path processing into strips) and by
+itself is already most of a cpu MT frame.
+
+So at 280x180 the chart is 0.08ms on one thread against 1.63ms through
+the GPU with readback: twenty times slower. At the phone's 1200x2400 the
+worst case measured, 2000 antialiased octagons, is 0.88ms threaded
+against 3.67ms through the GPU. Nothing here is within a factor of two
+of "decisively ahead", so ruling G3's named stop applies: SLICE 2 ENDS
+WITH "vello_cpu with threads, no GPU". No device policy, no probe scene,
+no second renderer to keep in step, and the linux lane's software GL
+question never arises.
+
+WHAT THE THREADS ARE WORTH, WHICH IS THE PART THAT SURVIVES
+-----------------------------------------------------------
+The determinism record measured threads SLOWER than one at small sizes
+with a fresh context per raster (the pool was rebuilt each time). With
+the context reused, the crossover is at about a megapixel: below it one
+thread wins (0.08 vs 0.23ms on the native chart; 0.70 vs 0.64ms on the
+native text page is the edge), above it 8 threads are 1.7-2.5x faster
+(0.42 -> 0.25, 1.69 -> 0.84, 2.16 -> 0.85, 1.95 -> 0.88ms). Every
+phone-size frame is under a millisecond threaded, against a 16.7ms
+budget. And the threaded bytes EQUALLED the single-threaded bytes in
+every cell (the probe compares them and would have printed
+`[MT bytes != 1T bytes]`), which the determinism record had already
+found for 2 and 4 threads; 8 is now measured too.
+
+What that makes the screen raster's remaining work: a RenderContext kept
+per thread and resized rather than rebuilt, threads switched on above a
+measured pixel count, `multithreading` enabled on the vello_cpu
+dependency. The canonical raster stays scalar and single-threaded
+(G2). That is a small slice of its own; nothing in this record needs a
+ruling.
+
+THE TOLERANCE NUMBERS, FOR THE RECORD
+-------------------------------------
+Had the GPU path been taken, `expect_drawing_matches` would have needed:
+the hybrid's bytes differ from vello_cpu's by at most 1 per channel on
+the chart and the text at native and desk sizes, at most 2 on the
+chart's large sizes, and at most 5 on the octagons, on 0.4-16.7% of the
+pixels, all of it at antialiased edges. vello's own `hybrid_tolerance`
+of 1-3 and the probe scene's tolerance of 3 sit in the same place.
+
+WHAT WAS RUN
+------------
+canvas-gpu-timing-2026-09-10.rs beside this file, the determinism
+probe's op streams and text pipeline plus a 2000-octagon stress scene
+(docs/canvas-plan.md §15.2's headroom unit), each fitted by kaya's own
+uniform-fit rule into the three tracks: the drawing's own viewbox, the
+linux lane's 1600x1000, and a phone's 1200x2400. Renderers: vello_cpu
+0.2.0 (u8 pipeline, Level::new() = NEON, num_threads 0 and 8, context
+reset and reused), and vello_hybrid 0.2.0 on wgpu 29.0.3 through Metal
+on the Apple M5 Pro (Features::empty(), Rgba8Unorm render target,
+RENDER_ATTACHMENT | COPY_SRC, readback into a MAP_READ buffer with
+256-byte row padding removed). `cargo run --release` in the dev shell.
+
+THE CAVEATS, SO NOBODY OVER-READS THIS
+--------------------------------------
+One host, one GPU, and it is unified memory: the readback is a same-
+memory copy here, so a discrete GPU would make the `gpu+readback` column
+WORSE, never better. The GPU's fixed per-frame cost (command encoding,
+submit, the poll) dominates at these sizes; a scene of hundreds of
+thousands of paths could cross over, and the octagon row's trend (the
+GPU's disadvantage shrinking from 20x to 4x as the CPU work grows) says
+where — but that is not a canvas kaya draws, and the moment it is, this
+probe is a `cargo run` away. The `gpu render` column joins the frame
+with a blocking poll; a presented surface would pipeline instead, which
+helps throughput and not the latency a chart re-raster cares about.

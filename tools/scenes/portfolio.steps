@@ -19,7 +19,7 @@ expect label#7 "Account total: $500.00"
 # the money labels, one for the dates), so these four numbers can
 # discriminate at all.
 expect_drawing canvas@chart "220/1,4,98,91"
-expect_drawing_hash canvas@chart "98ad246fcf87c572"
+expect_drawing_hash canvas@chart "6b2cf4b8a3f05415"
 # THE BLIT, at flat-region CENTRES: 18,36 is plot ground clear of both
 # gridlines, 18,73 deep inside the filled area. Both appearance modes
 # are named, and the pair is necessarily canvas.steps' (the same two
@@ -35,7 +35,7 @@ expect_ax canvas@chart "image/Portfolio value, 90 days to 2026-08-24, $9730.10 t
 # when the core's precedence answered "track"). Derived by canvas.rs's
 # the_portfolio_mark_expectations_are_derived, never from a platform.
 expect_drawing canvas@mark "21/4,7,96,93"
-expect_drawing_hash canvas@mark "29abce8483ccc343"
+expect_drawing_hash canvas@mark "3864e7eaa9a194b7"
 # THE CENTRE, and only the centre: this verb samples hundredths of the
 # canvas's own BOX, so the day the mark grows an edge probe would land
 # in a `fixed` drawing's margin and say nothing about it.
@@ -96,7 +96,7 @@ expect_rows column@positions[savings] "CASH,1,$500.00,$500.00"
 # bounds cannot (docs/canvas-plan.md §7.4) and that the redeclaration
 # replaced the whole drawing rather than patching it (§2.1).
 expect_drawing canvas@chart "220/1,4,98,91"
-expect_drawing_hash canvas@chart "6fc708cad68264c3"
+expect_drawing_hash canvas@chart "2a0b4ef7e4c99502"
 expect_ax canvas@chart "image/Portfolio value, 90 days to 2026-08-24, $9730.10 to $10357.99, now $10023.00"
 # THE TRANSACTIONS VIEW, one push away. The four status labels are
 # addressed by AUTHORED ID because their creation index sits behind

@@ -11,6 +11,10 @@ use skrifa::MetadataProvider;
 use skrifa::instance::Size;
 use skrifa::outline::{DrawSettings, OutlinePen};
 use skrifa::raw::FontRef;
+use vello_cpu::color::{AlphaColor, Srgb};
+use vello_cpu::kurbo::{BezPath, Cap, Join, Point, Stroke};
+use vello_cpu::peniko::Fill;
+use vello_cpu::{Level, PixmapMut, RenderContext, RenderSettings, Resources};
 
 /// Which palette a raster resolves its paint roles against. The ONLY
 /// thing a platform contributes to a drawing (§6).
@@ -40,6 +44,31 @@ impl Default for Presentation {
 /// five platforms needs every input to be one thing.
 pub(crate) const CANONICAL_SCALE: f64 = 1.0;
 pub(crate) const CANONICAL_MODE: Mode = Mode::Light;
+
+/// The canonical raster's renderer settings, PINNED: the scalar SIMD
+/// level and the single-threaded dispatcher, so the frozen hash depends
+/// on no host's CPU (docs/canvas-gpu-plan.md G2, held by
+/// tools/check-canvas-blit.py; the measurement is
+/// docs/measurements/canvas-vello-determinism-2026-09-10.txt).
+pub(crate) const CANONICAL_SETTINGS: RenderSettings =
+    RenderSettings { level: Level::fallback(), num_threads: 0 };
+
+/// The SCREEN raster's settings: the host's own SIMD level. Threads stay
+/// at 0 until slice 2 measures them — vello_cpu builds a thread pool per
+/// context, and at kaya's sizes that pool cost more than it saved
+/// (docs/measurements/canvas-vello-determinism-2026-09-10.txt).
+fn screen_settings() -> RenderSettings {
+    RenderSettings { level: Level::new(), num_threads: 0 }
+}
+
+/// Joins, caps and the miter limit are NOT in the op vocabulary
+/// (docs/canvas-plan.md §3.3). These are the values kaya has always drawn
+/// with (tiny-skia's defaults, kept through the vello_cpu swap); kurbo's
+/// own defaults are round, and a default taken by omission moves every
+/// stroke's pixels.
+fn stroke_style(width: f64) -> Stroke {
+    Stroke::new(width).with_caps(Cap::Butt).with_join(Join::Miter).with_miter_limit(4.0)
+}
 
 /// `KAYA_APPEARANCE=light|dark`, the harness's per-process appearance, for
 /// the two backends written in Rust — hence the cfg
@@ -409,7 +438,7 @@ const PALETTE_DARK: [(i64, u32); 5] = [
     (wire::PAINT_GROUND, 0x16181CFF),
 ];
 
-fn resolve(paint: i64, mode: Mode) -> tiny_skia::Color {
+fn resolve(paint: i64, mode: Mode) -> AlphaColor<Srgb> {
     let table = match mode {
         Mode::Light => &PALETTE_LIGHT,
         Mode::Dark => &PALETTE_DARK,
@@ -423,7 +452,7 @@ fn resolve(paint: i64, mode: Mode) -> tiny_skia::Color {
         .find(|(role, _)| *role == paint)
         .map(|(_, c)| *c)
         .unwrap_or(0xFFFFFFFF);
-    tiny_skia::Color::from_rgba8(
+    AlphaColor::<Srgb>::from_rgba8(
         ((packed >> 24) & 0xFF) as u8,
         ((packed >> 16) & 0xFF) as u8,
         ((packed >> 8) & 0xFF) as u8,
@@ -461,20 +490,23 @@ pub fn fit(viewbox: (f64, f64), track: (f64, f64)) -> Fit {
 /// A canvas at its natural size passes `drawing.viewbox` and gets k = 1
 /// with no margin.
 pub fn rasterize(drawing: &Drawing, track: (f64, f64), p: Presentation) -> Raster {
+    raster(drawing, track, p, screen_settings())
+}
+
+fn raster(drawing: &Drawing, track: (f64, f64), p: Presentation, settings: RenderSettings) -> Raster {
     let (t_w, t_h) = track;
     let width = ((t_w * p.scale).round() as i64).clamp(0, 16384) as u32;
     let height = ((t_h * p.scale).round() as i64).clamp(0, 16384) as u32;
-    let Some(mut pixmap) = tiny_skia::Pixmap::new(width.max(1), height.max(1)) else {
-        return Raster { width: 0, height: 0, scale: p.scale, pixels: Vec::new() };
-    };
     if width == 0 || height == 0 {
         return Raster { width: 0, height: 0, scale: p.scale, pixels: Vec::new() };
     }
+    let (w16, h16) = (width as u16, height as u16);
+    let mut ctx = RenderContext::new_with(w16, h16, settings);
 
     let Fit { k, ox, oy } = fit(drawing.viewbox, track);
     let s = k * p.scale;
     let (dx, dy) = (ox * p.scale, oy * p.scale);
-    let mut builder = tiny_skia::PathBuilder::new();
+    let mut path = BezPath::new();
     // The SELECTED face or the sentence saying why there is none. Held
     // rather than refused at the `font` op, so a face nothing draws with
     // refuses nothing: the measured failure is a RUN that vanishes.
@@ -482,49 +514,23 @@ pub fn rasterize(drawing: &Drawing, track: (f64, f64), p: Presentation) -> Raste
 
     for op in &drawing.ops {
         match op {
-            Op::MoveTo(x, y) => builder.move_to((x * s + dx) as f32, (y * s + dy) as f32),
-            Op::LineTo(x, y) => builder.line_to((x * s + dx) as f32, (y * s + dy) as f32),
-            Op::Close => builder.close(),
+            Op::MoveTo(x, y) => path.move_to(Point::new(x * s + dx, y * s + dy)),
+            Op::LineTo(x, y) => path.line_to(Point::new(x * s + dx, y * s + dy)),
+            Op::Close => path.close_path(),
             Op::Stroke { paint, width } => {
-                let built = std::mem::replace(&mut builder, tiny_skia::PathBuilder::new());
-                if let Some(path) = built.finish() {
-                    let mut style = tiny_skia::Paint::default();
-                    style.set_color(resolve(*paint, p.mode));
-                    style.anti_alias = true;
-                    // Joins, caps and the miter limit are NOT in the op
-                    // vocabulary (§3.3), so they are tiny-skia's
-                    // defaults and are the same number on every lane.
-                    let stroke = tiny_skia::Stroke {
-                        width: (width * s) as f32,
-                        ..Default::default()
-                    };
-                    pixmap.stroke_path(
-                        &path,
-                        &style,
-                        &stroke,
-                        tiny_skia::Transform::identity(),
-                        None,
-                    );
+                let built = std::mem::take(&mut path);
+                if !built.is_empty() {
+                    ctx.set_paint(resolve(*paint, p.mode));
+                    ctx.set_stroke(stroke_style(width * s));
+                    ctx.stroke_path(&built);
                 }
             }
             Op::Fill { paint, even_odd } => {
-                let built = std::mem::replace(&mut builder, tiny_skia::PathBuilder::new());
-                if let Some(path) = built.finish() {
-                    let mut style = tiny_skia::Paint::default();
-                    style.set_color(resolve(*paint, p.mode));
-                    style.anti_alias = true;
-                    let rule = if *even_odd {
-                        tiny_skia::FillRule::EvenOdd
-                    } else {
-                        tiny_skia::FillRule::Winding
-                    };
-                    pixmap.fill_path(
-                        &path,
-                        &style,
-                        rule,
-                        tiny_skia::Transform::identity(),
-                        None,
-                    );
+                let built = std::mem::take(&mut path);
+                if !built.is_empty() {
+                    ctx.set_paint(resolve(*paint, p.mode));
+                    ctx.set_fill_rule(if *even_odd { Fill::EvenOdd } else { Fill::NonZero });
+                    ctx.fill_path(&built);
                 }
             }
             Op::Font { asset, size, weight } => {
@@ -535,7 +541,7 @@ pub fn rasterize(drawing: &Drawing, track: (f64, f64), p: Presentation) -> Raste
                 // cannot speak for the second answer, so the refusal is
                 // repeated here (docs/canvas-plan.md §3.5, ruled
                 // 2026-08-26). It fires before anything of this run
-                // reaches the pixmap, and the unwind takes the buffer
+                // reaches the buffer, and the unwind takes the buffer
                 // with it: no half-drawn picture leaves this function.
                 let face = match &face {
                     Some(Ok(face)) => face,
@@ -550,32 +556,31 @@ pub fn rasterize(drawing: &Drawing, track: (f64, f64), p: Presentation) -> Raste
                     // it, so a face has always been selected here (§3.5).
                     None => unreachable!("a canvas text op with no font reached the raster"),
                 };
-                if let Some(path) = face.outline(text, x * s + dx, y * s + dy, *align, *baseline) {
-                    let mut style = tiny_skia::Paint::default();
-                    style.set_color(resolve(*paint, p.mode));
-                    style.anti_alias = true;
-                    pixmap.fill_path(
-                        &path,
-                        &style,
-                        tiny_skia::FillRule::Winding,
-                        tiny_skia::Transform::identity(),
-                        None,
-                    );
+                if let Some(line) = face.outline(text, x * s + dx, y * s + dy, *align, *baseline) {
+                    ctx.set_paint(resolve(*paint, p.mode));
+                    ctx.set_fill_rule(Fill::NonZero);
+                    ctx.fill_path(&line);
                 }
             }
         }
     }
 
-    Raster { width, height, scale: p.scale, pixels: pixmap.take() }
+    ctx.flush();
+    let mut pixels = vec![0u8; width as usize * height as usize * 4];
+    let target = PixmapMut::new(w16, h16, &mut pixels)
+        .expect("the buffer is exactly width * height * 4 bytes");
+    ctx.render(target, &mut Resources::new());
+    Raster { width, height, scale: p.scale, pixels }
 }
 
 /// The canonical raster and the two legible reads, all three from ONE
 /// render so a scene cannot see them disagree (§7.1, §7.2).
 pub fn probe(drawing: &Drawing) -> Probe {
-    let raster = rasterize(
+    let raster = raster(
         drawing,
         drawing.viewbox,
         Presentation { scale: CANONICAL_SCALE, mode: CANONICAL_MODE },
+        CANONICAL_SETTINGS,
     );
     Probe { hash: hash(&raster), ops: drawing.op_count(), ink: ink(&raster) }
 }
@@ -643,7 +648,7 @@ pub fn drawing_observation(p: &Probe) -> String {
 }
 
 // ---------------------------------------------------------------------
-// Text: shape with harfrust, outline with skrifa, fill with tiny-skia
+// Text: shape with harfrust, outline with skrifa, fill as a path
 // ---------------------------------------------------------------------
 
 /// One selected face at one pixel size. The bytes are owned so the
@@ -682,7 +687,7 @@ impl Face {
     }
 
     /// The whole line as ONE path in device space, already anchored.
-    /// Glyph outlines are UNHINTED and antialiased by tiny-skia — the
+    /// Glyph outlines are UNHINTED and antialiased by the rasterizer — the
     /// chosen trade, because hinting is per-platform flavour and
     /// byte-identity is the point (§4.1's hinting caveat).
     fn outline(
@@ -692,7 +697,7 @@ impl Face {
         y: f64,
         align: i64,
         baseline: i64,
-    ) -> Option<tiny_skia::Path> {
+    ) -> Option<BezPath> {
         // `Face::open` parsed these same bytes, so this cannot fail —
         // and says so LOUDLY rather than dropping the run, which is the
         // shape this file exists to refuse (docs/canvas-plan.md §3.5).
@@ -740,7 +745,7 @@ impl Face {
         };
 
         let outlines = font.outline_glyphs();
-        let mut sink = GlyphSink { builder: tiny_skia::PathBuilder::new(), dx: 0.0, dy: 0.0 };
+        let mut sink = GlyphSink { path: BezPath::new(), dx: 0.0, dy: 0.0 };
         let mut cursor = pen_x;
         for (info, pos) in shaped.glyph_infos().iter().zip(shaped.glyph_positions()) {
             let glyph = outlines.get(skrifa::GlyphId::new(info.glyph_id))?;
@@ -753,7 +758,7 @@ impl Face {
             glyph.draw(settings, &mut sink).ok()?;
             cursor += f64::from(pos.x_advance) * per_unit;
         }
-        sink.builder.finish()
+        if sink.path.is_empty() { None } else { Some(sink.path) }
     }
 }
 
@@ -761,43 +766,43 @@ impl Face {
 /// pen position, flipping the font's y-up convention to the raster's
 /// y-down.
 struct GlyphSink {
-    builder: tiny_skia::PathBuilder,
+    path: BezPath,
     dx: f64,
     dy: f64,
 }
 
 impl GlyphSink {
-    fn at(&self, x: f32, y: f32) -> (f32, f32) {
-        ((f64::from(x) + self.dx) as f32, (self.dy - f64::from(y)) as f32)
+    fn at(&self, x: f32, y: f32) -> Point {
+        Point::new(f64::from(x) + self.dx, self.dy - f64::from(y))
     }
 }
 
 impl OutlinePen for GlyphSink {
     fn move_to(&mut self, x: f32, y: f32) {
-        let (x, y) = self.at(x, y);
-        self.builder.move_to(x, y);
+        let p = self.at(x, y);
+        self.path.move_to(p);
     }
 
     fn line_to(&mut self, x: f32, y: f32) {
-        let (x, y) = self.at(x, y);
-        self.builder.line_to(x, y);
+        let p = self.at(x, y);
+        self.path.line_to(p);
     }
 
     fn quad_to(&mut self, cx: f32, cy: f32, x: f32, y: f32) {
-        let (cx, cy) = self.at(cx, cy);
-        let (x, y) = self.at(x, y);
-        self.builder.quad_to(cx, cy, x, y);
+        let c = self.at(cx, cy);
+        let p = self.at(x, y);
+        self.path.quad_to(c, p);
     }
 
     fn curve_to(&mut self, cx0: f32, cy0: f32, cx1: f32, cy1: f32, x: f32, y: f32) {
-        let (cx0, cy0) = self.at(cx0, cy0);
-        let (cx1, cy1) = self.at(cx1, cy1);
-        let (x, y) = self.at(x, y);
-        self.builder.cubic_to(cx0, cy0, cx1, cy1, x, y);
+        let c0 = self.at(cx0, cy0);
+        let c1 = self.at(cx1, cy1);
+        let p = self.at(x, y);
+        self.path.curve_to(c0, c1, p);
     }
 
     fn close(&mut self) {
-        self.builder.close();
+        self.path.close_path();
     }
 }
 
@@ -924,10 +929,11 @@ mod tests {
         );
         assert_eq!(
             format!("{:016x}", p.hash),
-            "e5ac8a2c0b240633",
-            "tools/scenes/canvas.steps freezes this hash (c4fa15caf170a5ff was this \
-             scene with the `Q3` run dropped for want of its font, which the raster \
-             refuses now rather than draws)"
+            "7ae0a9280909ee7b",
+            "tools/scenes/canvas.steps freezes this hash (e5ac8a2c0b240633 was the \
+             same scene under tiny-skia, before the vello_cpu swap of 2026-09-10; \
+             c4fa15caf170a5ff was this scene with the `Q3` run dropped for want of \
+             its font, which the raster refuses now rather than draws)"
         );
         assert_eq!(drawing_observation(&p), "41/2,8,97,83");
         // BOTH MODES, because the scene's `expect_ink` names both and the
@@ -1089,7 +1095,7 @@ mod tests {
         let p = probe(&d);
         assert_eq!(
             (drawing_observation(&p), format!("{:016x}", p.hash)),
-            ("21/4,7,96,93".to_string(), "29abce8483ccc343".to_string()),
+            ("21/4,7,96,93".to_string(), "3864e7eaa9a194b7".to_string()),
             "tools/scenes/portfolio.steps freezes these two"
         );
         // THE CENTRE, and only the centre: a `fixed` canvas is placed in

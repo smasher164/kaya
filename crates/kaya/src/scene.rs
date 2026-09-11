@@ -3653,7 +3653,16 @@ impl Scene {
             let window = self.breakpoints[n].window;
             if let Some((width, class)) = self.window_metrics.get(&window).copied() {
                 let mut ops = self.evaluate_breakpoint(n, width, class);
+                eprintln!(
+                    "KAYA_DIAG breakpoint window={} when={} declared against width={width} class={class}: hold={} ({} ops)",
+                    window.0, self.breakpoints[n].when, self.breakpoints[n].applied, ops.len()
+                );
                 out.append(&mut ops);
+            } else {
+                eprintln!(
+                    "KAYA_DIAG breakpoint window={} when={} declared with NO metrics latched for its window",
+                    window.0, self.breakpoints[n].when
+                );
             }
         }
 

@@ -3769,22 +3769,31 @@ pub extern "C" fn kaya_presentation(scale: f64, dark: bool) {
 #[unsafe(no_mangle)]
 pub extern "C" fn kaya_window_metrics(window: u64, width: f64, height: f64, size_class: i64) {
     let _ = height;
+    // THE REPORT'S OWN TRACE, one line per outcome: the third
+    // adaptive-swiftui sighting (2026-09-10) had the backend's diag line
+    // and a row that never folded, with nothing between them to say
+    // which link dropped (docs/deferred.md, the adaptive-swiftui entry).
     if !width.is_finite() || width <= 0.0 {
+        eprintln!("KAYA_DIAG core metrics REFUSED window={window} width={width} class={size_class}: width");
         return;
     }
     if !matches!(
         size_class,
         KAYA_SIZE_CLASS_NONE | KAYA_SIZE_CLASS_COMPACT | KAYA_SIZE_CLASS_REGULAR
     ) {
+        eprintln!("KAYA_DIAG core metrics REFUSED window={window} width={width} class={size_class}: class");
         return;
     }
     latch_window_metrics(window, width, size_class);
-    with_window_scene("reporting a window's content size", |scene| {
-        (
-            scene.set_window_metrics(crate::protocol::WindowId(window), width, size_class),
-            (),
-        )
+    let reached = with_window_scene("reporting a window's content size", |scene| {
+        let ops = scene.set_window_metrics(crate::protocol::WindowId(window), width, size_class);
+        let n = ops.len();
+        (ops, Some(n))
     });
+    match reached {
+        Some(n) => eprintln!("KAYA_DIAG core metrics window={window} width={width} class={size_class} latched and applied to the scene ({n} ops)"),
+        None => eprintln!("KAYA_DIAG core metrics window={window} width={width} class={size_class} latched; no scene yet, the next one is seeded from it"),
+    }
 }
 
 /// THE TRACK LAYOUT ASSIGNED ONE CANVAS, in device-independent points,

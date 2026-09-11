@@ -404,9 +404,21 @@ if MODE == "parallel":
                 f"{p} {s}" for p, s in phases if p != "matrix"))
         keep_lane_log(name, LANES_KEEP_DIR)
         budget = BUDGETS.get(name, 0)
-        if budget > 0 and secs > budget:
+        # THE TOKEN'S WAITS ARE NETTED OUT before the ceiling is read: a
+        # lane that waited for another lane's exclusive block did no work
+        # of its own in that time (matrix #3 of the vello swap, 2026-09-10:
+        # android 915s against 870 with 294s of waits, its two python
+        # legs 37s of a 249s phase). Read through exclusive.py's own
+        # template, so the sentence and its reader cannot drift.
+        waited = exclusive.waited_seconds(name, log_text)
+        net = secs - waited
+        if waited:
+            print(f"{name}: {waited}s of that waiting for the exclusive "
+                  f"token; {net}s net against the {budget}s ceiling")
+        if budget > 0 and net > budget:
             now = os.getloadavg()
-            print(f"{name}: DURATION ANOMALY — {secs}s exceeds the "
+            print(f"{name}: DURATION ANOMALY — {secs}s ({net}s net of the "
+                  f"token's waits) exceeds the "
                   f"{budget}s ceiling. A lane that slows down by this "
                   f"much changed in kind, not in degree: look for work "
                   f"added to EVERY leg (an env export, a per-leg wait, "

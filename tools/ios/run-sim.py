@@ -1486,41 +1486,74 @@ def link_door(udid, bundle_id, name, url, verdict, log, seconds=120):
         print(f"run-sim: {name}: `simctl openurl {url}` failed on {udid}",
               file=log)
         return False
-    ok, body = xcuidrive(udid, "sb_find Open")
-    if ok:
-        print(f"run-sim: {name}: SpringBoard asked to confirm this "
-              f"scheme ({body.strip()}); answering it once — the approval "
-              f"is remembered for {udid}", file=log)
-        tapped, why = xcuidrive(udid, "sb_tap Open")
-        if not tapped:
-            print(f"run-sim: {name}: could not answer SpringBoard's "
-                  f"confirmation: {why}", file=log)
-            return False
-        # THE ASK THAT RAISED THE ALERT DELIVERED NOTHING, so the door is
-        # pushed again now that the approval stands.
-        if ask() != 0:
-            print(f"run-sim: {name}: the second `simctl openurl` failed "
-                  f"on {udid}", file=log)
-            return False
-        still, body = xcuidrive(udid, "sb_find Open")
-        if still:
-            print(f"run-sim: {name}: SpringBoard is STILL asking after "
-                  f"the tap ({body.strip()}), so nothing was delivered "
-                  f"and every later openurl queues another alert",
-                  file=log)
-            return False
-    deadline = time.monotonic() + seconds
+    # THE ALERT IS LOOKED FOR UNTIL THE VERDICT ARRIVES, not once: it
+    # appears after `openurl` has returned, and under host load later
+    # than one immediate look — the vello matrix of 2026-09-10 (load 88)
+    # read `nothing carries the label Open` 0.05s after the ask, then
+    # nothing for 120s, while the same device asked the moment the lane
+    # ran alone (docs/traps.md). KAYA_IOS_LATE_ALERT_TEST skips the
+    # immediate look so the late arm is watched printing.
+    started = time.monotonic()
+    deadline = started + seconds
+    answered = 0
+    late_test = os.environ.get("KAYA_IOS_LATE_ALERT_TEST", "") in (udid, "all")
+    next_look = started + 2.0 if late_test else started
     while time.monotonic() < deadline:
         line = (verdict.read_text(encoding="utf-8", errors="replace").strip()
                 if verdict.is_file() else "")
         if line:
             print(f"run-sim: {name}: act two verdict {line}", file=log)
             return line.startswith("KAYA_SELFTEST: OK")
+        if time.monotonic() >= next_look and answered < 2:
+            next_look = time.monotonic() + 1.0
+            ok, body = xcuidrive(udid, "sb_find Open")
+            if ok:
+                answered += 1
+                print(f"run-sim: {name}: SpringBoard asked to confirm this "
+                      f"scheme ({body.strip()}) {time.monotonic() - started:.1f}s "
+                      f"after the door; answering it — the approval is "
+                      f"remembered for {udid}", file=log)
+                tapped, why = xcuidrive(udid, "sb_tap Open")
+                if not tapped:
+                    print(f"run-sim: {name}: could not answer SpringBoard's "
+                          f"confirmation: {why}", file=log)
+                    return False
+                # THE ASK THAT RAISED THE ALERT DELIVERED NOTHING, so the
+                # door is pushed again now that the approval stands.
+                if ask() != 0:
+                    print(f"run-sim: {name}: the second `simctl openurl` "
+                          f"failed on {udid}", file=log)
+                    return False
+                still, body = xcuidrive(udid, "sb_find Open")
+                if still:
+                    print(f"run-sim: {name}: SpringBoard is STILL asking "
+                          f"after the tap ({body.strip()}), so nothing was "
+                          f"delivered and every later openurl queues "
+                          f"another alert", file=log)
+                    return False
         time.sleep(0.2)
+    # THE TWO CAUSES ARE TOLD APART, not named together (invariant 3): the
+    # marker is CONSUMED ON READ (crates/kaya/src/act2.rs), so one still
+    # on disk is an app that never reached act two, and one gone is an app
+    # that adopted it and published nothing inside the deadline; launchctl
+    # says whether the process is alive at expiry (first sighting
+    # 2026-09-10, vello matrix #1, ios links-swiftui under host load 88).
+    marker = verdict.with_name("marker")
+    adopted = "GONE, so the app adopted it and published no verdict in time" \
+        if not marker.is_file() else "STILL ON DISK, so no app ever adopted it"
+    alive = "running" if app_running(udid, bundle_id) else "NOT running"
     print(f"run-sim: {name}: act two wrote no verdict to {verdict} within "
-          f"{seconds}s of the link door — the app either never started or "
-          f"never adopted the marker", file=log)
+          f"{seconds}s of the link door — the marker is {adopted}; the app is "
+          f"{alive} on {udid} at expiry (launchctl list)", file=log)
     return False
+
+
+def app_running(udid, bundle_id):
+    """Whether launchd on the device lists a process for the bundle —
+    `UIKitApplication:<bundle id>[...]` is the label an app gets."""
+    got = out_of(["xcrun", "simctl", "spawn", udid, "launchctl", "list"])
+    return any(f"UIKitApplication:{bundle_id}[" in line
+               for line in got.splitlines())
 
 
 def second_act(udid, bundle_id, name, scene, env, act_one_out, log):

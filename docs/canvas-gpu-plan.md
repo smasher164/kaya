@@ -1,4 +1,4 @@
-# Canvas rendering: vello_cpu, a GPU path, and zero-copy presentation (design pass, rulings PROPOSED 2026-09-10)
+# Canvas rendering: vello_cpu, a GPU path, and zero-copy presentation (design pass; rulings TAKEN 2026-09-10)
 
 The maintainer's question, 2026-09-10: "is zero copy gpu rasterization
 really not accessible on GTK without dmabuf? can you do some research
@@ -9,6 +9,10 @@ URL or file:line; inferences are marked). This document is the plan
 built on it: the direct answer, the crates, one mechanism per platform,
 what the harness keeps, and three slices each opened by the measurement
 that decides it.
+
+The maintainer took all six rulings the same day ("i'm cool with this
+plan. i'd like to tackle this now"), and slice 1 was built on them (§10
+records it).
 
 Nothing here touches the wire or a binding. docs/canvas-plan.md's ruling
 2 pins the rasterizer as an implementation detail behind the op stream,
@@ -197,12 +201,12 @@ answer now:
 
 | # | ruling | status |
 | --- | --- | --- |
-| G1 | **vello_cpu replaces tiny-skia, and kaya keeps its own text.** harfrust shapes and skrifa outlines glyphs into paths today; the swap feeds those PATHS to vello_cpu's `fill_path`, never its `glyph_run`, so the text half of every frozen hash changes engine for nothing. vello's own text is moving onto its `glifo` crate, which is one more reason not to depend on it. This is docs/canvas-plan.md ruling 14's lever 4 being taken, which that ruling already calls a standing evaluation, so it needs no ruling change. | PROPOSED |
-| G2 | **The canonical raster is pinned at `Level::fallback()` and `num_threads: 0`; the on-screen raster runs `Level::new()` with threads.** vello's snapshot corpus asserts byte-exact output across SIMD levels by default (threshold 0), with a handful of named tolerance exceptions, and its own example says scalar fallback "reduces the possibility of slight pixel differences when running on different platforms". The canonical raster is already a separate render from the screen's (docs/canvas-plan.md §7.1), so pinning costs nothing on screen, and the belt-and-braces keeps `expect_drawing_hash` ONE string. A gate holds the pinned settings, because a raster that quietly moved to `Level::new()` for the hash goes green on five aarch64 lanes and red on the first x86_64 one. | PROPOSED |
-| G3 | **A GPU display path is taken, subject to one measurement.** This is lever 5 leaving RESERVED, and it amends ruling 2's "GPU rendering for this buffer is refused ON PRINCIPLE" to: refused for the CANONICAL raster, which stays CPU and stays the thing kaya freezes and reasons about; the DISPLAY may be drawn by the GPU. The measurement gate: at kaya's real canvas sizes, vello_hybrid including its readback must beat multithreaded vello_cpu decisively, or slice 2 stops with "vello_cpu with threads, no GPU", which would be a fine outcome. | PROPOSED, the maintainer's call |
-| G4 | **One device owner in the core.** A new file under crates/kaya/src/, `canvas/gpu.rs`, creates the one wgpu instance, adapter and device; backends receive a texture or surface handle and never name a vello or wgpu type. tools/check-canvas-blit.py grows the clause: exactly one file constructs the device, and the four backend arms may name a handle but never a renderer type. "Kaya rasterizes, backends blit" survives with "blit" now including "composite the texture kaya gave you". | PROPOSED |
-| G5 | **Device-or-CPU is a measured answer, not an allowlist.** At device acquisition kaya renders vello's own eight-feature probe scene (`vello_common::probe`, tolerance 3 per channel against its bundled reference) and falls back to vello_cpu on anything but `Success`. That is a diagnostic that prints only what it measured (CLAUDE.md invariant 3). `KAYA_CANVAS_RENDERER=cpu|gpu` pins either for a lane. | PROPOSED |
-| G6 | **GTK takes the GL-texture route; readback is the fallback; dmabuf stays the Image widget's.** §1's answer as a ruling. The dmabuf export bridge under GSK's Vulkan renderer is GDK's own and costs kaya nothing to use; a kaya-side dmabuf export (raw `ash` through `Device::as_hal`, `VK_KHR_external_memory_fd`, `VK_EXT_image_drm_format_modifier`, none of which wgpu wraps) is NOT built for the canvas, and is the Image widget's business when its high-rate arm comes (docs/canvas-plan.md ruling 16). | PROPOSED |
+| G1 | **vello_cpu replaces tiny-skia, and kaya keeps its own text.** harfrust shapes and skrifa outlines glyphs into paths today; the swap feeds those PATHS to vello_cpu's `fill_path`, never its `glyph_run`, so the text half of every frozen hash changes engine for nothing. vello's own text is moving onto its `glifo` crate, which is one more reason not to depend on it. This is docs/canvas-plan.md ruling 14's lever 4 being taken, which that ruling already calls a standing evaluation, so it needs no ruling change. | TAKEN 2026-09-10 |
+| G2 | **The canonical raster is pinned at `Level::fallback()` and `num_threads: 0`; the on-screen raster runs `Level::new()` with threads.** vello's snapshot corpus asserts byte-exact output across SIMD levels by default (threshold 0), with a handful of named tolerance exceptions, and its own example says scalar fallback "reduces the possibility of slight pixel differences when running on different platforms". The canonical raster is already a separate render from the screen's (docs/canvas-plan.md §7.1), so pinning costs nothing on screen, and the belt-and-braces keeps `expect_drawing_hash` ONE string. A gate holds the pinned settings, because a raster that quietly moved to `Level::new()` for the hash goes green on five aarch64 lanes and red on the first x86_64 one. | TAKEN 2026-09-10 |
+| G3 | **A GPU display path is taken, subject to one measurement.** This is lever 5 leaving RESERVED, and it amends ruling 2's "GPU rendering for this buffer is refused ON PRINCIPLE" to: refused for the CANONICAL raster, which stays CPU and stays the thing kaya freezes and reasons about; the DISPLAY may be drawn by the GPU. The measurement gate: at kaya's real canvas sizes, vello_hybrid including its readback must beat multithreaded vello_cpu decisively, or slice 2 stops with "vello_cpu with threads, no GPU", which would be a fine outcome. | TAKEN 2026-09-10 |
+| G4 | **One device owner in the core.** A new file under crates/kaya/src/, `canvas/gpu.rs`, creates the one wgpu instance, adapter and device; backends receive a texture or surface handle and never name a vello or wgpu type. tools/check-canvas-blit.py grows the clause: exactly one file constructs the device, and the four backend arms may name a handle but never a renderer type. "Kaya rasterizes, backends blit" survives with "blit" now including "composite the texture kaya gave you". | TAKEN 2026-09-10 |
+| G5 | **Device-or-CPU is a measured answer, not an allowlist.** At device acquisition kaya renders vello's own eight-feature probe scene (`vello_common::probe`, tolerance 3 per channel against its bundled reference) and falls back to vello_cpu on anything but `Success`. That is a diagnostic that prints only what it measured (CLAUDE.md invariant 3). `KAYA_CANVAS_RENDERER=cpu|gpu` pins either for a lane. | TAKEN 2026-09-10 |
+| G6 | **GTK takes the GL-texture route; readback is the fallback; dmabuf stays the Image widget's.** §1's answer as a ruling. The dmabuf export bridge under GSK's Vulkan renderer is GDK's own and costs kaya nothing to use; a kaya-side dmabuf export (raw `ash` through `Device::as_hal`, `VK_KHR_external_memory_fd`, `VK_EXT_image_drm_format_modifier`, none of which wgpu wraps) is NOT built for the canvas, and is the Image widget's business when its high-rate arm comes (docs/canvas-plan.md ruling 16). | TAKEN 2026-09-10 |
 
 What the harness keeps under G3 is already written down in
 docs/canvas-plan.md §15.3 lever 5 and is restated in §7 with the one new
@@ -387,3 +391,69 @@ is always there, since the canonical raster never leaves it.
   the maintainer's call. G1, G2, G4 and G5 follow from rulings already
   taken and can be ratified by "go ahead". Slice 1 can start on either
   answer.
+
+## 10. Slice 1, built 2026-09-10
+
+- **The measurement first**, as §8 said: docs/measurements/canvas-vello-determinism-2026-09-10.txt.
+  Every cell of scalar × NEON/AVX2 × {0, 2, 4} threads × {aarch64,
+  x86_64} agreed on all three of kaya's op streams, and the probe's
+  tiny-skia hash of the canvas figure equalled the scene's frozen string,
+  which is how the probe was known to measure kaya's pipeline and not a
+  neighbour. The probe source is beside the record.
+- **The swap**: crates/kaya/Cargo.toml carries vello_cpu 0.2.0 (std and
+  the u8 pipeline; `multithreading` off until slice 2 measures it, since
+  the crate builds a thread pool per context and at kaya's sizes that
+  pool cost more than it saved) and names fearless_simd's
+  `force_support_fallback` feature, which is where `Level::fallback()`
+  lives. crates/kaya/src/canvas.rs rasterizes through `RenderContext`
+  onto kurbo paths: `CANONICAL_SETTINGS` (scalar, one thread) for
+  `probe()`, `screen_settings()` (`Level::new()`, one thread) for the
+  screen, text kept on harfrust + skrifa and fed as paths (G1), and the
+  stroke pinned to the values kaya always drew with — butt caps, miter
+  joins, limit 4 — because kurbo's own defaults are round on both.
+- **The hashes moved once.** canvas.steps 7ae0a9280909ee7b (was
+  e5ac8a2c0b240633), portfolio.steps 6b2cf4b8a3f05415 / 3864e7eaa9a194b7
+  / 2a0b4ef7e4c99502, sizepolicy.steps UNCHANGED at 8185fc030ee419b6:
+  its figure is axis-aligned rectangles on integer edges, so no
+  antialiasing is involved and the two rasterizers agree byte for byte.
+  The two unit tests that pin hashes moved with them.
+- **The guard**: tools/check-canvas-blit.py clause 6 holds the pin —
+  the constant's two fields, `probe()` passing it, `rasterize()` passing
+  the screen settings with `Level::new()`, and the u8 pipeline alone —
+  with five watched negatives on doctored copies of canvas.rs, each
+  seen firing.
+- **Not taken in this slice**: `aliasing_threshold` as a prop (§8 item
+  5) — a binding-surface sweep of its own, on the ledger.
+- **The matrices.** #1 on the swapped tree: mac 440, linux 765, windows
+  277 and android 143 legs green with the 58-gate sweep, every canvas leg
+  on every lane green (the iOS canvas legs in 4-5s), and ONE red leg, iOS
+  links-swiftui, where act two never wrote a verdict after the link
+  door — the app-links door, not the raster, on a host at load 88. Read
+  from the recorder: the driver looked for SpringBoard's confirmation
+  once, 0.05s after `openurl`, saw nothing, and nothing followed; the
+  same device asked and passed the moment the lane ran alone. Fixed at
+  the cause (the door polls for the alert until the verdict, the expiry
+  sentence tells its two causes apart; docs/traps.md), the late arm
+  watched printing under `KAYA_IOS_LATE_ALERT_TEST`, and #2 on the final
+  tree is recorded in the commit.
+
+## 11. Slice 2's measurement, taken 2026-09-10: the GPU path is not taken
+
+docs/measurements/canvas-gpu-timing-2026-09-10.txt. At every size kaya
+draws — the chart at its own 280x180, the lane's 1600x1000, a phone's
+1200x2400 — vello_hybrid on Metal is 3-20x SLOWER than vello_cpu, with
+or without the readback, and threaded vello_cpu with a reused context
+draws every phone-size frame in under a millisecond. G3's named stop
+applies: slice 2 ends with "vello_cpu with threads, no GPU", and slice
+3 (zero-copy presentation per backend, G6's GTK route included) is not
+built, because there is no GPU frame to present. The plan's research
+stands as the record of how it would be done if a canvas ever needs it,
+and the probe is a `cargo run` away.
+
+What survives from slice 2 is the threads: above about a megapixel, 8
+workers on a reused context are 1.7-2.5x faster than one, and their
+bytes equal the single-threaded bytes in every cell measured. The
+remaining work is a small slice of its own — a RenderContext kept per
+thread and resized rather than rebuilt, threads switched on above a
+measured pixel count, `multithreading` enabled on the dependency — with
+the canonical raster staying scalar and single-threaded under G2.

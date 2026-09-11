@@ -24,6 +24,12 @@ dev_shell_or_die()
 #    missing scale is invisible to all five. GTK is where it bites —
 #    gtk_widget_get_scale_factor "returns the next higher integer value"
 #    under fractional scaling, so 125% rasters at 2 (§5 rule 1).
+# 6. THE CANONICAL RASTER'S SETTINGS ARE PINNED (docs/canvas-gpu-plan.md
+#    G2): the hash the scenes freeze is taken at the scalar SIMD level on
+#    one thread, the screen raster at the host's own level. A hash that
+#    quietly moved onto Level::new() is green on five aarch64 lanes and
+#    red on the first x86_64 one, and no scene can tell the two apart
+#    (docs/measurements/canvas-vello-determinism-2026-09-10.txt).
 
 import os
 import platform
@@ -40,6 +46,8 @@ GTK = "crates/kaya/src/gtk.rs"
 WINUI = "crates/kaya/src/winui/mod.rs"
 SWIFTUI = "swift/KayaSwiftUI.swift"
 COMPOSE = "android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt"
+CANVAS = "crates/kaya/src/canvas.rs"
+CARGO = "crates/kaya/Cargo.toml"
 
 
 def strip_comments(text):
@@ -166,7 +174,7 @@ def check(gtk, winui, swiftui, compose):
     # sampling a grey cannot see it.
     FORMATS = [
         ("gtk", r"MemoryFormat::R8g8b8a8Premultiplied",
-         "GdkMemoryTexture takes tiny-skia's Pixmap layout verbatim — "
+         "GdkMemoryTexture takes the core's premultiplied RGBA8 layout verbatim — "
          "R at byte 0, A at byte 3 — so the GTK arm swizzles nothing"),
         ("swiftui", r"CGImageAlphaInfo\.premultipliedLast",
          "premultipliedLast plus byteOrder32Big is RGBA in MEMORY "
@@ -421,6 +429,72 @@ def check(gtk, winui, swiftui, compose):
     return bad
 
 
+# --- 6. THE CANONICAL RASTER'S PINNED SETTINGS. -----------------------
+
+def read_path(rel):
+    p = pathlib.Path(rel)
+    if not p.is_absolute():
+        p = ROOT / p
+    return p.read_text(encoding="utf-8")
+
+
+def check_canonical(canvas, cargo):
+    """Offender sentences for docs/canvas-gpu-plan.md G2 over the given
+    canvas.rs and Cargo.toml — either may be a doctored copy."""
+    bad = []
+    body = strip_comments(read_path(canvas))
+    why = ("the frozen `expect_drawing_hash` strings are taken at the "
+           "scalar SIMD level on one thread so no host's CPU is an input "
+           "to them (docs/canvas-gpu-plan.md G2, "
+           "docs/measurements/canvas-vello-determinism-2026-09-10.txt)")
+    m = re.search(r"const CANONICAL_SETTINGS: RenderSettings =\s*"
+                  r"RenderSettings \{([^}]*)\}", body)
+    if m is None:
+        bad.append(f"{canvas}: CANONICAL_SETTINGS is not where this gate "
+                   f"looks — the pinned settings moved and this clause is "
+                   f"blind, which would pass any level at all")
+    else:
+        fields = m.group(1)
+        if re.search(r"level:\s*Level::fallback\(\)", fields) is None:
+            bad.append(f"{canvas}: the canonical level is no longer "
+                       f"Level::fallback() — {why}")
+        if re.search(r"num_threads:\s*0\b", fields) is None:
+            bad.append(f"{canvas}: the canonical num_threads is no longer "
+                       f"0 — {why}")
+    pm = re.search(r"pub fn probe\(drawing: &Drawing\) -> Probe \{(.*?)\n\}",
+                   body, re.S)
+    if pm is None or "CANONICAL_SETTINGS" not in pm.group(1) \
+            or "screen_settings" in pm.group(1):
+        bad.append(f"{canvas}: probe() does not raster with "
+                   f"CANONICAL_SETTINGS — the hash the scenes freeze would "
+                   f"be taken at whatever the screen uses; {why}")
+    rm = re.search(r"pub fn rasterize\(drawing: &Drawing, track: \(f64, "
+                   r"f64\), p: Presentation\) -> Raster \{(.*?)\n\}",
+                   body, re.S)
+    if rm is None or "screen_settings()" not in rm.group(1):
+        bad.append(f"{canvas}: rasterize(), the screen raster, no longer "
+                   f"takes screen_settings() — the two rasters are meant "
+                   f"to differ in exactly that argument")
+    sm = re.search(r"fn screen_settings\(\) -> RenderSettings \{(.*?)\n\}",
+                   body, re.S)
+    if sm is None or re.search(r"level:\s*Level::new\(\)", sm.group(1)) is None:
+        bad.append(f"{canvas}: the screen raster's level is no longer "
+                   f"Level::new() — the pin is for the CANONICAL raster; "
+                   f"the screen draws with the host's own SIMD, and a "
+                   f"screen pinned to the scalar path pays for a guarantee "
+                   f"nothing reads")
+    if "OptimizeQuality" in body:
+        bad.append(f"{canvas}: names OptimizeQuality — the f32 pipeline, "
+                   f"whose arithmetic is where an FMA contraction could "
+                   f"differ between microarchitectures; only the u8 "
+                   f"pipeline was measured byte-exact across levels and "
+                   f"ISAs")
+    if re.search(r"f32_pipeline", read_path(cargo)):
+        bad.append(f"{cargo}: enables vello_cpu's f32_pipeline — the "
+                   f"pipeline the determinism measurement did not cover")
+    return bad
+
+
 # THE GUARD GUARDS ITSELF, on DOCTORED COPIES OF THE REAL FILES rather
 # than on synthetic samples (docs/traps.md, the wayland seat guard).
 # Every perturbation prints its substitution count and is refused if it
@@ -614,7 +688,44 @@ def negatives():
                lambda p=s: check(GTK, str(p), SWIFTUI, COMPOSE),
                want="no longer reads the parent-assigned layout slot")
 
-    g.negatives_ran(18)
+    # N6a-e: THE CANONICAL RASTER'S PIN, each field and each caller
+    # separately, on doctored copies of canvas.rs.
+    s = g.perturb("N6a (the canonical level moved to Level::new())", CANVAS,
+                  r"level: Level::fallback\(\), num_threads: 0",
+                  "level: Level::new(), num_threads: 0", flags=re.S)
+    g.negative("a canonical raster on the host's SIMD level",
+               lambda p=s: check_canonical(str(p), CARGO),
+               want="canonical level is no longer")
+    s = g.perturb("N6b (the canonical raster on four threads)", CANVAS,
+                  r"level: Level::fallback\(\), num_threads: 0",
+                  "level: Level::fallback(), num_threads: 4", flags=re.S)
+    g.negative("a canonical raster on four threads",
+               lambda p=s: check_canonical(str(p), CARGO),
+               want="canonical num_threads is no longer")
+    s = g.perturb("N6c (probe() rastering with the screen settings)", CANVAS,
+                  r"CANONICAL_SETTINGS,\n    \);",
+                  "screen_settings(),\n    );", flags=re.S)
+    g.negative("a probe that hashes the screen raster's settings",
+               lambda p=s: check_canonical(str(p), CARGO),
+               want="probe() does not raster with CANONICAL_SETTINGS")
+    s = g.perturb("N6d (the screen raster pinned to the scalar level)", CANVAS,
+                  r"RenderSettings \{ level: Level::new\(\), num_threads: 0 \}",
+                  "RenderSettings { level: Level::fallback(), num_threads: 0 }",
+                  flags=re.S)
+    g.negative("a screen raster on the scalar level",
+               lambda p=s: check_canonical(str(p), CARGO),
+               want="screen raster's level is no longer")
+    s = g.perturb("N6e (the f32 pipeline chosen for the render)", CANVAS,
+                  r"ctx\.render\(target, &mut Resources::new\(\)\);",
+                  "ctx.render_with(target, &mut Resources::new(), "
+                  "vello_cpu::RasterizerSettings { render_mode: "
+                  "vello_cpu::RenderMode::OptimizeQuality, "
+                  "..Default::default() });", flags=re.S)
+    g.negative("a render on the f32 pipeline",
+               lambda p=s: check_canonical(str(p), CARGO),
+               want="names OptimizeQuality")
+
+    g.negatives_ran(23)
 
 
 negatives()
@@ -662,12 +773,13 @@ else:
     print("check-canvas-blit: clause 4 (the SwiftUI ink-mode probe) "
           "SKIPPED — it needs macOS. Clauses 1-3 ran.")
 
-offenders = check(GTK, WINUI, SWIFTUI, COMPOSE)
+offenders = check(GTK, WINUI, SWIFTUI, COMPOSE) + check_canonical(CANVAS, CARGO)
 if offenders:
     print("\n".join(offenders))
     print("check-canvas-blit: FAIL")
     raise SystemExit(1)
 g.verdict("4 backends: the one rule, the four pixel formats, the one "
           "swizzle, the true scale reported, the 1:1 blit and its "
-          "track report, the GTK canvas's own 1:1 snapshot, and both "
-          "ink modes compared")
+          "track report, the GTK canvas's own 1:1 snapshot, both "
+          "ink modes compared, and the canonical raster's pinned "
+          "settings")

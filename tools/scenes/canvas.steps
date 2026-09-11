@@ -9,7 +9,7 @@ expect label#0 "portfolio value"
 # discriminate at all: a drawing that filled its box reads 0,0,100,100
 # whatever the transform did.
 expect_drawing canvas@chart "41/2,8,97,83"
-expect_drawing_hash canvas@chart "e5ac8a2c0b240633"
+expect_drawing_hash canvas@chart "7ae0a9280909ee7b"
 # THE BLIT, sampled at flat-region CENTRES (a rescale blurs a boundary
 # into a colour no palette entry has) and in BOTH appearance modes,
 # since a light-only string is green on a light machine and red on a

@@ -1,0 +1,128 @@
+VELLO_CPU DETERMINISM: SIMD LEVEL x THREADS x ISA, ON KAYA'S OWN OP STREAMS
+measured 2026-09-10, opening docs/canvas-gpu-plan.md's slice 1 (ruling G2)
+the obligation: "the measurement that settles the unknown, first, before
+any code moves" — whether swapping tiny-skia for vello_cpu keeps
+`expect_drawing_hash` ONE frozen string on five lanes
+
+THE QUESTION
+------------
+vello_cpu 0.2.0 dispatches on a runtime-detected SIMD level (scalar
+fallback, NEON, SSE4.2, AVX2, ...) and can rasterize on N worker
+threads. Its own example says the scalar level "reduces the possibility
+of slight pixel differences when running on different platforms", and
+its snapshot corpus compares every level against one reference PNG at
+threshold 0 with a handful of named tolerance exceptions. FNV-1a over
+the bytes tolerates nothing, so before a hash is frozen: does the SIMD
+level move a byte? does the thread count? does the ISA?
+
+THE RESULT
+----------
+Every cell of the cross product agrees, on both architectures:
+
+    drawing               aarch64 (mac, native)   x86_64 (docker, emulated)
+    canvas figure (41 ops)      7ae0a9280909ee7b        7ae0a9280909ee7b
+    portfolio chart (214 ops)   2a6508ded2aca70f        2a6508ded2aca70f
+    text page (34 ops)          87aa6247ca95443b        87aa6247ca95443b
+
+where each cell is the ONE hash all nine settings produced:
+    level   in {Fallback (scalar), baseline, new}
+            aarch64: baseline = new = Neon;   x86_64: baseline = Fallback, new = Avx2
+    threads in {0 (single-threaded dispatcher), 2, 4}
+
+So: NO SIMD-level dependence (scalar, NEON and AVX2 agree), NO thread
+dependence, NO ISA dependence, on the three shapes kaya draws. The
+primary observable survives the swap as one string per scene, exactly
+as it did under tiny-skia (docs/measurements/canvas-cross-isa-2026-08-26.txt).
+
+THE PROBE REPRODUCES KAYA'S PIPELINE BYTE FOR BYTE
+--------------------------------------------------
+The same probe also runs each stream through tiny-skia 0.12.0 with
+kaya's exact spelling, and its hash of the canvas figure is
+e5ac8a2c0b240633 — the string tools/scenes/canvas.steps freezes today.
+That is the check that the probe measures kaya's pipeline and not a
+neighbour of it.
+
+WHAT MOVES AND WHAT IT LOOKS LIKE
+---------------------------------
+tiny-skia versus vello_cpu (scalar, one thread), per drawing:
+    canvas figure       1406 /  36000 pixels differ ( 3.9%), max channel delta  50
+    portfolio chart     2527 /  50400 pixels differ ( 5.0%), max channel delta  64
+    text page          24866 / 120000 pixels differ (20.7%), max channel delta 124
+Every difference is antialiasing coverage at edges and glyph contours;
+the flat interiors are identical, which is what `expect_ink` samples.
+The six buffers were written out and viewed at 2-3x: the two figures are
+indistinguishable by eye, joins and caps included, because the probe
+pins tiny-skia's stroke defaults on the vello side (butt caps, miter
+joins, miter limit 4) — kurbo's own defaults are round caps and round
+joins, and NOT pinning them is a visible stroke change.
+
+TIMING, FOR ORIENTATION ONLY (median of 7, release, mac M-series)
+-----------------------------------------------------------------
+    drawing            tiny-skia   vello scalar/1T   vello NEON/1T
+    canvas figure        0.158ms        0.103ms          0.057ms
+    portfolio chart      0.270ms        0.129ms          0.093ms
+    text page            3.165ms        0.987ms          0.778ms
+At these sizes 2 and 4 worker threads were SLOWER than one (0.16-0.29ms
+against 0.06-0.10ms on the figure): vello_cpu builds a rayon pool per
+RenderContext, so a fresh context per raster pays thread start-up, and
+the rasters are far too small to amortize it. Threads are slice 2's
+measured lever (docs/canvas-gpu-plan.md §8), at kaya's large sizes and
+with a context that is reused; nothing here decides them.
+
+WHAT WAS RUN
+------------
+canvas-vello-determinism-2026-09-10.rs beside this file, a standalone
+probe reproducing crates/kaya/src/canvas.rs's pipeline: harfrust 0.13.3
+shaping and skrifa 0.46.2 scaling unhinted outlines of the vendored Sora
+into paths, then vello_cpu 0.2.0 (features std, u8_pipeline,
+multithreading; RenderMode::OptimizeSpeed, the u8/u16 pipeline) and
+tiny-skia 0.12.0 side by side. The hash is canvas.rs's FNV-1a over
+width, height and the premultiplied RGBA8 bytes. Its Cargo.toml:
+
+    [dependencies]
+    vello_cpu = { version = "=0.2.0", default-features = false, features = ["std", "u8_pipeline", "multithreading"] }
+    fearless_simd = { version = "=0.4.0", default-features = false, features = ["std", "force_support_fallback"] }
+    tiny-skia = "=0.12.0"
+    harfrust = "=0.13.3"
+    skrifa = "=0.46.2"
+
+`Level::fallback()` is behind fearless_simd's `force_support_fallback`
+feature (it is off by default; `Level::baseline()` is the target's
+compile-time floor, which is NEON on aarch64 and the scalar path on
+x86_64). Features unify across the graph, so naming the feature on a
+direct dependency is what makes the scalar level available on
+vello_cpu's re-exported `Level`, and it is what kaya does too.
+
+The three streams: guests/rust/canvas.rs's figure op for op;
+guests/python/portfolio.py's draw_chart with a deterministic synthetic
+90-day series in place of the CSV (214 ops: the area, the 1.5pt series,
+gridlines, the axis, the end mark, seven text runs at 9px); and a
+fourteen-line text page at sizes 8-21px and weights 300-800 with all
+three alignments, the curve-heavy case.
+
+    aarch64: the mac host, native, `cargo run --release` in the dev shell
+             (cargo 1.97.0), 18 hardware threads.
+    x86_64:  `docker run --platform linux/amd64 rust:1-slim` (rustc
+             1.98.0), the same source and the same pinned versions,
+             Level::new() detecting Avx2 under the emulator.
+
+THE CAVEATS, SO NOBODY OVER-READS THIS
+--------------------------------------
+The x86_64 run was EMULATED (Docker Desktop on Apple silicon): it tests
+x86_64 codegen including the AVX2 kernels the emulator executes, not a
+real x86_64 CPU's corner cases. Same caveat as the 2026-08-26 record,
+same instruction: re-run before trusting the frozen hash on a native
+x86_64 lane.
+
+Only the u8 pipeline (RenderMode::OptimizeSpeed) was measured. The f32
+pipeline (OptimizeQuality, feature f32_pipeline) is where an FMA
+contraction could differ between microarchitectures, and kaya does not
+use it; the gate that holds the canonical raster's settings holds the
+render mode too.
+
+AND THE BELT-AND-BRACES STANDS
+------------------------------
+Nothing measured here moved a byte, and the canonical raster is still
+pinned at Level::fallback() with num_threads 0 (ruling G2): a pin that
+costs nothing at canonical sizes and turns a residual risk vello itself
+names into a non-event. The screen raster is free to run Level::new().

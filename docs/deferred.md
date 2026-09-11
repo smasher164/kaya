@@ -10523,8 +10523,25 @@ container layout recorded". TWO consequences, one fixed and one held:
   re-reports. capi.rs latches every report and seeds new scenes from
   the latch now (docs/traps.md, the first-metrics-report entry), the
   unit test watched failing with the seed removed.
+  A THIRD SIGHTING, 2026-09-10 (the vello swap's matrix #2, ios lane
+  under the five-lane load): the same sentence, the same
+  `metrics window=0 375x734 class=1` 129ms before the harness epoch,
+  `scene ready after 3ms`, the row horizontal for the 15s retry window
+  and grid@sheet at 3 columns with it — so the latch-and-seed fix of
+  2026-09-01 did not cover this path, or a third link drops. Green in
+  matrix #1 the same evening and in three standalone suites. NOTHING
+  BETWEEN THE BACKEND'S LINE AND THE ROW said which link dropped, so
+  the core traces its own side now: `KAYA_DIAG core metrics ...` at
+  kaya_window_metrics (refused by width or class, latched with no scene
+  yet, or latched and applied with the op count) and `KAYA_DIAG
+  breakpoint window=... declared against width=... class=...: hold=...`
+  (or `declared with NO metrics latched for its window`) at the batch
+  tail. The next sighting reads those two lines against the harness
+  epoch; a report that was applied with hold=true and a row still
+  horizontal moves the question to the apply side.
   KEY: adaptive-swiftui narrow, UISupportedInterfaceOrientations,
-  ios bundle orientation, check-staging N4 N5, METRICS_REPORTED
+  ios bundle orientation, check-staging N4 N5, METRICS_REPORTED,
+  core metrics trace, breakpoint declared against
 
 - ~~**GAP — the mac NATIVE table cannot be reached when it overflows**~~ —
   CLOSED 2026-08-29, and the iOS SYNTHESIZED tier with it, so all five
@@ -11785,6 +11802,22 @@ KEY: 0x88000FA8, band.UpdateLayout, row window report, portfolio_python, IsLoade
 
 KEY: save-go, /sdcard/Documents, permission denied, am_freeze, com.android.externalstorage, cached-apps freezer
 - Matrix #6 of the app-links tree, emulator-5560: the Go save guest panicked with `open /sdcard/Documents/kaya-save-9209/draft: permission denied` six seconds into the leg, on a path that five matrices' runs of the same leg had written; the leg log's logcat carries `am_freeze: [29710,com.android.externalstorage]` at 16:34:08 (the platform's cached-apps freezer suspending the external storage provider under the pool's memory pressure) and the panic at 16:37:02. A write through the FUSE mount while its provider is frozen is one candidate; a stale grant after the host APK's reinstall is another (the app-links slice rewrote every host manifest). Instrument on the next sighting: the runner prints the freezer's state for com.android.externalstorage (`dumpsys activity processes` / the am_freeze lines) beside the guest's own error, and the save leg's staging writes a probe file under the same directory before the scene runs, so the two candidates read apart. Standalone right after: save-compose, save-jvm and save-go all PASS on the same pool, so the stale-grant candidate is out and the frozen provider stands as the likelier one — one sighting.
+
+## WATCH — the iOS link door's late-alert arm has not been seen printing (2026-09-10)
+
+KEY: link door, SpringBoard confirmation, sb_find Open, KAYA_IOS_LATE_ALERT_TEST, late alert, links-swiftui, act two wrote no verdict
+- The vello matrix #1 (2026-09-10, host load 88) failed ios links-swiftui with act two writing no verdict: the door looked for SpringBoard's scheme confirmation once, 0.05s after `simctl openurl`, saw none, and waited 120s for nothing; the same device asked and passed when run alone. The door polls for the alert until the verdict now and its expiry sentence names the marker's state and the app's liveness (docs/traps.md). WHAT IS OPEN: the polling arm's own sentence (`SpringBoard asked ... N.Ns after the door`) has not printed — every run since found the approval remembered, and uninstalling the bundle does not forget it. Closes when a run on a device that has never approved the scheme prints it (a fresh simulator pool, or `KAYA_IOS_LATE_ALERT_TEST=all` on such a device), or when the sentence prints on a matrix by itself.
+
+## DEFER — the screen raster's threads: vello_cpu multithreaded above a megapixel, on a reused context (2026-09-10)
+
+KEY: screen raster threads, multithreading, num_threads, RenderContext reused, thread pool per context, screen_settings, canvas threads
+- docs/measurements/canvas-gpu-timing-2026-09-10.txt: with the RenderContext reused, 8 vello_cpu workers are 1.7-2.5x faster than one from about 1.6 megapixels up and slower below it (the pool's own cost), and their bytes equal the single-threaded bytes in every cell. Today canvas.rs builds a context per raster with `num_threads: 0` (docs/canvas-gpu-plan.md §10). What closing it takes: a thread-local context resized rather than rebuilt, threads switched on above a measured pixel count, `multithreading` enabled on the vello_cpu dependency (rayon and friends, pure Rust on every target), the canonical raster untouched under G2 and its gate clause. Small; measured; needs no ruling.
+
+## DEFER — the per-canvas aliasing knob is one setter away, and unspelled in nine (2026-09-10)
+
+KEY: aliasing_threshold, aliasing knob, set_aliasing_threshold, canvas antialiasing, lever 2, pixel art
+- docs/canvas-plan.md §15.3 lever 2 named a DECLARED per-canvas antialiasing knob (aliased fill measured 11-17x cheaper under tiny-skia, and pixel-art drawings want it for looks). The vello_cpu swap of 2026-09-10 (docs/canvas-gpu-plan.md slice 1, §10) brought it to the core for free: `RenderContext::set_aliasing_threshold(Option<u8>)` is one call in crates/kaya/src/canvas.rs's raster. What is NOT done is the prop: a window/canvas prop on the wire (spec.rs, the hash moves), the sugar in all nine bindings (invariant 2's sweep), a scene asserting the aliased raster's hash on five lanes, and check-sugar-surface's census row. Deliberately left out of the swap slice so a rasterizer change and a surface change do not ride one commit.
+- What closing it takes: the prop through the generator (one `canvas` prop, `Option<u8>` or a boolean with a ruled threshold), nine constructors, one scene, one census row; and a measurement of what the knob buys under vello_cpu, since the 11-17x figure was tiny-skia's.
 
 ## DEFER — web links are generated by shape and never driven, because verification needs a served domain (2026-09-10)
 

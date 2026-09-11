@@ -1077,7 +1077,7 @@ If the GPU wins:
   (`vello_gpu/examples/*`), where classic vello demands
   `STORAGE_BINDING` render targets, i.e. compute
   (https://docs.rs/vello/latest/vello/struct.Renderer.html).
-- New file, `crates/kaya/src/canvas/gpu.rs`: instance/adapter/device
+- A new file under crates/kaya/src/, `canvas/gpu.rs`: instance/adapter/device
   acquisition, a `RenderTargetConfig`, the readback. **One place owns the
   device**, which is also the gate clause from §5.
 - The **device-or-CPU policy** is the design question, and the tree

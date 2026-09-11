@@ -4,6 +4,68 @@ Each of these cost a debugging session (or would have). Most now have a
 structural guard; the guard is named where it exists. Do not re-derive
 these the hard way.
 
+
+
+
+## A lane's duration ceiling can be spent WAITING for another lane's exclusive block (2026-09-10)
+
+Matrix #3 of the vello_cpu swap: every lane green, and android read
+915s against its 870s ceiling. Its own log: `exclusive: android waited
+218.1s to admit varied-python — lane=windows leg=dnd_rust holds`, then
+`exclusive: android held 5 legs for 202s; waited 4 times for 294s` at
+the end; the python phase was 249s for two legs that took 37s. The
+windows lane runs its eight exclusive legs as one block holding the
+token (226s that matrix), and which lane's phase lands inside another's
+block is a matter of alignment, so the same tree read 692s in #1 and
+952s in #2. The ceiling is meant to catch work added in KIND, and a
+wait for another lane is neither work nor this lane's. validate-all nets
+the token's waits out before it reads the ceiling — through
+exclusive.py's own summary sentence, formatted from the template it is
+read back with, so the two cannot drift — and its anomaly sentence
+prints the gross and the net. Read the `exclusive:` lines before raising
+a ceiling.
+
+## The iOS link door's SpringBoard confirmation arrives AFTER `openurl` returns, and later under load (2026-09-10)
+
+`simctl openurl` on a scheme the device has not approved raises a
+SpringBoard confirmation and delivers nothing while it stands
+(2026-09-09, below). The lane's door looked for that alert ONCE, right
+after `openurl` returned. On the first matrix of the vello_cpu swap, at a
+host load of 88, the driver read `nothing carries the label Open` 0.05s
+after the ask and then nothing for 120s: no verdict, the marker still
+unadopted. The same device, the same bundle, run alone twenty minutes
+later: "SpringBoard asked to confirm this scheme", answered, green in
+15s. So the approval is NOT remembered across the lane's reinstalls (the
+leg uninstalls every other claimant and installs its own bundle before
+act one), the alert is raised on every run, and on a starved host it
+appears after the one look. The door polls for it now, once a second
+until the verdict arrives, and `KAYA_IOS_LATE_ALERT_TEST=all` skips the
+immediate look so the late arm can be watched printing (`SpringBoard
+asked ... N.Ns after the door`). IT HAS NOT PRINTED YET: two hooked
+runs after the fix found the approval remembered, and `simctl uninstall`
+of the bundle does not forget it — the approval survives a reinstall of
+the same bundle id — so the arm fires on the next device that has never
+approved the scheme (a fresh pool, or a bundle id no device has seen).
+The expiry sentence tells its two causes apart as well: the marker still
+on disk (no app adopted it) against gone (the app published nothing in
+time), and whether launchd lists the app.
+
+## A new kaya dependency has TWO lockfiles to satisfy, and the second one fails a gate, not the build (2026-09-10)
+
+tools/kaya-bindgen is its own cargo workspace with its own Cargo.lock,
+and it depends on the kaya crate by path, so every dependency kaya adds
+must land in THAT lockfile too. `cargo build --locked` at the root is
+green after a `cargo update -w` at the root, and the tree looks done;
+then tools/gen-bindings.py, which builds the generator with `--locked`,
+refuses with "cannot update the lock file tools/kaya-bindgen/Cargo.lock"
+and the gate sweep reads 57 of 58. Measured on the vello_cpu swap: the
+root lock had 234 changed lines, the generator's none. The fix is
+`cargo update -w` run INSIDE tools/kaya-bindgen (the other secondary
+locks, tools/win/*probe and tools/winui-bindgen, carry no kaya
+dependency and need nothing). The refusal is the wall and it says which
+file; this entry exists so the next dependency change runs both updates
+before the sweep rather than after.
+
 ## Platform / toolkit
 
 - **macOS 26.6.2 gates the AX hop into the open/save panel service on
@@ -6608,6 +6670,14 @@ scale and appearance; the unit test was watched failing with the seed
 removed. The rule: A REPORT THE BACKEND MAKES ONCE MUST BE LATCHED ON
 THE CORE'S SIDE, because the backend has no reason to say it twice and
 the scene that needs it may not exist yet.
+A THIRD SIGHTING 2026-09-10, same lines, with the latch in place (the
+vello swap's matrix #2): the core prints its own trace now —
+`KAYA_DIAG core metrics window=… width=… class=… latched …` with the
+outcome (refused, no scene yet, applied with N ops) and `KAYA_DIAG
+breakpoint window=… declared against width=… class=…: hold=…` at the
+batch tail — so the next reader can see whether the report reached the
+scene, whether the breakpoint saw it, and what it decided
+(docs/deferred.md, the adaptive-swiftui entry).
 
 ## The matrix's gate-skip token, taken over stale artifacts, makes the mac lane sweep all 52 gates a second time (measured 2026-09-01)
 

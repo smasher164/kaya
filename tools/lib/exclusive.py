@@ -37,6 +37,7 @@ the wall cost of exclusion stands beside the lane's duration.
 
 import contextlib
 import os
+import re
 import pathlib
 import socket
 import subprocess
@@ -222,6 +223,18 @@ def summary(lane):
         waited_n=_tally["waited_n"], waited_s=f"{_tally['waited_s']:.0f}"))
 
 
+def waited_seconds(lane, text):
+    """The seconds `lane` spent waiting for the token, read off its own
+    summary line in `text` — through the template, so the reader and the
+    sentence cannot drift apart. 0 when the lane printed no summary."""
+    pattern = re.escape(SENTENCES["summary"])
+    for key, group in (("lane", re.escape(lane)), ("held_n", r"\d+"), ("held_s", r"\d+"),
+                       ("waited_n", r"\d+"), ("waited_s", r"(\d+)")):
+        pattern = pattern.replace(re.escape("{" + key + "}"), group)
+    m = re.search("^" + pattern + "$", text, re.M)
+    return int(m.group(1)) if m else 0
+
+
 def selftest(where=None):
     """The protocol watched before a lane trusts it: two processes race the
     mkdir and exactly one wins; a lock past STALE_S is broken and one under
@@ -268,6 +281,15 @@ def selftest(where=None):
                         holder))
         out.append(("the release removes the lock", not lock.exists(), lock.exists()))
         _tally["held_n"] -= 1
+        # 5. THE SUMMARY IS READ BACK THROUGH ITS OWN TEMPLATE, for the
+        # matrix's duration ceilings (validate-all nets the waits out):
+        # this lane's line answers its seconds, another lane's answers 0.
+        line = SENTENCES["summary"].format(lane="android", held_n=5, held_s="202",
+                                           waited_n=4, waited_s="294")
+        got = waited_seconds("android", "noise\n" + line + "\nmore\n")
+        out.append(("the summary's waited seconds read back", got == 294, got))
+        other = waited_seconds("ios", line)
+        out.append(("another lane's summary reads as no wait", other == 0, other))
     bad = [o for o in out if not o[1]]
     print(f"exclusive: self-test {len(out)} watched, {len(bad)} failed", file=sys.stderr,
           flush=True)

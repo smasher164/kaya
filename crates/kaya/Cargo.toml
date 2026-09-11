@@ -19,12 +19,18 @@ harness = ["dep:atspi"]
 [dependencies]
 kaya-derive = { path = "../kaya-derive" }
 
-# The canvas raster stack (docs/canvas-plan.md §1.4, §4.1): CPU only and
-# pure Rust on every target, which is what makes the byte-hash observable
-# possible — a buffer whose pixels depend on a GPU driver is one no scene
-# can freeze. A dependency here is never cited from memory (§4.1's
-# archived-crate near-miss).
-tiny-skia = "0.12.0"
+# The canvas raster stack (docs/canvas-plan.md §1.4, §4.1;
+# docs/canvas-gpu-plan.md G1/G2): CPU only and pure Rust on every target,
+# which is what makes the byte-hash observable possible — a buffer whose
+# pixels depend on a GPU driver is one no scene can freeze. A dependency
+# here is never cited from memory (§4.1's archived-crate near-miss).
+# `multithreading` is deliberately OFF until slice 2 measures it
+# (docs/measurements/canvas-vello-determinism-2026-09-10.txt).
+vello_cpu = { version = "0.2.0", default-features = false, features = ["std", "u8_pipeline"] }
+# `Level::fallback()`, the scalar level the CANONICAL raster is pinned to,
+# is behind this feature; features unify, so naming it here is what puts
+# it on vello_cpu's re-exported `Level` (tools/check-canvas-blit.py).
+fearless_simd = { version = "0.4.0", default-features = false, features = ["std", "force_support_fallback"] }
 # harfrust runs ON read-fonts by its own design, so the shaper and the
 # outline scaler share ONE font parser.
 harfrust = "0.13.3"
