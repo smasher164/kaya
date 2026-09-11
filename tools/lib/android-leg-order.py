@@ -640,7 +640,7 @@ def main() -> int:
     doctored, n = doctor(
         "IME scene census",
         lane_text,
-        r'(?m)^IME_SCENES = \["ranges"\]$',
+        r'(?m)^IME_SCENES = \["ranges", "richtext"\]$',
         'IME_SCENES = ["ordinary"]',
     )
     bad_ns = load_lane(doctored)

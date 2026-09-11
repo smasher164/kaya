@@ -518,7 +518,12 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("");
     }
     // From the spec's Record::payload, so the kind list cannot drift.
-    for r in spec.occurrence.iter().filter(|r| r.payload.is_some()) {
+    // The rich pair is excluded: its payload sits PAST a run block.
+    for r in spec
+        .occurrence
+        .iter()
+        .filter(|r| r.payload.is_some() && !crate::rich_edit_occurrence_names(spec).contains(&r.name))
+    {
         let name = r.name;
         let up = name.to_uppercase();
         let pad = " ".repeat(31 + name.len());
@@ -594,6 +599,90 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("        at = kaya_parse_value(rec, at, room ? &vals[*n_vals] : &scratch);");
         c.line("        (*n_vals)++;");
         c.line("    }");
+        c.line("    return 1;");
+        c.line("}");
+        c.line("");
+    }
+    // The rich pair (docs/rich-text-plan.md R1): the click identity, the
+    // edit's words, then the runs in fours and the inserted text.
+    for name in crate::rich_edit_occurrence_names(spec) {
+        let up = name.to_uppercase();
+        let pad = " ".repeat(31 + name.len());
+        c.line(&format!(
+            "/* Decode a {name} occurrence: id plus path_len key-path values,"
+        ));
+        c.line(" * `source` from the slot the click family pads, the replaced");
+        c.line(" * range in UTF-8 bytes, the inserted text, and 4*n_runs values");
+        c.line(" * read in FOURS — I64 start, I64 end, Str name, Str value, the");
+        c.line(" * run offsets relative to the inserted text. Returns 1 and fills");
+        c.line(" * the outputs, or 0 for other kinds. */");
+        c.line(&format!(
+            "static inline int kaya_parse_{name}(const uint8_t *rec, uint64_t *id,"
+        ));
+        c.line(&format!("{pad}KayaVal *keys, uint32_t max_keys,"));
+        c.line(&format!("{pad}uint32_t *n_keys, uint32_t *source,"));
+        c.line(&format!("{pad}uint64_t *start, uint64_t *end,"));
+        c.line(&format!("{pad}KayaVal *inserted, KayaVal *runs,"));
+        c.line(&format!("{pad}uint32_t max_runs, uint32_t *n_runs) {{"));
+        c.line("    const KayaRecordButtonClicked *r = (const KayaRecordButtonClicked *)rec;");
+        c.line(&format!("    if (r->header.kind != KAYA_OCCURRENCE_{up})"));
+        c.line("        return 0;");
+        c.line("    *id = r->id;");
+        c.line("    *n_keys = r->path_len;");
+        c.line("    memcpy(source, rec + 20, sizeof(uint32_t)); /* the click family's pad slot */");
+        c.line("    size_t at = sizeof(KayaRecordButtonClicked);");
+        c.line("    for (uint32_t k = 0; k < r->path_len; k++) {");
+        c.line("        KayaVal scratch;");
+        c.line("        at = kaya_parse_value(rec, at, k < max_keys ? &keys[k] : &scratch);");
+        c.line("    }");
+        c.line("    memcpy(start, rec + at, sizeof(uint64_t));");
+        c.line("    memcpy(end, rec + at + 8, sizeof(uint64_t));");
+        c.line("    uint32_t count;");
+        c.line("    memcpy(&count, rec + at + 16, sizeof(uint32_t));");
+        c.line("    at += 32; /* start, end, count, reserved, and the values header */");
+        c.line("    *n_runs = count * 4;");
+        c.line("    for (uint32_t i = 0; i < count * 4; i++) {");
+        c.line("        KayaVal scratch;");
+        c.line("        at = kaya_parse_value(rec, at, i < max_runs ? &runs[i] : &scratch);");
+        c.line("    }");
+        c.line("    kaya_parse_value(rec, at, inserted);");
+        c.line("    return 1;");
+        c.line("}");
+        c.line("");
+    }
+    for name in crate::rich_format_occurrence_names(spec) {
+        let up = name.to_uppercase();
+        let pad = " ".repeat(31 + name.len());
+        c.line(&format!(
+            "/* Decode a {name} occurrence: id plus path_len key-path values,"
+        ));
+        c.line(" * `removed` from the slot the click family pads, the formatted");
+        c.line(" * range in UTF-8 bytes, and the attribute as a name and a value.");
+        c.line(" * `removed` 1 means the attribute came OFF and the value is empty.");
+        c.line(" * Returns 1 and fills the outputs, or 0 for other kinds. */");
+        c.line(&format!(
+            "static inline int kaya_parse_{name}(const uint8_t *rec, uint64_t *id,"
+        ));
+        c.line(&format!("{pad}KayaVal *keys, uint32_t max_keys,"));
+        c.line(&format!("{pad}uint32_t *n_keys, uint32_t *removed,"));
+        c.line(&format!("{pad}uint64_t *start, uint64_t *end,"));
+        c.line(&format!("{pad}KayaVal *name, KayaVal *value) {{"));
+        c.line("    const KayaRecordButtonClicked *r = (const KayaRecordButtonClicked *)rec;");
+        c.line(&format!("    if (r->header.kind != KAYA_OCCURRENCE_{up})"));
+        c.line("        return 0;");
+        c.line("    *id = r->id;");
+        c.line("    *n_keys = r->path_len;");
+        c.line("    memcpy(removed, rec + 20, sizeof(uint32_t)); /* the click family's pad slot */");
+        c.line("    size_t at = sizeof(KayaRecordButtonClicked);");
+        c.line("    for (uint32_t k = 0; k < r->path_len; k++) {");
+        c.line("        KayaVal scratch;");
+        c.line("        at = kaya_parse_value(rec, at, k < max_keys ? &keys[k] : &scratch);");
+        c.line("    }");
+        c.line("    memcpy(start, rec + at, sizeof(uint64_t));");
+        c.line("    memcpy(end, rec + at + 8, sizeof(uint64_t));");
+        c.line("    at += 16;");
+        c.line("    at = kaya_parse_value(rec, at, name);");
+        c.line("    kaya_parse_value(rec, at, value);");
         c.line("    return 1;");
         c.line("}");
         c.line("");

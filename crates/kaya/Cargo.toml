@@ -383,6 +383,10 @@ name = "ranges"
 path = "../../guests/rust/ranges.rs"
 
 [[example]]
+name = "richtext"
+path = "../../guests/rust/richtext.rs"
+
+[[example]]
 name = "typeface"
 path = "../../guests/rust/typeface.rs"
 

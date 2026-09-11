@@ -532,6 +532,41 @@ pub enum Occurrence {
     TextChanged { id: WidgetId, text: String },
     /// The user edited a stamped copy of a template entry.
     InstanceTextChanged { node: TemplateNodeId, path: Path, text: String },
+    /// One addressed user edit: `range` into the text BEFORE the edit,
+    /// `runs` relative to `inserted`, `source` from wire::EDIT_SOURCES.
+    /// Emitted beside TextChanged (docs/rich-text-plan.md R1/R4).
+    TextEdited {
+        id: WidgetId,
+        range: TextRange,
+        inserted: String,
+        runs: Vec<TextRun>,
+        source: u32,
+    },
+    /// The same for a stamped copy of a template textarea.
+    InstanceTextEdited {
+        node: TemplateNodeId,
+        path: Path,
+        range: TextRange,
+        inserted: String,
+        runs: Vec<TextRun>,
+        source: u32,
+    },
+    /// The user formatted a range; `value` None is the attribute taken off.
+    /// A collapsed caret is pending state and emits nothing.
+    TextFormatted {
+        id: WidgetId,
+        range: TextRange,
+        name: String,
+        value: Option<String>,
+    },
+    /// The same for a stamped copy.
+    InstanceTextFormatted {
+        node: TemplateNodeId,
+        path: Path,
+        range: TextRange,
+        name: String,
+        value: Option<String>,
+    },
     /// The user toggled a checkbox the guest created directly; carries
     /// the new state. Same ownership stance as TextChanged.
     Toggled { id: WidgetId, checked: bool },
@@ -1366,6 +1401,9 @@ pub enum Prop {
     Placeholder,
     /// A link's destination on a `role link` label (docs/tasks-s2-plan.md T3).
     Href,
+    /// A textarea that carries attribute runs (Bool-valued;
+    /// docs/rich-text-plan.md R1).
+    Rich,
     /// An image's encoded source bytes (Blob-valued).
     Source,
     /// A container's inter-child gap on its main axis (F64-valued, DIP;
@@ -1591,7 +1629,7 @@ pub enum CommandKind {
 /// OF BOTH: every backend counts something else (UTF-16 code units, code
 /// points on GTK) and the core converts before it lowers, so two types make
 /// that conversion impossible to skip.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct TextRange {
     pub start: u64,
     pub stop: u64,
@@ -1611,6 +1649,33 @@ impl TextRange {
 pub struct NativeRange {
     pub start: u64,
     pub stop: u64,
+}
+
+/// One attribute over a half-open span in [`TextRange`]'s unit: `name` from
+/// wire::RICH_ATTRS, `value` "true" for the flags, a URL for `link`, a
+/// wire::BLOCK_KINDS name for `block`. Runs may overlap.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TextRun {
+    pub start: u64,
+    pub end: u64,
+    pub name: String,
+    pub value: String,
+}
+
+impl TextRun {
+    pub fn new(start: u64, end: u64, name: impl Into<String>, value: impl Into<String>) -> Self {
+        Self { start, end, name: name.into(), value: value.into() }
+    }
+}
+
+/// A run whose offsets are already in this build's backend unit (see
+/// [`NativeRange`]). Never constructed by a guest.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NativeRun {
+    pub start: u64,
+    pub end: u64,
+    pub name: String,
+    pub value: String,
 }
 
 /// A bound property's source: a constant, a signal reference, or —
@@ -1807,6 +1872,25 @@ pub enum TxOp {
     /// Scroll a range into the textarea's viewport. A pure effect:
     /// undo does not restore it (docs/undo-plan.md A2).
     RevealRange { widget: WidgetId, range: TextRange },
+    /// Replace a `rich` textarea's whole document: echoes nothing, resets
+    /// the native undo history like a text write (docs/undo-plan.md D7).
+    SetRichText { widget: WidgetId, text: String, runs: Vec<TextRun> },
+    /// Replace `range` with `inserted`, whose `runs` are relative to it:
+    /// keeps the selection, never resets undo, and is held while a
+    /// composition is live (docs/rich-text-plan.md R5).
+    ApplyEdit {
+        widget: WidgetId,
+        range: TextRange,
+        inserted: String,
+        runs: Vec<TextRun>,
+    },
+    /// Format the widget's CURRENT SELECTION through its own act; `value`
+    /// None removes (docs/rich-text-plan.md R1, spec `format_text`).
+    FormatText {
+        widget: WidgetId,
+        name: String,
+        value: Option<String>,
+    },
     /// A DECLARED BREAKPOINT (docs/adaptive-layout-plan.md D3; size classes
     /// ruled 2026-08-31): while the window's SIZE CLASS equals `when`
     /// (wire::SIZE_CLASS_COMPACT alone today) the setters apply, and leaving
@@ -1983,6 +2067,21 @@ pub enum ApplyOp {
     SelectRange { id: WidgetId, range: NativeRange },
     /// Scroll the range into the widget's viewport, in native units.
     RevealRange { id: WidgetId, range: NativeRange },
+    /// The widget's whole content, runs in native units; the backend draws
+    /// the `block` runs with nothing added to the text (rich-text-plan R3).
+    SetRichText { id: WidgetId, text: String, runs: Vec<NativeRun> },
+    /// One edit in native units, with the core's post-edit selection for the
+    /// backend to set (docs/rich-text-plan.md R5).
+    ApplyEdit {
+        id: WidgetId,
+        range: NativeRange,
+        inserted: String,
+        runs: Vec<NativeRun>,
+        selection: NativeRange,
+    },
+    /// The tx record verbatim: the backend formats its own selection and
+    /// reports the range through kaya_text_formatted.
+    FormatText { id: WidgetId, name: String, value: Option<String> },
     /// The column header bar on the For's live container — titles in visual
     /// order, the indicator on `sorted` (SORT_NONE for none), `direction` 0
     /// asc / 1 desc. Table presentation where the size class and platform
@@ -2102,6 +2201,28 @@ impl OccSink {
                     let tag = crate::wire::click_tag(node.0, &path);
                     let body = crate::wire::text_changed_body(&tag, &text);
                     ring.push_record(crate::ring::REC_TEXT_CHANGED, &body);
+                }
+                Occurrence::TextEdited { id, range, inserted, runs, source } => {
+                    let tag = crate::wire::click_tag(id.0, &[]);
+                    let body =
+                        crate::wire::text_edited_body(&tag, source, range, &inserted, &runs);
+                    ring.push_record(crate::ring::REC_TEXT_EDITED, &body);
+                }
+                Occurrence::InstanceTextEdited { node, path, range, inserted, runs, source } => {
+                    let tag = crate::wire::click_tag(node.0, &path);
+                    let body =
+                        crate::wire::text_edited_body(&tag, source, range, &inserted, &runs);
+                    ring.push_record(crate::ring::REC_TEXT_EDITED, &body);
+                }
+                Occurrence::TextFormatted { id, range, name, value } => {
+                    let tag = crate::wire::click_tag(id.0, &[]);
+                    let body = crate::wire::text_formatted_body(&tag, range, &name, value.as_deref());
+                    ring.push_record(crate::ring::REC_TEXT_FORMATTED, &body);
+                }
+                Occurrence::InstanceTextFormatted { node, path, range, name, value } => {
+                    let tag = crate::wire::click_tag(node.0, &path);
+                    let body = crate::wire::text_formatted_body(&tag, range, &name, value.as_deref());
+                    ring.push_record(crate::ring::REC_TEXT_FORMATTED, &body);
                 }
                 Occurrence::Toggled { id, checked } => {
                     let tag = crate::wire::click_tag(id.0, &[]);

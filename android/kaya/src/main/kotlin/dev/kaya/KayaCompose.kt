@@ -1237,6 +1237,13 @@ object KayaDiag {
 }
 
 /** A wire tag in a sentence: its length and its first eight bytes. */
+// A depth stub is a CALL, never a sentence (tools/check-stubs.py).
+internal fun depthStub(scene: String): Nothing =
+    error(
+        "kaya: the $scene scene is not yet materialized on this backend — " +
+            "it is a depth slice; see CLAUDE.md's sequencing"
+    )
+
 internal fun kayaTagDigest(tag: ByteArray): String {
     val head = tag.take(8).joinToString("") { "%02x".format(it) }
     return "${tag.size}B/$head"
@@ -1280,7 +1287,7 @@ object KayaCompose {
     // but only the runtime assert catches a stale compiled APK against
     // a new libkaya. ULong because the fingerprint's high bit is fair
     // game and a Kotlin Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0x1960b216df673c1fuL
+    private const val SPEC_HASH: ULong = 0xb14092d93e5c1359uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -1337,6 +1344,10 @@ object KayaCompose {
     private const val APPLY_SET_REORDERABLE = 40
     private const val APPLY_POST_NOTIFICATION = 41
     private const val APPLY_CANCEL_NOTIFICATION = 42
+    /** The rich-text pair (docs/rich-text-plan.md §4); the arm is a depth slice. */
+    private const val APPLY_SET_RICH_TEXT = 43
+    private const val APPLY_APPLY_EDIT = 44
+    private const val APPLY_FORMAT_TEXT = 45
     /** What a drop settles on (the wire's drag_op). */
     internal const val DRAG_OP_NONE = 0
     internal const val DRAG_OP_COPY = 1
@@ -1503,6 +1514,7 @@ object KayaCompose {
     private const val PROP_WRAP = 29
     private const val PROP_PLACEHOLDER = 30
     private const val PROP_HREF = 31
+    private const val PROP_RICH = 32
     private const val PROP_COLUMNS = 11
     // The accessibility identifier (never spoken) and label (spoken).
     // Universal: every widget kind carries both.
@@ -1661,6 +1673,40 @@ object KayaCompose {
         TEXT_ALIGN_START, TEXT_ALIGN_MIDDLE, TEXT_ALIGN_END,
         TEXT_BASELINE_ALPHABETIC, TEXT_BASELINE_MIDDLE, TEXT_BASELINE_TOP,
         TEXT_BASELINE_BOTTOM,
+    )
+    // The rich text vocabularies (wire.rs's RICH_ATTRS, BLOCK_KINDS, EDIT_SOURCES).
+    private const val RICH_ATTR_BOLD = 1L
+    private const val RICH_ATTR_ITALIC = 2L
+    private const val RICH_ATTR_UNDERLINE = 3L
+    private const val RICH_ATTR_STRIKE = 4L
+    private const val RICH_ATTR_CODE = 5L
+    private const val RICH_ATTR_LINK = 6L
+    private const val RICH_ATTR_BLOCK = 7L
+    private const val BLOCK_BODY = 0L
+    private const val BLOCK_HEADING1 = 1L
+    private const val BLOCK_HEADING2 = 2L
+    private const val BLOCK_HEADING3 = 3L
+    private const val BLOCK_QUOTE = 4L
+    private const val BLOCK_CODE_BLOCK = 5L
+    private const val EDIT_SOURCE_USER = 0L
+    private const val EDIT_SOURCE_IME_COMMIT = 1L
+    private const val EDIT_SOURCE_PASTE = 2L
+    private const val EDIT_SOURCE_NATIVE_UNDO = 3L
+    private const val EDIT_SOURCE_DROP = 4L
+
+    /**
+     * Named once so check-detekt sees them used, as CANVAS_VOCABULARY is
+     * (docs/rich-text-plan.md §4; the arm is a depth slice).
+     */
+    val RICH_VOCABULARY: List<Long> = listOf(
+        APPLY_SET_RICH_TEXT.toLong(), APPLY_APPLY_EDIT.toLong(), APPLY_FORMAT_TEXT.toLong(),
+        PROP_RICH.toLong(),
+        RICH_ATTR_BOLD, RICH_ATTR_ITALIC, RICH_ATTR_UNDERLINE, RICH_ATTR_STRIKE,
+        RICH_ATTR_CODE, RICH_ATTR_LINK, RICH_ATTR_BLOCK,
+        BLOCK_BODY, BLOCK_HEADING1, BLOCK_HEADING2, BLOCK_HEADING3, BLOCK_QUOTE,
+        BLOCK_CODE_BLOCK,
+        EDIT_SOURCE_USER, EDIT_SOURCE_IME_COMMIT, EDIT_SOURCE_PASTE,
+        EDIT_SOURCE_NATIVE_UNDO, EDIT_SOURCE_DROP,
     )
     private const val VALUE_BOOL = 1
     private const val VALUE_I64 = 2
@@ -2406,6 +2452,9 @@ object KayaCompose {
                     val accepting = readString(b)
                     kayaAnswerClipboardRead(request, accepting)
                 }
+                APPLY_SET_RICH_TEXT, APPLY_APPLY_EDIT, APPLY_FORMAT_TEXT ->
+                    // docs/rich-text-plan.md §4: this backend's breadth step.
+                    depthStub("richtext")
                 APPLY_HIGHLIGHT_RANGES -> {
                     // { u64 widget_id; u32 count; u32 reserved } then a
                     // Values block of 2*count I64s, read IN PAIRS, in
@@ -8141,6 +8190,9 @@ object KayaCompose {
                         if (got == want) observed.add("${parts[2]} $want")
                         else failures.add("${parts[2]} is $got, wanted $want")
                     }
+                    "format", "expect_runs", "expect_edit" ->
+                        // docs/rich-text-plan.md §4: this backend's breadth step.
+                        depthStub("richtext")
                     "compose" -> {
                         // The state a user is in mid-word with an IME,
                         // which no other verb reaches: `type` is

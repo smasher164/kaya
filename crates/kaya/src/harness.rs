@@ -571,6 +571,13 @@ pub enum Step {
     /// nothing. It exists so a scene can prove that select_range refuses
     /// to run over it (docs/ranges-plan.md D4).
     Compose(Target, String),
+    /// `format <target> <start:end> <name>[=<value>] [off]` — bytes; the
+    /// widget's own act over that selection (docs/rich-text-plan.md R9).
+    Format(Target, TextRange, String, String, bool),
+    /// `expect_runs <target> "<runs>"` — the CORE's attribute runs.
+    ExpectRuns(Target, String),
+    /// `expect_edit <target> "<edit>"` — the last text_edited the core published.
+    ExpectEdit(Target, String),
 }
 
 /// A range in a harness assertion, in the same UTF-8 byte offsets the
@@ -627,7 +634,10 @@ impl Step {
             | Step::ExpectDrawingHash(t, _)
             | Step::ExpectDrawing(t, _)
             | Step::ExpectRaster(t, _)
-            | Step::Compose(t, _) => vec![t],
+            | Step::Compose(t, _)
+            | Step::Format(t, ..)
+            | Step::ExpectRuns(t, _)
+            | Step::ExpectEdit(t, _) => vec![t],
             // BOTH ENDS OF A DRAG NORMALIZE. Handing the loop above the
             // source alone left `drag label#0 to label@row[a]` reaching every
             // rust-native backend as index 0 with the id still on it —
@@ -812,6 +822,9 @@ impl Step {
             Step::ExpectSelection { .. } => true,
             Step::ExpectRevealed { .. } => true,
             Step::Compose { .. } => false,
+            Step::Format { .. } => false,
+            Step::ExpectRuns { .. } => true,
+            Step::ExpectEdit { .. } => true,
         }
     }
 }
@@ -1334,6 +1347,18 @@ pub trait Stage: Send + 'static {
     /// write: a plain insertion proves nothing about D4. Blocks until the
     /// composition is live.
     fn compose(&self, target: Target, text: &str);
+    /// Format `range` (UTF-8 bytes) of a rich textarea THROUGH THE WIDGET'S
+    /// OWN ACT: select the range, then the path an app's format_text takes,
+    /// so the widget reports text_formatted exactly as for a user; `off`
+    /// removes the attribute and a collapsed range arms the typing attribute
+    /// (docs/rich-text-plan.md R9).
+    fn format(&self, target: Target, range: TextRange, name: &str, value: &str, off: bool);
+    /// The CORE's attribute runs for a rich textarea, spelled by the core
+    /// (`Scene::rich_runs_string`) so five lanes compare one string.
+    fn rich_runs(&self, target: Target) -> String;
+    /// The last text_edited the core published for the widget, spelled by
+    /// the core (`Scene::last_edit_string`).
+    fn last_edit(&self, target: Target) -> String;
     /// Report the verdict and end the process (backends own their exit
     /// discipline: process::exit, request_exit, _exit after finishing
     /// the Activity, ...).
@@ -2269,6 +2294,55 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     return Err(format!("compose wants a non-empty marked text: {line:?}"));
                 }
                 Step::Compose(parse_target(target)?, marked)
+            }
+            "format" => {
+                let mut parts = rest.split_whitespace();
+                let (Some(target), Some(range), Some(attr)) =
+                    (parts.next(), parts.next(), parts.next())
+                else {
+                    return Err(format!(
+                        "format wants a target, a start:end byte range and an \
+                         attribute name[=value], then an optional `off`: {line:?}"
+                    ));
+                };
+                let off = match (parts.next(), parts.next()) {
+                    (None, _) => false,
+                    (Some("off"), None) => true,
+                    _ => {
+                        return Err(format!(
+                            "format takes nothing but `off` after the attribute: {line:?}"
+                        ));
+                    }
+                };
+                let (name, value) = match attr.split_once('=') {
+                    Some((n, v)) => (n.to_owned(), v.to_owned()),
+                    None => (attr.to_owned(), "true".to_owned()),
+                };
+                if off && attr.contains('=') {
+                    return Err(format!("format ... off names the attribute alone: {line:?}"));
+                }
+                if name.is_empty() || value.is_empty() {
+                    return Err(format!("format wants a non-empty name and value: {line:?}"));
+                }
+                Step::Format(
+                    parse_target(target)?,
+                    parse_range(range).map_err(|e| format!("{e}: {line:?}"))?,
+                    name,
+                    value,
+                    off,
+                )
+            }
+            "expect_runs" => {
+                let (target, text) = rest.split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("expect_runs wants a target and a quoted run list: {line:?}")
+                })?;
+                Step::ExpectRuns(parse_target(target)?, parse_string(text)?)
+            }
+            "expect_edit" => {
+                let (target, text) = rest.split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("expect_edit wants a target and a quoted edit: {line:?}")
+                })?;
+                Step::ExpectEdit(parse_target(target)?, parse_string(text)?)
             }
             other => return Err(format!("unknown step {other:?}")),
         };
@@ -4468,6 +4542,29 @@ fn run_with_log(
                 await_answer(answered);
                 None
             }
+            Step::Format(target, range, name, value, off) => {
+                await_quiet();
+                let answered = crate::scene::answers();
+                stage.format(*target, *range, name, value, *off);
+                await_answer(answered);
+                None
+            }
+            Step::ExpectRuns(target, want) => Some(poll(|| {
+                let got = stage.rich_runs(*target);
+                if got == *want {
+                    Ok(format!("runs {want:?}"))
+                } else {
+                    Err(format!("runs {got:?}, wanted {want:?}"))
+                }
+            })),
+            Step::ExpectEdit(target, want) => Some(poll(|| {
+                let got = stage.last_edit(*target);
+                if got == *want {
+                    Ok(format!("edit {want:?}"))
+                } else {
+                    Err(format!("edit {got:?}, wanted {want:?}"))
+                }
+            })),
             Step::ExpectAx(target, want) => Some(poll(|| {
                 let got = stage.ax(*target);
                 if got == *want {
@@ -5475,6 +5572,48 @@ mod tests {
         assert!(verdict.contains("focused"), "{verdict}");
     }
 
+    /// docs/rich-text-plan.md §7: the three rich verbs' grammar.
+    #[test]
+    fn rich_verbs_parse() {
+        let steps = parse(
+            "format textarea#0 12:17 underline\nformat textarea#0 12:17 link=https://kaya.dev\n\
+             format textarea#0 0:6 bold off\nexpect_runs textarea#0 \"0:6 bold\"\n\
+             expect_edit textarea#0 \"29:29 <x> user [0:1 bold]\"",
+        )
+        .unwrap();
+        let target = Target { kind: TargetKind::Textarea, index: 0, id: None, keys: None };
+        assert_eq!(
+            steps[0],
+            Step::Format(target, TextRange { start: 12, stop: 17 }, "underline".into(), "true".into(), false)
+        );
+        assert_eq!(
+            steps[1],
+            Step::Format(
+                target,
+                TextRange { start: 12, stop: 17 },
+                "link".into(),
+                "https://kaya.dev".into(),
+                false
+            )
+        );
+        assert_eq!(
+            steps[2],
+            Step::Format(target, TextRange { start: 0, stop: 6 }, "bold".into(), "true".into(), true)
+        );
+        assert_eq!(steps[3], Step::ExpectRuns(target, "0:6 bold".into()));
+        assert_eq!(steps[4], Step::ExpectEdit(target, "29:29 <x> user [0:1 bold]".into()));
+        assert!(steps[3].is_assertion() && steps[4].is_assertion() && !steps[0].is_assertion());
+        for bad in [
+            "format textarea#0 12:17",
+            "format textarea#0 12:17 bold=true off",
+            "format textarea#0 12:17 bold on",
+            "format textarea#0 17:12 bold",
+            "expect_runs textarea#0",
+        ] {
+            assert!(parse(bad).is_err(), "{bad:?} parsed");
+        }
+    }
+
     /// `type` takes no target and reaches the stage as the text the
     /// script wrote, verbatim, escapes and all.
     #[test]
@@ -5896,6 +6035,13 @@ mod tests {
             "offscreen".to_owned()
         }
         fn compose(&self, _: Target, _: &str) {}
+        fn format(&self, _: Target, _: TextRange, _: &str, _: &str, _: bool) {}
+        fn rich_runs(&self, _: Target) -> String {
+            String::new()
+        }
+        fn last_edit(&self, _: Target) -> String {
+            String::new()
+        }
         fn menu_state(&self, _: &str, aspect: MenuAspect) -> String {
             match aspect {
                 MenuAspect::Enablement => "disabled".to_owned(),
@@ -6735,6 +6881,13 @@ mod tests {
             "offscreen".to_owned()
         }
         fn compose(&self, _: Target, _: &str) {}
+        fn format(&self, _: Target, _: TextRange, _: &str, _: &str, _: bool) {}
+        fn rich_runs(&self, _: Target) -> String {
+            String::new()
+        }
+        fn last_edit(&self, _: Target) -> String {
+            String::new()
+        }
         fn menu_state(&self, _: &str, _: MenuAspect) -> String {
             String::new()
         }
@@ -7009,6 +7162,13 @@ mod tests {
             "offscreen".to_owned()
         }
         fn compose(&self, _: Target, _: &str) {}
+        fn format(&self, _: Target, _: TextRange, _: &str, _: &str, _: bool) {}
+        fn rich_runs(&self, _: Target) -> String {
+            String::new()
+        }
+        fn last_edit(&self, _: Target) -> String {
+            String::new()
+        }
         fn menu_state(&self, _: &str, _: MenuAspect) -> String {
             String::new()
         }

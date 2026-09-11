@@ -202,6 +202,8 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     ("placeholder", 30, PropKind::Str),
     // docs/tasks-s2-plan.md T3.
     ("href", 31, PropKind::Str),
+    // docs/rich-text-plan.md R1.
+    ("rich", 32, PropKind::Bool),
 ];
 
 /// Window properties: the presentation-context twin of PROPS, in its
@@ -1486,6 +1488,76 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   app's first transaction: the core matches a link that \
                   STARTED the process once that transaction lands.",
         },
+        Record {
+            kind: 55,
+            name: "set_rich_text",
+            fields: &[
+                f("widget_id", FieldTy::U64),
+                f("count", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+                f("runs", FieldTy::Values),
+            ],
+            payload: Some(PropKind::Str),
+            doc: "The WHOLE attributed document of a `rich` textarea \
+                  (docs/rich-text-plan.md R1): the text as the payload, and \
+                  `runs` holding 4*`count` values read in FOURS — I64 start, \
+                  I64 end, Str name, Str value — each run one attribute over \
+                  one range in UTF-8 BYTE offsets into that text, validated \
+                  at the ranges' chokepoint (docs/ranges-units.md §7) and \
+                  allowed to overlap (bold and italic over one range are \
+                  two runs). A CONFIGURATION WRITE: it echoes nothing, and \
+                  it resets the widget's native undo history where that \
+                  tier is on (docs/undo-plan.md D7). The vocabulary is \
+                  wire::RICH_ATTRS; a `block` run must start and end on \
+                  paragraph boundaries. Refused on a textarea that is not \
+                  `rich`.",
+        },
+        Record {
+            kind: 56,
+            name: "apply_edit",
+            fields: &[
+                f("widget_id", FieldTy::U64),
+                f("start", FieldTy::U64),
+                f("stop", FieldTy::U64),
+                f("count", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+                f("runs", FieldTy::Values),
+            ],
+            payload: Some(PropKind::Str),
+            doc: "ONE edit into a `rich` textarea, the app's own or a \
+                  collaborator's (docs/rich-text-plan.md R1, R5): replace \
+                  `start..end` (UTF-8 byte offsets into the widget's \
+                  current text, validated as a range is) with the payload \
+                  text, whose attribute runs are `runs` in fours as \
+                  set_rich_text's, with offsets RELATIVE to the inserted \
+                  text. Keeps the selection: unchanged before the edit, \
+                  shifted after it, a caret at `start` ending AFTER the \
+                  insertion. Echoes nothing and never resets undo. QUEUED \
+                  while an input-method composition is live and applied \
+                  when it ends, since a refusal would drop a \
+                  collaborator's edit.",
+        },
+        Record {
+            kind: 57,
+            name: "format_text",
+            fields: &[
+                f("widget_id", FieldTy::U64),
+                f("removed", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+                f("attr", FieldTy::Values),
+            ],
+            payload: None,
+            doc: "Format a `rich` textarea's CURRENT SELECTION through the \
+                  widget's own act — what an app's toolbar button sends \
+                  (docs/rich-text-plan.md R1): `attr` is two Str values, name \
+                  then value; `removed` 1 takes the attribute off. The widget \
+                  answers with text_formatted over the range it formatted, \
+                  which is how the mirror moves; a collapsed selection arms \
+                  the typing attribute and answers nothing until the next \
+                  edit. A `block` act covers the selection's whole paragraphs, \
+                  and `block` with value `body` removes. Refused on a textarea \
+                  that is not `rich` and for a name outside wire::RICH_ATTRS.",
+        },
     ],
     apply: &[
         Record {
@@ -2145,6 +2217,67 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   copy carries one), and the model does not move until the \
                   app's collection_move.",
         },
+        Record {
+            kind: 43,
+            name: "set_rich_text",
+            fields: &[
+                f("widget_id", FieldTy::U64),
+                f("count", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+                f("runs", FieldTy::Values),
+            ],
+            payload: Some(PropKind::Str),
+            doc: "The tx record's twin in layout, and NOT in unit: the run \
+                  offsets are already in THIS BACKEND'S NATIVE UNIT, converted \
+                  by the core against the text it validated them against \
+                  (docs/ranges-units.md §7), exactly as highlight_ranges' \
+                  are. REPLACE the widget's whole attributed content with this \
+                  text and these runs; the backend does no Unicode arithmetic \
+                  and derives no attribute of its own. `block` runs are the \
+                  paragraph layer and are DRAWN (a heading's size and weight, \
+                  a quote's indent and rule, a code block's face and ground) \
+                  with nothing added to the text, so the bytes an app and a \
+                  backend count are the same bytes.",
+        },
+        Record {
+            kind: 44,
+            name: "apply_edit",
+            fields: &[
+                f("widget_id", FieldTy::U64),
+                f("start", FieldTy::U64),
+                f("stop", FieldTy::U64),
+                f("sel_start", FieldTy::U64),
+                f("sel_stop", FieldTy::U64),
+                f("count", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+                f("runs", FieldTy::Values),
+            ],
+            payload: Some(PropKind::Str),
+            doc: "One edit into the widget's content, native units: replace \
+                  `start..end` with the payload text carrying `runs` (offsets \
+                  RELATIVE to that text), then put the selection at \
+                  `sel_start..sel_end`. THE CORE COMPUTED THE SELECTION — \
+                  R5's transform against the selection it last heard of — so \
+                  the backend sets it rather than reasoning about it \
+                  (docs/rich-text-plan.md R5). The core also holds the edit \
+                  back while an input-method composition is live, so a \
+                  backend that receives one may apply it.",
+        },
+        Record {
+            kind: 45,
+            name: "format_text",
+            fields: &[
+                f("widget_id", FieldTy::U64),
+                f("removed", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+                f("attr", FieldTy::Values),
+            ],
+            payload: None,
+            doc: "The tx record verbatim: apply `attr` to the widget's own \
+                  selection (or arm its typing attributes when the selection \
+                  is collapsed) and report the range through \
+                  kaya_text_formatted in bytes, as a user's own act would.",
+        },
     ],
     occurrence: &[
         Record {
@@ -2707,6 +2840,55 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   and is delivered first, once the app's first transaction \
                   has landed and its routes are declared.",
         },
+        Record {
+            kind: 29,
+            name: "text_edited",
+            fields: &[
+                f("id", FieldTy::U64),
+                f("path_len", FieldTy::U32),
+                f("source", FieldTy::U32),
+                f("start", FieldTy::U64),
+                f("stop", FieldTy::U64),
+                f("count", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+                f("runs", FieldTy::Values),
+            ],
+            payload: Some(PropKind::Str),
+            doc: "ONE USER EDIT of a `rich` textarea, addressed \
+                  (docs/rich-text-plan.md R1, R4): `start..end` in UTF-8 \
+                  byte offsets into the text BEFORE the edit was replaced \
+                  by the payload text, whose attribute runs follow in \
+                  `runs` (4*`count` values in fours, offsets relative to the \
+                  inserted text; the runs of typed text are the widget's \
+                  own inheritance: inline styles carry on, a link does not). \
+                  `path_len` key values precede the runs, as text_changed's \
+                  do. `source` is wire::EDIT_SOURCE_*: user, ime_commit, \
+                  paste, native_undo, drop — the core derives the edit from \
+                  its own text mirror on every platform and the platform's \
+                  channel names the source. Emitted BESIDE text_changed, \
+                  which still carries the plain text; a programmatic write \
+                  emits neither.",
+        },
+        Record {
+            kind: 30,
+            name: "text_formatted",
+            fields: &[
+                f("id", FieldTy::U64),
+                f("path_len", FieldTy::U32),
+                f("removed", FieldTy::U32),
+                f("start", FieldTy::U64),
+                f("stop", FieldTy::U64),
+                f("attr", FieldTy::Values),
+            ],
+            payload: None,
+            doc: "The user FORMATTED a range of a `rich` textarea — a \
+                  toolbar act or a platform shortcut (docs/rich-text-plan.md \
+                  R1): `attr` is two Str values, name then value; `removed` \
+                  is 1 when the attribute was taken off the range. Offsets \
+                  are UTF-8 bytes into the current text. A format over a \
+                  collapsed caret is widget-local pending state and emits \
+                  nothing: it becomes the runs of the next text_edited.",
+        },
     ],
     enums: &[
         EnumSpec {
@@ -2854,6 +3036,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("wrap", 29),
                 ("placeholder", 30),
                 ("href", 31),
+                ("rich", 32),
             ],
         },
         EnumSpec {
@@ -3041,6 +3224,39 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             variants: &[("const", 0), ("signal", 1), ("element", 2)],
         },
         EnumSpec {
+            name: "rich_attr",
+            variants: &[
+                ("bold", 1),
+                ("italic", 2),
+                ("underline", 3),
+                ("strike", 4),
+                ("code", 5),
+                ("link", 6),
+                ("block", 7),
+            ],
+        },
+        EnumSpec {
+            name: "block_kind",
+            variants: &[
+                ("body", 0),
+                ("heading1", 1),
+                ("heading2", 2),
+                ("heading3", 3),
+                ("quote", 4),
+                ("code_block", 5),
+            ],
+        },
+        EnumSpec {
+            name: "edit_source",
+            variants: &[
+                ("user", 0),
+                ("ime_commit", 1),
+                ("paste", 2),
+                ("native_undo", 3),
+                ("drop", 4),
+            ],
+        },
+        EnumSpec {
             name: "occurrence",
             variants: &[
                 ("pad", 0),
@@ -3220,6 +3436,9 @@ mod tests {
             ("show_notification", wire::TX_SHOW_NOTIFICATION),
             ("cancel_notification", wire::TX_CANCEL_NOTIFICATION),
             ("declare_link_route", wire::TX_DECLARE_LINK_ROUTE),
+            ("set_rich_text", wire::TX_SET_RICH_TEXT),
+            ("apply_edit", wire::TX_APPLY_EDIT),
+            ("format_text", wire::TX_FORMAT_TEXT),
         ];
         assert_eq!(pins.len(), SPEC.tx.len());
         for (name, kind) in pins {
@@ -3273,6 +3492,9 @@ mod tests {
                 ("set_drag_source", wire::APPLY_SET_DRAG_SOURCE),
                 ("set_drop_target", wire::APPLY_SET_DROP_TARGET),
                 ("set_reorderable", wire::APPLY_SET_REORDERABLE),
+                ("set_rich_text", wire::APPLY_SET_RICH_TEXT),
+                ("apply_edit", wire::APPLY_APPLY_EDIT),
+                ("format_text", wire::APPLY_FORMAT_TEXT),
             ]
         );
         // The WHOLE list, not indexed asserts: an indexed pin says
@@ -3310,6 +3532,8 @@ mod tests {
                 ("value_committed", crate::ring::REC_VALUE_COMMITTED),
                 ("notification_result", crate::ring::REC_NOTIFICATION_RESULT),
                 ("link_opened", crate::ring::REC_LINK_OPENED),
+                ("text_edited", crate::ring::REC_TEXT_EDITED),
+                ("text_formatted", crate::ring::REC_TEXT_FORMATTED),
             ]
         );
     }
@@ -3524,6 +3748,9 @@ mod tests {
                     ("text_align", _) => canvas_pin(wire::TEXT_ALIGNS, name),
                     ("text_baseline", _) => canvas_pin(wire::TEXT_BASELINES, name),
                     ("size_policy", _) => canvas_pin(wire::SIZE_POLICIES, name),
+                    ("rich_attr", _) => canvas_pin(wire::RICH_ATTRS, name),
+                    ("block_kind", _) => canvas_pin(wire::BLOCK_KINDS, name),
+                    ("edit_source", _) => canvas_pin(wire::EDIT_SOURCES, name),
                     ("prop", "text") => wire::PROP_TEXT,
                     ("prop", "checked") => wire::PROP_CHECKED,
                     ("prop", "value") => wire::PROP_VALUE,
@@ -3555,6 +3782,7 @@ mod tests {
                     ("prop", "wrap") => wire::PROP_WRAP,
                     ("prop", "placeholder") => wire::PROP_PLACEHOLDER,
                     ("prop", "href") => wire::PROP_HREF,
+                    ("prop", "rich") => wire::PROP_RICH,
                     ("wprop", "title") => wire::WPROP_TITLE,
                     ("wprop", "width") => wire::WPROP_WIDTH,
                     ("wprop", "height") => wire::WPROP_HEIGHT,
@@ -3680,11 +3908,11 @@ mod tests {
         u32::try_from(*value).expect("a canvas enum value is a small non-negative number")
     }
 
-    /// The six canvas vocabularies are each spelled TWICE — the spec's
-    /// enum and wire.rs's (value, name) table, which the core's refusals
-    /// and every canvas diagnostic print from. enums_match_wire pins the
-    /// VALUES; this pins the NAMES and the COVERAGE, because a drifted
-    /// name leaves a refusal naming an opcode the app never wrote.
+    /// The numeric vocabularies that ride the wire as i64 are each spelled
+    /// TWICE — the spec's enum and wire.rs's (value, name) table, which the
+    /// core's refusals and every diagnostic print from. enums_match_wire
+    /// pins the VALUES; this pins the NAMES and the COVERAGE, because a
+    /// drifted name leaves a refusal naming what the app never wrote.
     #[test]
     fn canvas_names_match_the_spec_enums() {
         let pairs: &[(&str, &[(i64, &str)])] = &[
@@ -3694,6 +3922,9 @@ mod tests {
             ("text_align", wire::TEXT_ALIGNS),
             ("text_baseline", wire::TEXT_BASELINES),
             ("size_policy", wire::SIZE_POLICIES),
+            ("rich_attr", wire::RICH_ATTRS),
+            ("block_kind", wire::BLOCK_KINDS),
+            ("edit_source", wire::EDIT_SOURCES),
         ];
         for (enum_name, table) in pairs {
             let e = SPEC
@@ -3716,6 +3947,9 @@ mod tests {
             (wire::TEXT_ALIGNS, &[-1, 3, 4]),
             (wire::TEXT_BASELINES, &[-1, 4, 5]),
             (wire::SIZE_POLICIES, &[-1, 4, 5]),
+            (wire::RICH_ATTRS, &[-1, 0, 8]),
+            (wire::BLOCK_KINDS, &[-1, 6, 7]),
+            (wire::EDIT_SOURCES, &[-1, 5, 6]),
         ] {
             for value in outside {
                 assert_eq!(wire::vocab_name(table, *value), None, "{value} resolved");

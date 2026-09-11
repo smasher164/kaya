@@ -763,6 +763,64 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("            payload = BitConverter.ToUInt32(rec, at);");
         c.line("        }");
     }
+    // The rich pair's own arm (docs/rich-text-plan.md R1): the generic
+    // payload tail would read `start`, a bare word, as a tagged value.
+    let rich_edit = crate::rich_edit_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("kind == OccKind{}", pascal(n)))
+        .collect::<Vec<_>>()
+        .join(" || ");
+    if !rich_edit.is_empty() {
+        c.line(&format!("        if ({rich_edit})"));
+        c.line("        {");
+        c.line("            uint source = BitConverter.ToUInt32(rec, 20);");
+        c.line("            ulong start = BitConverter.ToUInt64(rec, at);");
+        c.line("            ulong stop = BitConverter.ToUInt64(rec, at + 8);");
+        c.line("            int count = (int)BitConverter.ToUInt32(rec, at + 16);");
+        c.line("            at += 32; // start, end, count, reserved, the values header");
+        c.line("            var runs = new List<object>();");
+        c.line("            for (int i = 0; i < count * 4 + 1; i++)");
+        c.line("            {");
+        c.line("                uint rtype = BitConverter.ToUInt32(rec, at);");
+        c.line("                int rlen = BitConverter.ToInt32(rec, at + 4);");
+        c.line("                switch (rtype)");
+        c.line("                {");
+        c.line("                    case ValueBool: runs.Add(rec[at + 8] != 0); break;");
+        c.line("                    case ValueI64: runs.Add(BitConverter.ToInt64(rec, at + 8)); break;");
+        c.line("                    case ValueF64: runs.Add(BitConverter.ToDouble(rec, at + 8)); break;");
+        c.line("                    default: runs.Add(Encoding.UTF8.GetString(rec, at + 8, rlen)); break;");
+        c.line("                }");
+        c.line("                at += 8 + ((rlen + 7) & ~7);");
+        c.line("            }");
+        c.line("            // The inserted text rides LAST on the wire and reads");
+        c.line("            // FOURTH here, so the head is fixed and the runs follow.");
+        c.line("            var flat = new List<object> { source, start, stop, runs[runs.Count - 1] };");
+        c.line("            flat.AddRange(runs.GetRange(0, runs.Count - 1));");
+        c.line("            payload = flat;");
+        c.line("        }");
+    }
+    let rich_format = crate::rich_format_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("kind == OccKind{}", pascal(n)))
+        .collect::<Vec<_>>()
+        .join(" || ");
+    if !rich_format.is_empty() {
+        c.line(&format!("        if ({rich_format})"));
+        c.line("        {");
+        c.line("            uint removed = BitConverter.ToUInt32(rec, 20);");
+        c.line("            ulong start = BitConverter.ToUInt64(rec, at);");
+        c.line("            ulong stop = BitConverter.ToUInt64(rec, at + 8);");
+        c.line("            at += 16;");
+        c.line("            var pair = new List<object>();");
+        c.line("            for (int i = 0; i < 2; i++)");
+        c.line("            {");
+        c.line("                int alen = BitConverter.ToInt32(rec, at + 4);");
+        c.line("                pair.Add(Encoding.UTF8.GetString(rec, at + 8, alen));");
+        c.line("                at += 8 + ((alen + 7) & ~7);");
+        c.line("            }");
+        c.line("            payload = new List<object> { removed, start, stop, pair[0], pair[1] };");
+        c.line("        }");
+    }
     // The canvas asks: bare values after the key path with no count in
     // front, read until the record ends (docs/canvas-plan.md §3.2.1).
     let values_tail = crate::values_tail_occurrence_names(spec)

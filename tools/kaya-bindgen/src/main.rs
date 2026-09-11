@@ -381,9 +381,39 @@ pub(crate) fn code_answer_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static 
 pub(crate) fn payload_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str> {
     spec.occurrence
         .iter()
-        .filter(|r| r.payload.is_some())
+        .filter(|r| r.payload.is_some() && !rich_shaped(r))
         .map(|r| r.name)
         .collect()
+}
+
+/// An addressed edit (docs/rich-text-plan.md R1): a click tag with the
+/// SOURCE in its reserved u32, the range, the runs in FOURS, then the text.
+/// Derived, not named: the generic payload tail would read `start` as a
+/// tagged value and die on an unknown value type.
+pub(crate) fn rich_edit_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str> {
+    spec.occurrence
+        .iter()
+        .filter(|r| r.payload.is_some() && rich_shaped(r))
+        .map(|r| r.name)
+        .collect()
+}
+
+/// A toolbar act: the same tag with REMOVED in the reserved slot, the
+/// range, and the attribute as a name/value pair.
+pub(crate) fn rich_format_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str> {
+    spec.occurrence
+        .iter()
+        .filter(|r| r.payload.is_none() && r.fields.iter().any(|f| f.name == "attr"))
+        .map(|r| r.name)
+        .collect()
+}
+
+fn rich_shaped(rec: &Record) -> bool {
+    let n = rec.fields.len();
+    n >= 3
+        && rec.fields[n - 1].name == "runs"
+        && matches!(rec.fields[n - 1].ty, kaya::spec::FieldTy::Values)
+        && rec.fields[n - 3].name == "count"
 }
 
 /// THE DROP (docs/dnd-plan.md D1): a click identity tag, then four words
@@ -430,6 +460,9 @@ pub(crate) fn u32_slot_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str
                 && matches!(r.fields[2].ty, kaya::spec::FieldTy::U32)
                 && r.fields[2].name != "reserved"
                 && r.fields[0].name == "id"
+                // The rich pair reads its own slot in its own arm.
+                && !rich_shaped(r)
+                && !r.fields.iter().any(|f| f.name == "attr")
         })
         .map(|r| r.name)
         .collect()

@@ -642,6 +642,40 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     }
     // The canvas asks: bare values after the key path with no count in
     // front, read until the record ends (docs/canvas-plan.md §3.2.1).
+    // The rich pair's own arm (docs/rich-text-plan.md R1): the generic
+    // payload tail would read `start`, a bare word, as a tagged value.
+    let rich_edit = crate::rich_edit_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("OCC_{}", n.to_uppercase()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    if !rich_edit.is_empty() {
+        c.line(&format!("    if kind in ({rich_edit},):"));
+        c.line("        source = struct.unpack_from(\"<I\", buf, 20)[0]");
+        c.line("        start, stop, count = struct.unpack_from(\"<QQI\", buf, at)");
+        c.line("        at += 24  # past start, end, count and its reserved word");
+        c.line("        at += 8  # past the values count and its reserved word");
+        c.line("        runs = []");
+        c.line("        for _ in range(count * 4):");
+        c.line("            v, at = parse_value(buf, at)");
+        c.line("            runs.append(v)");
+        c.line("        inserted, at = parse_value(buf, at)");
+        c.line("        return kind, ident, keys, [source, start, stop, inserted, *runs]");
+    }
+    let rich_format = crate::rich_format_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("OCC_{}", n.to_uppercase()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    if !rich_format.is_empty() {
+        c.line(&format!("    if kind in ({rich_format},):"));
+        c.line("        removed = struct.unpack_from(\"<I\", buf, 20)[0]");
+        c.line("        start, stop = struct.unpack_from(\"<QQ\", buf, at)");
+        c.line("        at += 16");
+        c.line("        name, at = parse_value(buf, at)");
+        c.line("        value, at = parse_value(buf, at)");
+        c.line("        return kind, ident, keys, [removed, start, stop, name, value]");
+    }
     let values_tail = crate::values_tail_occurrence_names(spec)
         .iter()
         .map(|n| format!("OCC_{}", n.to_uppercase()))

@@ -9,7 +9,7 @@ import UserNotifications
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0x1960b216df673c1f
+let kayaSpecHash: UInt64 = 0xb14092d93e5c1359
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -52,6 +52,11 @@ private let applyFold: UInt16 = 37
 private let applySetDragSource: UInt16 = 38
 private let applySetDropTarget: UInt16 = 39
 private let applySetReorderable: UInt16 = 40
+/// The rich-text pair (docs/rich-text-plan.md §4); the arms are the mac's
+/// own depth step, after this one.
+private let applySetRichText: UInt16 = 43
+private let applyApplyEdit: UInt16 = 44
+private let applyFormatText: UInt16 = 45
 /// What a drop settles on (the wire's drag_op).
 let kayaDragOpNone: UInt32 = 0
 let kayaDragOpCopy: UInt32 = 1
@@ -200,6 +205,29 @@ private let propMinColumnWidth: UInt32 = 28
 private let propWrap: UInt32 = 29
 private let propPlaceholder: UInt32 = 30
 private let propHref: UInt32 = 31
+private let propRich: UInt32 = 32
+// THE RICH TEXT VOCABULARIES, hand-copied APPEND-ONLY wire values held
+// against the core's by tools/check-verbs.py (docs/rich-text-plan.md R3).
+// An attribute NAME rides the wire as a string; these are the numbers the
+// spec assigns it.
+private let richAttrBold: Int64 = 1
+private let richAttrItalic: Int64 = 2
+private let richAttrUnderline: Int64 = 3
+private let richAttrStrike: Int64 = 4
+private let richAttrCode: Int64 = 5
+private let richAttrLink: Int64 = 6
+private let richAttrBlock: Int64 = 7
+private let blockBody: Int64 = 0
+private let blockHeading1: Int64 = 1
+private let blockHeading2: Int64 = 2
+private let blockHeading3: Int64 = 3
+private let blockQuote: Int64 = 4
+private let blockCodeBlock: Int64 = 5
+private let editSourceUser: Int64 = 0
+private let editSourceImeCommit: Int64 = 1
+private let editSourcePaste: Int64 = 2
+private let editSourceNativeUndo: Int64 = 3
+private let editSourceDrop: Int64 = 4
 // The align enum's wire values (spec enum "align").
 private let alignStart: Int64 = 0
 private let alignCenter: Int64 = 1
@@ -308,6 +336,70 @@ func kayaPromotedSymbolWhyNot(_ symbol: Int64) -> String {
         return NSImage(systemSymbolName: sf, accessibilityDescription: name)
     }
 #endif
+
+/// One attribute run as the view holds it (docs/rich-text-plan.md): UTF-16
+/// units, the spec's name, the value ("true" for a flag).
+struct KayaRichRun: Equatable {
+    var range: NSRange
+    var name: String
+    var value: String
+}
+
+/// The v1 vocabulary (docs/rich-text-plan.md R3); each name is its own key
+/// on the storage, so a read-back never guesses from a font.
+let kayaRichNames = ["bold", "italic", "underline", "strike", "code", "link", "block"]
+
+func kayaRichKey(_ name: String) -> NSAttributedString.Key {
+    NSAttributedString.Key("kaya.rich." + name)
+}
+
+private func kayaReadI64Value(_ raw: UnsafeRawBufferPointer, _ at: inout Int) -> Int {
+    let v = raw.loadUnaligned(fromByteOffset: at + 8, as: Int64.self)
+    at += 16
+    return Int(v)
+}
+
+/// One Str value: `{ u32 type; u32 len; bytes }`, padded to 8.
+func kayaReadStrValue(_ raw: UnsafeRawBufferPointer, _ at: inout Int) -> String {
+    let len = Int(raw.loadUnaligned(fromByteOffset: at + 4, as: UInt32.self))
+    let s = String(decoding: raw[(at + 8)..<(at + 8 + len)], as: UTF8.self)
+    at += 8 + len
+    if at % 8 != 0 { at += 8 - at % 8 }
+    return s
+}
+
+/// `{ u32 count; u32 reserved; u32 values; u32 reserved; Values }` in fours
+/// (I64 start, I64 end, Str name, Str value), UTF-16 units.
+func kayaReadWireRuns(_ raw: UnsafeRawBufferPointer, _ at: inout Int) -> [KayaRichRun] {
+    let count = Int(raw.loadUnaligned(fromByteOffset: at, as: UInt32.self))
+    at += 16
+    var runs: [KayaRichRun] = []
+    for _ in 0..<count {
+        let start = kayaReadI64Value(raw, &at)
+        let end = kayaReadI64Value(raw, &at)
+        let name = kayaReadStrValue(raw, &at)
+        let value = kayaReadStrValue(raw, &at)
+        runs.append(
+            KayaRichRun(
+                range: NSRange(location: start, length: max(0, end - start)), name: name,
+                value: value))
+    }
+    return runs
+}
+
+/// The harness's spelling of runs, the core's own (`Scene::rich_runs_string`):
+/// `start:end name[=value]` in bytes, `|`-joined, by start then name.
+func kayaRunSpelling(_ text: String, _ runs: [KayaRichRun]) -> String {
+    runs
+        .map { run -> (Int, String, String) in
+            (kayaByteOffset(text, run.range.location), run.name,
+             "\(kayaByteOffset(text, run.range.location)):\(kayaByteOffset(text, NSMaxRange(run.range))) "
+                + (run.value == "true" ? run.name : "\(run.name)=\(run.value)"))
+        }
+        .sorted { ($0.0, $0.1) < ($1.0, $1.1) }
+        .map(\.2)
+        .joined(separator: "|")
+}
 
 @Observable
 final class KayaNode: Identifiable {
@@ -418,6 +510,12 @@ final class KayaNode: Identifiable {
     var selectSeq = 0
     var revealRequest: NSRange?
     var revealSeq = 0
+    /// RICH TEXT (docs/rich-text-plan.md), textarea only: the attribute runs
+    /// in UTF-16 units, kept current from every edit so a remount pushes the
+    /// document the widget held. `richSeq` marks a whole-document write.
+    var rich = false
+    var richRuns: [KayaRichRun] = []
+    var richSeq = 0
     var children: [KayaNode] = []
     /// The stacked fold (D7): non-zero = the table whose viewport this
     /// node renders inside. Identity stays here — only layout moves.
@@ -4268,6 +4366,73 @@ enum KayaHost {
         return String(decoding: buffer[0..<Int(wrote)], as: UTF8.self)
     }
 
+    // RICH TEXT, presentation side (docs/rich-text-plan.md R4/R5): offsets
+    // in UTF-8 bytes; the CORE keeps the document and derives every delta.
+    static func textComposing(_ widget: UInt64, _ live: Bool) {
+        api.text_composing(widget, live ? 1 : 0)
+    }
+
+    static func textPending(_ widget: UInt64, _ name: String, _ value: String, on: Bool) {
+        let n = Array(name.utf8)
+        let v = Array(value.utf8)
+        n.withUnsafeBufferPointer { np in
+            v.withUnsafeBufferPointer { vp in
+                api.text_pending(
+                    widget, np.baseAddress, UInt(np.count), vp.baseAddress, UInt(vp.count),
+                    on ? 1 : 0)
+            }
+        }
+    }
+
+    static func textEditSource(_ widget: UInt64, _ source: Int64) {
+        api.text_edit_source(widget, UInt32(source))
+    }
+
+    static func textReportedEdit(_ widget: UInt64, _ start: Int, _ end: Int, inserted: Int) {
+        api.text_reported_edit(widget, UInt64(start), UInt64(end), UInt64(inserted))
+    }
+
+    static func textSelection(_ widget: UInt64, _ start: Int, _ end: Int) {
+        api.text_selection(widget, UInt64(start), UInt64(end))
+    }
+
+    static func textFormatted(
+        _ tag: [UInt8], _ start: Int, _ end: Int, _ name: String, _ value: String, removed: Bool
+    ) {
+        let n = Array(name.utf8)
+        let v = Array(value.utf8)
+        tag.withUnsafeBufferPointer { tp in
+            n.withUnsafeBufferPointer { np in
+                v.withUnsafeBufferPointer { vp in
+                    api.text_formatted(
+                        tp.baseAddress, UInt(tp.count), UInt64(start), UInt64(end),
+                        np.baseAddress, UInt(np.count), vp.baseAddress, UInt(vp.count),
+                        removed ? 1 : 0)
+                }
+            }
+        }
+    }
+
+    /// The core's own spelling of a rich textarea's runs (R9), or "" for none.
+    static func textRuns(_ widget: UInt64) -> String {
+        guard api != nil else { return "" }
+        var buffer = [UInt8](repeating: 0, count: 65536)
+        let wrote = buffer.withUnsafeMutableBufferPointer { buf in
+            api.text_runs(widget, buf.baseAddress, UInt(buf.count))
+        }
+        return String(decoding: buffer[0..<Int(wrote)], as: UTF8.self)
+    }
+
+    /// The last text_edited the core published for the widget, its spelling.
+    static func textLastEdit(_ widget: UInt64) -> String {
+        guard api != nil else { return "" }
+        var buffer = [UInt8](repeating: 0, count: 65536)
+        let wrote = buffer.withUnsafeMutableBufferPointer { buf in
+            api.text_last_edit(widget, buf.baseAddress, UInt(buf.count))
+        }
+        return String(decoding: buffer[0..<Int(wrote)], as: UTF8.self)
+    }
+
     /// An entry edit, with the three facts the core's undo ledger cannot derive
     /// (docs/undo-plan.md §3): the window, focus, and whether the edit is
     /// LEDGER-QUIET — a native undo this backend ROUTED must not be banked
@@ -4275,6 +4440,7 @@ enum KayaHost {
     static func emitText(_ node: KayaNode, _ text: String) {
         let utf8 = Array(text.utf8)
         let quiet = kayaTakeNativeUndoEcho(node.id, text)
+        if quiet && node.rich { textEditSource(node.id, editSourceNativeUndo) }
         let focused = kayaScene.focusedId == node.id
         let window = kayaWindowOf(node.id)
         node.tag.withUnsafeBufferPointer { t in
@@ -4618,6 +4784,71 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 // TARGETLESS — the record names the window and nothing else.
                 let undoWindow = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
                 kayaClearUndoForGroup(undoWindow)
+            case applySetRichText:
+                // { u64 id; runs; Str text } — runs in fours, UTF-16 units.
+                #if os(macOS)
+                    let rid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                    var rat = body + 8
+                    let runs = kayaReadWireRuns(raw, &rat)
+                    let text = kayaReadStrValue(raw, &rat)
+                    let rnode = kayaScene.nodes[rid]!
+                    let previous = rnode.text
+                    rnode.text = text
+                    rnode.richRuns = runs
+                    rnode.richSeq += 1
+                    // D7 + A3, as set_text: the reset only when the text moved.
+                    kayaNoteQuietTextWrite(rid, from: previous, to: text)
+                #else
+                    kayaDepthStub("richtext", on: "ios")
+                #endif
+            case applyApplyEdit:
+                // { u64 id; u64 start; u64 stop; u64 sel_start; u64 sel_stop;
+                //   runs; Str inserted } — the core's own post-edit selection.
+                #if os(macOS)
+                    let eid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                    let estart = Int(raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self))
+                    let estop = Int(raw.loadUnaligned(fromByteOffset: body + 16, as: UInt64.self))
+                    let sstart = Int(raw.loadUnaligned(fromByteOffset: body + 24, as: UInt64.self))
+                    let sstop = Int(raw.loadUnaligned(fromByteOffset: body + 32, as: UInt64.self))
+                    var eat = body + 40
+                    let eruns = kayaReadWireRuns(raw, &eat)
+                    let inserted = kayaReadStrValue(raw, &eat)
+                    let enode = kayaScene.nodes[eid]!
+                    let erange = NSRange(location: estart, length: estop - estart)
+                    let before = enode.text as NSString
+                    if NSMaxRange(erange) <= before.length {
+                        // The model's text moves HERE, inside the apply; the
+                        // runs and the live storage follow in the helper.
+                        enode.text = before.replacingCharacters(in: erange, with: inserted)
+                        MainActor.assumeIsolated {
+                            kayaApplyRichEdit(
+                                enode, erange, inserted, eruns,
+                                NSRange(location: sstart, length: sstop - sstart))
+                        }
+                    } else {
+                        kayaDiag(
+                            "apply_edit refused: \(erange) is past the \(before.length) units "
+                                + "widget \(eid) holds")
+                    }
+                #else
+                    kayaDepthStub("richtext", on: "ios")
+                #endif
+            case applyFormatText:
+                // { u64 id; u32 removed; u32 reserved; u32 count; u32 reserved;
+                //   Str name; Str value }
+                #if os(macOS)
+                    let fid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                    let removed = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt32.self) != 0
+                    var fat = body + 24
+                    let fname = kayaReadStrValue(raw, &fat)
+                    let fvalue = kayaReadStrValue(raw, &fat)
+                    let trouble = MainActor.assumeIsolated {
+                        kayaFormatSelection(kayaScene.nodes[fid]!, fname, fvalue, removed: removed)
+                    }
+                    if let trouble { kayaDiag("format_text refused: \(trouble)") }
+                #else
+                    kayaDepthStub("richtext", on: "ios")
+                #endif
             case applyHighlightRanges:
                 // THE DECLARED SET, replacing whatever was declared before:
                 // a flat Values list of I64s read IN PAIRS, already UTF-16.
@@ -4995,6 +5226,8 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     kayaNoteQuietTextWrite(id, from: previous, to: node.text)
                 case (propChecked, valueBool):
                     kayaScene.nodes[id]!.checked = raw[body + 24] != 0
+                case (propRich, valueBool):
+                    kayaScene.nodes[id]!.rich = raw[body + 24] != 0
                 case (propValue, valueF64):
                     kayaScene.nodes[id]!.value =
                         raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
@@ -9250,6 +9483,90 @@ private func kayaRunScript(_ script: String) {
                     observed.append("\(parts[2]) \(wantState)")
                 } else {
                     failures.append("\(parts[2]) is \(gotState), wanted \(wantState)")
+                }
+            case "format":
+                // `format <target> <start:end> <name>[=<value>] [off]`, bytes:
+                // select the range, then the widget's own act (R9).
+                kayaAwaitQuiet()
+                let answered = kayaAnswers()
+                #if os(macOS)
+                    let formatted = DispatchQueue.main.sync { () -> String? in
+                        guard parts.count >= 4 else {
+                            return "wants a target, a start:end range and an attribute"
+                        }
+                        guard let node = kayaTextTarget(parts[1]) else {
+                            return "no such target \(parts[1])"
+                        }
+                        guard let view = kayaMacTextViews[node.id]?.view else {
+                            return "no text view for \(parts[1])"
+                        }
+                        let bounds = parts[2].split(separator: ":")
+                        guard bounds.count == 2, let s = Int(bounds[0]), let e = Int(bounds[1])
+                        else { return "\(parts[2]) is not a start:end range" }
+                        let text = view.string
+                        let start = kayaUtf16Offset(text, s)
+                        let end = kayaUtf16Offset(text, e)
+                        guard start >= 0, end >= 0, start <= end else {
+                            return "\(parts[2]) is not on a character boundary of the "
+                                + "\(text.utf8.count)-byte text"
+                        }
+                        let attr = String(parts[3])
+                        let off = parts.count > 4 && parts[4] == "off"
+                        let name: String
+                        let value: String
+                        if let eq = attr.firstIndex(of: "=") {
+                            name = String(attr[..<eq])
+                            value = String(attr[attr.index(after: eq)...])
+                        } else {
+                            name = attr
+                            value = "true"
+                        }
+                        view.setSelectedRange(NSRange(location: start, length: end - start))
+                        return kayaFormatSelection(node, name, value, removed: off)
+                    }
+                    if let trouble = formatted {
+                        failures.append("format: \(trouble)")
+                    } else {
+                        kayaAwaitAnswer(answered)
+                    }
+                #else
+                    _ = answered
+                    kayaDepthStub("richtext", on: "ios")
+                #endif
+            case "expect_runs", "expect_edit":
+                // THE CORE'S DOCUMENT, spelled by the core (R9). On the mac the
+                // storage's own runs are read beside it, and a disagreement is
+                // a KAYA_DIAG naming both — the platform half R9 leaves to a
+                // per-backend read.
+                let wantDoc = kayaQuoted(Array(parts[2...]))
+                let (gotDoc, held) = DispatchQueue.main.sync { () -> (String, String?) in
+                    guard let node = kayaTextTarget(parts[1]) else {
+                        return ("<no such target>", nil)
+                    }
+                    if parts[0] == "expect_edit" { return (KayaHost.textLastEdit(node.id), nil) }
+                    let core = KayaHost.textRuns(node.id)
+                    #if os(macOS)
+                        // Not while marked text is live: the composition is the
+                        // widget's alone until it commits (R5).
+                        if let view = kayaMacTextViews[node.id]?.view,
+                            let storage = view.textStorage, !view.hasMarkedText()
+                        {
+                            let mine = kayaRunSpelling(storage.string, kayaReadRichRuns(storage))
+                            if mine != core { return (core, mine) }
+                        }
+                    #endif
+                    return (core, nil)
+                }
+                if let held {
+                    kayaDiag(
+                        "expect_runs on \(parts[1]): the core says \"\(gotDoc)\", the storage "
+                            + "holds \"\(held)\"")
+                }
+                let word = parts[0] == "expect_runs" ? "runs" : "edit"
+                if gotDoc == wantDoc {
+                    observed.append("\(word) \"\(wantDoc)\"")
+                } else {
+                    failures.append("\(word) \"\(gotDoc)\", wanted \"\(wantDoc)\"")
                 }
             case "compose":
                 // The state a user is in mid-word with an IME, which no other
@@ -18773,7 +19090,10 @@ struct KayaTextarea: View {
             selectRequest: node.selectRequest,
             selectSeq: node.selectSeq,
             revealRequest: node.revealRequest,
-            revealSeq: node.revealSeq
+            revealSeq: node.revealSeq,
+            rich: node.rich,
+            richRuns: node.richRuns,
+            richSeq: node.richSeq
         )
         .modifier(KayaTextareaPlaceholder(node: node))
         .kayaTextareaFrame(
@@ -18791,6 +19111,37 @@ private final class KayaTextView: NSTextView {
     /// Whose widget this is, so the view can ask the model whether it should be
     /// focused at a moment only the view knows about.
     var nodeId: UInt64 = 0
+    /// docs/rich-text-plan.md: the widget publishes attributed content.
+    var rich = false
+    /// A composition this view reported as live (its end is textDidChange's).
+    var composing = false
+    /// Typing attributes armed over a collapsed caret, re-applied whenever
+    /// AppKit re-derives them from the caret's neighbour and spent by the
+    /// next insertion — the core's own rule (docs/rich-text-plan.md R4).
+    var pendingOn: [NSAttributedString.Key: String] = [:]
+    var pendingOff: Set<NSAttributedString.Key> = []
+
+    /// A composition's start is reported here (its end in textDidChange):
+    /// `setMarkedText` notifies no delegate (docs/ranges-plan.md D4).
+    override func setMarkedText(
+        _ string: Any, selectedRange: NSRange, replacementRange: NSRange
+    ) {
+        let was = hasMarkedText()
+        super.setMarkedText(string, selectedRange: selectedRange, replacementRange: replacementRange)
+        if rich, !was, hasMarkedText() {
+            composing = true
+            KayaHost.textComposing(nodeId, true)
+        }
+    }
+
+    /// A rich view takes a paste as TEXT under the typing attributes: with
+    /// `isRichText` on, AppKit would paste RTF's own attributes, none of
+    /// which is in the v1 vocabulary (docs/rich-text-plan.md R3).
+    override func paste(_ sender: Any?) {
+        guard rich else { return super.paste(sender) }
+        KayaHost.textEditSource(nodeId, editSourcePaste)
+        pasteAsPlainText(sender)
+    }
 
     /// FOCUS IS APPLIED WHEN THE VIEW HAS SOMEWHERE TO BE FOCUSED — the case
     /// `updateNSView`'s hook CANNOT cover. MEASURED, two runs in three: SwiftUI
@@ -18822,12 +19173,14 @@ private final class KayaTextView: NSTextView {
 /// moves kaya's plain-text contract silently. EACH LINE IS LOAD-BEARING ON ITS
 /// OWN, since the `enabledTextCheckingTypes` umbrella makes every individual pin
 /// unfalsifiable; the defaults are read from the user's own settings.
-func kayaPinPlainText(_ view: NSTextView) {
+func kayaPinPlainText(_ view: NSTextView, rich: Bool = false) {
     // THE VALUE IS A STRING. Plain text refuses rich paste at the control (RTF
     // arrives as its characters and nothing else), refuses dropped/pasted
     // graphics — which would otherwise insert U+FFFC attachment characters INTO
     // the string the app reads — and keeps the format panels away.
-    view.isRichText = false
+    // A `rich` textarea unpins THIS ONE ALONE (docs/rich-text-plan.md §4):
+    // its paste override keeps foreign attributes out.
+    view.isRichText = rich
     view.importsGraphics = false
     view.allowsImageEditing = false
     view.usesFontPanel = false
@@ -18874,13 +19227,13 @@ var kayaPlainTextPinBreaches: Set<String> = []
 /// to the wrong view and every textarea-bearing leg fails naming the trait. It
 /// cannot prove AppKit HONOURS a trait, and no leg could — with the
 /// substitutions ON, real NSEvents still produced straight quotes (2026-08-06).
-func kayaAuditPlainTextPins(_ view: NSTextView) {
+func kayaAuditPlainTextPins(_ view: NSTextView, rich: Bool = false) {
     guard kayaHarnessActive else { return }
     var breaches: [String] = []
     func want(_ ok: Bool, _ name: String) {
         if !ok { breaches.append(name) }
     }
-    want(!view.isRichText, "isRichText")
+    want(view.isRichText == rich, "isRichText")
     want(!view.importsGraphics, "importsGraphics")
     want(!view.allowsImageEditing, "allowsImageEditing")
     want(!view.usesFontPanel, "usesFontPanel")
@@ -18933,12 +19286,18 @@ private struct KayaMacTextarea: NSViewRepresentable {
     let selectSeq: Int
     let revealRequest: NSRange?
     let revealSeq: Int
+    let rich: Bool
+    let richRuns: [KayaRichRun]
+    let richSeq: Int
 
     /// The uncontrolled fold, in AppKit's vocabulary: the view tells kaya what it
     /// holds, kaya normalizes it, writes the node and emits with the widget's
     /// identity tag. Nothing is read back.
     final class Coordinator: NSObject, NSTextViewDelegate {
         var node: KayaNode?
+        /// The last whole-document write this view performed (richSeq's twin
+        /// of selectDone).
+        var richDone = 0
         /// The last one-shot sequence this view performed. A SEQUENCE AND NOT A
         /// CONSUMED OPTIONAL: `updateNSView` runs many times for one model
         /// change, and clearing the request there would be a model write during
@@ -18953,14 +19312,79 @@ private struct KayaMacTextarea: NSViewRepresentable {
 
         func textDidChange(_ notification: Notification) {
             guard let node, let view = notification.object as? NSTextView else { return }
-            let value = kayaLF(view.string)
+            let value = node.rich ? view.string : kayaLF(view.string)
             // THE ECHO DOCTRINE, held where an echo could enter: a programmatic
             // write emits nothing. "AppKit does not notify about a `string`
             // write" is a premise whose cost, if wrong, is a text_changed the
             // app never caused, so this compares against the model instead.
             guard value != node.text else { return }
-            kayaUserWrite { node.text = value }
+            let commit = node.rich && !view.hasMarkedText() && (view as? KayaTextView)?.composing == true
+            if commit { KayaHost.textEditSource(node.id, editSourceImeCommit) }
+            kayaUserWrite {
+                node.text = value
+                if node.rich, let storage = view.textStorage {
+                    node.richRuns = kayaReadRichRuns(storage)
+                }
+            }
+            if let own = view as? KayaTextView {
+                own.pendingOn.removeAll()
+                own.pendingOff.removeAll()
+            }
             KayaHost.emitText(node, value)
+            if commit {
+                (view as? KayaTextView)?.composing = false
+                KayaHost.textComposing(node.id, false)
+            }
+        }
+
+        // docs/rich-text-plan.md R4: the range this backend says it is about
+        // to edit, so the core can corroborate its own diff. nil replacement
+        // is an attribute-only change, which is no edit.
+        func textView(
+            _ textView: NSTextView, shouldChangeTextIn affected: NSRange,
+            replacementString: String?
+        ) -> Bool {
+            if let node, node.rich, let replacement = replacementString {
+                let text = textView.string
+                let start = kayaByteOffset(text, affected.location)
+                let end = kayaByteOffset(text, NSMaxRange(affected))
+                if start >= 0, end >= 0 {
+                    KayaHost.textReportedEdit(node.id, start, end, inserted: replacement.utf8.count)
+                }
+            }
+            return true
+        }
+
+        // R5's transform needs the selection the widget holds, not the one the
+        // core last wrote.
+        func textViewDidChangeSelection(_ notification: Notification) {
+            guard let node, node.rich, let view = notification.object as? NSTextView else {
+                return
+            }
+            let text = view.string
+            let range = view.selectedRange
+            let start = kayaByteOffset(text, range.location)
+            let end = kayaByteOffset(text, NSMaxRange(range))
+            if start >= 0, end >= 0 { KayaHost.textSelection(node.id, start, end) }
+        }
+
+        // The inheritance rule's one exception, on the platform that breaks it
+        // the other way on iOS (docs/traps.md 2026-09-11): typing at a link's
+        // end never extends the link.
+        func textView(
+            _ textView: NSTextView,
+            shouldChangeTypingAttributes oldTypingAttributes: [String: Any],
+            toAttributes newTypingAttributes: [NSAttributedString.Key: Any]
+        ) -> [NSAttributedString.Key: Any] {
+            guard let node, node.rich else { return newTypingAttributes }
+            var attrs = newTypingAttributes
+            attrs.removeValue(forKey: kayaRichKey("link"))
+            attrs.removeValue(forKey: .link)
+            if let view = textView as? KayaTextView {
+                for (key, value) in view.pendingOn { attrs[key] = value }
+                for key in view.pendingOff { attrs.removeValue(forKey: key) }
+            }
+            return attrs
         }
     }
 
@@ -19000,7 +19424,8 @@ private struct KayaMacTextarea: NSViewRepresentable {
             height: CGFloat.greatestFiniteMagnitude)
         view.autoresizingMask = [.width]
         view.nodeId = node.id
-        kayaPinPlainText(view)
+        view.rich = node.rich
+        kayaPinPlainText(view, rich: node.rich)
         view.delegate = context.coordinator
 
         let coordinator = context.coordinator
@@ -19042,19 +19467,35 @@ private struct KayaMacTextarea: NSViewRepresentable {
         guard let view = scroll.documentView as? KayaTextView else { return }
         context.coordinator.node = node
         view.nodeId = node.id
+        view.rich = rich
 
         // APPLIED ON EVERY UPDATE, not once at construction: a pin that only ran
         // in makeNSView is lost the day SwiftUI hands back a recycled view or
         // AppKit re-derives a trait. The audit beside it reads the live control
         // back, so a breach fails the leg that rendered the widget.
-        kayaPinPlainText(view)
-        kayaAuditPlainTextPins(view)
+        kayaPinPlainText(view, rich: rich)
+        kayaAuditPlainTextPins(view, rich: rich)
 
         // THE PUSH KAYA OWNS, guarded by a comparison: an identical write still
         // rebuilds the storage and throws away the declared runs (measured, G2).
         // AND NOT WHILE THE USER IS COMPOSING (D4): `setMarkedText` notifies no
         // delegate, so the next pass would DESTROY the half-typed word.
-        if view.string != text, !view.hasMarkedText() {
+        if rich {
+            // The whole document, text and runs, on a declaration (richSeq) or
+            // a fresh view; an apply_edit edits the live storage instead.
+            if view.string != text || richSeq != context.coordinator.richDone,
+                !view.hasMarkedText(), let storage = view.textStorage
+            {
+                context.coordinator.richDone = richSeq
+                let selection = view.selectedRange
+                storage.setAttributedString(
+                    kayaAttributedDocument(text, richRuns, base: kayaRichBaseFont(view)))
+                let end = (text as NSString).length
+                let location = min(selection.location, end)
+                view.setSelectedRange(
+                    NSRange(location: location, length: min(selection.length, end - location)))
+            }
+        } else if view.string != text, !view.hasMarkedText() {
             let selection = view.selectedRange
             view.string = text
             let end = (text as NSString).length
@@ -19158,6 +19599,235 @@ final class KayaWeakTextView {
     init(_ view: NSTextView) { self.view = view }
 }
 var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
+
+// MARK: - Rich text, the macOS arm (docs/rich-text-plan.md §4)
+
+@MainActor func kayaRichBaseFont(_ view: NSTextView) -> NSFont {
+    view.font ?? kayaPlatformFont(.body) ?? .preferredFont(forTextStyle: .body)
+}
+
+/// The display attributes derived from the kaya keys over `range`. Nothing
+/// else on the storage moves; the highlight ground stays applyRanges'.
+@MainActor func kayaRestyle(_ storage: NSMutableAttributedString, _ range: NSRange, base: NSFont) {
+    let manager = NSFontManager.shared
+    storage.enumerateAttributes(in: range, options: []) { attrs, sub, _ in
+        let has = { (name: String) -> Bool in attrs[kayaRichKey(name)] != nil }
+        let block = attrs[kayaRichKey("block")] as? String ?? "body"
+        var size = base.pointSize
+        var bold = has("bold")
+        switch block {
+        case "heading1":
+            size = (base.pointSize * 1.6).rounded()
+            bold = true
+        case "heading2":
+            size = (base.pointSize * 1.35).rounded()
+            bold = true
+        case "heading3":
+            size = (base.pointSize * 1.15).rounded()
+            bold = true
+        default: break
+        }
+        var font: NSFont
+        if has("code") || block == "code_block" {
+            font = NSFont.monospacedSystemFont(ofSize: size, weight: bold ? .bold : .regular)
+        } else {
+            font = size == base.pointSize ? base : manager.convert(base, toSize: size)
+            if bold { font = manager.convert(font, toHaveTrait: .boldFontMask) }
+        }
+        if has("italic") { font = manager.convert(font, toHaveTrait: .italicFontMask) }
+        var out: [NSAttributedString.Key: Any] = [.font: font]
+        let link = attrs[kayaRichKey("link")] as? String
+        out[.foregroundColor] =
+            link != nil
+            ? NSColor.linkColor : (block == "quote" ? NSColor.secondaryLabelColor : NSColor.textColor)
+        if has("underline") || link != nil {
+            out[.underlineStyle] = NSUnderlineStyle.single.rawValue
+        } else {
+            storage.removeAttribute(.underlineStyle, range: sub)
+        }
+        if has("strike") {
+            out[.strikethroughStyle] = NSUnderlineStyle.single.rawValue
+        } else {
+            storage.removeAttribute(.strikethroughStyle, range: sub)
+        }
+        if let link { out[.link] = link } else { storage.removeAttribute(.link, range: sub) }
+        let paragraph = NSMutableParagraphStyle()
+        if block == "quote" {
+            paragraph.headIndent = 20
+            paragraph.firstLineHeadIndent = 20
+        }
+        out[.paragraphStyle] = paragraph
+        storage.addAttributes(out, range: sub)
+    }
+}
+
+@MainActor func kayaAttributedDocument(_ text: String, _ runs: [KayaRichRun], base: NSFont)
+    -> NSAttributedString
+{
+    let doc = NSMutableAttributedString(
+        string: text, attributes: [.font: base, .foregroundColor: NSColor.textColor])
+    for run in runs where run.range.length > 0 && NSMaxRange(run.range) <= doc.length {
+        doc.addAttribute(kayaRichKey(run.name), value: run.value, range: run.range)
+    }
+    kayaRestyle(doc, NSRange(location: 0, length: doc.length), base: base)
+    return doc
+}
+
+/// The runs the storage holds, by start then name, UTF-16 units.
+func kayaReadRichRuns(_ storage: NSAttributedString) -> [KayaRichRun] {
+    let full = NSRange(location: 0, length: storage.length)
+    guard full.length > 0 else { return [] }
+    var runs: [KayaRichRun] = []
+    for name in kayaRichNames {
+        storage.enumerateAttribute(kayaRichKey(name), in: full, options: []) { value, range, _ in
+            guard let value = value as? String else { return }
+            runs.append(KayaRichRun(range: range, name: name, value: value))
+        }
+    }
+    return runs.sorted { ($0.range.location, $0.name) < ($1.range.location, $1.name) }
+}
+
+/// The core's splice, in UTF-16: runs before the edit stay, runs after it
+/// shift, a run the edit falls inside is cut, the inserted runs land relative
+/// to the edit's start.
+func kayaSpliceRuns(
+    _ runs: [KayaRichRun], _ range: NSRange, _ insertedLength: Int, _ inserted: [KayaRichRun]
+) -> [KayaRichRun] {
+    let delta = insertedLength - range.length
+    let cutStart = range.location
+    let cutEnd = NSMaxRange(range)
+    var out: [KayaRichRun] = []
+    for run in runs {
+        let s = run.range.location
+        let e = NSMaxRange(run.range)
+        if e <= cutStart {
+            out.append(run)
+        } else if s >= cutEnd {
+            out.append(
+                KayaRichRun(
+                    range: NSRange(location: s + delta, length: e - s), name: run.name,
+                    value: run.value))
+        } else {
+            if s < cutStart {
+                out.append(
+                    KayaRichRun(
+                        range: NSRange(location: s, length: cutStart - s), name: run.name,
+                        value: run.value))
+            }
+            if e > cutEnd {
+                out.append(
+                    KayaRichRun(
+                        range: NSRange(location: cutEnd + delta, length: e - cutEnd),
+                        name: run.name, value: run.value))
+            }
+        }
+    }
+    for run in inserted where run.range.length > 0 {
+        out.append(
+            KayaRichRun(
+                range: NSRange(location: cutStart + run.range.location, length: run.range.length),
+                name: run.name, value: run.value))
+    }
+    return out.sorted { ($0.range.location, $0.name) < ($1.range.location, $1.name) }
+}
+
+/// apply_edit, this side, after the apply arm moved the node's text: the
+/// node's runs always, the live storage when the view is up — with the
+/// selection the core answered (R5).
+@MainActor func kayaApplyRichEdit(
+    _ node: KayaNode, _ range: NSRange, _ inserted: String, _ runs: [KayaRichRun],
+    _ selection: NSRange
+) {
+    node.richRuns = kayaSpliceRuns(node.richRuns, range, (inserted as NSString).length, runs)
+    guard let view = kayaMacTextViews[node.id]?.view as? KayaTextView,
+        let storage = view.textStorage, !view.hasMarkedText(),
+        NSMaxRange(range) <= storage.length
+    else {
+        node.richSeq += 1
+        return
+    }
+    let base = kayaRichBaseFont(view)
+    let piece = NSMutableAttributedString(
+        string: inserted, attributes: [.font: base, .foregroundColor: NSColor.textColor])
+    for run in runs where run.range.length > 0 && NSMaxRange(run.range) <= piece.length {
+        piece.addAttribute(kayaRichKey(run.name), value: run.value, range: run.range)
+    }
+    storage.beginEditing()
+    storage.replaceCharacters(in: range, with: piece)
+    kayaRestyle(storage, NSRange(location: range.location, length: piece.length), base: base)
+    storage.endEditing()
+    let end = storage.length
+    let location = min(selection.location, end)
+    view.setSelectedRange(
+        NSRange(location: location, length: min(selection.length, end - location)))
+}
+
+/// The widget's own formatting act over its current selection — the path an
+/// app's format_text and the harness's `format` share (docs/rich-text-plan.md
+/// R1, R9). A collapsed selection arms the typing attribute instead; a block
+/// act covers the selection's whole paragraphs. nil, or what refused.
+@MainActor func kayaFormatSelection(_ node: KayaNode, _ name: String, _ value: String, removed: Bool)
+    -> String?
+{
+    guard node.rich else { return "widget \(node.id) is not a rich textarea" }
+    guard kayaRichNames.contains(name) else { return "\(name) is not a rich attribute" }
+    guard let view = kayaMacTextViews[node.id]?.view as? KayaTextView,
+        let storage = view.textStorage
+    else {
+        return "widget \(node.id) has no text view yet"
+    }
+    if view.hasMarkedText() {
+        return "an input-method composition is live on widget \(node.id)"
+    }
+    let key = kayaRichKey(name)
+    let off = removed || (name == "block" && value == "body")
+    var range = view.selectedRange
+    if name == "block" {
+        let ns = storage.string as NSString
+        range = ns.paragraphRange(for: range)
+        if range.length > 0, ns.character(at: NSMaxRange(range) - 1) == 0x0A {
+            range.length -= 1
+        }
+    }
+    if range.length == 0 {
+        var attrs = view.typingAttributes
+        if off {
+            attrs.removeValue(forKey: key)
+            view.pendingOn.removeValue(forKey: key)
+            view.pendingOff.insert(key)
+        } else {
+            attrs[key] = value
+            view.pendingOff.remove(key)
+            view.pendingOn[key] = value
+        }
+        view.typingAttributes = attrs
+        KayaHost.textPending(node.id, name, value, on: !off)
+        return nil
+    }
+    let base = kayaRichBaseFont(view)
+    storage.beginEditing()
+    if off {
+        storage.removeAttribute(key, range: range)
+    } else {
+        storage.addAttribute(key, value: value, range: range)
+    }
+    kayaRestyle(storage, range, base: base)
+    storage.endEditing()
+    node.richRuns = kayaReadRichRuns(storage)
+    var typing = view.typingAttributes
+    if off {
+        typing.removeValue(forKey: key)
+    } else if name != "link" {
+        typing[key] = value
+    }
+    view.typingAttributes = typing
+    let text = storage.string
+    let start = kayaByteOffset(text, range.location)
+    let end = kayaByteOffset(text, NSMaxRange(range))
+    guard start >= 0, end >= 0 else { return "the selection is not on a character boundary" }
+    KayaHost.textFormatted(node.tag, start, end, name, value, removed: off)
+    return nil
+}
 
 #else
     /// The multi-line editor on iOS: KayaEntry's exact contract over a UITextView

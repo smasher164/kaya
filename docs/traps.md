@@ -11052,3 +11052,17 @@ bytes on both sides, which is why the plan's benchmark is automerge.
 with a hole where the word was — pushed before the line was read
 (d51001a2). Every narrative message goes through a file: `git commit -q -F
 <path>`, where nothing is interpolated.
+
+## A comment blanker that knows every language at once pairs OCaml's `(*` with a Rust `*)` (2026-09-11)
+
+tools/check-file-modes.py blanked comments with one list of patterns for
+every file — C's `/* */` and `//`, OCaml's `(* *)`, python's `#`, Haskell's
+`--` — and the OCaml pair matched `(*mut u8` in a Rust tuple type at line
+1382 of capi.rs against `(KAYA_EDIT_SOURCE_*)` in a doc comment at line
+3535, blanking the redemption function between them. The gate then reported
+capi.rs as a table entry that "no longer redeems a picked file at all": a
+false finding from a true file, produced by a comment two thousand lines
+away. The patterns are chosen by the file's suffix now (`COMMENTS_BY_SUFFIX`)
+and self-test N11 keeps the shape. A blanker for one language must not be
+handed another language's delimiters — `(*`, `{-`, `--` and `#` all occur
+in Rust, and `*/` occurs in a Haskell operator section.

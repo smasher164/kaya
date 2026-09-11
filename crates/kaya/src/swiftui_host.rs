@@ -294,6 +294,17 @@ pub struct KayaHostApi {
     /// crates/kaya/src/prefs.rs. `window_frame` answers 0 for none.
     pub window_frame: unsafe extern "C" fn(u64, *mut u8, usize) -> usize,
     pub set_window_frame: unsafe extern "C" fn(u64, *const u8, usize),
+    /// RICH TEXT, presentation side (docs/rich-text-plan.md R4/R5/R9): the
+    /// six reports an arm makes and the two reads the harness makes.
+    pub text_composing: extern "C" fn(u64, u8),
+    pub text_pending: unsafe extern "C" fn(u64, *const u8, usize, *const u8, usize, u8),
+    pub text_edit_source: extern "C" fn(u64, u32),
+    pub text_reported_edit: extern "C" fn(u64, u64, u64, u64),
+    pub text_selection: extern "C" fn(u64, u64, u64),
+    pub text_formatted:
+        unsafe extern "C" fn(*const u8, usize, u64, u64, *const u8, usize, *const u8, usize, u8),
+    pub text_runs: unsafe extern "C" fn(u64, *mut u8, usize) -> usize,
+    pub text_last_edit: unsafe extern "C" fn(u64, *mut u8, usize) -> usize,
 }
 
 /// # Safety
@@ -452,6 +463,14 @@ pub(crate) fn run() -> i32 {
         canvas_raster_shape: crate::capi::kaya_canvas_raster_shape,
         window_frame,
         set_window_frame,
+        text_composing: crate::capi::kaya_text_composing,
+        text_pending: crate::capi::kaya_text_pending,
+        text_edit_source: crate::capi::kaya_text_edit_source,
+        text_reported_edit: crate::capi::kaya_text_reported_edit,
+        text_selection: crate::capi::kaya_text_selection,
+        text_formatted: crate::capi::kaya_text_formatted,
+        text_runs: crate::capi::kaya_text_runs,
+        text_last_edit: crate::capi::kaya_text_last_edit,
     };
     // THIS BACKEND WINDOWS ROWS (docs/deferred.md, the declares-windowing
     // entry), and the declaration has to beat the first transaction rather

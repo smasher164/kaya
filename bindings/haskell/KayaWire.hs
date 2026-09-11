@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x1960b216df673c1f
+specHash = 0xb14092d93e5c1359
 
 valueBool :: Word32
 valueBool = 1
@@ -202,6 +202,8 @@ propPlaceholder :: Word32
 propPlaceholder = 30
 propHref :: Word32
 propHref = 31
+propRich :: Word32
+propRich = 32
 wpropTitle :: Word32
 wpropTitle = 1
 wpropWidth :: Word32
@@ -382,6 +384,42 @@ sourceSignal :: Word32
 sourceSignal = 1
 sourceElement :: Word32
 sourceElement = 2
+richAttrBold :: Word32
+richAttrBold = 1
+richAttrItalic :: Word32
+richAttrItalic = 2
+richAttrUnderline :: Word32
+richAttrUnderline = 3
+richAttrStrike :: Word32
+richAttrStrike = 4
+richAttrCode :: Word32
+richAttrCode = 5
+richAttrLink :: Word32
+richAttrLink = 6
+richAttrBlock :: Word32
+richAttrBlock = 7
+blockKindBody :: Word32
+blockKindBody = 0
+blockKindHeading1 :: Word32
+blockKindHeading1 = 1
+blockKindHeading2 :: Word32
+blockKindHeading2 = 2
+blockKindHeading3 :: Word32
+blockKindHeading3 = 3
+blockKindQuote :: Word32
+blockKindQuote = 4
+blockKindCodeBlock :: Word32
+blockKindCodeBlock = 5
+editSourceUser :: Word32
+editSourceUser = 0
+editSourceImeCommit :: Word32
+editSourceImeCommit = 1
+editSourcePaste :: Word32
+editSourcePaste = 2
+editSourceNativeUndo :: Word32
+editSourceNativeUndo = 3
+editSourceDrop :: Word32
+editSourceDrop = 4
 occurrencePad :: Word32
 occurrencePad = 0
 occurrenceButtonClicked :: Word32
@@ -504,6 +542,12 @@ txKindCancelNotification :: Word16
 txKindCancelNotification = 53
 txKindDeclareLinkRoute :: Word16
 txKindDeclareLinkRoute = 54
+txKindSetRichText :: Word16
+txKindSetRichText = 55
+txKindApplyEdit :: Word16
+txKindApplyEdit = 56
+txKindFormatText :: Word16
+txKindFormatText = 57
 applyKindCreate :: Word16
 applyKindCreate = 1
 applyKindSetProp :: Word16
@@ -584,6 +628,12 @@ applyKindSetDropTarget :: Word16
 applyKindSetDropTarget = 39
 applyKindSetReorderable :: Word16
 applyKindSetReorderable = 40
+applyKindSetRichText :: Word16
+applyKindSetRichText = 43
+applyKindApplyEdit :: Word16
+applyKindApplyEdit = 44
+applyKindFormatText :: Word16
+applyKindFormatText = 45
 occKindButtonClicked :: Word16
 occKindButtonClicked = 1
 occKindTextChanged :: Word16
@@ -640,6 +690,10 @@ occKindNotificationResult :: Word16
 occKindNotificationResult = 27
 occKindLinkOpened :: Word16
 occKindLinkOpened = 28
+occKindTextEdited :: Word16
+occKindTextEdited = 29
+occKindTextFormatted :: Word16
+occKindTextFormatted = 30
 
 -- Values self-pad to 8: they concatenate inside record bodies.
 encodeValue :: Value -> Builder
@@ -887,6 +941,18 @@ txCancelNotification notification = wireRecord txKindCancelNotification (word64L
 -- Declare one app-link route (docs/app-links-plan.md §4): `route` is the app's own id for it, `pattern` a Str. The MATCH HAPPENS ONCE, IN THE CORE — the patterns come here so a URL the platform hands over is turned into a route and its captures by one matcher rather than by nine. The grammar: segments split on `/`, a literal segment matches itself, `{name}` captures one segment. REFUSED AT THE DECLARATION, a fault like every other declaration refusal: an empty pattern, an empty segment, a brace a segment never closes, and a pattern already declared. Routes are declared at startup, before or inside the app's first transaction: the core matches a link that STARTED the process once that transaction lands.
 txDeclareLinkRoute :: Word64 -> Value -> Builder
 txDeclareLinkRoute route pattern = wireRecord txKindDeclareLinkRoute (word64LE route <> encodeValue pattern)
+
+-- The WHOLE attributed document of a `rich` textarea (docs/rich-text-plan.md R1): the text as the payload, and `runs` holding 4*`count` values read in FOURS — I64 start, I64 end, Str name, Str value — each run one attribute over one range in UTF-8 BYTE offsets into that text, validated at the ranges' chokepoint (docs/ranges-units.md §7) and allowed to overlap (bold and italic over one range are two runs). A CONFIGURATION WRITE: it echoes nothing, and it resets the widget's native undo history where that tier is on (docs/undo-plan.md D7). The vocabulary is wire::RICH_ATTRS; a `block` run must start and end on paragraph boundaries. Refused on a textarea that is not `rich`.
+txSetRichText :: Word64 -> Word32 -> [Value] -> Builder
+txSetRichText widgetId count runs = wireRecord txKindSetRichText (word64LE widgetId <> word32LE count <> word32LE 0 <> encodeValues runs)
+
+-- ONE edit into a `rich` textarea, the app's own or a collaborator's (docs/rich-text-plan.md R1, R5): replace `start..end` (UTF-8 byte offsets into the widget's current text, validated as a range is) with the payload text, whose attribute runs are `runs` in fours as set_rich_text's, with offsets RELATIVE to the inserted text. Keeps the selection: unchanged before the edit, shifted after it, a caret at `start` ending AFTER the insertion. Echoes nothing and never resets undo. QUEUED while an input-method composition is live and applied when it ends, since a refusal would drop a collaborator's edit.
+txApplyEdit :: Word64 -> Word64 -> Word64 -> Word32 -> [Value] -> Builder
+txApplyEdit widgetId start stop count runs = wireRecord txKindApplyEdit (word64LE widgetId <> word64LE start <> word64LE stop <> word32LE count <> word32LE 0 <> encodeValues runs)
+
+-- Format a `rich` textarea's CURRENT SELECTION through the widget's own act — what an app's toolbar button sends (docs/rich-text-plan.md R1): `attr` is two Str values, name then value; `removed` 1 takes the attribute off. The widget answers with text_formatted over the range it formatted, which is how the mirror moves; a collapsed selection arms the typing attribute and answers nothing until the next edit. A `block` act covers the selection's whole paragraphs, and `block` with value `body` removes. Refused on a textarea that is not `rich` and for a name outside wire::RICH_ATTRS.
+txFormatText :: Word64 -> Word32 -> [Value] -> Builder
+txFormatText widgetId removed attr = wireRecord txKindFormatText (word64LE widgetId <> word32LE removed <> word32LE 0 <> encodeValues attr)
 
 -- A civil date as the wire's I64: year * 10000 + month * 100 + day.
 packDate :: Int -> Int -> Int -> Int64
@@ -1497,6 +1563,25 @@ txBindHrefElement widgetId level field = wireRecord txKindSetProperty
   (word64LE widgetId <> word32LE propHref <> word32LE sourceElement
     <> word32LE level <> word32LE field)
 
+-- set_property with a constant rich value.
+txSetRich :: Word64 -> Bool -> Builder
+txSetRich widgetId rich = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propRich <> word32LE sourceConst
+    <> encodeValue (VBool rich))
+
+-- set_property with a signal-bound rich value.
+txBindRich :: Word64 -> Word64 -> Builder
+txBindRich widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propRich <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindRichElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindRichElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propRich <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
 -- set_window_prop with a constant title value (window 0, the primary surface).
 txSetWindowTitle :: Word64 -> String -> Builder
 txSetWindowTitle window title = wireRecord txKindSetWindowProp
@@ -1901,7 +1986,7 @@ parseOccurrence ::
   IO (Maybe (Word16, Word64, [Value], Maybe Value, Maybe ClipValues, Maybe DropValues, [Value]))
 parseOccurrence redeem rec = do
   kind <- peekByteOff rec 4 :: IO Word16
-  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult && kind /= occKindClipboardResult && kind /= occKindPasted && kind /= occKindUndone && kind /= occKindRedone && kind /= occKindSortRequested && kind /= occKindDrawRequested && kind /= occKindTick && kind /= occKindDropped && kind /= occKindDragEnded && kind /= occKindDateChanged && kind /= occKindTimeChanged && kind /= occKindValueCommitted && kind /= occKindNotificationResult && kind /= occKindLinkOpened
+  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult && kind /= occKindClipboardResult && kind /= occKindPasted && kind /= occKindUndone && kind /= occKindRedone && kind /= occKindSortRequested && kind /= occKindDrawRequested && kind /= occKindTick && kind /= occKindDropped && kind /= occKindDragEnded && kind /= occKindDateChanged && kind /= occKindTimeChanged && kind /= occKindValueCommitted && kind /= occKindNotificationResult && kind /= occKindLinkOpened && kind /= occKindTextEdited && kind /= occKindTextFormatted
     then return Nothing
     else do
       ident <- peekByteOff rec 8 :: IO Word64
@@ -2015,5 +2100,32 @@ parseOccurrence redeem rec = do
                           (v, next) <- parseValue rec at
                           rest next (v : acc)
                 rest at' []
+              else if kind == occKindTextEdited
+              then do
+                source <- peekByteOff rec 20 :: IO Word32
+                start <- peekByteOff rec at' :: IO Word64
+                stop <- peekByteOff rec (at' + 8) :: IO Word64
+                count <- peekByteOff rec (at' + 16) :: IO Word32
+                -- past start, end, count, reserved and the values header
+                let readRuns at 0 acc = return (reverse acc, at)
+                    readRuns at n acc = do
+                      (v, next) <- parseValue rec at
+                      readRuns next (n - 1 :: Word32) (v : acc)
+                (runs, afterRuns) <- readRuns (at' + 32) (count * 4) []
+                (inserted, _) <- parseValue rec afterRuns
+                return
+                  ( [ VI64 (fromIntegral source), VI64 (fromIntegral start)
+                    , VI64 (fromIntegral stop), inserted ]
+                      ++ runs )
+              else if kind == occKindTextFormatted
+              then do
+                removed <- peekByteOff rec 20 :: IO Word32
+                start <- peekByteOff rec at' :: IO Word64
+                stop <- peekByteOff rec (at' + 8) :: IO Word64
+                (name, afterName) <- parseValue rec (at' + 16)
+                (value, _) <- parseValue rec afterName
+                return
+                  [ VI64 (fromIntegral removed), VI64 (fromIntegral start)
+                  , VI64 (fromIntegral stop), name, value ]
               else return []
           return (Just (kind, ident, keys, payload, clip, drop_, tail_))

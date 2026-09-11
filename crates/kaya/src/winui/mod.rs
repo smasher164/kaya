@@ -12758,6 +12758,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
         // offsets in these ops are already UTF-16 code units — the core
         // converted them against the text it validated them on — so
         // nothing below counts a character.
+        // docs/rich-text-plan.md §4: this backend's breadth step.
+        ApplyOp::SetRichText { .. }
+            | ApplyOp::ApplyEdit { .. }
+            | ApplyOp::FormatText { .. } => {
+            crate::depth_stub("richtext")
+        }
         ApplyOp::HighlightRanges { id, ranges } => {
             let Some(field) = textarea_by_id(core, id.0) else {
                 return Ok(());
@@ -16719,6 +16725,34 @@ impl crate::harness::Stage for WinUiStage {
     /// does what a text service does (`tsf_compose`). Inserting the text and
     /// calling it a composition is the very state D4's refusal must
     /// distinguish it from.
+    fn format(
+        &self, _: crate::harness::Target, _: crate::harness::TextRange, _: &str, _: &str, _: bool,
+    ) {
+        crate::depth_stub("richtext")
+    }
+
+    fn rich_runs(&self, t: crate::harness::Target) -> String {
+        Self::on_ui_read(move |core| {
+            let Some(i) = crate::harness::try_resolve(t.index, core.textareas.len()) else {
+                return Ok("<no such target>".to_string());
+            };
+            let id = crate::protocol::WidgetId(core.textarea_ids[i]);
+            Ok(core.scene.rich_runs_string(id).unwrap_or_else(|| "<no rich document>".to_string()))
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
+    }
+
+    fn last_edit(&self, t: crate::harness::Target) -> String {
+        Self::on_ui_read(move |core| {
+            let Some(i) = crate::harness::try_resolve(t.index, core.textareas.len()) else {
+                return Ok("<no such target>".to_string());
+            };
+            let id = crate::protocol::WidgetId(core.textarea_ids[i]);
+            Ok(core.scene.last_edit_string(id).unwrap_or_else(|| "<no rich document>".to_string()))
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
+    }
+
     fn compose(&self, t: crate::harness::Target, text: &str) {
         let marked = text.to_owned();
         // The control must have the keyboard focus, or TSF's focused

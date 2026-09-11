@@ -10,7 +10,7 @@ value types.
 import struct
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x1960b216df673c1f
+SPEC_HASH = 0xb14092d93e5c1359
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -100,6 +100,7 @@ PROP_MIN_COLUMN_WIDTH = 28
 PROP_WRAP = 29
 PROP_PLACEHOLDER = 30
 PROP_HREF = 31
+PROP_RICH = 32
 WPROP_TITLE = 1
 WPROP_WIDTH = 2
 WPROP_HEIGHT = 3
@@ -190,6 +191,24 @@ SYMBOL_HOME = 20
 SOURCE_CONST = 0
 SOURCE_SIGNAL = 1
 SOURCE_ELEMENT = 2
+RICH_ATTR_BOLD = 1
+RICH_ATTR_ITALIC = 2
+RICH_ATTR_UNDERLINE = 3
+RICH_ATTR_STRIKE = 4
+RICH_ATTR_CODE = 5
+RICH_ATTR_LINK = 6
+RICH_ATTR_BLOCK = 7
+BLOCK_KIND_BODY = 0
+BLOCK_KIND_HEADING1 = 1
+BLOCK_KIND_HEADING2 = 2
+BLOCK_KIND_HEADING3 = 3
+BLOCK_KIND_QUOTE = 4
+BLOCK_KIND_CODE_BLOCK = 5
+EDIT_SOURCE_USER = 0
+EDIT_SOURCE_IME_COMMIT = 1
+EDIT_SOURCE_PASTE = 2
+EDIT_SOURCE_NATIVE_UNDO = 3
+EDIT_SOURCE_DROP = 4
 OCCURRENCE_PAD = 0
 OCCURRENCE_BUTTON_CLICKED = 1
 OCCURRENCE_TEXT_CHANGED = 2
@@ -252,6 +271,9 @@ TX_SET_REORDERABLE = 51
 TX_SHOW_NOTIFICATION = 52
 TX_CANCEL_NOTIFICATION = 53
 TX_DECLARE_LINK_ROUTE = 54
+TX_SET_RICH_TEXT = 55
+TX_APPLY_EDIT = 56
+TX_FORMAT_TEXT = 57
 APPLY_CREATE = 1
 APPLY_SET_PROP = 2
 APPLY_ADD_CHILD = 3
@@ -292,6 +314,9 @@ APPLY_FOLD = 37
 APPLY_SET_DRAG_SOURCE = 38
 APPLY_SET_DROP_TARGET = 39
 APPLY_SET_REORDERABLE = 40
+APPLY_SET_RICH_TEXT = 43
+APPLY_APPLY_EDIT = 44
+APPLY_FORMAT_TEXT = 45
 OCC_BUTTON_CLICKED = 1
 OCC_TEXT_CHANGED = 2
 OCC_TOGGLED = 3
@@ -320,6 +345,8 @@ OCC_TIME_CHANGED = 25
 OCC_VALUE_COMMITTED = 26
 OCC_NOTIFICATION_RESULT = 27
 OCC_LINK_OPENED = 28
+OCC_TEXT_EDITED = 29
+OCC_TEXT_FORMATTED = 30
 
 
 def _pad(b):
@@ -604,6 +631,18 @@ def tx_cancel_notification(notification):
 def tx_declare_link_route(route, pattern):
     """Declare one app-link route (docs/app-links-plan.md §4): `route` is the app's own id for it, `pattern` a Str. The MATCH HAPPENS ONCE, IN THE CORE — the patterns come here so a URL the platform hands over is turned into a route and its captures by one matcher rather than by nine. The grammar: segments split on `/`, a literal segment matches itself, `{name}` captures one segment. REFUSED AT THE DECLARATION, a fault like every other declaration refusal: an empty pattern, an empty segment, a brace a segment never closes, and a pattern already declared. Routes are declared at startup, before or inside the app's first transaction: the core matches a link that STARTED the process once that transaction lands."""
     return record(TX_DECLARE_LINK_ROUTE, struct.pack("<Q", route) + _enc.value(pattern))
+
+def tx_set_rich_text(widget_id, count, runs):
+    """The WHOLE attributed document of a `rich` textarea (docs/rich-text-plan.md R1): the text as the payload, and `runs` holding 4*`count` values read in FOURS — I64 start, I64 end, Str name, Str value — each run one attribute over one range in UTF-8 BYTE offsets into that text, validated at the ranges' chokepoint (docs/ranges-units.md §7) and allowed to overlap (bold and italic over one range are two runs). A CONFIGURATION WRITE: it echoes nothing, and it resets the widget's native undo history where that tier is on (docs/undo-plan.md D7). The vocabulary is wire::RICH_ATTRS; a `block` run must start and end on paragraph boundaries. Refused on a textarea that is not `rich`."""
+    return record(TX_SET_RICH_TEXT, struct.pack("<Q", widget_id) + struct.pack("<I", count) + struct.pack("<I", 0) + _enc.values(runs))
+
+def tx_apply_edit(widget_id, start, stop, count, runs):
+    """ONE edit into a `rich` textarea, the app's own or a collaborator's (docs/rich-text-plan.md R1, R5): replace `start..end` (UTF-8 byte offsets into the widget's current text, validated as a range is) with the payload text, whose attribute runs are `runs` in fours as set_rich_text's, with offsets RELATIVE to the inserted text. Keeps the selection: unchanged before the edit, shifted after it, a caret at `start` ending AFTER the insertion. Echoes nothing and never resets undo. QUEUED while an input-method composition is live and applied when it ends, since a refusal would drop a collaborator's edit."""
+    return record(TX_APPLY_EDIT, struct.pack("<Q", widget_id) + struct.pack("<Q", start) + struct.pack("<Q", stop) + struct.pack("<I", count) + struct.pack("<I", 0) + _enc.values(runs))
+
+def tx_format_text(widget_id, removed, attr):
+    """Format a `rich` textarea's CURRENT SELECTION through the widget's own act — what an app's toolbar button sends (docs/rich-text-plan.md R1): `attr` is two Str values, name then value; `removed` 1 takes the attribute off. The widget answers with text_formatted over the range it formatted, which is how the mirror moves; a collapsed selection arms the typing attribute and answers nothing until the next edit. A `block` act covers the selection's whole paragraphs, and `block` with value `body` removes. Refused on a textarea that is not `rich` and for a name outside wire::RICH_ATTRS."""
+    return record(TX_FORMAT_TEXT, struct.pack("<Q", widget_id) + struct.pack("<I", removed) + struct.pack("<I", 0) + _enc.values(attr))
 
 
 def tx_set_text(widget_id, text):
@@ -1071,6 +1110,21 @@ def tx_bind_href_element(widget_id, level=0, field=0):
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_HREF, SOURCE_ELEMENT, level, field))
 
 
+def tx_set_rich(widget_id, rich):
+    """set_property with a constant rich value (bool)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_RICH, SOURCE_CONST) + _enc.value(rich))
+
+
+def tx_bind_rich(widget_id, signal_id):
+    """set_property with a signal-bound rich value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_RICH, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_rich_element(widget_id, level=0, field=0):
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_RICH, SOURCE_ELEMENT, level, field))
+
+
 def tx_set_window_title(window, title):
     """set_window_prop with a constant title value (str); window 0, the primary surface."""
     return record(TX_SET_WINDOW_PROP, struct.pack("<QII", window, WPROP_TITLE, SOURCE_CONST) + _enc.value(title))
@@ -1394,7 +1448,7 @@ def parse_occurrence(buf):
     value for OCC_VALUE_CHANGED, None otherwise.
     """
     _size, kind, _flags = struct.unpack_from("<IHH", buf, 0)
-    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED):
+    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED):
         return kind, None, [], None
     if kind == OCC_ALERT_RESULT:
         # A request's one answer: id + the u32 code.
@@ -1511,6 +1565,24 @@ def parse_occurrence(buf):
         payload = (operation, bool(before), (x, y), anchor, clip, values)
     if kind in (OCC_DRAG_ENDED,):
         (payload,) = struct.unpack_from("<I", buf, at)
+    if kind in (OCC_TEXT_EDITED,):
+        source = struct.unpack_from("<I", buf, 20)[0]
+        start, stop, count = struct.unpack_from("<QQI", buf, at)
+        at += 24  # past start, end, count and its reserved word
+        at += 8  # past the values count and its reserved word
+        runs = []
+        for _ in range(count * 4):
+            v, at = parse_value(buf, at)
+            runs.append(v)
+        inserted, at = parse_value(buf, at)
+        return kind, ident, keys, [source, start, stop, inserted, *runs]
+    if kind in (OCC_TEXT_FORMATTED,):
+        removed = struct.unpack_from("<I", buf, 20)[0]
+        start, stop = struct.unpack_from("<QQ", buf, at)
+        at += 16
+        name, at = parse_value(buf, at)
+        value, at = parse_value(buf, at)
+        return kind, ident, keys, [removed, start, stop, name, value]
     if kind in (OCC_DRAW_REQUESTED, OCC_TICK,):
         # The canvas asks carry a run of BARE values after the
         # key path — the assigned size, and a tick's frame time

@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0x1960b216df673c1f;
+    public const ulong SpecHash = 0xb14092d93e5c1359;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -102,6 +102,7 @@ static class KayaWire
     public const uint PropWrap = 29;
     public const uint PropPlaceholder = 30;
     public const uint PropHref = 31;
+    public const uint PropRich = 32;
     public const uint WpropTitle = 1;
     public const uint WpropWidth = 2;
     public const uint WpropHeight = 3;
@@ -192,6 +193,24 @@ static class KayaWire
     public const uint SourceConst = 0;
     public const uint SourceSignal = 1;
     public const uint SourceElement = 2;
+    public const uint RichAttrBold = 1;
+    public const uint RichAttrItalic = 2;
+    public const uint RichAttrUnderline = 3;
+    public const uint RichAttrStrike = 4;
+    public const uint RichAttrCode = 5;
+    public const uint RichAttrLink = 6;
+    public const uint RichAttrBlock = 7;
+    public const uint BlockKindBody = 0;
+    public const uint BlockKindHeading1 = 1;
+    public const uint BlockKindHeading2 = 2;
+    public const uint BlockKindHeading3 = 3;
+    public const uint BlockKindQuote = 4;
+    public const uint BlockKindCodeBlock = 5;
+    public const uint EditSourceUser = 0;
+    public const uint EditSourceImeCommit = 1;
+    public const uint EditSourcePaste = 2;
+    public const uint EditSourceNativeUndo = 3;
+    public const uint EditSourceDrop = 4;
     public const uint OccurrencePad = 0;
     public const uint OccurrenceButtonClicked = 1;
     public const uint OccurrenceTextChanged = 2;
@@ -253,6 +272,9 @@ static class KayaWire
     public const ushort TxKindShowNotification = 52;
     public const ushort TxKindCancelNotification = 53;
     public const ushort TxKindDeclareLinkRoute = 54;
+    public const ushort TxKindSetRichText = 55;
+    public const ushort TxKindApplyEdit = 56;
+    public const ushort TxKindFormatText = 57;
     public const ushort ApplyKindCreate = 1;
     public const ushort ApplyKindSetProp = 2;
     public const ushort ApplyKindAddChild = 3;
@@ -293,6 +315,9 @@ static class KayaWire
     public const ushort ApplyKindSetDragSource = 38;
     public const ushort ApplyKindSetDropTarget = 39;
     public const ushort ApplyKindSetReorderable = 40;
+    public const ushort ApplyKindSetRichText = 43;
+    public const ushort ApplyKindApplyEdit = 44;
+    public const ushort ApplyKindFormatText = 45;
     public const ushort OccKindButtonClicked = 1;
     public const ushort OccKindTextChanged = 2;
     public const ushort OccKindToggled = 3;
@@ -321,6 +346,8 @@ static class KayaWire
     public const ushort OccKindValueCommitted = 26;
     public const ushort OccKindNotificationResult = 27;
     public const ushort OccKindLinkOpened = 28;
+    public const ushort OccKindTextEdited = 29;
+    public const ushort OccKindTextFormatted = 30;
 
     /// A blob value: the u64 handle from kaya_blob_register, consumed
     /// by the next submit; the bytes never ride the record stream.
@@ -938,6 +965,41 @@ static class KayaWire
         w.Write(route);
         EncodeValue(w, pattern);
         return Finish(stream, w, TxKindDeclareLinkRoute);
+    }
+
+    /// The WHOLE attributed document of a `rich` textarea (docs/rich-text-plan.md R1): the text as the payload, and `runs` holding 4*`count` values read in FOURS — I64 start, I64 end, Str name, Str value — each run one attribute over one range in UTF-8 BYTE offsets into that text, validated at the ranges' chokepoint (docs/ranges-units.md §7) and allowed to overlap (bold and italic over one range are two runs). A CONFIGURATION WRITE: it echoes nothing, and it resets the widget's native undo history where that tier is on (docs/undo-plan.md D7). The vocabulary is wire::RICH_ATTRS; a `block` run must start and end on paragraph boundaries. Refused on a textarea that is not `rich`.
+    public static byte[] TxSetRichText(ulong widgetId, uint count, object[] runs)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId);
+        w.Write(count);
+        w.Write(0u);
+        EncodeValues(w, runs);
+        return Finish(stream, w, TxKindSetRichText);
+    }
+
+    /// ONE edit into a `rich` textarea, the app's own or a collaborator's (docs/rich-text-plan.md R1, R5): replace `start..end` (UTF-8 byte offsets into the widget's current text, validated as a range is) with the payload text, whose attribute runs are `runs` in fours as set_rich_text's, with offsets RELATIVE to the inserted text. Keeps the selection: unchanged before the edit, shifted after it, a caret at `start` ending AFTER the insertion. Echoes nothing and never resets undo. QUEUED while an input-method composition is live and applied when it ends, since a refusal would drop a collaborator's edit.
+    public static byte[] TxApplyEdit(ulong widgetId, ulong start, ulong stop, uint count, object[] runs)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId);
+        w.Write(start);
+        w.Write(stop);
+        w.Write(count);
+        w.Write(0u);
+        EncodeValues(w, runs);
+        return Finish(stream, w, TxKindApplyEdit);
+    }
+
+    /// Format a `rich` textarea's CURRENT SELECTION through the widget's own act — what an app's toolbar button sends (docs/rich-text-plan.md R1): `attr` is two Str values, name then value; `removed` 1 takes the attribute off. The widget answers with text_formatted over the range it formatted, which is how the mirror moves; a collapsed selection arms the typing attribute and answers nothing until the next edit. A `block` act covers the selection's whole paragraphs, and `block` with value `body` removes. Refused on a textarea that is not `rich` and for a name outside wire::RICH_ATTRS.
+    public static byte[] TxFormatText(ulong widgetId, uint removed, object[] attr)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId);
+        w.Write(removed);
+        w.Write(0u);
+        EncodeValues(w, attr);
+        return Finish(stream, w, TxKindFormatText);
     }
 
     /// A civil date as the wire's I64: year * 10000 + month * 100 + day.
@@ -1739,6 +1801,31 @@ static class KayaWire
         return Finish(stream, w, TxKindSetProperty);
     }
 
+    /// set_property with a constant rich value.
+    public static byte[] TxSetRich(ulong widgetId, bool rich)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropRich); w.Write(SourceConst);
+        EncodeValue(w, rich);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound rich value.
+    public static byte[] TxBindRich(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropRich); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindRichElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropRich); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
     /// set_window_prop with a constant title value (window 0, the primary surface).
     public static byte[] TxSetWindowTitle(ulong window, string title)
     {
@@ -2234,7 +2321,7 @@ static class KayaWire
         keys = new List<object>();
         payload = null;
         kind = BitConverter.ToUInt16(rec, 4);
-        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged && kind != OccKindFileDialogResult && kind != OccKindClipboardResult && kind != OccKindPasted && kind != OccKindUndone && kind != OccKindRedone && kind != OccKindSortRequested && kind != OccKindDrawRequested && kind != OccKindTick && kind != OccKindDropped && kind != OccKindDragEnded && kind != OccKindDateChanged && kind != OccKindTimeChanged && kind != OccKindValueCommitted && kind != OccKindNotificationResult && kind != OccKindLinkOpened)
+        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged && kind != OccKindFileDialogResult && kind != OccKindClipboardResult && kind != OccKindPasted && kind != OccKindUndone && kind != OccKindRedone && kind != OccKindSortRequested && kind != OccKindDrawRequested && kind != OccKindTick && kind != OccKindDropped && kind != OccKindDragEnded && kind != OccKindDateChanged && kind != OccKindTimeChanged && kind != OccKindValueCommitted && kind != OccKindNotificationResult && kind != OccKindLinkOpened && kind != OccKindTextEdited && kind != OccKindTextFormatted)
             return false;
         id = BitConverter.ToUInt64(rec, 8);
         if (kind == OccKindAlertResult)
@@ -2369,6 +2456,48 @@ static class KayaWire
         if (kind == OccKindDragEnded)
         {
             payload = BitConverter.ToUInt32(rec, at);
+        }
+        if (kind == OccKindTextEdited)
+        {
+            uint source = BitConverter.ToUInt32(rec, 20);
+            ulong start = BitConverter.ToUInt64(rec, at);
+            ulong stop = BitConverter.ToUInt64(rec, at + 8);
+            int count = (int)BitConverter.ToUInt32(rec, at + 16);
+            at += 32; // start, end, count, reserved, the values header
+            var runs = new List<object>();
+            for (int i = 0; i < count * 4 + 1; i++)
+            {
+                uint rtype = BitConverter.ToUInt32(rec, at);
+                int rlen = BitConverter.ToInt32(rec, at + 4);
+                switch (rtype)
+                {
+                    case ValueBool: runs.Add(rec[at + 8] != 0); break;
+                    case ValueI64: runs.Add(BitConverter.ToInt64(rec, at + 8)); break;
+                    case ValueF64: runs.Add(BitConverter.ToDouble(rec, at + 8)); break;
+                    default: runs.Add(Encoding.UTF8.GetString(rec, at + 8, rlen)); break;
+                }
+                at += 8 + ((rlen + 7) & ~7);
+            }
+            // The inserted text rides LAST on the wire and reads
+            // FOURTH here, so the head is fixed and the runs follow.
+            var flat = new List<object> { source, start, stop, runs[runs.Count - 1] };
+            flat.AddRange(runs.GetRange(0, runs.Count - 1));
+            payload = flat;
+        }
+        if (kind == OccKindTextFormatted)
+        {
+            uint removed = BitConverter.ToUInt32(rec, 20);
+            ulong start = BitConverter.ToUInt64(rec, at);
+            ulong stop = BitConverter.ToUInt64(rec, at + 8);
+            at += 16;
+            var pair = new List<object>();
+            for (int i = 0; i < 2; i++)
+            {
+                int alen = BitConverter.ToInt32(rec, at + 4);
+                pair.Add(Encoding.UTF8.GetString(rec, at + 8, alen));
+                at += 8 + ((alen + 7) & ~7);
+            }
+            payload = new List<object> { removed, start, stop, pair[0], pair[1] };
         }
         if (kind == OccKindDrawRequested || kind == OccKindTick)
         {

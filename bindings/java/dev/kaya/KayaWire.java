@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0x1960b216df673c1fL;
+    public static final long SPEC_HASH = 0xb14092d93e5c1359L;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -103,6 +103,7 @@ public final class KayaWire {
     public static final int PROP_WRAP = 29;
     public static final int PROP_PLACEHOLDER = 30;
     public static final int PROP_HREF = 31;
+    public static final int PROP_RICH = 32;
     public static final int WPROP_TITLE = 1;
     public static final int WPROP_WIDTH = 2;
     public static final int WPROP_HEIGHT = 3;
@@ -193,6 +194,24 @@ public final class KayaWire {
     public static final int SOURCE_CONST = 0;
     public static final int SOURCE_SIGNAL = 1;
     public static final int SOURCE_ELEMENT = 2;
+    public static final int RICH_ATTR_BOLD = 1;
+    public static final int RICH_ATTR_ITALIC = 2;
+    public static final int RICH_ATTR_UNDERLINE = 3;
+    public static final int RICH_ATTR_STRIKE = 4;
+    public static final int RICH_ATTR_CODE = 5;
+    public static final int RICH_ATTR_LINK = 6;
+    public static final int RICH_ATTR_BLOCK = 7;
+    public static final int BLOCK_KIND_BODY = 0;
+    public static final int BLOCK_KIND_HEADING1 = 1;
+    public static final int BLOCK_KIND_HEADING2 = 2;
+    public static final int BLOCK_KIND_HEADING3 = 3;
+    public static final int BLOCK_KIND_QUOTE = 4;
+    public static final int BLOCK_KIND_CODE_BLOCK = 5;
+    public static final int EDIT_SOURCE_USER = 0;
+    public static final int EDIT_SOURCE_IME_COMMIT = 1;
+    public static final int EDIT_SOURCE_PASTE = 2;
+    public static final int EDIT_SOURCE_NATIVE_UNDO = 3;
+    public static final int EDIT_SOURCE_DROP = 4;
     public static final int OCCURRENCE_PAD = 0;
     public static final int OCCURRENCE_BUTTON_CLICKED = 1;
     public static final int OCCURRENCE_TEXT_CHANGED = 2;
@@ -254,6 +273,9 @@ public final class KayaWire {
     public static final short TX_KIND_SHOW_NOTIFICATION = 52;
     public static final short TX_KIND_CANCEL_NOTIFICATION = 53;
     public static final short TX_KIND_DECLARE_LINK_ROUTE = 54;
+    public static final short TX_KIND_SET_RICH_TEXT = 55;
+    public static final short TX_KIND_APPLY_EDIT = 56;
+    public static final short TX_KIND_FORMAT_TEXT = 57;
     public static final short APPLY_KIND_CREATE = 1;
     public static final short APPLY_KIND_SET_PROP = 2;
     public static final short APPLY_KIND_ADD_CHILD = 3;
@@ -294,6 +316,9 @@ public final class KayaWire {
     public static final short APPLY_KIND_SET_DRAG_SOURCE = 38;
     public static final short APPLY_KIND_SET_DROP_TARGET = 39;
     public static final short APPLY_KIND_SET_REORDERABLE = 40;
+    public static final short APPLY_KIND_SET_RICH_TEXT = 43;
+    public static final short APPLY_KIND_APPLY_EDIT = 44;
+    public static final short APPLY_KIND_FORMAT_TEXT = 45;
     public static final short OCC_KIND_BUTTON_CLICKED = 1;
     public static final short OCC_KIND_TEXT_CHANGED = 2;
     public static final short OCC_KIND_TOGGLED = 3;
@@ -322,6 +347,8 @@ public final class KayaWire {
     public static final short OCC_KIND_VALUE_COMMITTED = 26;
     public static final short OCC_KIND_NOTIFICATION_RESULT = 27;
     public static final short OCC_KIND_LINK_OPENED = 28;
+    public static final short OCC_KIND_TEXT_EDITED = 29;
+    public static final short OCC_KIND_TEXT_FORMATTED = 30;
 
     /** A blob value: the u64 handle from kaya_blob_register, consumed
      * by the next submit; the bytes never ride the record stream. */
@@ -911,6 +938,38 @@ public final class KayaWire {
         Enc b = begin(TX_KIND_DECLARE_LINK_ROUTE);
         b.putLong(route);
         encodeValue(b, pattern);
+        return finish(b);
+    }
+
+    /** The WHOLE attributed document of a `rich` textarea (docs/rich-text-plan.md R1): the text as the payload, and `runs` holding 4*`count` values read in FOURS — I64 start, I64 end, Str name, Str value — each run one attribute over one range in UTF-8 BYTE offsets into that text, validated at the ranges' chokepoint (docs/ranges-units.md §7) and allowed to overlap (bold and italic over one range are two runs). A CONFIGURATION WRITE: it echoes nothing, and it resets the widget's native undo history where that tier is on (docs/undo-plan.md D7). The vocabulary is wire::RICH_ATTRS; a `block` run must start and end on paragraph boundaries. Refused on a textarea that is not `rich`. */
+    public static byte[] txSetRichText(long widgetId, int count, Object[] runs) {
+        Enc b = begin(TX_KIND_SET_RICH_TEXT);
+        b.putLong(widgetId);
+        b.putInt(count);
+        b.putInt(0);
+        encodeValues(b, runs);
+        return finish(b);
+    }
+
+    /** ONE edit into a `rich` textarea, the app's own or a collaborator's (docs/rich-text-plan.md R1, R5): replace `start..end` (UTF-8 byte offsets into the widget's current text, validated as a range is) with the payload text, whose attribute runs are `runs` in fours as set_rich_text's, with offsets RELATIVE to the inserted text. Keeps the selection: unchanged before the edit, shifted after it, a caret at `start` ending AFTER the insertion. Echoes nothing and never resets undo. QUEUED while an input-method composition is live and applied when it ends, since a refusal would drop a collaborator's edit. */
+    public static byte[] txApplyEdit(long widgetId, long start, long stop, int count, Object[] runs) {
+        Enc b = begin(TX_KIND_APPLY_EDIT);
+        b.putLong(widgetId);
+        b.putLong(start);
+        b.putLong(stop);
+        b.putInt(count);
+        b.putInt(0);
+        encodeValues(b, runs);
+        return finish(b);
+    }
+
+    /** Format a `rich` textarea's CURRENT SELECTION through the widget's own act — what an app's toolbar button sends (docs/rich-text-plan.md R1): `attr` is two Str values, name then value; `removed` 1 takes the attribute off. The widget answers with text_formatted over the range it formatted, which is how the mirror moves; a collapsed selection arms the typing attribute and answers nothing until the next edit. A `block` act covers the selection's whole paragraphs, and `block` with value `body` removes. Refused on a textarea that is not `rich` and for a name outside wire::RICH_ATTRS. */
+    public static byte[] txFormatText(long widgetId, int removed, Object[] attr) {
+        Enc b = begin(TX_KIND_FORMAT_TEXT);
+        b.putLong(widgetId);
+        b.putInt(removed);
+        b.putInt(0);
+        encodeValues(b, attr);
         return finish(b);
     }
 
@@ -1654,6 +1713,29 @@ public final class KayaWire {
         return finish(b);
     }
 
+    /** set_property with a constant rich value. */
+    public static byte[] txSetRich(long widgetId, boolean rich) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_RICH).putInt(SOURCE_CONST);
+        encodeValue(b, rich);
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound rich value. */
+    public static byte[] txBindRich(long widgetId, long signalId) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_RICH).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindRichElement(long widgetId, int level, int field) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_RICH).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
     /** set_window_prop with a constant title value (window 0, the primary surface). */
     public static byte[] txSetWindowTitle(long window, String title) {
         Enc b = begin(TX_KIND_SET_WINDOW_PROP);
@@ -2255,7 +2337,7 @@ public final class KayaWire {
     public static Occ parseOccurrence(byte[] rec) {
         ByteBuffer b = ByteBuffer.wrap(rec).order(ByteOrder.LITTLE_ENDIAN);
         short kind = b.getShort(4);
-        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED && kind != OCC_KIND_FILE_DIALOG_RESULT && kind != OCC_KIND_CLIPBOARD_RESULT && kind != OCC_KIND_PASTED && kind != OCC_KIND_UNDONE && kind != OCC_KIND_REDONE && kind != OCC_KIND_SORT_REQUESTED && kind != OCC_KIND_DRAW_REQUESTED && kind != OCC_KIND_TICK && kind != OCC_KIND_DROPPED && kind != OCC_KIND_DRAG_ENDED && kind != OCC_KIND_DATE_CHANGED && kind != OCC_KIND_TIME_CHANGED && kind != OCC_KIND_VALUE_COMMITTED && kind != OCC_KIND_NOTIFICATION_RESULT && kind != OCC_KIND_LINK_OPENED) {
+        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED && kind != OCC_KIND_FILE_DIALOG_RESULT && kind != OCC_KIND_CLIPBOARD_RESULT && kind != OCC_KIND_PASTED && kind != OCC_KIND_UNDONE && kind != OCC_KIND_REDONE && kind != OCC_KIND_SORT_REQUESTED && kind != OCC_KIND_DRAW_REQUESTED && kind != OCC_KIND_TICK && kind != OCC_KIND_DROPPED && kind != OCC_KIND_DRAG_ENDED && kind != OCC_KIND_DATE_CHANGED && kind != OCC_KIND_TIME_CHANGED && kind != OCC_KIND_VALUE_COMMITTED && kind != OCC_KIND_NOTIFICATION_RESULT && kind != OCC_KIND_LINK_OPENED && kind != OCC_KIND_TEXT_EDITED && kind != OCC_KIND_TEXT_FORMATTED) {
             return null;
         }
         long id = b.getLong(8);
@@ -2438,6 +2520,35 @@ public final class KayaWire {
         }
         if (kind == OCC_KIND_DRAG_ENDED) {
             payload = b.getInt(at);
+        }
+        if (kind == OCC_KIND_TEXT_EDITED) {
+            int source = b.getInt(20);
+            long start = b.getLong(at);
+            long stop = b.getLong(at + 8);
+            int count = b.getInt(at + 16);
+            // past start, end, count, reserved and the values header
+            int[] cursor = new int[] {at + 32};
+            List<Object> runs = new ArrayList<>();
+            for (int i = 0; i < count * 4; i++) {
+                runs.add(parseValue(rec, b, cursor));
+            }
+            Object inserted = parseValue(rec, b, cursor);
+            List<Object> flat = new ArrayList<>();
+            flat.add(source);
+            flat.add(start);
+            flat.add(stop);
+            flat.add(inserted);
+            flat.addAll(runs);
+            payload = flat;
+        }
+        if (kind == OCC_KIND_TEXT_FORMATTED) {
+            int removed = b.getInt(20);
+            long start = b.getLong(at);
+            long stop = b.getLong(at + 8);
+            int[] cursor = new int[] {at + 16};
+            Object name = parseValue(rec, b, cursor);
+            Object value = parseValue(rec, b, cursor);
+            payload = List.of(removed, start, stop, name, value);
         }
         if (kind == OCC_KIND_DRAW_REQUESTED || kind == OCC_KIND_TICK) {
             // The canvas asks carry a run of BARE values after the

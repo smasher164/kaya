@@ -245,7 +245,7 @@ MODS = {
 # accessibility service), and the one that opens a composing region
 # (the helper IME).
 A11Y_SCENES = ["filedialog", "save", "editor"]
-IME_SCENES = ["ranges"]
+IME_SCENES = ["ranges", "richtext"]
 
 # A scene is wired on this lane IF AND ONLY IF a suite lists it, or it
 # is declared here. window/panels drive aux windows and panel chrome no

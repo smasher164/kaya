@@ -236,6 +236,73 @@ Depth then breadth, the standing pattern:
    editor asserting both routes. Cost M.
 5. **Labels** (R8). Cost M.
 
+## 7. The depth build, as it landed (2026-09-11)
+
+The root and the mac arm are on the tree (docs/deferred.md's rich text
+entry carries the open stubs). Three things were decided while building
+and are recorded here for the review:
+
+- **The app formats the widget's SELECTION through the widget's own act**:
+  a fifth record, TX `format_text { widget, removed, attr: [name, value] }`
+  (apply 45), lowered verbatim to the backend, which applies it over its
+  current selection — or arms its typing attributes when the selection is
+  collapsed — and answers with `text_formatted` exactly as for a user's
+  act. That is the toolbar: an app draws Bold as a kaya button and its
+  handler sends `tx.format(editor, "bold", "true")`, `tx.unformat(editor,
+  "bold")` or `tx.set_block(editor, Block::Heading1)`, and reads the range
+  back from `on_format`. The alternative, eleven menu roles (bold, italic,
+  … heading1-3, quote, code_block) routed focused-text-first the way undo
+  is, was refused: it puts the whole vocabulary into MENU_ROLES, into all
+  four backends' enablement and dispatch and into nine bindings' role
+  constants, for a mechanism the app can spell with the widgets it has.
+  A native act (iOS's edit menu, WinUI's Ctrl+B) reaches the same answer
+  when those arms land.
+- **The harness verbs (R9)**: `format <target> <start:end> <name>[=<value>]
+  [off]` in bytes — the runner selects the range and takes the widget's act,
+  so the widget reports as for a user — `expect_runs <target> "<runs>"`
+  reads the CORE's document as `start:stop name[=value]`, `|`-joined in the
+  mirror's normal order (a flag's `true` is its name alone), and
+  `expect_edit <target> "<edit>"` reads the last text_edited the core
+  published as `start:stop <inserted> source [runs]`, with angle brackets
+  because a `.steps` string cannot carry a quote. The mac runner reads the
+  storage's own runs beside the core's and prints a KAYA_DIAG naming both
+  when they disagree; that is R9's "per backend" half until check-verbs
+  holds a row for it. The scene is tools/scenes/richtext.steps, its guest
+  guests/rust/richtext.rs, and the guest's second label is the binding's
+  Document spelled the same way, so the fold is compared to the mirror
+  byte for byte.
+- **The mac arm keeps kaya's attributes under its own keys**
+  (`kaya.rich.<name>`) and DERIVES the display from them on every change
+  — font traits and heading sizes, underline and strike styles, the link
+  colour and `.link`, a quote's indent — so a read-back never guesses a
+  name from a font. `isRichText` is the one pin lifted, and the view's
+  paste goes through `pasteAsPlainText` under the typing attributes so
+  RTF's own attributes never enter (source `paste`). A block act covers
+  the selection's paragraphs WITHOUT the trailing newline. Pending typing
+  attributes survive AppKit's re-derivation and are spent by the next
+  insertion, the core's rule; a caret moved elsewhere by the user keeps
+  them until then, which most editors do not — a ruling if it matters.
+  Not drawn yet: a code run's ground (the highlight ground owns
+  `.backgroundColor` on this view) and a quote's rule; a link click takes
+  AppKit's default rather than kaya's link door.
+
+- **A composition is the widget's alone, and the app's own edits are the
+  app's at once.** Measured on the leg: `setMarkedText` notifies no
+  delegate, so marked text never reaches text_changed, the core's mirror
+  or the app — the composition commits as ONE edit when it ends, which is
+  what R5 assumed and A's open item 3 asked about (a held edit cannot be
+  stale against marked text the core never saw). And the binding folds an
+  `apply_edit` into the app's `Document` as it SENDS it, while the widget
+  and the core's mirror take it when the composition ends, so the two are
+  the edit's length apart until then; the scene asserts exactly that.
+
+Open after this step, beside the platform arms: the `Edit` the Rust sugar
+hands an app carries no `source` (the core's text_edited does; the harness
+reads it); `own_undo` (R6) is the undo step's and the mac's native undo
+stack stays on under a rich textarea until then; and the editor's rich
+toggle (§4 step 2) moves to the breadth step, since guests/go/editor needs
+the Go sugar first.
+
 ## 5. What this plan does not do
 
 - It does not put a CRDT, a delta format or a markup language on the

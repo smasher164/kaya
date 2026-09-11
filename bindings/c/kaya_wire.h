@@ -199,7 +199,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     }
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0x1960b216df673c1fULL
+#define KAYA_SPEC_HASH 0xb14092d93e5c1359ULL
 
 
 /* Create a signal holding `initial`. */
@@ -688,6 +688,38 @@ static inline void kaya_tx_declare_link_route(KayaTx *tx, uint64_t route, KayaVa
     size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_DECLARE_LINK_ROUTE);
     kaya_wire_u64(tx, route);
     kaya_wire_value(tx, pattern);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* The WHOLE attributed document of a `rich` textarea (docs/rich-text-plan.md R1): the text as the payload, and `runs` holding 4*`count` values read in FOURS — I64 start, I64 end, Str name, Str value — each run one attribute over one range in UTF-8 BYTE offsets into that text, validated at the ranges' chokepoint (docs/ranges-units.md §7) and allowed to overlap (bold and italic over one range are two runs). A CONFIGURATION WRITE: it echoes nothing, and it resets the widget's native undo history where that tier is on (docs/undo-plan.md D7). The vocabulary is wire::RICH_ATTRS; a `block` run must start and end on paragraph boundaries. Refused on a textarea that is not `rich`. */
+static inline void kaya_tx_set_rich_text(KayaTx *tx, uint64_t widget_id, uint32_t count, const KayaVal *runs, uint32_t runs_len) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_RICH_TEXT);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, count);
+    kaya_wire_u32(tx, 0);
+    kaya_wire_values(tx, runs, runs_len);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* ONE edit into a `rich` textarea, the app's own or a collaborator's (docs/rich-text-plan.md R1, R5): replace `start..end` (UTF-8 byte offsets into the widget's current text, validated as a range is) with the payload text, whose attribute runs are `runs` in fours as set_rich_text's, with offsets RELATIVE to the inserted text. Keeps the selection: unchanged before the edit, shifted after it, a caret at `start` ending AFTER the insertion. Echoes nothing and never resets undo. QUEUED while an input-method composition is live and applied when it ends, since a refusal would drop a collaborator's edit. */
+static inline void kaya_tx_apply_edit(KayaTx *tx, uint64_t widget_id, uint64_t start, uint64_t stop, uint32_t count, const KayaVal *runs, uint32_t runs_len) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_APPLY_EDIT);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u64(tx, start);
+    kaya_wire_u64(tx, stop);
+    kaya_wire_u32(tx, count);
+    kaya_wire_u32(tx, 0);
+    kaya_wire_values(tx, runs, runs_len);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* Format a `rich` textarea's CURRENT SELECTION through the widget's own act — what an app's toolbar button sends (docs/rich-text-plan.md R1): `attr` is two Str values, name then value; `removed` 1 takes the attribute off. The widget answers with text_formatted over the range it formatted, which is how the mirror moves; a collapsed selection arms the typing attribute and answers nothing until the next edit. A `block` act covers the selection's whole paragraphs, and `block` with value `body` removes. Refused on a textarea that is not `rich` and for a name outside wire::RICH_ATTRS. */
+static inline void kaya_tx_format_text(KayaTx *tx, uint64_t widget_id, uint32_t removed, const KayaVal *attr, uint32_t attr_len) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_FORMAT_TEXT);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, removed);
+    kaya_wire_u32(tx, 0);
+    kaya_wire_values(tx, attr, attr_len);
     kaya_wire_end(tx, kaya_at);
 }
 
@@ -1707,6 +1739,38 @@ static inline void kaya_tx_bind_href_element(KayaTx *tx, uint64_t widget_id, uin
     kaya_wire_end(tx, kaya_at);
 }
 
+/* set_property with a constant rich value. */
+static inline void kaya_tx_set_rich(KayaTx *tx, uint64_t widget_id, int rich) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_RICH);
+    kaya_wire_u32(tx, KAYA_SOURCE_CONST);
+    kaya_wire_value(tx, kaya_bool(rich));
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property with a signal-bound rich value. */
+static inline void kaya_tx_bind_rich(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_RICH);
+    kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
+    kaya_wire_u64(tx, signal_id);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property bound to one field of the element of the enclosing
+ * For, `level` Fors up (field 0 for a scalar collection). */
+static inline void kaya_tx_bind_rich_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_RICH);
+    kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
+    kaya_wire_u32(tx, level);
+    kaya_wire_u32(tx, field);
+    kaya_wire_end(tx, kaya_at);
+}
+
 /* set_menu_prop with a constant label value. */
 static inline void kaya_tx_set_menu_label(KayaTx *tx, uint64_t item, const char *label) {
     size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);
@@ -2124,6 +2188,72 @@ static inline int kaya_parse_tick(const uint8_t *rec, uint64_t *id,
         at = kaya_parse_value(rec, at, room ? &vals[*n_vals] : &scratch);
         (*n_vals)++;
     }
+    return 1;
+}
+
+/* Decode a text_edited occurrence: id plus path_len key-path values,
+ * `source` from the slot the click family pads, the replaced
+ * range in UTF-8 bytes, the inserted text, and 4*n_runs values
+ * read in FOURS — I64 start, I64 end, Str name, Str value, the
+ * run offsets relative to the inserted text. Returns 1 and fills
+ * the outputs, or 0 for other kinds. */
+static inline int kaya_parse_text_edited(const uint8_t *rec, uint64_t *id,
+                                          KayaVal *keys, uint32_t max_keys,
+                                          uint32_t *n_keys, uint32_t *source,
+                                          uint64_t *start, uint64_t *end,
+                                          KayaVal *inserted, KayaVal *runs,
+                                          uint32_t max_runs, uint32_t *n_runs) {
+    const KayaRecordButtonClicked *r = (const KayaRecordButtonClicked *)rec;
+    if (r->header.kind != KAYA_OCCURRENCE_TEXT_EDITED)
+        return 0;
+    *id = r->id;
+    *n_keys = r->path_len;
+    memcpy(source, rec + 20, sizeof(uint32_t)); /* the click family's pad slot */
+    size_t at = sizeof(KayaRecordButtonClicked);
+    for (uint32_t k = 0; k < r->path_len; k++) {
+        KayaVal scratch;
+        at = kaya_parse_value(rec, at, k < max_keys ? &keys[k] : &scratch);
+    }
+    memcpy(start, rec + at, sizeof(uint64_t));
+    memcpy(end, rec + at + 8, sizeof(uint64_t));
+    uint32_t count;
+    memcpy(&count, rec + at + 16, sizeof(uint32_t));
+    at += 32; /* start, end, count, reserved, and the values header */
+    *n_runs = count * 4;
+    for (uint32_t i = 0; i < count * 4; i++) {
+        KayaVal scratch;
+        at = kaya_parse_value(rec, at, i < max_runs ? &runs[i] : &scratch);
+    }
+    kaya_parse_value(rec, at, inserted);
+    return 1;
+}
+
+/* Decode a text_formatted occurrence: id plus path_len key-path values,
+ * `removed` from the slot the click family pads, the formatted
+ * range in UTF-8 bytes, and the attribute as a name and a value.
+ * `removed` 1 means the attribute came OFF and the value is empty.
+ * Returns 1 and fills the outputs, or 0 for other kinds. */
+static inline int kaya_parse_text_formatted(const uint8_t *rec, uint64_t *id,
+                                             KayaVal *keys, uint32_t max_keys,
+                                             uint32_t *n_keys, uint32_t *removed,
+                                             uint64_t *start, uint64_t *end,
+                                             KayaVal *name, KayaVal *value) {
+    const KayaRecordButtonClicked *r = (const KayaRecordButtonClicked *)rec;
+    if (r->header.kind != KAYA_OCCURRENCE_TEXT_FORMATTED)
+        return 0;
+    *id = r->id;
+    *n_keys = r->path_len;
+    memcpy(removed, rec + 20, sizeof(uint32_t)); /* the click family's pad slot */
+    size_t at = sizeof(KayaRecordButtonClicked);
+    for (uint32_t k = 0; k < r->path_len; k++) {
+        KayaVal scratch;
+        at = kaya_parse_value(rec, at, k < max_keys ? &keys[k] : &scratch);
+    }
+    memcpy(start, rec + at, sizeof(uint64_t));
+    memcpy(end, rec + at + 8, sizeof(uint64_t));
+    at += 16;
+    at = kaya_parse_value(rec, at, name);
+    kaya_parse_value(rec, at, value);
     return 1;
 }
 

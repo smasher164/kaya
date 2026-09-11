@@ -47,7 +47,8 @@ SCENES = [
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed — built and run rust-only until their guests arrive,
 # when they move into SCENES.
-DEPTH_SCENES = ["typeface", "windowed", "canvas", "dnd", "tasks", "notify"]
+DEPTH_SCENES = ["typeface", "windowed", "canvas", "dnd", "tasks", "notify",
+                "richtext"]
 # The C-floor scenes THIS LANE RUNS (guests/c/Makefile keeps the whole
 # list; this is the SCENES= override build_c passes, and check-steps'
 # sweep_c_floor reads it from the other side).
@@ -168,6 +169,7 @@ ORDER = [
     # The notification scene, bundled (BUNDLED_SCENES); rust-only until the
     # breadth slice (docs/tasks-s3-plan.md §6).
     ("notify", ("rust",)),
+    ("richtext", ("rust",)),
     ("drain",),
     # WHAT SURVIVES A RELAUNCH (docs/tasks-s4-plan.md §4): the tasks
     # guest again under taskspersist.steps, act two through the PLAIN

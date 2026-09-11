@@ -1,0 +1,67 @@
+# THE OFFSETS ARE UTF-8 BYTES (docs/ranges-units.md): the é in the first
+# word puts every later run one byte past its UTF-16 position, and the
+# core converts for each backend. `expect_runs` and `expect_edit` read the
+# CORE's document (docs/rich-text-plan.md R9); label#1 is the app's own
+# Document, folded by the binding from the same deltas, so the two must
+# spell the same string.
+expect_runs textarea#0 ""
+expect_edit textarea#0 ""
+# THE DECLARATION: text and runs in one write, the widget's whole content.
+click button#0
+expect_runs textarea#0 "0:6 bold|7:12 link=https://kaya.dev|13:24 block=heading2"
+expect label#1 "0:6 bold|7:12 link=https://kaya.dev|13:24 block=heading2"
+# THE APP'S EDIT: ", big" at byte 6 with italic over "big". The bold
+# before it stays, every run after it shifts by five, and nothing echoes.
+click button#1
+expect_runs textarea#0 "0:6 bold|8:11 italic|12:17 link=https://kaya.dev|18:29 block=heading2"
+expect label#1 "0:6 bold|8:11 italic|12:17 link=https://kaya.dev|18:29 block=heading2"
+# THE WIDGET'S OWN ACT, driven as a user would: select and underline. The
+# app hears text_formatted over the range, on and then off.
+format textarea#0 12:17 underline
+expect label#0 "format 12:17 underline=true"
+expect_runs textarea#0 "0:6 bold|8:11 italic|12:17 link=https://kaya.dev|12:17 underline|18:29 block=heading2"
+expect label#1 "0:6 bold|8:11 italic|12:17 link=https://kaya.dev|12:17 underline|18:29 block=heading2"
+format textarea#0 12:17 underline off
+expect label#0 "format 12:17 underline=off"
+expect_runs textarea#0 "0:6 bold|8:11 italic|12:17 link=https://kaya.dev|18:29 block=heading2"
+# THE APP'S TOOLBAR: the app selects the first word and sends format_text;
+# the widget answers over the range it formatted, as for the user's act.
+click button#2
+click button#3
+expect label#0 "format 0:6 bold=off"
+expect_runs textarea#0 "8:11 italic|12:17 link=https://kaya.dev|18:29 block=heading2"
+# A BLOCK ACT covers the selection's whole paragraph, never its newline.
+click button#4
+expect label#0 "format 0:17 block=heading1"
+expect_runs textarea#0 "0:17 block=heading1|8:11 italic|12:17 link=https://kaya.dev|18:29 block=heading2"
+expect label#1 "0:17 block=heading1|8:11 italic|12:17 link=https://kaya.dev|18:29 block=heading2"
+# TYPING INHERITS (R4): `type` appends at the end, inside the second
+# paragraph, so the typed byte carries its block and nothing else — the
+# core derives that from its mirror, and the app's document agrees. One
+# keystroke, one edit: expect_edit reads the last one published.
+click button#5
+expect_focused textarea#0
+type "x"
+expect_edit textarea#0 "29:29 <x> user [0:1 block=heading2]"
+expect label#0 "edit 29:29 <x> [0:1 block=heading2]"
+expect_runs textarea#0 "0:17 block=heading1|8:11 italic|12:17 link=https://kaya.dev|18:30 block=heading2"
+expect label#1 "0:17 block=heading1|8:11 italic|12:17 link=https://kaya.dev|18:30 block=heading2"
+# A FORMAT OVER A COLLAPSED CARET is pending state: no occurrence of its
+# own, and the next keystroke's run.
+format textarea#0 30:30 bold
+expect label#0 "edit 29:29 <x> [0:1 block=heading2]"
+type "y"
+expect_edit textarea#0 "30:30 <y> user [0:1 block=heading2|0:1 bold]"
+expect_runs textarea#0 "0:17 block=heading1|8:11 italic|12:17 link=https://kaya.dev|18:31 block=heading2|30:31 bold"
+expect label#1 "0:17 block=heading1|8:11 italic|12:17 link=https://kaya.dev|18:31 block=heading2|30:31 bold"
+# R5: an edit arriving mid-composition WAITS. The marked text is the
+# widget's alone — displayed, uncommitted, invisible to the app and to the
+# core's mirror — and the app's prefix is held, so nothing here moves.
+compose textarea#0 "ab"
+expect_runs textarea#0 "0:17 block=heading1|8:11 italic|12:17 link=https://kaya.dev|18:31 block=heading2|30:31 bold"
+click button#6
+expect_runs textarea#0 "0:17 block=heading1|8:11 italic|12:17 link=https://kaya.dev|18:31 block=heading2|30:31 bold"
+# The app's OWN document takes its edit at once — the binding folds an
+# apply_edit as it sends it — while the widget and the core's mirror take
+# it when the composition ends. The two are two bytes apart until then.
+expect label#1 "2:19 block=heading1|10:13 italic|14:19 link=https://kaya.dev|20:33 block=heading2|32:33 bold"

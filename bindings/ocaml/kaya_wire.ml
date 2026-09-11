@@ -30,7 +30,7 @@ type drop_values = {
 }
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0x1960b216df673c1fL
+let spec_hash = 0xb14092d93e5c1359L
 
 let value_bool = 1
 let value_i64 = 2
@@ -120,6 +120,7 @@ let prop_min_column_width = 28
 let prop_wrap = 29
 let prop_placeholder = 30
 let prop_href = 31
+let prop_rich = 32
 let wprop_title = 1
 let wprop_width = 2
 let wprop_height = 3
@@ -210,6 +211,24 @@ let symbol_home = 20
 let source_const = 0
 let source_signal = 1
 let source_element = 2
+let rich_attr_bold = 1
+let rich_attr_italic = 2
+let rich_attr_underline = 3
+let rich_attr_strike = 4
+let rich_attr_code = 5
+let rich_attr_link = 6
+let rich_attr_block = 7
+let block_kind_body = 0
+let block_kind_heading1 = 1
+let block_kind_heading2 = 2
+let block_kind_heading3 = 3
+let block_kind_quote = 4
+let block_kind_code_block = 5
+let edit_source_user = 0
+let edit_source_ime_commit = 1
+let edit_source_paste = 2
+let edit_source_native_undo = 3
+let edit_source_drop = 4
 let occurrence_pad = 0
 let occurrence_button_clicked = 1
 let occurrence_text_changed = 2
@@ -271,6 +290,9 @@ let tx_kind_set_reorderable = 51
 let tx_kind_show_notification = 52
 let tx_kind_cancel_notification = 53
 let tx_kind_declare_link_route = 54
+let tx_kind_set_rich_text = 55
+let tx_kind_apply_edit = 56
+let tx_kind_format_text = 57
 let apply_kind_create = 1
 let apply_kind_set_prop = 2
 let apply_kind_add_child = 3
@@ -311,6 +333,9 @@ let apply_kind_fold = 37
 let apply_kind_set_drag_source = 38
 let apply_kind_set_drop_target = 39
 let apply_kind_set_reorderable = 40
+let apply_kind_set_rich_text = 43
+let apply_kind_apply_edit = 44
+let apply_kind_format_text = 45
 let occ_kind_button_clicked = 1
 let occ_kind_text_changed = 2
 let occ_kind_toggled = 3
@@ -339,6 +364,8 @@ let occ_kind_time_changed = 25
 let occ_kind_value_committed = 26
 let occ_kind_notification_result = 27
 let occ_kind_link_opened = 28
+let occ_kind_text_edited = 29
+let occ_kind_text_formatted = 30
 
 let pad8 b =
   while Buffer.length b mod 8 <> 0 do
@@ -776,6 +803,32 @@ let tx_declare_link_route route pattern =
   finish tx_kind_declare_link_route (fun b ->
       Buffer.add_int64_le b route;
       encode_value b pattern)
+
+(* The WHOLE attributed document of a `rich` textarea (docs/rich-text-plan.md R1): the text as the payload, and `runs` holding 4*`count` values read in FOURS — I64 start, I64 end, Str name, Str value — each run one attribute over one range in UTF-8 BYTE offsets into that text, validated at the ranges' chokepoint (docs/ranges-units.md §7) and allowed to overlap (bold and italic over one range are two runs). A CONFIGURATION WRITE: it echoes nothing, and it resets the widget's native undo history where that tier is on (docs/undo-plan.md D7). The vocabulary is wire::RICH_ATTRS; a `block` run must start and end on paragraph boundaries. Refused on a textarea that is not `rich`. *)
+let tx_set_rich_text widget_id count runs =
+  finish tx_kind_set_rich_text (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int count);
+      Buffer.add_int32_le b 0l;
+      encode_values b runs)
+
+(* ONE edit into a `rich` textarea, the app's own or a collaborator's (docs/rich-text-plan.md R1, R5): replace `start..end` (UTF-8 byte offsets into the widget's current text, validated as a range is) with the payload text, whose attribute runs are `runs` in fours as set_rich_text's, with offsets RELATIVE to the inserted text. Keeps the selection: unchanged before the edit, shifted after it, a caret at `start` ending AFTER the insertion. Echoes nothing and never resets undo. QUEUED while an input-method composition is live and applied when it ends, since a refusal would drop a collaborator's edit. *)
+let tx_apply_edit widget_id start stop count runs =
+  finish tx_kind_apply_edit (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int64_le b start;
+      Buffer.add_int64_le b stop;
+      Buffer.add_int32_le b (Int32.of_int count);
+      Buffer.add_int32_le b 0l;
+      encode_values b runs)
+
+(* Format a `rich` textarea's CURRENT SELECTION through the widget's own act — what an app's toolbar button sends (docs/rich-text-plan.md R1): `attr` is two Str values, name then value; `removed` 1 takes the attribute off. The widget answers with text_formatted over the range it formatted, which is how the mirror moves; a collapsed selection arms the typing attribute and answers nothing until the next edit. A `block` act covers the selection's whole paragraphs, and `block` with value `body` removes. Refused on a textarea that is not `rich` and for a name outside wire::RICH_ATTRS. *)
+let tx_format_text widget_id removed attr =
+  finish tx_kind_format_text (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int removed);
+      Buffer.add_int32_le b 0l;
+      encode_values b attr)
 
 (* A civil date as the wire's I64: year * 10000 + month * 100 + day. *)
 let pack_date year month day =
@@ -1600,6 +1653,32 @@ let tx_bind_href_element ?(level = 0) ?(field = 0) widget_id =
       Buffer.add_int32_le b (Int32.of_int level);
       Buffer.add_int32_le b (Int32.of_int field))
 
+(* set_property with a constant rich value. *)
+let tx_set_rich widget_id rich =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_rich);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (Bool rich))
+
+(* set_property with a signal-bound rich value. *)
+let tx_bind_rich widget_id signal_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_rich);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_property bound to one field of the element of the enclosing
+   For, `level` Fors up (0 = nearest; field 0 for a scalar). *)
+let tx_bind_rich_element ?(level = 0) ?(field = 0) widget_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_rich);
+      Buffer.add_int32_le b (Int32.of_int source_element);
+      Buffer.add_int32_le b (Int32.of_int level);
+      Buffer.add_int32_le b (Int32.of_int field))
+
 (* set_window_prop with a constant title value (window 0, the primary surface). *)
 let tx_set_window_title window title =
   finish tx_kind_set_window_prop (fun b ->
@@ -2083,7 +2162,7 @@ let parse_clip byte at =
    value), None for clicks. None for pad/unknown kinds. *)
 let parse_occurrence byte =
   let kind = u16_at byte 4 in
-  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed && kind <> occ_kind_toggled && kind <> occ_kind_value_changed && kind <> occ_kind_close_requested && kind <> occ_kind_window_closed && kind <> occ_kind_alert_result && kind <> occ_kind_entry_popped && kind <> occ_kind_back_requested && kind <> occ_kind_section_selected && kind <> occ_kind_menu_activated && kind <> occ_kind_menu_toggled && kind <> occ_kind_menu_value_changed && kind <> occ_kind_file_dialog_result && kind <> occ_kind_clipboard_result && kind <> occ_kind_pasted && kind <> occ_kind_undone && kind <> occ_kind_redone && kind <> occ_kind_sort_requested && kind <> occ_kind_draw_requested && kind <> occ_kind_tick && kind <> occ_kind_dropped && kind <> occ_kind_drag_ended && kind <> occ_kind_date_changed && kind <> occ_kind_time_changed && kind <> occ_kind_value_committed && kind <> occ_kind_notification_result && kind <> occ_kind_link_opened then None
+  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed && kind <> occ_kind_toggled && kind <> occ_kind_value_changed && kind <> occ_kind_close_requested && kind <> occ_kind_window_closed && kind <> occ_kind_alert_result && kind <> occ_kind_entry_popped && kind <> occ_kind_back_requested && kind <> occ_kind_section_selected && kind <> occ_kind_menu_activated && kind <> occ_kind_menu_toggled && kind <> occ_kind_menu_value_changed && kind <> occ_kind_file_dialog_result && kind <> occ_kind_clipboard_result && kind <> occ_kind_pasted && kind <> occ_kind_undone && kind <> occ_kind_redone && kind <> occ_kind_sort_requested && kind <> occ_kind_draw_requested && kind <> occ_kind_tick && kind <> occ_kind_dropped && kind <> occ_kind_drag_ended && kind <> occ_kind_date_changed && kind <> occ_kind_time_changed && kind <> occ_kind_value_committed && kind <> occ_kind_notification_result && kind <> occ_kind_link_opened && kind <> occ_kind_text_edited && kind <> occ_kind_text_formatted then None
   else begin
     (* ids are guest-allocated and small; the low u32 is the story. *)
     let id = u32_at byte 8 in
@@ -2204,6 +2283,41 @@ let parse_occurrence byte =
       else None
     in
     let tail =
+      if kind = occ_kind_text_edited then begin
+        let source = u32_at byte 20 in
+        let start = u32_at byte !at in
+        let stop = u32_at byte (!at + 8) in
+        let count = u32_at byte (!at + 16) in
+        (* past start, end, count, reserved and the values header *)
+        at := !at + 32;
+        let runs = ref [] in
+        for _ = 1 to (count * 4) + 1 do
+          let v, next = parse_value byte !at in
+          runs := v :: !runs;
+          at := next
+        done;
+        (* The inserted text rides LAST on the wire and reads
+           FOURTH here, so the head is fixed and the runs follow. *)
+        let ordered = List.rev !runs in
+        let inserted = List.nth ordered (List.length ordered - 1) in
+        let run_values =
+          List.filteri (fun i _ -> i < List.length ordered - 1) ordered
+        in
+        [ I64 (Int64.of_int source); I64 (Int64.of_int start);
+          I64 (Int64.of_int stop); inserted ]
+        @ run_values
+      end
+      else
+      if kind = occ_kind_text_formatted then begin
+        let removed = u32_at byte 20 in
+        let start = u32_at byte !at in
+        let stop = u32_at byte (!at + 8) in
+        let name, next = parse_value byte (!at + 16) in
+        let value, _ = parse_value byte next in
+        [ I64 (Int64.of_int removed); I64 (Int64.of_int start);
+          I64 (Int64.of_int stop); name; value ]
+      end
+      else
       if kind = occ_kind_draw_requested || kind = occ_kind_tick then begin
         (* The canvas asks carry a run of BARE values after the
            key path — the assigned size, and a tick's frame time

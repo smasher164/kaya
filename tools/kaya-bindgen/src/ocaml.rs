@@ -666,6 +666,57 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     // Its own slot because the run is 2 values for a redraw and 3 for a
     // tick, and `payload` is one.
     c.line("    let tail =");
+    // The rich pair's own arm (docs/rich-text-plan.md R1): the generic
+    // payload tail would read `start`, a bare word, as a tagged value.
+    let rich_edit = crate::rich_edit_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("kind = occ_kind_{n}"))
+        .collect::<Vec<_>>()
+        .join(" || ");
+    if !rich_edit.is_empty() {
+        c.line(&format!("      if {rich_edit} then begin"));
+        c.line("        let source = u32_at byte 20 in");
+        c.line("        let start = u32_at byte !at in");
+        c.line("        let stop = u32_at byte (!at + 8) in");
+        c.line("        let count = u32_at byte (!at + 16) in");
+        c.line("        (* past start, end, count, reserved and the values header *)");
+        c.line("        at := !at + 32;");
+        c.line("        let runs = ref [] in");
+        c.line("        for _ = 1 to (count * 4) + 1 do");
+        c.line("          let v, next = parse_value byte !at in");
+        c.line("          runs := v :: !runs;");
+        c.line("          at := next");
+        c.line("        done;");
+        c.line("        (* The inserted text rides LAST on the wire and reads");
+        c.line("           FOURTH here, so the head is fixed and the runs follow. *)");
+        c.line("        let ordered = List.rev !runs in");
+        c.line("        let inserted = List.nth ordered (List.length ordered - 1) in");
+        c.line("        let run_values =");
+        c.line("          List.filteri (fun i _ -> i < List.length ordered - 1) ordered");
+        c.line("        in");
+        c.line("        [ I64 (Int64.of_int source); I64 (Int64.of_int start);");
+        c.line("          I64 (Int64.of_int stop); inserted ]");
+        c.line("        @ run_values");
+        c.line("      end");
+        c.line("      else");
+    }
+    let rich_format = crate::rich_format_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("kind = occ_kind_{n}"))
+        .collect::<Vec<_>>()
+        .join(" || ");
+    if !rich_format.is_empty() {
+        c.line(&format!("      if {rich_format} then begin"));
+        c.line("        let removed = u32_at byte 20 in");
+        c.line("        let start = u32_at byte !at in");
+        c.line("        let stop = u32_at byte (!at + 8) in");
+        c.line("        let name, next = parse_value byte (!at + 16) in");
+        c.line("        let value, _ = parse_value byte next in");
+        c.line("        [ I64 (Int64.of_int removed); I64 (Int64.of_int start);");
+        c.line("          I64 (Int64.of_int stop); name; value ]");
+        c.line("      end");
+        c.line("      else");
+    }
     let values_tail = crate::values_tail_occurrence_names(spec)
         .iter()
         .map(|n| format!("kind = occ_kind_{n}"))

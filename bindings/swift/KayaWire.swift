@@ -18,7 +18,7 @@ enum KayaValue: Hashable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0x1960b216df673c1f
+let kayaSpecHash: UInt64 = 0xb14092d93e5c1359
 
 /// A civil date as the wire's I64: year * 10000 + month * 100 + day.
 func kayaPackDate(_ year: Int, _ month: Int, _ day: Int) -> Int64 {
@@ -600,6 +600,38 @@ struct KayaTx {
         let kayaAt = self.begin(UInt16(KAYA_TX_DECLARE_LINK_ROUTE))
         self.u64(route)
         self.value(pattern)
+        self.end(kayaAt)
+    }
+
+    /// The WHOLE attributed document of a `rich` textarea (docs/rich-text-plan.md R1): the text as the payload, and `runs` holding 4*`count` values read in FOURS — I64 start, I64 end, Str name, Str value — each run one attribute over one range in UTF-8 BYTE offsets into that text, validated at the ranges' chokepoint (docs/ranges-units.md §7) and allowed to overlap (bold and italic over one range are two runs). A CONFIGURATION WRITE: it echoes nothing, and it resets the widget's native undo history where that tier is on (docs/undo-plan.md D7). The vocabulary is wire::RICH_ATTRS; a `block` run must start and end on paragraph boundaries. Refused on a textarea that is not `rich`.
+    mutating func setRichText(_ widgetId: UInt64, _ count: UInt32, _ runs: [KayaValue]) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_RICH_TEXT))
+        self.u64(widgetId)
+        self.u32(count)
+        self.u32(0)
+        self.values(runs)
+        self.end(kayaAt)
+    }
+
+    /// ONE edit into a `rich` textarea, the app's own or a collaborator's (docs/rich-text-plan.md R1, R5): replace `start..end` (UTF-8 byte offsets into the widget's current text, validated as a range is) with the payload text, whose attribute runs are `runs` in fours as set_rich_text's, with offsets RELATIVE to the inserted text. Keeps the selection: unchanged before the edit, shifted after it, a caret at `start` ending AFTER the insertion. Echoes nothing and never resets undo. QUEUED while an input-method composition is live and applied when it ends, since a refusal would drop a collaborator's edit.
+    mutating func applyEdit(_ widgetId: UInt64, _ start: UInt64, _ stop: UInt64, _ count: UInt32, _ runs: [KayaValue]) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_APPLY_EDIT))
+        self.u64(widgetId)
+        self.u64(start)
+        self.u64(stop)
+        self.u32(count)
+        self.u32(0)
+        self.values(runs)
+        self.end(kayaAt)
+    }
+
+    /// Format a `rich` textarea's CURRENT SELECTION through the widget's own act — what an app's toolbar button sends (docs/rich-text-plan.md R1): `attr` is two Str values, name then value; `removed` 1 takes the attribute off. The widget answers with text_formatted over the range it formatted, which is how the mirror moves; a collapsed selection arms the typing attribute and answers nothing until the next edit. A `block` act covers the selection's whole paragraphs, and `block` with value `body` removes. Refused on a textarea that is not `rich` and for a name outside wire::RICH_ATTRS.
+    mutating func formatText(_ widgetId: UInt64, _ removed: UInt32, _ attr: [KayaValue]) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_FORMAT_TEXT))
+        self.u64(widgetId)
+        self.u32(removed)
+        self.u32(0)
+        self.values(attr)
         self.end(kayaAt)
     }
 
@@ -1595,6 +1627,38 @@ struct KayaTx {
         self.end(kayaAt)
     }
 
+    /// set_property with a constant rich value.
+    mutating func setRich(_ widgetId: UInt64, _ rich: Bool) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_RICH))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.bool(rich))
+        self.end(kayaAt)
+    }
+
+    /// set_property with a signal-bound rich value.
+    mutating func bindRich(_ widgetId: UInt64, _ signalId: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_RICH))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(kayaAt)
+    }
+
+    /// set_property bound to one field of the element of the
+    /// enclosing For, `level` Fors up (0 = nearest).
+    mutating func bindRichElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_RICH))
+        self.u32(UInt32(KAYA_SOURCE_ELEMENT))
+        self.u32(level)
+        self.u32(field)
+        self.end(kayaAt)
+    }
+
     /// set_window_prop with a constant title value (window 0, the primary surface).
     mutating func setWindowTitle(_ window: UInt64, _ title: String) {
         let kayaAt = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
@@ -2220,6 +2284,8 @@ func kayaParseOccurrence(_ rec: [UInt8]) -> KayaOccurrence? {
             || kind == UInt16(KAYA_OCCURRENCE_VALUE_COMMITTED)
             || kind == UInt16(KAYA_OCCURRENCE_NOTIFICATION_RESULT)
             || kind == UInt16(KAYA_OCCURRENCE_LINK_OPENED)
+            || kind == UInt16(KAYA_OCCURRENCE_TEXT_EDITED)
+            || kind == UInt16(KAYA_OCCURRENCE_TEXT_FORMATTED)
         else { return nil }
         let id = raw.loadUnaligned(fromByteOffset: 8, as: UInt64.self)
         if kind == UInt16(KAYA_OCCURRENCE_ALERT_RESULT) {
@@ -2385,6 +2451,52 @@ func kayaParseOccurrence(_ rec: [UInt8]) -> KayaOccurrence? {
             payload = .i64(Int64(raw.loadUnaligned(fromByteOffset: at, as: UInt32.self)))
         }
         var tail: [KayaValue] = []
+        if kind == UInt16(KAYA_OCCURRENCE_TEXT_EDITED)
+        {
+            let source = raw.loadUnaligned(fromByteOffset: 20, as: UInt32.self)
+            let start = raw.loadUnaligned(fromByteOffset: at, as: UInt64.self)
+            let stop = raw.loadUnaligned(fromByteOffset: at + 8, as: UInt64.self)
+            let count = Int(raw.loadUnaligned(fromByteOffset: at + 16, as: UInt32.self))
+            // past start, end, count, reserved and the values header
+            var richAt = at + 32
+            var runs: [KayaValue] = []
+            for _ in 0..<(count * 4 + 1) {
+                let rtype = raw.loadUnaligned(fromByteOffset: richAt, as: UInt32.self)
+                let rlen = Int(raw.loadUnaligned(fromByteOffset: richAt + 4, as: UInt32.self))
+                switch rtype {
+                case UInt32(KAYA_VALUE_I64):
+                    runs.append(.i64(Int64(bitPattern:
+                        raw.loadUnaligned(fromByteOffset: richAt + 8, as: UInt64.self))))
+                default:
+                    runs.append(.str(String(
+                        decoding: raw[(richAt + 8)..<(richAt + 8 + rlen)], as: UTF8.self)))
+                }
+                richAt += 8 + ((rlen + 7) & ~7)
+            }
+            // The inserted text rides LAST on the wire and reads
+            // FOURTH here, so the head is fixed and the runs follow.
+            tail = [.i64(Int64(source)), .i64(Int64(bitPattern: start)),
+                    .i64(Int64(bitPattern: stop)), runs[runs.count - 1]]
+            tail.append(contentsOf: runs[0..<(runs.count - 1)])
+        }
+        if kind == UInt16(KAYA_OCCURRENCE_TEXT_FORMATTED)
+        {
+            let removed = raw.loadUnaligned(fromByteOffset: 20, as: UInt32.self)
+            let start = raw.loadUnaligned(fromByteOffset: at, as: UInt64.self)
+            let stop = raw.loadUnaligned(fromByteOffset: at + 8, as: UInt64.self)
+            // Both halves are strings: the name and, for a removal,
+            // the empty value the wire writes in its place.
+            var attrAt = at + 16
+            var words: [KayaValue] = []
+            for _ in 0..<2 {
+                let alen = Int(raw.loadUnaligned(fromByteOffset: attrAt + 4, as: UInt32.self))
+                words.append(.str(String(
+                    decoding: raw[(attrAt + 8)..<(attrAt + 8 + alen)], as: UTF8.self)))
+                attrAt += 8 + ((alen + 7) & ~7)
+            }
+            tail = [.i64(Int64(removed)), .i64(Int64(bitPattern: start)),
+                    .i64(Int64(bitPattern: stop)), words[0], words[1]]
+        }
         if kind == UInt16(KAYA_OCCURRENCE_DRAW_REQUESTED)
             || kind == UInt16(KAYA_OCCURRENCE_TICK)
         {

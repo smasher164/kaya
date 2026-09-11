@@ -116,6 +116,17 @@
 #define KAYA_OCCURRENCE_LINK_OPENED 28
 
 /**
+ * The rich text pair (docs/rich-text-plan.md R1), after the widget's click
+ * tag: TEXT_EDITED { u64 start; u64 end; u32 count; u32 reserved; Values of
+ * 4*count — I64 start, I64 end, Str name, Str value — then the inserted text
+ * as one Str }; TEXT_FORMATTED { u64 start; u64 end; Str name; Str value }.
+ * Offsets are UTF-8 bytes; a run's are relative to the inserted text.
+ */
+#define KAYA_OCCURRENCE_TEXT_EDITED 29
+
+#define KAYA_OCCURRENCE_TEXT_FORMATTED 30
+
+/**
  * Transaction record kinds (guest -> core, via kaya_submit). Layouts,
  * after the common 8-byte header, little-endian, 8-aligned:
  *   CREATE_SIGNAL:     u64 signal_id, value
@@ -343,6 +354,20 @@
  * pattern }. The core keeps the table and does the one match.
  */
 #define KAYA_TX_DECLARE_LINK_ROUTE 54
+
+/**
+ * The two rich-text writes (docs/rich-text-plan.md §2): SET_RICH_TEXT
+ * { u64 widget; u32 count; u32 reserved; Values of 4*count — I64 start,
+ * I64 end, Str name, Str value — then the whole text as one Str };
+ * APPLY_EDIT { u64 widget; u64 start; u64 end; u32 count; u32 reserved;
+ * the same run list; then the inserted text }. Offsets are UTF-8 bytes
+ * (docs/ranges-units.md §7); names are KAYA_RICH_ATTR_*'s spellings.
+ */
+#define KAYA_TX_SET_RICH_TEXT 55
+
+#define KAYA_TX_APPLY_EDIT 56
+
+#define KAYA_TX_FORMAT_TEXT 57
 
 /**
  * The size-class vocabulary (wire::SIZE_CLASS_*): what a breakpoint's
@@ -591,6 +616,18 @@
 #define KAYA_APPLY_SET_REORDERABLE 40
 
 /**
+ * The rich-text pair, apply side: the tx layouts with offsets already in
+ * this build's backend unit, and APPLY_EDIT carrying the core's post-edit
+ * selection — { u64 widget; u64 start; u64 end; u64 sel_start; u64 sel_end;
+ * ... } (docs/rich-text-plan.md R5).
+ */
+#define KAYA_APPLY_SET_RICH_TEXT 43
+
+#define KAYA_APPLY_APPLY_EDIT 44
+
+#define KAYA_APPLY_FORMAT_TEXT 45
+
+/**
  * What a drop settles on (spec enum "drag_op").
  */
 #define KAYA_DRAG_OP_NONE 0
@@ -757,6 +794,11 @@
 #define KAYA_PROP_PLACEHOLDER 30
 
 #define KAYA_PROP_HREF 31
+
+/**
+ * A textarea that carries attribute runs (docs/rich-text-plan.md R1).
+ */
+#define KAYA_PROP_RICH 32
 
 /**
  * Window properties (spec::WINDOW_PROPS): their own namespace —
@@ -1045,6 +1087,52 @@
 #define KAYA_SYMBOL_PERSON 19
 
 #define KAYA_SYMBOL_HOME 20
+
+/**
+ * The rich text vocabularies (spec enums "rich_attr", "block_kind",
+ * "edit_source"; docs/rich-text-plan.md R3/R4). A name rides as a string.
+ */
+#define KAYA_RICH_ATTR_BOLD 1
+
+#define KAYA_RICH_ATTR_ITALIC 2
+
+#define KAYA_RICH_ATTR_UNDERLINE 3
+
+#define KAYA_RICH_ATTR_STRIKE 4
+
+#define KAYA_RICH_ATTR_CODE 5
+
+#define KAYA_RICH_ATTR_LINK 6
+
+#define KAYA_RICH_ATTR_BLOCK 7
+
+/**
+ * One kind per paragraph, the value of a `block` run.
+ */
+#define KAYA_BLOCK_BODY 0
+
+#define KAYA_BLOCK_HEADING1 1
+
+#define KAYA_BLOCK_HEADING2 2
+
+#define KAYA_BLOCK_HEADING3 3
+
+#define KAYA_BLOCK_QUOTE 4
+
+#define KAYA_BLOCK_CODE_BLOCK 5
+
+/**
+ * What provoked a text_edited, in its `source` slot.
+ */
+#define KAYA_EDIT_SOURCE_USER 0
+
+#define KAYA_EDIT_SOURCE_IME_COMMIT 1
+
+#define KAYA_EDIT_SOURCE_PASTE 2
+
+#define KAYA_EDIT_SOURCE_NATIVE_UNDO 3
+
+#define KAYA_EDIT_SOURCE_DROP 4
 
 /**
  * set_property sources. SOURCE_ELEMENT is valid only inside a template.
@@ -1408,6 +1496,26 @@ typedef struct KayaHostApi {
    */
   uintptr_t (*window_frame)(uint64_t, uint8_t*, uintptr_t);
   void (*set_window_frame)(uint64_t, const uint8_t*, uintptr_t);
+  /**
+   * RICH TEXT, presentation side (docs/rich-text-plan.md R4/R5/R9): the
+   * six reports an arm makes and the two reads the harness makes.
+   */
+  void (*text_composing)(uint64_t, uint8_t);
+  void (*text_pending)(uint64_t, const uint8_t*, uintptr_t, const uint8_t*, uintptr_t, uint8_t);
+  void (*text_edit_source)(uint64_t, uint32_t);
+  void (*text_reported_edit)(uint64_t, uint64_t, uint64_t, uint64_t);
+  void (*text_selection)(uint64_t, uint64_t, uint64_t);
+  void (*text_formatted)(const uint8_t*,
+                         uintptr_t,
+                         uint64_t,
+                         uint64_t,
+                         const uint8_t*,
+                         uintptr_t,
+                         const uint8_t*,
+                         uintptr_t,
+                         uint8_t);
+  uintptr_t (*text_runs)(uint64_t, uint8_t*, uintptr_t);
+  uintptr_t (*text_last_edit)(uint64_t, uint8_t*, uintptr_t);
 } KayaHostApi;
 
 
@@ -1944,6 +2052,81 @@ void kaya_emit_text_changed(const uint8_t *tag,
                             uint64_t window,
                             uint8_t focused,
                             uint8_t quiet);
+
+/**
+ * Harness side: the CORE's attribute runs of a `rich` textarea in the
+ * harness's spelling (docs/rich-text-plan.md R9). Writes at most `cap`
+ * bytes and answers the length; 0 for a widget with no document.
+ *
+ * # Safety
+ * `out` must point at `cap` writable bytes, or be NULL with `cap` 0.
+ */
+uintptr_t kaya_text_runs(uint64_t widget, uint8_t *out, uintptr_t cap);
+
+/**
+ * Harness side: the last text_edited the core published for a `rich`
+ * textarea, in the harness's spelling. kaya_text_runs' contract.
+ *
+ * # Safety
+ * `out` must point at `cap` writable bytes, or be NULL with `cap` 0.
+ */
+uintptr_t kaya_text_last_edit(uint64_t widget, uint8_t *out, uintptr_t cap);
+
+/**
+ * Presentation side: an input-method composition began or ended; ending one
+ * lowers what was held (docs/rich-text-plan.md R5). Not for use with kaya_run.
+ */
+void kaya_text_composing(uint64_t widget, uint8_t live);
+
+/**
+ * Presentation side: a typing attribute armed over a collapsed caret. `on` 0
+ * turns it off for the next insertion, which spends it.
+ *
+ * # Safety
+ * `name`/`value` must describe valid UTF-8 byte ranges, or be NULL/0.
+ */
+void kaya_text_pending(uint64_t widget,
+                       const uint8_t *name,
+                       uintptr_t name_len,
+                       const uint8_t *value,
+                       uintptr_t value_len,
+                       uint8_t on);
+
+/**
+ * Presentation side: what provoked the next report (KAYA_EDIT_SOURCE_*).
+ * One-shot; the default is KAYA_EDIT_SOURCE_USER.
+ */
+void kaya_text_edit_source(uint64_t widget, uint32_t source);
+
+/**
+ * Presentation side: the range this backend says it edited, in UTF-8 bytes,
+ * reported just before the text. One-shot (docs/rich-text-plan.md R4).
+ */
+void kaya_text_reported_edit(uint64_t widget, uint64_t start, uint64_t end, uint64_t inserted_len);
+
+/**
+ * Presentation side: where this `rich` textarea's selection is now, in UTF-8
+ * bytes — the only way the core knows (docs/rich-text-plan.md R5).
+ */
+void kaya_text_selection(uint64_t widget, uint64_t start, uint64_t end);
+
+/**
+ * Presentation side: the user formatted a range of a `rich` textarea.
+ * `removed` 1 takes the attribute off; a collapsed range emits nothing and is
+ * kaya_text_pending's. Do not combine with kaya_run.
+ *
+ * # Safety
+ * `tag`, `name` and `value` must describe valid byte ranges, or be NULL/0.
+ */
+void kaya_text_formatted(const uint8_t *tag,
+                         uintptr_t tag_len,
+                         uint64_t start,
+                         uint64_t end,
+                         const uint8_t *name,
+                         uintptr_t name_len,
+                         const uint8_t *value,
+                         uintptr_t value_len,
+                         uint8_t removed);
 
 /**
  * Presentation side: a menu action fired — a bar/overflow click, a

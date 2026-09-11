@@ -59,6 +59,9 @@ pub(crate) const REC_TIME_CHANGED: u16 = 25;
 pub(crate) const REC_VALUE_COMMITTED: u16 = 26;
 pub(crate) const REC_NOTIFICATION_RESULT: u16 = 27;
 pub(crate) const REC_LINK_OPENED: u16 = 28;
+/// The rich text pair, both on a click tag (docs/rich-text-plan.md R1).
+pub(crate) const REC_TEXT_EDITED: u16 = 29;
+pub(crate) const REC_TEXT_FORMATTED: u16 = 30;
 
 /// Wire framing of every record, exported through the C header so direct
 /// consumers cast a pointer instead of bit-twiddling. Little-endian;

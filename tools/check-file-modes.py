@@ -98,15 +98,26 @@ def body(text, pattern):
     return span(text, i)
 
 
-COMMENTS = [
-    re.compile(r"/\*.*?\*/", re.S), re.compile(r"\(\*.*?\*\)", re.S),
-    re.compile(r"(?m)//.*$"), re.compile(r"(?m)#.*$"),
-    re.compile(r"(?m)--.*$"),
-]
+# ONE LANGUAGE'S COMMENT SYNTAX PER FILE, chosen by suffix. Applied all at
+# once to every file, OCaml's `(* *)` paired a Rust tuple type's `(*mut u8`
+# with a `_*)` inside a doc comment two thousand lines later and blanked
+# the redemption between them (docs/traps.md 2026-09-11).
+C_FAMILY = [re.compile(r"/\*.*?\*/", re.S), re.compile(r"(?m)//.*$")]
+COMMENTS_BY_SUFFIX = {
+    ".rs": C_FAMILY, ".swift": C_FAMILY, ".kt": C_FAMILY, ".java": C_FAMILY,
+    ".cs": C_FAMILY, ".go": C_FAMILY, ".ts": C_FAMILY, ".js": C_FAMILY,
+    ".c": C_FAMILY, ".h": C_FAMILY,
+    ".ml": [re.compile(r"\(\*.*?\*\)", re.S)],
+    ".mli": [re.compile(r"\(\*.*?\*\)", re.S)],
+    ".hs": [re.compile(r"\{-.*?-\}", re.S), re.compile(r"(?m)--.*$")],
+    ".py": [re.compile(r"(?m)#.*$")], ".sh": [re.compile(r"(?m)#.*$")],
+    ".ps1": [re.compile(r"(?m)#.*$")], ".toml": [re.compile(r"(?m)#.*$")],
+}
 
 
-def code(text):
-    """The file with its comments blanked. The census reads this and
+def code(text, rel):
+    """The file with its comments blanked, in ITS language's syntax. The
+    census reads this and
     not the raw bytes: gtk.rs, winui/mod.rs and KayaCompose.kt each
     NAME the redemption in a sentence — "so kaya_open_picked redeems a
     pasted file identically" — while registering a PathSource and never
@@ -116,7 +127,8 @@ def code(text):
 
     Newlines survive so the line numbers this gate prints are the
     file's own."""
-    for pattern in COMMENTS:
+    patterns = COMMENTS_BY_SUFFIX.get(pathlib.Path(rel).suffix, C_FAMILY)
+    for pattern in patterns:
         text = pattern.sub(lambda m: "\n" * m.group(0).count("\n"),
                            text)
     return text
@@ -437,7 +449,7 @@ def check(root):
             # twelve times.
             if not REDEEMS.search(raw):
                 continue
-            text = code(raw)
+            text = code(raw, rel)
             if not REDEEMS.search(text):
                 continue
             seen.append(rel)
@@ -622,7 +634,22 @@ g.negative("a table entry whose file stopped redeeming",
            lambda: check(s),
            want="no longer redeems a picked file at all")
 
-g.negatives_ran(14)
+# N11 — THE BLANKER KNOWS ONE LANGUAGE PER FILE: a Rust file with a tuple
+# type's `(*mut u8` before its redemption and an `_*)` in a comment after
+# it must still be SEEN redeeming (capi.rs's own shape, 2026-09-11) — so
+# this invented file, in no table, must draw N7's finding.
+s = fresh("ocaml-pair")
+(s / "crates/kaya/src/zz-invented-by-selftest.rs").write_text(
+    "fn raw() -> (*mut u8, u32) { todo!() }\n"
+    "fn f() { kaya_open_picked(); }\n"
+    "/// the vocabulary (KAYA_EDIT_SOURCE_*)\n"
+    "fn g() {}\n", encoding="utf-8")
+g.negative("a Rust file whose `(*mut` and a later `*)` would pair as an "
+           "OCaml comment",
+           lambda: check(s),
+           want="is in neither table of tools/check-file-modes.py")
+
+g.negatives_ran(15)
 
 offenders = check(ROOT)
 if offenders:

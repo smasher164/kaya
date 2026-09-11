@@ -1274,6 +1274,14 @@ if len(canvas_rows) < 21:
     fail(f"only {len(canvas_rows)} canvas constants found in wire.rs — "
          f"the sweep reads nothing and would agree with everything")
 rows += canvas_rows
+# The rich text vocabularies, i64 on the wire (docs/rich-text-plan.md R3).
+rich_rows = re.findall(
+    r"pub(?:\(crate\))? const ((?:RICH_ATTR|BLOCK|EDIT_SOURCE)"
+    r"_[A-Z_0-9]+): i64 = (\d+);", wire)
+if len(rich_rows) < 18:
+    fail(f"only {len(rich_rows)} rich-text constants found in wire.rs — "
+         f"the sweep reads nothing and would agree with everything")
+rows += rich_rows
 role_rows = [r for r in rows if r[0].startswith("ROLE_")]
 if len(role_rows) < 5:
     fail(f"only {len(role_rows)} role constants found in wire.rs — the "

@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x1960b216df673c1f
+	SpecHash uint64 = 0xb14092d93e5c1359
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -104,6 +104,7 @@ const (
 	PropWrap = 29
 	PropPlaceholder = 30
 	PropHref = 31
+	PropRich = 32
 	WpropTitle = 1
 	WpropWidth = 2
 	WpropHeight = 3
@@ -194,6 +195,24 @@ const (
 	SourceConst = 0
 	SourceSignal = 1
 	SourceElement = 2
+	RichAttrBold = 1
+	RichAttrItalic = 2
+	RichAttrUnderline = 3
+	RichAttrStrike = 4
+	RichAttrCode = 5
+	RichAttrLink = 6
+	RichAttrBlock = 7
+	BlockKindBody = 0
+	BlockKindHeading1 = 1
+	BlockKindHeading2 = 2
+	BlockKindHeading3 = 3
+	BlockKindQuote = 4
+	BlockKindCodeBlock = 5
+	EditSourceUser = 0
+	EditSourceImeCommit = 1
+	EditSourcePaste = 2
+	EditSourceNativeUndo = 3
+	EditSourceDrop = 4
 	OccurrencePad = 0
 	OccurrenceButtonClicked = 1
 	OccurrenceTextChanged = 2
@@ -255,6 +274,9 @@ const (
 	txShowNotification = 52
 	txCancelNotification = 53
 	txDeclareLinkRoute = 54
+	txSetRichText = 55
+	txApplyEdit = 56
+	txFormatText = 57
 	applyCreate = 1
 	applySetProp = 2
 	applyAddChild = 3
@@ -295,6 +317,9 @@ const (
 	applySetDragSource = 38
 	applySetDropTarget = 39
 	applySetReorderable = 40
+	applySetRichText = 43
+	applyApplyEdit = 44
+	applyFormatText = 45
 	occButtonClicked = 1
 	occTextChanged = 2
 	occToggled = 3
@@ -323,6 +348,8 @@ const (
 	occValueCommitted = 26
 	occNotificationResult = 27
 	occLinkOpened = 28
+	occTextEdited = 29
+	occTextFormatted = 30
 )
 
 func pad8(b []byte) []byte {
@@ -893,6 +920,38 @@ func TxDeclareLinkRoute(route uint64, pattern any) []byte {
 	b := beginRecord(txDeclareLinkRoute)
 	b = binary.LittleEndian.AppendUint64(b, route)
 	b = encodeValue(b, pattern)
+	return endRecord(b)
+}
+
+// TxSetRichText: The WHOLE attributed document of a `rich` textarea (docs/rich-text-plan.md R1): the text as the payload, and `runs` holding 4*`count` values read in FOURS — I64 start, I64 end, Str name, Str value — each run one attribute over one range in UTF-8 BYTE offsets into that text, validated at the ranges' chokepoint (docs/ranges-units.md §7) and allowed to overlap (bold and italic over one range are two runs). A CONFIGURATION WRITE: it echoes nothing, and it resets the widget's native undo history where that tier is on (docs/undo-plan.md D7). The vocabulary is wire::RICH_ATTRS; a `block` run must start and end on paragraph boundaries. Refused on a textarea that is not `rich`.
+func TxSetRichText(widgetId uint64, count uint32, runs []any) []byte {
+	b := beginRecord(txSetRichText)
+	b = binary.LittleEndian.AppendUint64(b, widgetId)
+	b = binary.LittleEndian.AppendUint32(b, count)
+	b = binary.LittleEndian.AppendUint32(b, 0)
+	b = encodeValues(b, runs)
+	return endRecord(b)
+}
+
+// TxApplyEdit: ONE edit into a `rich` textarea, the app's own or a collaborator's (docs/rich-text-plan.md R1, R5): replace `start..end` (UTF-8 byte offsets into the widget's current text, validated as a range is) with the payload text, whose attribute runs are `runs` in fours as set_rich_text's, with offsets RELATIVE to the inserted text. Keeps the selection: unchanged before the edit, shifted after it, a caret at `start` ending AFTER the insertion. Echoes nothing and never resets undo. QUEUED while an input-method composition is live and applied when it ends, since a refusal would drop a collaborator's edit.
+func TxApplyEdit(widgetId uint64, start uint64, stop uint64, count uint32, runs []any) []byte {
+	b := beginRecord(txApplyEdit)
+	b = binary.LittleEndian.AppendUint64(b, widgetId)
+	b = binary.LittleEndian.AppendUint64(b, start)
+	b = binary.LittleEndian.AppendUint64(b, stop)
+	b = binary.LittleEndian.AppendUint32(b, count)
+	b = binary.LittleEndian.AppendUint32(b, 0)
+	b = encodeValues(b, runs)
+	return endRecord(b)
+}
+
+// TxFormatText: Format a `rich` textarea's CURRENT SELECTION through the widget's own act — what an app's toolbar button sends (docs/rich-text-plan.md R1): `attr` is two Str values, name then value; `removed` 1 takes the attribute off. The widget answers with text_formatted over the range it formatted, which is how the mirror moves; a collapsed selection arms the typing attribute and answers nothing until the next edit. A `block` act covers the selection's whole paragraphs, and `block` with value `body` removes. Refused on a textarea that is not `rich` and for a name outside wire::RICH_ATTRS.
+func TxFormatText(widgetId uint64, removed uint32, attr []any) []byte {
+	b := beginRecord(txFormatText)
+	b = binary.LittleEndian.AppendUint64(b, widgetId)
+	b = binary.LittleEndian.AppendUint32(b, removed)
+	b = binary.LittleEndian.AppendUint32(b, 0)
+	b = encodeValues(b, attr)
 	return endRecord(b)
 }
 
@@ -1908,6 +1967,38 @@ func TxBindHrefElement(widgetID uint64, level uint32, field uint32) []byte {
 	return endRecord(b)
 }
 
+// TxSetRich: set_property with a constant rich value.
+func TxSetRich(widgetID uint64, rich bool) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropRich)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, rich)
+	return endRecord(b)
+}
+
+// TxBindRich: set_property with a signal-bound rich value.
+func TxBindRich(widgetID uint64, signalID uint64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropRich)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxBindRichElement: set_property bound to one field of the element of the
+// enclosing For, `level` Fors up (0 = nearest).
+func TxBindRichElement(widgetID uint64, level uint32, field uint32) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropRich)
+	b = binary.LittleEndian.AppendUint32(b, SourceElement)
+	b = binary.LittleEndian.AppendUint32(b, level)
+	b = binary.LittleEndian.AppendUint32(b, field)
+	return endRecord(b)
+}
+
 // TxSetWindowTitle: set_window_prop with a constant title value (window 0, the primary surface).
 func TxSetWindowTitle(window uint64, title string) []byte {
 	b := beginRecord(txSetWindowProp)
@@ -2504,7 +2595,7 @@ func parseValue(rec []byte, at int) (any, int) {
 // false for pad/unknown records.
 func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload any, ok bool) {
 	kind = binary.LittleEndian.Uint16(rec[4:])
-	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected && kind != occMenuActivated && kind != occMenuToggled && kind != occMenuValueChanged && kind != occFileDialogResult && kind != occClipboardResult && kind != occPasted && kind != occUndone && kind != occRedone && kind != occSortRequested && kind != occDrawRequested && kind != occTick && kind != occDropped && kind != occDragEnded && kind != occDateChanged && kind != occTimeChanged && kind != occValueCommitted && kind != occNotificationResult && kind != occLinkOpened {
+	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected && kind != occMenuActivated && kind != occMenuToggled && kind != occMenuValueChanged && kind != occFileDialogResult && kind != occClipboardResult && kind != occPasted && kind != occUndone && kind != occRedone && kind != occSortRequested && kind != occDrawRequested && kind != occTick && kind != occDropped && kind != occDragEnded && kind != occDateChanged && kind != occTimeChanged && kind != occValueCommitted && kind != occNotificationResult && kind != occLinkOpened && kind != occTextEdited && kind != occTextFormatted {
 		return 0, 0, nil, nil, false
 	}
 	id = binary.LittleEndian.Uint64(rec[8:])
@@ -2719,6 +2810,33 @@ func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload an
 	}
 	if kind == occDragEnded {
 		payload = binary.LittleEndian.Uint32(rec[at:])
+	}
+	if kind == occTextEdited {
+		source := binary.LittleEndian.Uint32(rec[20:])
+		start := binary.LittleEndian.Uint64(rec[at:])
+		stop := binary.LittleEndian.Uint64(rec[at+8:])
+		count := int(binary.LittleEndian.Uint32(rec[at+16:]))
+		at += 32 // past start, end, count, reserved and the values header
+		runs := []any{}
+		for i := 0; i < count*4; i++ {
+			var v any
+			v, at = parseValue(rec, at)
+			runs = append(runs, v)
+		}
+		var inserted any
+		inserted, at = parseValue(rec, at)
+		flat := []any{source, start, stop, inserted}
+		payload = append(flat, runs...)
+	}
+	if kind == occTextFormatted {
+		removed := binary.LittleEndian.Uint32(rec[20:])
+		start := binary.LittleEndian.Uint64(rec[at:])
+		stop := binary.LittleEndian.Uint64(rec[at+8:])
+		at += 16
+		var attr, value any
+		attr, at = parseValue(rec, at)
+		value, at = parseValue(rec, at)
+		payload = []any{removed, start, stop, attr, value}
 	}
 	if kind == occDrawRequested || kind == occTick {
 		// The canvas asks carry a run of BARE values after the key

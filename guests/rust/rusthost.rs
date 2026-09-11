@@ -81,6 +81,9 @@ mod dirty;
 #[path = "ranges.rs"]
 mod ranges;
 
+#[path = "richtext.rs"]
+mod richtext;
+
 #[path = "styling.rs"]
 mod styling;
 
@@ -168,6 +171,7 @@ fn app(ctx: kaya::AppCtx) {
         Ok("undo") => undo::app(ctx),
         Ok("dirty") => dirty::app(ctx),
         Ok("ranges") => ranges::app(ctx),
+        Ok("richtext") => richtext::app(ctx),
         Ok("styling") => styling::app(ctx),
         Ok("toolbar") => toolbar::app(ctx),
         Ok("table") => table::app(ctx),

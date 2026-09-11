@@ -12,7 +12,8 @@ use crate::protocol::{
     EntryProp, MenuItemId, MenuItemKind, MenuProp, SectionProp, WindowProp,
     AlertChoice, AlertId, AlertSpec,
     ApplyOp, Blob, CollectionId, CommandKind, Occurrence, Path, Prop, PropValue, Record, SignalId,
-    TemplateNodeId, TextRange, Transaction, TxOp, Value, ValueType, WidgetId, WidgetKind,
+    NativeRun, TemplateNodeId, TextRange, TextRun, Transaction, TxOp, Value, ValueType,
+    WidgetId, WidgetKind,
     WindowId,
 };
 
@@ -97,6 +98,11 @@ pub(crate) const TX_CANCEL_NOTIFICATION: u16 = 53;
 /// One app-link route (docs/app-links-plan.md §4); crate::links holds
 /// the table and does the one match.
 pub(crate) const TX_DECLARE_LINK_ROUTE: u16 = 54;
+/// The two rich-text writes (docs/rich-text-plan.md §2), in byte offsets
+/// converted before the core lowers (docs/ranges-units.md §7).
+pub(crate) const TX_SET_RICH_TEXT: u16 = 55;
+pub(crate) const TX_APPLY_EDIT: u16 = 56;
+pub(crate) const TX_FORMAT_TEXT: u16 = 57;
 /// The size-class vocabulary a breakpoint speaks (ruled 2026-08-31,
 /// docs/adaptive-layout-plan.md D3): the guest names the CLASS, never a
 /// width. `compact` is the only class a binding can spell today.
@@ -182,6 +188,11 @@ pub(crate) const APPLY_SET_DROP_TARGET: u16 = 39;
 pub(crate) const APPLY_SET_REORDERABLE: u16 = 40;
 pub(crate) const APPLY_POST_NOTIFICATION: u16 = 41;
 pub(crate) const APPLY_CANCEL_NOTIFICATION: u16 = 42;
+/// The pair, apply side: native units, the core's own selection
+/// (docs/rich-text-plan.md R5).
+pub(crate) const APPLY_SET_RICH_TEXT: u16 = 43;
+pub(crate) const APPLY_APPLY_EDIT: u16 = 44;
+pub(crate) const APPLY_FORMAT_TEXT: u16 = 45;
 
 // Value types.
 pub(crate) const VALUE_BOOL: u32 = 1;
@@ -296,9 +307,57 @@ pub(crate) const TEXT_BASELINES: &[(i64, &str)] = &[
     (TEXT_BASELINE_BOTTOM, "bottom"),
 ];
 
-/// One canvas vocabulary's name for a value, or None for a value the
-/// vocabulary does not carry. ONE lookup over all five tables: the
-/// caller already names the table.
+// The rich text vocabularies (docs/rich-text-plan.md R3).
+pub(crate) const RICH_ATTR_BOLD: i64 = 1;
+pub(crate) const RICH_ATTR_ITALIC: i64 = 2;
+pub(crate) const RICH_ATTR_UNDERLINE: i64 = 3;
+pub(crate) const RICH_ATTR_STRIKE: i64 = 4;
+pub(crate) const RICH_ATTR_CODE: i64 = 5;
+pub(crate) const RICH_ATTR_LINK: i64 = 6;
+pub(crate) const RICH_ATTR_BLOCK: i64 = 7;
+
+pub(crate) const RICH_ATTRS: &[(i64, &str)] = &[
+    (RICH_ATTR_BOLD, "bold"),
+    (RICH_ATTR_ITALIC, "italic"),
+    (RICH_ATTR_UNDERLINE, "underline"),
+    (RICH_ATTR_STRIKE, "strike"),
+    (RICH_ATTR_CODE, "code"),
+    (RICH_ATTR_LINK, "link"),
+    (RICH_ATTR_BLOCK, "block"),
+];
+
+pub(crate) const BLOCK_BODY: i64 = 0;
+pub(crate) const BLOCK_HEADING1: i64 = 1;
+pub(crate) const BLOCK_HEADING2: i64 = 2;
+pub(crate) const BLOCK_HEADING3: i64 = 3;
+pub(crate) const BLOCK_QUOTE: i64 = 4;
+pub(crate) const BLOCK_CODE_BLOCK: i64 = 5;
+
+pub(crate) const BLOCK_KINDS: &[(i64, &str)] = &[
+    (BLOCK_BODY, "body"),
+    (BLOCK_HEADING1, "heading1"),
+    (BLOCK_HEADING2, "heading2"),
+    (BLOCK_HEADING3, "heading3"),
+    (BLOCK_QUOTE, "quote"),
+    (BLOCK_CODE_BLOCK, "code_block"),
+];
+
+pub(crate) const EDIT_SOURCE_USER: i64 = 0;
+pub(crate) const EDIT_SOURCE_IME_COMMIT: i64 = 1;
+pub(crate) const EDIT_SOURCE_PASTE: i64 = 2;
+pub(crate) const EDIT_SOURCE_NATIVE_UNDO: i64 = 3;
+pub(crate) const EDIT_SOURCE_DROP: i64 = 4;
+
+pub(crate) const EDIT_SOURCES: &[(i64, &str)] = &[
+    (EDIT_SOURCE_USER, "user"),
+    (EDIT_SOURCE_IME_COMMIT, "ime_commit"),
+    (EDIT_SOURCE_PASTE, "paste"),
+    (EDIT_SOURCE_NATIVE_UNDO, "native_undo"),
+    (EDIT_SOURCE_DROP, "drop"),
+];
+
+/// One vocabulary's name for a value, or None for a value it does not
+/// carry. ONE lookup over every table: the caller already names it.
 pub fn vocab_name(table: &[(i64, &'static str)], value: i64) -> Option<&'static str> {
     table.iter().find(|(v, _)| *v == value).map(|(_, n)| *n)
 }
@@ -345,6 +404,7 @@ pub(crate) const PROP_MIN_COLUMN_WIDTH: u32 = 28;
 pub(crate) const PROP_WRAP: u32 = 29;
 pub(crate) const PROP_PLACEHOLDER: u32 = 30;
 pub(crate) const PROP_HREF: u32 = 31;
+pub(crate) const PROP_RICH: u32 = 32;
 
 /// The clip representation masks (spec enum "clip"). BIT POSITIONS, not
 /// an ordinal: a copy carries several and a widget accepts several, so
@@ -826,6 +886,7 @@ fn prop(raw: u32) -> Prop {
         PROP_WRAP => Prop::Wrap,
         PROP_PLACEHOLDER => Prop::Placeholder,
         PROP_HREF => Prop::Href,
+        PROP_RICH => Prop::Rich,
         other => panic!("kaya: unknown property {other}"),
     }
 }
@@ -1190,6 +1251,34 @@ pub fn decode_transaction_with_blobs(
                 widget: WidgetId(r.u64()),
                 range: TextRange::new(r.u64(), r.u64()),
             },
+            TX_SET_RICH_TEXT => {
+                let widget = WidgetId(r.u64());
+                let count = r.u32() as usize;
+                let _reserved = r.u32();
+                let runs = read_runs(&mut r, count, "set_rich_text");
+                let text = run_str(r.value(), "set_rich_text text");
+                TxOp::SetRichText { widget, text, runs }
+            }
+            TX_APPLY_EDIT => {
+                let widget = WidgetId(r.u64());
+                let range = TextRange::new(r.u64(), r.u64());
+                let count = r.u32() as usize;
+                let _reserved = r.u32();
+                let runs = read_runs(&mut r, count, "apply_edit");
+                let inserted = run_str(r.value(), "apply_edit text");
+                TxOp::ApplyEdit { widget, range, inserted, runs }
+            }
+            TX_FORMAT_TEXT => {
+                let widget = WidgetId(r.u64());
+                let removed = r.u32() != 0;
+                let _reserved = r.u32();
+                let count = r.u32();
+                let _reserved = r.u32();
+                assert_eq!(count, 2, "kaya: format_text carries {count} values, wanted name then value");
+                let name = run_str(r.value(), "format_text name");
+                let value = run_str(r.value(), "format_text value");
+                TxOp::FormatText { widget, name, value: (!removed).then_some(value) }
+            }
             TX_SET_BRAND_ACCENT => {
                 let seed = r.u32();
                 let mask = r.u32();
@@ -1672,6 +1761,61 @@ fn range_offset(v: &Value) -> u64 {
         Value::I64(n) if *n >= 0 => *n as u64,
         Value::I64(n) => panic!("kaya: a text range offset is {n}, which is negative"),
         other => panic!("kaya: a text range offset is {other:?}, wanted an integer"),
+    }
+}
+
+/// A run's string half; anything else is a broken encoder.
+fn run_str(v: Value, field: &str) -> String {
+    match v {
+        Value::Str(s) => s,
+        other => panic!("kaya: {field} is {other:?}, wanted a string"),
+    }
+}
+
+/// Runs read IN FOURS out of one flat Values list — I64 start, I64 end,
+/// Str name, Str value; `count` and the list's length must agree.
+fn read_runs(r: &mut Reader<'_>, count: usize, op: &str) -> Vec<TextRun> {
+    let flat = r.record();
+    assert!(
+        flat.len() == count * 4,
+        "kaya: {op} declares {count} runs but carries {} values (four per run)",
+        flat.len()
+    );
+    flat.chunks_exact(4)
+        .map(|four| TextRun {
+            start: range_offset(&four[0]),
+            end: range_offset(&four[1]),
+            name: run_str(four[2].clone(), "a run's attribute name"),
+            value: run_str(four[3].clone(), "a run's attribute value"),
+        })
+        .collect()
+}
+
+/// `read_runs`' inverse: the record's own count, then the flat list.
+fn write_runs(b: &mut Vec<u8>, blobs: &mut Vec<Arc<[u8]>>, runs: &[TextRun]) {
+    b.extend_from_slice(&(runs.len() as u32).to_le_bytes());
+    b.extend_from_slice(&0u32.to_le_bytes());
+    b.extend_from_slice(&((runs.len() * 4) as u32).to_le_bytes());
+    b.extend_from_slice(&0u32.to_le_bytes());
+    for run in runs {
+        write_value(b, &Value::I64(run.start as i64), blobs);
+        write_value(b, &Value::I64(run.end as i64), blobs);
+        write_value(b, &Value::Str(run.name.clone()), blobs);
+        write_value(b, &Value::Str(run.value.clone()), blobs);
+    }
+}
+
+/// `write_runs` with offsets already in the backend's unit.
+fn write_native_runs(b: &mut Vec<u8>, blobs: &mut Vec<Arc<[u8]>>, runs: &[NativeRun]) {
+    b.extend_from_slice(&(runs.len() as u32).to_le_bytes());
+    b.extend_from_slice(&0u32.to_le_bytes());
+    b.extend_from_slice(&((runs.len() * 4) as u32).to_le_bytes());
+    b.extend_from_slice(&0u32.to_le_bytes());
+    for run in runs {
+        write_value(b, &Value::I64(run.start as i64), blobs);
+        write_value(b, &Value::I64(run.end as i64), blobs);
+        write_value(b, &Value::Str(run.name.clone()), blobs);
+        write_value(b, &Value::Str(run.value.clone()), blobs);
     }
 }
 
@@ -2342,6 +2486,142 @@ pub fn text_changed_body(tag: &[u8], text: &str) -> Vec<u8> {
     b
 }
 
+// The pair rides the widget's click tag; the tag's `reserved` u32 carries
+// the edit's SOURCE and the format's REMOVED flag, as sort_body's column.
+pub fn text_edited_body(
+    tag: &[u8],
+    source: u32,
+    range: TextRange,
+    inserted: &str,
+    runs: &[TextRun],
+) -> Vec<u8> {
+    let mut b = tag.to_vec();
+    b[12..16].copy_from_slice(&source.to_le_bytes());
+    b.extend_from_slice(&range.start.to_le_bytes());
+    b.extend_from_slice(&range.stop.to_le_bytes());
+    let mut blobs = Vec::new();
+    write_runs(&mut b, &mut blobs, runs);
+    write_value(&mut b, &Value::Str(inserted.to_owned()), &mut blobs);
+    b
+}
+
+/// `value` None rides as the removed flag plus an empty string.
+pub fn text_formatted_body(
+    tag: &[u8],
+    range: TextRange,
+    name: &str,
+    value: Option<&str>,
+) -> Vec<u8> {
+    let mut b = tag.to_vec();
+    b[12..16].copy_from_slice(&u32::from(value.is_none()).to_le_bytes());
+    b.extend_from_slice(&range.start.to_le_bytes());
+    b.extend_from_slice(&range.stop.to_le_bytes());
+    let mut blobs = Vec::new();
+    write_value(&mut b, &Value::Str(name.to_owned()), &mut blobs);
+    write_value(&mut b, &Value::Str(value.unwrap_or_default().to_owned()), &mut blobs);
+    b
+}
+
+/// The pair's tag-side decoders, `decode_text_changed_tag`'s shape.
+pub fn decode_text_edited_tag(
+    tag: &[u8],
+    source: u32,
+    range: TextRange,
+    inserted: &str,
+    runs: &[TextRun],
+) -> Occurrence {
+    let mut r = Reader { buf: tag, at: 0, blobs: &|_| None };
+    let id = r.u64();
+    let path = r.path();
+    if path.is_empty() {
+        Occurrence::TextEdited {
+            id: WidgetId(id),
+            range,
+            inserted: inserted.to_owned(),
+            runs: runs.to_vec(),
+            source,
+        }
+    } else {
+        Occurrence::InstanceTextEdited {
+            node: TemplateNodeId(id),
+            path,
+            range,
+            inserted: inserted.to_owned(),
+            runs: runs.to_vec(),
+            source,
+        }
+    }
+}
+
+pub fn decode_text_formatted_tag(
+    tag: &[u8],
+    range: TextRange,
+    name: &str,
+    value: Option<&str>,
+) -> Occurrence {
+    let mut r = Reader { buf: tag, at: 0, blobs: &|_| None };
+    let id = r.u64();
+    let path = r.path();
+    let value = value.map(str::to_owned);
+    if path.is_empty() {
+        Occurrence::TextFormatted { id: WidgetId(id), range, name: name.to_owned(), value }
+    } else {
+        Occurrence::InstanceTextFormatted {
+            node: TemplateNodeId(id),
+            path,
+            range,
+            name: name.to_owned(),
+            value,
+        }
+    }
+}
+
+/// The pair's inverses, off the record BODY — what a foreign binding does;
+/// in Rust the sink decodes off the tag, so these are the round trip's.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn decode_text_edited(body: &[u8]) -> Occurrence {
+    let mut r = Reader { buf: body, at: 0, blobs: &|_| None };
+    let id = r.u64();
+    let path_len = r.u32() as usize;
+    let source = r.u32();
+    let path: Path = (0..path_len).map(|_| r.value()).collect();
+    let range = TextRange::new(r.u64(), r.u64());
+    let count = r.u32() as usize;
+    let _reserved = r.u32();
+    let runs = read_runs(&mut r, count, "text_edited");
+    let inserted = run_str(r.value(), "text_edited text");
+    if path.is_empty() {
+        Occurrence::TextEdited { id: WidgetId(id), range, inserted, runs, source }
+    } else {
+        Occurrence::InstanceTextEdited {
+            node: TemplateNodeId(id),
+            path,
+            range,
+            inserted,
+            runs,
+            source,
+        }
+    }
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn decode_text_formatted(body: &[u8]) -> Occurrence {
+    let mut r = Reader { buf: body, at: 0, blobs: &|_| None };
+    let id = r.u64();
+    let path_len = r.u32() as usize;
+    let removed = r.u32();
+    let path: Path = (0..path_len).map(|_| r.value()).collect();
+    let range = TextRange::new(r.u64(), r.u64());
+    let name = run_str(r.value(), "text_formatted name");
+    let raw = run_str(r.value(), "text_formatted value");
+    let value = (removed == 0).then_some(raw);
+    if path.is_empty() {
+        Occurrence::TextFormatted { id: WidgetId(id), range, name, value }
+    } else {
+        Occurrence::InstanceTextFormatted { node: TemplateNodeId(id), path, range, name, value }
+    }
+}
+
 // A toggled occurrence body: the checkbox's stored tag (identity, same
 // layout as a click) followed by the new state as a value.
 pub fn toggled_body(tag: &[u8], checked: bool) -> Vec<u8> {
@@ -2639,6 +2919,35 @@ impl Writer {
                         write_value(b, &Value::Str(label.clone()), blobs);
                         write_value(b, &Value::Str(exts.clone()), blobs);
                     }
+                })
+            }
+            ApplyOp::SetRichText { id, text, runs } => {
+                self.record(APPLY_SET_RICH_TEXT, |b, blobs| {
+                    b.extend_from_slice(&id.0.to_le_bytes());
+                    write_native_runs(b, blobs, runs);
+                    write_value(b, &Value::Str(text.clone()), blobs);
+                })
+            }
+            ApplyOp::ApplyEdit { id, range, inserted, runs, selection } => {
+                self.record(APPLY_APPLY_EDIT, |b, blobs| {
+                    b.extend_from_slice(&id.0.to_le_bytes());
+                    b.extend_from_slice(&range.start.to_le_bytes());
+                    b.extend_from_slice(&range.stop.to_le_bytes());
+                    b.extend_from_slice(&selection.start.to_le_bytes());
+                    b.extend_from_slice(&selection.stop.to_le_bytes());
+                    write_native_runs(b, blobs, runs);
+                    write_value(b, &Value::Str(inserted.clone()), blobs);
+                })
+            }
+            ApplyOp::FormatText { id, name, value } => {
+                self.record(APPLY_FORMAT_TEXT, |b, blobs| {
+                    b.extend_from_slice(&id.0.to_le_bytes());
+                    b.extend_from_slice(&(value.is_none() as u32).to_le_bytes());
+                    b.extend_from_slice(&0u32.to_le_bytes());
+                    b.extend_from_slice(&2u32.to_le_bytes());
+                    b.extend_from_slice(&0u32.to_le_bytes());
+                    write_value(b, &Value::Str(name.clone()), blobs);
+                    write_value(b, &Value::Str(value.clone().unwrap_or_default()), blobs);
                 })
             }
             ApplyOp::Copy(clip) => self.record(APPLY_COPY, |b, blobs| {
@@ -3149,6 +3458,33 @@ impl Writer {
                         write_value(b, &Value::I64(r.start as i64), blobs);
                         write_value(b, &Value::I64(r.stop as i64), blobs);
                     }
+                })
+            }
+            TxOp::SetRichText { widget, text, runs } => {
+                self.record(TX_SET_RICH_TEXT, |b, blobs| {
+                    b.extend_from_slice(&widget.0.to_le_bytes());
+                    write_runs(b, blobs, runs);
+                    write_value(b, &Value::Str(text.clone()), blobs);
+                })
+            }
+            TxOp::ApplyEdit { widget, range, inserted, runs } => {
+                self.record(TX_APPLY_EDIT, |b, blobs| {
+                    b.extend_from_slice(&widget.0.to_le_bytes());
+                    b.extend_from_slice(&range.start.to_le_bytes());
+                    b.extend_from_slice(&range.stop.to_le_bytes());
+                    write_runs(b, blobs, runs);
+                    write_value(b, &Value::Str(inserted.clone()), blobs);
+                })
+            }
+            TxOp::FormatText { widget, name, value } => {
+                self.record(TX_FORMAT_TEXT, |b, blobs| {
+                    b.extend_from_slice(&widget.0.to_le_bytes());
+                    b.extend_from_slice(&(value.is_none() as u32).to_le_bytes());
+                    b.extend_from_slice(&0u32.to_le_bytes());
+                    b.extend_from_slice(&2u32.to_le_bytes());
+                    b.extend_from_slice(&0u32.to_le_bytes());
+                    write_value(b, &Value::Str(name.clone()), blobs);
+                    write_value(b, &Value::Str(value.clone().unwrap_or_default()), blobs);
                 })
             }
             TxOp::CreateBreakpoint { window, when, setters } => {
@@ -3721,6 +4057,7 @@ fn prop_raw(prop: Prop) -> u32 {
         Prop::Wrap => PROP_WRAP,
         Prop::Placeholder => PROP_PLACEHOLDER,
         Prop::Href => PROP_HREF,
+        Prop::Rich => PROP_RICH,
     }
 }
 
@@ -4378,6 +4715,105 @@ mod tests {
         assert_eq!(decoded.len(), ops.len());
         for (a, b) in ops.iter().zip(decoded.iter()) {
             assert_eq!(format!("{a:?}"), format!("{b:?}"));
+        }
+    }
+
+    #[test]
+    fn rich_text_writes_round_trip() {
+        let ops = vec![
+            TxOp::SetRichText {
+                widget: WidgetId(3),
+                text: "héllo 👋 世界".into(),
+                runs: vec![
+                    TextRun::new(7, 11, "bold", "true"),
+                    TextRun::new(0, 6, "link", "https://kaya.dev"),
+                    TextRun::new(0, 18, "block", "heading1"),
+                ],
+            },
+            TxOp::SetRichText { widget: WidgetId(3), text: String::new(), runs: Vec::new() },
+            TxOp::ApplyEdit {
+                widget: WidgetId(3),
+                range: TextRange::new(7, 11),
+                inserted: "🎉".into(),
+                runs: vec![TextRun::new(0, 4, "italic", "true")],
+            },
+            TxOp::ApplyEdit {
+                widget: WidgetId(3),
+                range: TextRange::new(2, 9),
+                inserted: String::new(),
+                runs: Vec::new(),
+            },
+            TxOp::FormatText { widget: WidgetId(3), name: "link".into(), value: Some("https://kaya.dev".into()) },
+            TxOp::FormatText { widget: WidgetId(3), name: "bold".into(), value: None },
+        ];
+        let mut w = Writer::new();
+        for op in &ops {
+            w.tx_op(op);
+        }
+        let table = w.blobs.clone();
+        let decoded = wire_decode_with(&w.into_bytes(), &table);
+        assert_eq!(decoded.len(), ops.len());
+        for (a, b) in ops.iter().zip(decoded.iter()) {
+            assert_eq!(format!("{a:?}"), format!("{b:?}"));
+        }
+    }
+
+    /// Layout: 8-byte record header, u64 widget, then the count.
+    #[test]
+    #[should_panic(expected = "set_rich_text declares 2 runs but carries 4 values")]
+    fn a_run_count_disagreeing_with_its_values_fails_loudly() {
+        let mut w = Writer::new();
+        w.tx_op(&TxOp::SetRichText {
+            widget: WidgetId(3),
+            text: "hi".into(),
+            runs: vec![TextRun::new(0, 2, "bold", "true")],
+        });
+        let mut bytes = w.into_bytes();
+        assert_eq!(
+            bytes[16..20],
+            1u32.to_le_bytes(),
+            "the run count is not where this test thinks it is"
+        );
+        bytes[16..20].copy_from_slice(&2u32.to_le_bytes());
+        decode_transaction(&bytes);
+    }
+
+    /// Out and back through both doors: the record body and the tag.
+    #[test]
+    fn rich_occurrences_round_trip() {
+        let runs = vec![TextRun::new(0, 4, "bold", "true")];
+        let range = TextRange::new(7, 11);
+        for path in [Vec::new(), vec![Value::from("g1"), Value::from(2i64)]] {
+            let tag = click_tag(9, &path);
+            let body = text_edited_body(&tag, EDIT_SOURCE_PASTE as u32, range, "🎉", &runs);
+            let want = decode_text_edited_tag(&tag, EDIT_SOURCE_PASTE as u32, range, "🎉", &runs);
+            assert_eq!(decode_text_edited(&body), want);
+            match &want {
+                Occurrence::TextEdited { id, source, inserted, .. } => {
+                    assert!(path.is_empty());
+                    assert_eq!(id.0, 9);
+                    assert_eq!(*source, EDIT_SOURCE_PASTE as u32);
+                    assert_eq!(inserted, "🎉");
+                }
+                Occurrence::InstanceTextEdited { node, path: got, .. } => {
+                    assert_eq!(node.0, 9);
+                    assert_eq!(got, &path);
+                }
+                other => panic!("wanted a text_edited, got {other:?}"),
+            }
+            // `removed` is the only way to say OFF: no absent string exists.
+            for value in [Some("true"), None] {
+                let body = text_formatted_body(&tag, range, "bold", value);
+                let want = decode_text_formatted_tag(&tag, range, "bold", value);
+                assert_eq!(decode_text_formatted(&body), want);
+                match &want {
+                    Occurrence::TextFormatted { value: got, .. }
+                    | Occurrence::InstanceTextFormatted { value: got, .. } => {
+                        assert_eq!(got.as_deref(), value);
+                    }
+                    other => panic!("wanted a text_formatted, got {other:?}"),
+                }
+            }
         }
     }
 

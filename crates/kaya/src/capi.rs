@@ -92,6 +92,13 @@ pub const KAYA_OCCURRENCE_TIME_CHANGED: u16 = 25;
 pub const KAYA_OCCURRENCE_VALUE_COMMITTED: u16 = 26;
 pub const KAYA_OCCURRENCE_NOTIFICATION_RESULT: u16 = 27;
 pub const KAYA_OCCURRENCE_LINK_OPENED: u16 = 28;
+/// The rich text pair (docs/rich-text-plan.md R1), after the widget's click
+/// tag: TEXT_EDITED { u64 start; u64 end; u32 count; u32 reserved; Values of
+/// 4*count — I64 start, I64 end, Str name, Str value — then the inserted text
+/// as one Str }; TEXT_FORMATTED { u64 start; u64 end; Str name; Str value }.
+/// Offsets are UTF-8 bytes; a run's are relative to the inserted text.
+pub const KAYA_OCCURRENCE_TEXT_EDITED: u16 = 29;
+pub const KAYA_OCCURRENCE_TEXT_FORMATTED: u16 = 30;
 const _: () = assert!(
     KAYA_OCCURRENCE_PAD == ring::REC_PAD
         && KAYA_OCCURRENCE_BUTTON_CLICKED == ring::REC_BUTTON_CLICKED
@@ -122,6 +129,8 @@ const _: () = assert!(
         && KAYA_OCCURRENCE_VALUE_COMMITTED == ring::REC_VALUE_COMMITTED
         && KAYA_OCCURRENCE_NOTIFICATION_RESULT == ring::REC_NOTIFICATION_RESULT
         && KAYA_OCCURRENCE_LINK_OPENED == ring::REC_LINK_OPENED
+        && KAYA_OCCURRENCE_TEXT_EDITED == ring::REC_TEXT_EDITED
+        && KAYA_OCCURRENCE_TEXT_FORMATTED == ring::REC_TEXT_FORMATTED
 );
 
 /// Transaction record kinds (guest -> core, via kaya_submit). Layouts,
@@ -290,6 +299,20 @@ const _: () = assert!(KAYA_TX_CANCEL_NOTIFICATION == wire::TX_CANCEL_NOTIFICATIO
 /// pattern }. The core keeps the table and does the one match.
 pub const KAYA_TX_DECLARE_LINK_ROUTE: u16 = 54;
 const _: () = assert!(KAYA_TX_DECLARE_LINK_ROUTE == wire::TX_DECLARE_LINK_ROUTE);
+/// The two rich-text writes (docs/rich-text-plan.md §2): SET_RICH_TEXT
+/// { u64 widget; u32 count; u32 reserved; Values of 4*count — I64 start,
+/// I64 end, Str name, Str value — then the whole text as one Str };
+/// APPLY_EDIT { u64 widget; u64 start; u64 end; u32 count; u32 reserved;
+/// the same run list; then the inserted text }. Offsets are UTF-8 bytes
+/// (docs/ranges-units.md §7); names are KAYA_RICH_ATTR_*'s spellings.
+pub const KAYA_TX_SET_RICH_TEXT: u16 = 55;
+pub const KAYA_TX_APPLY_EDIT: u16 = 56;
+pub const KAYA_TX_FORMAT_TEXT: u16 = 57;
+const _: () = assert!(
+    KAYA_TX_SET_RICH_TEXT == wire::TX_SET_RICH_TEXT
+        && KAYA_TX_APPLY_EDIT == wire::TX_APPLY_EDIT
+        && KAYA_TX_FORMAT_TEXT == wire::TX_FORMAT_TEXT
+);
 /// The size-class vocabulary (wire::SIZE_CLASS_*): what a breakpoint's
 /// `size_class` value and kaya_window_metrics' `size_class` argument
 /// speak. COMPACT is the only class a breakpoint may name today; NONE is
@@ -584,6 +607,18 @@ pub const KAYA_APPLY_SET_REORDERABLE: u16 = 40;
 const _: () = assert!(KAYA_APPLY_SET_DRAG_SOURCE == wire::APPLY_SET_DRAG_SOURCE);
 const _: () = assert!(KAYA_APPLY_SET_DROP_TARGET == wire::APPLY_SET_DROP_TARGET);
 const _: () = assert!(KAYA_APPLY_SET_REORDERABLE == wire::APPLY_SET_REORDERABLE);
+/// The rich-text pair, apply side: the tx layouts with offsets already in
+/// this build's backend unit, and APPLY_EDIT carrying the core's post-edit
+/// selection — { u64 widget; u64 start; u64 end; u64 sel_start; u64 sel_end;
+/// ... } (docs/rich-text-plan.md R5).
+pub const KAYA_APPLY_SET_RICH_TEXT: u16 = 43;
+pub const KAYA_APPLY_APPLY_EDIT: u16 = 44;
+pub const KAYA_APPLY_FORMAT_TEXT: u16 = 45;
+const _: () = assert!(
+    KAYA_APPLY_SET_RICH_TEXT == wire::APPLY_SET_RICH_TEXT
+        && KAYA_APPLY_APPLY_EDIT == wire::APPLY_APPLY_EDIT
+        && KAYA_APPLY_FORMAT_TEXT == wire::APPLY_FORMAT_TEXT
+);
 /// What a drop settles on (spec enum "drag_op").
 pub const KAYA_DRAG_OP_NONE: u32 = 0;
 pub const KAYA_DRAG_OP_COPY: u32 = 1;
@@ -772,6 +807,8 @@ pub const KAYA_PROP_MIN_COLUMN_WIDTH: u32 = 28;
 pub const KAYA_PROP_WRAP: u32 = 29;
 pub const KAYA_PROP_PLACEHOLDER: u32 = 30;
 pub const KAYA_PROP_HREF: u32 = 31;
+/// A textarea that carries attribute runs (docs/rich-text-plan.md R1).
+pub const KAYA_PROP_RICH: u32 = 32;
 
 /// Window properties (spec::WINDOW_PROPS): their own namespace —
 /// windows are not widgets. Window 0 is the primary surface.
@@ -914,7 +951,7 @@ const _: () = assert!(
 // Completeness for the occurrence exports (docs/traps.md): a new spec
 // occurrence trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::SPEC.occurrence.len() == 28,
+    crate::spec::SPEC.occurrence.len() == 30,
     "spec occurrences grew: export the new KAYA_OCCURRENCE_* above, extend the pin, and \
      bump this count"
 );
@@ -974,6 +1011,7 @@ const _: () = assert!(
         && KAYA_PROP_WRAP == wire::PROP_WRAP
         && KAYA_PROP_PLACEHOLDER == wire::PROP_PLACEHOLDER
         && KAYA_PROP_HREF == wire::PROP_HREF
+        && KAYA_PROP_RICH == wire::PROP_RICH
         && KAYA_WPROP_TITLE == wire::WPROP_TITLE
         && KAYA_WPROP_WIDTH == wire::WPROP_WIDTH
         && KAYA_WPROP_HEIGHT == wire::WPROP_HEIGHT
@@ -1147,10 +1185,82 @@ const _: () = {
          bump this count"
     );
 };
+/// The rich text vocabularies (spec enums "rich_attr", "block_kind",
+/// "edit_source"; docs/rich-text-plan.md R3/R4). A name rides as a string.
+pub const KAYA_RICH_ATTR_BOLD: u32 = 1;
+pub const KAYA_RICH_ATTR_ITALIC: u32 = 2;
+pub const KAYA_RICH_ATTR_UNDERLINE: u32 = 3;
+pub const KAYA_RICH_ATTR_STRIKE: u32 = 4;
+pub const KAYA_RICH_ATTR_CODE: u32 = 5;
+pub const KAYA_RICH_ATTR_LINK: u32 = 6;
+pub const KAYA_RICH_ATTR_BLOCK: u32 = 7;
+/// One kind per paragraph, the value of a `block` run.
+pub const KAYA_BLOCK_BODY: u32 = 0;
+pub const KAYA_BLOCK_HEADING1: u32 = 1;
+pub const KAYA_BLOCK_HEADING2: u32 = 2;
+pub const KAYA_BLOCK_HEADING3: u32 = 3;
+pub const KAYA_BLOCK_QUOTE: u32 = 4;
+pub const KAYA_BLOCK_CODE_BLOCK: u32 = 5;
+/// What provoked a text_edited, in its `source` slot.
+pub const KAYA_EDIT_SOURCE_USER: u32 = 0;
+pub const KAYA_EDIT_SOURCE_IME_COMMIT: u32 = 1;
+pub const KAYA_EDIT_SOURCE_PASTE: u32 = 2;
+pub const KAYA_EDIT_SOURCE_NATIVE_UNDO: u32 = 3;
+pub const KAYA_EDIT_SOURCE_DROP: u32 = 4;
+const _: () = assert!(
+    KAYA_RICH_ATTR_BOLD as i64 == wire::RICH_ATTR_BOLD
+        && KAYA_RICH_ATTR_ITALIC as i64 == wire::RICH_ATTR_ITALIC
+        && KAYA_RICH_ATTR_UNDERLINE as i64 == wire::RICH_ATTR_UNDERLINE
+        && KAYA_RICH_ATTR_STRIKE as i64 == wire::RICH_ATTR_STRIKE
+        && KAYA_RICH_ATTR_CODE as i64 == wire::RICH_ATTR_CODE
+        && KAYA_RICH_ATTR_LINK as i64 == wire::RICH_ATTR_LINK
+        && KAYA_RICH_ATTR_BLOCK as i64 == wire::RICH_ATTR_BLOCK
+        && KAYA_BLOCK_BODY as i64 == wire::BLOCK_BODY
+        && KAYA_BLOCK_HEADING1 as i64 == wire::BLOCK_HEADING1
+        && KAYA_BLOCK_HEADING2 as i64 == wire::BLOCK_HEADING2
+        && KAYA_BLOCK_HEADING3 as i64 == wire::BLOCK_HEADING3
+        && KAYA_BLOCK_QUOTE as i64 == wire::BLOCK_QUOTE
+        && KAYA_BLOCK_CODE_BLOCK as i64 == wire::BLOCK_CODE_BLOCK
+        && KAYA_EDIT_SOURCE_USER as i64 == wire::EDIT_SOURCE_USER
+        && KAYA_EDIT_SOURCE_IME_COMMIT as i64 == wire::EDIT_SOURCE_IME_COMMIT
+        && KAYA_EDIT_SOURCE_PASTE as i64 == wire::EDIT_SOURCE_PASTE
+        && KAYA_EDIT_SOURCE_NATIVE_UNDO as i64 == wire::EDIT_SOURCE_NATIVE_UNDO
+        && KAYA_EDIT_SOURCE_DROP as i64 == wire::EDIT_SOURCE_DROP
+);
+// Completeness, not just agreement (docs/traps.md): a variant nobody
+// exported is a word the C floor lacks, so each count walks you above.
+const fn spec_enum_variants(want: &str) -> usize {
+    let mut n = 0;
+    let mut i = 0;
+    while i < crate::spec::SPEC.enums.len() {
+        if konst_eq(crate::spec::SPEC.enums[i].name, want) {
+            n = crate::spec::SPEC.enums[i].variants.len();
+        }
+        i += 1;
+    }
+    n
+}
+const _: () = {
+    assert!(
+        spec_enum_variants("rich_attr") == 7,
+        "the spec rich_attr enum grew: export the new KAYA_RICH_ATTR_* above, extend the \
+         pin, and bump this count"
+    );
+    assert!(
+        spec_enum_variants("block_kind") == 6,
+        "the spec block_kind enum grew: export the new KAYA_BLOCK_* above, extend the pin, \
+         and bump this count"
+    );
+    assert!(
+        spec_enum_variants("edit_source") == 5,
+        "the spec edit_source enum grew: export the new KAYA_EDIT_SOURCE_* above, extend the \
+         pin, and bump this count"
+    );
+};
 // Completeness, not just agreement (docs/traps.md): a new spec prop
 // trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::PROPS.len() == 31,
+    crate::spec::PROPS.len() == 32,
     "spec::PROPS grew: export the new KAYA_PROP_* above, extend the pin, and bump this count"
 );
 const _: () = assert!(
@@ -3319,13 +3429,196 @@ pub unsafe extern "C" fn kaya_emit_text_changed(
     if quiet == 0 {
         bank_text_changed(window, tag, text, focused != 0);
     }
+    // On every report, `quiet` included: a native undo is an edit the
+    // document hears (docs/rich-text-plan.md R4, docs/undo-plan.md A6).
+    let edit = rich_edit_of(tag, text);
     if let Some(sink) = PRESENTATION_SINK.lock().unwrap().as_ref() {
         sink.send_text_tag(tag, text);
+        if let Some(edit) = edit {
+            sink.send(wire::decode_text_edited_tag(
+                tag,
+                edit.source,
+                edit.range,
+                &edit.inserted,
+                &edit.runs,
+            ));
+        }
         return;
     }
     state()
         .ring
         .push_record(ring::REC_TEXT_CHANGED, &wire::text_changed_body(tag, text));
+    if let Some(edit) = edit {
+        state().ring.push_record(
+            ring::REC_TEXT_EDITED,
+            &wire::text_edited_body(tag, edit.source, edit.range, &edit.inserted, &edit.runs),
+        );
+    }
+}
+
+/// The one addressed edit, or None where the widget carries no document
+/// (docs/rich-text-plan.md R4).
+fn rich_edit_of(tag: &[u8], text: &str) -> Option<crate::scene::RichEdit> {
+    let mut scene_slot = PRESENTATION_SCENE.lock().unwrap();
+    let scene = scene_slot.as_mut()?;
+    let field = scene.text_field_of_tag(tag)?;
+    scene.note_rich_text(field, text)
+}
+
+/// Harness side: the CORE's attribute runs of a `rich` textarea in the
+/// harness's spelling (docs/rich-text-plan.md R9). Writes at most `cap`
+/// bytes and answers the length; 0 for a widget with no document.
+///
+/// # Safety
+/// `out` must point at `cap` writable bytes, or be NULL with `cap` 0.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_text_runs(widget: u64, out: *mut u8, cap: usize) -> usize {
+    let answer = with_window_scene("reading a rich textarea's runs", |scene| {
+        (Vec::new(), scene.rich_runs_string(crate::protocol::WidgetId(widget)))
+    });
+    match answer {
+        Some(s) => unsafe { fill(s.as_bytes(), out, cap) },
+        None => 0,
+    }
+}
+
+/// Harness side: the last text_edited the core published for a `rich`
+/// textarea, in the harness's spelling. kaya_text_runs' contract.
+///
+/// # Safety
+/// `out` must point at `cap` writable bytes, or be NULL with `cap` 0.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_text_last_edit(widget: u64, out: *mut u8, cap: usize) -> usize {
+    let answer = with_window_scene("reading a rich textarea's last edit", |scene| {
+        (Vec::new(), scene.last_edit_string(crate::protocol::WidgetId(widget)))
+    });
+    match answer {
+        Some(s) => unsafe { fill(s.as_bytes(), out, cap) },
+        None => 0,
+    }
+}
+
+/// Presentation side: an input-method composition began or ended; ending one
+/// lowers what was held (docs/rich-text-plan.md R5). Not for use with kaya_run.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_text_composing(widget: u64, live: u8) {
+    with_window_scene("reporting a text composition", |scene| {
+        (
+            scene.set_text_composing(crate::protocol::WidgetId(widget), live != 0),
+            (),
+        )
+    })
+}
+
+/// Presentation side: a typing attribute armed over a collapsed caret. `on` 0
+/// turns it off for the next insertion, which spends it.
+///
+/// # Safety
+/// `name`/`value` must describe valid UTF-8 byte ranges, or be NULL/0.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_text_pending(
+    widget: u64,
+    name: *const u8,
+    name_len: usize,
+    value: *const u8,
+    value_len: usize,
+    on: u8,
+) {
+    let name = unsafe { rich_str(name, name_len, "a pending attribute's name") };
+    let value = unsafe { rich_str(value, value_len, "a pending attribute's value") };
+    with_window_scene("arming a typing attribute", |scene| {
+        scene.set_text_pending(crate::protocol::WidgetId(widget), name, value, on != 0);
+        (Vec::new(), ())
+    })
+}
+
+/// Presentation side: what provoked the next report (KAYA_EDIT_SOURCE_*).
+/// One-shot; the default is KAYA_EDIT_SOURCE_USER.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_text_edit_source(widget: u64, source: u32) {
+    with_window_scene("naming an edit's source", |scene| {
+        scene.set_text_edit_source(crate::protocol::WidgetId(widget), source);
+        (Vec::new(), ())
+    })
+}
+
+/// Presentation side: the range this backend says it edited, in UTF-8 bytes,
+/// reported just before the text. One-shot (docs/rich-text-plan.md R4).
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_text_reported_edit(widget: u64, start: u64, end: u64, inserted_len: u64) {
+    with_window_scene("corroborating an edit", |scene| {
+        scene.set_reported_edit(crate::protocol::WidgetId(widget), start, end, inserted_len);
+        (Vec::new(), ())
+    })
+}
+
+/// Presentation side: where this `rich` textarea's selection is now, in UTF-8
+/// bytes — the only way the core knows (docs/rich-text-plan.md R5).
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_text_selection(widget: u64, start: u64, end: u64) {
+    with_window_scene("reporting a text selection", |scene| {
+        scene.set_text_selection(crate::protocol::WidgetId(widget), start, end);
+        (Vec::new(), ())
+    })
+}
+
+/// Presentation side: the user formatted a range of a `rich` textarea.
+/// `removed` 1 takes the attribute off; a collapsed range emits nothing and is
+/// kaya_text_pending's. Do not combine with kaya_run.
+///
+/// # Safety
+/// `tag`, `name` and `value` must describe valid byte ranges, or be NULL/0.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_text_formatted(
+    tag: *const u8,
+    tag_len: usize,
+    start: u64,
+    end: u64,
+    name: *const u8,
+    name_len: usize,
+    value: *const u8,
+    value_len: usize,
+    removed: u8,
+) {
+    assert!(!tag.is_null() && tag_len != 0, "kaya: empty textarea tag");
+    let tag = unsafe { std::slice::from_raw_parts(tag, tag_len) };
+    let name = unsafe { rich_str(name, name_len, "a formatted attribute's name") };
+    let value = unsafe { rich_str(value, value_len, "a formatted attribute's value") };
+    let want = (removed == 0).then_some(value);
+    let range = crate::protocol::TextRange::new(start, end);
+    let published = {
+        let mut scene_slot = PRESENTATION_SCENE.lock().unwrap();
+        match scene_slot.as_mut() {
+            Some(scene) => match scene.text_field_of_tag(tag) {
+                Some(field) => scene.note_text_formatted(field, range, name, want),
+                None => None,
+            },
+            None => None,
+        }
+    };
+    let Some((range, name, value)) = published else {
+        return;
+    };
+    if let Some(sink) = PRESENTATION_SINK.lock().unwrap().as_ref() {
+        sink.send(wire::decode_text_formatted_tag(tag, range, &name, value.as_deref()));
+        return;
+    }
+    state().ring.push_record(
+        ring::REC_TEXT_FORMATTED,
+        &wire::text_formatted_body(tag, range, &name, value.as_deref()),
+    );
+}
+
+/// One borrowed UTF-8 attribute word; NULL or zero length is the empty string.
+///
+/// # Safety
+/// `ptr`/`len` must describe a valid byte range, or be NULL/0.
+unsafe fn rich_str<'a>(ptr: *const u8, len: usize, what: &str) -> &'a str {
+    if ptr.is_null() || len == 0 {
+        return "";
+    }
+    std::str::from_utf8(unsafe { std::slice::from_raw_parts(ptr, len) })
+        .unwrap_or_else(|_| panic!("kaya: {what} must be UTF-8"))
 }
 
 /// Show the edit to the window's undo ledger on its way past, BEFORE the app
@@ -4406,6 +4699,9 @@ mod tests {
             ("show_notification", KAYA_TX_SHOW_NOTIFICATION),
             ("cancel_notification", KAYA_TX_CANCEL_NOTIFICATION),
             ("declare_link_route", KAYA_TX_DECLARE_LINK_ROUTE),
+            ("set_rich_text", KAYA_TX_SET_RICH_TEXT),
+            ("apply_edit", KAYA_TX_APPLY_EDIT),
+            ("format_text", KAYA_TX_FORMAT_TEXT),
         ];
         let apply = [
             ("create", KAYA_APPLY_CREATE),
@@ -4448,6 +4744,9 @@ mod tests {
             ("set_drag_source", KAYA_APPLY_SET_DRAG_SOURCE),
             ("set_drop_target", KAYA_APPLY_SET_DROP_TARGET),
             ("set_reorderable", KAYA_APPLY_SET_REORDERABLE),
+            ("set_rich_text", KAYA_APPLY_SET_RICH_TEXT),
+            ("apply_edit", KAYA_APPLY_APPLY_EDIT),
+            ("format_text", KAYA_APPLY_FORMAT_TEXT),
         ];
         for (spec, consts) in [(crate::spec::SPEC.tx, &tx[..]), (crate::spec::SPEC.apply, &apply[..])] {
             assert_eq!(

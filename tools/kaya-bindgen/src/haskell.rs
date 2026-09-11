@@ -651,7 +651,19 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             .map(|n| format!("kind == occKind{}", pascal(n)))
             .collect::<Vec<_>>()
             .join(" || ");
-        if values_tail.is_empty() {
+        // The rich pair's own branch (docs/rich-text-plan.md R1): the
+        // payload tail would read `start`, a bare word, as a tagged value.
+        let rich_edit = crate::rich_edit_occurrence_names(spec)
+            .iter()
+            .map(|n| format!("kind == occKind{}", pascal(n)))
+            .collect::<Vec<_>>()
+            .join(" || ");
+        let rich_format = crate::rich_format_occurrence_names(spec)
+            .iter()
+            .map(|n| format!("kind == occKind{}", pascal(n)))
+            .collect::<Vec<_>>()
+            .join(" || ");
+        if values_tail.is_empty() && rich_edit.is_empty() && rich_format.is_empty() {
             c.line("          let tail_ = []");
         } else {
             c.line("          -- The canvas asks carry a run of BARE values after");
@@ -659,15 +671,57 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             c.line("          -- frame time — with no count in front, so they are");
             c.line("          -- read until the record ends (canvas-plan §3.2.1).");
             c.line("          tail_ <-");
-            c.line(&format!("            if {values_tail}"));
-            c.line("              then do");
-            c.line("                stop <- peekByteOff rec 0 :: IO Word32");
-            c.line("                let rest at acc");
-            c.line("                      | at >= fromIntegral stop = return (reverse acc)");
-            c.line("                      | otherwise = do");
-            c.line("                          (v, next) <- parseValue rec at");
-            c.line("                          rest next (v : acc)");
-            c.line("                rest at' []");
+            let mut first = true;
+            let mut lead = |c: &mut Ctx, cond: &str, first: &mut bool| {
+                if *first {
+                    c.line(&format!("            if {cond}"));
+                    *first = false;
+                } else {
+                    c.line(&format!("              else if {cond}"));
+                }
+            };
+            if !values_tail.is_empty() {
+                lead(&mut c, &values_tail, &mut first);
+                c.line("              then do");
+                c.line("                stop <- peekByteOff rec 0 :: IO Word32");
+                c.line("                let rest at acc");
+                c.line("                      | at >= fromIntegral stop = return (reverse acc)");
+                c.line("                      | otherwise = do");
+                c.line("                          (v, next) <- parseValue rec at");
+                c.line("                          rest next (v : acc)");
+                c.line("                rest at' []");
+            }
+            if !rich_edit.is_empty() {
+                lead(&mut c, &rich_edit, &mut first);
+                c.line("              then do");
+                c.line("                source <- peekByteOff rec 20 :: IO Word32");
+                c.line("                start <- peekByteOff rec at' :: IO Word64");
+                c.line("                stop <- peekByteOff rec (at' + 8) :: IO Word64");
+                c.line("                count <- peekByteOff rec (at' + 16) :: IO Word32");
+                c.line("                -- past start, end, count, reserved and the values header");
+                c.line("                let readRuns at 0 acc = return (reverse acc, at)");
+                c.line("                    readRuns at n acc = do");
+                c.line("                      (v, next) <- parseValue rec at");
+                c.line("                      readRuns next (n - 1 :: Word32) (v : acc)");
+                c.line("                (runs, afterRuns) <- readRuns (at' + 32) (count * 4) []");
+                c.line("                (inserted, _) <- parseValue rec afterRuns");
+                c.line("                return");
+                c.line("                  ( [ VI64 (fromIntegral source), VI64 (fromIntegral start)");
+                c.line("                    , VI64 (fromIntegral stop), inserted ]");
+                c.line("                      ++ runs )");
+            }
+            if !rich_format.is_empty() {
+                lead(&mut c, &rich_format, &mut first);
+                c.line("              then do");
+                c.line("                removed <- peekByteOff rec 20 :: IO Word32");
+                c.line("                start <- peekByteOff rec at' :: IO Word64");
+                c.line("                stop <- peekByteOff rec (at' + 8) :: IO Word64");
+                c.line("                (name, afterName) <- parseValue rec (at' + 16)");
+                c.line("                (value, _) <- parseValue rec afterName");
+                c.line("                return");
+                c.line("                  [ VI64 (fromIntegral removed), VI64 (fromIntegral start)");
+                c.line("                  , VI64 (fromIntegral stop), name, value ]");
+            }
             c.line("              else return []");
         }
     }

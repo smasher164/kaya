@@ -813,6 +813,72 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     // Its own tuple member because the run is 2 values for a redraw and
     // 3 for a tick, and `payload` is one.
     c.line("        var tail: [KayaValue] = []");
+    // The rich pair's own arm (docs/rich-text-plan.md R1): the generic
+    // payload tail would read `start`, a bare word, as a tagged value.
+    let rich_edit = crate::rich_edit_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("kind == UInt16(KAYA_OCCURRENCE_{})", n.to_uppercase()))
+        .collect::<Vec<_>>();
+    if !rich_edit.is_empty() {
+        c.line(&format!("        if {}", rich_edit[0]));
+        for cond in &rich_edit[1..] {
+            c.line(&format!("            || {cond}"));
+        }
+        c.line("        {");
+        c.line("            let source = raw.loadUnaligned(fromByteOffset: 20, as: UInt32.self)");
+        c.line("            let start = raw.loadUnaligned(fromByteOffset: at, as: UInt64.self)");
+        c.line("            let stop = raw.loadUnaligned(fromByteOffset: at + 8, as: UInt64.self)");
+        c.line("            let count = Int(raw.loadUnaligned(fromByteOffset: at + 16, as: UInt32.self))");
+        c.line("            // past start, end, count, reserved and the values header");
+        c.line("            var richAt = at + 32");
+        c.line("            var runs: [KayaValue] = []");
+        c.line("            for _ in 0..<(count * 4 + 1) {");
+        c.line("                let rtype = raw.loadUnaligned(fromByteOffset: richAt, as: UInt32.self)");
+        c.line("                let rlen = Int(raw.loadUnaligned(fromByteOffset: richAt + 4, as: UInt32.self))");
+        c.line("                switch rtype {");
+        c.line("                case UInt32(KAYA_VALUE_I64):");
+        c.line("                    runs.append(.i64(Int64(bitPattern:");
+        c.line("                        raw.loadUnaligned(fromByteOffset: richAt + 8, as: UInt64.self))))");
+        c.line("                default:");
+        c.line("                    runs.append(.str(String(");
+        c.line("                        decoding: raw[(richAt + 8)..<(richAt + 8 + rlen)], as: UTF8.self)))");
+        c.line("                }");
+        c.line("                richAt += 8 + ((rlen + 7) & ~7)");
+        c.line("            }");
+        c.line("            // The inserted text rides LAST on the wire and reads");
+        c.line("            // FOURTH here, so the head is fixed and the runs follow.");
+        c.line("            tail = [.i64(Int64(source)), .i64(Int64(bitPattern: start)),");
+        c.line("                    .i64(Int64(bitPattern: stop)), runs[runs.count - 1]]");
+        c.line("            tail.append(contentsOf: runs[0..<(runs.count - 1)])");
+        c.line("        }");
+    }
+    let rich_format = crate::rich_format_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("kind == UInt16(KAYA_OCCURRENCE_{})", n.to_uppercase()))
+        .collect::<Vec<_>>();
+    if !rich_format.is_empty() {
+        c.line(&format!("        if {}", rich_format[0]));
+        for cond in &rich_format[1..] {
+            c.line(&format!("            || {cond}"));
+        }
+        c.line("        {");
+        c.line("            let removed = raw.loadUnaligned(fromByteOffset: 20, as: UInt32.self)");
+        c.line("            let start = raw.loadUnaligned(fromByteOffset: at, as: UInt64.self)");
+        c.line("            let stop = raw.loadUnaligned(fromByteOffset: at + 8, as: UInt64.self)");
+        c.line("            // Both halves are strings: the name and, for a removal,");
+        c.line("            // the empty value the wire writes in its place.");
+        c.line("            var attrAt = at + 16");
+        c.line("            var words: [KayaValue] = []");
+        c.line("            for _ in 0..<2 {");
+        c.line("                let alen = Int(raw.loadUnaligned(fromByteOffset: attrAt + 4, as: UInt32.self))");
+        c.line("                words.append(.str(String(");
+        c.line("                    decoding: raw[(attrAt + 8)..<(attrAt + 8 + alen)], as: UTF8.self)))");
+        c.line("                attrAt += 8 + ((alen + 7) & ~7)");
+        c.line("            }");
+        c.line("            tail = [.i64(Int64(removed)), .i64(Int64(bitPattern: start)),");
+        c.line("                    .i64(Int64(bitPattern: stop)), words[0], words[1]]");
+        c.line("        }");
+    }
     let values_tail = crate::values_tail_occurrence_names(spec)
         .iter()
         .map(|n| format!("kind == UInt16(KAYA_OCCURRENCE_{})", n.to_uppercase()))

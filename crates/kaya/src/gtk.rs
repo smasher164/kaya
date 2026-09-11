@@ -10072,6 +10072,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
         // against the text it validated the byte offsets against (scene.rs
         // `native_offset`) — so there is no Unicode arithmetic below and
         // there must never be.
+        // docs/rich-text-plan.md §4: this backend's breadth step.
+        ApplyOp::SetRichText { .. }
+            | ApplyOp::ApplyEdit { .. }
+            | ApplyOp::FormatText { .. } => {
+            crate::depth_stub("richtext")
+        }
         ApplyOp::HighlightRanges { id, ranges } => {
             let Some(NativeWidget::Textarea(_, view)) = core.widgets.get(&id) else {
                 return;
@@ -13718,6 +13724,32 @@ impl crate::harness::Stage for GtkStage {
     /// the duration and everything downstream is the platform's — including
     /// the RESET on any programmatic cursor or selection move, which is the
     /// D4 hazard this scene proves.
+    fn format(
+        &self, _: crate::harness::Target, _: crate::harness::TextRange, _: &str, _: &str, _: bool,
+    ) {
+        crate::depth_stub("richtext")
+    }
+
+    fn rich_runs(&self, target: crate::harness::Target) -> String {
+        Self::on_main(move |core| match rich_target_id(core, target) {
+            Some(id) => core
+                .scene
+                .rich_runs_string(id)
+                .unwrap_or_else(|| "<no rich document>".to_owned()),
+            None => "<no such target>".to_owned(),
+        })
+    }
+
+    fn last_edit(&self, target: crate::harness::Target) -> String {
+        Self::on_main(move |core| match rich_target_id(core, target) {
+            Some(id) => core
+                .scene
+                .last_edit_string(id)
+                .unwrap_or_else(|| "<no rich document>".to_owned()),
+            None => "<no such target>".to_owned(),
+        })
+    }
+
     fn compose(&self, target: crate::harness::Target, text: &str) {
         let text = text.to_owned();
         let marked = text.clone();
@@ -17335,6 +17367,17 @@ fn css_inset_of(widget: &gtk4::Widget) -> String {
 /// every other verb resolves through — creation order, which is what
 /// `kind#index` means.
 #[cfg(all(feature = "harness", target_os = "linux"))]
+/// The widget id behind a textarea target, for the reads that ask the core.
+fn rich_target_id(
+    core: &CoreState, target: crate::harness::Target,
+) -> Option<crate::protocol::WidgetId> {
+    if target.kind != crate::harness::TargetKind::Textarea {
+        return None;
+    }
+    let widget = target_widget(core, target)?;
+    core.widgets.iter().find(|(_, w)| w.control() == widget).map(|(id, _)| *id)
+}
+
 fn target_widget(core: &CoreState, target: crate::harness::Target) -> Option<gtk4::Widget> {
     use crate::harness::{try_resolve, TargetKind as K};
     use gtk4::prelude::Cast;

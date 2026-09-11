@@ -1001,6 +1001,51 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("            payload = b.getInt(at);");
         c.line("        }");
     }
+    // The rich pair's own arm (docs/rich-text-plan.md R1): the generic
+    // payload tail would read `start`, a bare word, as a tagged value.
+    let rich_edit = crate::rich_edit_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("kind == OCC_KIND_{}", n.to_uppercase()))
+        .collect::<Vec<_>>()
+        .join(" || ");
+    if !rich_edit.is_empty() {
+        c.line(&format!("        if ({rich_edit}) {{"));
+        c.line("            int source = b.getInt(20);");
+        c.line("            long start = b.getLong(at);");
+        c.line("            long stop = b.getLong(at + 8);");
+        c.line("            int count = b.getInt(at + 16);");
+        c.line("            // past start, end, count, reserved and the values header");
+        c.line("            int[] cursor = new int[] {at + 32};");
+        c.line("            List<Object> runs = new ArrayList<>();");
+        c.line("            for (int i = 0; i < count * 4; i++) {");
+        c.line("                runs.add(parseValue(rec, b, cursor));");
+        c.line("            }");
+        c.line("            Object inserted = parseValue(rec, b, cursor);");
+        c.line("            List<Object> flat = new ArrayList<>();");
+        c.line("            flat.add(source);");
+        c.line("            flat.add(start);");
+        c.line("            flat.add(stop);");
+        c.line("            flat.add(inserted);");
+        c.line("            flat.addAll(runs);");
+        c.line("            payload = flat;");
+        c.line("        }");
+    }
+    let rich_format = crate::rich_format_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("kind == OCC_KIND_{}", n.to_uppercase()))
+        .collect::<Vec<_>>()
+        .join(" || ");
+    if !rich_format.is_empty() {
+        c.line(&format!("        if ({rich_format}) {{"));
+        c.line("            int removed = b.getInt(20);");
+        c.line("            long start = b.getLong(at);");
+        c.line("            long stop = b.getLong(at + 8);");
+        c.line("            int[] cursor = new int[] {at + 16};");
+        c.line("            Object name = parseValue(rec, b, cursor);");
+        c.line("            Object value = parseValue(rec, b, cursor);");
+        c.line("            payload = List.of(removed, start, stop, name, value);");
+        c.line("        }");
+    }
     // The canvas asks: bare values after the key path with no count in
     // front, read until the record ends (docs/canvas-plan.md §3.2.1).
     let values_tail = crate::values_tail_occurrence_names(spec)

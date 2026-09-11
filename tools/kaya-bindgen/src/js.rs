@@ -711,6 +711,50 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("  // The drag's outcome: one word past the key path.");
         c.line(&format!("  if ([{outcome}].includes(kind)) payload = read_u32(buf, at);"));
     }
+    // The rich pair's own arm (docs/rich-text-plan.md R1): the generic
+    // payload tail would read `start`, a bare word, as a tagged value.
+    let rich_edit = crate::rich_edit_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("OCC_{}", n.to_uppercase()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    if !rich_edit.is_empty() {
+        c.line(&format!("  if ([{rich_edit}].includes(kind)) {{"));
+        c.line("    const source = read_u32(buf, 20);");
+        c.line("    const start = read_u64(buf, at);");
+        c.line("    const stop = read_u64(buf, at + 8);");
+        c.line("    const count = read_u32(buf, at + 16);");
+        c.line("    at += 32; // past start, end, count, reserved and the values header");
+        c.line("    const flat: Decoded[] = [source, start, stop];");
+        c.line("    const runs: Decoded[] = [];");
+        c.line("    for (let i = 0; i < count * 4; i++) {");
+        c.line("      let v: Decoded;");
+        c.line("      [v, at] = parse_value(buf, at);");
+        c.line("      runs.push(v);");
+        c.line("    }");
+        c.line("    let inserted: Decoded;");
+        c.line("    [inserted, at] = parse_value(buf, at);");
+        c.line("    flat.push(inserted, ...runs);");
+        c.line("    return { kind, id: ident, keys, payload: flat };");
+        c.line("  }");
+    }
+    let rich_format = crate::rich_format_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("OCC_{}", n.to_uppercase()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    if !rich_format.is_empty() {
+        c.line(&format!("  if ([{rich_format}].includes(kind)) {{"));
+        c.line("    const removed = read_u32(buf, 20);");
+        c.line("    const start = read_u64(buf, at);");
+        c.line("    const stop = read_u64(buf, at + 8);");
+        c.line("    at += 16;");
+        c.line("    let name: Decoded, value: Decoded;");
+        c.line("    [name, at] = parse_value(buf, at);");
+        c.line("    [value, at] = parse_value(buf, at);");
+        c.line("    return { kind, id: ident, keys, payload: [removed, start, stop, name, value] };");
+        c.line("  }");
+    }
     let values_tail = crate::values_tail_occurrence_names(spec)
         .iter()
         .map(|n| format!("OCC_{}", n.to_uppercase()))

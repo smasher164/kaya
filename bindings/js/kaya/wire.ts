@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0x1960b216df673c1fn;
+export const SPEC_HASH = 0xb14092d93e5c1359n;
 
 export const VALUE_BOOL = 1;
 export const VALUE_I64 = 2;
@@ -97,6 +97,7 @@ export const PROP_MIN_COLUMN_WIDTH = 28;
 export const PROP_WRAP = 29;
 export const PROP_PLACEHOLDER = 30;
 export const PROP_HREF = 31;
+export const PROP_RICH = 32;
 export const WPROP_TITLE = 1;
 export const WPROP_WIDTH = 2;
 export const WPROP_HEIGHT = 3;
@@ -187,6 +188,24 @@ export const SYMBOL_HOME = 20;
 export const SOURCE_CONST = 0;
 export const SOURCE_SIGNAL = 1;
 export const SOURCE_ELEMENT = 2;
+export const RICH_ATTR_BOLD = 1;
+export const RICH_ATTR_ITALIC = 2;
+export const RICH_ATTR_UNDERLINE = 3;
+export const RICH_ATTR_STRIKE = 4;
+export const RICH_ATTR_CODE = 5;
+export const RICH_ATTR_LINK = 6;
+export const RICH_ATTR_BLOCK = 7;
+export const BLOCK_KIND_BODY = 0;
+export const BLOCK_KIND_HEADING1 = 1;
+export const BLOCK_KIND_HEADING2 = 2;
+export const BLOCK_KIND_HEADING3 = 3;
+export const BLOCK_KIND_QUOTE = 4;
+export const BLOCK_KIND_CODE_BLOCK = 5;
+export const EDIT_SOURCE_USER = 0;
+export const EDIT_SOURCE_IME_COMMIT = 1;
+export const EDIT_SOURCE_PASTE = 2;
+export const EDIT_SOURCE_NATIVE_UNDO = 3;
+export const EDIT_SOURCE_DROP = 4;
 export const OCCURRENCE_PAD = 0;
 export const OCCURRENCE_BUTTON_CLICKED = 1;
 export const OCCURRENCE_TEXT_CHANGED = 2;
@@ -249,6 +268,9 @@ export const TX_SET_REORDERABLE = 51;
 export const TX_SHOW_NOTIFICATION = 52;
 export const TX_CANCEL_NOTIFICATION = 53;
 export const TX_DECLARE_LINK_ROUTE = 54;
+export const TX_SET_RICH_TEXT = 55;
+export const TX_APPLY_EDIT = 56;
+export const TX_FORMAT_TEXT = 57;
 export const APPLY_CREATE = 1;
 export const APPLY_SET_PROP = 2;
 export const APPLY_ADD_CHILD = 3;
@@ -289,6 +311,9 @@ export const APPLY_FOLD = 37;
 export const APPLY_SET_DRAG_SOURCE = 38;
 export const APPLY_SET_DROP_TARGET = 39;
 export const APPLY_SET_REORDERABLE = 40;
+export const APPLY_SET_RICH_TEXT = 43;
+export const APPLY_APPLY_EDIT = 44;
+export const APPLY_FORMAT_TEXT = 45;
 export const OCC_BUTTON_CLICKED = 1;
 export const OCC_TEXT_CHANGED = 2;
 export const OCC_TOGGLED = 3;
@@ -317,6 +342,8 @@ export const OCC_TIME_CHANGED = 25;
 export const OCC_VALUE_COMMITTED = 26;
 export const OCC_NOTIFICATION_RESULT = 27;
 export const OCC_LINK_OPENED = 28;
+export const OCC_TEXT_EDITED = 29;
+export const OCC_TEXT_FORMATTED = 30;
 
 const text_encoder = new TextEncoder();
 const text_decoder = new TextDecoder("utf-8", { fatal: true });
@@ -690,6 +717,21 @@ export function tx_cancel_notification(notification: number): Uint8Array {
 /** Declare one app-link route (docs/app-links-plan.md §4): `route` is the app's own id for it, `pattern` a Str. The MATCH HAPPENS ONCE, IN THE CORE — the patterns come here so a URL the platform hands over is turned into a route and its captures by one matcher rather than by nine. The grammar: segments split on `/`, a literal segment matches itself, `{name}` captures one segment. REFUSED AT THE DECLARATION, a fault like every other declaration refusal: an empty pattern, an empty segment, a brace a segment never closes, and a pattern already declared. Routes are declared at startup, before or inside the app's first transaction: the core matches a link that STARTED the process once that transaction lands. */
 export function tx_declare_link_route(route: number, pattern: WireValue): Uint8Array {
   return record(TX_DECLARE_LINK_ROUTE, cat(u64(route), enc.value(pattern)));
+}
+
+/** The WHOLE attributed document of a `rich` textarea (docs/rich-text-plan.md R1): the text as the payload, and `runs` holding 4*`count` values read in FOURS — I64 start, I64 end, Str name, Str value — each run one attribute over one range in UTF-8 BYTE offsets into that text, validated at the ranges' chokepoint (docs/ranges-units.md §7) and allowed to overlap (bold and italic over one range are two runs). A CONFIGURATION WRITE: it echoes nothing, and it resets the widget's native undo history where that tier is on (docs/undo-plan.md D7). The vocabulary is wire::RICH_ATTRS; a `block` run must start and end on paragraph boundaries. Refused on a textarea that is not `rich`. */
+export function tx_set_rich_text(widget_id: number, count: number, runs: readonly WireValue[]): Uint8Array {
+  return record(TX_SET_RICH_TEXT, cat(u64(widget_id), u32(count), u32(0), enc.values(runs)));
+}
+
+/** ONE edit into a `rich` textarea, the app's own or a collaborator's (docs/rich-text-plan.md R1, R5): replace `start..end` (UTF-8 byte offsets into the widget's current text, validated as a range is) with the payload text, whose attribute runs are `runs` in fours as set_rich_text's, with offsets RELATIVE to the inserted text. Keeps the selection: unchanged before the edit, shifted after it, a caret at `start` ending AFTER the insertion. Echoes nothing and never resets undo. QUEUED while an input-method composition is live and applied when it ends, since a refusal would drop a collaborator's edit. */
+export function tx_apply_edit(widget_id: number, start: number, stop: number, count: number, runs: readonly WireValue[]): Uint8Array {
+  return record(TX_APPLY_EDIT, cat(u64(widget_id), u64(start), u64(stop), u32(count), u32(0), enc.values(runs)));
+}
+
+/** Format a `rich` textarea's CURRENT SELECTION through the widget's own act — what an app's toolbar button sends (docs/rich-text-plan.md R1): `attr` is two Str values, name then value; `removed` 1 takes the attribute off. The widget answers with text_formatted over the range it formatted, which is how the mirror moves; a collapsed selection arms the typing attribute and answers nothing until the next edit. A `block` act covers the selection's whole paragraphs, and `block` with value `body` removes. Refused on a textarea that is not `rich` and for a name outside wire::RICH_ATTRS. */
+export function tx_format_text(widget_id: number, removed: number, attr: readonly WireValue[]): Uint8Array {
+  return record(TX_FORMAT_TEXT, cat(u64(widget_id), u32(removed), u32(0), enc.values(attr)));
 }
 
 /** A civil date as the wire's I64: year * 10000 + month * 100 + day. */
@@ -1177,6 +1219,21 @@ export function tx_bind_href_element(widget_id: number, level = 0, field = 0): U
   return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_HREF), u32(SOURCE_ELEMENT), u32(level), u32(field)));
 }
 
+/** set_property with a constant rich value. */
+export function tx_set_rich(widget_id: number, rich: boolean): Uint8Array {
+  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_RICH), u32(SOURCE_CONST), enc.value(rich)));
+}
+
+/** set_property with a signal-bound rich value. */
+export function tx_bind_rich(widget_id: number, signal_id: number): Uint8Array {
+  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_RICH), u32(SOURCE_SIGNAL), u64(signal_id)));
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_rich_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_RICH), u32(SOURCE_ELEMENT), u32(level), u32(field)));
+}
+
 /** set_window_prop with a constant title value; window 0, the primary surface. */
 export function tx_set_window_title(window: number, title: string): Uint8Array {
   return record(TX_SET_WINDOW_PROP, cat(u64(window), u32(WPROP_TITLE), u32(SOURCE_CONST), enc.value(title)));
@@ -1520,7 +1577,7 @@ export function parse_occurrence(buf: Uint8Array): Occurrence {
   const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   const size = view.getUint32(0, true);
   const kind = view.getUint16(4, true);
-  if (![OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED].includes(kind)) return { kind, id: null, keys: [], payload: null };
+  if (![OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED].includes(kind)) return { kind, id: null, keys: [], payload: null };
   if (kind === OCC_ALERT_RESULT) {
     // A request's one answer: id + the u32 code.
     return { kind, id: read_u64(buf, 8), keys: [], payload: read_u32(buf, 16) };
@@ -1675,6 +1732,34 @@ export function parse_occurrence(buf: Uint8Array): Occurrence {
   }
   // The drag's outcome: one word past the key path.
   if ([OCC_DRAG_ENDED].includes(kind)) payload = read_u32(buf, at);
+  if ([OCC_TEXT_EDITED].includes(kind)) {
+    const source = read_u32(buf, 20);
+    const start = read_u64(buf, at);
+    const stop = read_u64(buf, at + 8);
+    const count = read_u32(buf, at + 16);
+    at += 32; // past start, end, count, reserved and the values header
+    const flat: Decoded[] = [source, start, stop];
+    const runs: Decoded[] = [];
+    for (let i = 0; i < count * 4; i++) {
+      let v: Decoded;
+      [v, at] = parse_value(buf, at);
+      runs.push(v);
+    }
+    let inserted: Decoded;
+    [inserted, at] = parse_value(buf, at);
+    flat.push(inserted, ...runs);
+    return { kind, id: ident, keys, payload: flat };
+  }
+  if ([OCC_TEXT_FORMATTED].includes(kind)) {
+    const removed = read_u32(buf, 20);
+    const start = read_u64(buf, at);
+    const stop = read_u64(buf, at + 8);
+    at += 16;
+    let name: Decoded, value: Decoded;
+    [name, at] = parse_value(buf, at);
+    [value, at] = parse_value(buf, at);
+    return { kind, id: ident, keys, payload: [removed, start, stop, name, value] };
+  }
   if ([OCC_DRAW_REQUESTED, OCC_TICK].includes(kind)) {
     // The canvas asks carry a run of BARE values after the key path with
     // no count in front, read until the record ends (docs/canvas-plan.md §3.2.1).

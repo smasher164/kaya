@@ -864,6 +864,39 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("\t\tpayload = binary.LittleEndian.Uint32(rec[at:])");
         c.line("\t}");
     }
+    // The rich pair's own arm (docs/rich-text-plan.md R1): the generic
+    // payload tail would read `start`, a bare word, as a tagged value.
+    for name in crate::rich_edit_occurrence_names(spec) {
+        c.line(&format!("\tif kind == occ{} {{", camel(name)));
+        c.line("\t\tsource := binary.LittleEndian.Uint32(rec[20:])");
+        c.line("\t\tstart := binary.LittleEndian.Uint64(rec[at:])");
+        c.line("\t\tstop := binary.LittleEndian.Uint64(rec[at+8:])");
+        c.line("\t\tcount := int(binary.LittleEndian.Uint32(rec[at+16:]))");
+        c.line("\t\tat += 32 // past start, end, count, reserved and the values header");
+        c.line("\t\truns := []any{}");
+        c.line("\t\tfor i := 0; i < count*4; i++ {");
+        c.line("\t\t\tvar v any");
+        c.line("\t\t\tv, at = parseValue(rec, at)");
+        c.line("\t\t\truns = append(runs, v)");
+        c.line("\t\t}");
+        c.line("\t\tvar inserted any");
+        c.line("\t\tinserted, at = parseValue(rec, at)");
+        c.line("\t\tflat := []any{source, start, stop, inserted}");
+        c.line("\t\tpayload = append(flat, runs...)");
+        c.line("\t}");
+    }
+    for name in crate::rich_format_occurrence_names(spec) {
+        c.line(&format!("\tif kind == occ{} {{", camel(name)));
+        c.line("\t\tremoved := binary.LittleEndian.Uint32(rec[20:])");
+        c.line("\t\tstart := binary.LittleEndian.Uint64(rec[at:])");
+        c.line("\t\tstop := binary.LittleEndian.Uint64(rec[at+8:])");
+        c.line("\t\tat += 16");
+        c.line("\t\tvar attr, value any");
+        c.line("\t\tattr, at = parseValue(rec, at)");
+        c.line("\t\tvalue, at = parseValue(rec, at)");
+        c.line("\t\tpayload = []any{removed, start, stop, attr, value}");
+        c.line("\t}");
+    }
     // The canvas asks: bare values after the key path with no count in
     // front, read until the record ends (docs/canvas-plan.md §3.2.1).
     let values_tail = crate::values_tail_occurrence_names(spec)

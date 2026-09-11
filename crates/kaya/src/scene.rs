@@ -8,14 +8,15 @@
 //! (template node, key path). Lives on the UI thread, one instance per core,
 //! and every panic here is a broken guest or binding.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 #[cfg(feature = "harness")]
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::protocol::{
     ApplyOp, CollectionId, CommandKind, EntryProp, Key, MenuItemId, MenuItemKind, MenuProp,
-    NativeRange, Occurrence, Prop, PropValue, Record, SectionProp, SignalId, TextRange,
+    NativeRange, NativeRun, Occurrence, Prop, PropValue, Record, SectionProp, SignalId,
+    TextRange, TextRun,
     Transaction, TxOp, UndoDelta, UndoEntry, UndoOrder, Value, ValueType, WidgetId, WidgetKind,
     WindowId, WindowProp,
 };
@@ -587,6 +588,10 @@ fn undo_verdict(op: &TxOp) -> UndoVerdict {
         TxOp::HighlightRanges { .. } | TxOp::SelectRange { .. } | TxOp::RevealRange { .. } => {
             UndoVerdict::PureEffect
         }
+        // docs/rich-text-plan.md R6: the app owns the document's undo.
+        TxOp::SetRichText { .. } => UndoVerdict::Refused("set_rich_text"),
+        TxOp::ApplyEdit { .. } => UndoVerdict::Refused("apply_edit"),
+        TxOp::FormatText { .. } => UndoVerdict::Refused("format_text"),
         TxOp::WidgetCommand {
             command: CommandKind::Clear,
             ..
@@ -898,6 +903,9 @@ pub(crate) struct Scene {
     /// backend's own init: it rides no wire record and no guest hears it.
     /// It seeds a windowed-capable For's band — see `seed_window`.
     windowing: bool,
+    /// One per textarea declared `rich`; every delta is derived from it
+    /// (docs/rich-text-plan.md R1/R4).
+    rich: HashMap<WidgetId, RichDoc>,
 }
 
 /// The choice kinds: one selection among label-children options. Select
@@ -954,6 +962,8 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         }
         // A link's destination: the label alone (docs/tasks-s2-plan.md T3).
         Prop::Href => matches!(kind, WidgetKind::Label),
+        // Textarea alone this milestone (docs/rich-text-plan.md R1; labels are R8).
+        Prop::Rich => matches!(kind, WidgetKind::Textarea),
         Prop::Checked => matches!(kind, WidgetKind::Checkbox),
         // Value is the slider's position AND the progress bar's fraction
         // AND the select's 0-based index (per-kind domains, checked
@@ -1142,6 +1152,336 @@ fn split_char(text: &str, offset: usize) -> String {
     format!("{ch:?} (bytes {start}..{})", start + ch.len_utf8())
 }
 
+/// Refuses a run past the range chokepoint (docs/ranges-units.md §7) or
+/// outside the vocabulary; `paragraphs` adds set_rich_text's paragraph wall.
+fn check_runs(
+    text: &str,
+    widget: WidgetId,
+    op: &str,
+    runs: &[TextRun],
+    paragraphs: bool,
+) -> Vec<NativeRun> {
+    runs.iter()
+        .map(|run| {
+            let named = format!("{op} run {:?}", run.name);
+            let native = check_range(text, widget, &named, TextRange::new(run.start, run.end));
+            check_attr_name(widget, op, &run.name);
+            if run.name == "block" {
+                check_block_value(widget, op, &run.value);
+                if paragraphs {
+                    check_paragraph_bounds(text, widget, op, run);
+                }
+            }
+            NativeRun {
+                start: native.start,
+                end: native.stop,
+                name: run.name.clone(),
+                value: run.value.clone(),
+            }
+        })
+        .collect()
+}
+
+/// One vocabulary's words, for a refusal to print.
+fn vocabulary(table: &[(i64, &'static str)]) -> String {
+    table.iter().map(|(_, n)| *n).collect::<Vec<_>>().join(", ")
+}
+
+fn check_attr_name(widget: WidgetId, op: &str, name: &str) {
+    assert!(
+        crate::wire::RICH_ATTRS.iter().any(|(_, n)| *n == name),
+        "kaya: {op} on {widget:?}: {name:?} is not a kaya attribute — the vocabulary is {}",
+        vocabulary(crate::wire::RICH_ATTRS)
+    );
+}
+
+fn check_block_value(widget: WidgetId, op: &str, value: &str) {
+    assert!(
+        crate::wire::BLOCK_KINDS.iter().any(|(_, n)| *n == value),
+        "kaya: {op} on {widget:?}: {value:?} is not a block kind — the vocabulary is {}",
+        vocabulary(crate::wire::BLOCK_KINDS)
+    );
+}
+
+/// docs/rich-text-plan.md §2: a `block` run covers whole paragraphs.
+fn check_paragraph_bounds(text: &str, widget: WidgetId, op: &str, run: &TextRun) {
+    let bytes = text.as_bytes();
+    let start = run.start as usize;
+    let end = run.end as usize;
+    let starts = start == 0 || bytes[start - 1] == b'\n';
+    assert!(
+        starts,
+        "kaya: {op} on {widget:?}: the block run {start}..{end} does not START on a \
+         paragraph boundary — byte {start} follows {}, and a block attribute covers whole \
+         paragraphs (start at 0 or just after a newline)",
+        split_char(text, start - 1)
+    );
+    let ends = end == text.len() || bytes[end] == b'\n' || bytes[end - 1] == b'\n';
+    assert!(
+        ends,
+        "kaya: {op} on {widget:?}: the block run {start}..{end} does not END on a paragraph \
+         boundary — byte {end} is inside a paragraph, and a block attribute covers whole \
+         paragraphs (end at the text's end, at a newline, or just after one)"
+    );
+}
+
+/// The core's document for one `rich` textarea (docs/rich-text-plan.md
+/// R1/R4); `runs` are kept in `normalize`'s normal form.
+#[derive(Default, Clone, Debug, PartialEq)]
+pub(crate) struct RichDoc {
+    text: String,
+    runs: Vec<TextRun>,
+    /// A live composition: an apply_edit waits (docs/rich-text-plan.md R5).
+    composing: bool,
+    queued: Vec<(TextRange, String, Vec<TextRun>)>,
+    /// Armed over a collapsed caret; spent by the next insertion.
+    pending_on: BTreeMap<String, String>,
+    pending_off: BTreeSet<String>,
+    /// The selection the core last heard of; R5's transform moves it.
+    selection: TextRange,
+    /// One-shot, consumed by the next report.
+    source: Option<u32>,
+    reported: Option<(u64, u64, u64)>,
+    /// The last text_edited published, in the harness's spelling (R9).
+    last_edit: Option<String>,
+}
+
+fn spell_runs(runs: &[TextRun]) -> String {
+    runs.iter()
+        .map(|run| {
+            if run.value == "true" {
+                format!("{}:{} {}", run.start, run.end, run.name)
+            } else {
+                format!("{}:{} {}={}", run.start, run.end, run.name, run.value)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
+fn spell_edit(range: TextRange, inserted: &str, runs: &[TextRun], source: u32) -> String {
+    let word = crate::wire::EDIT_SOURCES
+        .iter()
+        .find(|(value, _)| *value == source as i64)
+        .map(|(_, name)| *name)
+        .unwrap_or("?");
+    format!("{}:{} <{inserted}> {word} [{}]", range.start, range.stop, spell_runs(runs))
+}
+
+/// One derived user edit, bound for text_edited (docs/rich-text-plan.md R4).
+pub(crate) struct RichEdit {
+    pub(crate) range: TextRange,
+    pub(crate) inserted: String,
+    pub(crate) runs: Vec<TextRun>,
+    pub(crate) source: u32,
+}
+
+impl RichDoc {
+    fn seeded(text: &str) -> Self {
+        RichDoc { text: text.to_owned(), ..RichDoc::default() }
+    }
+
+    /// The text a new apply_edit is addressed against: queued edits included.
+    fn shadow_text(&self) -> String {
+        let mut text = self.text.clone();
+        for (range, inserted, _) in &self.queued {
+            text.replace_range(range.start as usize..range.stop as usize, inserted);
+        }
+        text
+    }
+
+    fn attrs_at(&self, byte: usize) -> BTreeMap<String, String> {
+        let mut out = BTreeMap::new();
+        for run in &self.runs {
+            if (run.start as usize) <= byte && byte < run.end as usize {
+                out.insert(run.name.clone(), run.value.clone());
+            }
+        }
+        out
+    }
+
+    /// Replace `start..end` with `inserted`, whose `runs` are relative to it.
+    fn splice(&mut self, start: usize, end: usize, inserted: &str, runs: &[TextRun]) {
+        let shift = inserted.len() as i64 - (end - start) as i64;
+        let moved = |offset: u64| -> u64 { (offset as i64 + shift) as u64 };
+        let mut next: Vec<TextRun> = Vec::with_capacity(self.runs.len() + runs.len());
+        for run in &self.runs {
+            if (run.start as usize) < start {
+                next.push(TextRun {
+                    start: run.start,
+                    end: run.end.min(start as u64),
+                    ..run.clone()
+                });
+            }
+            if (run.end as usize) > end {
+                next.push(TextRun {
+                    start: moved(run.start.max(end as u64)),
+                    end: moved(run.end),
+                    ..run.clone()
+                });
+            }
+        }
+        for run in runs {
+            next.push(TextRun {
+                start: run.start + start as u64,
+                end: run.end + start as u64,
+                ..run.clone()
+            });
+        }
+        self.text.replace_range(start..end, inserted);
+        self.runs = next;
+        self.normalize();
+    }
+
+    /// Put `value` on `start..end` for `name`; None takes the attribute off.
+    fn format(&mut self, start: usize, end: usize, name: &str, value: Option<&str>) {
+        if start >= end {
+            return;
+        }
+        let mut next: Vec<TextRun> = Vec::with_capacity(self.runs.len() + 2);
+        for run in std::mem::take(&mut self.runs) {
+            if run.name != name || (run.end as usize) <= start || run.start as usize >= end {
+                next.push(run);
+                continue;
+            }
+            if (run.start as usize) < start {
+                next.push(TextRun { end: start as u64, ..run.clone() });
+            }
+            if (run.end as usize) > end {
+                next.push(TextRun { start: end as u64, ..run.clone() });
+            }
+        }
+        if let Some(value) = value {
+            next.push(TextRun {
+                start: start as u64,
+                end: end as u64,
+                name: name.to_owned(),
+                value: value.to_owned(),
+            });
+        }
+        self.runs = next;
+        self.normalize();
+    }
+
+    /// Per attribute: disjoint, sorted, never adjacent-and-equal, a later
+    /// run winning over an earlier one.
+    fn normalize(&mut self) {
+        let names: BTreeSet<String> = self.runs.iter().map(|r| r.name.clone()).collect();
+        let mut out: Vec<TextRun> = Vec::new();
+        for name in names {
+            let mut painted: Vec<TextRun> = Vec::new();
+            for run in self.runs.iter().filter(|r| r.name == name) {
+                if run.start >= run.end {
+                    continue;
+                }
+                let mut kept: Vec<TextRun> = Vec::new();
+                for old in painted.drain(..) {
+                    if old.end <= run.start || old.start >= run.end {
+                        kept.push(old);
+                        continue;
+                    }
+                    if old.start < run.start {
+                        kept.push(TextRun { end: run.start, ..old.clone() });
+                    }
+                    if old.end > run.end {
+                        kept.push(TextRun { start: run.end, ..old.clone() });
+                    }
+                }
+                kept.push(run.clone());
+                painted = kept;
+            }
+            painted.sort_by_key(|r| r.start);
+            let mut merged: Vec<TextRun> = Vec::new();
+            for run in painted {
+                match merged.last_mut() {
+                    Some(last) if last.end == run.start && last.value == run.value => {
+                        last.end = run.end;
+                    }
+                    _ => merged.push(run),
+                }
+            }
+            out.extend(merged);
+        }
+        out.sort_by(|a, b| (a.start, &a.name).cmp(&(b.start, &b.name)));
+        self.runs = out;
+    }
+}
+
+impl RichDoc {
+    /// Splice, then move the selection by R5's transform; answers where it ended.
+    fn apply_edit(&mut self, range: TextRange, inserted: &str, runs: &[TextRun]) -> TextRange {
+        let ins = inserted.len() as u64;
+        self.splice(range.start as usize, range.stop as usize, inserted, runs);
+        self.selection = TextRange::new(
+            transform_offset(self.selection.start, range.start, range.stop, ins),
+            transform_offset(self.selection.stop, range.start, range.stop, ins),
+        );
+        self.selection
+    }
+
+    /// The inheritance rule: typed text takes the byte before it, except a
+    /// link; armed typing attributes win (docs/rich-text-plan.md R4).
+    fn typed_runs(&self, start: usize, inserted: &str) -> Vec<TextRun> {
+        if inserted.is_empty() {
+            return Vec::new();
+        }
+        let mut attrs = if start == 0 { BTreeMap::new() } else { self.attrs_at(start - 1) };
+        attrs.remove("link");
+        for (name, value) in &self.pending_on {
+            attrs.insert(name.clone(), value.clone());
+        }
+        for name in &self.pending_off {
+            attrs.remove(name);
+        }
+        attrs
+            .into_iter()
+            .map(|(name, value)| TextRun { start: 0, end: inserted.len() as u64, name, value })
+            .collect()
+    }
+}
+
+/// docs/rich-text-plan.md R5's transform, one offset.
+fn transform_offset(offset: u64, start: u64, end: u64, inserted_len: u64) -> u64 {
+    if offset < start {
+        offset
+    } else if offset >= end {
+        offset - (end - start) + inserted_len
+    } else {
+        start + inserted_len
+    }
+}
+
+/// The one addressed edit between two strings (docs/rich-text-plan.md R4):
+/// common prefix, then common suffix, each backed off to a code-point boundary.
+fn derive_edit(before: &str, after: &str) -> (usize, usize, String) {
+    let mut prefix = 0;
+    let limit = before.len().min(after.len());
+    while prefix < limit && before.as_bytes()[prefix] == after.as_bytes()[prefix] {
+        prefix += 1;
+    }
+    while prefix > 0 && !(before.is_char_boundary(prefix) && after.is_char_boundary(prefix)) {
+        prefix -= 1;
+    }
+    let mut suffix = 0;
+    let room = (before.len() - prefix).min(after.len() - prefix);
+    while suffix < room
+        && before.as_bytes()[before.len() - 1 - suffix] == after.as_bytes()[after.len() - 1 - suffix]
+    {
+        suffix += 1;
+    }
+    while suffix > 0
+        && !(before.is_char_boundary(before.len() - suffix)
+            && after.is_char_boundary(after.len() - suffix))
+    {
+        suffix -= 1;
+    }
+    (
+        prefix,
+        before.len() - suffix,
+        after[prefix..after.len() - suffix].to_owned(),
+    )
+}
+
 /// Every property has one value type (spec::PROPS). The match is
 /// exhaustive: a new prop cannot ship without declaring its type.
 fn prop_value_type(prop: Prop) -> ValueType {
@@ -1161,7 +1501,7 @@ fn prop_value_type(prop: Prop) -> ValueType {
         Prop::Align => ValueType::I64,
         Prop::Axis => ValueType::I64,
         Prop::Role => ValueType::I64,
-        Prop::Indeterminate | Prop::Fill | Prop::Wrap => ValueType::Bool,
+        Prop::Indeterminate | Prop::Fill | Prop::Wrap | Prop::Rich => ValueType::Bool,
         Prop::Columns | Prop::MinColumnWidth => ValueType::F64,
         Prop::A11yId
         | Prop::A11yLabel
@@ -2207,6 +2547,24 @@ impl Scene {
                                     self.authored_axis.insert(widget, *mode);
                                 }
                                 self.layout_dirty = true;
+                            }
+                            // The mirror lives only while `rich` is on
+                            // (docs/rich-text-plan.md R1).
+                            if prop == Prop::Rich {
+                                if let Value::Bool(on) = &v {
+                                    if *on {
+                                        let seed = self
+                                            .field_text
+                                            .get(&widget)
+                                            .cloned()
+                                            .unwrap_or_default();
+                                        self.rich
+                                            .entry(widget)
+                                            .or_insert_with(|| RichDoc::seeded(&seed));
+                                    } else {
+                                        self.rich.remove(&widget);
+                                    }
+                                }
                             }
                             if prop == Prop::Columns {
                                 if let Value::F64(cols) = &v {
@@ -3543,6 +3901,51 @@ impl Scene {
                     let native = check_range(&text, widget, "reveal_range", range);
                     out.push(ApplyOp::RevealRange { id: widget, range: native });
                 }
+                TxOp::SetRichText { widget, text, runs } => {
+                    self.require_rich(widget, "set_rich_text");
+                    let native = check_runs(&text, widget, "set_rich_text", &runs, true);
+                    let doc = self.rich.entry(widget).or_default();
+                    doc.text = text.clone();
+                    doc.runs = runs.clone();
+                    doc.normalize();
+                    doc.queued.clear();
+                    doc.selection = TextRange::new(0, 0);
+                    out.push(ApplyOp::SetRichText { id: widget, text, runs: native });
+                }
+                TxOp::ApplyEdit { widget, range, inserted, runs } => {
+                    self.require_rich(widget, "apply_edit");
+                    let doc = self.rich.get(&widget).expect("just required");
+                    let text = doc.shadow_text();
+                    let native_range = check_range(&text, widget, "apply_edit", range);
+                    let native_runs = check_runs(&inserted, widget, "apply_edit", &runs, false);
+                    let doc = self.rich.get_mut(&widget).expect("just required");
+                    if doc.composing {
+                        // docs/rich-text-plan.md R5: held, never refused.
+                        doc.queued.push((range, inserted, runs));
+                    } else {
+                        let selection = doc.apply_edit(range, &inserted, &runs);
+                        let after = doc.text.clone();
+                        let native_selection =
+                            check_range(&after, widget, "apply_edit selection", selection);
+                        out.push(ApplyOp::ApplyEdit {
+                            id: widget,
+                            range: native_range,
+                            inserted,
+                            runs: native_runs,
+                            selection: native_selection,
+                        });
+                    }
+                }
+                TxOp::FormatText { widget, name, value } => {
+                    self.require_rich(widget, "format_text");
+                    check_attr_name(widget, "format_text", &name);
+                    if name == "block" {
+                        if let Some(kind) = &value {
+                            check_block_value(widget, "format_text", kind);
+                        }
+                    }
+                    out.push(ApplyOp::FormatText { id: widget, name, value });
+                }
                 TxOp::VariantCase { .. } => {
                     panic!("kaya: variant_case outside a template scope")
                 }
@@ -3990,6 +4393,12 @@ impl Scene {
                 ApplyOp::Command { id, command: CommandKind::Clear } if *id == widget => {
                     return String::new()
                 }
+                // A rich write in this batch already moved the mirror.
+                ApplyOp::SetRichText { id, .. } | ApplyOp::ApplyEdit { id, .. }
+                    if *id == widget =>
+                {
+                    return self.rich_text(widget).unwrap_or_default().to_owned()
+                }
                 _ => {}
             }
         }
@@ -3997,22 +4406,30 @@ impl Scene {
     }
 
     fn absorb_text_writes(&mut self, out: &[ApplyOp]) {
-        let mut writes: Vec<(WidgetId, String)> = Vec::new();
+        // The third word is whether the write resets (docs/undo-plan.md D7).
+        let mut writes: Vec<(WidgetId, String, bool)> = Vec::new();
         for op in out {
             match op {
                 ApplyOp::SetProp {
                     id,
                     prop: Prop::Text,
                     value: Value::Str(text),
-                } => writes.push((*id, text.clone())),
+                } => writes.push((*id, text.clone(), true)),
                 ApplyOp::Command {
                     id,
                     command: CommandKind::Clear,
-                } => writes.push((*id, String::new())),
+                } => writes.push((*id, String::new(), true)),
+                ApplyOp::SetRichText { id, text, .. } => {
+                    writes.push((*id, text.clone(), true))
+                }
+                ApplyOp::ApplyEdit { id, .. } => {
+                    let text = self.rich_text(*id).unwrap_or_default().to_owned();
+                    writes.push((*id, text, false));
+                }
                 _ => {}
             }
         }
-        for (id, text) in writes {
+        for (id, text, resets) in writes {
             // Only the text-bearing INTERACTIVE kinds carry a native undo
             // stack. A stamped copy's kind is not in the widget table, so an
             // internal id is admitted.
@@ -4027,7 +4444,7 @@ impl Scene {
             }
             let changed = self.field_text.get(&id).map(String::as_str) != Some(text.as_str());
             self.field_text.insert(id, text);
-            if changed {
+            if changed && resets {
                 self.close_episodes_on(id);
             }
         }
@@ -4114,6 +4531,225 @@ impl Scene {
                 }));
             }
         }
+    }
+
+    // --- Rich text: the mirror (docs/rich-text-plan.md R1/R4/R5) --------
+
+    /// Refuses a rich write to anything but a textarea declared `rich`.
+    fn require_rich(&mut self, widget: WidgetId, op: &str) {
+        let kind = self
+            .widgets
+            .get(&widget)
+            .unwrap_or_else(|| panic!("kaya: {op} on unknown widget {widget:?}"));
+        assert!(
+            matches!(kind, WidgetKind::Textarea),
+            "kaya: {op} on {widget:?}, which is a {kind:?} — an attributed document is a \
+             TEXTAREA surface (docs/rich-text-plan.md R1)"
+        );
+        assert!(
+            self.rich.contains_key(&widget),
+            "kaya: {op} on {widget:?}, which is not declared `rich` — the attributed \
+             surface exists only where the widget asked for it, so declare rich(true) on \
+             this textarea first"
+        );
+    }
+
+    /// The mirror's text; None where the widget has no document.
+    pub(crate) fn rich_text(&self, widget: WidgetId) -> Option<&str> {
+        self.rich.get(&widget).map(|doc| doc.text.as_str())
+    }
+
+    /// The mirror's normalized runs.
+    pub(crate) fn rich_runs(&self, widget: WidgetId) -> Option<&[TextRun]> {
+        self.rich.get(&widget).map(|doc| doc.runs.as_slice())
+    }
+
+    /// `expect_runs`' observation (docs/rich-text-plan.md R9): the runs in
+    /// bytes as `start:stop name[=value]`, `|`-joined, in normal order; a
+    /// flag's `true` is spelled by its name alone. None for no document.
+    pub(crate) fn rich_runs_string(&self, widget: WidgetId) -> Option<String> {
+        self.rich_runs(widget).map(spell_runs)
+    }
+
+    /// `expect_edit`'s observation: the last text_edited this widget
+    /// published, `start:stop <inserted> source [runs]`; "" before any.
+    pub(crate) fn last_edit_string(&self, widget: WidgetId) -> Option<String> {
+        self.rich.get(&widget).map(|doc| doc.last_edit.clone().unwrap_or_default())
+    }
+
+    /// The selection the core last heard of, for the tests that drive R5.
+    #[cfg(test)]
+    pub(crate) fn rich_selection(&self, widget: WidgetId) -> Option<TextRange> {
+        self.rich.get(&widget).map(|doc| doc.selection)
+    }
+
+    /// Advances the mirror by the diff and answers the edit to publish; None
+    /// for a widget with no document, or a report that says nothing new (R4).
+    pub(crate) fn note_rich_text(&mut self, widget: WidgetId, text: &str) -> Option<RichEdit> {
+        let doc = self.rich.get(&widget)?;
+        if doc.text == text {
+            return None;
+        }
+        let (start, end, inserted) = derive_edit(&doc.text, text);
+        let runs = doc.typed_runs(start, &inserted);
+        let disagreement = self.check_reported_edit(widget, start, end, inserted.len());
+        if let Some(sentence) = disagreement {
+            eprintln!("{sentence}");
+        }
+        let doc = self.rich.get_mut(&widget).expect("just read");
+        let range = TextRange::new(start as u64, end as u64);
+        doc.splice(start, end, &inserted, &runs);
+        let caret = (start + inserted.len()) as u64;
+        doc.selection = TextRange::new(caret, caret);
+        if !inserted.is_empty() {
+            doc.pending_on.clear();
+            doc.pending_off.clear();
+        }
+        let source = doc.source.take().unwrap_or(crate::wire::EDIT_SOURCE_USER as u32);
+        doc.last_edit = Some(spell_edit(range, &inserted, &runs, source));
+        Some(RichEdit { range, inserted, runs, source })
+    }
+
+    /// docs/rich-text-plan.md R4's corroboration: a sentence naming both
+    /// readings when they disagree, None when no arm reported or they agree.
+    fn check_reported_edit(
+        &mut self,
+        widget: WidgetId,
+        start: usize,
+        end: usize,
+        inserted_len: usize,
+    ) -> Option<String> {
+        let doc = self.rich.get_mut(&widget)?;
+        let (rs, re, rlen) = doc.reported.take()?;
+        let derived = (start as u64, end as u64, inserted_len as u64);
+        if (rs, re, rlen) == derived {
+            return None;
+        }
+        Some(format!(
+            "KAYA_DIAG rich edit on {widget:?}: the backend reported \
+             {rs}..{re} with {rlen} bytes inserted, the core's diff against its own mirror \
+             says {}..{} with {} — the core publishes ITS OWN reading \
+             (docs/rich-text-plan.md R4)",
+            derived.0, derived.1, derived.2
+        ))
+    }
+
+    /// A composition began or ended; ending one drains what R5 held.
+    pub(crate) fn set_text_composing(&mut self, widget: WidgetId, live: bool) -> Vec<ApplyOp> {
+        let Some(doc) = self.rich.get_mut(&widget) else {
+            return Vec::new();
+        };
+        doc.composing = live;
+        if live {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        for (range, inserted, runs) in std::mem::take(&mut doc.queued) {
+            // The range addresses the text before this held edit lands.
+            let before = doc.text.clone();
+            let native_range = check_range(&before, widget, "apply_edit", range);
+            let native_runs = check_runs(&inserted, widget, "apply_edit", &runs, false);
+            let selection = doc.apply_edit(range, &inserted, &runs);
+            let after = doc.text.clone();
+            let native_selection =
+                check_range(&after, widget, "apply_edit selection", selection);
+            out.push(ApplyOp::ApplyEdit {
+                id: widget,
+                range: native_range,
+                inserted,
+                runs: native_runs,
+                selection: native_selection,
+            });
+        }
+        let text = doc.text.clone();
+        self.field_text.insert(widget, text);
+        out
+    }
+
+
+    /// Armed over a collapsed caret, spent by the next insertion
+    /// (docs/rich-text-plan.md §2).
+    pub(crate) fn set_text_pending(
+        &mut self,
+        widget: WidgetId,
+        name: &str,
+        value: &str,
+        on: bool,
+    ) {
+        let Some(doc) = self.rich.get_mut(&widget) else {
+            return;
+        };
+        if on {
+            doc.pending_off.remove(name);
+            doc.pending_on.insert(name.to_owned(), value.to_owned());
+        } else {
+            doc.pending_on.remove(name);
+            doc.pending_off.insert(name.to_owned());
+        }
+    }
+
+    /// What provoked the next report (wire::EDIT_SOURCES); one-shot, default `user`.
+    pub(crate) fn set_text_edit_source(&mut self, widget: WidgetId, source: u32) {
+        assert!(
+            crate::wire::EDIT_SOURCES.iter().any(|(v, _)| *v == i64::from(source)),
+            "kaya: {source} is not an edit source — the vocabulary is {}",
+            vocabulary(crate::wire::EDIT_SOURCES)
+        );
+        if let Some(doc) = self.rich.get_mut(&widget) {
+            doc.source = Some(source);
+        }
+    }
+
+    /// The backend's own edited range, for `check_reported_edit`. One-shot.
+    pub(crate) fn set_reported_edit(
+        &mut self,
+        widget: WidgetId,
+        start: u64,
+        end: u64,
+        inserted_len: u64,
+    ) {
+        if let Some(doc) = self.rich.get_mut(&widget) {
+            doc.reported = Some((start, end, inserted_len));
+        }
+    }
+
+    /// Where the widget's selection is now; R5's transform moves it.
+    pub(crate) fn set_text_selection(&mut self, widget: WidgetId, start: u64, end: u64) {
+        if let Some(doc) = self.rich.get_mut(&widget) {
+            doc.selection = TextRange::new(start, end);
+        }
+    }
+
+    /// Moves the mirror and answers the occurrence to publish; a collapsed
+    /// range is pending state and answers None (docs/rich-text-plan.md §2).
+    pub(crate) fn note_text_formatted(
+        &mut self,
+        widget: WidgetId,
+        range: TextRange,
+        name: &str,
+        value: Option<&str>,
+    ) -> Option<(TextRange, String, Option<String>)> {
+        let doc = self.rich.get(&widget)?;
+        let text = doc.text.clone();
+        check_range(&text, widget, "text_formatted", range);
+        check_attr_name(widget, "text_formatted", name);
+        if name == "block" {
+            let value = value.unwrap_or_else(|| {
+                panic!(
+                    "kaya: text_formatted on {widget:?}: a block attribute cannot be \
+                     removed — every paragraph has a kind, and {:?} is what taking one \
+                     off means",
+                    "body"
+                )
+            });
+            check_block_value(widget, "text_formatted", value);
+        }
+        if range.start == range.stop {
+            return None;
+        }
+        let doc = self.rich.get_mut(&widget).expect("just read");
+        doc.format(range.start as usize, range.stop as usize, name, value);
+        Some((range, name.to_owned(), value.map(str::to_owned)))
     }
 
     /// The field a text_changed's identity tag names. A STAMPED COPY ANSWERS
@@ -12364,6 +13000,433 @@ mod tests {
         );
         assert_eq!(scene.window_menus[&WindowId(2)], vec![MenuItemId(3)]);
         assert!(scene.window_shortcuts[&WindowId(2)].contains("primary+s"));
+    }
+
+    // --- Rich text (docs/rich-text-plan.md R1-R5) -----------------------
+
+    /// A live textarea that DECLARED `rich`, holding `text`.
+    fn rich_editor(text: &str) -> Transaction {
+        let mut tx = editor(text);
+        tx.insert(
+            2,
+            TxOp::SetProperty {
+                widget: WidgetId(1),
+                prop: Prop::Rich,
+                value: PropValue::Const(Value::Bool(true)),
+            },
+        );
+        tx
+    }
+
+    fn run(start: u64, end: u64, name: &str, value: &str) -> TextRun {
+        TextRun::new(start, end, name, value)
+    }
+
+    /// The mirror's runs as (start, end, name, value).
+    fn runs_of(scene: &Scene) -> Vec<(u64, u64, String, String)> {
+        scene
+            .rich_runs(WidgetId(1))
+            .expect("the widget is rich")
+            .iter()
+            .map(|r| (r.start, r.end, r.name.clone(), r.value.clone()))
+            .collect()
+    }
+
+    fn set_document(text: &str, runs: Vec<TextRun>) -> TxOp {
+        TxOp::SetRichText { widget: WidgetId(1), text: text.to_owned(), runs }
+    }
+
+    #[test]
+    fn set_rich_text_fills_the_mirror_and_lowers_native_runs() {
+        let mut scene = Scene::new();
+        let out = scene.apply(rich_editor(""));
+        let _ = out;
+        let out = scene.apply(vec![set_document(EMOJI, vec![run(2, 6, "bold", "true")])]);
+        assert_eq!(scene.rich_text(WidgetId(1)), Some(EMOJI));
+        assert_eq!(runs_of(&scene), vec![(2, 6, "bold".into(), "true".into())]);
+        let lowered = out
+            .iter()
+            .find_map(|op| match op {
+                ApplyOp::SetRichText { runs, .. } => Some(runs.clone()),
+                _ => None,
+            })
+            .expect("a document was lowered");
+        assert_eq!(lowered.len(), 1);
+        assert_eq!(
+            (lowered[0].start, lowered[0].end),
+            (native_offset(EMOJI, 2), native_offset(EMOJI, 6)),
+            "the runs cross the same conversion a range does"
+        );
+    }
+
+    /// docs/ranges-units.md §7.
+    #[test]
+    #[should_panic(expected = "set_rich_text run \"bold\" on WidgetId(1): end 40 is past the end")]
+    fn a_run_past_the_end_is_refused() {
+        let mut scene = Scene::new();
+        scene.apply(rich_editor(""));
+        scene.apply(vec![set_document("héllo", vec![run(0, 40, "bold", "true")])]);
+    }
+
+    #[test]
+    #[should_panic(expected = "byte offset 2 is not a character boundary; it is inside '\u{e9}'")]
+    fn a_run_splitting_a_code_point_is_refused() {
+        let mut scene = Scene::new();
+        scene.apply(rich_editor(""));
+        scene.apply(vec![set_document("héllo", vec![run(1, 2, "bold", "true")])]);
+    }
+
+    #[test]
+    #[should_panic(expected = "\"shouty\" is not a kaya attribute — the vocabulary is bold, \
+                               italic, underline, strike, code, link, block")]
+    fn an_unknown_attribute_is_refused() {
+        let mut scene = Scene::new();
+        scene.apply(rich_editor(""));
+        scene.apply(vec![set_document("hello", vec![run(0, 5, "shouty", "true")])]);
+    }
+
+    #[test]
+    #[should_panic(expected = "\"heading\" is not a block kind — the vocabulary is body, \
+                               heading1, heading2, heading3, quote, code_block")]
+    fn an_unknown_block_kind_is_refused() {
+        let mut scene = Scene::new();
+        scene.apply(rich_editor(""));
+        scene.apply(vec![set_document("hello\n", vec![run(0, 6, "block", "heading")])]);
+    }
+
+    #[test]
+    #[should_panic(expected = "does not START on a paragraph boundary")]
+    fn a_block_run_off_a_paragraph_start_is_refused() {
+        let mut scene = Scene::new();
+        scene.apply(rich_editor(""));
+        scene.apply(vec![set_document("one\ntwo", vec![run(1, 3, "block", "quote")])]);
+    }
+
+    #[test]
+    #[should_panic(expected = "does not END on a paragraph boundary")]
+    fn a_block_run_off_a_paragraph_end_is_refused() {
+        let mut scene = Scene::new();
+        scene.apply(rich_editor(""));
+        scene.apply(vec![set_document("one\ntwo", vec![run(0, 2, "block", "quote")])]);
+    }
+
+    #[test]
+    fn an_edit_may_carry_a_block_run_over_its_own_inserted_text() {
+        let mut scene = Scene::new();
+        scene.apply(rich_editor(""));
+        scene.apply(vec![set_document("one\ntwo", vec![run(0, 4, "block", "heading1")])]);
+        scene.apply(vec![TxOp::ApplyEdit {
+            widget: WidgetId(1),
+            range: TextRange::new(3, 3),
+            inserted: "X".into(),
+            runs: vec![run(0, 1, "block", "heading1")],
+        }]);
+        assert_eq!(scene.rich_text(WidgetId(1)), Some("oneX\ntwo"));
+        assert_eq!(runs_of(&scene), vec![(0, 5, "block".into(), "heading1".into())]);
+    }
+
+    #[test]
+    fn the_diff_reads_typing() {
+        let mut scene = Scene::new();
+        scene.apply(rich_editor("milk"));
+        scene.apply(vec![set_document("milk", vec![])]);
+        let edit = scene.note_rich_text(WidgetId(1), "milky").expect("an edit");
+        assert_eq!((edit.range.start, edit.range.stop), (4, 4));
+        assert_eq!(edit.inserted, "y");
+        assert_eq!(edit.source, crate::wire::EDIT_SOURCE_USER as u32);
+        assert_eq!(scene.rich_text(WidgetId(1)), Some("milky"));
+    }
+
+    #[test]
+    fn the_diff_reads_a_deletion() {
+        let mut scene = Scene::new();
+        scene.apply(rich_editor(""));
+        scene.apply(vec![set_document("hello world", vec![])]);
+        let edit = scene.note_rich_text(WidgetId(1), "helloworld").expect("an edit");
+        assert_eq!((edit.range.start, edit.range.stop), (5, 6));
+        assert_eq!(edit.inserted, "");
+    }
+
+    #[test]
+    fn the_diff_reads_a_replacement() {
+        let mut scene = Scene::new();
+        scene.apply(rich_editor(""));
+        scene.apply(vec![set_document("hello world", vec![])]);
+        let edit = scene.note_rich_text(WidgetId(1), "hello there").expect("an edit");
+        assert_eq!((edit.range.start, edit.range.stop), (6, 11));
+        assert_eq!(edit.inserted, "there");
+    }
+
+    #[test]
+    fn the_diff_backs_off_to_a_code_point_boundary() {
+        let mut scene = Scene::new();
+        scene.apply(rich_editor(""));
+        scene.apply(vec![set_document("héllo ", vec![])]);
+        let edit = scene.note_rich_text(WidgetId(1), "héllo 👋").expect("an edit");
+        assert_eq!((edit.range.start, edit.range.stop), (7, 7));
+        assert_eq!(edit.inserted, "👋");
+        // The one that would split 'é': "héllo" -> "hêllo" shares the
+        // 0xC3 lead byte, and the edit has to start at byte 1.
+        let mut scene = Scene::new();
+        scene.apply(rich_editor(""));
+        scene.apply(vec![set_document("héllo", vec![])]);
+        let edit = scene.note_rich_text(WidgetId(1), "hêllo").expect("an edit");
+        assert_eq!((edit.range.start, edit.range.stop), (1, 3));
+        assert_eq!(edit.inserted, "ê");
+    }
+
+    /// docs/rich-text-plan.md R4, the automerge probe's two cases.
+    #[test]
+    fn typed_text_inherits_the_byte_before_it_except_a_link() {
+        let mut scene = Scene::new();
+        scene.apply(rich_editor(""));
+        scene.apply(vec![set_document(
+            "Hello world",
+            vec![run(0, 5, "link", "https://kaya.dev"), run(6, 11, "bold", "true")],
+        )]);
+        let edit = scene.note_rich_text(WidgetId(1), "Hello world again").expect("an edit");
+        assert_eq!(edit.runs, vec![run(0, 6, "bold", "true")]);
+        assert_eq!(
+            runs_of(&scene),
+            vec![
+                (0, 5, "link".into(), "https://kaya.dev".into()),
+                (6, 17, "bold".into(), "true".into()),
+            ],
+            "the bold run grew to hold what was typed at its end"
+        );
+        let edit = scene.note_rich_text(WidgetId(1), "Hello? world again").expect("an edit");
+        assert!(edit.runs.is_empty(), "a link never grows by typing");
+        assert_eq!(
+            runs_of(&scene),
+            vec![
+                (0, 5, "link".into(), "https://kaya.dev".into()),
+                (7, 18, "bold".into(), "true".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn pending_attributes_decide_the_next_insertion_and_are_spent() {
+        let mut scene = Scene::new();
+        scene.apply(rich_editor(""));
+        scene.apply(vec![set_document("ab", vec![run(0, 2, "bold", "true")])]);
+        // Bold pressed OFF with the caret at the end.
+        scene.set_text_pending(WidgetId(1), "bold", "", false);
+        let edit = scene.note_rich_text(WidgetId(1), "abc").expect("an edit");
+        assert!(edit.runs.is_empty(), "the armed OFF beat the inherited bold");
+        // Spent: 'd' inherits from 'c', which is not bold.
+        let edit = scene.note_rich_text(WidgetId(1), "abcd").expect("an edit");
+        assert!(edit.runs.is_empty());
+        // Armed ON with a value: italic follows the insertion.
+        scene.set_text_pending(WidgetId(1), "italic", "true", true);
+        let edit = scene.note_rich_text(WidgetId(1), "abcde").expect("an edit");
+        assert_eq!(edit.runs, vec![run(0, 1, "italic", "true")]);
+    }
+
+    /// docs/rich-text-plan.md R5.
+    #[test]
+    fn an_edit_is_held_through_a_composition_and_drains_after_it() {
+        let mut scene = Scene::new();
+        scene.apply(rich_editor(""));
+        scene.apply(vec![set_document("ab", vec![])]);
+        scene.set_text_selection(WidgetId(1), 1, 1);
+        scene.set_text_composing(WidgetId(1), true);
+        let out = scene.apply(vec![TxOp::ApplyEdit {
+            widget: WidgetId(1),
+            range: TextRange::new(1, 1),
+            inserted: "XYZ".into(),
+            runs: vec![],
+        }]);
+        assert!(
+            !out.iter().any(|op| matches!(op, ApplyOp::ApplyEdit { .. })),
+            "nothing is lowered while the user is composing"
+        );
+        assert_eq!(scene.rich_text(WidgetId(1)), Some("ab"), "the mirror waits too");
+        let drained = scene.set_text_composing(WidgetId(1), false);
+        assert_eq!(drained.len(), 1);
+        assert_eq!(scene.rich_text(WidgetId(1)), Some("aXYZb"));
+        // R5: a caret AT the insertion point ends after it.
+        assert_eq!(scene.rich_selection(WidgetId(1)), Some(TextRange::new(4, 4)));
+        match &drained[0] {
+            ApplyOp::ApplyEdit { selection, .. } => {
+                assert_eq!((selection.start, selection.stop), (4, 4));
+            }
+            other => panic!("wanted an apply_edit, got {other:?}"),
+        }
+    }
+
+    /// The automerge probe's cases
+    /// (docs/measurements/richtext-automerge-2026-09-11.txt).
+    #[test]
+    fn the_caret_transform_matches_the_probe() {
+        assert_eq!(transform_offset(2, 4, 4, 5), 2, "before the edit");
+        assert_eq!(transform_offset(9, 4, 4, 5), 14, "after an insertion");
+        assert_eq!(transform_offset(4, 4, 4, 5), 9, "AT an insertion: after it");
+        assert_eq!(transform_offset(9, 4, 9, 0), 4, "after a deletion");
+        assert_eq!(transform_offset(6, 4, 9, 2), 6, "inside a replacement");
+    }
+
+    /// docs/undo-plan.md D7.
+    #[test]
+    fn set_rich_text_closes_the_typing_episode_like_a_text_write() {
+        let mut scene = Scene::new();
+        scene.apply(rich_editor(""));
+        scene.note_text_changed(DEFAULT_WINDOW, WidgetId(1), "mi", true);
+        scene.note_text_changed(DEFAULT_WINDOW, WidgetId(1), "milk", true);
+        assert!(
+            matches!(
+                scene.ledgers[&DEFAULT_WINDOW].done.last(),
+                Some(LedgerEntry::Episode(ep)) if ep.open
+            ),
+            "the typing run is open"
+        );
+        scene.apply(vec![set_document("milk and tea", vec![])]);
+        assert!(
+            matches!(
+                scene.ledgers[&DEFAULT_WINDOW].done.last(),
+                Some(LedgerEntry::Episode(ep)) if !ep.open
+            ),
+            "the whole-document write ended the run"
+        );
+    }
+
+    /// ... and an apply_edit never resets undo (docs/rich-text-plan.md R6).
+    #[test]
+    fn apply_edit_leaves_the_typing_episode_open() {
+        let mut scene = Scene::new();
+        scene.apply(rich_editor(""));
+        scene.apply(vec![set_document("milk", vec![])]);
+        scene.note_text_changed(DEFAULT_WINDOW, WidgetId(1), "milky", true);
+        scene.apply(vec![TxOp::ApplyEdit {
+            widget: WidgetId(1),
+            range: TextRange::new(0, 0),
+            inserted: "a ".into(),
+            runs: vec![],
+        }]);
+        assert!(
+            matches!(
+                scene.ledgers[&DEFAULT_WINDOW].done.last(),
+                Some(LedgerEntry::Episode(ep)) if ep.open
+            ),
+            "an incremental edit is not a configuration write"
+        );
+    }
+
+    /// Invariant 3's why-not rule: R4's sentence is made to print.
+    #[test]
+    fn a_disagreeing_reported_range_says_what_both_sides_read() {
+        let mut scene = Scene::new();
+        scene.apply(rich_editor(""));
+        scene.apply(vec![set_document("milk", vec![])]);
+        scene.set_reported_edit(WidgetId(1), 0, 4, 5);
+        let sentence = scene
+            .check_reported_edit(WidgetId(1), 4, 4, 1)
+            .expect("the two readings disagree");
+        assert!(sentence.contains("the backend reported 0..4 with 5 bytes inserted"), "{sentence}");
+        assert!(sentence.contains("says 4..4 with 1"), "{sentence}");
+        eprintln!("{sentence}");
+        scene.set_reported_edit(WidgetId(1), 4, 4, 1);
+        assert!(scene.check_reported_edit(WidgetId(1), 4, 4, 1).is_none());
+        assert!(scene.check_reported_edit(WidgetId(1), 0, 0, 0).is_none(), "one-shot");
+    }
+
+    #[test]
+    fn a_format_moves_the_mirror_and_a_caret_format_does_not() {
+        let mut scene = Scene::new();
+        scene.apply(rich_editor(""));
+        scene.apply(vec![set_document("hello world", vec![])]);
+        let published =
+            scene.note_text_formatted(WidgetId(1), TextRange::new(6, 11), "bold", Some("true"));
+        assert!(published.is_some());
+        assert_eq!(runs_of(&scene), vec![(6, 11, "bold".into(), "true".into())]);
+        assert!(
+            scene
+                .note_text_formatted(WidgetId(1), TextRange::new(3, 3), "italic", Some("true"))
+                .is_none(),
+            "a format over a caret is the widget's pending state"
+        );
+        scene.note_text_formatted(WidgetId(1), TextRange::new(6, 8), "bold", None);
+        assert_eq!(runs_of(&scene), vec![(8, 11, "bold".into(), "true".into())]);
+    }
+
+    #[test]
+    #[should_panic(expected = "which is not declared `rich`")]
+    fn set_rich_text_on_a_plain_textarea_is_refused() {
+        let mut scene = Scene::new();
+        scene.apply(editor("hello"));
+        scene.apply(vec![set_document("hello", vec![])]);
+    }
+
+    #[test]
+    #[should_panic(expected = "has no property Rich")]
+    fn rich_on_an_entry_is_refused() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Entry },
+            TxOp::SetProperty {
+                widget: WidgetId(1),
+                prop: Prop::Rich,
+                value: PropValue::Const(Value::Bool(true)),
+            },
+        ]);
+    }
+
+    /// The normal form `normalize` keeps, in R9's compare shape.
+    /// docs/rich-text-plan.md R9: the harness reads the core's spelling —
+    /// bytes, normal order, a flag by its name alone, an edit in angle
+    /// brackets with its source word.
+    #[test]
+    fn the_harness_spellings_of_runs_and_edits() {
+        let mut scene = Scene::new();
+        scene.apply(rich_editor("Héllo world"));
+        let textarea = WidgetId(1);
+        assert_eq!(scene.rich_runs_string(textarea).as_deref(), Some(""));
+        assert_eq!(scene.last_edit_string(textarea).as_deref(), Some(""));
+        scene.apply(vec![set_document(
+            "Héllo world",
+            vec![run(7, 12, "link", "https://kaya.dev"), run(0, 6, "bold", "true")],
+        )]);
+        assert_eq!(
+            scene.rich_runs_string(textarea).as_deref(),
+            Some("0:6 bold|7:12 link=https://kaya.dev")
+        );
+        scene.set_text_edit_source(textarea, crate::wire::EDIT_SOURCE_PASTE as u32);
+        scene.note_rich_text(textarea, "Héllo, big world").unwrap();
+        // Inserted right after the bold run, the bytes inherit it (R4).
+        assert_eq!(
+            scene.last_edit_string(textarea).as_deref(),
+            Some("6:6 <, big> paste [0:5 bold]")
+        );
+        assert_eq!(scene.rich_runs_string(WidgetId(999)), None);
+    }
+
+    #[test]
+    fn the_mirror_normalizes_its_runs() {
+        let mut scene = Scene::new();
+        scene.apply(rich_editor(""));
+        scene.apply(vec![set_document(
+            "abcdef",
+            vec![
+                run(0, 3, "bold", "true"),
+                run(3, 6, "bold", "true"),
+                run(0, 6, "italic", "true"),
+                run(2, 4, "italic", "false"),
+                // Later in the alphabet, starting earlier: order is by start.
+                run(1, 2, "underline", "true"),
+                run(4, 5, "code", "true"),
+            ],
+        )]);
+        assert_eq!(
+            runs_of(&scene),
+            vec![
+                (0, 6, "bold".into(), "true".into()),
+                (0, 2, "italic".into(), "true".into()),
+                (1, 2, "underline".into(), "true".into()),
+                (2, 4, "italic".into(), "false".into()),
+                (4, 5, "code".into(), "true".into()),
+                (4, 6, "italic".into(), "true".into()),
+            ]
+        );
     }
 
     // --- Tables: set_columns's walls (docs/tables-plan.md) --------------

@@ -12336,6 +12336,38 @@ steps, the placeholder on entry and textarea in every backend, the gate
 clauses for S5's Escape arms and S7's identity per backend, and the
 matrix. The entry is struck when the last lane's arm lands.
 
+## RICH TEXT — the root is on the mac (2026-09-11); the five platform arms, the eight bindings' sugar, the template zone and the labels are the breadth slice (docs/rich-text-plan.md §4)
+KEY: rich text, richtext, set_rich_text, apply_edit, text_edited, text_formatted, rich prop, Document, on_edit, own_undo, DEPTH STUB richtext, expect_runs
+
+The root landed 2026-09-11: the spec records (prop `rich`, TX
+`set_rich_text`/`apply_edit`/`format_text`, occurrences
+`text_edited`/`text_formatted`, the three vocabularies), the core's per-widget mirror with its validation
+at the ranges' chokepoint, the diff-derived delta with the inheritance
+rule and the armed typing attributes, the composition queue and R5's
+caret transform, D7 for `set_rich_text` alone, six C entries, the Rust
+sugar (`rich()`, `Document`, `Edit`, `Format`, `set_document`,
+`apply_edit`, `format`/`unformat`/`set_block`, `on_edit`, `on_format`,
+`ctx.document`), the nine generated parsers' arms, and the harness's
+`format`, `expect_runs` and `expect_edit` (docs/rich-text-plan.md §7). Every backend refuses the two apply records
+through its depth stub until its arm lands:
+
+- ~~**DEPTH STUB: richtext on swiftui/macos**~~ — LANDED 2026-09-11: the NSTextView arm (the storage unpinned for `isRichText` alone, kaya's own attribute keys with the display derived from them, the corroboration and selection reports, the composition and paste sources, pending typing attributes), the `format_text` record, and the `format`/`expect_runs`/`expect_edit` verbs; `allowsUndo` as R6's lever is the undo step's.
+- **DEPTH STUB: richtext on swiftui/ios** — the same file, right after the mac: UITextView's `typingAttributes` cleared of a link at a run's end (docs/traps.md 2026-09-11), `disableUndoRegistration` as R6's lever.
+- **DEPTH STUB: richtext on gtk** — GtkTextTags for the inline runs, a side table for links, the block kinds drawn; `enable-undo = FALSE` as R6's lever (docs/measurements/richtext-gtk-2026-09-11.md).
+- **DEPTH STUB: richtext on winui** — TOM character formats with links drawn rather than inserted (the hidden HYPERLINK text, docs/traps.md 2026-09-11), the diff as the only delta, `UndoLimit 0` as R6's lever.
+- **DEPTH STUB: richtext on compose** — foundation 1.11.4 with the mirror driving the display through the output transformation, links drawn and hit-tested by the arm, `clearHistory()` after every commit (R7 as amended).
+
+Open beside the arms, from the root's own notes: no backend reports the
+SELECTION to the core yet, so R5's transform runs against the last
+`select_range` write or the core's own derived caret until an arm calls
+`kaya_text_selection`; a native undo moves the mirror only through the
+`text_changed` it raises; a queued edit is not transformed against local
+typing during the composition; `rich` is a live-zone spelling with no
+template constructor; the eight other bindings carry the wire tier and no
+sugar, and no gate demands it — check-sugar-surface's prop census reads
+window and template props only, so the breadth slice adds a widget-prop
+clause there. Labels are R8's slice, after the textarea's.
+
 ## RULING WANTED — a lost dialog answers the app as a cancel; should the app be able to tell the two apart? (recorded 2026-09-06)
 KEY: lost dialog, KAYA_DIALOG_LOST, file_dialog_result reason, cancelled versus lost, DIALOG_RESULT_BUDGET_MS, dialog occurrence
 

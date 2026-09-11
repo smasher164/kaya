@@ -719,6 +719,201 @@ impl Prefs {
     }
 }
 
+/// One attribute over one span, in kaya's unit (docs/ranges-units.md §7);
+/// `value` is "true" for the flags, a URL for a link, a kind for a block.
+pub type Run = crate::protocol::TextRun;
+
+/// One paragraph kind; drawn, never stored (docs/rich-text-plan.md R3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Block {
+    Body,
+    Heading1,
+    Heading2,
+    Heading3,
+    Quote,
+    CodeBlock,
+}
+
+impl Block {
+    pub fn name(self) -> &'static str {
+        match self {
+            Block::Body => "body",
+            Block::Heading1 => "heading1",
+            Block::Heading2 => "heading2",
+            Block::Heading3 => "heading3",
+            Block::Quote => "quote",
+            Block::CodeBlock => "code_block",
+        }
+    }
+}
+
+/// A `rich` textarea's text and runs, kept current by the binding from the
+/// edits it delivers (docs/rich-text-plan.md R1).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Document {
+    pub text: String,
+    pub runs: Vec<Run>,
+}
+
+impl Document {
+    pub fn new(text: impl Into<String>) -> Self {
+        Document { text: text.into(), runs: Vec::new() }
+    }
+
+    pub fn mark(
+        mut self,
+        range: std::ops::Range<usize>,
+        name: &str,
+        value: impl Into<String>,
+    ) -> Self {
+        self.runs.push(Run {
+            start: range.start as u64,
+            end: range.end as u64,
+            name: name.to_owned(),
+            value: value.into(),
+        });
+        self
+    }
+
+    pub fn bold(self, range: std::ops::Range<usize>) -> Self {
+        self.mark(range, "bold", "true")
+    }
+
+    pub fn italic(self, range: std::ops::Range<usize>) -> Self {
+        self.mark(range, "italic", "true")
+    }
+
+    pub fn underline(self, range: std::ops::Range<usize>) -> Self {
+        self.mark(range, "underline", "true")
+    }
+
+    pub fn strike(self, range: std::ops::Range<usize>) -> Self {
+        self.mark(range, "strike", "true")
+    }
+
+    pub fn code(self, range: std::ops::Range<usize>) -> Self {
+        self.mark(range, "code", "true")
+    }
+
+    pub fn link(self, range: std::ops::Range<usize>, url: impl Into<String>) -> Self {
+        self.mark(range, "link", url)
+    }
+
+    /// A paragraph's kind; the range covers whole paragraphs or is refused.
+    pub fn block(self, range: std::ops::Range<usize>, kind: Block) -> Self {
+        self.mark(range, "block", kind.name())
+    }
+
+    pub fn attr_at(&self, byte: usize, name: &str) -> Option<&str> {
+        self.runs
+            .iter()
+            .find(|r| r.name == name && (r.start as usize) <= byte && byte < r.end as usize)
+            .map(|r| r.value.as_str())
+    }
+}
+
+/// The core's normal form (scene.rs, `RichDoc::normalize`), so the two agree.
+fn normalize_runs(runs: Vec<Run>) -> Vec<Run> {
+    let names: std::collections::BTreeSet<String> =
+        runs.iter().map(|r| r.name.clone()).collect();
+    let mut out: Vec<Run> = Vec::new();
+    for name in names {
+        let mut painted: Vec<Run> = Vec::new();
+        for run in runs.iter().filter(|r| r.name == name) {
+            if run.start >= run.end {
+                continue;
+            }
+            let mut kept: Vec<Run> = Vec::new();
+            for old in painted.drain(..) {
+                if old.end <= run.start || old.start >= run.end {
+                    kept.push(old);
+                    continue;
+                }
+                if old.start < run.start {
+                    kept.push(Run { end: run.start, ..old.clone() });
+                }
+                if old.end > run.end {
+                    kept.push(Run { start: run.end, ..old.clone() });
+                }
+            }
+            kept.push(run.clone());
+            painted = kept;
+        }
+        painted.sort_by_key(|r| r.start);
+        let mut merged: Vec<Run> = Vec::new();
+        for run in painted {
+            match merged.last_mut() {
+                Some(last) if last.end == run.start && last.value == run.value => {
+                    last.end = run.end;
+                }
+                _ => merged.push(run),
+            }
+        }
+        out.extend(merged);
+    }
+    out.sort_by(|a, b| (a.start, &a.name).cmp(&(b.start, &b.name)));
+    out
+}
+
+/// Replace `start..end` with `inserted`, whose `runs` carry offsets
+/// RELATIVE to the inserted text.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Edit {
+    pub start: u64,
+    pub end: u64,
+    pub inserted: String,
+    pub runs: Vec<Run>,
+}
+
+impl Edit {
+    pub fn insert(at: usize, text: impl Into<String>) -> Self {
+        Edit { start: at as u64, end: at as u64, inserted: text.into(), runs: Vec::new() }
+    }
+
+    pub fn delete(range: std::ops::Range<usize>) -> Self {
+        Edit {
+            start: range.start as u64,
+            end: range.end as u64,
+            inserted: String::new(),
+            runs: Vec::new(),
+        }
+    }
+
+    pub fn replace(range: std::ops::Range<usize>, text: impl Into<String>) -> Self {
+        Edit {
+            start: range.start as u64,
+            end: range.end as u64,
+            inserted: text.into(),
+            runs: Vec::new(),
+        }
+    }
+
+    /// One attribute over the INSERTED text's own offsets.
+    pub fn mark(
+        mut self,
+        range: std::ops::Range<usize>,
+        name: &str,
+        value: impl Into<String>,
+    ) -> Self {
+        self.runs.push(Run {
+            start: range.start as u64,
+            end: range.end as u64,
+            name: name.to_owned(),
+            value: value.into(),
+        });
+        self
+    }
+}
+
+/// A toolbar act over a range; `value` None is the attribute taken off.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Format {
+    pub start: u64,
+    pub end: u64,
+    pub name: String,
+    pub value: Option<String>,
+}
+
 pub struct AppCtx {
     pub(crate) occurrences: Receiver<Inbox>,
     pub(crate) transactions: Sender<Transaction>,
@@ -751,6 +946,8 @@ pub struct AppCtx {
     // Each canvas's declared viewbox, so a redraw in a LATER transaction
     // need not repeat it (docs/canvas-plan.md §2.2).
     viewboxes: RefCell<HashMap<u64, Viewbox>>,
+    // The binding's rich mirror, live textareas only (docs/rich-text-plan.md R1).
+    documents: RefCell<HashMap<u64, Document>>,
 }
 
 impl AppCtx {
@@ -775,6 +972,7 @@ impl AppCtx {
             derived: RefCell::new(HashMap::new()),
             fresh: RefCell::new(HashMap::new()),
             viewboxes: RefCell::new(HashMap::new()),
+            documents: RefCell::new(HashMap::new()),
         }
     }
 
@@ -802,6 +1000,13 @@ impl AppCtx {
                         Occurrence::Undone { delta, .. } | Occurrence::Redone { delta, .. } => {
                             self.absorb_undo(delta)
                         }
+                        // The one place both loops take occurrences from.
+                        Occurrence::TextEdited { id, range, inserted, runs, .. } => {
+                            self.absorb_edit(id.0, *range, inserted, runs)
+                        }
+                        Occurrence::TextFormatted { id, range, name, value } => {
+                            self.absorb_format(id.0, *range, name, value.as_deref())
+                        }
                         _ => {}
                     }
                     return occ;
@@ -809,6 +1014,80 @@ impl AppCtx {
                 Err(_) => return Occurrence::Shutdown,
             }
         }
+    }
+
+    /// The folded document; empty until the first edit or write.
+    pub fn document(&self, widget: WidgetId) -> Document {
+        self.documents.borrow().get(&widget.0).cloned().unwrap_or_default()
+    }
+
+    /// Seed from a write, so a read after [`Tx::set_document`] answers it.
+    pub(crate) fn seed_document(&self, widget: u64, document: &Document) {
+        self.documents.borrow_mut().insert(widget, document.clone());
+    }
+
+    /// One delivered edit, folded by the core's own rules.
+    fn absorb_edit(&self, widget: u64, range: TextRange, inserted: &str, runs: &[Run]) {
+        let mut documents = self.documents.borrow_mut();
+        let doc = documents.entry(widget).or_default();
+        let (start, end) = (range.start as usize, range.stop as usize);
+        if end > doc.text.len() || !doc.text.is_char_boundary(start) || !doc.text.is_char_boundary(end)
+        {
+            // A mirror out of step with the core would panic in replace_range.
+            doc.text = inserted.to_owned();
+            doc.runs = runs.to_vec();
+            return;
+        }
+        let shift = inserted.len() as i64 - (end - start) as i64;
+        let moved = |offset: u64| -> u64 { (offset as i64 + shift) as u64 };
+        let mut next: Vec<Run> = Vec::new();
+        for run in &doc.runs {
+            if (run.start as usize) < start {
+                next.push(Run { start: run.start, end: run.end.min(start as u64), ..run.clone() });
+            }
+            if (run.end as usize) > end {
+                next.push(Run {
+                    start: moved(run.start.max(end as u64)),
+                    end: moved(run.end),
+                    ..run.clone()
+                });
+            }
+        }
+        for run in runs {
+            next.push(Run {
+                start: run.start + start as u64,
+                end: run.end + start as u64,
+                ..run.clone()
+            });
+        }
+        doc.text.replace_range(start..end, inserted);
+        doc.runs = normalize_runs(next);
+    }
+
+    fn absorb_format(&self, widget: u64, range: TextRange, name: &str, value: Option<&str>) {
+        let mut documents = self.documents.borrow_mut();
+        let doc = documents.entry(widget).or_default();
+        let (start, end) = (range.start, range.stop);
+        if start >= end {
+            return;
+        }
+        let mut next: Vec<Run> = Vec::new();
+        for run in std::mem::take(&mut doc.runs) {
+            if run.name != name || run.end <= start || run.start >= end {
+                next.push(run);
+                continue;
+            }
+            if run.start < start {
+                next.push(Run { end: start, ..run.clone() });
+            }
+            if run.end > end {
+                next.push(Run { start: end, ..run.clone() });
+            }
+        }
+        if let Some(value) = value {
+            next.push(Run { start, end, name: name.to_owned(), value: value.to_owned() });
+        }
+        doc.runs = normalize_runs(next);
     }
 
     /// Fold an undo's payload into the collection mirror. Core-authoritative,
@@ -1272,6 +1551,13 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
     /// A `role link` label's destination (docs/tasks-s2-plan.md T3).
     pub fn href(self, url: impl Into<LiveSource<StrKind>>) -> Self {
         self.tx.href(self.id, url);
+        self
+    }
+
+    /// This textarea carries attribute runs: [`Tx::set_document`],
+    /// [`Tx::apply_edit`], [`Messages::on_edit`] (docs/rich-text-plan.md R1).
+    pub fn rich(self) -> Self {
+        self.tx.set(self.id, Prop::Rich, true);
         self
     }
 
@@ -2345,6 +2631,52 @@ impl<'a> Tx<'a> {
             widget,
             range: TextRange::new(range.start as u64, range.end as u64),
         });
+    }
+
+    /// Replace a `rich` textarea's whole document: echoes nothing and, like
+    /// [`Tx::set_text`], spends the native undo history (docs/undo-plan.md D7).
+    pub fn set_document(&mut self, widget: WidgetId, document: &Document) {
+        self.ctx.seed_document(widget.0, document);
+        self.ops.push(TxOp::SetRichText {
+            widget,
+            text: document.text.clone(),
+            runs: document.runs.clone(),
+        });
+    }
+
+    /// One edit into a `rich` textarea: echoes nothing, never resets undo, and
+    /// is held rather than refused mid-composition (docs/rich-text-plan.md R5).
+    pub fn apply_edit(&mut self, widget: WidgetId, edit: &Edit) {
+        self.ctx.absorb_edit(widget.0, TextRange::new(edit.start, edit.end), &edit.inserted, &edit.runs);
+        self.ops.push(TxOp::ApplyEdit {
+            widget,
+            range: TextRange::new(edit.start, edit.end),
+            inserted: edit.inserted.clone(),
+            runs: edit.runs.clone(),
+        });
+    }
+
+    /// Format the widget's CURRENT SELECTION through its own act — what a
+    /// toolbar button sends; the widget answers through [`Messages::on_format`]
+    /// (docs/rich-text-plan.md R1). Over a collapsed selection the attribute
+    /// is armed for the next keystroke instead. `value` is `"true"` for a
+    /// flag, the URL for `link`.
+    pub fn format(&mut self, widget: WidgetId, name: &str, value: &str) {
+        self.ops.push(TxOp::FormatText {
+            widget,
+            name: name.to_owned(),
+            value: Some(value.to_owned()),
+        });
+    }
+
+    /// Take an attribute off the widget's current selection.
+    pub fn unformat(&mut self, widget: WidgetId, name: &str) {
+        self.ops.push(TxOp::FormatText { widget, name: name.to_owned(), value: None });
+    }
+
+    /// Make the selection's paragraphs `kind`; [`Block::Body`] clears.
+    pub fn set_block(&mut self, widget: WidgetId, kind: Block) {
+        self.format(widget, "block", kind.name());
     }
 
     /// Scroll the textarea so a range is inside the viewport. A pure
@@ -4105,6 +4437,36 @@ impl<M> Messages<M> {
         );
     }
 
+    /// One addressed user edit of a `rich` textarea; `on_change` still fires
+    /// beside it (docs/rich-text-plan.md R1).
+    pub fn on_edit(&self, w: WidgetId, f: impl Fn(Edit) -> M + 'static) {
+        self.widgets.borrow_mut().entry(w.0).or_default().push(Box::new(move |occ| match occ {
+                Occurrence::TextEdited { range, inserted, runs, .. } => Some(f(Edit {
+                    start: range.start,
+                    end: range.stop,
+                    inserted: inserted.clone(),
+                    runs: runs.clone(),
+                })),
+                _ => None,
+            }),
+        );
+    }
+
+    /// The user formatted a range; a format over a collapsed caret is pending
+    /// state and arrives as the next edit's runs, never here.
+    pub fn on_format(&self, w: WidgetId, f: impl Fn(Format) -> M + 'static) {
+        self.widgets.borrow_mut().entry(w.0).or_default().push(Box::new(move |occ| match occ {
+                Occurrence::TextFormatted { range, name, value, .. } => Some(f(Format {
+                    start: range.start,
+                    end: range.stop,
+                    name: name.clone(),
+                    value: value.clone(),
+                })),
+                _ => None,
+            }),
+        );
+    }
+
     pub fn on_toggle(&self, w: WidgetId, f: impl Fn(bool) -> M + 'static) {
         self.widgets.borrow_mut().entry(w.0).or_default().push(Box::new(move |occ| match occ {
                 Occurrence::Toggled { checked, .. } => Some(f(*checked)),
@@ -4647,6 +5009,8 @@ impl<M> Messages<M> {
                 | Occurrence::Dropped { id, .. }
                 | Occurrence::DragEnded { id, .. }
                 | Occurrence::DateChanged { id, .. }
+                | Occurrence::TextEdited { id, .. }
+                | Occurrence::TextFormatted { id, .. }
                 | Occurrence::TimeChanged { id, .. } => self
                     .widgets
                     .borrow()
@@ -4662,6 +5026,8 @@ impl<M> Messages<M> {
                 | Occurrence::InstanceDropped { node, .. }
                 | Occurrence::InstanceDragEnded { node, .. }
                 | Occurrence::InstanceDateChanged { node, .. }
+                | Occurrence::InstanceTextEdited { node, .. }
+                | Occurrence::InstanceTextFormatted { node, .. }
                 | Occurrence::InstanceTimeChanged { node, .. } => self
                     .nodes
                     .borrow()
@@ -7856,6 +8222,10 @@ mod tests {
                     Occurrence::InstanceButtonClicked { .. } => {}
                     Occurrence::TextChanged { .. }
                     | Occurrence::InstanceTextChanged { .. }
+                    | Occurrence::TextEdited { .. }
+                    | Occurrence::InstanceTextEdited { .. }
+                    | Occurrence::TextFormatted { .. }
+                    | Occurrence::InstanceTextFormatted { .. }
                     | Occurrence::Toggled { .. }
                     | Occurrence::InstanceToggled { .. }
                     | Occurrence::CloseRequested { .. }
@@ -8701,7 +9071,85 @@ mod tests {
     /// — the one place the raw loop and Messages both take occurrences
     /// from. An undo moved core state without a transaction, so a mirror
     /// that did not reconcile would answer every read-back with state
-    /// the core has already left behind.
+    /// docs/rich-text-plan.md R1: the binding's fold must match the core's.
+    #[test]
+    fn delivered_edits_fold_into_the_binding_s_document() {
+        use crate::protocol::{Occurrence, TextRange, TextRun, WidgetId};
+
+        let (occ_tx, occ_rx) = mpsc::channel();
+        let (tx_tx, _tx_rx) = mpsc::channel();
+        let ctx = AppCtx::new(occ_rx, tx_tx, no_wake());
+        let field = WidgetId(1);
+
+        let send = |occ| occ_tx.send(crate::protocol::Inbox::Occ(occ)).unwrap();
+        send(Occurrence::TextEdited {
+            id: field,
+            range: TextRange::new(0, 0),
+            inserted: "Hello world".into(),
+            runs: vec![],
+            source: 0,
+        });
+        ctx.next();
+        assert_eq!(ctx.document(field).text, "Hello world");
+        // Bold "world", then type at its end: the run inherits and rejoins.
+        send(Occurrence::TextFormatted {
+            id: field,
+            range: TextRange::new(6, 11),
+            name: "bold".into(),
+            value: Some("true".into()),
+        });
+        ctx.next();
+        send(Occurrence::TextEdited {
+            id: field,
+            range: TextRange::new(11, 11),
+            inserted: " again".into(),
+            runs: vec![TextRun::new(0, 6, "bold", "true")],
+            source: 0,
+        });
+        ctx.next();
+        let doc = ctx.document(field);
+        assert_eq!(doc.text, "Hello world again");
+        assert_eq!(doc.runs, vec![TextRun::new(6, 17, "bold", "true")]);
+        assert_eq!(doc.attr_at(6, "bold"), Some("true"));
+        assert_eq!(doc.attr_at(0, "bold"), None);
+        send(Occurrence::TextFormatted {
+            id: field,
+            range: TextRange::new(6, 8),
+            name: "bold".into(),
+            value: None,
+        });
+        ctx.next();
+        assert_eq!(ctx.document(field).runs, vec![TextRun::new(8, 17, "bold", "true")]);
+        send(Occurrence::TextEdited {
+            id: field,
+            range: TextRange::new(5, 9),
+            inserted: String::new(),
+            runs: vec![],
+            source: 0,
+        });
+        ctx.next();
+        let doc = ctx.document(field);
+        assert_eq!(doc.text, "Hellold again");
+        assert_eq!(doc.runs, vec![TextRun::new(5, 13, "bold", "true")]);
+        drop(occ_tx);
+    }
+
+    /// A written document reads back without a round trip.
+    #[test]
+    fn a_written_document_reads_back_at_once() {
+        let (_occ_tx, occ_rx) = mpsc::channel();
+        let (tx_tx, _tx_rx) = mpsc::channel();
+        let ctx = AppCtx::new(occ_rx, tx_tx, no_wake());
+        let doc = super::Document::new("Hello world")
+            .bold(6..11)
+            .link(0..5, "https://kaya.dev");
+        let mut tx = ctx.begin();
+        let field = crate::protocol::WidgetId(1);
+        tx.set_document(field, &doc);
+        tx.commit();
+        assert_eq!(ctx.document(field), doc);
+    }
+
     #[test]
     fn an_undone_delta_reconciles_the_model_mirror() {
         use crate::protocol::{
