@@ -97,3 +97,39 @@ where — but that is not a canvas kaya draws, and the moment it is, this
 probe is a `cargo run` away. The `gpu render` column joins the frame
 with a blocking poll; a presented surface would pipeline instead, which
 helps throughput and not the latency a chart re-raster cares about.
+
+WHERE A HYBRID FRAME'S TIME GOES, AND WHAT PIPELINING BUYS
+----------------------------------------------------------
+Taken after the maintainer asked why the GPU was so much slower and
+whether an initial overhead would amortize. One frame split into its
+four parts (median of 15 after 3 warm-ups), then a burst of 20 frames
+encoded and submitted back to back with ONE wait at the end, per frame:
+
+    drawing                    track               strips    encode    submit      wait       frame |    burst/frame   cpu MT ref
+    portfolio chart (214 ops)  native              0.08ms    0.09ms    0.04ms    1.52ms      1.74ms |         0.33ms       0.17ms
+    portfolio chart (214 ops)  phone 1200x2400     0.17ms    0.11ms    0.05ms    1.52ms      1.86ms |         0.59ms       0.28ms
+    text page (34 ops)         native              0.72ms    0.09ms    0.04ms    1.52ms      2.39ms |         0.89ms       0.62ms
+    text page (34 ops)         phone 1200x2400     1.27ms    0.17ms    0.05ms    1.52ms      3.01ms |         1.48ms       0.76ms
+    2000 octagons (20006 ops)  native              0.82ms    0.24ms    0.04ms    1.52ms      2.66ms |         1.19ms       0.76ms
+    2000 octagons (20006 ops)  phone 1200x2400     1.04ms    0.43ms    0.08ms    1.54ms      3.18ms |         1.61ms       0.92ms
+
+Read it this way. `strips` is the CPU half of the hybrid — flattening
+the curves and generating the sparse strips with their coverage — and
+it is the same front end vello_cpu runs, so it is never smaller than a
+good part of a whole vello_cpu frame. `encode` and `submit` are small.
+`wait` is 1.52ms IN EVERY ROW, independent of the drawing and of the
+pixel count: it is the round trip for a Metal command buffer to be
+scheduled, run and signal completion, a latency and not work. The
+one-time cost (pipeline compilation) is outside these numbers, paid in
+the warm-ups. So the per-frame cost does NOT amortize with more frames
+of the same kind — every joined frame pays the 1.5ms — but it does hide
+under PIPELINING: with 20 frames in flight and one wait the burst
+figure is 0.33-1.61ms per frame, which is the CPU half plus the GPU's
+share of the throughput. That is still above 8-thread vello_cpu in
+every row (0.17-0.92ms), because at these sizes the fine rasterization
+the GPU takes over is cheap on eight cores, and the hybrid's CPU half
+remains. What would move the balance is MORE WORK PER FRAME of the kind
+the GPU scales on — large overlapping fills, gradients, images, blend
+layers, tens of thousands of paths — not more frames; kaya's canvases
+are hundreds of ops, and a presented surface would hide the latency
+without changing which side finishes first.

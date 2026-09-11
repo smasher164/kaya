@@ -196,7 +196,60 @@ fn hybrid_frame(g: &Gpu, renderer: &mut vello_hybrid::Renderer, resources: &mut 
     (Some(out), t0.elapsed().as_secs_f64() * 1000.0, t_build)
 }
 
+fn breakdown() {
+    let g = gpu();
+    println!("BREAKDOWN of one vello_hybrid frame, median of 15 after 3 warm-ups; then a burst of 20 frames with ONE wait at the end");
+    println!("{:<26} {:<16} {:>9} {:>9} {:>9} {:>9} {:>11} | {:>14} {:>12}", "drawing", "track", "strips", "encode", "submit", "wait", "frame", "burst/frame", "cpu MT ref");
+    let threads = (std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1).saturating_sub(1)).min(8) as u16;
+    let drawings = [portfolio_chart(), text_page(), octagons()];
+    let tracks: [(&str, (f64, f64)); 2] = [("native", (0.0, 0.0)), ("phone 1200x2400", (1200.0, 2400.0))];
+    for d in &drawings {
+        for (tname, track) in &tracks {
+            let track = if *tname == "native" { d.viewbox } else { *track };
+            let (w, h) = (track.0.round() as u16, track.1.round() as u16);
+            let texture = g.device.create_texture(&wgpu::TextureDescriptor { label: None, size: wgpu::Extent3d { width: w.into(), height: h.into(), depth_or_array_layers: 1 }, mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2, format: wgpu::TextureFormat::Rgba8Unorm, usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC, view_formats: &[] });
+            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            let (mut renderer, mut resources) = vello_hybrid::Renderer::new(&g.device, &vello_hybrid::RenderTargetConfig { format: texture.format(), width: w.into(), height: h.into() });
+            let mut scene = vello_hybrid::Scene::new_with(w, h, Level::new());
+            let (mut ts, mut te, mut tsub, mut tw, mut tf) = (vec![], vec![], vec![], vec![], vec![]);
+            for i in 0..18 {
+                let t0 = Instant::now();
+                scene.reset(); walk(d, track, &mut scene);
+                let a = t0.elapsed().as_secs_f64() * 1000.0;
+                let t1 = Instant::now();
+                let mut encoder = g.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+                renderer.render(&scene, &mut resources, &g.device, &g.queue, &mut encoder, &vello_hybrid::RenderSize { width: w.into(), height: h.into() }, &view, &vello_hybrid::TextureBindings::new()).unwrap();
+                let b = t1.elapsed().as_secs_f64() * 1000.0;
+                let t2 = Instant::now();
+                g.queue.submit([encoder.finish()]);
+                let c = t2.elapsed().as_secs_f64() * 1000.0;
+                let t3 = Instant::now();
+                g.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+                let dd = t3.elapsed().as_secs_f64() * 1000.0;
+                if i >= 3 { ts.push(a); te.push(b); tsub.push(c); tw.push(dd); tf.push(t0.elapsed().as_secs_f64() * 1000.0); }
+            }
+            // BURST: 20 frames encoded and submitted back to back, one wait.
+            let tb = Instant::now();
+            for _ in 0..20 {
+                scene.reset(); walk(d, track, &mut scene);
+                let mut encoder = g.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+                renderer.render(&scene, &mut resources, &g.device, &g.queue, &mut encoder, &vello_hybrid::RenderSize { width: w.into(), height: h.into() }, &view, &vello_hybrid::TextureBindings::new()).unwrap();
+                g.queue.submit([encoder.finish()]);
+            }
+            g.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+            let burst = tb.elapsed().as_secs_f64() * 1000.0 / 20.0;
+            // cpu MT reference, context reused
+            let mut ctxm = RenderContext::new_with(w, h, RenderSettings { level: Level::new(), num_threads: threads });
+            let mut bufm = vec![0u8; usize::from(w) * usize::from(h) * 4];
+            let mut tm = Vec::new();
+            for i in 0..18 { let t = Instant::now(); ctxm.reset(); walk(d, track, &mut ctxm); ctxm.flush(); ctxm.render(PixmapMut::new(w, h, &mut bufm).unwrap(), &mut Resources::new()); if i >= 3 { tm.push(t.elapsed().as_secs_f64() * 1000.0); } }
+            println!("{:<26} {:<16} {:>7.2}ms {:>7.2}ms {:>7.2}ms {:>7.2}ms {:>9.2}ms | {:>12.2}ms {:>10.2}ms", d.name, tname, median(ts), median(te), median(tsub), median(tw), median(tf), burst, median(tm));
+        }
+    }
+}
+
 fn main() {
+    if std::env::args().nth(1).as_deref() == Some("breakdown") { breakdown(); return; }
     let threads = (std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1).saturating_sub(1)).min(8) as u16;
     let g = gpu();
     println!("host: {} threads available; vello_cpu MT uses {threads}; Level::new() = {:?}; GPU adapter {:?} via {}", std::thread::available_parallelism().map(|n| n.get()).unwrap_or(0), Level::new(), g.adapter_name, g.backend);
