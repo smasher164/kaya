@@ -7,6 +7,38 @@ these the hard way.
 
 
 
+
+## A GTK box asked for width-for-height below its natural height reports min above natural, and the warning names the box that answered, not the box that asked (2026-09-11)
+
+Twenty `GtkBox (box) reported min width 337 and natural width 299 in
+measure() with for_size=76; natural size must be >= min size` lines on
+the tasks scene, ledgered on 2026-09-07 as kaya's own FlexLayout::measure
+answering inconsistently. It was not: a trace inside that measure
+(printed whenever natural < minimum) never fired, a python port of the
+grow-pool arithmetic found no counterexample in 200,000 random rows, and
+the backtrace at the first warning (`G_DEBUG=fatal-warnings` under gdb
+in the lane's container) had every frame between the warning and
+libadwaita inside libgtk's own GtkBoxLayout. The mechanism is GTK's:
+GtkBoxLayout measuring the cross axis distributes the given `for_size`
+among its children at their MINIMUM sizes for the minimum and at their
+NATURAL sizes for the natural, and a wrapping label squeezed into fewer
+pixels of height is WIDER at its minimum than at its natural, so a
+vertical box inside libadwaita's row answers min width above natural
+width when the height it is given is below what its labels want. Who
+gave it 76: kaya's flex allocate, measuring a horizontal row's non-grower
+children for width at the row's ALLOCATED height (`c.measure(Horizontal,
+cross_total)`), which is width-for-height. GTK's own convention for boxes
+is height-for-width: ask widths at -1, ask heights for a width. The flex
+layout declares `SizeRequestMode::HeightForWidth` and does exactly that
+now, and the warnings are zero on every layout-heavy scene. The lane
+refuses any leg whose log carries the line (`gtk_layout_clean` in
+tools/linux/run-suites.sh, self-tested on a planted line at lane start),
+since the legs had stayed green through twenty of them: GTK clamps, and
+a layout it clamps to is not the one kaya asked for. The lesson beside
+the mechanism: the ledger entry named the reporter from the warning's
+text, which names the widget that ANSWERED; the asker is one backtrace
+away, and that is the entry's cause.
+
 ## A lane's duration ceiling can be spent WAITING for another lane's exclusive block (2026-09-10)
 
 Matrix #3 of the vello_cpu swap: every lane green, and android read
@@ -6806,6 +6838,19 @@ it, so the ps1 stopped between w=520 and w=480 for a reason prove.txt
 does not carry. The launcher prints the ps1's own psout.txt when the
 done line is missing now, so the next reading names the mechanism
 instead of the count.
+
+A SECOND MECHANISM FOR THE SAME READING, 2026-09-11 (1 of 11 on the
+height-for-width matrix): the probe's own last lines were
+`Add-Content : Stream was not readable` at its `Say` logger. The runner
+polls prove.txt with `cmd /c type` every two seconds, and an append that
+lands on a read throws under `$ErrorActionPreference = "Stop"`, which
+ends the sweep at whatever AIM count it had — one that night; a single
+lost line is also the shape of the earlier 10-of-11 readings. `Say`
+retries the append for two seconds now and throws with the line in it
+after that. The runner's deadline then expired as designed (`gave up
+after ~170s`), and the guest's own watchdog had ended it at 60s inside
+its settle, both of which the sentences said; the probe's psout tail was
+the line that named the cause.
 
 ## A GtkLabel's text write re-derives its accessible name, clobbering an authored one (measured 2026-09-02)
 

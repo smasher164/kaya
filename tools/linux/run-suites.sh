@@ -268,6 +268,42 @@ python3 /work/tools/linux/persist-leg.py --self-test || exit 1
 # an activatable entry with no service file, and a service file carrying
 # `--gapplication-service` all pass every warm assertion on this lane.
 python3 /work/tools/linux/link-leg.py --self-test || exit 1
+
+# A LEG WHOSE GTK PRINTED `natural size must be >= min size` IS RED: the
+# layout GTK clamps to is not the one kaya asked for, and the legs stayed
+# green through twenty of them on the tasks scene (docs/traps.md, the
+# height-for-width entry). Read off the leg's own log, after its verdict.
+gtk_layout_clean() { # leg-log
+    local kaya_hits
+    kaya_hits="$(grep -c 'natural size must be >= min size' "$1" || true)"
+    if [ "${kaya_hits:-0}" != "0" ]; then
+        echo "kaya: GTK reported a widget whose natural size fell below its minimum" \
+            "($kaya_hits line(s) above) — a layout GTK clamps to is not the one" \
+            "kaya asked for; the flex boxes are height-for-width since 2026-09-11" \
+            "and this is the wall (docs/traps.md)"
+        return 1
+    fi
+    return 0
+}
+gtk_layout_clean_selftest() {
+    local kaya_f
+    kaya_f="$(mktemp)"
+    printf 'noise\n(tasks:1): Gtk-WARNING **: 00:00:00.000: GtkBox 0x1 (box) reported min width 2 and natural width 1 in measure() with for_size=1; natural size must be >= min size\n' >"$kaya_f"
+    if gtk_layout_clean "$kaya_f" >/dev/null; then
+        echo "linux: SELF-TEST FAILED — the planted natural-size warning was not refused" >&2
+        rm -f "$kaya_f"
+        exit 1
+    fi
+    printf 'noise\n' >"$kaya_f"
+    if ! gtk_layout_clean "$kaya_f" >/dev/null; then
+        echo "linux: SELF-TEST FAILED — a clean leg log was refused" >&2
+        rm -f "$kaya_f"
+        exit 1
+    fi
+    rm -f "$kaya_f"
+    echo "linux: the natural-size guard refused the planted warning and passed a clean log"
+}
+gtk_layout_clean_selftest
 # THE LEGS THAT RUN AS THE ONLY INPUT-DRIVING LEG ON THE HOST (tools/lib/
 # exclusive.py): kaya's own x11 drag in the witness legs, three sightings
 # under a matrix (docs/deferred.md), and the wayland pastes.
@@ -340,7 +376,8 @@ run() {
         kaya_exclusive_hold_begin linux "$name-$proto"
         (
             local t0=$SECONDS
-            if run_one "$proto" "$name" "$@" >"$LEGS_DIR/$name-$proto.log" 2>&1; then
+            if run_one "$proto" "$name" "$@" >"$LEGS_DIR/$name-$proto.log" 2>&1 \
+                && gtk_layout_clean "$LEGS_DIR/$name-$proto.log" >>"$LEGS_DIR/$name-$proto.log"; then
                 echo PASS >"$LEGS_DIR/$name-$proto.verdict"
             else
                 echo FAIL >"$LEGS_DIR/$name-$proto.verdict"
@@ -370,7 +407,8 @@ run() {
     fi
     (
         local t0=$SECONDS
-        if run_one "$proto" "$name" "$@" >"$LEGS_DIR/$name-$proto.log" 2>&1; then
+        if run_one "$proto" "$name" "$@" >"$LEGS_DIR/$name-$proto.log" 2>&1 \
+            && gtk_layout_clean "$LEGS_DIR/$name-$proto.log" >>"$LEGS_DIR/$name-$proto.log"; then
             echo PASS >"$LEGS_DIR/$name-$proto.verdict"
         else
             echo FAIL >"$LEGS_DIR/$name-$proto.verdict"

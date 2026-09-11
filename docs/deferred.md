@@ -11744,7 +11744,7 @@ HRESULT, with `Layout cycle detected` above it — which is on
 docs/traps.md beside the first; the stamp trace it needed
 (`KAYA_WINUI_STAMP_TRACE=1`) stays as the instrument.
 
-## BUG — GTK: twenty `Gtk-WARNING … natural size must be >= min size` lines on the tasks scene, from kaya's own FlexLayout::measure (found 2026-09-07)
+## ~~BUG — GTK: twenty `Gtk-WARNING … natural size must be >= min size` lines on the tasks scene, from kaya's own FlexLayout::measure (found 2026-09-07)~~ FIXED 2026-09-11 AT THE CAUSE, WHICH WAS NOT THE ONE NAMED: a trace inside kaya's flex measure never fired and the backtrace at the first warning under G_DEBUG=fatal-warnings had no kaya frame — the reporters were libadwaita's own GtkBoxLayout boxes asked for width-for-height at a height below their natural, by kaya's flex allocate measuring a row's children at the allocated height. The flex layout declares height-for-width and asks widths at -1 now (crates/kaya/src/gtk.rs), zero warnings on the tasks, layout, grow, grid and sizepolicy scenes, and tools/linux/run-suites.sh fails any leg whose log carries the line, with a planted-line self-test at lane start (docs/traps.md)
 KEY: natural size must be >= min size, Gtk-WARNING, FlexLayout::measure, gtk flex measure, tasks scene gtk warnings
 
 Found while building the S2 GTK arms: the tasks scene under the lane's

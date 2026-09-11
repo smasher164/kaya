@@ -375,7 +375,14 @@ BUDGETS = {
     # check-app-identity's plist clause (41s) — and the two S4 matrices read
     # 242 and 455 (the four-wide sweep's slowest gate, check-table-tier at
     # 213s, beside three other swift compiles). 500 is 1.1x over the pair.
-    "gates": 500,
+    # 600 since 2026-09-11: the sweep starts when android ends, and on a
+    # matrix where android ended at 701s beside four lanes running 1100-
+    # 1200s the sweep read 513 — check-table-tier 275s against 40s the
+    # matrix before, every swift-compiling gate 5-7x slower, the rest 2-3x,
+    # which is load and not kind (the six sweeps that day read 403, 260,
+    # 262, 481, 432 and 513). 600 is 1.17x over it; the sweep yields the
+    # token, so the netting above cannot help it.
+    "gates": 600,
 }
 
 if MODE == "parallel":

@@ -18,7 +18,18 @@
 $ErrorActionPreference = "Stop"
 $log = $env:KAYA_TC_LOG
 if (-not $log) { $log = "C:\Users\akhil\kaya-tc\prove-centre.txt" }
-function Say($m) { Add-Content -Path $log -Value $m }
+# THE LOG IS APPENDED UNDER A READER: the runner polls prove.txt with
+# `type` every two seconds, and one append landing on a read threw
+# "Stream was not readable" under $ErrorActionPreference Stop, which ended
+# the sweep at one AIM line (2026-09-11, the 1-of-11 reading; docs/traps.md).
+# An append retries through the reader's window; a line that cannot be
+# written after two seconds is a throw with the line in it.
+function Say($m) {
+  for ($try = 0; $try -lt 40; $try++) {
+    try { Add-Content -Path $log -Value $m; return } catch { Start-Sleep -Milliseconds 50 }
+  }
+  throw ("Say: could not append to " + $log + " after 40 tries: " + $m)
+}
 
 Add-Type @"
 using System;

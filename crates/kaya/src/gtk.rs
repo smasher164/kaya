@@ -1168,12 +1168,23 @@ mod flex {
     }
 
     impl LayoutManagerImpl for FlexLayoutInner {
+        // HEIGHT-FOR-WIDTH, GTK's box convention: a width is asked at -1
+        // and a height for a width. A flex box that passed its height
+        // down as `for_size` on a width query had libadwaita's row boxes
+        // report min above natural (twenty Gtk-WARNINGs on the tasks
+        // scene; docs/traps.md), because a wrapping label squeezed below
+        // its natural height is WIDER at its minimum than at its natural.
+        fn request_mode(&self, _widget: &gtk4::Widget) -> gtk4::SizeRequestMode {
+            gtk4::SizeRequestMode::HeightForWidth
+        }
+
         fn measure(
             &self,
             widget: &gtk4::Widget,
             orientation: gtk4::Orientation,
             for_size: i32,
         ) -> (i32, i32, i32, i32) {
+            let for_size = if orientation == gtk4::Orientation::Horizontal { -1 } else { for_size };
             let (mut minimum, mut natural) = (0, 0);
             let mut main_children = Vec::new();
             let mut child = widget.first_child();
@@ -1215,7 +1226,10 @@ mod flex {
                         // consulted: the contract is flex-basis 0.
                         0
                     } else {
-                        c.measure(self.orientation.get(), cross_total).1
+                        // Height-for-width (request_mode above): a row's
+                        // child is asked its width at -1, a column's its
+                        // height at the column's width.
+                        c.measure(self.orientation.get(), if vertical { cross_total } else { -1 }).1
                     };
                     children.push((c.clone(), weight, natural));
                 }
