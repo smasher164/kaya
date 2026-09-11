@@ -450,6 +450,19 @@ built, because there is no GPU frame to present. The plan's research
 stands as the record of how it would be done if a canvas ever needs it,
 and the probe is a `cargo run` away.
 
+The maintainer's follow-up, whether slice 3's presented surface (no
+readback) would have changed the verdict, is measured in the same
+record: the pipelined, no-readback shape loses too, and the fill-heavy
+case that a GPU fine stage exists for is where the hybrid's own CPU
+half becomes the bottleneck (10ms of strips at 800 full-screen fills
+against vello_cpu's whole 5ms threaded frame). Only the all-GPU
+classic vello escapes that, and it is the experimental one. The
+chicken-and-egg is real in principle and not yet in practice: 800
+translucent full-screen fills per frame at phone resolution sit at a
+third of the budget on threads, and the trigger for revisiting is a
+canvas that misses that budget on a phone-class core, which is a
+measurement rather than a feeling.
+
 What survives from slice 2 is the threads: above about a megapixel, 8
 workers on a reused context are 1.7-2.5x faster than one, and their
 bytes equal the single-threaded bytes in every cell measured. The

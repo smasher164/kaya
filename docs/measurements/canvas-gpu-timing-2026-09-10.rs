@@ -248,8 +248,71 @@ fn breakdown() {
     }
 }
 
+/// The fill-heavy case: `n` large overlapping quads, each covering about
+/// 60% of the box, half of them the translucent series fill so every pixel
+/// blends many times — the shape a GPU fine stage scales on.
+fn big_fills(n: usize) -> Drawing {
+    let mut d = D(Vec::new()); let mut seed: u64 = 0x1234_5678_9ABC_DEF1;
+    d.m(0.0, 0.0).l(800.0, 0.0).l(800.0, 500.0).l(0.0, 500.0).close().fill(Paint::Ground);
+    for i in 0..n {
+        seed ^= seed << 13; seed ^= seed >> 7; seed ^= seed << 17;
+        let cx = 200.0 + (seed % 400) as f64; let cy = 120.0 + ((seed >> 20) % 260) as f64;
+        let a = ((seed >> 40) % 360) as f64 * std::f64::consts::PI / 180.0;
+        let (hw, hh) = (310.0, 190.0);
+        for (k, (x, y)) in [(-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)].iter().enumerate() {
+            let (rx, ry) = (cx + x * a.cos() - y * a.sin(), cy + x * a.sin() + y * a.cos());
+            if k == 0 { d.m(rx, ry); } else { d.l(rx, ry); }
+        }
+        d.close().fill(if i % 2 == 0 { Paint::SeriesFill } else if i % 4 == 1 { Paint::Grid } else { Paint::Series });
+    }
+    Drawing { name: format!("{n} big fills"), viewbox: (800.0, 500.0), ops: d.0 }
+}
+
+fn fills() {
+    let g = gpu();
+    let threads = (std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1).saturating_sub(1)).min(8) as u16;
+    println!("FILL-HEAVY FRAMES at phone size 1200x2400 (2.88 Mpx) and desk 1600x1000; median of 15 after 3 warm-ups; burst = 20 frames in flight, one wait");
+    println!("{:<16} {:<16} {:>9} {:>9} {:>11} {:>13} {:>12}", "drawing", "track", "cpu 1T", "cpu MT", "gpu frame", "gpu burst/fr", "strips (cpu)");
+    for n in [10usize, 50, 200, 800] {
+        let d = big_fills(n);
+        for (tname, track) in [("phone 1200x2400", (1200.0, 2400.0)), ("desk 1600x1000", (1600.0, 1000.0))] {
+            let (w, h) = (track.0 as u16, track.1 as u16);
+            let pixels = usize::from(w) * usize::from(h);
+            let mut ctx1 = RenderContext::new_with(w, h, RenderSettings { level: Level::new(), num_threads: 0 });
+            let mut buf = vec![0u8; pixels * 4]; let mut t1 = Vec::new();
+            for i in 0..18 { let t = Instant::now(); ctx1.reset(); walk(&d, track, &mut ctx1); ctx1.flush(); ctx1.render(PixmapMut::new(w, h, &mut buf).unwrap(), &mut Resources::new()); if i >= 3 { t1.push(t.elapsed().as_secs_f64() * 1000.0); } }
+            let mut ctxm = RenderContext::new_with(w, h, RenderSettings { level: Level::new(), num_threads: threads });
+            let mut tm = Vec::new();
+            for i in 0..18 { let t = Instant::now(); ctxm.reset(); walk(&d, track, &mut ctxm); ctxm.flush(); ctxm.render(PixmapMut::new(w, h, &mut buf).unwrap(), &mut Resources::new()); if i >= 3 { tm.push(t.elapsed().as_secs_f64() * 1000.0); } }
+            let texture = g.device.create_texture(&wgpu::TextureDescriptor { label: None, size: wgpu::Extent3d { width: w.into(), height: h.into(), depth_or_array_layers: 1 }, mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2, format: wgpu::TextureFormat::Rgba8Unorm, usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC, view_formats: &[] });
+            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            let (mut renderer, mut resources) = vello_hybrid::Renderer::new(&g.device, &vello_hybrid::RenderTargetConfig { format: texture.format(), width: w.into(), height: h.into() });
+            let mut scene = vello_hybrid::Scene::new_with(w, h, Level::new());
+            let mut tf = Vec::new(); let mut ts = Vec::new();
+            for i in 0..18 {
+                let t0 = Instant::now(); scene.reset(); walk(&d, track, &mut scene); let a = t0.elapsed().as_secs_f64() * 1000.0;
+                let mut encoder = g.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+                renderer.render(&scene, &mut resources, &g.device, &g.queue, &mut encoder, &vello_hybrid::RenderSize { width: w.into(), height: h.into() }, &view, &vello_hybrid::TextureBindings::new()).unwrap();
+                g.queue.submit([encoder.finish()]); g.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+                if i >= 3 { tf.push(t0.elapsed().as_secs_f64() * 1000.0); ts.push(a); }
+            }
+            let tb = Instant::now();
+            for _ in 0..20 {
+                scene.reset(); walk(&d, track, &mut scene);
+                let mut encoder = g.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+                renderer.render(&scene, &mut resources, &g.device, &g.queue, &mut encoder, &vello_hybrid::RenderSize { width: w.into(), height: h.into() }, &view, &vello_hybrid::TextureBindings::new()).unwrap();
+                g.queue.submit([encoder.finish()]);
+            }
+            g.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+            let burst = tb.elapsed().as_secs_f64() * 1000.0 / 20.0;
+            println!("{:<16} {:<16} {:>7.2}ms {:>7.2}ms {:>9.2}ms {:>11.2}ms {:>10.2}ms", d.name, tname, median(t1), median(tm), median(tf), burst, median(ts));
+        }
+    }
+}
+
 fn main() {
     if std::env::args().nth(1).as_deref() == Some("breakdown") { breakdown(); return; }
+    if std::env::args().nth(1).as_deref() == Some("fills") { fills(); return; }
     let threads = (std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1).saturating_sub(1)).min(8) as u16;
     let g = gpu();
     println!("host: {} threads available; vello_cpu MT uses {threads}; Level::new() = {:?}; GPU adapter {:?} via {}", std::thread::available_parallelism().map(|n| n.get()).unwrap_or(0), Level::new(), g.adapter_name, g.backend);

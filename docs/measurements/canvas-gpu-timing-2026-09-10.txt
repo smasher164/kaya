@@ -133,3 +133,49 @@ the GPU scales on — large overlapping fills, gradients, images, blend
 layers, tens of thousands of paths — not more frames; kaya's canvases
 are hundreds of ops, and a presented surface would hide the latency
 without changing which side finishes first.
+
+THE FILL-HEAVY CASE, WHICH IS THE CASE THE GPU IS FOR
+-----------------------------------------------------
+Taken on the maintainer's next question: is this a chicken-and-egg,
+where the heavy canvases never get written because there is no GPU
+path, and would the plan's slice 3 (a presented surface, no readback)
+have changed the verdict? Scenes of N large overlapping quads, each
+covering ~60% of the box and half of them the translucent series fill
+so every pixel blends many times — the shape a GPU fine stage scales on
+and a CPU fine stage does not — at kaya's own paint vocabulary (solid
+colours; no gradients, images or blurs exist in it). `gpu burst/fr` is
+the presented-surface shape: 20 frames in flight, one wait, no readback.
+
+    drawing          track               cpu 1T    cpu MT   gpu frame  gpu burst/fr strips (cpu)
+    10 big fills     phone 1200x2400     0.61ms    0.41ms      1.65ms        0.42ms       0.14ms
+    10 big fills     desk 1600x1000      0.52ms    0.35ms      1.63ms        0.43ms       0.12ms
+    50 big fills     phone 1200x2400     1.51ms    0.61ms      2.35ms        1.04ms       0.60ms
+    50 big fills     desk 1600x1000      1.30ms    0.53ms      2.31ms        1.00ms       0.53ms
+    200 big fills    phone 1200x2400     4.96ms    1.45ms      6.14ms        3.87ms       2.48ms
+    200 big fills    desk 1600x1000      4.66ms    1.45ms      6.26ms        4.21ms       2.39ms
+    800 big fills    phone 1200x2400    18.77ms    5.10ms     18.49ms       15.28ms      10.16ms
+    800 big fills    desk 1600x1000     17.51ms    4.73ms     18.83ms       13.73ms       9.30ms
+
+Two readings. First, vello_cpu on 8 threads draws 800 full-screen
+translucent fills at phone resolution in 5.1ms, a third of the 16.7ms
+frame budget, and that is far beyond anything a UI canvas draws, so the
+egg is large before any GPU is needed. Second, and the reason the
+verdict does not flip even in the presented shape: THE HYBRID'S CPU
+HALF SCALES WITH THE SCENE TOO — its strip generation alone is 10.2ms
+at 800 fills, twice vello_cpu's whole threaded frame — so the hybrid is
+CPU-bound exactly where a GPU was supposed to help, and pipelining
+cannot hide a cost that is on the CPU. At every N the burst figure is
+above cpu MT (0.42 vs 0.41 at 10 fills, 15.3 vs 5.1 at 800). The
+renderer that escapes this is the ALL-GPU one, classic `vello`
+(compute shaders for flattening and binning as well as fine), which
+the vello project keeps under research/ and calls experimental, needs
+compute (no GL ES, no WebGL2), and is what to measure if a canvas ever
+outgrows vello_cpu on threads; the presentation mechanisms in
+docs/canvas-gpu-plan.md §5 apply to it unchanged, since either
+renderer ends in a wgpu texture.
+
+The caveat that stands from §15.3: these are M5 Pro cores. A phone's
+efficiency cores are slower and fewer, so the CPU's frame at 800 fills
+is more like 12-15ms there by the plan's own scaling caution — inside
+budget, and still ahead of a hybrid whose CPU half doubles with it.
+Measure on a phone-class core before believing the ratio.
