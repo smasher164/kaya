@@ -12350,7 +12350,9 @@ sugar (`rich()`, `Document`, `Edit`, `Format`, `set_document`,
 `ctx.document`), the nine generated parsers' arms, and the harness's
 `format`, `expect_runs` and `expect_edit` (docs/rich-text-plan.md §7).
 Pushed as 2ec2748c; the matrix on that tree ALL PASS on all five lanes and
-58 gates, 1,760 legs in 1336s. Every backend refuses the two apply records
+58 gates, 1,760 legs in 1336s. The breadth pushed as d1f23d22; the matrix on
+that tree ALL PASS on all five lanes and 59 gates, 1,773 legs in 1285s, the
+richtext scene on every lane and in all nine languages on the mac. Every backend refuses the two apply records
 through its depth stub until its arm lands:
 
 - ~~**DEPTH STUB: richtext on swiftui/macos**~~ — LANDED 2026-09-11: the NSTextView arm (the storage unpinned for `isRichText` alone, kaya's own attribute keys with the display derived from them, the corroboration and selection reports, the composition and paste sources, pending typing attributes), the `format_text` record, and the `format`/`expect_runs`/`expect_edit` verbs; `allowsUndo` as R6's lever is the undo step's.

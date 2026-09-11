@@ -362,6 +362,9 @@ not a diagnostic.
   in all nine wire files (docs/traps.md), and the Haskell wire reader
   decodes UTF-8 (`wireUtf8`).
 
+Pushed as d1f23d22; the matrix on that tree ALL PASS on all five lanes and
+59 gates, 1,773 legs in 1285s.
+
 Open after the breadth: the marked-text divergence on plain Compose fields;
 a shared scene step that round-trips non-ASCII text through a guest's label
 (the Haskell decoder's wall); the template zone (`rich` is a live-zone
