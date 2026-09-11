@@ -40,10 +40,14 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
 '''
 
-# The one depth the tree has below tools/: a runner in tools/<dir>/
-# reaches the same prelude one parent up.
+# The depths the tree has below tools/: a runner in tools/<dir>/ reaches
+# the same prelude one parent up, and a probe tool in tools/<dir>/<tool>/
+# (tools/ios/gpuprobe/build.py, 2026-09-10) two parents up.
 HEADER_SUB = HEADER.replace(".resolve().parent / ",
                             ".resolve().parent.parent / ")
+HEADER_SUB2 = HEADER.replace(".resolve().parent / ",
+                             ".resolve().parent.parent.parent / ")
+HEADERS = {1: HEADER, 2: HEADER_SUB, 3: HEADER_SUB2}
 
 
 # Rule 6's exemptions. Every entry must name a file that EXISTS — an
@@ -82,7 +86,7 @@ def converted():
     out = {}
     for p in sorted(gate.walk("*.py", under="tools")):
         text = p.read_text(encoding="utf-8")
-        if text.startswith(HEADER) or text.startswith(HEADER_SUB):
+        if any(text.startswith(h) for h in HEADERS.values()):
             out[str(p.relative_to(ROOT))] = text
     lib = ROOT / "tools/lib/kaya_gate.py"
     out["tools/lib/kaya_gate.py"] = lib.read_text(encoding="utf-8")
@@ -265,7 +269,7 @@ def census(files):
         # dies at the wrong moment. The prelude carries neither header.
         if path != "tools/lib/kaya_gate.py":
             depth = path.count("/")
-            want_header = HEADER if depth == 1 else HEADER_SUB
+            want_header = HEADERS.get(depth, HEADER_SUB2)
             if not text.startswith(want_header):
                 bad.append(f"{path}: does not open with the exact prelude "
                            f"header for its depth. Six variants of the "
