@@ -386,6 +386,9 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
      * remap is kaya's and the display is derived from this on each change.
      */
     var richRuns: List<KayaRichRun> = emptyList()
+    /** The caret the pending attributes were armed at: only an insertion there
+     *  takes them (ruling 2, 2026-09-14; scene.rs's pending_at). */
+    var richPendingAt = -1
 
     /** Bumped whenever [richRuns] moves; the OutputTransformation is
      * remembered on it, so a run change re-derives the display. */
@@ -9995,8 +9998,10 @@ internal fun kayaRichTypedRuns(node: KayaNode, text: String, start: Int, inserte
         else start - 1
     val attrs = if (before < 0) LinkedHashMap() else kayaRichAttrsAt(node.richRuns, before)
     attrs.remove("link")
-    attrs.putAll(node.richPendingOn)
-    for (name in node.richPendingOff) attrs.remove(name)
+    if (start == node.richPendingAt) {
+        attrs.putAll(node.richPendingOn)
+        for (name in node.richPendingOff) attrs.remove(name)
+    }
     // R10: at the END of a heading paragraph the block stops at the
     // insertion's first newline (and is dropped when that newline is the
     // first character); a quote or code block continues, a Return INSIDE a
@@ -10218,6 +10223,11 @@ internal fun kayaFormatSelection(
         to = paragraph.second
     }
     if (from == to) {
+        if (node.richPendingAt != from) {
+            node.richPendingOn.clear()
+            node.richPendingOff.clear()
+        }
+        node.richPendingAt = from
         if (off) {
             node.richPendingOn.remove(name)
             node.richPendingOff.add(name)

@@ -12396,14 +12396,19 @@ THE REVIEW PAGE'S RULINGS, taken 2026-09-14 (the maintainer: "the rulings
 seem fine except im worried about the carve out" — the carve-out then ruled
 as R10 after five probes): (1) the general `format(name, value)` form stays
 the contract; named acts (`bold(editor)`…) are a later sugar pass; (2) a
-PENDING attribute is DROPPED when the caret moves — owed: the core clears
-`pending_on`/`pending_off` on a selection report that moves the caret, each
-arm's own pending record with it, a scene step (arm bold, move the caret,
-type: plain); (3) `Edit` carries its `source` — owed in all nine bindings'
+PENDING attribute is DROPPED when the caret moves — BUILT 2026-09-14 as the
+POSITIONAL rule (docs/rich-text-plan.md §12): the core and every arm keep the
+caret the attribute was armed at, only an insertion AT that caret takes it,
+and any insertion spends it; the first draft cleared it on a selection report
+that moved the caret and dropped the arm it was about to spend, because every
+arm reports the keystroke's own caret move BEFORE the text (docs/traps.md).
+Unit test a_pending_attribute_is_dropped_when_the_caret_moves; the scene arms
+italic inside a paragraph and types at the end, on all five lanes; (3) `Edit`
+carries its `source` — owed in all nine bindings'
 sugar (a binding-surface change: do/can't/defer per language, the wire
 already carries it); (4) R10, built; (5) the code run's ground, the quote's
-rule and the link door are a polish pass. KEY: pending dropped on caret
-move, Edit.source, named format acts, rich polish pass.
+rule and the link door are a polish pass. KEY: pending_at, Edit.source,
+named format acts, rich polish pass.
 
 Found by the editor's formatting bar (2026-09-14, docs/traps.md): only the
 CLICK door drops a torn-down copy's tag in the core; toggled, set_value,

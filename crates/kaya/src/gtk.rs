@@ -460,6 +460,9 @@ const RICH_LINK_PREFIX: &str = "kaya-rich-link-";
 struct RichPending {
     on: Vec<String>,
     off: std::collections::BTreeSet<String>,
+    /// The caret it was armed at: only an insertion there takes it (ruling 2,
+    /// 2026-09-14; scene.rs's pending_at).
+    at: i32,
 }
 
 /// The kaya attribute a tag stands for; None for every tag that is not
@@ -642,7 +645,11 @@ fn inherit_rich_tags(
     use gtk4::prelude::TextBufferExt;
     let start = buffer.iter_at_offset(at);
     let end = buffer.iter_at_offset(at + len);
-    let armed = pending.borrow_mut().remove(&id).unwrap_or_default();
+    let armed = pending
+        .borrow_mut()
+        .remove(&id)
+        .filter(|armed| armed.at == at)
+        .unwrap_or_default();
     let mut want: Vec<(gtk4::TextTag, String)> = Vec::new();
     // The block kind the inserted text would wear, last writer winning, as the
     // core's attribute map has it.
@@ -789,12 +796,14 @@ fn rich_format_selection(
     let (from, to) = (start.offset(), stop.offset());
     let pending = core.rich_pending.clone();
     if from == to {
-        pending
-            .borrow_mut()
-            .entry(id.0)
-            .or_default()
-            .on
-            .retain(|tag| rich_tag_attr_name(tag).as_deref() != Some(name));
+        {
+            let mut map = pending.borrow_mut();
+            let slot = map.entry(id.0).or_default();
+            if slot.at != from {
+                *slot = RichPending { at: from, ..Default::default() };
+            }
+            slot.on.retain(|tag| rich_tag_attr_name(tag).as_deref() != Some(name));
+        }
         if removed {
             pending.borrow_mut().entry(id.0).or_default().off.insert(name.to_owned());
         } else {

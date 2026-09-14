@@ -19253,6 +19253,9 @@ private final class KayaTextView: NSTextView {
     /// next insertion — the core's own rule (docs/rich-text-plan.md R4).
     var pendingOn: [NSAttributedString.Key: String] = [:]
     var pendingOff: Set<NSAttributedString.Key> = []
+    /// Where the pending attributes were armed: only an insertion at that
+    /// caret takes them (ruling 2, 2026-09-14; scene.rs's pending_at).
+    var pendingAt: Int?
 
     /// A composition's start is reported here (its end in textDidChange):
     /// `setMarkedText` notifies no delegate (docs/ranges-plan.md D4).
@@ -19494,10 +19497,11 @@ private struct KayaMacTextarea: NSViewRepresentable {
                 // R10 is decided on the text this Return has not landed in yet;
                 // textDidChange strips what it names.
                 let own = textView as? KayaTextView
+                let armed = own?.pendingAt == affected.location
                 returnStrip = textView.textStorage.map {
                     kayaReturnStrip(
-                        $0, affected, replacement, pendingOn: own?.pendingOn ?? [:],
-                        pendingOff: own?.pendingOff ?? [])
+                        $0, affected, replacement, pendingOn: armed ? own?.pendingOn ?? [:] : [:],
+                        pendingOff: armed ? own?.pendingOff ?? [] : [])
                 } ?? nil
             }
             return true
@@ -19528,7 +19532,7 @@ private struct KayaMacTextarea: NSViewRepresentable {
             var attrs = newTypingAttributes
             attrs.removeValue(forKey: kayaRichKey("link"))
             attrs.removeValue(forKey: .link)
-            if let view = textView as? KayaTextView {
+            if let view = textView as? KayaTextView, view.pendingAt == view.selectedRange().location {
                 for (key, value) in view.pendingOn { attrs[key] = value }
                 for key in view.pendingOff { attrs.removeValue(forKey: key) }
             }
@@ -19904,6 +19908,11 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
     }
     if range.length == 0 {
         var attrs = view.typingAttributes
+        if view.pendingAt != range.location {
+            view.pendingOn.removeAll()
+            view.pendingOff.removeAll()
+        }
+        view.pendingAt = range.location
         if off {
             attrs.removeValue(forKey: key)
             view.pendingOn.removeValue(forKey: key)
@@ -20064,9 +20073,11 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
                 // R10 is decided on the text this Return has not landed in yet;
                 // textViewDidChange strips what it names.
                 let own = textView as? KayaTextView
+                let armed = own?.pendingAt == affected.location
                 returnStrip = kayaReturnStrip(
-                    textView.textStorage, affected, replacement, pendingOn: own?.pendingOn ?? [:],
-                    pendingOff: own?.pendingOff ?? [])
+                    textView.textStorage, affected, replacement,
+                    pendingOn: armed ? own?.pendingOn ?? [:] : [:],
+                    pendingOff: armed ? own?.pendingOff ?? [] : [])
                 return true
             }
 
@@ -20255,6 +20266,7 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
         /// UIKit re-derives them from the caret's neighbour and spent by the
         /// next insertion — the core's own rule (docs/rich-text-plan.md R4).
         var pendingOn: [NSAttributedString.Key: String] = [:]
+        var pendingAt: Int?
         var pendingOff: Set<NSAttributedString.Key> = []
 
         /// A composition's start is reported here (its end in
@@ -20407,8 +20419,10 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
             }
         }
         attrs.removeValue(forKey: .link)
-        for (key, value) in view.pendingOn { attrs[key] = value }
-        for key in view.pendingOff { attrs.removeValue(forKey: key) }
+        if view.pendingAt == view.selectedRange.location {
+            for (key, value) in view.pendingOn { attrs[key] = value }
+            for key in view.pendingOff { attrs.removeValue(forKey: key) }
+        }
         view.typingAttributes = attrs
     }
 
@@ -20488,6 +20502,11 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
         }
         if range.length == 0 {
             var attrs = view.typingAttributes
+            if view.pendingAt != range.location {
+                view.pendingOn.removeAll()
+                view.pendingOff.removeAll()
+            }
+            view.pendingAt = range.location
             if off {
                 attrs.removeValue(forKey: key)
                 view.pendingOn.removeValue(forKey: key)

@@ -71,14 +71,21 @@ type "z"
 expect_edit textarea#0 "32:32 <z> user [0:1 bold]"
 expect_runs textarea#0 "0:17 block=heading1|8:11 italic|12:17 link=https://kaya.dev|18:31 block=heading2|30:33 bold"
 expect label#1 "0:17 block=heading1|8:11 italic|12:17 link=https://kaya.dev|18:31 block=heading2|30:33 bold"
+# A PENDING ATTRIBUTE APPLIES ONLY AT THE CARET IT WAS ARMED AT (the review
+# page's ruling 2): italic armed inside the first paragraph, and the next
+# keystroke, at the end, carries only what it inherits there.
+format textarea#0 12:12 italic
+type "w"
+expect_edit textarea#0 "33:33 <w> user [0:1 bold]"
+expect_runs textarea#0 "0:17 block=heading1|8:11 italic|12:17 link=https://kaya.dev|18:31 block=heading2|30:34 bold"
 # R5: an edit arriving mid-composition WAITS. The marked text is the
 # widget's alone — displayed, uncommitted, invisible to the app and to the
 # core's mirror — and the app's prefix is held, so nothing here moves.
 compose textarea#0 "ab"
-expect_runs textarea#0 "0:17 block=heading1|8:11 italic|12:17 link=https://kaya.dev|18:31 block=heading2|30:33 bold"
+expect_runs textarea#0 "0:17 block=heading1|8:11 italic|12:17 link=https://kaya.dev|18:31 block=heading2|30:34 bold"
 click button#6
-expect_runs textarea#0 "0:17 block=heading1|8:11 italic|12:17 link=https://kaya.dev|18:31 block=heading2|30:33 bold"
+expect_runs textarea#0 "0:17 block=heading1|8:11 italic|12:17 link=https://kaya.dev|18:31 block=heading2|30:34 bold"
 # The app's OWN document takes its edit at once — the binding folds an
 # apply_edit as it sends it — while the widget and the core's mirror take
 # it when the composition ends. The two are two bytes apart until then.
-expect label#1 "2:19 block=heading1|10:13 italic|14:19 link=https://kaya.dev|20:33 block=heading2|32:35 bold"
+expect label#1 "2:19 block=heading1|10:13 italic|14:19 link=https://kaya.dev|20:33 block=heading2|32:36 bold"

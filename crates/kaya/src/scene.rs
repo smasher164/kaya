@@ -1234,9 +1234,12 @@ pub(crate) struct RichDoc {
     /// A live composition: an apply_edit waits (docs/rich-text-plan.md R5).
     composing: bool,
     queued: Vec<(TextRange, String, Vec<TextRun>)>,
-    /// Armed over a collapsed caret; spent by the next insertion.
+    /// Armed over a collapsed caret; spent by the next insertion, and only
+    /// an insertion AT `pending_at` takes it (ruling 2, 2026-09-14: a
+    /// keystroke elsewhere finds nothing armed).
     pending_on: BTreeMap<String, String>,
     pending_off: BTreeSet<String>,
+    pending_at: u64,
     /// The selection the core last heard of; R5's transform moves it.
     selection: TextRange,
     /// One-shot, consumed by the next report.
@@ -1432,11 +1435,13 @@ impl RichDoc {
         }
         let mut attrs = if start == 0 { BTreeMap::new() } else { self.attrs_at(start - 1) };
         attrs.remove("link");
-        for (name, value) in &self.pending_on {
-            attrs.insert(name.clone(), value.clone());
-        }
-        for name in &self.pending_off {
-            attrs.remove(name);
+        if start as u64 == self.pending_at {
+            for (name, value) in &self.pending_on {
+                attrs.insert(name.clone(), value.clone());
+            }
+            for name in &self.pending_off {
+                attrs.remove(name);
+            }
         }
         let heading_ends = attrs.get("block").is_some_and(|kind| kind.starts_with("heading"))
             && (start >= self.text.len() || self.text.as_bytes()[start] == b'\n');
@@ -4735,6 +4740,11 @@ impl Scene {
         let Some(doc) = self.rich.get_mut(&widget) else {
             return;
         };
+        if doc.selection.start != doc.pending_at {
+            doc.pending_on.clear();
+            doc.pending_off.clear();
+        }
+        doc.pending_at = doc.selection.start;
         if on {
             doc.pending_off.remove(name);
             doc.pending_on.insert(name.to_owned(), value.to_owned());
@@ -13274,6 +13284,7 @@ mod tests {
         scene.apply(rich_editor(""));
         scene.apply(vec![set_document("ab", vec![run(0, 2, "bold", "true")])]);
         // Bold pressed OFF with the caret at the end.
+        scene.set_text_selection(WidgetId(1), 2, 2);
         scene.set_text_pending(WidgetId(1), "bold", "", false);
         let edit = scene.note_rich_text(WidgetId(1), "abc").expect("an edit");
         assert!(edit.runs.is_empty(), "the armed OFF beat the inherited bold");
@@ -13456,6 +13467,29 @@ mod tests {
             scene.note_text_formatted(textarea, TextRange::new(4, 7), "block", Some("body"));
         assert_eq!(published.map(|(_, _, v)| v), Some(None));
         assert_eq!(scene.rich_runs_string(textarea).as_deref(), Some(""));
+    }
+
+    /// Ruling 2 (2026-09-14): a pending attribute survives a re-report of the
+    /// same caret and dies when the caret moves.
+    #[test]
+    fn a_pending_attribute_is_dropped_when_the_caret_moves() {
+        let mut scene = Scene::new();
+        scene.apply(rich_editor("ab"));
+        let textarea = WidgetId(1);
+        scene.set_text_selection(textarea, 2, 2);
+        scene.set_text_pending(textarea, "bold", "true", true);
+        // The insertion's own selection report precedes its text report on
+        // every arm; neither moves the arm.
+        scene.set_text_selection(textarea, 3, 3);
+        let edit = scene.note_rich_text(textarea, "abc").unwrap();
+        assert_eq!(spell_runs(&edit.runs), "0:1 bold", "the keystroke at the armed caret takes it");
+        scene.set_text_selection(textarea, 3, 3);
+        scene.set_text_pending(textarea, "italic", "true", true);
+        // Typed ELSEWHERE: the arm is spent by the report and applied to nothing.
+        scene.set_text_selection(textarea, 0, 0);
+        let edit = scene.note_rich_text(textarea, "Xabc").unwrap();
+        assert_eq!(spell_runs(&edit.runs), "", "a keystroke elsewhere finds nothing armed");
+        assert_eq!(scene.note_rich_text(textarea, "Xabcd").map(|e| spell_runs(&e.runs)), Some("0:1 bold".into()));
     }
 
     /// docs/rich-text-plan.md R10: a heading ends at Return, a quote continues,

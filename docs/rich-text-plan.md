@@ -281,8 +281,8 @@ and are recorded here for the review:
   RTF's own attributes never enter (source `paste`). A block act covers
   the selection's paragraphs WITHOUT the trailing newline. Pending typing
   attributes survive AppKit's re-derivation and are spent by the next
-  insertion, the core's rule; a caret moved elsewhere by the user keeps
-  them until then, which most editors do not — a ruling if it matters.
+  insertion, the core's rule; since ruling 2 (§12) only an insertion at the
+  caret they were armed at takes them.
   Not drawn yet: a code run's ground (the highlight ground owns
   `.backgroundColor` on this view) and a quote's rule; a link click takes
   AppKit's default rather than kaya's link door.
@@ -468,6 +468,38 @@ measured it by hand.
 Pushed as 4624552c; the matrix on that tree green on mac, linux, windows and
 android with iOS red on one leg unrelated to the change (the dark canvas
 leg's ink read, on the ledger as a WATCH; green alone with its whole suite).
+
+## 12. Ruling 2 built: a pending attribute is positional (2026-09-14)
+
+The review page asked whether Bold pressed over a collapsed caret should
+survive the caret moving; the maintainer ruled it dropped. The rule as
+built is POSITIONAL rather than keyed on caret moves: the core's RichDoc
+keeps `pending_at`, the caret the attribute was armed at (`set_text_pending`
+reads the selection the arm reported first; arming at a different caret
+clears the earlier arm), `typed_runs` applies the pending map only to an
+insertion whose start IS `pending_at`, and any insertion spends it. Each
+arm keeps the same number beside its own record — `pendingAt` on both
+Apple text views (the typing-attribute re-derivation and the Return strip
+read the pending map only at that caret), `RichPending.at` on GTK
+(`inherit_rich_tags` takes the armed tags only when the insertion offset
+matches), the first field of WinUI's `RICH_PENDING` entry (the momentary
+TOM insertion format; the display itself follows the runs the core
+publishes), `richPendingAt` on Compose's node (`kayaRichTypedRuns`).
+
+Why not "cleared on a selection report that moves the caret", the first
+draft: every arm reports the caret move a keystroke causes BEFORE it
+reports the text — AppKit's `textViewDidChangeSelection` precedes
+`textDidChange`, GTK's `mark-set` precedes `changed`, Compose reads both
+from one snapshot — so the core cleared the arm one report before it
+would have spent it. The mac leg measured it on the scene's own pending
+step: `edit "30:30 <y> user [0:1 block=heading2]"` while the widget held
+`30:31 bold`, and the corroboration wall caught the disagreement on the
+first run. The observable difference from a move-keyed rule is one
+sequence — arm, click elsewhere, click back on the same caret, type —
+which takes the attribute here and drops it in TextEdit; the scene step
+is the one that matters, a keystroke elsewhere (italic armed at byte 12,
+`w` typed at the end carries only what it inherits there), and the unit
+test holds both halves.
 
 ## 5. What this plan does not do
 

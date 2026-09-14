@@ -11181,3 +11181,16 @@ stamped copy is no longer in `stamps`, with a KAYA_DIAG naming the template
 node and key path (capi.rs `stamped_tag_is_live`). The editor scene pins it
 on all five lanes; the other stamped-occurrence doors (toggle, set_value,
 sort, drop) still forward a dead copy's tag and are on the ledger.
+
+**A keystroke's caret move is reported before its text, on every arm
+(2026-09-14).** A rule that clears a rich textarea's pending attribute "when
+the caret moves" clears it on the selection report the keystroke itself
+raises — AppKit's `textViewDidChangeSelection` precedes `textDidChange`,
+GTK's `mark-set` precedes `changed`, Compose reads selection and text from
+one snapshot — so the arm is gone one report before the insertion that
+would have spent it. Measured on the mac richtext leg's own pending step:
+the core's edit read `30:30 <y> user [0:1 block=heading2]` while the widget
+held `30:31 bold`, and `expect_runs`'s corroboration wall failed the step
+naming both. The rule is positional instead (docs/rich-text-plan.md §12):
+the caret the attribute was armed at travels with it, only an insertion
+there takes it, and selection reports never touch it.

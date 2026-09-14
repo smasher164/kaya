@@ -9741,7 +9741,10 @@ thread_local! {
     /// (measured 2026-09-11) and re-derives that format from the character
     /// before the caret whenever the caret moves, so this record is what
     /// re-arms them — the mac's pendingOn/pendingOff, one platform over.
-    static RICH_PENDING: RefCell<HashMap<u64, (BTreeMap<String, String>, BTreeSet<String>)>> =
+    /// Per widget: the caret the pending attributes were armed at — only an
+    /// insertion there takes them (ruling 2, 2026-09-14; scene.rs's
+    /// pending_at) — the attributes on, the attributes off.
+    static RICH_PENDING: RefCell<HashMap<u64, (usize, BTreeMap<String, String>, BTreeSet<String>)>> =
         RefCell::new(HashMap::new());
 }
 
@@ -10053,7 +10056,7 @@ fn rich_arm_typing(field: &RichEditBox, widget: u64, caret: usize) -> windows_co
     let mut attrs = if caret == 0 { BTreeMap::new() } else { rich_attrs_at(&runs, caret - 1) };
     attrs.remove("link");
     RICH_PENDING.with_borrow(|pending| {
-        if let Some((on, off)) = pending.get(&widget) {
+        if let Some((_, on, off)) = pending.get(&widget).filter(|(at, _, _)| *at == caret) {
             for (name, value) in on {
                 attrs.insert(name.clone(), value.clone());
             }
@@ -10207,7 +10210,11 @@ fn rich_format_selection(
         let off = removed || (name == "block" && value == "body");
         if start == end {
             RICH_PENDING.with_borrow_mut(|pending| {
-                let (on, gone) = pending.entry(widget).or_default();
+                let slot = pending.entry(widget).or_insert((start, BTreeMap::new(), BTreeSet::new()));
+                if slot.0 != start {
+                    *slot = (start, BTreeMap::new(), BTreeSet::new());
+                }
+                let (_, on, gone) = slot;
                 if off {
                     on.remove(name);
                     gone.insert(name.to_owned());
