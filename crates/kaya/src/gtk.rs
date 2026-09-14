@@ -818,7 +818,8 @@ fn rich_format_selection(
                 slot.on.push(armed);
             }
         }
-        core.scene.set_text_pending(id, name, value, !removed);
+        let raw = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).to_string();
+        core.scene.set_text_pending(id, name, value, !removed, guest_byte_of(&raw, from));
         return None;
     }
     let raw = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).to_string();

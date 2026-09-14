@@ -297,7 +297,7 @@ pub struct KayaHostApi {
     /// RICH TEXT, presentation side (docs/rich-text-plan.md R4/R5/R9): the
     /// six reports an arm makes and the two reads the harness makes.
     pub text_composing: extern "C" fn(u64, u8),
-    pub text_pending: unsafe extern "C" fn(u64, *const u8, usize, *const u8, usize, u8),
+    pub text_pending: unsafe extern "C" fn(u64, *const u8, usize, *const u8, usize, u8, u64),
     pub text_edit_source: extern "C" fn(u64, u32),
     pub text_reported_edit: extern "C" fn(u64, u64, u64, u64),
     pub text_selection: extern "C" fn(u64, u64, u64),

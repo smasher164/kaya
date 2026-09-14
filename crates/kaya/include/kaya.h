@@ -1501,7 +1501,13 @@ typedef struct KayaHostApi {
    * six reports an arm makes and the two reads the harness makes.
    */
   void (*text_composing)(uint64_t, uint8_t);
-  void (*text_pending)(uint64_t, const uint8_t*, uintptr_t, const uint8_t*, uintptr_t, uint8_t);
+  void (*text_pending)(uint64_t,
+                       const uint8_t*,
+                       uintptr_t,
+                       const uint8_t*,
+                       uintptr_t,
+                       uint8_t,
+                       uint64_t);
   void (*text_edit_source)(uint64_t, uint32_t);
   void (*text_reported_edit)(uint64_t, uint64_t, uint64_t, uint64_t);
   void (*text_selection)(uint64_t, uint64_t, uint64_t);
@@ -2090,7 +2096,8 @@ void kaya_text_pending(uint64_t widget,
                        uintptr_t name_len,
                        const uint8_t *value,
                        uintptr_t value_len,
-                       uint8_t on);
+                       uint8_t on,
+                       uint64_t at);
 
 /**
  * Presentation side: what provoked the next report (KAYA_EDIT_SOURCE_*).

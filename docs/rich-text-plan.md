@@ -473,11 +473,16 @@ leg's ink read, on the ledger as a WATCH; green alone with its whole suite).
 
 The review page asked whether Bold pressed over a collapsed caret should
 survive the caret moving; the maintainer ruled it dropped. The rule as
-built is POSITIONAL rather than keyed on caret moves: the core's RichDoc
-keeps `pending_at`, the caret the attribute was armed at (`set_text_pending`
-reads the selection the arm reported first; arming at a different caret
-clears the earlier arm), `typed_runs` applies the pending map only to an
-insertion whose start IS `pending_at`, and any insertion spends it. Each
+built is POSITIONAL rather than keyed on caret moves: the arm's pending
+call names the caret it arms at (`kaya_text_pending(widget, name, value,
+on, at)`, `at` in bytes, on every arm — the core does NOT read it off its
+last selection report, because GTK's `mark-set` and Compose's snapshot
+deliver that report AFTER the act, and matrix 7's wayland and android
+legs applied an italic armed at byte 12 to the keystroke at 33 while x11
+passed by timing), the core's RichDoc keeps it as `pending_at` (arming at
+a different caret clears the earlier arm), `typed_runs` applies the
+pending map only to an insertion whose start IS `pending_at`, and any
+insertion spends it. Each
 arm keeps the same number beside its own record — `pendingAt` on both
 Apple text views (the typing-attribute re-derivation and the Return strip
 read the pending map only at that caret), `RichPending.at` on GTK

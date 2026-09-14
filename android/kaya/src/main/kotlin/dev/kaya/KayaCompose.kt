@@ -10235,7 +10235,7 @@ internal fun kayaFormatSelection(
             node.richPendingOff.remove(name)
             node.richPendingOn[name] = value
         }
-        KayaPresent.textPending(node.id, name, value, !off)
+        KayaPresent.textPending(node.id, name, value, !off, kayaByteOffset(text, from).toLong())
         return null
     }
     val start = kayaByteOffset(text, from)

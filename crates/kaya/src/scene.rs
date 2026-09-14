@@ -4728,23 +4728,26 @@ impl Scene {
     }
 
 
-    /// Armed over a collapsed caret, spent by the next insertion
-    /// (docs/rich-text-plan.md §2).
+    /// Armed over a collapsed caret at `at` (bytes), spent by the next
+    /// insertion (docs/rich-text-plan.md §2, §12). The arm names the caret
+    /// rather than the core reading its last selection report, which GTK
+    /// and Compose deliver later than the act (docs/traps.md 2026-09-14).
     pub(crate) fn set_text_pending(
         &mut self,
         widget: WidgetId,
         name: &str,
         value: &str,
         on: bool,
+        at: u64,
     ) {
         let Some(doc) = self.rich.get_mut(&widget) else {
             return;
         };
-        if doc.selection.start != doc.pending_at {
+        if at != doc.pending_at {
             doc.pending_on.clear();
             doc.pending_off.clear();
         }
-        doc.pending_at = doc.selection.start;
+        doc.pending_at = at;
         if on {
             doc.pending_off.remove(name);
             doc.pending_on.insert(name.to_owned(), value.to_owned());
@@ -13284,15 +13287,14 @@ mod tests {
         scene.apply(rich_editor(""));
         scene.apply(vec![set_document("ab", vec![run(0, 2, "bold", "true")])]);
         // Bold pressed OFF with the caret at the end.
-        scene.set_text_selection(WidgetId(1), 2, 2);
-        scene.set_text_pending(WidgetId(1), "bold", "", false);
+        scene.set_text_pending(WidgetId(1), "bold", "", false, 2);
         let edit = scene.note_rich_text(WidgetId(1), "abc").expect("an edit");
         assert!(edit.runs.is_empty(), "the armed OFF beat the inherited bold");
         // Spent: 'd' inherits from 'c', which is not bold.
         let edit = scene.note_rich_text(WidgetId(1), "abcd").expect("an edit");
         assert!(edit.runs.is_empty());
         // Armed ON with a value: italic follows the insertion.
-        scene.set_text_pending(WidgetId(1), "italic", "true", true);
+        scene.set_text_pending(WidgetId(1), "italic", "true", true, 4);
         let edit = scene.note_rich_text(WidgetId(1), "abcde").expect("an edit");
         assert_eq!(edit.runs, vec![run(0, 1, "italic", "true")]);
     }
@@ -13476,20 +13478,25 @@ mod tests {
         let mut scene = Scene::new();
         scene.apply(rich_editor("ab"));
         let textarea = WidgetId(1);
-        scene.set_text_selection(textarea, 2, 2);
-        scene.set_text_pending(textarea, "bold", "true", true);
+        scene.set_text_pending(textarea, "bold", "true", true, 2);
         // The insertion's own selection report precedes its text report on
         // every arm; neither moves the arm.
         scene.set_text_selection(textarea, 3, 3);
         let edit = scene.note_rich_text(textarea, "abc").unwrap();
         assert_eq!(spell_runs(&edit.runs), "0:1 bold", "the keystroke at the armed caret takes it");
-        scene.set_text_selection(textarea, 3, 3);
-        scene.set_text_pending(textarea, "italic", "true", true);
-        // Typed ELSEWHERE: the arm is spent by the report and applied to nothing.
+        // The act names its caret; the selection report GTK and Compose
+        // deliver later than the act (docs/traps.md 2026-09-14) decides nothing.
         scene.set_text_selection(textarea, 0, 0);
-        let edit = scene.note_rich_text(textarea, "Xabc").unwrap();
+        scene.set_text_pending(textarea, "italic", "true", true, 3);
+        let edit = scene.note_rich_text(textarea, "abcd").unwrap();
+        assert_eq!(spell_runs(&edit.runs), "0:1 bold|0:1 italic", "the act's caret, not the report's");
+        // Typed ELSEWHERE: the arm is spent by the report and applied to nothing.
+        scene.set_text_pending(textarea, "underline", "true", true, 4);
+        scene.set_text_selection(textarea, 0, 0);
+        let edit = scene.note_rich_text(textarea, "Xabcd").unwrap();
         assert_eq!(spell_runs(&edit.runs), "", "a keystroke elsewhere finds nothing armed");
-        assert_eq!(scene.note_rich_text(textarea, "Xabcd").map(|e| spell_runs(&e.runs)), Some("0:1 bold".into()));
+        let edit = scene.note_rich_text(textarea, "Xabcde").unwrap();
+        assert_eq!(spell_runs(&edit.runs), "0:1 bold|0:1 italic", "spent: the next keystroke only inherits");
     }
 
     /// docs/rich-text-plan.md R10: a heading ends at Return, a quote continues,

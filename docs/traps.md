@@ -11194,3 +11194,18 @@ held `30:31 bold`, and `expect_runs`'s corroboration wall failed the step
 naming both. The rule is positional instead (docs/rich-text-plan.md §12):
 the caret the attribute was armed at travels with it, only an insertion
 there takes it, and selection reports never touch it.
+
+**GTK and Compose report a selection AFTER the act that used it
+(2026-09-14).** GTK's `mark-set` handler and Compose's selection snapshot
+reach the core on the next idle turn, so a harness `format` over a collapsed
+caret runs its act while the core still holds the PREVIOUS selection
+report; the mac reports synchronously from the delegate and WinUI from
+`SelectionChanged` before the verb returns. A core rule that took the armed
+caret from its last report armed at the old caret: matrix 7's wayland and
+android richtext legs applied an italic armed at byte 12 to the keystroke
+at byte 33 (`edit "33:33 <w> user [0:1 bold|0:1 italic]"`), and x11 passed
+the same step by timing alone. Anything an arm knows at the moment of an
+act travels IN the call — `kaya_text_pending` carries `at` in bytes — never
+through a report that may still be in flight. The unit test
+a_pending_attribute_is_dropped_when_the_caret_moves arms at 3 with the
+core's selection reported at 0 and demands the act's caret.

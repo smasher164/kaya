@@ -12397,11 +12397,15 @@ seem fine except im worried about the carve out" — the carve-out then ruled
 as R10 after five probes): (1) the general `format(name, value)` form stays
 the contract; named acts (`bold(editor)`…) are a later sugar pass; (2) a
 PENDING attribute is DROPPED when the caret moves — BUILT 2026-09-14 as the
-POSITIONAL rule (docs/rich-text-plan.md §12): the core and every arm keep the
-caret the attribute was armed at, only an insertion AT that caret takes it,
-and any insertion spends it; the first draft cleared it on a selection report
-that moved the caret and dropped the arm it was about to spend, because every
-arm reports the keystroke's own caret move BEFORE the text (docs/traps.md).
+POSITIONAL rule (docs/rich-text-plan.md §12): the arm's pending call names
+the caret it arms at (`kaya_text_pending`'s `at`, bytes), the core and every
+arm keep it, only an insertion AT that caret takes the attribute, and any
+insertion spends it; the first draft cleared it on a selection report that
+moved the caret and dropped the arm it was about to spend, because every arm
+reports the keystroke's own caret move BEFORE the text, and the second read
+the caret off the core's last selection report, which GTK and Compose
+deliver AFTER the act (matrix 7: wayland and android applied an italic armed
+at byte 12 to the keystroke at 33; docs/traps.md).
 Unit test a_pending_attribute_is_dropped_when_the_caret_moves; the scene arms
 italic inside a paragraph and types at the end, on all five lanes; (3) `Edit`
 carries its `source` — owed in all nine bindings'

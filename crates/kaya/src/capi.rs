@@ -3549,11 +3549,12 @@ pub unsafe extern "C" fn kaya_text_pending(
     value: *const u8,
     value_len: usize,
     on: u8,
+    at: u64,
 ) {
     let name = unsafe { rich_str(name, name_len, "a pending attribute's name") };
     let value = unsafe { rich_str(value, value_len, "a pending attribute's value") };
     with_window_scene("arming a typing attribute", |scene| {
-        scene.set_text_pending(crate::protocol::WidgetId(widget), name, value, on != 0);
+        scene.set_text_pending(crate::protocol::WidgetId(widget), name, value, on != 0, at);
         (Vec::new(), ())
     })
 }

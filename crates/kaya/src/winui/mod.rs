@@ -10223,7 +10223,7 @@ fn rich_format_selection(
                     on.insert(name.to_owned(), value.to_owned());
                 }
             });
-            core.scene.set_text_pending(WidgetId(widget), name, value, !off);
+            core.scene.set_text_pending(WidgetId(widget), name, value, !off, start as u64);
             rich_arm_typing(&field, widget, start)?;
             return Ok(Ok(()));
         }

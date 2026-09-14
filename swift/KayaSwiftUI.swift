@@ -4468,14 +4468,14 @@ enum KayaHost {
         api.text_composing(widget, live ? 1 : 0)
     }
 
-    static func textPending(_ widget: UInt64, _ name: String, _ value: String, on: Bool) {
+    static func textPending(_ widget: UInt64, _ name: String, _ value: String, on: Bool, at: Int) {
         let n = Array(name.utf8)
         let v = Array(value.utf8)
         n.withUnsafeBufferPointer { np in
             v.withUnsafeBufferPointer { vp in
                 api.text_pending(
                     widget, np.baseAddress, UInt(np.count), vp.baseAddress, UInt(vp.count),
-                    on ? 1 : 0)
+                    on ? 1 : 0, UInt64(max(at, 0)))
             }
         }
     }
@@ -19923,7 +19923,8 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
             view.pendingOn[key] = value
         }
         view.typingAttributes = attrs
-        KayaHost.textPending(node.id, name, value, on: !off)
+        KayaHost.textPending(
+            node.id, name, value, on: !off, at: kayaByteOffset(view.string, range.location))
         return nil
     }
     let base = kayaRichBaseFont(view)
@@ -20517,7 +20518,8 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
                 view.pendingOn[key] = value
             }
             view.typingAttributes = attrs
-            KayaHost.textPending(node.id, name, value, on: !off)
+            KayaHost.textPending(
+                node.id, name, value, on: !off, at: kayaByteOffset(view.text ?? "", range.location))
             return nil
         }
         let base = kayaRichBaseFont(view)

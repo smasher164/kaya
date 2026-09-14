@@ -854,7 +854,7 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
             },
             NativeMethod {
                 name: "textPending".into(),
-                sig: "(JLjava/lang/String;Ljava/lang/String;Z)V".into(),
+                sig: "(JLjava/lang/String;Ljava/lang/String;ZJ)V".into(),
                 fn_ptr: present_text_pending as *mut _,
             },
             NativeMethod {
@@ -1120,6 +1120,7 @@ extern "system" fn present_text_pending(
     name: JString,
     value: JString,
     on: jni::sys::jboolean,
+    at: jlong,
 ) {
     let name: String = env
         .get_string(&name)
@@ -1137,6 +1138,7 @@ extern "system" fn present_text_pending(
             value.as_ptr(),
             value.len(),
             u8::from(on != 0),
+            at as u64,
         )
     };
 }
