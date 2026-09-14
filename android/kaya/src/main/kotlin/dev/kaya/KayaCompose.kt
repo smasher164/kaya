@@ -10221,10 +10221,12 @@ internal fun kayaFormatSelection(
  * [kayaWriteText] exactly as set_text's does; nothing echoes.
  */
 internal fun kayaRichSetDocument(node: KayaNode, text: String, runs: List<KayaRichRun>) {
+    // The text FIRST: a plain write drops the runs (kayaWriteText), and these
+    // are the runs that come after it.
+    kayaWriteText(node, kayaLf(text))
     node.richRuns = kayaRichNormalize(runs)
     node.richPendingOn.clear()
     node.richPendingOff.clear()
-    kayaWriteText(node, kayaLf(text))
     node.richSeq += 1
 }
 

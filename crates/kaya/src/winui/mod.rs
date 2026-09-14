@@ -18502,12 +18502,13 @@ impl crate::harness::Stage for WinUiStage {
             // swallowed (see entry_swallow). The handles are CLONED out of the
             // core — a refcount bump — because the banking below borrows the
             // core mutably.
-            let (field, id) = match t.kind {
+            let (field, id, rich_box) = match t.kind {
                 crate::harness::TargetKind::Textarea => {
                     let i = crate::harness::resolve(t.index, core.textareas.len());
                     (
                         Editable::Textarea(core.textareas[i].clone()),
                         core.textarea_ids[i],
+                        Some(core.textareas[i].clone()),
                     )
                 }
                 crate::harness::TargetKind::Search => {
@@ -18515,11 +18516,12 @@ impl crate::harness::Stage for WinUiStage {
                     (
                         Editable::Entry(core.searches[i].clone()),
                         core.search_ids[i],
+                        None,
                     )
                 }
                 _ => {
                     let i = crate::harness::resolve(t.index, core.entries.len());
-                    (Editable::Entry(core.entries[i].clone()), core.entry_ids[i])
+                    (Editable::Entry(core.entries[i].clone()), core.entry_ids[i], None)
                 }
             };
             if lf(field.text()?) != text {
@@ -18534,8 +18536,31 @@ impl crate::harness::Stage for WinUiStage {
                 // the history entirely, this backend being the only one
                 // whose set_text silences the control's own change event.
                 let _ = bank_text_changed_on(core, id, &text);
+                // AND THE DOCUMENT HEARS IT, as the user path's rich_note_edit
+                // (docs/rich-text-plan.md R4): this verb skipped the derivation
+                // and the mirror kept a run through a whole-text replacement
+                // (windows lane, 2026-09-14).
+                let edit = match rich_box.filter(|_| rich_is_on(id)) {
+                    Some(field) => {
+                        let edit = core.scene.note_rich_text(WidgetId(id), &text);
+                        if let Some(edit) = &edit {
+                            rich_take_edit(id, &field, &text, edit);
+                        }
+                        edit
+                    }
+                    None => None,
+                };
                 if let Some(tag) = core.entry_tags.get(&id) {
                     core.occurrences.send_text_tag(tag, &text);
+                    if let Some(edit) = edit {
+                        core.occurrences.send(crate::wire::decode_text_edited_tag(
+                            tag,
+                            edit.source,
+                            edit.range,
+                            &edit.inserted,
+                            &edit.runs,
+                        ));
+                    }
                 }
             }
             Ok(())
