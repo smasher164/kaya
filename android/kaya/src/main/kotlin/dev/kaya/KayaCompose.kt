@@ -7321,6 +7321,17 @@ object KayaCompose {
                         if (why != null) failures.add(why)
                         else kayaAwaitAnswer(answered)
                     }
+                    "press" -> {
+                        // The Return key as its own verb (docs/rich-text-plan.md
+                        // R10), through the same key path `type` takes.
+                        kayaAwaitQuiet()
+                        val answered = kayaBatches
+                        val why =
+                            if (parts.size == 2 && parts[1] == "return") kayaTypeAtFocus(activity, "\n")
+                            else "press wants one of the named keys (return): $line"
+                        if (why != null) failures.add(why)
+                        else kayaAwaitAnswer(answered)
+                    }
                     "set_text" -> {
                         kayaAwaitQuiet()
                         val answered = kayaBatches
@@ -9967,16 +9978,16 @@ internal fun kayaRichAttrsAt(runs: List<KayaRichRun>, at: Int): LinkedHashMap<St
 }
 
 /**
- * The inheritance rule (docs/rich-text-plan.md R4), the core's `typed_runs`
- * one unit over: typed text takes the character before it, except `link`;
- * armed typing attributes win. The CORE's copy is the authority and this
- * one only decides what the user SEES — `expect_runs` prints both when
- * they disagree.
+ * The inheritance rule (docs/rich-text-plan.md R4 and R10), the core's
+ * `typed_runs` one unit over: typed text takes the character before it,
+ * except `link`; armed typing attributes win; a heading ENDS at Return.
+ * `text` is the PRE-EDIT text, as the core's `self.text` is at its call.
+ * The CORE's copy is the authority and this one only decides what the user
+ * SEES — `expect_runs` prints both when they disagree.
  */
-internal fun kayaRichTypedRuns(node: KayaNode, start: Int, insertedLength: Int):
+internal fun kayaRichTypedRuns(node: KayaNode, text: String, start: Int, inserted: String):
     List<KayaRichRun> {
-    if (insertedLength <= 0) return emptyList()
-    val text = node.textState.text
+    if (inserted.isEmpty()) return emptyList()
     // The character before the caret, never half a surrogate pair.
     val before =
         if (start <= 0) -1
@@ -9986,7 +9997,18 @@ internal fun kayaRichTypedRuns(node: KayaNode, start: Int, insertedLength: Int):
     attrs.remove("link")
     attrs.putAll(node.richPendingOn)
     for (name in node.richPendingOff) attrs.remove(name)
-    return attrs.map { (name, value) -> KayaRichRun(0, insertedLength, name, value) }
+    // R10: at the END of a heading paragraph the block stops at the
+    // insertion's first newline (and is dropped when that newline is the
+    // first character); a quote or code block continues, a Return INSIDE a
+    // paragraph keeps both halves, and inline attributes ride either way.
+    val headingEnds = attrs["block"]?.startsWith("heading") == true &&
+        (start >= text.length || text[start] == '\n')
+    val newline = inserted.indexOf('\n')
+    val blockEnd = if (headingEnds && newline >= 0) newline else inserted.length
+    return attrs.mapNotNull { (name, value) ->
+        val end = if (name == "block") blockEnd else inserted.length
+        if (end > 0) KayaRichRun(0, end, name, value) else null
+    }
 }
 
 /**
@@ -10314,7 +10336,7 @@ internal fun kayaRichDerive(before: String, after: String): Triple<Int, Int, Int
 internal fun kayaRichUserEdit(node: KayaNode, before: String, after: String) {
     if (before == after) return
     val (start, stop, insertedLength) = kayaRichDerive(before, after)
-    val runs = kayaRichTypedRuns(node, start, insertedLength)
+    val runs = kayaRichTypedRuns(node, before, start, after.substring(start, start + insertedLength))
     node.richRuns = kayaRichSplice(node.richRuns, start, stop, insertedLength, runs)
     if (insertedLength > 0) {
         node.richPendingOn.clear()

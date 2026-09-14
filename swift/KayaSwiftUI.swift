@@ -459,6 +459,31 @@ func kayaSpliceRuns(
     return out.sorted { ($0.range.location, $0.name) < ($1.range.location, $1.name) }
 }
 
+/// docs/rich-text-plan.md R10, the core's own rule (`RichDoc::typed_runs`): the
+/// part of an insertion at the END of a heading paragraph that loses its block,
+/// from the insertion's first newline on, in the storage's coordinates after
+/// the edit. nil when nothing is stripped.
+func kayaReturnStrip(
+    _ storage: NSAttributedString, _ affected: NSRange, _ replacement: String,
+    pendingOn: [NSAttributedString.Key: String], pendingOff: Set<NSAttributedString.Key>
+) -> NSRange? {
+    let piece = replacement as NSString
+    let at = piece.range(of: "\n").location
+    guard at != NSNotFound, affected.location > 0, affected.location <= storage.length else {
+        return nil
+    }
+    let key = kayaRichKey("block")
+    var block = storage.attributes(at: affected.location - 1, effectiveRange: nil)[key] as? String
+    if pendingOff.contains(key) { block = nil }
+    if let armed = pendingOn[key] { block = armed }
+    guard let block, block.hasPrefix("heading") else { return nil }
+    let text = storage.string as NSString
+    guard affected.location >= text.length || text.character(at: affected.location) == 0x0A else {
+        return nil
+    }
+    return NSRange(location: affected.location + at, length: piece.length - at)
+}
+
 @Observable
 final class KayaNode: Identifiable {
     let id: UInt64
@@ -7510,6 +7535,28 @@ private func kayaRunScript(_ script: String) {
                         failures.append("type \"\(typed)\": \(why)")
                     } else {
                         kayaAwaitAnswer(answered)
+                    }
+                #endif
+            case "press":
+                // The Return key as its own verb (docs/rich-text-plan.md R10),
+                // through the same key path `type` takes.
+                guard parts.count == 2, parts[1] == "return" else {
+                    failures.append("press wants one of the named keys (return): \(line)")
+                    break
+                }
+                kayaAwaitQuiet()
+                let pressAnswered = kayaAnswers()
+                #if os(macOS)
+                    if kayaTypeAtFocus("\n") {
+                        kayaAwaitAnswer(pressAnswered)
+                    } else {
+                        failures.append("press return reached no window — nothing was pressed")
+                    }
+                #else
+                    if let why = kayaTypeThroughHost("\n") {
+                        failures.append("press return: \(why)")
+                    } else {
+                        kayaAwaitAnswer(pressAnswered)
                     }
                 #endif
             case "expect":
@@ -19395,9 +19442,14 @@ private struct KayaMacTextarea: NSViewRepresentable {
         /// manager alive, and a widget whose content manager is collected has no
         /// text at all. The coordinator outlives every update.
         var content: NSTextContentStorage?
+        /// What the Return seen in `shouldChangeTextIn` will insert past the end
+        /// of a heading (docs/rich-text-plan.md R10), stripped below.
+        var returnStrip: NSRange?
 
         func textDidChange(_ notification: Notification) {
             guard let node, let view = notification.object as? NSTextView else { return }
+            let strip = returnStrip
+            returnStrip = nil
             let value = node.rich ? view.string : kayaLF(view.string)
             // THE ECHO DOCTRINE, held where an echo could enter: a programmatic
             // write emits nothing. "AppKit does not notify about a `string`
@@ -19406,15 +19458,17 @@ private struct KayaMacTextarea: NSViewRepresentable {
             guard value != node.text else { return }
             let commit = node.rich && !view.hasMarkedText() && (view as? KayaTextView)?.composing == true
             if commit { KayaHost.textEditSource(node.id, editSourceImeCommit) }
+            if let own = view as? KayaTextView {
+                own.pendingOn.removeAll()
+                own.pendingOff.removeAll()
+                // R10, before the read below: the storage and the report agree.
+                if node.rich, let strip { kayaStripReturnBlock(own, strip) }
+            }
             kayaUserWrite {
                 node.text = value
                 if node.rich, let storage = view.textStorage {
                     node.richRuns = kayaReadRichRuns(storage)
                 }
-            }
-            if let own = view as? KayaTextView {
-                own.pendingOn.removeAll()
-                own.pendingOff.removeAll()
             }
             KayaHost.emitText(node, value)
             if commit {
@@ -19437,6 +19491,14 @@ private struct KayaMacTextarea: NSViewRepresentable {
                 if start >= 0, end >= 0 {
                     KayaHost.textReportedEdit(node.id, start, end, inserted: replacement.utf8.count)
                 }
+                // R10 is decided on the text this Return has not landed in yet;
+                // textDidChange strips what it names.
+                let own = textView as? KayaTextView
+                returnStrip = textView.textStorage.map {
+                    kayaReturnStrip(
+                        $0, affected, replacement, pendingOn: own?.pendingOn ?? [:],
+                        pendingOff: own?.pendingOff ?? [])
+                } ?? nil
             }
             return true
         }
@@ -19763,6 +19825,25 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
     return doc
 }
 
+/// R10's strip, this side: AppKit carries a heading's font, paragraph style and
+/// kaya's own key across Return (docs/measurements/richtext-return-mac-2026-09-14.md
+/// §B), so the block comes off the inserted newline, its display goes back to
+/// body, and what follows types as body.
+@MainActor private func kayaStripReturnBlock(_ view: KayaTextView, _ range: NSRange) {
+    guard let storage = view.textStorage, range.length > 0,
+        NSMaxRange(range) <= storage.length
+    else { return }
+    let base = kayaRichBaseFont(view)
+    storage.beginEditing()
+    storage.removeAttribute(kayaRichKey("block"), range: range)
+    kayaRestyle(storage, range, base: base)
+    storage.endEditing()
+    var typing = storage.attributes(at: NSMaxRange(range) - 1, effectiveRange: nil)
+    typing.removeValue(forKey: kayaRichKey("link"))
+    typing.removeValue(forKey: .link)
+    view.typingAttributes = typing
+}
+
 /// apply_edit, this side, after the apply arm moved the node's text: the
 /// node's runs always, the live storage when the view is up — with the
 /// selection the core answered (R5).
@@ -19927,6 +20008,10 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
             /// write during a view update.
             var selectDone = 0
             var revealDone = 0
+            /// What the Return seen in `shouldChangeTextIn` will insert past
+            /// the end of a heading (docs/rich-text-plan.md R10), stripped
+            /// below.
+            var returnStrip: NSRange?
 
             /// The uncontrolled fold, spelled in UIKit: normalize line endings,
             /// mirror the value into the node, emit with the widget's identity
@@ -19934,6 +20019,8 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
             /// change, no emission" true by construction.
             func textViewDidChange(_ textView: UITextView) {
                 guard let node else { return }
+                let strip = returnStrip
+                returnStrip = nil
                 // A COMPOSITION IS THE WIDGET'S ALONE (docs/rich-text-plan.md
                 // R5). UITextView notifies for marked text and NSTextView does
                 // not (docs/measurements/richtext-apple-2026-09-11.md §2.4), so
@@ -19944,12 +20031,14 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
                 let own = textView as? KayaTextView
                 let commit = node.rich && own?.composing == true
                 if commit { KayaHost.textEditSource(node.id, editSourceImeCommit) }
+                own?.pendingOn.removeAll()
+                own?.pendingOff.removeAll()
+                // R10, before the read below: the storage and the report agree.
+                if node.rich, let own, let strip { kayaStripReturnBlock(own, strip) }
                 kayaUserWrite {
                     node.text = value
                     if node.rich { node.richRuns = kayaReadRichRuns(textView.textStorage) }
                 }
-                own?.pendingOn.removeAll()
-                own?.pendingOff.removeAll()
                 KayaHost.emitText(node, value)
                 if commit {
                     own?.composing = false
@@ -19972,6 +20061,12 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
                 if start >= 0, end >= 0 {
                     KayaHost.textReportedEdit(node.id, start, end, inserted: replacement.utf8.count)
                 }
+                // R10 is decided on the text this Return has not landed in yet;
+                // textViewDidChange strips what it names.
+                let own = textView as? KayaTextView
+                returnStrip = kayaReturnStrip(
+                    textView.textStorage, affected, replacement, pendingOn: own?.pendingOn ?? [:],
+                    pendingOff: own?.pendingOff ?? [])
                 return true
             }
 
@@ -20315,6 +20410,23 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
         for (key, value) in view.pendingOn { attrs[key] = value }
         for key in view.pendingOff { attrs.removeValue(forKey: key) }
         view.typingAttributes = attrs
+    }
+
+    /// R10's strip, this side: UIKit inherits the heading's font and paragraph
+    /// style across Return (docs/measurements/richtext-return-ios-2026-09-14.md
+    /// §B), so the block comes off the inserted newline, its display goes back
+    /// to body, and the typing attributes are re-derived from it.
+    @MainActor private func kayaStripReturnBlock(_ view: KayaTextView, _ range: NSRange) {
+        let storage = view.textStorage
+        guard range.length > 0, NSMaxRange(range) <= storage.length else { return }
+        let base = kayaRichBaseFont(view)
+        storage.beginEditing()
+        storage.removeAttribute(kayaRichKey("block"), range: range)
+        kayaRestyle(storage, range, base: base)
+        storage.endEditing()
+        view.typingAttributes = storage.attributes(
+            at: NSMaxRange(range) - 1, effectiveRange: nil)
+        kayaRearmTyping(view)
     }
 
     /// apply_edit, this side, after the apply arm moved the node's text: the

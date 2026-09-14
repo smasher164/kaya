@@ -627,6 +627,14 @@ fn set_rich_runs(
 /// P1.7): the inserted range is restated as the character before it wears it,
 /// minus `link`, plus whatever a collapsed `format` armed. The pending set is
 /// spent here, as in the core.
+///
+/// A HEADING ENDS AT RETURN (R10, the core's `Scene::typed_runs`): at a heading
+/// paragraph's END the block tag stops at the insertion's first newline, which
+/// is what a bare GtkTextView does there anyway — this arm's inheritance is the
+/// only reason the tag carried across at all
+/// (docs/measurements/richtext-return-gtk-2026-09-14.md). A quote or code_block
+/// rides, and a Return INSIDE a heading keeps the tag, so both halves stay one
+/// run.
 fn inherit_rich_tags(
     buffer: &gtk4::TextBuffer, pending: &std::rc::Rc<RefCell<HashMap<u64, RichPending>>>,
     id: u64, at: i32, len: i32,
@@ -635,7 +643,10 @@ fn inherit_rich_tags(
     let start = buffer.iter_at_offset(at);
     let end = buffer.iter_at_offset(at + len);
     let armed = pending.borrow_mut().remove(&id).unwrap_or_default();
-    let mut want: Vec<gtk4::TextTag> = Vec::new();
+    let mut want: Vec<(gtk4::TextTag, String)> = Vec::new();
+    // The block kind the inserted text would wear, last writer winning, as the
+    // core's attribute map has it.
+    let mut block: Option<String> = None;
     if at > 0 {
         let before = buffer.iter_at_offset(at - 1);
         for (tag, name) in rich_tags(buffer) {
@@ -645,19 +656,35 @@ fn inherit_rich_tags(
             if rich_tag_attr_name(&name).is_some_and(|a| armed.off.contains(&a)) {
                 continue;
             }
-            want.push(tag);
+            if let Some(kind) = name.strip_prefix(RICH_BLOCK_PREFIX) {
+                block = Some(kind.to_owned());
+            }
+            want.push((tag, name));
         }
     }
     for name in &armed.on {
         if let Some(tag) = buffer.tag_table().lookup(name) {
-            want.push(tag);
+            if let Some(kind) = name.strip_prefix(RICH_BLOCK_PREFIX) {
+                block = Some(kind.to_owned());
+            }
+            want.push((tag, name.clone()));
         }
     }
+    let inserted = buffer.text(&start, &end, false).to_string();
+    let ends_heading = block.is_some_and(|kind| kind.starts_with("heading"))
+        && (end.is_end() || end.char() == '\n');
+    let block_end = match inserted.find('\n') {
+        Some(byte) if ends_heading => {
+            buffer.iter_at_offset(at + inserted[..byte].chars().count() as i32)
+        }
+        _ => end.clone(),
+    };
     for (tag, _) in rich_tags(buffer) {
         buffer.remove_tag(&tag, &start, &end);
     }
-    for tag in want {
-        buffer.apply_tag(&tag, &start, &end);
+    for (tag, name) in want {
+        let stop = if name.starts_with(RICH_BLOCK_PREFIX) { &block_end } else { &end };
+        buffer.apply_tag(&tag, &start, stop);
     }
 }
 
@@ -14415,6 +14442,12 @@ impl crate::harness::Stage for GtkStage {
     /// the duration and everything downstream is the platform's — including
     /// the RESET on any programmatic cursor or selection move, which is the
     /// D4 hazard this scene proves.
+    fn press(&self, key: &str) {
+        debug_assert_eq!(key, "return");
+        // The Return key rides type_text's own key path (docs/rich-text-plan.md §10).
+        self.type_text("\n");
+    }
+
     fn compose(&self, target: crate::harness::Target, text: &str) {
         let text = text.to_owned();
         let marked = text.clone();

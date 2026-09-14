@@ -102,6 +102,7 @@ stack would revert text the document never moved.
 | R6 | **The native undo tier is opt-out per widget, and an app that owns the document says so.** docs/undo-plan.md A7 already names the lever; this rules its spelling: `own_undo()` on a rich textarea (a prop) turns the native stack off on that widget (`allowsUndo`, `enable-undo`, `UndoLimit 0`, the Compose undo state — the rich controls can all be told, where the plain TextBox could not), D7's history reset applies to `set_rich_text` and never to `apply_edit`, and D6's routing takes the app's `can_undo`/`can_redo` props for that widget so Edit>Undo reaches the app's own undo (a CRDT's, or the app's) instead of a stack that has been switched off. The core's own log (D3-D5) is untouched: a document the app owns never became core signals. | TAKEN 2026-09-11 (amends docs/undo-plan.md D1/D6/D7 by the maintainer's word) |
 | R7 | **Compose takes the first-party path**: foundation 1.12's `addStyle`/`removeStyle`/`getSpanStyles` on the editable buffer, behind its experimental flag, with the pin bump measured on the android lane first (build, the 143 legs, the three unmeasured points in §3). A synthesized tier (an output transformation over the plain buffer) stays the fallback if the measurement says no. AMENDED BY THE PROBE the same day (docs/measurements/richtext-compose-2026-09-11.md): foundation 1.12.1 is a TOOLCHAIN MIGRATION (AGP 9.1, Gradle 9.7, compileSdk 37 the nix SDK does not ship, the standalone Kotlin plugin deleted), while foundation 1.11.4 builds on kaya's pins as they stand and carries display-only `addStyle`; links render nothing in an editable field on either version; undo has no off switch. So the Compose arm takes 1.11.4: the core's mirror drives the display styles through the field's output transformation, the arm draws links (underline and colour) and hit-tests taps itself, and `clearHistory()` after every commit is R6's lever. The 1.12 tracked API is revisited when the toolchain moves for its own reasons. | TAKEN 2026-09-11, amended: foundation 1.11.4, styles driven from the mirror |
 | R8 | **Labels get the same inline vocabulary as a second slice.** The roadmap's rich-text row was about labels (a markup subset on label text). One document type serves both: a `rich` label renders the inline runs read-only through AttributedString, Pango attributes, RichTextBlock and AnnotatedString. After the textarea's depth, not before. | TAKEN 2026-09-11, sequenced after |
+| R10 | **A heading ends at Return; a quote or code block continues; a Return inside a block paragraph splits it and both halves keep the kind** — a property of each block kind in kaya's vocabulary, not an exception to inheritance: the platforms' controls know only raw formatting and inherit it (measured, §10), while every editor with named headings ends one at Return. The core's `typed_runs` cuts a block run at the first newline of an insertion made at the end of a heading paragraph; inline attributes ride the Return as they do everywhere. AND THE DIFF IS PLACED AT THE CARET when that placement reproduces the text (an amendment to R4): a byte typed before an identical byte is ambiguous to a diff and not to the widget, and the byte it inherits from depends on the placement — every arm reports the selection, so the core places the edit there and falls back to the prefix/suffix diff only when the caret cannot explain the change. | TAKEN 2026-09-14 (the maintainer: "im okay with your recommendation") |
 | R9 | **The harness reads the CORE's document, never the platform's.** `expect_runs <target> "<runs>"` compares the mirror's attribute runs byte for byte on five lanes (the canvas hash's shape); `format <target> <name> <start> <end>` toggles as the user would; `type` and `select_range` already exist; `expect_edit "<last text_edited>"` reads the occurrence. What the PLATFORM holds is verified per backend in check-verbs' gate shape (a read-back at a range, tri-state for a mixed range as Windows answers it), not in a shared scene, because five read-backs answer five ways. The AX words a rich run adds (`heading`, `link`) join the closed word set only after each platform's screen reader is measured saying them. | TAKEN 2026-09-11 |
 
 ## 2. The protocol, in the spec's terms
@@ -420,8 +421,10 @@ after a Return at a heading's end. The two reference editors with headings
 that could be measured (Notepad, Chromium) both drop the heading at the end
 and split it in the middle.
 
-Three harness findings from the probe: the `type` verb now carries `\n` as
-the Return key on every lane (macOS as "\r" on keyCode 36, GTK cut at each
+Three harness findings from the probe: the Return key is its own verb, `press
+return` (tools/check-steps.py's rule: a line break is a command whose meaning
+the widget decides, so `type` never carries it), riding each runner's key path
+— the probe first taught that path the key on every lane (macOS as "\r" on keyCode 36, GTK cut at each
 newline with the tool's own key command since xdotool dropped it and wtype
 typed a Linefeed, WinUI as VK_RETURN, iOS and Compose already did); `type`
 cannot drive a keystroke mid-paragraph, since its contract sends the caret
@@ -433,6 +436,34 @@ character at a time.
 Pushed as fb084de4; the matrix on that tree green on mac, linux, windows and
 iOS with the android lane red on one leg unrelated to the change (the save
 scene's cancel door under load, on the ledger as a WATCH; green alone).
+
+## 11. R10 built (2026-09-14)
+
+The core: `RichDoc::typed_runs` ends a block run at the first newline of an
+insertion made at the end of a heading paragraph (`start` at the text's end
+or on a newline, the byte before it under a heading), and
+`placed_at_selection` places the diff at the caret the arms report whenever
+that placement reproduces the text; three unit tests (the heading's end, the
+split, the quote) and one for the placement. The scene: `press return` then
+`type "z"` after the second paragraph's heading, asserting the edits
+(`31:31 <\n> user [0:1 bold]`, the bold riding the Return) and the runs
+(the heading stays 18:31, the bold reaches 30:33). Each arm then makes its
+control agree — the corroboration wall names the disagreement — and the
+matrix holds all five.
+
+Built the same day on all five arms, each watched failing first on the
+scene's Return step (`18:31 block=heading2 — but the widget holds 18:33`):
+macOS and iOS record the Return in `shouldChangeTextIn` and strip the block
+from the inserted newline and the typing attributes in `textDidChange`
+(one shared `kayaReturnStrip`); GTK's `inherit_rich_tags` gives the block
+tag its own stop at the insertion's first newline; Compose's
+`kayaRichTypedRuns` takes the pre-edit text and the insertion and cuts the
+block run the core's way; WinUI's table already agreed and the drawn text
+was right, but the caret's insertion format still carried the heading
+until `rich_take_edit` re-armed it from the arm's own table. The split
+(Return inside a heading) is held by the core's unit test, since the
+harness's `type` cannot place a keystroke mid-paragraph; GTK and WinUI
+measured it by hand.
 
 ## 5. What this plan does not do
 

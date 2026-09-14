@@ -12392,6 +12392,19 @@ no shared scene echoes a non-ASCII wire string through a guest's label.
 One such step in a shared scene is the wall to add. KEY: wireUtf8, Haskell
 decoder, non-ASCII round trip.
 
+THE REVIEW PAGE'S RULINGS, taken 2026-09-14 (the maintainer: "the rulings
+seem fine except im worried about the carve out" — the carve-out then ruled
+as R10 after five probes): (1) the general `format(name, value)` form stays
+the contract; named acts (`bold(editor)`…) are a later sugar pass; (2) a
+PENDING attribute is DROPPED when the caret moves — owed: the core clears
+`pending_on`/`pending_off` on a selection report that moves the caret, each
+arm's own pending record with it, a scene step (arm bold, move the caret,
+type: plain); (3) `Edit` carries its `source` — owed in all nine bindings'
+sugar (a binding-surface change: do/can't/defer per language, the wire
+already carries it); (4) R10, built; (5) the code run's ground, the quote's
+rule and the link door are a polish pass. KEY: pending dropped on caret
+move, Edit.source, named format acts, rich polish pass.
+
 Found by the editor's formatting bar (2026-09-14, docs/traps.md): only the
 CLICK door drops a torn-down copy's tag in the core; toggled, set_value,
 sort_requested, dropped and the other stamped-occurrence doors still
@@ -12415,6 +12428,31 @@ same leg alone: PASS in 7s. The other four lanes were green on that tree and
 nothing in the commit touches android. Instrument on the next sighting: log
 the back-gate's successive `backState` readings so the record says WHAT
 moved (a recreated picker, a settling animation, or a stale list entry).
+
+## STRETCH — a demo app with automerge behind the rich textarea (the maintainer, 2026-09-14)
+KEY: automerge demo, CRDT notes app, automerge bridge, sync demo, rich text demo
+
+The maintainer's stretch goal after rich text landed: "actually integrate
+automerge for the demo app" — the CRDT-based notes app he named when rich
+text was chosen (2026-09-11). Not a kaya concept and never on the wire
+(docs/rich-text-plan.md §5): it is a GUEST that keeps an automerge document
+behind a `rich` textarea, which the plan's benchmark already measured
+(§6, tools/richtext/automerge-probe: `splice_text` from each `text_edited`,
+`mark`/`unmark` from each `text_formatted`, patches from a remote change
+reconciled into `apply_edit`, the caret carried by `get_cursor`, 0.024ms an
+edit). The shape: a Rust guest first (automerge-rs is the crate the probe
+used; guests/rust is the reference tier), two peers in one process — two
+kaya windows over the same document, or one window and a headless peer
+that replays a script — each edit on one side arriving on the other as an
+apply_edit with its runs, the merge visible in both; then the same app in
+Go through automerge-go and in JS on the desktop lanes (no JS on the
+phones, ruled 2026-09-03). What it would prove that no scene proves today:
+the round trip through a real CRDT under concurrent edits, R5's held edit
+against a live composition, and R10's block rule against a CRDT's expand
+policy (the app applies kaya's reported runs rather than trusting the
+CRDT's growth, docs/rich-text-plan.md R10's implication). Cost: M for the
+Rust guest and its scene, L with the two other languages. Sequenced after
+own_undo (R6), since a CRDT app is the one that turns the native tier off.
 
 ## RULING WANTED — a lost dialog answers the app as a cancel; should the app be able to tell the two apart? (recorded 2026-09-06)
 KEY: lost dialog, KAYA_DIALOG_LOST, file_dialog_result reason, cancelled versus lost, DIALOG_RESULT_BUDGET_MS, dialog occurrence

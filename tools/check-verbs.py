@@ -1808,6 +1808,9 @@ ACTION_VERBS = (
     # it through `link_opened`, so the answer-wait is the real one — the
     # step after it reads a screen the link pushed.
     "open_link",
+    # The Return key as its own verb (docs/rich-text-plan.md R10): the
+    # widget answers it as it answers a keystroke.
+    "press",
 )
 
 # A VERB THE GUEST IS NEVER ASKED ABOUT HAS NO ANSWER TO WAIT FOR.

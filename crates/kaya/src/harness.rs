@@ -578,6 +578,11 @@ pub enum Step {
     ExpectRuns(Target, String),
     /// `expect_edit <target> "<edit>"` — the last text_edited the core published.
     ExpectEdit(Target, String),
+    /// `press return` — one named key as a real keystroke at whatever holds
+    /// focus, the way `type` types (docs/rich-text-plan.md R10). A line
+    /// break is a COMMAND whose meaning the widget decides, so it is not
+    /// `type`'s to carry (tools/check-steps.py).
+    Press(String),
 }
 
 /// A range in a harness assertion, in the same UTF-8 byte offsets the
@@ -662,6 +667,7 @@ impl Step {
             | Step::ExpectStall
             | Step::ExpectNoStall
             | Step::Type(..)
+            | Step::Press(..)
             | Step::ExpectRootFills
             | Step::ExpectTypeface(..)
             | Step::ExpectAppIcon(..)
@@ -825,6 +831,7 @@ impl Step {
             Step::Format { .. } => false,
             Step::ExpectRuns { .. } => true,
             Step::ExpectEdit { .. } => true,
+            Step::Press { .. } => false,
         }
     }
 }
@@ -882,8 +889,8 @@ pub trait Stage: Send + 'static {
     ///    a following ACTION has no POLL_DEADLINE cover, so a race there
     ///    reads as a broken undo rather than a missed keystroke.
     /// 5. NO SYNTHETIC COALESCING: separate key events, in order.
-    /// 6. PRINTABLE ASCII, PLUS `\\n` FOR THE RETURN KEY (2026-09-14, the
-    ///    heading-return probe) — `parse` refuses anything else.
+    /// 6. PRINTABLE ASCII ONLY — `parse` refuses anything else; the Return
+    ///    key is [`Stage::press`]'s (2026-09-14, docs/rich-text-plan.md R10).
     fn type_text(&self, text: &str);
     fn read_label(&self, target: Target) -> String;
     /// The displayed text of an entry, read from the toolkit — the
@@ -1360,6 +1367,13 @@ pub trait Stage: Send + 'static {
     /// The last text_edited the core published for the widget, spelled by
     /// the core (`Scene::last_edit_string`).
     fn last_edit(&self, target: Target) -> String;
+    /// One named key (`return` today) as a REAL keystroke at whatever holds
+    /// focus, under `type_text`'s five contract points — the caret goes to
+    /// the END first, as for text; a caret-preserving key is the split
+    /// case's verb and is not written (docs/rich-text-plan.md §11). The
+    /// widget decides what the key means (a newline in a textarea,
+    /// activation in an entry), which is why `type` never carries it.
+    fn press(&self, key: &str);
     /// Report the verdict and end the process (backends own their exit
     /// discipline: process::exit, request_exit, _exit after finishing
     /// the Activity, ...).
@@ -2345,6 +2359,15 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 })?;
                 Step::ExpectEdit(parse_target(target)?, parse_string(text)?)
             }
+            "press" => {
+                let key = rest.trim();
+                if key != "return" {
+                    return Err(format!(
+                        "press wants one of the named keys (return), got {key:?}: {line:?}"
+                    ));
+                }
+                Step::Press(key.to_owned())
+            }
             other => return Err(format!("unknown step {other:?}")),
         };
         steps.push(step);
@@ -2512,11 +2535,12 @@ fn check_typing(text: &str) -> Result<(), String> {
         return Err("type wants some text to type".to_owned());
     }
     for c in text.chars() {
-        if !matches!(c, ' '..='~' | '\n') {
+        if !matches!(c, ' '..='~') {
             return Err(format!(
-                "type {text:?} carries {c:?}, which is not printable ASCII or a newline — a \
+                "type {text:?} carries {c:?}, which is not printable ASCII — a \
                  keystroke needs one keycode per character, and that mapping is \
-                 only platform-independent inside 0x20..0x7e plus Return"
+                 only platform-independent inside 0x20..0x7e; a line break is the \
+                 `press return` verb"
             ));
         }
     }
@@ -4550,6 +4574,13 @@ fn run_with_log(
                 await_answer(answered);
                 None
             }
+            Step::Press(key) => {
+                await_quiet();
+                let answered = crate::scene::answers();
+                stage.press(key);
+                await_answer(answered);
+                None
+            }
             Step::ExpectRuns(target, want) => Some(poll(|| {
                 let got = stage.rich_runs(*target);
                 if got == *want {
@@ -5634,13 +5665,15 @@ mod tests {
     }
 
     /// The payload floor, refused at PARSE so no backend has to invent
-    /// a keycode the five platforms do not agree on. A newline is the one
-    /// non-printable let through: it is the Return key on every platform
-    /// (2026-09-14, the heading-return probe).
+    /// a keycode the five platforms do not agree on; the Return key has its
+    /// own verb, `press return` (2026-09-14, docs/rich-text-plan.md R10).
     #[test]
     fn type_refuses_what_a_keystroke_cannot_carry() {
-        assert!(parse("type \"a\\nb\"").is_ok());
+        assert!(parse("type \"a\\nb\"").is_err());
         assert!(parse("type \"a\\rb\"").is_err());
+        assert_eq!(parse("press return").unwrap()[0], Step::Press("return".into()));
+        assert!(parse("press enter").is_err());
+        assert!(parse("press").is_err());
         assert!(parse("type \"héllo\"").is_err());
         assert!(parse("type \"\"").is_err());
         assert!(parse("type").is_err());
@@ -6045,6 +6078,7 @@ mod tests {
         fn last_edit(&self, _: Target) -> String {
             String::new()
         }
+        fn press(&self, _: &str) {}
         fn menu_state(&self, _: &str, aspect: MenuAspect) -> String {
             match aspect {
                 MenuAspect::Enablement => "disabled".to_owned(),
@@ -6891,6 +6925,7 @@ mod tests {
         fn last_edit(&self, _: Target) -> String {
             String::new()
         }
+        fn press(&self, _: &str) {}
         fn menu_state(&self, _: &str, _: MenuAspect) -> String {
             String::new()
         }
@@ -7172,6 +7207,7 @@ mod tests {
         fn last_edit(&self, _: Target) -> String {
             String::new()
         }
+        fn press(&self, _: &str) {}
         fn menu_state(&self, _: &str, _: MenuAspect) -> String {
             String::new()
         }

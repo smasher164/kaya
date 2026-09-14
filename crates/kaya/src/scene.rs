@@ -1265,6 +1265,7 @@ fn spell_edit(range: TextRange, inserted: &str, runs: &[TextRun], source: u32) -
         .find(|(value, _)| *value == source as i64)
         .map(|(_, name)| *name)
         .unwrap_or("?");
+    let inserted = inserted.replace('\\', "\\\\").replace('\n', "\\n").replace('\r', "\\r");
     format!("{}:{} <{inserted}> {word} [{}]", range.start, range.stop, spell_runs(runs))
 }
 
@@ -1421,7 +1422,10 @@ impl RichDoc {
     }
 
     /// The inheritance rule: typed text takes the byte before it, except a
-    /// link; armed typing attributes win (docs/rich-text-plan.md R4).
+    /// link; armed typing attributes win (docs/rich-text-plan.md R4). AND A
+    /// HEADING ENDS AT RETURN (R10): at the end of a heading paragraph, the
+    /// bytes from the first newline on carry no block; a quote or code
+    /// block continues, and a Return inside a heading splits it.
     fn typed_runs(&self, start: usize, inserted: &str) -> Vec<TextRun> {
         if inserted.is_empty() {
             return Vec::new();
@@ -1434,9 +1438,19 @@ impl RichDoc {
         for name in &self.pending_off {
             attrs.remove(name);
         }
+        let heading_ends = attrs.get("block").is_some_and(|kind| kind.starts_with("heading"))
+            && (start >= self.text.len() || self.text.as_bytes()[start] == b'\n');
+        let block_end = match inserted.find('\n') {
+            Some(at) if heading_ends => at as u64,
+            _ => inserted.len() as u64,
+        };
         attrs
             .into_iter()
-            .map(|(name, value)| TextRun { start: 0, end: inserted.len() as u64, name, value })
+            .map(|(name, value)| {
+                let end = if name == "block" { block_end } else { inserted.len() as u64 };
+                TextRun { start: 0, end, name, value }
+            })
+            .filter(|run| run.end > run.start)
             .collect()
     }
 }
@@ -1450,6 +1464,25 @@ fn transform_offset(offset: u64, start: u64, end: u64, inserted_len: u64) -> u64
     } else {
         start + inserted_len
     }
+}
+
+/// The edit that replaces the selection the core last heard of, if one such
+/// edit turns `before` into `after`; None when the selection cannot explain
+/// the change (a paste elsewhere, a stale selection, a programmatic write).
+fn placed_at_selection(before: &str, after: &str, sel: TextRange) -> Option<(usize, usize, String)> {
+    let (s, e) = (sel.start as usize, sel.stop as usize);
+    if s > e || e > before.len() || !before.is_char_boundary(s) || !before.is_char_boundary(e) {
+        return None;
+    }
+    let inserted_len = (after.len() + (e - s)).checked_sub(before.len())?;
+    let ins_end = s + inserted_len;
+    if ins_end > after.len() || !after.is_char_boundary(ins_end) {
+        return None;
+    }
+    if before[..s] != after[..s] || before[e..] != after[ins_end..] {
+        return None;
+    }
+    Some((s, e, after[s..ins_end].to_owned()))
 }
 
 /// The one addressed edit between two strings (docs/rich-text-plan.md R4):
@@ -4606,6 +4639,14 @@ impl Scene {
             return None;
         }
         let (start, end, inserted) = derive_edit(&doc.text, text);
+        // PLACED AT THE CARET when that placement also reproduces the text
+        // (docs/rich-text-plan.md R4, amended 2026-09-14): a byte typed before
+        // an identical byte is ambiguous to a diff and not to the widget, and
+        // the byte it inherits from depends on the placement.
+        let (start, end, inserted) = match placed_at_selection(&doc.text, text, doc.selection) {
+            Some(at_caret) if at_caret != (start, end, inserted.clone()) => at_caret,
+            _ => (start, end, inserted),
+        };
         let runs = doc.typed_runs(start, &inserted);
         let disagreement = self.check_reported_edit(widget, start, end, inserted.len());
         if let Some(sentence) = disagreement {
@@ -13415,6 +13456,60 @@ mod tests {
             scene.note_text_formatted(textarea, TextRange::new(4, 7), "block", Some("body"));
         assert_eq!(published.map(|(_, _, v)| v), Some(None));
         assert_eq!(scene.rich_runs_string(textarea).as_deref(), Some(""));
+    }
+
+    /// docs/rich-text-plan.md R10: a heading ends at Return, a quote continues,
+    /// a split keeps the kind, and an inline attribute rides the Return.
+    #[test]
+    fn a_heading_ends_at_return_and_a_quote_continues() {
+        let mut scene = Scene::new();
+        scene.apply(rich_editor("Title\nbody"));
+        let textarea = WidgetId(1);
+        scene.apply(vec![set_document(
+            "Title\nbody",
+            vec![run(0, 5, "block", "heading1"), run(0, 5, "bold", "true")],
+        )]);
+        // Return at the heading's end (the caret there, as the arm reports it):
+        // the newline and the letter carry no block, the bold rides on.
+        scene.set_text_selection(textarea, 5, 5);
+        let edit = scene.note_rich_text(textarea, "Title\nx\nbody").unwrap();
+        assert_eq!((edit.range.start, edit.range.stop, edit.inserted.as_str()), (5, 5, "\nx"));
+        assert_eq!(spell_runs(&edit.runs), "0:2 bold");
+        assert_eq!(scene.rich_runs_string(textarea).as_deref(), Some("0:5 block=heading1|0:7 bold"));
+        assert_eq!(scene.last_edit_string(textarea).as_deref(), Some("5:5 <\\nx> user [0:2 bold]"));
+        // A Return INSIDE the heading splits it: both halves keep the kind.
+        let mut scene = Scene::new();
+        scene.apply(rich_editor("Title\nbody"));
+        scene.apply(vec![set_document("Title\nbody", vec![run(0, 5, "block", "heading1")])]);
+        scene.set_text_selection(textarea, 2, 2);
+        let edit = scene.note_rich_text(textarea, "Ti\ntle\nbody").unwrap();
+        assert_eq!(spell_runs(&edit.runs), "0:1 block=heading1");
+        assert_eq!(scene.rich_runs_string(textarea).as_deref(), Some("0:6 block=heading1"));
+        // A quote continues across Return.
+        let mut scene = Scene::new();
+        scene.apply(rich_editor("said\nbody"));
+        scene.apply(vec![set_document("said\nbody", vec![run(0, 4, "block", "quote")])]);
+        scene.set_text_selection(textarea, 4, 4);
+        let edit = scene.note_rich_text(textarea, "said\nmore\nbody").unwrap();
+        assert_eq!(spell_runs(&edit.runs), "0:5 block=quote");
+        assert_eq!(scene.rich_runs_string(textarea).as_deref(), Some("0:9 block=quote"));
+    }
+
+    /// The caret places an ambiguous diff, and never a diff it cannot explain.
+    #[test]
+    fn the_caret_places_an_ambiguous_edit() {
+        assert_eq!(
+            placed_at_selection("Title\nbody", "Title\n\nbody", TextRange::new(5, 5)),
+            Some((5, 5, "\n".to_owned()))
+        );
+        assert_eq!(placed_at_selection("aa", "aaa", TextRange::new(2, 2)), Some((2, 2, "a".to_owned())));
+        assert_eq!(placed_at_selection("aa", "aaa", TextRange::new(0, 0)), Some((0, 0, "a".to_owned())));
+        // A selection that does not explain the change is no placement.
+        assert_eq!(placed_at_selection("Title\nbody", "Title\nx\nbody", TextRange::new(0, 0)), None);
+        assert_eq!(placed_at_selection("abc", "ac", TextRange::new(0, 0)), None);
+        assert_eq!(placed_at_selection("abc", "ac", TextRange::new(1, 2)), Some((1, 2, String::new())));
+        // A stale selection past the text is no placement either.
+        assert_eq!(placed_at_selection("ab", "abc", TextRange::new(5, 5)), None);
     }
 
     /// docs/traps.md 2026-09-14: a torn-down copy's tag is dead to the core.

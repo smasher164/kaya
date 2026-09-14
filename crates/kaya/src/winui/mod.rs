@@ -10139,6 +10139,28 @@ fn rich_take_edit(widget: u64, field: &RichEditBox, text: &str, edit: &crate::sc
     if let Err(e) = rich_restyle(field, text, &spliced, start, start + edit.inserted.len()) {
         eprintln!("kaya: winui could not draw an edit's runs: {}", e.message());
     }
+    // THE CARET IS RE-ARMED FROM THE TABLE, because TOM keeps the insertion
+    // format it derived when the selection moved — the heading's, across a
+    // Return (docs/rich-text-plan.md R10; measured
+    // docs/measurements/richtext-return-winui-2026-09-14.md §B1). Safe here and
+    // not in SelectionChanged, which is where writing back spins.
+    if let Err(e) = rich_arm_after_edit(field, widget, text) {
+        eprintln!("kaya: winui could not re-arm the caret's format: {}", e.message());
+    }
+}
+
+/// `rich_arm_typing` at the caret the control left after an edit; a selection
+/// that is not collapsed has no insertion format to arm.
+fn rich_arm_after_edit(field: &RichEditBox, widget: u64, text: &str) -> windows_core::Result<()> {
+    let selection = field.TextDocument()?.Selection()?;
+    let (from, to) = (selection.StartPosition()?, selection.EndPosition()?);
+    if from != to {
+        return Ok(());
+    }
+    let Some(caret) = byte_offset(text, from) else {
+        return Ok(());
+    };
+    rich_arm_typing(field, widget, caret)
 }
 
 /// The edits R5 held through a composition, lowered now that it has ended.
@@ -17593,6 +17615,12 @@ impl crate::harness::Stage for WinUiStage {
             Ok(core.scene.last_edit_string(id).unwrap_or_else(|| "<no rich document>".to_string()))
         })
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
+    }
+
+    fn press(&self, key: &str) {
+        debug_assert_eq!(key, "return");
+        // The Return key rides type_text's own key path (docs/rich-text-plan.md §10).
+        self.type_text("\n");
     }
 
     fn compose(&self, t: crate::harness::Target, text: &str) {
