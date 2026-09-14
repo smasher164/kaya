@@ -15245,12 +15245,22 @@ impl crate::harness::Stage for GtkStage {
     /// event per character. THE FIRST KEYSTROKE IS LOST WITHOUT A WARM-UP on
     /// wayland (docs/traps.md: "A fresh wtype keyboard loses its first key").
     fn type_text(&self, text: &str) {
-        assert!(
-            !text.starts_with('-'),
-            "kaya: type {text:?} begins with '-', which both injection tools read as an \
-             option — type text that does not, or teach this verb a tool that takes a \
-             payload on stdin"
-        );
+        // A NEWLINE IS THE RETURN KEY, never a character to type (contract
+        // point 6): neither injector types one — `xdotool type` drops it
+        // outright — so the text is cut at every newline and each tool's OWN
+        // key command carries the Return, in the one invocation the letters
+        // ride (docs/measurements/richtext-return-gtk-2026-09-14.md).
+        // EVERY LINE is checked, not just the first: the '-' both tools read
+        // as an option can begin any of them.
+        let lines: Vec<&str> = text.split('\n').collect();
+        for line in &lines {
+            assert!(
+                !line.starts_with('-'),
+                "kaya: type {text:?} has a line beginning with '-', which both injection \
+                 tools read as an option — type text that does not, or teach this verb a \
+                 tool that takes a payload on stdin"
+            );
+        }
         // FIRST, LET THE PREVIOUS STEP'S CONSEQUENCES LAND: an ACTION returns
         // as soon as it is delivered, so a `focus` transaction can still be in
         // flight, and GTK's grab_focus SELECTS THE ENTRY'S CONTENTS — turning
@@ -15327,14 +15337,24 @@ impl crate::harness::Stage for GtkStage {
         // time", measured), keeping the burst inside GDK's event reading.
         let pid_arg;
         let window_arg;
-        let (tool, args): (&str, Vec<&str>) = if linux_wayland_session() {
-            (
-                "wtype",
-                vec![
-                    "-P", "F24", "-s", hold, "-p", "F24", "-s", "20", "-M", "ctrl", "-k",
-                    "End", "-m", "ctrl", "-s", "10", "-d", "1", text,
-                ],
-            )
+        let (tool, args): (&str, Vec<String>) = if linux_wayland_session() {
+            let mut args: Vec<String> = [
+                "-P", "F24", "-s", hold, "-p", "F24", "-s", "20", "-M", "ctrl", "-k", "End",
+                "-m", "ctrl", "-s", "10",
+            ]
+            .iter()
+            .map(|a| (*a).to_owned())
+            .collect();
+            for (i, line) in lines.iter().enumerate() {
+                if i > 0 {
+                    args.extend(["-k".to_owned(), "Return".to_owned(), "-s".to_owned(),
+                                 "10".to_owned()]);
+                }
+                if !line.is_empty() {
+                    args.extend(["-d".to_owned(), "1".to_owned(), (*line).to_owned()]);
+                }
+            }
+            ("wtype", args)
         } else {
             // THE POINTER IS PARKED OVER THE PRIMARY WINDOW FIRST, and focus
             // re-asserted: with no window manager a closing dialog's X focus
@@ -15351,15 +15371,31 @@ impl crate::harness::Stage for GtkStage {
                     .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
                     .unwrap_or_default();
                 window_arg = found.split_whitespace().next().unwrap_or("").to_owned();
-                if window_arg.is_empty() {
-                    vec!["key", "ctrl+End", "type", "--delay", "0", text]
+                let mut args: Vec<String> = if window_arg.is_empty() {
+                    vec!["key".to_owned(), "ctrl+End".to_owned()]
                 } else {
                     vec![
-                        "mousemove", "--window", &window_arg, "40", "40",
-                        "windowfocus", &window_arg, "key", "ctrl+End", "type",
-                        "--delay", "0", text,
+                        "mousemove".to_owned(), "--window".to_owned(), window_arg.clone(),
+                        "40".to_owned(), "40".to_owned(), "windowfocus".to_owned(),
+                        window_arg.clone(), "key".to_owned(), "ctrl+End".to_owned(),
                     ]
+                };
+                for (i, line) in lines.iter().enumerate() {
+                    if i > 0 {
+                        args.extend(["key".to_owned(), "Return".to_owned()]);
+                    }
+                    if !line.is_empty() {
+                        // `--args 1` OR THE CHAIN ENDS HERE: a bare `type`
+                        // swallows every remaining argument, so a following
+                        // `key Return` would be TYPED (measured in the lane
+                        // image, the record above).
+                        args.extend([
+                            "type".to_owned(), "--args".to_owned(), "1".to_owned(),
+                            "--delay".to_owned(), "0".to_owned(), (*line).to_owned(),
+                        ]);
+                    }
                 }
+                args
             })
         };
         let send = || {

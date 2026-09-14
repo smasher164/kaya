@@ -16028,7 +16028,12 @@ func kayaUndoInertNote(_ item: KayaMenuItemModel, verb: String) {
         }
         for ch in text {
             let sent = DispatchQueue.main.sync { () -> Bool in
-                let key = String(ch)
+                // `\n` IS THE RETURN KEY, which AppKit spells "\r" on keyCode
+                // 36: an NSTextView reaches insertNewline: from either shape,
+                // but only "\r" matches a "\r" key equivalent
+                // (docs/measurements/richtext-return-mac-2026-09-14.md).
+                let key = ch == "\n" ? "\r" : String(ch)
+                let code: UInt16 = ch == "\n" ? 36 : 0
                 for kind in [NSEvent.EventType.keyDown, .keyUp] {
                     guard
                         let event = NSEvent.keyEvent(
@@ -16036,7 +16041,7 @@ func kayaUndoInertNote(_ item: KayaMenuItemModel, verb: String) {
                             timestamp: ProcessInfo.processInfo.systemUptime,
                             windowNumber: window.windowNumber, context: nil,
                             characters: key, charactersIgnoringModifiers: key,
-                            isARepeat: false, keyCode: 0)
+                            isARepeat: false, keyCode: code)
                     else { return false }
                     NSApp.sendEvent(event)
                 }

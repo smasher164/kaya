@@ -18404,8 +18404,8 @@ impl crate::harness::Stage for WinUiStage {
     /// below blocks until the text has landed, since the next action is
     /// `menu_activate "Edit>Undo"`; this platform merges the WHOLE RUN into
     /// one native step (measured), which is what makes A1's clear at the
-    /// episode boundary load-bearing; printable ASCII only, mapped through the
-    /// ACTIVE LAYOUT (VkKeyScanW).
+    /// episode boundary load-bearing; printable ASCII mapped through the ACTIVE
+    /// LAYOUT (VkKeyScanW), plus Return as its own virtual key.
     fn type_text(&self, text: &str) {
         let text = text.to_owned();
         // The caret first, and the field's text before the run — both read
@@ -18426,14 +18426,22 @@ impl crate::harness::Stage for WinUiStage {
         Self::foreground_guest("type");
         const KEYEVENTF_KEYUP: u32 = 0x2;
         for ch in text.chars() {
-            let scan = unsafe { VkKeyScanW(ch as u16) };
-            assert!(
-                scan != -1,
-                "kaya: type {text:?}: the active keyboard layout has no key for {ch:?} \
-                 (parse admits printable ASCII, which every layout can type)"
-            );
-            let vk = (scan & 0xff) as u8;
-            let shifts = (scan >> 8) & 0x7;
+            // Return is a COMMAND, not a character: no layout maps U+000A to a
+            // key, so VkKeyScanW answers -1 for it and the assert below would
+            // refuse the newline `type` admits (crates/kaya/src/harness.rs
+            // check_typing). VK_RETURN rides the same injection sequence as the
+            // letters, so the control sees a real keystroke.
+            let (vk, shifts) = if ch == '\n' {
+                (0x0d_u8, 0_i16)
+            } else {
+                let scan = unsafe { VkKeyScanW(ch as u16) };
+                assert!(
+                    scan != -1,
+                    "kaya: type {text:?}: the active keyboard layout has no key for {ch:?} \
+                     (parse admits printable ASCII and Return, which every layout can type)"
+                );
+                ((scan & 0xff) as u8, (scan >> 8) & 0x7)
+            };
             let mut mods: Vec<u8> = Vec::new();
             if shifts & 1 != 0 {
                 mods.push(0x10); // VK_SHIFT

@@ -882,7 +882,8 @@ pub trait Stage: Send + 'static {
     ///    a following ACTION has no POLL_DEADLINE cover, so a race there
     ///    reads as a broken undo rather than a missed keystroke.
     /// 5. NO SYNTHETIC COALESCING: separate key events, in order.
-    /// 6. PRINTABLE ASCII ONLY — `parse` refuses anything else.
+    /// 6. PRINTABLE ASCII, PLUS `\\n` FOR THE RETURN KEY (2026-09-14, the
+    ///    heading-return probe) — `parse` refuses anything else.
     fn type_text(&self, text: &str);
     fn read_label(&self, target: Target) -> String;
     /// The displayed text of an entry, read from the toolkit — the
@@ -2511,11 +2512,11 @@ fn check_typing(text: &str) -> Result<(), String> {
         return Err("type wants some text to type".to_owned());
     }
     for c in text.chars() {
-        if !matches!(c, ' '..='~') {
+        if !matches!(c, ' '..='~' | '\n') {
             return Err(format!(
-                "type {text:?} carries {c:?}, which is not printable ASCII — a \
+                "type {text:?} carries {c:?}, which is not printable ASCII or a newline — a \
                  keystroke needs one keycode per character, and that mapping is \
-                 only platform-independent inside 0x20..0x7e"
+                 only platform-independent inside 0x20..0x7e plus Return"
             ));
         }
     }
@@ -5633,10 +5634,12 @@ mod tests {
     }
 
     /// The payload floor, refused at PARSE so no backend has to invent
-    /// a keycode the five platforms do not agree on.
+    /// a keycode the five platforms do not agree on. A newline is the one
+    /// non-printable let through: it is the Return key on every platform
+    /// (2026-09-14, the heading-return probe).
     #[test]
     fn type_refuses_what_a_keystroke_cannot_carry() {
-        assert!(parse("type \"a\\nb\"").is_err());
+        assert!(parse("type \"a\\nb\"").is_ok());
         assert!(parse("type \"a\\rb\"").is_err());
         assert!(parse("type \"héllo\"").is_err());
         assert!(parse("type \"\"").is_err());

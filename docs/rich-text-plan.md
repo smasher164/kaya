@@ -395,6 +395,41 @@ set_text verb skipped the derivation), both fixed at cause in 2cf9852d; the
 matrix on that tree ALL PASS, 1,773 legs in 1213s.
 
 
+## 10. Return at the end of a heading, measured on five lanes (2026-09-14)
+
+Ruling 4's measurement, one record per lane:
+docs/measurements/richtext-return-mac-2026-09-14.md,
+docs/measurements/richtext-return-ios-2026-09-14.md,
+docs/measurements/richtext-return-gtk-2026-09-14.md,
+docs/measurements/richtext-return-winui-2026-09-14.md and
+docs/measurements/richtext-return-compose-2026-09-14.md.
+
+| lane | kaya today | the bare control by itself | the platform's reference editor |
+| --- | --- | --- | --- |
+| macOS | the new paragraph is a heading, at the end and on a split | NSTextView inherits everything across Return: the font, the paragraph style and any custom key (typingAttributes are untouched by a Return) | TextEdit inherits, but has no heading concept; Apple Notes not measured (needs the host's UI) |
+| iOS | the same | UITextView inherits the font and paragraph style (its own keys only) | none on the simulator |
+| GTK | the same, by kaya's own `inherit_rich_tags` | GtkTextView DROPS a tag at a paragraph's end and KEEPS it on a split | none on the lane image |
+| WinUI | the same | RichEditBox carries the character and paragraph formats forward | Windows 11 Notepad (Markdown) drops the heading after Return |
+| Compose | the same | nothing native carries a style; the arm's table decides | Chromium's editable view: a plain div after an h1's end, two h1s on a split |
+
+So today the five lanes agree, by construction (every arm mirrors the core's
+rule). The exception would run WITH GtkTextView and Compose and AGAINST the
+three native controls, where the arm strips what the control inherited
+(AppKit's typingAttributes, UIKit's re-derived ones, TOM's insertion format)
+after a Return at a heading's end. The two reference editors with headings
+that could be measured (Notepad, Chromium) both drop the heading at the end
+and split it in the middle.
+
+Three harness findings from the probe: the `type` verb now carries `\n` as
+the Return key on every lane (macOS as "\r" on keyCode 36, GTK cut at each
+newline with the tool's own key command since xdotool dropped it and wtype
+typed a Linefeed, WinUI as VK_RETURN, iOS and Compose already did); `type`
+cannot drive a keystroke mid-paragraph, since its contract sends the caret
+to the end first, so the split case is a core unit test or a
+caret-preserving verb; and a multi-key `type` arrives as ONE edit on WinUI
+and one per key on the mac, so a scene asserting `expect_edit` types one
+character at a time.
+
 ## 5. What this plan does not do
 
 - It does not put a CRDT, a delta format or a markup language on the
