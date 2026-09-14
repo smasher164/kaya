@@ -430,6 +430,10 @@ caret-preserving verb; and a multi-key `type` arrives as ONE edit on WinUI
 and one per key on the mac, so a scene asserting `expect_edit` types one
 character at a time.
 
+Pushed as fb084de4; the matrix on that tree green on mac, linux, windows and
+iOS with the android lane red on one leg unrelated to the change (the save
+scene's cancel door under load, on the ledger as a WATCH; green alone).
+
 ## 5. What this plan does not do
 
 - It does not put a CRDT, a delta format or a markup language on the

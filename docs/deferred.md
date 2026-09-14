@@ -12399,6 +12399,23 @@ forward one. Route them all through `stamped_tag_is_live` (capi.rs) and
 add the drop to each. KEY: stamped_tag_is_live, torn-down copy, dead copy,
 lingering registry.
 
+## WATCH — the android save leg's cancel door under a matrix: Back pressed once, then withheld 29 looks "until a new stable picker path" (first sighting 2026-09-14)
+KEY: save-compose, cancel door, pickerBackGate, withheld until a new stable picker path, would not dismiss
+
+Matrix 5 of 2026-09-14 (fb084de4, the Return-key commit): `save-compose`
+failed `file_save cancel` with the door's own count — "the picker would not
+dismiss after 1 backs in 30 looks (0 refused while the app's own activity
+was resumed, 29 withheld until a new stable picker path, 0 with no readable
+picker path)" — then the scene's second save found "file dialog 2 is already
+live". The bundle shows DocumentsUI's PickActivity destroyed at 12:00:13.354
+and a new one created at 12:00:13.713, so the door's back-gate
+(KayaHarnessAccessibility.kt `pickerBackGate.observe`) kept seeing a moving
+window path and refused a second Back for the rest of its 30 looks. The
+same leg alone: PASS in 7s. The other four lanes were green on that tree and
+nothing in the commit touches android. Instrument on the next sighting: log
+the back-gate's successive `backState` readings so the record says WHAT
+moved (a recreated picker, a settling animation, or a stale list entry).
+
 ## RULING WANTED — a lost dialog answers the app as a cancel; should the app be able to tell the two apart? (recorded 2026-09-06)
 KEY: lost dialog, KAYA_DIALOG_LOST, file_dialog_result reason, cancelled versus lost, DIALOG_RESULT_BUDGET_MS, dialog occurrence
 
