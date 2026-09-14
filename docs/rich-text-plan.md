@@ -465,6 +465,10 @@ until `rich_take_edit` re-armed it from the arm's own table. The split
 harness's `type` cannot place a keystroke mid-paragraph; GTK and WinUI
 measured it by hand.
 
+Pushed as 4624552c; the matrix on that tree green on mac, linux, windows and
+android with iOS red on one leg unrelated to the change (the dark canvas
+leg's ink read, on the ledger as a WATCH; green alone with its whole suite).
+
 ## 5. What this plan does not do
 
 - It does not put a CRDT, a delta format or a markup language on the

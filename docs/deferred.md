@@ -12454,6 +12454,26 @@ CRDT's growth, docs/rich-text-plan.md R10's implication). Cost: M for the
 Rust guest and its scene, L with the two other languages. Sequenced after
 own_undo (R6), since a CRDT app is the one that turns the native tier off.
 
+## WATCH — the iOS dark canvas leg read LIGHT pixels under a matrix, once (first sighting 2026-09-14)
+KEY: canvasdark-swift, expect_ink dark, KAYA_APPEARANCE, kayaCanvasAppearance, traitCollection, appearance flake
+
+Matrix 6 of 2026-09-14 (4624552c, the R10 commit, nothing in it near the
+canvas or the appearance): `canvasdark-swift` failed its one ink read —
+`ink dark FFFFFF/D2E3F7 at 15,20 70,63, wanted light FFFFFF/D2E3F7 dark
+16181C/212A35` — the dark half of the frozen string against a raster that
+was the LIGHT one, with the drawing's hash and shape green a step earlier.
+The same leg alone, in the whole swift suite: PASS (3s), `run-sim: ALL
+PASS`. The other four lanes were green on that tree, and the leg had
+passed in every matrix that day. This is the 2026-08-27 class the other way
+round (CLAUDE.md's check-appearance paragraph: the window-scope trait read,
+`kayaCanvasAppearance` on the window's own traitCollection): either the
+presentation report carried light because the window's override had not
+applied when the first raster was cut under load, or the read happened on a
+window that was still light. Instrument on the next sighting: log the
+window's `traitCollection.userInterfaceStyle` and the value of
+KAYA_APPEARANCE at the presentation report and at the ink read, so the
+record says which of the two it was.
+
 ## RULING WANTED — a lost dialog answers the app as a cancel; should the app be able to tell the two apart? (recorded 2026-09-06)
 KEY: lost dialog, KAYA_DIALOG_LOST, file_dialog_result reason, cancelled versus lost, DIALOG_RESULT_BUDGET_MS, dialog occurrence
 
