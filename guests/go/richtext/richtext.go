@@ -42,8 +42,8 @@ func App() *kaya.App {
 		tx.Mount(tx.Column(func() {
 			editor = tx.Textarea(nil).Rich().A11yID("doc").A11yLabel("Document")
 			app.OnEdit(editor, func(tx *kaya.Tx, edit kaya.Edit) {
-				tx.Write(last, fmt.Sprintf("edit %d:%d <%s> [%s]",
-					edit.Start, edit.End, edit.Inserted, spell(edit.Runs)))
+				tx.Write(last, fmt.Sprintf("edit %d:%d <%s> %s [%s]",
+					edit.Start, edit.End, edit.Inserted, edit.Source, spell(edit.Runs)))
 				tx.Write(runs, spell(app.Document(editor).Runs))
 			})
 			app.OnFormat(editor, func(tx *kaya.Tx, act kaya.Format) {

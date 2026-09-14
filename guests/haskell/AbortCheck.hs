@@ -1,12 +1,14 @@
 -- The Haskell uniform-abort guard. Run headless by tools/check-abort.py.
 
-import Control.Exception (SomeException, try)
+import Control.Exception (SomeException, evaluate, try)
 import Control.Monad (unless)
+import Data.List (isInfixOf)
 import System.Exit (exitFailure)
 import System.IO (hPutStrLn, stderr)
 
 import KayaApp
 import KayaWire (Value (..))
+import qualified KayaWire as W
 
 failWith :: String -> IO a
 failWith msg = hPutStrLn stderr msg >> exitFailure
@@ -66,5 +68,35 @@ main = do
     Right () -> failWith "menu abort: buildTx must propagate"
     Left _ -> return ()
   buildTx app (menuAppend file [item "Publish" [IPrimary True]])
+
+  -- THE EDIT SOURCE (the review page's ruling 3, 2026-09-14): the wire's
+  -- number is the name the core's own table gives it, an app-built edit
+  -- carries none, and a number this build does not know is refused by
+  -- value. Nothing else runs the mapping — the scene reaches it only
+  -- through a real keystroke.
+  mapM_
+    ( \(wire, want) -> do
+        let got = editSourceName (editSourceOfWire wire)
+        unless (got == want) $
+          failWith
+            ( "edit source " ++ show wire ++ " reads as " ++ show got
+                ++ ", wanted " ++ show want
+            )
+    )
+    [ (W.editSourceUser, "user"),
+      (W.editSourceImeCommit, "ime_commit"),
+      (W.editSourcePaste, "paste"),
+      (W.editSourceNativeUndo, "native_undo"),
+      (W.editSourceDrop, "drop")
+    ]
+  unless (editSource (insertEdit 0 "x") == Nothing) $
+    failWith "an app-built edit carries a source — nothing on the wire carries one downward"
+  unknown <- try (evaluate (editSourceName (editSourceOfWire 99)))
+  case (unknown :: Either SomeException String) of
+    Right s ->
+      failWith ("edit source 99 read as " ++ show s ++ " instead of being refused")
+    Left e ->
+      unless ("99" `isInfixOf` show e) $
+        failWith ("the unknown edit source was refused without naming it: " ++ show e)
 
   putStrLn "haskell abort check: OK"

@@ -83,7 +83,9 @@ main = kayaMain $ \app -> do
             ( "edit " ++ show (editStart e) ++ ":" ++ show (editEnd e)
                 ++ " <"
                 ++ editInserted e
-                ++ "> ["
+                ++ "> "
+                ++ maybe "?" editSourceName (editSource e)
+                ++ " ["
                 ++ spell (editRuns e)
                 ++ "]"
             )

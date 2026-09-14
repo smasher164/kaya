@@ -51,13 +51,13 @@ click button#5
 expect_focused textarea#0
 type "x"
 expect_edit textarea#0 "29:29 <x> user [0:1 block=heading2]"
-expect label#0 "edit 29:29 <x> [0:1 block=heading2]"
+expect label#0 "edit 29:29 <x> user [0:1 block=heading2]"
 expect_runs textarea#0 "0:17 block=heading1|8:11 italic|12:17 link=https://kaya.dev|18:30 block=heading2"
 expect label#1 "0:17 block=heading1|8:11 italic|12:17 link=https://kaya.dev|18:30 block=heading2"
 # A FORMAT OVER A COLLAPSED CARET is pending state: no occurrence of its
 # own, and the next keystroke's run.
 format textarea#0 30:30 bold
-expect label#0 "edit 29:29 <x> [0:1 block=heading2]"
+expect label#0 "edit 29:29 <x> user [0:1 block=heading2]"
 type "y"
 expect_edit textarea#0 "30:30 <y> user [0:1 block=heading2|0:1 bold]"
 expect_runs textarea#0 "0:17 block=heading1|8:11 italic|12:17 link=https://kaya.dev|18:31 block=heading2|30:31 bold"

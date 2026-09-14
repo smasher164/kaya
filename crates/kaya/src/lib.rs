@@ -106,7 +106,7 @@ pub use app::{
     MenuItems, MenuRef, MenuSource, Messages, OptionRef, PropToken, RadioGroupRef, RadioOptions,
     CatalogHome, MenuRole, Platform, Role, SizeClass, Sort, Symbol, ToggleRef, Tpl, TplSource, Tx,
     ValueKind,
-    props, Dropped, Op, Block, Document, Edit, Format, Run,
+    props, Dropped, Op, Block, Document, Edit, EditSource, Format, Run,
 };
 
 /// The canvas surface (docs/canvas-plan.md §2.2).

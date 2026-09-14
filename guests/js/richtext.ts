@@ -20,7 +20,7 @@ function spell(runs: readonly kaya.Run[]): string {
 }
 
 function onEdit(edit: kaya.Edit): void {
-  last.set(`edit ${edit.start}:${edit.end} <${edit.inserted}> [${spell(edit.runs)}]`);
+  last.set(`edit ${edit.start}:${edit.end} <${edit.inserted}> ${edit.source} [${spell(edit.runs)}]`);
   runs.set(spell(editor.document().runs));
 }
 

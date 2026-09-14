@@ -693,4 +693,32 @@ let () =
          %d, wanted one record in the copy and nothing in the parent"
         (List.length copy) (List.length own));
 
+  (* THE EDIT SOURCE (the review page's ruling 3, 2026-09-14): the wire's
+     number is the name the core's own table gives it, an app-built edit
+     carries none, and a number this build does not know is refused by
+     value. Nothing else runs [edit_source_of_wire] — the scene reaches it
+     only through a real keystroke. *)
+  List.iter
+    (fun (wire, want) ->
+      let got = edit_source_name (edit_source_of_wire wire) in
+      if got <> want then
+        fail "edit source %d reads as %S, wanted %S" wire got want)
+    [
+      (Kaya_wire.edit_source_user, "user");
+      (Kaya_wire.edit_source_ime_commit, "ime_commit");
+      (Kaya_wire.edit_source_paste, "paste");
+      (Kaya_wire.edit_source_native_undo, "native_undo");
+      (Kaya_wire.edit_source_drop, "drop");
+    ];
+  if (Edit.insert 0 "x").e_source <> None then
+    fail "an app-built edit carries a source — nothing on the wire carries \
+          one downward";
+  (match edit_source_of_wire 99 with
+  | exception Failure msg ->
+      if not (contains_sub msg "99") then
+        fail "the unknown edit source was refused without naming it: %s" msg
+  | s ->
+      fail "edit source 99 read as %S instead of being refused"
+        (edit_source_name s));
+
   print_endline "ocaml abort check: OK"

@@ -506,6 +506,39 @@ is the one that matters, a keystroke elsewhere (italic armed at byte 12,
 `w` typed at the end carries only what it inherits there), and the unit
 test holds both halves.
 
+## 13. Ruling 3 built: `Edit` carries its `source` (2026-09-14)
+
+The core's `text_edited` always carried the number (§2: user 0,
+ime_commit 1, paste 2, native_undo 3, drop 4); the sugar dropped it in
+all nine. Now every binding's `Edit` has a `source`, ABSENT on an edit the
+app builds (`Edit::insert`/`delete`/`replace` — Rust's `Option<EditSource>`,
+Python's `None`, JS's optional field, Go's `SourceNone` zero value, C#'s
+and Java's null, Swift's `KayaEditSource?`, OCaml's `option`, Haskell's
+`Maybe`) and PRESENT on every edit `on_edit` delivers, mapped at the
+decode site through the GENERATED wire constant so a renumbered spec
+moves every binding — except Swift, whose generated wire carries no
+edit-source constants and whose `enum KayaEditSource: Int` pins the
+numbers by hand. The vocabulary is spelled the way each binding spells
+`Block`: an enum in Rust, C#, Java, Swift, OCaml (`Ime_commit`,
+`Native_undo`, the file's own `Code_block` casing) and Haskell, a class of
+string constants in Python, a frozen object plus `EditSourceName` in JS,
+a typed string in Go. An unknown number is refused by name in all nine.
+
+The guests print it between the inserted text and the runs — `edit 29:29
+<x> user [0:1 block=heading2]`, the harness's own `expect_edit` spelling —
+so tools/scenes/richtext.steps compares it byte for byte across the nine
+languages on every lane that runs them. tools/check-sugar-surface.py holds
+the type in all nine (an `EditSource` row in RICH_PARTS, with the
+rename-in-a-copy negatives that grow by themselves) and the MAPPING: one
+line per source per binding naming the generated constant beside the
+name, read against the core's own `EDIT_SOURCES` table, a fake source
+firing nine, and Swift's `native_undo` renumbered in a copy watched
+refused. The census earned its keep on the first run: Java's `USER` entry
+named `EDIT_SOURCE_DROP` while every scene was green, because the scene
+only ever sees `user`. Each binding's own checks file holds a delivered
+edit's name and an app-built edit's absence (Haskell's lives in
+guests/haskell/AbortCheck.hs, the binding's one run check).
+
 ## 5. What this plan does not do
 
 - It does not put a CRDT, a delta format or a markup language on the

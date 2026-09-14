@@ -3621,8 +3621,34 @@ rich_check("a delivered edit shifts what follows and MERGES the inherited "
               "|18:30 block=heading2")
 rich_check("on_edit hears the addressed edit, its runs relative to the "
            "inserted text",
-           _edits[-1] == kaya.Edit(29, 29, "x",
-                                   [kaya.Run(0, 1, "block", "heading2")]))
+           (_edits[-1].start, _edits[-1].end, _edits[-1].inserted,
+            _edits[-1].runs)
+           == (29, 29, "x", [kaya.Run(0, 1, "block", "heading2")]))
+
+# AN EDIT CARRIES ITS SOURCE (the review page's ruling 3, 2026-09-14): the
+# wire's number mapped to the vocabulary's name, absent on one the app
+# builds, and an unknown number refused naming it.
+rich_check("a delivered edit carries the source the wire named",
+           _edits[-1].source == kaya.EditSource.USER)
+_deliver(_packed_text_edited(_editor.id, kaya.wire.EDIT_SOURCE_PASTE,
+                             30, 30, "y", []))
+rich_check("every source in the vocabulary reaches the app by name",
+           _edits[-1].source == kaya.EditSource.PASTE
+           and sorted(kaya._EDIT_SOURCES.values())
+           == ["drop", "ime_commit", "native_undo", "paste", "user"])
+rich_check("an edit the app builds carries NO source, and one it builds "
+           "differs from the same edit delivered",
+           kaya.Edit.insert(6, ", big").source is None
+           and kaya.Edit(29, 29, "x",
+                         [kaya.Run(0, 1, "block", "heading2")]) != _edits[-2])
+_source_said = ""
+try:
+    _deliver(_packed_text_edited(_editor.id, 9, 30, 30, "z", []))
+except ValueError as e:
+    _source_said = str(e)
+rich_check("an edit source this build does not know is refused, naming "
+           "the number",
+           "9" in _source_said and "edit source" in _source_said)
 
 # THE FOLD FOLLOWS WITHOUT A HANDLER, as an undo's mirrors do: this
 # textarea registered neither delta.

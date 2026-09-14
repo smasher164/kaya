@@ -1091,12 +1091,12 @@ if (isMainThread) {
   /** The occurrence's own layout (crates/kaya/src/wire.rs): the click tag
    * with the SOURCE in its reserved word, the range, the runs in FOURS,
    * then the inserted text as a bare value. */
-  function packEdited(ident: number, start: number, stop: number, inserted: string, runs: readonly K.Run[], keys: K.Key[] = []): Uint8Array {
+  function packEdited(ident: number, start: number, stop: number, inserted: string, runs: readonly K.Run[], keys: K.Key[] = [], source: number = wire.EDIT_SOURCE_USER): Uint8Array {
     const tag = new Uint8Array(16);
     const tv = new DataView(tag.buffer);
     tv.setBigUint64(0, BigInt(ident), true);
     tv.setUint32(8, keys.length, true);
-    tv.setUint32(12, 0, true); // source: user
+    tv.setUint32(12, source, true);
     const range = new Uint8Array(24);
     const rv = new DataView(range.buffer);
     rv.setBigUint64(0, BigInt(start), true);
@@ -1220,6 +1220,24 @@ if (isMainThread) {
     "onEdit hears the addressed edit, its runs relative to the inserted text",
     lastEdit.start === 29 && lastEdit.end === 29 && lastEdit.inserted === "x" && JSON.stringify(lastEdit.runs) === JSON.stringify([{ start: 0, end: 1, name: "block", value: "heading2" }]),
   );
+
+  // AN EDIT CARRIES ITS SOURCE (the review page's ruling 3, 2026-09-14):
+  // the wire's number mapped to the vocabulary's name, undefined on one
+  // the app builds, and an unknown number refused naming it.
+  richCheck("a delivered edit carries the source the wire named", lastEdit.source === kaya.EditSource.USER);
+  fire(wire.parse_occurrence(packEdited(editor.id, 30, 30, "y", [], [], wire.EDIT_SOURCE_PASTE)));
+  richCheck(
+    "every source in the vocabulary reaches the app by name",
+    edits[edits.length - 1]!.source === kaya.EditSource.PASTE && Object.values(kaya.EditSource).sort().join("|") === "drop|ime_commit|native_undo|paste|user",
+  );
+  richCheck("an edit the app builds carries NO source", kaya.Edit.insert(6, ", big").source === undefined && new kaya.Edit(29, 29, "x").source === undefined);
+  let sourceSaid = "";
+  try {
+    fire(wire.parse_occurrence(packEdited(editor.id, 30, 30, "z", [], [], 9)));
+  } catch (e) {
+    sourceSaid = String(e);
+  }
+  richCheck("an edit source this build does not know is refused, naming the number", sourceSaid.includes("9") && sourceSaid.includes("edit source"));
 
   // THE FOLD FOLLOWS WITHOUT A HANDLER, as an undo's mirrors do: this
   // textarea registered neither delta.

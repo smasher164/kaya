@@ -175,6 +175,59 @@ func TestMirrorAnswersTheScenesFrozenRuns(t *testing.T) {
 	}
 }
 
+// AN EDIT CARRIES ITS SOURCE (the review page's ruling 3, 2026-09-14):
+// the occurrence's reserved word, mapped through the generated constants
+// to this binding's vocabulary, absent on an edit the app builds.
+func TestEditSourceNamesMatchTheConstants(t *testing.T) {
+	for number, want := range map[uint32]EditSource{
+		EditSourceUser:       SourceUser,
+		EditSourceImeCommit:  SourceImeCommit,
+		EditSourcePaste:      SourcePaste,
+		EditSourceNativeUndo: SourceNativeUndo,
+		EditSourceDrop:       SourceDrop,
+	} {
+		if got := editSourceOf(number); got != want {
+			t.Errorf("edit source %d is %q, want %q", number, got, want)
+		}
+	}
+	if len(editSources) != 5 {
+		t.Errorf("the vocabulary holds %d names, want the wire's 5", len(editSources))
+	}
+}
+
+func TestEditOfCarriesTheSourceAndAnAppBuiltEditCarriesNone(t *testing.T) {
+	tail := []any{uint32(EditSourcePaste), uint64(29), uint64(29), "x",
+		int64(0), int64(1), "block", "heading2"}
+	e := editOf(tail)
+	if e.Source != SourcePaste {
+		t.Errorf("a delivered edit's source is %q, want %q", e.Source, SourcePaste)
+	}
+	if got := fmt.Sprintf("edit %d:%d <%s> %s [%s]", e.Start, e.End, e.Inserted,
+		e.Source, spellRuns(e.Runs)); got != "edit 29:29 <x> paste [0:1 block=heading2]" {
+		t.Errorf("the guest's line reads %q", got)
+	}
+	// The zero value, on every edit the app builds.
+	for _, built := range []Edit{Insert(6, ", big"), Delete(0, 2), Replace(0, 2, "z"),
+		Insert(0, "> ").Mark(0, 1, "bold", "true")} {
+		if built.Source != SourceNone {
+			t.Errorf("an app-built edit carries source %q, want none", built.Source)
+		}
+	}
+}
+
+// An edit source this build does not know is refused NAMING the number,
+// the way every other unknown wire value is.
+func TestEditOfRefusesAnUnknownSourceByName(t *testing.T) {
+	defer func() {
+		said, ok := recover().(string)
+		if !ok || !strings.Contains(said, "9") || !strings.Contains(said, "edit source") {
+			t.Errorf("an unknown edit source said %v, want the number named", said)
+		}
+	}()
+	editOf([]any{uint32(9), uint64(0), uint64(0), ""})
+	t.Error("an unknown edit source was accepted")
+}
+
 // A splice that would cut a character in half is the mirror out of step
 // with the core, and is answered by taking the core's word for the text.
 func TestAbsorbEditRefusesToCutACharacter(t *testing.T) {

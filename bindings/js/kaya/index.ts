@@ -2276,13 +2276,41 @@ export class Document {
   }
 }
 
+/** What provoked an edit the widget reports (docs/rich-text-plan.md §2;
+ * the review page's ruling 3, 2026-09-14). */
+export const EditSource = Object.freeze({
+  USER: "user",
+  IME_COMMIT: "ime_commit",
+  PASTE: "paste",
+  NATIVE_UNDO: "native_undo",
+  DROP: "drop",
+} as const);
+export type EditSourceName = (typeof EditSource)[keyof typeof EditSource];
+
+const EDIT_SOURCES: ReadonlyMap<number, EditSourceName> = new Map([
+  [wire.EDIT_SOURCE_USER, "user"],
+  [wire.EDIT_SOURCE_IME_COMMIT, "ime_commit"],
+  [wire.EDIT_SOURCE_PASTE, "paste"],
+  [wire.EDIT_SOURCE_NATIVE_UNDO, "native_undo"],
+  [wire.EDIT_SOURCE_DROP, "drop"],
+] as const);
+
+function editSource(source: number): EditSourceName {
+  const name = EDIT_SOURCES.get(source);
+  if (name === undefined) throw new Error(`kaya: text_edited carries edit source ${source}, which this build does not know`);
+  return name;
+}
+
 /** Replace `start..end` with `inserted`, whose `runs` carry offsets
- * RELATIVE to the inserted text (docs/rich-text-plan.md R1). */
+ * RELATIVE to the inserted text (docs/rich-text-plan.md R1). `source` is
+ * what provoked an edit the widget delivered and undefined on one the app
+ * builds; applyEdit sends nothing of it. */
 export class Edit {
   start: number;
   end: number;
   inserted: string;
   runs: Run[];
+  source?: EditSourceName;
 
   constructor(start: number, end: number, inserted = "", runs: readonly Run[] = []) {
     this.start = start;
@@ -4481,6 +4509,7 @@ export class App {
       if (kind === wire.OCC_TEXT_EDITED) {
         const runs = runsFrom(flat.slice(4));
         arg = new Edit(flat[1] as number, flat[2] as number, flat[3] as string, runs);
+        arg.source = editSource(flat[0] as number);
         if (keys.length === 0) this._absorbEdit(ident, arg.start, arg.end, arg.inserted, runs);
       } else {
         const [removed, start, stop, name, value] = flat as [number, number, number, string, string];

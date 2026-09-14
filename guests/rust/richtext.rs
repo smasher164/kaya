@@ -76,10 +76,11 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     tx.write(
                         last,
                         format!(
-                            "edit {}:{} <{}> [{}]",
+                            "edit {}:{} <{}> {} [{}]",
                             edit.start,
                             edit.end,
                             edit.inserted,
+                            edit.source.map_or("?", |s| s.name()),
                             spell(&edit.runs)
                         ),
                     );

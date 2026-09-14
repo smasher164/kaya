@@ -36,8 +36,12 @@ let () =
           let mirror = spell (document editor).d_runs in
           write last
             (Str
-               (Printf.sprintf "edit %d:%d <%s> [%s]" e.e_start e.e_stop
-                  e.e_inserted (spell e.e_runs)));
+               (Printf.sprintf "edit %d:%d <%s> %s [%s]" e.e_start e.e_stop
+                  e.e_inserted
+                  (match e.e_source with
+                  | Some s -> edit_source_name s
+                  | None -> "?")
+                  (spell e.e_runs)));
           write runs (Str mirror));
       on_format app editor (fun act ->
           let mirror = spell (document editor).d_runs in

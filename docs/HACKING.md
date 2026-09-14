@@ -47,13 +47,16 @@ A Rust leg's example is built and restaged on EVERY run, --build or not:
 it links the core statically, so the two dylibs vouch for nothing it
 runs (docs/traps.md: A hand-run leg uses whatever interpreter).
 
-`--build` rebuilds libkaya and the interpreter, AND builds the leg's own
-language the way the lane builds it (the seven compiled languages share
-one copy of each build with tools/validate-mac.py, in
-tools/lib/lanes/mac.py). Every one of those builds stamps the spec hash
-it compiled against into target/guest-specs/<lang>.spec, and a run whose
-staged guest carries another spec is refused by name — both hashes, and
-the panic the leg would otherwise die of — rather than started.
+`--build` rebuilds libkaya and the interpreter. The leg's own language is
+built the way the lane builds it on EVERY run, --build or not (the seven
+compiled languages share one copy of each build with tools/validate-mac.py,
+in tools/lib/lanes/mac.py's GUEST_BUILDS), because no build id vouches for
+a guest binary: a go leg run without --build after a guest edit failed on
+last build's label and read as a binding defect (docs/traps.md
+2026-09-14). Every one of those builds stamps the spec hash it compiled
+against into target/guest-specs/<lang>.spec, and a run whose staged guest
+carries another spec is refused by name — both hashes, and the panic the
+leg would otherwise die of — rather than started.
 
 A hand run that fails can keep its verb trace: `KAYA_VERB_TRACE=<file>
 tools/run-leg.py <scene> <lang>` appends the harness's attempt-by-attempt
@@ -337,7 +340,9 @@ and each lane prints its own instruments under a failed leg's log:
   `gtk_window_active` is on the line but names no cause: it reads false
   for the whole life of a green wayland leg (docs/traps.md).
 - run-leg refusals: a compiled guest staged against another spec is
-  named before the leg with both hashes; `--build` is the fix.
+  named before the leg with both hashes; the leg's own language is built
+  the lane's way on every run (docs/traps.md 2026-09-14), so the refusal
+  is about a guest ANOTHER language staged.
 
 ## Layout forensics (when a share assertion fails)
 

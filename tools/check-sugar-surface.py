@@ -2940,6 +2940,7 @@ RICH_PARTS = [
     ("Document", rich_type_rows, ("document", "Document", "document")),
     ("Run", rich_type_rows, ("run", "Run", "run")),
     ("Edit", rich_type_rows, ("edit", "Edit", "edit")),
+    ("EditSource", rich_type_rows, ("edit_source", "EditSource", "editSource")),
     ("Format", rich_type_rows, ("format", "Format", "format")),
     ("on_edit", rich_handler_rows, ("on_edit", "OnEdit", "onEdit")),
     ("on_format", rich_handler_rows, ("on_format", "OnFormat", "onFormat")),
@@ -3069,6 +3070,115 @@ for _what, _rows_of, _names in RICH_PARTS:
     print(f"check-sugar-surface: rich rename negatives, '{_what}': "
           + (" ".join(_counts) if _counts
              else "none — no binding spells it yet"))
+# THE EDIT SOURCE VOCABULARY (the review page's ruling 3, 2026-09-14): the
+# `Edit` an app receives says what provoked it, and the five names are the
+# core's own (crates/kaya/src/wire.rs EDIT_SOURCES). Every binding maps the
+# wire's NUMBER to its name on ONE line that names the GENERATED constant,
+# so a renumbered spec moves every binding with it (check-file-modes'
+# lesson); Swift's generated wire carries no such constant, so its row pins
+# the NUMBER to the core's instead. One call per source, nine patterns.
+def edit_sources_of_core():
+    text = read_rel("crates/kaya/src/wire.rs")
+    numbers = dict(re.findall(
+        r"^pub\(crate\) const EDIT_SOURCE_([A-Z_]+): i64 = (\d+);$", text, re.M))
+    names = re.findall(r"^    \(EDIT_SOURCE_([A-Z_]+), \"([a-z_]+)\"\),$", text, re.M)
+    out = []
+    for upper, snake in names:
+        parts = snake.split("_")
+        pascal = "".join(s.capitalize() for s in parts)
+        camel = parts[0] + "".join(s.capitalize() for s in parts[1:])
+        out.append((snake, pascal, upper, camel, int(numbers[upper])))
+    return out
+
+
+def swift_edit_source_block(text):
+    m = re.search(r"enum KayaEditSource[^\n]*\{\n(.*?)\n\}", text, re.S)
+    return m.group(1) if m else ""
+
+
+def check_edit_source(snake, pascal, upper, camel, number, findings=None,
+                      text_for=None):
+    def text_of(rel):
+        return text_for(rel) if text_for else read_rel(rel)
+
+    def want(lang, rel, pattern, text=None):
+        global status
+        if not grep_e(pattern, text if text is not None else text_of(rel)):
+            msg = (f"check-sugar-surface: {lang} does not map the "
+                   f"'{snake}' edit source (wanted /{pattern}/ in {rel})")
+            if findings is None:
+                print(msg)
+                status = 1
+            else:
+                findings.append(msg)
+    want("rust", "crates/kaya/src/app.rs",
+         rf"EDIT_SOURCE_{upper} => EditSource::{pascal}\b")
+    want("python", "bindings/python/kaya/__init__.py",
+         rf"wire\.EDIT_SOURCE_{upper}\b.*\"{snake}\"|\"{snake}\".*wire\.EDIT_SOURCE_{upper}\b")
+    want("js", "bindings/js/kaya/index.ts",
+         rf"wire\.EDIT_SOURCE_{upper}\b.*\"{snake}\"|\"{snake}\".*wire\.EDIT_SOURCE_{upper}\b")
+    want("go", "bindings/go/app.go",
+         rf"\bEditSource{pascal}\b.*\"{snake}\"|\"{snake}\".*\bEditSource{pascal}\b")
+    want("csharp", "bindings/csharp/KayaApp.cs",
+         rf"KayaWire\.EditSource{pascal}\b.*EditSource\.{pascal}\b|EditSource\.{pascal}\b.*KayaWire\.EditSource{pascal}\b")
+    want("java", "bindings/java/dev/kaya/KayaApp.java",
+         rf"KayaWire\.EDIT_SOURCE_{upper}\b.*\b{upper}\b|\b{upper}\b.*KayaWire\.EDIT_SOURCE_{upper}\b")
+    want("swift", "bindings/swift/KayaApp.swift",
+         rf"^\s*case {camel} = {number}$",
+         text=swift_edit_source_block(text_of("bindings/swift/KayaApp.swift")))
+    want("haskell", "bindings/haskell/KayaApp.hs",
+         rf"editSource{pascal}\b.*\b{pascal}\b|\b{pascal}\b.*editSource{pascal}\b")
+    # OCaml's own constructor casing (`Code_block` one type up).
+    ocaml = snake.capitalize()
+    want("ocaml", "bindings/ocaml/kaya_app.ml",
+         rf"Kaya_wire\.edit_source_{snake}\b.*\b{ocaml}\b|\b{ocaml}\b.*Kaya_wire\.edit_source_{snake}\b")
+
+
+EDIT_SOURCES = edit_sources_of_core()
+if len(EDIT_SOURCES) < 5:
+    selftest_exit(f"check-sugar-surface: read {len(EDIT_SOURCES)} edit sources "
+                  f"out of crates/kaya/src/wire.rs, fewer than the five the "
+                  f"spec has — the reader has rotted")
+for _src in EDIT_SOURCES:
+    check_edit_source(*_src)
+print("check-sugar-surface: edit source vocabulary — "
+      + ", ".join(f"{s} {n}" for s, _p, _u, _c, n in EDIT_SOURCES))
+_fake = []
+check_edit_source("kaya_fake_source", "KayaFakeSource", "KAYA_FAKE_SOURCE",
+                  "kayaFakeSource", 99, findings=_fake)
+_fired = sum(1 for m in _fake if "'kaya_fake_source' edit source" in m)
+if _fired != 9:
+    selftest_exit(f"check-sugar-surface: self-test failed ({_fired}/9 "
+                  f"edit-source patterns fired for a source that exists "
+                  f"nowhere)")
+# Swift's number is the one hand-copied value here: a copy with native_undo
+# renumbered must be refused, or the pin is prose.
+_swift_rel = "bindings/swift/KayaApp.swift"
+_swift_text = read_rel(_swift_rel)
+_nu = next(s for s in EDIT_SOURCES if s[0] == "native_undo")
+_real_line = rf"^\s*case {_nu[3]} = {_nu[4]}$"
+if grep_e(_real_line, swift_edit_source_block(_swift_text)):
+    _doctored, _n = sub_count(rf"(case {_nu[3]} = ){_nu[4]}\b", r"\g<1>9",
+                              _swift_text)
+    print(f"check-sugar-surface: edit-source number negative perturbed "
+          f"{_n} line(s) of {_swift_rel}")
+    if _n != 1:
+        selftest_exit("check-sugar-surface: self-test failed — the swift "
+                      "edit-source number negative perturbed nothing")
+    _fake = []
+    check_edit_source(*_nu, findings=_fake,
+                      text_for=lambda rel, _d=_doctored: (
+                          _d if rel == _swift_rel else read_rel(rel)))
+    if not any(m.startswith("check-sugar-surface: swift does not map")
+               for m in _fake):
+        selftest_exit("check-sugar-surface: self-test failed — swift's "
+                      "native_undo renumbered to 9 was not refused")
+    print("check-sugar-surface: edit-source number negative: swift's "
+          "renumbered native_undo refused")
+else:
+    print("check-sugar-surface: edit-source number negative NOT RUN — swift "
+          "has not landed KayaEditSource yet (the row above is red for it)")
+
 rich_landed = sum(1 for n in rich_seen.values() if n == len(RICH_PARTS))
 print("check-sugar-surface: rich surface watched: "
       + ", ".join(rich_fakes)

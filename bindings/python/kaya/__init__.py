@@ -2216,17 +2216,49 @@ class Document:
         return f"Document(text={self.text!r}, runs={self.runs!r})"
 
 
+class EditSource:
+    """What provoked an edit the widget reports (docs/rich-text-plan.md
+    §2; the review page's ruling 3, 2026-09-14)."""
+
+    USER = "user"
+    IME_COMMIT = "ime_commit"
+    PASTE = "paste"
+    NATIVE_UNDO = "native_undo"
+    DROP = "drop"
+
+
+_EDIT_SOURCES = {
+    wire.EDIT_SOURCE_USER: "user",
+    wire.EDIT_SOURCE_IME_COMMIT: "ime_commit",
+    wire.EDIT_SOURCE_PASTE: "paste",
+    wire.EDIT_SOURCE_NATIVE_UNDO: "native_undo",
+    wire.EDIT_SOURCE_DROP: "drop",
+}
+
+
+def _edit_source(source):
+    name = _EDIT_SOURCES.get(int(source))
+    if name is None:
+        raise ValueError(
+            f"kaya: text_edited carries edit source {int(source)}, which "
+            f"this build does not know")
+    return name
+
+
 class Edit:
     """Replace `start..end` with `inserted`, whose `runs` carry offsets
-    RELATIVE to the inserted text (docs/rich-text-plan.md R1)."""
+    RELATIVE to the inserted text (docs/rich-text-plan.md R1). `source`
+    is what provoked an edit the widget delivered and None on one the app
+    builds; `apply_edit` sends nothing of it."""
 
-    __slots__ = ("start", "end", "inserted", "runs")
+    __slots__ = ("start", "end", "inserted", "runs", "source")
 
     def __init__(self, start, end, inserted="", runs=None):
         self.start = int(start)
         self.end = int(end)
         self.inserted = _text_value("Edit text", inserted)
         self.runs = list(runs) if runs else []
+        self.source = None
 
     @classmethod
     def insert(cls, at, text):
@@ -2251,12 +2283,15 @@ class Edit:
 
     def __eq__(self, other):
         return (isinstance(other, Edit)
-                and (self.start, self.end, self.inserted, self.runs)
-                == (other.start, other.end, other.inserted, other.runs))
+                and (self.start, self.end, self.inserted, self.runs,
+                     self.source)
+                == (other.start, other.end, other.inserted, other.runs,
+                    other.source))
 
     def __repr__(self):
         return (f"Edit(start={self.start!r}, end={self.end!r}, "
-                f"inserted={self.inserted!r}, runs={self.runs!r})")
+                f"inserted={self.inserted!r}, runs={self.runs!r}, "
+                f"source={self.source!r})")
 
 
 class Format:
@@ -5009,9 +5044,10 @@ class App:
                 # `document()`. A STAMPED copy carries no document —
                 # the mirror is keyed by live widget, as the core's is.
                 if kind == wire.OCC_TEXT_EDITED:
-                    _source, start, stop, inserted = payload[:4]
+                    source, start, stop, inserted = payload[:4]
                     runs = _runs_from(payload[4:])
                     arg = Edit(start, stop, inserted, runs)
+                    arg.source = _edit_source(source)
                     if not keys:
                         self._absorb_edit(ident, start, stop, inserted, runs)
                 else:

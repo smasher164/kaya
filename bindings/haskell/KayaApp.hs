@@ -126,6 +126,11 @@ module KayaApp
     Run (..),
     Document (..),
     Edit (..),
+    EditSource (..),
+    editSourceName,
+    -- Exported for guests/haskell's AbortCheck, which is the only thing
+    -- that reaches the wire mapping without a real keystroke.
+    editSourceOfWire,
     Format (..),
     Block (..),
     blockName,
@@ -2299,14 +2304,43 @@ data Document = Document
   deriving (Eq, Show)
 
 -- | Replace @editStart..editEnd@ with 'editInserted', whose runs carry
--- offsets RELATIVE to the inserted text.
+-- offsets RELATIVE to the inserted text. 'editSource' is what provoked an
+-- edit the widget delivered and 'Nothing' on one the app builds.
 data Edit = Edit
   { editStart :: !Int,
     editEnd :: !Int,
     editInserted :: !String,
-    editRuns :: ![Run]
+    editRuns :: ![Run],
+    editSource :: !(Maybe EditSource)
   }
   deriving (Eq, Show)
+
+-- | What provoked an edit the widget reports (docs\/rich-text-plan.md R1;
+-- the review page's ruling 3, docs\/deferred.md 2026-09-14).
+data EditSource = User | ImeCommit | Paste | NativeUndo | Drop
+  deriving (Eq, Show)
+
+editSourceName :: EditSource -> String
+editSourceName s = case s of
+  User -> "user"
+  ImeCommit -> "ime_commit"
+  Paste -> "paste"
+  NativeUndo -> "native_undo"
+  Drop -> "drop"
+
+editSourceOfWire :: Word32 -> EditSource
+editSourceOfWire n
+  | n == W.editSourceUser = User
+  | n == W.editSourceImeCommit = ImeCommit
+  | n == W.editSourcePaste = Paste
+  | n == W.editSourceNativeUndo = NativeUndo
+  | n == W.editSourceDrop = Drop
+  | otherwise =
+      error
+        ( "kaya: text_edited carries edit source "
+            ++ show n
+            ++ ", which this build does not know"
+        )
 
 -- | A toolbar act over a range; 'formatValue' 'Nothing' is the attribute
 -- taken off.
@@ -2369,13 +2403,13 @@ attrAt doc byte name =
       ]
 
 insertEdit :: Int -> String -> Edit
-insertEdit at text = Edit at at text []
+insertEdit at text = Edit at at text [] Nothing
 
 deleteEdit :: (Int, Int) -> Edit
-deleteEdit (start, stop) = Edit start stop "" []
+deleteEdit (start, stop) = Edit start stop "" [] Nothing
 
 replaceEdit :: (Int, Int) -> String -> Edit
-replaceEdit (start, stop) text = Edit start stop text []
+replaceEdit (start, stop) text = Edit start stop text [] Nothing
 
 -- | One attribute over the INSERTED text's own offsets.
 markEdit :: (Int, Int) -> String -> String -> Edit -> Edit
@@ -4863,13 +4897,14 @@ dispatchLoop app = do
       -- inserted text, then four values per run.
       | kind == W.occKindTextEdited -> do
           case askTail of
-            (_source : W.VI64 start : W.VI64 stop : W.VStr inserted : values) -> do
+            (W.VI64 source : W.VI64 start : W.VI64 stop : W.VStr inserted : values) -> do
               let e =
                     Edit
                       (fromIntegral start)
                       (fromIntegral stop)
                       inserted
                       (runsOfValues values)
+                      (Just (editSourceOfWire (fromIntegral source)))
               absorbEdit app ident e
               handlers <- readIORef (appWidgetEdits app)
               dispatch (mapM_ ($ e) (Map.lookup ident handlers))

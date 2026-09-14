@@ -25,7 +25,7 @@ def spell(runs):
 
 def on_edit(edit):
     last.set(f"edit {edit.start}:{edit.end} <{edit.inserted}> "
-             f"[{spell(edit.runs)}]")
+             f"{edit.source} [{spell(edit.runs)}]")
     runs.set(spell(editor.document().runs))
 
 

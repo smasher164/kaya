@@ -755,12 +755,18 @@ func kayaLinkParams(_ tail: [KayaValue]) -> [String: String] {
 }
 
 /// A text_edited tail (KayaWire's arm): source, start, stop, the inserted
-/// text, then four values per run. The sugar's `KayaEdit` carries no
-/// source — the core's occurrence does, and the harness reads it there
-/// (docs/rich-text-plan.md §7).
+/// text, then four values per run.
 func kayaEditFromTail(_ tail: [KayaValue]) -> KayaEdit {
     var edit = KayaEdit()
     guard tail.count >= 4 else { return edit }
+    if case .i64(let source) = tail[0] {
+        guard let known = KayaEditSource(rawValue: Int(source)) else {
+            fatalError(
+                "kaya: text_edited carries edit source \(source), which this "
+                    + "build does not know")
+        }
+        edit.source = known
+    }
     if case .i64(let start) = tail[1] { edit.start = Int(start) }
     if case .i64(let stop) = tail[2] { edit.end = Int(stop) }
     if case .str(let inserted) = tail[3] { edit.inserted = inserted }
@@ -1636,6 +1642,28 @@ enum KayaBlock: String {
     var name: String { rawValue }
 }
 
+/// What provoked an edit the widget reports (docs/rich-text-plan.md §2;
+/// the review page's ruling 3). THE RAW VALUES ARE WIRE VALUES
+/// (crates/kaya/src/wire.rs `EDIT_SOURCES`): KayaWire.swift carries no
+/// constant for this vocabulary, so they are pinned here as KayaRole's are.
+enum KayaEditSource: Int {
+    case user = 0
+    case imeCommit = 1
+    case paste = 2
+    case nativeUndo = 3
+    case drop = 4
+
+    var name: String {
+        switch self {
+        case .user: return "user"
+        case .imeCommit: return "ime_commit"
+        case .paste: return "paste"
+        case .nativeUndo: return "native_undo"
+        case .drop: return "drop"
+        }
+    }
+}
+
 /// A `rich` textarea's text and runs, kept current by the binding from
 /// the edits it delivers.
 struct KayaDocument: Equatable {
@@ -1677,6 +1705,9 @@ struct KayaEdit: Equatable {
     var end: Int = 0
     var inserted: String = ""
     var runs: [KayaRun] = []
+    /// What provoked it; nil on an edit the app builds, and ignored by
+    /// `applyEdit` — nothing on the wire carries it downward.
+    var source: KayaEditSource? = nil
 
     static func insert(at: Int, _ text: String) -> KayaEdit {
         KayaEdit(start: at, end: at, inserted: text, runs: [])

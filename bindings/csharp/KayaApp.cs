@@ -221,6 +221,38 @@ static class BlockKinds
     };
 }
 
+/// What provoked an edit the widget reports (docs/rich-text-plan.md §2;
+/// the review page's ruling 3).
+enum EditSource { User, ImeCommit, Paste, NativeUndo, Drop }
+
+static class EditSources
+{
+    /// The wire's own name for a source.
+    internal static string Name(this EditSource source) => source switch
+    {
+        EditSource.User => "user",
+        EditSource.ImeCommit => "ime_commit",
+        EditSource.Paste => "paste",
+        EditSource.NativeUndo => "native_undo",
+        EditSource.Drop => "drop",
+        _ => throw new ArgumentOutOfRangeException(
+            nameof(source), $"kaya: {source} is no edit source"),
+    };
+
+    /// The wire's number, refused naming one this build does not know.
+    internal static EditSource FromWire(uint source) => source switch
+    {
+        KayaWire.EditSourceUser => EditSource.User,
+        KayaWire.EditSourceImeCommit => EditSource.ImeCommit,
+        KayaWire.EditSourcePaste => EditSource.Paste,
+        KayaWire.EditSourceNativeUndo => EditSource.NativeUndo,
+        KayaWire.EditSourceDrop => EditSource.Drop,
+        _ => throw new InvalidOperationException(
+            $"kaya: text_edited carries edit source {source}, which this "
+                + "build does not know"),
+    };
+}
+
 /// One attribute over one span, in TextRange's unit (UTF-8 bytes):
 /// Value is "true" for the flags, a URL for a link, a BlockKind's own
 /// spelling for a block.
@@ -357,11 +389,13 @@ sealed class Edit
 {
     internal readonly List<TextRun> Marks = new List<TextRun>();
 
-    internal Edit(long start, long stop, string inserted, List<TextRun> runs)
+    internal Edit(long start, long stop, string inserted, List<TextRun> runs,
+        EditSource? source = null)
     {
         Start = start;
         Stop = stop;
         Inserted = inserted;
+        Source = source;
         if (runs != null) Marks = runs;
     }
 
@@ -372,6 +406,10 @@ sealed class Edit
     public string Inserted { get; }
 
     public IReadOnlyList<TextRun> Runs => Marks;
+
+    /// What provoked it; null on an edit the app builds, and ignored by
+    /// ApplyEdit (nothing on the wire carries it downward).
+    public EditSource? Source { get; }
 
     /// Put text at one offset; `at` is a caret, so a range with a width
     /// is refused naming both ends (Replace is the verb for that).
@@ -1602,7 +1640,7 @@ sealed class KayaApp
         for (int at = 4; at < tail.Count; at += 4)
             runs.Add(RunOf(tail, at));
         return new Edit((long)(ulong)tail[1], (long)(ulong)tail[2],
-            tail[3] as string ?? "", runs);
+            tail[3] as string ?? "", runs, EditSources.FromWire((uint)tail[0]));
     }
 
     static Format FormatOf(List<object> tail)

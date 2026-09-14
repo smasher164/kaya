@@ -12408,11 +12408,13 @@ deliver AFTER the act (matrix 7: wayland and android applied an italic armed
 at byte 12 to the keystroke at 33; docs/traps.md).
 Unit test a_pending_attribute_is_dropped_when_the_caret_moves; the scene arms
 italic inside a paragraph and types at the end, on all five lanes; (3) `Edit`
-carries its `source` — owed in all nine bindings'
-sugar (a binding-surface change: do/can't/defer per language, the wire
-already carries it); (4) R10, built; (5) the code run's ground, the quote's
-rule and the link door are a polish pass. KEY: pending_at, Edit.source,
-named format acts, rich polish pass.
+carries its `source` — BUILT 2026-09-14 in all nine (docs/rich-text-plan.md
+§13: absent on an app-built edit, present on a delivered one, mapped through
+the generated constant, the guests printing it in the scene's label, the
+census holding type and mapping — which caught Java's `USER` naming the
+`DROP` constant on its first run); (4) R10, built; (5) the code run's
+ground, the quote's rule and the link door are a polish pass. KEY: pending_at,
+EditSource, named format acts, rich polish pass.
 
 Found by the editor's formatting bar (2026-09-14, docs/traps.md): only the
 CLICK door drops a torn-down copy's tag in the core; toggled, set_value,

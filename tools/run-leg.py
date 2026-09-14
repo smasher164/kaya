@@ -15,10 +15,11 @@ dev_shell_or_die()
 # built it: this refuses a stale one NAMING THE BUILD, or rebuilds with
 # --build.
 #
-# AND THE COMPILED GUEST IS THE LANE'S BUILD OR IT IS REFUSED (2026-09-06,
-# docs/traps.md): --build runs the leg's language through
-# tools/lib/lanes/mac.py's own build, and a guest staged against another
-# spec is named here rather than left to panic at launch.
+# AND THE COMPILED GUEST IS THE LANE'S BUILD, ALWAYS (2026-09-06 and
+# 2026-09-14, docs/traps.md): the leg's language goes through
+# tools/lib/lanes/mac.py's own build on every run, --build or not, because
+# no build id vouches for a guest binary and a go leg run without --build
+# was measured failing on last build's label after a guest edit.
 #
 #   tools/run-leg.py <scene> <lang> [--build] [--appearance dark]
 
@@ -58,17 +59,16 @@ if "--build" in flags:
         if subprocess.run(cmd, cwd=ROOT).returncode != 0:
             print(f"run-leg: build failed: {' '.join(cmd)}", file=sys.stderr)
             sys.exit(1)
-    # THE LEG'S OWN LANGUAGE, THE LANE'S OWN BUILD: the same function
-    # validate-mac.py pools, streaming to this terminal. rust is built
-    # below (per example), and python and js run from source.
-    if lang in lane.GUEST_BUILDS:
-        print(f"run-leg: building the {lang} guests the lane's way",
-              flush=True)
-        guest_rc = lane.build_guests(ROOT, [lang])[lang]
-        if guest_rc != 0:
-            print(f"run-leg: the {lang} guest build failed (rc {guest_rc})",
-                  file=sys.stderr)
-            sys.exit(1)
+# THE LEG'S OWN LANGUAGE, THE LANE'S OWN BUILD, ON EVERY RUN: the same
+# function validate-mac.py pools, streaming to this terminal. rust is built
+# below (per example), and python and js run from source.
+if lang in lane.GUEST_BUILDS:
+    print(f"run-leg: building the {lang} guests the lane's way", flush=True)
+    guest_rc = lane.build_guests(ROOT, [lang])[lang]
+    if guest_rc != 0:
+        print(f"run-leg: the {lang} guest build failed (rc {guest_rc})",
+              file=sys.stderr)
+        sys.exit(1)
 # THE WALL: both artifacts carry the id of the sources they came from,
 # and a hand run gets the lane's refusal, not a stale answer.
 for what, path, fix in (("libkaya", LIB, "cargo build --locked --lib"),

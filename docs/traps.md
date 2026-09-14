@@ -11209,3 +11209,25 @@ act travels IN the call — `kaya_text_pending` carries `at` in bytes — never
 through a report that may still be in flight. The unit test
 a_pending_attribute_is_dropped_when_the_caret_moves arms at 3 with the
 core's selection reported at 0 and demands the act's caret.
+
+**No build id vouches for a compiled guest (2026-09-14).** tools/run-leg.py
+verifies libkaya and the SwiftUI interpreter by build id before a hand
+run, but a Go, C#, Java, Swift, OCaml or Haskell guest binary is whatever
+the lane last built: a `richtext go` leg run without `--build` after the
+guest's label changed failed on LAST build's label (`edit 29:29 <x> [0:1
+block=heading2]`, the source missing), and the sentence looked like a
+binding defect. run-leg builds the leg's own language through the lane's
+build on every run now, `--build` or not; `--build` still names what
+rebuilds libkaya and the interpreter.
+
+**A restore that keeps the old mtime keeps the doctored build (2026-09-14).**
+A watched negative that doctors a C# guest, builds it and restores the
+source with `shutil.copy2` (which preserves the copy's OLDER mtime) leaves
+`dotnet build` believing the assembly is current: the next leg ran the
+DOCTORED assembly against a clean tree (rc 250) until the restored file
+was touched. The perturb-restore rule (CLAUDE.md, the copy-and-shasum
+half) has a second half: the restore must carry a fresh mtime — `touch`
+it, or write the bytes back with `write_text` — wherever a build decides
+staleness by time rather than by content. Cargo, gradle, cabal and dune
+also key on mtimes; the mac lane's own builds run once per lane and never
+restore, so only hand negatives see this.

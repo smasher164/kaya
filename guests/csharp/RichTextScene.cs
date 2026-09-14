@@ -45,8 +45,10 @@ static class RichTextScene
                 tx.SetA11yLabel(editor, "Document");
                 app.OnEdit(editor, (t, edit) =>
                 {
+                    string source = edit.Source is EditSource s ? s.Name() : "?";
                     t.Write(last,
-                        $"edit {edit.Start}:{edit.Stop} <{edit.Inserted}> [{Spell(edit.Runs)}]");
+                        $"edit {edit.Start}:{edit.Stop} <{edit.Inserted}> {source} "
+                            + $"[{Spell(edit.Runs)}]");
                     t.Write(runs, Spell(app.Document(editor).Runs));
                 });
                 app.OnFormat(editor, (t, act) =>

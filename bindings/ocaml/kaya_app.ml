@@ -266,13 +266,38 @@ type run = { r_start : int; r_stop : int; r_name : string; r_value : string }
    the edits it delivers. *)
 type document = { d_text : string; d_runs : run list }
 
+(* What provoked an edit the widget reports (docs/rich-text-plan.md §13). *)
+type edit_source = User | Ime_commit | Paste | Native_undo | Drop
+
+let edit_source_name = function
+  | User -> "user"
+  | Ime_commit -> "ime_commit"
+  | Paste -> "paste"
+  | Native_undo -> "native_undo"
+  | Drop -> "drop"
+
+let edit_source_of_wire n =
+  if n = Kaya_wire.edit_source_user then User
+  else if n = Kaya_wire.edit_source_ime_commit then Ime_commit
+  else if n = Kaya_wire.edit_source_paste then Paste
+  else if n = Kaya_wire.edit_source_native_undo then Native_undo
+  else if n = Kaya_wire.edit_source_drop then Drop
+  else
+    failwith
+      (Printf.sprintf
+         "kaya: text_edited carries edit source %d, which this build does \
+          not know"
+         n)
+
 (* Replace [e_start..e_stop] with [e_inserted], whose runs carry offsets
-   RELATIVE to the inserted text. *)
+   RELATIVE to the inserted text. [e_source] is what provoked an edit the
+   widget delivered and [None] on one the app builds. *)
 type edit = {
   e_start : int;
   e_stop : int;
   e_inserted : string;
   e_runs : run list;
+  e_source : edit_source option;
 }
 
 (* A toolbar act over a range; [f_value = None] is the attribute taken
@@ -1102,13 +1127,20 @@ end
 module Edit = struct
   type t = edit
 
-  let insert at text = { e_start = at; e_stop = at; e_inserted = text; e_runs = [] }
+  let insert at text =
+    { e_start = at; e_stop = at; e_inserted = text; e_runs = []; e_source = None }
 
   let delete (start, stop) =
-    { e_start = start; e_stop = stop; e_inserted = ""; e_runs = [] }
+    { e_start = start; e_stop = stop; e_inserted = ""; e_runs = []; e_source = None }
 
   let replace (start, stop) text =
-    { e_start = start; e_stop = stop; e_inserted = text; e_runs = [] }
+    {
+      e_start = start;
+      e_stop = stop;
+      e_inserted = text;
+      e_runs = [];
+      e_source = None;
+    }
 
   (* One attribute over the INSERTED text's own offsets. *)
   let mark (start, stop) name value e =
@@ -4401,7 +4433,7 @@ let dispatch_loop app =
               (docs/rich-text-plan.md R1). The tail is source, start,
               stop, the inserted text, then four values per run. *)
            match tail with
-           | _source :: Kaya_wire.I64 start :: Kaya_wire.I64 stop
+           | Kaya_wire.I64 source :: Kaya_wire.I64 start :: Kaya_wire.I64 stop
              :: Kaya_wire.Str inserted :: values ->
                let e =
                  {
@@ -4409,6 +4441,7 @@ let dispatch_loop app =
                    e_stop = Int64.to_int stop;
                    e_inserted = inserted;
                    e_runs = runs_of_values values;
+                   e_source = Some (edit_source_of_wire (Int64.to_int source));
                  }
                in
                absorb_edit app id (e.e_start, e.e_stop) e.e_inserted e.e_runs;

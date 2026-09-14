@@ -47,8 +47,10 @@ public final class RichText {
             tx.mount(tx.column(() -> {
                 editor[0] = tx.textarea().rich().a11yId("doc").a11yLabel("Document");
                 app.onEdit(editor[0], (t, edit) -> {
+                    String source = edit.source() == null ? "?" : edit.source().toString();
                     t.write(last, "edit " + edit.start() + ":" + edit.stop() + " <"
-                            + edit.inserted() + "> [" + spell(edit.runs()) + "]");
+                            + edit.inserted() + "> " + source + " ["
+                            + spell(edit.runs()) + "]");
                     t.write(runs, spell(app.document(editor[0]).runs()));
                 });
                 app.onFormat(editor[0], (t, act) -> {

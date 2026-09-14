@@ -1415,12 +1415,49 @@ func normalizeRuns(runs []TextRun) []TextRun {
 	return out
 }
 
+// EditSource is what provoked an edit the widget reports
+// (docs/rich-text-plan.md §2; the review page's ruling 3, 2026-09-14).
+// SourceNone is the zero value: an edit the app builds carries no source
+// and ApplyEdit sends none.
+type EditSource string
+
+const (
+	SourceNone       EditSource = ""
+	SourceUser       EditSource = "user"
+	SourceImeCommit  EditSource = "ime_commit"
+	SourcePaste      EditSource = "paste"
+	SourceNativeUndo EditSource = "native_undo"
+	SourceDrop       EditSource = "drop"
+)
+
+// The wire's own numbers (crates/kaya/src/wire.rs EDIT_SOURCES), read
+// through the generated constants so this binding cannot renumber;
+// TestEditSourceNamesMatchTheConstants holds it level with the constants
+// above.
+var editSources = map[uint32]EditSource{
+	EditSourceUser:       "user",
+	EditSourceImeCommit:  "ime_commit",
+	EditSourcePaste:      "paste",
+	EditSourceNativeUndo: "native_undo",
+	EditSourceDrop:       "drop",
+}
+
+func editSourceOf(source uint32) EditSource {
+	name, ok := editSources[source]
+	if !ok {
+		panic(fmt.Sprintf("kaya: text_edited carries edit source %d, which this build does not know", source))
+	}
+	return name
+}
+
 // Edit replaces Start..End with Inserted, whose Runs carry offsets
-// RELATIVE to the inserted text.
+// RELATIVE to the inserted text. Source is what provoked an edit the
+// widget delivered and SourceNone on one the app builds.
 type Edit struct {
 	Start, End int
 	Inserted   string
 	Runs       []TextRun
+	Source     EditSource
 }
 
 // Insert puts text at one byte offset.
@@ -5358,7 +5395,8 @@ func editOf(tail []any) Edit {
 		panic(fmt.Sprintf("kaya: a text_edited carries %d values, want 4 plus four per run",
 			len(tail)))
 	}
-	e := Edit{Start: int(tail[1].(uint64)), End: int(tail[2].(uint64))}
+	e := Edit{Start: int(tail[1].(uint64)), End: int(tail[2].(uint64)),
+		Source: editSourceOf(tail[0].(uint32))}
 	e.Inserted, _ = tail[3].(string)
 	for at := 4; at < len(tail); at += 4 {
 		e.Runs = append(e.Runs, runOf(tail[at:at+4]))

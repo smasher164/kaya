@@ -3099,6 +3099,42 @@ public final class KayaApp {
         }
     }
 
+    /** What provoked an edit the widget reports
+     * (docs/rich-text-plan.md §2; the review page's ruling 3). */
+    public enum EditSource {
+        USER(KayaWire.EDIT_SOURCE_USER, "user"),
+        IME_COMMIT(KayaWire.EDIT_SOURCE_IME_COMMIT, "ime_commit"),
+        PASTE(KayaWire.EDIT_SOURCE_PASTE, "paste"),
+        NATIVE_UNDO(KayaWire.EDIT_SOURCE_NATIVE_UNDO, "native_undo"),
+        DROP(KayaWire.EDIT_SOURCE_DROP, "drop");
+
+        final int wire;
+        final String spelling;
+
+        EditSource(int wire, String spelling) {
+            this.wire = wire;
+            this.spelling = spelling;
+        }
+
+        /** The wire's own name; {@link Enum#name} is Java's, "USER". */
+        @Override
+        public String toString() {
+            return spelling;
+        }
+
+        /** The wire's number, refused naming one this build does not
+         * know. */
+        static EditSource fromWire(int number) {
+            for (EditSource source : values()) {
+                if (source.wire == number) {
+                    return source;
+                }
+            }
+            throw new IllegalStateException("kaya: text_edited carries edit source "
+                    + number + ", which this build does not know");
+        }
+    }
+
     /** One attribute over one span, in TextRange's unit (UTF-8 bytes):
      * {@code value} is "true" for the flags, a URL for a link, a
      * {@link Block}'s own spelling for a block. */
@@ -3250,11 +3286,18 @@ public final class KayaApp {
         final long stop;
         final String inserted;
         final List<TextRun> marks = new ArrayList<>();
+        final EditSource source;
 
         Edit(long start, long stop, String inserted, List<TextRun> runs) {
+            this(start, stop, inserted, runs, null);
+        }
+
+        Edit(long start, long stop, String inserted, List<TextRun> runs,
+                EditSource source) {
             this.start = start;
             this.stop = stop;
             this.inserted = inserted;
+            this.source = source;
             if (runs != null) {
                 this.marks.addAll(runs);
             }
@@ -3300,6 +3343,12 @@ public final class KayaApp {
 
         public List<TextRun> runs() {
             return java.util.Collections.unmodifiableList(marks);
+        }
+
+        /** What provoked it; null on an edit the app builds, and ignored
+         * by {@code applyEdit} (nothing on the wire carries it down). */
+        public EditSource source() {
+            return source;
         }
     }
 
@@ -7164,7 +7213,7 @@ public final class KayaApp {
             runs.add(runOf(tail, at));
         }
         return new Edit((Long) tail.get(1), (Long) tail.get(2),
-                (String) tail.get(3), runs);
+                (String) tail.get(3), runs, EditSource.fromWire((Integer) tail.get(0)));
     }
 
     private static Format formatOf(Object payload) {

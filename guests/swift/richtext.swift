@@ -35,7 +35,7 @@ app.build { tx in
                 t.write(
                     last,
                     .str("edit \(edit.start):\(edit.end) <\(edit.inserted)> "
-                        + "[\(spell(edit.runs))]"))
+                        + "\(edit.source?.name ?? "?") [\(spell(edit.runs))]"))
                 t.write(runs, .str(mirror))
             },
             onFormat: { t, act in

@@ -855,28 +855,60 @@ fn normalize_runs(runs: Vec<Run>) -> Vec<Run> {
     out
 }
 
+/// What provoked an edit the widget reports (docs/rich-text-plan.md §2;
+/// the review page's ruling 3, 2026-09-14).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditSource {
+    User,
+    ImeCommit,
+    Paste,
+    NativeUndo,
+    Drop,
+}
+
+impl EditSource {
+    pub fn name(self) -> &'static str {
+        match self {
+            EditSource::User => "user",
+            EditSource::ImeCommit => "ime_commit",
+            EditSource::Paste => "paste",
+            EditSource::NativeUndo => "native_undo",
+            EditSource::Drop => "drop",
+        }
+    }
+
+    /// The wire's number; None for one this build does not know.
+    pub(crate) fn from_wire(source: u32) -> Option<Self> {
+        Some(match i64::from(source) {
+            crate::wire::EDIT_SOURCE_USER => EditSource::User,
+            crate::wire::EDIT_SOURCE_IME_COMMIT => EditSource::ImeCommit,
+            crate::wire::EDIT_SOURCE_PASTE => EditSource::Paste,
+            crate::wire::EDIT_SOURCE_NATIVE_UNDO => EditSource::NativeUndo,
+            crate::wire::EDIT_SOURCE_DROP => EditSource::Drop,
+            _ => return None,
+        })
+    }
+}
+
 /// Replace `start..end` with `inserted`, whose `runs` carry offsets
-/// RELATIVE to the inserted text.
+/// RELATIVE to the inserted text. `source` is what provoked an edit the
+/// widget delivered and None on one the app builds.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Edit {
     pub start: u64,
     pub end: u64,
     pub inserted: String,
     pub runs: Vec<Run>,
+    pub source: Option<EditSource>,
 }
 
 impl Edit {
     pub fn insert(at: usize, text: impl Into<String>) -> Self {
-        Edit { start: at as u64, end: at as u64, inserted: text.into(), runs: Vec::new() }
+        Edit { start: at as u64, end: at as u64, inserted: text.into(), ..Default::default() }
     }
 
     pub fn delete(range: std::ops::Range<usize>) -> Self {
-        Edit {
-            start: range.start as u64,
-            end: range.end as u64,
-            inserted: String::new(),
-            runs: Vec::new(),
-        }
+        Edit { start: range.start as u64, end: range.end as u64, ..Default::default() }
     }
 
     pub fn replace(range: std::ops::Range<usize>, text: impl Into<String>) -> Self {
@@ -884,7 +916,7 @@ impl Edit {
             start: range.start as u64,
             end: range.end as u64,
             inserted: text.into(),
-            runs: Vec::new(),
+            ..Default::default()
         }
     }
 
@@ -4441,11 +4473,14 @@ impl<M> Messages<M> {
     /// beside it (docs/rich-text-plan.md R1).
     pub fn on_edit(&self, w: WidgetId, f: impl Fn(Edit) -> M + 'static) {
         self.widgets.borrow_mut().entry(w.0).or_default().push(Box::new(move |occ| match occ {
-                Occurrence::TextEdited { range, inserted, runs, .. } => Some(f(Edit {
+                Occurrence::TextEdited { range, inserted, runs, source, .. } => Some(f(Edit {
                     start: range.start,
                     end: range.stop,
                     inserted: inserted.clone(),
                     runs: runs.clone(),
+                    source: Some(EditSource::from_wire(*source).unwrap_or_else(|| {
+                        panic!("kaya: text_edited carries edit source {source}, which this build does not know")
+                    })),
                 })),
                 _ => None,
             }),
