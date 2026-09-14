@@ -12355,7 +12355,8 @@ that tree ALL PASS on all five lanes and 59 gates, 1,773 legs in 1285s, the
 richtext scene on every lane and in all nine languages on the mac.
 The editor's formatting bar landed 2026-09-14 (docs/rich-text-plan.md §9)
 with the registry prune on every backend and the core's dead-copy click
-drop. Every backend refuses the two apply records
+drop. Pushed as c4f7bc5f with 2cf9852d's two lane fixes; the matrix on
+that tree ALL PASS on all five lanes and 59 gates, 1,773 legs in 1213s. Every backend refuses the two apply records
 through its depth stub until its arm lands:
 
 - ~~**DEPTH STUB: richtext on swiftui/macos**~~ — LANDED 2026-09-11: the NSTextView arm (the storage unpinned for `isRichText` alone, kaya's own attribute keys with the display derived from them, the corroboration and selection reports, the composition and paste sources, pending typing attributes), the `format_text` record, and the `format`/`expect_runs`/`expect_edit` verbs; `allowsUndo` as R6's lever is the undo step's.

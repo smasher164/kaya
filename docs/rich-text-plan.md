@@ -389,6 +389,10 @@ a click under a dead copy's tag to the app — every destroy prunes every
 kind registry now, and the click door drops a dead copy's tag with a
 KAYA_DIAG (docs/traps.md 2026-09-14); a plain `set_text` on a rich textarea
 resets the mirror and every arm's runs (54ab00ce and this slice).
+Pushed as c4f7bc5f; the first matrix on it reddened Android (the Compose seed
+set its runs before the plain-write rule wiped them) and Windows (the harness's
+set_text verb skipped the derivation), both fixed at cause in 2cf9852d; the
+matrix on that tree ALL PASS, 1,773 legs in 1213s.
 
 
 ## 5. What this plan does not do
