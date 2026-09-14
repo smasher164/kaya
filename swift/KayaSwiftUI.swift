@@ -854,6 +854,19 @@ final class KayaSceneModel {
     var textareas: [KayaNode] = []
     var labeleds: [KayaNode] = []
     var searches: [KayaNode] = []
+
+    /// Every kind registry, so a destroyed node leaves all of them at once.
+    static let registries: [ReferenceWritableKeyPath<KayaSceneModel, [KayaNode]>] = [
+        \.buttons, \.checkboxes, \.labels, \.entryWidgets, \.sliders, \.datePickers,
+        \.timePickers, \.images, \.canvases, \.columns, \.rows, \.scrolls, \.progresses,
+        \.selects, \.radios, \.grids, \.textareas, \.labeleds, \.searches,
+    ]
+
+    func forget(_ id: UInt64) {
+        for registry in Self.registries {
+            self[keyPath: registry].removeAll { $0.id == id }
+        }
+    }
 }
 
 // The single-window spellings, forwarding to the primary surface. An
@@ -5269,6 +5282,12 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     // moment it exists.
                     let previous = node.text
                     node.text = kayaLF(String(decoding: bytes, as: UTF8.self))
+                    if node.rich {
+                        // A plain write is a whole document with no runs
+                        // (docs/rich-text-plan.md §8), pushed as one.
+                        node.richRuns = []
+                        node.richSeq += 1
+                    }
                     kayaNoteQuietTextWrite(id, from: previous, to: node.text)
                 case (propChecked, valueBool):
                     kayaScene.nodes[id]!.checked = raw[body + 24] != 0
@@ -5509,6 +5528,10 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     parentNode.children.removeAll { $0.id == id }
                 }
                 kayaScene.nodes.removeValue(forKey: id)
+                // AND EVERY KIND REGISTRY: a torn-down copy that stayed in
+                // `buttons` was `button#last` and took a click
+                // (docs/traps.md 2026-09-14).
+                kayaScene.forget(id)
                 // A destroyed anchor takes its context attachment with it
                 // (menu ITEMS are never destroyed; the anchor map entry is): a
                 // For-row removal must not leave the harness's open-menu

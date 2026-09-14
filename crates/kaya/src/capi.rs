@@ -3287,11 +3287,37 @@ pub extern "C" fn kaya_emit_notification_result(notification: u64, outcome: u32)
 pub unsafe extern "C" fn kaya_emit_clicked(tag: *const u8, len: usize) {
     assert!(!tag.is_null() && len != 0, "kaya: empty click tag");
     let tag = unsafe { std::slice::from_raw_parts(tag, len) };
+    if !stamped_tag_is_live(tag, "click") {
+        return;
+    }
     if let Some(sink) = PRESENTATION_SINK.lock().unwrap().as_ref() {
         sink.send_click_tag(tag);
         return;
     }
     state().ring.push_record(ring::REC_BUTTON_CLICKED, tag);
+}
+
+/// A tag naming a torn-down stamped copy is dropped with one sentence: the
+/// app never asked to hear from a row it removed, and a backend's registry
+/// keeping the dead copy addressable is exactly the hole this closes
+/// (docs/traps.md 2026-09-14). A live widget's tag always passes.
+fn stamped_tag_is_live(tag: &[u8], what: &str) -> bool {
+    let (node, path) = match wire::decode_click_tag(tag) {
+        crate::protocol::Occurrence::InstanceButtonClicked { node, path } => (node.0, path),
+        _ => return true,
+    };
+    let live = PRESENTATION_SCENE
+        .lock()
+        .unwrap()
+        .as_ref()
+        .is_none_or(|scene| scene.stamped_copy_is_live(node, &path));
+    if !live {
+        eprintln!(
+            "KAYA_DIAG {what} on a torn-down stamped copy dropped: template node {node} at \
+             {path:?} is no longer stamped — the backend's registry still addresses it"
+        );
+    }
+    live
 }
 
 /// Presentation side: emit a column-header click, exactly as a

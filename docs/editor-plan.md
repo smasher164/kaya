@@ -92,6 +92,13 @@ platforms, plus artifacts a human can watch.
    take caught the stale-title defect (fixed same hour, the frame made
    impossible). The films ride the styling artifact.
 
+## §2b — the formatting bar (2026-09-14)
+
+The buffer is `rich` from launch and a Format menu shows a formatting bar over
+the widget's own selection; the runs are the widget's, never the file's
+(docs/rich-text-plan.md §9). Saving writes the plain text; an interchange
+format for the runs is the notes app's question, not the editor's.
+
 ## §3 — not in v1 (recorded, not forgotten)
 
 Syntax highlighting; tabs and panes; find-and-replace-all across a

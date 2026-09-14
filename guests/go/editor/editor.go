@@ -147,6 +147,9 @@ func docName(dest *kaya.PickedFile) string {
 
 const findKey = "bar"
 
+// The formatting bar is stamped and torn down the find bar's way.
+const barKey = "format"
+
 // Spelled rather than formatted: "1 matches" is what a person reads.
 func tally(n int) string {
 	switch n {
@@ -192,6 +195,12 @@ func App() *kaya.App {
 		findRows kaya.Collection
 		// TEMPLATE NODES, not widgets: their handlers register below Build.
 		query, prev, next, done kaya.Node
+		// THE FORMATTING BAR (docs/rich-text-plan.md §8): the app's own
+		// toolbar over the widget's own selection, shown and hidden the
+		// find bar's way. One template node per act, keyed by its a11y id.
+		formatRows kaya.Collection
+		barOpen    bool
+		acts       = map[string]kaya.Node{}
 	)
 
 	mark := func(tx *kaya.Tx) { tx.Window(0).Dirty(text != saved) }
@@ -368,6 +377,18 @@ func App() *kaya.App {
 
 		win.OnCloseRequested(func(tx *kaya.Tx) { ask(tx, quit) })
 
+		format := win.Menu("Format")
+		format.Item("Formatting Bar").Shortcut("primary+shift+f").OnActivate(func(tx *kaya.Tx) {
+			if barOpen {
+				barOpen = false
+				tx.Remove(formatRows, barKey)
+				tx.Focus(buffer)
+				return
+			}
+			barOpen = true
+			tx.Insert(formatRows, barKey, "")
+		})
+
 		file := win.Menu("File")
 		file.Item("New").Shortcut("primary+n").OnActivate(func(tx *kaya.Tx) {
 			ask(tx, newDoc)
@@ -405,12 +426,31 @@ func App() *kaya.App {
 		// grow divides the MAIN axis and align owns the cross one: a
 		// full-window buffer needs both.
 		tx.Mount(tx.Column(func() {
+			// RICH FROM LAUNCH: a plain document is a rich one with no runs,
+			// and the runs are the widget's, never the file's (§8).
 			buffer = tx.Textarea(func(tx *kaya.Tx, s string) {
 				// Every user edit arrives here, a native undo included.
 				text = s
 				mark(tx)
 				refind(tx)
-			}).Grow(1).A11yID("buffer").A11yLabel("Document") // textarea#0
+			}).Grow(1).A11yID("buffer").A11yLabel("Document").Rich() // textarea#0
+
+			formatRows = tx.Collection()
+			for row := range tx.Rows(formatRows).All() {
+				bar := row.Row(func() {
+					for _, act := range []struct{ id, title string }{
+						{"bold", "Bold"}, {"italic", "Italic"}, {"underline", "Underline"},
+						{"strike", "Strike"}, {"code", "Code"},
+						{"heading1", "H1"}, {"heading2", "H2"}, {"quote", "Quote"},
+						{"body", "Body"},
+					} {
+						n := row.Button(act.title)
+						row.SetA11yID(n, act.id)
+						acts[act.id] = n
+					}
+				})
+				row.SetInset(bar, 8)
+			}
 
 			// There is no visibility property: "shown and hidden" means
 			// stamped and torn down. SetInset rides the STAMPED row.
@@ -447,6 +487,30 @@ func App() *kaya.App {
 	})
 	app.OnClickNode(prev, func(tx *kaya.Tx, _ []any) { show(tx, at-1) })
 	app.OnClickNode(next, func(tx *kaya.Tx, _ []any) { show(tx, at+1) })
+
+	// THE ACTS, each over the widget's own selection (docs/rich-text-plan.md
+	// §7): an inline attribute goes on, a block kind is set, body takes the
+	// block off. The widget answers through OnFormat.
+	for _, name := range []string{"bold", "italic", "underline", "strike", "code"} {
+		name := name
+		app.OnClickNode(acts[name], func(tx *kaya.Tx, _ []any) { tx.Format(buffer, name, "true") })
+	}
+	for id, kind := range map[string]kaya.Block{
+		"heading1": kaya.Heading1, "heading2": kaya.Heading2, "quote": kaya.Quote, "body": kaya.Body,
+	} {
+		kind := kind
+		app.OnClickNode(acts[id], func(tx *kaya.Tx, _ []any) { tx.SetBlock(buffer, kind) })
+	}
+	app.OnFormat(buffer, func(tx *kaya.Tx, f kaya.Format) {
+		switch {
+		case f.Removed:
+			tx.Write(status, fmt.Sprintf("%s off %d:%d", f.Name, f.Start, f.End))
+		case f.Name == "block":
+			tx.Write(status, fmt.Sprintf("%s %d:%d", f.Value, f.Start, f.End))
+		default:
+			tx.Write(status, fmt.Sprintf("%s %d:%d", f.Name, f.Start, f.End))
+		}
+	})
 
 	// Dismiss TEARS THE BAR DOWN; nothing clears the query field, so the
 	// next Find… stamps a NEW one.

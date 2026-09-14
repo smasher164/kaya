@@ -29,7 +29,7 @@ expect_fills textarea#0
 
 # Five of Edit's six items are kaya ROLES the app writes no behaviour
 # for at all.
-expect_menus 2
+expect_menus 3
 # Enablement is not a build-time fact and this app computes none of it:
 # the platform's own undo has nothing to offer yet.
 expect_menu "Edit>Undo" disabled
@@ -159,6 +159,27 @@ expect label#1 "1 of 4"
 click button#0
 expect label#1 "4 of 4"
 
+# ---- rich text (docs/rich-text-plan.md §8): the same buffer, formatted --
+#
+# The buffer is rich from launch and the Format menu shows the bar. The
+# app's toolbar formats the WIDGET'S OWN SELECTION (§7): the find above
+# left "99" selected, the widget answers each act, and the status line
+# says what it heard. Formatting is the widget's, never the file's, so
+# `dirty` does not move. The bar is torn down again before the find bar's
+# own dismiss, since `button#last` counts every stamped copy.
+menu_activate "Format>Formatting Bar"
+click button@bold[format]
+expect label#0 "bold 132:134"
+expect_runs textarea#0 "132:134 bold"
+click button@heading1[format]
+expect label#0 "heading1 125:134"
+expect_runs textarea#0 "125:134 block=heading1|132:134 bold"
+click button@body[format]
+expect label#0 "block off 125:134"
+expect_runs textarea#0 "132:134 bold"
+expect_dirty false
+menu_activate "Format>Formatting Bar"
+
 # ---- a declared set is bound to the text it was declared against ---
 #
 # The document changed, so kaya DROPS the decorations and the app
@@ -166,6 +187,9 @@ expect label#1 "4 of 4"
 # the count says so rather than going stale.
 set_text textarea#0 "scratch"
 expect textarea#0 "scratch"
+# A PLAIN WRITE IS A WHOLE DOCUMENT WITH NO RUNS (§8): the bold went with
+# the text it sat on.
+expect_runs textarea#0 ""
 expect label#1 "no matches"
 expect_highlights textarea#0 ""
 expect_dirty true
@@ -186,7 +210,8 @@ expect entry#last ""
 expect label#1 "no matches"
 click button#last
 expect label#1 ""
-expect_order row#0 "saved, 134 bytes|"
+# The status line carries the last act the buffer answered (§8).
+expect_order row#0 "block off 125:134|"
 # The STATUS ROW'S OWN INSET (docs/styling-plan.md D3), at a BAR-FREE
 # moment deliberately: the find bar's stamped row would shift row
 # ordinals, and here the status row is the only row there is.

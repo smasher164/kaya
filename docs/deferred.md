@@ -12352,7 +12352,10 @@ sugar (`rich()`, `Document`, `Edit`, `Format`, `set_document`,
 Pushed as 2ec2748c; the matrix on that tree ALL PASS on all five lanes and
 58 gates, 1,760 legs in 1336s. The breadth pushed as d1f23d22; the matrix on
 that tree ALL PASS on all five lanes and 59 gates, 1,773 legs in 1285s, the
-richtext scene on every lane and in all nine languages on the mac. Every backend refuses the two apply records
+richtext scene on every lane and in all nine languages on the mac.
+The editor's formatting bar landed 2026-09-14 (docs/rich-text-plan.md §9)
+with the registry prune on every backend and the core's dead-copy click
+drop. Every backend refuses the two apply records
 through its depth stub until its arm lands:
 
 - ~~**DEPTH STUB: richtext on swiftui/macos**~~ — LANDED 2026-09-11: the NSTextView arm (the storage unpinned for `isRichText` alone, kaya's own attribute keys with the display derived from them, the corroboration and selection reports, the composition and paste sources, pending typing attributes), the `format_text` record, and the `format`/`expect_runs`/`expect_edit` verbs; `allowsUndo` as R6's lever is the undo step's.
@@ -12387,6 +12390,13 @@ non-ASCII Str until 2026-09-11 (docs/traps.md) and no scene could see it —
 no shared scene echoes a non-ASCII wire string through a guest's label.
 One such step in a shared scene is the wall to add. KEY: wireUtf8, Haskell
 decoder, non-ASCII round trip.
+
+Found by the editor's formatting bar (2026-09-14, docs/traps.md): only the
+CLICK door drops a torn-down copy's tag in the core; toggled, set_value,
+sort_requested, dropped and the other stamped-occurrence doors still
+forward one. Route them all through `stamped_tag_is_live` (capi.rs) and
+add the drop to each. KEY: stamped_tag_is_live, torn-down copy, dead copy,
+lingering registry.
 
 ## RULING WANTED — a lost dialog answers the app as a cancel; should the app be able to tell the two apart? (recorded 2026-09-06)
 KEY: lost dialog, KAYA_DIALOG_LOST, file_dialog_result reason, cancelled versus lost, DIALOG_RESULT_BUDGET_MS, dialog occurrence

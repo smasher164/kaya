@@ -11161,3 +11161,23 @@ buffer. A rich textarea wears every attribute as a tag on the same buffer, so
 a declared highlight set would have stripped the whole document's formatting
 with no observable moving (the highlight scene has no rich field). It removes
 the highlight tag BY NAME now; the corroboration read is the guard.
+
+## A torn-down stamped copy stayed addressable, and its click reached the app (2026-09-14)
+
+Every backend's harness registries (`buttons`, `textareas`, … in creation
+order) appended a stamped copy and never removed it when its row was torn
+down: the SwiftUI interpreter's `applyDestroy` pruned `nodes` and the
+parent's children and nothing else, GTK's and WinUI's Destroy arms pruned
+their own side tables and not the kind vectors, Compose's the same. The
+editor scene found it the moment a second stamped row existed: `button#last`
+after the formatting bar's teardown was the dead `Body` button, the click
+went out under the dead copy's tag, and the core forwarded it — the app
+answered `block off 0:7` on a document that had no bar. The scene's own
+`click button#last` for the find bar's dismiss had only ever worked because
+the newest copy happened to be the last created. Two walls now: every
+backend's destroy prunes every kind registry (SwiftUI `forget`, Compose
+`forget`, the GTK and WinUI Destroy arms), and the core drops any click whose
+stamped copy is no longer in `stamps`, with a KAYA_DIAG naming the template
+node and key path (capi.rs `stamped_tag_is_live`). The editor scene pins it
+on all five lanes; the other stamped-occurrence doors (toggle, set_value,
+sort, drop) still forward a dead copy's tag and are on the ledger.

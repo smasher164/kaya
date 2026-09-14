@@ -4787,6 +4787,13 @@ impl Scene {
     /// need to be, since a template node belongs to exactly one blueprint.
     /// Linear in live copies, deliberately: an O(1) map would be a second
     /// index over the same facts, and a second index drifts.
+    /// Whether the stamped copy a tag names still exists: a backend whose
+    /// registries kept a torn-down copy can still emit its tag
+    /// (docs/traps.md 2026-09-14). A live widget (empty path) is always live.
+    pub(crate) fn stamped_copy_is_live(&self, node: u64, path: &[Value]) -> bool {
+        path.is_empty() || self.instance_widget(node, path).is_some()
+    }
+
     fn instance_widget(&self, node: u64, path: &[Value]) -> Option<WidgetId> {
         let (key, site) = path.split_last()?;
         let key = Key::from_value(key);
@@ -13408,6 +13415,39 @@ mod tests {
             scene.note_text_formatted(textarea, TextRange::new(4, 7), "block", Some("body"));
         assert_eq!(published.map(|(_, _, v)| v), Some(None));
         assert_eq!(scene.rich_runs_string(textarea).as_deref(), Some(""));
+    }
+
+    /// docs/traps.md 2026-09-14: a torn-down copy's tag is dead to the core.
+    #[test]
+    fn a_torn_down_copy_is_not_live() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+            TxOp::CreateCollection { id: CollectionId(1), variants: vec![vec![ValueType::Str]] },
+            TxOp::CreateFor { id: 4, collection: CollectionId(1) },
+            TxOp::CreateWidget { id: WidgetId(10), kind: WidgetKind::Row },
+            TxOp::CreateWidget { id: WidgetId(11), kind: WidgetKind::Button },
+            TxOp::AddChild { parent: WidgetId(10), child: WidgetId(11) },
+            TxOp::TemplateEnd,
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(4) },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ]);
+        let key = Value::from("bar");
+        scene.apply(vec![TxOp::CollectionInsert {
+            id: CollectionId(1),
+            path: Vec::new(),
+            key: key.clone(),
+            variant: 0,
+            record: vec![Value::from("x")],
+        }]);
+        assert!(scene.stamped_copy_is_live(11, std::slice::from_ref(&key)));
+        assert!(scene.stamped_copy_is_live(11, &[]), "a live widget's empty path is live");
+        scene.apply(vec![TxOp::CollectionRemove {
+            id: CollectionId(1),
+            path: Vec::new(),
+            key: key.clone(),
+        }]);
+        assert!(!scene.stamped_copy_is_live(11, &[key]));
     }
 
     /// docs/rich-text-plan.md §8: a plain set_text on a rich textarea is a

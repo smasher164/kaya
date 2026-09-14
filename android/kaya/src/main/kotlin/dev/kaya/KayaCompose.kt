@@ -926,6 +926,18 @@ object KayaSceneModel {
     val timePickers = ArrayList<KayaNode>()
     val labeleds = ArrayList<KayaNode>()
     val searches = ArrayList<KayaNode>()
+
+    // Every kind registry, so a destroyed node leaves all of them at once
+    // (docs/traps.md 2026-09-14: a torn-down copy stayed addressable).
+    private val registries = listOf(
+        buttons, checkboxes, labels, entryWidgets, sliders, images, columns, rows, scrolls,
+        progresses, selects, radios, grids, textareas, canvases, datePickers, timePickers,
+        labeleds, searches,
+    )
+
+    fun forget(id: Long) {
+        for (registry in registries) registry.removeAll { it.id == id }
+    }
     /**
      * The appearance the core last rastered with — written by the ONE
      * reading the presentation report sends (KayaRoot), so
@@ -2983,6 +2995,7 @@ object KayaCompose {
                         bereaved.add(parent)
                     }
                     KayaSceneModel.nodes.remove(id)
+                    KayaSceneModel.forget(id)
                     // A destroyed anchor takes its context attachment
                     // with it (menu ITEMS are never destroyed; the
                     // anchor map entry is): a For-row removal must not
@@ -9685,6 +9698,11 @@ internal fun kayaWriteText(node: KayaNode, next: String) {
         return
     }
     if (node.textState.text.contentEquals(next)) return
+    // A plain write is a whole document with no runs (docs/rich-text-plan.md
+    // §8): the arm's table and its pending attributes go with the text.
+    node.richRuns = emptyList()
+    node.richPendingOn.clear()
+    node.richPendingOff.clear()
     node.textState.setTextAndPlaceCursorAtEnd(next)
     KayaUndoState.clearHistory(node)
 }

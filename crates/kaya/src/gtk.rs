@@ -10002,6 +10002,33 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 .remove(&id)
                 .expect("scene validated the id")
                 .widget();
+            // AND EVERY KIND REGISTRY (docs/traps.md 2026-09-14): a torn-down
+            // copy that stayed in `buttons` was `button#last` and took a
+            // click. A registry entry inside the destroyed widget goes too.
+            {
+                use gtk4::prelude::{Cast, WidgetExt};
+                let gone = |w: &gtk4::Widget| w == &widget || w.is_ancestor(&widget);
+                core.buttons.retain(|b| !gone(b.upcast_ref()));
+                core.checkboxes.retain(|w| !gone(w));
+                core.labels.retain(|w| !gone(w));
+                core.entries.retain(|e| !gone(e.upcast_ref()));
+                core.searches.retain(|s| !gone(s.upcast_ref()));
+                core.sliders.retain(|s| !gone(s.scale.upcast_ref()));
+                core.date_pickers.retain(|d| !gone(d.button.upcast_ref()));
+                core.time_pickers.retain(|t| !gone(t.button.upcast_ref()));
+                core.images.retain(|p| !gone(p.upcast_ref()));
+                core.scrolls.retain(|s| !gone(s.upcast_ref()));
+                core.progresses.retain(|p| !gone(p.upcast_ref()));
+                core.selects.retain(|d| !gone(d.upcast_ref()));
+                core.radios.retain(|b| !gone(b.upcast_ref()));
+                core.grids.retain(|g| !gone(g.upcast_ref()));
+                core.labeleds.retain(|r| !gone(r.upcast_ref()));
+                core.textareas.retain(|v| !gone(v.upcast_ref()));
+                if let Some(i) = core.canvas_ids.iter().position(|c| *c == id) {
+                    core.canvas_ids.remove(i);
+                    core.canvases.remove(i);
+                }
+            }
             if let Some(parent) = widget.parent() {
                 // A FORM'S ROWS ARE ITS BOXED LIST'S CHILDREN, and that
                 // parent is no GtkBox; a labelled row's seats are inside the
@@ -11287,6 +11314,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     core.apply_quiet.set(true);
                     buffer.set_text(&s);
                     core.apply_quiet.set(false);
+                    // The tags went with the text (docs/rich-text-plan.md
+                    // §8); the pending attributes go with them.
+                    core.rich_pending.borrow_mut().remove(&id.0);
                     note_quiet_text_write(core, id, &previous, &s);
                 }
                 (NativeWidget::Checkbox(check), Prop::Text, Value::Str(s)) => {

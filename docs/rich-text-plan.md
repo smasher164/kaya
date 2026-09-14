@@ -369,9 +369,27 @@ Open after the breadth: the marked-text divergence on plain Compose fields;
 a shared scene step that round-trips non-ASCII text through a guest's label
 (the Haskell decoder's wall); the template zone (`rich` is a live-zone
 spelling; JS refuses `document()` on a template node in its own words, no
-gate holds the other eight); `own_undo` (R6); labels (R8); the editor's
-rich toggle, now that the Go sugar exists; and the five rulings on the
-review page.
+gate holds the other eight); `own_undo` (R6); labels (R8); and the five
+rulings on the review page.
+
+## 9. The editor's formatting bar (2026-09-14)
+
+guests/go/editor declares its buffer `rich` from launch (a plain document is
+a rich one with no runs; the runs are the widget's, never the file's, so
+`dirty` never moves on a format) and grows a Format menu whose one item
+shows and hides a formatting bar — a stamped row, the find bar's mechanism,
+with Bold/Italic/Underline/Strike/Code/H1/H2/Quote/Body acting on the
+widget's own selection through `tx.Format`/`tx.SetBlock`; the status line
+says what the widget answered (`bold 132:134`, `heading1 125:134`, `block
+off 125:134`). tools/scenes/editor.steps drives it on every lane after its
+find has selected the last match. The slice found two defects no rich scene
+could see: every backend's harness registries kept torn-down stamped copies
+addressable (`button#last` was the dead Body button) and the core forwarded
+a click under a dead copy's tag to the app — every destroy prunes every
+kind registry now, and the click door drops a dead copy's tag with a
+KAYA_DIAG (docs/traps.md 2026-09-14); a plain `set_text` on a rich textarea
+resets the mirror and every arm's runs (54ab00ce and this slice).
+
 
 ## 5. What this plan does not do
 

@@ -13020,6 +13020,39 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 }
             }
             let widget = core.widgets.remove(&id).expect("scene validated the id");
+            // AND EVERY KIND REGISTRY (docs/traps.md 2026-09-14): a torn-down
+            // copy that stayed addressable took a click on the mac; the
+            // id-keyed pairs prune by id, the buttons by tag, the rest by
+            // element identity.
+            fn drop_pair<T>(ids: &mut Vec<u64>, items: &mut Vec<T>, id: u64) {
+                if let Some(i) = ids.iter().position(|x| *x == id) {
+                    ids.remove(i);
+                    items.remove(i);
+                }
+            }
+            drop_pair(&mut core.entry_ids, &mut core.entries, id.0);
+            drop_pair(&mut core.textarea_ids, &mut core.textareas, id.0);
+            drop_pair(&mut core.slider_ids, &mut core.sliders, id.0);
+            drop_pair(&mut core.date_picker_ids, &mut core.date_pickers, id.0);
+            drop_pair(&mut core.time_picker_ids, &mut core.time_pickers, id.0);
+            drop_pair(&mut core.canvas_ids, &mut core.canvases, id.0);
+            drop_pair(&mut core.search_ids, &mut core.searches, id.0);
+            if let Some(tag) = core.widget_tags.get(&id.0) {
+                if let Some(i) = core.buttons.iter().position(|t| t == tag) {
+                    core.buttons.remove(i);
+                    core.button_controls.remove(i);
+                }
+            }
+            if let Ok(element) = widget.element() {
+                core.checkboxes.retain(|c| c.cast::<UIElement>().ok().as_ref() != Some(&element));
+                core.labels.retain(|c| c.cast::<UIElement>().ok().as_ref() != Some(&element));
+                core.images.retain(|c| c.cast::<UIElement>().ok().as_ref() != Some(&element));
+                core.scrolls.retain(|c| c.cast::<UIElement>().ok().as_ref() != Some(&element));
+                core.progresses.retain(|c| c.cast::<UIElement>().ok().as_ref() != Some(&element));
+                core.selects.retain(|c| c.cast::<UIElement>().ok().as_ref() != Some(&element));
+                core.radios.retain(|c| c.cast::<UIElement>().ok().as_ref() != Some(&element));
+                core.grids.retain(|c| c.cast::<UIElement>().ok().as_ref() != Some(&element));
+            }
             core.tree_parent.remove(&id.0);
             core.grow.remove(&id);
             core.child_order.forget(id);
@@ -13875,6 +13908,17 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         clear_native_undo(&field);
                     }
                     core.banked_text.insert(id.0, s.clone());
+                    // A plain write is a whole document with no runs
+                    // (docs/rich-text-plan.md §8): the table stays (rich is
+                    // still on) and empties, the pending attributes go.
+                    RICH_RUNS.with_borrow_mut(|table| {
+                        if let Some(runs) = table.get_mut(&id.0) {
+                            runs.clear();
+                        }
+                    });
+                    RICH_PENDING.with_borrow_mut(|table| {
+                        table.remove(&id.0);
+                    });
                 }
                 // docs/rich-text-plan.md R1: the attributed surface exists only
                 // where the widget asked for it, and the table's own entry is
