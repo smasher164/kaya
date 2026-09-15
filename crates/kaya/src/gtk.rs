@@ -13430,6 +13430,79 @@ mod weight_tests {
     }
 }
 
+/// THE WINDOW CONTROLS' FALLBACK (the maintainer, 2026-09-14/15;
+/// docs/gtk-chrome.md): a session's own layout and icons are followed; a
+/// session that supplied NOTHING — GTK reports its compiled-in layout —
+/// takes GNOME's single close button; and any layout that shows minimize
+/// or maximize gets kaya's flat rules on the buttons, with Adwaita's
+/// baseline minimize bar centred. Pure, so `chrome_tests` holds it.
+const GTK_DEFAULT_DECORATION_LAYOUT: &str = "menu:minimize,maximize,close";
+const GNOME_DECORATION_LAYOUT: &str = "appmenu:close";
+const FLAT_CONTROLS_CSS: &str = "windowcontrols > button > image { background: none; \
+    box-shadow: none; padding: 5px; border-radius: 6px; }\n\
+    windowcontrols > button:hover > image { background: alpha(currentColor, 0.10); }\n\
+    windowcontrols > button.close:hover > image { background: #c01c28; color: white; }\n";
+const ADWAITA_MINIMIZE_NUDGE_CSS: &str =
+    "windowcontrols > button.minimize > image { -gtk-icon-transform: translateY(-3px); }\n";
+
+#[derive(Debug, PartialEq, Eq)]
+struct WindowControlsPlan {
+    /// The layout to SET, when the session supplied none.
+    layout: Option<&'static str>,
+    /// The stylesheet the controls wear, empty on a close-only layout.
+    css: String,
+}
+
+fn window_controls_plan(session_layout: Option<&str>, icon_theme: Option<&str>) -> WindowControlsPlan {
+    let supplied = session_layout.filter(|l| !l.is_empty() && *l != GTK_DEFAULT_DECORATION_LAYOUT);
+    let layout = if supplied.is_none() { Some(GNOME_DECORATION_LAYOUT) } else { None };
+    let effective = supplied.unwrap_or(GNOME_DECORATION_LAYOUT);
+    let three = effective.contains("minimize") || effective.contains("maximize");
+    let mut css = String::new();
+    if three {
+        css.push_str(FLAT_CONTROLS_CSS);
+        if icon_theme.is_some_and(|t| t.starts_with("Adwaita")) {
+            css.push_str(ADWAITA_MINIMIZE_NUDGE_CSS);
+        }
+    }
+    WindowControlsPlan { layout, css }
+}
+
+#[cfg(test)]
+mod chrome_tests {
+    use super::{
+        ADWAITA_MINIMIZE_NUDGE_CSS, FLAT_CONTROLS_CSS, GNOME_DECORATION_LAYOUT,
+        GTK_DEFAULT_DECORATION_LAYOUT, window_controls_plan,
+    };
+
+    #[test]
+    fn a_session_with_no_settings_takes_gnomes_layout_and_no_css() {
+        let plan = window_controls_plan(Some(GTK_DEFAULT_DECORATION_LAYOUT), Some("Adwaita"));
+        assert_eq!(plan.layout, Some(GNOME_DECORATION_LAYOUT));
+        assert_eq!(plan.css, "");
+        let none = window_controls_plan(None, None);
+        assert_eq!(none.layout, Some(GNOME_DECORATION_LAYOUT));
+    }
+
+    #[test]
+    fn a_sessions_own_layout_is_followed() {
+        let gnome = window_controls_plan(Some("appmenu:close"), Some("Adwaita"));
+        assert_eq!(gnome.layout, None, "the session's choice stands");
+        assert_eq!(gnome.css, "", "a lone close button keeps the theme's look");
+        let kde = window_controls_plan(Some("icon:minimize,maximize,close"), Some("breeze"));
+        assert_eq!(kde.layout, None);
+        assert_eq!(kde.css, FLAT_CONTROLS_CSS, "three buttons go flat; Breeze's glyphs are its own");
+    }
+
+    #[test]
+    fn adwaitas_minimize_bar_is_centred_only_under_adwaita() {
+        let adwaita = window_controls_plan(Some("menu:minimize,close"), Some("Adwaita"));
+        assert_eq!(adwaita.css, format!("{FLAT_CONTROLS_CSS}{ADWAITA_MINIMIZE_NUDGE_CSS}"));
+        let other = window_controls_plan(Some("menu:minimize,close"), Some("Papirus"));
+        assert!(!other.css.contains("translateY"));
+    }
+}
+
 #[cfg(test)]
 mod frame_tests {
     use super::{
@@ -13704,7 +13777,33 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
         let weight_css = gtk4::CssProvider::new();
         watch_css_errors(&weight_css, &css_error);
         load_kaya_css(&weight_css, "label weights", &weight_css_for(None), &css_error);
+        // The window controls' fallback (window_controls_plan; docs/gtk-chrome.md).
+        let chrome_css = gtk4::CssProvider::new();
+        watch_css_errors(&chrome_css, &css_error);
+        if let Some(settings) = gtk4::Settings::default() {
+            let apply = {
+                let chrome_css = chrome_css.clone();
+                let css_error = css_error.clone();
+                move |settings: &gtk4::Settings| {
+                    let layout = settings.gtk_decoration_layout();
+                    let theme = settings.gtk_icon_theme_name();
+                    let plan = window_controls_plan(layout.as_deref(), theme.as_deref());
+                    if let Some(layout) = plan.layout {
+                        settings.set_gtk_decoration_layout(Some(layout));
+                    }
+                    load_kaya_css(&chrome_css, "window controls", &plan.css, &css_error);
+                }
+            };
+            apply(&settings);
+            settings.connect_gtk_decoration_layout_notify(apply.clone());
+            settings.connect_gtk_icon_theme_name_notify(apply);
+        }
         if let Some(display) = gtk4::gdk::Display::default() {
+            gtk4::style_context_add_provider_for_display(
+                &display,
+                &chrome_css,
+                gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
+            );
             gtk4::style_context_add_provider_for_display(
                 &display,
                 &css,

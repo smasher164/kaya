@@ -423,6 +423,11 @@ PY
             gtk::weight_tests::gtk_weights_clamp_to_the_brand_font_named_instances \\
         && run_exact_test \\
             gtk::weight_tests::gtk_weights_stand_at_the_wish_with_no_variable_brand_font \\
+        && run_exact_test \\
+            gtk::chrome_tests::a_session_with_no_settings_takes_gnomes_layout_and_no_css \\
+        && run_exact_test gtk::chrome_tests::a_sessions_own_layout_is_followed \\
+        && run_exact_test \\
+            gtk::chrome_tests::adwaitas_minimize_bar_is_centred_only_under_adwaita \\
         && if run_exact_test gtk::flex::tests::check_gtk_zero_test_selftest \\
             >/dev/null 2>&1; then
                 echo "check-gtk: zero-test self-test was accepted" >&2
