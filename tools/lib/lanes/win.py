@@ -44,7 +44,7 @@ EXCLUSIVE = {"dnd_rust", "dnd_python", "dnd_js", "dnd_go", "dnd_csharp", "dnd_ja
 # THIS default; the runner calls depth_scenes(), which honours the
 # KAYA_WIN_DEPTH_SCENES override the lane uses for one-off slices.
 DEPTH_SCENES = ["windowed", "canvas", "sizepolicy", "tasks", "notify", "richtext",
-                "ownundo"]
+                "ownundo", "richlabel"]
 
 # THE PACKAGED LEGS (docs/packaging-plan.md P3): the SAME Rust guests, run
 # out of an installed MSIX instead of out of C:\kaya, because a kaya app is
@@ -233,6 +233,12 @@ ORDER = [
      "canvas_rust",
      "canvasdark_rust",
      "sizepolicy_rust",
+     # THE RICH LABEL (docs/rich-text-plan.md §15). POOLED, unlike its
+     # richtext neighbour: a label is read-only, so the scene clicks two
+     # buttons and reads the runs back — no typed input, no composition, no
+     # OS-global chrome. RUST-ONLY while the eight bindings' sugar is the
+     # parallel worktree — hence the DEPTH_SCENES row.
+     "richlabel_rust",
      "portfolio_python",
      "varied_python",
      "a11yrows_rust", "a11yrows_python", "a11yrows_js", "a11yrows_go", "a11yrows_csharp", "a11yrows_java",

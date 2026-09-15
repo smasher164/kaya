@@ -83,6 +83,25 @@ fn main() {
         // `SetTextWrapping`/`SetTextTrimming` take.
         "Microsoft.UI.Xaml.TextWrapping".to_string(),
         "Microsoft.UI.Xaml.TextTrimming".to_string(),
+        // THE RICH LABEL'S INLINES (docs/rich-text-plan.md §15). A rich label
+        // draws its run table as `TextBlock.Inlines`, and nothing in that
+        // chain is pulled transitively: `Inlines` is a `usize` pad until
+        // InlineCollection is named, a Run is unreachable without the Inline
+        // and TextElement it derives from, and a Hyperlink derives from Span.
+        // The three per-run traits are TextElement properties whose types
+        // live in Windows.UI.Text — without them SetFontWeight, SetFontStyle
+        // and SetTextDecorations are pads beside a real SetFontFamily —
+        // and FontWeights is the statics class the bold weight comes from.
+        "Microsoft.UI.Xaml.Documents.TextElement".to_string(),
+        "Microsoft.UI.Xaml.Documents.Inline".to_string(),
+        "Microsoft.UI.Xaml.Documents.InlineCollection".to_string(),
+        "Microsoft.UI.Xaml.Documents.Run".to_string(),
+        "Microsoft.UI.Xaml.Documents.Span".to_string(),
+        "Microsoft.UI.Xaml.Documents.Hyperlink".to_string(),
+        "Windows.UI.Text.FontWeight".to_string(),
+        "Windows.UI.Text.FontStyle".to_string(),
+        "Windows.UI.Text.TextDecorations".to_string(),
+        "Microsoft.UI.Text.FontWeights".to_string(),
         "Microsoft.UI.Xaml.Controls.TextBox".to_string(),
         // THE TEXTAREA'S CONTROL (docs/textarea-foundation-plan.md):
         // RichEditBox is the rich-CAPABLE control kaya pins to plain

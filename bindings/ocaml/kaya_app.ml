@@ -1297,8 +1297,9 @@ let absorb_format app id (start, stop) name value =
    or write. Reads the ambient transaction, as [items] does. *)
 let document (Widget id) = the_document (the_tx ()).app id
 
-(* This textarea carries attribute runs: [set_document], [apply_edit],
-   [~on_edit]. *)
+(* This widget carries attribute runs: [set_document], [apply_edit],
+   [~on_edit]. A textarea edits them; a label draws them read-only
+   (docs/rich-text-plan.md R8, §15). *)
 let set_rich (Widget id) on = emit (the_tx ()) (Kaya_wire.tx_set_rich id on)
 
 (* The app owns this textarea's history (docs/rich-text-plan.md R6, §14):
@@ -1397,7 +1398,7 @@ let textarea ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?he
   Option.iter (Hashtbl.replace tx.app.widget_formats id) on_format;
   w
 
-let label ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?role ?href ?href_bind ?text ?bind () =
+let label ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?role ?rich ?href ?href_bind ?text ?bind () =
   let w = widget Kaya_wire.kind_label in
   Option.iter (fun g -> set_grow w g) grow;
   Option.iter (fun v -> set_fill w v) fill;
@@ -1405,6 +1406,8 @@ let label ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help 
   (* [Heading] and [Caption] are the label's roles; the two button
      emphases die here. *)
   Option.iter (fun r -> set_role w r) role;
+  (* Read-only here: the app writes the runs (docs/rich-text-plan.md R8). *)
+  Option.iter (fun v -> set_rich w v) rich;
   Option.iter (fun u -> set_href w u) href;
   Option.iter (fun s -> bind_href w s) href_bind;
   Option.iter (fun t -> set_text w t) text;

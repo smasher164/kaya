@@ -3591,15 +3591,18 @@ final class KayaAppTx {
     }
 
     /// `role:` is this label's place in the text hierarchy — `.heading`
-    /// or `.caption`, a semantic fact and not a font size.
+    /// or `.caption`, a semantic fact and not a font size. `rich: true`
+    /// draws the label's attribute runs over the role's own font,
+    /// read-only (docs/rich-text-plan.md R8, §15).
     func label(
         _ text: String? = nil, bind: KayaSignal? = nil, role: KayaRole? = nil,
-        grow: Double? = nil
+        rich: Bool = false, grow: Double? = nil
     ) -> KayaWidget {
         let w = widget(UInt32(KAYA_KIND_LABEL))
         if let text { setText(w, text) }
         if let bind { bindText(w, bind) }
         if let role { setRole(w, role) }
+        if rich { setRich(w, true) }
         if let grow { setGrow(w, grow) }
         return w
     }

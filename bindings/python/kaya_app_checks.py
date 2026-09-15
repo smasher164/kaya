@@ -3751,6 +3751,26 @@ rich_check("can_undo writes prop 34 and can_redo prop 35, as written",
            kaya.wire.tx_set_can_undo(_owned.id, True) in _own_records
            and kaya.wire.tx_set_can_redo(_owned.id, False) in _own_records)
 
+# THE RICH LABEL (docs/rich-text-plan.md R8, §15): `rich=` is the LABEL
+# constructor's too, and the prop rides the same record — so the create
+# record is read beside it, since prop 32 on a textarea proves nothing
+# about a label.
+_label_records = []
+kaya.runtime.submit = lambda *recs: _label_records.extend(recs)
+_label_app = kaya.App()
+with _label_app.window(2604):
+    with kaya.column():
+        _rich_label = kaya.label("Héllo world, code", rich=True)
+        _plain_label = kaya.label("Héllo world, code")
+kaya.runtime.submit = _real_ship
+
+rich_check("a rich LABEL declares prop 32 on a LABEL, a plain one does not",
+           kaya.wire.tx_create_widget(_rich_label.id, kaya.wire.KIND_LABEL)
+           in _label_records
+           and kaya.wire.tx_set_rich(_rich_label.id, True) in _label_records
+           and kaya.wire.tx_set_rich(_plain_label.id, True)
+           not in _label_records)
+
 print(f"rich text: {len(_rich_checks)} checks over the fold, driven from "
       f"packed occurrence bytes through App._dispatch_loop")
 

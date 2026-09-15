@@ -3669,10 +3669,15 @@ export function search(opts: TextInputOptions = {}): Widget {
   return handle;
 }
 
-export type LabelOptions = GrowOption & { bind?: Bindable; href?: Bindable | string };
+export type LabelOptions = GrowOption & { bind?: Bindable; href?: Bindable | string; rich?: boolean };
 
 /** A label: a constant, or `{bind}` for a Signal or the enclosing For's
- * element or field. */
+ * element or field.
+ *
+ * `rich: true` draws the inline vocabulary READ-ONLY
+ * (docs/rich-text-plan.md R8, §15): setDocument and applyEdit are the
+ * writes, document() the read, a `block` run is refused, and a plain
+ * text write drops the runs. */
 export function label(text: string, opts?: LabelOptions): Widget;
 export function label(opts: LabelOptions): Widget;
 export function label(a: string | LabelOptions, b?: LabelOptions): Widget {
@@ -3680,6 +3685,7 @@ export function label(a: string | LabelOptions, b?: LabelOptions): Widget {
   const handle = widget(wire.KIND_LABEL);
   if (text !== undefined) records().push(wire.tx_set_text(handle.id, textValue("label text", text)));
   if (opts.bind !== undefined) bindText("label", handle, opts.bind);
+  if (opts.rich === true) handle.rich(true);
   if (opts.href !== undefined) handle.href(opts.href);
   setGrow(handle, opts);
   return handle;

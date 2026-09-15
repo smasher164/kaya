@@ -1,0 +1,16 @@
+# A LABEL CARRIES THE INLINE VOCABULARY, READ-ONLY (docs/rich-text-plan.md
+# R8, §15): the app writes and edits its document, and every arm draws the
+# runs over the role's own font. The widget's runs are read beside the
+# core's on every lane (the corroboration wall).
+expect label#0 ""
+expect_runs label#0 ""
+click button#0
+expect label#0 "Héllo world, code"
+expect_runs label#0 "0:6 bold|7:12 link=https://kaya.dev|14:18 code"
+expect label#2 "0:6 bold|7:12 link=https://kaya.dev|14:18 code"
+expect label#1 "Heading with italic"
+expect_runs label#1 "13:19 italic"
+click button#1
+expect label#0 "Héllo, big world, code"
+expect_runs label#0 "0:6 bold|8:11 italic|12:17 link=https://kaya.dev|19:23 code"
+expect label#2 "0:6 bold|8:11 italic|12:17 link=https://kaya.dev|19:23 code"

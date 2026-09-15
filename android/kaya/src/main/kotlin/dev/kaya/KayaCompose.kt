@@ -240,6 +240,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withLink
@@ -5261,6 +5262,10 @@ object KayaCompose {
     private fun kayaFormatVerb(parts: List<String>): String? {
         if (parts.size < 4) return "wants a target, a start:end range and an attribute"
         val node = kayaTextTarget(parts[1]) ?: return "no such target ${parts[1]}"
+        if (node.kind == KayaCompose.KIND_LABEL) {
+            return "${parts[1]} is a label — a format act covers the widget's own " +
+                "selection and a label has none (docs/rich-text-plan.md R8)"
+        }
         val bounds = parts[2].split(":")
         val s = bounds.getOrNull(0)?.toIntOrNull()
         val e = bounds.getOrNull(1)?.toIntOrNull()
@@ -5295,8 +5300,12 @@ object KayaCompose {
         val node = kayaTextTarget(parts[1]) ?: return Pair("<no such target>", null)
         if (parts[0] == "expect_edit") return Pair(KayaPresent.textLastEdit(node.id), null)
         val core = KayaPresent.textRuns(node.id)
-        if (node.textState.composition != null) return Pair(core, null)
-        val mine = kayaRichSpelling(node.textState.text.toString(), node.richRuns)
+        // A LABEL's own runs are the table it draws from, and it has no
+        // TextFieldState to compose in (docs/rich-text-plan.md §15).
+        val field = kayaIsTextField(node)
+        if (field && node.textState.composition != null) return Pair(core, null)
+        val held = if (field) node.textState.text.toString() else node.text
+        val mine = kayaRichSpelling(held, node.richRuns)
         return Pair(core, if (mine == core) null else mine)
     }
 
@@ -5474,6 +5483,9 @@ object KayaCompose {
 
     private fun kayaTextTarget(spec: String): KayaNode? =
         if (spec.startsWith("textarea")) target(spec, "textarea", KayaSceneModel.textareas)
+        // A LABEL carries the inline vocabulary read-only
+        // (docs/rich-text-plan.md §15), so the rich reads resolve one.
+        else if (spec.startsWith("label")) target(spec, "label", KayaSceneModel.labels)
         else if (spec.startsWith("search")) target(spec, "search", KayaSceneModel.searches)
         else target(spec, "entry", KayaSceneModel.entryWidgets)
 
@@ -9740,19 +9752,33 @@ internal fun kayaWriteText(node: KayaNode, next: String) {
     // to write into: touching `textState` would mint a state object per
     // label for nothing. The model assignment above is their whole
     // write.
-    if (node.kind != KayaCompose.KIND_ENTRY && node.kind != KayaCompose.KIND_TEXTAREA &&
-        node.kind != KayaCompose.KIND_SEARCH
-    ) {
+    if (!kayaIsTextField(node)) {
+        // A rich LABEL's runs go with its text, the field's rule below
+        // (docs/rich-text-plan.md §15).
+        if (node.rich) kayaRichDropRuns(node)
         return
     }
     if (node.textState.text.contentEquals(next)) return
     // A plain write is a whole document with no runs (docs/rich-text-plan.md
     // §8): the arm's table and its pending attributes go with the text.
+    kayaRichDropRuns(node)
+    node.textState.setTextAndPlaceCursorAtEnd(next)
+    KayaUndoState.clearHistory(node)
+}
+
+/** The kinds that own a [KayaNode.textState]; every other kind's text is the
+ * model mirror alone (a LABEL's, docs/rich-text-plan.md §15). */
+internal fun kayaIsTextField(node: KayaNode): Boolean =
+    node.kind == KayaCompose.KIND_ENTRY || node.kind == KayaCompose.KIND_TEXTAREA ||
+        node.kind == KayaCompose.KIND_SEARCH
+
+/** The arm's run table and its pending attributes, dropped together; the
+ * display is remembered on [KayaNode.richSeq]. */
+internal fun kayaRichDropRuns(node: KayaNode) {
     node.richRuns = emptyList()
     node.richPendingOn.clear()
     node.richPendingOff.clear()
-    node.textState.setTextAndPlaceCursorAtEnd(next)
-    KayaUndoState.clearHistory(node)
+    node.richSeq += 1
 }
 
 // ---- Text ranges: the ONE place this file converts an offset ---------
@@ -10174,6 +10200,25 @@ internal fun kayaRichTransformation(
         }
     }
 
+/**
+ * A RICH LABEL'S DOCUMENT, read-only (docs/rich-text-plan.md §15): one
+ * [kayaRichSpanStyle] per maximal segment over the label's own role style,
+ * and a real `LinkAnnotation.Url` for a link run — a non-editable Text
+ * renders and clicks one, which the editable field cannot
+ * (docs/measurements/richtext-compose-2026-09-11.md §4).
+ */
+internal fun kayaRichAnnotated(
+    text: String,
+    runs: List<KayaRichRun>,
+    palette: KayaRichPalette,
+): AnnotatedString = buildAnnotatedString {
+    append(text)
+    for ((from, to, attrs) in kayaRichSegments(runs, text.length)) {
+        addStyle(kayaRichSpanStyle(attrs, palette), from, to)
+        attrs["link"]?.let { addLink(LinkAnnotation.Url(it), from, to) }
+    }
+}
+
 /** A quote's indent, the mac arm's 20 points in this platform's unit. */
 private val KAYA_RICH_QUOTE_INDENT = 20.sp
 
@@ -10313,7 +10358,10 @@ internal fun kayaRichApplyEdit(
     selStart: Int,
     selStop: Int,
 ) {
-    val held = node.textState.text.toString()
+    // A LABEL has no TextFieldState: its text is the model mirror alone
+    // (docs/rich-text-plan.md §15).
+    val field = kayaIsTextField(node)
+    val held = if (field) node.textState.text.toString() else node.text
     if (start < 0 || start > stop || stop > held.length) {
         Log.i(
             "kaya",
@@ -10327,12 +10375,14 @@ internal fun kayaRichApplyEdit(
     val next = held.replaceRange(start, stop, inserted)
     node.text = kayaLf(next)
     val end = next.length
-    node.textState.edit {
-        replace(start, stop, inserted)
-        selection = androidx.compose.ui.text.TextRange(
-            selStart.coerceIn(0, end), selStop.coerceIn(0, end))
+    if (field) {
+        node.textState.edit {
+            replace(start, stop, inserted)
+            selection = androidx.compose.ui.text.TextRange(
+                selStart.coerceIn(0, end), selStop.coerceIn(0, end))
+        }
+        KayaUndoState.clearHistory(node)
     }
-    KayaUndoState.clearHistory(node)
     node.richSeq += 1
 }
 
@@ -12541,6 +12591,41 @@ private fun KayaRenderCore(
                     }
             }
         KayaCompose.KIND_LABEL ->
+            // A RICH LABEL draws its inline runs READ-ONLY over the role's
+            // own style (docs/rich-text-plan.md §15).
+            // A `role link` label's content IS its href, so it keeps its own
+            // arm here as it does on the mac.
+            if (node.rich && node.role != KayaCompose.ROLE_LINK) {
+                check(
+                    node.role == 0L || node.role == KayaCompose.ROLE_HEADING ||
+                        node.role == KayaCompose.ROLE_CAPTION
+                ) {
+                    "kaya: rich label role ${node.role} has no compose arm"
+                }
+                // Read HERE: a CompositionLocal is a composable's to read,
+                // and the builder runs outside one.
+                val palette = KayaRichPalette(
+                    link = MaterialTheme.colorScheme.primary,
+                    quote = LocalContentColor.current.copy(alpha = KAYA_RICH_QUOTE_ALPHA))
+                // richSeq is the composition state a run change moves: the
+                // table itself is a plain field.
+                val document = remember(node, node.text, node.richSeq, palette) {
+                    kayaRichAnnotated(node.text, node.richRuns, palette)
+                }
+                Text(
+                    document,
+                    style = when (node.role) {
+                        KayaCompose.ROLE_HEADING -> MaterialTheme.typography.titleLarge
+                        KayaCompose.ROLE_CAPTION -> MaterialTheme.typography.bodySmall
+                        else -> LocalTextStyle.current
+                    },
+                    color = if (node.role == KayaCompose.ROLE_CAPTION)
+                        MaterialTheme.colorScheme.onSurfaceVariant else Color.Unspecified,
+                    modifier = if (node.role == KayaCompose.ROLE_HEADING)
+                        boxFill.then(a11y).semantics { heading() }
+                    else boxFill.then(a11y),
+                )
+            } else
             // The heading role is BOTH facts at once (docs/styling-plan.md
             // D4): Compose's `heading()` semantics, which is the half
             // every platform publishes and the half the styling scene

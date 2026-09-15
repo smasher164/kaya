@@ -391,6 +391,10 @@ name = "ownundo"
 path = "../../guests/rust/ownundo.rs"
 
 [[example]]
+name = "richlabel"
+path = "../../guests/rust/richlabel.rs"
+
+[[example]]
 name = "typeface"
 path = "../../guests/rust/typeface.rs"
 

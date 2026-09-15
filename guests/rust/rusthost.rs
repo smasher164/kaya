@@ -87,6 +87,9 @@ mod richtext;
 #[path = "ownundo.rs"]
 mod ownundo;
 
+#[path = "richlabel.rs"]
+mod richlabel;
+
 #[path = "styling.rs"]
 mod styling;
 
@@ -176,6 +179,7 @@ fn app(ctx: kaya::AppCtx) {
         Ok("ranges") => ranges::app(ctx),
         Ok("richtext") => richtext::app(ctx),
         Ok("ownundo") => ownundo::app(ctx),
+        Ok("richlabel") => richlabel::app(ctx),
         Ok("styling") => styling::app(ctx),
         Ok("toolbar") => toolbar::app(ctx),
         Ok("table") => table::app(ctx),

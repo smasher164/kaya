@@ -42,7 +42,7 @@ SCENES = [
     "commands", "a11y", "a11yrows", "filedialog", "clipboard", "undo",
     "dirty", "ranges", "save", "styling", "toolbar", "identity",
     "assets", "sizepolicy", "adaptive", "pickers", "sliders",
-    "tooltips", "search", "richtext", "ownundo",
+    "tooltips", "search", "richtext", "ownundo", "richlabel",
 ]
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed — built and run rust-only until their guests arrive,
@@ -172,6 +172,8 @@ ORDER = [
                   "ocaml", "haskell")),
     ("ownundo", ("rust", "python", "js", "go", "csharp", "java", "swift",
                  "ocaml", "haskell")),
+    ("richlabel", ("rust", "python", "js", "go", "csharp", "java", "swift",
+                   "ocaml", "haskell")),
     ("drain",),
     # WHAT SURVIVES A RELAUNCH (docs/tasks-s4-plan.md §4): the tasks
     # guest again under taskspersist.steps, act two through the PLAIN

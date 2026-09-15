@@ -3940,11 +3940,16 @@ def search(text=None, on_change=None, grow=None, placeholder=None):
     return handle
 
 
-def label(text=None, bind=None, grow=None, href=None):
+def label(text=None, bind=None, grow=None, href=None, rich=False):
     """A label; `text` for a constant, `bind` for a Signal or an
     Element (the enclosing For's, levels computed). `href=` with
     `role="link"` is the destination the platform opens
-    (docs/tasks-s2-plan.md T3)."""
+    (docs/tasks-s2-plan.md T3).
+
+    `rich=True` draws the inline vocabulary READ-ONLY
+    (docs/rich-text-plan.md R8, §15): `set_document` and `apply_edit`
+    are the writes, `document()` the read, a `block` run is refused,
+    and a plain text write drops the runs."""
     handle = _widget(wire.KIND_LABEL)
     if text is not None:
         _records().append(wire.tx_set_text(handle.id, _text_value("label text", text)))
@@ -3965,6 +3970,8 @@ def label(text=None, bind=None, grow=None, href=None):
             f"or one of its fields (el.title), not {type(bind).__name__} — "
             "inside a case arm project the field: kaya.label(bind=note.text)"
         )
+    if rich:
+        handle.rich(True)
     if href is not None:
         handle.href(href)
     _set_grow(handle, grow)

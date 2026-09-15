@@ -188,6 +188,11 @@ executable ownundo
   main-is: ownundo.hs
   build-depends: kaya-guests
 
+executable richlabel
+  import: shared
+  main-is: richlabel.hs
+  build-depends: kaya-guests
+
 executable sections
   import: shared
   main-is: sections.hs

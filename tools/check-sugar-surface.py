@@ -2837,6 +2837,26 @@ def rich_prop_rows(snake, pascal, camel):
     ]
 
 
+def rich_label_rows(snake, pascal, camel):
+    """`rich` on the LABEL constructor (docs/rich-text-plan.md R8, §15): the
+    bindings whose `rich` is a chained call on any leaf (rust, go, java) or a
+    leaf attribute (haskell) are read where the textarea's row reads them;
+    the five that spell it per constructor take a label-shaped pattern."""
+    F = RICH_FILES
+    return [
+        ("rust", F["rust"], rf"pub fn {snake}\(self\) -> Self"),
+        ("python", F["python"], rf"def label\([^)]*\b{snake}="),
+        ("go", F["go"], rf"func \(w Widget\) {pascal}\("),
+        ("csharp", F["csharp"],
+         rf"public Widget Label\([\s\S]{{0,200}}?bool {camel}\b"),
+        ("java", F["java"], rf"public Widget {camel}\("),
+        ("swift", F["swift"], rf"func label\([\s\S]{{0,300}}?{camel}: Bool"),
+        ("haskell", F["haskell"], rf"^  {pascal} :: Bool -> Attr 'LeafW"),
+        ("ocaml", F["ocaml"], rf"^let label [\s\S]{{0,600}}?\?{snake}\b"),
+        ("js", F["js"], rf"LabelOptions = [^\n]*\b{camel}\?:"),
+    ]
+
+
 def rich_type_rows(snake, pascal, camel):
     """The values an app reads and builds, in each binding's own
     declaration idiom — a struct, a class, a record, a data type, a frozen
@@ -2936,6 +2956,7 @@ def rich_document_rows(snake, pascal, camel):
 # because the negatives below rename them away.
 RICH_PARTS = [
     ("rich", rich_prop_rows, ("rich", "Rich", "rich")),
+    ("rich label", rich_label_rows, ("rich", "Rich", "rich")),
     # docs/rich-text-plan.md R6, §14: the app-owned undo, a prop, and the
     # two live answers, transaction writes.
     ("own_undo", rich_prop_rows, ("own_undo", "OwnUndo", "ownUndo")),

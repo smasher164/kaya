@@ -82,6 +82,9 @@ RUST_SCENES = [
     # THE APP-OWNED UNDO (docs/rich-text-plan.md §14): rust-only for the
     # same reason, and the one scene that drives route App on this lane.
     "ownundo",
+    # THE RICH LABEL (docs/rich-text-plan.md §15): rust-only for the same
+    # reason; the runs are read-only, so this lane drives no keyboard.
+    "richlabel",
 ]
 
 # The iPad legs, queued right after their phone sibling: the phone pool is

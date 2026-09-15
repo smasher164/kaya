@@ -625,6 +625,151 @@ fn set_rich_runs(
     }
 }
 
+/// A RICH LABEL IS DRAWN, NEVER EDITED (docs/rich-text-plan.md §15). It has no
+/// GtkTextBuffer, so the arm's own table IS the document it draws from, and a
+/// link's URL rides its run instead of the textarea's side table.
+///
+/// Pango indexes by BYTE and the core hands this backend CODE POINTS
+/// (scene.rs `native_offset_chars`), so every offset crosses here.
+fn label_byte_of(text: &str, chars: u64) -> u32 {
+    text.char_indices()
+        .nth(chars as usize)
+        .map(|(byte, _)| byte as u32)
+        .unwrap_or(text.len() as u32)
+}
+
+/// The Pango attribute one kaya inline attribute is, as a TRAIT over whatever
+/// font the label's role left it — never a whole font description, which is
+/// what would throw the heading's and caption's own size away.
+/// `link` is absent on purpose: it takes GtkLabel's markup door instead.
+fn label_rich_attr(name: &str) -> Option<gtk4::pango::Attribute> {
+    use gtk4::pango;
+    Some(match name {
+        "bold" => pango::AttrInt::new_weight(pango::Weight::Bold).into(),
+        "italic" => pango::AttrInt::new_style(pango::Style::Italic).into(),
+        "underline" => pango::AttrInt::new_underline(pango::Underline::Single).into(),
+        "strike" => pango::AttrInt::new_strikethrough(true).into(),
+        "code" => pango::AttrString::new_family("monospace").into(),
+        _ => return None,
+    })
+}
+
+/// Put `text` and `runs` (CODE POINT offsets) on a rich label.
+///
+/// A LINK TAKES GTKLABEL'S OWN DOOR, and that door is markup: `<a href>` is the
+/// only spelling that mints the link ranges GtkLabel makes clickable and hands
+/// to `gtk_show_uri` — a Pango underline+colour would draw the same picture and
+/// open nothing, which is the textarea arm's carve-out (a GtkTextTag has no
+/// link) and not the label's. Markup and `set_attributes` SPLICE rather than
+/// replace (`gtk_label_get_effective_attributes`), so the traits below ride over
+/// the link's platform dress; and the parsed text is the guest's own bytes, so
+/// the escaping never shifts an offset.
+fn draw_rich_label(label: &gtk4::Label, text: &str, runs: &[crate::protocol::NativeRun]) {
+    let mut links: Vec<(usize, usize, &str)> = runs
+        .iter()
+        .filter(|run| run.name == "link")
+        .map(|run| {
+            (
+                label_byte_of(text, run.start) as usize,
+                label_byte_of(text, run.end) as usize,
+                run.value.as_str(),
+            )
+        })
+        .collect();
+    if links.is_empty() {
+        label.set_text(text);
+    } else {
+        links.sort_by_key(|(start, _, _)| *start);
+        let mut markup = String::new();
+        let mut at = 0usize;
+        for (start, stop, url) in links {
+            if start < at || stop < start || stop > text.len() {
+                continue;
+            }
+            markup.push_str(&glib::markup_escape_text(&text[at..start]));
+            markup.push_str("<a href=\"");
+            markup.push_str(&glib::markup_escape_text(url));
+            markup.push_str("\">");
+            markup.push_str(&glib::markup_escape_text(&text[start..stop]));
+            markup.push_str("</a>");
+            at = stop;
+        }
+        markup.push_str(&glib::markup_escape_text(&text[at..]));
+        label.set_markup(&markup);
+    }
+    let attrs = gtk4::pango::AttrList::new();
+    for run in runs {
+        let Some(mut attr) = label_rich_attr(&run.name) else {
+            continue;
+        };
+        attr.set_start_index(label_byte_of(text, run.start));
+        attr.set_end_index(label_byte_of(text, run.end));
+        attrs.insert(attr);
+    }
+    label.set_attributes(Some(&attrs));
+}
+
+/// The runs a rich LABEL holds, in the core's own spelling (`Scene::
+/// rich_runs_string`, guest BYTES) — `buffer_rich_runs`'s twin one kind over,
+/// and the corroboration half of R9 for a label.
+#[cfg_attr(not(feature = "harness"), allow(dead_code))]
+fn label_rich_runs(text: &str, runs: &[crate::protocol::NativeRun]) -> String {
+    let mut spelled: Vec<(u64, &str, String)> = Vec::new();
+    for run in runs {
+        let (s, e) = (label_byte_of(text, run.start), label_byte_of(text, run.end));
+        let spelling = if run.value == "true" {
+            format!("{s}:{e} {}", run.name)
+        } else {
+            format!("{s}:{e} {}={}", run.name, run.value)
+        };
+        spelled.push((u64::from(s), run.name.as_str(), spelling));
+    }
+    spelled.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
+    spelled.into_iter().map(|(_, _, spelling)| spelling).collect::<Vec<_>>().join("|")
+}
+
+/// An `apply_edit` on a label, on the arm's own table: the held runs are cut
+/// and shifted by the edit and the inserted ones placed at its start, in this
+/// backend's CODE POINTS. The mac arm's `kayaSpliceRuns` spells the same rule.
+fn splice_label_runs(
+    held: &[crate::protocol::NativeRun], from: u64, to: u64, inserted: u64,
+    runs: &[crate::protocol::NativeRun],
+) -> Vec<crate::protocol::NativeRun> {
+    let shift = |at: u64| (at as i64 + inserted as i64 - (to - from) as i64).max(0) as u64;
+    let mut out: Vec<crate::protocol::NativeRun> = Vec::new();
+    for run in held {
+        if run.end <= from {
+            out.push(run.clone());
+        } else if run.start >= to {
+            out.push(crate::protocol::NativeRun {
+                start: shift(run.start),
+                end: shift(run.end),
+                ..run.clone()
+            });
+        } else {
+            if run.start < from {
+                out.push(crate::protocol::NativeRun { end: from, ..run.clone() });
+            }
+            if run.end > to {
+                out.push(crate::protocol::NativeRun {
+                    start: shift(to),
+                    end: shift(run.end),
+                    ..run.clone()
+                });
+            }
+        }
+    }
+    for run in runs.iter().filter(|run| run.end > run.start) {
+        out.push(crate::protocol::NativeRun {
+            start: from + run.start,
+            end: from + run.end,
+            ..run.clone()
+        });
+    }
+    out.sort_by(|a, b| (a.start, &a.name).cmp(&(b.start, &b.name)));
+    out
+}
+
 /// TYPING INHERITS (docs/rich-text-plan.md R4), which GTK does not do at a
 /// run's toggle and does WRONGLY for a link inside one (tag gravity, measured
 /// P1.7): the inserted range is restated as the character before it wears it,
@@ -3771,6 +3916,9 @@ struct CoreState {
     /// link property, so the synthesized tier keeps it beside the tag
     /// (docs/measurements/richtext-gtk-2026-09-11.md §5).
     rich_links: HashMap<u64, HashMap<String, String>>,
+    /// Per rich LABEL, the runs the arm draws (docs/rich-text-plan.md §15): a
+    /// label has no buffer, so this table IS the document the arm holds.
+    label_runs: HashMap<u64, Vec<crate::protocol::NativeRun>>,
     /// Per rich textarea, the typing attributes armed over a collapsed caret.
     rich_pending: std::rc::Rc<RefCell<HashMap<u64, RichPending>>>,
     /// Indeterminate bars pulse on a shared ticker (GTK's activity mode is
@@ -10660,6 +10808,17 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
         // THE WHOLE DOCUMENT (docs/rich-text-plan.md R1): text and runs in one
         // write, echoing nothing, and D7's history reset exactly as set_text's.
         ApplyOp::SetRichText { id, text, runs } => {
+            // A LABEL DRAWS THE SAME DOCUMENT, read-only
+            // (docs/rich-text-plan.md §15).
+            let rich_label = match core.widgets.get(&id) {
+                Some(NativeWidget::Label(label)) => Some(label.clone()),
+                _ => None,
+            };
+            if let Some(label) = rich_label {
+                draw_rich_label(&label, &text, &runs);
+                core.label_runs.insert(id.0, runs);
+                return;
+            }
             let buffer = match core.widgets.get(&id) {
                 Some(NativeWidget::Textarea(_, view)) => view.buffer(),
                 _ => return,
@@ -10682,6 +10841,25 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
         // ONE EDIT, with the core's own post-edit selection (R5). Never a
         // history reset, and nothing echoes.
         ApplyOp::ApplyEdit { id, range, inserted, runs, selection } => {
+            // A LABEL HAS NO BUFFER AND NO SELECTION (docs/rich-text-plan.md
+            // §15): the arm splices its own text and table and redraws.
+            let rich_label = match core.widgets.get(&id) {
+                Some(NativeWidget::Label(label)) => Some(label.clone()),
+                _ => None,
+            };
+            if let Some(label) = rich_label {
+                let was = label.text().to_string();
+                let from = label_byte_of(&was, range.start) as usize;
+                let to = label_byte_of(&was, range.stop) as usize;
+                let text = format!("{}{inserted}{}", &was[..from], &was[to..]);
+                let held = core.label_runs.remove(&id.0).unwrap_or_default();
+                let width = inserted.chars().count() as u64;
+                let spliced =
+                    splice_label_runs(&held, range.start, range.stop, width, &runs);
+                draw_rich_label(&label, &text, &spliced);
+                core.label_runs.insert(id.0, spliced);
+                return;
+            }
             let buffer = match core.widgets.get(&id) {
                 Some(NativeWidget::Textarea(_, view)) => view.buffer(),
                 _ => return,
@@ -11242,7 +11420,15 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     button.set_label(&s);
                 }
                 (NativeWidget::Label(label), Prop::Text, Value::Str(s)) => {
+                    let label = label.clone();
                     label.set_text(&s);
+                    // A PLAIN WRITE DROPS THE RUNS, the textarea's rule
+                    // (docs/rich-text-plan.md §8, §15). `set_text` clears the
+                    // markup a link was drawn through; the attribute list is a
+                    // property of its own and has to be taken off by hand.
+                    if core.label_runs.remove(&id.0).is_some() {
+                        label.set_attributes(None);
+                    }
                     // The authored name outlives the text write (see
                     // CoreState::a11y_labels).
                     if let Some(name) = core.a11y_labels.get(&id.0) {
@@ -11353,6 +11539,22 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     } else {
                         core.rich.borrow_mut().remove(&id.0);
                         core.rich_pending.borrow_mut().remove(&id.0);
+                    }
+                }
+                // R8 (docs/rich-text-plan.md §15): the same prop on a LABEL,
+                // whose document is inline-only and read-only. The table goes
+                // when the prop does — nothing below it may still be drawn.
+                (NativeWidget::Label(label), Prop::Rich, Value::Bool(on)) => {
+                    let label = label.clone();
+                    if on {
+                        core.rich.borrow_mut().insert(id.0);
+                    } else {
+                        core.rich.borrow_mut().remove(&id.0);
+                        if core.label_runs.remove(&id.0).is_some() {
+                            let text = label.text().to_string();
+                            label.set_attributes(None);
+                            label.set_text(&text);
+                        }
                     }
                 }
                 // R6's lever here (docs/rich-text-plan.md §14); the ROUTE
@@ -13795,6 +13997,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 rich: std::rc::Rc::new(RefCell::new(std::collections::HashSet::new())),
                 own_undo: RefCell::new(std::collections::HashSet::new()),
                 rich_links: HashMap::new(),
+                label_runs: HashMap::new(),
                 rich_pending: std::rc::Rc::new(RefCell::new(HashMap::new())),
                 indeterminate: std::rc::Rc::new(RefCell::new(std::collections::HashSet::new())),
                 columns: Vec::new(),
@@ -14407,6 +14610,17 @@ impl crate::harness::Stage for GtkStage {
                 kaya_diag!("KAYA_DIAG format refused: <no such target>");
                 return;
             };
+            // A LABEL HAS NO SELECTION (docs/rich-text-plan.md §15), in the
+            // mac arm's own words.
+            if matches!(core.widgets.get(&id), Some(NativeWidget::Label(_))) {
+                kaya_diag!(
+                    "KAYA_DIAG format refused: {} is a label — a format act covers the \
+                     widget's own selection and a label has none \
+                     (docs/rich-text-plan.md R8)",
+                    label_target_spec(target)
+                );
+                return;
+            }
             let buffer = match core.widgets.get(&id) {
                 Some(NativeWidget::Textarea(_, view)) => view.buffer(),
                 _ => return,
@@ -14454,6 +14668,18 @@ impl crate::harness::Stage for GtkStage {
                         if held != answer {
                             // A widget disagreeing with the core FAILS the read
                             // (docs/rich-text-plan.md §7): the sentence carries both.
+                            return format!("{answer} — but the widget holds {held:?}");
+                        }
+                    }
+                    // A LABEL'S OWN RUNS are the table it draws from
+                    // (docs/rich-text-plan.md §15).
+                    if let Some(NativeWidget::Label(label)) = core.widgets.get(&id) {
+                        let empty = Vec::new();
+                        let held = label_rich_runs(
+                            &label.text(),
+                            core.label_runs.get(&id.0).unwrap_or(&empty),
+                        );
+                        if held != answer {
                             return format!("{answer} — but the widget holds {held:?}");
                         }
                     }
@@ -18140,12 +18366,26 @@ fn css_inset_of(widget: &gtk4::Widget) -> String {
     }
 }
 
-/// The widget id behind a textarea target, for the reads that ask the core.
+/// The steps-file spelling of a LABEL target, for the `format` refusal
+/// (harness.rs's `target_spec` is private to that module).
+#[cfg(all(feature = "harness", target_os = "linux"))]
+fn label_target_spec(target: crate::harness::Target) -> String {
+    match (target.id, target.keys) {
+        (Some(id), Some(keys)) => format!("label@{id}[{keys}]"),
+        (Some(id), None) => format!("label@{id}"),
+        (None, _) if target.index < 0 => "label#last".to_owned(),
+        (None, _) => format!("label#{}", target.index),
+    }
+}
+
+/// The widget id behind a textarea OR LABEL target, for the reads that ask the
+/// core — a rich label answers `expect_runs` too (docs/rich-text-plan.md §15).
 #[cfg(all(feature = "harness", target_os = "linux"))]
 fn rich_target_id(
     core: &CoreState, target: crate::harness::Target,
 ) -> Option<crate::protocol::WidgetId> {
-    if target.kind != crate::harness::TargetKind::Textarea {
+    use crate::harness::TargetKind as K;
+    if !matches!(target.kind, K::Textarea | K::Label) {
         return None;
     }
     let widget = target_widget(core, target)?;

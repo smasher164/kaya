@@ -2554,8 +2554,9 @@ absorbFormat app n act
             Nothing -> kept
        in Just doc {docRuns = normalizeRuns painted}
 
--- | This textarea carries attribute runs: 'setDocument', 'applyEdit',
--- 'onEdit'.
+-- | This widget carries attribute runs: 'setDocument', 'applyEdit',
+-- 'onEdit'. A textarea edits them; a label draws them read-only
+-- (docs\/rich-text-plan.md R8, §15).
 setRich :: Widget -> Bool -> Build ()
 setRich (Widget n) on = emitB (W.txSetRich n on)
 
@@ -2895,9 +2896,9 @@ data Attr (c :: WClass) where
   -- are: one short sentence saying what the control is or does. A
   -- 'String' or a 'Signal'.
   Help :: LiveStrSource s => s -> Attr c
-  -- | This textarea carries attribute runs (docs\/rich-text-plan.md R1):
-  -- 'setDocument', 'applyEdit', 'onEdit'. Textarea only; the root
-  -- refuses it elsewhere.
+  -- | This widget carries attribute runs (docs\/rich-text-plan.md R1):
+  -- 'setDocument', 'applyEdit', 'onEdit'. A textarea edits them; a label
+  -- draws them read-only (R8, §15). The root refuses it elsewhere.
   Rich :: Bool -> Attr 'LeafW
   -- | The app owns this textarea's undo history
   -- (docs\/rich-text-plan.md R6, §14). Textarea only.

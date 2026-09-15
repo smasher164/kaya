@@ -2574,15 +2574,17 @@ sealed class Tx
     /// `role:` is this label's place in the text hierarchy
     /// (Role.Heading) — the platform's heading text style AND the
     /// accessibility heading trait, which is why it is a role and not a
-    /// font size.
+    /// font size. `rich: true` draws the label's attribute runs over the
+    /// role's own font, read-only (docs/rich-text-plan.md R8, §15).
     public Widget Label(string text = null, Signal? bind = null, double? grow = null,
-        Role? role = null)
+        Role? role = null, bool rich = false)
     {
         var w = Widget(KayaWire.KindLabel);
         if (text != null) SetText(w, text);
         if (bind is Signal s) BindText(w, s);
         if (grow is double g) SetGrow(w, g);
         if (role is Role r) SetRole(w, r);
+        if (rich) Records.Add(KayaWire.TxSetRich(w.Id, true));
         return w;
     }
 

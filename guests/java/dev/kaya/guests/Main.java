@@ -134,6 +134,9 @@ public final class Main {
             case "richtext":
                 app = RichText::app;
                 break;
+            case "richlabel":
+                app = Richlabel::app;
+                break;
             case "ownundo":
                 app = Ownundo::app;
                 break;

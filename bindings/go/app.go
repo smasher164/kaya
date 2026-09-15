@@ -1494,7 +1494,9 @@ type Format struct {
 }
 
 // Rich declares this textarea attributed: Tx.SetDocument, Tx.ApplyEdit,
-// App.OnEdit, App.OnFormat (docs/rich-text-plan.md R1).
+// App.OnEdit, App.OnFormat (docs/rich-text-plan.md R1). A LABEL takes it
+// too, read-only — Tx.SetDocument and Tx.ApplyEdit write it, App.Document
+// reads it, and no delta ever comes back (docs/rich-text-plan.md R8, §15).
 func (w Widget) Rich() Widget {
 	w.tx.emit(TxSetRich(w.id, true))
 	return w

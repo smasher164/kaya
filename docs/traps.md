@@ -11284,3 +11284,27 @@ is RECORDED on the view now (`undoSuspendedBy`): disable only when
 registration is enabled and nothing is recorded, enable only the recorded
 manager and only while it is disabled. No scene before ownundo.steps ever
 moved focus off an own_undo widget, which is why nothing saw it.
+
+**Nothing observes that a rich label's runs were DRAWN (2026-09-14).** The
+harness reads a label's text (`expect`) and the two run tables
+(`expect_runs`, the core's and the arm's), so an arm that set the plain
+text and ignored every trait passes the whole richlabel scene on five
+lanes. tools/check-verbs.py holds each arm's label draw to naming its
+platform's per-run trait API (kayaLabelBaseFont / Pango AttrList +
+markup / TextDecorations + Hyperlink / addStyle + LinkAnnotation) and the
+review page carries a viewed capture per lane; the first mac capture is
+what caught the heading-role label drawn at body weight.
+
+**WinUI's generated bindings had no Documents namespace (2026-09-14).**
+crates/kaya/src/winui/bindings.rs is generated from the Windows App SDK
+metadata through tools/winui-bindgen's filter, and until the rich label
+every FontWeight/FontStyle/TextDecorations slot was a dead `usize` vtable
+pad with `Microsoft.UI.Xaml.Documents` (Inline, Run, Span, Hyperlink,
+TextElement) absent altogether — so `TextBlock.Inlines` could not be built
+in code and there was no markup route either (a XamlReader-built block's
+inlines cannot be moved without an InlineCollection binding). The filter
+grew ten lines and the file was regenerated; tools/check-winui-bindings.py
+holds the two together. A GtkLabel's clickable link, by contrast, exists
+only through `set_markup`'s `<a href>`: markup attributes and
+`set_attributes` splice rather than replace, so the label's text is set
+from markup and the trait attributes layered after.

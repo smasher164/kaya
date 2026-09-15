@@ -40,9 +40,9 @@ SCENES="background stall milestone2 entry search gallery todos reorder feed grow
 # on the eight other bindings' `step`/`tick_spacing`/`on_commit` spelling
 # (docs/slider-plan.md §4, docs/deferred.md's sliders entry); `notify`
 # waits on the bindings sweep too (docs/tasks-s3-plan.md §6 step 3);
-# `richtext` and `ownundo` wait on the eight other bindings'
-# Document/Edit/Format spelling (docs/rich-text-plan.md §4 step 3, §14).
-DEPTH_SCENES="windowed canvas sizepolicy dnd tooltips tasks notify richtext ownundo"
+# `richtext`, `ownundo` and `richlabel` wait on the eight other bindings'
+# Document/Edit/Format spelling (docs/rich-text-plan.md §4 step 3, §14, §15).
+DEPTH_SCENES="windowed canvas sizepolicy dnd tooltips tasks notify richtext ownundo richlabel"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 
@@ -1536,6 +1536,12 @@ for proto in x11 wayland; do
     # its reasons (docs/rich-text-plan.md §14).
     run "$proto" ownundo-rust env KAYA_SELFTEST=ownundo \
         "$CARGO_TARGET_DIR/debug/examples/ownundo"
+    # THE RICH LABEL SCENE (docs/rich-text-plan.md R8, §15): the inline
+    # vocabulary read-only on a label. Rust alone for richtext's reason,
+    # and pooled beside it — the scene drives clicks and reads the core's
+    # document, so it asks the host for nothing exclusive.
+    run "$proto" richlabel-rust env KAYA_SELFTEST=richlabel \
+        "$CARGO_TARGET_DIR/debug/examples/richlabel"
     # THE TEXT EDITOR (docs/editor-plan.md). GO ALONE by the plan's
     # choice, so there is no rust example and `editor` is in neither
     # SCENES nor DEPTH_SCENES (both derive a `cargo build --example`).

@@ -2155,10 +2155,88 @@ if failures:
     for f_ in failures:
         print(f"check-verbs: {f_}", file=sys.stderr)
     raise SystemExit(1)
+# THE RICH LABEL'S TWO INVISIBLE HALVES (docs/rich-text-plan.md §15): no
+# lane drives `format label#N`, so the four arms' refusal sentence is
+# held equal here, flattened over each language's continuations; and no
+# observable says the runs were DRAWN — `expect` reads the text and
+# `expect_runs` the two tables — so each arm's label draw must name its
+# platform's per-run trait API (check-table-card's shape).
+LABEL_REFUSAL = ("is a label — a format act covers the widget's own selection "
+                 "and a label has none")
+LABEL_DRAWS = [
+    ("KayaSwiftUI.swift", SWIFT,
+     r"Text\(AttributedString\(kayaAttributedDocument\(", None,
+     [r"kayaLabelBaseFont\(node\)"]),
+    ("gtk.rs", GTK, r"fn draw_rich_label\(", r"\n}\n",
+     [r"AttrList::new\(\)", r"set_markup\("]),
+    ("winui/mod.rs", WINUI, r"fn label_restyle\(", r"\n}\n",
+     [r"TextDecorations::", r"Hyperlink::new\(\)"]),
+    ("KayaCompose.kt", KOTLIN, r"fun kayaRichAnnotated\(", r"\n}\n",
+     [r"addStyle\(", r"LinkAnnotation"]),
+]
+
+
+def label_flatten(text):
+    text = re.sub(r"\\\n\s*", "", text)          # Rust's continuation
+    text = re.sub(r'"\s*\+\s*"', "", text)       # Swift/Kotlin concatenation
+    return text
+
+
+def label_clauses(gtk_src=None, winui_src=None, swift_src=None,
+                  kotlin_src=None):
+    bad = []
+    srcs = {GTK: gtk_src, WINUI: winui_src, SWIFT: swift_src, KOTLIN: kotlin_src}
+    for name, rel in (("gtk.rs", GTK), ("winui/mod.rs", WINUI),
+                      ("KayaSwiftUI.swift", SWIFT), ("KayaCompose.kt", KOTLIN)):
+        text = srcs[rel] if srcs[rel] is not None else real(rel)
+        if LABEL_REFUSAL not in label_flatten(text):
+            bad.append(f"{name} refuses a format on a label in other words than "
+                       f"'{LABEL_REFUSAL}' (docs/rich-text-plan.md §15) — the "
+                       f"three harnesses' sentence is compared byte for byte and "
+                       f"no lane drives it")
+    for name, rel, anchor, end, apis in LABEL_DRAWS:
+        text = srcs[rel] if srcs[rel] is not None else real(rel)
+        m = re.search(anchor, text)
+        if not m:
+            bad.append(f"{name} has no rich-label draw (wanted /{anchor}/)")
+            continue
+        body = text[m.start():]
+        if end:
+            stop = re.search(end, body)
+            body = body[:stop.end()] if stop else body
+        else:
+            body = "\n".join(body.split("\n")[:6])
+        for api in apis:
+            if not re.search(api, body):
+                bad.append(f"{name}'s rich-label draw does not name its per-run "
+                           f"trait API /{api}/ — an arm that set the text and "
+                           f"ignored every trait passes the whole scene")
+    return bad
+
+
+label_out = label_clauses()
+label_status = 0
+for line in label_out:
+    print(f"check-verbs: {line}", file=sys.stderr)
+    label_status = 1
+for label, kwargs, finding in (
+    ("the mac label refusal reworded",
+     dict(swift_src=perturb("label-refusal (mac reworded)", SWIFT,
+                            r'(a format act covers the widget\'s own )"',
+                            'range"')),
+     r"^KayaSwiftUI\.swift refuses a format on a label in other words"),
+    ("the gtk label draw without its attribute list",
+     dict(gtk_src=perturb("label-draw (gtk attrs renamed)", GTK,
+                          r"(fn draw_rich_label\([\s\S]*?)AttrList::new\(\)",
+                          "AttrList::gone()")),
+     r"^gtk\.rs's rich-label draw does not name its per-run trait API"),
+):
+    score_or_die(introduced(label_clauses(**kwargs), label_out, finding), label)
+
 # clip_mirrors() ran first and printed its own findings; its verdict
 # is read here so there is exactly ONE verdict line.
 if (clip_status or window_status or ink_status or ax_status
-        or words_status
+        or words_status or label_status
         or metrics_status or keyed_status or drop_line_status
         or vtrace_status or norm_status or ind_status
         or answer_status):
@@ -2174,5 +2252,5 @@ g.verdict(f"{len(verbs)} verbs, {len(rows)} constants "
           f"+ the reorder's insertion indicator on GTK "
           f"+ every Step's Targets normalized "
           f"+ an action returns once the app has answered it in 3 "
-          f"runners "
+          f"runners + the rich label's refusal sentence and draw on 4 arms "
           f"+ spec hash against 2 interpreters")

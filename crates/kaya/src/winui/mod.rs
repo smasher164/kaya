@@ -57,6 +57,11 @@ use bindings::Microsoft::UI::Text::{
     TextGetOptions, TextSetOptions, UnderlineType,
 };
 use bindings::Windows::Foundation::{Point, TypedEventHandler};
+// A RICH LABEL'S INLINES (docs/rich-text-plan.md §15): the run table is drawn
+// as TextBlock.Inlines, and the three traits are TextElement properties.
+use bindings::Microsoft::UI::Text::FontWeights;
+use bindings::Microsoft::UI::Xaml::Documents::{Hyperlink, Run};
+use bindings::Windows::UI::Text::{FontStyle, TextDecorations};
 // The caption title's two text properties are vtable pads in this
 // backend's bindings, so the one element that needs them is parsed from
 // markup — see `caption_title_text`.
@@ -10270,6 +10275,15 @@ fn rich_format_selection(
 fn rich_set_document(
     core: &mut CoreState, widget: u64, text: &str, runs: &[crate::protocol::NativeRun],
 ) -> windows_core::Result<()> {
+    // docs/rich-text-plan.md §15: a LABEL takes the same table, drawn
+    // read-only — no control to write, no history to reset, no bank.
+    if let Some(block) = label_block(core, widget) {
+        let table = rich_normalize(rich_native_runs(text, runs));
+        RICH_RUNS.with_borrow_mut(|map| {
+            map.insert(widget, table.clone());
+        });
+        return label_restyle(&block, text, &table);
+    }
     let Some(field) = textarea_by_id(core, widget) else {
         return Ok(());
     };
@@ -10297,6 +10311,32 @@ fn rich_apply_edit(
     core: &mut CoreState, widget: u64, range: crate::protocol::NativeRange, inserted: &str,
     runs: &[crate::protocol::NativeRun], selection: crate::protocol::NativeRange,
 ) -> windows_core::Result<()> {
+    // docs/rich-text-plan.md §15: a LABEL holds its text in the block, so the
+    // splice is a string one and the answered selection has nothing to land
+    // on — a label has no caret.
+    if let Some(block) = label_block(core, widget) {
+        let before = block.Text()?.to_string();
+        let (Some(start), Some(stop)) = (
+            byte_offset(&before, range.start as i32),
+            byte_offset(&before, range.stop as i32),
+        ) else {
+            eprintln!(
+                "kaya: winui apply_edit refused: {}..{} is not on a character boundary of the \
+                 {}-byte text label {widget} holds",
+                range.start,
+                range.stop,
+                before.len()
+            );
+            return Ok(());
+        };
+        let after = format!("{}{inserted}{}", &before[..start], &before[stop..]);
+        let added = rich_native_runs(inserted, runs);
+        let table = rich_splice(&rich_table(widget), start, stop, inserted.len(), &added);
+        RICH_RUNS.with_borrow_mut(|map| {
+            map.insert(widget, table.clone());
+        });
+        return label_restyle(&block, &after, &table);
+    }
     let Some(field) = textarea_by_id(core, widget) else {
         return Ok(());
     };
@@ -10333,6 +10373,98 @@ fn rich_apply_edit(
         map.insert(widget, table.clone());
     });
     rich_restyle(&field, &after, &table, start, start + inserted.len())
+}
+
+/// A LABEL'S OWN BLOCK, or None when the widget is not a label
+/// (docs/rich-text-plan.md §15).
+fn label_block(core: &CoreState, widget: u64) -> Option<TextBlock> {
+    match core.widgets.get(&WidgetId(widget)) {
+        Some(NativeWidget::Label { block, .. }) => Some(block.clone()),
+        _ => None,
+    }
+}
+
+/// THE MAXIMAL SAME-ATTRIBUTE SPANS of `text` under `runs`, in bytes — one
+/// span per Inline the label draws.
+fn rich_segments(text: &str, runs: &[TextRun]) -> Vec<(usize, usize, BTreeMap<String, String>)> {
+    let mut edges: Vec<usize> = vec![0, text.len()];
+    for run in runs {
+        for edge in [run.start as usize, run.end as usize] {
+            if edge > 0 && edge < text.len() && text.is_char_boundary(edge) {
+                edges.push(edge);
+            }
+        }
+    }
+    edges.sort_unstable();
+    edges.dedup();
+    let mut out: Vec<(usize, usize, BTreeMap<String, String>)> = Vec::new();
+    for pair in edges.windows(2) {
+        let (a, b) = (pair[0], pair[1]);
+        let attrs = rich_attrs_at(runs, a);
+        match out.last_mut() {
+            Some(last) if last.2 == attrs => last.1 = b,
+            _ => out.push((a, b, attrs)),
+        }
+    }
+    out
+}
+
+/// THE LABEL'S DISPLAY, DERIVED FROM THE TABLE (docs/rich-text-plan.md §15):
+/// one `Run` per maximal same-attribute span inside `TextBlock.Inlines`, a
+/// `Hyperlink` around a link run. OVER THE ROLE'S OWN FONT: the block keeps
+/// its local FontFamily and its role Style, and a Run writes only the
+/// properties its attributes ask for — everything else it inherits.
+fn label_restyle(block: &TextBlock, text: &str, runs: &[TextRun]) -> windows_core::Result<()> {
+    if runs.is_empty() {
+        // A document with no runs IS the plain text, and a Text write drops
+        // whatever inlines the block was carrying.
+        block.SetText(&HSTRING::from(text))?;
+        return Ok(());
+    }
+    let inlines = block.Inlines()?;
+    inlines.Clear()?;
+    for (start, end, attrs) in rich_segments(text, runs) {
+        let piece = Run::new()?;
+        piece.SetText(&HSTRING::from(&text[start..end]))?;
+        if attrs.contains_key("bold") {
+            piece.SetFontWeight(FontWeights::Bold()?)?;
+        }
+        if attrs.contains_key("italic") {
+            piece.SetFontStyle(FontStyle::Italic)?;
+        }
+        let mut decorated = TextDecorations::None;
+        if attrs.contains_key("underline") {
+            decorated |= TextDecorations::Underline;
+        }
+        if attrs.contains_key("strike") {
+            decorated |= TextDecorations::Strikethrough;
+        }
+        piece.SetTextDecorations(decorated)?;
+        if attrs.contains_key("code") {
+            piece.SetFontFamily(&FontFamily::CreateInstanceWithName(&HSTRING::from(
+                RICH_MONOSPACE,
+            ))?)?;
+        }
+        match attrs.get("link") {
+            // THE PLATFORM'S DEFAULT DOOR, `set_navigate_uri`'s rule one
+            // element over: a Hyperlink wears Fluent's accent at rest (no
+            // underline — measured in the capture, docs/rich-text-plan.md §15)
+            // and WinUI's own shell opens NavigateUri.
+            Some(url) => {
+                let link = Hyperlink::new()?;
+                match Uri::CreateUri(&HSTRING::from(url.as_str())) {
+                    Ok(uri) => link.SetNavigateUri(&uri)?,
+                    Err(e) => {
+                        eprintln!("kaya: winui label link {url:?} is not a uri Windows can open: {e}")
+                    }
+                }
+                link.Inlines()?.Append(&piece)?;
+                inlines.Append(&link)?;
+            }
+            None => inlines.Append(&piece)?,
+        }
+    }
+    Ok(())
 }
 
 /// Native runs (cp) as the table's own (bytes), against the text they cover.
@@ -13911,6 +14043,15 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 }
                 (NativeWidget::Label { block, .. }, Prop::Text, Value::Str(s)) => {
                     block.SetText(&HSTRING::from(&s))?;
+                    // A plain write is a whole document with no runs
+                    // (docs/rich-text-plan.md §8, §15): the SetText above has
+                    // already dropped the inlines, and the table stays (rich
+                    // is still on) and empties.
+                    RICH_RUNS.with_borrow_mut(|table| {
+                        if let Some(runs) = table.get_mut(&id.0) {
+                            runs.clear();
+                        }
+                    });
                     // An option label's text lands on its ComboBox row
                     // too, as string content (see select_options for why
                     // never a TextBlock) — or its radio row.
@@ -13973,6 +14114,21 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         RICH_PENDING.with_borrow_mut(|pending| pending.remove(&id.0));
                         let text = lf(Editable::Textarea(field.clone()).text()?);
                         rich_restyle(&field, &text, &[], 0, text.len())?;
+                    }
+                }
+                // docs/rich-text-plan.md §15: a LABEL carries the inline
+                // vocabulary read-only, off the same table — an entry here is
+                // what `rich_is_on` answers for it. Off puts the plain text back.
+                (NativeWidget::Label { block, .. }, Prop::Rich, Value::Bool(on)) => {
+                    let block = block.clone();
+                    if on {
+                        RICH_RUNS.with_borrow_mut(|table| {
+                            table.entry(id.0).or_default();
+                        });
+                    } else {
+                        RICH_RUNS.with_borrow_mut(|table| table.remove(&id.0));
+                        let text = block.Text()?;
+                        block.SetText(&text)?;
                     }
                 }
                 // docs/rich-text-plan.md §14: the platform's undo lever. ONE-WAY
@@ -16686,6 +16842,19 @@ fn registry_widget_at(core: &CoreState, kind: crate::harness::TargetKind, i: usi
     }
 }
 
+/// THE WIDGET A RICH VERB'S TARGET NAMES: a textarea, or a LABEL since R8
+/// (docs/rich-text-plan.md §15) — the mac's `kayaTextTarget`, this side.
+#[cfg(feature = "harness")]
+fn rich_target_id(core: &CoreState, t: crate::harness::Target) -> Option<u64> {
+    use crate::harness::TargetKind as K;
+    if matches!(t.kind, K::Label) {
+        let i = crate::harness::try_resolve(t.index, core.labels.len())?;
+        return registry_widget_at(core, K::Label, i);
+    }
+    let i = crate::harness::try_resolve(t.index, core.textareas.len())?;
+    core.textarea_ids.get(i).copied()
+}
+
 /// The declared table a `column#N` target names, or `None` when that
 /// container declared no columns — which is what the empty
 /// `columns_presented` answer means.
@@ -17576,6 +17745,15 @@ impl crate::harness::Stage for WinUiStage {
     ) {
         let (name, value) = (name.to_owned(), value.to_owned());
         let trouble = Self::on_ui_mut(move |core| {
+            // docs/rich-text-plan.md §15, the mac arm's own words: a format act
+            // covers the widget's SELECTION, and a rich label has none.
+            if matches!(t.kind, crate::harness::TargetKind::Label) {
+                return Ok(Some(
+                    "the target is a label — a format act covers the widget's own selection \
+                     and a label has none (docs/rich-text-plan.md R8)"
+                        .to_string(),
+                ));
+            }
             let Some(i) = crate::harness::try_resolve(t.index, core.textareas.len()) else {
                 return Ok(Some("no such target".to_string()));
             };
@@ -17611,10 +17789,9 @@ impl crate::harness::Stage for WinUiStage {
     /// comparison can fail.
     fn rich_runs(&self, t: crate::harness::Target) -> String {
         let (answer, held) = Self::on_ui_read(move |core| {
-            let Some(i) = crate::harness::try_resolve(t.index, core.textareas.len()) else {
+            let Some(widget) = rich_target_id(core, t) else {
                 return Ok(("<no such target>".to_string(), None));
             };
-            let widget = core.textarea_ids[i];
             let core_says = core
                 .scene
                 .rich_runs_string(crate::protocol::WidgetId(widget))
@@ -17639,10 +17816,10 @@ impl crate::harness::Stage for WinUiStage {
 
     fn last_edit(&self, t: crate::harness::Target) -> String {
         Self::on_ui_read(move |core| {
-            let Some(i) = crate::harness::try_resolve(t.index, core.textareas.len()) else {
+            let Some(widget) = rich_target_id(core, t) else {
                 return Ok("<no such target>".to_string());
             };
-            let id = crate::protocol::WidgetId(core.textarea_ids[i]);
+            let id = crate::protocol::WidgetId(widget);
             Ok(core.scene.last_edit_string(id).unwrap_or_else(|| "<no rich document>".to_string()))
         })
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))

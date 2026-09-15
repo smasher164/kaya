@@ -1130,6 +1130,8 @@ if (isMainThread) {
   let quietEditor!: K.Widget;
   let owned!: K.Widget;
   let rowEditor!: K.Widget;
+  let richLabel!: K.Widget;
+  let plainLabel!: K.Widget;
   const rowSeen: [K.Key, K.Edit][] = [];
   shipped.length = 0;
   app.window({ windowId: 2600 }, () => {
@@ -1142,6 +1144,8 @@ if (isMainThread) {
         rowEditor = kaya.textarea({ rich: true, onEdit: (row: K.RowHandle<string>, e: K.Edit) => rowSeen.push([row.key, e]) });
         kaya.label({ bind: item });
       }
+      richLabel = kaya.label("Héllo world, code", { rich: true });
+      plainLabel = kaya.label("Héllo world, code");
     });
   });
   const declared = shipped.flat();
@@ -1314,6 +1318,16 @@ if (isMainThread) {
   richCheck(
     "canUndo writes prop 34 and canRedo prop 35, as written",
     undoWrites.some((r) => sameBytes(r, wire.tx_set_can_undo(owned.id, true))) && undoWrites.some((r) => sameBytes(r, wire.tx_set_can_redo(owned.id, false))),
+  );
+
+  // THE RICH LABEL (docs/rich-text-plan.md R8, §15): `rich` is the LABEL
+  // constructor's option too, and the CREATE record is read beside the prop,
+  // since prop 32 on a textarea proves nothing about a label.
+  richCheck(
+    "a rich LABEL declares prop 32 on a LABEL, a plain one does not",
+    declared.some((r) => sameBytes(r, wire.tx_create_widget(richLabel.id, wire.KIND_LABEL))) &&
+      declared.some((r) => sameBytes(r, wire.tx_set_rich(richLabel.id, true))) &&
+      !declared.some((r) => sameBytes(r, wire.tx_set_rich(plainLabel.id, true))),
   );
 
   console.log(`rich text: ${richChecks.length} checks over the fold, driven from packed occurrence bytes through App._onOccurrence`);

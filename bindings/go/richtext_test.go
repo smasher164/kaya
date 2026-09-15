@@ -312,3 +312,34 @@ func TestOwnUndoAndItsTwoLiveAnswersRideTheProps(t *testing.T) {
 		}
 	})
 }
+
+// THE RICH LABEL (docs/rich-text-plan.md R8, §15): Rich is a Widget method,
+// so nothing else in this binding says it reaches a LABEL. The CREATE record
+// is read beside the prop, since prop 32 on a textarea proves nothing here.
+func TestRichOnALabelDeclaresPropRichOnALabel(t *testing.T) {
+	app := NewApp()
+	var rich, plain Widget
+	var records [][]byte
+	app.Build(func(tx *Tx) {
+		rich = tx.LabelText("Héllo world, code").Rich()
+		plain = tx.LabelText("Héllo world, code")
+		records = append(records, tx.records...)
+	})
+	has := func(want []byte) bool {
+		for _, rec := range records {
+			if bytes.Equal(rec, want) {
+				return true
+			}
+		}
+		return false
+	}
+	if !has(TxCreateWidget(rich.id, KindLabel)) {
+		t.Fatalf("the widget Rich rode on is not a label, so this test proves nothing about R8")
+	}
+	if !has(TxSetRich(rich.id, true)) {
+		t.Errorf("Rich() on a label queued no prop %d record — the label would draw its runs nowhere", PropRich)
+	}
+	if has(TxSetRich(plain.id, true)) {
+		t.Errorf("a plain label carries prop %d", PropRich)
+	}
+}

@@ -7011,6 +7011,7 @@ private func kayaAnyTarget(_ spec: Substring) -> KayaNode? {
 /// drive or read a field's text (harness.rs routes the same three).
 private func kayaTextTarget(_ spec: Substring) -> KayaNode? {
     if spec.hasPrefix("textarea") { return kayaTarget(spec, "textarea", kayaScene.textareas) }
+    if spec.hasPrefix("label") { return kayaTarget(spec, "label", kayaScene.labels) }
     if spec.hasPrefix("search") { return kayaTarget(spec, "search", kayaScene.searches) }
     return kayaTarget(spec, "entry", kayaScene.entryWidgets)
 }
@@ -9628,6 +9629,10 @@ private func kayaRunScript(_ script: String) {
                     guard let node = kayaTextTarget(parts[1]) else {
                         return "no such target \(parts[1])"
                     }
+                    if node.kind == kindLabel {
+                        return "\(parts[1]) is a label — a format act covers the widget's own "
+                            + "selection and a label has none (docs/rich-text-plan.md R8)"
+                    }
                     #if os(macOS)
                         guard let view = kayaMacTextViews[node.id]?.view else {
                             return "no text view for \(parts[1])"
@@ -9701,6 +9706,11 @@ private func kayaRunScript(_ script: String) {
                             if mine != core { return (core, mine) }
                         }
                     #endif
+                    // A label's own runs are the table it draws from (R8).
+                    if node.kind == kindLabel {
+                        let mine = kayaRunSpelling(node.text, node.richRuns)
+                        if mine != core { return (core, mine) }
+                    }
                     return (core, nil)
                 }
                 let word = parts[0] == "expect_runs" ? "runs" : "edit"
@@ -13954,6 +13964,21 @@ func kayaFamilyPresent(_ family: String) -> Bool {
 
 /// The platform's ramp for `style`, with the family swapped and nothing
 /// else touched. nil when no typeface is in force.
+/// The font a rich LABEL's runs apply their traits to: the role's own
+/// (docs/rich-text-plan.md R8, §15).
+@MainActor func kayaLabelBaseFont(_ node: KayaNode) -> KayaPlatformFont {
+    let style: KayaPlatformTextStyle =
+        node.role == roleHeading ? .headline : node.role == roleCaption ? .footnote : .body
+    // The brand family when one is set; otherwise the platform's own ramp for
+    // the STYLE — a plain system font would drop the heading's weight.
+    if let font = kayaPlatformFont(style) { return font }
+    #if os(macOS)
+        return NSFont.preferredFont(forTextStyle: style)
+    #else
+        return UIFont.preferredFont(forTextStyle: style)
+    #endif
+}
+
 @MainActor func kayaPlatformFont(_ style: KayaPlatformTextStyle) -> KayaPlatformFont? {
     guard let family = kayaScene.typefaceFamily else { return nil }
     // The ramp: this platform's own pointSize and weight for the style.
@@ -15382,7 +15407,12 @@ struct KayaRender: View {
                         : (kayaBrandFont(.headline) ?? .headline))
                     : node.role == roleCaption
                         ? (kayaBrandFont(.footnote) ?? .footnote) : nil
-            let base = Text(node.text)
+            // A rich label draws its inline runs read-only over the role's
+            // own font (docs/rich-text-plan.md R8, §15).
+            let base = (node.rich
+                ? Text(AttributedString(kayaAttributedDocument(
+                    node.text, node.richRuns, base: kayaLabelBaseFont(node))))
+                : Text(node.text))
                 .font(font)
                 .textCase(
                     node.role == roleHeading && sectionText ? .uppercase : nil)

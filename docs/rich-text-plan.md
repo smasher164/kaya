@@ -592,7 +592,70 @@ to the platform); the scene on five lanes; the census rows; check-verbs'
 constant sweep over both interpreters (the three props and the route
 code); and a static clause per arm that the `own_undo` apply arm names the
 platform's lever, since a lever forgotten leaves a native stack the scene
-never asks (the JabRef class, docs/undo-plan.md A7).
+never asks (the JabRef class, docs/undo-plan.md A7). Landed as 7ce879df; the matrix on that tree ALL PASS on all five
+lanes, 1,787 legs (mac 458, linux 769, windows 279, ios 136, android 145)
+in 1169s.
+
+## 15. R8 built: labels carry the inline vocabulary (2026-09-14)
+
+No spec change: `rich` is legal on a LABEL now (`check_prop`), the mirror
+seeds from its text, and the label's document is INLINE ONLY — a `block`
+run on a label is refused by the root naming the run, a `format_text` on a
+label is refused because a format act covers the widget's own selection
+and a label has none (the harness `format` verb refuses a label target in
+the same words), and no user edit ever comes from one. `set_document` and
+`apply_edit` are the label's writes, `document()` its read, all
+widget-addressed and unchanged in the nine bindings; the sugar's one
+addition is `rich()` on the label constructor where the textarea's is
+(check-sugar-surface's `rich label` row: the chained/attribute bindings
+read where the textarea's row reads them, the five per-constructor
+bindings take a label-shaped pattern).
+
+The arms draw the runs read-only from the same run table the textarea
+arms keep, over the ROLE'S OWN FONT (body, heading, caption): SwiftUI
+`Text(AttributedString(…))` off the textarea's attributed-document builder
+with `kayaLabelBaseFont(node)` as the base — the brand family's font for
+the style when one is set, else the platform's own ramp for the STYLE
+(the first capture showed a heading-role label at body weight, since
+`kayaPlatformFont` answers nil with no brand family and the fallback had
+been a plain system font; no scene reads a label's weight, so the capture
+is the wall, and the review page carries it); GTK a Pango attribute list on
+the GtkLabel (weight, style, underline, strikethrough, monospace family)
+with links through markup; WinUI `TextBlock.Inlines` (a `Run` per maximal
+span, a `Hyperlink` for a link run); Compose `Text(AnnotatedString)` with a
+`SpanStyle` per run and `LinkAnnotation.Url`. A link in a label takes the
+platform's default door, as the textarea's does (the polish pass). A plain
+text write to a rich label drops the runs, the textarea's rule — on the
+arms AND in the core's mirror (the Compose fan-out found the core keeping
+a label's runs where the arms dropped them, since the reset sat behind the
+editable-kinds gate; a unit test holds it now). The
+harness reads `expect_runs label#N` against the core and the arm's own
+table beside it (the corroboration wall), and `expect label#N "…"` still
+answers the plain text.
+
+The scene tools/scenes/richlabel.steps with a guest in every language: a
+body label seeded `Héllo world, code` with bold, a link and a code run;
+a heading-role label with an italic run (the trait rides the role's font);
+an `apply_edit` inserting `, big` with an italic mark, the runs and the
+text re-read. Guards: the four unit tests (a label's document and edit,
+the block run refused, the format act refused, a plain write resetting
+the mirror), the scene on five lanes with the corroboration wall, the
+census row, and tools/check-verbs.py's two label clauses — the four arms'
+refusal sentence held equal (no lane drives `format label#N`), and each
+arm's label draw naming its per-run trait API, since nothing observes
+that the runs were DRAWN: `expect` reads the text and `expect_runs` the
+two tables, so an arm that set the text and ignored every trait would
+pass the whole scene (docs/traps.md). The review page carries a viewed
+capture of the scene on macOS, Windows and GTK beside the earlier phones.
+
+As the arms landed: GTK's clickable link exists only through
+`set_markup`'s `<a href>` (markup attributes and `set_attributes` splice
+rather than replace, so the text is set from markup and the Pango
+AttrList of traits layered after); WinUI's `TextBlock.Inlines` needed the
+binding generator's filter widened to the Documents namespace, every
+font-trait slot having been a dead vtable pad, and its Hyperlink wears
+Fluent's accent with no underline at rest; Compose's `LinkAnnotation.Url`
+is a real link on a non-editable Text. Landed the same day as §13 and §14.
 
 ## 5. What this plan does not do
 

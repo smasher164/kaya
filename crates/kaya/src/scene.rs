@@ -971,8 +971,9 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         }
         // A link's destination: the label alone (docs/tasks-s2-plan.md T3).
         Prop::Href => matches!(kind, WidgetKind::Label),
-        // Textarea alone this milestone (docs/rich-text-plan.md R1; labels are R8).
-        Prop::Rich => matches!(kind, WidgetKind::Textarea),
+        // The textarea (docs/rich-text-plan.md R1) and, read-only with the
+        // inline vocabulary, the label (R8, §15).
+        Prop::Rich => matches!(kind, WidgetKind::Textarea | WidgetKind::Label),
         Prop::OwnUndo | Prop::CanUndo | Prop::CanRedo => matches!(kind, WidgetKind::Textarea),
         Prop::Checked => matches!(kind, WidgetKind::Checkbox),
         // Value is the slider's position AND the progress bar's fraction
@@ -3967,6 +3968,7 @@ impl Scene {
                 }
                 TxOp::SetRichText { widget, text, runs } => {
                     self.require_rich(widget, "set_rich_text");
+                    self.refuse_block_runs_on_a_label(widget, "set_rich_text", &runs);
                     let native = check_runs(&text, widget, "set_rich_text", &runs, true);
                     let doc = self.rich.entry(widget).or_default();
                     doc.text = text.clone();
@@ -3978,6 +3980,7 @@ impl Scene {
                 }
                 TxOp::ApplyEdit { widget, range, inserted, runs } => {
                     self.require_rich(widget, "apply_edit");
+                    self.refuse_block_runs_on_a_label(widget, "apply_edit", &runs);
                     let doc = self.rich.get(&widget).expect("just required");
                     let text = doc.shadow_text();
                     let native_range = check_range(&text, widget, "apply_edit", range);
@@ -4002,6 +4005,12 @@ impl Scene {
                 }
                 TxOp::FormatText { widget, name, value } => {
                     self.require_rich(widget, "format_text");
+                    assert!(
+                        self.widgets.get(&widget) != Some(&WidgetKind::Label),
+                        "kaya: format_text on {widget:?}, a LABEL — a format act covers the \
+                         widget's own selection and a label has none; write the document \
+                         with set_document or apply_edit (docs/rich-text-plan.md R8)"
+                    );
                     check_attr_name(widget, "format_text", &name);
                     if name == "block" {
                         if let Some(kind) = &value {
@@ -4503,24 +4512,22 @@ impl Scene {
                 }
                 None => id.0 & INTERNAL_BIT != 0,
             };
+            // A plain text write on ANY `rich` widget is a whole-document
+            // write with no runs (docs/rich-text-plan.md §8, §15 for the
+            // label): the mirror follows it, or the next read would be of
+            // runs the widget no longer draws.
+            if let Some(doc) = self.rich.get_mut(&id) {
+                if doc.text != text {
+                    doc.text = text.clone();
+                    doc.runs.clear();
+                    doc.queued.clear();
+                    doc.selection = TextRange::new(0, 0);
+                }
+            }
             if !editable {
                 continue;
             }
             let changed = self.field_text.get(&id).map(String::as_str) != Some(text.as_str());
-            // A plain text write on a `rich` textarea is a whole-document
-            // write with no runs (docs/rich-text-plan.md §8): the mirror
-            // follows it, or the next diff would be against a text the
-            // widget no longer holds.
-            if resets {
-                if let Some(doc) = self.rich.get_mut(&id) {
-                    if doc.text != text {
-                        doc.text = text.clone();
-                        doc.runs.clear();
-                        doc.queued.clear();
-                        doc.selection = TextRange::new(0, 0);
-                    }
-                }
-            }
             self.field_text.insert(id, text);
             if changed && resets {
                 self.close_episodes_on(id);
@@ -4619,15 +4626,30 @@ impl Scene {
     // --- Rich text: the mirror (docs/rich-text-plan.md R1/R4/R5) --------
 
     /// Refuses a rich write to anything but a textarea declared `rich`.
+    /// A label's document is INLINE ONLY (docs/rich-text-plan.md R8, §15):
+    /// it has no paragraphs to give a block kind to.
+    fn refuse_block_runs_on_a_label(&self, widget: WidgetId, op: &str, runs: &[TextRun]) {
+        if self.widgets.get(&widget) != Some(&WidgetKind::Label) {
+            return;
+        }
+        if let Some(run) = runs.iter().find(|r| r.name == "block") {
+            panic!(
+                "kaya: {op} on {widget:?}, a LABEL, carries the block run {}..{} ({}) — a \
+                 label's document is inline only (docs/rich-text-plan.md R8)",
+                run.start, run.end, run.value
+            );
+        }
+    }
+
     fn require_rich(&mut self, widget: WidgetId, op: &str) {
         let kind = self
             .widgets
             .get(&widget)
             .unwrap_or_else(|| panic!("kaya: {op} on unknown widget {widget:?}"));
         assert!(
-            matches!(kind, WidgetKind::Textarea),
+            matches!(kind, WidgetKind::Textarea | WidgetKind::Label),
             "kaya: {op} on {widget:?}, which is a {kind:?} — an attributed document is a \
-             TEXTAREA surface (docs/rich-text-plan.md R1)"
+             TEXTAREA or a LABEL surface (docs/rich-text-plan.md R1, R8)"
         );
         assert!(
             self.rich.contains_key(&widget),
@@ -13146,6 +13168,84 @@ mod tests {
 
     fn set_document(text: &str, runs: Vec<TextRun>) -> TxOp {
         TxOp::SetRichText { widget: WidgetId(1), text: text.to_owned(), runs }
+    }
+
+    /// docs/rich-text-plan.md R8, §15: a label carries the inline vocabulary,
+    /// read-only.
+    fn rich_label(text: &str) -> Transaction {
+        vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Label },
+            TxOp::SetProperty {
+                widget: WidgetId(1),
+                prop: Prop::Text,
+                value: PropValue::Const(Value::Str(text.to_owned())),
+            },
+            TxOp::SetProperty {
+                widget: WidgetId(1),
+                prop: Prop::Rich,
+                value: PropValue::Const(Value::Bool(true)),
+            },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ]
+    }
+
+    #[test]
+    fn a_rich_label_takes_a_document_and_an_edit() {
+        let mut scene = Scene::new();
+        scene.apply(rich_label(""));
+        let out = scene.apply(vec![set_document(
+            "Héllo world",
+            vec![run(0, 6, "bold", "true"), run(7, 12, "link", "https://kaya.dev")],
+        )]);
+        assert!(out.iter().any(|op| matches!(op, ApplyOp::SetRichText { .. })));
+        assert_eq!(scene.rich_runs_string(WidgetId(1)).unwrap(), "0:6 bold|7:12 link=https://kaya.dev");
+        scene.apply(vec![TxOp::ApplyEdit {
+            widget: WidgetId(1),
+            range: TextRange::new(6, 6),
+            inserted: ", big".into(),
+            runs: vec![run(2, 5, "italic", "true")],
+        }]);
+        assert_eq!(
+            scene.rich_runs_string(WidgetId(1)).unwrap(),
+            "0:6 bold|8:11 italic|12:17 link=https://kaya.dev"
+        );
+    }
+
+    /// docs/rich-text-plan.md §15: the arms drop a rich label's runs on a
+    /// plain text write, and the core's mirror must say the same.
+    #[test]
+    fn a_plain_text_write_resets_a_rich_label() {
+        let mut scene = Scene::new();
+        scene.apply(rich_label(""));
+        scene.apply(vec![set_document("Héllo", vec![run(0, 6, "bold", "true")])]);
+        assert_eq!(scene.rich_runs_string(WidgetId(1)).unwrap(), "0:6 bold");
+        scene.apply(vec![TxOp::SetProperty {
+            widget: WidgetId(1),
+            prop: Prop::Text,
+            value: PropValue::Const(Value::Str("plain".to_owned())),
+        }]);
+        assert_eq!(scene.rich_runs_string(WidgetId(1)).unwrap(), "");
+        assert_eq!(scene.rich_text(WidgetId(1)), Some("plain"));
+    }
+
+    #[test]
+    #[should_panic(expected = "a label's document is inline only")]
+    fn a_block_run_on_a_label_is_refused() {
+        let mut scene = Scene::new();
+        scene.apply(rich_label(""));
+        scene.apply(vec![set_document("Title", vec![run(0, 5, "block", "heading1")])]);
+    }
+
+    #[test]
+    #[should_panic(expected = "a LABEL — a format act covers the widget's own selection")]
+    fn a_format_act_on_a_label_is_refused() {
+        let mut scene = Scene::new();
+        scene.apply(rich_label("Héllo"));
+        scene.apply(vec![TxOp::FormatText {
+            widget: WidgetId(1),
+            name: "bold".into(),
+            value: Some("true".into()),
+        }]);
     }
 
     #[test]

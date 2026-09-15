@@ -87,6 +87,10 @@ LEGS = {
         # The app-owned undo scene (docs/rich-text-plan.md §14): rust-only
         # for richtext's reason, so it rides the compose suite alone.
         "ownundo-compose",
+        # The rich LABEL scene (docs/rich-text-plan.md §15): rust-only for
+        # richtext's reason, and no IME_SCENES member — a label takes no
+        # user edit at all.
+        "richlabel-compose",
     ],
     "jvm": [
         "jvm", "a11y-jvm", "entry-jvm",

@@ -2728,8 +2728,10 @@ public final class KayaApp {
             return this;
         }
 
-        /** This textarea carries attribute runs: Tx.setDocument,
-         * Tx.applyEdit, KayaApp.onEdit (docs/rich-text-plan.md R1). Same
+        /** This widget carries attribute runs: Tx.setDocument,
+         * Tx.applyEdit, KayaApp.onEdit (docs/rich-text-plan.md R1) — a
+         * textarea edits them, a LABEL draws them read-only over the
+         * role's own font (docs/rich-text-plan.md R8, §15). Same
          * discipline as {@link #grow}. */
         public Widget rich() {
             if (tx == null || tx.closed) {
