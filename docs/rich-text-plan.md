@@ -711,6 +711,10 @@ spec change with nine sugar twins (`format_range`), ruling asked
 2026-09-15. Until then the app counts the marks it could not apply
 (`marks <n>` on the status line), which the scene holds at 0.
 
+Landed as a4b10516 and bfe1a503; the matrix on that tree ALL PASS on all
+five lanes, 1,807 legs (mac 468, linux 773, windows 281, ios 138, android
+147) in 1220s.
+
 ## 5. What this plan does not do
 
 - It does not put a CRDT, a delta format or a markup language on the
