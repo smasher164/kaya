@@ -3503,6 +3503,18 @@ final class KayaAppTx {
         format(w, "block", kind.name)
     }
 
+    /// What an `ownUndo` textarea's app answers for Edit>Undo: true
+    /// enables the item and routes its activation to the app
+    /// (docs/rich-text-plan.md R6, §14).
+    func canUndo(_ w: KayaWidget, _ can: Bool) {
+        tx.setCanUndo(w.id, can)
+    }
+
+    /// The same for Edit>Redo.
+    func canRedo(_ w: KayaWidget, _ can: Bool) {
+        tx.setCanRedo(w.id, can)
+    }
+
     /// A `Range<Int>` as the wire's two unsigned offsets. `Range` already
     /// guarantees lower <= upper; checking the lower bound HERE names kaya
     /// instead of letting `UInt64.init` trap with "Negative value is not
@@ -3544,10 +3556,13 @@ final class KayaAppTx {
 
     /// A multi-line text editor, on the entry's uncontrolled contract.
     /// `rich:` adds the attribute-run channel (docs/rich-text-plan.md R1):
-    /// `onEdit:` and `onFormat:` answer only on one.
+    /// `onEdit:` and `onFormat:` answer only on one. `ownUndo:` turns the
+    /// platform's own undo stack off on this widget and routes Edit>Undo
+    /// to the app's Undo item (docs/rich-text-plan.md R6, §14).
     func textarea(
         onChange: ((KayaAppTx, String) throws -> Void)? = nil,
         rich: Bool = false,
+        ownUndo: Bool = false,
         onEdit: ((KayaAppTx, KayaEdit) throws -> Void)? = nil,
         onFormat: ((KayaAppTx, KayaFormat) throws -> Void)? = nil,
         grow: Double? = nil
@@ -3555,6 +3570,7 @@ final class KayaAppTx {
         let w = widget(UInt32(KAYA_KIND_TEXTAREA))
         if let onChange { app.onChange(w, onChange) }
         if rich { setRich(w, true) }
+        if ownUndo { tx.setOwnUndo(w.id, true) }
         if let onEdit { app.onEdit(w, onEdit) }
         if let onFormat { app.onFormat(w, onFormat) }
         if let grow { setGrow(w, grow) }

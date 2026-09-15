@@ -1593,6 +1593,15 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
         self
     }
 
+    /// The app owns this rich textarea's undo (docs/rich-text-plan.md R6,
+    /// §14): the native stack is off, and Edit>Undo/Redo reach the app
+    /// through the role item's own `on_activate` while [`Tx::can_undo`] /
+    /// [`Tx::can_redo`] say whether they are enabled.
+    pub fn own_undo(self) -> Self {
+        self.tx.set(self.id, Prop::OwnUndo, true);
+        self
+    }
+
     /// This widget's spoken accessibility label — [`Tx::a11y_label`]
     /// chained.
     pub fn a11y_label(self, label: impl Into<LiveSource<StrKind>>) -> Self {
@@ -2627,6 +2636,17 @@ impl<'a> Tx<'a> {
     /// ordinary `text_changed`. A write that CHANGES the text drops the
     /// app's declared ranges and spends the field's native undo history,
     /// which is why undo's D7 treats it as an episode boundary.
+    /// Whether an `own_undo` textarea's app has something to undo — what
+    /// Edit>Undo's enablement reads while that textarea is focused.
+    pub fn can_undo(&mut self, widget: WidgetId, on: bool) {
+        self.set(widget, Prop::CanUndo, on);
+    }
+
+    /// Redo's twin.
+    pub fn can_redo(&mut self, widget: WidgetId, on: bool) {
+        self.set(widget, Prop::CanRedo, on);
+    }
+
     pub fn set_text(&mut self, widget: WidgetId, text: &str) {
         self.set(widget, Prop::Text, text);
     }

@@ -151,11 +151,14 @@ module KayaApp
     replaceEdit,
     markEdit,
     setRich,
+    setOwnUndo,
     setDocument,
     applyEdit,
     formatText,
     unformat,
     setBlock,
+    canUndo,
+    canRedo,
     document,
     onEdit,
     onFormat,
@@ -2556,6 +2559,12 @@ absorbFormat app n act
 setRich :: Widget -> Bool -> Build ()
 setRich (Widget n) on = emitB (W.txSetRich n on)
 
+-- | The app owns this textarea's history (docs\/rich-text-plan.md R6, §14):
+-- the platform's own stack goes off and Edit>Undo reaches the app through
+-- the role item's activation.
+setOwnUndo :: Widget -> Bool -> Build ()
+setOwnUndo (Widget n) on = emitB (W.txSetOwnUndo n on)
+
 -- | Replace a @rich@ textarea's whole document: echoes nothing and, like
 -- 'setText', spends the native undo history (docs\/undo-plan.md D7).
 --
@@ -2604,6 +2613,15 @@ unformat (Widget n) name = emitB (W.txFormatText n 1 [W.VStr name, W.VStr ""])
 -- | Make the selection's paragraphs @kind@; 'Body' clears.
 setBlock :: Widget -> Block -> Build ()
 setBlock w kind = formatText w "block" (blockName kind)
+
+-- | What an 'OwnUndo' textarea's app can take back right now, and put
+-- back: the route reads these (docs\/rich-text-plan.md §14), so a write
+-- re-reads Edit>Undo's and Edit>Redo's enablement.
+canUndo :: Widget -> Bool -> Build ()
+canUndo (Widget n) on = emitB (W.txSetCanUndo n on)
+
+canRedo :: Widget -> Bool -> Build ()
+canRedo (Widget n) on = emitB (W.txSetCanRedo n on)
 
 -- | One addressed user edit of a @rich@ textarea; a change handler still
 -- fires beside it (docs\/rich-text-plan.md R1). App-registered, the way
@@ -2881,6 +2899,9 @@ data Attr (c :: WClass) where
   -- 'setDocument', 'applyEdit', 'onEdit'. Textarea only; the root
   -- refuses it elsewhere.
   Rich :: Bool -> Attr 'LeafW
+  -- | The app owns this textarea's undo history
+  -- (docs\/rich-text-plan.md R6, §14). Textarea only.
+  OwnUndo :: Bool -> Attr 'LeafW
   -- | The PROMPT this field shows while its text is empty
   -- (docs\/search-plan.md S3). Entry, textarea and search only; the root
   -- refuses it elsewhere, and an empty one by name.
@@ -2930,6 +2951,7 @@ applyAttr (A11yLabel l) w = liveStr setA11yLabel bindA11yLabel w l
 applyAttr (A11yHint h) w = liveStr setA11yHint bindA11yHint w h
 applyAttr (Help h) w = liveStr setHelp bindHelp w h
 applyAttr (Rich on) w = setRich w on
+applyAttr (OwnUndo on) w = setOwnUndo w on
 applyAttr (Placeholder p) w = liveStr setPlaceholder bindPlaceholder w p
 applyAttr (Href u) w = liveStr setHref bindHref w u
 applyAttr (MinDate d) (Widget n) =

@@ -3728,6 +3728,29 @@ rich_check("a stamped copy's edit reaches the row's handler with its key",
 rich_check("and NO document is folded for it — the mirror is live widgets",
            _row_app._documents == {})
 
+# THE APP-OWNED UNDO (docs/rich-text-plan.md R6, §14): the declaration is
+# the prop, and the two live answers Edit>Undo's enablement reads are the
+# other two — nothing else in this binding says so.
+_own_records = []
+kaya.runtime.submit = lambda *recs: _own_records.extend(recs)
+_own_app = kaya.App()
+with _own_app.window(2603):
+    with kaya.column():
+        _owned = kaya.textarea(rich=True, own_undo=True)
+        _plain_rich = kaya.textarea(rich=True)
+with _own_app.build():
+    _owned.can_undo(True)
+    _owned.can_redo(False)
+kaya.runtime.submit = _real_ship
+
+rich_check("own_undo declares prop 33, and a plain rich textarea does not",
+           kaya.wire.tx_set_own_undo(_owned.id, True) in _own_records
+           and kaya.wire.tx_set_own_undo(_plain_rich.id, True)
+           not in _own_records)
+rich_check("can_undo writes prop 34 and can_redo prop 35, as written",
+           kaya.wire.tx_set_can_undo(_owned.id, True) in _own_records
+           and kaya.wire.tx_set_can_redo(_owned.id, False) in _own_records)
+
 print(f"rich text: {len(_rich_checks)} checks over the fold, driven from "
       f"packed occurrence bytes through App._dispatch_loop")
 

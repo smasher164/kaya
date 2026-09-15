@@ -405,6 +405,9 @@ pub(crate) const PROP_WRAP: u32 = 29;
 pub(crate) const PROP_PLACEHOLDER: u32 = 30;
 pub(crate) const PROP_HREF: u32 = 31;
 pub(crate) const PROP_RICH: u32 = 32;
+pub(crate) const PROP_OWN_UNDO: u32 = 33;
+pub(crate) const PROP_CAN_UNDO: u32 = 34;
+pub(crate) const PROP_CAN_REDO: u32 = 35;
 
 /// The clip representation masks (spec enum "clip"). BIT POSITIONS, not
 /// an ordinal: a copy carries several and a widget accepts several, so
@@ -887,6 +890,9 @@ fn prop(raw: u32) -> Prop {
         PROP_PLACEHOLDER => Prop::Placeholder,
         PROP_HREF => Prop::Href,
         PROP_RICH => Prop::Rich,
+        PROP_OWN_UNDO => Prop::OwnUndo,
+        PROP_CAN_UNDO => Prop::CanUndo,
+        PROP_CAN_REDO => Prop::CanRedo,
         other => panic!("kaya: unknown property {other}"),
     }
 }
@@ -4058,6 +4064,9 @@ fn prop_raw(prop: Prop) -> u32 {
         Prop::Placeholder => PROP_PLACEHOLDER,
         Prop::Href => PROP_HREF,
         Prop::Rich => PROP_RICH,
+        Prop::OwnUndo => PROP_OWN_UNDO,
+        Prop::CanUndo => PROP_CAN_UNDO,
+        Prop::CanRedo => PROP_CAN_REDO,
     }
 }
 

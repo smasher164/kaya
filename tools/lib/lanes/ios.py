@@ -79,6 +79,9 @@ RUST_SCENES = [
     # RICH TEXT (docs/rich-text-plan.md §4): rust-only until the bindings'
     # sugar sweep lands, as `ranges` was.
     "richtext",
+    # THE APP-OWNED UNDO (docs/rich-text-plan.md §14): rust-only for the
+    # same reason, and the one scene that drives route App on this lane.
+    "ownundo",
 ]
 
 # The iPad legs, queued right after their phone sibling: the phone pool is

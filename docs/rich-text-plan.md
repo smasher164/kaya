@@ -308,8 +308,9 @@ and are recorded here for the review:
 
 Open after this step, beside the platform arms: the `Edit` the Rust sugar
 hands an app carries no `source` (the core's text_edited does; the harness
-reads it); `own_undo` (R6) is the undo step's and the mac's native undo
-stack stays on under a rich textarea until then; and the editor's rich
+reads it — built §13); `own_undo` (R6) is the undo step's and the mac's
+native undo stack stays on under a rich textarea until then (built §14);
+and the editor's rich
 toggle (§4 step 2) moves to the breadth step, since guests/go/editor needs
 the Go sugar first.
 
@@ -370,8 +371,8 @@ Open after the breadth: the marked-text divergence on plain Compose fields;
 a shared scene step that round-trips non-ASCII text through a guest's label
 (the Haskell decoder's wall); the template zone (`rich` is a live-zone
 spelling; JS refuses `document()` on a template node in its own words, no
-gate holds the other eight); `own_undo` (R6); labels (R8); and the five
-rulings on the review page.
+gate holds the other eight); `own_undo` (R6, built §14); labels (R8); and
+the five rulings on the review page (taken 2026-09-14: §12, §13, §14).
 
 ## 9. The editor's formatting bar (2026-09-14)
 
@@ -538,6 +539,60 @@ named `EDIT_SOURCE_DROP` while every scene was green, because the scene
 only ever sees `user`. Each binding's own checks file holds a delivered
 edit's name and an app-built edit's absence (Haskell's lives in
 guests/haskell/AbortCheck.hs, the binding's one run check).
+
+## 14. R6 built: `own_undo`, the app-owned undo (2026-09-14)
+
+Three Bool props on a rich textarea (spec.rs: `own_undo` 33, `can_undo`
+34, `can_redo` 35; the hash moved, everything regenerated). `own_undo`
+says the app owns the document's history: the native stack is off on that
+widget through the platform's measured lever (macOS `allowsUndo = false`;
+iOS `undoManager.disableUndoRegistration()` at begin-editing, after the
+responder cycle the measurement demands, `enableUndoRegistration()` at
+end; GTK `enable-undo = FALSE`; WinUI `UndoLimit = 0`; Compose
+`clearHistory()` after every commit, R7's rule already), the core's ledger
+NEVER banks that field (`note_text_changed` returns before opening an
+episode), and D6's routing gains a fourth answer, `UndoRoute::App` (wire
+code 3): when the focused widget has `own_undo`, Edit>Undo routes App if
+its `can_undo` prop is true and Nothing otherwise, the ledger not
+consulted (`route_redo` the same over `can_redo`). THE APP'S DOOR IS THE
+ROLE ITEM'S OWN ACTIVATION: on route App the arm's undo performer
+declines the role, so the plain activation path emits `menu_activated`
+for the Undo (or Redo) item, exactly what a role item does when no
+performer claims it — the app registers its handler on the item beside
+the role, and the item keeps the platform's chord and title. No new
+occurrence. Enablement is the route as before (App reads enabled), and a
+write to `can_undo`/`can_redo` re-reads it (the arm refreshes its role
+enablement from the prop's apply arm; Compose caches none and composes the
+route live, so its two arms only store). On Compose the lever is
+`clearHistory()` after every commit AND after every user edit of an owned
+textarea — the per-commit clear covers the app's writes alone, and a
+hardware Ctrl+Z in an app with no Undo role item would otherwise reach
+BasicTextField's own binding. WinUI's `UndoLimit = 0` is one-way
+(measured): a later `own_undo(false)` restores the limit and an empty
+history. D7's reset applies to
+`set_rich_text` (a no-op with the stack off) and never to `apply_edit`.
+
+The sugar: `own_undo()` chained on the textarea where `rich()` is, and
+`can_undo(widget, bool)` / `can_redo(widget, bool)` as transaction writes,
+in all nine (tools/check-sugar-surface.py: three rows in the rich census,
+rename negatives growing by themselves). The scene
+tools/scenes/ownundo.steps, with a guest in every language, holds two
+rich textareas — `native` on the platform's tier, `owned` with `own_undo`
+and an app history of Documents built from `on_edit` — an Edit menu whose
+Undo/Redo role items carry the app's handlers, and a label `undo <n> redo
+<m>`: keystrokes into the owned one move the counters, Edit>Undo/Redo
+walk the app's stacks (the label and the text say so), the native one's
+own Undo takes its typing back with the counters untouched, and the split
+is by focus. The editor keeps the native tier; the plan's "editor
+asserting both routes" is this scene's two widgets.
+
+Guards: scene.rs's an_app_owned_textarea_routes_undo_to_the_app_and_is_never_banked
+(route by the props, the ledger skipped, the prop off returning the field
+to the platform); the scene on five lanes; the census rows; check-verbs'
+constant sweep over both interpreters (the three props and the route
+code); and a static clause per arm that the `own_undo` apply arm names the
+platform's lever, since a lever forgotten leaves a native stack the scene
+never asks (the JabRef class, docs/undo-plan.md A7).
 
 ## 5. What this plan does not do
 

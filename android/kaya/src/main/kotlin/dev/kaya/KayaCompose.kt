@@ -379,6 +379,13 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     /** docs/rich-text-plan.md R1: the widget publishes attributed content. */
     var rich = false
 
+    /** docs/rich-text-plan.md §14: the app owns this widget's undo history,
+     *  and answers whether it can walk it in either direction. The ROUTE is
+     *  the core's (scene.rs's route_undo reads the same three props). */
+    var ownUndo = false
+    var canUndo = false
+    var canRedo = false
+
     /**
      * THE ARM'S OWN MIRROR of the document's runs, UTF-16 units — foundation
      * 1.11.4's `addStyle` is display-only and tracks nothing across an edit
@@ -1337,7 +1344,7 @@ object KayaCompose {
     // but only the runtime assert catches a stale compiled APK against
     // a new libkaya. ULong because the fingerprint's high bit is fair
     // game and a Kotlin Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0xb14092d93e5c1359uL
+    private const val SPEC_HASH: ULong = 0x692fe11a5922795auL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -1565,6 +1572,11 @@ object KayaCompose {
     private const val PROP_PLACEHOLDER = 30
     private const val PROP_HREF = 31
     private const val PROP_RICH = 32
+    // docs/rich-text-plan.md §14: the app owns this widget's history, and
+    // says live whether it can walk it.
+    private const val PROP_OWN_UNDO = 33
+    private const val PROP_CAN_UNDO = 34
+    private const val PROP_CAN_REDO = 35
     private const val PROP_COLUMNS = 11
     // The accessibility identifier (never spoken) and label (spoken).
     // Universal: every widget kind carries both.
@@ -1751,6 +1763,7 @@ object KayaCompose {
     val RICH_VOCABULARY: List<Long> = listOf(
         APPLY_SET_RICH_TEXT.toLong(), APPLY_APPLY_EDIT.toLong(), APPLY_FORMAT_TEXT.toLong(),
         PROP_RICH.toLong(),
+        PROP_OWN_UNDO.toLong(), PROP_CAN_UNDO.toLong(), PROP_CAN_REDO.toLong(),
         RICH_ATTR_BOLD, RICH_ATTR_ITALIC, RICH_ATTR_UNDERLINE, RICH_ATTR_STRIKE,
         RICH_ATTR_CODE, RICH_ATTR_LINK, RICH_ATTR_BLOCK,
         BLOCK_BODY, BLOCK_HEADING1, BLOCK_HEADING2, BLOCK_HEADING3, BLOCK_QUOTE,
@@ -2365,6 +2378,21 @@ object KayaCompose {
                         // stays pinned as today.
                         PROP_RICH ->
                             KayaSceneModel.nodes[id]!!.rich = readBool(b)
+                        // docs/rich-text-plan.md §14: this platform's lever
+                        // is `clearHistory()`, so taking ownership drops what
+                        // the field had banked.
+                        PROP_OWN_UNDO -> {
+                            val node = KayaSceneModel.nodes[id]!!
+                            node.ownUndo = readBool(b)
+                            if (node.ownUndo) KayaUndoState.clearHistory(node)
+                        }
+                        // The route IS the enablement and it is read live
+                        // here, so the write is the whole arm
+                        // (docs/rich-text-plan.md §14).
+                        PROP_CAN_UNDO ->
+                            KayaSceneModel.nodes[id]!!.canUndo = readBool(b)
+                        PROP_CAN_REDO ->
+                            KayaSceneModel.nodes[id]!!.canRedo = readBool(b)
                         PROP_WRAP ->
                             KayaSceneModel.nodes[id]!!.wrap = readBool(b)
                         PROP_COLUMNS ->
@@ -4850,6 +4878,9 @@ object KayaCompose {
                     KayaUndoRoute.NATIVE -> kayaNativeUndo(redo = false)
                     KayaUndoRoute.CORE -> kayaCoreUndo()
                     KayaUndoRoute.NOTHING -> {}
+                    // The plain activation path delivers the item to the
+                    // app (docs/rich-text-plan.md §14).
+                    KayaUndoRoute.APP -> return false
                 }
                 return true
             }
@@ -4858,6 +4889,9 @@ object KayaCompose {
                     KayaUndoRoute.NATIVE -> kayaNativeUndo(redo = true)
                     KayaUndoRoute.CORE -> kayaCoreRedo()
                     KayaUndoRoute.NOTHING -> {}
+                    // The plain activation path delivers the item to the
+                    // app (docs/rich-text-plan.md §14).
+                    KayaUndoRoute.APP -> return false
                 }
                 return true
             }
@@ -10353,6 +10387,9 @@ internal fun kayaRichUserEdit(node: KayaNode, before: String, after: String) {
         node.richPendingOff.clear()
     }
     node.richSeq += 1
+    // The native stack is OFF on an app-owned textarea (docs/rich-text-plan.md
+    // §14): typing may not bank what the app's own history holds.
+    if (node.ownUndo) KayaUndoState.clearHistory(node)
 }
 
 /**
@@ -10428,6 +10465,11 @@ enum class KayaUndoRoute {
     NOTHING,
     NATIVE,
     CORE,
+
+    /** The focused textarea's app owns its undo: the role item's own
+     *  activation reaches the app and nothing else happens here
+     *  (docs/rich-text-plan.md §14). */
+    APP,
 }
 
 /**
@@ -10495,6 +10537,7 @@ internal fun kayaRouteCode(code: Int): KayaUndoRoute =
         0 -> KayaUndoRoute.NOTHING
         1 -> KayaUndoRoute.NATIVE
         2 -> KayaUndoRoute.CORE
+        3 -> KayaUndoRoute.APP
         else -> error(
             "kaya: unknown undo route $code from the core — the JNI surface and " +
                 "this interpreter disagree")

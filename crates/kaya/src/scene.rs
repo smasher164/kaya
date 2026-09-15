@@ -8,7 +8,7 @@
 //! (template node, key path). Lives on the UI thread, one instance per core,
 //! and every panic here is a broken guest or binding.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 #[cfg(feature = "harness")]
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -536,6 +536,10 @@ pub(crate) enum UndoRoute {
     Native,
     /// The core answers: call `undo`/`redo`.
     Core,
+    /// The focused textarea's app owns its undo (docs/rich-text-plan.md R6,
+    /// §14): deliver the role item's own activation to the app and do
+    /// nothing else.
+    App,
     /// Nothing to undo; the command is inert and should read disabled.
     Nothing,
 }
@@ -737,6 +741,11 @@ pub(crate) struct Scene {
     /// breakpoint restores (falling back to the creation kind's own).
     /// Breakpoint applies deliberately do not write here.
     authored_axis: HashMap<WidgetId, i64>,
+    /// `own_undo` textareas and the app's live `can_undo`/`can_redo` answers
+    /// for them (docs/rich-text-plan.md R6, §14).
+    own_undo: HashSet<WidgetId>,
+    can_undo: HashSet<WidgetId>,
+    can_redo: HashSet<WidgetId>,
     /// The guest-authored column count a reverting breakpoint restores
     /// (docs/adaptive-layout-plan.md D6.2); absent means the grid's own 1.
     authored_columns: HashMap<WidgetId, f64>,
@@ -964,6 +973,7 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         Prop::Href => matches!(kind, WidgetKind::Label),
         // Textarea alone this milestone (docs/rich-text-plan.md R1; labels are R8).
         Prop::Rich => matches!(kind, WidgetKind::Textarea),
+        Prop::OwnUndo | Prop::CanUndo | Prop::CanRedo => matches!(kind, WidgetKind::Textarea),
         Prop::Checked => matches!(kind, WidgetKind::Checkbox),
         // Value is the slider's position AND the progress bar's fraction
         // AND the select's 0-based index (per-kind domains, checked
@@ -1541,6 +1551,7 @@ fn prop_value_type(prop: Prop) -> ValueType {
         Prop::Axis => ValueType::I64,
         Prop::Role => ValueType::I64,
         Prop::Indeterminate | Prop::Fill | Prop::Wrap | Prop::Rich => ValueType::Bool,
+        Prop::OwnUndo | Prop::CanUndo | Prop::CanRedo => ValueType::Bool,
         Prop::Columns | Prop::MinColumnWidth => ValueType::F64,
         Prop::A11yId
         | Prop::A11yLabel
@@ -2586,6 +2597,20 @@ impl Scene {
                                     self.authored_axis.insert(widget, *mode);
                                 }
                                 self.layout_dirty = true;
+                            }
+                            if let (Prop::OwnUndo | Prop::CanUndo | Prop::CanRedo, Value::Bool(on)) =
+                                (prop, &v)
+                            {
+                                let set = match prop {
+                                    Prop::OwnUndo => &mut self.own_undo,
+                                    Prop::CanUndo => &mut self.can_undo,
+                                    _ => &mut self.can_redo,
+                                };
+                                if *on {
+                                    set.insert(widget);
+                                } else {
+                                    set.remove(&widget);
+                                }
                             }
                             // The mirror lives only while `rich` is on
                             // (docs/rich-text-plan.md R1).
@@ -4546,6 +4571,11 @@ impl Scene {
             return;
         }
         self.field_text.insert(field, text.to_owned());
+        // A document the app owns never becomes a ledger episode
+        // (docs/rich-text-plan.md R6, §14).
+        if self.own_undo.contains(&field) {
+            return;
+        }
         let ledger = self.ledgers.entry(window).or_default();
         // Typing is a new step: the forward history dies here, which is
         // the same rule the platforms apply to their own text stacks.
@@ -4953,6 +4983,9 @@ impl Scene {
         focused: Option<WidgetId>,
         focused_can_undo: bool,
     ) -> UndoRoute {
+        if let Some(owned) = focused.filter(|f| self.own_undo.contains(f)) {
+            return if self.can_undo.contains(&owned) { UndoRoute::App } else { UndoRoute::Nothing };
+        }
         match self.ledgers.get(&window).and_then(|l| l.done.last()) {
             None => UndoRoute::Nothing,
             Some(LedgerEntry::Episode(ep))
@@ -4973,6 +5006,9 @@ impl Scene {
         focused: Option<WidgetId>,
         focused_can_redo: bool,
     ) -> UndoRoute {
+        if let Some(owned) = focused.filter(|f| self.own_undo.contains(f)) {
+            return if self.can_redo.contains(&owned) { UndoRoute::App } else { UndoRoute::Nothing };
+        }
         let ledger = match self.ledgers.get(&window) {
             Some(ledger) => ledger,
             None => return UndoRoute::Nothing,
@@ -14679,6 +14715,49 @@ mod tests {
             scene.route_undo(DEFAULT_WINDOW, Some(WidgetId(2)), true),
             UndoRoute::Core,
             "a group is the newest entry, so the core answers whatever has focus"
+        );
+    }
+
+    /// docs/rich-text-plan.md R6, §14.
+    #[test]
+    fn an_app_owned_textarea_routes_undo_to_the_app_and_is_never_banked() {
+        let mut scene = Scene::new();
+        scene.apply(rich_editor(""));
+        let owned = WidgetId(1);
+        let set = |prop, on| TxOp::SetProperty {
+            widget: owned,
+            prop,
+            value: PropValue::Const(Value::Bool(on)),
+        };
+        scene.apply(vec![set(Prop::OwnUndo, true)]);
+        scene.note_text_changed(DEFAULT_WINDOW, owned, "ab", true);
+        assert_eq!(
+            scene.route_undo(DEFAULT_WINDOW, Some(owned), true),
+            UndoRoute::Nothing,
+            "the app has not said it can undo, and the native stack is not asked"
+        );
+        assert_eq!(
+            scene.route_undo(DEFAULT_WINDOW, Some(WidgetId(9)), true),
+            UndoRoute::Nothing,
+            "typing into an app-owned document opened no ledger episode"
+        );
+        scene.apply(vec![set(Prop::CanUndo, true)]);
+        assert_eq!(scene.route_undo(DEFAULT_WINDOW, Some(owned), true), UndoRoute::App);
+        assert_eq!(
+            scene.route_redo(DEFAULT_WINDOW, Some(owned), true),
+            UndoRoute::Nothing,
+            "redo has its own answer"
+        );
+        scene.apply(vec![set(Prop::CanRedo, true)]);
+        assert_eq!(scene.route_redo(DEFAULT_WINDOW, Some(owned), true), UndoRoute::App);
+        scene.apply(vec![set(Prop::CanUndo, false)]);
+        assert_eq!(scene.route_undo(DEFAULT_WINDOW, Some(owned), true), UndoRoute::Nothing);
+        scene.apply(vec![set(Prop::OwnUndo, false)]);
+        scene.note_text_changed(DEFAULT_WINDOW, owned, "abc", true);
+        assert_eq!(
+            scene.route_undo(DEFAULT_WINDOW, Some(owned), true),
+            UndoRoute::Native,
+            "with the prop off the field is the platform's again"
         );
     }
 

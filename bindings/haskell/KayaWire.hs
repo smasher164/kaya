@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0xb14092d93e5c1359
+specHash = 0x692fe11a5922795a
 
 valueBool :: Word32
 valueBool = 1
@@ -204,6 +204,12 @@ propHref :: Word32
 propHref = 31
 propRich :: Word32
 propRich = 32
+propOwnUndo :: Word32
+propOwnUndo = 33
+propCanUndo :: Word32
+propCanUndo = 34
+propCanRedo :: Word32
+propCanRedo = 35
 wpropTitle :: Word32
 wpropTitle = 1
 wpropWidth :: Word32
@@ -1580,6 +1586,63 @@ txBindRich widgetId signalId = wireRecord txKindSetProperty
 txBindRichElement :: Word64 -> Word32 -> Word32 -> Builder
 txBindRichElement widgetId level field = wireRecord txKindSetProperty
   (word64LE widgetId <> word32LE propRich <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
+-- set_property with a constant own_undo value.
+txSetOwnUndo :: Word64 -> Bool -> Builder
+txSetOwnUndo widgetId ownUndo = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propOwnUndo <> word32LE sourceConst
+    <> encodeValue (VBool ownUndo))
+
+-- set_property with a signal-bound own_undo value.
+txBindOwnUndo :: Word64 -> Word64 -> Builder
+txBindOwnUndo widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propOwnUndo <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindOwnUndoElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindOwnUndoElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propOwnUndo <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
+-- set_property with a constant can_undo value.
+txSetCanUndo :: Word64 -> Bool -> Builder
+txSetCanUndo widgetId canUndo = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propCanUndo <> word32LE sourceConst
+    <> encodeValue (VBool canUndo))
+
+-- set_property with a signal-bound can_undo value.
+txBindCanUndo :: Word64 -> Word64 -> Builder
+txBindCanUndo widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propCanUndo <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindCanUndoElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindCanUndoElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propCanUndo <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
+-- set_property with a constant can_redo value.
+txSetCanRedo :: Word64 -> Bool -> Builder
+txSetCanRedo widgetId canRedo = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propCanRedo <> word32LE sourceConst
+    <> encodeValue (VBool canRedo))
+
+-- set_property with a signal-bound can_redo value.
+txBindCanRedo :: Word64 -> Word64 -> Builder
+txBindCanRedo widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propCanRedo <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindCanRedoElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindCanRedoElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propCanRedo <> word32LE sourceElement
     <> word32LE level <> word32LE field)
 
 -- set_window_prop with a constant title value (window 0, the primary surface).

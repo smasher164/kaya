@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0xb14092d93e5c1359L;
+    public static final long SPEC_HASH = 0x692fe11a5922795aL;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -104,6 +104,9 @@ public final class KayaWire {
     public static final int PROP_PLACEHOLDER = 30;
     public static final int PROP_HREF = 31;
     public static final int PROP_RICH = 32;
+    public static final int PROP_OWN_UNDO = 33;
+    public static final int PROP_CAN_UNDO = 34;
+    public static final int PROP_CAN_REDO = 35;
     public static final int WPROP_TITLE = 1;
     public static final int WPROP_WIDTH = 2;
     public static final int WPROP_HEIGHT = 3;
@@ -1734,6 +1737,75 @@ public final class KayaWire {
     public static byte[] txBindRichElement(long widgetId, int level, int field) {
         Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_RICH).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
+    /** set_property with a constant own_undo value. */
+    public static byte[] txSetOwnUndo(long widgetId, boolean ownUndo) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_OWN_UNDO).putInt(SOURCE_CONST);
+        encodeValue(b, ownUndo);
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound own_undo value. */
+    public static byte[] txBindOwnUndo(long widgetId, long signalId) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_OWN_UNDO).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindOwnUndoElement(long widgetId, int level, int field) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_OWN_UNDO).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
+    /** set_property with a constant can_undo value. */
+    public static byte[] txSetCanUndo(long widgetId, boolean canUndo) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_CAN_UNDO).putInt(SOURCE_CONST);
+        encodeValue(b, canUndo);
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound can_undo value. */
+    public static byte[] txBindCanUndo(long widgetId, long signalId) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_CAN_UNDO).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindCanUndoElement(long widgetId, int level, int field) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_CAN_UNDO).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
+    /** set_property with a constant can_redo value. */
+    public static byte[] txSetCanRedo(long widgetId, boolean canRedo) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_CAN_REDO).putInt(SOURCE_CONST);
+        encodeValue(b, canRedo);
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound can_redo value. */
+    public static byte[] txBindCanRedo(long widgetId, long signalId) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_CAN_REDO).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindCanRedoElement(long widgetId, int level, int field) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_CAN_REDO).putInt(SOURCE_ELEMENT)
                 .putInt(level).putInt(field);
         return finish(b);
     }

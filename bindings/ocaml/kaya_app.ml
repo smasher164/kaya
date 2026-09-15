@@ -1301,6 +1301,12 @@ let document (Widget id) = the_document (the_tx ()).app id
    [~on_edit]. *)
 let set_rich (Widget id) on = emit (the_tx ()) (Kaya_wire.tx_set_rich id on)
 
+(* The app owns this textarea's history (docs/rich-text-plan.md R6, §14):
+   the platform's own stack goes off and Edit>Undo reaches the app through
+   the role item's activation. *)
+let set_own_undo (Widget id) on =
+  emit (the_tx ()) (Kaya_wire.tx_set_own_undo id on)
+
 (* Replace a [rich] textarea's whole document: echoes nothing and, like
    [set_text], spends the native undo history (docs/undo-plan.md D7). *)
 let set_document (Widget id) doc =
@@ -1337,6 +1343,15 @@ let unformat (Widget id) name =
 (* Make the selection's paragraphs [kind]; [Body] clears. *)
 let set_block widget kind = format widget "block" (block_name kind)
 
+(* What an [~own_undo] textarea's app can take back right now, and put
+   back: the route reads these (docs/rich-text-plan.md §14), so a write
+   re-reads Edit>Undo's and Edit>Redo's enablement. *)
+let can_undo (Widget id) on =
+  emit (the_tx ()) (Kaya_wire.tx_set_can_undo id on)
+
+let can_redo (Widget id) on =
+  emit (the_tx ()) (Kaya_wire.tx_set_can_redo id on)
+
 let add_child (Widget parent) (Widget child) =
   let tx = the_tx () in
   emit tx (Kaya_wire.tx_add_child parent child)
@@ -1364,7 +1379,7 @@ let button ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help
    the platform's real multi-line editor. [~rich:true] adds the
    attribute-run channel (docs/rich-text-plan.md R1); [~on_edit] and
    [~on_format] answer only on one. *)
-let textarea ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?placeholder ?placeholder_bind ?on_change ?rich ?on_edit ?on_format () =
+let textarea ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?placeholder ?placeholder_bind ?on_change ?rich ?own_undo ?on_edit ?on_format () =
   let tx = the_tx () in
   let w = widget Kaya_wire.kind_textarea in
   Option.iter (fun g -> set_grow w g) grow;
@@ -1373,6 +1388,7 @@ let textarea ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?he
   Option.iter (fun v -> set_placeholder w v) placeholder;
   Option.iter (fun s -> bind_placeholder w s) placeholder_bind;
   Option.iter (fun v -> set_rich w v) rich;
+  Option.iter (fun v -> set_own_undo w v) own_undo;
   let (Widget id) = w in
   (match on_change with
   | Some handler -> Hashtbl.replace tx.app.widget_changes id handler

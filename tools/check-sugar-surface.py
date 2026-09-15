@@ -2936,6 +2936,11 @@ def rich_document_rows(snake, pascal, camel):
 # because the negatives below rename them away.
 RICH_PARTS = [
     ("rich", rich_prop_rows, ("rich", "Rich", "rich")),
+    # docs/rich-text-plan.md R6, §14: the app-owned undo, a prop, and the
+    # two live answers, transaction writes.
+    ("own_undo", rich_prop_rows, ("own_undo", "OwnUndo", "ownUndo")),
+    ("can_undo", rich_write_rows, ("can_undo", "CanUndo", "canUndo")),
+    ("can_redo", rich_write_rows, ("can_redo", "CanRedo", "canRedo")),
     ("Block", rich_type_rows, ("block", "Block", "block")),
     ("Document", rich_type_rows, ("document", "Document", "document")),
     ("Run", rich_type_rows, ("run", "Run", "run")),

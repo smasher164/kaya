@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0xb14092d93e5c1359;
+    public const ulong SpecHash = 0x692fe11a5922795a;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -103,6 +103,9 @@ static class KayaWire
     public const uint PropPlaceholder = 30;
     public const uint PropHref = 31;
     public const uint PropRich = 32;
+    public const uint PropOwnUndo = 33;
+    public const uint PropCanUndo = 34;
+    public const uint PropCanRedo = 35;
     public const uint WpropTitle = 1;
     public const uint WpropWidth = 2;
     public const uint WpropHeight = 3;
@@ -1825,6 +1828,81 @@ static class KayaWire
     {
         var w = Begin(out var stream);
         w.Write(widgetId); w.Write(PropRich); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a constant own_undo value.
+    public static byte[] TxSetOwnUndo(ulong widgetId, bool ownUndo)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropOwnUndo); w.Write(SourceConst);
+        EncodeValue(w, ownUndo);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound own_undo value.
+    public static byte[] TxBindOwnUndo(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropOwnUndo); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindOwnUndoElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropOwnUndo); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a constant can_undo value.
+    public static byte[] TxSetCanUndo(ulong widgetId, bool canUndo)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropCanUndo); w.Write(SourceConst);
+        EncodeValue(w, canUndo);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound can_undo value.
+    public static byte[] TxBindCanUndo(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropCanUndo); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindCanUndoElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropCanUndo); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a constant can_redo value.
+    public static byte[] TxSetCanRedo(ulong widgetId, bool canRedo)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropCanRedo); w.Write(SourceConst);
+        EncodeValue(w, canRedo);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound can_redo value.
+    public static byte[] TxBindCanRedo(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropCanRedo); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindCanRedoElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropCanRedo); w.Write(SourceElement); w.Write(level); w.Write(field);
         return Finish(stream, w, TxKindSetProperty);
     }
 

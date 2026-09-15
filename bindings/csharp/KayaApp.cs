@@ -2507,6 +2507,16 @@ sealed class Tx
     /// Make the selection's paragraphs `kind`; BlockKind.Body clears.
     public void SetBlock(Widget w, BlockKind kind) => Format(w, "block", kind.Name());
 
+    /// What an `ownUndo` textarea's app answers for Edit>Undo: true
+    /// enables the item and routes its activation here
+    /// (docs/rich-text-plan.md R6, §14).
+    public void CanUndo(Widget w, bool can) =>
+        Records.Add(KayaWire.TxSetCanUndo(w.Id, can));
+
+    /// The same for Edit>Redo.
+    public void CanRedo(Widget w, bool can) =>
+        Records.Add(KayaWire.TxSetCanRedo(w.Id, can));
+
     // --- Construction sugar: everything lowers eagerly to the same
     // records — children first, then the container, then the AddChilds.
 
@@ -2535,14 +2545,17 @@ sealed class Tx
     /// A multi-line text editor: the entry's uncontrolled contract
     /// over the platform's real multi-line editor. `rich: true` makes it
     /// carry attribute runs — SetDocument, ApplyEdit, KayaApp.OnEdit
-    /// (docs/rich-text-plan.md R1).
+    /// (docs/rich-text-plan.md R1). `ownUndo: true` turns the platform's
+    /// own undo stack off on this widget and routes Edit>Undo to the
+    /// app's Undo item (docs/rich-text-plan.md R6, §14).
     public Widget Textarea(Action<Tx, string> onChange = null, double? grow = null,
-        bool rich = false)
+        bool rich = false, bool ownUndo = false)
     {
         var w = Widget(KayaWire.KindTextarea);
         if (onChange != null) App.OnChange(w, onChange);
         if (grow is double g) SetGrow(w, g);
         if (rich) Records.Add(KayaWire.TxSetRich(w.Id, true));
+        if (ownUndo) Records.Add(KayaWire.TxSetOwnUndo(w.Id, true));
         return w;
     }
 

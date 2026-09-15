@@ -6,6 +6,7 @@ package kaya
 // normalize_runs). No core, no library — a bare App is the mirror.
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 	"testing"
@@ -276,4 +277,38 @@ func TestDocumentReadIsASnapshot(t *testing.T) {
 	if got := spellRuns(held.Runs); got != "0:2 italic" {
 		t.Errorf("a later fold changed a document already handed out: %q", got)
 	}
+}
+
+// THE APP-OWNED UNDO (docs/rich-text-plan.md R6, §14): the declaration is
+// the prop, and the two live answers Edit>Undo's enablement reads are the
+// other two — nothing else in this binding says so.
+func TestOwnUndoAndItsTwoLiveAnswersRideTheProps(t *testing.T) {
+	app := NewApp()
+	app.Build(func(tx *Tx) {
+		owned := tx.Textarea(nil).Rich().OwnUndo()
+		plain := tx.Textarea(nil).Rich()
+		tx.CanUndo(owned, true)
+		tx.CanRedo(owned, false)
+
+		has := func(want []byte) bool {
+			for _, rec := range tx.records {
+				if bytes.Equal(rec, want) {
+					return true
+				}
+			}
+			return false
+		}
+		if !has(TxSetOwnUndo(owned.id, true)) {
+			t.Error("OwnUndo() put no own_undo prop on the wire")
+		}
+		if has(TxSetOwnUndo(plain.id, true)) {
+			t.Error("a plain rich textarea declared own_undo")
+		}
+		if !has(TxSetCanUndo(owned.id, true)) {
+			t.Error("CanUndo(w, true) put no can_undo prop on the wire")
+		}
+		if !has(TxSetCanRedo(owned.id, false)) {
+			t.Error("CanRedo(w, false) put no can_redo prop on the wire")
+		}
+	})
 }

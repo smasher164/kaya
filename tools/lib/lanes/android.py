@@ -84,6 +84,9 @@ LEGS = {
         # rides the compose suite alone, and it is an IME_SCENES member,
         # which is what puts the helper keyboard under its `compose` step.
         "richtext-compose",
+        # The app-owned undo scene (docs/rich-text-plan.md §14): rust-only
+        # for richtext's reason, so it rides the compose suite alone.
+        "ownundo-compose",
     ],
     "jvm": [
         "jvm", "a11y-jvm", "entry-jvm",

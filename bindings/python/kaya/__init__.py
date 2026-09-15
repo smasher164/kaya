@@ -519,6 +519,14 @@ class _Handle:
         _records().append(wire.tx_set_rich(self.id, bool(on)))
         return self
 
+    def own_undo(self, on=True):
+        """The app owns this rich textarea's undo (docs/rich-text-plan.md
+        R6, §14): the native stack is off, and Edit>Undo/Redo reach the
+        app through the role item's own `on_activate` while `can_undo` /
+        `can_redo` say whether they are enabled. Returns the handle."""
+        _records().append(wire.tx_set_own_undo(self.id, bool(on)))
+        return self
+
     def columns_auto(self, min_width):
         """THE GRID THAT FITS (docs/layout-knobs-plan.md §3): as many
         columns as fit this grid's width at `min_width` DIP each, sharing
@@ -825,6 +833,18 @@ class Widget(_Handle):
         """Make the selection's whole paragraphs `kind` (kaya.Block;
         plain names accepted). `body` clears. Returns the widget."""
         return self.format("block", _block_value(kind))
+
+    def can_undo(self, on):
+        """Whether this `own_undo` textarea's app has something to undo —
+        what Edit>Undo's enablement reads while it is focused
+        (docs/rich-text-plan.md R6, §14). Returns the widget."""
+        _records().append(wire.tx_set_can_undo(self.id, bool(on)))
+        return self
+
+    def can_redo(self, on):
+        """Redo's twin. Returns the widget."""
+        _records().append(wire.tx_set_can_redo(self.id, bool(on)))
+        return self
 
     def document(self):
         """This `rich` textarea's document, as this binding has folded it
@@ -3874,7 +3894,7 @@ def entry(text=None, on_change=None, grow=None, placeholder=None):
 
 
 def textarea(text=None, on_change=None, grow=None, placeholder=None,
-             rich=False, on_edit=None, on_format=None):
+             rich=False, own_undo=False, on_edit=None, on_format=None):
     """A multi-line text editor: the entry's uncontrolled contract over
     the platform's real multi-line editor.
 
@@ -3882,12 +3902,17 @@ def textarea(text=None, on_change=None, grow=None, placeholder=None,
     `set_document`, `apply_edit`, `format`/`unformat`/`set_block`, the
     `document()` this binding folds, and the two deltas — `on_edit(edit)`
     for every user edit, addressed, beside the whole-text `on_change`, and
-    `on_format(act)` for a toolbar act over a range."""
+    `on_format(act)` for a toolbar act over a range.
+
+    `own_undo=True` puts the history in the app's hands
+    (docs/rich-text-plan.md R6, §14)."""
     handle = _widget(wire.KIND_TEXTAREA)
     if text is not None:
         _records().append(wire.tx_set_text(handle.id, _text_value("textarea text", text)))
     if rich:
         handle.rich(True)
+    if own_undo:
+        handle.own_undo(True)
     if placeholder is not None:
         handle.placeholder(placeholder)
     if on_change is not None:

@@ -809,6 +809,9 @@ pub const KAYA_PROP_PLACEHOLDER: u32 = 30;
 pub const KAYA_PROP_HREF: u32 = 31;
 /// A textarea that carries attribute runs (docs/rich-text-plan.md R1).
 pub const KAYA_PROP_RICH: u32 = 32;
+pub const KAYA_PROP_OWN_UNDO: u32 = 33;
+pub const KAYA_PROP_CAN_UNDO: u32 = 34;
+pub const KAYA_PROP_CAN_REDO: u32 = 35;
 
 /// Window properties (spec::WINDOW_PROPS): their own namespace —
 /// windows are not widgets. Window 0 is the primary surface.
@@ -1012,6 +1015,9 @@ const _: () = assert!(
         && KAYA_PROP_PLACEHOLDER == wire::PROP_PLACEHOLDER
         && KAYA_PROP_HREF == wire::PROP_HREF
         && KAYA_PROP_RICH == wire::PROP_RICH
+        && KAYA_PROP_OWN_UNDO == wire::PROP_OWN_UNDO
+        && KAYA_PROP_CAN_UNDO == wire::PROP_CAN_UNDO
+        && KAYA_PROP_CAN_REDO == wire::PROP_CAN_REDO
         && KAYA_WPROP_TITLE == wire::WPROP_TITLE
         && KAYA_WPROP_WIDTH == wire::WPROP_WIDTH
         && KAYA_WPROP_HEIGHT == wire::WPROP_HEIGHT
@@ -1260,7 +1266,7 @@ const _: () = {
 // Completeness, not just agreement (docs/traps.md): a new spec prop
 // trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::PROPS.len() == 32,
+    crate::spec::PROPS.len() == 35,
     "spec::PROPS grew: export the new KAYA_PROP_* above, extend the pin, and bump this count"
 );
 const _: () = assert!(
@@ -3838,6 +3844,7 @@ fn undo_route_code(window: u64, focused: u64, can: u8, redo: bool) -> u32 {
         crate::scene::UndoRoute::Nothing => 0,
         crate::scene::UndoRoute::Native => 1,
         crate::scene::UndoRoute::Core => 2,
+        crate::scene::UndoRoute::App => 3,
     }
 }
 

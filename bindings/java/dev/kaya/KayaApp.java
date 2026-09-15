@@ -2741,6 +2741,20 @@ public final class KayaApp {
             return this;
         }
 
+        /** The app owns this textarea's history: the platform's own undo
+         * stack is off on it and Edit>Undo reaches the app's Undo item
+         * (docs/rich-text-plan.md R6, §14). Same discipline as
+         * {@link #rich}. */
+        public Widget ownUndo() {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: ownUndo on a widget outside its build transaction"
+                    + " — declare it where the textarea is made");
+            }
+            tx.emit(KayaWire.txSetOwnUndo(id, true));
+            return this;
+        }
+
         /** This widget's accessibility hint at construction. */
         public Widget a11yHint(String hint) {
             if (tx == null || tx.closed) {
@@ -5148,6 +5162,18 @@ public final class KayaApp {
          * {@link Block#BODY} clears. */
         public void setBlock(Widget w, Block kind) {
             format(w, "block", kind.kind);
+        }
+
+        /** What an {@code ownUndo} textarea's app answers for Edit>Undo:
+         * true enables the item and routes its activation to the app
+         * (docs/rich-text-plan.md R6, §14). */
+        public void canUndo(Widget w, boolean can) {
+            emit(KayaWire.txSetCanUndo(w.id, can));
+        }
+
+        /** The same for Edit>Redo. */
+        public void canRedo(Widget w, boolean can) {
+            emit(KayaWire.txSetCanRedo(w.id, can));
         }
 
         private Object[] flatRuns(List<TextRun> runs) {

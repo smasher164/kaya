@@ -204,6 +204,13 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     ("href", 31, PropKind::Str),
     // docs/rich-text-plan.md R1.
     ("rich", 32, PropKind::Bool),
+    // docs/rich-text-plan.md R6, §14: the app owns this rich textarea's
+    // undo — the native stack is off, the core's ledger never banks it, and
+    // Edit>Undo/Redo reach the app through the role item's own activation
+    // while `can_undo`/`can_redo` say whether they are enabled.
+    ("own_undo", 33, PropKind::Bool),
+    ("can_undo", 34, PropKind::Bool),
+    ("can_redo", 35, PropKind::Bool),
 ];
 
 /// Window properties: the presentation-context twin of PROPS, in its
@@ -3037,6 +3044,9 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("placeholder", 30),
                 ("href", 31),
                 ("rich", 32),
+                ("own_undo", 33),
+                ("can_undo", 34),
+                ("can_redo", 35),
             ],
         },
         EnumSpec {
@@ -3783,6 +3793,9 @@ mod tests {
                     ("prop", "placeholder") => wire::PROP_PLACEHOLDER,
                     ("prop", "href") => wire::PROP_HREF,
                     ("prop", "rich") => wire::PROP_RICH,
+                    ("prop", "own_undo") => wire::PROP_OWN_UNDO,
+                    ("prop", "can_undo") => wire::PROP_CAN_UNDO,
+                    ("prop", "can_redo") => wire::PROP_CAN_REDO,
                     ("wprop", "title") => wire::WPROP_TITLE,
                     ("wprop", "width") => wire::WPROP_WIDTH,
                     ("wprop", "height") => wire::WPROP_HEIGHT,

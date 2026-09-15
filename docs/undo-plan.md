@@ -485,6 +485,11 @@ per commit); D7's reset then applies to `set_rich_text` and never to
 `apply_edit`, and D6's routing takes that widget's app-declared
 `can_undo`/`can_redo` through A4's query.
 
+BUILT 2026-09-14 (docs/rich-text-plan.md §14): the three props, the
+ledger skipping an own_undo field, `UndoRoute::App` (wire code 3) with
+the role item's own activation as the app's door, the levers on every
+arm, the sugar in nine, tools/scenes/ownundo.steps on five lanes.
+
 ### A8 — TESTABILITY (the invariant-1 obligation)
 
 The delegated tier was unobservable when this was written: no harness

@@ -1500,6 +1500,15 @@ func (w Widget) Rich() Widget {
 	return w
 }
 
+// OwnUndo gives this rich textarea's history to the app: the native
+// stack is off, and Edit>Undo/Redo reach the app through the role item's
+// own OnActivate while Tx.CanUndo and Tx.CanRedo say whether they are
+// enabled (docs/rich-text-plan.md R6, §14).
+func (w Widget) OwnUndo() Widget {
+	w.tx.emit(TxSetOwnUndo(w.id, true))
+	return w
+}
+
 // SetDocument replaces a rich textarea's whole content: it echoes
 // nothing and, like SetText, spends the native undo history
 // (docs/undo-plan.md D7).
@@ -1545,6 +1554,18 @@ func (tx *Tx) Unformat(w Widget, name string) {
 // SetBlock makes the selection's paragraphs kind; Body clears.
 func (tx *Tx) SetBlock(w Widget, kind Block) {
 	tx.Format(w, "block", string(kind))
+}
+
+// CanUndo says whether an OwnUndo textarea's app has something to undo —
+// what Edit>Undo's enablement reads while it is focused
+// (docs/rich-text-plan.md R6, §14).
+func (tx *Tx) CanUndo(w Widget, on bool) {
+	tx.emit(TxSetCanUndo(w.id, on))
+}
+
+// CanRedo is Redo's twin.
+func (tx *Tx) CanRedo(w Widget, on bool) {
+	tx.emit(TxSetCanRedo(w.id, on))
 }
 
 // Construction sugar: containers take their body as a closure and parent

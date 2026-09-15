@@ -1404,6 +1404,14 @@ pub enum Prop {
     /// A textarea that carries attribute runs (Bool-valued;
     /// docs/rich-text-plan.md R1).
     Rich,
+    /// The app owns a rich textarea's undo (Bool-valued; docs/rich-text-plan.md
+    /// R6, §14): the native stack is off, the ledger never banks it, and
+    /// Edit>Undo/Redo reach the app through the role item's own activation.
+    OwnUndo,
+    /// Whether the app's own undo/redo has something to do, on an `own_undo`
+    /// textarea (Bool-valued): what Edit>Undo/Redo's enablement reads.
+    CanUndo,
+    CanRedo,
     /// An image's encoded source bytes (Blob-valued).
     Source,
     /// A container's inter-child gap on its main axis (F64-valued, DIP;

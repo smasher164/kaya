@@ -191,9 +191,81 @@ def line(text, at):
     return text.count("\n", 0, at) + 1
 
 
+# THE APP-OWNED UNDO'S LEVER (docs/rich-text-plan.md §14; CLAUDE.md's gate
+# list): the `own_undo` apply arm names the platform's measured off switch,
+# and the undo performer DECLINES the App route so the role item's own
+# activation reaches the app. The scene's owned textarea never asks the
+# native stack, so neither half is visible to any lane.
+OWN_UNDO = [
+    dict(path=GTK, name="gtk",
+         arm=r"Prop::OwnUndo, Value::Bool\(on\)\) => \{",
+         lever=r"set_enable_undo\(",
+         decline=r"UndoRoute::App => \{", decline_min=1,
+         decline_body=r"send_menu_activated_tag\("),
+    dict(path=WINUI, name="winui",
+         arm=r"Prop::OwnUndo, Value::Bool\(on\)\) => \{",
+         lever=r"SetUndoLimit\(",
+         decline=r"UndoRoute::App => return false", decline_min=2),
+    dict(path=SWIFTUI, name="swiftui",
+         arm=r"case \(propOwnUndo, valueBool\):",
+         # The lever sits on the VIEW, keyed on the node's flag: the mac's
+         # allowsUndo at creation and update, iOS's recorded suspension.
+         levers=[r"allowsUndo = !node\.ownUndo",
+                 r"own\.undoSuspendedBy = manager"],
+         decline=r"case \.app: return false", decline_min=4),
+    dict(path=COMPOSE, name="compose",
+         arm=r"PROP_OWN_UNDO ->",
+         lever=r"KayaUndoState\.clearHistory\(",
+         # And typing clears too: the per-commit clear covers the app's
+         # writes alone (docs/rich-text-plan.md §14).
+         levers=[r"if \(node\.ownUndo\) KayaUndoState\.clearHistory\(node\)"],
+         decline=r"KayaUndoRoute\.APP -> return false", decline_min=2),
+]
+
+OWN_UNDO_WINDOW = 12
+
+
+def check_own_undo(texts):
+    bad = []
+    for be in OWN_UNDO:
+        path, name, text = be["path"], be["name"], texts[be["path"]]
+        arms = list(re.finditer(be["arm"], text))
+        if not arms:
+            bad.append(f"{path}: the {name} arm has no `own_undo` apply arm "
+                       f"(wanted /{be['arm']}/) — docs/rich-text-plan.md §14")
+            continue
+        if "lever" in be:
+            start = arms[0].start()
+            window = "\n".join(text[start:].split("\n")[:OWN_UNDO_WINDOW])
+            if not re.search(be["lever"], window):
+                bad.append(f"{path}:{line(text, start)}: the {name} `own_undo` "
+                           f"apply arm does not name the platform's lever "
+                           f"(/{be['lever']}/ within {OWN_UNDO_WINDOW} lines) "
+                           f"— the native stack stays live on a document "
+                           f"the app owns")
+        for lever in be.get("levers", []):
+            if not re.search(lever, text):
+                bad.append(f"{path}: the {name} arm no longer spells the "
+                           f"own_undo lever /{lever}/")
+        found = list(re.finditer(be["decline"], text))
+        if len(found) < be["decline_min"]:
+            bad.append(f"{path}: the {name} undo performer declines the App "
+                       f"route {len(found)} time(s), wanted {be['decline_min']} "
+                       f"(/{be['decline']}/) — the role item's own activation "
+                       f"never reaches the app")
+        if "decline_body" in be:
+            for m in found:
+                window = "\n".join(text[m.start():].split("\n")[:OWN_UNDO_WINDOW])
+                if not re.search(be["decline_body"], window):
+                    bad.append(f"{path}:{line(text, m.start())}: the {name} App "
+                               f"arm does not send the item's activation "
+                               f"(/{be['decline_body']}/)")
+    return bad
+
+
 def check(texts):
     """texts: {site: text}. Offender sentences."""
-    bad = []
+    bad = check_own_undo(texts)
     for be in BACKENDS:
         path, name = be["path"], be["name"]
         text = texts[path]
@@ -331,6 +403,31 @@ moved = gate.doctor(
     "core.scene.note_native_undo_renamed(", flags=re.S)
 refuses({**REAL, WINUI: moved}, "no longer finds",
         "a WinUI backend whose core seam moved")
+
+# 5. THE APP-OWNED UNDO'S LEVER, one per arm, and one declined route.
+gtk_lever = gate.doctor(
+    "the gtk own_undo lever perturbation", REAL[GTK],
+    r"(Prop::OwnUndo, Value::Bool\(on\)\) => \{\n\s*view\.buffer\(\)\.)set_enable_undo\(",
+    r"\g<1>set_enable_undo_gone(", flags=re.S)
+refuses({**REAL, GTK: gtk_lever}, "does not name the platform's lever",
+        "a GTK own_undo arm that flips no enable-undo")
+winui_lever = gate.doctor(
+    "the winui own_undo lever perturbation", REAL[WINUI],
+    r"(Prop::OwnUndo, Value::Bool\(on\)\) => \{[\s\S]{0,400}?)SetUndoLimit\(",
+    r"\g<1>SetUndoLimit_gone(", flags=re.S)
+refuses({**REAL, WINUI: winui_lever}, "does not name the platform's lever",
+        "a WinUI own_undo arm that sets no undo limit")
+swift_decline = gate.doctor(
+    "the swiftui App-route perturbation", REAL[SWIFTUI],
+    r"case \.app: return false", "case .app: break", want=4)
+refuses({**REAL, SWIFTUI: swift_decline}, "declines the App route 0 time(s)",
+        "a SwiftUI performer that swallows the App route")
+compose_typing = gate.doctor(
+    "the compose typing-clear perturbation", REAL[COMPOSE],
+    r"if \(node\.ownUndo\) KayaUndoState\.clearHistory\(node\)",
+    "if (node.ownUndo) Unit", want=2)
+refuses({**REAL, COMPOSE: compose_typing}, "no longer spells the own_undo lever",
+        "a Compose arm whose typing banks native entries again")
 
 offenders = check(REAL)
 if offenders:

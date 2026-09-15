@@ -1128,6 +1128,7 @@ if (isMainThread) {
   let editor!: K.Widget;
   let plain!: K.Widget;
   let quietEditor!: K.Widget;
+  let owned!: K.Widget;
   let rowEditor!: K.Widget;
   const rowSeen: [K.Key, K.Edit][] = [];
   shipped.length = 0;
@@ -1136,6 +1137,7 @@ if (isMainThread) {
       editor = kaya.textarea({ rich: true, onEdit: (e: K.Edit) => edits.push(e), onFormat: (f: K.Format) => formats.push(f) });
       plain = kaya.textarea();
       quietEditor = kaya.textarea({ rich: true });
+      owned = kaya.textarea({ rich: true, ownUndo: true });
       for (const item of items) {
         rowEditor = kaya.textarea({ rich: true, onEdit: (row: K.RowHandle<string>, e: K.Edit) => rowSeen.push([row.key, e]) });
         kaya.label({ bind: item });
@@ -1294,6 +1296,24 @@ if (isMainThread) {
         });
       });
     }, /template node/),
+  );
+
+  // THE APP-OWNED UNDO (docs/rich-text-plan.md R6, §14): the declaration
+  // is the prop, and the two live answers Edit>Undo's enablement reads are
+  // the other two — nothing else in this binding says so.
+  richCheck(
+    "ownUndo declares prop 33, and a plain rich textarea does not",
+    declared.some((r) => sameBytes(r, wire.tx_set_own_undo(owned.id, true))) && !declared.some((r) => sameBytes(r, wire.tx_set_own_undo(quietEditor.id, true))),
+  );
+  shipped.length = 0;
+  app.build(() => {
+    owned.canUndo(true);
+    owned.canRedo(false);
+  });
+  const undoWrites = shipped.flat();
+  richCheck(
+    "canUndo writes prop 34 and canRedo prop 35, as written",
+    undoWrites.some((r) => sameBytes(r, wire.tx_set_can_undo(owned.id, true))) && undoWrites.some((r) => sameBytes(r, wire.tx_set_can_redo(owned.id, false))),
   );
 
   console.log(`rich text: ${richChecks.length} checks over the fold, driven from packed occurrence bytes through App._onOccurrence`);

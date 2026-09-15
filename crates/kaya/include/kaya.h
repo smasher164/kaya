@@ -800,6 +800,12 @@
  */
 #define KAYA_PROP_RICH 32
 
+#define KAYA_PROP_OWN_UNDO 33
+
+#define KAYA_PROP_CAN_UNDO 34
+
+#define KAYA_PROP_CAN_REDO 35
+
 /**
  * Window properties (spec::WINDOW_PROPS): their own namespace —
  * windows are not widgets. Window 0 is the primary surface.

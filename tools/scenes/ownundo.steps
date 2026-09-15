@@ -1,0 +1,46 @@
+# THE APP-OWNED UNDO (docs/rich-text-plan.md R6, §14): the owned textarea's
+# Edit>Undo/Redo reach the app's own history through the role item's
+# activation, the native textarea's reach the platform's tier, and the
+# split is by focus. KEYSTROKES throughout: set_text is a programmatic
+# write and the native half is made of the platform's own history.
+expect_menu "Edit>Undo" disabled
+expect_menu "Edit>Redo" disabled
+expect label#0 "undo 0 redo 0"
+click button#1
+expect_focused textarea#1
+type "a"
+expect label#0 "undo 1 redo 0"
+type "b"
+expect label#0 "undo 2 redo 0"
+expect_menu "Edit>Undo" enabled
+expect_menu "Edit>Redo" disabled
+menu_activate "Edit>Undo"
+expect textarea#1 "a"
+expect label#0 "undo 1 redo 1"
+expect_menu "Edit>Redo" enabled
+menu_activate "Edit>Redo"
+expect textarea#1 "ab"
+expect label#0 "undo 2 redo 0"
+expect_menu "Edit>Redo" disabled
+menu_activate "Edit>Undo"
+menu_activate "Edit>Undo"
+expect textarea#1 ""
+expect label#0 "undo 0 redo 2"
+expect_menu "Edit>Undo" disabled
+# THE SPLIT BY FOCUS: the native textarea's typing is the platform's own
+# history, and its Undo leaves the app's counters where they were.
+click button#0
+expect_focused textarea#0
+type "x"
+expect textarea#0 "x"
+expect_menu "Edit>Undo" enabled
+menu_activate "Edit>Undo"
+expect textarea#0 ""
+expect label#0 "undo 0 redo 2"
+# Back on the owned textarea the app's redo is still there.
+click button#1
+expect_focused textarea#1
+expect_menu "Edit>Redo" enabled
+menu_activate "Edit>Redo"
+expect textarea#1 "a"
+expect label#0 "undo 1 redo 1"

@@ -50,7 +50,11 @@ else:
 # refused by the same command. The copy carries every .go file, the
 # module files and the C header cgo preprocesses; nothing is linked.
 scratch = g.scratch() / "module"
-tracked = subprocess.run(["git", "ls-files", "*.go", "go.mod", "go.sum", "crates/kaya/include"],
+# Tracked AND untracked (not ignored): a new package still uncommitted
+# was measured making the negative's copy unbuildable (docs/traps.md
+# 2026-09-14), which reads as a negative that did not fire.
+tracked = subprocess.run(["git", "ls-files", "--cached", "--others", "--exclude-standard",
+                          "*.go", "go.mod", "go.sum", "crates/kaya/include"],
                          cwd=ROOT, capture_output=True, text=True, check=False).stdout.split()
 for rel in tracked:
     dst = scratch / rel

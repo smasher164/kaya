@@ -9495,6 +9495,12 @@ fn pin_plain_text(field: &RichEditBox, widget: u64) -> windows_core::Result<()> 
     Ok(())
 }
 
+/// The RichEdit engine's own undo depth, which `own_undo` off puts back
+/// (docs/rich-text-plan.md §14; the lever's one-way half is measured in
+/// docs/measurements/richtext-windows-2026-09-11.md §3). Nothing else in this
+/// backend writes `UndoLimit`, so this IS the value a widget had before.
+const RICH_UNDO_LIMIT: u32 = 100;
+
 /// D7/A1's clear, in this platform's one available spelling. MEASURED A
 /// NO-OP ON THE ENTRY, AND CALLED ANYWAY (docs/undo-plan.md §1.1): setting
 /// `TextBox.Text` resets the control's undo buffer by itself, but that is
@@ -10804,6 +10810,9 @@ fn perform_undo_role(core: &mut CoreState, role: &str) -> bool {
             match undo_route(core) {
                 crate::scene::UndoRoute::Native => native_walk(core, false),
                 crate::scene::UndoRoute::Core => core_walk(core, false),
+                // docs/rich-text-plan.md §14: DECLINE, so the caller's plain
+                // activation path sends this item's own menu_activated.
+                crate::scene::UndoRoute::App => return false,
                 // Inert: enablement IS this route (role_enabled), recomputed live.
                 crate::scene::UndoRoute::Nothing => {}
             }
@@ -10813,6 +10822,7 @@ fn perform_undo_role(core: &mut CoreState, role: &str) -> bool {
             match redo_route(core) {
                 crate::scene::UndoRoute::Native => native_walk(core, true),
                 crate::scene::UndoRoute::Core => core_walk(core, true),
+                crate::scene::UndoRoute::App => return false,
                 crate::scene::UndoRoute::Nothing => {}
             }
             true
@@ -13964,6 +13974,20 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         let text = lf(Editable::Textarea(field.clone()).text()?);
                         rich_restyle(&field, &text, &[], 0, text.len())?;
                     }
+                }
+                // docs/rich-text-plan.md §14: the platform's undo lever. ONE-WAY
+                // (docs/measurements/richtext-windows-2026-09-11.md §3): dropping
+                // the limit destroys the stack and raising it back does not bring
+                // it home, so `false` restores the default limit and no history.
+                (NativeWidget::Textarea(field), Prop::OwnUndo, Value::Bool(on)) => {
+                    let limit = if on { 0 } else { RICH_UNDO_LIMIT };
+                    field.TextDocument()?.SetUndoLimit(limit)?;
+                }
+                // docs/rich-text-plan.md §14: the app's answer IS the route, so a
+                // write re-reads Edit>Undo/Redo's enablement. The core holds the
+                // flag (scene.rs's can_undo/can_redo sets); nothing is kept here.
+                (_, Prop::CanUndo | Prop::CanRedo, Value::Bool(_)) => {
+                    refresh_role_enablement(core);
                 }
                 (NativeWidget::Checkbox { caption, switch, .. }, Prop::Text, Value::Str(s)) => {
                     caption.SetText(&HSTRING::from(&s))?;

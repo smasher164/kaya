@@ -447,7 +447,15 @@ in docs/deferred.md.
    shared scene can fail — both sit inside a SECOND consecutive native
    walk, which the routing makes unreachable, and each was broken with
    the lane watched staying green. The scene cannot be fixed to reach
-   them, so static pairing is the only wall available),
+   them, so static pairing is the only wall available.
+   AND THE APP-OWNED UNDO'S LEVER SINCE 2026-09-14 (docs/rich-text-plan.md
+   §14): each arm's `own_undo` handling names its platform's measured off
+   switch — `allowsUndo` keyed on the flag, `disableUndoRegistration`,
+   `set_enable_undo`, `SetUndoLimit(0)` — and its undo performer declines
+   the App route so the role item's own activation reaches the app. The
+   scene's owned textarea never asks the native stack, so a lever
+   forgotten leaves a divergent stack no lane can see (the JabRef class,
+   docs/undo-plan.md A7); watched negatives per arm, counts printed),
    `tools/check-slider-commit.py` (A SLIDER COMMITS ONCE PER GESTURE, and
    no lane can see whether it does. `set_value` is the only slider drive
    any scene has and it is one finished gesture by construction, so a

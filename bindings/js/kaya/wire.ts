@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0xb14092d93e5c1359n;
+export const SPEC_HASH = 0x692fe11a5922795an;
 
 export const VALUE_BOOL = 1;
 export const VALUE_I64 = 2;
@@ -98,6 +98,9 @@ export const PROP_WRAP = 29;
 export const PROP_PLACEHOLDER = 30;
 export const PROP_HREF = 31;
 export const PROP_RICH = 32;
+export const PROP_OWN_UNDO = 33;
+export const PROP_CAN_UNDO = 34;
+export const PROP_CAN_REDO = 35;
 export const WPROP_TITLE = 1;
 export const WPROP_WIDTH = 2;
 export const WPROP_HEIGHT = 3;
@@ -1232,6 +1235,51 @@ export function tx_bind_rich(widget_id: number, signal_id: number): Uint8Array {
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_rich_element(widget_id: number, level = 0, field = 0): Uint8Array {
   return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_RICH), u32(SOURCE_ELEMENT), u32(level), u32(field)));
+}
+
+/** set_property with a constant own_undo value. */
+export function tx_set_own_undo(widget_id: number, own_undo: boolean): Uint8Array {
+  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_OWN_UNDO), u32(SOURCE_CONST), enc.value(own_undo)));
+}
+
+/** set_property with a signal-bound own_undo value. */
+export function tx_bind_own_undo(widget_id: number, signal_id: number): Uint8Array {
+  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_OWN_UNDO), u32(SOURCE_SIGNAL), u64(signal_id)));
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_own_undo_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_OWN_UNDO), u32(SOURCE_ELEMENT), u32(level), u32(field)));
+}
+
+/** set_property with a constant can_undo value. */
+export function tx_set_can_undo(widget_id: number, can_undo: boolean): Uint8Array {
+  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_CAN_UNDO), u32(SOURCE_CONST), enc.value(can_undo)));
+}
+
+/** set_property with a signal-bound can_undo value. */
+export function tx_bind_can_undo(widget_id: number, signal_id: number): Uint8Array {
+  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_CAN_UNDO), u32(SOURCE_SIGNAL), u64(signal_id)));
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_can_undo_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_CAN_UNDO), u32(SOURCE_ELEMENT), u32(level), u32(field)));
+}
+
+/** set_property with a constant can_redo value. */
+export function tx_set_can_redo(widget_id: number, can_redo: boolean): Uint8Array {
+  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_CAN_REDO), u32(SOURCE_CONST), enc.value(can_redo)));
+}
+
+/** set_property with a signal-bound can_redo value. */
+export function tx_bind_can_redo(widget_id: number, signal_id: number): Uint8Array {
+  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_CAN_REDO), u32(SOURCE_SIGNAL), u64(signal_id)));
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_can_redo_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_CAN_REDO), u32(SOURCE_ELEMENT), u32(level), u32(field)));
 }
 
 /** set_window_prop with a constant title value; window 0, the primary surface. */

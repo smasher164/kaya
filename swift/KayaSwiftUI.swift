@@ -9,7 +9,7 @@ import UserNotifications
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0xb14092d93e5c1359
+let kayaSpecHash: UInt64 = 0x692fe11a5922795a
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -206,6 +206,9 @@ private let propWrap: UInt32 = 29
 private let propPlaceholder: UInt32 = 30
 private let propHref: UInt32 = 31
 private let propRich: UInt32 = 32
+private let propOwnUndo: UInt32 = 33
+private let propCanUndo: UInt32 = 34
+private let propCanRedo: UInt32 = 35
 // THE RICH TEXT VOCABULARIES, hand-copied APPEND-ONLY wire values held
 // against the core's by tools/check-verbs.py (docs/rich-text-plan.md R3).
 // An attribute NAME rides the wire as a string; these are the numbers the
@@ -599,6 +602,11 @@ final class KayaNode: Identifiable {
     var rich = false
     var richRuns: [KayaRichRun] = []
     var richSeq = 0
+    /// The app owns this textarea's undo (docs/rich-text-plan.md R6, §14),
+    /// and its live answers for Edit>Undo/Redo's enablement.
+    var ownUndo = false
+    var canUndo = false
+    var canRedo = false
     var children: [KayaNode] = []
     /// The stacked fold (D7): non-zero = the table whose viewport this
     /// node renders inside. Identity stays here — only layout moves.
@@ -5318,6 +5326,14 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     kayaScene.nodes[id]!.checked = raw[body + 24] != 0
                 case (propRich, valueBool):
                     kayaScene.nodes[id]!.rich = raw[body + 24] != 0
+                case (propOwnUndo, valueBool):
+                    kayaScene.nodes[id]!.ownUndo = raw[body + 24] != 0
+                case (propCanUndo, valueBool):
+                    kayaScene.nodes[id]!.canUndo = raw[body + 24] != 0
+                    kayaUndoEnablementChanged()
+                case (propCanRedo, valueBool):
+                    kayaScene.nodes[id]!.canRedo = raw[body + 24] != 0
+                    kayaUndoEnablementChanged()
                 case (propValue, valueF64):
                     kayaScene.nodes[id]!.value =
                         raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
@@ -16456,6 +16472,19 @@ enum KayaUndoRoute {
     case nothing
     case native
     case core
+    /// The focused textarea's app owns its undo: the role item's own
+    /// activation reaches the app and nothing else happens here
+    /// (docs/rich-text-plan.md R6, §14).
+    case app
+}
+
+/// The app wrote `can_undo`/`can_redo`: Edit>Undo/Redo read the route again.
+func kayaUndoEnablementChanged() {
+    #if os(macOS)
+        kayaRefreshRoleEnablement()
+    #else
+        DispatchQueue.main.async { UIMenuSystem.main.setNeedsRebuild() }
+    #endif
 }
 
 /// Where an undo would go RIGHT NOW. ASKED ONCE AND USED TWICE — enablement and
@@ -16512,6 +16541,7 @@ func kayaRouteCode(_ code: UInt32) -> KayaUndoRoute {
     case 0: return .nothing
     case 1: return .native
     case 2: return .core
+    case 3: return .app
     default:
         fatalError("kaya: unknown undo route \(code) from the host — the vtable and this interpreter disagree")
     }
@@ -16531,6 +16561,8 @@ func kayaPerformUndoRole(_ role: String) -> Bool {
                 kayaNoteNativeUndo(kayaPresentedMenuWindow)
             case .core: kayaCoreUndo(kayaPresentedMenuWindow)
             case .nothing: break
+            // The plain activation path delivers the item to the app.
+            case .app: return false
             }
             return true
         case "redo":
@@ -16540,6 +16572,8 @@ func kayaPerformUndoRole(_ role: String) -> Bool {
                 kayaNoteNativeUndo(kayaPresentedMenuWindow)
             case .core: kayaCoreRedo(kayaPresentedMenuWindow)
             case .nothing: break
+            // The plain activation path delivers the item to the app.
+            case .app: return false
             }
             return true
         default:
@@ -16559,6 +16593,8 @@ func kayaPerformUndoRole(_ role: String) -> Bool {
                 kayaNoteNativeUndo(window)
             case .core: kayaCoreUndo(window)
             case .nothing: break
+            // The plain activation path delivers the item to the app.
+            case .app: return false
             }
             return true
         case "redo":
@@ -16569,6 +16605,8 @@ func kayaPerformUndoRole(_ role: String) -> Bool {
                 kayaNoteNativeUndo(window)
             case .core: kayaCoreRedo(window)
             case .nothing: break
+            // The plain activation path delivers the item to the app.
+            case .app: return false
             }
             return true
         default:
@@ -19562,7 +19600,9 @@ private struct KayaMacTextarea: NSViewRepresentable {
         // undoManager resolves to the WINDOW's, and `kayaFocusedTextResponder`
         // reaches it as an NSText. Without this the native tier has nothing to
         // delegate to.
-        view.allowsUndo = true
+        // OFF when the app owns the document (docs/rich-text-plan.md R6, §14;
+        // measured complete on this platform, docs/traps.md 2026-09-11).
+        view.allowsUndo = !node.ownUndo
         // The textarea names its own ramp rung, so the swap is spelled here. This
         // view is also the best read-back site on the platform, and
         // expect_typeface reads it.
@@ -19620,6 +19660,7 @@ private struct KayaMacTextarea: NSViewRepresentable {
         context.coordinator.node = node
         view.nodeId = node.id
         view.rich = rich
+        view.allowsUndo = !node.ownUndo
 
         // APPLIED ON EVERY UPDATE, not once at construction: a pin that only ran
         // in makeNSView is lost the day SwiftUI hands back a recycled view or
@@ -20099,11 +20140,25 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
             /// A user-driven focus change flows back so the model stays
             /// truthful, exactly as the `@FocusState` mirror did.
             func textViewDidBeginEditing(_ textView: UITextView) {
+                // The lever takes only after the responder cycle
+                // (docs/traps.md 2026-09-11), which is where this runs; the
+                // pairing is RECORDED on the view (docs/traps.md 2026-09-14).
+                if let node, node.ownUndo, let own = textView as? KayaTextView,
+                    own.undoSuspendedBy == nil, let manager = textView.undoManager,
+                    manager.isUndoRegistrationEnabled
+                {
+                    manager.disableUndoRegistration()
+                    own.undoSuspendedBy = manager
+                }
                 guard let node, kayaScene.focusedId != node.id else { return }
                 kayaScene.focusedId = node.id
             }
 
             func textViewDidEndEditing(_ textView: UITextView) {
+                if let own = textView as? KayaTextView, let manager = own.undoSuspendedBy {
+                    own.undoSuspendedBy = nil
+                    if !manager.isUndoRegistrationEnabled { manager.enableUndoRegistration() }
+                }
                 guard let node, kayaScene.focusedId == node.id else { return }
                 kayaScene.focusedId = nil
             }
@@ -20268,6 +20323,11 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
         /// next insertion — the core's own rule (docs/rich-text-plan.md R4).
         var pendingOn: [NSAttributedString.Key: String] = [:]
         var pendingAt: Int?
+        /// The manager whose registration the own_undo lever suspended, so the
+        /// end-editing call re-enables THAT one exactly once: UIKit throws on an
+        /// enable without its matching disable (measured on the ownundo leg,
+        /// docs/traps.md 2026-09-14).
+        var undoSuspendedBy: UndoManager?
         var pendingOff: Set<NSAttributedString.Key> = []
 
         /// A composition's start is reported here (its end in

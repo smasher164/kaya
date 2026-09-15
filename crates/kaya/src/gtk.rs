@@ -3763,6 +3763,10 @@ struct CoreState {
     /// The textareas `rich` is on for (docs/rich-text-plan.md R1); the buffer
     /// handlers read it to stay off every plain field.
     rich: std::rc::Rc<RefCell<std::collections::HashSet<u64>>>,
+    /// The textareas the APP owns the history of (docs/rich-text-plan.md §14);
+    /// the buffer's own history is off there, which the typing verb's native
+    /// proof has to know.
+    own_undo: RefCell<std::collections::HashSet<u64>>,
     /// Per rich textarea, the URL behind each link TAG — GtkTextTag has no
     /// link property, so the synthesized tier keeps it beside the tag
     /// (docs/measurements/richtext-gtk-2026-09-11.md §5).
@@ -6229,7 +6233,7 @@ fn make_menu_action(core: &CoreState, id: u64, noun: &[Value]) -> Option<gio::Si
                 let role = menus.borrow().items[&id].role.clone();
                 // An undo is not a clipboard command, so it has its own
                 // performer — asked first, the mac arm's order.
-                if perform_undo_role(&role) {
+                if perform_undo_role(&role, &tag, &sink) {
                     return;
                 }
                 if hub.perform_role(&role) {
@@ -7808,12 +7812,14 @@ fn note_native_undo(core: &mut CoreState, field: WidgetId, moved: bool) {
 /// DEFERRED TO AN IDLE, this file's standing discipline — a menu action's
 /// handler may run while the harness holds the CORE borrow, and both tiers of
 /// an undo need `&mut CoreState`. Idle sources run FIFO.
-fn perform_undo_role(role: &str) -> bool {
+fn perform_undo_role(role: &str, tag: &[u8], sink: &OccSink) -> bool {
     let redo = match role {
         "undo" => false,
         "redo" => true,
         _ => return false,
     };
+    let tag = tag.to_vec();
+    let sink = sink.clone();
     glib::idle_add_local_once(move || {
         CORE.with_borrow_mut(|core| {
             let Some(core) = core.as_mut() else { return };
@@ -7896,6 +7902,11 @@ fn perform_undo_role(role: &str) -> bool {
                         }
                         core.occurrences.send(occurrence);
                     }
+                }
+// The app's door is this item's own activation, the plain path's
+// own send and nothing else (docs/rich-text-plan.md §14).
+                crate::scene::UndoRoute::App => {
+                    sink.send_menu_activated_tag(&tag);
                 }
 // Inert: both tiers are empty, and the item reads disabled for
 // the same reason — the route above IS the enablement.
@@ -11344,6 +11355,22 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                         core.rich_pending.borrow_mut().remove(&id.0);
                     }
                 }
+                // R6's lever here (docs/rich-text-plan.md §14); the ROUTE
+                // reads the core's own copy of the prop, this one is what the
+                // typing verb's native proof asks.
+                (NativeWidget::Textarea(_, view), Prop::OwnUndo, Value::Bool(on)) => {
+                    view.buffer().set_enable_undo(!on);
+                    if on {
+                        core.own_undo.borrow_mut().insert(id.0);
+                    } else {
+                        core.own_undo.borrow_mut().remove(&id.0);
+                    }
+                }
+                // The route IS the enablement (docs/rich-text-plan.md §14), and
+                // the app just moved its half of it.
+                (NativeWidget::Textarea(..), Prop::CanUndo | Prop::CanRedo, Value::Bool(_)) => {
+                    refresh_roles(core);
+                }
                 (NativeWidget::Textarea(_, view), Prop::Text, Value::Str(s)) => {
                     let buffer = view.buffer();
                     let previous =
@@ -13766,6 +13793,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 highlight_text: std::rc::Rc::new(RefCell::new(HashMap::new())),
                 preedit: std::rc::Rc::new(RefCell::new(HashMap::new())),
                 rich: std::rc::Rc::new(RefCell::new(std::collections::HashSet::new())),
+                own_undo: RefCell::new(std::collections::HashSet::new()),
                 rich_links: HashMap::new(),
                 rich_pending: std::rc::Rc::new(RefCell::new(HashMap::new())),
                 indeterminate: std::rc::Rc::new(RefCell::new(std::collections::HashSet::new())),
@@ -15486,7 +15514,12 @@ impl crate::harness::Stage for GtkStage {
                 // stand-in cannot fake: a `set_text` here would satisfy every
                 // assertion in tools/scenes/undo.steps while the native tier
                 // went untested and the leg went green.
-                let filled = Self::on_main(move |core| core.native_undo_filled(id));
+                // AN APP-OWNED FIELD HAS NO SUCH HISTORY BY DESIGN
+                // (docs/rich-text-plan.md §14): R6's lever turned it off, so
+                // this proof is unavailable there and is not asked for.
+                let filled = Self::on_main(move |core| {
+                    core.own_undo.borrow().contains(&id.0) || core.native_undo_filled(id)
+                });
                 assert!(
                     filled,
                     "kaya: type {text:?} landed but the field's NATIVE undo history is \

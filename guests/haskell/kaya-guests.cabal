@@ -183,6 +183,11 @@ executable richtext
   main-is: richtext.hs
   build-depends: kaya-guests
 
+executable ownundo
+  import: shared
+  main-is: ownundo.hs
+  build-depends: kaya-guests
+
 executable sections
   import: shared
   main-is: sections.hs

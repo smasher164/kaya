@@ -600,6 +600,15 @@ export class Handle {
     return this;
   }
 
+  /** The app owns this rich textarea's undo (docs/rich-text-plan.md R6,
+   * §14): the native stack is off, and Edit>Undo/Redo reach the app
+   * through the role item's own `onActivate` while canUndo/canRedo say
+   * whether they are enabled. Chains. */
+  ownUndo(on = true): this {
+    records().push(wire.tx_set_own_undo(this.id, Boolean(on)));
+    return this;
+  }
+
   /** THE GRID THAT FITS (docs/layout-knobs-plan.md §3): as many columns
    * as fit this grid's width at `minWidth` DIP each, sharing the extra.
    * An explicit `columnsWhen` still wins while its class holds. Chains. */
@@ -885,6 +894,22 @@ export class Widget extends Handle {
    * clears. */
   setBlock(kind: BlockName): this {
     return this.format("block", blockValue(kind));
+  }
+
+  /** Whether this `ownUndo` textarea's app has something to undo — what
+   * Edit>Undo's enablement reads while it is focused
+   * (docs/rich-text-plan.md R6, §14). */
+  canUndo(on: boolean): this {
+    this._live("canUndo()");
+    records().push(wire.tx_set_can_undo(this.id, Boolean(on)));
+    return this;
+  }
+
+  /** Redo's twin. */
+  canRedo(on: boolean): this {
+    this._live("canRedo()");
+    records().push(wire.tx_set_can_redo(this.id, Boolean(on)));
+    return this;
   }
 
   /** This `rich` textarea's document, as this binding has folded it from
@@ -3606,7 +3631,7 @@ export function entry(opts: TextInputOptions = {}): Widget {
   return handle;
 }
 
-export type TextAreaOptions = TextInputOptions & { rich?: boolean; onEdit?: Handler; onFormat?: Handler };
+export type TextAreaOptions = TextInputOptions & { rich?: boolean; ownUndo?: boolean; onEdit?: Handler; onFormat?: Handler };
 
 /** A multi-line text editor: the entry's contract over the platform's
  * real multi-line editor.
@@ -3615,11 +3640,15 @@ export type TextAreaOptions = TextInputOptions & { rich?: boolean; onEdit?: Hand
  * setDocument, applyEdit, format/unformat/setBlock, the document() this
  * binding folds, and the two deltas — onEdit(edit) for every user edit,
  * addressed, beside the whole-text onChange, and onFormat(act) for a
- * toolbar act over a range. */
+ * toolbar act over a range.
+ *
+ * `ownUndo: true` puts the history in the app's hands
+ * (docs/rich-text-plan.md R6, §14). */
 export function textarea(opts: TextAreaOptions = {}): Widget {
   const handle = widget(wire.KIND_TEXTAREA);
   if (opts.text !== undefined) records().push(wire.tx_set_text(handle.id, textValue("textarea text", opts.text)));
   if (opts.rich === true) handle.rich(true);
+  if (opts.ownUndo === true) handle.ownUndo(true);
   if (opts.placeholder !== undefined) handle.placeholder(opts.placeholder);
   if (opts.onChange !== undefined) app()._register(handle, wire.OCC_TEXT_CHANGED, opts.onChange);
   if (opts.onEdit !== undefined) app()._register(handle, wire.OCC_TEXT_EDITED, opts.onEdit);

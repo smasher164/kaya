@@ -10,7 +10,7 @@ value types.
 import struct
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0xb14092d93e5c1359
+SPEC_HASH = 0x692fe11a5922795a
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -101,6 +101,9 @@ PROP_WRAP = 29
 PROP_PLACEHOLDER = 30
 PROP_HREF = 31
 PROP_RICH = 32
+PROP_OWN_UNDO = 33
+PROP_CAN_UNDO = 34
+PROP_CAN_REDO = 35
 WPROP_TITLE = 1
 WPROP_WIDTH = 2
 WPROP_HEIGHT = 3
@@ -1123,6 +1126,51 @@ def tx_bind_rich(widget_id, signal_id):
 def tx_bind_rich_element(widget_id, level=0, field=0):
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_RICH, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_own_undo(widget_id, own_undo):
+    """set_property with a constant own_undo value (bool)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_OWN_UNDO, SOURCE_CONST) + _enc.value(own_undo))
+
+
+def tx_bind_own_undo(widget_id, signal_id):
+    """set_property with a signal-bound own_undo value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_OWN_UNDO, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_own_undo_element(widget_id, level=0, field=0):
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_OWN_UNDO, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_can_undo(widget_id, can_undo):
+    """set_property with a constant can_undo value (bool)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_CAN_UNDO, SOURCE_CONST) + _enc.value(can_undo))
+
+
+def tx_bind_can_undo(widget_id, signal_id):
+    """set_property with a signal-bound can_undo value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_CAN_UNDO, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_can_undo_element(widget_id, level=0, field=0):
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_CAN_UNDO, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_can_redo(widget_id, can_redo):
+    """set_property with a constant can_redo value (bool)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_CAN_REDO, SOURCE_CONST) + _enc.value(can_redo))
+
+
+def tx_bind_can_redo(widget_id, signal_id):
+    """set_property with a signal-bound can_redo value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_CAN_REDO, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_can_redo_element(widget_id, level=0, field=0):
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_CAN_REDO, SOURCE_ELEMENT, level, field))
 
 
 def tx_set_window_title(window, title):

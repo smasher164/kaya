@@ -11231,3 +11231,56 @@ it, or write the bytes back with `write_text` — wherever a build decides
 staleness by time rather than by content. Cargo, gradle, cabal and dune
 also key on mtimes; the mac lane's own builds run once per lane and never
 restore, so only hand negatives see this.
+
+**A gate run outside the dev shell is a red that proves nothing
+(2026-09-14).** Every tools/ gate refuses to run when `KAYA_DEV_SHELL` does
+not carry the flake's fingerprint, and it leaves with rc 1 before reading
+a byte — the same exit code a watched negative demands. An agent's first
+negative run of check-sugar-surface was exactly that: the census never
+opened the doctored file, and the "red" was the dev-shell sentence. A
+watched negative asserts the gate's OWN finding sentence (the part and the
+file it names), never the exit code alone, and every gate invocation is
+`nix develop -c tools/<gate>.py` from the repo root.
+
+**A negative's copy made from `git ls-files` omits a new package
+(2026-09-14).** tools/go-typecheck.py's negative copies the module into
+scratch from the tracked file list and runs `go vet` on the doctored copy;
+an UNTRACKED new package that the tracked scenes table already names made
+the copy unbuildable, so the duplicate-key refusal never came and the
+negative read as one that did not fire. The copy takes `--cached --others
+--exclude-standard` now, so a package on the tree is in the copy whether
+or not it has been added. Any gate that stages a copy from git's index has
+the same hole one command over.
+
+**A save under crates/ during another lane's cargo build reddens that
+lane (2026-09-14).** Two agents each lost a first lane run the same hour:
+one saved a Rust file while the other's `cargo build` was in flight, and
+the artifact the lane then verified carried a build id for sources that
+had moved — `build-id: … STALE`, on a lane whose own tree edit was
+finished. Concurrent agents editing crates/ must serialise their final
+verification runs (or run them once from the coordinator on the settled
+tree); the refusal is correct and the cure is scheduling, not the gate.
+
+**GTK proves a keystroke by the field's native undo history, which
+`own_undo` switches off (2026-09-14).** The GTK `type` verb's proof that
+its synthesized key reached the buffer reads the field's undo history
+back, so on an app-owned textarea — `enable-undo = FALSE` by R6's lever —
+the first ownundo leg died in the typing verb, not in the routing. The
+verb skips that proof for exactly the fields the `own_undo` prop named
+(`own_undo.contains(id) || native_undo_filled(id)`); the still-green undo
+legs are what would catch that exemption widening.
+
+**UIKit throws on `enableUndoRegistration` without its own matching
+disable (2026-09-14).** The iOS own_undo lever suspends registration on
+the view's `_UITextUndoManager` at begin-editing (after the responder
+cycle, docs/traps.md 2026-09-11) and re-enabled it at end-editing by
+inference; the first focus change OFF an app-owned textarea died with
+`NSInternalInconsistencyException: enableUndoRegistration may only be
+invoked with matching call to disableUndoRegistration` — a disable that
+had not taken (the log carried `NSMapGet … map table argument is NULL` at
+the begin-editing call, a half-built manager) or a different manager at
+the second callback; the exception cannot tell those apart. The pairing
+is RECORDED on the view now (`undoSuspendedBy`): disable only when
+registration is enabled and nothing is recorded, enable only the recorded
+manager and only while it is disabled. No scene before ownundo.steps ever
+moved focus off an own_undo widget, which is why nothing saw it.
