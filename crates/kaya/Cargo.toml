@@ -38,14 +38,17 @@ harfrust = "0.13.3"
 skrifa = "0.46.2"
 
 [dev-dependencies]
-# THE EXAMPLES' ONLY DEPENDENCY, and the task manager's document
-# (docs/tasks-s4-plan.md P1/P7): guests/rust are examples of this crate,
-# so the app's SQLite binding belongs here. `bundled` compiles the engine
-# in, so every lane and both phones carry the same one and no host's
-# libsqlite3 version decides what the app can do. Not a dependency of the
-# LIBRARY: kaya answers app_data_dir() and has no opinion about the
-# format under it.
+# THE EXAMPLES' DEPENDENCIES, never the library's. The task manager's
+# document (docs/tasks-s4-plan.md P1/P7): guests/rust are examples of this
+# crate, so the app's SQLite binding belongs here. `bundled` compiles the
+# engine in, so every lane and both phones carry the same one and no
+# host's libsqlite3 version decides what the app can do. kaya answers
+# app_data_dir() and has no opinion about the format under it.
 rusqlite = { version = "0.40.2", features = ["bundled"] }
+# The notes demo's CRDT (docs/rich-text-plan.md §16; the probe measured the
+# protocol against this exact release, docs/measurements/richtext-automerge-2026-09-11.txt).
+# Pure Rust, so both phones build it; libkaya's own graph never sees it.
+automerge = "=0.11.0"
 
 [build-dependencies]
 # Emits msvc linker directives at build time; no-op for other targets.
@@ -393,6 +396,10 @@ path = "../../guests/rust/ownundo.rs"
 [[example]]
 name = "richlabel"
 path = "../../guests/rust/richlabel.rs"
+
+[[example]]
+name = "notes"
+path = "../../guests/rust/notes.rs"
 
 [[example]]
 name = "typeface"

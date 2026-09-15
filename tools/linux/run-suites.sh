@@ -42,7 +42,7 @@ SCENES="background stall milestone2 entry search gallery todos reorder feed grow
 # waits on the bindings sweep too (docs/tasks-s3-plan.md §6 step 3);
 # `richtext`, `ownundo` and `richlabel` wait on the eight other bindings'
 # Document/Edit/Format spelling (docs/rich-text-plan.md §4 step 3, §14, §15).
-DEPTH_SCENES="windowed canvas sizepolicy dnd tooltips tasks notify richtext ownundo richlabel"
+DEPTH_SCENES="windowed canvas sizepolicy dnd tooltips tasks notify richtext ownundo richlabel notes"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 
@@ -1542,6 +1542,9 @@ for proto in x11 wayland; do
     # document, so it asks the host for nothing exclusive.
     run "$proto" richlabel-rust env KAYA_SELFTEST=richlabel \
         "$CARGO_TARGET_DIR/debug/examples/richlabel"
+    # notes asserts expect_selection, which GTK answers over the a11y bus.
+    run "$proto" notes-rust env KAYA_SELFTEST=notes \
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/notes"
     # THE TEXT EDITOR (docs/editor-plan.md). GO ALONE by the plan's
     # choice, so there is no rust example and `editor` is in neither
     # SCENES nor DEPTH_SCENES (both derive a `cargo build --example`).

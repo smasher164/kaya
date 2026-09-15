@@ -12464,6 +12464,13 @@ policy (the app applies kaya's reported runs rather than trusting the
 CRDT's growth, docs/rich-text-plan.md R10's implication). Cost: M for the
 Rust guest and its scene, L with the two other languages. Sequenced after
 own_undo (R6), since a CRDT app is the one that turns the native tier off.
+BUILT 2026-09-15, the Rust half (docs/rich-text-plan.md §16): guests/rust/notes.rs
+and tools/scenes/notes.steps on all five lanes, automerge 0.11.0 as the
+examples' dependency, the peer a fork of the local document, undo a walk
+over heads. OPEN: the remote MARK step — a peer's bold is a range-addressed
+format and `format_text` acts over the selection; needs an optional range
+on the act (ruling asked) — and the Go and JS halves.
+KEY: notes demo, automerge, format_range, remote mark, peer fork.
 
 ## WATCH — the iOS dark canvas leg read LIGHT pixels under a matrix, once (first sighting 2026-09-14)
 KEY: canvasdark-swift, expect_ink dark, KAYA_APPEARANCE, kayaCanvasAppearance, traitCollection, appearance flake

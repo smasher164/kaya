@@ -91,6 +91,7 @@ LEGS = {
         # richtext's reason, and no IME_SCENES member — a label takes no
         # user edit at all.
         "richlabel-compose",
+        "notes-compose",
     ],
     "jvm": [
         "jvm", "a11y-jvm", "entry-jvm",

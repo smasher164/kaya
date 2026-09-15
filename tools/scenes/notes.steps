@@ -1,0 +1,57 @@
+# THE NOTES DEMO (docs/rich-text-plan.md §16): automerge behind the rich
+# textarea, a headless peer beside it. Keystrokes become splices, a format
+# act a mark, and each peer step comes back through the merge as apply_edit
+# with its runs; the app's own view of the CRDT (label#1) must equal the
+# widget's runs and the core's (expect_runs) after every merge, and the
+# caret is the core's transform (R5) against the peer's inserts.
+expect label#0 "peer 0 undo 0 redo 0 marks 0"
+expect_focused textarea#0
+type "abc"
+expect textarea#0 "abc"
+expect label#0 "peer 0 undo 3 redo 0 marks 0"
+format textarea#0 0:3 bold
+expect_runs textarea#0 "0:3 bold"
+expect label#1 "0:3 bold"
+expect_selection textarea#0 "0:3=abc"
+# The peer inserts before the caret: the text shifts and the selection
+# rides the core's transform. The greeting arrives BOLD — automerge's own
+# expand rule at a mark's start, the CRDT's truth for a remote insert, and
+# the widget, the core and the app's view all say so.
+click button#0
+expect textarea#0 "Hi, abc"
+expect_runs textarea#0 "0:7 bold"
+expect label#1 "0:7 bold"
+expect_selection textarea#0 "4:7=abc"
+expect label#0 "peer 1 undo 5 redo 0 marks 0"
+# The peer takes its greeting back.
+click button#0
+expect textarea#0 "abc"
+expect_runs textarea#0 "0:3 bold"
+expect label#1 "0:3 bold"
+expect_selection textarea#0 "0:3=abc"
+# A concurrent insert at the same offset: the local keystroke and the
+# peer's Z, ordered by automerge the same way on every lane (the peer's
+# actor sorts first).
+type "d"
+expect textarea#0 "abcd"
+expect_runs textarea#0 "0:4 bold"
+click button#0
+expect textarea#0 "abcZd"
+expect_runs textarea#0 "0:5 bold"
+expect label#1 "0:5 bold"
+expect label#0 "peer 3 undo 8 redo 0 marks 0"
+# The app's own undo is a walk over automerge's heads: Edit>Undo takes the
+# merge back as a new change, then the keystroke, and Redo returns them.
+expect_menu "Edit>Undo" enabled
+expect_menu "Edit>Redo" disabled
+menu_activate "Edit>Undo"
+expect textarea#0 "abcd"
+expect label#0 "peer 3 undo 7 redo 1 marks 0"
+menu_activate "Edit>Undo"
+expect textarea#0 "abc"
+expect_runs textarea#0 "0:3 bold"
+expect label#1 "0:3 bold"
+expect_menu "Edit>Redo" enabled
+menu_activate "Edit>Redo"
+expect textarea#0 "abcd"
+expect label#0 "peer 3 undo 7 redo 1 marks 0"

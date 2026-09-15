@@ -85,6 +85,7 @@ RUST_SCENES = [
     # THE RICH LABEL (docs/rich-text-plan.md §15): rust-only for the same
     # reason; the runs are read-only, so this lane drives no keyboard.
     "richlabel",
+    "notes",
 ]
 
 # The iPad legs, queued right after their phone sibling: the phone pool is

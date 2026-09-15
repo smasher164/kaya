@@ -659,6 +659,52 @@ is a real link on a non-editable Text. Landed the same day as §13 and §14,
 as c8b166a5; the matrix on that tree ALL PASS on all five lanes, 1,801
 legs (mac 467, linux 771, windows 280, ios 137, android 146) in 1206s.
 
+## 16. The notes demo: automerge behind the widget (2026-09-15)
+
+The stretch goal the maintainer asked for (docs/deferred.md's STRETCH
+entry), ruled as recommended: `notes` at guests/rust/notes.rs, one window
+with a headless scripted peer, `automerge = "=0.11.0"` as a dev-dependency
+of the kaya crate beside rusqlite (the examples' dependencies, never the
+library's; pure Rust, so both phones build it — two version lines of one
+project: the Rust crate is 0.11, the JS package 3.4, checked 2026-09-14).
+
+The app is the probe's bridge on the real widget: a rich textarea with
+`own_undo`; every `on_edit` becomes `splice_text` on the local document
+(kaya's byte unit IS automerge's `Utf8CodeUnit`) with the inserted range
+made to carry exactly the widget's runs, read from the splice's own patch;
+every `on_format` a mark or unmark (expand After for inline styles, None
+for links); the peer is a FORK of the local document under its own actor
+— two documents each creating "text" at the root merge into two
+conflicting objects and the peer's edits land in one the widget never
+shows, the first leg's finding — and each "peer" click takes its next
+scripted step on its own view, merges both ways, and turns the local
+document's patches (SpliceText, DeleteSeq) into `apply_edit` with their
+runs. The app's undo is a walk over automerge's heads: Edit>Undo diffs
+the current heads back to the previous ones and re-applies that diff as a
+NEW change on both the document and the widget, which is what a CRDT's
+selective undo is; `can_undo`/`can_redo` are the two stacks.
+
+The scene tools/scenes/notes.steps, rust on all five lanes: typing, a
+format act, a peer insert before the selection (the text shifts, the
+selection rides R5's transform from 0:3 to 4:7, and the greeting arrives
+BOLD — automerge's own expand rule at a mark's start, the CRDT's truth for
+a remote insert, agreed by the widget, the core and the app's view), the
+peer taking it back, a concurrent insert at the same offset ordered by
+automerge (the peer's actor sorts first: `abcZd`), then undo, undo, redo
+through the app's own history. The wall is the three-way agreement at
+every step: `expect_runs` (the widget against the core) and `label#1`
+(the app's `spans()` in the core's spelling).
+
+WHAT IT FOUND IN THE PROTOCOL: a remote Mark patch is a range-addressed
+format, and kaya's `format_text` acts over the widget's own selection.
+The app cannot apply a peer's bold to a range without moving the user's
+selection or rewriting the document (which resets the caret). The demo's
+remote-mark step is held until the act takes an optional range — `start`
+and `end` on `format_text`, absent meaning the selection as today — a
+spec change with nine sugar twins (`format_range`), ruling asked
+2026-09-15. Until then the app counts the marks it could not apply
+(`marks <n>` on the status line), which the scene holds at 0.
+
 ## 5. What this plan does not do
 
 - It does not put a CRDT, a delta format or a markup language on the
