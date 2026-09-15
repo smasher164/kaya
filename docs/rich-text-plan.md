@@ -655,7 +655,9 @@ AttrList of traits layered after); WinUI's `TextBlock.Inlines` needed the
 binding generator's filter widened to the Documents namespace, every
 font-trait slot having been a dead vtable pad, and its Hyperlink wears
 Fluent's accent with no underline at rest; Compose's `LinkAnnotation.Url`
-is a real link on a non-editable Text. Landed the same day as §13 and §14.
+is a real link on a non-editable Text. Landed the same day as §13 and §14,
+as c8b166a5; the matrix on that tree ALL PASS on all five lanes, 1,801
+legs (mac 467, linux 771, windows 280, ios 137, android 146) in 1206s.
 
 ## 5. What this plan does not do
 
