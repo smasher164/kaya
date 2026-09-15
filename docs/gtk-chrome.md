@@ -60,3 +60,6 @@ the scene's steps held by a settle, injecting a GTK settings file through
 look, `icon:minimize,maximize,close` for a three-button desktop), shoots
 the root window and crops to the kaya window. Without `--layout` the
 capture shows kaya's own fallback.
+
+Landed as 187db95a; the matrix on that tree ALL PASS on all five lanes,
+1,801 legs, in 1180s.
