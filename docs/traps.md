@@ -11308,3 +11308,14 @@ holds the two together. A GtkLabel's clickable link, by contrast, exists
 only through `set_markup`'s `<a href>`: markup attributes and
 `set_attributes` splice rather than replace, so the label's text is set
 from markup and the trait attributes layered after.
+
+**A scene may not count keystrokes as edits (2026-09-15).** The harness
+`type` verb reaches the widget as one `text_edited` per key on the mac,
+iOS, GTK and Compose, and as ONE edit for the whole word on WinUI, which
+folds the run before it reports. An app that keeps one history entry per
+delivered edit therefore counts differently per lane, and the notes
+scene's undo counter — written on the mac — read 1 on Windows where it
+expected 3, with every text, run and selection step green around it
+(matrix 13). The app coalesces a typing run into one entry now, keyed on
+the edit's `source`; a scene that needs a count of edits asserts what the
+app does with them, never how many the platform delivered.

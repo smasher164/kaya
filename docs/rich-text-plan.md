@@ -682,7 +682,13 @@ document's patches (SpliceText, DeleteSeq) into `apply_edit` with their
 runs. The app's undo is a walk over automerge's heads: Edit>Undo diffs
 the current heads back to the previous ones and re-applies that diff as a
 NEW change on both the document and the widget, which is what a CRDT's
-selective undo is; `can_undo`/`can_redo` are the two stacks.
+selective undo is; `can_undo`/`can_redo` are the two stacks. A TYPING RUN IS ONE ENTRY:
+consecutive user keystrokes (the edit's `source`, ruling 3) extend the
+entry they started, as every editor's undo groups typing — and the only
+rule that reads the same on every lane, since WinUI folds a typed word
+into one `text_edited` where the other four report one per key (matrix
+13's Windows leg counted 1 where the scene, written on the mac, expected
+3; docs/traps.md).
 
 The scene tools/scenes/notes.steps, rust on all five lanes: typing, a
 format act, a peer insert before the selection (the text shifts, the

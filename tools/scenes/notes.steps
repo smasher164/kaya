@@ -8,7 +8,7 @@ expect label#0 "peer 0 undo 0 redo 0 marks 0"
 expect_focused textarea#0
 type "abc"
 expect textarea#0 "abc"
-expect label#0 "peer 0 undo 3 redo 0 marks 0"
+expect label#0 "peer 0 undo 1 redo 0 marks 0"
 format textarea#0 0:3 bold
 expect_runs textarea#0 "0:3 bold"
 expect label#1 "0:3 bold"
@@ -22,7 +22,7 @@ expect textarea#0 "Hi, abc"
 expect_runs textarea#0 "0:7 bold"
 expect label#1 "0:7 bold"
 expect_selection textarea#0 "4:7=abc"
-expect label#0 "peer 1 undo 5 redo 0 marks 0"
+expect label#0 "peer 1 undo 3 redo 0 marks 0"
 # The peer takes its greeting back.
 click button#0
 expect textarea#0 "abc"
@@ -39,14 +39,16 @@ click button#0
 expect textarea#0 "abcZd"
 expect_runs textarea#0 "0:5 bold"
 expect label#1 "0:5 bold"
-expect label#0 "peer 3 undo 8 redo 0 marks 0"
+expect label#0 "peer 3 undo 6 redo 0 marks 0"
 # The app's own undo is a walk over automerge's heads: Edit>Undo takes the
-# merge back as a new change, then the keystroke, and Redo returns them.
+# merge back as a new change, then the typing run, and Redo returns them.
+# A TYPING RUN IS ONE ENTRY, however the platform batches keystrokes —
+# WinUI folds a typed word into one edit where the others report three.
 expect_menu "Edit>Undo" enabled
 expect_menu "Edit>Redo" disabled
 menu_activate "Edit>Undo"
 expect textarea#0 "abcd"
-expect label#0 "peer 3 undo 7 redo 1 marks 0"
+expect label#0 "peer 3 undo 5 redo 1 marks 0"
 menu_activate "Edit>Undo"
 expect textarea#0 "abc"
 expect_runs textarea#0 "0:3 bold"
@@ -54,4 +56,4 @@ expect label#1 "0:3 bold"
 expect_menu "Edit>Redo" enabled
 menu_activate "Edit>Redo"
 expect textarea#0 "abcd"
-expect label#0 "peer 3 undo 7 redo 1 marks 0"
+expect label#0 "peer 3 undo 5 redo 1 marks 0"

@@ -285,6 +285,13 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     let mut redo: Vec<Vec<ChangeHash>> = Vec::new();
     let mut step = 0usize;
     let mut marks_pending = 0usize;
+    // A TYPING RUN IS ONE HISTORY ENTRY: consecutive user keystrokes extend
+    // the entry they started, the way every editor's undo groups typing —
+    // and the only rule that reads the same on a platform that reports one
+    // keystroke per edit and on one that folds a typed word into one
+    // (WinUI, matrix 13). The edit's source (ruling 3) tells a keystroke
+    // from a paste, a drop or an IME commit, each of which starts its own.
+    let mut typing_run = false;
 
     let publish = |tx: &mut kaya::Tx,
                    local: &Doc,
@@ -314,12 +321,19 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         match msg {
             Msg::Edited(edit) => {
                 bridge_edit(&mut local, &edit);
-                history.push(local.am.get_heads());
+                let keystroke = edit.source == Some(kaya::EditSource::User);
+                if keystroke && typing_run {
+                    *history.last_mut().expect("a head") = local.am.get_heads();
+                } else {
+                    history.push(local.am.get_heads());
+                }
+                typing_run = keystroke;
                 redo.clear();
                 ctx.apply(|tx| publish(tx, &local, &history, &redo, step, marks_pending));
             }
             Msg::Formatted(act) => {
                 bridge_format(&mut local, &act);
+                typing_run = false;
                 history.push(local.am.get_heads());
                 redo.clear();
                 ctx.apply(|tx| publish(tx, &local, &history, &redo, step, marks_pending));
@@ -329,6 +343,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     continue;
                 }
                 step += 1;
+                typing_run = false;
                 let before = local.am.get_heads();
                 // The peer acted on ITS view, then both sides merge: a step
                 // at the local caret's own offset is a true concurrent edit.
@@ -347,6 +362,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 ctx.apply(|tx| publish(tx, &local, &history, &redo, step, marks_pending));
             }
             Msg::Undo => {
+                typing_run = false;
                 if history.len() < 2 {
                     continue;
                 }
@@ -357,6 +373,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 ctx.apply(|tx| publish(tx, &local, &history, &redo, step, marks_pending));
             }
             Msg::Redo => {
+                typing_run = false;
                 let Some(target) = redo.pop() else { continue };
                 walk(&ctx, &mut local, &target, &mut marks_pending);
                 history.push(target);
