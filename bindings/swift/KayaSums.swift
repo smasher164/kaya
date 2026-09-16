@@ -50,7 +50,7 @@ extension KayaSumElement {
                 case .bool: return UInt32(KAYA_VALUE_BOOL)
                 case .i64: return UInt32(KAYA_VALUE_I64)
                 case .f64: return UInt32(KAYA_VALUE_F64)
-                case .blob: return UInt32(KAYA_VALUE_BLOB)
+                case .blob, .bytes: return UInt32(KAYA_VALUE_BLOB)
                 }
             }
         }

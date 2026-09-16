@@ -28,7 +28,18 @@ let notes!: kaya.Collection<NoteFields, kaya.Row<typeof Note.schema>>;
 let last!: kaya.Signal<string>;
 let view!: kaya.Signal<string>;
 
-app.window({ title: "richrows" }, () => {
+/** An undo or redo moved the row back: the app reads ITS OWN mirror of
+ * row b, which is the fold a restored Blob field lands in. */
+function onRestored(): void {
+  const note = notes.get("b")!;
+  view.set(`${note.body.text} | ${spell(note.body.runs)}`);
+}
+
+app.window({ title: "richrows", onUndone: onRestored, onRedone: onRestored }, () => {
+  app.menu("Edit", () => {
+    kaya.item("Undo", { role: kaya.ROLE_UNDO });
+    kaya.item("Redo", { role: kaya.ROLE_REDO });
+  });
   notes = kaya.collection(Note);
   last = kaya.signal("");
   view = kaya.signal("");
@@ -38,6 +49,7 @@ app.window({ title: "richrows" }, () => {
     kaya.row(() => {
       kaya.button("patch b", {
         onClick: () => {
+          kaya.undoable("patch b");
           notes.patch("b", { body: new kaya.Document("Patched").mark([0, 7], "italic", "true") });
         },
       });

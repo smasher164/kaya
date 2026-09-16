@@ -13,6 +13,11 @@ enum KayaValue: Hashable {
     /// The u64 handle from kaya_blob_register, consumed by the next
     /// submit; the bytes never ride the record stream.
     case blob(UInt64)
+    /// A blob a decoder REDEEMED: an undo delta names a restored
+    /// record's blob field by occurrence handle and the reader takes
+    /// the bytes (crates/kaya/src/wire.rs, `undo_body`). Read-only —
+    /// a write registers bytes and sends `blob`.
+    case bytes([UInt8])
 }
 
 /// A transaction under construction: packed records accumulate in
@@ -83,6 +88,9 @@ struct KayaTx {
             u32(UInt32(KAYA_VALUE_BLOB))
             u32(8)
             u64(x)
+        case .bytes:
+            preconditionFailure(
+                "kaya: a redeemed blob's bytes are a READ value — a write registers them and sends a handle")
         }
         pad()
     }
@@ -2318,6 +2326,20 @@ struct KayaClipValues {
     let parts: [KayaClipPart]
 }
 
+/// Redeem-and-release, for the two decoders that meet a blob: a
+/// clip's values and an undo delta's restored record
+/// (crates/kaya/src/wire.rs, `undo_body`). COPY THEN RELEASE, in
+/// that order: the pointer borrows core memory that the release frees.
+func kayaOccurrenceBlobBytes(_ handle: UInt64) -> [UInt8] {
+    var length = 0
+    var out: [UInt8] = []
+    if let data = kaya_occurrence_blob(handle, &length) {
+        out = [UInt8](UnsafeBufferPointer(start: data, count: length))
+    }
+    kaya_occurrence_blob_release(handle)
+    return out
+}
+
 /// The VALUES half of a representation at `at`: the count, then that
 /// many values with blobs redeemed and RELEASED. Its own function
 /// because a drop's clip KIND sits four words and a point earlier
@@ -2335,16 +2357,8 @@ func kayaParseRepresentation(_ raw: UnsafeRawBufferPointer, _ at: Int)
         case UInt32(KAYA_VALUE_I64):
             parts.append(.i64(raw.loadUnaligned(fromByteOffset: at + 8, as: Int64.self)))
         case UInt32(KAYA_VALUE_BLOB):
-            let handle = raw.loadUnaligned(fromByteOffset: at + 8, as: UInt64.self)
-            var length = 0
-            // COPY THEN RELEASE, in that order: the pointer borrows
-            // core memory that the release frees.
-            if let data = kaya_occurrence_blob(handle, &length) {
-                parts.append(.bytes([UInt8](UnsafeBufferPointer(start: data, count: length))))
-            } else {
-                parts.append(.bytes([]))
-            }
-            kaya_occurrence_blob_release(handle)
+            parts.append(.bytes(kayaOccurrenceBlobBytes(
+                raw.loadUnaligned(fromByteOffset: at + 8, as: UInt64.self))))
         default:
             parts.append(.str(String(
                 decoding: raw[(at + 8)..<(at + 8 + vlen)], as: UTF8.self)))

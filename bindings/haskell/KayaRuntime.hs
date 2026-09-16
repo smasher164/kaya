@@ -40,6 +40,7 @@ where
 
 import Data.Bits ((.&.))
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Char8 as BC
 import Data.ByteString.Builder (Builder, toLazyByteString)
 import qualified Data.ByteString.Lazy as BL
 import Data.ByteString.Unsafe (unsafeUseAsCStringLen)
@@ -476,7 +477,14 @@ parseUndo rec = do
   let readValues 0 _ acc = return (reverse acc)
       readValues n at acc = do
         (v, next) <- parseValue rec at
-        readValues (n - 1 :: Word32) next (v : acc)
+        -- A restored record's blob field (a document's bytes, an image's)
+        -- rides the OCCURRENCE table like a paste's: redeem and release
+        -- here, so the model holds the bytes the field readers expect
+        -- (crates/kaya/src/wire.rs, undo_body).
+        v' <- case v of
+          VBlob handle -> VStr . BC.unpack <$> occurrenceBlob handle
+          other -> return other
+        readValues (n - 1 :: Word32) next (v' : acc)
   -- The Values block's own header is {u32 count, u32 reserved}.
   flat <- readValues count (afterLabel + 8) []
   let label = case labelValue of

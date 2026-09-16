@@ -897,7 +897,10 @@ func kayaParseUndo(_ rec: [UInt8]) -> (window: UInt64, label: String, delta: Kay
                 out = .f64(Double(bitPattern:
                     raw.loadUnaligned(fromByteOffset: at + 8, as: UInt64.self)))
             case UInt32(KAYA_VALUE_BLOB):
-                out = .blob(raw.loadUnaligned(fromByteOffset: at + 8, as: UInt64.self))
+                // A restored record's blob field rides the OCCURRENCE table
+                // like a paste's bytes (crates/kaya/src/wire.rs, undo_body).
+                out = .bytes(kayaOccurrenceBlobBytes(
+                    raw.loadUnaligned(fromByteOffset: at + 8, as: UInt64.self)))
             default:
                 out = .str(String(decoding: raw[(at + 8)..<(at + 8 + vlen)], as: UTF8.self))
             }
@@ -1852,6 +1855,46 @@ func kayaDocumentBlob(_ doc: KayaDocument) -> Data {
         pad()
     }
     return out
+}
+
+/// `kayaDocumentBlob`'s inverse, for a row an undo restored: the delta
+/// carries a Document field as a blob and the decoder redeems it to these
+/// bytes (crates/kaya/src/wire.rs, `read_document_blob`).
+func kayaDocumentOfBlob(_ bytes: Data) -> KayaDocument {
+    let raw = [UInt8](bytes)
+    var values: [KayaValue] = []
+    raw.withUnsafeBytes { buf in
+        guard buf.count >= 8 else { return }
+        let count = Int(buf.loadUnaligned(fromByteOffset: 0, as: UInt32.self))
+        var at = 8
+        for _ in 0..<count {
+            guard at + 8 <= buf.count else { return }
+            let vtype = buf.loadUnaligned(fromByteOffset: at, as: UInt32.self)
+            let vlen = Int(buf.loadUnaligned(fromByteOffset: at + 4, as: UInt32.self))
+            guard at + 8 + vlen <= buf.count else { return }
+            if vtype == UInt32(KAYA_VALUE_I64) {
+                values.append(.i64(buf.loadUnaligned(fromByteOffset: at + 8, as: Int64.self)))
+            } else {
+                values.append(.str(String(
+                    decoding: raw[(at + 8)..<(at + 8 + vlen)], as: UTF8.self)))
+            }
+            at += 8 + ((vlen + 7) & ~7)
+        }
+    }
+    guard case .str(let text)? = values.first else {
+        preconditionFailure(
+            "kaya: a document blob starts with its text; this one holds \(values.count) value(s)")
+    }
+    var doc = KayaDocument(text)
+    var i = 1
+    while i + 3 < values.count {
+        guard case .i64(let start) = values[i], case .i64(let end) = values[i + 1],
+              case .str(let name) = values[i + 2], case .str(let value) = values[i + 3]
+        else { break }
+        doc.runs.append(KayaRun(start: Int(start), end: Int(end), name: name, value: value))
+        i += 4
+    }
+    return doc
 }
 
 /// The core's normal form (crates/kaya/src/scene.rs, `RichDoc::normalize`),

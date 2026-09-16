@@ -11027,12 +11027,13 @@ fn label_restyle(block: &TextBlock, text: &str, runs: &[TextRun]) -> windows_cor
 
 /// THE LABEL'S GROUNDS, as `TextHighlighter`s over the block. NOT AN INLINE
 /// PROPERTY: `Run`, `Span` and `Hyperlink` carry no Background on this
-/// platform, so a `code` run's ground and a `quote`'s tint are drawn by the
-/// block's own highlight layer instead (docs/rich-text-plan.md §18, the
-/// ledger's rich-label-ground entry). THE COLOURS ARE `rich_ground`'s OWN, so
-/// the label and the textarea cannot drift, and the palette is read off the
-/// block's `ActualTheme` at every restyle exactly as `rich_restyle` reads the
-/// control's.
+/// platform, so a `code` run's ground is drawn by the block's own highlight
+/// layer instead (docs/rich-text-plan.md §18, the ledger's rich-label-ground
+/// entry). The `quote` tint `rich_ground` also answers is unreachable here —
+/// a label's document is inline only (§15 R8). THE COLOURS ARE
+/// `rich_ground`'s OWN, so the label and the textarea cannot drift, and the
+/// palette is read off the block's `ActualTheme` at every restyle exactly as
+/// `rich_restyle` reads the control's.
 fn label_paint_grounds(
     block: &TextBlock, text: &str, runs: &[TextRun],
 ) -> windows_core::Result<()> {

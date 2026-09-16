@@ -11,6 +11,19 @@ click button#0
 expect_runs textarea@body[b] "0:7 italic"
 expect textarea@body[b] "Patched"
 expect_runs textarea@body[a] "0:6 bold"
+# AN UNDO RESTORES THE ROW'S DOCUMENT FIELD, and the app's own copy of the
+# row with it: the delta carries a Document field as a Blob, and label#1 is
+# the APP'S mirror read back — the widget alone would pass with every
+# binding's fold broken, since the core restores the bound prop itself.
+expect_menu "Edit>Undo" enabled
+menu_activate "Edit>Undo"
+expect_runs textarea@body[b] "7:11 link=https://kaya.dev"
+expect textarea@body[b] "Second note"
+expect label#1 "Second note | 7:11 link=https://kaya.dev"
+menu_activate "Edit>Redo"
+expect_runs textarea@body[b] "0:7 italic"
+expect textarea@body[b] "Patched"
+expect label#1 "Patched | 0:7 italic"
 # THE COPY'S OWN ACT FOLDS INTO ITS ROW: the widget's act on a stamped copy
 # reaches the app with the row's key, the binding has already folded it into
 # the row's field, and the app reads the row back — never the widget.

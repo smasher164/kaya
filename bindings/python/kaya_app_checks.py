@@ -3972,6 +3972,40 @@ _deliver_rows(_packed_text_formatted(_body.id, 0, 0, 3, "bold", "true",
 rich_check("a row that is gone has no field to fold into, and that is not "
            "a fault", True)
 
+
+def _packed_undone(window, label, coll, key, fields):
+    """One `undone` record restoring ONE entry (crates/kaya/src/wire.rs,
+    `undo_body`): the window, the four run counts, the label, then the
+    flat tail — here a single entries group, `size` counting itself."""
+    entry = [6 + len(fields), coll, 1, 0, 0, key, *fields]
+    body = (struct.pack("<QIIII", window, 0, 0, 1, 0)
+            + kaya.wire._enc.value(label) + kaya.wire._enc.values(entry))
+    return struct.pack("<IHH", 8 + len(body), kaya.wire.OCC_UNDONE, 0) + body
+
+
+# AN UNDO RESTORES A ROW'S DOCUMENT FIELD FROM BYTES, never from the
+# handle that carried them (docs/deferred.md, the restored-row blob
+# entry). The core registers the bytes in the OCCURRENCE table and the
+# decoder redeems them, so the redeemer is stood in for here and the
+# handle it is asked for is the one the record named.
+_undone_asked = []
+_real_occ_blob = kaya.wire.occurrence_blob
+kaya.wire.occurrence_blob = lambda handle: (
+    _undone_asked.append(handle) or _REFERENCE_DOCUMENT_BLOB)
+try:
+    _deliver_rows(_packed_undone(
+        2605, "patch a", _notes._id, "a",
+        ["a", kaya.wire.BlobHandle(77)]))
+finally:
+    kaya.wire.occurrence_blob = _real_occ_blob
+rich_check("a restored row's Document field decodes to its BYTES, which "
+           "the delta carries by occurrence handle",
+           _notes.get("a").body == kaya.Document(
+               "ab", [kaya.Run(0, 1, "bold", "true"),
+                      kaya.Run(1, 2, "link", "u")]))
+rich_check("the decoder redeems the handle the record named, once",
+           _undone_asked == [77])
+
 kaya.runtime.submit = lambda *recs: None
 _refuse_app = kaya.App()
 with _refuse_app.window(2606):

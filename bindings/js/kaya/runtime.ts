@@ -86,17 +86,19 @@ export function capabilityBits(): number {
   return lib.capabilities();
 }
 
-// Copy then release, in that order: the addon does both inside
-// occurrenceBlob, so no handle ever reaches an app.
-wire.install_occurrence_blob((handle) => lib.occurrenceBlob(handle));
-
 /** The test seams: bindings/js/kaya_app_checks.ts routes submits into a
- * list and reads the bytes a blob field registered. Properties rather
- * than reassignable exports, because an ES module's exports are frozen. */
+ * list, reads the bytes a blob field registered, and stands in for the
+ * core when it redeems an occurrence blob. Properties rather than
+ * reassignable exports, because an ES module's exports are frozen. */
 export const hooks: {
   submit: ((records: readonly Uint8Array[]) => void) | null;
   blob: ((data: Uint8Array) => void) | null;
-} = { submit: null, blob: null };
+  occurrenceBlob: ((handle: number) => Uint8Array) | null;
+} = { submit: null, blob: null, occurrenceBlob: null };
+
+// Copy then release, in that order: the addon does both inside
+// occurrenceBlob, so no handle ever reaches an app.
+wire.install_occurrence_blob((handle) => (hooks.occurrenceBlob !== null ? hooks.occurrenceBlob(handle) : lib.occurrenceBlob(handle)));
 
 /** Submit one transaction: the concatenation of packed records, applied
  * atomically. */

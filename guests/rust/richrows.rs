@@ -14,6 +14,9 @@ enum Msg {
     Acted(kaya::Path),
     Patch,
     Read,
+    /// An undo or redo moved the row back: the app reads ITS OWN mirror of
+    /// row b, which is the fold a restored Blob field lands in.
+    Restored,
 }
 
 /// The core's spelling of runs (`expect_runs`), so the row's field and the
@@ -41,7 +44,13 @@ fn key_text(key: &kaya::Value) -> String {
 pub(crate) fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::new();
     let (notes, last, view) = ctx.apply(|tx| {
-        tx.window(kaya::DEFAULT_WINDOW).title("richrows");
+        tx.window(kaya::DEFAULT_WINDOW)
+            .title("richrows")
+            .menu("Edit", |m| {
+                m.item("Undo").role(kaya::MenuRole::Undo).id();
+                m.item("Redo").role(kaya::MenuRole::Redo).id();
+            })
+            .id();
         let notes = tx.collection::<Note>();
         let last = tx.signal("");
         let view = tx.signal("");
@@ -86,6 +95,9 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         (notes, last, view)
     });
 
+    msgs.on_undone(kaya::DEFAULT_WINDOW, |_, _| Msg::Restored);
+    msgs.on_redone(kaya::DEFAULT_WINDOW, |_, _| Msg::Restored);
+
     let row = |tx: &kaya::Tx<'_>, key: &kaya::Value| -> Note {
         tx.items(&notes)
             .into_iter()
@@ -103,12 +115,18 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 tx.write(last, shown);
             }),
             Msg::Patch => ctx.apply(|tx| {
+                tx.undoable("patch b");
                 notes
                     .patch(tx, kaya::Value::Str("b".to_owned()))
                     .body(kaya::Document::new("Patched").mark(0..7, "italic", "true"));
             }),
             Msg::Read => ctx.apply(|tx| {
                 let note = row(tx, &kaya::Value::Str("a".to_owned()));
+                let shown = format!("{} | {}", note.body.text, spell(&note.body.runs));
+                tx.write(view, shown);
+            }),
+            Msg::Restored => ctx.apply(|tx| {
+                let note = row(tx, &kaya::Value::Str("b".to_owned()));
                 let shown = format!("{} | {}", note.body.text, spell(&note.body.runs));
                 tx.write(view, shown);
             }),

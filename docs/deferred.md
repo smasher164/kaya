@@ -12536,7 +12536,7 @@ before any hypothesis: whether the root's background brush follows
 `RequestedTheme`, and whether the missing text is unpainted or painted
 white on white.
 
-## An undo that restores a row rebuilds its Blob fields from the wire's HANDLE, not its bytes, in C# and Java (stated 2026-09-16 by the richrows breadth)
+## ~~An undo that restores a row rebuilds its Blob fields from the wire's HANDLE, not its bytes, in C# and Java (stated 2026-09-16 by the richrows breadth)~~ FIXED 2026-09-16 AT THE CAUSE, WHICH THIS ENTRY HAD WRONG: nobody was clean, because the bytes never left the core — wire.rs's `undo_body` wrote every delta value through a fresh batch blob table it dropped on return, so a Blob in a restored record went out as handle 1 into nothing, and the nine bindings answered one case five ways (Rust correct only because an in-process app never encodes an undo body; Python and JS refused out loud; Go panicked on the reflection type; C# threw out of Ctor.Invoke and Java out of Constructor.newInstance; Swift's generated init(values:) was a fatalError for every blob record; OCaml silently handed the app an EMPTY document; Haskell errored). `undo_body` writes through `write_occurrence_value` now, `decode_undo_body` redeems through the two C entry points a paste's bytes take, and every binding rebuilds the row with bytes (the byte[]/Data/bytes fields this entry also named ride the same change). GUARD: wire::tests' `an_undo_bodys_blob_fields_redeem_to_their_bytes`, two blobs in one body as the discriminator, watched failing against the pre-fix encoder; and tools/scenes/richrows.steps' undo/redo block reading row b out of the app's own mirror after each, green in nine languages. Negatives watched red in Python, JS, C#, Java and Swift; Go, OCaml and Haskell hold the five-lane scene as their wall.
 KEY: undo restore blob field, Document field undo, byte[] field undo, init(values:) refuses, wire handle not bytes
 
 The `Document` field (docs/rich-text-plan.md §19) is a Blob field, and it
@@ -12619,6 +12619,20 @@ miss prints the scene's own metrics map. The next sighting reads those two
 lines. The python guest runs INSIDE the iOS app, so the report preceding
 the first batch is the normal order there, not the anomaly.
 Bundle: ~/.local/state/kaya/flightrec/runs/20260916T102305Z-027911/bundles/ios-portfolio-python.
+
+## bindings/go's seventeen `_test.go` files are run by no gate (found 2026-09-16 in passing by the blob-undo pass)
+KEY: go test unrun, bindings/go _test.go, go-typecheck go test, richrows_test.go, richtext_test.go, app_test.go
+
+tools/go-typecheck.py runs `go vet` over the module and nothing runs
+`go test ./bindings/go/...`: the seventeen `_test.go` files there — the
+named acts' byte checks, the richrows document-blob negatives, the table,
+typeface, symbol and notification tests among them — pass only when an
+agent runs them by hand. The cgo half links libkaya by a `${SRCDIR}`-relative
+path and the test binary loads `target/debug/deps/libkaya.dylib` by its
+install name, so the run belongs after the sweep's own libkaya build, with
+a count floor on the tests that ran and a negative that doctors one test
+in a copy of the module (CGO_LDFLAGS pointing the copy at the real target)
+and demands the red. The fix is that clause in go-typecheck.py.
 
 ## The stamped-occurrence doors other than click still forward a torn-down copy's tag (found 2026-09-14)
 KEY: stamped_tag_is_live, torn-down copy, dead copy, lingering registry, toggled dead copy, set_value dead copy

@@ -4,6 +4,7 @@
 package kaya
 
 import (
+	"encoding/binary"
 	"fmt"
 	"reflect"
 	"sync"
@@ -154,6 +155,43 @@ func documentBlob(doc Document) []byte {
 	return encodeValues(nil, vals)
 }
 
+// documentOf is documentBlob's inverse, for a row an undo restored: the
+// delta carries a Document field as a blob and the decoder redeems it to
+// these bytes (crates/kaya/src/wire.rs, read_document_blob).
+func documentOf(data []byte) Document {
+	if len(data) < 8 {
+		panic(fmt.Sprintf(
+			"kaya: a document blob carries its count first; this one is %d byte(s)", len(data)))
+	}
+	count := int(binary.LittleEndian.Uint32(data))
+	vals := make([]any, count)
+	at := 8
+	for i := range vals {
+		vals[i], at = parseValue(data, at)
+	}
+	text := ""
+	if len(vals) > 0 {
+		var isText bool
+		if text, isText = vals[0].(string); !isText {
+			vals = nil
+		}
+	}
+	if len(vals) == 0 {
+		panic(fmt.Sprintf(
+			"kaya: a document blob starts with its text; this one holds %d value(s)", count))
+	}
+	doc := Document{Text: text}
+	for i := 1; i+3 < len(vals); i += 4 {
+		doc.Runs = append(doc.Runs, TextRun{
+			Start: int(vals[i].(int64)),
+			End:   int(vals[i+1].(int64)),
+			Name:  vals[i+2].(string),
+			Value: vals[i+3].(string),
+		})
+	}
+	return doc
+}
+
 // blobWire registers a blob's bytes at encode time and returns the wire
 // handle. Handles are single-submit, so every operation carrying blob
 // bytes re-registers; the model keeps the guest's own bytes.
@@ -288,6 +326,17 @@ func restoreRecord(t reflect.Type, info *recordInfo, fields []any) any {
 		if !v.IsValid() {
 			panic(fmt.Sprintf("kaya: an undone entry of %v has no value for %s",
 				t, t.Field(idx).Name))
+		}
+		if field.Type() == documentType {
+			// A restored Document field is the blob's BYTES, redeemed
+			// by parseValue (crates/kaya/src/wire.rs, undo_body).
+			raw, isBytes := fields[wire].([]byte)
+			if !isBytes {
+				panic(fmt.Sprintf("kaya: an undone entry of %v carries %T for %s, which is a Document",
+					t, fields[wire], t.Field(idx).Name))
+			}
+			field.Set(reflect.ValueOf(documentOf(raw)))
+			continue
 		}
 		if field.Type() == dateType || field.Type() == timeType {
 			// A packed I64 comes back as the picker type it was written

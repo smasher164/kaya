@@ -137,11 +137,15 @@ sealed class RecordInfo
             // A packed I64 comes back as the picker type it was written
             // from, never as the integer it travelled as.
             var want = parameters[WireToCtor[wire]].ParameterType;
+            // A restored Document field is the blob's BYTES, redeemed by
+            // ReadValue (crates/kaya/src/wire.rs, undo_body).
             args[WireToCtor[wire]] = want == typeof(DateOnly)
                 ? KayaRecords.DateOf(fields[wire])
                 : want == typeof(TimeOnly)
                     ? KayaRecords.TimeOf(fields[wire])
-                    : fields[wire];
+                    : want == typeof(Document)
+                        ? KayaApp.DocumentOfBlob(fields[wire])
+                        : fields[wire];
         }
         return Ctor.Invoke(args);
     }

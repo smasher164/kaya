@@ -1442,6 +1442,38 @@ sealed class KayaApp
         return stream.ToArray();
     }
 
+    /// `DocumentBlob`'s inverse, for a row an undo restored: the delta
+    /// carries a Document field as a blob and the decoder redeems it to
+    /// these bytes (crates/kaya/src/wire.rs, `read_document_blob`).
+    internal static Document DocumentOfBlob(object value)
+    {
+        if (value is not byte[] bytes)
+            throw new ArgumentException(
+                "kaya: a restored Document field carries bytes, not "
+                    + (value?.GetType().Name ?? "null"));
+        int count = bytes.Length < 8 ? 0 : (int)BitConverter.ToUInt32(bytes, 0);
+        var values = new List<object>(count);
+        int at = 8;
+        for (int i = 0; i < count; i++)
+        {
+            uint vtype = BitConverter.ToUInt32(bytes, at);
+            int vlen = (int)BitConverter.ToUInt32(bytes, at + 4);
+            values.Add(vtype == KayaWire.ValueI64
+                ? BitConverter.ToInt64(bytes, at + 8)
+                : System.Text.Encoding.UTF8.GetString(bytes, at + 8, vlen));
+            at += 8 + ((vlen + 7) & ~7);
+        }
+        if (values.Count == 0 || values[0] is not string text)
+            throw new ArgumentException(
+                "kaya: a document blob starts with its text; this one holds "
+                    + values.Count + " value(s)");
+        var runs = new List<TextRun>();
+        for (int i = 1; i + 3 < values.Count; i += 4)
+            runs.Add(new TextRun((long)values[i], (long)values[i + 1],
+                (string)values[i + 2], (string)values[i + 3]));
+        return new Document(text, runs);
+    }
+
     /// One delivered edit, folded into the live widget's mirror.
     internal void AbsorbEdit(ulong widget, long start, long stop, string inserted,
         List<TextRun> runs)

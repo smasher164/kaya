@@ -4442,6 +4442,13 @@ let decode_undo body =
   let flat = Array.make (max count 1) (Kaya_wire.I64 0L) in
   for i = 0 to count - 1 do
     let v, next = Kaya_wire.parse_value byte !at in
+    (* A restored record's blob field (a document's bytes, an image's)
+       rides the OCCURRENCE table like a paste's: redeem and release
+       here, so the model holds the bytes the record readers expect
+       (crates/kaya/src/wire.rs, [undo_body]). *)
+    let v =
+      match v with Kaya_wire.Blob h -> Kaya_wire.Str (!Kaya_wire.occurrence_blob h) | v -> v
+    in
     flat.(i) <- v;
     at := next
   done;

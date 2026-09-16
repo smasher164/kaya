@@ -120,6 +120,20 @@ public final class IdSpaceCheck {
             if (tx.items(c).size() != 1) {
                 throw new AssertionError("folding into a row that is gone invented one");
             }
+
+            // AN UNDO RESTORES THE FIELD FROM ITS BYTES, never from the
+            // handle that carried them (docs/deferred.md, the
+            // restored-row blob entry): the core registers the bytes in
+            // the occurrence table, KayaWire.parseValue redeems them, and
+            // the record decoder reads a Document out of them.
+            Note restored = (Note) KayaRecords.Info.of(Note.class)
+                    .fromWire(List.of("a", KayaApp.documentBlob(doc)));
+            if (!restored.body().text().equals(doc.text())
+                    || !spell(restored.body().runs()).equals(spell(doc.runs()))) {
+                throw new AssertionError("a restored row's Document field read \""
+                        + restored.body().text() + "\" / " + spell(restored.body().runs())
+                        + ", the bytes say \"" + doc.text() + "\" / " + spell(doc.runs()));
+            }
             throw new RuntimeException("handler bug");
         };
         try {

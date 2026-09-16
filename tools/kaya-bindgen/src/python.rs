@@ -538,6 +538,12 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("        flat = []");
         c.line("        for _ in range(count):");
         c.line("            value, at = parse_value(buf, at)");
+        // A restored record's blob field (a Document's bytes, an image's)
+        // rides the OCCURRENCE table like a paste's: redeem and release
+        // here, so the record decoder sees bytes (crates/kaya/src/wire.rs,
+        // `undo_body`).
+        c.line("            if isinstance(value, BlobHandle):");
+        c.line("                value = occurrence_blob(value.handle)");
         c.line("            flat.append(value)");
         c.line("        i = 0");
         c.line("        signals = []");

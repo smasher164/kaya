@@ -29,7 +29,6 @@ func keyText(_ key: KayaValue) -> String {
 let app = KayaApp()
 
 app.build { tx in
-    tx.window(title: "richrows")
     let notes = noteCollection(tx)
     let last = tx.signal(.str(""))
     let view = tx.signal(.str(""))
@@ -41,11 +40,28 @@ app.build { tx in
         return note
     }
 
+    // An undo or redo moved the row back: the app reads ITS OWN mirror of
+    // row b, which is the fold a restored Blob field lands in.
+    func restored(_ t: KayaAppTx, _ label: String, _ delta: KayaUndoDelta) {
+        let note = row(t, .str("b"))
+        t.write(view, .str("\(note.body.text) | \(spell(note.body.runs))"))
+    }
+
+    let edit = tx.menu(
+        "Edit",
+        items: [
+            tx.item("Undo", role: KayaAppTx.roleUndo),
+            tx.item("Redo", role: KayaAppTx.roleRedo),
+        ])
+    tx.window(
+        title: "richrows", onUndone: restored, onRedone: restored, menus: [edit])
+
     let root = tx.column {
         tx.label(bind: last)  // label#0
         tx.label(bind: view)  // label#1
         tx.row {
             tx.button("patch b") { t in  // button#0
+                t.undoable("patch b")
                 notes.patch(t, .str("b")).set(
                     \.body, KayaDocument("Patched").italic(0..<7))
             }

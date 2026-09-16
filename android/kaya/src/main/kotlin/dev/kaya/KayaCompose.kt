@@ -10251,6 +10251,9 @@ internal fun kayaRichTransformation(
  * and a real `LinkAnnotation.Url` for a link run — a non-editable Text
  * renders and clicks one, which the editable field cannot
  * (docs/measurements/richtext-compose-2026-09-11.md §4).
+ *
+ * INLINE ONLY: the core refuses a `block` run on a label, so no quote
+ * paragraph reaches here (docs/rich-text-plan.md §15 R8, §18).
  */
 internal fun kayaRichAnnotated(
     text: String,
@@ -10261,9 +10264,6 @@ internal fun kayaRichAnnotated(
     for ((from, to, attrs) in kayaRichSegments(runs, text.length)) {
         addStyle(kayaRichSpanStyle(attrs, palette), from, to)
         attrs["link"]?.let { addLink(LinkAnnotation.Url(it), from, to) }
-    }
-    for ((from, to) in kayaRichQuoteExtents(runs, text)) {
-        addStyle(KAYA_RICH_QUOTE_PARAGRAPH, from, to)
     }
 }
 
@@ -12748,15 +12748,6 @@ private fun KayaRenderCore(
                 val document = remember(node, node.text, node.richSeq, palette) {
                     kayaRichAnnotated(node.text, node.richRuns, palette)
                 }
-                // THE QUOTE'S RULE ON A LABEL: the layout is written in
-                // the layout phase and read in the draw, so a run change
-                // redraws and recomposes nothing (docs/rich-text-plan.md §18).
-                var layout by remember(node) {
-                    mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null)
-                }
-                val quotes = remember(node, node.text, node.richSeq) {
-                    kayaRichQuoteExtents(node.richRuns, node.text)
-                }
                 val base = if (node.role == KayaCompose.ROLE_HEADING)
                     boxFill.then(a11y).semantics { heading() }
                 else boxFill.then(a11y)
@@ -12769,10 +12760,7 @@ private fun KayaRenderCore(
                     },
                     color = if (node.role == KayaCompose.ROLE_CAPTION)
                         MaterialTheme.colorScheme.onSurfaceVariant else Color.Unspecified,
-                    onTextLayout = { layout = it },
-                    modifier = base.drawBehind {
-                        layout?.let { kayaRichQuoteRule(quotes, it, palette.quote) }
-                    },
+                    modifier = base,
                 )
             } else
             // The heading role is BOTH facts at once (docs/styling-plan.md

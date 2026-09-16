@@ -1572,6 +1572,8 @@ def parse_occurrence(buf):
         flat = []
         for _ in range(count):
             value, at = parse_value(buf, at)
+            if isinstance(value, BlobHandle):
+                value = occurrence_blob(value.handle)
             flat.append(value)
         i = 0
         signals = []

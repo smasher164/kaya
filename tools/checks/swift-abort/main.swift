@@ -238,7 +238,10 @@ struct RowNote: KayaRecord {
     }
 
     init(values: [KayaValue]) {
-        fatalError("kaya: a blob field cannot rebuild from wire — update via key path")
+        guard case .str(let title) = values[0], case .bytes(let body) = values[1] else {
+            preconditionFailure("kaya: RowNote fields out of order")
+        }
+        self.init(title: title, body: kayaDocumentOfBlob(Data(body)))
     }
 
     static func kayaDocument(_ record: RowNote, _ index: UInt32) -> KayaDocument? {
@@ -319,6 +322,20 @@ app.build { tx in
     precondition(
         rowNotes.items(tx).count == 1, "folding into a row that is gone invented one")
 }
+
+// AN UNDO RESTORES THE FIELD FROM ITS BYTES, never from the handle that
+// carried them (docs/deferred.md, the restored-row blob entry): the core
+// registers the bytes in the occurrence table, kayaParseUndo redeems them,
+// and the generated init(values:) reads a Document out of them.
+let restoredNote = RowNote(values: [
+    .str("a"), .bytes([UInt8](kayaDocumentBlob(rowDoc))),
+])
+precondition(
+    restoredNote.body.text == rowDoc.text
+        && spellRuns(restoredNote.body.runs) == spellRuns(rowDoc.runs),
+    "a restored row's Document field read \"\(restoredNote.body.text)\" / "
+        + spellRuns(restoredNote.body.runs) + ", the bytes say \"\(rowDoc.text)\" / "
+        + spellRuns(rowDoc.runs))
 
 // The trap side, via re-exec (see the KAYA_GUARD_TRAP branch at the
 // top): a mirror read inside a For or When body being declared must

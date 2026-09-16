@@ -30,26 +30,41 @@ enum Decl {
     }
 }
 
-/// The wire vocabulary a field type maps into: the KayaValue case and
-/// the prototype's zero value. Any other type is a loud error.
+/// The WRITE direction: the KayaValue case a field's value is sent as,
+/// and the prototype's zero value. Any other type is a loud error.
 /// KayaRecords.swift's kayaSchema maps Data properties in, so a skipped
 /// Data field HERE shifts every later exact-index token off the runtime
-/// schema. Data is record-only: sums die loudly below.
-let wire: [String: (valueCase: String, zero: String, lift: String)] = [
-    "String": ("str", "\"\"", ""),
-    "Bool": ("bool", "false", ""),
-    "Int64": ("i64", "0", ""),
-    "Double": ("f64", "0", ""),
-    "Data": ("blob", "Data()", ""),
+/// schema. Data is record-only: sums die loudly below. The read
+/// direction is `readWire` below.
+let wire: [String: (valueCase: String, zero: String)] = [
+    "String": ("str", "\"\""),
+    "Bool": ("bool", "false"),
+    "Int64": ("i64", "0"),
+    "Double": ("f64", "0"),
+    "Data": ("blob", "Data()"),
     // A stamped copy's document (docs/rich-text-plan.md §19), the blob
     // channel's second inhabitant. Record-only for Data's reason.
-    "KayaDocument": ("blob", "KayaDocument()", ""),
+    "KayaDocument": ("blob", "KayaDocument()"),
     // The picker types (docs/datetime-plan.md D10). Both are
     // DateComponents at run time, so the DECLARED SPELLING is what tells
-    // a Date field from a Time one, and the lift turns the packed I64
-    // back into the components.
-    "KayaDate": ("i64", "KayaDate(year: 1970, month: 1, day: 1)", "kayaDate(packed:)"),
-    "KayaTime": ("i64", "KayaTime(hour: 0, minute: 0)", "kayaTime(packed:)"),
+    // a Date field from a Time one.
+    "KayaDate": ("i64", "KayaDate(year: 1970, month: 1, day: 1)"),
+    "KayaTime": ("i64", "KayaTime(hour: 0, minute: 0)"),
+]
+
+/// The READ direction — `init(values:)`, the shape an undo's restored
+/// record arrives in: a blob field is the REDEEMED BYTES
+/// (crates/kaya/src/wire.rs, `undo_body`), never the handle a write sends,
+/// and the lift turns each wire value into the field's own type.
+let readWire: [String: (valueCase: String, lift: (String) -> String)] = [
+    "String": ("str", { $0 }),
+    "Bool": ("bool", { $0 }),
+    "Int64": ("i64", { $0 }),
+    "Double": ("f64", { $0 }),
+    "Data": ("bytes", { "Data(\($0))" }),
+    "KayaDocument": ("bytes", { "kayaDocumentOfBlob(Data(\($0)))" }),
+    "KayaDate": ("i64", { "kayaDate(packed: \($0))" }),
+    "KayaTime": ("i64", { "kayaTime(packed: \($0))" }),
 ]
 
 func conformsToKayaGen(_ clause: InheritanceClauseSyntax?) -> Bool {
@@ -117,7 +132,7 @@ func zeroCall(_ head: String, _ fields: [Field]) -> String {
 /// The `guard case .str(let title) = values[0], …` unpacking lines.
 func unpackLines(_ fields: [Field], indent: String, onFail: String) -> [String] {
     let guards = fields.enumerated().map { (j, f) in
-        "case .\(wire[f.type]!.valueCase)(let \(f.label)) = values[\(j)]"
+        "case .\(readWire[f.type]!.valueCase)(let \(f.label)) = values[\(j)]"
     }
     return [
         "\(indent)guard \(guards.joined(separator: ", ")) else {",
@@ -279,25 +294,12 @@ func generateRecord(_ name: String, _ fields: [Field]) -> String {
     line("    static let prototype = \(zeroCall(name, fields))")
     line("")
     line("    init(values: [KayaValue]) {")
-    if fields.contains(where: { wire[$0.type]!.valueCase == "blob" }) {
-        // A blob slot carries a HANDLE, not bytes, so this rebuild
-        // cannot be inverted and the generated init says so. The runtime
-        // guards the one path that would call it, so a record with a
-        // blob field patches through the key-path form instead.
-        line("        // A blob slot carries a handle, not bytes — see the")
-        line("        // blob-schema precondition on token updateField in")
-        line("        // KayaRecords.swift, which keeps this unreachable.")
-        line("        fatalError(\"kaya: a blob field cannot rebuild from wire — update via key path\")")
-    } else {
-        unpackLines(fields, indent: "        ",
-                    onFail: "kaya: \(name) fields out of order").forEach { line($0) }
-        let args = fields.map { f -> String in
-            let lift = wire[f.type]!.lift
-            if lift.isEmpty { return "\(f.label): \(f.label)" }
-            return "\(f.label): \(lift.dropLast(1)) \(f.label))"
-        }
-        line("        self.init(\(args.joined(separator: ", ")))")
+    unpackLines(fields, indent: "        ",
+                onFail: "kaya: \(name) fields out of order").forEach { line($0) }
+    let args = fields.map { f -> String in
+        "\(f.label): \(readWire[f.type]!.lift(f.label))"
     }
+    line("        self.init(\(args.joined(separator: ", ")))")
     line("    }")
     let documents = fields.enumerated().filter { $0.element.type == "KayaDocument" }
     if !documents.isEmpty {

@@ -7268,6 +7268,38 @@ public final class KayaApp {
      * is the generated file's own; the bytes are pinned against the wire
      * rules in tools/checks/java-abort/dev/kaya/IdSpaceCheck.java.
      */
+    /**
+     * {@code documentBlob}'s inverse, for a row an undo restored: the
+     * delta carries a Document field as a blob and the decoder redeems it
+     * to these bytes (crates/kaya/src/wire.rs, {@code read_document_blob}).
+     */
+    static Document documentOfBlob(Object value) {
+        if (!(value instanceof byte[] bytes)) {
+            throw new IllegalArgumentException("kaya: a restored Document field carries bytes, not "
+                    + (value == null ? "null" : value.getClass().getName()));
+        }
+        java.nio.ByteBuffer b = java.nio.ByteBuffer.wrap(bytes)
+                .order(java.nio.ByteOrder.LITTLE_ENDIAN);
+        int count = bytes.length < 8 ? 0 : b.getInt(0);
+        List<Object> values = new ArrayList<>(count);
+        int[] cursor = {8};
+        for (int i = 0; i < count; i++) {
+            values.add(KayaWire.parseValue(bytes, b, cursor));
+        }
+        if (values.isEmpty() || !(values.get(0) instanceof String text)) {
+            throw new IllegalArgumentException(
+                    "kaya: a document blob starts with its text; this one holds "
+                            + values.size() + " value(s)");
+        }
+        List<TextRun> runs = new ArrayList<>();
+        for (int i = 1; i + 3 < values.size(); i += 4) {
+            runs.add(new TextRun((int) (long) (Long) values.get(i),
+                    (int) (long) (Long) values.get(i + 1),
+                    (String) values.get(i + 2), (String) values.get(i + 3)));
+        }
+        return new Document(text, runs);
+    }
+
     static byte[] documentBlob(Document document) {
         List<Object> values = new ArrayList<>();
         values.add(document.content);

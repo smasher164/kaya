@@ -210,6 +210,11 @@ public final class KayaRecords {
                     args[at] = dateOf(fields.get(wire));
                 } else if (want == LocalTime.class) {
                     args[at] = timeOf(fields.get(wire));
+                } else if (want == KayaApp.Document.class) {
+                    // A restored Document field is the blob's BYTES,
+                    // redeemed by KayaWire.parseValue
+                    // (crates/kaya/src/wire.rs, undo_body).
+                    args[at] = KayaApp.documentOfBlob(fields.get(wire));
                 } else {
                     args[at] = fields.get(wire);
                 }

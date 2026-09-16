@@ -2041,7 +2041,13 @@ pub(crate) fn undo_body(
     b.extend_from_slice(&(values.len() as u32).to_le_bytes());
     b.extend_from_slice(&0u32.to_le_bytes());
     for v in &values {
-        write_value(&mut b, v, &mut Vec::new());
+        // THE OCCURRENCE TABLE, not a batch-local one: a restored
+        // record's blob field (a `Document`, an image's bytes) is
+        // redeemed and released by the binding's undo fold, the way a
+        // paste's bytes are. `write_value` here wrote an index into a
+        // Vec dropped on return, so eight bindings got a handle into
+        // nothing (docs/deferred.md, the restored-row blob entry).
+        write_occurrence_value(&mut b, v);
     }
     b
 }
@@ -2055,7 +2061,7 @@ pub(crate) fn decode_undo_body(
     body: &[u8],
 ) -> (WindowId, String, crate::protocol::UndoDelta) {
     use crate::protocol::{UndoDelta, UndoEntry, UndoOrder, UndoText};
-    let mut r = Reader { buf: body, at: 0, blobs: &|_| None };
+    let mut r = Reader { buf: body, at: 0, blobs: &occurrence_blob_redeem };
     let window = WindowId(r.u64());
     let signals = r.u32() as usize;
     let texts = r.u32() as usize;
@@ -2357,6 +2363,21 @@ fn write_representation(b: &mut Vec<u8>, clip: Option<&crate::protocol::Represen
     for v in &values {
         write_occurrence_value(b, v);
     }
+}
+
+/// Redeem-and-release, through the two C entry points a binding uses —
+/// so the round trip above reads an occurrence blob the way the eight
+/// generated readers do, rather than through a private table.
+#[cfg_attr(not(test), allow(dead_code))]
+fn occurrence_blob_redeem(handle: u64) -> Option<Arc<[u8]>> {
+    let mut len = 0usize;
+    let ptr = unsafe { crate::capi::kaya_occurrence_blob(handle, &mut len) };
+    if ptr.is_null() {
+        return None;
+    }
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, len) }.to_vec();
+    crate::capi::kaya_occurrence_blob_release(handle);
+    Some(Arc::from(bytes))
 }
 
 /// A value on the OCCURRENCE channel, where a blob resolves through the
@@ -5078,6 +5099,65 @@ mod tests {
                 Value::from("ha"),
             ]
         );
+    }
+
+    /// A RESTORED ROW'S BLOB FIELD ARRIVES AS BYTES (docs/deferred.md, the
+    /// restored-row blob entry; docs/rich-text-plan.md §19). The values went
+    /// out through `write_value` with a FRESH batch table per value, so every
+    /// blob was index 1 into a Vec dropped on return: Python and JS refused
+    /// out loud, Go panicked on the type, C# threw out of Ctor.Invoke and
+    /// Swift's generated `init(values:)` called the case unreachable. Two
+    /// blobs in one body are the discriminator — a batch-local index writes
+    /// 1 twice, the occurrence table mints two handles that redeem.
+    #[test]
+    fn an_undo_bodys_blob_fields_redeem_to_their_bytes() {
+        use crate::protocol::{Blob, UndoDelta, UndoEntry};
+        let delta = UndoDelta {
+            signals: vec![(SignalId(4), Value::Blob(Blob::from(&b"signal bytes"[..])))],
+            entries: vec![UndoEntry {
+                collection: CollectionId(2),
+                path: vec![],
+                key: Value::from("b"),
+                state: Some((
+                    0,
+                    vec![
+                        Value::from("b"),
+                        Value::Blob(Blob::from(&b"\x02\x00document bytes"[..])),
+                    ],
+                )),
+            }],
+            ..UndoDelta::default()
+        };
+        let body = undo_body(WindowId(1), "patch b", &delta);
+        // The handles as they ride, redeeming nothing: a reader that took
+        // them for a batch index would see 1 and 1.
+        let seen: std::cell::RefCell<Vec<u64>> = Default::default();
+        let peek = |handle: u64| -> Option<Arc<[u8]>> {
+            seen.borrow_mut().push(handle);
+            Some(Arc::from(&[][..]))
+        };
+        {
+            let mut r = Reader { buf: &body, at: 0, blobs: &peek };
+            let _window = r.u64();
+            let _counts = (r.u32(), r.u32(), r.u32(), r.u32());
+            let _label = r.value();
+            let _flat = r.record();
+        }
+        let handles = seen.into_inner();
+        assert_eq!(handles.len(), 2, "both blobs rode the body");
+        assert_ne!(
+            handles[0], handles[1],
+            "occurrence handles are minted per blob; a batch-local index is 1 every time"
+        );
+        let (window, label, back) = decode_undo_body(&body);
+        assert_eq!((window, label.as_str()), (WindowId(1), "patch b"));
+        assert_eq!(back, delta, "the bytes come back, not the handles");
+        for handle in handles {
+            assert!(
+                occurrence_blob_redeem(handle).is_none(),
+                "the binding's reader redeems each handle once and releases it"
+            );
+        }
     }
 
     #[test]

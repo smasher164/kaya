@@ -890,11 +890,13 @@ by `expect_highlights ""`, on five lanes, and the linux richtext leg goes
 through a11y-leg.sh for it (check-steps holds the route).
 
 A LABEL'S QUOTE RULE IS UNREACHABLE BY R8: a label's document is inline
-only and the core refuses a block run on one, so the arms that route a
-label's quote paragraphs to the rule (Compose's label `drawBehind`, the
-polish pass's own breadth) draw it for no document that can exist. Left
-standing as the field's shared drawing code rather than pruned per arm; a
-label that grows blocks is the day it earns a driver.
+only and the core refuses a block run on one, so the arms that routed a
+label's quote paragraphs to a rule drew it for no document that can exist.
+PRUNED 2026-09-16: Compose was the one arm that drew it (the label builder's
+paragraph style and the label arm's drawBehind, both gone; the textarea's
+copies and the shared helpers stay); SwiftUI, GTK and WinUI had no label
+quote path. check-verbs refuses the two Compose label sites naming the quote
+rule or paragraph style again, one watched negative.
 
 THE RESIDUES: the plain Compose textarea's marked-text divergence
 (invariant 1) closed with the suppression widened to EVERY Compose field

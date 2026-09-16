@@ -2328,7 +2328,39 @@ def polish_clauses(gtk_src=None, winui_src=None, swift_src=None,
     return bad
 
 
-polish_out = polish_clauses()
+# A LABEL'S DOCUMENT IS INLINE ONLY (docs/rich-text-plan.md §15 R8, §18): the
+# core refuses a block run on a label, so a label never carries a quote, and
+# the Compose label builder and label arm drew one anyway until 2026-09-16
+# (pruned; the textarea keeps the rule). The two label sites may not name
+# the quote rule or the quote paragraph style again — dead code no scene can
+# reach is what this file exists to refuse.
+LABEL_NO_QUOTE = [
+    ("the Compose label builder", r"internal fun kayaRichAnnotated\(", r"\n}\n"),
+    ("the Compose label arm", r"^        KayaCompose\.KIND_LABEL ->",
+     r"\n        KayaCompose\.KIND_"),
+]
+
+
+def label_no_quote_clauses(kotlin_src=None):
+    bad = []
+    text = kotlin_src if kotlin_src is not None else real(KOTLIN)
+    for what, anchor_re, end in LABEL_NO_QUOTE:
+        m = re.search(anchor_re, text, re.M)
+        if not m:
+            bad.append(f"KayaCompose.kt has no site for {what} (wanted /{anchor_re}/)")
+            continue
+        body = text[m.end():]
+        stop = re.search(end, body)
+        body = body[:stop.start()] if stop else body
+        for name in ("kayaRichQuoteRule(", "KAYA_RICH_QUOTE_PARAGRAPH"):
+            if name in body:
+                bad.append(f"{what} names {name} — a label's document is inline only, "
+                           f"so that path draws for no document that can exist "
+                           f"(docs/rich-text-plan.md §18)")
+    return bad
+
+
+polish_out = polish_clauses() + label_no_quote_clauses()
 polish_status = 0
 for line in polish_out:
     print(f"check-verbs: {line}", file=sys.stderr)
@@ -2359,13 +2391,20 @@ for label, kwargs, finding in (
                             r"(fn label_restyle\([\s\S]*?)label_paint_grounds\(block, text, runs\)",
                             "label_skip_grounds(block, text, runs)")),
      r"^winui/mod\.rs's site for the label restyle painting its grounds does not name"),
+    ("the compose label builder drawing a quote again",
+     dict(kotlin_src=perturb("polish (compose label quote re-added)", KOTLIN,
+                             r"(internal fun kayaRichAnnotated\([^\n]*\n)",
+                             "    val dead = KAYA_RICH_QUOTE_PARAGRAPH\n")),
+     r"^the Compose label builder names KAYA_RICH_QUOTE_PARAGRAPH"),
     ("the compose quote rule drawing nothing",
      dict(kotlin_src=perturb("polish (compose rule cut)", KOTLIN,
                              r"(fun (?:[\w.]+\.)?DrawScope\.kayaRichQuoteRule\([\s\S]*?)drawRect\(",
                              "drawNothing(")),
      r"^KayaCompose\.kt's site for the quote rule does not name /drawRect"),
 ):
-    score_or_die(introduced(polish_clauses(**kwargs), polish_out, finding), label)
+    score_or_die(introduced(polish_clauses(**kwargs)
+                            + label_no_quote_clauses(kwargs.get("kotlin_src")),
+                            polish_out, finding), label)
 
 # clip_mirrors() ran first and printed its own findings; its verdict
 # is read here so there is exactly ONE verdict line.

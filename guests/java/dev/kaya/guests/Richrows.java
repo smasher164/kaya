@@ -50,20 +50,35 @@ public final class Richrows {
         KayaApp app = new KayaApp();
 
         app.build(tx -> {
-            tx.window(0).title("richrows");
+            KayaApp.WindowRef win = tx.window(0).title("richrows");
+            KayaApp.MenuItem editMenu = win.menu("Edit");
+            editMenu.item("Undo").role(KayaApp.ROLE_UNDO);
+            editMenu.item("Redo").role(KayaApp.ROLE_REDO);
+
             var notes = NoteKaya.collection(tx);
             KayaApp.Signal<String> last = tx.signal("");
             KayaApp.Signal<String> view = tx.signal("");
+
+            // An undo or redo moved the row back: the app reads ITS OWN
+            // mirror of row b, which is the fold a restored Blob field
+            // lands in.
+            KayaApp.UndoHandler restored = (t, label, delta) -> {
+                Note note = row(t, notes, "b");
+                t.write(view, note.body().text() + " | " + spell(note.body().runs()));
+            };
+            win.onUndone(restored).onRedone(restored);
 
             tx.mount(tx.column(() -> {
                 tx.label(last); // label#0
                 tx.label(view); // label#1
 
                 tx.row(() -> {
-                    tx.button("patch b", t -> // button#0
-                            NoteKaya.patch(t, notes, "b").body(
-                                    new KayaApp.Document("Patched").italic(
-                                            KayaApp.TextRange.ofBytes(0, 7))));
+                    tx.button("patch b", t -> { // button#0
+                        t.undoable("patch b");
+                        NoteKaya.patch(t, notes, "b").body(
+                                new KayaApp.Document("Patched").italic(
+                                        KayaApp.TextRange.ofBytes(0, 7)));
+                    });
                     tx.button("read a", t -> { // button#1
                         Note note = row(t, notes, "a");
                         t.write(view, note.body().text() + " | " + spell(note.body().runs()));

@@ -43,10 +43,32 @@ noteAt items key = case lookup key items of
 main :: IO ()
 main = kayaMain $ \app -> do
   (notes, lastAct, bodyNode) <- buildTx app $ do
-    window 0 [WTitle "richrows"]
     notes <- collectionOf (Proxy :: Proxy Note)
     lastAct <- signal (VStr "")
     view <- signal (VStr "")
+
+    -- An undo or redo moved the row back: the app reads ITS OWN mirror of
+    -- row b, which is the fold a restored Blob field lands in.
+    let restored _label _delta = submitTx app $ do
+          items <- recordItems notes
+          let note = noteAt items (VStr "b")
+          writeSignal
+            view
+            (VStr (docText (body note) ++ " | " ++ spell (docRuns (body note))))
+    window
+      0
+      [ WTitle "richrows",
+        WMenus
+          [ menu
+              "Edit"
+              []
+              [ item "Undo" [IRole roleUndo],
+                item "Redo" [IRole roleRedo]
+              ]
+          ],
+        WOnUndone restored,
+        WOnRedone restored
+      ]
 
     lastLabel <- labelBound lastAct -- label#0
     viewLabel <- labelBound view -- label#1
@@ -54,7 +76,7 @@ main = kayaMain $ \app -> do
       row
         []
         [ -- button#0 — the app writes a copy by patching its row
-          buttonOn "patch b" . submitTx app $
+          buttonOn "patch b" . undoableTx app "patch b" $
             patch
               notes
               (VStr "b")

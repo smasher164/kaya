@@ -121,6 +121,32 @@ function documentBytes(doc: Document): Uint8Array {
   return Uint8Array.from(out);
 }
 
+/** `documentBytes`' inverse, for a row an undo restored: the delta carries
+ * a Document field as a blob and the decoder redeems it to these bytes
+ * (crates/kaya/src/wire.rs, `read_document_blob`). */
+function documentOfBytes(bytes: Uint8Array): Document {
+  if (!(bytes instanceof Uint8Array)) {
+    throw new TypeError(`kaya: a restored Document field carries bytes, not ${runtime.describe(bytes)}`);
+  }
+  const count = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(0, true);
+  const values: wire.Decoded[] = [];
+  let at = 8;
+  for (let i = 0; i < count; i++) {
+    let value: wire.Decoded;
+    [value, at] = wire.parse_value(bytes, at);
+    values.push(value);
+  }
+  const text = values[0];
+  if (typeof text !== "string") {
+    throw new Error(`kaya: a document blob starts with its text; this one holds ${values.length} value(s)`);
+  }
+  const doc = new Document(text);
+  for (let i = 1; i + 3 < values.length; i += 4) {
+    doc.runs.push({ start: values[i] as number, end: values[i + 1] as number, name: values[i + 2] as string, value: values[i + 3] as string });
+  }
+  return doc;
+}
+
 /** A civil date's components, refused BY NAME when they are not one — a
  * plain object cannot type this the way DateOnly or LocalDate does, so
  * the packing site is the wall (docs/datetime-plan.md D2). */
@@ -1215,7 +1241,7 @@ class Variant {
   readonly schema: number[];
   readonly tokens: Token[];
   readonly encoders: ((v: unknown, name: string) => wire.WireValue)[];
-  readonly decoders: ((v: wire.Decoded) => unknown)[];
+  readonly decoders: ((v: wire.Decoded | Uint8Array) => unknown)[];
 
   constructor(ctor: RecordType | null) {
     this.ctor = ctor;
@@ -1247,9 +1273,10 @@ class Variant {
   }
 }
 
-function fieldDecoder(token: Token): (v: wire.Decoded) => unknown {
+function fieldDecoder(token: Token): (v: wire.Decoded | Uint8Array) => unknown {
   if (token === CivilDate) return (v) => civilDate(v as number);
   if (token === CivilTime) return (v) => civilTime(v as number);
+  if (token === Document) return (v) => documentOfBytes(v as Uint8Array);
   return (v) => v;
 }
 
@@ -1641,15 +1668,8 @@ export class Collection<E, R> extends BoundCollection<E, R> {
 
   /** @internal Rebuild a model value from an undo delta's wire record. An
    * entry the mirror still holds is UPDATED IN PLACE. */
-  _decode(variant: number, fields: wire.Decoded[], current: unknown): E {
+  _decode(variant: number, fields: (wire.Decoded | Uint8Array)[], current: unknown): E {
     const spec = this._variants[variant]!;
-    for (const value of fields) {
-      if (value instanceof BlobHandle) {
-        throw new Error(
-          "kaya: this undo step restores a collection entry with a bytes field, and the core's undo payload cannot carry blob bytes yet (wire.rs undo_body encodes them as a batch-local handle with no table behind it). Keep bytes fields out of undoable groups until that lands.",
-        );
-      }
-    }
     if (spec.ctor === null) return fields[0] as E;
     const target = (current instanceof spec.ctor ? current : Object.create(spec.ctor.prototype)) as Record<string, unknown>;
     spec.names.forEach((name, i) => {
@@ -2310,9 +2330,12 @@ function dropped(payload: wire.DroppedPayload): Dropped {
  * (docs/undo-plan.md D5). The collection mirrors are already reconciled
  * before your handler runs; signals and text are handed to the app. */
 export type UndoDelta = {
-  signals: [id: number, value: wire.Decoded][];
+  /** A restored blob field (a Document's bytes, an image's) arrives
+   * REDEEMED: the delta names it by occurrence handle and the decoder
+   * takes the bytes (crates/kaya/src/wire.rs, `undo_body`). */
+  signals: [id: number, value: wire.Decoded | Uint8Array][];
   texts: [id: number, path: wire.Decoded[], text: string][];
-  entries: [coll: number, path: wire.Decoded[], key: wire.Decoded, state: [variant: number, fields: wire.Decoded[]] | null][];
+  entries: [coll: number, path: wire.Decoded[], key: wire.Decoded, state: [variant: number, fields: (wire.Decoded | Uint8Array)[]] | null][];
   orders: [coll: number, path: wire.Decoded[], keys: wire.Decoded[]][];
 };
 

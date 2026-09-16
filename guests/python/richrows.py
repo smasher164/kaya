@@ -36,6 +36,7 @@ def on_acted(key, _act):
 
 
 def on_patch():
+    kaya.undoable("patch b")
     notes.patch("b", body=kaya.Document("Patched").mark((0, 7), "italic", "true"))
 
 
@@ -44,7 +45,18 @@ def on_read():
     view.set(f"{note.body.text} | {spell(note.body.runs)}")
 
 
-with app.window(title="richrows"):
+def on_restored(_label, _delta):
+    # An undo or redo moved the row back: the app reads ITS OWN mirror of
+    # row b, which is the fold a restored Blob field lands in.
+    note = notes.get("b")
+    view.set(f"{note.body.text} | {spell(note.body.runs)}")
+
+
+with app.window(title="richrows", on_undone=on_restored, on_redone=on_restored):
+    with app.menu("Edit"):
+        kaya.item("Undo", role=kaya.ROLE_UNDO)
+        kaya.item("Redo", role=kaya.ROLE_REDO)
+
     notes = kaya.collection(Note)
     last = kaya.signal("")
     view = kaya.signal("")

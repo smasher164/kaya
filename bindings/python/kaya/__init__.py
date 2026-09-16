@@ -1488,18 +1488,6 @@ class Collection(_BoundCollection):
         dataclass field the wire never carried survives the undo.
         """
         spec = self._variants[variant]
-        for value in fields:
-            if isinstance(value, wire.BlobHandle):
-                # NOT REDEEMABLE: a blob field arrives as an index into
-                # a batch-local table that was thrown away.
-                raise NotImplementedError(
-                    "kaya: this undo step restores a collection entry with "
-                    "a bytes field, and the core's undo payload cannot "
-                    "carry blob bytes yet (wire.rs undo_body encodes them "
-                    "as a batch-local handle with no table behind it). "
-                    "Keep bytes fields out of undoable groups until that "
-                    "lands."
-                )
         if spec.cls is None:
             return fields[0]
         names = list(spec.fields)  # schema order == wire order
@@ -2320,12 +2308,34 @@ def _encode_document_field(value):
     return wire.BlobHandle(runtime.register_blob(_document_bytes(value)))
 
 
+def _decode_document_field(data):
+    """`_document_bytes`' inverse, for a row an undo restored: the delta
+    carries the field as a blob, redeemed to bytes by the decoder
+    (crates/kaya/src/wire.rs, `read_document_blob`)."""
+    if not isinstance(data, (bytes, bytearray)):
+        raise TypeError(
+            f"kaya: a restored Document field carries bytes, not "
+            f"{type(data).__name__}")
+    count = int.from_bytes(data[0:4], "little")
+    values, at = [], 8
+    for _ in range(count):
+        value, at = wire.parse_value(data, at)
+        values.append(value)
+    if not values or not isinstance(values[0], str):
+        raise ValueError(
+            "kaya: a document blob starts with its text; this one holds "
+            f"{len(values)} value(s)")
+    runs = [Run(*values[i:i + 4]) for i in range(1, len(values), 4)]
+    return Document(values[0], runs)
+
+
 # A Document field IS a Blob field carrying `_document_bytes`' list, so
 # it binds through the template zone as a String field does
 # (docs/rich-text-plan.md §19). Registered here rather than in the table
 # above, which is written before the class exists.
 _WIRE_TYPES.append((Document, wire.VALUE_BLOB))
 _FIELD_ENCODERS[Document] = _encode_document_field
+_FIELD_DECODERS[Document] = _decode_document_field
 
 
 class EditSource:

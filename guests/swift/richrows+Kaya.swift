@@ -9,10 +9,10 @@ extension Note: KayaRecord {
     static let prototype = Note(title: "", body: KayaDocument())
 
     init(values: [KayaValue]) {
-        // A blob slot carries a handle, not bytes — see the
-        // blob-schema precondition on token updateField in
-        // KayaRecords.swift, which keeps this unreachable.
-        fatalError("kaya: a blob field cannot rebuild from wire — update via key path")
+        guard case .str(let title) = values[0], case .bytes(let body) = values[1] else {
+            preconditionFailure("kaya: Note fields out of order")
+        }
+        self.init(title: title, body: kayaDocumentOfBlob(Data(body)))
     }
 
     /// This record's Document fields, read and written by WIRE

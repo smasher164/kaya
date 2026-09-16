@@ -47,8 +47,18 @@ func App() *kaya.App {
 		panic(fmt.Sprintf("richrows: no row %q", key))
 	}
 
+	// An undo or redo moved the row back: the app reads ITS OWN mirror of
+	// row b, which is the fold a restored Blob field lands in.
+	restored := func(tx *kaya.Tx, _ string, _ kaya.UndoDelta) {
+		note := row(tx, "b")
+		tx.Write(view, fmt.Sprintf("%s | %s", note.Body.Text, spell(note.Body.Runs)))
+	}
+
 	app.Build(func(tx *kaya.Tx) {
-		tx.Window(0).Title("richrows")
+		win := tx.Window(0).Title("richrows").OnUndone(restored).OnRedone(restored)
+		edit := win.Menu("Edit")
+		edit.Item("Undo").Role(kaya.RoleUndo)
+		edit.Item("Redo").Role(kaya.RoleRedo)
 		notes = NoteCollection(tx)
 		last = tx.Signal("")
 		view = tx.Signal("")
@@ -59,6 +69,7 @@ func App() *kaya.App {
 
 			tx.Row(func() {
 				tx.Button("patch b", func(tx *kaya.Tx) { // button#0
+					tx.Undoable("patch b")
 					NotePatch(notes, tx, "b").Body(kaya.NewDocument("Patched").Italic(0, 7))
 				})
 				tx.Button("read a", func(tx *kaya.Tx) { // button#1

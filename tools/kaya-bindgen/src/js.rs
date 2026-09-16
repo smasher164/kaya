@@ -13,7 +13,7 @@ use crate::{Ctx, PropKind, is_padding, prop_variants, record_params, tx_fields, 
 pub const RESERVED: &[&str] = &[
     "enc", "record", "pad", "cat", "u32", "u64", "i64", "f64", "parse_value", "parse_clip", "parse_representation",
     "parse_occurrence", "BlobHandle", "I64", "canonicalize_shortcut", "occurrence_blob",
-    "install_occurrence_blob", "text_encoder", "text_decoder",
+    "install_occurrence_blob", "redeem_occurrence_blob", "text_encoder", "text_decoder",
     "pack_date", "unpack_date", "pack_time", "unpack_time",
     "arguments", "await", "break", "case", "catch", "class", "const", "continue", "debugger",
     "default", "delete", "do", "else", "enum", "eval", "export", "extends", "false", "finally",
@@ -439,6 +439,13 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("  occurrence_blob = fn;");
     c.line("}");
     c.line("");
+    c.line("/** One redemption, for the two decoders that meet a blob: a clip's values");
+    c.line(" * and an undo delta's restored record (crates/kaya/src/wire.rs, `undo_body`). */");
+    c.line("function redeem_occurrence_blob(handle: BlobHandle): Uint8Array {");
+    c.line("  if (occurrence_blob === null) throw new Error(\"kaya: occurrence blob redemption is not installed\");");
+    c.line("  return occurrence_blob(handle.handle);");
+    c.line("}");
+    c.line("");
     c.line("export type ClipPayload = { clip: number; values: (Decoded | Uint8Array)[] };");
     c.line("");
     c.line("/** What a drop delivered (docs/dnd-plan.md D1): the operation the core");
@@ -459,10 +466,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("  for (let i = 0; i < count; i++) {");
     c.line("    let value: Decoded | Uint8Array;");
     c.line("    [value, at] = parse_value(buf, at);");
-    c.line("    if (value instanceof BlobHandle) {");
-    c.line("      if (occurrence_blob === null) throw new Error(\"kaya: occurrence blob redemption is not installed\");");
-    c.line("      value = occurrence_blob(value.handle);");
-    c.line("    }");
+    c.line("    if (value instanceof BlobHandle) value = redeem_occurrence_blob(value);");
     c.line("    values.push(value);");
     c.line("  }");
     c.line("  return [values, at];");
@@ -478,9 +482,9 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("export type PickedTriple = [handle: number, name: string, local_path: string];");
     c.line("export type UndoPayload = {");
     c.line("  label: string;");
-    c.line("  signals: [id: number, value: Decoded][];");
+    c.line("  signals: [id: number, value: Decoded | Uint8Array][];");
     c.line("  texts: [id: number, path: Decoded[], text: string][];");
-    c.line("  entries: [coll: number, path: Decoded[], key: Decoded, state: [variant: number, fields: Decoded[]] | null][];");
+    c.line("  entries: [coll: number, path: Decoded[], key: Decoded, state: [variant: number, fields: (Decoded | Uint8Array)[]] | null][];");
     c.line("  orders: [coll: number, path: Decoded[], keys: Decoded[]][];");
     c.line("};");
     c.line("");
@@ -587,10 +591,14 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("    [label, at] = parse_value(buf, at);");
         c.line("    const count = read_u32(buf, at);");
         c.line("    at += 8;");
-        c.line("    const flat: Decoded[] = [];");
+        c.line("    const flat: (Decoded | Uint8Array)[] = [];");
         c.line("    for (let i = 0; i < count; i++) {");
-        c.line("      let value: Decoded;");
+        c.line("      let value: Decoded | Uint8Array;");
         c.line("      [value, at] = parse_value(buf, at);");
+        // A restored record's blob field rides the OCCURRENCE table like a
+        // paste's bytes: redeem and release here, so the record decoder sees
+        // bytes (crates/kaya/src/wire.rs, `undo_body`).
+        c.line("      if (value instanceof BlobHandle) value = redeem_occurrence_blob(value);");
         c.line("      flat.push(value);");
         c.line("    }");
         c.line("    let i = 0;");
@@ -608,7 +616,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("      const path_len = flat[i + 2] as number;");
         c.line("      const body = flat.slice(i + 3, i + size);");
         c.line("      i += size;");
-        c.line("      texts.push([ident, body.slice(0, path_len), body[path_len] as string]);");
+        c.line("      texts.push([ident, body.slice(0, path_len) as Decoded[], body[path_len] as string]);");
         c.line("    }");
         c.line("    const entries: UndoPayload[\"entries\"] = [];");
         c.line("    for (let n = 0; n < n_entries; n++) {");
@@ -619,8 +627,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("      const path_len = flat[i + 4] as number;");
         c.line("      const body = flat.slice(i + 5, i + size);");
         c.line("      i += size;");
-        c.line("      const state: [number, Decoded[]] | null = present ? [variant, body.slice(path_len + 1)] : null;");
-        c.line("      entries.push([coll, body.slice(0, path_len), body[path_len]!, state]);");
+        c.line("      const state: [number, (Decoded | Uint8Array)[]] | null = present ? [variant, body.slice(path_len + 1)] : null;");
+        c.line("      entries.push([coll, body.slice(0, path_len) as Decoded[], body[path_len] as Decoded, state]);");
         c.line("    }");
         c.line("    const orders: UndoPayload[\"orders\"] = [];");
         c.line("    for (let n = 0; n < n_orders; n++) {");
@@ -629,7 +637,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("      const path_len = flat[i + 2] as number;");
         c.line("      const body = flat.slice(i + 3, i + size);");
         c.line("      i += size;");
-        c.line("      orders.push([coll, body.slice(0, path_len), body.slice(path_len)]);");
+        c.line("      orders.push([coll, body.slice(0, path_len) as Decoded[], body.slice(path_len) as Decoded[]]);");
         c.line("    }");
         c.line("    // A truncated or over-long body is a broken ENCODER, not bad input.");
         c.line("    if (i !== flat.length) throw new Error(\"kaya: undo delta has trailing values\");");

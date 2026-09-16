@@ -374,6 +374,28 @@ static class AbortCheck
             held => KayaApp.FoldEdit(held, 0, 0, "x", new List<TextRun>()));
         app.Build(tx => Check(notes.Items(tx).Count == 1,
             "folding into a row that is gone invented one"));
+
+        // AN UNDO RESTORES THE FIELD FROM ITS BYTES, never from the handle
+        // that carried them (docs/deferred.md, the restored-row blob
+        // entry): the core registers the bytes in the occurrence table,
+        // ReadValue redeems them, and the record decoder reads a Document
+        // out of them.
+        var undone = new UndoDelta();
+        undone.Entries.Add(new UndoEntry
+        {
+            Collection = notes.Collection.Id,
+            Key = "a",
+            State = (0u, new List<object> { "a", KayaApp.DocumentBlob(doc) }),
+        });
+        app.AbsorbUndo(undone);
+        app.Build(tx =>
+        {
+            Document restored = notes.Items(tx)[0].Value.Body;
+            Check(restored.Text == doc.Text && Spell(restored.Runs) == Spell(doc.Runs),
+                "a restored row's Document field read \"" + restored.Text + "\" / "
+                    + Spell(restored.Runs) + ", the bytes say \"" + doc.Text + "\" / "
+                    + Spell(doc.Runs));
+        });
     }
 
     // OPEN IS NOT ENOUGH: a transaction is the app thread's (docs/deferred.md).

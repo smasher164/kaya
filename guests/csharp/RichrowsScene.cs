@@ -48,7 +48,21 @@ static class RichrowsScene
 
         app.Build(tx =>
         {
-            tx.Window(title: "richrows");
+            var edit = tx.Menu("Edit", items: new[]
+            {
+                tx.Item("Undo", role: Tx.RoleUndo),
+                tx.Item("Redo", role: Tx.RoleRedo),
+            });
+            // An undo or redo moved the row back: the app reads ITS OWN
+            // mirror of row b, which is the fold a restored Blob field
+            // lands in.
+            void Restored(Tx t, string label, UndoDelta delta)
+            {
+                Note note = Row(t, notes, "b");
+                t.Write(view, $"{note.Body.Text} | {Spell(note.Body.Runs)}");
+            }
+            tx.Window(title: "richrows", menus: new[] { edit },
+                onUndone: Restored, onRedone: Restored);
             notes = NoteKaya.Collection(tx);
             last = tx.Signal("");
             view = tx.Signal("");
@@ -61,9 +75,12 @@ static class RichrowsScene
                 tx.Row(() =>
                 {
                     tx.Button("patch b", onClick: t => // button#0
+                    {
+                        t.Undoable("patch b");
                         NoteKaya.Patch(t, notes, "b").Body(
                             new Document("Patched")
-                                .Mark(TextRange.Bytes(0, 7), "italic", "true")));
+                                .Mark(TextRange.Bytes(0, 7), "italic", "true"));
+                    });
                     tx.Button("read a", onClick: t => // button#1
                     {
                         Note note = Row(t, notes, "a");

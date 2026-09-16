@@ -29,7 +29,6 @@ let () =
   let app = Kaya_app.create () in
 
   build app (fun () ->
-      window ~title:"richrows" ();
       let notes = collection_of note_record in
       let last = signal (Str "") in
       let view = signal (Str "") in
@@ -39,6 +38,25 @@ let () =
         | Some note -> note
         | None -> failwith (Printf.sprintf "richrows: no row %s" (key_text key))
       in
+      (* An undo or redo moved the row back: the app reads ITS OWN mirror
+         of row b, which is the fold a restored Blob field lands in. *)
+      let restored _step _delta =
+        let note = row_of (Str "b") in
+        write view
+          (Str (Printf.sprintf "%s | %s" note.body.d_text (spell note.body.d_runs)))
+      in
+
+      window ~title:"richrows"
+        ~menus:
+          [
+            menu ~label:"Edit"
+              [
+                item ~label:"Undo" ~role:role_undo;
+                item ~label:"Redo" ~role:role_redo;
+              ];
+          ]
+        ~on_undone:restored ~on_redone:restored ();
+
       (* The row's field already carries the copy's act when this fires:
          the app reads the row, never the widget. *)
       let acted keys =
@@ -58,6 +76,7 @@ let () =
                  (* button#0 — the app writes a copy by patching its row *)
                  button ~text:"patch b"
                    ~on_click:(fun () ->
+                     undoable "patch b";
                      note_patch
                        ~body:(Document.create "Patched" |> Document.italic (0, 7))
                        notes (Str "b"));

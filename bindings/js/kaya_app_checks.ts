@@ -1489,6 +1489,28 @@ if (isMainThread) {
   fire(wire.parse_occurrence(packFormatted(boundBody.id, 0, 0, 3, "bold", "true", ["gone"])));
   richCheck("a row that is gone has no field to fold into, and that is not a fault", true);
 
+  // AN UNDO RESTORES A ROW'S DOCUMENT FIELD FROM BYTES, never from the
+  // handle that carried them (docs/deferred.md, the restored-row blob
+  // entry). The core registers the bytes in the OCCURRENCE table and the
+  // decoder redeems them, so the redeemer is stood in for here and the
+  // handle it is asked for is the one the record named.
+  const redeemed: number[] = [];
+  runtime.hooks.occurrenceBlob = (handle) => {
+    redeemed.push(handle);
+    return REFERENCE_DOCUMENT_BLOB;
+  };
+  try {
+    fire(wire.parse_occurrence(packUndo(2605, "patch a", [[(richNotes as unknown as { _id: number })._id, [], "a", [0, ["a", new wire.BlobHandle(77)]]]], [], [])));
+  } finally {
+    runtime.hooks.occurrenceBlob = null;
+  }
+  const restoredBody = richNotes.get("a")!.body;
+  richCheck(
+    "a restored row's Document field decodes to its BYTES, which the delta carries by occurrence handle",
+    restoredBody.text === "ab" && spell(restoredBody.runs) === "0:1 bold|1:2 link=u",
+  );
+  richCheck("the decoder redeems the handle the record named, once", redeemed.length === 1 && redeemed[0] === 77);
+
   richCheck(
     "{document} refuses a live Document, naming setDocument",
     throws(() => app.build(() => kaya.textarea({ document: new kaya.Document("x") as unknown as K.FieldRef })), /setDocument/),
