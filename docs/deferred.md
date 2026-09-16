@@ -12596,6 +12596,30 @@ them), the agent's notes §6 carry the evidence
 (tmp/openlist/notes-layout.md in the 2026-09-16 job), and the fix is
 whatever makes the grid's first post-resize measure its last.
 
+## WATCH — the iOS `portfolio-python` leg laid its tables out UNFOLDED beside the summary on a phone: the metrics report latched with no scene and the breakpoint then found no metrics (first sighting 2026-09-16, matrix 23)
+KEY: portfolio-python ios unfolded, no metrics latched, presentation_scene seed, METRICS_REPORTED, breakpoint window=0 when=1, viewport 320...343pt, adaptive fold ios
+
+Matrix 23 (67d844b9), the iOS lane's `portfolio-python` leg, green on
+every matrix before: every `expect_column_edges`/`expect_rows` on the
+dashboard's tables read `cells occupy 320...610pt outside viewport
+320...343pt that scrolls 0pt` — the tables sat to the RIGHT of the summary
+column on a 375pt phone, the adaptive fold never applied. The leg log's
+own diagnostics, in order: `metrics window=0 375x734 class=1` from the
+SwiftUI reporter, `core metrics window=0 width=375 class=1 latched; no
+scene yet, the next one is seeded from it`, and then `breakpoint window=0
+when=1 declared with NO metrics latched for its window`. READ SO FAR:
+`presentation_scene()` (capi.rs) is the ONE constructor of the scene the
+pump applies batches to, and it seeds `set_window_metrics` from
+`METRICS_REPORTED` for every latched window — so by the code the seed ran
+and the breakpoint should have found window 0. Nothing between the two
+lines said whether it did, so this sighting is instrumented and not
+explained: `presentation_scene` prints what it seeded (`core scene
+created; seeding N latched metrics report(s): ...`) and the breakpoint's
+miss prints the scene's own metrics map. The next sighting reads those two
+lines. The python guest runs INSIDE the iOS app, so the report preceding
+the first batch is the normal order there, not the anomaly.
+Bundle: ~/.local/state/kaya/flightrec/runs/20260916T102305Z-027911/bundles/ios-portfolio-python.
+
 ## The stamped-occurrence doors other than click still forward a torn-down copy's tag (found 2026-09-14)
 KEY: stamped_tag_is_live, torn-down copy, dead copy, lingering registry, toggled dead copy, set_value dead copy
 
@@ -12709,6 +12733,19 @@ the console session (tools/guest/dismiss-toasts.ps1 through its .cmd and
 the hidden task, notify-ready's route) and prints what each held, since
 clearing a history takes its banner down. The lane alone on that, then the
 matrix, are the proof.
+
+THE SIXTH RED, matrix 23 (67d844b9), AND A DISCRIMINATOR: the dismissal ran
+before every exclusive leg and every kaya identity's history read `held 0`
+— the unpackaged id and both packaged ones — and a "New notification"
+window still held the foreground through the whole 15s wait two seconds
+after the pooled richlabel/richrows/sizepolicy legs' windows. So the toast
+is NOT one of kaya's: the shell's own, or another app's, raised under
+matrix load at the moment the pool empties. The sampler reads the toast's
+own text through UI Automation the moment it sees one now
+(tools/guest/flightrec.ps1 `ToastText`, on the `New notification` title
+alone), which is the only thing that can name it; the next sighting's
+foreground.txt carries `toast='...'`. Matrix 22 had this leg green, so the
+toast is not every matrix's.
 
 ## WATCH — the iOS dark canvas leg read LIGHT pixels under a matrix, once (first sighting 2026-09-14)
 KEY: canvasdark-swift, expect_ink dark, KAYA_APPEARANCE, kayaCanvasAppearance, traitCollection, appearance flake

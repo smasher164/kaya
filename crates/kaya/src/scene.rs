@@ -4245,8 +4245,16 @@ impl Scene {
                 out.append(&mut ops);
             } else {
                 eprintln!(
-                    "KAYA_DIAG breakpoint window={} when={} declared with NO metrics latched for its window",
-                    window.0, self.breakpoints[n].when
+                    "KAYA_DIAG breakpoint window={} when={} declared with NO metrics latched for its \
+                     window; the scene holds metrics for {} window(s): [{}]",
+                    window.0,
+                    self.breakpoints[n].when,
+                    self.window_metrics.len(),
+                    self.window_metrics
+                        .iter()
+                        .map(|(w, (width, class))| format!("{}:{width}/{class}", w.0))
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 );
             }
         }

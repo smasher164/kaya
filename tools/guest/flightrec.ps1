@@ -122,6 +122,32 @@ function ClassOf($h) {
     return $c.ToString()
 }
 
+# A TOAST SAYS WHAT IT IS: a shell "New notification" window in the
+# foreground blocks every SetForegroundWindow (docs/traps.md, "A shell toast
+# holds the foreground"), and the sixth notes-leg red came with every kaya
+# history EMPTY at the dismissal before it -- so the sampler reads the
+# toast's own text through UI Automation the moment it sees one, which is
+# the only thing that tells a kaya toast from the shell's own.
+function ToastText($h) {
+    try {
+        Add-Type -AssemblyName UIAutomationClient -ErrorAction Stop
+        Add-Type -AssemblyName UIAutomationTypes -ErrorAction Stop
+        $root = [System.Windows.Automation.AutomationElement]::FromHandle($h)
+        $all = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants,
+            [System.Windows.Automation.Condition]::TrueCondition)
+        $names = New-Object System.Collections.ArrayList
+        foreach ($el in $all) {
+            $n = $el.Current.Name
+            if ($n -and $n.Length -gt 0 -and -not $names.Contains($n)) { [void]$names.Add($n) }
+        }
+        $joined = ($names -join ' | ')
+        if ($joined.Length -gt 300) { $joined = $joined.Substring(0, 300) + '...' }
+        return $joined
+    } catch {
+        return "uia failed: $($_.Exception.Message)"
+    }
+}
+
 function Describe($h) {
     $t = New-Object System.Text.StringBuilder 512
     [void][KayaFR.Win]::GetWindowTextW($h, $t, 512)
@@ -129,8 +155,10 @@ function Describe($h) {
     [void][KayaFR.Win]::GetWindowThreadProcessId($h, [ref]$procId)
     $name = '?'
     try { $name = (Get-Process -Id $procId -ErrorAction Stop).ProcessName } catch { $name = '?' }
-    return "hwnd=0x{0:x} pid={1} proc={2} class='{3}' title='{4}'" -f `
+    $line = "hwnd=0x{0:x} pid={1} proc={2} class='{3}' title='{4}'" -f `
         [int64]$h, $procId, $name, (ClassOf $h), $t.ToString()
+    if ($t.ToString() -eq 'New notification') { $line = $line + " toast='" + (ToastText $h) + "'" }
+    return $line
 }
 
 function VisibleWindows() {

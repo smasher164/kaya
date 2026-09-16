@@ -2041,6 +2041,18 @@ fn presentation_scene() -> Scene {
     }
     // A scene this new declares no breakpoints, so seeding emits nothing.
     let latched = METRICS_REPORTED.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    // THE SEED'S OWN TRACE: an iOS portfolio leg read `latched; no scene
+    // yet` and then `declared with NO metrics latched` with nothing between
+    // them to say whether this ran (matrix 23, 2026-09-16; docs/deferred.md).
+    eprintln!(
+        "KAYA_DIAG core scene created; seeding {} latched metrics report(s): {}",
+        latched.len(),
+        latched
+            .iter()
+            .map(|(w, width, class)| format!("window={w} width={width} class={class}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
     for (window, width, size_class) in latched {
         let _ = scene.set_window_metrics(crate::protocol::WindowId(window), width, size_class);
     }
