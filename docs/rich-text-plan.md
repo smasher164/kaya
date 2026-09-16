@@ -953,3 +953,102 @@ format, and a bridged edit costs 0.024ms when the app reads the
 splice's own patch (0.63ms when it walks the document instead, which is
 the note for a binding's bridge). R1, R2 and R5 stand as measured; what
 remains to measure is the platforms (§3).
+
+## §19 — The template zone for `rich`: the design read, and one ruling (2026-09-16)
+
+WHAT THE TEMPLATE ZONE IS, from zero. A kaya app declares a widget once in
+the LIVE zone and gets a handle for it; inside a `For` it declares a
+TEMPLATE, a prototype the core stamps once per row of a collection, and no
+handle comes back — the app never addresses one stamped copy directly.
+Instead a template node's props are BOUND to the row's record fields
+(`PropValue::Element { level, field }`): a stamped textarea's `text` is a
+string field of its row, the copy shows the field, the user's typing
+arrives as `InstanceTextChanged` carrying the row's KEY PATH, and the app
+writes the row (`row.patch(...)`) rather than the widget. That is how every
+template prop works today, and it is why a stamped copy can vanish under a
+rebuild without anything dangling.
+
+WHAT EXISTS FOR RICH ALREADY. The read half: the two occurrences a rich
+copy emits, `InstanceTextEdited { node, path, range, inserted, runs, source }`
+and `InstanceTextFormatted { node, path, range, name, value }`, are in the
+protocol with the row's path on them, and the wire folds a stamped copy's
+edit into them by the copy's tag (wire.rs). What does NOT exist: any way
+for the app to put a document INTO a stamped copy, or to change one there.
+In the live zone the document is a TRANSACTION RECORD — `set_rich_text
+(widget, document)`, `apply_edit (widget, edit)`, `format_text (widget,
+…)` — and each names a live WidgetId. A stamped copy's id is internal; the
+app never holds it. So today `rich` on a template textarea is accepted by
+`check_prop`, the copy renders plain, and the JS binding refuses
+`document()` on a template node in its own words while the other eight say
+nothing (the plan's §18 residue, and the ledger's "per-instance
+addressing" bullet is the addressing that would make the three records
+reach a copy).
+
+TWO WAYS IN, COSTED.
+
+(A) PER-INSTANCE ADDRESSING: give `set_rich_text`, `apply_edit` and
+`format_text` a second target shape, `{ node: TemplateNodeId, path }`, so
+the app writes ONE copy's document by the row key it got from the
+occurrence. Spec change: three records grow a target variant, the hash
+moves, nine encoders regenerate, four arms resolve the target through the
+stamped-copy registry the harness's keyed target already uses. It is the
+ledger's "first instance-addressed command" made real, and it keeps the
+live zone's shape (document as a write to a widget). Its cost is the
+addressing itself — a new kind of target in every binding's sugar
+(`tx.set_document(node, key, doc)` in nine spellings) — and a semantics
+question the live zone never had: a write to a copy that has vanished under
+a rebuild must be a silent no-op (the ledger bullet says so), the one
+place in kaya a write to nothing is not a fault.
+
+(B) THE DOCUMENT AS A FIELD (recommended): a stamped copy's document is a
+FIELD of the row's record, bound through the template exactly as its text
+is. The wire already carries bulk bytes by handle (`Value::Blob`), and a
+Document already has a wire encoding (the bytes `set_rich_text` ships), so
+a `Document` field is a Blob field with that encoding and NO new value
+type. The template textarea takes ONE new prop, `document` (bound to that
+field, the way `text` binds to a string field), and the copy renders the
+field's document; the app writes a copy's document by patching the row —
+`row.patch(body=doc)` — which is the write every other template prop
+already has, uniform in nine bindings through the record sugar that exists.
+The user's edits arrive as `InstanceTextEdited` with the row's path (built),
+and the BINDING folds them into the row's field as it folds a live widget's
+edits into its mirror today, so the app's model is the truth for a copy as
+for a live widget. `apply_edit` and `format_range` on a copy are then
+record patches too: the binding's `Document` value takes the edit
+binding-side (the fold it already has) and the patch ships the new bytes;
+nothing new crosses the wire. A vanished copy needs no rule: a row that is
+gone has no field to patch, and the record layer already says so.
+Spec change: ONE prop (`document`, Blob-typed, template zone only —
+refused in the live zone in one sentence, since a live widget's document
+is `set_rich_text`), the hash moves, the generators do the rest.
+
+WHY B. It is the shape the template zone already has — a prop bound to a
+field, a write that is a row patch — so a reader who knows how a stamped
+textarea's text works knows how its document works, and no binding grows a
+second addressing scheme. It costs one prop where A costs three record
+variants and a no-op rule. What B cannot do that A could: address a copy's
+WIDGET STATE that is not the document — its selection, its caret — and
+nothing asks for that today (`select_range` is a live-zone verb and stays
+one). What B needs settled: the document's bytes on the wire are the
+record's field VALUE, so a 15,000-row list of rich notes carries 15,000
+documents in the model — the same as 15,000 strings today, and the
+virtualizer stamps only the window (docs/dynamic-tables §virtualization).
+
+THE RULING FOR THE MAINTAINER: B — a stamped copy's document is a Blob
+field bound through a new template-zone `document` prop, written by
+patching the row; or A — instance-addressed twins of the three document
+records. The build after B: the prop in spec.rs (hash moves); scene.rs
+seeding a copy's mirror from the bound field at stamp and at every field
+write (the same mirror the live zone keeps, keyed by the copy's internal
+id, so the corroboration wall and the harness reads — `expect_runs
+textarea@id[key]` through the keyed target — work unchanged); the four
+arms applying the prop as they apply `set_rich_text`; the nine bindings'
+template-zone sugar (`row.textarea(document=field, rich=True)` in Python's
+idiom and the others in theirs, with `Document` as a record field type and
+the binding folding `InstanceTextEdited` into it), censused by
+tools/tpl-surfaces.py's PROP_MEMBERS; and a scene, `richrows.steps`, a
+stamped list of notes where the scene edits one copy by key, reads its
+runs by key, patches the row from a button and reads the copy again, on
+five lanes in nine languages. `own_undo` stays a live-zone prop (the
+ledger is keyed by widget; a copy's undo is the platform's), stated in one
+sentence in all nine.
