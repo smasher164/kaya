@@ -770,6 +770,11 @@ mark are concurrent, and automerge's expand rule takes a concurrent insert
 at a mark's end into the mark — measured, the CRDT's truth, frozen in the
 scene.
 
+Landed as 5531fe55; the matrix on that tree ALL PASS on all five lanes,
+1,807 legs (mac 468, linux 773, windows 281, ios 138, android 147) in
+1254s — its first run had lost the Windows notes leg to an explorer
+PopupHost holding the VM's foreground, the ledger's WATCH of 2026-09-15.
+
 ## 5. What this plan does not do
 
 - It does not put a CRDT, a delta format or a markup language on the
