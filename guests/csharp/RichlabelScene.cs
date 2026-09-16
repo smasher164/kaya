@@ -73,6 +73,17 @@ static class RichlabelScene
                         t.ApplyEdit(body, edit);
                         t.Write(runs, Spell(app.Document(body).Runs));
                     });
+                    // THE RANGED ACT ON A LABEL (docs/rich-text-plan.md §17):
+                    // the label's own document written by range, no selection
+                    // to move; the ranges convert against the CURRENT text,
+                    // which the insert moved.
+                    tx.Button("mark", onClick: t => // button#2
+                    {
+                        string text = app.Document(body).Text;
+                        t.FormatRange(body, TextRange.In(text, 1, 2), "italic", "true");
+                        t.UnformatRange(body, TextRange.In(text, 0, 2), "bold"); // "Hé"
+                        t.Write(runs, Spell(app.Document(body).Runs));
+                    });
                 });
             }));
         });

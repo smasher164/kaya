@@ -63,6 +63,11 @@ func App() *kaya.App {
 					tx.ApplyEdit(body, kaya.Insert(6, ", big").Mark(2, 5, "italic", "true"))
 					tx.Write(runs, spell(app.Document(body).Runs))
 				})
+				tx.Button("mark", func(tx *kaya.Tx) { // button#2
+					tx.FormatRange(body, kaya.TextRange{Start: 1, End: 4}, "italic", "true")
+					tx.UnformatRange(body, kaya.TextRange{Start: 0, End: 3}, "bold") // "Hé": byte 2 is inside the é
+					tx.Write(runs, spell(app.Document(body).Runs))
+				})
 			})
 		}))
 	})

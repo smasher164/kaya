@@ -14,3 +14,10 @@ click button#1
 expect label#0 "Héllo, big world, code"
 expect_runs label#0 "0:6 bold|8:11 italic|12:17 link=https://kaya.dev|19:23 code"
 expect label#2 "0:6 bold|8:11 italic|12:17 link=https://kaya.dev|19:23 code"
+# THE RANGED ACT ON A LABEL (docs/rich-text-plan.md §17): an italic over a
+# range and the bold taken off another, written by range with no selection
+# to move; the widget's runs, the core's and the binding's fold agree.
+click button#2
+expect_runs label#0 "1:4 italic|3:6 bold|8:11 italic|12:17 link=https://kaya.dev|19:23 code"
+expect label#2 "1:4 italic|3:6 bold|8:11 italic|12:17 link=https://kaya.dev|19:23 code"
+expect label#0 "Héllo, big world, code"

@@ -65,6 +65,16 @@ let () =
                      apply_edit body
                        (Edit.insert 6 ", big" |> Edit.mark (2, 5) "italic" "true");
                      write runs (Str (spell (document body).d_runs)));
+                 (* button#2 — THE RANGED ACT ON A LABEL
+                    (docs/rich-text-plan.md §17): an italic over a range
+                    and the bold taken off another, the label's own
+                    document written by range. *)
+                 button ~text:"mark"
+                   ~on_click:(fun () ->
+                     format_range body (1, 4) "italic" "true";
+                     (* "Hé": byte 2 is inside the é *)
+                     unformat_range body (0, 3) "bold";
+                     write runs (Str (spell (document body).d_runs)));
                ];
            ]
            ()));

@@ -40,6 +40,12 @@ def on_insert():
     runs.set(spell(body.document().runs))
 
 
+def on_mark():
+    body.format_range(range(1, 4), "italic", "true")
+    body.unformat_range(range(0, 3), "bold")  # "Hé": byte 2 is inside the é
+    runs.set(spell(body.document().runs))
+
+
 with app.window(title="richlabel"):
     runs = kaya.signal("")
     with kaya.column():
@@ -53,5 +59,6 @@ with app.window(title="richlabel"):
         with kaya.row():
             kaya.button("seed", on_click=on_seed)         # button#0
             kaya.button("insert", on_click=on_insert)     # button#1
+            kaya.button("mark", on_click=on_mark)         # button#2
 
 sys.exit(app.run())

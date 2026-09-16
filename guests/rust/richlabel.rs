@@ -9,6 +9,7 @@ const DOC: &str = "Héllo world, code";
 enum Msg {
     Seed,
     Insert,
+    Mark,
 }
 
 fn spell(runs: &[kaya::Run]) -> String {
@@ -42,7 +43,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     .id(); // label#1
                 tx.label(runs).a11y_id("runs"); // label#2
                 tx.row(|tx| {
-                    for (title, msg) in [("seed", Msg::Seed), ("insert", Msg::Insert)] {
+                    for (title, msg) in [("seed", Msg::Seed), ("insert", Msg::Insert), ("mark", Msg::Mark)] {
                         let button = tx.button(title).id();
                         msgs.on_click(button, msg);
                     }
@@ -71,6 +72,17 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             Msg::Insert => {
                 let edit = kaya::Edit::insert(6, ", big").mark(2..5, "italic", "true");
                 ctx.apply(|tx| tx.apply_edit(body, &edit));
+                let mirror = spell(&ctx.document(body).runs);
+                ctx.apply(|tx| tx.write(runs, mirror.clone()));
+            }
+            // THE RANGED ACT ON A LABEL (docs/rich-text-plan.md §17): an italic
+            // over a range and the bold taken off another, the label's own
+            // document written by range; the runs label is the binding's fold.
+            Msg::Mark => {
+                ctx.apply(|tx| {
+                    tx.format_range(body, 1..4, "italic", "true");
+                    tx.unformat_range(body, 0..3, "bold"); // "Hé": byte 2 is inside the é
+                });
                 let mirror = spell(&ctx.document(body).runs);
                 ctx.apply(|tx| tx.write(runs, mirror.clone()));
             }

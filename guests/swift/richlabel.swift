@@ -55,6 +55,13 @@ app.build { tx in
                 t.applyEdit(body, edit)
                 t.write(runs, .str(spell(app.document(body).runs)))
             }
+            // THE RANGED ACT ON A LABEL (docs/rich-text-plan.md §17): the
+            // label's own document written by range, no selection to move.
+            tx.button("mark") { t in  // button#2
+                t.formatRange(body, 1..<4, "italic", "true")
+                t.unformatRange(body, 0..<3, "bold")  // "Hé": byte 2 is inside the é
+                t.write(runs, .str(spell(app.document(body).runs)))
+            }
         }
     }
     tx.mount(root)

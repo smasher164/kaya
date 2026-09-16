@@ -31,6 +31,12 @@ function onInsert(): void {
   runs.set(spell(body.document().runs));
 }
 
+function onMark(): void {
+  body.formatRange([1, 4], "italic", "true");
+  body.unformatRange([0, 3], "bold"); // "Hé": byte 2 is inside the é
+  runs.set(spell(body.document().runs));
+}
+
 let runs!: kaya.Signal<string>;
 let body!: kaya.Widget;
 let heading!: kaya.Widget;
@@ -46,6 +52,7 @@ app.window({ title: "richlabel" }, () => {
     kaya.row(() => {
       kaya.button("seed", { onClick: onSeed }); // button#0
       kaya.button("insert", { onClick: onInsert }); // button#1
+      kaya.button("mark", { onClick: onMark }); // button#2
     });
   });
 });

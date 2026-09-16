@@ -61,6 +61,15 @@ main = kayaMain $ \app -> buildTx app $ do
                     (markEdit (2, 5) "italic" "true" (insertEdit 6 ", big"))
                 )
               doc <- document app body
+              submitTx app (writeSignal runs (VStr (spell (docRuns doc)))),
+            -- button#2 — THE RANGED ACT ON A LABEL (docs/rich-text-plan.md
+            -- §17): an italic over a range and the bold taken off another,
+            -- the label's own document written by range.
+            buttonOn "mark" $ do
+              submitTx app $ do
+                formatTextRange app body (1, 4) "italic" "true"
+                unformatRange app body (0, 3) "bold" -- "Hé": byte 2 is inside the é
+              doc <- document app body
               submitTx app (writeSignal runs (VStr (spell (docRuns doc))))
           ]
       ]

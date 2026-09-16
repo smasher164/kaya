@@ -77,6 +77,17 @@ public final class Richlabel {
                         t.applyEdit(body[0], edit);
                         t.write(runs, spell(app.document(body[0]).runs()));
                     });
+                    // THE RANGED ACT ON A LABEL (docs/rich-text-plan.md §17):
+                    // the label's own document written by range, no selection
+                    // to move; the ranges convert against the CURRENT text,
+                    // which the insert moved.
+                    tx.button("mark", t -> { // button#2
+                        String text = app.document(body[0]).text();
+                        t.formatRange(body[0], KayaApp.TextRange.in(text, 1, 3), "italic",
+                                "true");
+                        t.unformatRange(body[0], KayaApp.TextRange.in(text, 0, 2), "bold");
+                        t.write(runs, spell(app.document(body[0]).runs()));
+                    });
                 });
             }));
         });
