@@ -1345,7 +1345,7 @@ object KayaCompose {
     // but only the runtime assert catches a stale compiled APK against
     // a new libkaya. ULong because the fingerprint's high bit is fair
     // game and a Kotlin Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0x692fe11a5922795auL
+    private const val SPEC_HASH: ULong = 0xe52568620b0ca54euL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -2566,18 +2566,27 @@ object KayaCompose {
                         enode, estart, estop, einserted, eruns, eselStart, eselStop)
                 }
                 APPLY_FORMAT_TEXT -> {
-                    // { u64 id; u32 removed; u32 reserved; u32 count;
-                    //   u32 reserved; Str name; Str value }
+                    // { u64 id; u32 removed; u32 ranged; u64 start; u64 stop;
+                    //   u32 count; u32 reserved; Str name; Str value } — the
+                    // range in UTF-16 units when `ranged`
+                    // (docs/rich-text-plan.md §17).
                     val fid = b.long
                     val fremoved = b.int != 0
-                    b.int // reserved
+                    val franged = b.int != 0
+                    val fstart = b.long.toInt()
+                    val fstop = b.long.toInt()
                     b.int // slots
                     b.int // reserved
                     val fname = readString(b)
                     val fvalue = readString(b)
                     val fnode = KayaSceneModel.nodes[fid]
                         ?: error("kaya: format_text on an unknown widget $fid")
-                    kayaFormatSelection(fnode, fname, fvalue, fremoved)?.let {
+                    val ftrouble = if (franged) {
+                        kayaFormatRange(fnode, fstart, fstop, fname, fvalue, fremoved)
+                    } else {
+                        kayaFormatSelection(fnode, fname, fvalue, fremoved)
+                    }
+                    ftrouble?.let {
                         Log.i("kaya", "KAYA_DIAG format_text refused: $it")
                     }
                 }
@@ -10324,6 +10333,33 @@ internal fun kayaFormatSelection(
     node.richSeq += 1
     KayaPresent.textFormatted(
         node.tag, start.toLong(), end.toLong(), name, value, off)
+    return null
+}
+
+/**
+ * A RANGED formatting act — a DOCUMENT WRITE, not the widget's own act
+ * (docs/rich-text-plan.md §17): the attribute over `from`..`to` UTF-16 units
+ * on the arm's run table, a label's as well as a textarea's, the selection
+ * and the pending attributes untouched and NOTHING reported — the core moved
+ * its mirror before it sent this. null, or what refused.
+ */
+internal fun kayaFormatRange(
+    node: KayaNode,
+    from: Int,
+    to: Int,
+    name: String,
+    value: String,
+    removed: Boolean,
+): String? {
+    if (!node.rich) return "widget ${node.id} is not rich"
+    if (!KAYA_RICH_NAMES.contains(name)) return "$name is not a rich attribute"
+    // A LABEL's text is the model mirror alone (docs/rich-text-plan.md §15).
+    val text = if (kayaIsTextField(node)) node.textState.text.toString() else node.text
+    if (from < 0 || to < from) return "range $from:$to is backwards"
+    if (to > text.length) return "range $from:$to is past the ${text.length}-unit text"
+    val off = removed || (name == "block" && value == "body")
+    node.richRuns = kayaRichFormat(node.richRuns, from, to, name, if (off) null else value)
+    node.richSeq += 1
     return null
 }
 

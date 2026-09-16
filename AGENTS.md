@@ -1049,8 +1049,12 @@ in docs/deferred.md.
    must each still be read somewhere, since a stale exemption is the
    next stale audit — and the one ordering four of them lean on, the
    alert fields written BEFORE `alertId` in APPLY_PRESENT_ALERT, is read
-   and held rather than assumed. Four watched negatives, counts printed,
-   the first of them the shipped defect itself),
+   and held rather than assumed. AND SINCE 2026-09-15 THE RUN TABLE'S
+   GENERATION: every `richRuns` write bumps `richSeq` in the same body,
+   because both displays re-derive from the generation and a table written
+   without its bump leaves the picture stale while `expect_runs`, which
+   reads the table, stays green (docs/rich-text-plan.md §17). Five watched
+   negatives, counts printed, the first of them the shipped defect itself),
    `tools/check-jni.py` (every native a Kotlin or Java class declares is
    in a registration list. JNI's own check runs one way only: it fails
    loudly at attach for a registered native the class lacks, but a

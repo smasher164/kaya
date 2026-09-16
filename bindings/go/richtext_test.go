@@ -313,6 +313,83 @@ func TestOwnUndoAndItsTwoLiveAnswersRideTheProps(t *testing.T) {
 	})
 }
 
+// THE RANGED ACT (docs/rich-text-plan.md §17): a document write, so the
+// BYTES say ranged 1 and carry the range, and the app's own fold takes it
+// HERE — nothing is echoed back to move it. No scene drives FormatRange,
+// so nothing else in this binding reads either half.
+func TestRangedActRidesTheBytesAndMovesTheFold(t *testing.T) {
+	const para = "Héllo world\nSecond line"
+	if len(para) != 24 {
+		t.Fatalf("the fixture is %d bytes, so its paragraph offsets mean nothing", len(para))
+	}
+	app := NewApp()
+	app.Build(func(tx *Tx) {
+		w := tx.Textarea(nil).Rich()
+		has := func(want []byte) bool {
+			for _, rec := range tx.records {
+				if bytes.Equal(rec, want) {
+					return true
+				}
+			}
+			return false
+		}
+
+		tx.SetDocument(w, NewDocument(para))
+		tx.FormatRange(w, TextRange{Start: 2, End: 5}, "italic", "true")
+		tx.UnformatRange(w, TextRange{Start: 0, End: 2}, "bold")
+		tx.Format(w, "bold", "true")
+		tx.Unformat(w, "link")
+		if !has(TxFormatText(w.id, 0, 1, 2, 5, []any{"italic", "true"})) {
+			t.Error("FormatRange wrote no ranged 1 record carrying the range's bytes")
+		}
+		if !has(TxFormatText(w.id, 1, 1, 0, 2, []any{"bold", ""})) {
+			t.Error("UnformatRange wrote no ranged 1 removal carrying the range's bytes")
+		}
+		if !has(TxFormatText(w.id, 0, 0, 0, 0, []any{"bold", "true"})) ||
+			!has(TxFormatText(w.id, 1, 0, 0, 0, []any{"link", ""})) {
+			t.Error("the SELECTION act did not write ranged 0 with no range — the two acts differ in the bytes alone")
+		}
+		if got, want := spellRuns(app.Document(w).Runs), "2:5 italic"; got != want {
+			t.Errorf("the app's own Document did not take the ranged act as it sent: %q, want %q", got, want)
+		}
+
+		// A ranged block act covers the whole paragraphs it touches, as the
+		// core snaps it — on the wire and in the fold alike.
+		tx.FormatRange(w, TextRange{Start: 14, End: 16}, "block", "heading2")
+		if !has(TxFormatText(w.id, 0, 1, 13, 24, []any{"block", "heading2"})) {
+			t.Error("a ranged block act did not snap to the paragraph's own bytes on the wire")
+		}
+		if got, want := spellRuns(app.Document(w).Runs),
+			"2:5 italic|13:24 block=heading2"; got != want {
+			t.Errorf("the fold did not snap the block to the paragraph: %q, want %q", got, want)
+		}
+
+		// `body` is the REMOVAL, on the wire and in the fold.
+		tx.FormatRange(w, TextRange{Start: 14, End: 16}, "block", "body")
+		if !has(TxFormatText(w.id, 1, 1, 13, 24, []any{"block", ""})) {
+			t.Error("a ranged block act with `body` did not write the removal")
+		}
+		if got, want := spellRuns(app.Document(w).Runs), "2:5 italic"; got != want {
+			t.Errorf("`body` left the block run in the fold: %q, want %q", got, want)
+		}
+	})
+}
+
+// A NEGATIVE OFFSET IS THIS BINDING'S OWN WALL (TextRange.check): Go's int
+// is signed and the wire's offset is not, so a strings.Index miss would
+// reach the core as 2^64-1 under a number the app never wrote.
+func TestFormatRangeRefusesANegativeOffsetByName(t *testing.T) {
+	defer func() {
+		said, ok := recover().(string)
+		if !ok || !strings.Contains(said, "FormatRange") || !strings.Contains(said, "-1") {
+			t.Errorf("FormatRange on a strings.Index miss said %v, which does not name the verb and the offset", said)
+		}
+	}()
+	NewApp().Build(func(tx *Tx) {
+		tx.FormatRange(tx.Textarea(nil).Rich(), TextRange{Start: -1, End: 2}, "bold", "true")
+	})
+}
+
 // THE RICH LABEL (docs/rich-text-plan.md R8, §15): Rich is a Widget method,
 // so nothing else in this binding says it reaches a LABEL. The CREATE record
 // is read beside the prop, since prop 32 on a textarea proves nothing here.

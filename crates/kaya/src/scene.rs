@@ -1214,6 +1214,17 @@ fn check_block_value(widget: WidgetId, op: &str, value: &str) {
     );
 }
 
+/// The paragraphs a byte range touches, whole (docs/rich-text-plan.md §17:
+/// a ranged block act covers them as the widget's own act would).
+fn paragraph_bounds(text: &str, range: TextRange) -> TextRange {
+    let bytes = text.as_bytes();
+    let start = (range.start as usize).min(bytes.len());
+    let stop = (range.stop as usize).min(bytes.len());
+    let para_start = bytes[..start].iter().rposition(|b| *b == b'\n').map_or(0, |i| i + 1);
+    let para_end = bytes[stop..].iter().position(|b| *b == b'\n').map_or(bytes.len(), |i| stop + i);
+    TextRange::new(para_start as u64, para_end as u64)
+}
+
 /// docs/rich-text-plan.md §2: a `block` run covers whole paragraphs.
 fn check_paragraph_bounds(text: &str, widget: WidgetId, op: &str, run: &TextRun) {
     let bytes = text.as_bytes();
@@ -4003,21 +4014,49 @@ impl Scene {
                         });
                     }
                 }
-                TxOp::FormatText { widget, name, value } => {
+                TxOp::FormatText { widget, name, value, range } => {
                     self.require_rich(widget, "format_text");
                     assert!(
-                        self.widgets.get(&widget) != Some(&WidgetKind::Label),
+                        range.is_some() || self.widgets.get(&widget) != Some(&WidgetKind::Label),
                         "kaya: format_text on {widget:?}, a LABEL — a format act covers the \
                          widget's own selection and a label has none; write the document \
-                         with set_document or apply_edit (docs/rich-text-plan.md R8)"
+                         with set_document, apply_edit or format_range (docs/rich-text-plan.md R8)"
                     );
                     check_attr_name(widget, "format_text", &name);
                     if name == "block" {
                         if let Some(kind) = &value {
                             check_block_value(widget, "format_text", kind);
                         }
+                        if range.is_some() {
+                            self.refuse_block_runs_on_a_label(
+                                widget,
+                                "format_text",
+                                &[TextRun::new(0, 0, "block", value.as_deref().unwrap_or("body"))],
+                            );
+                        }
                     }
-                    out.push(ApplyOp::FormatText { id: widget, name, value });
+                    // A RANGED ACT IS A DOCUMENT WRITE (docs/rich-text-plan.md
+                    // §17): the core moves its mirror here, the arm applies the
+                    // range silently, and nothing is echoed — the selection
+                    // stays where the user left it.
+                    let native = range.map(|range| {
+                        let doc = self.rich.get(&widget).expect("just required");
+                        let text = doc.text.clone();
+                        let range = if name == "block" {
+                            paragraph_bounds(&text, range)
+                        } else {
+                            range
+                        };
+                        let native = check_range(&text, widget, "format_text", range);
+                        let value = match (name.as_str(), value.as_deref()) {
+                            ("block", Some("body")) => None,
+                            (_, v) => v,
+                        };
+                        let doc = self.rich.get_mut(&widget).expect("just required");
+                        doc.format(range.start as usize, range.stop as usize, &name, value);
+                        native
+                    });
+                    out.push(ApplyOp::FormatText { id: widget, name, value, range: native });
                 }
                 TxOp::VariantCase { .. } => {
                     panic!("kaya: variant_case outside a template scope")
@@ -13245,6 +13284,65 @@ mod tests {
             widget: WidgetId(1),
             name: "bold".into(),
             value: Some("true".into()),
+            range: None,
+        }]);
+    }
+
+    /// docs/rich-text-plan.md §17: a ranged act is a document write.
+    #[test]
+    fn a_ranged_format_moves_the_mirror_silently_and_reaches_a_label() {
+        let mut scene = Scene::new();
+        scene.apply(rich_editor("Hello world\nSecond"));
+        scene.set_text_selection(WidgetId(1), 3, 3);
+        let out = scene.apply(vec![TxOp::FormatText {
+            widget: WidgetId(1),
+            name: "italic".into(),
+            value: Some("true".into()),
+            range: Some(TextRange::new(6, 11)),
+        }]);
+        assert_eq!(scene.rich_runs_string(WidgetId(1)).unwrap(), "6:11 italic");
+        assert!(out.iter().any(|op| matches!(
+            op,
+            ApplyOp::FormatText { range: Some(_), .. }
+        )), "the arm receives the range");
+        assert_eq!(scene.rich_selection(WidgetId(1)), Some(TextRange::new(3, 3)), "the selection stays");
+        // A block act over a partial range covers its whole paragraphs.
+        scene.apply(vec![TxOp::FormatText {
+            widget: WidgetId(1),
+            name: "block".into(),
+            value: Some("heading1".into()),
+            range: Some(TextRange::new(2, 4)),
+        }]);
+        assert_eq!(scene.rich_runs_string(WidgetId(1)).unwrap(), "0:11 block=heading1|6:11 italic");
+        scene.apply(vec![TxOp::FormatText {
+            widget: WidgetId(1),
+            name: "italic".into(),
+            value: None,
+            range: Some(TextRange::new(6, 8)),
+        }]);
+        assert_eq!(scene.rich_runs_string(WidgetId(1)).unwrap(), "0:11 block=heading1|8:11 italic");
+        // A label takes a ranged inline act, and no block act.
+        let mut scene = Scene::new();
+        scene.apply(rich_label("Héllo"));
+        scene.apply(vec![TxOp::FormatText {
+            widget: WidgetId(1),
+            name: "bold".into(),
+            value: Some("true".into()),
+            range: Some(TextRange::new(0, 6)),
+        }]);
+        assert_eq!(scene.rich_runs_string(WidgetId(1)).unwrap(), "0:6 bold");
+    }
+
+    #[test]
+    #[should_panic(expected = "a label's document is inline only")]
+    fn a_ranged_block_act_on_a_label_is_refused() {
+        let mut scene = Scene::new();
+        scene.apply(rich_label("Title"));
+        scene.apply(vec![TxOp::FormatText {
+            widget: WidgetId(1),
+            name: "block".into(),
+            value: Some("heading1".into()),
+            range: Some(TextRange::new(0, 5)),
         }]);
     }
 

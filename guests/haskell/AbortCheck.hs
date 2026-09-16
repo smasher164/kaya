@@ -2,6 +2,9 @@
 
 import Control.Exception (SomeException, evaluate, try)
 import Control.Monad (unless)
+import qualified Data.ByteString as BS
+import Data.ByteString.Builder (toLazyByteString)
+import qualified Data.ByteString.Lazy as BL
 import Data.List (isInfixOf)
 import System.Exit (exitFailure)
 import System.IO (hPutStrLn, stderr)
@@ -98,5 +101,60 @@ main = do
     Left e ->
       unless ("99" `isInfixOf` show e) $
         failWith ("the unknown edit source was refused without naming it: " ++ show e)
+
+  -- THE RANGED FORMAT ACT (docs/rich-text-plan.md §17). Nothing else
+  -- reads these bytes: the richtext scene drives the SELECTION act, whose
+  -- record differs only in these two words, and a ranged act is echoed by
+  -- nothing, so a sugar that sent ranged 0 would format whatever the user
+  -- had selected with every lane green.
+  let check ok what = unless ok (failWith what)
+  editor <- buildTx app (textarea [Rich True])
+  buildTx app (setDocument app editor (documentOf "one\ntwo\nthree"))
+  let staged what body = do
+        bytes <- BL.toStrict . toLazyByteString . snd <$> stageTx app body
+        let byteAt at = fromIntegral (BS.index bytes at) :: Int
+            word n at = sum [byteAt (at + k) * (256 ^ k) | k <- [0 .. n - 1]]
+        check (BS.length bytes >= 40)
+          (what ++ " staged " ++ show (BS.length bytes)
+             ++ " bytes, too few for one format_text record")
+        check (word 2 4 == fromIntegral W.txKindFormatText)
+          (what ++ " staged record kind " ++ show (word 2 4) ++ ", wanted "
+             ++ show W.txKindFormatText)
+        return (word 4 16, word 4 20, word 8 24, word 8 32)
+      act what body want = do
+        got <- staged what body
+        check (got == want)
+          (what ++ " staged (removed, ranged, start, stop) " ++ show got
+             ++ ", wanted " ++ show want)
+      runsNow = docRuns <$> document app editor
+  act "formatText" (formatText editor "bold" "true") (0, 0, 0, 0)
+  act "unformat" (unformat editor "bold") (1, 0, 0, 0)
+  act "setBlock" (setBlock editor Heading1) (0, 0, 0, 0)
+  runsNow >>= \runs ->
+    check (null runs)
+      ("a SELECTION act moved the fold (" ++ show runs
+         ++ ") — the widget echoes that one back, and the fold moves when "
+         ++ "it arrives")
+  act "formatTextRange" (formatTextRange app editor (4, 7) "italic" "true")
+    (0, 1, 4, 7)
+  runsNow >>= \runs ->
+    check (runs == [Run 4 7 "italic" "true"])
+      ("the fold after formatTextRange holds " ++ show runs
+         ++ ", wanted 4..7 italic=true")
+  -- A block covers the range's whole paragraphs, snapped against the
+  -- FOLD's own text: "one\ntwo\nthree" puts (5, 6) inside 4..7.
+  act "formatTextRange block" (formatTextRange app editor (5, 6) "block" "heading1")
+    (0, 1, 4, 7)
+  runsNow >>= \runs ->
+    check (filter ((== "block") . runName) runs == [Run 4 7 "block" "heading1"])
+      ("the fold after a ranged block act holds " ++ show runs
+         ++ ", wanted 4..7 block=heading1")
+  act "formatTextRange block body" (formatTextRange app editor (5, 6) "block" "body")
+    (1, 1, 4, 7)
+  act "unformatRange" (unformatRange app editor (4, 7) "italic") (1, 1, 4, 7)
+  runsNow >>= \runs ->
+    check (null runs)
+      ("the fold after the two removals holds " ++ show runs
+         ++ ", wanted nothing")
 
   putStrLn "haskell abort check: OK"

@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0x692fe11a5922795an;
+export const SPEC_HASH = 0xe52568620b0ca54en;
 
 export const VALUE_BOOL = 1;
 export const VALUE_I64 = 2;
@@ -732,9 +732,9 @@ export function tx_apply_edit(widget_id: number, start: number, stop: number, co
   return record(TX_APPLY_EDIT, cat(u64(widget_id), u64(start), u64(stop), u32(count), u32(0), enc.values(runs), enc.value(text)));
 }
 
-/** Format a `rich` textarea's CURRENT SELECTION through the widget's own act — what an app's toolbar button sends (docs/rich-text-plan.md R1): `attr` is two Str values, name then value; `removed` 1 takes the attribute off. The widget answers with text_formatted over the range it formatted, which is how the mirror moves; a collapsed selection arms the typing attribute and answers nothing until the next edit. A `block` act covers the selection's whole paragraphs, and `block` with value `body` removes. Refused on a textarea that is not `rich` and for a name outside wire::RICH_ATTRS. */
-export function tx_format_text(widget_id: number, removed: number, attr: readonly WireValue[]): Uint8Array {
-  return record(TX_FORMAT_TEXT, cat(u64(widget_id), u32(removed), u32(0), enc.values(attr)));
+/** Format a `rich` textarea's CURRENT SELECTION through the widget's own act — what an app's toolbar button sends (docs/rich-text-plan.md R1): `attr` is two Str values, name then value; `removed` 1 takes the attribute off. `ranged` 1 formats `start..stop` (UTF-8 bytes) INSTEAD of the selection, which stays where it is: a document write, echoed by nothing, legal on a rich label too (docs/rich-text-plan.md §17, the notes demo's remote mark). The widget answers with text_formatted over the range it formatted, which is how the mirror moves; a collapsed selection arms the typing attribute and answers nothing until the next edit. A `block` act covers the selection's whole paragraphs, and `block` with value `body` removes. Refused on a textarea that is not `rich` and for a name outside wire::RICH_ATTRS. */
+export function tx_format_text(widget_id: number, removed: number, ranged: number, start: number, stop: number, attr: readonly WireValue[]): Uint8Array {
+  return record(TX_FORMAT_TEXT, cat(u64(widget_id), u32(removed), u32(ranged), u64(start), u64(stop), enc.values(attr)));
 }
 
 /** A civil date as the wire's I64: year * 10000 + month * 100 + day. */

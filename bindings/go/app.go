@@ -1545,12 +1545,36 @@ func (tx *Tx) ApplyEdit(w Widget, e Edit) {
 // is armed for the next keystroke instead. value is "true" for a flag,
 // the URL for link.
 func (tx *Tx) Format(w Widget, name, value string) {
-	tx.emit(TxFormatText(w.id, 0, []any{name, value}))
+	tx.emit(TxFormatText(w.id, 0, 0, 0, 0, []any{name, value}))
 }
 
 // Unformat takes an attribute off the widget's current selection.
 func (tx *Tx) Unformat(w Widget, name string) {
-	tx.emit(TxFormatText(w.id, 1, []any{name, ""}))
+	tx.emit(TxFormatText(w.id, 1, 0, 0, 0, []any{name, ""}))
+}
+
+// FormatRange puts one attribute over a BYTE RANGE of the document and
+// leaves the selection where the user put it: a document write like
+// ApplyEdit, echoed by nothing, heard by no App.OnFormat, and legal on a
+// rich label (docs/rich-text-plan.md §17). A block act covers the range's
+// whole paragraphs.
+func (tx *Tx) FormatRange(w Widget, r TextRange, name, value string) {
+	r.check("FormatRange", w)
+	r = tx.app.rangedActBounds(w.id, r, name)
+	removed, word := name == "block" && value == "body", uint32(0)
+	if removed {
+		value, word = "", 1
+	}
+	tx.app.absorbFormat(w.id, r.Start, r.End, name, value, removed)
+	tx.emit(TxFormatText(w.id, word, 1, uint64(r.Start), uint64(r.End), []any{name, value}))
+}
+
+// UnformatRange is FormatRange's removal.
+func (tx *Tx) UnformatRange(w Widget, r TextRange, name string) {
+	r.check("UnformatRange", w)
+	r = tx.app.rangedActBounds(w.id, r, name)
+	tx.app.absorbFormat(w.id, r.Start, r.End, name, "", true)
+	tx.emit(TxFormatText(w.id, 1, 1, uint64(r.Start), uint64(r.End), []any{name, ""}))
 }
 
 // SetBlock makes the selection's paragraphs kind; Body clears.
@@ -5375,6 +5399,22 @@ func (a *App) absorbEdit(widget uint64, start, end int, inserted string, runs []
 // continuation byte.
 func utf8Boundary(s string, at int) bool {
 	return at == len(s) || s[at]&0xC0 != 0x80
+}
+
+// rangedActBounds is a ranged act's range in the fold's text: a block
+// covers the whole paragraphs it touches, as the core snaps it
+// (docs/rich-text-plan.md §17).
+func (a *App) rangedActBounds(widget uint64, r TextRange, name string) TextRange {
+	if name != "block" {
+		return r
+	}
+	text := a.documents[widget].Text
+	start, stop := min(r.Start, len(text)), min(r.End, len(text))
+	paraEnd := len(text)
+	if at := strings.IndexByte(text[stop:], '\n'); at >= 0 {
+		paraEnd = stop + at
+	}
+	return TextRange{Start: strings.LastIndexByte(text[:start], '\n') + 1, End: paraEnd}
 }
 
 // absorbFormat puts one attribute over a range, or takes it off,

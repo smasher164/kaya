@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x692fe11a5922795a
+specHash = 0xe52568620b0ca54e
 
 valueBool :: Word32
 valueBool = 1
@@ -956,9 +956,9 @@ txSetRichText widgetId count runs text = wireRecord txKindSetRichText (word64LE 
 txApplyEdit :: Word64 -> Word64 -> Word64 -> Word32 -> [Value] -> Value -> Builder
 txApplyEdit widgetId start stop count runs text = wireRecord txKindApplyEdit (word64LE widgetId <> word64LE start <> word64LE stop <> word32LE count <> word32LE 0 <> encodeValues runs <> encodeValue text)
 
--- Format a `rich` textarea's CURRENT SELECTION through the widget's own act — what an app's toolbar button sends (docs/rich-text-plan.md R1): `attr` is two Str values, name then value; `removed` 1 takes the attribute off. The widget answers with text_formatted over the range it formatted, which is how the mirror moves; a collapsed selection arms the typing attribute and answers nothing until the next edit. A `block` act covers the selection's whole paragraphs, and `block` with value `body` removes. Refused on a textarea that is not `rich` and for a name outside wire::RICH_ATTRS.
-txFormatText :: Word64 -> Word32 -> [Value] -> Builder
-txFormatText widgetId removed attr = wireRecord txKindFormatText (word64LE widgetId <> word32LE removed <> word32LE 0 <> encodeValues attr)
+-- Format a `rich` textarea's CURRENT SELECTION through the widget's own act — what an app's toolbar button sends (docs/rich-text-plan.md R1): `attr` is two Str values, name then value; `removed` 1 takes the attribute off. `ranged` 1 formats `start..stop` (UTF-8 bytes) INSTEAD of the selection, which stays where it is: a document write, echoed by nothing, legal on a rich label too (docs/rich-text-plan.md §17, the notes demo's remote mark). The widget answers with text_formatted over the range it formatted, which is how the mirror moves; a collapsed selection arms the typing attribute and answers nothing until the next edit. A `block` act covers the selection's whole paragraphs, and `block` with value `body` removes. Refused on a textarea that is not `rich` and for a name outside wire::RICH_ATTRS.
+txFormatText :: Word64 -> Word32 -> Word32 -> Word64 -> Word64 -> [Value] -> Builder
+txFormatText widgetId removed ranged start stop attr = wireRecord txKindFormatText (word64LE widgetId <> word32LE removed <> word32LE ranged <> word64LE start <> word64LE stop <> encodeValues attr)
 
 -- A civil date as the wire's I64: year * 10000 + month * 100 + day.
 packDate :: Int -> Int -> Int -> Int64

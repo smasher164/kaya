@@ -12467,9 +12467,11 @@ own_undo (R6), since a CRDT app is the one that turns the native tier off.
 BUILT 2026-09-15, the Rust half (docs/rich-text-plan.md §16): guests/rust/notes.rs
 and tools/scenes/notes.steps on all five lanes, automerge 0.11.0 as the
 examples' dependency, the peer a fork of the local document, undo a walk
-over heads. OPEN: the remote MARK step — a peer's bold is a range-addressed
-format and `format_text` acts over the selection; needs an optional range
-on the act (ruling asked) — and the Go and JS halves.
+over heads. The remote MARK step: RULED 2026-09-15 and built as the ranged
+format act (docs/rich-text-plan.md §17, `format_range`/`unformat_range` in
+nine), the demo's peer steps 3 and 4. OPEN: the Go and JS halves (the
+ledger's L half; automerge-go and @automerge/automerge 3.x on the desktop
+lanes).
 KEY: notes demo, automerge, format_range, remote mark, peer fork.
 
 ## WATCH — the iOS dark canvas leg read LIGHT pixels under a matrix, once (first sighting 2026-09-14)

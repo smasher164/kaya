@@ -999,6 +999,109 @@ fn rich_format_selection(
     None
 }
 
+/// A ranged act on a label's table (docs/rich-text-plan.md §17), merged per
+/// attribute the way the core's `normalize` does — nothing merges a label's
+/// adjacent spans for it, and the corroboration read compares the two.
+fn format_label_runs(
+    held: &[crate::protocol::NativeRun], from: u64, to: u64, name: &str, value: Option<&str>,
+) -> Vec<crate::protocol::NativeRun> {
+    let mut cut: Vec<crate::protocol::NativeRun> = Vec::new();
+    for run in held {
+        if run.name != name || run.end <= from || run.start >= to {
+            cut.push(run.clone());
+            continue;
+        }
+        if run.start < from {
+            cut.push(crate::protocol::NativeRun { end: from, ..run.clone() });
+        }
+        if run.end > to {
+            cut.push(crate::protocol::NativeRun { start: to, ..run.clone() });
+        }
+    }
+    if let Some(value) = value {
+        cut.push(crate::protocol::NativeRun {
+            start: from,
+            end: to,
+            name: name.to_owned(),
+            value: value.to_owned(),
+        });
+    }
+    cut.retain(|run| run.start < run.end);
+    let names: BTreeSet<String> = cut.iter().map(|run| run.name.clone()).collect();
+    let mut out: Vec<crate::protocol::NativeRun> = Vec::new();
+    for name in names {
+        let mut group: Vec<crate::protocol::NativeRun> =
+            cut.iter().filter(|run| run.name == name).cloned().collect();
+        group.sort_by_key(|run| run.start);
+        let mut merged: Vec<crate::protocol::NativeRun> = Vec::new();
+        for run in group {
+            match merged.last_mut() {
+                Some(last) if last.end == run.start && last.value == run.value => {
+                    last.end = run.end;
+                }
+                _ => merged.push(run),
+            }
+        }
+        out.extend(merged);
+    }
+    out.sort_by(|a, b| (a.start, &a.name).cmp(&(b.start, &b.name)));
+    out
+}
+
+/// The ranged act (docs/rich-text-plan.md §17): the attribute over `range`,
+/// the selection untouched and nothing reported. None, or what refused.
+fn rich_format_range(
+    core: &mut CoreState, id: WidgetId, range: crate::protocol::NativeRange, name: &str,
+    value: &str, removed: bool,
+) -> Option<String> {
+    use gtk4::prelude::TextBufferExt;
+    // `body` is the block attribute taken off (docs/rich-text-plan.md §7).
+    let removed = removed || (name == "block" && value == "body");
+    // A LABEL HAS NO BUFFER (docs/rich-text-plan.md §15): its table is drawn.
+    if let Some(NativeWidget::Label(label)) = core.widgets.get(&id) {
+        let label = label.clone();
+        let held = core.label_runs.remove(&id.0).unwrap_or_default();
+        let next =
+            format_label_runs(&held, range.start, range.stop, name, (!removed).then_some(value));
+        draw_rich_label(&label, &label.text().to_string(), &next);
+        core.label_runs.insert(id.0, next);
+        return None;
+    }
+    let buffer = match core.widgets.get(&id) {
+        Some(NativeWidget::Textarea(_, view)) => view.buffer(),
+        _ => return Some(format!("widget {} is no textarea", id.0)),
+    };
+    if !core.rich.borrow().contains(&id.0) {
+        return Some(format!("widget {} is not a rich textarea", id.0));
+    }
+    // THE UNIT ASSERTION, `highlight_ranges`' own: a byte offset that reached
+    // here unconverted indexes a LONGER string, and `buffer_offset` clamps, so
+    // the wrong answer would be silent.
+    assert!(
+        range.stop <= buffer.char_count() as u64,
+        "kaya: format_text on {id:?}: offset {} is past the buffer's {} CODE POINTS — \
+         GTK counts code points and the core converts byte offsets before lowering \
+         (scene.rs native_offset); an unconverted byte offset looks exactly like this",
+        range.stop,
+        buffer.char_count()
+    );
+    let raw = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).to_string();
+    let start = buffer.iter_at_offset(buffer_offset(&raw, range.start));
+    let stop = buffer.iter_at_offset(buffer_offset(&raw, range.stop));
+    // One value per attribute over the range, as the selection act spells it.
+    for (tag, tag_name) in rich_tags(&buffer) {
+        if rich_tag_attr_name(&tag_name).as_deref() == Some(name) {
+            buffer.remove_tag(&tag, &start, &stop);
+        }
+    }
+    if !removed {
+        let links = core.rich_links.entry(id.0).or_default();
+        let tag = rich_tag(&buffer, links, name, value);
+        buffer.apply_tag(&tag, &start, &stop);
+    }
+    None
+}
+
 /// D2's drop, in the buffer's own `changed` handler — the one place on this
 /// backend that cannot be late. A COMPARE rather than a blanket drop:
 /// `apply_tag` fires no `changed` (measured — 20 full re-declare cycles
@@ -10884,11 +10987,16 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             buffer.select_range(&ins, &bound);
         }
         // The widget's own act over its CURRENT selection — the path the
-        // harness's `format` verb shares (docs/rich-text-plan.md §7).
-        ApplyOp::FormatText { id, name, value } => {
+        // harness's `format` verb shares (docs/rich-text-plan.md §7) — or the
+        // silent document write of §17 when a range came with it.
+        ApplyOp::FormatText { id, name, value, range } => {
             let removed = value.is_none();
             let value = value.unwrap_or_default();
-            if let Some(why) = rich_format_selection(core, id, &name, &value, removed) {
+            let why = match range {
+                Some(range) => rich_format_range(core, id, range, &name, &value, removed),
+                None => rich_format_selection(core, id, &name, &value, removed),
+            };
+            if let Some(why) = why {
                 kaya_diag!("KAYA_DIAG format_text refused: {why}");
             }
         }

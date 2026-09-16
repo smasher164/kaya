@@ -1334,12 +1334,51 @@ let apply_edit (Widget id) e =
    instead. [value] is "true" for a flag, the URL for [link]. *)
 let format (Widget id) name value =
   emit (the_tx ())
-    (Kaya_wire.tx_format_text id 0 [ Kaya_wire.Str name; Kaya_wire.Str value ])
+    (Kaya_wire.tx_format_text id 0 0 0L 0L
+       [ Kaya_wire.Str name; Kaya_wire.Str value ])
 
 (* Take an attribute off the widget's current selection. *)
 let unformat (Widget id) name =
   emit (the_tx ())
-    (Kaya_wire.tx_format_text id 1 [ Kaya_wire.Str name; Kaya_wire.Str "" ])
+    (Kaya_wire.tx_format_text id 1 0 0L 0L
+       [ Kaya_wire.Str name; Kaya_wire.Str "" ])
+
+(* A ranged act's range in the fold's text: a [block] covers the whole
+   paragraphs it touches, as the core snaps it. *)
+let ranged_act_bounds app id (start, stop) name =
+  if name <> "block" then (start, stop)
+  else
+    let text = (the_document app id).d_text in
+    let len = String.length text in
+    let start = min start len and stop = min stop len in
+    let rec back i = if i <= 0 then 0 else if text.[i - 1] = '\n' then i else back (i - 1) in
+    let rec forward i = if i >= len then len else if text.[i] = '\n' then i else forward (i + 1) in
+    (back start, forward stop)
+
+(* One attribute over a BYTE RANGE of the document, the selection left
+   where it is: a document write, echoed by nothing, legal on a rich
+   label, and the fold moves here as [apply_edit]'s does
+   (docs/rich-text-plan.md §17). A [block] covers the range's whole
+   paragraphs, and [block] with "body" takes the kind off. *)
+let format_range (Widget id) range name value =
+  let tx = the_tx () in
+  let start, stop = ranged_act_bounds tx.app id range name in
+  let value = if name = "block" && value = "body" then None else Some value in
+  absorb_format tx.app id (start, stop) name value;
+  emit tx
+    (Kaya_wire.tx_format_text id
+       (if Option.is_none value then 1 else 0)
+       1 (Int64.of_int start) (Int64.of_int stop)
+       [ Kaya_wire.Str name; Kaya_wire.Str (Option.value value ~default:"") ])
+
+(* [format_range]'s removal. *)
+let unformat_range (Widget id) range name =
+  let tx = the_tx () in
+  let start, stop = ranged_act_bounds tx.app id range name in
+  absorb_format tx.app id (start, stop) name None;
+  emit tx
+    (Kaya_wire.tx_format_text id 1 1 (Int64.of_int start) (Int64.of_int stop)
+       [ Kaya_wire.Str name; Kaya_wire.Str "" ])
 
 (* Make the selection's paragraphs [kind]; [Body] clears. *)
 let set_block widget kind = format widget "block" (block_name kind)

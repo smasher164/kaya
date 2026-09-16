@@ -5152,12 +5152,36 @@ public final class KayaApp {
          * for link.
          */
         public void format(Widget w, String name, String value) {
-            emit(KayaWire.txFormatText(w.id, 0, new Object[] { name, value }));
+            emit(KayaWire.txFormatText(w.id, 0, 0, 0, 0, new Object[] { name, value }));
         }
 
         /** Take an attribute off the widget's current selection. */
         public void unformat(Widget w, String name) {
-            emit(KayaWire.txFormatText(w.id, 1, new Object[] { name, "" }));
+            emit(KayaWire.txFormatText(w.id, 1, 0, 0, 0, new Object[] { name, "" }));
+        }
+
+        /**
+         * One attribute over a BYTE RANGE of the document, the selection
+         * left where it is: a document write, echoed by nothing, legal on
+         * a rich label (docs/rich-text-plan.md §17). A {@code "block"}
+         * name covers the range's whole paragraphs.
+         */
+        public void formatRange(Widget w, TextRange range, String name, String value) {
+            // A silent document write moves the fold, as applyEdit does
+            // (docs/rich-text-plan.md §17).
+            TextRange at = rangedActBounds(w.id, range, name);
+            String mark = name.equals("block") && "body".equals(value) ? null : value;
+            absorbFormat(w.id, new Format(at.start, at.stop, name, mark));
+            emit(KayaWire.txFormatText(w.id, mark == null ? 1 : 0, 1, at.start, at.stop,
+                    new Object[] { name, mark == null ? "" : mark }));
+        }
+
+        /** {@link #formatRange}'s removal. */
+        public void unformatRange(Widget w, TextRange range, String name) {
+            TextRange at = rangedActBounds(w.id, range, name);
+            absorbFormat(w.id, new Format(at.start, at.stop, name, null));
+            emit(KayaWire.txFormatText(w.id, 1, 1, at.start, at.stop,
+                    new Object[] { name, "" }));
         }
 
         /** Make the selection's paragraphs {@code kind};
@@ -7193,6 +7217,35 @@ public final class KayaApp {
      * continuation byte. */
     private static boolean boundary(byte[] utf8, long at) {
         return at == utf8.length || (utf8[(int) at] & 0xC0) != 0x80;
+    }
+
+    /** A ranged act's range in the fold's text: a {@code block} covers the
+     * whole paragraphs it touches, as the core snaps it
+     * (docs/rich-text-plan.md §17). */
+    private TextRange rangedActBounds(long widget, TextRange range, String name) {
+        if (!name.equals("block")) {
+            return range;
+        }
+        Document doc = documents.get(widget);
+        byte[] utf8 = (doc == null ? "" : doc.content)
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        long start = Math.min(range.start, utf8.length);
+        long stop = Math.min(range.stop, utf8.length);
+        long paraStart = 0;
+        for (long at = start - 1; at >= 0; at--) {
+            if (utf8[(int) at] == '\n') {
+                paraStart = at + 1;
+                break;
+            }
+        }
+        long paraEnd = utf8.length;
+        for (long at = stop; at < utf8.length; at++) {
+            if (utf8[(int) at] == '\n') {
+                paraEnd = at;
+                break;
+            }
+        }
+        return TextRange.ofBytes(paraStart, paraEnd);
     }
 
     /** One delivered format: put the attribute over the range or take it

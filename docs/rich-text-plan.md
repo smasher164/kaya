@@ -709,11 +709,66 @@ remote-mark step is held until the act takes an optional range — `start`
 and `end` on `format_text`, absent meaning the selection as today — a
 spec change with nine sugar twins (`format_range`), ruling asked
 2026-09-15. Until then the app counts the marks it could not apply
-(`marks <n>` on the status line), which the scene holds at 0.
+(`marks <n>` on the status line), which the scene holds at 0. RULED
+2026-09-15 and built as §17: the demo applies the peer's marks now.
 
 Landed as a4b10516 and bfe1a503; the matrix on that tree ALL PASS on all
 five lanes, 1,807 legs (mac 468, linux 773, windows 281, ios 138, android
 147) in 1220s.
+
+## 17. The ranged format act (2026-09-15, the maintainer's ruling)
+
+`format_text` carries an optional range: `ranged` 0 is the act as before,
+over the widget's own selection, reported by the arm through
+kaya_text_formatted and delivered to the app as `text_formatted`;
+`ranged` 1 formats `start..stop` (UTF-8 bytes on the transaction, the
+backend's native unit on the apply record) INSTEAD of the selection,
+which stays where the user left it — a DOCUMENT WRITE like apply_edit:
+the core moves its mirror before the apply goes out (a `block` covering
+the range's whole paragraphs, `body` the removal), the arm applies the
+attribute over the range and reports NOTHING, and nothing is echoed. A
+rich LABEL takes a ranged act (its document is inline only, so a block
+act on one is refused as set_document's is); the selection act stays
+refused on a label. The record's spare word became `ranged` and `start`
+and `stop` follow it (`stop`, since `end` is OCaml's keyword and the
+generator refuses it); the spec hash moved.
+
+The sugar: `format_range(widget, range, name, value)` and
+`unformat_range(widget, range, name)` beside `format`/`unformat` in all
+nine, spelled the way each binding spells the selection act
+(check-sugar-surface's two new write rows); `set_block` keeps its
+selection form, a ranged block act being `format_range(w, r, "block",
+kind)`. AND THE BINDING'S OWN FOLD FOLLOWS IT, as it follows apply_edit
+and set_document: a silent document write that the fold ignored would
+leave `document()` missing the mark (the Python fan-out's observation),
+so every binding absorbs the ranged act into its Document when it sends
+it, a `block` snapped to whole paragraphs as the core snaps it. The notes
+scene holds the fold as a fourth view (label#2) beside the widget, the
+core and automerge. The arms: each backend's apply decoder reads the new layout and
+takes a ranged path — the mac and iOS over the storage when the view is
+up, else over an attributed document built from the node's own runs (a
+label's), the runs read back through the same reader the corroboration
+uses; GTK, WinUI and Compose over their run tables and displays.
+
+Two walls the fan-out asked for: Compose's displays re-derive from a
+generation, so a run-table write without its `richSeq` bump leaves the
+picture stale while `expect_runs`, which reads the table, stays green —
+tools/check-compose-state.py pairs every `richRuns` write with a bump in
+the same body, one watched negative. And no scene drives a ranged act at
+a rich LABEL yet (the core's unit test and each arm's label branch stand
+alone); the richlabel guests take one as a follow-up.
+
+What asked for it: the notes demo's remote mark (§16). A peer's Mark
+patch is a range, and applying it through the selection act meant moving
+the user's selection or rewriting the document. With the ranged act the
+demo's peer steps 3 and 4 — an italic over a range the user is not
+touching, the bold taken off the first two bytes — arrive as
+format_range/unformat_range, and the scene holds the widget, the core and
+the app's automerge view equal after each. The italic the peer put on
+"bc" covers the local `d` as well: the local redo of `d` and the peer's
+mark are concurrent, and automerge's expand rule takes a concurrent insert
+at a mark's end into the mark — measured, the CRDT's truth, frozen in the
+scene.
 
 ## 5. What this plan does not do
 

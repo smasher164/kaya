@@ -10,7 +10,7 @@ value types.
 import struct
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x692fe11a5922795a
+SPEC_HASH = 0xe52568620b0ca54e
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -643,9 +643,9 @@ def tx_apply_edit(widget_id, start, stop, count, runs, text):
     """ONE edit into a `rich` textarea, the app's own or a collaborator's (docs/rich-text-plan.md R1, R5): replace `start..end` (UTF-8 byte offsets into the widget's current text, validated as a range is) with the payload text, whose attribute runs are `runs` in fours as set_rich_text's, with offsets RELATIVE to the inserted text. Keeps the selection: unchanged before the edit, shifted after it, a caret at `start` ending AFTER the insertion. Echoes nothing and never resets undo. QUEUED while an input-method composition is live and applied when it ends, since a refusal would drop a collaborator's edit."""
     return record(TX_APPLY_EDIT, struct.pack("<Q", widget_id) + struct.pack("<Q", start) + struct.pack("<Q", stop) + struct.pack("<I", count) + struct.pack("<I", 0) + _enc.values(runs) + _enc.value(text))
 
-def tx_format_text(widget_id, removed, attr):
-    """Format a `rich` textarea's CURRENT SELECTION through the widget's own act — what an app's toolbar button sends (docs/rich-text-plan.md R1): `attr` is two Str values, name then value; `removed` 1 takes the attribute off. The widget answers with text_formatted over the range it formatted, which is how the mirror moves; a collapsed selection arms the typing attribute and answers nothing until the next edit. A `block` act covers the selection's whole paragraphs, and `block` with value `body` removes. Refused on a textarea that is not `rich` and for a name outside wire::RICH_ATTRS."""
-    return record(TX_FORMAT_TEXT, struct.pack("<Q", widget_id) + struct.pack("<I", removed) + struct.pack("<I", 0) + _enc.values(attr))
+def tx_format_text(widget_id, removed, ranged, start, stop, attr):
+    """Format a `rich` textarea's CURRENT SELECTION through the widget's own act — what an app's toolbar button sends (docs/rich-text-plan.md R1): `attr` is two Str values, name then value; `removed` 1 takes the attribute off. `ranged` 1 formats `start..stop` (UTF-8 bytes) INSTEAD of the selection, which stays where it is: a document write, echoed by nothing, legal on a rich label too (docs/rich-text-plan.md §17, the notes demo's remote mark). The widget answers with text_formatted over the range it formatted, which is how the mirror moves; a collapsed selection arms the typing attribute and answers nothing until the next edit. A `block` act covers the selection's whole paragraphs, and `block` with value `body` removes. Refused on a textarea that is not `rich` and for a name outside wire::RICH_ATTRS."""
+    return record(TX_FORMAT_TEXT, struct.pack("<Q", widget_id) + struct.pack("<I", removed) + struct.pack("<I", ranged) + struct.pack("<Q", start) + struct.pack("<Q", stop) + _enc.values(attr))
 
 
 def tx_set_text(widget_id, text):

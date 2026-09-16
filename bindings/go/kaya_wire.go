@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x692fe11a5922795a
+	SpecHash uint64 = 0xe52568620b0ca54e
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -950,12 +950,14 @@ func TxApplyEdit(widgetId uint64, start uint64, stop uint64, count uint32, runs 
 	return endRecord(b)
 }
 
-// TxFormatText: Format a `rich` textarea's CURRENT SELECTION through the widget's own act — what an app's toolbar button sends (docs/rich-text-plan.md R1): `attr` is two Str values, name then value; `removed` 1 takes the attribute off. The widget answers with text_formatted over the range it formatted, which is how the mirror moves; a collapsed selection arms the typing attribute and answers nothing until the next edit. A `block` act covers the selection's whole paragraphs, and `block` with value `body` removes. Refused on a textarea that is not `rich` and for a name outside wire::RICH_ATTRS.
-func TxFormatText(widgetId uint64, removed uint32, attr []any) []byte {
+// TxFormatText: Format a `rich` textarea's CURRENT SELECTION through the widget's own act — what an app's toolbar button sends (docs/rich-text-plan.md R1): `attr` is two Str values, name then value; `removed` 1 takes the attribute off. `ranged` 1 formats `start..stop` (UTF-8 bytes) INSTEAD of the selection, which stays where it is: a document write, echoed by nothing, legal on a rich label too (docs/rich-text-plan.md §17, the notes demo's remote mark). The widget answers with text_formatted over the range it formatted, which is how the mirror moves; a collapsed selection arms the typing attribute and answers nothing until the next edit. A `block` act covers the selection's whole paragraphs, and `block` with value `body` removes. Refused on a textarea that is not `rich` and for a name outside wire::RICH_ATTRS.
+func TxFormatText(widgetId uint64, removed uint32, ranged uint32, start uint64, stop uint64, attr []any) []byte {
 	b := beginRecord(txFormatText)
 	b = binary.LittleEndian.AppendUint64(b, widgetId)
 	b = binary.LittleEndian.AppendUint32(b, removed)
-	b = binary.LittleEndian.AppendUint32(b, 0)
+	b = binary.LittleEndian.AppendUint32(b, ranged)
+	b = binary.LittleEndian.AppendUint64(b, start)
+	b = binary.LittleEndian.AppendUint64(b, stop)
 	b = encodeValues(b, attr)
 	return endRecord(b)
 }

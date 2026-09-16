@@ -2349,6 +2349,37 @@ final class KayaApp {
         documents[widget] = doc
     }
 
+    /// A ranged act's range in the fold's text: a `block` covers the whole
+    /// paragraphs it touches, as the core snaps it
+    /// (docs/rich-text-plan.md §17).
+    fileprivate func rangedActBounds(
+        _ widget: UInt64, _ range: Range<Int>, _ name: String
+    ) -> Range<Int> {
+        guard name == "block" else { return range }
+        let bytes = Array((documents[widget]?.text ?? "").utf8)
+        let start = min(range.lowerBound, bytes.count)
+        let stop = min(range.upperBound, bytes.count)
+        var paraStart = 0
+        var back = start - 1
+        while back >= 0 {
+            if bytes[back] == 0x0A {
+                paraStart = back + 1
+                break
+            }
+            back -= 1
+        }
+        var paraEnd = bytes.count
+        var ahead = stop
+        while ahead < bytes.count {
+            if bytes[ahead] == 0x0A {
+                paraEnd = ahead
+                break
+            }
+            ahead += 1
+        }
+        return paraStart..<paraEnd
+    }
+
     /// One delivered format act, the core's `absorb_format`.
     fileprivate func absorbFormat(
         _ widget: UInt64, _ start: Int, _ end: Int, _ name: String, _ value: String?
@@ -3490,12 +3521,35 @@ final class KayaAppTx {
     /// armed for the next keystroke instead. `value` is "true" for a
     /// flag, the URL for `link`.
     func format(_ w: KayaWidget, _ name: String, _ value: String) {
-        tx.formatText(w.id, 0, [.str(name), .str(value)])
+        tx.formatText(w.id, 0, 0, 0, 0, [.str(name), .str(value)])
     }
 
     /// Take an attribute off the widget's current selection.
     func unformat(_ w: KayaWidget, _ name: String) {
-        tx.formatText(w.id, 1, [.str(name), .str("")])
+        tx.formatText(w.id, 1, 0, 0, 0, [.str(name), .str("")])
+    }
+
+    /// One attribute over a BYTE RANGE of the document, the selection left
+    /// where it is: a document write, echoed by nothing, legal on a rich
+    /// label (docs/rich-text-plan.md §17). A `block` name covers the
+    /// range's whole paragraphs.
+    func formatRange(_ w: KayaWidget, _ range: Range<Int>, _ name: String, _ value: String) {
+        // A silent document write moves the fold, as applyEdit does
+        // (docs/rich-text-plan.md §17).
+        let at = app.rangedActBounds(w.id, range, name)
+        let mark: String? = name == "block" && value == "body" ? nil : value
+        app.absorbFormat(w.id, at.lowerBound, at.upperBound, name, mark)
+        let (start, stop) = kayaRangeOffsets(at)
+        tx.formatText(w.id, mark == nil ? 1 : 0, 1, start, stop,
+                      [.str(name), .str(mark ?? "")])
+    }
+
+    /// `formatRange`'s removal.
+    func unformatRange(_ w: KayaWidget, _ range: Range<Int>, _ name: String) {
+        let at = app.rangedActBounds(w.id, range, name)
+        app.absorbFormat(w.id, at.lowerBound, at.upperBound, name, nil)
+        let (start, stop) = kayaRangeOffsets(at)
+        tx.formatText(w.id, 1, 1, start, stop, [.str(name), .str("")])
     }
 
     /// Make the selection's paragraphs `kind`; `.body` clears.

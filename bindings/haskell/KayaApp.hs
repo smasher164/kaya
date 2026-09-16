@@ -47,6 +47,9 @@ module KayaApp
     newApp,
     post,
     buildTx,
+    -- Exported for guests/haskell's AbortCheck, which reads a ranged
+    -- format act's record back before it is submitted.
+    stageTx,
     submitTx,
     undoableTx,
     undoableTxIn,
@@ -156,6 +159,10 @@ module KayaApp
     applyEdit,
     formatText,
     unformat,
+    -- docs\/rich-text-plan.md §17: the ranged act, a document write
+    -- beside the selection act.
+    formatTextRange,
+    unformatRange,
     setBlock,
     canUndo,
     canRedo,
@@ -2605,11 +2612,57 @@ applyEdit app (Widget n) e = emitBIO $ do
 -- instead. The value is @\"true\"@ for a flag, the URL for @link@.
 formatText :: Widget -> String -> String -> Build ()
 formatText (Widget n) name value =
-  emitB (W.txFormatText n 0 [W.VStr name, W.VStr value])
+  emitB (W.txFormatText n 0 0 0 0 [W.VStr name, W.VStr value])
 
 -- | Take an attribute off the widget's current selection.
 unformat :: Widget -> String -> Build ()
-unformat (Widget n) name = emitB (W.txFormatText n 1 [W.VStr name, W.VStr ""])
+unformat (Widget n) name =
+  emitB (W.txFormatText n 1 0 0 0 [W.VStr name, W.VStr ""])
+
+-- A ranged act's range in the fold's text: a @block@ covers the whole
+-- paragraphs it touches, as the core snaps it.
+rangedActBounds :: App -> Word64 -> (Int, Int) -> String -> IO (Int, Int)
+rangedActBounds app n (start, stop) name
+  | name /= "block" = return (start, stop)
+  | otherwise = do
+      docs <- readIORef (appDocuments app)
+      let bytes = utf8Bytes (maybe "" docText (Map.lookup n docs))
+          len = length bytes
+          from = min start len
+          to = min stop len
+          paraStart = maybe 0 (from -) (elemIndex 10 (reverse (take from bytes)))
+          paraEnd = maybe len (to +) (elemIndex 10 (drop to bytes))
+      return (paraStart, paraEnd)
+
+-- | One attribute over a BYTE RANGE of the document, the selection left
+-- where it is: a document write, echoed by nothing, legal on a rich
+-- label, and the fold moves here as 'applyEdit' moves it
+-- (docs\/rich-text-plan.md §17). A @block@ covers the range's whole
+-- paragraphs, and @block@ with @\"body\"@ takes the kind off.
+formatTextRange :: App -> Widget -> (Int, Int) -> String -> String -> Build ()
+formatTextRange app (Widget n) range name value = emitBIO $ do
+  (start, stop) <- rangedActBounds app n range name
+  let painted = if name == "block" && value == "body" then Nothing else Just value
+  absorbFormat app n (Format start stop name painted)
+  return
+    ( W.txFormatText
+        n
+        (maybe 1 (const 0) painted)
+        1
+        (fromIntegral start)
+        (fromIntegral stop)
+        [W.VStr name, W.VStr (fromMaybe "" painted)]
+    )
+
+-- | The removal 'formatTextRange' pairs with.
+unformatRange :: App -> Widget -> (Int, Int) -> String -> Build ()
+unformatRange app (Widget n) range name = emitBIO $ do
+  (start, stop) <- rangedActBounds app n range name
+  absorbFormat app n (Format start stop name Nothing)
+  return
+    ( W.txFormatText n 1 1 (fromIntegral start) (fromIntegral stop)
+        [W.VStr name, W.VStr ""]
+    )
 
 -- | Make the selection's paragraphs @kind@; 'Body' clears.
 setBlock :: Widget -> Block -> Build ()
@@ -4525,12 +4578,12 @@ requireAppThread = do
         else return ()
     Nothing -> return ()
 
--- | Run a Build to records, submit them as one transaction, and return
--- the block's result. The model folds inside the Build's pure state and
--- is stored back here alongside the submit — a transaction that never
--- reaches this point (its Build threw) leaves the model as committed.
-buildTx :: App -> Build a -> IO a
-buildTx app (Build f) = do
+-- | 'buildTx' up to the transaction's bytes, submitting nothing.
+-- Exported for guests/haskell's AbortCheck, which reads a ranged format
+-- act's record back (docs\/rich-text-plan.md §17) — 'buildTx' is this
+-- plus the submit, so the check reads the path an app takes.
+stageTx :: App -> Build a -> IO (a, Builder)
+stageTx app (Build f) = do
   requireAppThread
   counters <- readIORef (appCounters app)
   (model, children) <- readIORef (appModel app)
@@ -4554,6 +4607,16 @@ buildTx app (Build f) = do
   -- submit; a Build that threw never reaches here, abandoning them
   -- with its records.
   mapM_ (register app) (reverse (bPending s))
+  return (a, records)
+
+-- | Run a Build to records, submit them as one transaction, and return
+-- the block's result. The model folds inside the Build's pure state and
+-- is stored back in 'stageTx' alongside the submit — a transaction that
+-- never reaches this point (its Build threw) leaves the model as
+-- committed.
+buildTx :: App -> Build a -> IO a
+buildTx app b = do
+  (a, records) <- stageTx app b
   -- The pending link-route declarations go FIRST, in declaration order
   -- (docs/app-links-plan.md §4; Rust's PENDING_ROUTES drained head-first
   -- by Tx::commit is the shape).

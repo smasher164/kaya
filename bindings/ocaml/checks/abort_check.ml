@@ -721,4 +721,84 @@ let () =
       fail "edit source 99 read as %S instead of being refused"
         (edit_source_name s));
 
+  (* THE RANGED FORMAT ACT (docs/rich-text-plan.md §17). Nothing else
+     reads these bytes: the richtext scene drives the SELECTION act, whose
+     record is identical but for these two words, and a ranged act is
+     echoed by nothing, so a sugar that sent ranged 0 would format
+     whatever the user had selected with every lane green. *)
+  let format_records call =
+    build app (fun () ->
+        let tx = the_tx () in
+        let before = List.length tx.records in
+        call ();
+        List.filter
+          (fun r -> rec_kind r = Kaya_wire.tx_kind_format_text)
+          (queued_since tx before))
+  in
+  let fmt what call want =
+    match format_records call with
+    | [ r ] ->
+        let got = (rec_u32 r 16, rec_u32 r 20, rec_u64 r 24, rec_u64 r 32) in
+        if got <> want then begin
+          let rm, rg, start, stop = got in
+          let wrm, wrg, wstart, wstop = want in
+          fail
+            "%s queued removed %d ranged %d %Ld..%Ld, wanted removed %d \
+             ranged %d %Ld..%Ld"
+            what rm rg start stop wrm wrg wstart wstop
+        end
+    | l ->
+        fail "%s queued %d format_text records, wanted one" what
+          (List.length l)
+  in
+  let editor = build app (fun () -> textarea ~rich:true ()) in
+  let fold () = (build app (fun () -> document editor)).d_runs in
+  let show_runs runs =
+    String.concat ", "
+      (List.map
+         (fun r ->
+           Printf.sprintf "%d..%d %s=%s" r.r_start r.r_stop r.r_name r.r_value)
+         runs)
+  in
+  build app (fun () -> set_document editor (Document.create "one\ntwo\nthree"));
+  fmt "format" (fun () -> format editor "bold" "true") (0, 0, 0L, 0L);
+  fmt "unformat" (fun () -> unformat editor "bold") (1, 0, 0L, 0L);
+  fmt "set_block" (fun () -> set_block editor Heading1) (0, 0, 0L, 0L);
+  (match fold () with
+  | [] -> ()
+  | runs ->
+      fail "a SELECTION act moved the fold (%s) — the widget echoes that \
+            one back, and the fold moves when it arrives"
+        (show_runs runs));
+  fmt "format_range"
+    (fun () -> format_range editor (4, 7) "italic" "true")
+    (0, 1, 4L, 7L);
+  (match fold () with
+  | [ { r_start = 4; r_stop = 7; r_name = "italic"; r_value = "true" } ] -> ()
+  | runs ->
+      fail "the fold after format_range holds [%s], wanted 4..7 italic=true"
+        (show_runs runs));
+  (* A [block] covers the range's whole paragraphs, snapped against the
+     FOLD's own text: "one\ntwo\nthree" puts (5, 6) inside 4..7. *)
+  fmt "format_range block"
+    (fun () -> format_range editor (5, 6) "block" "heading1")
+    (0, 1, 4L, 7L);
+  (match List.filter (fun r -> r.r_name = "block") (fold ()) with
+  | [ { r_start = 4; r_stop = 7; r_value = "heading1"; _ } ] -> ()
+  | runs ->
+      fail "the fold after a ranged block act holds [%s], wanted 4..7 \
+            block=heading1"
+        (show_runs runs));
+  fmt "format_range block body"
+    (fun () -> format_range editor (5, 6) "block" "body")
+    (1, 1, 4L, 7L);
+  fmt "unformat_range"
+    (fun () -> unformat_range editor (4, 7) "italic")
+    (1, 1, 4L, 7L);
+  (match fold () with
+  | [] -> ()
+  | runs ->
+      fail "the fold after the two removals holds [%s], wanted nothing"
+        (show_runs runs));
+
   print_endline "ocaml abort check: OK"

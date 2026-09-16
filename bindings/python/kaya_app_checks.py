@@ -3751,6 +3751,78 @@ rich_check("can_undo writes prop 34 and can_redo prop 35, as written",
            kaya.wire.tx_set_can_undo(_owned.id, True) in _own_records
            and kaya.wire.tx_set_can_redo(_owned.id, False) in _own_records)
 
+# THE RANGED ACT (docs/rich-text-plan.md §17): a document write, so the
+# BYTES say `ranged` 1 and carry the range, and the app's own fold takes it
+# HERE — nothing is echoed back to move it. No scene drives format_range,
+# so nothing else in this binding reads either half.
+_PARA = "Héllo world\nSecond line"
+_range_records = []
+kaya.runtime.submit = lambda *recs: _range_records.extend(recs)
+_range_app = kaya.App()
+with _range_app.window(2605):
+    with kaya.column():
+        _ranged = kaya.textarea(rich=True)
+with _range_app.build():
+    _ranged.set_document(kaya.Document(_PARA))
+    _ranged.format_range(range(2, 5), "italic")
+    _ranged.unformat_range((0, 2), "bold")
+    _ranged.format("bold")
+    _ranged.unformat("link")
+kaya.runtime.submit = _real_ship
+
+rich_check("format_range writes ranged 1 with the range's bytes, and "
+           "unformat_range takes the attribute off the same way",
+           kaya.wire.tx_format_text(_ranged.id, 0, 1, 2, 5,
+                                    ["italic", "true"]) in _range_records
+           and kaya.wire.tx_format_text(_ranged.id, 1, 1, 0, 2,
+                                        ["bold", ""]) in _range_records)
+rich_check("the selection act writes ranged 0 and NO range — the two acts "
+           "differ in the bytes alone",
+           kaya.wire.tx_format_text(_ranged.id, 0, 0, 0, 0,
+                                    ["bold", "true"]) in _range_records
+           and kaya.wire.tx_format_text(_ranged.id, 1, 0, 0, 0,
+                                        ["link", ""]) in _range_records)
+rich_check("the app's own Document takes a ranged act AS IT SENDS, since "
+           "nothing is echoed to move it",
+           _spell(_ranged.document().runs) == "2:5 italic")
+
+# A RANGED `block` COVERS THE WHOLE PARAGRAPHS IT TOUCHES, as the core
+# snaps it — on the wire and in the fold alike — and `body` is the removal.
+_range_records.clear()
+kaya.runtime.submit = lambda *recs: _range_records.extend(recs)
+with _range_app.build():
+    _ranged.format_range(range(14, 16), "block", "heading2")
+kaya.runtime.submit = _real_ship
+rich_check("a ranged block act snaps to the paragraph's own bytes, wire "
+           "and fold agreeing",
+           len(_PARA.encode()) == 24
+           and kaya.wire.tx_format_text(_ranged.id, 0, 1, 13, 24,
+                                        ["block", "heading2"])
+           in _range_records
+           and _spell(_ranged.document().runs)
+           == "2:5 italic|13:24 block=heading2")
+_range_records.clear()
+kaya.runtime.submit = lambda *recs: _range_records.extend(recs)
+with _range_app.build():
+    _ranged.format_range(range(14, 16), "block", "body")
+kaya.runtime.submit = _real_ship
+rich_check("a ranged block act with `body` is the REMOVAL: removed 1 on "
+           "the wire and the run gone from the fold",
+           kaya.wire.tx_format_text(_ranged.id, 1, 1, 13, 24, ["block", ""])
+           in _range_records
+           and _spell(_ranged.document().runs) == "2:5 italic")
+
+_ranged_said = ""
+try:
+    with _range_app.build():
+        _ranged.format_range(slice(0, 2), "bold")
+except TypeError as e:
+    _ranged_said = str(e)
+rich_check("format_range takes the binding's own range spelling, refusing "
+           "a slice by name",
+           "format_range" in _ranged_said
+           and "range(start, stop)" in _ranged_said)
+
 # THE RICH LABEL (docs/rich-text-plan.md R8, §15): `rich=` is the LABEL
 # constructor's too, and the prop rides the same record — so the create
 # record is read beside it, since prop 32 on a textarea proves nothing

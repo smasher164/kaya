@@ -207,6 +207,28 @@ def alert_order(code):
     return re.findall(MODEL + r"\.(alert\w+)\s*=(?!=)", code[arm.end():end])
 
 
+def rich_seq_pairs(code, findings, counts):
+    """EVERY `richRuns =` WRITE BUMPS `richSeq` IN THE SAME BODY
+    (docs/rich-text-plan.md §17): both displays re-derive from the
+    generation, so a table written without its bump leaves the picture
+    stale while `expect_runs`, which reads the table, stays green."""
+    writes = 0
+    for m in re.finditer(r"\.richRuns\s*=[^=]", code):
+        writes += 1
+        head = max(code.rfind(k, 0, m.start()) for k in ("\n    fun ", "\nfun ", "\ninternal fun "))
+        if head < 0:
+            findings.append(f"{COMPOSE}:{line_of(code, m.start())}: a richRuns write outside "
+                            "any fun body — the generation pairing cannot be read")
+            continue
+        open_at = code.find("{", head)
+        body = code[open_at:brace_block(code, open_at)]
+        if not re.search(r"richSeq\s*(\+=\s*1|\+\+)", body):
+            findings.append(f"{COMPOSE}:{line_of(code, m.start())} writes richRuns "
+                            "without a richSeq bump in the same body — the run table "
+                            "moves and the picture does not (docs/rich-text-plan.md §17)")
+    counts["rich_writes"] = writes
+
+
 def census(text):
     """The findings for one KayaCompose.kt text, plus the counts the
     verdict prints. A pure function of its input, so the negatives can
@@ -265,6 +287,7 @@ def census(text):
     counts = {"fields": len(fields),
               "state": sum(1 for _l, s in fields.values() if s),
               "composables": len(comps), "reads": reads}
+    rich_seq_pairs(code, bad, counts)
     return bad, counts
 
 
@@ -288,6 +311,10 @@ NEGATIVES = [
      r"(\n\s+)(Text\(KayaSceneModel\.alertCancel\))",
      r"\1val stale = KayaSceneModel.labels.size\1\2",
      "draws from KayaSceneModel.labels, declared plain"),
+    ("a run-table write without its generation bump",
+     r"(node\.richRuns = kayaRichNormalize\(runs\)\n(?:[^\n]*\n){0,3}?)    node\.richSeq \+= 1\n",
+     r"\1",
+     "writes richRuns without a richSeq bump"),
 ]
 for label, pattern, repl, want in NEGATIVES:
     doctored = g.doctor(label, real, pattern, repl)
@@ -300,9 +327,12 @@ g.counted("composable functions", range(counts.get("composables", 0)),
           floor=15)
 g.counted("model reads inside composables", range(counts.get("reads", 0)),
           floor=10)
+g.counted("richRuns writes paired with a generation bump",
+          range(counts.get("rich_writes", 0)), floor=5)
 for line in findings:
     g.finding(line)
 g.verdict(f"{counts['fields']} fields ({counts['state']} state-backed), "
           f"{counts['composables']} composables, {counts['reads']} model "
           f"reads classified, {len(EXEMPT)} exemptions live, the alert "
-          f"ordering held, {len(NEGATIVES)} watched negatives")
+          f"ordering held, {counts['rich_writes']} richRuns writes each "
+          f"bumping richSeq, {len(NEGATIVES)} watched negatives")

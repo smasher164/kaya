@@ -80,6 +80,20 @@ impl Doc {
     }
 }
 
+/// The binding's fold in the core's spelling.
+fn spell_fold(runs: &[kaya::Run]) -> String {
+    runs.iter()
+        .map(|run| {
+            if run.value == "true" {
+                format!("{}:{} {}", run.start, run.end, run.name)
+            } else {
+                format!("{}:{} {}={}", run.start, run.end, run.name, run.value)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
 fn scalar(v: &str) -> ScalarValue {
     if v == "true" { ScalarValue::Boolean(true) } else { ScalarValue::Str(v.into()) }
 }
@@ -183,14 +197,20 @@ fn bridge_format(doc: &mut Doc, act: &kaya::Format) {
         .expect("bridge_format");
 }
 
+/// One remote mark: a range-addressed format (docs/rich-text-plan.md §17).
+struct MarkAct {
+    start: usize,
+    end: usize,
+    name: String,
+    value: Option<String>,
+}
+
 /// The patches between two views of the local document, as the widget's
 /// DOWN messages: SpliceText and DeleteSeq become apply_edit with their
-/// runs. A Mark patch is a range-addressed format, which the protocol's
-/// selection-scoped act cannot carry yet (docs/rich-text-plan.md §16);
-/// it is counted and reported until the range lands.
-fn patches_to_edits(doc: &Doc, before: &[ChangeHash], after: &[ChangeHash]) -> (Vec<kaya::Edit>, usize) {
+/// runs, a Mark patch a ranged format act (docs/rich-text-plan.md §16, §17).
+fn patches_to_edits(doc: &Doc, before: &[ChangeHash], after: &[ChangeHash]) -> (Vec<kaya::Edit>, Vec<MarkAct>) {
     let mut edits = Vec::new();
-    let mut marks = 0;
+    let mut marks = Vec::new();
     for patch in doc.am.diff(before, after) {
         if patch.obj != doc.text {
             continue;
@@ -209,16 +229,37 @@ fn patches_to_edits(doc: &Doc, before: &[ChangeHash], after: &[ChangeHash]) -> (
                 edits.push(edit);
             }
             PatchAction::DeleteSeq { index, length } => edits.push(kaya::Edit::delete(index..index + length)),
-            PatchAction::Mark { .. } => marks += 1,
+            PatchAction::Mark { marks: set } => {
+                for mark in set.iter() {
+                    marks.push(MarkAct {
+                        start: mark.start,
+                        end: mark.end,
+                        name: mark.name().to_string(),
+                        value: scalar_str(mark.value()),
+                    });
+                }
+            }
             _ => {}
         }
     }
     (edits, marks)
 }
 
+/// The marks on the widget, over their ranges, the selection untouched.
+fn apply_marks(tx: &mut kaya::Tx, editor: kaya::WidgetId, marks: &[MarkAct]) {
+    for mark in marks {
+        match &mark.value {
+            Some(value) => tx.format_range(editor, mark.start..mark.end, &mark.name, value),
+            None => tx.unformat_range(editor, mark.start..mark.end, &mark.name),
+        }
+    }
+}
+
 /// The peer's scripted session, one step per click: an insert before the
 /// caret, a deletion before it, a concurrent insert at the caret's own
-/// offset (automerge's order by actor decides, the same on every lane).
+/// offset (automerge's order by actor decides, the same on every lane), an
+/// italic mark over a range the user is not touching, and the bold taken
+/// off the first two bytes — the two marks arrive as ranged format acts.
 fn peer_step(peer: &mut Doc, step: usize) -> bool {
     let text = peer.text.clone();
     let op: Box<dyn Fn(&mut automerge::transaction::Transaction<'_>) -> Result<(), automerge::AutomergeError>> =
@@ -229,6 +270,10 @@ fn peer_step(peer: &mut Doc, step: usize) -> bool {
                 let len = tx.text(&text)?.len();
                 tx.splice_text(&text, len, 0, "Z")
             }),
+            3 => Box::new(move |tx| {
+                tx.mark(&text, Mark::new("italic".into(), ScalarValue::Boolean(true), 1, 3), ExpandMark::After)
+            }),
+            4 => Box::new(move |tx| tx.unmark(&text, "bold", 0, 2, ExpandMark::After)),
             _ => return false,
         };
     peer.am.transact::<_, _, automerge::AutomergeError>(|tx| op(tx)).expect("peer step");
@@ -237,7 +282,7 @@ fn peer_step(peer: &mut Doc, step: usize) -> bool {
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::new();
-    let (status, mirror, editor) = ctx.apply(|tx| {
+    let (status, mirror, fold, editor) = ctx.apply(|tx| {
         tx.window(kaya::DEFAULT_WINDOW)
             .title("notes")
             .menu("Edit", |m| {
@@ -247,12 +292,14 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 msgs.on_menu_item(redo, Msg::Redo);
             })
             .id();
-        let status = tx.signal("peer 0 undo 0 redo 0 marks 0");
+        let status = tx.signal("peer 0 undo 0 redo 0");
         let mirror = tx.signal("");
+        let fold = tx.signal("");
         let (root, editor) = tx
             .column(|tx| {
                 tx.label(status).a11y_id("status"); // label#0
                 tx.label(mirror).a11y_id("mirror"); // label#1
+                tx.label(fold).a11y_id("fold"); // label#2: the binding's own Document
                 let editor = tx
                     .textarea()
                     .rich()
@@ -269,7 +316,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             .into_parts();
         tx.mount(root);
         tx.focus(editor);
-        (status, mirror, editor)
+        (status, mirror, fold, editor)
     });
 
     let mut local = Doc::new(b"local");
@@ -284,7 +331,6 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     let mut history: Vec<Vec<ChangeHash>> = vec![local.am.get_heads()];
     let mut redo: Vec<Vec<ChangeHash>> = Vec::new();
     let mut step = 0usize;
-    let mut marks_pending = 0usize;
     // A TYPING RUN IS ONE HISTORY ENTRY: consecutive user keystrokes extend
     // the entry they started, the way every editor's undo groups typing —
     // and the only rule that reads the same on a platform that reports one
@@ -293,28 +339,41 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     // from a paste, a drop or an IME commit, each of which starts its own.
     let mut typing_run = false;
 
+    // FOUR VIEWS OF ONE DOCUMENT: the widget's runs and the core's mirror
+    // (expect_runs), automerge's spans (label#1), and the binding's own fold
+    // (label#2) — the last is what a silent write must move too
+    // (docs/rich-text-plan.md §17).
     let publish = |tx: &mut kaya::Tx,
                    local: &Doc,
                    history: &[Vec<ChangeHash>],
                    redo: &[Vec<ChangeHash>],
                    step: usize,
-                   marks: usize| {
-        tx.write(status, format!("peer {step} undo {} redo {} marks {marks}", history.len() - 1, redo.len()));
+                   folded: String| {
+        tx.write(status, format!("peer {step} undo {} redo {}", history.len() - 1, redo.len()));
         tx.write(mirror, local.runs());
+        tx.write(fold, folded);
         tx.can_undo(editor, history.len() > 1);
         tx.can_redo(editor, !redo.is_empty());
     };
 
     // Walk the local document from `from` to `to` heads by re-applying the
     // diff as a new change, and mirror every patch onto the widget.
-    let walk = |ctx: &kaya::AppCtx, local: &mut Doc, to: &[ChangeHash], marks_pending: &mut usize| {
+    let walk = |ctx: &kaya::AppCtx, local: &mut Doc, to: &[ChangeHash]| {
         let from = local.am.get_heads();
         let (edits, marks) = patches_to_edits(local, &from, to);
-        *marks_pending += marks;
         for edit in &edits {
             bridge_edit(local, edit);
             ctx.apply(|tx| tx.apply_edit(editor, edit));
         }
+        for mark in &marks {
+            bridge_format(local, &kaya::Format {
+                start: mark.start as u64,
+                end: mark.end as u64,
+                name: mark.name.clone(),
+                value: mark.value.clone(),
+            });
+        }
+        ctx.apply(|tx| apply_marks(tx, editor, &marks));
     };
 
     while let Some(msg) = msgs.next(&ctx) {
@@ -329,14 +388,16 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 }
                 typing_run = keystroke;
                 redo.clear();
-                ctx.apply(|tx| publish(tx, &local, &history, &redo, step, marks_pending));
+                let folded = spell_fold(&ctx.document(editor).runs);
+                ctx.apply(|tx| publish(tx, &local, &history, &redo, step, folded));
             }
             Msg::Formatted(act) => {
                 bridge_format(&mut local, &act);
                 typing_run = false;
                 history.push(local.am.get_heads());
                 redo.clear();
-                ctx.apply(|tx| publish(tx, &local, &history, &redo, step, marks_pending));
+                let folded = spell_fold(&ctx.document(editor).runs);
+                ctx.apply(|tx| publish(tx, &local, &history, &redo, step, folded));
             }
             Msg::Peer => {
                 if !peer_step(&mut peer, step) {
@@ -351,15 +412,16 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 local.am.merge(&mut peer.am).expect("local merge");
                 let after = local.am.get_heads();
                 let (edits, marks) = patches_to_edits(&local, &before, &after);
-                marks_pending += marks;
                 ctx.apply(|tx| {
                     for edit in &edits {
                         tx.apply_edit(editor, edit);
                     }
+                    apply_marks(tx, editor, &marks);
                 });
                 history.push(after);
                 redo.clear();
-                ctx.apply(|tx| publish(tx, &local, &history, &redo, step, marks_pending));
+                let folded = spell_fold(&ctx.document(editor).runs);
+                ctx.apply(|tx| publish(tx, &local, &history, &redo, step, folded));
             }
             Msg::Undo => {
                 typing_run = false;
@@ -368,16 +430,18 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 }
                 let current = history.pop().expect("a head");
                 let target = history.last().expect("a head").clone();
-                walk(&ctx, &mut local, &target, &mut marks_pending);
+                walk(&ctx, &mut local, &target);
                 redo.push(current);
-                ctx.apply(|tx| publish(tx, &local, &history, &redo, step, marks_pending));
+                let folded = spell_fold(&ctx.document(editor).runs);
+                ctx.apply(|tx| publish(tx, &local, &history, &redo, step, folded));
             }
             Msg::Redo => {
                 typing_run = false;
                 let Some(target) = redo.pop() else { continue };
-                walk(&ctx, &mut local, &target, &mut marks_pending);
+                walk(&ctx, &mut local, &target);
                 history.push(target);
-                ctx.apply(|tx| publish(tx, &local, &history, &redo, step, marks_pending));
+                let folded = spell_fold(&ctx.document(editor).runs);
+                ctx.apply(|tx| publish(tx, &local, &history, &redo, step, folded));
             }
         }
     }

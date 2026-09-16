@@ -2787,7 +2787,8 @@ RICH_TYPE_NAMES = {
 # AND ONE WRITE NAME: Haskell exports the toolbar act under the name of the
 # wire record it sends (`format_text`, so `formatText`), where the other
 # eight spell it `format`.
-RICH_WRITE_NAMES = {"format": {"haskell": "formatText"}}
+RICH_WRITE_NAMES = {"format": {"haskell": "formatText"},
+                    "format_range": {"haskell": "formatTextRange"}}
 
 
 def rich_findings(what, rows, text_for=read_rel):
@@ -2976,6 +2977,10 @@ RICH_PARTS = [
      ("apply_edit", "ApplyEdit", "applyEdit")),
     ("format", rich_write_rows, ("format", "Format", "format")),
     ("unformat", rich_write_rows, ("unformat", "Unformat", "unformat")),
+    # docs/rich-text-plan.md §17: the ranged act beside the selection act.
+    ("format_range", rich_write_rows, ("format_range", "FormatRange", "formatRange")),
+    ("unformat_range", rich_write_rows,
+     ("unformat_range", "UnformatRange", "unformatRange")),
     ("set_block", rich_write_rows, ("set_block", "SetBlock", "setBlock")),
     ("document", rich_document_rows, ("document", "Document", "document")),
 ]
@@ -3044,6 +3049,14 @@ def rich_rename(text, pattern, names):
     on satisfying the pattern through the one left alone."""
     fakes = {names[0]: "kaya_fake_spelling", names[1]: "KayaFakeSpelling",
              names[2]: "kayaFakeSpelling"}
+    # A ROW'S OWN SPELLING, where a binding names the part differently
+    # (RICH_WRITE_NAMES / RICH_TYPE_NAMES): Haskell's `formatTextRange`
+    # carries none of the three generic spellings, and a rename that finds
+    # nothing to rename is a negative that cannot fire (measured 2026-09-15
+    # on the ranged act's row).
+    for i, own in enumerate(list(RICH_WRITE_NAMES.get(names[0], {}).values())
+                            + list(RICH_TYPE_NAMES.get(names[1], {}).values())):
+        fakes.setdefault(own, f"kayaFakeOwnSpelling{i}")
     out, at, applied = [], 0, 0
     for found in re.finditer(pattern, text, re.M):
         said = found.group(0)

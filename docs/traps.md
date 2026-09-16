@@ -11319,3 +11319,15 @@ expected 3, with every text, run and selection step green around it
 (matrix 13). The app coalesces a typing run into one entry now, keyed on
 the edit's `source`; a scene that needs a count of edits asserts what the
 app does with them, never how many the platform delivered.
+
+**A rename-in-a-copy negative must rename the row's OWN spelling
+(2026-09-15).** check-sugar-surface's rich census perturbs each row by
+renaming the part's three generic spellings inside the pattern's match;
+a binding whose row names the part differently (RICH_WRITE_NAMES: Haskell's
+`formatTextRange` for `format_range`) matched none of them, the rename
+applied nothing, and the self-test halted the whole sweep — found by the
+OCaml/Haskell fan-out the moment the row landed. The older `format` row had
+only passed because `formatText` happens to contain `format`. The fakes
+map now carries every per-binding override for the row, so a negative
+that finds nothing to rename is impossible by construction rather than by
+luck.

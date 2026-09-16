@@ -1320,6 +1320,61 @@ if (isMainThread) {
     undoWrites.some((r) => sameBytes(r, wire.tx_set_can_undo(owned.id, true))) && undoWrites.some((r) => sameBytes(r, wire.tx_set_can_redo(owned.id, false))),
   );
 
+  // THE RANGED ACT (docs/rich-text-plan.md §17): a document write, so the
+  // BYTES say `ranged` 1 and carry the range, and the app's own fold takes
+  // it HERE — nothing is echoed back to move it. No scene drives
+  // formatRange, so nothing else in this binding reads either half.
+  const PARA = "Héllo world\nSecond line";
+  shipped.length = 0;
+  app.build(() => {
+    quietEditor.setDocument(new kaya.Document(PARA));
+    quietEditor.formatRange([2, 5], "italic");
+    quietEditor.unformatRange([0, 2], "bold");
+    quietEditor.format("bold");
+    quietEditor.unformat("link");
+  });
+  const rangedWrites = shipped.flat();
+  richCheck(
+    "formatRange writes ranged 1 with the range's bytes, and unformatRange takes the attribute off the same way",
+    rangedWrites.some((r) => sameBytes(r, wire.tx_format_text(quietEditor.id, 0, 1, 2, 5, ["italic", "true"]))) &&
+      rangedWrites.some((r) => sameBytes(r, wire.tx_format_text(quietEditor.id, 1, 1, 0, 2, ["bold", ""]))),
+  );
+  richCheck(
+    "the selection act writes ranged 0 and NO range — the two acts differ in the bytes alone",
+    rangedWrites.some((r) => sameBytes(r, wire.tx_format_text(quietEditor.id, 0, 0, 0, 0, ["bold", "true"]))) &&
+      rangedWrites.some((r) => sameBytes(r, wire.tx_format_text(quietEditor.id, 1, 0, 0, 0, ["link", ""]))),
+  );
+  richCheck("the app's own Document takes a ranged act AS IT SENDS, since nothing is echoed to move it", spell(quietEditor.document().runs) === "2:5 italic");
+
+  // A RANGED `block` COVERS THE WHOLE PARAGRAPHS IT TOUCHES, as the core
+  // snaps it — on the wire and in the fold alike — and `body` is the removal.
+  shipped.length = 0;
+  app.build(() => {
+    quietEditor.formatRange([14, 16], "block", "heading2");
+  });
+  richCheck(
+    "a ranged block act snaps to the paragraph's own bytes, wire and fold agreeing",
+    Buffer.from(PARA, "utf8").length === 24 &&
+      shipped.flat().some((r) => sameBytes(r, wire.tx_format_text(quietEditor.id, 0, 1, 13, 24, ["block", "heading2"]))) &&
+      spell(quietEditor.document().runs) === "2:5 italic|13:24 block=heading2",
+  );
+  shipped.length = 0;
+  app.build(() => {
+    quietEditor.formatRange([14, 16], "block", "body");
+  });
+  richCheck(
+    "a ranged block act with `body` is the REMOVAL: removed 1 on the wire and the run gone from the fold",
+    shipped.flat().some((r) => sameBytes(r, wire.tx_format_text(quietEditor.id, 1, 1, 13, 24, ["block", ""]))) && spell(quietEditor.document().runs) === "2:5 italic",
+  );
+  richCheck(
+    "formatRange takes the binding's own range spelling, refusing a bad range by name",
+    throws(() => {
+      app.build(() => {
+        quietEditor.formatRange([0, "2"] as unknown as readonly [number, number], "bold");
+      });
+    }, /formatRange/),
+  );
+
   // THE RICH LABEL (docs/rich-text-plan.md R8, §15): `rich` is the LABEL
   // constructor's option too, and the CREATE record is read beside the prop,
   // since prop 32 on a textarea proves nothing about a label.

@@ -199,7 +199,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     }
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0x692fe11a5922795aULL
+#define KAYA_SPEC_HASH 0xe52568620b0ca54eULL
 
 
 /* Create a signal holding `initial`. */
@@ -715,12 +715,14 @@ static inline void kaya_tx_apply_edit(KayaTx *tx, uint64_t widget_id, uint64_t s
     kaya_wire_end(tx, kaya_at);
 }
 
-/* Format a `rich` textarea's CURRENT SELECTION through the widget's own act — what an app's toolbar button sends (docs/rich-text-plan.md R1): `attr` is two Str values, name then value; `removed` 1 takes the attribute off. The widget answers with text_formatted over the range it formatted, which is how the mirror moves; a collapsed selection arms the typing attribute and answers nothing until the next edit. A `block` act covers the selection's whole paragraphs, and `block` with value `body` removes. Refused on a textarea that is not `rich` and for a name outside wire::RICH_ATTRS. */
-static inline void kaya_tx_format_text(KayaTx *tx, uint64_t widget_id, uint32_t removed, const KayaVal *attr, uint32_t attr_len) {
+/* Format a `rich` textarea's CURRENT SELECTION through the widget's own act — what an app's toolbar button sends (docs/rich-text-plan.md R1): `attr` is two Str values, name then value; `removed` 1 takes the attribute off. `ranged` 1 formats `start..stop` (UTF-8 bytes) INSTEAD of the selection, which stays where it is: a document write, echoed by nothing, legal on a rich label too (docs/rich-text-plan.md §17, the notes demo's remote mark). The widget answers with text_formatted over the range it formatted, which is how the mirror moves; a collapsed selection arms the typing attribute and answers nothing until the next edit. A `block` act covers the selection's whole paragraphs, and `block` with value `body` removes. Refused on a textarea that is not `rich` and for a name outside wire::RICH_ATTRS. */
+static inline void kaya_tx_format_text(KayaTx *tx, uint64_t widget_id, uint32_t removed, uint32_t ranged, uint64_t start, uint64_t stop, const KayaVal *attr, uint32_t attr_len) {
     size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_FORMAT_TEXT);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, removed);
-    kaya_wire_u32(tx, 0);
+    kaya_wire_u32(tx, ranged);
+    kaya_wire_u64(tx, start);
+    kaya_wire_u64(tx, stop);
     kaya_wire_values(tx, attr, attr_len);
     kaya_wire_end(tx, kaya_at);
 }

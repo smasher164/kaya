@@ -9,7 +9,7 @@ import UserNotifications
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0x692fe11a5922795a
+let kayaSpecHash: UInt64 = 0xe52568620b0ca54e
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -4930,15 +4930,23 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                             + "widget \(eid) holds")
                 }
             case applyFormatText:
-                // { u64 id; u32 removed; u32 reserved; u32 count; u32 reserved;
-                //   Str name; Str value }
+                // { u64 id; u32 removed; u32 ranged; u64 start; u64 stop;
+                //   u32 count; u32 reserved; Str name; Str value } — the range
+                //   in UTF-16 units when `ranged` (docs/rich-text-plan.md §17).
                 let fid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
                 let removed = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt32.self) != 0
-                var fat = body + 24
+                let ranged = raw.loadUnaligned(fromByteOffset: body + 12, as: UInt32.self) != 0
+                let rstart = Int(raw.loadUnaligned(fromByteOffset: body + 16, as: UInt64.self))
+                let rstop = Int(raw.loadUnaligned(fromByteOffset: body + 24, as: UInt64.self))
+                var fat = body + 40
                 let fname = kayaReadStrValue(raw, &fat)
                 let fvalue = kayaReadStrValue(raw, &fat)
                 let trouble = MainActor.assumeIsolated {
-                    kayaFormatSelection(kayaScene.nodes[fid]!, fname, fvalue, removed: removed)
+                    ranged
+                        ? kayaFormatRange(
+                            kayaScene.nodes[fid]!, NSRange(location: rstart, length: rstop - rstart),
+                            fname, fvalue, removed: removed)
+                        : kayaFormatSelection(kayaScene.nodes[fid]!, fname, fvalue, removed: removed)
                 }
                 if let trouble { kayaDiag("format_text refused: \(trouble)") }
             case applyHighlightRanges:
@@ -19954,6 +19962,44 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
 /// app's format_text and the harness's `format` share (docs/rich-text-plan.md
 /// R1, R9). A collapsed selection arms the typing attribute instead; a block
 /// act covers the selection's whole paragraphs. nil, or what refused.
+/// A RANGED act (docs/rich-text-plan.md §17): the attribute over `range` on
+/// the widget's storage — or, for a label or a textarea whose view is not
+/// up, on an attributed document built from the node's own runs — the
+/// selection untouched and NOTHING reported: the core moved its mirror
+/// before sending this.
+@MainActor func kayaFormatRange(
+    _ node: KayaNode, _ range: NSRange, _ name: String, _ value: String, removed: Bool
+) -> String? {
+    guard node.rich else { return "widget \(node.id) is not rich" }
+    guard kayaRichNames.contains(name) else { return "\(name) is not a rich attribute" }
+    let key = kayaRichKey(name)
+    let off = removed || (name == "block" && value == "body")
+    if let view = kayaMacTextViews[node.id]?.view as? KayaTextView, let storage = view.textStorage {
+        guard NSMaxRange(range) <= storage.length else {
+            return "range \(range) is past the \(storage.length)-unit text"
+        }
+        storage.beginEditing()
+        if off { storage.removeAttribute(key, range: range) } else {
+            storage.addAttribute(key, value: value, range: range)
+        }
+        kayaRestyle(storage, range, base: kayaRichBaseFont(view))
+        storage.endEditing()
+        node.richRuns = kayaReadRichRuns(storage)
+        return nil
+    }
+    let doc = NSMutableAttributedString(
+        attributedString: kayaAttributedDocument(node.text, node.richRuns, base: kayaLabelBaseFont(node)))
+    guard NSMaxRange(range) <= doc.length else {
+        return "range \(range) is past the \(doc.length)-unit text"
+    }
+    if off { doc.removeAttribute(key, range: range) } else {
+        doc.addAttribute(key, value: value, range: range)
+    }
+    node.richRuns = kayaReadRichRuns(doc)
+    node.richSeq += 1
+    return nil
+}
+
 @MainActor func kayaFormatSelection(_ node: KayaNode, _ name: String, _ value: String, removed: Bool)
     -> String?
 {
@@ -20569,6 +20615,42 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
     /// app's format_text and the harness's `format` share (docs/rich-text-plan.md
     /// R1, R9). A collapsed selection arms the typing attribute instead; a block
     /// act covers the selection's whole paragraphs. nil, or what refused.
+    /// The ranged act, this side (docs/rich-text-plan.md §17): the same rule
+    /// as the mac's over the UIKit storage or the node's own runs.
+    @MainActor func kayaFormatRange(
+        _ node: KayaNode, _ range: NSRange, _ name: String, _ value: String, removed: Bool
+    ) -> String? {
+        guard node.rich else { return "widget \(node.id) is not rich" }
+        guard kayaRichNames.contains(name) else { return "\(name) is not a rich attribute" }
+        let key = kayaRichKey(name)
+        let off = removed || (name == "block" && value == "body")
+        if let view = kayaUITextViews[node.id]?.view as? KayaTextView {
+            let storage = view.textStorage
+            guard NSMaxRange(range) <= storage.length else {
+                return "range \(range) is past the \(storage.length)-unit text"
+            }
+            storage.beginEditing()
+            if off { storage.removeAttribute(key, range: range) } else {
+                storage.addAttribute(key, value: value, range: range)
+            }
+            kayaRestyle(storage, range, base: kayaRichBaseFont(view))
+            storage.endEditing()
+            node.richRuns = kayaReadRichRuns(storage)
+            return nil
+        }
+        let doc = NSMutableAttributedString(
+            attributedString: kayaAttributedDocument(node.text, node.richRuns, base: kayaLabelBaseFont(node)))
+        guard NSMaxRange(range) <= doc.length else {
+            return "range \(range) is past the \(doc.length)-unit text"
+        }
+        if off { doc.removeAttribute(key, range: range) } else {
+            doc.addAttribute(key, value: value, range: range)
+        }
+        node.richRuns = kayaReadRichRuns(doc)
+        node.richSeq += 1
+        return nil
+    }
+
     @MainActor func kayaFormatSelection(
         _ node: KayaNode, _ name: String, _ value: String, removed: Bool
     ) -> String? {

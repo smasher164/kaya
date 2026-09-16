@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0x692fe11a5922795a;
+    public const ulong SpecHash = 0xe52568620b0ca54e;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -996,13 +996,15 @@ static class KayaWire
         return Finish(stream, w, TxKindApplyEdit);
     }
 
-    /// Format a `rich` textarea's CURRENT SELECTION through the widget's own act — what an app's toolbar button sends (docs/rich-text-plan.md R1): `attr` is two Str values, name then value; `removed` 1 takes the attribute off. The widget answers with text_formatted over the range it formatted, which is how the mirror moves; a collapsed selection arms the typing attribute and answers nothing until the next edit. A `block` act covers the selection's whole paragraphs, and `block` with value `body` removes. Refused on a textarea that is not `rich` and for a name outside wire::RICH_ATTRS.
-    public static byte[] TxFormatText(ulong widgetId, uint removed, object[] attr)
+    /// Format a `rich` textarea's CURRENT SELECTION through the widget's own act — what an app's toolbar button sends (docs/rich-text-plan.md R1): `attr` is two Str values, name then value; `removed` 1 takes the attribute off. `ranged` 1 formats `start..stop` (UTF-8 bytes) INSTEAD of the selection, which stays where it is: a document write, echoed by nothing, legal on a rich label too (docs/rich-text-plan.md §17, the notes demo's remote mark). The widget answers with text_formatted over the range it formatted, which is how the mirror moves; a collapsed selection arms the typing attribute and answers nothing until the next edit. A `block` act covers the selection's whole paragraphs, and `block` with value `body` removes. Refused on a textarea that is not `rich` and for a name outside wire::RICH_ATTRS.
+    public static byte[] TxFormatText(ulong widgetId, uint removed, uint ranged, ulong start, ulong stop, object[] attr)
     {
         var w = Begin(out var stream);
         w.Write(widgetId);
         w.Write(removed);
-        w.Write(0u);
+        w.Write(ranged);
+        w.Write(start);
+        w.Write(stop);
         EncodeValues(w, attr);
         return Finish(stream, w, TxKindFormatText);
     }

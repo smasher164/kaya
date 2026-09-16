@@ -1892,12 +1892,15 @@ pub enum TxOp {
         inserted: String,
         runs: Vec<TextRun>,
     },
-    /// Format the widget's CURRENT SELECTION through its own act; `value`
-    /// None removes (docs/rich-text-plan.md R1, spec `format_text`).
+    /// Format the widget's CURRENT SELECTION through its own act, or `range`
+    /// (bytes) when one is given — a document write echoed by nothing;
+    /// `value` None removes (docs/rich-text-plan.md R1, §17, spec
+    /// `format_text`).
     FormatText {
         widget: WidgetId,
         name: String,
         value: Option<String>,
+        range: Option<TextRange>,
     },
     /// A DECLARED BREAKPOINT (docs/adaptive-layout-plan.md D3; size classes
     /// ruled 2026-08-31): while the window's SIZE CLASS equals `when`
@@ -2087,9 +2090,10 @@ pub enum ApplyOp {
         runs: Vec<NativeRun>,
         selection: NativeRange,
     },
-    /// The tx record verbatim: the backend formats its own selection and
-    /// reports the range through kaya_text_formatted.
-    FormatText { id: WidgetId, name: String, value: Option<String> },
+    /// The tx record: the backend formats its own selection and reports the
+    /// range through kaya_text_formatted, or — with `range` in its native
+    /// unit — formats that range silently (docs/rich-text-plan.md §17).
+    FormatText { id: WidgetId, name: String, value: Option<String>, range: Option<NativeRange> },
     /// The column header bar on the For's live container — titles in visual
     /// order, the indicator on `sorted` (SORT_NONE for none), `direction` 0
     /// asc / 1 desc. Table presentation where the size class and platform

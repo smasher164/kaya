@@ -1277,13 +1277,20 @@ pub fn decode_transaction_with_blobs(
             TX_FORMAT_TEXT => {
                 let widget = WidgetId(r.u64());
                 let removed = r.u32() != 0;
-                let _reserved = r.u32();
+                let ranged = r.u32() != 0;
+                let start = r.u64();
+                let end = r.u64();
                 let count = r.u32();
                 let _reserved = r.u32();
                 assert_eq!(count, 2, "kaya: format_text carries {count} values, wanted name then value");
                 let name = run_str(r.value(), "format_text name");
                 let value = run_str(r.value(), "format_text value");
-                TxOp::FormatText { widget, name, value: (!removed).then_some(value) }
+                TxOp::FormatText {
+                    widget,
+                    name,
+                    value: (!removed).then_some(value),
+                    range: ranged.then(|| TextRange::new(start, end)),
+                }
             }
             TX_SET_BRAND_ACCENT => {
                 let seed = r.u32();
@@ -2945,11 +2952,13 @@ impl Writer {
                     write_value(b, &Value::Str(inserted.clone()), blobs);
                 })
             }
-            ApplyOp::FormatText { id, name, value } => {
+            ApplyOp::FormatText { id, name, value, range } => {
                 self.record(APPLY_FORMAT_TEXT, |b, blobs| {
                     b.extend_from_slice(&id.0.to_le_bytes());
                     b.extend_from_slice(&(value.is_none() as u32).to_le_bytes());
-                    b.extend_from_slice(&0u32.to_le_bytes());
+                    b.extend_from_slice(&(range.is_some() as u32).to_le_bytes());
+                    b.extend_from_slice(&range.map_or(0, |r| r.start).to_le_bytes());
+                    b.extend_from_slice(&range.map_or(0, |r| r.stop).to_le_bytes());
                     b.extend_from_slice(&2u32.to_le_bytes());
                     b.extend_from_slice(&0u32.to_le_bytes());
                     write_value(b, &Value::Str(name.clone()), blobs);
@@ -3482,11 +3491,13 @@ impl Writer {
                     write_value(b, &Value::Str(inserted.clone()), blobs);
                 })
             }
-            TxOp::FormatText { widget, name, value } => {
+            TxOp::FormatText { widget, name, value, range } => {
                 self.record(TX_FORMAT_TEXT, |b, blobs| {
                     b.extend_from_slice(&widget.0.to_le_bytes());
                     b.extend_from_slice(&(value.is_none() as u32).to_le_bytes());
-                    b.extend_from_slice(&0u32.to_le_bytes());
+                    b.extend_from_slice(&(range.is_some() as u32).to_le_bytes());
+                    b.extend_from_slice(&range.map_or(0, |r| r.start).to_le_bytes());
+                    b.extend_from_slice(&range.map_or(0, |r| r.stop).to_le_bytes());
                     b.extend_from_slice(&2u32.to_le_bytes());
                     b.extend_from_slice(&0u32.to_le_bytes());
                     write_value(b, &Value::Str(name.clone()), blobs);
@@ -4752,8 +4763,9 @@ mod tests {
                 inserted: String::new(),
                 runs: Vec::new(),
             },
-            TxOp::FormatText { widget: WidgetId(3), name: "link".into(), value: Some("https://kaya.dev".into()) },
-            TxOp::FormatText { widget: WidgetId(3), name: "bold".into(), value: None },
+            TxOp::FormatText { widget: WidgetId(3), name: "link".into(), value: Some("https://kaya.dev".into()), range: None },
+            TxOp::FormatText { widget: WidgetId(3), name: "bold".into(), value: None, range: None },
+            TxOp::FormatText { widget: WidgetId(3), name: "italic".into(), value: Some("true".into()), range: Some(TextRange::new(2, 9)) },
         ];
         let mut w = Writer::new();
         for op in &ops {

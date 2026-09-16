@@ -1550,14 +1550,20 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             fields: &[
                 f("widget_id", FieldTy::U64),
                 f("removed", FieldTy::U32),
-                f("reserved", FieldTy::U32),
+                f("ranged", FieldTy::U32),
+                f("start", FieldTy::U64),
+                f("stop", FieldTy::U64),
                 f("attr", FieldTy::Values),
             ],
             payload: None,
             doc: "Format a `rich` textarea's CURRENT SELECTION through the \
                   widget's own act — what an app's toolbar button sends \
                   (docs/rich-text-plan.md R1): `attr` is two Str values, name \
-                  then value; `removed` 1 takes the attribute off. The widget \
+                  then value; `removed` 1 takes the attribute off. `ranged` 1 \
+                  formats `start..stop` (UTF-8 bytes) INSTEAD of the selection, \
+                  which stays where it is: a document write, echoed by nothing, \
+                  legal on a rich label too (docs/rich-text-plan.md §17, the \
+                  notes demo's remote mark). The widget \
                   answers with text_formatted over the range it formatted, \
                   which is how the mirror moves; a collapsed selection arms \
                   the typing attribute and answers nothing until the next \
@@ -2276,14 +2282,19 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             fields: &[
                 f("widget_id", FieldTy::U64),
                 f("removed", FieldTy::U32),
-                f("reserved", FieldTy::U32),
+                f("ranged", FieldTy::U32),
+                f("start", FieldTy::U64),
+                f("stop", FieldTy::U64),
                 f("attr", FieldTy::Values),
             ],
             payload: None,
-            doc: "The tx record verbatim: apply `attr` to the widget's own \
-                  selection (or arm its typing attributes when the selection \
-                  is collapsed) and report the range through \
-                  kaya_text_formatted in bytes, as a user's own act would.",
+            doc: "The tx record with the range in the backend's NATIVE unit: \
+                  `ranged` 0 applies `attr` to the widget's own selection (or \
+                  arms its typing attributes when the selection is collapsed) \
+                  and reports the range through kaya_text_formatted in bytes, \
+                  as a user's own act would; `ranged` 1 applies it over \
+                  `start..stop` without touching the selection and reports \
+                  NOTHING — the core moved its mirror before sending this.",
         },
     ],
     occurrence: &[

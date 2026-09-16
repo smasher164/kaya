@@ -820,13 +820,46 @@ class Widget(_Handle):
         reports the range it formatted to `on_format`, which is how the
         document moves. Returns the widget."""
         _records().append(wire.tx_format_text(
-            self.id, 0, [str(name), _text_value("format value", value)]))
+            self.id, 0, 0, 0, 0,
+            [str(name), _text_value("format value", value)]))
         return self
 
     def unformat(self, name):
         """Take an attribute off this textarea's current selection.
         Returns the widget."""
-        _records().append(wire.tx_format_text(self.id, 1, [str(name), ""]))
+        _records().append(wire.tx_format_text(self.id, 1, 0, 0, 0,
+                                              [str(name), ""]))
+        return self
+
+    def format_range(self, span, name, value="true"):
+        """One attribute over a BYTE RANGE of this document, the selection
+        left exactly where the user put it (docs/rich-text-plan.md §17).
+
+        A DOCUMENT WRITE like `apply_edit` rather than a toolbar act: the
+        widget echoes nothing and `on_format` hears nothing, so the app's
+        own Document takes it HERE, as it is sent. A rich LABEL takes it
+        too. A `block` act covers the range's whole paragraphs, and `block`
+        with `body` removes. Returns the widget."""
+        start, stop = _text_range("format_range", span)
+        name, value = str(name), _text_value("format value", value)
+        start, stop = _app._ranged_act_bounds(self.id, start, stop, name)
+        removed = name == "block" and value == "body"
+        _app._absorb_format(self.id, start, stop, name,
+                            None if removed else value)
+        _records().append(wire.tx_format_text(
+            self.id, 1 if removed else 0, 1, start, stop,
+            [name, "" if removed else value]))
+        return self
+
+    def unformat_range(self, span, name):
+        """`format_range`'s removal: take an attribute off a byte range,
+        the selection untouched. Returns the widget."""
+        start, stop = _text_range("unformat_range", span)
+        name = str(name)
+        start, stop = _app._ranged_act_bounds(self.id, start, stop, name)
+        _app._absorb_format(self.id, start, stop, name, None)
+        _records().append(wire.tx_format_text(self.id, 1, 1, start, stop,
+                                              [name, ""]))
         return self
 
     def set_block(self, kind):
@@ -4900,6 +4933,18 @@ class App:
                            run.value))
         doc.text = (data[:start] + added + data[stop:]).decode("utf-8")
         doc.runs = _normalize_runs(nxt)
+
+    def _ranged_act_bounds(self, widget, start, stop, name):
+        """A ranged act's range in the fold's text: a `block` covers the
+        whole paragraphs it touches, as the core snaps it
+        (docs/rich-text-plan.md §17)."""
+        if name != "block":
+            return start, stop
+        doc = self._documents.get(widget)
+        data = b"" if doc is None else doc.text.encode("utf-8")
+        start, stop = min(start, len(data)), min(stop, len(data))
+        nl = data.find(b"\n", stop)
+        return data.rfind(b"\n", 0, start) + 1, len(data) if nl < 0 else nl
 
     def _absorb_format(self, widget, start, stop, name, value):
         """One toolbar act folded in: the attribute put over the range or

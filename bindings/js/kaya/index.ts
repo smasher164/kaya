@@ -879,14 +879,44 @@ export class Widget extends Handle {
    * `onFormat`, which is how the document moves. */
   format(name: string, value = "true"): this {
     this._live("format()");
-    records().push(wire.tx_format_text(this.id, 0, [String(name), textValue("format value", value)]));
+    records().push(wire.tx_format_text(this.id, 0, 0, 0, 0, [String(name), textValue("format value", value)]));
     return this;
   }
 
   /** Take an attribute off this textarea's current selection. */
   unformat(name: string): this {
     this._live("unformat()");
-    records().push(wire.tx_format_text(this.id, 1, [String(name), ""]));
+    records().push(wire.tx_format_text(this.id, 1, 0, 0, 0, [String(name), ""]));
+    return this;
+  }
+
+  /** One attribute over a BYTE RANGE of this document, the selection left
+   * exactly where the user put it (docs/rich-text-plan.md §17). A DOCUMENT
+   * WRITE like applyEdit rather than a toolbar act: nothing is echoed and
+   * `onFormat` hears nothing, so the app's own Document takes it HERE, as
+   * it is sent. A rich LABEL takes it too. A `block` act covers the range's
+   * whole paragraphs, and `block` with `body` removes. */
+  formatRange(span: readonly [number, number], name: string, value = "true"): this {
+    this._live("formatRange()");
+    const raw = textRange("formatRange", span);
+    const attr = String(name);
+    const text = textValue("format value", value);
+    const [start, stop] = app()._rangedActBounds(this.id, raw[0], raw[1], attr);
+    const removed = attr === "block" && text === "body";
+    app()._absorbFormat(this.id, start, stop, attr, removed ? null : text);
+    records().push(wire.tx_format_text(this.id, removed ? 1 : 0, 1, start, stop, [attr, removed ? "" : text]));
+    return this;
+  }
+
+  /** formatRange's removal: take an attribute off a byte range, the
+   * selection untouched. */
+  unformatRange(span: readonly [number, number], name: string): this {
+    this._live("unformatRange()");
+    const raw = textRange("unformatRange", span);
+    const attr = String(name);
+    const [start, stop] = app()._rangedActBounds(this.id, raw[0], raw[1], attr);
+    app()._absorbFormat(this.id, start, stop, attr, null);
+    records().push(wire.tx_format_text(this.id, 1, 1, start, stop, [attr, ""]));
     return this;
   }
 
@@ -4384,6 +4414,18 @@ export class App {
     for (const run of runs) next.push({ ...run, start: run.start + start, end: run.end + start });
     doc.text = Buffer.concat([data.subarray(0, start), added, data.subarray(stop)]).toString("utf8");
     doc.runs = normalizeRuns(next);
+  }
+
+  /** @internal A ranged act's range in the fold's text: a `block` covers
+   * the whole paragraphs it touches, as the core snaps it
+   * (docs/rich-text-plan.md §17). */
+  _rangedActBounds(widget: number, start: number, stop: number, name: string): [number, number] {
+    if (name !== "block") return [start, stop];
+    const data = Buffer.from(this._documents.get(widget)?.text ?? "", "utf8");
+    const from = Math.min(start, data.length);
+    const to = Math.min(stop, data.length);
+    const at = data.subarray(to).indexOf(0x0a);
+    return [data.subarray(0, from).lastIndexOf(0x0a) + 1, at < 0 ? data.length : to + at];
   }
 
   /** @internal One toolbar act folded in: the attribute put over the

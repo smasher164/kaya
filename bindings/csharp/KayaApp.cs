@@ -1432,6 +1432,25 @@ sealed class KayaApp
     static bool Boundary(byte[] utf8, long at) =>
         at == utf8.Length || (utf8[at] & 0xC0) != 0x80;
 
+    /// A ranged act's range in the fold's text: a "block" covers the whole
+    /// paragraphs it touches, as the core snaps it
+    /// (docs/rich-text-plan.md §17).
+    internal TextRange RangedActBounds(ulong widget, TextRange range, string name)
+    {
+        if (name != "block") return range;
+        byte[] utf8 = System.Text.Encoding.UTF8.GetBytes(
+            documents.TryGetValue(widget, out var doc) ? doc.Text : "");
+        long start = Math.Min((long)range.Start, utf8.Length);
+        long stop = Math.Min((long)range.Stop, utf8.Length);
+        long paraStart = 0;
+        for (long at = start - 1; at >= 0; at--)
+            if (utf8[at] == (byte)'\n') { paraStart = at + 1; break; }
+        long paraEnd = utf8.Length;
+        for (long at = stop; at < utf8.Length; at++)
+            if (utf8[at] == (byte)'\n') { paraEnd = at; break; }
+        return TextRange.Bytes(paraStart, paraEnd);
+    }
+
     /// One delivered format: put the attribute over the range or take it
     /// off, clipping THIS attribute's runs (AppCtx::absorb_format).
     internal void AbsorbFormat(ulong widget, Format act)
@@ -2498,11 +2517,36 @@ sealed class Tx
     /// selection the attribute is armed for the next keystroke instead.
     /// `value` is "true" for a flag, the URL for link.
     public void Format(Widget w, string name, string value) =>
-        Records.Add(KayaWire.TxFormatText(w.Id, 0, new object[] { name, value }));
+        Records.Add(KayaWire.TxFormatText(w.Id, 0, 0, 0, 0, new object[] { name, value }));
 
     /// Take an attribute off the widget's current selection.
     public void Unformat(Widget w, string name) =>
-        Records.Add(KayaWire.TxFormatText(w.Id, 1, new object[] { name, "" }));
+        Records.Add(KayaWire.TxFormatText(w.Id, 1, 0, 0, 0, new object[] { name, "" }));
+
+    /// One attribute over a BYTE RANGE of the document, the selection
+    /// left where it is: a document write, echoed by nothing, legal on a
+    /// rich label (docs/rich-text-plan.md §17). A "block" name covers the
+    /// range's whole paragraphs.
+    public void FormatRange(Widget w, TextRange range, string name, string value)
+    {
+        // A silent document write moves the fold, as ApplyEdit does
+        // (docs/rich-text-plan.md §17).
+        TextRange at = App.RangedActBounds(w.Id, range, name);
+        string mark = name == "block" && value == "body" ? null : value;
+        App.AbsorbFormat(w.Id, new Format((long)at.Start, (long)at.Stop, name, mark));
+        Records.Add(KayaWire.TxFormatText(
+            w.Id, mark == null ? 1u : 0u, 1, at.Start, at.Stop,
+            new object[] { name, mark ?? "" }));
+    }
+
+    /// FormatRange's removal.
+    public void UnformatRange(Widget w, TextRange range, string name)
+    {
+        TextRange at = App.RangedActBounds(w.Id, range, name);
+        App.AbsorbFormat(w.Id, new Format((long)at.Start, (long)at.Stop, name, null));
+        Records.Add(KayaWire.TxFormatText(
+            w.Id, 1, 1, at.Start, at.Stop, new object[] { name, "" }));
+    }
 
     /// Make the selection's paragraphs `kind`; BlockKind.Body clears.
     public void SetBlock(Widget w, BlockKind kind) => Format(w, "block", kind.Name());

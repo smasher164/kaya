@@ -18,7 +18,7 @@ enum KayaValue: Hashable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0x692fe11a5922795a
+let kayaSpecHash: UInt64 = 0xe52568620b0ca54e
 
 /// A civil date as the wire's I64: year * 10000 + month * 100 + day.
 func kayaPackDate(_ year: Int, _ month: Int, _ day: Int) -> Int64 {
@@ -627,12 +627,14 @@ struct KayaTx {
         self.end(kayaAt)
     }
 
-    /// Format a `rich` textarea's CURRENT SELECTION through the widget's own act — what an app's toolbar button sends (docs/rich-text-plan.md R1): `attr` is two Str values, name then value; `removed` 1 takes the attribute off. The widget answers with text_formatted over the range it formatted, which is how the mirror moves; a collapsed selection arms the typing attribute and answers nothing until the next edit. A `block` act covers the selection's whole paragraphs, and `block` with value `body` removes. Refused on a textarea that is not `rich` and for a name outside wire::RICH_ATTRS.
-    mutating func formatText(_ widgetId: UInt64, _ removed: UInt32, _ attr: [KayaValue]) {
+    /// Format a `rich` textarea's CURRENT SELECTION through the widget's own act — what an app's toolbar button sends (docs/rich-text-plan.md R1): `attr` is two Str values, name then value; `removed` 1 takes the attribute off. `ranged` 1 formats `start..stop` (UTF-8 bytes) INSTEAD of the selection, which stays where it is: a document write, echoed by nothing, legal on a rich label too (docs/rich-text-plan.md §17, the notes demo's remote mark). The widget answers with text_formatted over the range it formatted, which is how the mirror moves; a collapsed selection arms the typing attribute and answers nothing until the next edit. A `block` act covers the selection's whole paragraphs, and `block` with value `body` removes. Refused on a textarea that is not `rich` and for a name outside wire::RICH_ATTRS.
+    mutating func formatText(_ widgetId: UInt64, _ removed: UInt32, _ ranged: UInt32, _ start: UInt64, _ stop: UInt64, _ attr: [KayaValue]) {
         let kayaAt = self.begin(UInt16(KAYA_TX_FORMAT_TEXT))
         self.u64(widgetId)
         self.u32(removed)
-        self.u32(0)
+        self.u32(ranged)
+        self.u64(start)
+        self.u64(stop)
         self.values(attr)
         self.end(kayaAt)
     }

@@ -1096,6 +1096,22 @@ impl AppCtx {
         doc.runs = normalize_runs(next);
     }
 
+    /// A ranged act's range in the fold's text: a `block` covers the whole
+    /// paragraphs it touches, as the core snaps it (docs/rich-text-plan.md §17).
+    fn ranged_act_bounds(&self, widget: u64, range: std::ops::Range<usize>, name: &str) -> TextRange {
+        if name != "block" {
+            return TextRange::new(range.start as u64, range.end as u64);
+        }
+        let docs = self.documents.borrow();
+        let text = docs.get(&widget).map(|d| d.text.as_str()).unwrap_or("");
+        let bytes = text.as_bytes();
+        let start = range.start.min(bytes.len());
+        let stop = range.end.min(bytes.len());
+        let para_start = bytes[..start].iter().rposition(|b| *b == b'\n').map_or(0, |i| i + 1);
+        let para_end = bytes[stop..].iter().position(|b| *b == b'\n').map_or(bytes.len(), |i| stop + i);
+        TextRange::new(para_start as u64, para_end as u64)
+    }
+
     fn absorb_format(&self, widget: u64, range: TextRange, name: &str, value: Option<&str>) {
         let mut documents = self.documents.borrow_mut();
         let doc = documents.entry(widget).or_default();
@@ -2718,12 +2734,44 @@ impl<'a> Tx<'a> {
             widget,
             name: name.to_owned(),
             value: Some(value.to_owned()),
+            range: None,
+        });
+    }
+
+    /// One attribute over a BYTE RANGE of the document, the selection left
+    /// where it is: a document write, echoed by nothing, legal on a rich
+    /// label (docs/rich-text-plan.md §17). A `block` covers the range's whole
+    /// paragraphs.
+    pub fn format_range(&mut self, widget: WidgetId, range: std::ops::Range<usize>, name: &str, value: &str) {
+        // A silent document write moves the binding's own fold, as apply_edit
+        // does (docs/rich-text-plan.md §17); a block covers whole paragraphs,
+        // as the core snaps it.
+        let range = self.ctx.ranged_act_bounds(widget.0, range, name);
+        let value = if name == "block" && value == "body" { None } else { Some(value) };
+        self.ctx.absorb_format(widget.0, range, name, value);
+        self.ops.push(TxOp::FormatText {
+            widget,
+            name: name.to_owned(),
+            value: value.map(str::to_owned),
+            range: Some(range),
+        });
+    }
+
+    /// [`Tx::format_range`]'s removal.
+    pub fn unformat_range(&mut self, widget: WidgetId, range: std::ops::Range<usize>, name: &str) {
+        let range = self.ctx.ranged_act_bounds(widget.0, range, name);
+        self.ctx.absorb_format(widget.0, range, name, None);
+        self.ops.push(TxOp::FormatText {
+            widget,
+            name: name.to_owned(),
+            value: None,
+            range: Some(range),
         });
     }
 
     /// Take an attribute off the widget's current selection.
     pub fn unformat(&mut self, widget: WidgetId, name: &str) {
-        self.ops.push(TxOp::FormatText { widget, name: name.to_owned(), value: None });
+        self.ops.push(TxOp::FormatText { widget, name: name.to_owned(), value: None, range: None });
     }
 
     /// Make the selection's paragraphs `kind`; [`Block::Body`] clears.

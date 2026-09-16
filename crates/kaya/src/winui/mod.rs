@@ -10269,6 +10269,65 @@ fn rich_format_selection(
     }
 }
 
+/// A RANGED ACT — a DOCUMENT WRITE, never the widget's own
+/// (docs/rich-text-plan.md §17): the attribute over `range` (cp on the record,
+/// bytes in the table) on this arm's table and its display, the selection and
+/// the typing attributes left alone and nothing reported, because the core
+/// moved its mirror before this arrived. A rich LABEL takes one, redrawn the
+/// way `rich_apply_edit` redraws one (§15). None, or what refused.
+fn rich_format_range(
+    core: &CoreState, widget: u64, name: &str, value: &str, removed: bool,
+    range: crate::protocol::NativeRange,
+) -> Option<String> {
+    if !rich_is_on(widget) {
+        return Some(format!("widget {widget} holds no rich document"));
+    }
+    if !crate::wire::RICH_ATTRS.iter().any(|(_, word)| *word == name) {
+        return Some(format!("{name:?} is not a kaya attribute"));
+    }
+    // `body` IS the removal, and the core's paragraph expansion for a `block`
+    // act is already in this range (docs/rich-text-plan.md §7, §17).
+    let off = removed || (name == "block" && value == "body");
+    let want = (!off).then_some(value);
+    let block = label_block(core, widget);
+    let field = textarea_by_id(core, widget);
+    let acted = (|| -> windows_core::Result<Result<(), String>> {
+        let text = match (&block, &field) {
+            (Some(block), _) => block.Text()?.to_string(),
+            (None, Some(field)) => lf(Editable::Textarea(field.clone()).text()?),
+            (None, None) => {
+                return Ok(Err(format!("widget {widget} is not a live rich widget")));
+            }
+        };
+        let (Some(start), Some(end)) = (
+            byte_offset(&text, range.start as i32),
+            byte_offset(&text, range.stop as i32),
+        ) else {
+            return Ok(Err(format!(
+                "{}..{} is not on a character boundary of the {}-byte text widget {widget} holds",
+                range.start,
+                range.stop,
+                text.len()
+            )));
+        };
+        let runs = rich_format_runs(&rich_table(widget), start, end, name, want);
+        RICH_RUNS.with_borrow_mut(|table| {
+            table.insert(widget, runs.clone());
+        });
+        match (&block, &field) {
+            (Some(block), _) => label_restyle(block, &text, &runs)?,
+            (None, Some(field)) => rich_restyle(field, &text, &runs, start, end)?,
+            (None, None) => unreachable!("the text above came from one of the two"),
+        }
+        Ok(Ok(()))
+    })();
+    match acted {
+        Ok(Ok(())) => None,
+        Ok(Err(refused)) => Some(refused),
+        Err(e) => Some(format!("the control refused the act: {}", e.message())),
+    }
+}
+
 /// set_rich_text: the whole content, runs in this backend's native unit
 /// (UTF-16 code units, `crates/kaya/src/scene.rs` native_offset). Echoes
 /// nothing and resets the native history, as a text write does (D7).
@@ -13696,10 +13755,16 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
         ApplyOp::ApplyEdit { id, range, inserted, runs, selection } => {
             rich_apply_edit(core, id.0, range, &inserted, &runs, selection)?;
         }
-        ApplyOp::FormatText { id, name, value } => {
+        ApplyOp::FormatText { id, name, value, range } => {
             let removed = value.is_none();
             let word = value.unwrap_or_default();
-            if let Some(trouble) = rich_format_selection(core, id.0, &name, &word, removed) {
+            // docs/rich-text-plan.md §17: a range formats it INSTEAD of the
+            // selection, silently.
+            let trouble = match range {
+                Some(range) => rich_format_range(core, id.0, &name, &word, removed, range),
+                None => rich_format_selection(core, id.0, &name, &word, removed),
+            };
+            if let Some(trouble) = trouble {
                 eprintln!("kaya: winui format_text refused: {trouble}");
             }
         }
