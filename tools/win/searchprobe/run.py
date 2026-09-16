@@ -83,7 +83,7 @@ def main():
     else:
         print("run.py: no PROBEDONE after 180s; the log so far:", file=sys.stderr)
         print(ssh(host, f"cmd /c type {R}\\log.txt", quiet=True).stdout)
-    ssh(host, f"taskkill /f /im KayaSearchProbe.exe >nul 2>&1", quiet=True)
+    ssh(host, "taskkill /f /im KayaSearchProbe.exe >nul 2>&1", quiet=True)
     ssh(host, f"schtasks /delete /tn {TASK} /f >nul 2>&1", quiet=True)
 
 

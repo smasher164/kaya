@@ -263,7 +263,11 @@ in docs/deferred.md.
    directly — executable, python shebang, the dev-shell check inside —
    so `tools/check-steps.py` is the whole invocation; the two-line
    `.sh` shims that bridged the docs' citations through the conversion
-   went on 2026-09-02, every citation renamed with them. It also runs
+   went on 2026-09-02, every citation renamed with them. AND RUFF'S F FAMILY OVER THE UNCONVERTED POPULATION since 2026-09-17 —
+   undefined and unused names in every tools/**/*.py the eleven rules do
+   not reach, because `re` used and never imported in the recorder's host
+   half passed this gate and died on the Windows failure path; one planted
+   undefined name is its watched negative. It also runs
    the prelude's OWN negatives — the fingerprint against the real
    shell pipeline, both dev-shell sentences, a perturbation that
    applied nothing, the census floor, scratch surviving nothing —

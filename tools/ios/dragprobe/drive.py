@@ -14,7 +14,6 @@ driver SOURCE is the lane's own, never a copy.
   drive.py stop  <udid>          `quit`, then kill, then census
   drive.py ps                    what this probe still has running
 """
-import json
 import os
 import pathlib
 import plistlib

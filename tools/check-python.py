@@ -30,6 +30,8 @@ RUFF = [
     "--ignore", "E402",
     "--line-length", "100",
 ]
+# The names-must-exist family alone, for the population the style rules do not hold.
+RUFF_F = ["ruff", "check", "--no-cache", "--output-format", "concise", "--select", "F"]
 
 # The five lines every converted gate opens with — the whole reach from
 # "a file python runs" to "the prelude is importable", byte-identical.
@@ -524,7 +526,24 @@ gate.negative("N20 rule 11 — a javac with no -encoding in an unconverted "
               lambda b=mac_body: command_census({"tools/lib/lanes/mac.py": b}),
               want="javac compile without -encoding")
 
-gate.negatives_ran(19)
+# N21 — an undefined name in an unconverted module, the shape that passed
+# this gate on 2026-09-16 (docs/deferred.md: the recorder's `re`).
+_lib_copy = gate.scratch() / "n21" / "tools/lib/flightrec_lane.py"
+_lib_copy.parent.mkdir(parents=True, exist_ok=True)
+_lib_copy.write_text(
+    gate.doctor("N21 an undefined name planted in an unconverted module",
+                gate.read("tools/lib/flightrec_lane.py"),
+                r"^import re\n",
+                "import re\n_kaya_census_probe = undefined_name_for_the_census()\n",
+                want=1, flags=re.M),
+    encoding="utf-8")
+_n21 = subprocess.run(RUFF_F + [str(_lib_copy)], cwd=ROOT, stdout=subprocess.PIPE,
+                      stderr=subprocess.STDOUT, text=True, check=False)
+gate.negative("N21 an undefined name in an unconverted module",
+              lambda r=_n21: ([] if r.returncode == 0 else [r.stdout]),
+              want="F821")
+
+gate.negatives_ran(20)
 
 # --------------------------------------------------------------- clauses
 
@@ -571,6 +590,20 @@ if run.returncode != 0:
 else:
     print(f"check-python: ruff clean over {len(files)} file(s) "
           f"({' '.join(RUFF[4:])})")
+
+# RUFF'S F FAMILY OVER THE UNCONVERTED POPULATION TOO (2026-09-17): an
+# undefined name in tools/lib/flightrec_lane.py — `re` used and never
+# imported — passed this gate and died on the Windows recorder's failure
+# path, since the library files are held to rule 11 alone. Style rules stay
+# with the gate bodies; the names must exist everywhere.
+lib_files = sorted(unconverted())
+run_f = subprocess.run(RUFF_F + lib_files, cwd=ROOT, stdout=subprocess.PIPE,
+                       stderr=subprocess.STDOUT, text=True, check=False)
+if run_f.returncode != 0:
+    gate.finding("ruff's F family (undefined and unused names) is not clean over the "
+                 "unconverted tools population:\n" + run_f.stdout.rstrip())
+else:
+    print(f"check-python: ruff F clean over {len(lib_files)} unconverted file(s)")
 
 # THE PRELUDE'S OWN NEGATIVES, on a path nobody can avoid: every converted
 # gate's refusals are that file's.
