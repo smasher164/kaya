@@ -542,10 +542,11 @@ kaya's own delivery record prices the cost. What they say: the table
 stakes come first — search field, toggle switch, badge, hyperlink label,
 splash slot, local notifications, settings persistence, and a compliance
 pass proving dynamic type, RTL and locale formatting on every lane — then
-the sheet, rich text with the text-layout props, the tree view,
-OS-scheduled background work, the `video` kind, animations and the
-packaging milestone; the task manager and the settings utility are the
-two archetypes the first tier finishes. The section remains the
+the sheet, ~~rich text with the text-layout props~~ (rich text SHIPPED
+2026-09-11..15, docs/rich-text-plan.md; the text-layout props stay open),
+the tree view, OS-scheduled background work, the `video` kind, animations
+and the packaging milestone; the task manager and the settings utility
+are the two archetypes the first tier finishes. The section remains the
 roadmap list, in rough priority order; chat / todo / media stay
 unpicked.
 
@@ -2933,14 +2934,21 @@ reach.
 - Per-binding EMISSION checks (kaya_app_checks.py-style — assert the
   records a construction emits) in Java and Haskell — Go, Swift, C#
   and OCaml already have one (run by tools/check-abort.py), so this is
-  two languages owed, not seven.
+  two languages owed, not seven. HASKELL PAID 2026-09-15: `stageTx` is
+  exported so guests/haskell/AbortCheck.hs reads the records a
+  transaction emits (the ranged act's fourteen negatives ride it, under
+  tools/check-abort.py). Java is the one still owed. KEY: emission
+  check java, kaya_app_checks java
   The motivating miss: the Swift binding's containerOf ACCEPTED
   construction-time `spacing:` but never applied it (one commit's
   worth of silently dropped writes) — and no gate could see it,
   because the interpreter's render and its fills observation share
   the node state a wire-dropped write never reaches; recordings were
   the only gate for that class.
-- The WinUI bindings have no regeneration gate:
+- ~~The WinUI bindings have no regeneration gate~~ — CLOSED 2026-09-11:
+  tools/check-winui-bindings.py runs the generator's `--check` into a
+  scratch file and compares, in the sweep; the rich text breadth found
+  the filter line that had never been regenerated (docs/traps.md). As filed:
   crates/kaya/src/winui/bindings.rs comes from tools/winui-bindgen, but
   unlike gen-header/gen-bindings/gen-guests there is no `--check`
   proving the checked-in file matches the generator — a hand edit (or a
@@ -4235,6 +4243,7 @@ WATCH stays: the next sighting after the settle is a different premise.
 KEY: android portfolio title, wanted Transactions, title propagation
 
 ## MAYBE: read Windows accessibility client-side, like the other platforms
+KEY: windows accessibility client-side, UIA client, expect_ax windows, AutomationPeer read
 
 Raised 2026-07-31, NOT decided. Recorded so a green lane does not read
 as a settled question. RE-AFFIRMED 2026-08-31 (maintainer): stays a
@@ -4266,6 +4275,7 @@ evidence: if a real defect ever slips past the Windows a11y legs while
 another platform's client-side read would have caught it, this stops
 being a maybe.
 ## MAYBE: the WinUI seed writes once too, on a board with a relay on it
+KEY: winui clipboard seed, relay board, clipboard_seed windows
 
 Raised 2026-08-04, alongside the mac seed's fix (docs/traps.md,
 docs/clipboard-plan.md §9). RE-AFFIRMED 2026-08-31 (maintainer):
@@ -4293,6 +4303,7 @@ then — the arm was settled 2026-08-03 and a speculative rewrite of a
 green lane's seed buys nothing.
 
 ## MAYBE: the other three backends say nothing when a standard command is inert
+KEY: inert command, kayaUndoInertNote, standard command diagnostic, role inert
 
 Raised 2026-08-04 with the mac paste fix (docs/traps.md, "A standard
 clipboard command that is DISABLED does nothing"). RE-AFFIRMED
@@ -4346,7 +4357,7 @@ DECIDE IT: a second real app hand-copying a mark color into
 brand_accent — that duplication is exactly what the default would
 erase.
 
-## SOLVED: template-node props (was "grow, the a11y pair, accepts, on_paste")
+## ~~SOLVED: template-node props (was "grow, the a11y pair, accepts, on_paste")~~ CLOSED 2026-08-11 by the props slice; struck 2026-09-15 (the headline had said so for a month)
 
 Raised 2026-08-10 by the sugar pass; CLOSED 2026-08-11 by the props
 slice (docs/tpl-props-plan.md). A template node now carries the a11y
@@ -4367,7 +4378,7 @@ arms fire for the first time.
 Still open from the entry, deliberately: spacing and align stay
 floor-only on template containers, uniformly, in every binding alike.
 
-## SOLVED: the floor tier is repo-wide (was "a guest at the FLOOR fails no gate unless its scene is in the tables")
+## ~~SOLVED: the floor tier is repo-wide (was "a guest at the FLOOR fails no gate unless its scene is in the tables")~~ CLOSED 2026-08-11 (tools/guest-floor.py); struck 2026-09-15
 
 Raised 2026-08-10; CLOSED 2026-08-11. tools/guest-floor.py now carries
 the whole per-language floor vocabulary over every sugar guest:
@@ -4393,7 +4404,7 @@ floor (all converted), 21 legitimate, 4 sugar gaps (each closed:
 Tpl.each in OCaml and Haskell, Haskell's live bound slider, the
 scalar-element token). Sweep result today: zero hits, zero exemptions.
 
-## SOLVED: the rust guests cost ~11s to START (macOS walked their build directory)
+## ~~SOLVED: the rust guests cost ~11s to START (macOS walked their build directory)~~ FIXED 2026-08-10, kept for the mechanism; struck 2026-09-15
 
 Measured and FIXED 2026-08-10, while diagnosing two matrix failures
 during the template-zone sugar pass. Kept because the mechanism
@@ -5517,6 +5528,7 @@ Four watched negatives, the first of them `windowTitle` made plain, the
 shipped defect itself. Keyed on android/ and docs/.
 
 ## The typeface scene's depth stubs (Slice 2b mid-flight, expected to close with the fan-out)
+KEY: typeface depth stub, depth_stub("typeface"), typeface scene, SetTypeface arm
 
 The depth landed 2026-08-16: spec (`set_brand_typeface` / `set_typeface`,
 the `platform` enum) + the SwiftUI mac arm + the Rust binding
@@ -7063,6 +7075,7 @@ a crossing child. It would throw on a SubcomposeLayout-based kind
 
 ## WATCH — save-jvm once died to AccessDeniedException on /sdcard/Documents (2026-08-19)
 KEY: save-jvm AccessDenied, sdcard Documents, storage state, straggler
+SEE ALSO the 2026-09-10 sighting on save-go, the same door under the same path, recorded as its own WATCH below ("the android save-go leg's write under /sdcard/Documents was refused once"); and the 2026-09-14 cancel-door WATCH, whose over-refusal is this entry's own A.2 remedy misfiring — loosening it costs what eleven sightings paid for.
 back, appResumed, KAYA_DIALOG_SEEN, KAYA_DIALOG_UNSEEN, windowCensus,
 dialogReport, wait for adding window timeout, OnPreDrawListener,
 first-draw admission, android lane barrier, four-phone Android pool,
@@ -8250,7 +8263,7 @@ clause — this leg has no wrapper beyond a11y-leg.sh. If it repeats:
 core-dump the container (ulimit -c unlimited, coredumpctl or
 /proc/sys/kernel/core_pattern in docker), and look at the RTS's
 foreign-finalizer ordering against gtk_main teardown, not at the scene.
-## Test-speed profile 2026-08-20 — the measured map; both speedups ratified and landed (headline refreshed 2026-08-31)
+## ~~Test-speed profile 2026-08-20 — the measured map; both speedups ratified and landed (headline refreshed 2026-08-31)~~ CLOSED: both speedups landed 2026-08-20 and the scheduler anomaly closed 2026-08-30; kept for the measured map, which is that day's tree (41 gates, a 422s matrix), not today's
 KEY: test speed, keyed cache, matrix bound, save panel cost, clipboard prompt cost
 
 HEADLINE REFRESHED 2026-08-31: the old headline said the two speedups
@@ -10069,7 +10082,7 @@ and the lane is 113 green standalone. "Landed" waits on a green
 matrix from a trusted host.
 
 
-## DESIGN — THE LINUX OUT-OF-BOX LOOK: EMBEDDED DEFAULT TYPEFACE + GTK CHROME (2026-08-31)
+## DESIGN — THE LINUX OUT-OF-BOX LOOK: EMBEDDED DEFAULT TYPEFACE + GTK CHROME (2026-08-31) — the CHROME half SHIPPED 2026-09-15 (187db95a, docs/gtk-chrome.md: the window controls follow the desktop, GNOME's layout where a session supplies none, flat glyphs where three buttons show); the headerbar height/spacing piece and the EMBEDDED TYPEFACE half stay open
 KEY: linux default typeface, embedded plex, script companions, fontconfig fallback pin, headerbar chrome, windowcontrols
 
 RULED 2026-08-31 (maintainer), scope only — the build is sequenced
@@ -10635,7 +10648,7 @@ AT-SPI, the mac 68pt of 508 by the watched negative — the doctored
 SwiftUI arm failed `expect_breadth scroll#0` with that sentence and the
 restored one passed — Compose and WinUI by their arms' own code).
 
-## CHORE — SYNTHESIZING A PAN INTO THE iOS SIMULATOR (2026-08-30) — the guaranteed path is BUILT and PROVEN STANDALONE 2026-09-02 (a resident XCUITest driver, tools/ios/xcuidrive: a real tap changed kaya's model, a real drag scrolled a system app), wired opt-in behind KAYA_IOS_XCUIDRIVE and its in-lane selfcheck green (the swift suite ALL PASS with it, 2026-09-02); kaya's SwiftUI ScrollView ignores a synthetic pan (docs/traps.md); stays open for the subsumption slice the entry above proposes
+## ~~CHORE — SYNTHESIZING A PAN INTO THE iOS SIMULATOR (2026-08-30)~~ CLOSED — the guaranteed path is BUILT and PROVEN STANDALONE 2026-09-02 (a resident XCUITest driver, tools/ios/xcuidrive: a real tap changed kaya's model, a real drag scrolled a system app), wired opt-in behind KAYA_IOS_XCUIDRIVE and its in-lane selfcheck green (the swift suite ALL PASS with it, 2026-09-02); kaya's SwiftUI ScrollView ignores a synthetic pan (docs/traps.md); stays open for the subsumption slice the entry above proposes
 KEY: simulator input, simdrive swipe, IndigoHIDMessageForScrollEvent, XCUITest driver, idb-companion, xcuidrive, resident driver
 
 The maintainer asked for host-driven scrolling so visual checks need no
@@ -10730,7 +10743,7 @@ binding's surface moves. Close it by rewriting the encoder against the
 probe's output bytes as the oracle, with bindings/js/kaya_app_checks.ts's
 byte-equality negatives held, and record the new batch time here.
 
-## DRAG AND DROP — LANDED on every lane in every language 2026-09-03 (spec, core, five backend arms, the `drag` verb per lane, nine bindings, the dnd scene), and its ledger CLOSED the same day: the TEMPLATE ZONE in three shapes (a declaration in the row's body, a keyed per-copy override, and the ELEMENT-BOUND payload, ruled 2026-09-03) in all nine bindings, a row's own `drag_ended`, the files drop on every lane that has a foreign source (a phone cuts it, D9), the reorder's insertion indicator on GTK and WinUI, and the cross-app witnesses as lane legs on linux (both pools, both directions) and windows (a stock OLE reader and EXPLORER ITSELF, the OLE route's first real drops); the one thing owed is the mac witness, measured undrivable without a human (docs/probes/dnd-witness-mac-2026-09-03.md) and payable by a hand run or a check-pane-ladder-shaped gate
+## ~~DRAG AND DROP~~ COMPLETE — LANDED on every lane in every language 2026-09-03 (spec, core, five backend arms, the `drag` verb per lane, nine bindings, the dnd scene), and its ledger CLOSED the same day: the TEMPLATE ZONE in three shapes (a declaration in the row's body, a keyed per-copy override, and the ELEMENT-BOUND payload, ruled 2026-09-03) in all nine bindings, a row's own `drag_ended`, the files drop on every lane that has a foreign source (a phone cuts it, D9), the reorder's insertion indicator on GTK and WinUI, and the cross-app witnesses as lane legs on linux (both pools, both directions) and windows (a stock OLE reader and EXPLORER ITSELF, the OLE route's first real drops); the one thing owed is the mac witness, measured undrivable without a human (docs/probes/dnd-witness-mac-2026-09-03.md) and payable by a hand run or a check-pane-ladder-shaped gate
 KEY: set_drag_source, set_drop_target, set_reorderable, dropped, drag_ended, drag_op, kaya_drag_verdict, dnd scene, docs/dnd-plan.md, KayaDragDropView, kayaDriveDrag, identityTag, kaya_blob_count, KayaPhoneDragDropSurface, KayaDropSessionDouble, kayaReadDropValue, DndHub, dragdrive.py, KAYA_DRAG_DRIVER, await_frames, targets_mut, drag_file, kayaProviderIsFile, kayaDriveFileDrop, dragwitness, dragWriter, draggable_at, drop_target_at, on_drop_node, on_drag_ended_node, TplDraggable, setDragSourceAt, deliver_drop, ClipOffer::Foreign, kaya-drop-before, show_insertion, dragwitness.py, dragwitness-leg.py, dndwitness-out, dndwitness-in, TplDragRef, KayaTplDragRef, TplClip, TplRep, tplClipText, text_field, _drag_slot, dragSlot, bound
 
 THE APPLE HALF OF THE FILES DROP AND THE TEMPLATE ZONE, 2026-09-03: the ios
@@ -11065,7 +11078,7 @@ arm lands, and the lanes carry no pickers legs until then:
 - DESIGN.md's first-admissions lines (3378, 3386) struck when the matrix is
   green.
 
-## WATCH — android `dnd-compose` under a matrix: the drag started and was acked, and the destination answered none (first sighting 2026-09-04)
+## ~~WATCH — android `dnd-compose` under a matrix: the drag started and was acked, and the destination answered none (first sighting 2026-09-04)~~ CLOSED 2026-09-15: the cause was removed at the cause on 2026-09-06 (the injection holds the press until the app's own KAYA_DRAG_STARTED; `input draganddrop` is gone) and the drag legs hold the exclusive token; not re-sighted in any matrix since, seventeen of them on 2026-09-14/15 alone
 EXCLUSIVE SINCE 2026-09-06: `dnd-compose`, `dnd-jvm`, `dnd-go` and
 `tasks-compose` run holding the matrix-wide exclusive token (tools/lib/exclusive.py,
 tools/lib/lanes/android.py EXCLUSIVE), so no other lane starts a leg while an
@@ -11598,7 +11611,7 @@ seconds with a one-second floor, the miss sentence byte-identical to the
 other two harnesses, and `KAYA_HARNESS: scene ready after <n>ms` on the way
 through. tools/check-harness-ceiling.py holds all three. The android python suite standalone the same day: varied-python 3s, green.
 
-## WATCH — `clipboard-python-wayland` under a contended matrix: every paste read "empty"
+## ~~WATCH — `clipboard-python-wayland` under a contended matrix: every paste read "empty"~~ CLOSED 2026-09-15: a real race read and fixed 2026-09-06 (clipboard_seed waits for this process's own offer, not only the foreign targets list; two perturbed census entries in check-gtk.py hold it; the `gtk_window_is_active` false premise is in docs/traps.md); not re-sighted in any matrix since, seventeen of them on 2026-09-14/15 alone
 EXCLUSIVE SINCE 2026-09-06: the three wayland clipboard legs run holding the
 matrix-wide quiet token (tools/linux/run-suites.sh KAYA_EXCLUSIVE_LEGS); the
 x11 leg does not, its one sighting being the first paste's, so a second
@@ -11799,6 +11812,7 @@ KEY: 0x88000FA8, band.UpdateLayout, row window report, portfolio_python, IsLoade
 - Matrix #6 of the app-links tree: `KAYA_HARNESS: step-failed kaya: reporting a row window failed: band.UpdateLayout: (0x88000FA8)` at +94ms, right after the dashboard's eight labels and the canvas drawing read green, on the leg's FIRST report — no `Layout cycle detected` line above it (the bundle's leg log carries nothing unhandled before the fault), so per the 2026-09-07 traps entry this is the ORIGINAL shape (a read off a band XAML will not lay out) and not the cycle shape, on a leg the `IsLoaded` gate had held green on the five matrices since (20260909T231551Z through 20260910T230607Z). The condition XAML refuses on was left unknown by that fix; this sighting says it is still reachable, at the first report rather than after a pop. Instrument on the next sighting: the report prints the band's `IsLoaded`, `ActualWidth/Height` and its screen's push state beside the HRESULT, so the refusal names the state it read. Standalone right after: FAIL once more at +4.2s (after the scene's resize, the class's original position, the second fault in eight minutes), then PASS three times in a row — an intermittent whose window was the host's load, two sightings on the record.
 
 ## WATCH — the android save-go leg's write under /sdcard/Documents was refused once, with the external storage provider frozen (2026-09-10)
+SEE ALSO the save-jvm WATCH of 2026-08-19 above, the same path refusing the same door; the two are one class with two records.
 
 KEY: save-go, /sdcard/Documents, permission denied, am_freeze, com.android.externalstorage, cached-apps freezer
 - Matrix #6 of the app-links tree, emulator-5560: the Go save guest panicked with `open /sdcard/Documents/kaya-save-9209/draft: permission denied` six seconds into the leg, on a path that five matrices' runs of the same leg had written; the leg log's logcat carries `am_freeze: [29710,com.android.externalstorage]` at 16:34:08 (the platform's cached-apps freezer suspending the external storage provider under the pool's memory pressure) and the panic at 16:37:02. A write through the FUSE mount while its provider is frozen is one candidate; a stale grant after the host APK's reinstall is another (the app-links slice rewrote every host manifest). Instrument on the next sighting: the runner prints the freezer's state for com.android.externalstorage (`dumpsys activity processes` / the am_freeze lines) beside the guest's own error, and the save leg's staging writes a probe file under the same directory before the scene runs, so the two candidates read apart. Standalone right after: save-compose, save-jvm and save-go all PASS on the same pool, so the stale-grant candidate is out and the frozen provider stands as the likelier one — one sighting.
@@ -11975,7 +11989,7 @@ three legs that passed on that run (`search_rust`, `search_js`,
 `search_java`) had their click land after Loaded, 400-500ms before the
 first expect_focused.
 
-## WATCH — the dnd scene's keyed drag from a stamped row landed the EARLIER payload, on windows `dnd_java` and then linux `dnd-js-wayland` (first sighting 2026-09-05)
+## WATCH — the dnd scene's keyed drag from a stamped row landed the EARLIER payload, on windows `dnd_java` (first sighting 2026-09-05; the linux wayland face was read and fixed 2026-09-07 and the android face ruled and built 2026-09-06 — headline narrowed 2026-09-15, windows `dnd_java` is the one face still unread)
 KEY: dnd_java, dnd-js-wayland, dnd-jvm, windows drag, wayland drag, android drag, item y drag ended none, text target got text hello, touch slop, seven-pixel source, matrix contention
 
 The task manager's third matrix (d5b85612): the windows lane's `dnd_java` leg
@@ -12336,7 +12350,7 @@ steps, the placeholder on entry and textarea in every backend, the gate
 clauses for S5's Escape arms and S7's identity per backend, and the
 matrix. The entry is struck when the last lane's arm lands.
 
-## RICH TEXT — the root is on the mac (2026-09-11); the five platform arms, the eight bindings' sugar, the template zone and the labels are the breadth slice (docs/rich-text-plan.md §4)
+## ~~RICH TEXT — the root is on the mac (2026-09-11); the five platform arms, the eight bindings' sugar, the template zone and the labels are the breadth slice (docs/rich-text-plan.md §4)~~ COMPLETE 2026-09-15: the breadth 2026-09-11 (§8), the editor's bar and R10 2026-09-14 (§9-§11), the review page's rulings built (§12-§14: positional pending, Edit.source, own_undo), labels 2026-09-14 (§15), the ranged act 2026-09-15 (§17); what stays open is on the rulings entry below (named acts, the polish pass) and the template zone for `rich`
 KEY: rich text, richtext, set_rich_text, apply_edit, text_edited, text_formatted, rich prop, Document, on_edit, own_undo, DEPTH STUB richtext, expect_runs
 
 The root landed 2026-09-11: the spec records (prop `rich`, TX
@@ -12440,7 +12454,29 @@ nothing in the commit touches android. Instrument on the next sighting: log
 the back-gate's successive `backState` readings so the record says WHAT
 moved (a recreated picker, a settling animation, or a stale list entry).
 
-## STRETCH — a demo app with automerge behind the rich textarea (the maintainer, 2026-09-14)
+## A plain Compose textarea reports marked text through text_changed where the mac never does (found 2026-09-11, invariant 1)
+KEY: marked text, composing, text_changed, snapshotFlow, plain textarea compose
+
+Promoted 2026-09-15 out of the struck rich text entry above, whose body
+records it ("Found by the Compose arm (2026-09-11, breadth)"): a PLAIN
+textarea on Compose reports every composing keystroke as `text_changed`
+while the mac's `setMarkedText` notifies nothing; the rich arm suppresses
+it for `rich` fields (R5) and the plain field diverges on every backend.
+Close with its own scene step and the suppression widened to plain fields
+uniformly.
+
+## The stamped-occurrence doors other than click still forward a torn-down copy's tag (found 2026-09-14)
+KEY: stamped_tag_is_live, torn-down copy, dead copy, lingering registry, toggled dead copy, set_value dead copy
+
+Promoted 2026-09-15 out of the struck rich text entry above, whose body
+records it ("Found by the editor's formatting bar (2026-09-14)"): only the
+CLICK door drops a torn-down copy's tag in the core (`stamped_tag_is_live`,
+capi.rs); toggled, set_value, sort_requested, dropped and the other
+stamped-occurrence doors still forward one. Route them all through the
+same check and add the drop to each, with the editor scene's shape of
+negative for each door.
+
+## ~~STRETCH — a demo app with automerge behind the rich textarea (the maintainer, 2026-09-14)~~ CLOSED 2026-09-15 — BUILT in Rust, one language by the maintainer's word (guests/rust/notes.rs, tools/scenes/notes.steps on five lanes; docs/rich-text-plan.md §16, §17)
 KEY: automerge demo, CRDT notes app, automerge bridge, sync demo, rich text demo
 
 The maintainer's stretch goal after rich text landed: "actually integrate
@@ -12491,9 +12527,19 @@ richtext_rust, which types too, passed in the same matrix. The lane also
 read 1113s of suites against its usual ~900, plausibly the same popup
 slowing every typing leg's dance; not measured. Bundle:
 ~/.local/state/kaya/flightrec/runs/20260916T012604Z-002645/bundles/windows-notes_rust.
-On a second sighting: teach the dance to dismiss a PopupHost (a click on
-the desktop, or `SendMessage(WM_CLOSE)` to that class) and record which
-flyout it was (`foreground.txt` names only the class).
+SECOND SIGHTING, matrix 17 the same evening, with NO PopupHost this time:
+the foreground ring shows the tray and four pooled neighbours' windows
+(milestone2 in rust, python, go and java) taking the foreground around
+the leg, whose first `type` comes three seconds after launch. The common
+cause of both sightings is a typing leg starting while the pool is still
+launching windows — the class docs/traps.md's foreground entry names and
+the exclusive token exists for; richtext_rust types too and survives
+because its first keystroke comes later in its scene. REMEDY TAKEN
+2026-09-15: `notes_rust` joined tools/lib/lanes/win.py's EXCLUSIVE set,
+so it runs with the pool emptied (tools/check-exclusive.py holds the name
+to a leg the lane runs). The PopupHost of the first sighting stays what
+it was — a flyout that happened to hold the foreground during that
+window — and the dismissal idea stands if a third sighting shows one.
 
 ## WATCH — the iOS dark canvas leg read LIGHT pixels under a matrix, once (first sighting 2026-09-14)
 KEY: canvasdark-swift, expect_ink dark, KAYA_APPEARANCE, kayaCanvasAppearance, traitCollection, appearance flake

@@ -36,7 +36,12 @@ SCENES = [
 # matrix can leave them (the maintainer, 2026-09-06: the drags are what
 # make a matrix long).
 EXCLUSIVE = {"dnd_rust", "dnd_python", "dnd_js", "dnd_go", "dnd_csharp", "dnd_java",
-             "dndwitness_rust", "dndforeign_rust"}
+             "dndwitness_rust", "dndforeign_rust",
+             # notes types three seconds after launch, while a pooled
+             # neighbour's window is still taking the foreground; twice
+             # red under a matrix, green alone (docs/deferred.md, the
+             # PopupHost WATCH's second sighting, 2026-09-15).
+             "notes_rust"}
 
 # Depth-slice scenes: a rust example + steps exist, the language
 # sweep has not landed. Built, shipped and run RUST-ONLY — the
