@@ -58,6 +58,9 @@ public final class KayaRecords {
             if (t == long.class || t == Long.class) return KayaWire.VALUE_I64;
             if (t == double.class || t == Double.class) return KayaWire.VALUE_F64;
             if (t == byte[].class) return KayaWire.VALUE_BLOB;
+            // A stamped copy's document is a Blob field whose bytes are
+            // the document's own value list (docs/rich-text-plan.md §19).
+            if (t == KayaApp.Document.class) return KayaWire.VALUE_BLOB;
             // The picker types ride the I64 tag in packed decimal
             // (docs/datetime-plan.md D10).
             if (t == LocalDate.class || t == LocalTime.class) return KayaWire.VALUE_I64;
@@ -166,10 +169,14 @@ public final class KayaRecords {
                 return scalarWire(value);
             }
             if (schema[wireIndex] == KayaWire.VALUE_BLOB) {
+                if (value instanceof KayaApp.Document document) {
+                    return new KayaWire.BlobHandle(
+                            KayaRing.blobRegister(KayaApp.documentBlob(document)));
+                }
                 if (!(value instanceof byte[])) {
                     throw new IllegalArgumentException("kaya: "
                             + ctor.getDeclaringClass().getName() + " wire field " + wireIndex
-                            + " is a blob — pass byte[] (encoded image bytes), not "
+                            + " is a blob — pass byte[] (encoded image bytes) or a Document, not "
                             + (value == null ? "null" : value.getClass().getName()));
                 }
                 return new KayaWire.BlobHandle(KayaRing.blobRegister((byte[]) value));
@@ -211,6 +218,17 @@ public final class KayaRecords {
                 return ctor.newInstance(args);
             } catch (ReflectiveOperationException e) {
                 throw new IllegalStateException("kaya: record reconstruction failed", e);
+            }
+        }
+
+        /** One wire field's value as the record holds it — the read
+         * half of withField, which the row-document fold needs
+         * (docs/rich-text-plan.md §19). */
+        Object fieldOfWire(Object record, int wireIndex) {
+            try {
+                return accessors[wireToComponent[wireIndex]].invoke(record);
+            } catch (ReflectiveOperationException e) {
+                throw new IllegalStateException("kaya: record accessor failed", e);
             }
         }
 

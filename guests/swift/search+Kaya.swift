@@ -40,6 +40,10 @@ struct SearchItemRow {
         t.image(f)
     }
 
+    func textarea(document f: KayaField<KayaDocument>) -> KayaNodeHandle {
+        t.textarea(document: f)
+    }
+
     func checkbox(
         _ f: KayaField<Bool>,
         onToggle: ((KayaAppTx, [KayaValue], Bool) -> Void)? = nil

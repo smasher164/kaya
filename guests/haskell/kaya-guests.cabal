@@ -193,6 +193,11 @@ executable richlabel
   main-is: richlabel.hs
   build-depends: kaya-guests
 
+executable richrows
+  import: shared
+  main-is: richrows.hs
+  build-depends: kaya-guests
+
 executable sections
   import: shared
   main-is: sections.hs

@@ -10003,6 +10003,28 @@ tools/linux/dragprobe.py proves the whole chain before the first leg of
 every lane run — the flag, the wait, the reading — and refuses a route
 whose gate never fired, since a quiet host drops fine without it.
 
+THE SECOND HANDSHAKE (measured 2026-09-16): drag-begin is not the last
+gate. On wayland the compositor delivers `wl_data_device.drop` on the
+release only to a client that has already answered `wl_data_offer.accept`,
+which GDK sends when the destination's drag-enter/drag-motion returns a
+non-empty action — so a release that lands before that answer is met with
+`leave`, the drag is cancelled, and the target reads `no drop yet` while
+the source reads `drag ended none`, exactly like a refused drop. The
+2026-09-07 gate above handed the destination a FIXED 540ms after
+drag-begin, and under a five-lane matrix the app was further behind than
+that at its FIRST gesture, the busiest moment it has (four sightings, all
+step 2). Measured with `KAYA_DRAG_DRIVER` shrinking the grace with no edit
+to the tree: 0ms fails with the sighting's readings byte for byte and the
+drop-side instrument reads `accept 1/1 enter 1/1 motion 1/1 drop 0;
+delivered 0; ended 0`; 50ms and up pass. The release waits for the
+destination's accept now (`note_drop_took` in gtk.rs, wlpointer's `hold
+PATH MS` verb, dragdrive.py's step), dragprobe.py proves the gate and
+both expiry branches on every lane run, and the verb refuses a gesture
+whose destination answered while the gate never fired. On a host that is
+not a matrix this never reproduces — 96 runs under every contention the
+lane could make were green — which is why it took the instrument and not
+the loop to find.
+
 ## A headless macOS notification request burns its bundle id (2026-09-08)
 
 The first notify leg asked `UNUserNotificationCenter.requestAuthorization`

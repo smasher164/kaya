@@ -1345,7 +1345,7 @@ object KayaCompose {
     // but only the runtime assert catches a stale compiled APK against
     // a new libkaya. ULong because the fingerprint's high bit is fair
     // game and a Kotlin Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0xe52568620b0ca54euL
+    private const val SPEC_HASH: ULong = 0x3854759c1c5d028cuL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -1578,6 +1578,9 @@ object KayaCompose {
     private const val PROP_OWN_UNDO = 33
     private const val PROP_CAN_UNDO = 34
     private const val PROP_CAN_REDO = 35
+    // docs/rich-text-plan.md §19: a stamped copy's document, a template-zone
+    // prop the core turns into set_rich_text before any arm sees it.
+    private const val PROP_DOCUMENT = 36
     private const val PROP_COLUMNS = 11
     // The accessibility identifier (never spoken) and label (spoken).
     // Universal: every widget kind carries both.
@@ -1765,6 +1768,7 @@ object KayaCompose {
         APPLY_SET_RICH_TEXT.toLong(), APPLY_APPLY_EDIT.toLong(), APPLY_FORMAT_TEXT.toLong(),
         PROP_RICH.toLong(),
         PROP_OWN_UNDO.toLong(), PROP_CAN_UNDO.toLong(), PROP_CAN_REDO.toLong(),
+        PROP_DOCUMENT.toLong(),
         RICH_ATTR_BOLD, RICH_ATTR_ITALIC, RICH_ATTR_UNDERLINE, RICH_ATTR_STRIKE,
         RICH_ATTR_CODE, RICH_ATTR_LINK, RICH_ATTR_BLOCK,
         BLOCK_BODY, BLOCK_HEADING1, BLOCK_HEADING2, BLOCK_HEADING3, BLOCK_QUOTE,

@@ -868,11 +868,13 @@ own "no app for this link" dialog; a click beside the quote opened
 nothing). The plain-field half of ranges.steps D5 read "4 matches" there
 too: suppression is `composing_now` alone now, and entries and search
 fields, which had no composition handlers at all, take the pair through
-`watch_plain_composition`. The rich LABEL's ground is not drawable on
-WinUI — `Run`, `Span` and `Hyperlink` carry no background, and
-`TextHighlighter`, the real mechanism, is not projected in bindings.rs
-(one line in tools/winui-bindgen's type list plus a regenerate would buy
-it; left for a slice of its own).
+`watch_plain_composition`. The rich LABEL's ground on WinUI: `Run`,
+`Span` and `Hyperlink` carry no background, so `label_paint_grounds`
+installs one `TextHighlighter` per colour over the block (three filter
+lines in tools/winui-bindgen — TextHighlighterBase, TextHighlighter,
+TextRange — and a regenerate; built 2026-09-16), its colours from
+`rich_ground` so the label and textarea arms cannot drift; check-verbs
+holds the painter and the restyle that calls it.
 
 THE GTK GROUND IS AN ATTRIBUTE THE HIGHLIGHTS READ COULD SEE (found by
 the GTK arm, 2026-09-15): `expect_highlights` on GTK walks the bus's
@@ -1034,7 +1036,8 @@ record's field VALUE, so a 15,000-row list of rich notes carries 15,000
 documents in the model — the same as 15,000 strings today, and the
 virtualizer stamps only the window (docs/virtualization-plan.md).
 
-THE RULING FOR THE MAINTAINER: B — a stamped copy's document is a Blob
+THE RULING FOR THE MAINTAINER — TAKEN 2026-09-16, B ("i like your
+recommendation"): B — a stamped copy's document is a Blob
 field bound through a new template-zone `document` prop, written by
 patching the row; or A — instance-addressed twins of the three document
 records. The build after B: the prop in spec.rs (hash moves); scene.rs
@@ -1052,3 +1055,73 @@ runs by key, patches the row from a button and reads the copy again, on
 five lanes in nine languages. `own_undo` stays a live-zone prop (the
 ledger is keyed by widget; a copy's undo is the platform's), stated in one
 sentence in all nine.
+
+BUILT, THE DEPTH (2026-09-16): `document` is prop 36 (Blob; the hash moved
+to 0x3854759c1c5d028c and both interpreters carry it); the core's
+`push_bound_prop` is the one door a bound prop takes to a stamped copy — at
+the stamp and at every field write — and for `document` it decodes the
+blob (`wire::document_blob` / `read_document_blob`: the text, then four
+values per run), seeds the copy's mirror under the copy's own id and
+pushes `ApplyOp::SetRichText`, so no arm knows the prop; a copy's teardown
+takes its mirrors; the live zone refuses the prop and a template that
+binds `document` without `rich` before it is refused at its end, each in
+one sentence (four unit tests, the third an end-to-end stamp, field write
+and removal). The Rust binding: `impl KayaField for Document` (Blob-kinded,
+so a `Document` field derives like a String one), `Tpl::textarea_rich_bound`
+(rich first, then the bound document, remembering node -> (collection,
+field)), `fold_row_document` applying the live fold (`fold_edit`,
+`fold_format`, lifted out of the mirror's absorbers) to the row's field on
+`InstanceTextEdited`/`InstanceTextFormatted`, and `on_edit_node` /
+`on_format_node`. guests/rust/richrows.rs + tools/scenes/richrows.steps,
+wired on five lanes rust-only. MEASURED ON THE FIRST RUN: the core spells a
+copy's runs by start and then by NAME — `format 0:5 italic` over `0:6 bold`
+reads `0:6 bold|0:5 italic` — and the binding's fold agreed with the core
+byte for byte on the label, which is the corroboration the scene exists
+for; the scene's strings took the core's order. The mac leg is green; the
+eight bindings are the breadth, fanned out the same hour.
+
+BUILT, THE BREADTH (2026-09-16, three agents, eight bindings, all nine
+green on the mac): `Document` is a record field type in every binding —
+Python's `_WIRE_TYPES`/`_FIELD_ENCODERS`, JS's `Token`/`FieldOf`/`wireTag`,
+Go's `wireTag` plus two generator rows in cmd/kaya-gen, C#'s csgen `Wire`
+set and row forwarder, Java's processor `wireTokenType` arm, Swift's
+swift-gen `wire` map with a generated `kayaDocument`/`kayaWithDocument`
+pair (Mirror reads a stored property and cannot write one), OCaml's ppx
+(a `Doc` wire kind) and Haskell's `KayaFieldType Document` instance — each
+packing `wire::document_blob`'s list through its OWN value encoder, held
+by a negative against ONE hand-derived 152-byte reference in all eight.
+The template spelling follows each binding's bound-text textarea: Python
+`textarea(document=row.body)`, JS `textarea({document: row.body})`, Go
+`TextareaRichBound` (the façade's `TextareaRich`), C# an OVERLOAD
+`Textarea(Field<Document>)`, Java `textareaRich` (erasure makes the
+overload one method), Swift `textarea(document:)`, OCaml `?document_field`
+over `Floor.bind_document_field`, Haskell `textareaRichBound` over
+`bindDocumentField`. tools/tpl-surfaces.py censuses `document` in all
+eight zones; the C# and Swift readers spell a member with its first
+parameter type or label, since a bare `Textarea` is satisfied by the text
+overload, Haskell's reads its `bind*Field` family, and JS's counts the
+option from the textarea WRITER alone, since `Handle.document()` is the
+live read of the same name — the reader's `brace_block` took the first
+brace after a header's START and read a `{}` parameter default as the
+block until it searched from the header's end.
+A DEFECT FOUND THREE TIMES: Go, OCaml and Haskell folded a STAMPED copy's
+edit into the live mirror keyed by the template node's id and called the
+live handler; each now splits on the key path. And a residue stated, on
+the ledger: an undo restoring a row rebuilds a Blob field from the wire's
+handle, not its bytes, in C# and Java (byte[] fields had the same hole).
+
+THE LINUX LANE'S FIRST RUN FOUND THE GTK KEYED TARGET'S HOLE (2026-09-16):
+`textarea@body[a]` resolved on the mac, on Compose and on WinUI and read
+`names no widget` on both GTK displays, and the arm's own diagnostic said
+why in one line — `2 in the registry, 2 carrying the id (2 of them live),
+0 tagged`: the keyed arm matched a registry widget to its native by
+`native.widget() == w`, and a textarea's registry holds its INNER text
+view while its native's widget is the scroller around it, so no textarea
+copy could ever carry a tag there (a stamped button, the slice's first
+customer, is its own outer widget). The first fix — "any native whose
+widget contains w" — resolved copy a and not copy b, because the natives
+are a hash map and copy b's walk met its enclosing COLUMN's native first,
+which carries no tag; the match walks the registry widget's OWN parent
+chain to the nearest native now. The richrows leg on the linux lane is the
+guard; the diagnostic that named the cause both times is why each took
+one read and not a session.

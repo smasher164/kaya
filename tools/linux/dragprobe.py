@@ -63,21 +63,32 @@ def main():
     # whose gate never fired would still drop on a quiet host, so the
     # reading is asserted, not just the drop.
     begin_flag = f"/tmp/kaya-dragprobe-begin-{os.getpid()}" if proto == "wayland" else None
-    if begin_flag and os.path.exists(begin_flag):
-        os.remove(begin_flag)
-    state = {"child": None, "origin_tries": 0, "begin_flag": begin_flag}
+    # AND THE DROP-SIDE GATE, proven the same way: the flag a destination's
+    # own answer touches (crates/kaya/src/gtk.rs's note_drop_took) and the
+    # injector's `hold` step at the walk's end. A release that beats that
+    # answer is answered `leave` by the compositor and no drop is ever
+    # delivered, which reads exactly like a refused drop
+    # (docs/deferred.md's dnd wayland WATCH).
+    took_flag = f"/tmp/kaya-dragprobe-took-{os.getpid()}" if proto == "wayland" else None
+    for flag in (begin_flag, took_flag):
+        if flag and os.path.exists(flag):
+            os.remove(flag)
+    state = {"child": None, "origin_tries": 0, "begin_flag": begin_flag,
+             "took_flag": took_flag}
     if begin_flag:
-        # THE GATE'S OTHER BRANCH, made to print (CLAUDE.md invariant 3): a
+        # EACH GATE'S OTHER BRANCH, made to print (CLAUDE.md invariant 3): a
         # wait whose flag never comes must say so and release, or a leg
         # under load would hang on a drag nobody began.
-        expired = subprocess.run([injector, "wait", begin_flag + ".never", "100"],
-                                 capture_output=True, text=True, encoding="utf-8",
-                                 check=False)
-        line = expired.stdout.strip().splitlines()[-1:] or ["nothing"]
-        print("dragprobe: injector's expired wait said " + line[0], flush=True)
-        if expired.returncode != 0 or "no drag began within 100ms" not in line[0]:
-            fail(f"the injector's wait did not expire as it should (exit "
-                 f"{expired.returncode}: {line[0]}; stderr {expired.stderr.strip()!r})")
+        for verb, want in (("wait", "no drag began within 100ms"),
+                           ("hold", "no drop target took the drag within 100ms")):
+            expired = subprocess.run([injector, verb, begin_flag + ".never", "100"],
+                                     capture_output=True, text=True, encoding="utf-8",
+                                     check=False)
+            line = (expired.stdout.strip().splitlines()[-1:] or ["nothing"])[0]
+            print(f"dragprobe: injector's expired {verb} said " + line, flush=True)
+            if expired.returncode != 0 or want not in line:
+                fail(f"the injector's {verb} did not expire as it should (exit "
+                     f"{expired.returncode}: {line}; stderr {expired.stderr.strip()!r})")
     app = Gtk.Application(application_id="dev.kaya.dragprobe")
 
     def note(line):
@@ -122,6 +133,11 @@ def main():
 
         def enter(_target, _x, _y):
             note("enter")
+            # THE DROP-SIDE GATE'S OTHER HALF, as the backend does it: a
+            # destination that answers an action is the moment GDK sends
+            # wl_data_offer.accept, and the injector holds its release for it.
+            if state["took_flag"]:
+                open(state["took_flag"], "w", encoding="utf-8").close()
             return Gdk.DragAction.COPY
 
         def dropped(_target, value, x, y):
@@ -160,7 +176,8 @@ def main():
                   f"(surface transform {transform}); "
                   f"drag {start} -> {end}", flush=True)
             state["child"] = subprocess.Popen(
-                injector_argv(proto, injector, start, end, begin_flag=begin_flag),
+                injector_argv(proto, injector, start, end, begin_flag=begin_flag,
+                              took_flag=took_flag),
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8")
             GLib.timeout_add(DROP_DEADLINE_MS, deadline)
             return False
@@ -189,14 +206,21 @@ def main():
         child = state["child"]
         out = child.communicate(timeout=10)[0] if child else ""
         gate = [line for line in out.splitlines() if line.startswith("wlpointer:")]
-        print("dragprobe: injector said " + (gate[-1] if gate else "nothing about the gate"),
-              flush=True)
+        print("dragprobe: injector said " + ("; ".join(gate) if gate
+                                             else "nothing about the gates"), flush=True)
         if not any("drag began" in line and "no drag" not in line for line in gate):
             fail(f"the wayland drag-begin gate did not fire: the injector's wait step "
                  f"never saw the flag {begin_flag} ({gate or 'no wait line at all'}) — "
                  f"a release that beats GTK's drag-begin would go unnamed on every leg")
-        if os.path.exists(begin_flag):
-            os.remove(begin_flag)
+        if not any("took the drag" in line and "no drop target" not in line
+                   for line in gate):
+            fail(f"the wayland drop-side gate did not fire: the injector's hold step "
+                 f"never saw the flag {took_flag} ({gate or 'no hold line at all'}) — "
+                 f"a release that beats the destination's own answer loses the drop "
+                 f"with no sign anywhere (docs/deferred.md's dnd wayland WATCH)")
+        for flag in (begin_flag, took_flag):
+            if os.path.exists(flag):
+                os.remove(flag)
     return 0
 
 

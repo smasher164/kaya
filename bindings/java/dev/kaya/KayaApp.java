@@ -281,6 +281,12 @@ public final class KayaApp {
     private final Map<Long, BiConsumer<Tx, Edit>> widgetEdits = new HashMap<>();
     private final Map<Long, BiConsumer<Tx, Format>> widgetFormats = new HashMap<>();
     private final Map<Long, Document> documents = new HashMap<>();
+    // A stamped copy's own acts (docs/rich-text-plan.md §19): the
+    // handlers, and the template node -> (collection, field) every
+    // document-bound textarea registers so the act folds into its row.
+    private final Map<Long, EditHandler> nodeEdits = new HashMap<>();
+    private final Map<Long, FormatHandler> nodeFormats = new HashMap<>();
+    private final Map<Long, long[]> documentBinds = new HashMap<>();
     private final Map<Long, ChangeHandler> nodeChanges = new HashMap<>();
     private final Map<Long, BiConsumer<Tx, Boolean>> widgetToggles = new HashMap<>();
     private final Map<Long, BiConsumer<Tx, Double>> widgetValues = new HashMap<>();
@@ -368,6 +374,19 @@ public final class KayaApp {
      * the entry's new text. */
     public interface ChangeHandler {
         void accept(Tx tx, List<Object> keys, String text);
+    }
+
+    /** A stamped copy's edit handler: the copy's keys, then the edit.
+     * The row's Document field already carries it (docs/rich-text-plan.md
+     * §19). */
+    public interface EditHandler {
+        void accept(Tx tx, List<Object> keys, Edit edit);
+    }
+
+    /** A stamped copy's format handler, EditHandler's twin one act
+     * over. */
+    public interface FormatHandler {
+        void accept(Tx tx, List<Object> keys, Format act);
     }
 
     /** A template widget's paste handler: the stamped copy's keys, then
@@ -3574,6 +3593,10 @@ public final class KayaApp {
             return t.textarea(f);
         }
 
+        public Node textareaRich(KayaRecords.Field<Document> f) {
+            return t.textareaRich(f);
+        }
+
         public Node search() {
             return t.search();
         }
@@ -6642,6 +6665,28 @@ public final class KayaApp {
             return n;
         }
 
+        /** A RICH textarea per stamped copy whose document is a Document
+         * FIELD of the row (docs/rich-text-plan.md §19): {@code rich}
+         * first, then the bound document, which the core turns into that
+         * copy's own set_rich_text. The user's acts fold into the row's
+         * field as a live widget's fold into its mirror, so the app
+         * writes a copy's document by patching the row and reads it back
+         * off the row. A NAME OF ITS OWN because erasure makes
+         * {@code textarea(Field&lt;Document&gt;)} the same method as
+         * {@link #textarea(KayaRecords.Field)}. */
+        public Node textareaRich(KayaRecords.Field<Document> f) {
+            Node n = widget(KayaWire.KIND_TEXTAREA);
+            tx.emit(KayaWire.txSetRich(n.id, true));
+            // LEVEL 0 ONLY: the fold names the row by the occurrence's
+            // own last key.
+            if (!openFors.isEmpty()) {
+                documentBinds.put(n.id,
+                        new long[] {openFors.get(openFors.size() - 1), f.index});
+            }
+            tx.emit(KayaWire.txBindDocumentElement(n.id, 0, f.index));
+            return n;
+        }
+
         /** A search field per stamped copy: {@link #entry()}'s
          * uncontrolled contract under the platform's search chrome
          * (docs/search-plan.md), with the same three seeding overloads
@@ -7187,6 +7232,21 @@ public final class KayaApp {
     }
 
     /**
+     * One addressed user edit of a STAMPED copy's rich textarea: the
+     * handler receives that copy's keys, outermost first. The row's
+     * Document field already carries the edit when it fires, so the app
+     * reads the row and never the widget (docs/rich-text-plan.md §19).
+     */
+    public void onEdit(Node n, EditHandler handler) {
+        nodeEdits.put(n.id, handler);
+    }
+
+    /** The same for a stamped copy's toolbar act. */
+    public void onFormat(Node n, FormatHandler handler) {
+        nodeFormats.put(n.id, handler);
+    }
+
+    /**
      * This app's copy of a rich textarea's content, folded from every
      * edit and format the core delivered; empty until the first of them
      * or the first Tx.setDocument.
@@ -7200,21 +7260,80 @@ public final class KayaApp {
         documents.put(widget, new Document(document.content, document.marks));
     }
 
-    /** One delivered edit, folded by the core's own rules
-     * (crates/kaya/src/app.rs, AppCtx::absorb_edit). THE SPLICE IS IN
+    /**
+     * A Document's BYTES as a record field holds them
+     * (docs/rich-text-plan.md §19, crates/kaya/src/wire.rs
+     * {@code document_blob}): one counted value list — the text, then
+     * four values per run. Hand-packed because KayaWire's value encoder
+     * is the generated file's own; the bytes are pinned against the wire
+     * rules in tools/checks/java-abort/dev/kaya/IdSpaceCheck.java.
+     */
+    static byte[] documentBlob(Document document) {
+        List<Object> values = new ArrayList<>();
+        values.add(document.content);
+        for (TextRun run : document.marks) {
+            values.add(run.start());
+            values.add(run.stop());
+            values.add(run.name());
+            values.add(run.value());
+        }
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        putInt(out, values.size());
+        putInt(out, 0);
+        for (Object v : values) {
+            if (v instanceof String text) {
+                byte[] utf8 = text.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                putInt(out, KayaWire.VALUE_STR);
+                putInt(out, utf8.length);
+                out.write(utf8, 0, utf8.length);
+            } else {
+                putInt(out, KayaWire.VALUE_I64);
+                putInt(out, 8);
+                putLong(out, (Long) v);
+            }
+            while (out.size() % 8 != 0) {
+                out.write(0);
+            }
+        }
+        return out.toByteArray();
+    }
+
+    private static void putInt(java.io.ByteArrayOutputStream out, int v) {
+        for (int shift = 0; shift < 32; shift += 8) {
+            out.write((v >>> shift) & 0xFF);
+        }
+    }
+
+    private static void putLong(java.io.ByteArrayOutputStream out, long v) {
+        for (int shift = 0; shift < 64; shift += 8) {
+            out.write((int) ((v >>> shift) & 0xFF));
+        }
+    }
+
+    /** One delivered edit, folded into the live widget's mirror. */
+    private void absorbEdit(long widget, long start, long stop, String inserted,
+            List<TextRun> runs) {
+        foldEdit(documents.computeIfAbsent(widget, id -> new Document("")),
+                start, stop, inserted, runs);
+    }
+
+    /** The core's own fold rule over ANY document — a live widget's
+     * mirror or a stamped copy's ROW FIELD (crates/kaya/src/app.rs,
+     * AppCtx::fold_edit; docs/rich-text-plan.md §19). THE SPLICE IS IN
      * UTF-8 BYTES, which a Java String is not: the offsets are the
      * core's (docs/ranges-units.md), so the text is cut as bytes and
      * decoded back. */
-    private void absorbEdit(long widget, long start, long stop, String inserted,
+    static void foldEdit(Document doc, long start, long stop, String inserted,
             List<TextRun> runs) {
-        Document doc = documents.computeIfAbsent(widget, id -> new Document(""));
         byte[] was = doc.content.getBytes(java.nio.charset.StandardCharsets.UTF_8);
         byte[] put = inserted.getBytes(java.nio.charset.StandardCharsets.UTF_8);
         if (start < 0 || start > stop || stop > was.length
                 || !boundary(was, start) || !boundary(was, stop)) {
             // A mirror out of step with the core would splice a character
             // in half.
-            documents.put(widget, new Document(inserted, runs));
+            doc.content = inserted;
+            doc.marks.clear();
+            doc.marks.addAll(runs);
             return;
         }
         long shift = put.length - (stop - start);
@@ -7278,13 +7397,21 @@ public final class KayaApp {
         return TextRange.ofBytes(paraStart, paraEnd);
     }
 
-    /** One delivered format: put the attribute over the range or take it
-     * off, clipping THIS attribute's runs (AppCtx::absorb_format). */
+    /** One delivered format, folded into the live widget's mirror. */
     private void absorbFormat(long widget, Format act) {
         if (act.start() >= act.stop()) {
             return;
         }
-        Document doc = documents.computeIfAbsent(widget, id -> new Document(""));
+        foldFormat(documents.computeIfAbsent(widget, id -> new Document("")), act);
+    }
+
+    /** foldEdit's twin one act over: put the attribute over the range or
+     * take it off, clipping THIS attribute's runs
+     * (AppCtx::fold_format). */
+    static void foldFormat(Document doc, Format act) {
+        if (act.start() >= act.stop()) {
+            return;
+        }
         List<TextRun> next = new ArrayList<>();
         for (TextRun run : doc.marks) {
             if (!run.name().equals(act.name()) || run.stop() <= act.start()
@@ -7304,6 +7431,41 @@ public final class KayaApp {
         }
         doc.marks.clear();
         doc.marks.addAll(Document.normalize(next));
+    }
+
+    /**
+     * A stamped copy's edit or format act reaches its ROW's Document
+     * field (docs/rich-text-plan.md §19, crates/kaya/src/app.rs
+     * {@code fold_row_document}): the node is bound to
+     * (collection, field) by the document-bound template textarea, and
+     * the occurrence's keys name the row. A row that is gone has no
+     * field to fold into, and that is not a fault.
+     */
+    void foldRowDocument(long node, List<Object> keys, Consumer<Document> fold) {
+        long[] bind = documentBinds.get(node);
+        if (bind == null || keys.isEmpty()) {
+            return;
+        }
+        Instance instance = instanceOf(bind[0], keys.subList(0, keys.size() - 1));
+        if (instance == null) {
+            return;
+        }
+        Object key = keys.get(keys.size() - 1);
+        for (int at = 0; at < instance.entries.size(); at++) {
+            Entry entry = instance.entries.get(at);
+            if (!java.util.Objects.equals(entry.key, key) || entry.value == null) {
+                continue;
+            }
+            KayaRecords.Info info = KayaRecords.Info.of(entry.value.getClass());
+            if (!(info.fieldOfWire(entry.value, (int) bind[1]) instanceof Document held)) {
+                return;
+            }
+            Document doc = new Document(held.content, held.marks);
+            fold.accept(doc);
+            instance.entries.set(at,
+                    new Entry(key, info.withField(entry.value, (int) bind[1], doc)));
+            return;
+        }
     }
 
     /**
@@ -7663,22 +7825,43 @@ public final class KayaApp {
             // handler lookup, so a rich textarea nobody registered for
             // still keeps its document in step
             // (docs/rich-text-plan.md R1).
-            } else if (occ.kind == KayaWire.OCC_KIND_TEXT_EDITED) {
+            } else if (occ.kind == KayaWire.OCC_KIND_TEXT_EDITED && occ.keys.isEmpty()) {
                 Edit edit = editOf(occ.payload);
                 absorbEdit(occ.id, edit.start, edit.stop, edit.inserted, edit.marks);
                 BiConsumer<Tx, Edit> handler = widgetEdits.get(occ.id);
-                if (handler != null && occ.keys.isEmpty()) {
+                if (handler != null) {
                     dispatch(tx -> {
                         handler.accept(tx, edit);
                     });
                 }
-            } else if (occ.kind == KayaWire.OCC_KIND_TEXT_FORMATTED) {
+            // A STAMPED COPY FOLDS INTO ITS ROW, never into a mirror the
+            // app cannot address (docs/rich-text-plan.md §19).
+            } else if (occ.kind == KayaWire.OCC_KIND_TEXT_EDITED) {
+                Edit edit = editOf(occ.payload);
+                foldRowDocument(occ.id, occ.keys,
+                        doc -> foldEdit(doc, edit.start, edit.stop, edit.inserted, edit.marks));
+                EditHandler handler = nodeEdits.get(occ.id);
+                if (handler != null) {
+                    dispatch(tx -> {
+                        handler.accept(tx, occ.keys, edit);
+                    });
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_TEXT_FORMATTED && occ.keys.isEmpty()) {
                 Format act = formatOf(occ.payload);
                 absorbFormat(occ.id, act);
                 BiConsumer<Tx, Format> handler = widgetFormats.get(occ.id);
-                if (handler != null && occ.keys.isEmpty()) {
+                if (handler != null) {
                     dispatch(tx -> {
                         handler.accept(tx, act);
+                    });
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_TEXT_FORMATTED) {
+                Format act = formatOf(occ.payload);
+                foldRowDocument(occ.id, occ.keys, doc -> foldFormat(doc, act));
+                FormatHandler handler = nodeFormats.get(occ.id);
+                if (handler != null) {
+                    dispatch(tx -> {
+                        handler.accept(tx, occ.keys, act);
                     });
                 }
             } else if (occ.kind == KayaWire.OCC_KIND_TOGGLED && occ.keys.isEmpty()) {

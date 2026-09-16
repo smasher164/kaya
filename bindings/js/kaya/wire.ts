@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0xe52568620b0ca54en;
+export const SPEC_HASH = 0x3854759c1c5d028cn;
 
 export const VALUE_BOOL = 1;
 export const VALUE_I64 = 2;
@@ -101,6 +101,7 @@ export const PROP_RICH = 32;
 export const PROP_OWN_UNDO = 33;
 export const PROP_CAN_UNDO = 34;
 export const PROP_CAN_REDO = 35;
+export const PROP_DOCUMENT = 36;
 export const WPROP_TITLE = 1;
 export const WPROP_WIDTH = 2;
 export const WPROP_HEIGHT = 3;
@@ -1280,6 +1281,21 @@ export function tx_bind_can_redo(widget_id: number, signal_id: number): Uint8Arr
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_can_redo_element(widget_id: number, level = 0, field = 0): Uint8Array {
   return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_CAN_REDO), u32(SOURCE_ELEMENT), u32(level), u32(field)));
+}
+
+/** set_property with a constant document value. */
+export function tx_set_document(widget_id: number, handle: number): Uint8Array {
+  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_DOCUMENT), u32(SOURCE_CONST), enc.value(new BlobHandle(handle))));
+}
+
+/** set_property with a signal-bound document value. */
+export function tx_bind_document(widget_id: number, signal_id: number): Uint8Array {
+  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_DOCUMENT), u32(SOURCE_SIGNAL), u64(signal_id)));
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_document_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_DOCUMENT), u32(SOURCE_ELEMENT), u32(level), u32(field)));
 }
 
 /** set_window_prop with a constant title value; window 0, the primary surface. */

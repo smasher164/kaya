@@ -2300,6 +2300,34 @@ class Document:
         return f"Document(text={self.text!r}, runs={self.runs!r})"
 
 
+def _document_bytes(document):
+    """A Document's wire bytes: ONE flat value list — the text, then four
+    values per run (crates/kaya/src/wire.rs, `document_blob`)."""
+    values = [document.text]
+    for run in document.runs:
+        values += [run.start, run.end, run.name, run.value]
+    return wire._enc.values(values)
+
+
+def _encode_document_field(value):
+    """A Document field's wire value (docs/rich-text-plan.md §19): the
+    blob a stamped copy's `document` prop reads, registered like any
+    other blob field's bytes."""
+    if not isinstance(value, Document):
+        raise TypeError(
+            f"kaya: a Document field takes a kaya.Document, not "
+            f"{type(value).__name__}")
+    return wire.BlobHandle(runtime.register_blob(_document_bytes(value)))
+
+
+# A Document field IS a Blob field carrying `_document_bytes`' list, so
+# it binds through the template zone as a String field does
+# (docs/rich-text-plan.md §19). Registered here rather than in the table
+# above, which is written before the class exists.
+_WIRE_TYPES.append((Document, wire.VALUE_BLOB))
+_FIELD_ENCODERS[Document] = _encode_document_field
+
+
 class EditSource:
     """What provoked an edit the widget reports (docs/rich-text-plan.md
     §2; the review page's ruling 3, 2026-09-14)."""
@@ -2454,6 +2482,55 @@ def _on_boundary(data, at):
     if at > len(data):
         return False
     return at == len(data) or (data[at] & 0xC0) != 0x80
+
+
+def _fold_edit(doc, start, stop, inserted, runs):
+    """One edit folded into a document: runs before it keep, runs after it
+    shift, a run the edit falls inside is cut, and the inserted text's own
+    runs land relative to the edit (crates/kaya/src/app.rs, fold_edit)."""
+    data = doc.text.encode("utf-8")
+    added = inserted.encode("utf-8")
+    if stop > len(data) or not _on_boundary(data, start) \
+            or not _on_boundary(data, stop):
+        # A mirror out of step with the core takes the edit whole
+        # rather than splicing at an offset that means nothing here.
+        doc.text = inserted
+        doc.runs = [Run(r.start, r.end, r.name, r.value) for r in runs]
+        return
+    shift = len(added) - (stop - start)
+    nxt = []
+    for run in doc.runs:
+        if run.start < start:
+            nxt.append(Run(run.start, min(run.end, start), run.name,
+                           run.value))
+        if run.end > stop:
+            nxt.append(Run(max(run.start, stop) + shift, run.end + shift,
+                           run.name, run.value))
+    for run in runs:
+        nxt.append(Run(run.start + start, run.end + start, run.name,
+                       run.value))
+    doc.text = (data[:start] + added + data[stop:]).decode("utf-8")
+    doc.runs = _normalize_runs(nxt)
+
+
+def _fold_format(doc, start, stop, name, value):
+    """One toolbar act folded into a document: the attribute put over the
+    range or taken off it, clipping THIS attribute's runs and no other
+    (crates/kaya/src/app.rs, fold_format)."""
+    if start >= stop:
+        return
+    nxt = []
+    for run in doc.runs:
+        if run.name != name or run.end <= start or run.start >= stop:
+            nxt.append(run)
+            continue
+        if run.start < start:
+            nxt.append(Run(run.start, start, run.name, run.value))
+        if run.end > stop:
+            nxt.append(Run(stop, run.end, run.name, run.value))
+    if value is not None:
+        nxt.append(Run(start, stop, name, value))
+    doc.runs = _normalize_runs(nxt)
 
 
 def _accept_list(kinds):
@@ -3957,8 +4034,30 @@ def entry(text=None, on_change=None, grow=None, placeholder=None):
     return handle
 
 
+def _bind_document(handle, field):
+    """A stamped copy's document, bound to a `Document` FIELD of its row
+    (docs/rich-text-plan.md §19): `rich` FIRST — the core refuses
+    `document` without it — then the binding, and the node is recorded so
+    a copy's own edit or format act folds into the row."""
+    if not isinstance(field, FieldRef):
+        raise TypeError(
+            f"kaya: textarea document= takes a Document field of the "
+            f"enclosing For's element (el.body), not "
+            f"{type(field).__name__} — a LIVE textarea's document is "
+            "set_document(doc), which names the widget")
+    if field._type is not Document:
+        raise TypeError(
+            "kaya: textarea document= takes a kaya.Document field; this "
+            f"one is {getattr(field._type, '__name__', field._type)}")
+    handle.rich(True)
+    _records().append(wire.tx_bind_document_element(
+        handle.id, field._level(), field._index))
+    _app._document_binds[handle.id] = (field._element._coll, field._index)
+
+
 def textarea(text=None, on_change=None, grow=None, placeholder=None,
-             rich=False, own_undo=False, on_edit=None, on_format=None):
+             rich=False, own_undo=False, on_edit=None, on_format=None,
+             document=None):
     """A multi-line text editor: the entry's uncontrolled contract over
     the platform's real multi-line editor.
 
@@ -3968,12 +4067,21 @@ def textarea(text=None, on_change=None, grow=None, placeholder=None,
     for every user edit, addressed, beside the whole-text `on_change`, and
     `on_format(act)` for a toolbar act over a range.
 
+    `document=` is the TEMPLATE zone's rich spelling (§19): a Document
+    field of the enclosing For's element, which makes the copy rich and
+    renders that field. The app writes a copy's document by patching its
+    row, and a copy's own acts fold back into the field, so `on_edit` and
+    `on_format` arrive with the row's key and the row already reads
+    current.
+
     `own_undo=True` puts the history in the app's hands
     (docs/rich-text-plan.md R6, §14)."""
     handle = _widget(wire.KIND_TEXTAREA)
     if text is not None:
         _records().append(wire.tx_set_text(handle.id, _text_value("textarea text", text)))
-    if rich:
+    if document is not None:
+        _bind_document(handle, document)
+    elif rich:
         handle.rich(True)
     if own_undo:
         handle.own_undo(True)
@@ -4602,6 +4710,9 @@ class App:
         # Outside the rollback journal, as the Rust binding's is: an edge
         # the widget and the core have taken is not the app's to undo.
         self._documents = {}
+        # Template node -> (collection, field index) per bound `document`,
+        # so a stamped copy's act folds into its row (§19).
+        self._document_binds = {}
         # THE ONLY STATE HERE TOUCHED FROM ANOTHER THREAD, and the only
         # reason App carries a lock.
         self._post_lock = threading.Lock()
@@ -4937,33 +5048,8 @@ class App:
             [Run(r.start, r.end, r.name, r.value) for r in document.runs])
 
     def _absorb_edit(self, widget, start, stop, inserted, runs):
-        """One edit folded in: runs before it keep, runs after it shift,
-        a run the edit falls inside is cut, and the inserted text's own
-        runs land relative to the edit."""
-        doc = self._documents.setdefault(widget, Document())
-        data = doc.text.encode("utf-8")
-        added = inserted.encode("utf-8")
-        if stop > len(data) or not _on_boundary(data, start) \
-                or not _on_boundary(data, stop):
-            # A mirror out of step with the core takes the edit whole
-            # rather than splicing at an offset that means nothing here.
-            doc.text = inserted
-            doc.runs = [Run(r.start, r.end, r.name, r.value) for r in runs]
-            return
-        shift = len(added) - (stop - start)
-        nxt = []
-        for run in doc.runs:
-            if run.start < start:
-                nxt.append(Run(run.start, min(run.end, start), run.name,
-                               run.value))
-            if run.end > stop:
-                nxt.append(Run(max(run.start, stop) + shift, run.end + shift,
-                               run.name, run.value))
-        for run in runs:
-            nxt.append(Run(run.start + start, run.end + start, run.name,
-                           run.value))
-        doc.text = (data[:start] + added + data[stop:]).decode("utf-8")
-        doc.runs = _normalize_runs(nxt)
+        _fold_edit(self._documents.setdefault(widget, Document()),
+                   start, stop, inserted, runs)
 
     def _ranged_act_bounds(self, widget, start, stop, name):
         """A ranged act's range in the fold's text: a `block` covers the
@@ -4978,23 +5064,36 @@ class App:
         return data.rfind(b"\n", 0, start) + 1, len(data) if nl < 0 else nl
 
     def _absorb_format(self, widget, start, stop, name, value):
-        """One toolbar act folded in: the attribute put over the range or
-        taken off it, clipping THIS attribute's runs and no other."""
-        doc = self._documents.setdefault(widget, Document())
-        if start >= stop:
+        _fold_format(self._documents.setdefault(widget, Document()),
+                     start, stop, name, value)
+
+    def _fold_row_document(self, node, keys, fold):
+        """A stamped copy's edit or format act reaches its ROW's Document
+        field (docs/rich-text-plan.md §19): the node was bound to
+        (collection, field) by the template textarea's `document=`, and
+        the occurrence's keys name the row. A row that is gone has no
+        field to fold into, and that is not a fault."""
+        bind = self._document_binds.get(node)
+        if bind is None:
             return
-        nxt = []
-        for run in doc.runs:
-            if run.name != name or run.end <= start or run.start >= stop:
-                nxt.append(run)
-                continue
-            if run.start < start:
-                nxt.append(Run(run.start, start, run.name, run.value))
-            if run.end > stop:
-                nxt.append(Run(stop, run.end, run.name, run.value))
-        if value is not None:
-            nxt.append(Run(start, stop, name, value))
-        doc.runs = _normalize_runs(nxt)
+        coll, index = bind
+        table = coll._instances.get(tuple(keys[:-1]))
+        if table is None:
+            return
+        entry = table.get(keys[-1])
+        if entry is None:
+            return
+        _, spec = coll._variant_for(entry)
+        if spec.fields is None:
+            return
+        name = next((n for n, at in spec.fields.items() if at == index), None)
+        if name is None:
+            return
+        doc = getattr(entry, name, None)
+        if not isinstance(doc, Document):
+            doc = Document()
+        fold(doc)
+        setattr(entry, name, doc)
 
     def _drain_posted(self):
         """Run everything posted, each as its own transaction, in order.
@@ -5149,20 +5248,30 @@ class App:
                 # THE DOCUMENT FOLLOWS FIRST AND WITHOUT A HANDLER, as an
                 # undo's mirrors do (docs/rich-text-plan.md R1): an app
                 # that registered neither delta still reads a current
-                # `document()`. A STAMPED copy carries no document —
-                # the mirror is keyed by live widget, as the core's is.
+                # `document()`. A STAMPED copy's act folds into its ROW's
+                # Document field instead, by the same rule (§19).
                 if kind == wire.OCC_TEXT_EDITED:
                     source, start, stop, inserted = payload[:4]
                     runs = _runs_from(payload[4:])
                     arg = Edit(start, stop, inserted, runs)
                     arg.source = _edit_source(source)
-                    if not keys:
+                    if keys:
+                        self._fold_row_document(
+                            ident, keys,
+                            lambda doc: _fold_edit(doc, start, stop,
+                                                   inserted, runs))
+                    else:
                         self._absorb_edit(ident, start, stop, inserted, runs)
                 else:
                     removed, start, stop, name, value = payload
                     arg = Format(start, stop, name,
                                  None if removed else value)
-                    if not keys:
+                    if keys:
+                        self._fold_row_document(
+                            ident, keys,
+                            lambda doc: _fold_format(doc, start, stop, name,
+                                                     arg.value))
+                    else:
                         self._absorb_format(ident, start, stop, name,
                                             arg.value)
                 table = self._node_handlers if keys else self._widget_handlers

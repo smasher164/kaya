@@ -3725,7 +3725,8 @@ finally:
 rich_check("a stamped copy's edit reaches the row's handler with its key",
            len(_row_seen) == 1 and _row_seen[0][0] == "a"
            and _row_seen[0][1].inserted == "hi")
-rich_check("and NO document is folded for it — the mirror is live widgets",
+rich_check("and NO document is folded for it — the live mirror is live "
+           "widgets, and this copy binds no row field (§19)",
            _row_app._documents == {})
 
 # THE APP-OWNED UNDO (docs/rich-text-plan.md R6, §14): the declaration is
@@ -3871,6 +3872,128 @@ rich_check("a rich LABEL declares prop 32 on a LABEL, a plain one does not",
            and kaya.wire.tx_set_rich(_rich_label.id, True) in _label_records
            and kaya.wire.tx_set_rich(_plain_label.id, True)
            not in _label_records)
+
+# ------------------------------------------------- the rich TEMPLATE zone
+# A STAMPED COPY'S DOCUMENT IS A FIELD OF ITS ROW (docs/rich-text-plan.md
+# §19): the field is a Blob carrying ONE value list, the copy's own act
+# folds into the ROW through the same fold the live mirror uses, and the
+# app reads the row. The bytes below are spelled from the wire rules —
+# {u32 count, u32 reserved}, then per value {u32 tag, u32 len, payload,
+# pad to 8} — so this compares the encoder with the protocol, not with
+# itself.
+_REFERENCE_DOCUMENT_BLOB = (
+    # 9 values: the text, then four per run — "ab", (0, 1, bold, true),
+    # (1, 2, link, u).
+    b"\x09\x00\x00\x00\x00\x00\x00\x00\x04\x00\x00\x00\x02\x00\x00\x00"
+    b"\x61\x62\x00\x00\x00\x00\x00\x00\x02\x00\x00\x00\x08\x00\x00\x00"
+    b"\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x00\x00\x08\x00\x00\x00"
+    b"\x01\x00\x00\x00\x00\x00\x00\x00\x04\x00\x00\x00\x04\x00\x00\x00"
+    b"\x62\x6f\x6c\x64\x00\x00\x00\x00\x04\x00\x00\x00\x04\x00\x00\x00"
+    b"\x74\x72\x75\x65\x00\x00\x00\x00\x02\x00\x00\x00\x08\x00\x00\x00"
+    b"\x01\x00\x00\x00\x00\x00\x00\x00\x02\x00\x00\x00\x08\x00\x00\x00"
+    b"\x02\x00\x00\x00\x00\x00\x00\x00\x04\x00\x00\x00\x04\x00\x00\x00"
+    b"\x6c\x69\x6e\x6b\x00\x00\x00\x00\x04\x00\x00\x00\x01\x00\x00\x00"
+    b"\x75\x00\x00\x00\x00\x00\x00\x00")
+
+
+@dataclass
+class _Note:
+    title: str
+    body: kaya.Document
+
+
+_rows_records = []
+_rows_blobs = []
+_real_register = kaya.runtime.register_blob
+kaya.runtime.register_blob = lambda data: (_rows_blobs.append(bytes(data))
+                                           or _real_register(data))
+kaya.runtime.submit = lambda *recs: _rows_records.extend(recs)
+_rows_app = kaya.App()
+_row_acts = []
+with _rows_app.window(2605):
+    _notes = kaya.collection(_Note)
+    with kaya.column():
+        for _note in _notes:
+            with kaya.column():
+                kaya.label(bind=_note.title)
+                _body = kaya.textarea(
+                    document=_note.body,
+                    on_edit=lambda key, edit: _row_acts.append((key, edit)),
+                    on_format=lambda key, act: _row_acts.append((key, act)))
+    _notes.insert("a", _Note(
+        title="a",
+        body=kaya.Document("ab").mark((0, 1), "bold", "true")
+                                .mark((1, 2), "link", "u")))
+kaya.runtime.register_blob = _real_register
+kaya.runtime.submit = _real_ship
+
+rich_check("a Document FIELD travels as the blob the wire rules spell",
+           _rows_blobs == [_REFERENCE_DOCUMENT_BLOB])
+rich_check("the template textarea declares `rich` BEFORE the bound "
+           "document, which is the order the core demands",
+           _rows_records.index(kaya.wire.tx_set_rich(_body.id, True))
+           < _rows_records.index(
+               kaya.wire.tx_bind_document_element(_body.id, 0, 1)))
+
+# THE COPY'S ACT FOLDS INTO ITS ROW, by the same fold the live mirror
+# takes: the two are driven from one edit and compared.
+_live_fold = kaya.Document("ab", [kaya.Run(0, 1, "bold", "true"),
+                                  kaya.Run(1, 2, "link", "u")])
+kaya._fold_edit(_live_fold, 1, 1, "X", [kaya.Run(0, 1, "code", "true")])
+
+
+def _deliver_rows(*packed):
+    queue = [kaya.wire.parse_occurrence(p) for p in packed]
+    real = kaya.runtime.next_occurrence
+    kaya.runtime.next_occurrence = lambda: queue.pop(0) if queue else None
+    try:
+        _rows_app._dispatch_loop()
+    finally:
+        kaya.runtime.next_occurrence = real
+
+
+_deliver_rows(_packed_text_edited(
+    _body.id, kaya.wire.EDIT_SOURCE_USER, 1, 1, "X",
+    [kaya.Run(0, 1, "code", "true")], keys=("a",)))
+rich_check("a stamped copy's edit folds into its ROW's field, as the live "
+           "fold folds a widget's",
+           _notes.get("a").body == _live_fold)
+rich_check("the handler hears the act with the row's key, the row already "
+           "current",
+           len(_row_acts) == 1 and _row_acts[0][0] == "a")
+
+_deliver_rows(_packed_text_formatted(_body.id, 0, 0, 3, "bold", "true",
+                                     keys=("a",)))
+rich_check("a stamped copy's format act folds into its ROW's field",
+           _spell(_notes.get("a").body.runs)
+           == "0:3 bold|1:2 code|2:3 link=u")
+_deliver_rows(_packed_text_formatted(_body.id, 0, 0, 3, "bold", "true",
+                                     keys=("gone",)))
+rich_check("a row that is gone has no field to fold into, and that is not "
+           "a fault", True)
+
+kaya.runtime.submit = lambda *recs: None
+_refuse_app = kaya.App()
+with _refuse_app.window(2606):
+    _refused = kaya.collection(_Note)
+    with kaya.column():
+        try:
+            kaya.textarea(document=kaya.Document("x"))
+            rich_check("document= refuses a live Document, naming "
+                       "set_document", False)
+        except TypeError as exc:
+            rich_check("document= refuses a live Document, naming "
+                       "set_document", "set_document" in str(exc))
+        for _refused_note in _refused:
+            try:
+                kaya.textarea(document=_refused_note.title)
+                rich_check("document= refuses a field that is not a "
+                           "Document", False)
+            except TypeError:
+                rich_check("document= refuses a field that is not a "
+                           "Document", True)
+            kaya.label(bind=_refused_note.title)
+kaya.runtime.submit = _real_ship
 
 print(f"rich text: {len(_rich_checks)} checks over the fold, driven from "
       f"packed occurrence bytes through App._dispatch_loop")

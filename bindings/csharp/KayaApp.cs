@@ -1003,6 +1003,12 @@ sealed class KayaApp
     readonly Dictionary<ulong, Action<Tx, Edit>> widgetEdits = new();
     readonly Dictionary<ulong, Action<Tx, Format>> widgetFormats = new();
     readonly Dictionary<ulong, Document> documents = new();
+    // A stamped copy's own acts (docs/rich-text-plan.md §19): the
+    // handlers, and the template node -> (collection, field) every
+    // document-bound textarea registers so the act folds into its row.
+    readonly Dictionary<ulong, Action<Tx, List<object>, Edit>> nodeEdits = new();
+    readonly Dictionary<ulong, Action<Tx, List<object>, Format>> nodeFormats = new();
+    internal readonly Dictionary<ulong, (ulong Collection, uint Field)> DocumentBinds = new();
     readonly Dictionary<ulong, Action<Tx, bool>> widgetToggles = new();
     readonly Dictionary<ulong, Action<Tx, double>> widgetValues = new();
     readonly Dictionary<ulong, Action<Tx, List<object>, bool>> nodeToggles = new();
@@ -1371,6 +1377,17 @@ sealed class KayaApp
     /// pending state and arrives as the next edit's runs, never here.
     public void OnFormat(Widget w, Action<Tx, Format> handler) => widgetFormats[w.Id] = handler;
 
+    /// One addressed user edit of a STAMPED copy's rich textarea: the
+    /// handler receives that copy's keys, outermost first. The row's
+    /// Document field already carries the edit when it fires, so the app
+    /// reads the row and never the widget (docs/rich-text-plan.md §19).
+    public void OnEdit(Node n, Action<Tx, List<object>, Edit> handler) =>
+        nodeEdits[n.Id] = handler;
+
+    /// The same for a stamped copy's toolbar act.
+    public void OnFormat(Node n, Action<Tx, List<object>, Format> handler) =>
+        nodeFormats[n.Id] = handler;
+
     /// This app's copy of a rich textarea's content, folded from every
     /// edit and format the core delivered; empty until the first of them
     /// or the first Tx.SetDocument.
@@ -1383,16 +1400,66 @@ sealed class KayaApp
         documents[widget] = new global::Document(document.Text,
             new List<TextRun>(document.Marks));
 
-    /// One delivered edit, folded by the core's own rules
-    /// (crates/kaya/src/app.rs, AppCtx::absorb_edit). THE SPLICE IS IN
-    /// UTF-8 BYTES, which a .NET string is not: the offsets are the
-    /// core's (docs/ranges-units.md), so the text is cut as bytes and
-    /// decoded back.
+    /// A Document's BYTES as a record field holds them
+    /// (docs/rich-text-plan.md §19, crates/kaya/src/wire.rs
+    /// `document_blob`): one counted value list — the text, then four
+    /// values per run. Hand-packed because KayaWire's value encoder is
+    /// the generated file's own; guests/csharp/AbortCheck.cs compares
+    /// these bytes against the wire rules read off by hand.
+    internal static byte[] DocumentBlob(Document document)
+    {
+        var values = new List<object> { document.Text };
+        foreach (TextRun run in document.Runs)
+        {
+            values.Add(run.Start);
+            values.Add(run.Stop);
+            values.Add(run.Name);
+            values.Add(run.Value);
+        }
+        var stream = new MemoryStream();
+        var w = new BinaryWriter(stream);
+        w.Write((uint)values.Count);
+        w.Write(0u);
+        foreach (object v in values)
+        {
+            if (v is string s)
+            {
+                byte[] utf8 = System.Text.Encoding.UTF8.GetBytes(s);
+                w.Write(KayaWire.ValueStr);
+                w.Write((uint)utf8.Length);
+                w.Write(utf8);
+            }
+            else
+            {
+                w.Write(KayaWire.ValueI64);
+                w.Write(8u);
+                w.Write((long)v);
+            }
+            while (stream.Position % 8 != 0)
+                w.Write((byte)0);
+        }
+        w.Flush();
+        return stream.ToArray();
+    }
+
+    /// One delivered edit, folded into the live widget's mirror.
     internal void AbsorbEdit(ulong widget, long start, long stop, string inserted,
         List<TextRun> runs)
     {
         if (!documents.TryGetValue(widget, out var doc))
             documents[widget] = doc = new global::Document("");
+        FoldEdit(doc, start, stop, inserted, runs);
+    }
+
+    /// The core's own fold rule over ANY document — a live widget's
+    /// mirror or a stamped copy's ROW FIELD (crates/kaya/src/app.rs,
+    /// AppCtx::fold_edit; docs/rich-text-plan.md §19). THE SPLICE IS IN
+    /// UTF-8 BYTES, which a .NET string is not: the offsets are the
+    /// core's (docs/ranges-units.md), so the text is cut as bytes and
+    /// decoded back.
+    internal static void FoldEdit(Document doc, long start, long stop, string inserted,
+        List<TextRun> runs)
+    {
         byte[] was = System.Text.Encoding.UTF8.GetBytes(doc.Text);
         byte[] put = System.Text.Encoding.UTF8.GetBytes(inserted);
         if (start < 0 || start > stop || stop > was.Length
@@ -1400,7 +1467,9 @@ sealed class KayaApp
         {
             // A mirror out of step with the core would splice a character
             // in half.
-            documents[widget] = new global::Document(inserted, new List<TextRun>(runs));
+            doc.Text = inserted;
+            doc.Marks.Clear();
+            doc.Marks.AddRange(runs);
             return;
         }
         long shift = put.Length - (stop - start);
@@ -1451,13 +1520,48 @@ sealed class KayaApp
         return TextRange.Bytes(paraStart, paraEnd);
     }
 
-    /// One delivered format: put the attribute over the range or take it
-    /// off, clipping THIS attribute's runs (AppCtx::absorb_format).
+    /// One delivered format, folded into the live widget's mirror.
     internal void AbsorbFormat(ulong widget, Format act)
     {
         if (act.Start >= act.Stop) return;
         if (!documents.TryGetValue(widget, out var doc))
             documents[widget] = doc = new global::Document("");
+        FoldFormat(doc, act);
+    }
+
+    /// A stamped copy's edit or format act reaches its ROW's Document
+    /// field (docs/rich-text-plan.md §19, crates/kaya/src/app.rs
+    /// `fold_row_document`): the node is bound to (collection, field) by
+    /// the document-bound template textarea, and the occurrence's keys
+    /// name the row. A row that is gone has no field to fold into, and
+    /// that is not a fault.
+    internal void FoldRowDocument(ulong node, List<object> keys, Action<Document> fold)
+    {
+        if (!DocumentBinds.TryGetValue(node, out var bind) || keys.Count == 0)
+            return;
+        var instance = InstanceOf(bind.Collection, keys.GetRange(0, keys.Count - 1));
+        if (instance == null)
+            return;
+        object key = keys[^1];
+        int at = instance.Entries.FindIndex(e => Equals(e.Key, key));
+        if (at < 0 || instance.Entries[at].Value == null)
+            return;
+        object record = instance.Entries[at].Value;
+        var info = RecordInfo.Of(record.GetType());
+        if (info.FieldOfWire(record, bind.Field) is not Document held)
+            return;
+        var doc = new global::Document(held.Text, new List<TextRun>(held.Marks));
+        fold(doc);
+        instance.Entries[at] = new KeyValuePair<object, object>(
+            key, info.WithField(record, bind.Field, doc));
+    }
+
+    /// FoldEdit's twin one act over: put the attribute over the range or
+    /// take it off, clipping THIS attribute's runs
+    /// (AppCtx::fold_format).
+    internal static void FoldFormat(Document doc, Format act)
+    {
+        if (act.Start >= act.Stop) return;
         var next = new List<TextRun>();
         foreach (TextRun run in doc.Marks)
         {
@@ -1752,19 +1856,36 @@ sealed class KayaApp
             // handler lookup, so a rich textarea nobody registered for
             // still keeps its document in step
             // (docs/rich-text-plan.md R1).
-            else if (kind == KayaWire.OccKindTextEdited)
+            else if (kind == KayaWire.OccKindTextEdited && keys.Count == 0)
             {
                 Edit edit = EditOf(payload as List<object>);
                 AbsorbEdit(id, edit.Start, edit.Stop, edit.Inserted, edit.Marks);
-                if (keys.Count == 0 && widgetEdits.TryGetValue(id, out var fn))
+                if (widgetEdits.TryGetValue(id, out var fn))
                     Dispatch(tx => fn(tx, edit));
+            }
+            // A STAMPED COPY FOLDS INTO ITS ROW, never into a mirror the
+            // app cannot address (docs/rich-text-plan.md §19).
+            else if (kind == KayaWire.OccKindTextEdited)
+            {
+                Edit edit = EditOf(payload as List<object>);
+                FoldRowDocument(id, keys,
+                    doc => FoldEdit(doc, edit.Start, edit.Stop, edit.Inserted, edit.Marks));
+                if (nodeEdits.TryGetValue(id, out var fn))
+                    Dispatch(tx => fn(tx, keys, edit));
+            }
+            else if (kind == KayaWire.OccKindTextFormatted && keys.Count == 0)
+            {
+                Format act = FormatOf(payload as List<object>);
+                AbsorbFormat(id, act);
+                if (widgetFormats.TryGetValue(id, out var fn))
+                    Dispatch(tx => fn(tx, act));
             }
             else if (kind == KayaWire.OccKindTextFormatted)
             {
                 Format act = FormatOf(payload as List<object>);
-                AbsorbFormat(id, act);
-                if (keys.Count == 0 && widgetFormats.TryGetValue(id, out var fn))
-                    Dispatch(tx => fn(tx, act));
+                FoldRowDocument(id, keys, doc => FoldFormat(doc, act));
+                if (nodeFormats.TryGetValue(id, out var fn))
+                    Dispatch(tx => fn(tx, keys, act));
             }
             else if (kind == KayaWire.OccKindToggled && keys.Count == 0)
             {
@@ -4093,6 +4214,18 @@ sealed class Tpl
     public void BindSourceField(Node n, uint level, Field<byte[]> f) =>
         tx.Records.Add(KayaWire.TxBindSourceElement(n.Id, level, f.Index));
 
+    /// Bind a `rich` textarea's document to one Document field of the
+    /// element. LEVEL 0 ONLY: the fold names the row by the occurrence's
+    /// own last key (docs/rich-text-plan.md §19). PRIVATE, because the
+    /// root refuses `document` unless `rich` was declared first — the
+    /// pair is spellable only through Textarea(Field&lt;Document&gt;).
+    void BindDocumentField(Node n, Field<Document> f)
+    {
+        if (tx.App.OpenFors.Count > 0)
+            tx.App.DocumentBinds[n.Id] = (tx.App.OpenFors[^1], f.Index);
+        tx.Records.Add(KayaWire.TxBindDocumentElement(n.Id, 0, f.Index));
+    }
+
     /// Bind a slider's, progress bar's or choice widget's value to one
     /// field of the element; Field&lt;double&gt; only. A choice's 0-based
     /// index rides a `double` record field too: `value` is an F64 prop
@@ -4486,6 +4619,21 @@ sealed class Tpl
     {
         var n = Textarea(onChange);
         BindTextField(n, 0, text);
+        return n;
+    }
+
+    /// A RICH textarea per stamped copy whose document is a Document
+    /// FIELD of the row (docs/rich-text-plan.md §19): `rich` first, then
+    /// the bound document, which the core turns into that copy's own
+    /// set_rich_text. The user's acts fold into the row's field as a live
+    /// widget's fold into its mirror, so the app writes a copy's document
+    /// by patching the row and reads it back off the row.
+    public Node Textarea(Field<Document> document,
+        Action<Tx, List<object>, string> onChange = null)
+    {
+        var n = Textarea(onChange);
+        tx.Records.Add(KayaWire.TxSetRich(n.Id, true));
+        BindDocumentField(n, document);
         return n;
     }
 

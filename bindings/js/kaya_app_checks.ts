@@ -1110,17 +1110,17 @@ if (isMainThread) {
   }
   /** The same tag with REMOVED in the reserved word, the range, and the
    * attribute as a name/value pair. */
-  function packFormatted(ident: number, removed: number, start: number, stop: number, name: string, value: string): Uint8Array {
+  function packFormatted(ident: number, removed: number, start: number, stop: number, name: string, value: string, keys: K.Key[] = []): Uint8Array {
     const tag = new Uint8Array(16);
     const tv = new DataView(tag.buffer);
     tv.setBigUint64(0, BigInt(ident), true);
-    tv.setUint32(8, 0, true);
+    tv.setUint32(8, keys.length, true);
     tv.setUint32(12, removed, true);
     const range = new Uint8Array(16);
     const rv = new DataView(range.buffer);
     rv.setBigUint64(0, BigInt(start), true);
     rv.setBigUint64(8, BigInt(stop), true);
-    return frameOcc(wire.OCC_TEXT_FORMATTED, [tag, range, valueBytes(name), valueBytes(value)]);
+    return frameOcc(wire.OCC_TEXT_FORMATTED, [tag, ...keys.map((k) => valueBytes(keyOf(k))), range, valueBytes(name), valueBytes(value)]);
   }
 
   const edits: K.Edit[] = [];
@@ -1287,7 +1287,7 @@ if (isMainThread) {
   const documents = (app as unknown as { _documents: Map<number, K.Document> })._documents;
   fire(wire.parse_occurrence(packEdited(rowEditor.id, 0, 0, "hi", [], ["z"])));
   richCheck("a stamped copy's edit reaches the row's handler with its key", rowSeen.length === 1 && rowSeen[0]![0] === "z" && rowSeen[0]![1].inserted === "hi");
-  richCheck("and NO document is folded for it — the mirror is live widgets", !documents.has(rowEditor.id));
+  richCheck("and NO document is folded for it — the live mirror is live widgets, and this copy binds no row field (§19)", !documents.has(rowEditor.id));
   richCheck(
     "document() on a template node is refused, naming the live widget rule",
     throws(() => {
@@ -1411,6 +1411,104 @@ if (isMainThread) {
     declared.some((r) => sameBytes(r, wire.tx_create_widget(richLabel.id, wire.KIND_LABEL))) &&
       declared.some((r) => sameBytes(r, wire.tx_set_rich(richLabel.id, true))) &&
       !declared.some((r) => sameBytes(r, wire.tx_set_rich(plainLabel.id, true))),
+  );
+
+  // ----------------------------------------------- the rich TEMPLATE zone
+  // A STAMPED COPY'S DOCUMENT IS A FIELD OF ITS ROW (docs/rich-text-plan.md
+  // §19): the field is a Blob carrying ONE value list, the copy's own act
+  // folds into the ROW through the same fold the live mirror uses, and the
+  // app reads the row. The bytes below are spelled from the wire rules —
+  // {u32 count, u32 reserved}, then per value {u32 tag, u32 len, payload,
+  // pad to 8} — so this compares the encoder with the protocol, not with
+  // itself. Byte for byte bindings/python/kaya_app_checks.py's reference.
+  const REFERENCE_DOCUMENT_BLOB = Uint8Array.from([
+    // 9 values: the text, then four per run — "ab", (0, 1, bold, true),
+    // (1, 2, link, u).
+    0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x61, 0x62, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00,
+    0x62, 0x6f, 0x6c, 0x64, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x74, 0x72, 0x75, 0x65, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00,
+    0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00,
+    0x6c, 0x69, 0x6e, 0x6b, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x75, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  ]);
+
+  const RichNote = kaya.record({ title: String, body: kaya.Document }, "RichNote");
+  type RichNoteFields = K.Fields<typeof RichNote.schema>;
+  let richNotes!: K.Collection<RichNoteFields, K.Row<typeof RichNote.schema>>;
+  let boundBody!: K.Widget;
+  const rowActs: [K.Key, K.Edit | K.Format][] = [];
+  const registered: Uint8Array[] = [];
+  runtime.hooks.blob = (data) => registered.push(Uint8Array.from(data));
+  shipped.length = 0;
+  app.window({ windowId: 2605 }, () => {
+    richNotes = kaya.collection(RichNote);
+    kaya.column(() => {
+      for (const note of richNotes) {
+        kaya.column(() => {
+          kaya.label({ bind: note.title });
+          boundBody = kaya.textarea({
+            document: note.body,
+            onEdit: (row: K.RowHandle<RichNoteFields>, e: K.Edit) => rowActs.push([row.key, e]),
+            onFormat: (row: K.RowHandle<RichNoteFields>, f: K.Format) => rowActs.push([row.key, f]),
+          });
+        });
+      }
+    });
+    richNotes.insert("a", RichNote({ title: "a", body: new kaya.Document("ab").mark([0, 1], "bold", "true").mark([1, 2], "link", "u") }));
+  });
+  runtime.hooks.blob = null;
+  const rowDeclared = shipped.flat();
+  richCheck(
+    "a Document FIELD travels as the blob the wire rules spell",
+    registered.length === 1 && sameBytes(registered[0]!, REFERENCE_DOCUMENT_BLOB),
+  );
+  richCheck(
+    "the template textarea declares `rich` BEFORE the bound document, which is the order the core demands",
+    rowDeclared.findIndex((r) => sameBytes(r, wire.tx_set_rich(boundBody.id, true))) < rowDeclared.findIndex((r) => sameBytes(r, wire.tx_bind_document_element(boundBody.id, 0, 1))),
+  );
+
+  // THE COPY'S ACT FOLDS INTO ITS ROW, by the same fold the live mirror
+  // takes: the two are driven from one edit and compared.
+  const liveFold = new kaya.Document("ab", [
+    { start: 0, end: 1, name: "bold", value: "true" },
+    { start: 1, end: 2, name: "link", value: "u" },
+  ]);
+  app.build(() => {
+    quietEditor.setDocument(liveFold);
+    quietEditor.applyEdit(new kaya.Edit(1, 1, "X", [{ start: 0, end: 1, name: "code", value: "true" }]));
+  });
+  fire(wire.parse_occurrence(packEdited(boundBody.id, 1, 1, "X", [{ start: 0, end: 1, name: "code", value: "true" }], ["a"])));
+  const folded = richNotes.get("a")!.body;
+  richCheck(
+    "a stamped copy's edit folds into its ROW's field, as the live fold folds a widget's",
+    folded.text === quietEditor.document().text && spell(folded.runs) === spell(quietEditor.document().runs),
+  );
+  richCheck("the handler hears the act with a row handle whose row already reads current", rowActs.length === 1 && rowActs[0]![0] === "a");
+
+  fire(wire.parse_occurrence(packFormatted(boundBody.id, 0, 0, 3, "bold", "true", ["a"])));
+  richCheck("a stamped copy's format act folds into its ROW's field", spell(richNotes.get("a")!.body.runs) === "0:3 bold|1:2 code|2:3 link=u");
+  fire(wire.parse_occurrence(packFormatted(boundBody.id, 0, 0, 3, "bold", "true", ["gone"])));
+  richCheck("a row that is gone has no field to fold into, and that is not a fault", true);
+
+  richCheck(
+    "{document} refuses a live Document, naming setDocument",
+    throws(() => app.build(() => kaya.textarea({ document: new kaya.Document("x") as unknown as K.FieldRef })), /setDocument/),
+  );
+  richCheck(
+    "{document} refuses a field that is not a Document",
+    throws(
+      () =>
+        app.window({ windowId: 2606 }, () => {
+          const other = kaya.collection(RichNote);
+          kaya.column(() => {
+            for (const note of other) kaya.textarea({ document: note.title });
+          });
+        }),
+      /kaya\.Document field/,
+    ),
+  );
+  richCheck(
+    "{document} outside a For names the template zone",
+    throws(() => app.build(() => kaya.textarea({ document: Object.create(kaya.FieldRef.prototype) as K.FieldRef })), /TEMPLATE zone/),
   );
 
   console.log(`rich text: ${richChecks.length} checks over the fold, driven from packed occurrence bytes through App._onOccurrence`);

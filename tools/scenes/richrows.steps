@@ -1,0 +1,23 @@
+# docs/rich-text-plan.md §19: a rich textarea per stamped ROW whose document
+# is a FIELD of the row. Every copy is addressed by its key through the
+# keyed target; the app never holds a copy's handle.
+expect_runs textarea@body[a] "0:6 bold"
+expect textarea@body[a] "Héllo world"
+expect_runs textarea@body[b] "7:11 link=https://kaya.dev"
+expect textarea@body[b] "Second note"
+# THE APP WRITES A COPY BY PATCHING ITS ROW: the field moves, the copy
+# re-renders through the core's own set_rich_text, and nothing echoes.
+click button#0
+expect_runs textarea@body[b] "0:7 italic"
+expect textarea@body[b] "Patched"
+expect_runs textarea@body[a] "0:6 bold"
+# THE COPY'S OWN ACT FOLDS INTO ITS ROW: the widget's act on a stamped copy
+# reaches the app with the row's key, the binding has already folded it into
+# the row's field, and the app reads the row back — never the widget.
+# (Runs are spelled in the core's order, by start and then by name, so the
+# bold run declared first still comes first.)
+format textarea@body[a] 0:5 italic
+expect_runs textarea@body[a] "0:6 bold|0:5 italic"
+expect label#0 "a: 0:6 bold|0:5 italic"
+click button#1
+expect label#1 "Héllo world | 0:6 bold|0:5 italic"

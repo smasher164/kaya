@@ -87808,7 +87808,11 @@ pub mod Microsoft {
                         -> windows_core::HRESULT,
                     HorizontalTextAlignment: usize,
                     SetHorizontalTextAlignment: usize,
-                    TextHighlighters: usize,
+                    pub TextHighlighters: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
                     pub SelectionFlyout: unsafe extern "system" fn(
                         *mut core::ffi::c_void,
                         *mut *mut core::ffi::c_void,
@@ -170800,6 +170804,21 @@ pub mod Microsoft {
                             .map(|| result__)
                         }
                     }
+                    pub fn TextHighlighters(
+                        &self,
+                    ) -> windows_core::Result<
+                        windows_collections::IVector<super::Documents::TextHighlighter>,
+                    > {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).TextHighlighters)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
                     pub fn SelectionFlyout(&self) -> windows_core::Result<Primitives::FlyoutBase> {
                         let this = self;
                         unsafe {
@@ -229104,6 +229123,110 @@ pub mod Microsoft {
                     KeyTipHorizontalOffsetProperty: usize,
                     KeyTipVerticalOffsetProperty: usize,
                 }
+                windows_core::imp::define_interface!(
+                    ITextHighlighter,
+                    ITextHighlighter_Vtbl,
+                    0xb756e861_1d2b_5f6f_81fd_c51a5bc068ff
+                );
+                impl windows_core::RuntimeType for ITextHighlighter {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct ITextHighlighter_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    pub Ranges: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub Foreground: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetForeground: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub Background: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetBackground: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                }
+                windows_core::imp::define_interface!(
+                    ITextHighlighterBase,
+                    ITextHighlighterBase_Vtbl,
+                    0x5c21aaf0_3a17_5468_8aac_be14db0ed8c1
+                );
+                impl windows_core::RuntimeType for ITextHighlighterBase {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct ITextHighlighterBase_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                }
+                windows_core::imp::define_interface!(
+                    ITextHighlighterBaseFactory,
+                    ITextHighlighterBaseFactory_Vtbl,
+                    0xe091e461_53ab_599e_aaea_800adc72da4f
+                );
+                impl windows_core::RuntimeType for ITextHighlighterBaseFactory {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct ITextHighlighterBaseFactory_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                }
+                windows_core::imp::define_interface!(
+                    ITextHighlighterFactory,
+                    ITextHighlighterFactory_Vtbl,
+                    0x69c7311f_c019_5b93_b511_81418543bab7
+                );
+                impl windows_core::RuntimeType for ITextHighlighterFactory {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct ITextHighlighterFactory_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    pub CreateInstance: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                }
+                windows_core::imp::define_interface!(
+                    ITextHighlighterStatics,
+                    ITextHighlighterStatics_Vtbl,
+                    0x4975047a_87ad_51a2_977c_e771de4f4035
+                );
+                impl windows_core::RuntimeType for ITextHighlighterStatics {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct ITextHighlighterStatics_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    ForegroundProperty: usize,
+                    BackgroundProperty: usize,
+                }
                 #[repr(transparent)]
                 #[derive(Clone, Debug, Eq, PartialEq)]
                 pub struct Inline(windows_core::IUnknown);
@@ -231544,6 +231667,186 @@ pub mod Microsoft {
                 }
                 unsafe impl Send for TextElement {}
                 unsafe impl Sync for TextElement {}
+                #[repr(transparent)]
+                #[derive(Clone, Debug, Eq, PartialEq)]
+                pub struct TextHighlighter(windows_core::IUnknown);
+                windows_core::imp::interface_hierarchy!(
+                    TextHighlighter,
+                    windows_core::IUnknown,
+                    windows_core::IInspectable
+                );
+                impl TextHighlighter {
+                    pub fn Ranges(
+                        &self,
+                    ) -> windows_core::Result<windows_collections::IVector<TextRange>>
+                    {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Ranges)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn Foreground(&self) -> windows_core::Result<super::Media::Brush> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Foreground)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetForeground<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::Brush>,
+                    {
+                        let this = self;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetForeground)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn Background(&self) -> windows_core::Result<super::Media::Brush> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Background)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetBackground<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::Brush>,
+                    {
+                        let this = self;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetBackground)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn new() -> windows_core::Result<TextHighlighter> {
+                        Self::ITextHighlighterFactory(|this| unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).CreateInstance)(
+                                windows_core::Interface::as_raw(this),
+                                core::ptr::null_mut(),
+                                &mut core::ptr::null_mut(),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        })
+                    }
+                    fn ITextHighlighterFactory<
+                        R,
+                        F: FnOnce(&ITextHighlighterFactory) -> windows_core::Result<R>,
+                    >(
+                        callback: F,
+                    ) -> windows_core::Result<R> {
+                        static SHARED: windows_core::imp::FactoryCache<
+                            TextHighlighter,
+                            ITextHighlighterFactory,
+                        > = windows_core::imp::FactoryCache::new();
+                        SHARED.call(callback)
+                    }
+                    fn ITextHighlighterStatics<
+                        R,
+                        F: FnOnce(&ITextHighlighterStatics) -> windows_core::Result<R>,
+                    >(
+                        callback: F,
+                    ) -> windows_core::Result<R> {
+                        static SHARED: windows_core::imp::FactoryCache<
+                            TextHighlighter,
+                            ITextHighlighterStatics,
+                        > = windows_core::imp::FactoryCache::new();
+                        SHARED.call(callback)
+                    }
+                }
+                impl windows_core::RuntimeType for TextHighlighter {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_class::<Self, ITextHighlighter>();
+                }
+                unsafe impl windows_core::Interface for TextHighlighter {
+                    type Vtable = <ITextHighlighter as windows_core::Interface>::Vtable;
+                    const IID: windows_core::GUID =
+                        <ITextHighlighter as windows_core::Interface>::IID;
+                }
+                impl windows_core::RuntimeName for TextHighlighter {
+                    const NAME: &'static str = "Microsoft.UI.Xaml.Documents.TextHighlighter";
+                }
+                unsafe impl Send for TextHighlighter {}
+                unsafe impl Sync for TextHighlighter {}
+                #[repr(transparent)]
+                #[derive(Clone, Debug, Eq, PartialEq)]
+                pub struct TextHighlighterBase(windows_core::IUnknown);
+                windows_core::imp::interface_hierarchy!(
+                    TextHighlighterBase,
+                    windows_core::IUnknown,
+                    windows_core::IInspectable
+                );
+                windows_core::imp::required_hierarchy!(
+                    TextHighlighterBase,
+                    super::DependencyObject
+                );
+                impl TextHighlighterBase {
+                    pub fn DispatcherQueue(
+                        &self,
+                    ) -> windows_core::Result<super::super::Dispatching::DispatcherQueue>
+                    {
+                        let this =
+                            &windows_core::Interface::cast::<super::IDependencyObject>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).DispatcherQueue)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                }
+                impl windows_core::RuntimeType for TextHighlighterBase {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_class::<Self, ITextHighlighterBase>();
+                }
+                unsafe impl windows_core::Interface for TextHighlighterBase {
+                    type Vtable = <ITextHighlighterBase as windows_core::Interface>::Vtable;
+                    const IID: windows_core::GUID =
+                        <ITextHighlighterBase as windows_core::Interface>::IID;
+                }
+                impl windows_core::RuntimeName for TextHighlighterBase {
+                    const NAME: &'static str = "Microsoft.UI.Xaml.Documents.TextHighlighterBase";
+                }
+                unsafe impl Send for TextHighlighterBase {}
+                unsafe impl Sync for TextHighlighterBase {}
+                #[repr(C)]
+                #[derive(Clone, Copy, Debug, Default, PartialEq)]
+                pub struct TextRange {
+                    pub StartIndex: i32,
+                    pub Length: i32,
+                }
+                impl windows_core::TypeKind for TextRange {
+                    type TypeKind = windows_core::CopyType;
+                }
+                impl windows_core::RuntimeType for TextRange {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::from_slice(
+                            b"struct(Microsoft.UI.Xaml.Documents.TextRange;i4;i4)",
+                        );
+                }
             }
             pub mod Input {
                 #[repr(transparent)]

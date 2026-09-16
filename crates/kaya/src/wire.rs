@@ -408,6 +408,7 @@ pub(crate) const PROP_RICH: u32 = 32;
 pub(crate) const PROP_OWN_UNDO: u32 = 33;
 pub(crate) const PROP_CAN_UNDO: u32 = 34;
 pub(crate) const PROP_CAN_REDO: u32 = 35;
+pub(crate) const PROP_DOCUMENT: u32 = 36;
 
 /// The clip representation masks (spec enum "clip"). BIT POSITIONS, not
 /// an ordinal: a copy carries several and a widget accepts several, so
@@ -893,6 +894,7 @@ fn prop(raw: u32) -> Prop {
         PROP_OWN_UNDO => Prop::OwnUndo,
         PROP_CAN_UNDO => Prop::CanUndo,
         PROP_CAN_REDO => Prop::CanRedo,
+        PROP_DOCUMENT => Prop::Document,
         other => panic!("kaya: unknown property {other}"),
     }
 }
@@ -1802,6 +1804,60 @@ fn read_runs(r: &mut Reader<'_>, count: usize, op: &str) -> Vec<TextRun> {
             value: run_str(four[3].clone(), "a run's attribute value"),
         })
         .collect()
+}
+
+
+/// A DOCUMENT AS A BLOB (docs/rich-text-plan.md §19): the bytes a stamped
+/// copy's `document` field holds are one flat value list — the text, then
+/// four values per run as `read_runs` reads them — so a Document field is
+/// a Blob field and the wire grows no value type. Every binding packs the
+/// same list; the core reads it here at stamp and at every field write.
+pub(crate) fn document_blob(text: &str, runs: &[TextRun]) -> Arc<[u8]> {
+    let mut values = Vec::with_capacity(1 + runs.len() * 4);
+    values.push(Value::Str(text.to_owned()));
+    for run in runs {
+        values.push(Value::I64(run.start as i64));
+        values.push(Value::I64(run.end as i64));
+        values.push(Value::Str(run.name.clone()));
+        values.push(Value::Str(run.value.clone()));
+    }
+    let mut b = Vec::new();
+    let mut blobs = Vec::new();
+    write_values(&mut b, &values, &mut blobs);
+    assert!(blobs.is_empty(), "kaya: a document blob nests no blob");
+    Arc::from(b)
+}
+
+/// `document_blob`'s inverse; a list that is not one is refused naming
+/// what it held, since a field can hold any bytes.
+pub(crate) fn read_document_blob(bytes: &[u8]) -> (String, Vec<TextRun>) {
+    let refuse = |_: u64| -> Option<Arc<[u8]>> { None };
+    let mut r = Reader { buf: bytes, at: 0, blobs: &refuse };
+    let values = r.path();
+    let text = match values.first() {
+        Some(Value::Str(s)) => s.clone(),
+        other => panic!(
+            "kaya: a document blob starts with its text, this one with {other:?} \
+             ({} value(s))",
+            values.len()
+        ),
+    };
+    let rest = &values[1..];
+    assert!(
+        rest.len() % 4 == 0,
+        "kaya: a document blob carries four values per run; this one carries {} after its text",
+        rest.len()
+    );
+    let runs = rest
+        .chunks_exact(4)
+        .map(|four| TextRun {
+            start: range_offset(&four[0]),
+            end: range_offset(&four[1]),
+            name: run_str(four[2].clone(), "a run's attribute name"),
+            value: run_str(four[3].clone(), "a run's attribute value"),
+        })
+        .collect();
+    (text, runs)
 }
 
 /// `read_runs`' inverse: the record's own count, then the flat list.
@@ -3795,7 +3851,6 @@ fn write_app_identity(
 }
 
 /// A record's fields, count-prefixed — the same shape as a path.
-#[cfg(test)]
 fn write_values(b: &mut Vec<u8>, values: &[Value], blobs: &mut Vec<Arc<[u8]>>) {
     b.extend_from_slice(&(values.len() as u32).to_le_bytes());
     b.extend_from_slice(&0u32.to_le_bytes());
@@ -4078,6 +4133,7 @@ fn prop_raw(prop: Prop) -> u32 {
         Prop::OwnUndo => PROP_OWN_UNDO,
         Prop::CanUndo => PROP_CAN_UNDO,
         Prop::CanRedo => PROP_CAN_REDO,
+        Prop::Document => PROP_DOCUMENT,
     }
 }
 

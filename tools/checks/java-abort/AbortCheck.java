@@ -192,6 +192,11 @@ public final class AbortCheck {
             throw new AssertionError("menu reopen: build must propagate");
         }
 
+        // A STAMPED COPY'S DOCUMENT IS A ROW FIELD
+        // (docs/rich-text-plan.md §19): the blob's bytes and the fold,
+        // both in package dev.kaya where their instruments live.
+        dev.kaya.IdSpaceCheck.rowDocument(app);
+
         System.out.println("java abort check: OK");
     }
 }

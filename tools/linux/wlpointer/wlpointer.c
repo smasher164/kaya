@@ -7,7 +7,8 @@
 // moment it exits, which is the rule the pool runs under.
 //
 //   wlpointer set X Y | move DX DY | press BTN | release BTN
-//             | click BTN | sleep MS ...           (BTN: left right middle)
+//             | click BTN | sleep MS | wait PATH MS | hold PATH MS ...
+//                                                  (BTN: left right middle)
 //
 // Coordinates are output pixels; every command is followed by a frame
 // and a roundtrip. Built by run-suites.sh, proven every lane run by
@@ -76,7 +77,7 @@ static int button_code(const char *s, uint32_t *code) {
 
 static int usage(const char *why) {
     fprintf(stderr, "wlpointer: %s\n  usage: wlpointer (set X Y | move DX DY | press BTN | "
-            "release BTN | click BTN | sleep MS | wait PATH MS)...\n", why);
+            "release BTN | click BTN | sleep MS | wait PATH MS | hold PATH MS)...\n", why);
     return 2;
 }
 
@@ -157,6 +158,31 @@ int main(int argc, char **argv) {
             else
                 printf("wlpointer: no drag began within %ldms of the threshold; releasing anyway\n",
                        limit);
+            fflush(stdout);
+            i += 3;
+        } else if (!strcmp(cmd, "hold") && i + 2 < argc) {
+            /* THE DROP-SIDE GATE, `wait`'s twin one handshake later
+             * (tools/linux/dragdrive.py): hold at the walk's END, button
+             * still down, until a drop target has ANSWERED the drag. sway
+             * sends wl_data_device.drop on the release only if the client
+             * has already answered wl_data_offer.accept, so a release that
+             * arrives first is answered `leave` and the drop never happens
+             * (docs/deferred.md's dnd wayland WATCH). Its own sentences,
+             * because `wait`'s name the drag-begin. */
+            const char *path = argv[i + 1];
+            long limit = atol(argv[i + 2]);
+            long waited = 0;
+            wl_display_roundtrip(display);
+            while (access(path, F_OK) != 0 && waited < limit) {
+                usleep(20000);
+                waited += 20;
+            }
+            if (access(path, F_OK) == 0)
+                printf("wlpointer: a drop target took the drag %ldms after the walk\n",
+                       waited);
+            else
+                printf("wlpointer: no drop target took the drag within %ldms; "
+                       "releasing anyway\n", limit);
             fflush(stdout);
             i += 3;
         } else {

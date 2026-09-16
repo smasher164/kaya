@@ -41,6 +41,9 @@ let wire: [String: (valueCase: String, zero: String, lift: String)] = [
     "Int64": ("i64", "0", ""),
     "Double": ("f64", "0", ""),
     "Data": ("blob", "Data()", ""),
+    // A stamped copy's document (docs/rich-text-plan.md §19), the blob
+    // channel's second inhabitant. Record-only for Data's reason.
+    "KayaDocument": ("blob", "KayaDocument()", ""),
     // The picker types (docs/datetime-plan.md D10). Both are
     // DateComponents at run time, so the DECLARED SPELLING is what tells
     // a Date field from a Time one, and the lift turns the packed I64
@@ -296,6 +299,35 @@ func generateRecord(_ name: String, _ fields: [Field]) -> String {
         line("        self.init(\(args.joined(separator: ", ")))")
     }
     line("    }")
+    let documents = fields.enumerated().filter { $0.element.type == "KayaDocument" }
+    if !documents.isEmpty {
+        line("")
+        line("    /// This record's Document fields, read and written by WIRE")
+        line("    /// INDEX so a stamped copy's act folds into its row")
+        line("    /// (docs/rich-text-plan.md §19). Mirror can read a stored")
+        line("    /// property and cannot write one, so the pair is generated.")
+        line("    static func kayaDocument(_ record: \(name), _ index: UInt32) -> KayaDocument? {")
+        line("        switch index {")
+        for (j, f) in documents {
+            line("        case \(j): return record.\(f.label)")
+        }
+        line("        default: return nil")
+        line("        }")
+        line("    }")
+        line("")
+        line("    static func kayaWithDocument(")
+        line("        _ record: \(name), _ index: UInt32, _ document: KayaDocument")
+        line("    ) -> \(name) {")
+        line("        var next = record")
+        line("        switch index {")
+        for (j, f) in documents {
+            line("        case \(j): next.\(f.label) = document")
+        }
+        line("        default: break")
+        line("        }")
+        line("        return next")
+        line("    }")
+    }
     line("}")
     line("")
     line("/// \(name)'s typed field tokens.")
@@ -324,6 +356,10 @@ func generateRecord(_ name: String, _ fields: [Field]) -> String {
     line("")
     line("    func image(_ f: KayaField<Data>) -> KayaNodeHandle {")
     line("        t.image(f)")
+    line("    }")
+    line("")
+    line("    func textarea(document f: KayaField<KayaDocument>) -> KayaNodeHandle {")
+    line("        t.textarea(document: f)")
     line("    }")
     line("")
     line("    func checkbox(")
@@ -396,8 +432,8 @@ func generate(_ decl: Decl) -> String {
             // invert a blob handle back into bytes, so a blob field on a
             // sum constructor is a GENERATION-time error, not a runtime
             // trap.
-            for f in c.fields where f.type == "Data" {
-                die("kaya-swift-gen: \(name).\(c.name).\(f.label): a Data (blob) field is record-only — a sum's witnessed update cannot rebuild blob bytes from the wire")
+            for f in c.fields where f.type == "Data" || f.type == "KayaDocument" {
+                die("kaya-swift-gen: \(name).\(c.name).\(f.label): a \(f.type) (blob) field is record-only — a sum's witnessed update cannot rebuild blob bytes from the wire")
             }
             for f in c.fields where wire[f.type] == nil {
                 die("kaya-swift-gen: \(name).\(c.name).\(f.label): \(f.type) is not a wire type")

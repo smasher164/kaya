@@ -10,9 +10,29 @@ protocol KayaGen {}
 
 /// A collection element type. Conform with a prototype (any instance — Mirror
 /// needs one to walk) and init(values:); everything else derives.
+///
+/// The two Document members are what a stamped copy's fold needs
+/// (docs/rich-text-plan.md §19): Mirror can READ a stored property and
+/// cannot WRITE one, so kaya-swift-gen emits the pair for a record that
+/// declares a `KayaDocument` field. A record that declares none has no
+/// `KayaField<KayaDocument>` token to bind with, so the defaults below are
+/// the answer for exactly that case.
 protocol KayaRecord {
     static var prototype: Self { get }
     init(values: [KayaValue])
+    static func kayaDocument(_ record: Self, _ index: UInt32) -> KayaDocument?
+    static func kayaWithDocument(
+        _ record: Self, _ index: UInt32, _ document: KayaDocument) -> Self
+}
+
+extension KayaRecord {
+    static func kayaDocument(_ record: Self, _ index: UInt32) -> KayaDocument? { nil }
+
+    static func kayaWithDocument(
+        _ record: Self, _ index: UInt32, _ document: KayaDocument
+    ) -> Self {
+        record
+    }
 }
 
 /// A civil date: a `DateComponents` carrying year, month and day
@@ -111,6 +131,9 @@ func wireValue(_ any: Any) -> KayaValue? {
 /// write that carries a blob field re-registers.
 func kayaEncode(_ any: Any) -> KayaValue? {
     if let data = any as? Data { return .blob(kayaRegisterBlob(data)) }
+    // A stamped copy's document is a Blob field whose bytes are the
+    // document's own value list (docs/rich-text-plan.md §19).
+    if let doc = any as? KayaDocument { return .blob(kayaRegisterBlob(kayaDocumentBlob(doc))) }
     return wireValue(any)
 }
 
@@ -119,7 +142,9 @@ extension KayaRecord {
     /// declaration order.
     static var kayaSchema: [UInt32] {
         Mirror(reflecting: prototype).children.compactMap { child in
-            if child.value is Data { return UInt32(KAYA_VALUE_BLOB) }
+            if child.value is Data || child.value is KayaDocument {
+                return UInt32(KAYA_VALUE_BLOB)
+            }
             switch wireValue(child.value) {
             case .some(.str): return UInt32(KAYA_VALUE_STR)
             case .some(.bool): return UInt32(KAYA_VALUE_BOOL)
@@ -144,6 +169,9 @@ extension KayaRecord {
     private var kayaProbeValues: [KayaValue] {
         Mirror(reflecting: self).children.compactMap { child in
             if let data = child.value as? Data { return .blob(UInt64(data.count)) }
+            if let doc = child.value as? KayaDocument {
+                return .blob(UInt64(kayaDocumentBlob(doc).count))
+            }
             return wireValue(child.value)
         }
     }
@@ -163,6 +191,8 @@ extension KayaRecord {
         case let n as Int64: probe[keyPath: keyPath] = (n &+ 0x5eed) as! V
         case let x as Double: probe[keyPath: keyPath] = (x.isNaN ? 0 : x + 1) as! V
         case let d as Data: probe[keyPath: keyPath] = (d + Data([0x6b])) as! V
+        case let doc as KayaDocument:
+            probe[keyPath: keyPath] = doc.mark(0..<0, "kaya", "probe") as! V
         default: preconditionFailure("kaya: \(V.self) is not a wire type")
         }
         for (i, (a, b)) in zip(prototype.kayaProbeValues, probe.kayaProbeValues).enumerated()
@@ -332,6 +362,16 @@ extension KayaAppTx {
         // payload carries wire fields, and this declaration is the ONLY
         // place T is known.
         app.registerDecoder(c.id) { _, values in T(values: values) }
+        // How a stamped copy's act reaches its row's Document field
+        // (docs/rich-text-plan.md §19): this declaration is the ONLY
+        // place T is known, as the decoder above is.
+        app.registerDocumentField(
+            c.id,
+            read: { record, index in (record as? T).flatMap { T.kayaDocument($0, index) } },
+            write: { record, index, document in
+                guard let typed = record as? T else { return record }
+                return T.kayaWithDocument(typed, index, document)
+            })
         return KayaRecordCollection(collection: c)
     }
 }

@@ -58,7 +58,10 @@ def brace_block(src, header_re, open_ch="{", close_ch="}"):
     m = re.search(header_re, src, re.M)
     if not m:
         return None
-    i = src.find(open_ch, m.start())
+    # From the header's END, not its start: a header whose parameter list
+    # carries a `{}` default (`textarea(opts: TextAreaOptions = {})`) would
+    # otherwise hand back that empty pair as the block (measured 2026-09-16).
+    i = src.find(open_ch, m.end() - 1)
     if i < 0:
         return None
     depth = 0
@@ -255,7 +258,13 @@ ZONES = [
 # the same file, so every name is read out of the zone's own block
 # (docs/tpl-props-plan.md P1/P2, docs/styling-plan.md D3/D4).
 TPL_PROPS = ["grow", "a11y_id", "a11y_label", "a11y_hint", "accepts", "role", "inset",
-             "help", "placeholder", "href", "fill", "columns_auto", "wrap"]
+             "help", "placeholder", "href", "fill", "columns_auto", "wrap",
+             # docs/rich-text-plan.md §19: a stamped copy's document, bound
+             # to a Document field of its row. Three bindings spell it as an
+             # OVERLOAD or a labelled argument of the bound-text textarea, so
+             # their readers spell a member with its first parameter too — a
+             # bare `Textarea` would be satisfied by the text overload.
+             "document"]
 
 # Rust's `grow` is the generic floor `set(node, prop, value)` and not a
 # named setter, so that one row cannot tell grow from any other generic
@@ -267,6 +276,7 @@ PROP_MEMBERS = {
         "inset": "inset", "help": "help", "placeholder": "placeholder",
         "href": "href", "fill": "fill",
         "columns_auto": "columns_auto", "wrap": "wrap",
+        "document": "textarea_rich_bound",
     },
     "go": {
         "grow": "SetGrow", "a11y_id": "SetA11yID", "a11y_label": "SetA11yLabel",
@@ -274,6 +284,7 @@ PROP_MEMBERS = {
         "inset": "SetInset", "help": "SetHelp",
         "placeholder": "SetPlaceholder", "href": "SetHref", "fill": "SetFill",
         "columns_auto": "SetColumnsAuto", "wrap": "SetWrap",
+        "document": "TextareaRichBound",
     },
     "csharp": {
         "grow": "SetGrow", "a11y_id": "SetA11yId", "a11y_label": "SetA11yLabel",
@@ -281,6 +292,7 @@ PROP_MEMBERS = {
         "inset": "SetInset", "help": "SetHelp",
         "placeholder": "SetPlaceholder", "href": "SetHref", "fill": "SetFill",
         "columns_auto": "SetColumnsAuto", "wrap": "SetWrap",
+        "document": "Textarea(Field<Document>",
     },
     "java": {
         "grow": "setGrow", "a11y_id": "setA11yId", "a11y_label": "setA11yLabel",
@@ -288,6 +300,7 @@ PROP_MEMBERS = {
         "inset": "setInset", "help": "setHelp",
         "placeholder": "setPlaceholder", "href": "setHref", "fill": "setFill",
         "columns_auto": "setColumnsAuto", "wrap": "setWrap",
+        "document": "textareaRich",
     },
     "swift": {
         "grow": "setGrow", "a11y_id": "setA11yId", "a11y_label": "setA11yLabel",
@@ -295,6 +308,7 @@ PROP_MEMBERS = {
         "inset": "setInset", "help": "setHelp",
         "placeholder": "setPlaceholder", "href": "setHref", "fill": "setFill",
         "columns_auto": "setColumnsAuto", "wrap": "setWrap",
+        "document": "textarea(document:",
     },
     "ocaml": {
         "grow": "set_grow", "a11y_id": "set_a11y_id", "a11y_label": "set_a11y_label",
@@ -302,6 +316,7 @@ PROP_MEMBERS = {
         "inset": "set_inset", "help": "set_help",
         "placeholder": "set_placeholder", "href": "set_href", "fill": "set_fill",
         "columns_auto": "set_columns_auto", "wrap": "set_wrap",
+        "document": "bind_document_field",
     },
     # Haskell's template props are not methods but CONSTRUCTORS of the
     # `TplAttr` GADT, applied by `applyTplAttr`.
@@ -311,6 +326,7 @@ PROP_MEMBERS = {
         "inset": "TplInset", "help": "TplHelp",
         "placeholder": "TplPlaceholder", "href": "TplHref", "fill": "TplFill",
         "columns_auto": "TplColumnsAuto", "wrap": "TplWrap",
+        "document": "bindDocumentField",
     },
     # JS spells five of the seven as chainable methods on the base handle
     # and the other two as CONSTRUCTOR OPTIONS; members_js says why the
@@ -321,6 +337,7 @@ PROP_MEMBERS = {
         "inset": "inset", "help": "help", "placeholder": "placeholder",
         "href": "href", "fill": "fill",
         "columns_auto": "columnsAuto", "wrap": "wrap",
+        "document": "document",
     },
 }
 
@@ -339,7 +356,10 @@ def members_csharp(_):
     body = brace_block(read("bindings/csharp/KayaApp.cs"),
                        r"^\s*(public |internal )?sealed class Tpl\b")
     return None if body is None else set(
-        re.findall(r"^\s*public\s+(?:void|Node)\s+([A-Za-z][A-Za-z0-9]*)\s*\(", body, re.M))
+        re.findall(r"^\s*public\s+(?:void|Node)\s+([A-Za-z][A-Za-z0-9]*)\s*\(", body, re.M)
+        + [f"{name}({ptype}" for name, ptype in re.findall(
+            r"^\s*public\s+(?:void|Node)\s+([A-Za-z][A-Za-z0-9]*)\s*\(\s*([A-Za-z][A-Za-z0-9<>]*)",
+            body, re.M)])
 
 
 def members_java(_):
@@ -352,7 +372,10 @@ def members_java(_):
 def members_swift(_):
     body = brace_block(read("bindings/swift/KayaApp.swift"), r"^final class KayaTpl\b")
     return None if body is None else set(
-        re.findall(r"^\s*func ([a-zA-Z][A-Za-z0-9]*)\s*\(", body, re.M))
+        re.findall(r"^\s*func ([a-zA-Z][A-Za-z0-9]*)\s*\(", body, re.M)
+        + [f"{name}({label}:" for name, label in re.findall(
+            r"^\s*func ([a-zA-Z][A-Za-z0-9]*)\s*\(\s*([a-zA-Z][A-Za-z0-9]*)\s*[a-zA-Z0-9]*\s*:",
+            body, re.M)])
 
 
 def members_ocaml(_):
@@ -364,7 +387,10 @@ def members_ocaml(_):
 
 def members_haskell(_):
     src = read("bindings/haskell/KayaApp.hs")
-    return set(re.findall(r"^\s*(Tpl[A-Za-z0-9]*)\s*::", src, re.M))
+    # The TplAttr constructors, and the template zone's FIELD BINDERS
+    # (bindTextField .. bindDocumentField), which is where a field-bound
+    # prop lives in this binding (docs/rich-text-plan.md §19).
+    return set(re.findall(r"^\s*(Tpl[A-Za-z0-9]*|bind[A-Za-z0-9]*Field)\s*::", src, re.M))
 
 
 def members_js(_):
@@ -391,11 +417,18 @@ def members_js(_):
         src, r"^function setLayout\(handle: Handle, opts: ContainerOptions\): void \{")
     grow = brace_block(
         src, r"^function setGrow\(handle: Handle, opts: GrowOption\): void \{")
-    if None in (base, layout, grow):
+    textarea = brace_block(
+        src, r"^export function textarea\(opts: TextAreaOptions = \{\}\): Widget \{")
+    if None in (base, layout, grow, textarea):
         return None
     names = set(re.findall(r"^  ([a-zA-Z][A-Za-z0-9]*)\(", base, re.M))
+    # `document` is a constructor OPTION (docs/rich-text-plan.md §19) and
+    # `Handle.document()` is the live READ of the same name, so the option
+    # is counted from its writer alone, never from the class block.
+    names.discard("document")
     for prop, writer, emitter in (("grow", grow, "wire.tx_set_grow("),
-                                  ("inset", layout, "wire.tx_set_inset(")):
+                                  ("inset", layout, "wire.tx_set_inset("),
+                                  ("document", textarea, "bindDocument(")):
         if emitter in writer and "isNode" not in writer and "_tplDepth" not in writer:
             names.add(prop)
     return names
@@ -1891,7 +1924,7 @@ def facade_csharp():
 # first leaves a nested typed For's body holding the raw Tpl
 # (docs/deferred.md, closed 2026-08-24). The floor is the census
 # discipline; sum surfaces have no `<Rec>Row`.
-CSHARP_TWIN_FLOOR = 8
+CSHARP_TWIN_FLOOR = 9
 
 
 JAVA_TWIN_FLOOR = 9

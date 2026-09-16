@@ -50,6 +50,16 @@ module KayaApp
     -- Exported for guests/haskell's AbortCheck, which reads a ranged
     -- format act's record back before it is submitted.
     stageTx,
+    -- The document's own wire bytes, and the fold rule the live mirror
+    -- and a stamped copy's ROW field share (docs\/rich-text-plan.md §19).
+    -- Exported for guests/haskell's AbortCheck, which compares the bytes
+    -- against the wire's rules and the two folds against each other.
+    documentBlob,
+    documentOfBlob,
+    foldEdit,
+    foldFormat,
+    foldRowDocument,
+    absorbEdit,
     submitTx,
     undoableTx,
     undoableTxIn,
@@ -176,6 +186,10 @@ module KayaApp
     document,
     onEdit,
     onFormat,
+    -- A stamped rich copy's own acts, with the row's key path first
+    -- (docs\/rich-text-plan.md §19).
+    onEditNode,
+    onFormatNode,
     setText,
     bindText,
     bindA11yId,
@@ -241,6 +255,7 @@ module KayaApp
     bindCheckedField,
     bindValueField,
     bindSourceField,
+    bindDocumentField,
     button,
     buttonOn,
     entry,
@@ -322,6 +337,7 @@ module KayaApp
     buttonBound,
     entryBound,
     textareaBound,
+    textareaRichBound,
     searchBound,
     progressBound,
     slider,
@@ -792,6 +808,12 @@ data Pending
   | PToggle !Word64 (Bool -> IO ())
   | PValue !Word64 (Double -> IO ())
   | PToggleNode !Word64 ([W.Value] -> Bool -> IO ())
+  -- The template node's document bind, recorded at the transaction
+  -- boundary because the collection is BuildState's and the table is
+  -- the App's (docs/rich-text-plan.md §19).
+  | PDocumentBind !Word64 !Word64 !Word32 !Word32
+  | PEditNode !Word64 ([W.Value] -> Edit -> IO ())
+  | PFormatNode !Word64 ([W.Value] -> Format -> IO ())
   | PDate !Word64 (Day -> IO ())
   | PTime !Word64 (TimeOfDay -> IO ())
   | PDateNode !Word64 ([W.Value] -> Day -> IO ())
@@ -2454,6 +2476,60 @@ runsOfValues (W.VI64 start : W.VI64 stop : W.VStr name : W.VStr value : rest) =
     : runsOfValues rest
 runsOfValues _ = []
 
+-- | A stamped copy's document is a record FIELD
+-- (docs\/rich-text-plan.md §19): the field's Blob bytes are ONE flat
+-- value list — the text, then four values per run — the bytes
+-- 'setDocument' already ships (crates\/kaya\/src\/wire.rs,
+-- @document_blob@).
+documentBlob :: Document -> BS.ByteString
+documentBlob doc =
+  BL.toStrict
+    ( toLazyByteString
+        (W.encodeValues (W.VStr (docText doc) : runValues (docRuns doc)))
+    )
+
+-- | @documentBlob@'s inverse, over the same 8-byte-aligned layout
+-- (@read_document_blob@). A document blob holds Strs and I64s alone, so
+-- any other tag is refused naming it rather than silently read as text.
+documentOfBlob :: BS.ByteString -> Document
+documentOfBlob bytes
+  | BS.length bytes < 8 =
+      error
+        ( "kaya: a document blob carries its count first; this one is "
+            ++ show (BS.length bytes)
+            ++ " byte(s)"
+        )
+  | otherwise = case walk 8 (le32 0) of
+      (W.VStr text : rest) -> Document text (runsOfValues rest)
+      vs ->
+        error
+          ( "kaya: a document blob starts with its text; this one holds "
+              ++ show (length vs)
+              ++ " value(s)"
+          )
+  where
+    le32 :: Int -> Int
+    le32 i =
+      sum [fromIntegral (BS.index bytes (i + k)) `shiftL` (8 * k) | k <- [0 .. 3]]
+    le64 :: Int -> Int64
+    le64 i =
+      sum [fromIntegral (BS.index bytes (i + k)) `shiftL` (8 * k) | k <- [0 .. 7]]
+    walk :: Int -> Int -> [W.Value]
+    walk _ 0 = []
+    walk at n =
+      let vlen = le32 (at + 4)
+          next = at + 8 + ((vlen + 7) `div` 8) * 8
+          tag = fromIntegral (le32 at) :: Word32
+          v
+            | tag == W.valueI64 = W.VI64 (le64 (at + 8))
+            | tag == W.valueStr =
+                W.VStr (utf8Chars (BS.unpack (BS.take vlen (BS.drop (at + 8) bytes))))
+            | otherwise =
+                error
+                  ("kaya: a document blob carries Strs and I64s; this one a "
+                     ++ show tag)
+       in v : walk next (n - 1)
+
 -- Byte offsets are the core's (docs/ranges-units.md); the wire module
 -- decodes inbound Strs itself (docs/traps.md 2026-09-11).
 
@@ -2508,14 +2584,12 @@ document :: App -> Widget -> IO Document
 document app (Widget n) =
   Map.findWithDefault (documentOf "") n <$> readIORef (appDocuments app)
 
--- One delivered edit, folded by the core's own rules
--- (crates/kaya/src/app.rs, @absorb_edit@).
-absorbEdit :: App -> Word64 -> Edit -> IO ()
-absorbEdit app n e = modifyIORef' (appDocuments app) (Map.alter fold n)
-  where
-    fold held =
-      let doc = fromMaybe (documentOf "") held
-          bytes = utf8Bytes (docText doc)
+-- | The core's own fold rule, over ANY document — a live mirror or a
+-- stamped copy's row field (crates\/kaya\/src\/app.rs, @fold_edit@;
+-- docs\/rich-text-plan.md §19).
+foldEdit :: Edit -> Document -> Document
+foldEdit e doc =
+      let bytes = utf8Bytes (docText doc)
           len = length bytes
           ins = utf8Bytes (editInserted e)
           start = editStart e
@@ -2536,25 +2610,21 @@ absorbEdit app n e = modifyIORef' (appDocuments app) (Map.alter fold n)
               (docRuns doc)
           landed =
             map (\r -> r {runStart = runStart r + start, runEnd = runEnd r + start}) (editRuns e)
-       in Just $
-            if start < 0 || start > stop || stop > len || not (boundary start)
-              || not (boundary stop)
-              then -- A mirror out of step with the core would splice garbage.
-                Document (editInserted e) (editRuns e)
-              else
-                Document
-                  (utf8Chars (take start bytes ++ ins ++ drop stop bytes))
-                  (normalizeRuns (kept ++ landed))
+       in if start < 0 || start > stop || stop > len || not (boundary start)
+            || not (boundary stop)
+            then -- A mirror out of step with the core would splice garbage.
+              Document (editInserted e) (editRuns e)
+            else
+              Document
+                (utf8Chars (take start bytes ++ ins ++ drop stop bytes))
+                (normalizeRuns (kept ++ landed))
 
--- One delivered format act, the core's @absorb_format@.
-absorbFormat :: App -> Word64 -> Format -> IO ()
-absorbFormat app n act
-  | formatStart act >= formatEnd act = return ()
-  | otherwise = modifyIORef' (appDocuments app) (Map.alter fold n)
-  where
-    (start, stop, name) = (formatStart act, formatEnd act, formatName act)
-    fold held =
-      let doc = fromMaybe (documentOf "") held
+-- | The core's @fold_format@, over any document.
+foldFormat :: Format -> Document -> Document
+foldFormat act doc
+  | formatStart act >= formatEnd act = doc
+  | otherwise =
+      let (start, stop, name) = (formatStart act, formatEnd act, formatName act)
           kept =
             concatMap
               ( \r ->
@@ -2568,7 +2638,56 @@ absorbFormat app n act
           painted = case formatValue act of
             Just v -> kept ++ [Run start stop name v]
             Nothing -> kept
-       in Just doc {docRuns = normalizeRuns painted}
+       in doc {docRuns = normalizeRuns painted}
+
+-- One delivered act, into the live mirror (crates/kaya/src/app.rs,
+-- @absorb_edit@ / @absorb_format@).
+absorbEdit :: App -> Widget -> Edit -> IO ()
+absorbEdit app (Widget n) e =
+  modifyIORef'
+    (appDocuments app)
+    (Map.alter (Just . foldEdit e . fromMaybe (documentOf "")) n)
+
+
+absorbFormat :: App -> Widget -> Format -> IO ()
+absorbFormat app (Widget n) act =
+  modifyIORef'
+    (appDocuments app)
+    (Map.alter (Just . foldFormat act . fromMaybe (documentOf "")) n)
+
+-- A stamped copy's edit or format act reaches its ROW's Document field
+-- (docs/rich-text-plan.md §19): the node is bound to (collection, field,
+-- level) by 'textareaRichBound', and the occurrence's path names the
+-- row. A row that is gone has no field to fold into, and that is not a
+-- fault.
+foldRowDocument :: App -> Node -> [W.Value] -> (Document -> Document) -> IO ()
+foldRowDocument app (Node n) path f = do
+  binds <- readIORef (appDocumentBinds app)
+  case Map.lookup n binds of
+    Nothing -> return ()
+    -- [level] Fors up is [level] keys shorter: the innermost copy's own
+    -- keys are the trailing ones.
+    Just (cid, i, level) ->
+      case reverse (take (length path - fromIntegral level) path) of
+        [] -> return ()
+        (key : revAncestors) ->
+          let ancestors = reverse revAncestors
+              at = fromIntegral i
+              slot vs =
+                let doc = case drop at vs of
+                      (W.VStr b : _) -> documentOfBlob (BC.pack b)
+                      _ -> documentOf ""
+                 in take at vs
+                      ++ [W.VStr (BC.unpack (documentBlob (f doc)))]
+                      ++ drop (at + 1) vs
+              onEntry (k, (variant, vs))
+                | k == key = (k, (variant, slot vs))
+                | otherwise = (k, (variant, vs))
+              onInstance inst
+                | iPath inst == ancestors = inst {iEntries = map onEntry (iEntries inst)}
+                | otherwise = inst
+           in modifyIORef' (appModel app) $ \(model, children) ->
+                (Map.adjust (map onInstance) cid model, children)
 
 -- | This widget carries attribute runs: 'setDocument', 'applyEdit',
 -- 'onEdit'. A textarea edits them; a label draws them read-only
@@ -2604,7 +2723,7 @@ setDocument app (Widget n) doc = emitBIO $ do
 -- a live composition ends (docs\/rich-text-plan.md §7).
 applyEdit :: App -> Widget -> Edit -> Build ()
 applyEdit app (Widget n) e = emitBIO $ do
-  absorbEdit app n e
+  absorbEdit app (Widget n) e
   return
     ( W.txApplyEdit
         n
@@ -2673,7 +2792,7 @@ formatTextRange :: App -> Widget -> (Int, Int) -> String -> String -> Build ()
 formatTextRange app (Widget n) range name value = emitBIO $ do
   (start, stop) <- rangedActBounds app n range name
   let painted = if name == "block" && value == "body" then Nothing else Just value
-  absorbFormat app n (Format start stop name painted)
+  absorbFormat app (Widget n) (Format start stop name painted)
   return
     ( W.txFormatText
         n
@@ -2688,7 +2807,7 @@ formatTextRange app (Widget n) range name value = emitBIO $ do
 unformatRange :: App -> Widget -> (Int, Int) -> String -> Build ()
 unformatRange app (Widget n) range name = emitBIO $ do
   (start, stop) <- rangedActBounds app n range name
-  absorbFormat app n (Format start stop name Nothing)
+  absorbFormat app (Widget n) (Format start stop name Nothing)
   return
     ( W.txFormatText n 1 1 (fromIntegral start) (fromIntegral stop)
         [W.VStr name, W.VStr ""]
@@ -2717,6 +2836,16 @@ onEdit app (Widget n) f = modifyIORef' (appWidgetEdits app) (Map.insert n f)
 -- pending state and arrives as the next edit's runs, never here.
 onFormat :: App -> Widget -> (Format -> IO ()) -> IO ()
 onFormat app (Widget n) f = modifyIORef' (appWidgetFormats app) (Map.insert n f)
+
+-- | A stamped rich copy's edit, with its row's key path outermost first
+-- — 'onEdit' one zone over (docs\/rich-text-plan.md §19). The row's
+-- Document field has already taken the act when this fires, so the
+-- handler reads the ROW and never the widget.
+onEditNode :: App -> Node -> ([W.Value] -> Edit -> IO ()) -> IO ()
+onEditNode app (Node n) f = modifyIORef' (appNodeEdits app) (Map.insert n f)
+
+onFormatNode :: App -> Node -> ([W.Value] -> Format -> IO ()) -> IO ()
+onFormatNode app (Node n) f = modifyIORef' (appNodeFormats app) (Map.insert n f)
 
 -- | Write a live widget's text: seed an editor's document, re-caption a
 -- label. LIVE WIDGETS ONLY — the same write on a template Node is the
@@ -3820,6 +3949,10 @@ setNodeDropTarget (Node n) ops =
 setNodeInset :: Node -> Double -> Tpl ()
 setNodeInset (Node n) pad = emitT (W.txSetInset n pad)
 
+-- | A stamped copy carries attribute runs (the live 'setRich').
+setNodeRich :: Node -> Bool -> Tpl ()
+setNodeRich (Node n) on = emitT (W.txSetRich n on)
+
 setNodeRole :: Node -> Role -> Tpl ()
 setNodeRole (Node n) r = emitT (W.txSetRole n (roleWire r))
 
@@ -3914,6 +4047,25 @@ textareaBound src = do
   n <- widget W.kindTextarea
   bindTextSource n src
   return n
+
+-- | A stamped RICH textarea whose whole document is the row's own
+-- 'Document' field (docs\/rich-text-plan.md §19): @rich@ FIRST and then
+-- the bound document — the core refuses the one without the other before
+-- it — and the bind is recorded so a copy's own act folds into its ROW.
+-- CONTROLLED where 'textareaBound' is not: the app writes a copy's
+-- document by patching the row, and the copy's own acts come back folded.
+textareaRichBound :: KField Document -> Tpl Node
+textareaRichBound fd@(KField i) = do
+  n@(Node ident) <- widget W.kindTextarea
+  setNodeRich n True
+  held <- openFor 0
+  mapM_ (\cid -> pendT (PDocumentBind ident cid i 0)) held
+  bindDocumentField n 0 fd
+  return n
+
+-- The For this template body is being declared inside, @level@ Fors up.
+openFor :: Word32 -> Tpl (Maybe Word64)
+openFor level = Tpl $ \s -> (listToMaybe (drop (fromIntegral level) (bOpenFors s)), s)
 
 -- | A stamped search field seeded from an addressable source;
 -- 'entryBound''s contract under the platform's search chrome.
@@ -4257,6 +4409,16 @@ instance KayaFieldType BS.ByteString where
   toFieldValue = W.VStr . BC.unpack
   fromFieldValue v = case v of W.VStr s -> BC.pack s; _ -> error "kaya: field is not a Blob"
 
+-- | A stamped copy's document is a Blob slot whose bytes are the
+-- document's own wire list, so it binds through the template zone as a
+-- String field does (docs/rich-text-plan.md §19).
+instance KayaFieldType Document where
+  fieldTag _ = W.valueBlob
+  toFieldValue = W.VStr . BC.unpack . documentBlob
+  fromFieldValue v = case v of
+    W.VStr s -> documentOfBlob (BC.pack s)
+    _ -> error "kaya: field is not a Document"
+
 encodeFieldWire :: Word32 -> W.Value -> IO W.Value
 encodeFieldWire tag v
   | tag == W.valueBlob, W.VStr s <- v = W.VBlob <$> registerBlob (BC.pack s)
@@ -4483,6 +4645,11 @@ bindValueField (Node n) level (KField i) = emitT (W.txBindValueElement n level i
 bindSourceField :: Node -> Word32 -> KField BS.ByteString -> Tpl ()
 bindSourceField (Node n) level (KField i) = emitT (W.txBindSourceElement n level i)
 
+-- | Bind a stamped rich textarea's whole document to one field of the
+-- element; @KField Document@ only (docs\/rich-text-plan.md §19).
+bindDocumentField :: Node -> Word32 -> KField Document -> Tpl ()
+bindDocumentField (Node n) level (KField i) = emitT (W.txBindDocumentElement n level i)
+
 data App = App
   { -- THE ONLY FIELD HERE TOUCHED FROM ANOTHER THREAD, and the only
     -- reason this record carries an MVar at all — every IORef below is
@@ -4506,6 +4673,12 @@ data App = App
     -- (docs/rich-text-plan.md R1): folded from the two occurrences here
     -- and from the app's own setDocument/applyEdit as they are SENT.
     appDocuments :: IORef (Map.Map Word64 Document),
+    -- Template node -> (collection, field, level) for every template
+    -- textarea bound to a document, so a copy's act folds into its ROW
+    -- (docs/rich-text-plan.md §19).
+    appDocumentBinds :: IORef (Map.Map Word64 (Word64, Word32, Word32)),
+    appNodeEdits :: IORef (Map.Map Word64 ([W.Value] -> Edit -> IO ())),
+    appNodeFormats :: IORef (Map.Map Word64 ([W.Value] -> Format -> IO ())),
     appWidgetEdits :: IORef (Map.Map Word64 (Edit -> IO ())),
     appWidgetFormats :: IORef (Map.Map Word64 (Format -> IO ())),
     appWidgetToggles :: IORef (Map.Map Word64 (Bool -> IO ())),
@@ -4678,6 +4851,10 @@ register app pending = case pending of
   PToggle n handler -> modifyIORef' (appWidgetToggles app) (Map.insert n handler)
   PValue n handler -> modifyIORef' (appWidgetValues app) (Map.insert n handler)
   PToggleNode n handler -> modifyIORef' (appNodeToggles app) (Map.insert n handler)
+  PDocumentBind n cid i level ->
+    modifyIORef' (appDocumentBinds app) (Map.insert n (cid, i, level))
+  PEditNode n handler -> modifyIORef' (appNodeEdits app) (Map.insert n handler)
+  PFormatNode n handler -> modifyIORef' (appNodeFormats app) (Map.insert n handler)
   PDate n handler -> modifyIORef' (appWidgetDates app) (Map.insert n handler)
   PTime n handler -> modifyIORef' (appWidgetTimes app) (Map.insert n handler)
   PDateNode n handler -> modifyIORef' (appNodeDates app) (Map.insert n handler)
@@ -4881,6 +5058,9 @@ newApp =
     <*> newIORef Map.empty -- appWidgetChanges
     <*> newIORef Map.empty -- appNodeChanges
     <*> newIORef Map.empty -- appDocuments
+    <*> newIORef Map.empty -- appDocumentBinds
+    <*> newIORef Map.empty -- appNodeEdits
+    <*> newIORef Map.empty -- appNodeFormats
     <*> newIORef Map.empty -- appWidgetEdits
     <*> newIORef Map.empty -- appWidgetFormats
     <*> newIORef Map.empty -- appWidgetToggles
@@ -5021,9 +5201,18 @@ dispatchLoop app = do
                       inserted
                       (runsOfValues values)
                       (Just (editSourceOfWire (fromIntegral source)))
-              absorbEdit app ident e
-              handlers <- readIORef (appWidgetEdits app)
-              dispatch (mapM_ ($ e) (Map.lookup ident handlers))
+              -- A STAMPED COPY FOLDS INTO ITS ROW and a live widget
+              -- into the mirror, one fold either way
+              -- (docs/rich-text-plan.md §19).
+              case keys of
+                [] -> do
+                  absorbEdit app (Widget ident) e
+                  handlers <- readIORef (appWidgetEdits app)
+                  dispatch (mapM_ ($ e) (Map.lookup ident handlers))
+                _ -> do
+                  foldRowDocument app (Node ident) keys (foldEdit e)
+                  handlers <- readIORef (appNodeEdits app)
+                  dispatch (mapM_ (\h -> h keys e) (Map.lookup ident handlers))
             _ -> return ()
           dispatchLoop app
       | kind == W.occKindTextFormatted -> do
@@ -5035,9 +5224,15 @@ dispatchLoop app = do
                       (fromIntegral stop)
                       name
                       (if removed == 0 then Just value else Nothing)
-              absorbFormat app ident act
-              handlers <- readIORef (appWidgetFormats app)
-              dispatch (mapM_ ($ act) (Map.lookup ident handlers))
+              case keys of
+                [] -> do
+                  absorbFormat app (Widget ident) act
+                  handlers <- readIORef (appWidgetFormats app)
+                  dispatch (mapM_ ($ act) (Map.lookup ident handlers))
+                _ -> do
+                  foldRowDocument app (Node ident) keys (foldFormat act)
+                  handlers <- readIORef (appNodeFormats app)
+                  dispatch (mapM_ (\h -> h keys act) (Map.lookup ident handlers))
             _ -> return ()
           dispatchLoop app
       | kind == W.occKindTextChanged -> do

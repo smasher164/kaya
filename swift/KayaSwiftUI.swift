@@ -9,7 +9,7 @@ import UserNotifications
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0xe52568620b0ca54e
+let kayaSpecHash: UInt64 = 0x3854759c1c5d028c
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -209,6 +209,9 @@ private let propRich: UInt32 = 32
 private let propOwnUndo: UInt32 = 33
 private let propCanUndo: UInt32 = 34
 private let propCanRedo: UInt32 = 35
+// docs/rich-text-plan.md §19: a stamped copy's document, a template-zone
+// prop the core turns into set_rich_text before any arm sees it.
+private let propDocument: UInt32 = 36
 // THE RICH TEXT VOCABULARIES, hand-copied APPEND-ONLY wire values held
 // against the core's by tools/check-verbs.py (docs/rich-text-plan.md R3).
 // An attribute NAME rides the wire as a string; these are the numbers the

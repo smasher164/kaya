@@ -113,9 +113,20 @@ def content_origin(proto, pid, transform):
 # BEGIN_WAIT_MS, before it releases — the x11 two-phase gate in one process.
 BEGIN_FLAG_VAR = "KAYA_DRAG_BEGIN_FLAG"
 BEGIN_WAIT_MS = 5000
+# AND THE DROP SIDE'S OWN GATE, one handshake later: touched when a
+# destination has ANSWERED the drag, which is when GDK sends
+# wl_data_offer.accept. The compositor delivers wl_data_device.drop on the
+# release only to a client that has accepted, so a release that arrives first
+# is answered `leave` and the drop silently never happens (docs/deferred.md's
+# dnd wayland WATCH). Shorter than BEGIN_WAIT_MS because a drag whose path
+# crosses no destination at all pays this wait on every gesture; the expiry
+# is printed either way.
+TOOK_FLAG_VAR = "KAYA_DRAG_TOOK_FLAG"
+TOOK_WAIT_MS = 2000
 
 
-def injector_argv(proto, injector, start, end, phase="all", begin_flag=None):
+def injector_argv(proto, injector, start, end, phase="all", begin_flag=None,
+                  took_flag=None):
     """One process that presses at `start`, walks to `end` and releases —
     or, on x11, HALF of it: `press` presses and walks past GTK's threshold
     to the midpoint, `release` walks the rest and releases. XTEST's pointer
@@ -125,8 +136,10 @@ def injector_argv(proto, injector, start, end, phase="all", begin_flag=None):
     release reached the server before GDK began, and no drag ever ran).
     wayland stays one process — the virtual pointer dies with it — so its
     gate is a `wait` step INSIDE the process: past the threshold it waits
-    for the app's drag-begin flag before walking on and releasing
-    (docs/traps.md, the wayland release that beat GTK's drag-begin)."""
+    for the app's drag-begin flag before walking on, and a `hold` step at
+    the walk's end waits for a destination to have answered the drag before
+    it releases (docs/traps.md, the wayland release that beat GTK's
+    drag-begin; docs/deferred.md's dnd WATCH for the drop side)."""
     (x0, y0), (x1, y1) = start, end
     path = [(x0 + (x1 - x0) * i // STEPS, y0 + (y1 - y0) * i // STEPS)
             for i in range(1, STEPS + 1)]
@@ -140,6 +153,8 @@ def injector_argv(proto, injector, start, end, phase="all", begin_flag=None):
             argv += ["wait", begin_flag, str(BEGIN_WAIT_MS)]
         for x, y in path[half:]:
             argv += ["set", str(x), str(y), "sleep", "40"]
+        if took_flag:
+            argv += ["hold", took_flag, str(TOOK_WAIT_MS)]
         return argv + ["sleep", "300", "release", "left", "sleep", "300"]
     half = STEPS // 2
     argv = [injector]
@@ -173,17 +188,19 @@ def drive(proto, pid, transform, start_in_window, end_in_window, injector=None,
     start = (int(origin[0] + start_in_window[0]), int(origin[1] + start_in_window[1]))
     end = (int(origin[0] + end_in_window[0]), int(origin[1] + end_in_window[1]))
     out = subprocess.run(injector_argv(proto, injector, start, end, phase,
-                                       os.environ.get(BEGIN_FLAG_VAR)),
+                                       os.environ.get(BEGIN_FLAG_VAR),
+                                       os.environ.get(TOOK_FLAG_VAR)),
                          capture_output=True, text=True, encoding="utf-8",
                          check=False)
     if out.returncode != 0:
         raise DragDriveError(
             f"{injector} exited {out.returncode} driving {start} -> {end}: "
             + (out.stderr.strip() or "no stderr"))
-    # The injector's own reading of the gate ("waited Nms" / "expired") rides
-    # the caller's line, so a release that beat the drag-begin is named.
+    # The injector's own reading of EACH gate ("waited Nms" / "expired") rides
+    # the caller's line, so a release that beat the drag-begin, or beat the
+    # destination's own answer, is named.
     gate = out.stdout.strip().splitlines()
-    return origin, start, end, (gate[-1] if gate else "")
+    return origin, start, end, "; ".join(line.strip() for line in gate)
 
 
 def main():

@@ -398,6 +398,10 @@ name = "richlabel"
 path = "../../guests/rust/richlabel.rs"
 
 [[example]]
+name = "richrows"
+path = "../../guests/rust/richrows.rs"
+
+[[example]]
 name = "notes"
 path = "../../guests/rust/notes.rs"
 

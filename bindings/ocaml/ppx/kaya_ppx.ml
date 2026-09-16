@@ -7,7 +7,7 @@
 
 open Ppxlib
 
-type wire = Str | Bool | I64 | F64 | Blob | Date | Time
+type wire = Str | Bool | I64 | F64 | Blob | Doc | Date | Time
 
 let wire_of_core_type (ct : core_type) =
   match ct with
@@ -18,6 +18,10 @@ let wire_of_core_type (ct : core_type) =
   | [%type: float] -> Some F64
   | [%type: bytes] -> Some Blob
   | [%type: Bytes.t] -> Some Blob
+  (* A stamped copy's document is a Blob field whose bytes are the
+     document's own wire list (docs/rich-text-plan.md §19). *)
+  | [%type: document] -> Some Doc
+  | [%type: Kaya_app.document] -> Some Doc
   (* The picker types (docs/datetime-plan.md D10): a [date] field is an
      I64 in packed decimal on the wire and a [date] everywhere else. *)
   | [%type: date] -> Some Date
@@ -31,7 +35,7 @@ let tag_expr ~loc = function
   | Bool -> [%expr Kaya_wire.value_bool]
   | I64 | Date | Time -> [%expr Kaya_wire.value_i64]
   | F64 -> [%expr Kaya_wire.value_f64]
-  | Blob -> [%expr Kaya_wire.value_blob]
+  | Blob | Doc -> [%expr Kaya_wire.value_blob]
 
 (* A blob field's MODEL value carries the guest's bytes as a binary Str
    (Kaya_app.encode_field re-registers them at encode time), so its
@@ -41,12 +45,13 @@ let value_ctor = function
   | Bool -> "Bool"
   | I64 | Date | Time -> "I64"
   | F64 -> "F64"
-  | Blob -> "Str"
+  | Blob | Doc -> "Str"
 
 (* Wrap a record field's read for its model value (bytes -> Str). *)
 let to_model_expr ~loc w e =
   match w with
   | Blob -> [%expr Bytes.to_string [%e e]]
+  | Doc -> [%expr Kaya_app.document_blob [%e e]]
   | Date -> [%expr Kaya_app.pack_date [%e e]]
   | Time -> [%expr Kaya_app.pack_time [%e e]]
   | _ -> e
@@ -55,6 +60,7 @@ let to_model_expr ~loc w e =
 let of_model_expr ~loc w e =
   match w with
   | Blob -> [%expr Bytes.of_string [%e e]]
+  | Doc -> [%expr Kaya_app.document_of_blob [%e e]]
   | Date -> [%expr Kaya_app.date_of_packed [%e e]]
   | Time -> [%expr Kaya_app.time_of_packed [%e e]]
   | _ -> e
@@ -65,6 +71,7 @@ let field_ctor = function
   | I64 -> "i64_field"
   | F64 -> "f64_field"
   | Blob -> "blob_field"
+  | Doc -> "document_field"
   | Date -> "date_field"
   | Time -> "time_field"
 
@@ -81,7 +88,7 @@ let generate ~ctxt (_rec_flag, type_decls) =
             | None ->
                 Location.raise_errorf ~loc:ld.pld_loc
                   "kaya: field %s is not wire-typed (string, bool, int64, \
-                   float, bytes, date, or time)"
+                   float, bytes, document, date, or time)"
                   ld.pld_name.txt)
           labels
       in
@@ -205,7 +212,7 @@ let generate ~ctxt (_rec_flag, type_decls) =
                       | None ->
                           Location.raise_errorf ~loc:ld.pld_loc
                             "kaya: field %s is not wire-typed (string, bool, \
-                             int64, float, or bytes)"
+                             int64, float, bytes, or document)"
                             ld.pld_name.txt)
                     labels
                 in

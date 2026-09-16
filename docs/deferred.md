@@ -1902,6 +1902,13 @@ unpicked.
   silent vanished-target no-op (live-zone commands fail loudly; stamped
   copies legitimately vanish under rebuild). Wants a long-list scene —
   which pairs with row-window virtualization for For.
+  NOTE 2026-09-16: the rich textarea was this item's first customer and is
+  not any more — a stamped copy's document is a Blob FIELD of its row bound
+  through the template `document` prop, written by patching the row
+  (docs/rich-text-plan.md §19, ruled B), so nothing in the rich surface
+  needs an instance-addressed command. What still would: a copy's WIDGET
+  state that is not model — selection, caret, scroll — which nothing asks
+  for today.
 - **Sections above five on Android present as a navigation drawer**
   (ratified 2026-09-05, DESIGN.md Sections; UNBUILT). Material's bottom
   bar takes three to five destinations and prescribes the drawer past
@@ -12094,17 +12101,37 @@ the begin reads as "the earlier payload stayed" — and the next one will
 say so on its driver line. Windows' `dnd_java` stays unread.
 
 FOURTH DESKTOP SIGHTING 2026-09-15, matrix 19 (5dfdcca7),
-`dnd-python-wayland` again and the wayland shape again: the first drag
-from the "hello" label read `no drop yet`, every drag after `drag ended
-none`, four drags in all, each with the driver's own line `drag began 0ms
-after the threshold` — the press, the motion past the threshold and the
-release all reached the compositor and no drop reached the target. The
-linux lane ran 715s (603 net) on a five-lane matrix; the 18 dnd legs
-re-run alone straight after passed 18 of 18, this one in 15s. Bundle:
-~/.local/state/kaya/flightrec/runs/20260916T051923Z-004131/bundles/linux-dnd-python-wayland
-(leg log, verb trace, xvfb). The cause is still unread; the next sighting
-is to be read through the GTK arm's drop-side lines, since the driver's
-side says the drag began.
+`dnd-python-wayland` again. CORRECTED ON THE READ (2026-09-16): only ONE
+drag failed — step 2, the leg's first, driven 0ms after `scene ready`; the
+`drag ended none` this entry had read as "every drag after" is step 20's
+own expectation (the deliberate refusal onto the files target), and it
+passed. Bundle:
+~/.local/state/kaya/flightrec/runs/20260916T051923Z-004131/bundles/linux-dnd-python-wayland.
+
+THE WAYLAND FACE, READ AND FIXED 2026-09-16 (docs/traps.md, the sibling
+paragraph under the wayland drag-begin entry): the 2026-09-07 gate held
+the injector's release for GTK's drag-BEGIN and then handed the
+destination a fixed 540ms. Wayland needs one handshake more — the
+compositor delivers `wl_data_device.drop` on the release only to a client
+that has already answered `wl_data_offer.accept`, which GDK sends when
+kaya's drag-enter/drag-motion returns a non-empty action; a release that
+lands first is answered `leave`, the drag is cancelled, and it reads
+exactly like a refused drop. Under a matrix the app is more than 540ms
+behind at its first gesture, the busiest moment it has. PROVED BY
+MEASUREMENT: with `KAYA_DRAG_DRIVER` the grace was shrunk with no edit to
+the tree — at 0ms the leg fails with the sighting's three readings byte
+for byte and the new drop-side instrument says why (`accept 1/1 enter 1/1
+motion 1/1 drop 0; delivered 0; ended 0`); 50ms and up pass; and 96 runs
+alone, under seven churning lane scenes, at 3-4 CPUs and eight-wide
+across every sway slot were all green, so this host's contention never
+reached a matrix's. The injector's release waits for the destination's
+accept now (`note_drop_took` in gtk.rs, a `hold PATH MS` verb in
+tools/linux/wlpointer/wlpointer.c, the step in tools/linux/dragdrive.py);
+tools/linux/dragprobe.py proves the second gate and both expiry branches
+on every lane run, and the verb refuses a gesture whose destination
+answered while the gate never fired — nine refusals against a doctored
+copy, counts printed. The instrument is silent on a green leg. The
+Windows `dnd_java` face stays open.
 
 ## ~~WATCH — android `portfolio-python` under a matrix: the header sort click did not land (first sighting 2026-09-05)~~
 KEY: portfolio-python, header_click, Total v3, 4698 of 15003, android sort, matrix contention
@@ -12495,7 +12522,7 @@ it for `rich` fields (R5) and the plain field diverges on every backend.
 Close with its own scene step and the suppression widened to plain fields
 uniformly.
 
-## A WinUI window under the dark appearance paints its RichEditBox dark and nothing else (found 2026-09-15 by the polish pass, pre-existing)
+## ~~A WinUI window under the dark appearance paints its RichEditBox dark and nothing else (found 2026-09-15 by the polish pass, pre-existing)~~ FIXED 2026-09-16 AT THE CAUSE, read from a hand run first: the window's content root carried the themed `ApplicationPageBackgroundThemeBrush` ground only on `ensure_menu_shell`'s path (the first menubar_append), so every other window sat on the XAML island's white and its labels and buttons were painted WHITE ON WHITE — `expect_appearance "dark"` passed on it, since the toolkit read back Dark; and the Rich Edit run foreground was `AutoColor`, which Rich Edit resolves to the SYSTEM's window text, black. `window_ground()` is the single caller of `Window::SetContent` now, minting the grounded root every route goes through, and the run foreground is the control's own. GUARD on the path nobody can avoid: `presentation_report` asserts the content root is the ground on every drain of every scene, and the markup's brush and name are held by a winui unit test on the guest (32/32). Still unwritten, in the agent's notes: a dark-appearance pixel leg for a non-canvas scene, which is the observable this class needed.
 KEY: KAYA_APPEARANCE dark winui, RequestedTheme, root background, RichEditBox ground, polish-dark
 
 Photographed on the guest with `KAYA_APPEARANCE=dark` on the richtext
@@ -12508,6 +12535,21 @@ the requested theme is green on every windows leg. Read from a hand run
 before any hypothesis: whether the root's background brush follows
 `RequestedTheme`, and whether the missing text is unpainted or painted
 white on white.
+
+## An undo that restores a row rebuilds its Blob fields from the wire's HANDLE, not its bytes, in C# and Java (stated 2026-09-16 by the richrows breadth)
+KEY: undo restore blob field, Document field undo, byte[] field undo, init(values:) refuses, wire handle not bytes
+
+The `Document` field (docs/rich-text-plan.md §19) is a Blob field, and it
+inherits a hole `byte[]` fields already had: an undo delta carries a
+row's values as WIRE values, and a blob's wire value is a registration
+HANDLE, so the C# and Java record decoders rebuild the restored row with
+a handle where bytes belong; Swift's generated `init(values:)` refuses
+the same case out loud. No scene reaches it — no undoable transaction
+inserts or removes a row carrying a blob — which is why it is a ledger
+entry and not a red leg. The fix is one rule in the undo fold: a Blob
+value in a restored record is resolved to its bytes (the core holds them)
+before the binding's record decoder sees it, in every binding, with the
+richrows guest's undo as the scene.
 
 ## The stamped-occurrence doors other than click still forward a torn-down copy's tag (found 2026-09-14)
 KEY: stamped_tag_is_live, torn-down copy, dead copy, lingering registry, toggled dead copy, set_value dead copy

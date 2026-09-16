@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0xe52568620b0ca54e
+specHash = 0x3854759c1c5d028c
 
 valueBool :: Word32
 valueBool = 1
@@ -210,6 +210,8 @@ propCanUndo :: Word32
 propCanUndo = 34
 propCanRedo :: Word32
 propCanRedo = 35
+propDocument :: Word32
+propDocument = 36
 wpropTitle :: Word32
 wpropTitle = 1
 wpropWidth :: Word32
@@ -1643,6 +1645,25 @@ txBindCanRedo widgetId signalId = wireRecord txKindSetProperty
 txBindCanRedoElement :: Word64 -> Word32 -> Word32 -> Builder
 txBindCanRedoElement widgetId level field = wireRecord txKindSetProperty
   (word64LE widgetId <> word32LE propCanRedo <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
+-- set_property with a constant document value.
+txSetDocument :: Word64 -> Word64 -> Builder
+txSetDocument widgetId handle = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propDocument <> word32LE sourceConst
+    <> encodeValue (VBlob handle))
+
+-- set_property with a signal-bound document value.
+txBindDocument :: Word64 -> Word64 -> Builder
+txBindDocument widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propDocument <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindDocumentElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindDocumentElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propDocument <> word32LE sourceElement
     <> word32LE level <> word32LE field)
 
 -- set_window_prop with a constant title value (window 0, the primary surface).

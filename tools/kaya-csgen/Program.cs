@@ -97,7 +97,7 @@ static class Program
     // skipped one HERE shifts every later exact-index token off the
     // runtime schema.
     static readonly System.Collections.Generic.HashSet<string> Wire =
-        new() { "string", "bool", "long", "double", "byte[]",
+        new() { "string", "bool", "long", "double", "byte[]", "Document",
             "System.DateOnly", "System.TimeOnly" };
 
     // The generated files carry no usings (the guests' csproj disables
@@ -366,6 +366,10 @@ static class Program
         Fwd("Textarea", ["string text", $"{onText} onChange = null"], "text, onChange");
         Fwd("Textarea", ["Signal text", $"{onText} onChange = null"], "text, onChange");
         Fwd("Textarea", ["Field<string> text", $"{onText} onChange = null"], "text, onChange");
+        // The rich template textarea, whose source is a Document FIELD
+        // of the row (docs/rich-text-plan.md §19).
+        Fwd("Textarea", ["Field<Document> document", $"{onText} onChange = null"],
+            "document, onChange");
         Fwd("Search", [$"{onText} onChange = null"], "onChange");
         Fwd("Search", ["string text", $"{onText} onChange = null"], "text, onChange");
         Fwd("Search", ["Signal text", $"{onText} onChange = null"], "text, onChange");

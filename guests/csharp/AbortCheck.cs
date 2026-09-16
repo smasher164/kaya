@@ -297,6 +297,85 @@ static class AbortCheck
         });
     }
 
+    // A STAMPED COPY'S DOCUMENT IS A ROW FIELD (docs/rich-text-plan.md
+    // §19), and NO SCENE CAN SEE EITHER HALF: a copy renders the same
+    // picture whatever bytes the field holds, and the fold is the app's
+    // own mirror of an act the core already applied. So the BYTES are
+    // pinned against the wire's rules read off crates/kaya/src/wire.rs
+    // (write_values: u32 count, u32 0; write_value: u32 tag, u32 len,
+    // payload, zero-padded to 8; VALUE_I64 2, VALUE_STR 4) rather than
+    // against this binding's own encoder, and the fold is required to
+    // answer what the LIVE fold answers.
+    const string DocumentBlobHex =
+        "09000000000000000400000003000000"
+        + "48C3A900000000000200000008000000"
+        + "00000000000000000200000008000000"
+        + "02000000000000000400000004000000"
+        + "626F6C64000000000400000004000000"
+        + "74727565000000000200000008000000"
+        + "02000000000000000200000008000000"
+        + "03000000000000000400000004000000"
+        + "6C696E6B000000000400000001000000"
+        + "7500000000000000";
+
+    static string Spell(IReadOnlyList<TextRun> runs)
+    {
+        var parts = new List<string>();
+        foreach (TextRun run in runs)
+            parts.Add($"{run.Start}:{run.Stop} {run.Name}={run.Value}");
+        return string.Join("|", parts);
+    }
+
+    static void RowDocument(KayaApp app)
+    {
+        var doc = new Document("Hé")
+            .Mark(TextRange.Bytes(0, 2), "bold", "true")
+            .Mark(TextRange.Bytes(2, 3), "link", "u");
+        string got = Convert.ToHexString(KayaApp.DocumentBlob(doc));
+        Check(got == DocumentBlobHex,
+            "a Document field's blob is\n  " + got + "\nand the wire's rules say\n  "
+                + DocumentBlobHex);
+
+        RecordCollection<Richrows.Note> notes = null;
+        Node body = default;
+        app.Build(tx =>
+        {
+            notes = Richrows.NoteKaya.Collection(tx);
+            Richrows.NoteKaya.Each(tx, notes, row => body = row.Textarea(row.Body));
+            notes.Insert(tx, "a", new Richrows.Note("a", doc));
+        });
+
+        // ONE EDIT, through the ONE fold: the live mirror's answer is the
+        // row field's answer.
+        var edit = Edit.Insert(TextRange.Bytes(3, 3), "!")
+            .Mark(TextRange.Bytes(0, 1), "code", "true");
+        var live = new Document(doc.Text, new List<TextRun>(doc.Runs));
+        KayaApp.FoldEdit(live, edit.Start, edit.Stop, edit.Inserted, edit.Marks);
+        app.FoldRowDocument(body.Id, new List<object> { "a" },
+            held => KayaApp.FoldEdit(held, edit.Start, edit.Stop, edit.Inserted, edit.Marks));
+        app.Build(tx =>
+        {
+            var items = notes.Items(tx);
+            Check(items.Count == 1, "the row-document probe lost its row");
+            Document folded = items[0].Value.Body;
+            Check(folded.Text == live.Text,
+                "the row field folded to \"" + folded.Text + "\", the live mirror to \""
+                    + live.Text + "\"");
+            Check(Spell(folded.Runs) == Spell(live.Runs),
+                "the row field's runs are " + Spell(folded.Runs) + ", the live mirror's "
+                    + Spell(live.Runs));
+            Check(items[0].Value.Title == "a",
+                "the fold rewrote a field the act never named");
+        });
+
+        // A ROW THAT IS GONE HAS NO FIELD TO FOLD INTO, and that is not a
+        // fault (docs/rich-text-plan.md §19).
+        app.FoldRowDocument(body.Id, new List<object> { "gone" },
+            held => KayaApp.FoldEdit(held, 0, 0, "x", new List<TextRun>()));
+        app.Build(tx => Check(notes.Items(tx).Count == 1,
+            "folding into a row that is gone invented one"));
+    }
+
     // OPEN IS NOT ENOUGH: a transaction is the app thread's (docs/deferred.md).
     // The Go twin is bindings/go/app_test.go's TestATransactionRefusesAnotherGoroutine.
     static void WrongThread(KayaApp app)
@@ -580,6 +659,8 @@ static class AbortCheck
         FacadeNestedTable(app);
 
         NestedRecordTable(app);
+
+        RowDocument(app);
 
         WrongThread(app);
 

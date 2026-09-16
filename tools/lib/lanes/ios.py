@@ -86,6 +86,9 @@ RUST_SCENES = [
     # reason; the runs are read-only, so this lane drives no keyboard.
     "richlabel",
     "notes",
+    # THE RICH ROWS (docs/rich-text-plan.md §19): rust-only for richtext's
+    # reason; the copy's act is the harness's format verb, no keyboard.
+    "richrows",
 ]
 
 # The iPad legs, queued right after their phone sibling: the phone pool is

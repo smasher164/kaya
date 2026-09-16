@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0xe52568620b0ca54e;
+    public const ulong SpecHash = 0x3854759c1c5d028c;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -106,6 +106,7 @@ static class KayaWire
     public const uint PropOwnUndo = 33;
     public const uint PropCanUndo = 34;
     public const uint PropCanRedo = 35;
+    public const uint PropDocument = 36;
     public const uint WpropTitle = 1;
     public const uint WpropWidth = 2;
     public const uint WpropHeight = 3;
@@ -1905,6 +1906,31 @@ static class KayaWire
     {
         var w = Begin(out var stream);
         w.Write(widgetId); w.Write(PropCanRedo); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a constant document value.
+    public static byte[] TxSetDocument(ulong widgetId, ulong handle)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropDocument); w.Write(SourceConst);
+        EncodeValue(w, new BlobHandle(handle));
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound document value.
+    public static byte[] TxBindDocument(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropDocument); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindDocumentElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropDocument); w.Write(SourceElement); w.Write(level); w.Write(field);
         return Finish(stream, w, TxKindSetProperty);
     }
 

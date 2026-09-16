@@ -211,6 +211,10 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     ("own_undo", 33, PropKind::Bool),
     ("can_undo", 34, PropKind::Bool),
     ("can_redo", 35, PropKind::Bool),
+    // docs/rich-text-plan.md §19: a stamped copy's document, bound to a
+    // Blob field of its row. Template zone only; the live zone's document
+    // is set_rich_text.
+    ("document", 36, PropKind::Blob),
 ];
 
 /// Window properties: the presentation-context twin of PROPS, in its
@@ -3058,6 +3062,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("own_undo", 33),
                 ("can_undo", 34),
                 ("can_redo", 35),
+                ("document", 36),
             ],
         },
         EnumSpec {
@@ -3807,6 +3812,7 @@ mod tests {
                     ("prop", "own_undo") => wire::PROP_OWN_UNDO,
                     ("prop", "can_undo") => wire::PROP_CAN_UNDO,
                     ("prop", "can_redo") => wire::PROP_CAN_REDO,
+                    ("prop", "document") => wire::PROP_DOCUMENT,
                     ("wprop", "title") => wire::WPROP_TITLE,
                     ("wprop", "width") => wire::WPROP_WIDTH,
                     ("wprop", "height") => wire::WPROP_HEIGHT,

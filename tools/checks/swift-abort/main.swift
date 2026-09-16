@@ -216,6 +216,110 @@ app.build { tx in
     tx.menu(fileItem, items: [tx.item("Recovered")])
 }
 
+// A STAMPED COPY'S DOCUMENT IS A ROW FIELD (docs/rich-text-plan.md §19),
+// and NO SCENE CAN SEE EITHER HALF: a copy renders the same picture
+// whatever bytes the field holds, and the fold is the app's own mirror of
+// an act the core already applied. So the BYTES are pinned against the
+// wire's rules read off crates/kaya/src/wire.rs (write_values is
+// {u32 count, u32 0}; write_value is {u32 tag, u32 len, payload}
+// zero-padded to 8; VALUE_I64 is 2, VALUE_STR is 4) rather than against
+// this binding's own encoder, and the fold is required to answer what the
+// LIVE fold answers. THE CONFORMANCE IS HAND-WRITTEN here, in the shape
+// kaya-swift-gen emits: this fixture compiles the bindings alone.
+struct RowNote: KayaRecord {
+    var title: String
+    var body: KayaDocument
+
+    static let prototype = RowNote(title: "", body: KayaDocument())
+
+    init(title: String, body: KayaDocument) {
+        self.title = title
+        self.body = body
+    }
+
+    init(values: [KayaValue]) {
+        fatalError("kaya: a blob field cannot rebuild from wire — update via key path")
+    }
+
+    static func kayaDocument(_ record: RowNote, _ index: UInt32) -> KayaDocument? {
+        index == 1 ? record.body : nil
+    }
+
+    static func kayaWithDocument(
+        _ record: RowNote, _ index: UInt32, _ document: KayaDocument
+    ) -> RowNote {
+        var next = record
+        if index == 1 { next.body = document }
+        return next
+    }
+}
+
+func spellRuns(_ runs: [KayaRun]) -> String {
+    runs.map { "\($0.start):\($0.end) \($0.name)=\($0.value)" }.joined(separator: "|")
+}
+
+let documentBlobHex =
+    "09000000000000000400000003000000"
+    + "48C3A900000000000200000008000000"
+    + "00000000000000000200000008000000"
+    + "02000000000000000400000004000000"
+    + "626F6C64000000000400000004000000"
+    + "74727565000000000200000008000000"
+    + "02000000000000000200000008000000"
+    + "03000000000000000400000004000000"
+    + "6C696E6B000000000400000001000000"
+    + "7500000000000000"
+
+let rowDoc = KayaDocument("H\u{e9}")
+    .mark(0..<2, "bold", "true")
+    .mark(2..<3, "link", "u")
+let rowBlob = kayaDocumentBlob(rowDoc).map { String(format: "%02X", $0) }.joined()
+precondition(
+    rowBlob == documentBlobHex,
+    "a Document field's blob is\n  \(rowBlob)\nand the wire's rules say\n  "
+        + documentBlobHex)
+
+// ONE EDIT, through the ONE fold: the live mirror's answer is the row
+// field's answer.
+let rowMarks = [KayaRun(start: 0, end: 1, name: "code", value: "true")]
+var rowLive = rowDoc
+kayaFoldEdit(&rowLive, 3, 3, "!", rowMarks)
+
+var rowNotes: KayaRecordCollection<RowNote>! = nil
+var rowBody: KayaNodeHandle! = nil
+app.build { tx in
+    rowNotes = tx.collection(of: RowNote.self)
+    _ = tx.forEach(rowNotes.collection) { t in
+        rowBody = t.textarea(document: KayaField<KayaDocument>(index: 1))
+    }
+    rowNotes.insert(tx, .str("a"), RowNote(title: "a", body: rowDoc))
+}
+app.foldRowDocument(rowBody.id, [.str("a")]) { doc in
+    kayaFoldEdit(&doc, 3, 3, "!", rowMarks)
+}
+app.build { tx in
+    let items = rowNotes.items(tx)
+    precondition(items.count == 1, "the row-document probe lost its row")
+    let folded = items[0].value.body
+    precondition(
+        folded.text == rowLive.text,
+        "the row field folded to \"\(folded.text)\", the live mirror to \"\(rowLive.text)\"")
+    precondition(
+        spellRuns(folded.runs) == spellRuns(rowLive.runs),
+        "the row field's runs are \(spellRuns(folded.runs)), the live mirror's "
+            + spellRuns(rowLive.runs))
+    precondition(
+        items[0].value.title == "a", "the fold rewrote a field the act never named")
+}
+// A ROW THAT IS GONE HAS NO FIELD TO FOLD INTO, and that is not a fault.
+app.foldRowDocument(rowBody.id, [.str("gone")]) { doc in
+    kayaFoldEdit(&doc, 0, 0, "x", [])
+}
+app.build { tx in
+    precondition(
+        rowNotes.items(tx).count == 1, "folding into a row that is gone invented one")
+}
+
 // The trap side, via re-exec (see the KAYA_GUARD_TRAP branch at the
 // top): a mirror read inside a For or When body being declared must
 // kill the process — and so must an alias shortcut hitting the

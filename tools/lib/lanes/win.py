@@ -49,7 +49,7 @@ EXCLUSIVE = {"dnd_rust", "dnd_python", "dnd_js", "dnd_go", "dnd_csharp", "dnd_ja
 # THIS default; the runner calls depth_scenes(), which honours the
 # KAYA_WIN_DEPTH_SCENES override the lane uses for one-off slices.
 DEPTH_SCENES = ["windowed", "canvas", "sizepolicy", "tasks", "notify", "richtext",
-                "ownundo", "richlabel", "notes"]
+                "ownundo", "richlabel", "notes", "richrows"]
 
 # THE PACKAGED LEGS (docs/packaging-plan.md P3): the SAME Rust guests, run
 # out of an installed MSIX instead of out of C:\kaya, because a kaya app is
@@ -244,6 +244,7 @@ ORDER = [
      # OS-global chrome. RUST-ONLY while the eight bindings' sugar is the
      # parallel worktree — hence the DEPTH_SCENES row.
      "richlabel_rust",
+     "richrows_rust",
      "notes_rust",
      "portfolio_python",
      "varied_python",

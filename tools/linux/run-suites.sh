@@ -42,7 +42,7 @@ SCENES="background stall milestone2 entry search gallery todos reorder feed grow
 # waits on the bindings sweep too (docs/tasks-s3-plan.md §6 step 3);
 # `richtext`, `ownundo` and `richlabel` wait on the eight other bindings'
 # Document/Edit/Format spelling (docs/rich-text-plan.md §4 step 3, §14, §15).
-DEPTH_SCENES="windowed canvas sizepolicy dnd tooltips tasks notify richtext ownundo richlabel notes"
+DEPTH_SCENES="windowed canvas sizepolicy dnd tooltips tasks notify richtext ownundo richlabel notes richrows"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 
@@ -1533,6 +1533,10 @@ for proto in x11 wayland; do
     # bus (§18), and check-steps holds that route.
     run "$proto" richtext-rust env KAYA_SELFTEST=richtext \
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/richtext"
+    # THE RICH ROWS (docs/rich-text-plan.md §19): rust alone for richtext's
+    # reason; every read is the core's document, so no a11y-leg.sh.
+    run "$proto" richrows-rust env KAYA_SELFTEST=richrows \
+        "$CARGO_TARGET_DIR/debug/examples/richrows"
     # The app-owned undo scene, rust alone and pooled beside richtext for
     # its reasons (docs/rich-text-plan.md §14).
     run "$proto" ownundo-rust env KAYA_SELFTEST=ownundo \

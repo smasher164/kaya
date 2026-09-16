@@ -90,10 +90,13 @@ export function capabilityBits(): number {
 // occurrenceBlob, so no handle ever reaches an app.
 wire.install_occurrence_blob((handle) => lib.occurrenceBlob(handle));
 
-/** The one test seam: bindings/js/kaya_app_checks.ts routes submits into
- * a list. A property rather than a reassignable export, because an ES
- * module's exports are frozen. */
-export const hooks: { submit: ((records: readonly Uint8Array[]) => void) | null } = { submit: null };
+/** The test seams: bindings/js/kaya_app_checks.ts routes submits into a
+ * list and reads the bytes a blob field registered. Properties rather
+ * than reassignable exports, because an ES module's exports are frozen. */
+export const hooks: {
+  submit: ((records: readonly Uint8Array[]) => void) | null;
+  blob: ((data: Uint8Array) => void) | null;
+} = { submit: null, blob: null };
 
 /** Submit one transaction: the concatenation of packed records, applied
  * atomically. */
@@ -119,6 +122,7 @@ export function registerBlob(data: Uint8Array): number {
   if (!(data instanceof Uint8Array)) {
     throw new TypeError(`kaya: blob data must be a Uint8Array, not ${describe(data)}`);
   }
+  if (hooks.blob !== null) hooks.blob(data);
   return lib.blobRegister(data);
 }
 

@@ -1738,6 +1738,122 @@ struct KayaFormat: Equatable {
     var value: String?
 }
 
+/// The core's own fold rule over ANY document — a live widget's mirror or
+/// a stamped copy's ROW FIELD (crates/kaya/src/app.rs, `fold_edit`;
+/// docs/rich-text-plan.md §19). EVERY OFFSET IS A UTF-8 BYTE OFFSET, so
+/// the text is cut as bytes and decoded back.
+func kayaFoldEdit(
+    _ doc: inout KayaDocument, _ start: Int, _ end: Int, _ inserted: String, _ runs: [KayaRun]
+) {
+    var bytes = Array(doc.text.utf8)
+    let boundary = { (at: Int) in at == bytes.count || bytes[at] & 0xC0 != 0x80 }
+    if start < 0 || start > end || end > bytes.count || !boundary(start) || !boundary(end) {
+        // A mirror out of step with the core would splice garbage.
+        doc.text = inserted
+        doc.runs = runs
+        return
+    }
+    let insertedBytes = Array(inserted.utf8)
+    let shift = insertedBytes.count - (end - start)
+    var next: [KayaRun] = []
+    for run in doc.runs {
+        if run.start < start {
+            var head = run
+            head.end = min(run.end, start)
+            next.append(head)
+        }
+        if run.end > end {
+            var tail = run
+            tail.start = max(run.start, end) + shift
+            tail.end = run.end + shift
+            next.append(tail)
+        }
+    }
+    for run in runs {
+        var moved = run
+        moved.start += start
+        moved.end += start
+        next.append(moved)
+    }
+    bytes.replaceSubrange(start..<end, with: insertedBytes)
+    doc.text = String(decoding: bytes, as: UTF8.self)
+    doc.runs = kayaNormalizeRuns(next)
+}
+
+/// kayaFoldEdit's twin one act over (`fold_format`): put the attribute
+/// over the range or take it off, clipping THIS attribute's runs.
+func kayaFoldFormat(
+    _ doc: inout KayaDocument, _ start: Int, _ end: Int, _ name: String, _ value: String?
+) {
+    if start >= end { return }
+    var next: [KayaRun] = []
+    for run in doc.runs {
+        if run.name != name || run.end <= start || run.start >= end {
+            next.append(run)
+            continue
+        }
+        if run.start < start {
+            var head = run
+            head.end = start
+            next.append(head)
+        }
+        if run.end > end {
+            var tail = run
+            tail.start = end
+            next.append(tail)
+        }
+    }
+    if let value {
+        next.append(KayaRun(start: start, end: end, name: name, value: value))
+    }
+    doc.runs = kayaNormalizeRuns(next)
+}
+
+/// A Document's BYTES as a record field holds them
+/// (docs/rich-text-plan.md §19, crates/kaya/src/wire.rs `document_blob`):
+/// one counted value list — the text, then four values per run.
+/// Hand-packed because KayaWire's value encoder is the generated file's
+/// own; the bytes are pinned against the wire rules in
+/// tools/checks/swift-abort/main.swift.
+func kayaDocumentBlob(_ doc: KayaDocument) -> Data {
+    var out = Data()
+    func put32(_ v: UInt32) {
+        withUnsafeBytes(of: v.littleEndian) { out.append(contentsOf: $0) }
+    }
+    func put64(_ v: Int64) {
+        withUnsafeBytes(of: v.littleEndian) { out.append(contentsOf: $0) }
+    }
+    func str(_ s: String) {
+        let utf8 = Array(s.utf8)
+        put32(UInt32(KAYA_VALUE_STR))
+        put32(UInt32(utf8.count))
+        out.append(contentsOf: utf8)
+    }
+    func i64(_ v: Int) {
+        put32(UInt32(KAYA_VALUE_I64))
+        put32(8)
+        put64(Int64(v))
+    }
+    func pad() {
+        while out.count % 8 != 0 { out.append(0) }
+    }
+    put32(UInt32(1 + doc.runs.count * 4))
+    put32(0)
+    str(doc.text)
+    pad()
+    for run in doc.runs {
+        i64(run.start)
+        pad()
+        i64(run.end)
+        pad()
+        str(run.name)
+        pad()
+        str(run.value)
+        pad()
+    }
+    return out
+}
+
 /// The core's normal form (crates/kaya/src/scene.rs, `RichDoc::normalize`),
 /// so the mirror and the core's document spell one string.
 func kayaNormalizeRuns(_ runs: [KayaRun]) -> [KayaRun] {
@@ -1920,6 +2036,17 @@ final class KayaApp {
     private var documents: [UInt64: KayaDocument] = [:]
     private var widgetEdits: [UInt64: (KayaAppTx, KayaEdit) throws -> Void] = [:]
     private var widgetFormats: [UInt64: (KayaAppTx, KayaFormat) throws -> Void] = [:]
+    // A stamped copy's own acts (docs/rich-text-plan.md §19): the
+    // handlers, the template node -> (collection, field) every
+    // document-bound textarea registers, and the per-collection pair
+    // that reads and rewrites T's Document field by wire index.
+    private var nodeEdits: [UInt64: (KayaAppTx, [KayaValue], KayaEdit) throws -> Void] = [:]
+    private var nodeFormats: [UInt64: (KayaAppTx, [KayaValue], KayaFormat) throws -> Void] = [:]
+    private var documentBinds: [UInt64: (collection: UInt64, field: UInt32)] = [:]
+    private var documentFields: [UInt64: (
+        read: (Any, UInt32) -> KayaDocument?,
+        write: (Any, UInt32, KayaDocument) -> Any
+    )] = [:]
     private var widgetPastes: [UInt64: (KayaAppTx, KayaRepresentation) throws -> Void] = [:]
     private var nodePastes: [UInt64: (KayaAppTx, [KayaValue], KayaRepresentation) throws -> Void] = [:]
     private var widgetDrops: [UInt64: (KayaAppTx, KayaDropped) throws -> Void] = [:]
@@ -2295,6 +2422,63 @@ final class KayaApp {
         widgetFormats[w.id] = handler
     }
 
+    /// One addressed user edit of a STAMPED copy's rich textarea: the
+    /// handler receives that copy's keys, outermost first. The row's
+    /// Document field already carries the edit when it fires, so the app
+    /// reads the row and never the widget (docs/rich-text-plan.md §19).
+    func onEdit(
+        _ n: KayaNodeHandle,
+        _ handler: @escaping (KayaAppTx, [KayaValue], KayaEdit) throws -> Void
+    ) {
+        nodeEdits[n.id] = handler
+    }
+
+    /// The same for a stamped copy's toolbar act.
+    func onFormat(
+        _ n: KayaNodeHandle,
+        _ handler: @escaping (KayaAppTx, [KayaValue], KayaFormat) throws -> Void
+    ) {
+        nodeFormats[n.id] = handler
+    }
+
+    /// A document-bound template textarea's node, against the For it was
+    /// declared in and the row field it reads.
+    fileprivate func bindDocument(node: UInt64, field: UInt32) {
+        guard let collection = openFors.last else { return }
+        documentBinds[node] = (collection: collection, field: field)
+    }
+
+    /// How THIS collection's element type reads and rewrites a Document
+    /// field by wire index; registered by the collection factory, the one
+    /// place T is known (KayaRecords.swift).
+    func registerDocumentField(
+        _ coll: UInt64,
+        read: @escaping (Any, UInt32) -> KayaDocument?,
+        write: @escaping (Any, UInt32, KayaDocument) -> Any
+    ) {
+        documentFields[coll] = (read: read, write: write)
+    }
+
+    /// A stamped copy's edit or format act reaches its ROW's Document
+    /// field (docs/rich-text-plan.md §19, crates/kaya/src/app.rs
+    /// `fold_row_document`): the node is bound to (collection, field) by
+    /// the document-bound template textarea, and the occurrence's keys
+    /// name the row. A row that is gone has no field to fold into, and
+    /// that is not a fault.
+    func foldRowDocument(
+        _ node: UInt64, _ keys: [KayaValue], _ fold: (inout KayaDocument) -> Void
+    ) {
+        guard let bind = documentBinds[node], let key = keys.last,
+            let field = documentFields[bind.collection]
+        else { return }
+        let path = Array(keys.dropLast())
+        guard let entry = instanceEntries(bind.collection, path).first(where: { $0.key == key }),
+            var doc = field.read(entry.value, bind.field)
+        else { return }
+        fold(&doc)
+        modelSet(bind.collection, path, key, field.write(entry.value, bind.field, doc))
+    }
+
     /// The folded document of a `rich` textarea; empty until the first
     /// edit or write.
     func document(_ w: KayaWidget) -> KayaDocument {
@@ -2306,49 +2490,14 @@ final class KayaApp {
         documents[widget] = document
     }
 
-    /// One delivered edit, folded by the core's own rules
-    /// (crates/kaya/src/app.rs, `absorb_edit`).
+    /// One delivered edit, folded into the live widget's mirror.
     fileprivate func absorbEdit(
         _ widget: UInt64, _ start: Int, _ end: Int, _ inserted: String, _ runs: [KayaRun]
     ) {
         var doc = documents[widget] ?? KayaDocument()
-        var bytes = Array(doc.text.utf8)
-        let boundary = { (at: Int) in at == bytes.count || bytes[at] & 0xC0 != 0x80 }
-        if start < 0 || start > end || end > bytes.count || !boundary(start) || !boundary(end) {
-            // A mirror out of step with the core would splice garbage.
-            doc.text = inserted
-            doc.runs = runs
-            documents[widget] = doc
-            return
-        }
-        let insertedBytes = Array(inserted.utf8)
-        let shift = insertedBytes.count - (end - start)
-        var next: [KayaRun] = []
-        for run in doc.runs {
-            if run.start < start {
-                var head = run
-                head.end = min(run.end, start)
-                next.append(head)
-            }
-            if run.end > end {
-                var tail = run
-                tail.start = max(run.start, end) + shift
-                tail.end = run.end + shift
-                next.append(tail)
-            }
-        }
-        for run in runs {
-            var moved = run
-            moved.start += start
-            moved.end += start
-            next.append(moved)
-        }
-        bytes.replaceSubrange(start..<end, with: insertedBytes)
-        doc.text = String(decoding: bytes, as: UTF8.self)
-        doc.runs = kayaNormalizeRuns(next)
+        kayaFoldEdit(&doc, start, end, inserted, runs)
         documents[widget] = doc
     }
-
     /// A ranged act's range in the fold's text: a `block` covers the whole
     /// paragraphs it touches, as the core snaps it
     /// (docs/rich-text-plan.md §17).
@@ -2380,36 +2529,14 @@ final class KayaApp {
         return paraStart..<paraEnd
     }
 
-    /// One delivered format act, the core's `absorb_format`.
+    /// One delivered format act, folded into the live widget's mirror.
     fileprivate func absorbFormat(
         _ widget: UInt64, _ start: Int, _ end: Int, _ name: String, _ value: String?
     ) {
         var doc = documents[widget] ?? KayaDocument()
-        if start >= end { return }
-        var next: [KayaRun] = []
-        for run in doc.runs {
-            if run.name != name || run.end <= start || run.start >= end {
-                next.append(run)
-                continue
-            }
-            if run.start < start {
-                var head = run
-                head.end = start
-                next.append(head)
-            }
-            if run.end > end {
-                var tail = run
-                tail.start = end
-                next.append(tail)
-            }
-        }
-        if let value {
-            next.append(KayaRun(start: start, end: end, name: name, value: value))
-        }
-        doc.runs = kayaNormalizeRuns(next)
+        kayaFoldFormat(&doc, start, end, name, value)
         documents[widget] = doc
     }
-
     /// Register a toggle handler for a live checkbox: the box owns its
     /// checked bit and reports each flip here.
     func onToggle(_ w: KayaWidget, _ handler: @escaping (KayaAppTx, Bool) throws -> Void) {
@@ -2812,17 +2939,35 @@ final class KayaApp {
             // THE MIRROR IS FOLDED BEFORE THE HANDLER RUNS, so a handler
             // reading `document` sees the edit it was told about
             // (docs/rich-text-plan.md R1).
-            case (UInt16(KAYA_OCCURRENCE_TEXT_EDITED), _):
+            case (UInt16(KAYA_OCCURRENCE_TEXT_EDITED), true):
                 let edit = kayaEditFromTail(tail)
                 absorbEdit(id, edit.start, edit.end, edit.inserted, edit.runs)
                 if let handler = widgetEdits[id] {
                     dispatch { try build { tx in try handler(tx, edit) } }
                 }
-            case (UInt16(KAYA_OCCURRENCE_TEXT_FORMATTED), _):
+            // A STAMPED COPY FOLDS INTO ITS ROW, never into a mirror the
+            // app cannot address (docs/rich-text-plan.md §19).
+            case (UInt16(KAYA_OCCURRENCE_TEXT_EDITED), false):
+                let edit = kayaEditFromTail(tail)
+                foldRowDocument(id, keys) { doc in
+                    kayaFoldEdit(&doc, edit.start, edit.end, edit.inserted, edit.runs)
+                }
+                if let handler = nodeEdits[id] {
+                    dispatch { try build { tx in try handler(tx, keys, edit) } }
+                }
+            case (UInt16(KAYA_OCCURRENCE_TEXT_FORMATTED), true):
                 let act = kayaFormatFromTail(tail)
                 absorbFormat(id, act.start, act.end, act.name, act.value)
                 if let handler = widgetFormats[id] {
                     dispatch { try build { tx in try handler(tx, act) } }
+                }
+            case (UInt16(KAYA_OCCURRENCE_TEXT_FORMATTED), false):
+                let act = kayaFormatFromTail(tail)
+                foldRowDocument(id, keys) { doc in
+                    kayaFoldFormat(&doc, act.start, act.end, act.name, act.value)
+                }
+                if let handler = nodeFormats[id] {
+                    dispatch { try build { tx in try handler(tx, keys, act) } }
                 }
             case (UInt16(KAYA_OCCURRENCE_TOGGLED), true):
                 if let handler = widgetToggles[id] {
@@ -5379,6 +5524,25 @@ final class KayaTpl {
     ) -> KayaNodeHandle {
         let n = textFieldOf(UInt32(KAYA_KIND_TEXTAREA), onChange)
         bindTextField(n, f)
+        return n
+    }
+
+    /// A RICH textarea per stamped copy whose document is a
+    /// `KayaDocument` FIELD of the row (docs/rich-text-plan.md §19):
+    /// `rich` first, then the bound document, which the core turns into
+    /// that copy's own set_rich_text. The user's acts fold into the row's
+    /// field as a live widget's fold into its mirror, so the app writes a
+    /// copy's document by patching the row and reads it back off the row.
+    func textarea(
+        document f: KayaField<KayaDocument>,
+        onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
+    ) -> KayaNodeHandle {
+        let n = textFieldOf(UInt32(KAYA_KIND_TEXTAREA), onChange)
+        tx.tx.setRich(n.id, true)
+        // LEVEL 0 ONLY: the fold names the row by the occurrence's own
+        // last key.
+        tx.app.bindDocument(node: n.id, field: f.index)
+        tx.tx.bindDocumentElement(n.id, level: 0, field: f.index)
         return n
     }
 

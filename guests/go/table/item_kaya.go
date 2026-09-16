@@ -63,6 +63,10 @@ func (r itemRow) Checkbox(f kaya.Field[bool], onToggle func(*kaya.Tx, string, bo
 	return r.c.Checkbox(r.t, f, onToggle)
 }
 
+func (r itemRow) TextareaRich(f kaya.Field[kaya.Document], onEdit func(*kaya.Tx, string, kaya.Edit), onFormat func(*kaya.Tx, string, kaya.Format)) kaya.Node {
+	return r.c.TextareaRich(r.t, f, onEdit, onFormat)
+}
+
 func (r itemRow) DatePicker(f kaya.Field[kaya.Date], onDate func(*kaya.Tx, string, kaya.Date)) kaya.Node {
 	return r.c.DatePicker(r.t, f, onDate)
 }

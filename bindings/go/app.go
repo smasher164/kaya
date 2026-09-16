@@ -237,6 +237,11 @@ type App struct {
 	widgetEdits    map[uint64]func(*Tx, Edit)
 	widgetFormats  map[uint64]func(*Tx, Format)
 	documents      map[uint64]Document
+	// The stamped-copy twins, and the (collection, field) each bound
+	// `document` node writes into (docs/rich-text-plan.md §19).
+	nodeEdits      map[uint64]func(*Tx, []any, Edit)
+	nodeFormats    map[uint64]func(*Tx, []any, Format)
+	documentBinds  map[uint64]documentBind
 	widgetToggles  map[uint64]func(*Tx, bool)
 	widgetValues   map[uint64]func(*Tx, float64)
 	nodeValues     map[uint64]func(*Tx, []any, float64)
@@ -363,6 +368,9 @@ func NewApp() *App {
 		widgetEdits:    make(map[uint64]func(*Tx, Edit)),
 		widgetFormats:  make(map[uint64]func(*Tx, Format)),
 		documents:      make(map[uint64]Document),
+		nodeEdits:      make(map[uint64]func(*Tx, []any, Edit)),
+		nodeFormats:    make(map[uint64]func(*Tx, []any, Format)),
+		documentBinds:  make(map[uint64]documentBind),
 		widgetToggles:  make(map[uint64]func(*Tx, bool)),
 		widgetValues:   make(map[uint64]func(*Tx, float64)),
 		nodeValues:     make(map[uint64]func(*Tx, []any, float64)),
@@ -4723,6 +4731,22 @@ func (t *Tpl) TextareaBound[S interface {
 	return n
 }
 
+// TextareaRichBound creates a rich textarea per stamped copy whose
+// document is a Document FIELD of the row (docs/rich-text-plan.md §19):
+// `rich` first, then the bound document, which the core turns into
+// set_rich_text per copy; the user's edits fold into the row's field as
+// a live widget's fold into its mirror, and the app writes a copy's
+// document by patching the row.
+func (t *Tpl) TextareaRichBound(f Field[Document]) Node {
+	n := t.Widget(KindTextarea)
+	t.tx.emit(TxSetRich(n.id, true))
+	t.tx.emit(TxBindDocumentElement(n.id, 0, f.index))
+	if open := t.tx.app.openFors; len(open) > 0 {
+		t.tx.app.documentBinds[n.id] = documentBind{collection: open[len(open)-1], field: f.index}
+	}
+	return n
+}
+
 // Search creates an empty search field in the blueprint: the template
 // twin of Tx.Search, with Tpl.Entry's uncontrolled contract under the
 // platform's search chrome.
@@ -5383,6 +5407,19 @@ func (a *App) OnFormat(w Widget, fn func(*Tx, Format)) {
 	a.widgetFormats[w.id] = fn
 }
 
+// OnEditNode registers a handler for a stamped rich copy's edit, with
+// its row's key path — OnEdit one zone over (docs/rich-text-plan.md
+// §19). The row's Document field has already taken the edit when this
+// fires.
+func (a *App) OnEditNode(n Node, fn func(*Tx, []any, Edit)) {
+	a.nodeEdits[n.id] = fn
+}
+
+// OnFormatNode is OnEditNode's twin for a stamped copy's toolbar act.
+func (a *App) OnFormatNode(n Node, fn func(*Tx, []any, Format)) {
+	a.nodeFormats[n.id] = fn
+}
+
 // Document is this app's copy of a rich textarea's content, folded from
 // every edit and format the core delivered; empty until the first of
 // them or the first Tx.SetDocument.
@@ -5396,14 +5433,20 @@ func (a *App) seedDocument(widget uint64, doc Document) {
 	a.documents[widget] = doc
 }
 
-// absorbEdit folds one delivered edit by the core's own rules
-// (crates/kaya/src/app.rs, AppCtx::absorb_edit).
+// absorbEdit folds one delivered edit into a LIVE widget's mirror.
 func (a *App) absorbEdit(widget uint64, start, end int, inserted string, runs []TextRun) {
 	doc := a.documents[widget]
+	foldEdit(&doc, start, end, inserted, runs)
+	a.documents[widget] = doc
+}
+
+// foldEdit folds one edit into a document by the core's own rules
+// (crates/kaya/src/app.rs, fold_edit).
+func foldEdit(doc *Document, start, end int, inserted string, runs []TextRun) {
 	if start < 0 || start > end || end > len(doc.Text) ||
 		!utf8Boundary(doc.Text, start) || !utf8Boundary(doc.Text, end) {
 		// A mirror out of step with the core would slice a character in half.
-		a.documents[widget] = Document{Text: inserted, Runs: slices.Clone(runs)}
+		*doc = Document{Text: inserted, Runs: slices.Clone(runs)}
 		return
 	}
 	shift := len(inserted) - (end - start)
@@ -5424,7 +5467,6 @@ func (a *App) absorbEdit(widget uint64, start, end int, inserted string, runs []
 	}
 	doc.Text = doc.Text[:start] + inserted + doc.Text[end:]
 	doc.Runs = normalizeRuns(next)
-	a.documents[widget] = doc
 }
 
 // utf8Boundary: an offset is a character boundary unless it lands on a
@@ -5449,13 +5491,21 @@ func (a *App) rangedActBounds(widget uint64, r TextRange, name string) TextRange
 	return TextRange{Start: strings.LastIndexByte(text[:start], '\n') + 1, End: paraEnd}
 }
 
-// absorbFormat puts one attribute over a range, or takes it off,
-// clipping that attribute's runs (AppCtx::absorb_format).
+// absorbFormat puts one attribute over a LIVE widget's range, or takes
+// it off.
 func (a *App) absorbFormat(widget uint64, start, end int, name, value string, removed bool) {
+	doc := a.documents[widget]
+	foldFormat(&doc, start, end, name, value, removed)
+	a.documents[widget] = doc
+}
+
+// foldFormat puts one attribute over a document's range, or takes it
+// off, clipping that attribute's runs (crates/kaya/src/app.rs,
+// fold_format).
+func foldFormat(doc *Document, start, end int, name, value string, removed bool) {
 	if start >= end {
 		return
 	}
-	doc := a.documents[widget]
 	var next []TextRun
 	for _, run := range doc.Runs {
 		if run.Name != name || run.End <= start || run.Start >= end {
@@ -5477,7 +5527,53 @@ func (a *App) absorbFormat(widget uint64, start, end int, name, value string, re
 		next = append(next, TextRun{Start: start, End: end, Name: name, Value: value})
 	}
 	doc.Runs = normalizeRuns(next)
-	a.documents[widget] = doc
+}
+
+// documentBind is what a template textarea's bound `document` wrote
+// down: the collection whose row carries the field, and the field's
+// wire index (docs/rich-text-plan.md §19).
+type documentBind struct {
+	collection uint64
+	field      uint32
+}
+
+// foldRowDocument reaches a stamped copy's act into its ROW's Document
+// field: the node was bound to (collection, field) by TextareaRichBound,
+// and the occurrence's keys name the row. A row that is gone has no
+// field to fold into, and that is not a fault.
+func (a *App) foldRowDocument(node uint64, keys []any, fold func(*Document)) {
+	bind, ok := a.documentBinds[node]
+	if !ok || len(keys) == 0 {
+		return
+	}
+	in := a.instanceOf(bind.collection, keys[:len(keys)-1])
+	if in == nil {
+		return
+	}
+	for i := range in.entries {
+		if in.entries[i].Key != keys[len(keys)-1] {
+			continue
+		}
+		record := reflect.ValueOf(in.entries[i].Value)
+		if record.Kind() != reflect.Struct {
+			return
+		}
+		info := recordInfoOfType(record.Type())
+		if int(bind.field) >= len(info.indexes) {
+			return
+		}
+		copied := reflect.New(record.Type()).Elem()
+		copied.Set(record)
+		slot := copied.Field(info.indexes[bind.field])
+		if slot.Type() != documentType {
+			return
+		}
+		doc := slot.Interface().(Document)
+		fold(&doc)
+		slot.Set(reflect.ValueOf(doc))
+		in.entries[i].Value = copied.Interface()
+		return
+	}
 }
 
 // editOf and formatOf cut the decoded payloads
@@ -5706,17 +5802,35 @@ func (a *App) Serve() {
 		// THE MIRROR FOLLOWS FIRST, and unconditionally — before the
 		// handler lookup, so a rich textarea nobody registered for still
 		// keeps its document in step (docs/rich-text-plan.md R1).
-		case kind == occTextEdited:
+		case kind == occTextEdited && len(keys) == 0:
 			edit := editOf(tail)
 			a.absorbEdit(id, edit.Start, edit.End, edit.Inserted, edit.Runs)
-			if fn := a.widgetEdits[id]; fn != nil && len(keys) == 0 {
+			if fn := a.widgetEdits[id]; fn != nil {
 				a.dispatch(func(tx *Tx) { fn(tx, edit) })
+			}
+		// A STAMPED copy's act folds into its ROW's Document field
+		// instead, by the same rule (docs/rich-text-plan.md §19).
+		case kind == occTextEdited:
+			edit := editOf(tail)
+			a.foldRowDocument(id, keys, func(doc *Document) {
+				foldEdit(doc, edit.Start, edit.End, edit.Inserted, edit.Runs)
+			})
+			if fn := a.nodeEdits[id]; fn != nil {
+				a.dispatch(func(tx *Tx) { fn(tx, keys, edit) })
+			}
+		case kind == occTextFormatted && len(keys) == 0:
+			act := formatOf(tail)
+			a.absorbFormat(id, act.Start, act.End, act.Name, act.Value, act.Removed)
+			if fn := a.widgetFormats[id]; fn != nil {
+				a.dispatch(func(tx *Tx) { fn(tx, act) })
 			}
 		case kind == occTextFormatted:
 			act := formatOf(tail)
-			a.absorbFormat(id, act.Start, act.End, act.Name, act.Value, act.Removed)
-			if fn := a.widgetFormats[id]; fn != nil && len(keys) == 0 {
-				a.dispatch(func(tx *Tx) { fn(tx, act) })
+			a.foldRowDocument(id, keys, func(doc *Document) {
+				foldFormat(doc, act.Start, act.End, act.Name, act.Value, act.Removed)
+			})
+			if fn := a.nodeFormats[id]; fn != nil {
+				a.dispatch(func(tx *Tx) { fn(tx, keys, act) })
 			}
 		case kind == occToggled && len(keys) == 0:
 			if fn := a.widgetToggles[id]; fn != nil {

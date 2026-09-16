@@ -30,7 +30,7 @@ type drop_values = {
 }
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0xe52568620b0ca54eL
+let spec_hash = 0x3854759c1c5d028cL
 
 let value_bool = 1
 let value_i64 = 2
@@ -124,6 +124,7 @@ let prop_rich = 32
 let prop_own_undo = 33
 let prop_can_undo = 34
 let prop_can_redo = 35
+let prop_document = 36
 let wprop_title = 1
 let wprop_width = 2
 let wprop_height = 3
@@ -1760,6 +1761,32 @@ let tx_bind_can_redo_element ?(level = 0) ?(field = 0) widget_id =
   finish tx_kind_set_property (fun b ->
       Buffer.add_int64_le b widget_id;
       Buffer.add_int32_le b (Int32.of_int prop_can_redo);
+      Buffer.add_int32_le b (Int32.of_int source_element);
+      Buffer.add_int32_le b (Int32.of_int level);
+      Buffer.add_int32_le b (Int32.of_int field))
+
+(* set_property with a constant document value. *)
+let tx_set_document widget_id handle =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_document);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (Blob handle))
+
+(* set_property with a signal-bound document value. *)
+let tx_bind_document widget_id signal_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_document);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_property bound to one field of the element of the enclosing
+   For, `level` Fors up (0 = nearest; field 0 for a scalar). *)
+let tx_bind_document_element ?(level = 0) ?(field = 0) widget_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_document);
       Buffer.add_int32_le b (Int32.of_int source_element);
       Buffer.add_int32_le b (Int32.of_int level);
       Buffer.add_int32_le b (Int32.of_int field))

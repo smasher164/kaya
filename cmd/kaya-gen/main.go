@@ -34,6 +34,10 @@ var wireTypes = map[string]bool{
 	// The picker types (docs/datetime-plan.md D10): a Date field is an
 	// I64 on the wire and a kaya.Date everywhere the record is touched.
 	"kaya.Date": true, "kaya.Time": true,
+	// A stamped copy's document is a FIELD of its row
+	// (docs/rich-text-plan.md §19): VALUE_BLOB in the schema, a
+	// kaya.Document everywhere the record is touched.
+	"kaya.Document": true,
 }
 
 // wireTypeName names a field's declared type in the wire vocabulary: a
@@ -377,6 +381,10 @@ func generateRecord(w func(string, ...any), strct *ast.StructType, name, key str
 	w("")
 	w("func (r %sRow) Checkbox(f kaya.Field[bool], onToggle func(*kaya.Tx, %s, bool)) kaya.Node {", lowerFirst(name), key)
 	w("\treturn r.c.Checkbox(r.t, f, onToggle)")
+	w("}")
+	w("")
+	w("func (r %sRow) TextareaRich(f kaya.Field[kaya.Document], onEdit func(*kaya.Tx, %s, kaya.Edit), onFormat func(*kaya.Tx, %s, kaya.Format)) kaya.Node {", lowerFirst(name), key, key)
+	w("\treturn r.c.TextareaRich(r.t, f, onEdit, onFormat)")
 	w("}")
 	w("")
 	w("func (r %sRow) DatePicker(f kaya.Field[kaya.Date], onDate func(*kaya.Tx, %s, kaya.Date)) kaya.Node {", lowerFirst(name), key)

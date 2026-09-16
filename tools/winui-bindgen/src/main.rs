@@ -98,6 +98,17 @@ fn main() {
         "Microsoft.UI.Xaml.Documents.Run".to_string(),
         "Microsoft.UI.Xaml.Documents.Span".to_string(),
         "Microsoft.UI.Xaml.Documents.Hyperlink".to_string(),
+        // THE RICH LABEL'S CODE GROUND (docs/rich-text-plan.md §18). An
+        // inline carries no Background on this platform — Run, Span and
+        // Hyperlink all lack one — so a `code` run's ground is drawn as a
+        // `TextHighlighter` over the block. `TextBlock.TextHighlighters` is a
+        // `usize` pad until TextHighlighter is named, TextHighlighter is
+        // unreachable without the TextHighlighterBase it derives from (the
+        // Run/Inline/TextElement chain above, one family over), and TextRange
+        // is the struct its `Ranges` hold.
+        "Microsoft.UI.Xaml.Documents.TextHighlighterBase".to_string(),
+        "Microsoft.UI.Xaml.Documents.TextHighlighter".to_string(),
+        "Microsoft.UI.Xaml.Documents.TextRange".to_string(),
         "Windows.UI.Text.FontWeight".to_string(),
         "Windows.UI.Text.FontStyle".to_string(),
         "Windows.UI.Text.TextDecorations".to_string(),

@@ -224,6 +224,9 @@ public final class KayaProcessor extends AbstractProcessor {
             // so a component skipped HERE shifts every later exact-index
             // token off the runtime schema.
             case "byte[]" -> "byte[]";
+            // A stamped copy's document (docs/rich-text-plan.md §19),
+            // the blob channel's second inhabitant.
+            case "dev.kaya.KayaApp.Document" -> "dev.kaya.KayaApp.Document";
             // The picker types (docs/datetime-plan.md D10).
             case "java.time.LocalDate" -> "java.time.LocalDate";
             case "java.time.LocalTime" -> "java.time.LocalTime";

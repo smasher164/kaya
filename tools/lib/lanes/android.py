@@ -92,6 +92,10 @@ LEGS = {
         # user edit at all.
         "richlabel-compose",
         "notes-compose",
+        # THE RICH ROWS (docs/rich-text-plan.md §19): rust-only for
+        # richtext's reason, and no IME_SCENES member — the copy's act is
+        # the harness's format verb.
+        "richrows-compose",
     ],
     "jvm": [
         "jvm", "a11y-jvm", "entry-jvm",

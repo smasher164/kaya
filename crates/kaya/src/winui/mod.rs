@@ -60,7 +60,7 @@ use bindings::Windows::Foundation::{Point, TypedEventHandler};
 // A RICH LABEL'S INLINES (docs/rich-text-plan.md §15): the run table is drawn
 // as TextBlock.Inlines, and the three traits are TextElement properties.
 use bindings::Microsoft::UI::Text::FontWeights;
-use bindings::Microsoft::UI::Xaml::Documents::{Hyperlink, Run};
+use bindings::Microsoft::UI::Xaml::Documents::{Hyperlink, Run, TextHighlighter, TextRange};
 use bindings::Windows::UI::Text::{FontStyle, TextDecorations};
 // The caption title's two text properties are vtable pads in this
 // backend's bindings, so the one element that needs them is parsed from
@@ -74,7 +74,7 @@ use bindings::Microsoft::UI::Xaml::{
 // The styling pass's two resource types (docs/styling-plan.md D4): a role
 // lowers to a keyed Style or a keyed Brush, looked up out of the
 // framework's own dictionary.
-use bindings::Microsoft::UI::Xaml::Media::Brush;
+use bindings::Microsoft::UI::Xaml::Media::{Brush, SolidColorBrush};
 // The brand typeface's one type (docs/styling-plan.md Slice 2b); its
 // bindgen filter entry is in tools/winui-bindgen.
 use bindings::Microsoft::UI::Xaml::Media::FontFamily;
@@ -1285,6 +1285,22 @@ fn switch_caption(toggle: &ToggleSwitch, caption: &TextBlock) -> windows_core::R
 fn presentation_report(core: &mut CoreState) -> windows_core::Result<()> {
     let Ok(root) = core.window.Content() else { return Ok(()) };
     let element: FrameworkElement = windows_core::Interface::cast(&root)?;
+    // THE GROUND IS THE CONTENT ROOT, and this is the wall on the path
+    // nobody can avoid: every drain of every scene on every lane runs this,
+    // while NO scene can see a missing ground — `expect_appearance` reads the
+    // toolkit back and passed "dark" on an entirely white window
+    // (WINDOW_GROUND_XAML). A fourth `Window::SetContent` outside
+    // `window_ground` is the only way to get here.
+    let root_name = element.Name()?.to_string();
+    assert!(
+        root_name == WINDOW_GROUND_NAME,
+        "kaya: winui: window 0's content root is named `{root_name}`, not the \
+         ground `{WINDOW_GROUND_NAME}`. Every window's content goes through \
+         `window_ground`, which is the one caller of `Window::SetContent`; a \
+         root without it paints no background, and under the dark appearance \
+         the window keeps the XAML island's white while every label paints \
+         white on it (docs/tasks-s2b-plan.md §3)."
+    );
     // The harness appearance, on the SAME element whose ActualTheme this
     // function reads. ELEMENT SCOPE, NOT APPLICATION SCOPE:
     // Application.RequestedTheme throws if set while the app runs, and kaya's
@@ -2791,16 +2807,34 @@ const TABLE_RULE_XAML: &str = concat!(
     "Height=\"1\" Background=\"#40808080\" HorizontalAlignment=\"Stretch\"/>"
 );
 
-/// A TABLE BOUNDS ITS OWN EXTENT (docs/deferred.md's table-card entry) —
-/// Fluent's layer card, FLAT: fill, a 1 DIP stroke and the radius, no shadow.
-/// IT SITS BEHIND THE THREE TRACKS, NOT AROUND THEM: a BorderThickness on the
-/// The menu shell, a window's own ground: the page background as the theme
-/// resource Fluent's own pages use (docs/tasks-s2b-plan.md §3).
+/// EVERY WINDOW'S OWN GROUND (docs/tasks-s2b-plan.md §3). A WinUI window
+/// paints nothing of its own, so the ground rides the content root as a
+/// `{ThemeResource}` and follows that root's `RequestedTheme`. Until
+/// 2026-09-15 only `ensure_menu_shell` installed one, so a MENU-LESS window
+/// under the dark appearance kept the island's WHITE and every label,
+/// button fill and control stroke — all near-white under Dark — composited
+/// away on it: measured on the richtext and dirty scenes with
+/// `expect_appearance "dark"` PASSING on an entirely light window.
+const WINDOW_GROUND_XAML: &str = concat!(
+    "<Grid xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" ",
+    "Name=\"KayaWindowGround\" ",
+    "Background=\"{ThemeResource ApplicationPageBackgroundThemeBrush}\"/>"
+);
+
+/// How `window_ground` knows the content root is already its own.
+const WINDOW_GROUND_NAME: &str = "KayaWindowGround";
+
+/// The menu shell, inside the window's ground: the same page background, so
+/// the shell that replaces the ground's child still paints one
+/// (docs/tasks-s2b-plan.md §3).
 const MENU_SHELL_XAML: &str = concat!(
     "<Grid xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" ",
     "Background=\"{ThemeResource ApplicationPageBackgroundThemeBrush}\"/>"
 );
 
+/// A TABLE BOUNDS ITS OWN EXTENT (docs/deferred.md's table-card entry) —
+/// Fluent's layer card, FLAT: fill, a 1 DIP stroke and the radius, no shadow.
+/// IT SITS BEHIND THE THREE TRACKS, NOT AROUND THEM: a BorderThickness on the
 /// container takes 2 DIP out of the box every track arithmetic divides. AND IT
 /// CARRIES A NEGATIVE MARGIN of the card's interior padding, which rides the
 /// CONTAINER's own Padding, so the card cannot move a cell edge.
@@ -4799,10 +4833,6 @@ fn ensure_menu_shell(core: &mut CoreState, window: u64) -> windows_core::Result<
     // milliseconds later on a dispatcher tick.
     require_control_resources("this window declares a menu");
     let target = winui_window(core, window)?;
-    // THE PAGE BACKGROUND RIDES THE SHELL as a {ThemeResource}, so the
-    // window's own ground follows the root's RequestedTheme: a window whose
-    // content paints nothing shows the XAML root's white under a dark
-    // theme, which is what the first dark capture showed (docs/tasks-s2b-plan.md §3).
     let shell: Grid = XamlReader::Load(&HSTRING::from(MENU_SHELL_XAML))?.cast()?;
     let defs = shell.RowDefinitions()?;
     let bar_row = RowDefinition::new()?;
@@ -4831,8 +4861,14 @@ fn ensure_menu_shell(core: &mut CoreState, window: u64) -> windows_core::Result<
     let slot_el: FrameworkElement = slot.cast()?;
     Grid::SetRow(&slot_el, TOOLBAR_CONTENT_ROW)?;
     shell.Children()?.Append(&slot_el)?;
-    let old = target.Content().ok();
-    target.SetContent(&shell.cast::<UIElement>()?)?;
+    // INTO THE GROUND, which stays the window's content (`window_ground`):
+    // whatever the window already presents is the ground's own child, and it
+    // moves into the slot.
+    let ground = window_ground(&target)?;
+    let grounded = ground.Children()?;
+    let old = (grounded.Size()? == 1).then(|| grounded.GetAt(0)).transpose()?;
+    grounded.Clear()?;
+    grounded.Append(&shell.cast::<UIElement>()?)?;
     if let Some(old) = old {
         slot.Children()?.Append(&old)?;
     }
@@ -6922,7 +6958,7 @@ fn detach_window_content(core: &CoreState, window: u64) -> windows_core::Result<
     if let Some(slot) = core.menu_slots.get(&window) {
         slot.Children()?.Clear()
     } else {
-        winui_window(core, window)?.SetContent(None)
+        window_ground(&winui_window(core, window)?)?.Children()?.Clear()
     }
 }
 
@@ -6931,14 +6967,51 @@ fn set_window_content(
     window: u64,
     element: &UIElement,
 ) -> windows_core::Result<()> {
-    if let Some(slot) = core.menu_slots.get(&window) {
-        let children = slot.Children()?;
-        children.Clear()?;
-        children.Append(element)?;
-        Ok(())
-    } else {
-        winui_window(core, window)?.SetContent(element)
+    let children = match core.menu_slots.get(&window) {
+        Some(slot) => slot.Children()?,
+        None => window_ground(&winui_window(core, window)?)?.Children()?,
+    };
+    children.Clear()?;
+    children.Append(element)
+}
+
+/// THE WINDOW'S GROUND, minted on first use and never replaced: this is the
+/// ONLY place `Window.SetContent` is called for a kaya window, so no route to
+/// a window's content can leave it without one (`WINDOW_GROUND_XAML`), and
+/// `presentation_report`'s `SetRequestedTheme` has one target for the life of
+/// the window. Its wall is that function's ground assertion.
+/// WHAT `Window.Content` USED TO BE, before every window got a ground: the
+/// ground's single child — the app's mounted root, or a menu window's shell,
+/// or a split's TwoPaneView. EVERY READ THAT MEASURES THE ROOT ASKS FOR THIS
+/// and not for `Window.Content`, because the ground fills the island by
+/// construction and carries no padding: `root_fills` would answer "fills" for
+/// any root at all, and `inset` measured its first child's offset inside the
+/// ground and read 0 (the portfolio leg, 2026-09-16).
+#[cfg(feature = "harness")]
+fn window_surface(window: &Window) -> windows_core::Result<FrameworkElement> {
+    let ground = window_ground(window)?;
+    let children = ground.Children()?;
+    if children.Size()? == 1 {
+        return windows_core::Interface::cast(&children.GetAt(0)?);
     }
+    windows_core::Interface::cast(&ground)
+}
+
+fn window_ground(window: &Window) -> windows_core::Result<Grid> {
+    if let Ok(content) = window.Content()
+        && let Ok(grid) = windows_core::Interface::cast::<Grid>(&content)
+        && grid.Name().is_ok_and(|name| name.to_string() == WINDOW_GROUND_NAME)
+    {
+        return Ok(grid);
+    }
+    let ground: Grid =
+        windows_core::Interface::cast(&XamlReader::Load(&HSTRING::from(WINDOW_GROUND_XAML))?)?;
+    let old = window.Content().ok();
+    window.SetContent(&windows_core::Interface::cast::<UIElement>(&ground)?)?;
+    if let Some(old) = old {
+        ground.Children()?.Append(&old)?;
+    }
+    Ok(ground)
 }
 
 /// One real MenuFlyout per context anchor, set as the element's ContextFlyout.
@@ -9832,13 +9905,22 @@ const RICH_QUOTE_GROUND_DARK: bindings::Windows::UI::Color =
 /// is what a quote wears here (docs/rich-text-plan.md §18).
 const RICH_QUOTE_INDENT: f32 = 20.0;
 
-/// The three colours a theme decides, together — every rich write takes one
-/// of these rather than reading `ActualTheme` three times.
+/// The colours a theme decides, together — every rich write takes one of
+/// these rather than reading `ActualTheme` three times.
 #[derive(Clone, Copy)]
 struct RichPalette {
     link: bindings::Windows::UI::Color,
     code_ground: bindings::Windows::UI::Color,
     quote_ground: bindings::Windows::UI::Color,
+    /// THE CONTROL'S OWN FOREGROUND, WHICH `AutoColor` IS NOT: Rich Edit
+    /// resolves `tomAutoColor` to the SYSTEM's window text, so every styled
+    /// run stayed BLACK under the dark appearance and the document was drawn
+    /// black on its dark ground — measured 2026-09-16 on the richtext scene,
+    /// where `expect_appearance "dark"` passes and no observable reads a run's
+    /// colour. `TextControlForeground` resolves to a SolidColorBrush under
+    /// every shipped template; where it does not, `AutoColor` is still the
+    /// only spelling this format has.
+    text: Option<bindings::Windows::UI::Color>,
 }
 
 /// The baseline the derived display is a multiple of: the document's own
@@ -9860,19 +9942,37 @@ fn rich_base(field: &RichEditBox) -> windows_core::Result<(f32, String)> {
     Ok((size, name))
 }
 
-fn rich_palette(field: &RichEditBox) -> RichPalette {
-    match field.ActualTheme() {
-        Ok(ElementTheme::Dark) => RichPalette {
+fn rich_palette_of(dark: bool, text: Option<bindings::Windows::UI::Color>) -> RichPalette {
+    if dark {
+        RichPalette {
             link: RICH_LINK_DARK,
             code_ground: RICH_CODE_GROUND_DARK,
             quote_ground: RICH_QUOTE_GROUND_DARK,
-        },
-        _ => RichPalette {
+            text,
+        }
+    } else {
+        RichPalette {
             link: RICH_LINK_LIGHT,
             code_ground: RICH_CODE_GROUND_LIGHT,
             quote_ground: RICH_QUOTE_GROUND_LIGHT,
-        },
+            text,
+        }
     }
+}
+
+fn rich_palette(field: &RichEditBox) -> RichPalette {
+    let text = field
+        .Foreground()
+        .ok()
+        .and_then(|brush| windows_core::Interface::cast::<SolidColorBrush>(&brush).ok())
+        .and_then(|brush| brush.Color().ok());
+    rich_palette_of(matches!(field.ActualTheme(), Ok(ElementTheme::Dark)), text)
+}
+
+/// The same palette off a LABEL's block. NO `text`: a label's runs write no
+/// foreground at all and inherit the block's, so only the grounds are read.
+fn label_palette(block: &TextBlock) -> RichPalette {
+    rich_palette_of(matches!(block.ActualTheme(), Ok(ElementTheme::Dark)), None)
 }
 
 /// THE GROUND ONE RUN WEARS, or none. ONE ATTRIBUTE, THREE CLAIMANTS: this
@@ -10077,8 +10177,11 @@ fn rich_write_format(
     })?;
     character.SetSize(size)?;
     character.SetName(&HSTRING::from(if monospace { RICH_MONOSPACE } else { base_face }))?;
-    character
-        .SetForegroundColor(if linked { palette.link } else { TextConstants::AutoColor()? })?;
+    character.SetForegroundColor(match (linked, palette.text) {
+        (true, _) => palette.link,
+        (false, Some(text)) => text,
+        (false, None) => TextConstants::AutoColor()?,
+    })?;
     // The ground, written on every call like every other property: a run that
     // LOST its `code` takes its ground back off.
     character.SetBackgroundColor(match rich_ground(attrs, palette) {
@@ -10773,7 +10876,9 @@ fn rich_segments(text: &str, runs: &[TextRun]) -> Vec<(usize, usize, BTreeMap<St
 fn label_restyle(block: &TextBlock, text: &str, runs: &[TextRun]) -> windows_core::Result<()> {
     if runs.is_empty() {
         // A document with no runs IS the plain text, and a Text write drops
-        // whatever inlines the block was carrying.
+        // whatever inlines the block was carrying. The highlight layer is NOT
+        // inlines and a Text write leaves it standing, so it is emptied here.
+        block.TextHighlighters()?.Clear()?;
         block.SetText(&HSTRING::from(text))?;
         return Ok(());
     }
@@ -10819,6 +10924,46 @@ fn label_restyle(block: &TextBlock, text: &str, runs: &[TextRun]) -> windows_cor
             }
             None => inlines.Append(&piece)?,
         }
+    }
+    label_paint_grounds(block, text, runs)
+}
+
+/// THE LABEL'S GROUNDS, as `TextHighlighter`s over the block. NOT AN INLINE
+/// PROPERTY: `Run`, `Span` and `Hyperlink` carry no Background on this
+/// platform, so a `code` run's ground and a `quote`'s tint are drawn by the
+/// block's own highlight layer instead (docs/rich-text-plan.md §18, the
+/// ledger's rich-label-ground entry). THE COLOURS ARE `rich_ground`'s OWN, so
+/// the label and the textarea cannot drift, and the palette is read off the
+/// block's `ActualTheme` at every restyle exactly as `rich_restyle` reads the
+/// control's.
+fn label_paint_grounds(
+    block: &TextBlock, text: &str, runs: &[TextRun],
+) -> windows_core::Result<()> {
+    let palette = label_palette(block);
+    let highlighters = block.TextHighlighters()?;
+    highlighters.Clear()?;
+    // ONE HIGHLIGHTER PER COLOUR, its ranges together: a `TextHighlighter`
+    // carries one Background for every range it holds.
+    let mut painted: Vec<(bindings::Windows::UI::Color, Vec<TextRange>)> = Vec::new();
+    for (start, end, attrs) in rich_segments(text, runs) {
+        let Some(ground) = rich_ground(&attrs, palette) else { continue };
+        let (Some(from), Some(to)) = (utf16_offset(text, start), utf16_offset(text, end)) else {
+            continue;
+        };
+        let range = TextRange { StartIndex: from, Length: to - from };
+        match painted.iter_mut().find(|(colour, _)| *colour == ground) {
+            Some((_, ranges)) => ranges.push(range),
+            None => painted.push((ground, vec![range])),
+        }
+    }
+    for (colour, ranges) in painted {
+        let highlighter = TextHighlighter::new()?;
+        highlighter.SetBackground(&SolidColorBrush::CreateInstanceWithColor(colour)?)?;
+        let slots = highlighter.Ranges()?;
+        for range in ranges {
+            slots.Append(range)?;
+        }
+        highlighters.Append(&highlighter)?;
     }
     Ok(())
 }
@@ -21397,7 +21542,7 @@ impl crate::harness::Stage for WinUiStage {
             // model: Grid.Padding shifts the first child's visual
             // offset inside the root by exactly the inset
             // (docs/styling-plan.md D3).
-            let root: FrameworkElement = core.window.Content()?.cast()?;
+            let root = window_surface(&core.window)?;
             root.UpdateLayout()?;
             // The mounted root is a Grid for the container kinds and a
             // ScrollViewer for a scroll-rooted scene (the portfolio
@@ -21521,10 +21666,10 @@ impl crate::harness::Stage for WinUiStage {
 
     fn root_fills(&self) -> String {
         Self::on_ui_read(move |core| {
-            // The mounted root is the window's Content; the content
-            // island (XamlRoot) is the framework's own notion of the
-            // area handed to it.
-            let root: FrameworkElement = core.window.Content()?.cast()?;
+            // The mounted root is the window ground's one child
+            // (`window_surface`); the content island (XamlRoot) is the
+            // framework's own notion of the area handed to it.
+            let root = window_surface(&core.window)?;
             root.UpdateLayout()?;
             let area = root.XamlRoot()?.Size()?;
             let (width, height) = (root.ActualWidth()?, root.ActualHeight()?);
@@ -25218,6 +25363,32 @@ mod tests {
             assert!(
                 !xaml.contains(forbidden),
                 "the brand dictionary writes {forbidden}\n{xaml}"
+            );
+        }
+    }
+
+    /// THE WINDOW'S GROUND IS A THEME RESOURCE, AND THE RECOGNISER MATCHES
+    /// THE MARKUP. What it can see is the two claims `window_ground` rests
+    /// on and nothing else — a live tree needs the XAML runtime, so the
+    /// funnel itself is held by `presentation_report`'s assertion, which
+    /// every drain of every leg runs.
+    ///
+    /// A LITERAL COLOUR HERE WOULD NOT FOLLOW `RequestedTheme`, which is
+    /// the whole defect: a menu-less window under the dark appearance kept
+    /// the XAML island's white while `expect_appearance "dark"` passed
+    /// (measured 2026-09-15 on the richtext and dirty scenes).
+    #[test]
+    fn the_window_ground_is_a_themed_page_background() {
+        assert!(
+            WINDOW_GROUND_XAML.contains(&format!("Name=\"{WINDOW_GROUND_NAME}\"")),
+            "the ground's markup must carry the name `window_ground` reads \
+             back, or every call mints a second ground: {WINDOW_GROUND_XAML}"
+        );
+        for markup in [WINDOW_GROUND_XAML, MENU_SHELL_XAML] {
+            assert!(
+                markup.contains("Background=\"{ThemeResource ApplicationPageBackgroundThemeBrush}\""),
+                "a ground written as a literal colour cannot follow the \
+                 root's RequestedTheme: {markup}"
             );
         }
     }

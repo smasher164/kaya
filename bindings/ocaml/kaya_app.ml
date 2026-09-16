@@ -364,8 +364,17 @@ type app = {
      (docs/rich-text-plan.md R1): folded from the two occurrences and
      from the app's own [set_document]/[apply_edit] as they are SENT. *)
   documents : (int64, document) Hashtbl.t;
+  (* Template node -> (collection, field, level) for every template
+     textarea bound to a document, so a copy's act folds into its ROW
+     (docs/rich-text-plan.md §19). *)
+  document_binds : (int64, int64 * int * int) Hashtbl.t;
   widget_edits : (int64, edit -> unit) Hashtbl.t;
   widget_formats : (int64, format_act -> unit) Hashtbl.t;
+  (* A stamped rich copy's own acts, the node flavor of the two above:
+     the handler receives the copy's key path first
+     (docs/rich-text-plan.md §19). *)
+  node_edits : (int64, Kaya_wire.value list -> edit -> unit) Hashtbl.t;
+  node_formats : (int64, Kaya_wire.value list -> format_act -> unit) Hashtbl.t;
   widget_toggles : (int64, bool -> unit) Hashtbl.t;
   widget_values : (int64, float -> unit) Hashtbl.t;
   (* The pickers' committed values arrive as the packed I64; the sugar
@@ -514,6 +523,9 @@ let create () =
     widget_changes = Hashtbl.create 8;
     node_changes = Hashtbl.create 8;
     documents = Hashtbl.create 8;
+    document_binds = Hashtbl.create 8;
+    node_edits = Hashtbl.create 8;
+    node_formats = Hashtbl.create 8;
     widget_edits = Hashtbl.create 8;
     widget_formats = Hashtbl.create 8;
     widget_toggles = Hashtbl.create 8;
@@ -1177,6 +1189,39 @@ let rec runs_of_values = function
       :: runs_of_values rest
   | _ -> []
 
+(* A stamped copy's document is a record FIELD (docs/rich-text-plan.md
+   §19): the field's Blob bytes are ONE flat value list — the text, then
+   four values per run — the bytes [set_rich_text] already ships
+   (crates/kaya/src/wire.rs, [document_blob] / [read_document_blob]). *)
+let document_blob doc =
+  let b = Buffer.create 64 in
+  Kaya_wire.encode_values b
+    (Kaya_wire.Str doc.d_text :: run_values doc.d_runs);
+  Buffer.contents b
+
+let document_of_blob bytes =
+  if String.length bytes < 8 then
+    invalid_arg
+      (Printf.sprintf "kaya: a document blob carries its count first; this one is %d byte(s)"
+         (String.length bytes));
+  let byte i = Char.code bytes.[i] in
+  let count = Kaya_wire.u32_at byte 0 in
+  let at = ref 8 in
+  let values = ref [] in
+  for _ = 1 to count do
+    let v, next = Kaya_wire.parse_value byte !at in
+    values := v :: !values;
+    at := next
+  done;
+  match List.rev !values with
+  | Kaya_wire.Str text :: rest ->
+      { d_text = text; d_runs = runs_of_values rest }
+  | _ ->
+      invalid_arg
+        (Printf.sprintf
+           "kaya: a document blob starts with its text; this one holds %d value(s)"
+           count)
+
 (* The core's normal form (crates/kaya/src/scene.rs, [RichDoc::normalize]),
    so the mirror and the core's document spell one string. *)
 let normalize_runs runs =
@@ -1223,10 +1268,10 @@ let the_document app id =
   | Some doc -> doc
   | None -> { d_text = ""; d_runs = [] }
 
-(* One delivered edit, folded by the core's own rules
-   (crates/kaya/src/app.rs, [absorb_edit]). *)
-let absorb_edit app id (start, stop) inserted runs =
-  let doc = the_document app id in
+(* The core's own fold rule, over ANY document — a live mirror or a
+   stamped copy's row field (crates/kaya/src/app.rs, [fold_edit];
+   docs/rich-text-plan.md §19). *)
+let fold_edit doc (start, stop) inserted runs =
   let len = String.length doc.d_text in
   let boundary at =
     at = len || Char.code doc.d_text.[at] land 0xc0 <> 0x80
@@ -1235,7 +1280,7 @@ let absorb_edit app id (start, stop) inserted runs =
      || not (boundary stop)
   then
     (* A mirror out of step with the core would splice garbage. *)
-    Hashtbl.replace app.documents id { d_text = inserted; d_runs = runs }
+    { d_text = inserted; d_runs = runs }
   else begin
     let shift = String.length inserted - (stop - start) in
     let kept =
@@ -1265,14 +1310,13 @@ let absorb_edit app id (start, stop) inserted runs =
       String.sub doc.d_text 0 start ^ inserted
       ^ String.sub doc.d_text stop (len - stop)
     in
-    Hashtbl.replace app.documents id
-      { d_text = text; d_runs = normalize_runs (kept @ landed) }
+    { d_text = text; d_runs = normalize_runs (kept @ landed) }
   end
 
-(* One delivered format act, the core's [absorb_format]. *)
-let absorb_format app id (start, stop) name value =
-  let doc = the_document app id in
-  if start < stop then begin
+(* The core's [fold_format], over any document. *)
+let fold_format doc (start, stop) name value =
+  if start >= stop then doc
+  else begin
     let kept =
       List.concat_map
         (fun run ->
@@ -1289,9 +1333,53 @@ let absorb_format app id (start, stop) name value =
           kept @ [ { r_start = start; r_stop = stop; r_name = name; r_value = v } ]
       | None -> kept
     in
-    Hashtbl.replace app.documents id
-      { doc with d_runs = normalize_runs painted }
+    { doc with d_runs = normalize_runs painted }
   end
+
+(* One delivered act, into the live mirror (crates/kaya/src/app.rs,
+   [absorb_edit] / [absorb_format]). *)
+let absorb_edit app id range inserted runs =
+  Hashtbl.replace app.documents id
+    (fold_edit (the_document app id) range inserted runs)
+
+let absorb_format app id range name value =
+  Hashtbl.replace app.documents id
+    (fold_format (the_document app id) range name value)
+
+(* A stamped copy's edit or format act reaches its ROW's Document field
+   (docs/rich-text-plan.md §19): the node is bound to (collection, field)
+   by [Tpl.textarea ~document_field], and the occurrence's path names the
+   row. A row that is gone has no field to fold into, and that is not a
+   fault. *)
+let fold_row_document app node path fold =
+  let bind = Hashtbl.find_opt app.document_binds node in
+  let up = match bind with Some (_, _, level) -> level | None -> 0 in
+  (* [level] Fors up is [level] keys shorter: the innermost copy's own
+     keys are the trailing ones. *)
+  let path = List.filteri (fun i _ -> i < List.length path - up) path in
+  match (bind, List.rev path) with
+  | Some (cid, field, _), key :: rev_ancestors ->
+      let ancestors = List.rev rev_ancestors in
+      let entry (k, (variant, values)) =
+        if k <> key then (k, (variant, values))
+        else
+          let doc =
+            match List.nth_opt values field with
+            | Some (Kaya_wire.Str bytes) -> document_of_blob bytes
+            | _ -> { d_text = ""; d_runs = [] }
+          in
+          let packed = Kaya_wire.Str (document_blob (fold doc)) in
+          ( k,
+            ( variant,
+              List.mapi (fun i v -> if i = field then packed else v) values ) )
+      in
+      Hashtbl.replace app.model cid
+        (List.map
+           (fun i ->
+             if i.path <> ancestors then i
+             else { i with entries = List.map entry i.entries })
+           (instances_of app cid))
+  | _ -> ()
 
 (* The folded document of a [rich] textarea; empty until the first edit
    or write. Reads the ambient transaction, as [items] does. *)
@@ -2145,6 +2233,12 @@ let time_field index : ('a, time) field =
    Str), so record_items reads back exactly what was written. *)
 let blob_field index : ('a, bytes) field =
   { fd_index = index; fd_to_value = (fun d -> Kaya_wire.Str (Bytes.to_string d)) }
+
+(* A [document] field: a Blob slot whose bytes are the document's own
+   wire list, so a stamped copy's document binds through the template
+   zone as a string field does (docs/rich-text-plan.md §19). *)
+let document_field index : ('a, document) field =
+  { fd_index = index; fd_to_value = (fun d -> Kaya_wire.Str (document_blob d)) }
 
 (* The model-to-wire crossing for one record field: a blob field's model
    value registers a fresh copy with the core here — handles are
@@ -3530,6 +3624,17 @@ module Tpl = struct
     let bind_source_field ?(level = 0) (Node id) (fd : (_, bytes) field) =
       emit (the_tx ()) (Kaya_wire.tx_bind_source_element ~level ~field:fd.fd_index id)
 
+    (* A stamped copy carries attribute runs (the live [set_rich]). *)
+    let set_rich (Node id) on = emit (the_tx ()) (Kaya_wire.tx_set_rich id on)
+
+    (* Bind a stamped rich textarea's whole document to one field of the
+       element; a (_, document) field only. The core refuses [document]
+       without [rich] before it, which is why [Tpl.textarea] sends the
+       pair (docs/rich-text-plan.md §19). *)
+    let bind_document_field ?(level = 0) (Node id) (fd : (_, document) field) =
+      emit (the_tx ())
+        (Kaya_wire.tx_bind_document_element ~level ~field:fd.fd_index id)
+
     let add_child (Node parent) (Node child) =
       emit (the_tx ()) (Kaya_wire.tx_add_child parent child)
   end
@@ -3694,11 +3799,13 @@ module Tpl = struct
     n
 
   (* A multi-line editor per stamped copy: the entry's uncontrolled contract
-     over the platform's real multi-line control. *)
+     over the platform's real multi-line control. [~document_field] makes
+     the copy RICH and binds its whole document to that field of the row
+     (docs/rich-text-plan.md §19). *)
   let textarea ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
       ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?placeholder
       ?placeholder_bind ?placeholder_field ?accepts ?text ?bind ?bind_field
-      ?(level = 0) ?(a11y_level = level) ?on_change () =
+      ?document_field ?(level = 0) ?(a11y_level = level) ?on_change () =
     let n = Floor.widget Kaya_wire.kind_textarea in
     Option.iter (fun g -> Floor.set_grow n g) grow;
     Option.iter (fun v -> Floor.set_fill n v) fill;
@@ -3711,6 +3818,20 @@ module Tpl = struct
     Option.iter (fun x -> Floor.set_text n x) text;
     Option.iter (fun s -> Floor.bind_text n s) bind;
     Option.iter (fun fd -> Floor.bind_text_field ~level n fd) bind_field;
+    (* [rich] FIRST, then the bound document — the core refuses the one
+       without the other before it — and the bind is recorded so a copy's
+       own act folds into its ROW. *)
+    Option.iter
+      (fun (fd : (_, document) field) ->
+        let tx = the_tx () in
+        Floor.set_rich n true;
+        (match List.nth_opt tx.app.open_fors level with
+        | Some cid ->
+            let (Node id) = n in
+            Hashtbl.replace tx.app.document_binds id (cid, fd.fd_index, level)
+        | None -> ());
+        Floor.bind_document_field ~level n fd)
+      document_field;
     (match on_change with
     | Some handler ->
         let (Node id) = n in
@@ -4208,6 +4329,18 @@ let on_edit app (Widget id) (handler : edit -> unit) =
 let on_format app (Widget id) (handler : format_act -> unit) =
   Hashtbl.replace app.widget_formats id handler
 
+(* A stamped rich copy's edit, with its row's key path outermost first —
+   [on_edit] one zone over (docs/rich-text-plan.md §19). The row's
+   document field has already taken the act when this fires, so the
+   handler reads the ROW and never the widget. *)
+let on_edit_node app (Node id)
+    (handler : Kaya_wire.value list -> edit -> unit) =
+  Hashtbl.replace app.node_edits id handler
+
+let on_format_node app (Node id)
+    (handler : Kaya_wire.value list -> format_act -> unit) =
+  Hashtbl.replace app.node_formats id handler
+
 (* Register a toggle handler for a live checkbox: the box owns its
    checked bit and reports each flip here; the app folds it into its
    own state. *)
@@ -4512,10 +4645,21 @@ let dispatch_loop app =
                    e_source = Some (edit_source_of_wire (Int64.to_int source));
                  }
                in
-               absorb_edit app id (e.e_start, e.e_stop) e.e_inserted e.e_runs;
-               (match Hashtbl.find_opt app.widget_edits id with
-               | Some handler -> dispatch app (fun () -> handler e)
-               | None -> ())
+               (* A STAMPED COPY FOLDS INTO ITS ROW and a live widget
+                  into the mirror, one fold either way
+                  (docs/rich-text-plan.md §19). *)
+               (match keys with
+               | [] ->
+                   absorb_edit app id (e.e_start, e.e_stop) e.e_inserted e.e_runs;
+                   (match Hashtbl.find_opt app.widget_edits id with
+                   | Some handler -> dispatch app (fun () -> handler e)
+                   | None -> ())
+               | keys ->
+                   fold_row_document app id keys (fun doc ->
+                       fold_edit doc (e.e_start, e.e_stop) e.e_inserted e.e_runs);
+                   (match Hashtbl.find_opt app.node_edits id with
+                   | Some handler -> dispatch app (fun () -> handler keys e)
+                   | None -> ()))
            | _ -> ()
          else if kind = Kaya_wire.occ_kind_text_formatted then
            match tail with
@@ -4529,10 +4673,20 @@ let dispatch_loop app =
                    f_value = (if removed = 0L then Some value else None);
                  }
                in
-               absorb_format app id (act.f_start, act.f_stop) act.f_name act.f_value;
-               (match Hashtbl.find_opt app.widget_formats id with
-               | Some handler -> dispatch app (fun () -> handler act)
-               | None -> ())
+               (match keys with
+               | [] ->
+                   absorb_format app id (act.f_start, act.f_stop) act.f_name
+                     act.f_value;
+                   (match Hashtbl.find_opt app.widget_formats id with
+                   | Some handler -> dispatch app (fun () -> handler act)
+                   | None -> ())
+               | keys ->
+                   fold_row_document app id keys (fun doc ->
+                       fold_format doc (act.f_start, act.f_stop) act.f_name
+                         act.f_value);
+                   (match Hashtbl.find_opt app.node_formats id with
+                   | Some handler -> dispatch app (fun () -> handler keys act)
+                   | None -> ()))
            | _ -> ()
          else if kind = Kaya_wire.occ_kind_text_changed then
            match (payload, keys) with

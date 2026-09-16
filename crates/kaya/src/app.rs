@@ -267,6 +267,42 @@ impl KayaField for String {
     }
 }
 
+/// A stamped copy's document is a record FIELD (docs/rich-text-plan.md §19):
+/// a Blob holding `wire::document_blob`'s list, so a `Document` field binds
+/// through the template zone as a String field does and a copy's document is
+/// written by patching its row.
+impl KayaField for Document {
+    type Kind = BlobKind;
+    fn to_value(&self) -> Value {
+        Value::Blob(crate::protocol::Blob::from(self))
+    }
+    fn from_value(v: &Value) -> Self {
+        match v {
+            Value::Blob(b) => Document::from_blob(b),
+            other => panic!("kaya: expected a Document (Blob) field, model holds {other:?}"),
+        }
+    }
+}
+
+impl From<&Document> for crate::protocol::Blob {
+    fn from(d: &Document) -> Self {
+        crate::protocol::Blob(crate::wire::document_blob(&d.text, &d.runs))
+    }
+}
+
+impl From<Document> for crate::protocol::Blob {
+    fn from(d: Document) -> Self {
+        (&d).into()
+    }
+}
+
+impl Document {
+    pub(crate) fn from_blob(b: &crate::protocol::Blob) -> Document {
+        let (text, runs) = crate::wire::read_document_blob(&b.0);
+        Document { text, runs }
+    }
+}
+
 impl KayaField for bool {
     type Kind = BoolKind;
     fn to_value(&self) -> Value {
@@ -980,6 +1016,9 @@ pub struct AppCtx {
     viewboxes: RefCell<HashMap<u64, Viewbox>>,
     // The binding's rich mirror, live textareas only (docs/rich-text-plan.md R1).
     documents: RefCell<HashMap<u64, Document>>,
+    /// Template node -> (collection, field) for every `textarea_rich_bound`,
+    /// so a copy's edit folds into its row (docs/rich-text-plan.md §19).
+    document_binds: RefCell<HashMap<u64, (CollectionId, u32)>>,
 }
 
 impl AppCtx {
@@ -1005,6 +1044,7 @@ impl AppCtx {
             fresh: RefCell::new(HashMap::new()),
             viewboxes: RefCell::new(HashMap::new()),
             documents: RefCell::new(HashMap::new()),
+            document_binds: RefCell::new(HashMap::new()),
         }
     }
 
@@ -1039,6 +1079,16 @@ impl AppCtx {
                         Occurrence::TextFormatted { id, range, name, value } => {
                             self.absorb_format(id.0, *range, name, value.as_deref())
                         }
+                        Occurrence::InstanceTextEdited { node, path, range, inserted, runs, .. } => {
+                            self.fold_row_document(node.0, path, |doc| {
+                                Self::fold_edit(doc, *range, inserted, runs)
+                            })
+                        }
+                        Occurrence::InstanceTextFormatted { node, path, range, name, value } => {
+                            self.fold_row_document(node.0, path, |doc| {
+                                Self::fold_format(doc, *range, name, value.as_deref())
+                            })
+                        }
                         _ => {}
                     }
                     return occ;
@@ -1062,6 +1112,12 @@ impl AppCtx {
     fn absorb_edit(&self, widget: u64, range: TextRange, inserted: &str, runs: &[Run]) {
         let mut documents = self.documents.borrow_mut();
         let doc = documents.entry(widget).or_default();
+        Self::fold_edit(doc, range, inserted, runs);
+    }
+
+    /// The core's own fold rule, over any document — a live mirror or a
+    /// stamped copy's row field (docs/rich-text-plan.md §19).
+    fn fold_edit(doc: &mut Document, range: TextRange, inserted: &str, runs: &[Run]) {
         let (start, end) = (range.start as usize, range.stop as usize);
         if end > doc.text.len() || !doc.text.is_char_boundary(start) || !doc.text.is_char_boundary(end)
         {
@@ -1115,6 +1171,10 @@ impl AppCtx {
     fn absorb_format(&self, widget: u64, range: TextRange, name: &str, value: Option<&str>) {
         let mut documents = self.documents.borrow_mut();
         let doc = documents.entry(widget).or_default();
+        Self::fold_format(doc, range, name, value);
+    }
+
+    fn fold_format(doc: &mut Document, range: TextRange, name: &str, value: Option<&str>) {
         let (start, end) = (range.start, range.stop);
         if start >= end {
             return;
@@ -1136,6 +1196,32 @@ impl AppCtx {
             next.push(Run { start, end, name: name.to_owned(), value: value.to_owned() });
         }
         doc.runs = normalize_runs(next);
+    }
+
+    /// A stamped copy's edit or format act reaches its ROW's Document field
+    /// (docs/rich-text-plan.md §19): the node is bound to (collection, field)
+    /// by `textarea_rich_bound`, the occurrence's path names the row. A row
+    /// that is gone has no field to fold into, and that is not a fault.
+    fn fold_row_document(&self, node: u64, path: &[Value], fold: impl FnOnce(&mut Document)) {
+        let Some((collection, field)) = self.document_binds.borrow().get(&node).copied() else {
+            return;
+        };
+        let Some((last, ancestors)) = path.split_last() else { return };
+        let mut model = self.model.borrow_mut();
+        let Some(instances) = model.get_mut(&collection) else { return };
+        let Some(instance) = instances.iter_mut().find(|i| i.path.as_slice() == ancestors) else {
+            return;
+        };
+        let Some(entry) = instance.entries.iter_mut().find(|(key, _, _)| key == last) else {
+            return;
+        };
+        let Some(slot) = entry.2.get_mut(field as usize) else { return };
+        let mut doc = match &*slot {
+            Value::Blob(b) => Document::from_blob(b),
+            _ => Document::default(),
+        };
+        fold(&mut doc);
+        *slot = Value::Blob(crate::protocol::Blob::from(&doc));
     }
 
     /// Fold an undo's payload into the collection mirror. Core-authoritative,
@@ -4133,6 +4219,10 @@ impl<'b> Row<'_, 'b> {
         self.tpl().textarea_bound(src)
     }
 
+    pub fn textarea_rich_bound(&mut self, src: impl Into<TplSource<BlobKind>>) -> TemplateNodeId {
+        self.tpl().textarea_rich_bound(src)
+    }
+
     pub fn search(&mut self) -> TemplateNodeId {
         self.tpl().search()
     }
@@ -4662,6 +4752,42 @@ impl<M> Messages<M> {
         self.nodes.borrow_mut().entry(n.0).or_default().push(Box::new(move |occ| match occ {
                 Occurrence::InstanceTextChanged { path, text, .. } => {
                     Some(f(path.clone(), text.clone()))
+                }
+                _ => None,
+            }),
+        );
+    }
+
+    /// A stamped rich copy's edit, with its row's key path — the live
+    /// `on_edit` one zone over (docs/rich-text-plan.md §19); the row's
+    /// Document field has already taken the edit when this fires.
+    pub fn on_edit_node(&self, n: TemplateNodeId, f: impl Fn(Path, Edit) -> M + 'static) {
+        self.nodes.borrow_mut().entry(n.0).or_default().push(Box::new(move |occ| match occ {
+                Occurrence::InstanceTextEdited { path, range, inserted, runs, source, .. } => {
+                    Some(f(path.clone(), Edit {
+                        start: range.start,
+                        end: range.stop,
+                        inserted: inserted.clone(),
+                        runs: runs.clone(),
+                        source: Some(EditSource::from_wire(*source).unwrap_or_else(|| {
+                            panic!("kaya: text_edited carries edit source {source}, which this build does not know")
+                        })),
+                    }))
+                }
+                _ => None,
+            }),
+        );
+    }
+
+    pub fn on_format_node(&self, n: TemplateNodeId, f: impl Fn(Path, Format) -> M + 'static) {
+        self.nodes.borrow_mut().entry(n.0).or_default().push(Box::new(move |occ| match occ {
+                Occurrence::InstanceTextFormatted { path, range, name, value, .. } => {
+                    Some(f(path.clone(), Format {
+                        start: range.start,
+                        end: range.stop,
+                        name: name.clone(),
+                        value: value.clone(),
+                    }))
                 }
                 _ => None,
             }),
@@ -7149,6 +7275,24 @@ impl<'b> Tpl<'_, 'b> {
     pub fn textarea_bound(&mut self, src: impl Into<TplSource<StrKind>>) -> TemplateNodeId {
         let n = self.widget(WidgetKind::Textarea);
         self.apply_source(n, Prop::Text, src.into().inner);
+        n
+    }
+
+    /// A rich textarea per stamped copy whose document is a `Document`
+    /// FIELD of the row (docs/rich-text-plan.md §19): `rich` first, then the
+    /// bound document, which the core turns into set_rich_text per copy; the
+    /// user's edits fold into the row's field as a live widget's fold into
+    /// its mirror, and the app writes a copy's document by patching the row.
+    pub fn textarea_rich_bound(&mut self, src: impl Into<TplSource<BlobKind>>) -> TemplateNodeId {
+        let n = self.widget(WidgetKind::Textarea);
+        self.apply_source(n, Prop::Rich, SourceInner::Const(Value::Bool(true)));
+        let inner = src.into().inner;
+        if let SourceInner::Field(field) = &inner {
+            if let Some(collection) = self.tx.ctx.open_fors.borrow().last().copied() {
+                self.tx.ctx.document_binds.borrow_mut().insert(n.0, (collection, *field));
+            }
+        }
+        self.apply_source(n, Prop::Document, inner);
         n
     }
 

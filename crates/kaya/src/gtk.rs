@@ -8823,6 +8823,169 @@ fn note_drag_began() {
     }
 }
 
+/// A DESTINATION HAS ANSWERED THIS DRAG, which is when GDK sends
+/// `wl_data_offer.accept`: the wayland injector holds the button down at the
+/// END of its walk until this file appears (tools/linux/dragdrive.py's `hold`
+/// step), because sway delivers `wl_data_device.drop` on the release only to
+/// a client that has already accepted, and a release that arrives first is
+/// answered `leave` with no drop and no complaint anywhere.
+/// docs/deferred.md's dnd wayland WATCH; the drag-begin gate above is the
+/// same rule one handshake earlier.
+static DRAG_TOOK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static DRAG_TOOK_FLAG: std::sync::Mutex<Option<std::path::PathBuf>> = std::sync::Mutex::new(None);
+
+fn note_drop_took() {
+    if DRAG_TOOK.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
+    if let Some(flag) = DRAG_TOOK_FLAG.lock().ok().and_then(|f| f.clone()) {
+        let _ = std::fs::File::create(flag);
+    }
+}
+
+/// WHAT THE PLATFORM'S DROP SIDE SAW during ONE gesture of the `drag` verb.
+/// docs/deferred.md's dnd WATCH, fourth desktop sighting: the driver's line
+/// says the press, the walk past the threshold and the release all reached
+/// the compositor and that GTK began a drag, and no drop reaches the target —
+/// this side of the same gesture has never been read. ARMED BY THE VERB and
+/// `None` otherwise, so a shipped app records nothing.
+#[cfg(feature = "harness")]
+#[derive(Default)]
+struct DropSide {
+    /// Where each `drag-begin` fired, in the verb's own naming.
+    began: Vec<String>,
+    accept: u32,
+    accept_yes: u32,
+    enter: u32,
+    enter_yes: u32,
+    motion: u32,
+    motion_yes: u32,
+    drop: u32,
+    /// `deliver_drop` reached `emit_dropped` — the bytes arrived.
+    delivered: u32,
+    /// The bytes did not, so nothing was dropped.
+    empty: u32,
+    /// Each `drag-end`'s operation mask, in kaya's vocabulary.
+    ended: Vec<u32>,
+    /// The mime types the drag carried, the first time a drop arm read them.
+    offer: Option<String>,
+    /// Whether the LAST answer any destination gave was a non-empty action —
+    /// the discriminator between a drop the app refused (its own last word was
+    /// no, and `drag ended none` is the scene's expectation) and a drop that
+    /// was lost while a destination was still holding the drag.
+    last_yes: Option<bool>,
+    first: Option<std::time::Duration>,
+    last: Option<std::time::Duration>,
+    armed: Option<std::time::Instant>,
+}
+
+#[cfg(feature = "harness")]
+static DROP_SIDE: std::sync::Mutex<Option<DropSide>> = std::sync::Mutex::new(None);
+
+/// Record one drop-side event, if the verb is watching this gesture.
+#[cfg(feature = "harness")]
+fn note_drop_side(f: impl FnOnce(&mut DropSide)) {
+    let Ok(mut side) = DROP_SIDE.lock() else { return };
+    let Some(side) = side.as_mut() else { return };
+    let since = side.armed.map(|t| t.elapsed());
+    if side.first.is_none() {
+        side.first = since;
+    }
+    side.last = since;
+    f(side);
+}
+
+/// THE GESTURE'S DROP SIDE, after waiting for the drag to end — printed ONLY
+/// when the gesture delivered no drop and the destination it ended on had not
+/// refused it. A green leg is silent: every landing drag reads `drop 1`, and
+/// the scene's one deliberate refusal ends on a destination whose own last
+/// answer was no (tools/scenes/dnd.steps, `drag ended none`).
+///
+/// A DIAGNOSTIC MAY ONLY PRINT WHAT IT MEASURED (CLAUDE.md invariant 3):
+/// every number here is a signal this process's own arms counted, and the
+/// settle is named so a reading taken before the toolkit finished says so.
+///
+/// IT IS ALSO THE PAIR'S OWN WALL, and the reason it returns a String: the
+/// release gate is two halves in two files, and the half in THIS one can be
+/// removed with every lane still green on a quiet host. A gesture whose
+/// destination answered and whose gate never fired is refused by name, on the
+/// path nobody can avoid — the verb itself.
+#[cfg(feature = "harness")]
+fn report_drop_side(aimed: &str, gated: bool) -> String {
+    let settle = std::time::Instant::now();
+    let limit = std::time::Duration::from_millis(1500);
+    loop {
+        let done = DROP_SIDE
+            .lock()
+            .ok()
+            .and_then(|s| s.as_ref().map(|s| !s.ended.is_empty()))
+            .unwrap_or(true);
+        if done || settle.elapsed() >= limit {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let Some(side) = DROP_SIDE.lock().ok().and_then(|mut s| s.take()) else {
+        return String::new();
+    };
+    let answered = side.enter_yes + side.motion_yes;
+    if gated && answered > 0 && !DRAG_TOOK.load(std::sync::atomic::Ordering::SeqCst) {
+        return format!(
+            "a destination answered this drag ({answered} of {} enter/motion calls) \
+             and the wayland release gate never fired: note_drop_took must be called \
+             wherever a drop arm answers a non-empty action, or the injector releases \
+             before the compositor has an accepted offer and the drop is lost with no \
+             sign anywhere (docs/deferred.md's dnd wayland WATCH)",
+            side.enter + side.motion
+        );
+    }
+    if side.drop > 0 || side.last_yes == Some(false) {
+        return String::new();
+    }
+    let ms = |d: Option<std::time::Duration>| match d {
+        Some(d) => format!("{}ms", d.as_millis()),
+        None => "never".to_owned(),
+    };
+    kaya_diag!(
+        "KAYA_DIAG dragdrive: NO DROP REACHED THE TARGET, and the destination \
+         did not refuse it. aimed {aimed}, drag-begin on {began}; \
+         accept {accept}/{accept_yes} enter {enter}/{enter_yes} \
+         motion {motion}/{motion_yes} drop {drop}; \
+         delivered {delivered}, empty {empty}; ended {ended}; \
+         offered {offer}; first {first}, last {last}, settled after {settled}ms",
+        began = if side.began.is_empty() { "<nothing>".to_owned() } else { side.began.join("+") },
+        accept = side.accept,
+        accept_yes = side.accept_yes,
+        enter = side.enter,
+        enter_yes = side.enter_yes,
+        motion = side.motion,
+        motion_yes = side.motion_yes,
+        drop = side.drop,
+        delivered = side.delivered,
+        empty = side.empty,
+        ended = if side.ended.is_empty() {
+            "<never>".to_owned()
+        } else {
+            side.ended.iter().map(|op| op.to_string()).collect::<Vec<_>>().join("+")
+        },
+        offer = side.offer.as_deref().unwrap_or("<no drop arm read one>"),
+        first = ms(side.first),
+        last = ms(side.last),
+        settled = settle.elapsed().as_millis(),
+    );
+    String::new()
+}
+
+/// The drag's own vocabulary, read off whatever offer a drop arm was handed.
+#[cfg(feature = "harness")]
+fn note_drop_offer(side: &mut DropSide, offer: &ClipOffer) {
+    if side.offer.is_none() {
+        let mimes: Vec<String> =
+            offer.formats().mime_types().iter().map(|m| m.to_string()).collect();
+        side.offer = Some(if mimes.is_empty() { "<none>".to_owned() } else { mimes.join(",") });
+    }
+}
+
 fn drag_actions(mask: u32) -> gdk::DragAction {
     let mut actions = gdk::DragAction::empty();
     if mask & crate::wire::DRAG_OP_COPY != 0 {
@@ -9198,6 +9361,8 @@ fn install_drag_source(core: &CoreState, id: WidgetId) {
     source.connect_drag_begin(move |_source, _drag| {
         began.set(false);
         note_drag_began();
+        #[cfg(feature = "harness")]
+        note_drop_side(|side| side.began.push(format!("widget#{}", id.0)));
     });
     let refused = cancelled.clone();
     source.connect_drag_cancel(move |_source, _drag, _reason| {
@@ -9211,6 +9376,8 @@ fn install_drag_source(core: &CoreState, id: WidgetId) {
         } else {
             drag_mask(drag.selected_action())
         };
+        #[cfg(feature = "harness")]
+        note_drop_side(|side| side.ended.push(operation));
         end_hub.emit_drag_ended(&tag, operation);
     });
     widget.add_controller(source.clone());
@@ -9239,6 +9406,8 @@ fn deliver_drop(
         accepts,
         Box::new(move |clip| match clip {
             Some(clip) => {
+                #[cfg(feature = "harness")]
+                note_drop_side(|side| side.delivered += 1);
                 hub.emit_dropped(&tag, point, drag_mask(action), anchor, before, clip);
                 if let Some(finish) = finish {
                     finish.finish(action);
@@ -9247,6 +9416,8 @@ fn deliver_drop(
             // Nothing transferred is not a drop; the source learns
             // `none` through its own drag_ended, as a refusal does.
             None => {
+                #[cfg(feature = "harness")]
+                note_drop_side(|side| side.empty += 1);
                 if let Some(finish) = finish {
                     finish.finish(gdk::DragAction::empty());
                 }
@@ -9276,20 +9447,51 @@ fn install_drop_target(core: &CoreState, id: WidgetId) {
         gtk4::DropTargetAsync::new(Some(accept_formats(&accepts)), drag_actions(operations));
     let accept_hub = hub.clone();
     target.connect_accept(move |_target, drop| {
-        !drop_action(&accept_hub.accepts_of(id.0), operations, drop).is_empty()
+        let took = !drop_action(&accept_hub.accepts_of(id.0), operations, drop).is_empty();
+        #[cfg(feature = "harness")]
+        note_drop_side(|side| {
+            side.accept += 1;
+            side.accept_yes += u32::from(took);
+            side.last_yes = Some(took);
+            note_drop_offer(side, &ClipOffer::Drop(drop.clone()));
+        });
+        took
     });
     let enter_hub = hub.clone();
     target.connect_drag_enter(move |_target, drop, _x, _y| {
-        drop_action(&enter_hub.accepts_of(id.0), operations, drop)
+        let action = drop_action(&enter_hub.accepts_of(id.0), operations, drop);
+        #[cfg(feature = "harness")]
+        note_drop_side(|side| {
+            side.enter += 1;
+            side.enter_yes += u32::from(!action.is_empty());
+            side.last_yes = Some(!action.is_empty());
+            note_drop_offer(side, &ClipOffer::Drop(drop.clone()));
+        });
+        if !action.is_empty() {
+            note_drop_took();
+        }
+        action
     });
     let motion_hub = hub.clone();
     target.connect_drag_motion(move |_target, drop, _x, _y| {
-        drop_action(&motion_hub.accepts_of(id.0), operations, drop)
+        let action = drop_action(&motion_hub.accepts_of(id.0), operations, drop);
+        #[cfg(feature = "harness")]
+        note_drop_side(|side| {
+            side.motion += 1;
+            side.motion_yes += u32::from(!action.is_empty());
+            side.last_yes = Some(!action.is_empty());
+        });
+        if !action.is_empty() {
+            note_drop_took();
+        }
+        action
     });
     let drop_hub = hub.clone();
     target.connect_drop(move |_target, drop, x, y| {
         let accepts = drop_hub.accepts_of(id.0);
         let action = drop_action(&accepts, operations, drop);
+        #[cfg(feature = "harness")]
+        note_drop_side(|side| side.drop += 1);
         if action.is_empty() {
             return false;
         }
@@ -9351,6 +9553,8 @@ fn install_reorder(core: &CoreState, container: WidgetId) {
     let begin_hub = hub.clone();
     source.connect_drag_begin(move |_source, drag| {
         note_drag_began();
+        #[cfg(feature = "harness")]
+        note_drop_side(|side| side.began.push(format!("reorder#{}", container.0)));
         if let Some(row) = begin_hub.row_drag.borrow_mut().as_mut() {
             row.drag = Some(drag.clone());
         }
@@ -9362,7 +9566,10 @@ fn install_reorder(core: &CoreState, container: WidgetId) {
         clear_insertion(&end_rows);
         let ended = end_hub.row_drag.borrow_mut().take();
         if let Some(row) = ended {
-            end_hub.emit_drag_ended(&row.tag, drag_mask(drag.selected_action()));
+            let operation = drag_mask(drag.selected_action());
+            #[cfg(feature = "harness")]
+            note_drop_side(|side| side.ended.push(operation));
+            end_hub.emit_drag_ended(&row.tag, operation);
         }
     });
     rows.add_controller(source.clone());
@@ -9371,12 +9578,30 @@ fn install_reorder(core: &CoreState, container: WidgetId) {
         gdk::DragAction::MOVE,
     );
     let accept_hub = hub.clone();
-    target.connect_accept(move |_target, drop| reorder_takes(&accept_hub, container.0, drop));
+    target.connect_accept(move |_target, drop| {
+        let took = reorder_takes(&accept_hub, container.0, drop);
+        #[cfg(feature = "harness")]
+        note_drop_side(|side| {
+            side.accept += 1;
+            side.accept_yes += u32::from(took);
+            side.last_yes = Some(took);
+            note_drop_offer(side, &ClipOffer::Drop(drop.clone()));
+        });
+        took
+    });
     let enter_hub = hub.clone();
     let enter_rows = rows.clone();
     target.connect_drag_enter(move |_target, drop, x, y| {
         let action = reorder_action(&enter_hub, container.0, drop);
+        #[cfg(feature = "harness")]
+        note_drop_side(|side| {
+            side.enter += 1;
+            side.enter_yes += u32::from(!action.is_empty());
+            side.last_yes = Some(!action.is_empty());
+            note_drop_offer(side, &ClipOffer::Drop(drop.clone()));
+        });
         if !action.is_empty() {
+            note_drop_took();
             show_insertion(&enter_rows, x, y);
         }
         action
@@ -9385,9 +9610,16 @@ fn install_reorder(core: &CoreState, container: WidgetId) {
     let motion_rows = rows.clone();
     target.connect_drag_motion(move |_target, drop, x, y| {
         let action = reorder_action(&motion_hub, container.0, drop);
+        #[cfg(feature = "harness")]
+        note_drop_side(|side| {
+            side.motion += 1;
+            side.motion_yes += u32::from(!action.is_empty());
+            side.last_yes = Some(!action.is_empty());
+        });
         if action.is_empty() {
             clear_insertion(&motion_rows);
         } else {
+            note_drop_took();
             show_insertion(&motion_rows, x, y);
         }
         action
@@ -9397,6 +9629,8 @@ fn install_reorder(core: &CoreState, container: WidgetId) {
     let drop_hub = hub.clone();
     let drop_rows = rows.clone();
     target.connect_drop(move |_target, drop, x, y| {
+        #[cfg(feature = "harness")]
+        note_drop_side(|side| side.drop += 1);
         if !reorder_takes(&drop_hub, container.0, drop) {
             return false;
         }
@@ -9475,7 +9709,7 @@ fn drag_points(
     source: crate::harness::Target,
     destination: crate::harness::Target,
     reorder: Option<bool>,
-) -> Result<((f64, f64), (f64, f64)), String> {
+) -> Result<((f64, f64), (f64, f64), String), String> {
     let src = target_widget(core, source)
         .ok_or_else(|| format!("no such source {:?}", source))?;
     let dst = target_widget(core, destination)
@@ -9526,7 +9760,33 @@ fn drag_points(
         f64::from(db.x()) + f64::from(db.width()) / 2.0,
         f64::from(db.y()) + f64::from(db.height()) * share,
     );
-    Ok((from, to))
+    Ok((from, to, source_name(core, &src)))
+}
+
+/// Which declared source the verb is AIMING at, in the same naming the
+/// drag-begin arms record — so one reading says whether GTK began the drag
+/// on the widget kaya pressed (docs/deferred.md's dnd WATCH).
+#[cfg(feature = "harness")]
+fn source_name(core: &CoreState, widget: &gtk4::Widget) -> String {
+    let declared = core.dnd.source_ctl.borrow().keys().copied().find(|id| {
+        core.widgets
+            .get(&WidgetId(*id))
+            .is_some_and(|native| &native.control() == widget)
+    });
+    if let Some(id) = declared {
+        return format!("widget#{id}");
+    }
+    let rows = core
+        .dnd
+        .reorder
+        .borrow()
+        .keys()
+        .copied()
+        .find(|id| rows_box(core, WidgetId(*id)).is_some_and(|rows| widget.is_ancestor(&rows)));
+    match rows {
+        Some(id) => format!("reorder#{id}"),
+        None => "<undeclared>".to_owned(),
+    }
 }
 
 #[cfg(feature = "harness")]
@@ -16699,7 +16959,7 @@ impl crate::harness::Stage for GtkStage {
                 Err(_) => std::thread::sleep(std::time::Duration::from_millis(20)),
             }
         };
-        let (from, to) = match points {
+        let (from, to, aimed) = match points {
             Ok(points) => points,
             Err(why) => return why,
         };
@@ -16720,22 +16980,29 @@ impl crate::harness::Stage for GtkStage {
         .iter()
         .map(|v| v.to_string())
         .collect();
-        // THE WAYLAND GATE: one file per gesture, touched by note_drag_began,
-        // waited for by the injector past the threshold (x11 holds its
-        // release in the harness instead, below).
-        let begin_flag = (proto == "wayland").then(|| {
+        // THE WAYLAND GATES, one file per gesture each: `begin` is touched by
+        // note_drag_began and waited for past the threshold, `took` by
+        // note_drop_took and waited for at the walk's end, before the release
+        // (x11 holds its release in the harness instead, below).
+        let gesture_flag = |what: &str| {
             std::env::temp_dir().join(format!(
-                "kaya-drag-begin-{}-{}",
+                "kaya-drag-{what}-{}-{}",
                 std::process::id(),
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .map(|d| d.as_nanos())
                     .unwrap_or(0)
             ))
-        });
+        };
+        let begin_flag = (proto == "wayland").then(|| gesture_flag("begin"));
+        let took_flag = (proto == "wayland").then(|| gesture_flag("took"));
         if let Some(flag) = &begin_flag {
             let _ = std::fs::remove_file(flag);
             *DRAG_BEGIN_FLAG.lock().unwrap() = Some(flag.clone());
+        }
+        if let Some(flag) = &took_flag {
+            let _ = std::fs::remove_file(flag);
+            *DRAG_TOOK_FLAG.lock().unwrap() = Some(flag.clone());
         }
         let run = |phase: Option<&str>| {
             let mut cmd = std::process::Command::new("python3");
@@ -16745,6 +17012,9 @@ impl crate::harness::Stage for GtkStage {
             }
             if let Some(flag) = &begin_flag {
                 cmd.env("KAYA_DRAG_BEGIN_FLAG", flag);
+            }
+            if let Some(flag) = &took_flag {
+                cmd.env("KAYA_DRAG_TOOK_FLAG", flag);
             }
             match cmd.output() {
                 Ok(out) if out.status.success() => {
@@ -16763,10 +17033,19 @@ impl crate::harness::Stage for GtkStage {
             }
         };
         DRAG_BEGAN.store(false, std::sync::atomic::Ordering::SeqCst);
+        DRAG_TOOK.store(false, std::sync::atomic::Ordering::SeqCst);
+        // THE DROP SIDE OF THIS GESTURE, read back below: the driver's line
+        // above says what reached the compositor, and nothing has ever said
+        // what the destination's own arms saw (docs/deferred.md's dnd WATCH).
+        *DROP_SIDE.lock().unwrap() = Some(DropSide {
+            armed: Some(std::time::Instant::now()),
+            ..DropSide::default()
+        });
         if proto != "x11" {
             let out = run(None);
             *DRAG_BEGIN_FLAG.lock().unwrap() = None;
-            if let Some(flag) = &begin_flag {
+            *DRAG_TOOK_FLAG.lock().unwrap() = None;
+            for flag in [&begin_flag, &took_flag].into_iter().flatten() {
                 let _ = std::fs::remove_file(flag);
             }
             if !DRAG_BEGAN.load(std::sync::atomic::Ordering::SeqCst) {
@@ -16775,7 +17054,8 @@ impl crate::harness::Stage for GtkStage {
                      the injector's own wait line above says how long it held"
                 );
             }
-            return out;
+            let gate = report_drop_side(&aimed, true);
+            return if out.is_empty() { gate } else { out };
         }
         // THE RELEASE WAITS FOR GTK'S OWN drag-begin (x11): the pointer is
         // pressed and walked past the threshold, and the button stays down
@@ -16800,7 +17080,9 @@ impl crate::harness::Stage for GtkStage {
                 wait.as_millis()
             );
         }
-        run(Some("release"))
+        let out = run(Some("release"));
+        let gate = report_drop_side(&aimed, false);
+        if out.is_empty() { gate } else { out }
     }
 
     /// A FOREIGN FILE DROP, IN PROCESS (docs/dnd-plan.md D6). `GdkDrop` is
@@ -16968,11 +17250,28 @@ impl crate::harness::Stage for GtkStage {
                 // matches is the target (a stamped button by key —
                 // docs/deferred.md's keyed-target entry, 2026-09-01).
                 let candidates = kind_registry(core, kind);
+                // A registry may hold the native's INNER widget — the
+                // textarea's registry is its text view, its native's widget
+                // the scroller around it — so a copy is matched by the
+                // registry widget being the native's or sitting inside it
+                // (richrows on the linux lane read `0 tagged` with two live
+                // copies carrying the id, 2026-09-16).
+                // THE NEAREST NATIVE ON THE WIDGET'S OWN PARENT CHAIN: the
+                // natives are a hash map, and "any native whose widget
+                // contains w" answered copy a's textarea and copy b's
+                // enclosing COLUMN, whichever the iteration met first
+                // (measured on the second run, 2026-09-16).
                 let tag_of = |w: &gtk4::Widget| -> Option<Vec<u8>> {
-                    core.widgets
-                        .iter()
-                        .find(|(_, native)| native.widget() == *w)
-                        .and_then(|(wid, _)| core.widget_tags.get(&wid.0).cloned())
+                    let mut node = Some(w.clone());
+                    while let Some(n) = node {
+                        if let Some((wid, _)) =
+                            core.widgets.iter().find(|(_, native)| native.widget() == n)
+                        {
+                            return core.widget_tags.get(&wid.0).cloned();
+                        }
+                        node = n.parent();
+                    }
+                    None
                 };
                 // EVERY copy carrying the id is a candidate, whichever
                 // template stamped it (harness::table_tag_keys_match).

@@ -1,17 +1,31 @@
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE TypeApplications #-}
+
 -- The Haskell uniform-abort guard. Run headless by tools/check-abort.py.
 
 import Control.Exception (SomeException, evaluate, try)
 import Control.Monad (unless)
+import Data.Bits (shiftR, (.&.))
 import qualified Data.ByteString as BS
 import Data.ByteString.Builder (toLazyByteString)
+import qualified Data.ByteString.Char8 as BC
 import qualified Data.ByteString.Lazy as BL
 import Data.List (isInfixOf)
+import Data.Proxy (Proxy (..))
+import GHC.Generics (Generic)
 import System.Exit (exitFailure)
 import System.IO (hPutStrLn, stderr)
 
 import KayaApp
 import KayaWire (Value (..))
 import qualified KayaWire as W
+
+-- A record with a DOCUMENT field (docs/rich-text-plan.md §19).
+data CheckNote = CheckNote {cnTitle :: String, cnBody :: Document}
+  deriving (Generic)
+
+instance KayaRecord CheckNote
 
 failWith :: String -> IO a
 failWith msg = hPutStrLn stderr msg >> exitFailure
@@ -181,5 +195,76 @@ main = do
     check (null runs)
       ("the fold after the two removals holds " ++ show runs
          ++ ", wanted nothing")
+
+  -- THE DOCUMENT AS A ROW FIELD (docs/rich-text-plan.md §19). NOTHING
+  -- ELSE READS THESE BYTES: the richrows scene asserts what the CORE
+  -- renders, so a field encoding the core happens to tolerate would be
+  -- green on five lanes; the reference list below is built from the wire
+  -- rules by hand — u32 tag, u32 length, payload, padded to 8 — and not
+  -- from this binding's own encoder.
+  let le :: Int -> Int -> BS.ByteString
+      le n width =
+        BS.pack [fromIntegral ((n `shiftR` (8 * i)) .&. 0xff) | i <- [0 .. width - 1]]
+      pad8 b = b <> BS.replicate ((8 - BS.length b `mod` 8) `mod` 8) 0
+      handStr v = pad8 (le 4 4 <> le (length (BC.unpack (BC.pack v))) 4 <> BC.pack v)
+      handI64 n = pad8 (le 2 4 <> le 8 4 <> le n 8)
+      reference =
+        BS.concat
+          [ le 9 4, le 0 4, handStr "abc",
+            handI64 0, handI64 1, handStr "bold", handStr "true",
+            handI64 1, handI64 3, handStr "link", handStr "u"
+          ]
+      twoRuns = linkRun (1, 3) "u" (boldRun (0, 1) (documentOf "abc"))
+  case toFieldValue twoRuns of
+    VStr got
+      | BC.pack got == reference -> return ()
+      | otherwise ->
+          let packed = BC.pack got
+              n = min (BS.length packed) (BS.length reference)
+              differs = [i | i <- [0 .. n - 1], BS.index packed i /= BS.index reference i]
+           in failWith
+                ( case differs of
+                    (i : _) ->
+                      "a Document field's bytes differ from the wire's own list at byte "
+                        ++ show i ++ ": " ++ show (BS.index packed i) ++ ", wanted "
+                        ++ show (BS.index reference i) ++ " (" ++ show (BS.length packed)
+                        ++ " byte(s) packed, " ++ show (BS.length reference) ++ " wanted)"
+                    [] ->
+                      "a Document field packed " ++ show (BS.length packed)
+                        ++ " byte(s) where the wire's own list is "
+                        ++ show (BS.length reference)
+                        ++ " — the text as a Str, then four values per run"
+                )
+    other ->
+      failWith
+        ( "a Document field's model value is " ++ show other
+            ++ ", wanted the blob's bytes as a binary Str" )
+  check (documentOfBlob reference == Document "abc" [Run 0 1 "bold" "true", Run 1 3 "link" "u"])
+    ("the reference list read back as " ++ show (documentOfBlob reference))
+
+  -- AND THE FOLD REACHES THE ROW: a stamped copy's edit folds into its
+  -- row's field by the rule the LIVE mirror folds by, so the two
+  -- documents are one document.
+  let seed = boldRun (0, 6) (documentOf "Héllo world")
+      oneEdit = Edit 0 6 "Hey" [] Nothing
+  rowApp <- newApp
+  (rowNotes, rowNode) <- buildTx rowApp $ do
+    notes <- collectionOf (Proxy :: Proxy CheckNote)
+    (_, node) <- forEach (recordHandle notes) (textareaRichBound (field @"cnBody" @CheckNote))
+    insertRecord notes (VStr "a") (CheckNote "a" seed)
+    return (notes, node)
+  foldRowDocument rowApp rowNode [VStr "a"] (foldEdit oneEdit)
+  liveEditor <- buildTx rowApp (textarea [Rich True])
+  buildTx rowApp (setDocument rowApp liveEditor seed)
+  absorbEdit rowApp liveEditor oneEdit
+  mirrored <- document rowApp liveEditor
+  items <- buildTx rowApp (recordItems rowNotes)
+  case lookup (VStr "a") items of
+    Nothing -> failWith "the row vanished before the fold could be read back"
+    Just note ->
+      check (cnBody note == mirrored)
+        ( "the row's field folded to " ++ show (cnBody note)
+            ++ " where the live mirror folded to " ++ show mirrored
+            ++ " — one rule, two documents" )
 
   putStrLn "haskell abort check: OK"

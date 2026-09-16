@@ -33,6 +33,9 @@ sealed class RecordInfo
         : t == typeof(long) ? KayaWire.ValueI64
         : t == typeof(double) ? KayaWire.ValueF64
         : t == typeof(byte[]) ? KayaWire.ValueBlob
+        // A stamped copy's document is a Blob field whose bytes are the
+        // document's own value list (docs/rich-text-plan.md §19).
+        : t == typeof(Document) ? KayaWire.ValueBlob
         // The picker types ride the I64 tag in packed decimal
         // (docs/datetime-plan.md D10).
         : t == typeof(DateOnly) ? KayaWire.ValueI64
@@ -98,9 +101,12 @@ sealed class RecordInfo
         if (value is DateOnly or TimeOnly) return KayaRecords.ScalarWire(value);
         if (Schema[wireIndex] == KayaWire.ValueBlob)
         {
+            if (value is Document document)
+                return new KayaWire.BlobHandle(
+                    Kaya.RegisterBlob(KayaApp.DocumentBlob(document)));
             if (value is not byte[] bytes)
                 throw new ArgumentException(
-                    $"kaya: {name} is a blob field and takes byte[], not "
+                    $"kaya: {name} is a blob field and takes byte[] or Document, not "
                     + $"{value?.GetType().Name ?? "null"}");
             return new KayaWire.BlobHandle(Kaya.RegisterBlob(bytes));
         }
@@ -139,6 +145,12 @@ sealed class RecordInfo
         }
         return Ctor.Invoke(args);
     }
+
+    /// One wire field's value as the record holds it — the read half of
+    /// WithField, which the row-document fold needs
+    /// (docs/rich-text-plan.md §19).
+    internal object FieldOfWire(object record, uint wireIndex) =>
+        Getters[WireToCtor[wireIndex]](record);
 
     internal object WithField(object record, uint wireIndex, object value)
     {

@@ -42,6 +42,22 @@ let check_todo_rt =
 
 let check_todo_ct_pic : (check_todo, bytes) Kaya_app.field = blob_field 1
 
+(* A record with a DOCUMENT field (docs/rich-text-plan.md §19), hand
+   spelled for the same reason [check_todo] is. *)
+type check_note = { cn_title : string; cn_body : document }
+
+let check_note_rt =
+  {
+    rt_schema = [ Kaya_wire.value_str; Kaya_wire.value_blob ];
+    rt_to_values = (fun n -> [ Str n.cn_title; Str (document_blob n.cn_body) ]);
+    rt_of_values =
+      (function
+        | [ Str t; Str b ] -> { cn_title = t; cn_body = document_of_blob b }
+        | _ -> invalid_arg "check_note");
+  }
+
+let check_note_body : (check_note, document) Kaya_app.field = document_field 1
+
 let () =
   (* ONE ID SPACE: a template node draws from the WIDGET counter, so an
      app hands out one number sequence and the core's two "already
@@ -833,5 +849,108 @@ let () =
   | runs ->
       fail "the fold after the two removals holds [%s], wanted nothing"
         (show_runs runs));
+
+  (* THE DOCUMENT AS A ROW FIELD (docs/rich-text-plan.md §19). NOTHING
+     ELSE READS THESE BYTES: the richrows scene asserts what the CORE
+     renders, so a field encoding the core happens to tolerate would be
+     green on five lanes; the reference list below is built from the wire
+     rules by hand — u32 tag, u32 length, payload, padded to 8 — and not
+     from this binding's own encoder. *)
+  let le n width =
+    String.init width (fun i -> Char.chr ((n lsr (8 * i)) land 0xff))
+  in
+  let pad8 s = s ^ String.make ((8 - (String.length s mod 8)) mod 8) '\000' in
+  let hand_str v = pad8 (le 4 4 ^ le (String.length v) 4 ^ v) in
+  let hand_i64 n = pad8 (le 2 4 ^ le 8 4 ^ le n 8) in
+  let two_runs =
+    Document.create "abc" |> Document.bold (0, 1) |> Document.link (1, 3) "u"
+  in
+  let reference =
+    String.concat ""
+      [
+        le 9 4; le 0 4;
+        hand_str "abc";
+        hand_i64 0; hand_i64 1; hand_str "bold"; hand_str "true";
+        hand_i64 1; hand_i64 3; hand_str "link"; hand_str "u";
+      ]
+  in
+  (match check_note_body.fd_to_value two_runs with
+  | Str got when got = reference -> ()
+  | Str got ->
+      let n = min (String.length got) (String.length reference) in
+      let rec first at =
+        if at >= n then at else if got.[at] <> reference.[at] then at else first (at + 1)
+      in
+      let at = first 0 in
+      if at >= n then
+        fail
+          "a Document field packed %d byte(s) where the wire's own list is %d \
+           — the text as a Str, then four values per run"
+          (String.length got) (String.length reference)
+      else
+        fail
+          "a Document field's bytes differ from the wire's own list at byte \
+           %d: 0x%02x, wanted 0x%02x (%d byte(s) packed, %d wanted)"
+          at (Char.code got.[at]) (Char.code reference.[at])
+          (String.length got) (String.length reference)
+  | other ->
+      fail "a Document field's model value is %s, wanted the blob's bytes \
+            as a binary Str"
+        (show_key other));
+  (match document_of_blob reference with
+  | { d_text = "abc"; d_runs = [ a; b ] }
+    when (a.r_start, a.r_stop, a.r_name, a.r_value) = (0, 1, "bold", "true")
+         && (b.r_start, b.r_stop, b.r_name, b.r_value) = (1, 3, "link", "u") ->
+      ()
+  | doc ->
+      fail "the reference list read back as %S [%s]" doc.d_text
+        (String.concat ", "
+           (List.map
+              (fun r ->
+                Printf.sprintf "%d..%d %s=%s" r.r_start r.r_stop r.r_name
+                  r.r_value)
+              doc.d_runs)));
+
+  (* AND THE FOLD REACHES THE ROW: a stamped copy's edit folds into its
+     row's field by the rule the LIVE mirror folds by, so the two
+     documents are one document. *)
+  let seed = Document.create "Héllo world" |> Document.bold (0, 6) in
+  let edit = ((0, 6), "Hey", []) in
+  let row_app = create () in
+  let notes, node =
+    build row_app (fun () ->
+        let notes = collection_of check_note_rt in
+        let node = ref 0L in
+        let _, () =
+          for_each (record_handle notes)
+            (fun () ->
+              let (Node n) =
+                Tpl.textarea ~document_field:check_note_body ()
+              in
+              node := n)
+            ()
+        in
+        insert_record notes (Str "a") { cn_title = "a"; cn_body = seed };
+        (notes, !node))
+  in
+  let range, inserted, runs = edit in
+  fold_row_document row_app node [ Str "a" ] (fun doc ->
+      fold_edit doc range inserted runs);
+  let live = build row_app (fun () -> textarea ~rich:true ()) in
+  build row_app (fun () -> set_document live seed);
+  let (Widget live_id) = live in
+  absorb_edit row_app live_id range inserted runs;
+  let mirrored = build row_app (fun () -> document live) in
+  let rowed =
+    match List.assoc_opt (Str "a") (build row_app (fun () -> record_items notes)) with
+    | Some note -> note.cn_body
+    | None -> fail "the row vanished before the fold could be read back"
+  in
+  if rowed <> mirrored then
+    fail
+      "the row's field folded to %S [%s] where the live mirror folded to \
+       %S [%s] — one rule, two documents"
+      rowed.d_text (show_runs rowed.d_runs) mirrored.d_text
+      (show_runs mirrored.d_runs);
 
   print_endline "ocaml abort check: OK"

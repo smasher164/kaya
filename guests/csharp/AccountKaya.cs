@@ -164,6 +164,10 @@ sealed class AccountRow
         System.Action<Tx, System.Collections.Generic.List<object>, string> onChange = null) =>
         t.Textarea(text, onChange);
 
+    public Node Textarea(Field<Document> document,
+        System.Action<Tx, System.Collections.Generic.List<object>, string> onChange = null) =>
+        t.Textarea(document, onChange);
+
     public Node Search(
         System.Action<Tx, System.Collections.Generic.List<object>, string> onChange = null) =>
         t.Search(onChange);

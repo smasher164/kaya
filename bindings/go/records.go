@@ -110,12 +110,19 @@ func timeOf(packed int64) Time {
 
 var dateType = reflect.TypeFor[Date]()
 var timeType = reflect.TypeFor[Time]()
+var documentType = reflect.TypeFor[Document]()
 
 func wireTag(t reflect.Type) (uint32, bool) {
 	// The two picker types ride the I64 tag in packed decimal; every
 	// other struct field is guest-only.
 	if t == dateType || t == timeType {
 		return ValueI64, true
+	}
+	// A Document field IS a Blob field carrying documentBlob's value
+	// list, so it binds through the template zone as a string field does
+	// (docs/rich-text-plan.md §19).
+	if t == documentType {
+		return ValueBlob, true
 	}
 	switch t.Kind() {
 	case reflect.Bool:
@@ -135,10 +142,25 @@ func wireTag(t reflect.Type) (uint32, bool) {
 	return 0, false
 }
 
+// documentBlob is a Document's wire bytes: ONE flat value list — the
+// text, then four values per run (crates/kaya/src/wire.rs,
+// document_blob).
+func documentBlob(doc Document) []byte {
+	vals := make([]any, 0, 1+4*len(doc.Runs))
+	vals = append(vals, doc.Text)
+	for _, run := range doc.Runs {
+		vals = append(vals, int64(run.Start), int64(run.End), run.Name, run.Value)
+	}
+	return encodeValues(nil, vals)
+}
+
 // blobWire registers a blob's bytes at encode time and returns the wire
 // handle. Handles are single-submit, so every operation carrying blob
 // bytes re-registers; the model keeps the guest's own bytes.
 func blobWire(v any) BlobHandle {
+	if doc, ok := v.(Document); ok {
+		return BlobHandle(RegisterBlob(documentBlob(doc)))
+	}
 	rv := reflect.ValueOf(v)
 	if rv.Kind() != reflect.Slice || rv.Type().Elem().Kind() != reflect.Uint8 {
 		panic(fmt.Sprintf(
@@ -813,6 +835,26 @@ func (c RecordCollection[K, T]) onValueOf(t *Tpl, n Node, onChange func(*Tx, K, 
 	t.tx.app.OnValueChangedNode(n, func(tx *Tx, keys []any, v float64) {
 		onChange(tx, keys[0].(K), v)
 	})
+}
+
+// TextareaRich creates a rich textarea per stamped copy whose document
+// is a Document FIELD of the row (docs/rich-text-plan.md §19), with its
+// edit and format handlers (nil for none). The app writes a copy's
+// document by patching its row; the copy's own acts fold back into the
+// field before the handler runs.
+func (c RecordCollection[K, T]) TextareaRich(t *Tpl, f Field[Document], onEdit func(*Tx, K, Edit), onFormat func(*Tx, K, Format)) Node {
+	n := t.TextareaRichBound(f)
+	if onEdit != nil {
+		t.tx.app.OnEditNode(n, func(tx *Tx, keys []any, edit Edit) {
+			onEdit(tx, keys[0].(K), edit)
+		})
+	}
+	if onFormat != nil {
+		t.tx.app.OnFormatNode(n, func(tx *Tx, keys []any, act Format) {
+			onFormat(tx, keys[0].(K), act)
+		})
+	}
+	return n
 }
 
 // DatePicker creates a date picker whose VALUE comes from any

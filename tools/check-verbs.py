@@ -2275,6 +2275,17 @@ POLISH_DRAWS = [
     ("winui/mod.rs", WINUI, "the ground and indent written",
      r"fn rich_write_format\(", r"\n}\n",
      [r"SetBackgroundColor\(match rich_ground\(", r"SetIndents\(0\.0, indent, 0\.0\)"]),
+    # The rich LABEL's ground on WinUI is a TextHighlighter per colour over
+    # the block (Run/Span/Hyperlink carry no background); the restyle row
+    # has the teeth, since a restyle that stopped calling the painter draws
+    # the same runs and passes every lane.
+    ("winui/mod.rs", WINUI, "the label's code ground",
+     r"fn label_paint_grounds\(", r"\n}\n",
+     [r"block\.TextHighlighters\(\)", r"rich_ground\(&attrs, palette\)",
+      r"TextHighlighter::new\(\)"]),
+    ("winui/mod.rs", WINUI, "the label restyle painting its grounds",
+     r"fn label_restyle\(", r"\n}\n",
+     [r"label_paint_grounds\(block, text, runs\)"]),
     ("winui/mod.rs", WINUI, "the highlights read keyed on the highlight's own colour",
      r"fn painted_runs\(", r"\n}\n",
      [r"== HIGHLIGHT_BACKGROUND"]),
@@ -2343,6 +2354,11 @@ for label, kwargs, finding in (
                             r"(fn painted_runs\([\s\S]*?)== HIGHLIGHT_BACKGROUND",
                             "!= AUTO_COLOR")),
      r"^winui/mod\.rs's site for the highlights read keyed on the highlight's own"),
+    ("the winui label restyle no longer painting",
+     dict(winui_src=perturb("polish (winui label painter dropped)", WINUI,
+                            r"(fn label_restyle\([\s\S]*?)label_paint_grounds\(block, text, runs\)",
+                            "label_skip_grounds(block, text, runs)")),
+     r"^winui/mod\.rs's site for the label restyle painting its grounds does not name"),
     ("the compose quote rule drawing nothing",
      dict(kotlin_src=perturb("polish (compose rule cut)", KOTLIN,
                              r"(fun (?:[\w.]+\.)?DrawScope\.kayaRichQuoteRule\([\s\S]*?)drawRect\(",

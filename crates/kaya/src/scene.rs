@@ -974,6 +974,10 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         // The textarea (docs/rich-text-plan.md R1) and, read-only with the
         // inline vocabulary, the label (R8, §15).
         Prop::Rich => matches!(kind, WidgetKind::Textarea | WidgetKind::Label),
+        // A stamped copy's document (docs/rich-text-plan.md §19): the
+        // textarea alone, and the template zone alone — the live zone is
+        // refused where the prop is applied.
+        Prop::Document => matches!(kind, WidgetKind::Textarea),
         Prop::OwnUndo | Prop::CanUndo | Prop::CanRedo => matches!(kind, WidgetKind::Textarea),
         Prop::Checked => matches!(kind, WidgetKind::Checkbox),
         // Value is the slider's position AND the progress bar's fraction
@@ -1563,6 +1567,7 @@ fn prop_value_type(prop: Prop) -> ValueType {
         Prop::Axis => ValueType::I64,
         Prop::Role => ValueType::I64,
         Prop::Indeterminate | Prop::Fill | Prop::Wrap | Prop::Rich => ValueType::Bool,
+        Prop::Document => ValueType::Blob,
         Prop::OwnUndo | Prop::CanUndo | Prop::CanRedo => ValueType::Bool,
         Prop::Columns | Prop::MinColumnWidth => ValueType::F64,
         Prop::A11yId
@@ -2394,6 +2399,66 @@ impl Scene {
     /// Every labelled row in a template body, checked against the shape
     /// its stamps will have (docs/forms-plan.md §2); nested For and When
     /// bodies are walked too.
+    /// A bound prop reaches a stamped copy here, at the stamp and at every
+    /// field write. `document` (docs/rich-text-plan.md §19) is the one prop
+    /// that is not a SetProp to the arm: its Blob is the copy's document, so
+    /// it takes the live set_rich_text path — the mirror keyed by the copy's
+    /// own id, and the arm's one apply op — and no arm knows the prop.
+    fn push_bound_prop(&mut self, id: WidgetId, prop: Prop, value: Value, out: &mut Vec<ApplyOp>) {
+        if prop != Prop::Document {
+            if prop == Prop::Rich {
+                if let Value::Bool(true) = value {
+                    self.rich.entry(id).or_insert_with(|| RichDoc::seeded(""));
+                }
+            }
+            out.push(ApplyOp::SetProp { id, prop, value });
+            return;
+        }
+        let Value::Blob(blob) = &value else {
+            panic!("kaya: `document` binds a Blob field; {id:?} was handed {value:?}");
+        };
+        let (text, runs) = crate::wire::read_document_blob(&blob.0);
+        let native = check_runs(&text, id, "document", &runs, true);
+        let doc = self.rich.entry(id).or_insert_with(|| RichDoc::seeded(""));
+        doc.text = text.clone();
+        doc.runs = runs;
+        doc.normalize();
+        doc.queued.clear();
+        doc.selection = TextRange::new(0, 0);
+        out.push(ApplyOp::SetRichText { id, text, runs: native });
+    }
+
+    /// `document` renders only on a rich textarea, and the arm hears `rich`
+    /// as a SetProp before the document's apply op — so a template that
+    /// binds a document names `rich` on the same node, earlier in the body
+    /// (docs/rich-text-plan.md §19). Every binding's sugar meets this by
+    /// construction; a hand-built template is refused here.
+    fn check_document_template(&self, body: &TplBody) {
+        let mut rich_on: HashSet<u64> = HashSet::new();
+        for op in &body.ops {
+            match op {
+                TplOp::SetProp { node, prop: Prop::Rich, value: PropValue::Const(Value::Bool(true)) } => {
+                    rich_on.insert(*node);
+                }
+                TplOp::SetProp { node, prop: Prop::Document, .. } => {
+                    assert!(
+                        rich_on.contains(node),
+                        "kaya: template node {node} binds `document` without `rich` before it \
+                         — a document renders only on a rich textarea, and the arm must hear \
+                         `rich` first (docs/rich-text-plan.md §19)"
+                    );
+                }
+                TplOp::For { bodies, .. } => {
+                    for b in bodies {
+                        self.check_document_template(b);
+                    }
+                }
+                TplOp::When { body, .. } => self.check_document_template(body),
+                _ => {}
+            }
+        }
+    }
+
     fn check_labeled_template(&self, body: &TplBody) {
         let mut children: HashMap<u64, Vec<u64>> = HashMap::new();
         for op in &body.ops {
@@ -2624,6 +2689,11 @@ impl Scene {
                                     set.remove(&widget);
                                 }
                             }
+                            assert!(
+                                prop != Prop::Document,
+                                "kaya: `document` is a template-zone prop — a live textarea's \
+                                 document is set_rich_text (docs/rich-text-plan.md §19)"
+                            );
                             // The mirror lives only while `rich` is on
                             // (docs/rich-text-plan.md R1).
                             if prop == Prop::Rich {
@@ -6146,9 +6216,13 @@ impl Scene {
                     ClosedScope::For { bodies, .. } => {
                         for body in bodies {
                             self.check_labeled_template(body);
+                            self.check_document_template(body);
                         }
                     }
-                    ClosedScope::When { body, .. } => self.check_labeled_template(body),
+                    ClosedScope::When { body, .. } => {
+                        self.check_labeled_template(body);
+                        self.check_document_template(body);
+                    }
                 }
                 match (scopes.last_mut(), bodies) {
                     // Nested: fold into the parent template.
@@ -6845,13 +6919,10 @@ impl Scene {
         }
         // Same constructor: the data changed; every property fed by
         // this entry follows, each from its own field.
-        if let Some(bound) = self.element_bindings.get(&(id, path.clone(), key.clone())) {
+        if let Some(bound) = self.element_bindings.get(&(id, path.clone(), key.clone())).cloned() {
             for (widget, prop, field) in bound {
-                out.push(ApplyOp::SetProp {
-                    id: *widget,
-                    prop: *prop,
-                    value: record[*field as usize].clone(),
-                });
+                let value = record[field as usize].clone();
+                self.push_bound_prop(widget, prop, value, out);
             }
         }
         self.refresh_drag_binds(&(id, path, key), out);
@@ -6936,14 +7007,10 @@ impl Scene {
              variant {stored} (update, not update_field, changes a constructor)"
         );
         current[field as usize] = value.clone();
-        if let Some(bound) = self.element_bindings.get(&(id, path.clone(), key.clone())) {
+        if let Some(bound) = self.element_bindings.get(&(id, path.clone(), key.clone())).cloned() {
             for (widget, prop, bound_field) in bound {
-                if *bound_field == field {
-                    out.push(ApplyOp::SetProp {
-                        id: *widget,
-                        prop: *prop,
-                        value: value.clone(),
-                    });
+                if bound_field == field {
+                    self.push_bound_prop(widget, prop, value.clone(), out);
                 }
             }
         }
@@ -7156,20 +7223,15 @@ impl Scene {
                         self.accept_lists.insert(id, list.clone());
                     }
                     match value {
-                        PropValue::Const(v) => out.push(ApplyOp::SetProp {
-                            id,
-                            prop: *prop,
-                            value: v.clone(),
-                        }),
+                        PropValue::Const(v) => {
+                            let v = v.clone();
+                            self.push_bound_prop(id, *prop, v, out);
+                        }
                         PropValue::Signal(sig) => {
                             let current = self.signals[sig].clone();
                             self.bindings.entry(*sig).or_default().push((id, *prop));
                             stamp.signal_binds.push((*sig, id));
-                            out.push(ApplyOp::SetProp {
-                                id,
-                                prop: *prop,
-                                value: current,
-                            });
+                            self.push_bound_prop(id, *prop, current, out);
                         }
                         PropValue::Element { level, field } => {
                             let entry = chain[chain.len() - 1 - *level as usize].clone();
@@ -7182,11 +7244,7 @@ impl Scene {
                                 .or_default()
                                 .push((id, *prop, *field));
                             stamp.element_binds.push((entry, id));
-                            out.push(ApplyOp::SetProp {
-                                id,
-                                prop: *prop,
-                                value: current,
-                            });
+                            self.push_bound_prop(id, *prop, current, out);
                         }
                     }
                 }
@@ -7515,6 +7573,9 @@ impl Scene {
             if let Some(bound) = self.element_bindings.get_mut(entry) {
                 bound.retain(|(w, _, _)| w != widget);
             }
+        }
+        for widget in &stamp.widgets {
+            self.rich.remove(widget);
         }
         for (entry, widget) in &stamp.drag_binds {
             if let Some(bound) = self.drag_binds.get_mut(entry) {
@@ -13173,6 +13234,140 @@ mod tests {
         );
         assert_eq!(scene.window_menus[&WindowId(2)], vec![MenuItemId(3)]);
         assert!(scene.window_shortcuts[&WindowId(2)].contains("primary+s"));
+    }
+
+    // --- A stamped copy's document (docs/rich-text-plan.md §19) -----------
+
+    fn document_blob_value(text: &str, runs: &[TextRun]) -> Value {
+        Value::Blob(crate::protocol::Blob(crate::wire::document_blob(text, runs)))
+    }
+
+    /// The list a Document field holds reads back as the document it packed,
+    /// runs and non-ASCII text alike.
+    #[test]
+    fn document_blob_round_trips() {
+        let runs = vec![
+            TextRun::new(0, 6, "bold", "true"),
+            TextRun::new(7, 11, "link", "https://kaya.dev"),
+        ];
+        let blob = crate::wire::document_blob("Héllo world", &runs);
+        let (text, back) = crate::wire::read_document_blob(&blob);
+        assert_eq!(text, "Héllo world");
+        assert_eq!(back, runs);
+        let (empty, none) = crate::wire::read_document_blob(&crate::wire::document_blob("", &[]));
+        assert_eq!((empty.as_str(), none.len()), ("", 0));
+    }
+
+    fn rich_rows_template(document: PropValue) -> Vec<TxOp> {
+        vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+            TxOp::CreateCollection {
+                id: CollectionId(1),
+                variants: vec![vec![ValueType::Str, ValueType::Blob]],
+            },
+            TxOp::CreateFor { id: 2, collection: CollectionId(1) },
+            TxOp::CreateWidget { id: WidgetId(10), kind: WidgetKind::Textarea },
+            TxOp::SetProperty {
+                widget: WidgetId(10),
+                prop: Prop::Rich,
+                value: PropValue::Const(Value::Bool(true)),
+            },
+            TxOp::SetProperty { widget: WidgetId(10), prop: Prop::Document, value: document },
+            TxOp::TemplateEnd,
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ]
+    }
+
+    fn rich_texts(ops: &[ApplyOp]) -> Vec<(WidgetId, String)> {
+        ops.iter()
+            .filter_map(|op| match op {
+                ApplyOp::SetRichText { id, text, .. } => Some((*id, text.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A stamped copy's bound document is the live set_rich_text path: the
+    /// arm hears one SetRichText per copy, the mirror keyed by the copy's own
+    /// id holds the document, a field write re-applies it, and the copy's
+    /// removal takes the mirror with it.
+    #[test]
+    fn a_stamped_copys_document_field_is_set_rich_text() {
+        let mut scene = Scene::new();
+        scene.apply(rich_rows_template(PropValue::Element { level: 0, field: 1 }));
+        let seeded = document_blob_value("Héllo world", &[TextRun::new(0, 6, "bold", "true")]);
+        let stamped = scene.apply(vec![TxOp::CollectionInsert {
+            id: CollectionId(1),
+            path: vec![],
+            key: v("a"),
+            variant: 0,
+            record: vec![v("a"), seeded],
+        }]);
+        let texts = rich_texts(&stamped);
+        assert_eq!(texts.len(), 1, "one SetRichText for the one copy: {stamped:?}");
+        let (copy, text) = texts[0].clone();
+        assert_eq!(text, "Héllo world");
+        assert!(
+            !stamped.iter().any(|op| matches!(op, ApplyOp::SetProp { prop: Prop::Document, .. })),
+            "the arm never hears `document` as a prop"
+        );
+        let doc = scene.rich.get(&copy).expect("the copy's mirror");
+        assert_eq!((doc.text.as_str(), doc.runs.len()), ("Héllo world", 1));
+
+        let patched = document_blob_value("Patched", &[TextRun::new(0, 7, "italic", "true")]);
+        let written = scene.apply(vec![TxOp::CollectionUpdateField {
+            id: CollectionId(1),
+            path: vec![],
+            key: v("a"),
+            variant: 0,
+            field: 1,
+            value: patched,
+        }]);
+        assert_eq!(rich_texts(&written), vec![(copy, "Patched".to_owned())]);
+        assert_eq!(scene.rich[&copy].runs[0].name, "italic");
+
+        scene.apply(vec![TxOp::CollectionRemove { id: CollectionId(1), path: vec![], key: v("a") }]);
+        assert!(scene.rich.get(&copy).is_none(), "a torn-down copy's mirror goes with it");
+    }
+
+    /// `document` without `rich` before it on the same node is refused at
+    /// the template's end, in one sentence naming the node.
+    #[test]
+    fn document_without_rich_is_refused() {
+        let mut ops = rich_rows_template(PropValue::Element { level: 0, field: 1 });
+        ops.retain(|op| !matches!(op, TxOp::SetProperty { prop: Prop::Rich, .. }));
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            Scene::new().apply(ops);
+        }));
+        let why = caught.expect_err("refused").downcast::<String>().expect("a sentence");
+        assert!(
+            why.contains("binds `document` without `rich` before it"),
+            "the sentence names the rule: {why}"
+        );
+    }
+
+    /// The live zone refuses the prop: a live textarea's document is
+    /// set_rich_text.
+    #[test]
+    fn document_is_refused_on_a_live_widget() {
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            Scene::new().apply(vec![
+                TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Textarea },
+                TxOp::SetProperty {
+                    widget: WidgetId(1),
+                    prop: Prop::Document,
+                    value: PropValue::Const(document_blob_value("x", &[])),
+                },
+            ]);
+        }));
+        let payload = caught.expect_err("refused");
+        let why = payload
+            .downcast::<String>()
+            .map(|s| *s)
+            .or_else(|p| p.downcast::<&str>().map(|s| s.to_string()))
+            .expect("a sentence");
+        assert!(why.contains("is a template-zone prop"), "{why}");
     }
 
     // --- Rich text (docs/rich-text-plan.md R1-R5) -----------------------

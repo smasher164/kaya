@@ -1,0 +1,105 @@
+// The rich rows scene, C# port — guests/rust/richrows.rs,
+// tools/scenes/richrows.steps: a rich textarea per stamped ROW whose
+// document is a FIELD of the row (docs/rich-text-plan.md §19). The app
+// writes a copy's document by patching its row, and a copy's own act
+// folds into the row the app reads back.
+
+using System;
+using System.Collections.Generic;
+
+// Its own namespace: one binary hosts every scene and feed owns the
+// bare Note.
+namespace Richrows;
+
+[KayaGen]
+record Note(string Title, Document Body);
+
+static class RichrowsScene
+{
+    /// The core's spelling of runs (`expect_runs`), so the row's field
+    /// and the core's mirror are compared as one string.
+    static string Spell(IReadOnlyList<TextRun> runs)
+    {
+        var parts = new List<string>();
+        foreach (TextRun run in runs)
+            parts.Add(run.Value == "true"
+                ? $"{run.Start}:{run.Stop} {run.Name}"
+                : $"{run.Start}:{run.Stop} {run.Name}={run.Value}");
+        return string.Join("|", parts);
+    }
+
+    static string KeyText(object key) => key is string s ? s : $"{key}";
+
+    static Note Row(Tx tx, RecordCollection<Note> notes, object key)
+    {
+        foreach (KeyValuePair<object, Note> entry in notes.Items(tx))
+            if (Equals(entry.Key, key))
+                return entry.Value;
+        throw new InvalidOperationException($"richrows: no row {key}");
+    }
+
+    public static void Run()
+    {
+        var app = new KayaApp();
+
+        Signal last = default;
+        Signal view = default;
+        RecordCollection<Note> notes = null;
+
+        app.Build(tx =>
+        {
+            tx.Window(title: "richrows");
+            notes = NoteKaya.Collection(tx);
+            last = tx.Signal("");
+            view = tx.Signal("");
+
+            tx.Mount(tx.Column(() =>
+            {
+                tx.Label(bind: last); // label#0
+                tx.Label(bind: view); // label#1
+
+                tx.Row(() =>
+                {
+                    tx.Button("patch b", onClick: t => // button#0
+                        NoteKaya.Patch(t, notes, "b").Body(
+                            new Document("Patched")
+                                .Mark(TextRange.Bytes(0, 7), "italic", "true")));
+                    tx.Button("read a", onClick: t => // button#1
+                    {
+                        Note note = Row(t, notes, "a");
+                        t.Write(view, $"{note.Body.Text} | {Spell(note.Body.Runs)}");
+                    });
+                });
+
+                foreach (var row in notes.Rows())
+                {
+                    row.Column(() =>
+                    {
+                        row.Label(row.Title);
+                        Node body = row.Textarea(row.Body);
+                        row.SetA11yId(body, "body");
+                        // The row's field already carries the copy's act
+                        // when these fire: the app reads the row, never
+                        // the widget.
+                        app.OnEdit(body, (t, keys, _) => Acted(t, notes, last, keys));
+                        app.OnFormat(body, (t, keys, _) => Acted(t, notes, last, keys));
+                    });
+                }
+            }));
+
+            notes.Insert(tx, "a", new Note("a",
+                new Document("Héllo world").Mark(TextRange.Bytes(0, 6), "bold", "true")));
+            notes.Insert(tx, "b", new Note("b",
+                new Document("Second note").Mark(
+                    TextRange.Bytes(7, 11), "link", "https://kaya.dev")));
+        });
+
+        Environment.Exit(app.Run());
+    }
+
+    static void Acted(Tx tx, RecordCollection<Note> notes, Signal last, List<object> keys)
+    {
+        Note note = Row(tx, notes, keys[0]);
+        tx.Write(last, $"{KeyText(keys[0])}: {Spell(note.Body.Runs)}");
+    }
+}

@@ -1412,6 +1412,7 @@ pub enum Prop {
     /// textarea (Bool-valued): what Edit>Undo/Redo's enablement reads.
     CanUndo,
     CanRedo,
+    Document,
     /// An image's encoded source bytes (Blob-valued).
     Source,
     /// A container's inter-child gap on its main axis (F64-valued, DIP;

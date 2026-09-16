@@ -32,23 +32,28 @@ export const CivilDate: unique symbol = Symbol("kaya.CivilDate");
 export const CivilTime: unique symbol = Symbol("kaya.CivilTime");
 export type CivilDateToken = typeof CivilDate;
 export type CivilTimeToken = typeof CivilTime;
-export type Token = StringConstructor | BooleanConstructor | NumberConstructor | Uint8ArrayConstructor | IntToken | CivilDateToken | CivilTimeToken;
+/** A stamped copy's document is a FIELD of its row: a Blob carrying the
+ * document's own value list (docs/rich-text-plan.md §19). */
+export type DocumentToken = typeof Document;
+export type Token = StringConstructor | BooleanConstructor | NumberConstructor | Uint8ArrayConstructor | IntToken | CivilDateToken | CivilTimeToken | DocumentToken;
 export type Schema = { readonly [name: string]: Token };
-type FieldOf<T> = T extends StringConstructor
-  ? string
-  : T extends BooleanConstructor
-    ? boolean
-    : T extends NumberConstructor
-      ? number
-      : T extends Uint8ArrayConstructor
-        ? Uint8Array
-        : T extends IntToken
-          ? number
-          : T extends CivilDateToken
-            ? CivilDate
-            : T extends CivilTimeToken
-              ? CivilTime
-              : never;
+type FieldOf<T> = T extends DocumentToken
+  ? Document
+  : T extends StringConstructor
+    ? string
+    : T extends BooleanConstructor
+      ? boolean
+      : T extends NumberConstructor
+        ? number
+        : T extends Uint8ArrayConstructor
+          ? Uint8Array
+          : T extends IntToken
+            ? number
+            : T extends CivilDateToken
+              ? CivilDate
+              : T extends CivilTimeToken
+                ? CivilTime
+                : never;
 /** A record's fields as a plain object — what `insert` takes and the
  * mirror holds. */
 export type Fields<S extends Schema> = { -readonly [K in keyof S]: FieldOf<S[K]> };
@@ -73,9 +78,47 @@ function wireTag(token: Token, name: string): number {
   if (token === Uint8Array) return wire.VALUE_BLOB;
   if (token === Int) return wire.VALUE_I64;
   if (token === CivilDate || token === CivilTime) return wire.VALUE_I64;
+  if (token === Document) return wire.VALUE_BLOB;
   throw new TypeError(
-    `kaya: field ${JSON.stringify(name)} has no wire type — a schema names String, Boolean, Number, kaya.Int, kaya.CivilDate, kaya.CivilTime or Uint8Array per field`,
+    `kaya: field ${JSON.stringify(name)} has no wire type — a schema names String, Boolean, Number, kaya.Int, kaya.CivilDate, kaya.CivilTime, kaya.Document or Uint8Array per field`,
   );
+}
+
+/** A Document's wire bytes: ONE flat value list — {u32 count, u32
+ * reserved}, then per value {u32 tag, u32 len, payload, padded to 8} —
+ * the text, then four values per run (crates/kaya/src/wire.rs,
+ * `document_blob`). */
+function documentBytes(doc: Document): Uint8Array {
+  const out: number[] = [];
+  const u32 = (v: number): void => {
+    out.push(v & 0xff, (v >>> 8) & 0xff, (v >>> 16) & 0xff, (v >>> 24) & 0xff);
+  };
+  const pad = (): void => {
+    while (out.length % 8 !== 0) out.push(0);
+  };
+  const str = (v: string): void => {
+    const utf8 = Buffer.from(v, "utf8");
+    u32(wire.VALUE_STR);
+    u32(utf8.length);
+    for (const byte of utf8) out.push(byte);
+    pad();
+  };
+  const i64 = (v: number): void => {
+    u32(wire.VALUE_I64);
+    u32(8);
+    const big = BigInt(v);
+    for (let at = 0n; at < 8n; at++) out.push(Number((big >> (at * 8n)) & 0xffn));
+  };
+  u32(1 + doc.runs.length * 4);
+  u32(0);
+  str(doc.text);
+  for (const run of doc.runs) {
+    i64(run.start);
+    i64(run.end);
+    str(run.name);
+    str(run.value);
+  }
+  return Uint8Array.from(out);
 }
 
 /** A civil date's components, refused BY NAME when they are not one — a
@@ -982,7 +1025,7 @@ export class Widget extends Handle {
    * moves nothing. Empty until the first write or edit. */
   document(): Document {
     if (this.isNode) {
-      throw new Error("kaya: document() on a template node — a rich document belongs to ONE live widget, and a stamped copy's deltas arrive with the row's keys (docs/rich-text-plan.md R1)");
+      throw new Error("kaya: document() on a template node — a stamped copy's document is a FIELD of its row, declared `textarea({document: row.body})` and read off the row (docs/rich-text-plan.md §19)");
     }
     return app()._document(this.id);
   }
@@ -1216,6 +1259,8 @@ function fieldEncoder(token: Token, tag: number, type: string): (v: unknown, nam
   };
   if (token === CivilDate) return (v, name) => new wire.I64(wire.pack_date(...dateParts(`${type}.${name}`, v)));
   if (token === CivilTime) return (v, name) => new wire.I64(wire.pack_time(...timeParts(`${type}.${name}`, v)));
+  // A Document field IS a Blob field carrying `documentBytes`' list (§19).
+  if (token === Document) return (v, name) => (v instanceof Document ? new BlobHandle(runtime.registerBlob(documentBytes(v))) : refuse(v, name, "kaya.Document"));
   switch (tag) {
     case wire.VALUE_STR:
       return (v, name) => (typeof v === "string" ? v : refuse(v, name, "string"));
@@ -2489,6 +2534,48 @@ function onBoundary(data: Buffer, at: number): boolean {
   return at === data.length || (data[at]! & 0xc0) !== 0x80;
 }
 
+/** One edit folded into a document: runs before it keep, runs after it
+ * shift, a run the edit falls inside is cut, and the inserted text's own
+ * runs land relative to the edit (crates/kaya/src/app.rs, foldEdit). */
+function foldEdit(doc: Document, start: number, stop: number, inserted: string, runs: readonly Run[]): void {
+  const data = Buffer.from(doc.text, "utf8");
+  const added = Buffer.from(inserted, "utf8");
+  if (stop > data.length || !onBoundary(data, start) || !onBoundary(data, stop)) {
+    // A mirror out of step with the core takes the edit whole rather
+    // than splicing at an offset that means nothing here.
+    doc.text = inserted;
+    doc.runs = runs.map((r) => ({ ...r }));
+    return;
+  }
+  const shift = added.length - (stop - start);
+  const next: Run[] = [];
+  for (const run of doc.runs) {
+    if (run.start < start) next.push({ ...run, end: Math.min(run.end, start) });
+    if (run.end > stop) next.push({ ...run, start: Math.max(run.start, stop) + shift, end: run.end + shift });
+  }
+  for (const run of runs) next.push({ ...run, start: run.start + start, end: run.end + start });
+  doc.text = Buffer.concat([data.subarray(0, start), added, data.subarray(stop)]).toString("utf8");
+  doc.runs = normalizeRuns(next);
+}
+
+/** One toolbar act folded into a document: the attribute put over the
+ * range or taken off it, clipping THIS attribute's runs and no other
+ * (crates/kaya/src/app.rs, foldFormat). */
+function foldFormat(doc: Document, start: number, stop: number, name: string, value: string | null): void {
+  if (start >= stop) return;
+  const next: Run[] = [];
+  for (const run of doc.runs) {
+    if (run.name !== name || run.end <= start || run.start >= stop) {
+      next.push(run);
+      continue;
+    }
+    if (run.start < start) next.push({ ...run, end: start });
+    if (run.end > stop) next.push({ ...run, start: stop });
+  }
+  if (value !== null) next.push({ start, end: stop, name, value });
+  doc.runs = normalizeRuns(next);
+}
+
 /** Join an accept list: the closed kinds by name plus any custom ids,
  * space separated — ids carry NO SPACES. */
 function acceptList(kinds: readonly string[]): string {
@@ -3696,7 +3783,29 @@ export function entry(opts: TextInputOptions = {}): Widget {
   return handle;
 }
 
-export type TextAreaOptions = TextInputOptions & { rich?: boolean; ownUndo?: boolean; onEdit?: Handler; onFormat?: Handler };
+export type TextAreaOptions = TextInputOptions & { rich?: boolean; ownUndo?: boolean; onEdit?: Handler; onFormat?: Handler; document?: FieldRef };
+
+/** A stamped copy's document, bound to a `Document` FIELD of its row
+ * (docs/rich-text-plan.md §19): `rich` FIRST — the core refuses
+ * `document` without it — then the binding, and the node is recorded so
+ * a copy's own edit or format act folds into the row. */
+function bindDocument(handle: Widget, field: unknown): void {
+  if (!(field instanceof FieldRef)) {
+    throw new TypeError(
+      `kaya: textarea {document} takes a Document field of the enclosing For's row (row.body), not ${runtime.describe(field)} — a LIVE textarea's document is setDocument(doc), which names the widget`,
+    );
+  }
+  const owner = _forCollections[_forCollections.length - 1];
+  if (owner === undefined) {
+    throw new Error("kaya: textarea {document} is the TEMPLATE zone's rich spelling — it binds a field of the enclosing For's row, so it belongs inside `for (const row of notes)` (docs/rich-text-plan.md §19)");
+  }
+  if (field._token !== Document) {
+    throw new TypeError("kaya: textarea {document} takes a kaya.Document field; this one is declared with another schema token");
+  }
+  handle.rich(true);
+  records().push(wire.tx_bind_document_element(handle.id, field._level(), field._index));
+  app()._documentBinds.set(handle.id, [owner, field._index]);
+}
 
 /** A multi-line text editor: the entry's contract over the platform's
  * real multi-line editor.
@@ -3707,12 +3816,19 @@ export type TextAreaOptions = TextInputOptions & { rich?: boolean; ownUndo?: boo
  * addressed, beside the whole-text onChange, and onFormat(act) for a
  * toolbar act over a range.
  *
+ * `document` is the TEMPLATE zone's rich spelling (§19): a Document field
+ * of the enclosing For's row, which makes the copy rich and renders that
+ * field. The app writes a copy's document by patching its row, and a
+ * copy's own acts fold back into the field, so onEdit and onFormat
+ * arrive with a row handle that already reads current.
+ *
  * `ownUndo: true` puts the history in the app's hands
  * (docs/rich-text-plan.md R6, §14). */
 export function textarea(opts: TextAreaOptions = {}): Widget {
   const handle = widget(wire.KIND_TEXTAREA);
   if (opts.text !== undefined) records().push(wire.tx_set_text(handle.id, textValue("textarea text", opts.text)));
-  if (opts.rich === true) handle.rich(true);
+  if (opts.document !== undefined) bindDocument(handle, opts.document);
+  else if (opts.rich === true) handle.rich(true);
   if (opts.ownUndo === true) handle.ownUndo(true);
   if (opts.placeholder !== undefined) handle.placeholder(opts.placeholder);
   if (opts.onChange !== undefined) app()._register(handle, wire.OCC_TEXT_CHANGED, opts.onChange);
@@ -4143,6 +4259,9 @@ export class App {
    * Rust binding's is: an edge the widget and the core have taken is not
    * the app's to undo. */
   readonly _documents = new Map<number, Document>();
+  /** @internal Template node -> [collection, field index] per bound
+   * `document`, so a stamped copy's act folds into its row (§19). */
+  readonly _documentBinds = new Map<number, [Collection<unknown, unknown>, number]>();
   private _posted: [Handler, unknown[]][] = [];
   private _drainScheduled = false;
   private _shutdown: (() => void) | null = null;
@@ -4422,33 +4541,41 @@ export class App {
     this._documents.set(widget, new Document(document.text, document.runs));
   }
 
-  /** @internal One edit folded in: runs before it keep, runs after it
-   * shift, a run the edit falls inside is cut, and the inserted text's
-   * own runs land relative to the edit. */
+  /** @internal */
   _absorbEdit(widget: number, start: number, stop: number, inserted: string, runs: readonly Run[]): void {
+    foldEdit(this._mirrorDocument(widget), start, stop, inserted, runs);
+  }
+
+  /** @internal */
+  private _mirrorDocument(widget: number): Document {
     let doc = this._documents.get(widget);
     if (doc === undefined) {
       doc = new Document();
       this._documents.set(widget, doc);
     }
-    const data = Buffer.from(doc.text, "utf8");
-    const added = Buffer.from(inserted, "utf8");
-    if (stop > data.length || !onBoundary(data, start) || !onBoundary(data, stop)) {
-      // A mirror out of step with the core takes the edit whole rather
-      // than splicing at an offset that means nothing here.
-      doc.text = inserted;
-      doc.runs = runs.map((r) => ({ ...r }));
-      return;
-    }
-    const shift = added.length - (stop - start);
-    const next: Run[] = [];
-    for (const run of doc.runs) {
-      if (run.start < start) next.push({ ...run, end: Math.min(run.end, start) });
-      if (run.end > stop) next.push({ ...run, start: Math.max(run.start, stop) + shift, end: run.end + shift });
-    }
-    for (const run of runs) next.push({ ...run, start: run.start + start, end: run.end + start });
-    doc.text = Buffer.concat([data.subarray(0, start), added, data.subarray(stop)]).toString("utf8");
-    doc.runs = normalizeRuns(next);
+    return doc;
+  }
+
+  /** @internal A stamped copy's edit or format act reaches its ROW's
+   * Document field (docs/rich-text-plan.md §19): the node was bound to
+   * (collection, field) by the template textarea's `document`, and the
+   * occurrence's keys name the row. A row that is gone has no field to
+   * fold into, and that is not a fault. */
+  private _foldRowDocument(node: number, keys: readonly Key[], fold: (doc: Document) => void): void {
+    const bind = this._documentBinds.get(node);
+    if (bind === undefined) return;
+    const [coll, index] = bind;
+    const table = coll._instances.get(pathKey(keys.slice(0, -1)));
+    if (table === undefined) return;
+    const entry = table.get(keys[keys.length - 1]!);
+    if (entry === undefined) return;
+    const [, spec] = coll._variantFor(entry);
+    const name = spec.names[index];
+    if (name === undefined) return;
+    const held = (entry as Record<string, unknown>)[name];
+    const doc = held instanceof Document ? held : new Document();
+    fold(doc);
+    (entry as Record<string, unknown>)[name] = doc;
   }
 
   /** @internal A ranged act's range in the fold's text: a `block` covers
@@ -4463,26 +4590,9 @@ export class App {
     return [data.subarray(0, from).lastIndexOf(0x0a) + 1, at < 0 ? data.length : to + at];
   }
 
-  /** @internal One toolbar act folded in: the attribute put over the
-   * range or taken off it, clipping THIS attribute's runs and no other. */
+  /** @internal */
   _absorbFormat(widget: number, start: number, stop: number, name: string, value: string | null): void {
-    let doc = this._documents.get(widget);
-    if (doc === undefined) {
-      doc = new Document();
-      this._documents.set(widget, doc);
-    }
-    if (start >= stop) return;
-    const next: Run[] = [];
-    for (const run of doc.runs) {
-      if (run.name !== name || run.end <= start || run.start >= stop) {
-        next.push(run);
-        continue;
-      }
-      if (run.start < start) next.push({ ...run, end: start });
-      if (run.end > stop) next.push({ ...run, start: stop });
-    }
-    if (value !== null) next.push({ start, end: stop, name, value });
-    doc.runs = normalizeRuns(next);
+    foldFormat(this._mirrorDocument(widget), start, stop, name, value);
   }
 
   /** Run everything posted, each as its own transaction, in order. The
@@ -4613,20 +4723,24 @@ export class App {
     if (kind === wire.OCC_TEXT_EDITED || kind === wire.OCC_TEXT_FORMATTED) {
       // THE DOCUMENT FOLLOWS FIRST AND WITHOUT A HANDLER, as an undo's
       // mirrors do (docs/rich-text-plan.md R1): an app that registered
-      // neither delta still reads a current document(). A STAMPED copy
-      // carries no document — the mirror is keyed by live widget, as the
-      // core's is.
+      // neither delta still reads a current document(). A STAMPED copy's
+      // act folds into its ROW's Document field instead, by the same
+      // rule (§19).
       const flat = payload as wire.Decoded[];
       let arg: Edit | Format;
       if (kind === wire.OCC_TEXT_EDITED) {
         const runs = runsFrom(flat.slice(4));
         arg = new Edit(flat[1] as number, flat[2] as number, flat[3] as string, runs);
         arg.source = editSource(flat[0] as number);
-        if (keys.length === 0) this._absorbEdit(ident, arg.start, arg.end, arg.inserted, runs);
+        const edit = arg;
+        if (keys.length === 0) this._absorbEdit(ident, edit.start, edit.end, edit.inserted, runs);
+        else this._foldRowDocument(ident, keys as Key[], (doc) => foldEdit(doc, edit.start, edit.end, edit.inserted, runs));
       } else {
         const [removed, start, stop, name, value] = flat as [number, number, number, string, string];
         arg = { start, end: stop, name, value: removed !== 0 ? null : value };
-        if (keys.length === 0) this._absorbFormat(ident, start, stop, name, arg.value);
+        const act = arg;
+        if (keys.length === 0) this._absorbFormat(ident, start, stop, name, act.value);
+        else this._foldRowDocument(ident, keys as Key[], (doc) => foldFormat(doc, start, stop, name, act.value));
       }
       const handler = keys.length > 0 ? this._nodeHandlers.get(menuKey(kind, ident)) : this._widgetHandlers.get(menuKey(kind, ident));
       if (handler !== undefined) this._dispatch(handler, ...this._rowArgs(ident, keys as Key[]), arg);
