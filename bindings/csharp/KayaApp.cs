@@ -2519,6 +2519,21 @@ sealed class Tx
     public void Format(Widget w, string name, string value) =>
         Records.Add(KayaWire.TxFormatText(w.Id, 0, 0, 0, 0, new object[] { name, value }));
 
+    /// The named acts (the review page's ruling 1 — docs/rich-text-plan.md
+    /// §18): each is Format with its name, over the widget's own selection;
+    /// removal stays Unformat, the block kinds stay SetBlock.
+    public void Bold(Widget w) => Format(w, "bold", "true");
+
+    public void Italic(Widget w) => Format(w, "italic", "true");
+
+    public void Underline(Widget w) => Format(w, "underline", "true");
+
+    public void Strike(Widget w) => Format(w, "strike", "true");
+
+    public void Code(Widget w) => Format(w, "code", "true");
+
+    public void Link(Widget w, string url) => Format(w, "link", url);
+
     /// Take an attribute off the widget's current selection.
     public void Unformat(Widget w, string name) =>
         Records.Add(KayaWire.TxFormatText(w.Id, 1, 0, 0, 0, new object[] { name, "" }));

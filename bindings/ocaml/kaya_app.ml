@@ -388,14 +388,14 @@ type app = {
      result whose id has none above (docs/tasks-s9-plan.md R1). A
      relaunched process never called show_notification. *)
   mutable notification_activation : (int64 -> int -> unit) option;
-  (* NOT one-shot either: a route declared by [link] answers every URL
-     that matches it, for the life of the process
+  (* NOT one-shot either: a route declared by [link_route] answers every
+     URL that matches it, for the life of the process
      (docs/app-links-plan.md §4), and the core owns the pattern table —
      nothing is kept here but the handler. *)
   link_handlers : (int64, (string * string) list -> unit) Hashtbl.t;
   mutable next_link_route : int64;
-  (* [link] may be called before the first transaction, so its record
-     waits here for one (the transaction drains it head-first). *)
+  (* [link_route] may be called before the first transaction, so its
+     record waits here for one (the transaction drains it head-first). *)
   mutable pending_routes : string list;
   file_dialog_handlers : (int64, picked_file list -> unit) Hashtbl.t;
   mutable next_file_dialog : int64;
@@ -1336,6 +1336,16 @@ let format (Widget id) name value =
   emit (the_tx ())
     (Kaya_wire.tx_format_text id 0 0 0L 0L
        [ Kaya_wire.Str name; Kaya_wire.Str value ])
+
+(* The named acts (docs/rich-text-plan.md §18): [format] with its own name
+   over the widget's selection. The app-links route declarator is
+   [link_route], since [link] is this act. *)
+let bold (Widget id) = format (Widget id) "bold" "true"
+let italic (Widget id) = format (Widget id) "italic" "true"
+let underline (Widget id) = format (Widget id) "underline" "true"
+let strike (Widget id) = format (Widget id) "strike" "true"
+let code (Widget id) = format (Widget id) "code" "true"
+let link (Widget id) url = format (Widget id) "link" url
 
 (* Take an attribute off the widget's current selection. *)
 let unformat (Widget id) name =
@@ -2552,7 +2562,7 @@ let on_notification_activation app ~f = app.notification_activation <- Some f
    malformed one, a duplicate — and it faults at apply with the whole
    sentence, where every other declaration refusal in kaya lands
    (tools/check-sugar-surface.py refuses a reason spelled here). *)
-let link app ~pattern ~f =
+let link_route app ~pattern ~f =
   let route = Int64.add app.next_link_route 1L in
   app.next_link_route <- route;
   Hashtbl.replace app.link_handlers route f;
@@ -2577,7 +2587,7 @@ let link_opened app route url params =
         prerr_endline
           (Printf.sprintf
              "kaya: link %s matched route %Ld and reached no handler — \
-              none is registered for it (Kaya_app.link)"
+              none is registered for it (Kaya_app.link_route)"
              url route)
 
 (* The filters encoding, written ONCE because two requests carry it:

@@ -348,8 +348,8 @@ not a diagnostic.
   look plus kaya's own hit test on the pointer's initial pass; heading
   sizes in `em`; pending attributes are kaya's state (a zero-length
   addStyle is dropped by Compose); `clearHistory()` after every commit
-  including apply_edit (D7 cannot be honoured there, measured); a plain
-  Compose field still reports marked text (ledger).
+  including apply_edit (D7 cannot be honoured there, measured); every
+  field holds marked text back since 2026-09-15 (§18, ranges.steps D5).
 - **The eight bindings**: the Rust surface in each idiom. Ambient bindings
   (Python, JS, OCaml) put the writes on the widget as their other verbs are;
   registry-family bindings (C#, Java, Swift, Haskell) register `on_edit`
@@ -367,7 +367,7 @@ not a diagnostic.
 Pushed as d1f23d22; the matrix on that tree ALL PASS on all five lanes and
 59 gates, 1,773 legs in 1285s.
 
-Open after the breadth: the marked-text divergence on plain Compose fields;
+Open after the breadth (the first closed 2026-09-15, §18): the marked-text divergence on plain Compose fields;
 a shared scene step that round-trips non-ASCII text through a guest's label
 (the Haskell decoder's wall); the template zone (`rich` is a live-zone
 spelling; JS refuses `document()` on a template node in its own words, no
@@ -787,6 +787,144 @@ Landed as 5531fe55; the matrix on that tree ALL PASS on all five lanes,
 1,807 legs (mac 468, linux 773, windows 281, ios 138, android 147) in
 1254s — its first run had lost the Windows notes leg to an explorer
 PopupHost holding the VM's foreground, the ledger's WATCH of 2026-09-15.
+
+## 18. The review page's remaining items (2026-09-15)
+
+The page's "still open" list after the milestone: named acts, the polish
+pass, the demo (built, §16), and three residues.
+
+NAMED ACTS (ruling 1's later sugar pass): `bold(widget)`, `italic`,
+`underline`, `strike`, `code` and `link(widget, url)` on the transaction
+in all nine, each the general `format` with its name over the widget's
+own selection; removal stays `unformat`, the block kinds `set_block`, and
+the ranged act the general form's. check-sugar-surface's six act rows
+are ANCHORED ON THE WIDGET ARGUMENT, since every binding's Document
+builder also spells `bold(range)` and a row that read the bare name was
+satisfied by it — three columns green before any act existed.
+
+THE POLISH PASS (ruling 5), on textareas and rich labels: a `code` run's
+ground in the platform's own fill, yielding to find's highlight ground on
+the Apple views; a quote paragraph indented with a leading rule, or a
+tint where the toolkit can draw no rule; and a link click through the
+arm's own link door — the role-link label's door on that platform — with
+GTK's and WinUI's textareas, which answered no click at all, hit-testing
+their link tags and runs. No scene can see any of it: the captures are
+the wall, and a check-verbs clause holds each arm's restyle to naming its
+ground and its rule.
+
+THE NAMED ACTS' ONE COLLISION, ruled 2026-09-15 (a spelling ruling, the
+maintainer's to reverse): the two flat-namespace bindings already held
+kaya's words at top level — Haskell's Document builder spelled its run
+constructors `bold`…`code` and both bindings named the app-links route
+declarator `link` — and OCaml's last definition wins while GHC refuses the
+second, so the acts could not simply join them. The acts take kaya's own
+words in both; the collidees take the suffix their families already used:
+the builder's five are `boldRun`…`codeRun` beside `linkRun` and `blockRun`
+(the convention "a run's is suffixed" made uniform), and the route
+declarator is `link_route` / `linkRoute`, which is what it declares. The
+census rows for the declarator move in the same commit, since the Haskell
+row `^link ::` would have gone green reading the act.
+
+THE APPLE GROUND IS DRAWN, NEVER STORED (the Apple arm, 2026-09-15,
+measured both halves first): a `.backgroundColor` ground is wiped by
+`applyRanges`' clear on the next update pass, and re-applied past that
+clear it reads back through accessibility as a highlight — the GTK
+finding one platform over. So the ground and the quote rule ride kaya's
+own attribute keys (`kayaGroundKey`, `kayaRuleKey`) and `KayaRichFragment`,
+a TextKit 2 layout fragment shared by macOS and iOS, paints them; the
+quote's gutter lies outside the fragment's frame (it starts at the head
+indent, measured `frame.x 25`), so `renderingSurfaceBounds` is widened or
+the rule is clipped. The rich LABEL merges the ground into
+`.backgroundColor` (`kayaMergeGround`), since a SwiftUI `Text` paints that
+and ignores `headIndent`: a label's quote keeps its secondary colour and no
+rule on Apple, recorded rather than faked by splitting the label into
+per-paragraph views, which would break its one accessibility element.
+Links go through `kayaOpenLink` (`clickedOnLink` true on macOS,
+`shouldInteractWith` false on iOS beside the iOS 17 `primaryActionFor`);
+no lane drives a link tap. The iOS half of ranges.steps D5 is
+`textViewDidChange`'s early-out on `markedTextRange` with no `node.rich`
+in it — the leg had read "4 matches" before, 48/48 after; macOS needed
+nothing (NSTextView notifies nothing for marked text) and the single-line
+entry has no such path on either (SwiftUI `TextField`; `compose` reaches
+textareas only).
+
+THE WINUI GROUND HAS THREE CLAIMANTS (the WinUI arm, 2026-09-15):
+`ITextCharacterFormat` has ONE `BackgroundColor` and find's highlight
+already owned it, so `rich_ground` states the order — highlight over code
+over quote — kept by `rich_repaint_highlights` after every restyle and
+`rich_paint_grounds` after both blanket clears; the highlights read
+(`painted_runs`) had keyed a highlight on "not AutoColor" and read a code
+run as one the moment the richtext code step ran, and compares to
+`HIGHLIGHT_BACKGROUND` now. No quote RULE is drawable there —
+`ITextParagraphFormat` has no border and no ground, and an overlaid XAML
+rule would chase a Rich Edit surface whose rects do not move with the
+viewport (the 2026-08-06 trap) — so a quote is indent plus tint. The link
+click is `PointerCaptureLost`: `PointerReleased` never fires, and a
+`WH_GETMESSAGE` hook on the UI thread sees no button or WM_POINTER message
+at all, since WinUI 3 delivers button input through the content island;
+the position comes from `GetCursorPos`, and the click opens through
+`open_link_through_shell` (proof: an unclaimed scheme produced the shell's
+own "no app for this link" dialog; a click beside the quote opened
+nothing). The plain-field half of ranges.steps D5 read "4 matches" there
+too: suppression is `composing_now` alone now, and entries and search
+fields, which had no composition handlers at all, take the pair through
+`watch_plain_composition`. The rich LABEL's ground is not drawable on
+WinUI — `Run`, `Span` and `Hyperlink` carry no background, and
+`TextHighlighter`, the real mechanism, is not projected in bindings.rs
+(one line in tools/winui-bindgen's type list plus a regenerate would buy
+it; left for a slice of its own).
+
+THE GTK GROUND IS AN ATTRIBUTE THE HIGHLIGHTS READ COULD SEE (found by
+the GTK arm, 2026-09-15): `expect_highlights` on GTK walks the bus's
+attribute runs and keyed a highlight on the mere presence of `bg-color`,
+so a code run's ground read as one (`format 0:6 code` then `highlights
+"0:6=Héllo"`, measured); no scene was red because none puts a code run
+and a declared set in one widget. The highlight tag carries
+`background_full_height(true)` now and the read keys on `bg-full-height`
+alone, which a highlight over a code run still carries — the look is a
+find highlight painted to the line's full height, on the review page for
+the maintainer. The step is tools/scenes/richtext.steps' code act followed
+by `expect_highlights ""`, on five lanes, and the linux richtext leg goes
+through a11y-leg.sh for it (check-steps holds the route).
+
+A LABEL'S QUOTE RULE IS UNREACHABLE BY R8: a label's document is inline
+only and the core refuses a block run on one, so the arms that route a
+label's quote paragraphs to the rule (Compose's label `drawBehind`, the
+polish pass's own breadth) draw it for no document that can exist. Left
+standing as the field's shared drawing code rather than pruned per arm; a
+label that grows blocks is the day it earns a driver.
+
+THE RESIDUES: the plain Compose textarea's marked-text divergence
+(invariant 1) closed with the suppression widened to EVERY Compose field
+— the collector's `if (read.composing) return` no longer keyed on `rich`
+— and a step that can see it, tools/scenes/ranges.steps D5: the plain
+field's live composition is the word "alpha", and a Find re-declared over
+the mirror reads three on a backend that held the marked text and four on
+one that leaked it (the count label had been "0 matches" either way, so
+the composed word is what makes the step discriminate; five bytes, so D4's
+caret assertion stands); a shared non-ASCII round-trip step — the
+clipboard scene's text seed is `från ett annat program` now, so the text
+crosses the lane's seeding tool, the platform's board, the wire and every
+binding's reader before the guest prints it, on five lanes in nine
+languages (the Haskell reader's wall; the mac legs green in Rust, Haskell
+and Python the day it landed); and the template zone for `rich`,
+READ AND DEFERRED: `run_body` pushes a template prop straight to the arm
+(`TplOp::SetProp` → `ApplyOp::SetProp`) and seeds no mirror for a stamped
+copy, and nothing in the protocol addresses a stamped copy's DOCUMENT
+from the app — `set_rich_text`, `apply_edit` and `format_text` take a live
+WidgetId, a stamped copy's id is internal, and per-instance addressing is
+itself the ledger's open "scrollTo + ref markers" item ("the first
+instance-addressed command"). A rich textarea is a live-zone widget until
+that addressing exists; the template zone's `rich` is that design's first
+customer, not a slice of its own.
+
+AND THE WINDOWS NOTES LEG, red three times under a matrix on the `type`
+verb's foreground dance: the third bundle showed no kaya window on the
+desktop at all — the scene's first keystroke comes three seconds after
+launch and, on a loaded host, the WinUI window had not appeared; the
+dance cannot raise a window that is not on screen. The verb waits for
+the window's visibility first now (bounded, with its own sentence), the
+premise the two earlier readings had missed.
 
 ## 5. What this plan does not do
 

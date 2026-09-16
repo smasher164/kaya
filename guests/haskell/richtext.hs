@@ -42,7 +42,7 @@ main = kayaMain $ \app -> do
                 let doc =
                       blockRun (13, 24) Heading2
                         . linkRun (7, 12) "https://kaya.dev"
-                        . bold (0, 6)
+                        . boldRun (0, 6)
                         $ documentOf docSource
                 submitTx app $ do
                   setDocument app editor doc

@@ -1375,6 +1375,34 @@ if (isMainThread) {
     }, /formatRange/),
   );
 
+  // THE NAMED ACTS (docs/rich-text-plan.md §18): sugar and nothing else —
+  // each writes the record `format` writes under its own name, `link`
+  // carrying the URL where the flags carry "true".
+  const namedActs: ReadonlyArray<readonly [string, string]> = [
+    ["bold", "true"],
+    ["italic", "true"],
+    ["underline", "true"],
+    ["strike", "true"],
+    ["code", "true"],
+    ["link", "https://kaya.dev"],
+  ];
+  shipped.length = 0;
+  let actChained: unknown = null;
+  app.build(() => {
+    quietEditor.bold();
+    quietEditor.italic();
+    quietEditor.underline();
+    quietEditor.strike();
+    actChained = quietEditor.code().link("https://kaya.dev");
+  });
+  const actWrites = shipped.flat();
+  richCheck(
+    "each named act writes the record `format` writes with its own name, `link` carrying the URL",
+    actWrites.length === namedActs.length &&
+      namedActs.every(([name, value], i) => sameBytes(actWrites[i]!, wire.tx_format_text(quietEditor.id, 0, 0, 0, 0, [name, value]))),
+  );
+  richCheck("a named act answers the widget, so the acts chain as `format` does", actChained === quietEditor);
+
   // THE RICH LABEL (docs/rich-text-plan.md R8, §15): `rich` is the LABEL
   // constructor's option too, and the CREATE record is read beside the prop,
   // since prop 32 on a textarea proves nothing about a label.

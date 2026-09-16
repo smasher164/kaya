@@ -1553,6 +1553,38 @@ func (tx *Tx) Unformat(w Widget, name string) {
 	tx.emit(TxFormatText(w.id, 1, 0, 0, 0, []any{name, ""}))
 }
 
+// Bold formats the widget's CURRENT SELECTION bold — Tx.Format under its
+// own name, what a toolbar button sends (docs/rich-text-plan.md §18).
+// Removal stays Tx.Unformat and the block kinds stay Tx.SetBlock.
+func (tx *Tx) Bold(w Widget) {
+	tx.Format(w, "bold", "true")
+}
+
+// Italic italicizes the widget's current selection.
+func (tx *Tx) Italic(w Widget) {
+	tx.Format(w, "italic", "true")
+}
+
+// Underline underlines the widget's current selection.
+func (tx *Tx) Underline(w Widget) {
+	tx.Format(w, "underline", "true")
+}
+
+// Strike strikes the widget's current selection through.
+func (tx *Tx) Strike(w Widget) {
+	tx.Format(w, "strike", "true")
+}
+
+// Code makes the widget's current selection monospaced code.
+func (tx *Tx) Code(w Widget) {
+	tx.Format(w, "code", "true")
+}
+
+// Link makes the widget's current selection a link to url.
+func (tx *Tx) Link(w Widget, url string) {
+	tx.Format(w, "link", url)
+}
+
 // FormatRange puts one attribute over a BYTE RANGE of the document and
 // leaves the selection where the user put it: a document write like
 // ApplyEdit, echoed by nothing, heard by no App.OnFormat, and legal on a

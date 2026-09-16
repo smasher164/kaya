@@ -356,6 +356,103 @@ func kayaRichKey(_ name: String) -> NSAttributedString.Key {
     NSAttributedString.Key("kaya.rich." + name)
 }
 
+/// THE TWO DECORATIONS (docs/rich-text-plan.md §18): a code run's ground and a
+/// quote's leading rule, derived onto the storage under kaya's OWN keys and
+/// painted by KayaRichFragment. NEVER `.backgroundColor`, which find's
+/// highlight owns on these views (§7): measured 2026-09-15 — a ground written
+/// there is wiped by applyRanges' clear on the next update pass, and re-applied
+/// past that clear it reads back through accessibility as a highlight
+/// (`expect_highlights 0:6=Héllo` over a document with none declared).
+let kayaGroundKey = NSAttributedString.Key("kaya.draw.ground")
+let kayaRuleKey = NSAttributedString.Key("kaya.draw.rule")
+
+#if os(macOS)
+    let kayaCodeGround = NSColor.quaternaryLabelColor
+    let kayaQuoteRule = NSColor.tertiaryLabelColor
+#else
+    let kayaCodeGround = UIColor.tertiarySystemFill
+    let kayaQuoteRule = UIColor.tertiaryLabel
+#endif
+let kayaQuoteIndent: CGFloat = 20
+let kayaQuoteRuleInset: CGFloat = 6
+let kayaQuoteRuleWidth: CGFloat = 3
+let kayaCodeGroundRadius: CGFloat = 3
+let kayaCodeGroundPad: CGFloat = 2
+
+/// The layout manager's background pass, TextKit 2's own hook and both Apple
+/// arms': the ground behind a code run's glyphs and the rule at a quote
+/// paragraph's leading edge, painted UNDER the fragment's text.
+final class KayaRichFragment: NSTextLayoutFragment {
+    /// THE GUTTER IS OUTSIDE THE FRAGMENT: a quote's own frame starts AT its
+    /// head indent (measured 2026-09-15 — frame.x 25 = the container's 5pt
+    /// padding plus the 20pt indent, the line's own minX 0), and this is the
+    /// surface the layer is sized from, so a rule drawn left of it is clipped.
+    override var renderingSurfaceBounds: CGRect {
+        super.renderingSurfaceBounds.insetBy(dx: -kayaQuoteIndent, dy: 0)
+    }
+
+    override func draw(at point: CGPoint, in context: CGContext) {
+        for line in textLineFragments {
+            let bounds = line.typographicBounds
+            let attributed = line.attributedString
+            let range = line.characterRange
+            guard range.length > 0, NSMaxRange(range) <= attributed.length else { continue }
+            attributed.enumerateAttribute(kayaRuleKey, in: range, options: []) { value, _, stop in
+                guard let colour = value as? KayaPlatformColor else { return }
+                context.setFillColor(colour.cgColor)
+                context.fill(
+                    CGRect(
+                        x: point.x - kayaQuoteIndent + kayaQuoteRuleInset,
+                        y: point.y + bounds.minY, width: kayaQuoteRuleWidth,
+                        height: bounds.height))
+                stop.pointee = true
+            }
+            attributed.enumerateAttribute(kayaGroundKey, in: range, options: []) { value, sub, _ in
+                guard let colour = value as? KayaPlatformColor, sub.length > 0 else { return }
+                let from = line.locationForCharacter(at: sub.location).x
+                let to = line.locationForCharacter(at: NSMaxRange(sub)).x
+                guard to > from else { return }
+                let rect = CGRect(
+                    x: point.x + bounds.minX + from, y: point.y + bounds.minY,
+                    width: to - from, height: bounds.height)
+                context.setFillColor(colour.cgColor)
+                context.addPath(
+                    CGPath(
+                        roundedRect: rect.insetBy(dx: -kayaCodeGroundPad, dy: 0),
+                        cornerWidth: kayaCodeGroundRadius, cornerHeight: kayaCodeGroundRadius,
+                        transform: nil))
+                context.fillPath()
+            }
+        }
+        super.draw(at: point, in: context)
+    }
+}
+
+/// Every fragment of every kaya text view is one of these; a view whose storage
+/// carries neither key draws exactly what it drew before.
+final class KayaRichLayoutDelegate: NSObject, NSTextLayoutManagerDelegate {
+    func textLayoutManager(
+        _ textLayoutManager: NSTextLayoutManager, textLayoutFragmentFor location: NSTextLocation,
+        in textElement: NSTextElement
+    ) -> NSTextLayoutFragment {
+        KayaRichFragment(textElement: textElement, range: textElement.elementRange)
+    }
+}
+let kayaRichLayoutDelegate = KayaRichLayoutDelegate()
+
+/// A SwiftUI `Text` draws no layout fragment, so a rich LABEL's code ground is
+/// merged into `.backgroundColor` — the one of the two a Text honours
+/// (measured 2026-09-15: it ignores the quote's headIndent and can draw no
+/// rule, so a label's quote keeps its secondary colour alone;
+/// docs/rich-text-plan.md §18). A label declares no highlights, so the
+/// attribute collides with nothing here.
+@MainActor func kayaMergeGround(_ doc: NSMutableAttributedString, _ range: NSRange) {
+    doc.enumerateAttribute(kayaGroundKey, in: range, options: []) { value, sub, _ in
+        guard let colour = value as? KayaPlatformColor else { return }
+        doc.addAttribute(.backgroundColor, value: colour, range: sub)
+    }
+}
+
 private func kayaReadI64Value(_ raw: UnsafeRawBufferPointer, _ at: inout Int) -> Int {
     let v = raw.loadUnaligned(fromByteOffset: at + 8, as: Int64.self)
     at += 16
@@ -13953,10 +14050,12 @@ private func kayaBrandTint() -> Color? {
     typealias KayaPlatformFont = NSFont
     typealias KayaPlatformTextStyle = NSFont.TextStyle
     typealias KayaPlatformFontDescriptor = NSFontDescriptor
+    typealias KayaPlatformColor = NSColor
 #else
     typealias KayaPlatformFont = UIFont
     typealias KayaPlatformTextStyle = UIFont.TextStyle
     typealias KayaPlatformFontDescriptor = UIFontDescriptor
+    typealias KayaPlatformColor = UIColor
 #endif
 
 /// Is this family installed on THIS device? ONE GATE FOR BOTH APPLE PLATFORMS:
@@ -15419,7 +15518,7 @@ struct KayaRender: View {
             // own font (docs/rich-text-plan.md R8, §15).
             let base = (node.rich
                 ? Text(AttributedString(kayaAttributedDocument(
-                    node.text, node.richRuns, base: kayaLabelBaseFont(node))))
+                    node.text, node.richRuns, base: kayaLabelBaseFont(node), ground: true)))
                 : Text(node.text))
                 .font(font)
                 .textCase(
@@ -19614,6 +19713,16 @@ private struct KayaMacTextarea: NSViewRepresentable {
             }
             return attrs
         }
+
+        /// A link in a rich textarea opens through KAYA'S OWN DOOR, the one
+        /// `open_link` takes (docs/rich-text-plan.md §18); `true` is this
+        /// delegate's "handled", so AppKit does not open it a second time.
+        func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
+            let url = (link as? URL)?.absoluteString ?? link as? String
+            guard let url, !url.isEmpty else { return false }
+            kayaOpenLink(url)
+            return true
+        }
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -19624,6 +19733,7 @@ private struct KayaMacTextarea: NSViewRepresentable {
         let content = NSTextContentStorage()
         let layout = NSTextLayoutManager()
         content.addTextLayoutManager(layout)
+        layout.delegate = kayaRichLayoutDelegate
         let container = NSTextContainer(
             size: CGSize(width: 0, height: CGFloat.greatestFiniteMagnitude))
         container.widthTracksTextView = true
@@ -19886,25 +19996,36 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
             storage.removeAttribute(.strikethroughStyle, range: sub)
         }
         if let link { out[.link] = link } else { storage.removeAttribute(.link, range: sub) }
+        // The two decorations, painted by KayaRichFragment (docs/rich-text-plan.md §18).
+        if has("code") || block == "code_block" {
+            out[kayaGroundKey] = kayaCodeGround
+        } else {
+            storage.removeAttribute(kayaGroundKey, range: sub)
+        }
         let paragraph = NSMutableParagraphStyle()
         if block == "quote" {
-            paragraph.headIndent = 20
-            paragraph.firstLineHeadIndent = 20
+            paragraph.headIndent = kayaQuoteIndent
+            paragraph.firstLineHeadIndent = kayaQuoteIndent
+            out[kayaRuleKey] = kayaQuoteRule
+        } else {
+            storage.removeAttribute(kayaRuleKey, range: sub)
         }
         out[.paragraphStyle] = paragraph
         storage.addAttributes(out, range: sub)
     }
 }
 
-@MainActor func kayaAttributedDocument(_ text: String, _ runs: [KayaRichRun], base: NSFont)
-    -> NSAttributedString
-{
+@MainActor func kayaAttributedDocument(
+    _ text: String, _ runs: [KayaRichRun], base: NSFont, ground: Bool = false
+) -> NSAttributedString {
     let doc = NSMutableAttributedString(
         string: text, attributes: [.font: base, .foregroundColor: NSColor.textColor])
     for run in runs where run.range.length > 0 && NSMaxRange(run.range) <= doc.length {
         doc.addAttribute(kayaRichKey(run.name), value: run.value, range: run.range)
     }
-    kayaRestyle(doc, NSRange(location: 0, length: doc.length), base: base)
+    let full = NSRange(location: 0, length: doc.length)
+    kayaRestyle(doc, full, base: base)
+    if ground { kayaMergeGround(doc, full) }
     return doc
 }
 
@@ -20148,11 +20269,12 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
                 guard let node else { return }
                 let strip = returnStrip
                 returnStrip = nil
-                // A COMPOSITION IS THE WIDGET'S ALONE (docs/rich-text-plan.md
-                // R5). UITextView notifies for marked text and NSTextView does
-                // not (docs/measurements/richtext-apple-2026-09-11.md §2.4), so
-                // the rich arm holds the divergence here.
-                if node.rich, textView.markedTextRange != nil { return }
+                // A COMPOSITION IS THE WIDGET'S ALONE, on a plain field as on a
+                // rich one (tools/scenes/ranges.steps D5,
+                // docs/rich-text-plan.md §18). UITextView notifies for marked
+                // text and NSTextView does not
+                // (docs/measurements/richtext-apple-2026-09-11.md §2.4).
+                if textView.markedTextRange != nil { return }
                 let value = node.rich ? (textView.text ?? "") : kayaLF(textView.text ?? "")
                 guard value != node.text else { return }
                 let own = textView as? KayaTextView
@@ -20238,6 +20360,30 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
                 guard let node, kayaScene.focusedId == node.id else { return }
                 kayaScene.focusedId = nil
             }
+
+            /// A link in a rich textarea opens through KAYA'S OWN DOOR, the one
+            /// `open_link` takes (docs/rich-text-plan.md §18); `false` is this
+            /// delegate's "do not interact", so UIKit does not open it again.
+            /// DEPRECATED IN iOS 17 AND KEPT FOR THE FLOOR — the annotation is
+            /// what silences the warning the type raises — with the interaction
+            /// UIKit calls in its place below.
+            @available(iOS, deprecated: 17.0)
+            func textView(
+                _ textView: UITextView, shouldInteractWith url: URL, in characterRange: NSRange,
+                interaction: UITextItemInteraction
+            ) -> Bool {
+                kayaOpenLink(url.absoluteString)
+                return false
+            }
+
+            @available(iOS 17.0, *)
+            func textView(
+                _ textView: UITextView, primaryActionFor textItem: UITextItem,
+                defaultAction: UIAction
+            ) -> UIAction? {
+                guard case .link(let url) = textItem.content else { return defaultAction }
+                return UIAction { _ in kayaOpenLink(url.absoluteString) }
+            }
         }
 
         func makeCoordinator() -> Coordinator { Coordinator() }
@@ -20249,6 +20395,7 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
             // `.layoutManager` silently downgrade the view to TextKit 1. The
             // audit below asserts it is still there.
             let view = KayaTextView()
+            view.textLayoutManager?.delegate = kayaRichLayoutDelegate
             view.delegate = context.coordinator
             view.font = kayaPlatformFont(.body) ?? UIFont.preferredFont(forTextStyle: .body)
             view.adjustsFontForContentSizeCategory = true
@@ -20509,25 +20656,36 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
                 storage.removeAttribute(.strikethroughStyle, range: sub)
             }
             if let link { out[.link] = link } else { storage.removeAttribute(.link, range: sub) }
+            // The two decorations, painted by KayaRichFragment (docs/rich-text-plan.md §18).
+            if has("code") || block == "code_block" {
+                out[kayaGroundKey] = kayaCodeGround
+            } else {
+                storage.removeAttribute(kayaGroundKey, range: sub)
+            }
             let paragraph = NSMutableParagraphStyle()
             if block == "quote" {
-                paragraph.headIndent = 20
-                paragraph.firstLineHeadIndent = 20
+                paragraph.headIndent = kayaQuoteIndent
+                paragraph.firstLineHeadIndent = kayaQuoteIndent
+                out[kayaRuleKey] = kayaQuoteRule
+            } else {
+                storage.removeAttribute(kayaRuleKey, range: sub)
             }
             out[.paragraphStyle] = paragraph
             storage.addAttributes(out, range: sub)
         }
     }
 
-    @MainActor func kayaAttributedDocument(_ text: String, _ runs: [KayaRichRun], base: UIFont)
-        -> NSAttributedString
-    {
+    @MainActor func kayaAttributedDocument(
+        _ text: String, _ runs: [KayaRichRun], base: UIFont, ground: Bool = false
+    ) -> NSAttributedString {
         let doc = NSMutableAttributedString(
             string: text, attributes: [.font: base, .foregroundColor: UIColor.label])
         for run in runs where run.range.length > 0 && NSMaxRange(run.range) <= doc.length {
             doc.addAttribute(kayaRichKey(run.name), value: run.value, range: run.range)
         }
-        kayaRestyle(doc, NSRange(location: 0, length: doc.length), base: base)
+        let full = NSRange(location: 0, length: doc.length)
+        kayaRestyle(doc, full, base: base)
+        if ground { kayaMergeGround(doc, full) }
         return doc
     }
 

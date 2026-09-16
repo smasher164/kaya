@@ -3823,6 +3823,35 @@ rich_check("format_range takes the binding's own range spelling, refusing "
            "format_range" in _ranged_said
            and "range(start, stop)" in _ranged_said)
 
+# THE NAMED ACTS (docs/rich-text-plan.md §18): sugar and nothing else —
+# each writes the record `format` writes under its own name, `link`
+# carrying the URL where the flags carry "true".
+_ACTS = (("bold", "true"), ("italic", "true"), ("underline", "true"),
+         ("strike", "true"), ("code", "true"), ("link", "https://kaya.dev"))
+_act_records = []
+kaya.runtime.submit = lambda *recs: _act_records.extend(recs)
+with _range_app.build():
+    _ranged.bold()
+    _ranged.italic()
+    _ranged.underline()
+    _ranged.strike()
+    _ranged.code()
+    _ranged.link("https://kaya.dev")
+kaya.runtime.submit = _real_ship
+rich_check("each named act writes the record `format` writes with its own "
+           "name, `link` carrying the URL",
+           _act_records == [kaya.wire.tx_format_text(_ranged.id, 0, 0, 0, 0,
+                                                     [name, value])
+                            for name, value in _ACTS])
+_act_chained = None
+kaya.runtime.submit = lambda *recs: None
+with _range_app.build():
+    _act_chained = _ranged.code().link("https://kaya.dev")
+kaya.runtime.submit = _real_ship
+rich_check("a named act answers the widget, so the acts chain as `format` "
+           "does",
+           _act_chained is _ranged)
+
 # THE RICH LABEL (docs/rich-text-plan.md R8, §15): `rich=` is the LABEL
 # constructor's too, and the prop rides the same record — so the create
 # record is read beside it, since prop 32 on a textarea proves nothing

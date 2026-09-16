@@ -24,6 +24,18 @@ expect label#1 "0:6 bold|8:11 italic|12:17 link=https://kaya.dev|12:17 underline
 format textarea#0 12:17 underline off
 expect label#0 "format 12:17 underline=off"
 expect_runs textarea#0 "0:6 bold|8:11 italic|12:17 link=https://kaya.dev|18:29 block=heading2"
+# A CODE RUN IS NOT A HIGHLIGHT: its ground is a background on every arm
+# that draws one, so the highlights read must key on the highlight's own
+# mark — GTK's reads bg-full-height, never bg-color (docs/rich-text-plan.md
+# §18) — and a run that reads as a highlight here is a reader keyed on the
+# ground.
+format textarea#0 12:17 code
+expect label#0 "format 12:17 code=true"
+expect_runs textarea#0 "0:6 bold|8:11 italic|12:17 code|12:17 link=https://kaya.dev|18:29 block=heading2"
+expect_highlights textarea#0 ""
+format textarea#0 12:17 code off
+expect label#0 "format 12:17 code=off"
+expect_runs textarea#0 "0:6 bold|8:11 italic|12:17 link=https://kaya.dev|18:29 block=heading2"
 # THE APP'S TOOLBAR: the app selects the first word and sends format_text;
 # the widget answers over the range it formatted, as for the user's act.
 click button#2

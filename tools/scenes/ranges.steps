@@ -35,6 +35,14 @@ expect_highlights textarea#0 ""
 # would COMMIT the marked text mid-word and shift every later offset.
 # THE OBSERVABLE IS THE CARET, parked at the end of the marked text —
 # had the select been honoured this would read `57:62=alpha`.
-compose textarea#0 "nihon"
+compose textarea#0 "alpha"
 click button#3
 expect_selection textarea#0 "820:820="
+# D5 — MARKED TEXT IS THE WIDGET'S ALONE, on a plain field as on a rich
+# one (invariant 1; docs/rich-text-plan.md R5 and §18): the composition
+# above reached no text_changed and no mirror, so a re-declaration over
+# the mirror still finds three — a backend that leaked the marked "alpha"
+# finds four. The composed word is "alpha" for exactly that reason, and
+# it is five bytes like the caret assertion above was measured with.
+click button#0
+expect label#0 "3 matches"

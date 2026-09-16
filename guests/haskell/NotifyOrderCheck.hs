@@ -101,8 +101,8 @@ main = do
   -- of every declaration refusal, and it faults at apply.
   links <- newApp
   linkSeen <- newIORef ([] :: [(String, Map.Map String String)])
-  link links "task/{key}" (\p -> modifyIORef' linkSeen (++ [("task", p)]))
-  link links "{section}" (\p -> modifyIORef' linkSeen (++ [("section", p)]))
+  linkRoute links "task/{key}" (\p -> modifyIORef' linkSeen (++ [("task", p)]))
+  linkRoute links "{section}" (\p -> modifyIORef' linkSeen (++ [("section", p)]))
 
   -- CASE 1: the declaration is the generated record, parked, and the ids
   -- come from the binding's own counter starting at 1.
@@ -138,7 +138,7 @@ main = do
     check (length seen == 3) "a route this process never declared reached a handler"
   let linkWant =
         "kaya: link dev.kaya.aurora.notes://task/t2 matched route 9 and"
-          ++ " reached no handler — none is registered for it (KayaApp.link)"
+          ++ " reached no handler — none is registered for it (KayaApp.linkRoute)"
   check (trim linkSaid == linkWant)
     ("the link drop was announced as " ++ show (trim linkSaid) ++ ", wanted " ++ show linkWant)
 

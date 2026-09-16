@@ -2757,6 +2757,33 @@ impl<'a> Tx<'a> {
         });
     }
 
+    /// The named acts (the review page's ruling 1, a later sugar pass —
+    /// docs/rich-text-plan.md §18): each is [`Tx::format`] with its name,
+    /// over the widget's own selection; removal stays [`Tx::unformat`].
+    pub fn bold(&mut self, widget: WidgetId) {
+        self.format(widget, "bold", "true");
+    }
+
+    pub fn italic(&mut self, widget: WidgetId) {
+        self.format(widget, "italic", "true");
+    }
+
+    pub fn underline(&mut self, widget: WidgetId) {
+        self.format(widget, "underline", "true");
+    }
+
+    pub fn strike(&mut self, widget: WidgetId) {
+        self.format(widget, "strike", "true");
+    }
+
+    pub fn code(&mut self, widget: WidgetId) {
+        self.format(widget, "code", "true");
+    }
+
+    pub fn link(&mut self, widget: WidgetId, url: &str) {
+        self.format(widget, "link", url);
+    }
+
     /// [`Tx::format_range`]'s removal.
     pub fn unformat_range(&mut self, widget: WidgetId, range: std::ops::Range<usize>, name: &str) {
         let range = self.ctx.ranged_act_bounds(widget.0, range, name);

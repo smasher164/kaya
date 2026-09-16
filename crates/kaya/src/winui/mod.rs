@@ -757,6 +757,13 @@ thread_local! {
     /// (range-probe-windows.md §5).
     static HIGHLIGHT_TEXT: RefCell<HashMap<u64, String>> = RefCell::new(HashMap::new());
 
+    /// THE SAME SET, in the offsets it was painted at, because a rich
+    /// restyle writes the very attribute the highlight wears and has to put
+    /// it back on top (`rich_ground`, docs/rich-text-plan.md §18). Written
+    /// and dropped wherever HIGHLIGHT_TEXT is, so the two cannot disagree.
+    static HIGHLIGHT_SPANS: RefCell<HashMap<u64, Vec<(i32, i32)>>> =
+        RefCell::new(HashMap::new());
+
     /// Widgets with a LIVE INPUT-METHOD COMPOSITION, from the control's
     /// own `TextCompositionStarted`/`TextCompositionEnded` (D4): a
     /// composition rides no kaya channel, so only the control knows, and
@@ -9575,15 +9582,30 @@ fn clear_highlights(field: &RichEditBox) -> windows_core::Result<()> {
 /// THE DECLARED SET, painted (D1's first primitive).
 fn paint_highlights(
     field: &RichEditBox,
+    widget: u64,
     ranges: &[crate::protocol::NativeRange],
 ) -> windows_core::Result<()> {
+    HIGHLIGHT_SPANS.with_borrow_mut(|map| {
+        if ranges.is_empty() {
+            map.remove(&widget);
+        } else {
+            map.insert(
+                widget,
+                ranges.iter().map(|r| (r.start as i32, r.stop as i32)).collect(),
+            );
+        }
+    });
     let doc = field.TextDocument()?;
     // Batched unconditionally: measured 2.2x faster per range
     // (docs/probes/range-probe-windows.md, 96µs -> 44µs) and it keeps the clear
     // below from being a visible flash of undecorated text.
     doc.BatchDisplayUpdates()?;
     let painted = (|| -> windows_core::Result<()> {
+        // The clear is the whole story's background, which is where a rich
+        // document's own grounds live too — so they are written again under
+        // the set (`rich_ground`, docs/rich-text-plan.md §18).
         clear_highlights(field)?;
+        rich_paint_grounds(field, widget)?;
         for range in ranges {
             set_background(
                 &doc.GetRange(range.start as i32, range.stop as i32)?,
@@ -9614,8 +9636,14 @@ fn drop_stale_highlights(id: u64, field: &RichEditBox) {
         return;
     }
     HIGHLIGHT_TEXT.with_borrow_mut(|map| map.remove(&id));
+    HIGHLIGHT_SPANS.with_borrow_mut(|map| map.remove(&id));
     if let Err(e) = clear_highlights(field) {
         eprintln!("kaya: winui could not drop a stale highlight set: {}", e.message());
+    }
+    // That clear is the whole story's background, grounds included, and the
+    // restyle behind this edit repaints its own span alone (`rich_ground`).
+    if let Err(e) = rich_paint_grounds(field, id) {
+        eprintln!("kaya: winui could not put a rich ground back: {}", e.message());
     }
 }
 
@@ -9628,15 +9656,18 @@ fn drop_stale_highlights(id: u64, field: &RichEditBox) {
 #[cfg(feature = "harness")]
 fn painted_runs(field: &RichEditBox, units: i32) -> windows_core::Result<Vec<(i32, i32)>> {
     let doc = field.TextDocument()?;
-    let auto = TextConstants::AutoColor()?;
     let mut runs: Vec<(i32, i32)> = Vec::new();
     let mut open: Option<i32> = None;
     for at in 0..units {
+        // THE HIGHLIGHT'S OWN MARK, never "some ground": a `code` run and a
+        // `quote` paragraph wear this same attribute now (`rich_ground`,
+        // docs/rich-text-plan.md §18), and a reader keyed on "not AutoColor"
+        // would report them as declared ranges.
         let painted = doc
             .GetRange(at, at + 1)?
             .CharacterFormat()?
             .BackgroundColor()?
-            != auto;
+            == HIGHLIGHT_BACKGROUND;
         match (painted, open) {
             (true, None) => open = Some(at),
             (false, Some(from)) => {
@@ -9703,7 +9734,6 @@ fn range_extent(field: &RichEditBox, start: i32, stop: i32) -> windows_core::Res
 /// The ScrollViewer inside a text control's template — the part named
 /// `ContentElement`, which is what actually moves when a WinUI text
 /// control scrolls.
-#[cfg(feature = "harness")]
 fn template_scroll(field: &RichEditBox) -> windows_core::Result<ScrollViewer> {
     fn walk(element: &UIElement) -> windows_core::Result<Option<ScrollViewer>> {
         use bindings::Microsoft::UI::Xaml::Media::VisualTreeHelper;
@@ -9779,8 +9809,37 @@ const RICH_LINK_LIGHT: bindings::Windows::UI::Color =
 const RICH_LINK_DARK: bindings::Windows::UI::Color =
     bindings::Windows::UI::Color { A: 255, R: 0x60, G: 0xCD, B: 0xFF };
 
+/// A `code` run's own ground and a `quote` paragraph's tint, flattened for
+/// the same reason the link colour is: Fluent's subtle fills carry an alpha
+/// this attribute has none of, so they are composited here over the
+/// control's own ground (docs/rich-text-plan.md §18).
+const RICH_CODE_GROUND_LIGHT: bindings::Windows::UI::Color =
+    bindings::Windows::UI::Color { A: 255, R: 0xED, G: 0xED, B: 0xED };
+const RICH_CODE_GROUND_DARK: bindings::Windows::UI::Color =
+    bindings::Windows::UI::Color { A: 255, R: 0x3D, G: 0x3D, B: 0x3D };
+const RICH_QUOTE_GROUND_LIGHT: bindings::Windows::UI::Color =
+    bindings::Windows::UI::Color { A: 255, R: 0xEF, G: 0xEF, B: 0xEF };
+const RICH_QUOTE_GROUND_DARK: bindings::Windows::UI::Color =
+    bindings::Windows::UI::Color { A: 255, R: 0x3A, G: 0x3A, B: 0x3A };
+
 /// A quote's indent, in TOM's points — the mac arm's `headIndent` number.
+/// IT IS THE WHOLE RULE ON THIS BACKEND: `ITextParagraphFormat` carries
+/// indents, spacing, tabs and list levels and no border or ground, and the
+/// Rich Edit engine draws into a surface whose own rectangles do not move
+/// with the viewport (docs/traps.md 2026-08-06), so an overlaid XAML rule
+/// would have to be recomputed against the ScrollViewer on every scroll and
+/// edit. The indent plus `RICH_QUOTE_GROUND_*` behind the paragraph's runs
+/// is what a quote wears here (docs/rich-text-plan.md §18).
 const RICH_QUOTE_INDENT: f32 = 20.0;
+
+/// The three colours a theme decides, together — every rich write takes one
+/// of these rather than reading `ActualTheme` three times.
+#[derive(Clone, Copy)]
+struct RichPalette {
+    link: bindings::Windows::UI::Color,
+    code_ground: bindings::Windows::UI::Color,
+    quote_ground: bindings::Windows::UI::Color,
+}
 
 /// The baseline the derived display is a multiple of: the document's own
 /// default character format, which is what an unformatted run already wears.
@@ -9801,11 +9860,35 @@ fn rich_base(field: &RichEditBox) -> windows_core::Result<(f32, String)> {
     Ok((size, name))
 }
 
-fn rich_link_colour(field: &RichEditBox) -> bindings::Windows::UI::Color {
+fn rich_palette(field: &RichEditBox) -> RichPalette {
     match field.ActualTheme() {
-        Ok(ElementTheme::Dark) => RICH_LINK_DARK,
-        _ => RICH_LINK_LIGHT,
+        Ok(ElementTheme::Dark) => RichPalette {
+            link: RICH_LINK_DARK,
+            code_ground: RICH_CODE_GROUND_DARK,
+            quote_ground: RICH_QUOTE_GROUND_DARK,
+        },
+        _ => RichPalette {
+            link: RICH_LINK_LIGHT,
+            code_ground: RICH_CODE_GROUND_LIGHT,
+            quote_ground: RICH_QUOTE_GROUND_LIGHT,
+        },
     }
+}
+
+/// THE GROUND ONE RUN WEARS, or none. ONE ATTRIBUTE, THREE CLAIMANTS: this
+/// control has a single `BackgroundColor` and find's highlight ranges own it
+/// too (docs/ranges-plan.md D1), so the order is stated here — the highlight
+/// over a `code` ground over a `quote` tint — and `rich_repaint_highlights`
+/// puts the top one back after every restyle wrote the ones under it
+/// (docs/rich-text-plan.md §18).
+fn rich_ground(
+    attrs: &BTreeMap<String, String>, palette: RichPalette,
+) -> Option<bindings::Windows::UI::Color> {
+    let block = attrs.get("block").map(String::as_str).unwrap_or("body");
+    if attrs.contains_key("code") || block == "code_block" {
+        return Some(palette.code_ground);
+    }
+    (block == "quote").then_some(palette.quote_ground)
 }
 
 /// The attributes covering one byte, last run winning — the core's `attrs_at`
@@ -9960,7 +10043,7 @@ fn rich_paragraph_bounds(text: &str, start: usize, end: usize) -> (usize, usize)
 fn rich_write_format(
     character: &ITextCharacterFormat, paragraph: Option<&ITextParagraphFormat>,
     attrs: &BTreeMap<String, String>, base_size: f32, base_face: &str,
-    link: bindings::Windows::UI::Color,
+    palette: RichPalette,
 ) -> windows_core::Result<()> {
     let has = |name: &str| attrs.contains_key(name);
     let block = attrs.get("block").map(String::as_str).unwrap_or("body");
@@ -9994,10 +10077,18 @@ fn rich_write_format(
     })?;
     character.SetSize(size)?;
     character.SetName(&HSTRING::from(if monospace { RICH_MONOSPACE } else { base_face }))?;
-    character.SetForegroundColor(if linked { link } else { TextConstants::AutoColor()? })?;
+    character
+        .SetForegroundColor(if linked { palette.link } else { TextConstants::AutoColor()? })?;
+    // The ground, written on every call like every other property: a run that
+    // LOST its `code` takes its ground back off.
+    character.SetBackgroundColor(match rich_ground(attrs, palette) {
+        Some(ground) => ground,
+        None => TextConstants::AutoColor()?,
+    })?;
     if let Some(paragraph) = paragraph {
-        // The block layer's only paragraph property in v1: a heading is size
-        // plus weight and a code block a face, both character formats.
+        // The block layer's only paragraph property: a heading is size plus
+        // weight and a code block a face, both character formats, and a
+        // quote's own rule is this indent (RICH_QUOTE_INDENT's note).
         let indent = if block == "quote" { RICH_QUOTE_INDENT } else { 0.0 };
         paragraph.SetIndents(0.0, indent, 0.0)?;
     }
@@ -10008,13 +10099,13 @@ fn rich_write_format(
 /// never guesses a name from a font, so this is the only direction the two
 /// travel in (docs/rich-text-plan.md R1).
 fn rich_restyle(
-    field: &RichEditBox, text: &str, runs: &[TextRun], from: usize, to: usize,
+    field: &RichEditBox, widget: u64, text: &str, runs: &[TextRun], from: usize, to: usize,
 ) -> windows_core::Result<()> {
     if from >= to {
         return Ok(());
     }
     let (base_size, base_face) = rich_base(field)?;
-    let link = rich_link_colour(field);
+    let palette = rich_palette(field);
     let mut edges: Vec<usize> = vec![from, to];
     for run in runs {
         for edge in [run.start as usize, run.end as usize] {
@@ -10040,7 +10131,7 @@ fn rich_restyle(
             let character = range.CharacterFormat()?;
             let paragraph = range.ParagraphFormat()?;
             rich_write_format(
-                &character, Some(&paragraph), &attrs, base_size, &base_face, link,
+                &character, Some(&paragraph), &attrs, base_size, &base_face, palette,
             )?;
             // ASSIGNED BACK as `set_background` assigns: the probe measured the
             // object live (docs/measurements/richtext-windows-2026-09-11.md §4)
@@ -10049,12 +10140,49 @@ fn rich_restyle(
             range.SetCharacterFormat(&character)?;
             range.SetParagraphFormat(&paragraph)?;
         }
-        Ok(())
+        // The grounds above were written into the attribute find's highlight
+        // owns, so the top claimant goes back on last (`rich_ground`).
+        rich_repaint_highlights(field, widget)
     })();
     // ALWAYS, even on the failure above: an unmatched BatchDisplayUpdates leaves
     // the control's rendering suspended for the rest of the process.
     doc.ApplyDisplayUpdates()?;
     painted
+}
+
+/// THE GROUNDS ALONE, over the whole document: what a highlight declaration's
+/// blanket clear takes with it (docs/rich-text-plan.md §18).
+fn rich_paint_grounds(field: &RichEditBox, widget: u64) -> windows_core::Result<()> {
+    if !rich_is_on(widget) {
+        return Ok(());
+    }
+    let text = lf(Editable::Textarea(field.clone()).text()?);
+    let runs = rich_table(widget);
+    let palette = rich_palette(field);
+    let doc = field.TextDocument()?;
+    for (start, end, attrs) in rich_segments(&text, &runs) {
+        let Some(ground) = rich_ground(&attrs, palette) else {
+            continue;
+        };
+        let (Some(a), Some(b)) = (utf16_offset(&text, start), utf16_offset(&text, end)) else {
+            continue;
+        };
+        set_background(&doc.GetRange(a, b)?, ground)?;
+    }
+    Ok(())
+}
+
+/// THE LIVE HIGHLIGHT SET, back on top of the grounds a restyle just wrote —
+/// the top claimant of the one background attribute (`rich_ground`).
+fn rich_repaint_highlights(field: &RichEditBox, widget: u64) -> windows_core::Result<()> {
+    let Some(spans) = HIGHLIGHT_SPANS.with_borrow(|map| map.get(&widget).cloned()) else {
+        return Ok(());
+    };
+    let doc = field.TextDocument()?;
+    for (start, stop) in spans {
+        set_background(&doc.GetRange(start, stop)?, HIGHLIGHT_BACKGROUND)?;
+    }
+    Ok(())
 }
 
 /// THE TYPING ATTRIBUTES A COLLAPSED CARET CARRIES: the byte before it, never a
@@ -10077,11 +10205,178 @@ fn rich_arm_typing(field: &RichEditBox, widget: u64, caret: usize) -> windows_co
         }
     });
     let (base_size, base_face) = rich_base(field)?;
-    let link = rich_link_colour(field);
+    let palette = rich_palette(field);
     let selection = field.TextDocument()?.Selection()?;
     let character = selection.CharacterFormat()?;
-    rich_write_format(&character, None, &attrs, base_size, &base_face, link)?;
+    rich_write_format(&character, None, &attrs, base_size, &base_face, palette)?;
     selection.SetCharacterFormat(&character)
+}
+
+// --- A LINK RUN'S CLICK (docs/rich-text-plan.md §18) -------------------
+//
+// THE GESTURE'S END IS `PointerCaptureLost`, the Slider arm's own door
+// (docs/slider-plan.md §6) and for the same reason: a text control marks
+// its PointerPressed AND PointerReleased handled, and `AddHandler`'s
+// handled-events-too registration wants an `IInspectable` a WinRT delegate
+// is not. TWO OTHER ROUTES WERE MEASURED DEAD on this control, 2026-09-15:
+// an instance `PointerReleased` handler never ran, and a WH_GETMESSAGE hook
+// on the UI thread saw WM_MOUSEMOVE and NO button or WM_POINTER message at
+// all — WinUI 3 delivers button input through the content island, not
+// through this thread's message queue, so the chord route's shape cannot be
+// borrowed here. The POSITION comes from the cursor, because
+// `PointerRoutedEventArgs` carries none in these bindings.
+unsafe extern "system" {
+    fn GetCursorPos(point: *mut Point32) -> i32;
+}
+
+/// The cursor, at the release that just happened.
+fn rich_link_release(widget: u64) {
+    if !rich_is_on(widget) {
+        return;
+    }
+    let mut at = Point32 { x: 0, y: 0 };
+    // SAFETY: a stack POINT.
+    if unsafe { GetCursorPos(&mut at) } == 0 {
+        return;
+    }
+    rich_link_click(f64::from(at.x), f64::from(at.y));
+}
+
+/// A RELEASE OVER A LINK RUN OPENS IT, through the arm's own door — the
+/// same `open_link_through_shell` the app's `open_link` and the rich
+/// label's `Hyperlink` take. A release the borrow cannot be taken for, or
+/// one over no rich textarea, is nothing: a click is never worth an abort.
+fn rich_link_click(sx: f64, sy: f64) {
+    let hit = CORE.with(|slot| {
+        let borrowed = slot.try_borrow().ok()?;
+        let core = borrowed.as_ref()?;
+        core.textarea_ids.iter().enumerate().find_map(|(at, id)| {
+            if !rich_is_on(*id) {
+                return None;
+            }
+            let (x, y, w, h) = widget_screen_rect(core, *id)?;
+            if sx < x || sy < y || sx >= x + w || sy >= y + h {
+                return None;
+            }
+            let field = core.textareas.get(at)?.clone();
+            let scale = windows_core::Interface::cast::<UIElement>(&field)
+                .ok()?
+                .XamlRoot()
+                .ok()?
+                .RasterizationScale()
+                .ok()?;
+            Some((*id, field, (sx - x) / scale, (sy - y) / scale))
+        })
+    });
+    let Some((widget, field, x, y)) = hit else {
+        return;
+    };
+    match rich_link_at(&field, widget, x, y) {
+        Ok(Some(url)) => open_link_through_shell(&url),
+        Ok(None) => {}
+        Err(e) => {
+            eprintln!("kaya: winui could not hit-test a rich link: {}", e.message())
+        }
+    }
+}
+
+/// THE LINK UNDER A POINT INSIDE THE CONTROL, in the control's own points.
+/// The Rich Edit engine's coordinates are its DOCUMENT's and not the
+/// viewport's (docs/traps.md 2026-08-06), so the ScrollViewer's offset is
+/// added before the hit test.
+fn rich_link_at(
+    field: &RichEditBox, widget: u64, x: f64, y: f64,
+) -> windows_core::Result<Option<String>> {
+    // A DRAG IS NOT A CLICK: a selection gesture ends with a range, a click
+    // with a caret, and this door is `PointerCaptureLost` for both.
+    let selection = field.TextDocument()?.Selection()?;
+    if selection.StartPosition()? != selection.EndPosition()? {
+        return Ok(None);
+    }
+    let (dx, dy) = match template_scroll(field) {
+        Ok(viewer) => (viewer.HorizontalOffset()?, viewer.VerticalOffset()?),
+        Err(_) => (0.0, 0.0),
+    };
+    let point = Point { X: (x + dx) as f32, Y: (y + dy) as f32 };
+    let doc = field.TextDocument()?;
+    let cp = doc.GetRangeFromPoint(point, PointOptions::ClientCoordinates)?.StartPosition()?;
+    let text = lf(Editable::Textarea(field.clone()).text()?);
+    let runs = rich_table(widget);
+    // THE CHARACTER THE POINT IS IN, and not the one the cp names:
+    // `GetRangeFromPoint` answers an INSERTION POINT — the boundary nearest
+    // the click — so the click is inside the character before it or the one
+    // after it, and inside NEITHER when it is past the end of a line, which
+    // is what keeps the blank beside a link from opening one.
+    for from in [cp - 1, cp] {
+        if from < 0 {
+            continue;
+        }
+        let mut rect = bindings::Windows::Foundation::Rect::default();
+        let mut edge = 0i32;
+        doc.GetRange(from, from + 1)?.GetRect(
+            PointOptions::ClientCoordinates | PointOptions::AllowOffClient,
+            &mut rect,
+            &mut edge,
+        )?;
+        if point.X < rect.X
+            || point.X > rect.X + rect.Width
+            || point.Y < rect.Y
+            || point.Y > rect.Y + rect.Height
+        {
+            continue;
+        }
+        let Some(byte) = byte_offset(&text, from) else {
+            continue;
+        };
+        if let Some(url) = rich_attrs_at(&runs, byte).get("link") {
+            return Ok(Some(url.clone()));
+        }
+    }
+    Ok(None)
+}
+
+/// Whether this field is holding a live composition — the one test every
+/// TextChanged asks before it reports anything. MARKED TEXT IS THE WIDGET'S
+/// ALONE ON EVERY FIELD, plain or rich (invariant 1, docs/rich-text-plan.md
+/// R5 and §18; tools/scenes/ranges.steps D5 is the observable — a leaked
+/// composition reads one match too many).
+fn composing_now(widget: u64) -> bool {
+    COMPOSING.with_borrow(|live| live.contains(&widget))
+}
+
+/// A PLAIN TextBox's half of that rule: the composition's own raises are
+/// held back by `composing_now` above, and the COMMIT is the one
+/// text_changed the app hears. The rich textarea keeps its own pair, since
+/// a rich commit is an edit as well.
+fn watch_plain_composition(
+    field: &TextBox, widget: u64, tag: Vec<u8>, sink: OccSink,
+) -> windows_core::Result<()> {
+    field.TextCompositionStarted(
+        &TypedEventHandler::<TextBox, TextCompositionStartedEventArgs>::new(move |_, _| {
+            COMPOSING.with_borrow_mut(|live| live.insert(widget));
+            Ok(())
+        }),
+    )?;
+    let commit = field.clone();
+    field.TextCompositionEnded(
+        &TypedEventHandler::<TextBox, TextCompositionEndedEventArgs>::new(move |_, _| {
+            COMPOSING.with_borrow_mut(|live| live.remove(&widget));
+            let field = commit.clone();
+            let tag = tag.clone();
+            let sink = sink.clone();
+            // Through the deferring door: a composition can end inside an
+            // apply's own borrow (`rich_scene`'s note).
+            rich_scene("committing a plain composition", move |core| {
+                let Ok(text) = field.Text() else { return };
+                let text = lf(text.to_string());
+                if bank_text_changed_on(core, widget, &text) {
+                    sink.send_text_tag(&tag, &text);
+                }
+            });
+            Ok(())
+        }),
+    )?;
+    Ok(())
 }
 
 /// The scene, from a CONTROL EVENT HANDLER, where `CORE.with_borrow_mut`
@@ -10150,7 +10445,9 @@ fn rich_take_edit(widget: u64, field: &RichEditBox, text: &str, edit: &crate::sc
             pending.remove(&widget);
         });
     }
-    if let Err(e) = rich_restyle(field, text, &spliced, start, start + edit.inserted.len()) {
+    if let Err(e) =
+        rich_restyle(field, widget, text, &spliced, start, start + edit.inserted.len())
+    {
         eprintln!("kaya: winui could not draw an edit's runs: {}", e.message());
     }
     // THE CARET IS RE-ARMED FROM THE TABLE, because TOM keeps the insertion
@@ -10243,7 +10540,7 @@ fn rich_format_selection(
         RICH_RUNS.with_borrow_mut(|table| {
             table.insert(widget, runs.clone());
         });
-        rich_restyle(&field, &text, &runs, start, end)?;
+        rich_restyle(&field, widget, &text, &runs, start, end)?;
         let range = crate::protocol::TextRange::new(start as u64, end as u64);
         if let Some((range, name, value)) =
             core.scene.note_text_formatted(WidgetId(widget), range, name, want)
@@ -10316,7 +10613,7 @@ fn rich_format_range(
         });
         match (&block, &field) {
             (Some(block), _) => label_restyle(block, &text, &runs)?,
-            (None, Some(field)) => rich_restyle(field, &text, &runs, start, end)?,
+            (None, Some(field)) => rich_restyle(field, widget, &text, &runs, start, end)?,
             (None, None) => unreachable!("the text above came from one of the two"),
         }
         Ok(Ok(()))
@@ -10362,7 +10659,7 @@ fn rich_set_document(
     RICH_PENDING.with_borrow_mut(|pending| {
         pending.remove(&widget);
     });
-    rich_restyle(&field, text, &table, 0, text.len())
+    rich_restyle(&field, widget, text, &table, 0, text.len())
 }
 
 /// apply_edit: `range` and `runs` arrive in cp, the table keeps bytes.
@@ -10431,7 +10728,7 @@ fn rich_apply_edit(
     RICH_RUNS.with_borrow_mut(|map| {
         map.insert(widget, table.clone());
     });
-    rich_restyle(&field, &after, &table, start, start + inserted.len())
+    rich_restyle(&field, widget, &after, &table, start, start + inserted.len())
 }
 
 /// A LABEL'S OWN BLOCK, or None when the widget is not a label
@@ -12512,6 +12809,11 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         {
                             return Ok(());
                         }
+                        // Marked text is the widget's alone here too
+                        // (`composing_now`, ranges.steps D5).
+                        if composing_now(bank_id) {
+                            return Ok(());
+                        }
                         let text = lf(field_for_handler.Text()?.to_string());
                         // The ledger sees it BEFORE the app does (§3),
                         // and it decides whether anything happened at
@@ -12522,6 +12824,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         Ok(())
                     });
                     field.TextChanged(&handler)?;
+                    watch_plain_composition(
+                        &field, id.0, tag.clone(), core.occurrences.clone(),
+                    )?;
                     // Paste's enablement is the offer/accepts
                     // intersection AT THE FOCUSED WIDGET; deferred a
                     // tick, because a programmatic Focus() inside apply
@@ -12599,6 +12904,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         {
                             return Ok(());
                         }
+                        if composing_now(bank_id) {
+                            return Ok(());
+                        }
                         let text = lf(field_for_handler.Text()?.to_string());
                         if bank_text_changed(bank_id, &text) {
                             sink.send_text_tag(&handler_tag, &text);
@@ -12606,6 +12914,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         Ok(())
                     });
                     field.TextChanged(&handler)?;
+                    watch_plain_composition(
+                        &field, id.0, tag.clone(), core.occurrences.clone(),
+                    )?;
                     // ESCAPE IS THE CLEAR ACT ON A DESKTOP (S5), and it takes
                     // THE SAME PATH the clear button does: it operates that
                     // button, so the app sees one text_changed("") either way
@@ -12883,10 +13194,11 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         // docs/rich-text-plan.md R5): TSF writes a composition
                         // into this store, so the only place it can be held
                         // back is here. The commit reports from
-                        // TextCompositionEnded.
-                        if rich_is_on(bank_id)
-                            && COMPOSING.with_borrow(|live| live.contains(&bank_id))
-                        {
+                        // TextCompositionEnded. KEYED ON NOTHING ELSE since
+                        // 2026-09-15 — a PLAIN textarea leaked its marked text
+                        // to the app's fold (tools/scenes/ranges.steps D5,
+                        // docs/rich-text-plan.md §18).
+                        if composing_now(bank_id) {
                             return Ok(());
                         }
                         let text = lf(field_for_handler.text()?);
@@ -12944,6 +13256,21 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     >::new(move |_, _| {
                         COMPOSING.with_borrow_mut(|live| live.remove(&composing_id));
                         if !rich_is_on(composing_id) {
+                            // The plain half of D5: the marked text was held
+                            // back above, so this is the app's one
+                            // text_changed (`watch_plain_composition`).
+                            let field = commit_field.clone();
+                            let tag = commit_tag.clone();
+                            let sink = commit_sink.clone();
+                            rich_scene("committing a plain composition", move |core| {
+                                let Ok(text) = Editable::Textarea(field).text() else {
+                                    return;
+                                };
+                                let text = lf(text);
+                                if bank_text_changed_on(core, composing_id, &text) {
+                                    sink.send_text_tag(&tag, &text);
+                                }
+                            });
                             return Ok(());
                         }
                         // THE COMMIT IS ONE EDIT, named before it is reported
@@ -13014,6 +13341,18 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         });
                         Ok(())
                     }))?;
+                    // A CLICK OVER A LINK RUN OPENS IT (docs/rich-text-plan.md
+                    // §18): registered here and not in the `rich` arm, which
+                    // can run again for the same widget and would stack a
+                    // second door; `rich_link_release` answers nothing while
+                    // the widget is plain.
+                    let link_id = id.0;
+                    field.PointerCaptureLost(&PointerEventHandler::new(
+                        move |_, _: windows_core::Ref<'_, PointerRoutedEventArgs>| {
+                            rich_link_release(link_id);
+                            Ok(())
+                        },
+                    ))?;
                     // Same focus-handoff refresh as the entry (paste
                     // enablement follows the focused editable).
                     let focus_handler = RoutedEventHandler::new(move |_, _| {
@@ -13782,7 +14121,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             if ranges.is_empty() && !painted {
                 return Ok(());
             }
-            paint_highlights(&field, &ranges)?;
+            paint_highlights(&field, id.0, &ranges)?;
             // D2's compare needs the text these offsets were validated against,
             // and the control is holding it RIGHT NOW. AN EMPTY DECLARATION
             // LEAVES NO ENTRY: one kept here would send
@@ -14174,11 +14513,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         RICH_RUNS.with_borrow_mut(|table| {
                             table.entry(id.0).or_default();
                         });
+
                     } else {
                         RICH_RUNS.with_borrow_mut(|table| table.remove(&id.0));
                         RICH_PENDING.with_borrow_mut(|pending| pending.remove(&id.0));
                         let text = lf(Editable::Textarea(field.clone()).text()?);
-                        rich_restyle(&field, &text, &[], 0, text.len())?;
+                        rich_restyle(&field, id.0, &text, &[], 0, text.len())?;
                     }
                 }
                 // docs/rich-text-plan.md §15: a LABEL carries the inline
@@ -16716,6 +17056,24 @@ impl WinUiStage {
             let native: IWindowNative = windows_core::Interface::cast(&core.window)?;
             native.window_handle()
         });
+        // THE WINDOW FIRST: a scene whose first keystroke comes three
+        // seconds after launch met a window that had not appeared yet on a
+        // loaded host, and the dance below cannot raise a window that is
+        // not on screen — three matrices' red on one leg read exactly so
+        // (docs/deferred.md, the PopupHost WATCH's third sighting). Wait
+        // for visibility, bounded, and say so when it never comes.
+        let shown = (0..400).any(|_| {
+            if unsafe { IsWindowVisible(hwnd) } != 0 {
+                return true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            false
+        });
+        assert!(
+            shown,
+            "kaya: the guest window was not visible 20s after {what} injection \
+             was asked for — the scene typed before the window came up"
+        );
         let mut confirmed = false;
         for attempt in 0..150 {
             if unsafe { GetForegroundWindow() } == hwnd {
@@ -20183,11 +20541,7 @@ impl crate::harness::Stage for WinUiStage {
     /// cannot otherwise see that the second process redirected rather than
     /// opened a window of its own.
     fn open_link(&self, url: &str) {
-        let url = url.to_owned();
-        match on_notify(move || shell_open(&url)) {
-            Some(Ok(())) | None => {}
-            Some(Err(why)) => eprintln!("kaya: winui could not open the link — {why}"),
-        }
+        open_link_through_shell(url)
     }
     fn alert_title(&self, window: u64) -> Option<String> {
         Self::on_ui_read(move |core| {
@@ -23218,6 +23572,16 @@ unsafe extern "system" {
         directory: *const u16,
         show: i32,
     ) -> isize;
+}
+
+/// THE ARM'S ONE LINK DOOR: the app's `open_link`, and a click on a link run
+/// in a rich textarea (`rich_link_click`, docs/rich-text-plan.md §18).
+fn open_link_through_shell(url: &str) {
+    let url = url.to_owned();
+    match on_notify(move || shell_open(&url)) {
+        Some(Ok(())) | None => {}
+        Some(Err(why)) => eprintln!("kaya: winui could not open the link — {why}"),
+    }
 }
 
 /// `open_link`'s platform half. Runs on the notification apartment because it

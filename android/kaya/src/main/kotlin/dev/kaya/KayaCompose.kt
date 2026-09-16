@@ -10113,7 +10113,11 @@ internal fun kayaRichParagraph(text: String, start: Int, stop: Int): Pair<Int, I
 
 /** The colours the display derives from kaya's keys, read where a
  * CompositionLocal can be read and handed to the transformation. */
-internal data class KayaRichPalette(val link: Color, val quote: Color)
+internal data class KayaRichPalette(
+    val link: Color,
+    val quote: Color,
+    val code: Color,
+)
 
 /** The run table cut into maximal segments of constant attributes — the
  * mac arm's `enumerateAttributes`, which is what keeps two decorations on
@@ -10159,6 +10163,8 @@ internal fun kayaRichSpanStyle(
             block == "quote" -> palette.quote
             else -> Color.Unspecified
         },
+        // A CODE RUN'S GROUND (docs/rich-text-plan.md §18).
+        background = if (mono) palette.code else Color.Unspecified,
         fontSize = when (block) {
             "heading1" -> 1.6.em
             "heading2" -> 1.35.em
@@ -10198,14 +10204,11 @@ internal fun kayaRichTransformation(
             val stop = minOf(to, length)
             if (stop <= from) continue
             addStyle(kayaRichSpanStyle(attrs, palette), from, stop)
-            if (attrs["block"] == "quote") {
-                addStyle(
-                    androidx.compose.ui.text.ParagraphStyle(
-                        textIndent = androidx.compose.ui.text.style.TextIndent(
-                            KAYA_RICH_QUOTE_INDENT, KAYA_RICH_QUOTE_INDENT)),
-                    from,
-                    stop)
-            }
+        }
+        // ONE PARAGRAPH STYLE PER QUOTE RUN, never per segment — a boundary
+        // inside a quote breaks the line (docs/rich-text-plan.md §18).
+        for ((from, to) in kayaRichQuoteExtents(runs, asCharSequence())) {
+            addStyle(KAYA_RICH_QUOTE_PARAGRAPH, from, to)
         }
     }
 
@@ -10226,14 +10229,77 @@ internal fun kayaRichAnnotated(
         addStyle(kayaRichSpanStyle(attrs, palette), from, to)
         attrs["link"]?.let { addLink(LinkAnnotation.Url(it), from, to) }
     }
+    for ((from, to) in kayaRichQuoteExtents(runs, text)) {
+        addStyle(KAYA_RICH_QUOTE_PARAGRAPH, from, to)
+    }
+}
+
+/**
+ * A QUOTE PARAGRAPH'S EXTENT: the block run WITH its terminating newline,
+ * since a paragraph-style boundary in front of one draws an empty line
+ * (docs/rich-text-plan.md §18).
+ */
+internal fun kayaRichQuoteExtents(
+    runs: List<KayaRichRun>,
+    text: CharSequence,
+): List<Pair<Int, Int>> {
+    val out = ArrayList<Pair<Int, Int>>()
+    for (run in runs) {
+        if (run.name != "block" || run.value != "quote") continue
+        val from = run.start.coerceIn(0, text.length)
+        var to = run.end.coerceIn(from, text.length)
+        if (to < text.length && text[to] == '\n') to += 1
+        if (to > from) out.add(Pair(from, to))
+    }
+    return out
+}
+
+/**
+ * THE QUOTE'S LEADING RULE, over the paragraph's own line bounds: Compose
+ * draws no paragraph border and offers no hook inside a text layout, so
+ * the bar is kaya's own, behind the text and inside the indent
+ * [KAYA_RICH_QUOTE_PARAGRAPH] clears for it (docs/rich-text-plan.md §18).
+ */
+internal fun androidx.compose.ui.graphics.drawscope.DrawScope.kayaRichQuoteRule(
+    extents: List<Pair<Int, Int>>,
+    layout: androidx.compose.ui.text.TextLayoutResult,
+    color: Color,
+) {
+    val width = KAYA_RICH_QUOTE_RULE_WIDTH.toPx()
+    val length = layout.layoutInput.text.length
+    for ((from, to) in extents) {
+        if (from >= length) continue
+        val first = layout.getLineForOffset(from)
+        val last = layout.getLineForOffset((to - 1).coerceIn(from, length - 1))
+        val top = layout.getLineTop(first)
+        val bottom = layout.getLineBottom(last)
+        drawRect(
+            color,
+            topLeft = Offset(0f, top),
+            size = androidx.compose.ui.geometry.Size(width, bottom - top))
+    }
 }
 
 /** A quote's indent, the mac arm's 20 points in this platform's unit. */
 private val KAYA_RICH_QUOTE_INDENT = 20.sp
 
+/** The indent the rule is drawn inside, declared AFTER the value it
+ * reads (a file's top-level properties initialize in order). */
+private val KAYA_RICH_QUOTE_PARAGRAPH = androidx.compose.ui.text.ParagraphStyle(
+    textIndent = androidx.compose.ui.text.style.TextIndent(
+        KAYA_RICH_QUOTE_INDENT, KAYA_RICH_QUOTE_INDENT))
+
+/** The leading rule's width. */
+private val KAYA_RICH_QUOTE_RULE_WIDTH = 3.dp
+
 /** A quote's dimmed ground, the mac arm's secondary label one platform
  * over. */
 internal const val KAYA_RICH_QUOTE_ALPHA = 0.7f
+
+/** A CODE RUN'S GROUND is a tint of the content colour, so it composites
+ * over whatever is behind it — the highlight wash included, which is the
+ * one thing it may not hide (docs/rich-text-plan.md §18). */
+internal const val KAYA_RICH_CODE_ALPHA = 0.12f
 
 /** One read of the field, all three facts the collector needs from the
  * same snapshot: a caret move changes no text and would otherwise wake
@@ -12642,12 +12708,25 @@ private fun KayaRenderCore(
                 // and the builder runs outside one.
                 val palette = KayaRichPalette(
                     link = MaterialTheme.colorScheme.primary,
-                    quote = LocalContentColor.current.copy(alpha = KAYA_RICH_QUOTE_ALPHA))
+                    quote = LocalContentColor.current.copy(alpha = KAYA_RICH_QUOTE_ALPHA),
+                    code = LocalContentColor.current.copy(alpha = KAYA_RICH_CODE_ALPHA))
                 // richSeq is the composition state a run change moves: the
                 // table itself is a plain field.
                 val document = remember(node, node.text, node.richSeq, palette) {
                     kayaRichAnnotated(node.text, node.richRuns, palette)
                 }
+                // THE QUOTE'S RULE ON A LABEL: the layout is written in
+                // the layout phase and read in the draw, so a run change
+                // redraws and recomposes nothing (docs/rich-text-plan.md §18).
+                var layout by remember(node) {
+                    mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null)
+                }
+                val quotes = remember(node, node.text, node.richSeq) {
+                    kayaRichQuoteExtents(node.richRuns, node.text)
+                }
+                val base = if (node.role == KayaCompose.ROLE_HEADING)
+                    boxFill.then(a11y).semantics { heading() }
+                else boxFill.then(a11y)
                 Text(
                     document,
                     style = when (node.role) {
@@ -12657,9 +12736,10 @@ private fun KayaRenderCore(
                     },
                     color = if (node.role == KayaCompose.ROLE_CAPTION)
                         MaterialTheme.colorScheme.onSurfaceVariant else Color.Unspecified,
-                    modifier = if (node.role == KayaCompose.ROLE_HEADING)
-                        boxFill.then(a11y).semantics { heading() }
-                    else boxFill.then(a11y),
+                    onTextLayout = { layout = it },
+                    modifier = base.drawBehind {
+                        layout?.let { kayaRichQuoteRule(quotes, it, palette.quote) }
+                    },
                 )
             } else
             // The heading role is BOTH facts at once (docs/styling-plan.md
@@ -12921,7 +13001,8 @@ fun KayaTextField(
     // be read in a composable and the transformation runs outside one.
     val palette = KayaRichPalette(
         link = MaterialTheme.colorScheme.primary,
-        quote = LocalContentColor.current.copy(alpha = KAYA_RICH_QUOTE_ALPHA))
+        quote = LocalContentColor.current.copy(alpha = KAYA_RICH_QUOTE_ALPHA),
+        code = LocalContentColor.current.copy(alpha = KAYA_RICH_CODE_ALPHA))
     val richSeq = node.richSeq
     val output = remember(node, node.rich, richSeq, palette) {
         if (node.rich) kayaRichTransformation(node.richRuns, palette) else null
@@ -12942,10 +13023,9 @@ fun KayaTextField(
                 node.textState.selection)
         }.collect { read ->
             // R5: a composition is the WIDGET'S ALONE — marked text reaches
-            // neither the core's mirror nor the app, which is what the mac
-            // gets for free (setMarkedText notifies no delegate). A plain
-            // field on this backend still reports it; only a `rich` one is
-            // held to the rule.
+            // neither the core's mirror nor the app, on a plain field as on
+            // a rich one (invariant 1; tools/scenes/ranges.steps D5 is the
+            // step, docs/rich-text-plan.md §18).
             val commit = node.rich && node.richComposing && !read.composing
             if (node.rich && read.composing && !node.richComposing) {
                 node.richComposing = true
@@ -12958,7 +13038,7 @@ fun KayaTextField(
                     KayaPresent.textSelection(node.id, from.toLong(), to.toLong())
                 }
             }
-            if (node.rich && read.composing) return@collect
+            if (read.composing) return@collect
             val value = kayaLf(read.text)
             // The echo of kaya's own write: the model already says this.
             if (value != node.text) {
@@ -13109,7 +13189,7 @@ fun KayaTextField(
                 // around the decoration: the inner field IS the scrolling
                 // viewport, so a decoration-level draw would sit still
                 // while the text moved under it.
-                innerTextField = { KayaHighlightLayer(node, inner) },
+                innerTextField = { KayaHighlightLayer(node, palette, inner) },
                 enabled = true,
                 singleLine = singleLine,
                 visualTransformation = VisualTransformation.None,
@@ -13142,7 +13222,11 @@ fun KayaTextField(
  * hoisted read recomposes the field 200 times in 200 frames.
  */
 @Composable
-private fun KayaHighlightLayer(node: KayaNode, inner: @Composable () -> Unit) {
+private fun KayaHighlightLayer(
+    node: KayaNode,
+    palette: KayaRichPalette,
+    inner: @Composable () -> Unit,
+) {
     // THE WASH THIS LAYER IS PAINTED UNDER, taken from the composition
     // that will paint it. Read in the body because a CompositionLocal can
     // only be read here — it is not snapshot state that moves per
@@ -13151,6 +13235,12 @@ private fun KayaHighlightLayer(node: KayaNode, inner: @Composable () -> Unit) {
     // colour from a composition that did not draw.
     val wash = androidx.compose.foundation.text.selection.LocalTextSelectionColors
         .current.backgroundColor.toArgb()
+    // THE RUN TABLE FOR THE QUOTE RULE, re-read when its epoch moves:
+    // richSeq is the composition state a run change bumps, and reading it
+    // HERE is what reaches the draw below (docs/rich-text-plan.md §18).
+    val runs = remember(node, node.richSeq) {
+        if (node.rich) node.richRuns else emptyList()
+    }
     androidx.compose.foundation.layout.Box(
         propagateMinConstraints = true,
         modifier = Modifier
@@ -13193,12 +13283,13 @@ private fun KayaHighlightLayer(node: KayaNode, inner: @Composable () -> Unit) {
             val live = node.textState.text.toString()
             val paint =
                 if (node.highlightsFor == live) node.highlights else emptyList()
+            val quotes = kayaRichQuoteExtents(runs, live)
             // WHAT WAS ACTUALLY PAINTED, published from the only place
             // the answer is true. expect_highlights reads this and not
             // the declaration, so a verb cannot pass on kaya's intent.
             kayaPaintedRanges[node.id] = paint
             kayaSelectionWash[node.id] = wash
-            if (paint.isEmpty()) return@drawBehind
+            if (paint.isEmpty() && quotes.isEmpty()) return@drawBehind
             val layout = kayaTextLayouts[node.id]?.invoke() ?: return@drawBehind
             // The field scrolls its text inside this box, so the paint
             // moves with it. Clipped for the same reason: a range below
@@ -13206,6 +13297,7 @@ private fun KayaHighlightLayer(node: KayaNode, inner: @Composable () -> Unit) {
             val scrolled = node.scrollState.value.toFloat()
             clipRect {
                 translate(top = -scrolled) {
+                    kayaRichQuoteRule(quotes, layout, palette.quote)
                     for (r in paint) {
                         if (r.start < 0 || r.start > r.stop || r.stop > live.length) continue
                         drawPath(

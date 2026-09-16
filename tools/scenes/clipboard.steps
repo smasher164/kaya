@@ -28,9 +28,14 @@ click button#1
 expect label#0 "custom dev.kaya/note note=1"
 
 # ---- reading what another app put there ---------------------------
-clipboard_seed text "from another app"
+# NON-ASCII ON PURPOSE (docs/rich-text-plan.md §18, the shared round-trip
+# step): the text crosses the lane's seeding tool, the platform's board,
+# the wire and every binding's reader before the guest prints it — the
+# generated Haskell reader took one Char per byte until 2026-09-11 and no
+# scene could see it (docs/traps.md).
+clipboard_seed text "från ett annat program"
 click button#2
-expect label#0 "text from another app"
+expect label#0 "text från ett annat program"
 
 # THE READ IS FILTERED BY WHAT IT ACCEPTS: only text is on the board and
 # this read accepts only files, so the answer is EMPTY — the same answer

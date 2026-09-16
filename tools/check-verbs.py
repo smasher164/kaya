@@ -2233,10 +2233,128 @@ for label, kwargs, finding in (
 ):
     score_or_die(introduced(label_clauses(**kwargs), label_out, finding), label)
 
+# THE POLISH PASS (docs/rich-text-plan.md §18): a code run's GROUND and a
+# quote's RULE are pixels — expect_runs reads the run table and no ink
+# probe samples a rich field — so an arm that dropped either draws the
+# same runs and passes every lane. Each arm's own style site is held to
+# naming the identifier it paints with, the label draw's shape one row
+# over; a row joins the table when its arm lands, and an arm whose site
+# is not in the table is red here rather than absent.
+POLISH_DRAWS = [
+    ("gtk.rs", GTK, "the code ground",
+     r"fn style_rich_tag\(", r"\n}\n",
+     [r"set_background_rgba\(Some\(&rich_ground\(view, CODE_GROUND_ALPHA\)\)\)",
+      r"set_paragraph_background_rgba\(Some\(&rich_ground\(\s*view,\s*CODE_GROUND_ALPHA,?\s*\)\)\)"]),
+    ("gtk.rs", GTK, "the quote tint",
+     r"fn style_rich_tag\(", r"\n}\n",
+     [r"set_paragraph_background_rgba\(Some\(&rich_ground\(\s*view,\s*QUOTE_GROUND_ALPHA,?\s*\)\)\)"]),
+    # snapshot_layer lives inside `mod rich_view`, so its body ends at the
+    # indented brace; `\n}\n` would run it to the module's end.
+    ("gtk.rs", GTK, "the quote rule",
+     r"fn snapshot_layer\(", r"\n    \}\n",
+     [r"snapshot\.append_color\(", r"QUOTE_RULE_WIDTH", r"line_yrange\("]),
+    ("gtk.rs", GTK, "the appearance flip",
+     r"fn restyle_rich_grounds\(", r"\n}\n",
+     [r"style_rich_tag\(&view, &tag, &tag_name\)", r"draw_rich_label\("]),
+    # Both Apple platforms: the ground and the rule are DRAWN by a TextKit 2
+    # fragment off kaya's own keys, never stored as .backgroundColor, which
+    # the accessibility read would answer as a highlight (measured).
+    ("KayaSwiftUI.swift", SWIFT, "the code ground and quote rule",
+     r"class KayaRichFragment", r"\n}\n",
+     [r"kayaGroundKey", r"kayaRuleKey", r"kayaCodeGround", r"kayaQuoteRule",
+      r"renderingSurfaceBounds", r"\.fill\("]),
+    # WinUI: ITextCharacterFormat has ONE BackgroundColor and find's
+    # highlight already owned it, so the order is stated in rich_ground
+    # (highlight > code > quote) and the highlights read compares the
+    # colour to the highlight's own rather than to AutoColor (a code run
+    # read as a highlight before, measured). No quote rule is drawable
+    # there: indent and tint.
+    ("winui/mod.rs", WINUI, "the code and quote grounds",
+     r"fn rich_ground\(", r"\n}\n",
+     [r"code_ground", r"quote_ground"]),
+    ("winui/mod.rs", WINUI, "the ground and indent written",
+     r"fn rich_write_format\(", r"\n}\n",
+     [r"SetBackgroundColor\(match rich_ground\(", r"SetIndents\(0\.0, indent, 0\.0\)"]),
+    ("winui/mod.rs", WINUI, "the highlights read keyed on the highlight's own colour",
+     r"fn painted_runs\(", r"\n}\n",
+     [r"== HIGHLIGHT_BACKGROUND"]),
+    ("KayaCompose.kt", KOTLIN, "the code ground",
+     r"fun kayaRichSpanStyle\(", r"\n}\n",
+     [r"background = if \(mono\) palette\.code"]),
+    ("KayaCompose.kt", KOTLIN, "the quote rule",
+     r"fun (?:[\w.]+\.)?DrawScope\.kayaRichQuoteRule\(", r"\n}\n",
+     [r"drawRect\(", r"getLineTop\(", r"getLineBottom\("]),
+    ("KayaCompose.kt", KOTLIN, "the quote rule's call under the field",
+     r"fun KayaHighlightLayer\(", r"\n}\n",
+     [r"kayaRichQuoteRule\("]),
+]
+
+
+def polish_clauses(gtk_src=None, winui_src=None, swift_src=None,
+                   kotlin_src=None):
+    bad = []
+    srcs = {GTK: gtk_src, WINUI: winui_src, SWIFT: swift_src, KOTLIN: kotlin_src}
+    for name, rel, what, anchor_re, end, apis in POLISH_DRAWS:
+        text = srcs[rel] if srcs[rel] is not None else real(rel)
+        m = re.search(anchor_re, text)
+        if not m:
+            bad.append(f"{name} has no site for {what} (wanted /{anchor_re}/)")
+            continue
+        body = text[m.start():]
+        stop = re.search(end, body)
+        body = body[:stop.end()] if stop else body
+        for api in apis:
+            if not re.search(api, body):
+                bad.append(f"{name}'s site for {what} does not name /{api}/ — "
+                           f"an arm that dropped it draws the same runs and "
+                           f"passes every lane (docs/rich-text-plan.md §18)")
+    arms = {rel for _, rel, *_ in POLISH_DRAWS}
+    for name, rel in (("gtk.rs", GTK), ("winui/mod.rs", WINUI),
+                      ("KayaSwiftUI.swift", SWIFT), ("KayaCompose.kt", KOTLIN)):
+        if rel not in arms:
+            bad.append(f"{name} has no row in POLISH_DRAWS — its code ground "
+                       f"and quote rule are held by nothing")
+    return bad
+
+
+polish_out = polish_clauses()
+polish_status = 0
+for line in polish_out:
+    print(f"check-verbs: {line}", file=sys.stderr)
+    polish_status = 1
+for label, kwargs, finding in (
+    ("the compose code ground dropped",
+     dict(kotlin_src=perturb("polish (compose ground dropped)", KOTLIN,
+                             r"(background = if \(mono\) )palette\.code",
+                             "Color.Unspecified")),
+     r"^KayaCompose\.kt's site for the code ground does not name"),
+    ("the gtk quote rule drawing nothing",
+     dict(gtk_src=perturb("polish (gtk rule cut)", GTK,
+                          r"(fn snapshot_layer\([\s\S]*?)snapshot\.append_color\(",
+                          "snapshot.append_nothing(")),
+     r"^gtk\.rs's site for the quote rule does not name /snapshot"),
+    ("the apple fragment painting nothing",
+     dict(swift_src=perturb("polish (apple fragment fill cut)", SWIFT,
+                            r"(class KayaRichFragment[\s\S]*?)\.fill\(",
+                            ".stroke(")),
+     r"^KayaSwiftUI\.swift's site for the code ground and quote rule does not name /\\.fill"),
+    ("the winui highlights read keyed on any colour again",
+     dict(winui_src=perturb("polish (winui read keyed on AutoColor)", WINUI,
+                            r"(fn painted_runs\([\s\S]*?)== HIGHLIGHT_BACKGROUND",
+                            "!= AUTO_COLOR")),
+     r"^winui/mod\.rs's site for the highlights read keyed on the highlight's own"),
+    ("the compose quote rule drawing nothing",
+     dict(kotlin_src=perturb("polish (compose rule cut)", KOTLIN,
+                             r"(fun (?:[\w.]+\.)?DrawScope\.kayaRichQuoteRule\([\s\S]*?)drawRect\(",
+                             "drawNothing(")),
+     r"^KayaCompose\.kt's site for the quote rule does not name /drawRect"),
+):
+    score_or_die(introduced(polish_clauses(**kwargs), polish_out, finding), label)
+
 # clip_mirrors() ran first and printed its own findings; its verdict
 # is read here so there is exactly ONE verdict line.
 if (clip_status or window_status or ink_status or ax_status
-        or words_status or label_status
+        or words_status or label_status or polish_status
         or metrics_status or keyed_status or drop_line_status
         or vtrace_status or norm_status or ind_status
         or answer_status):
@@ -2253,4 +2371,5 @@ g.verdict(f"{len(verbs)} verbs, {len(rows)} constants "
           f"+ every Step's Targets normalized "
           f"+ an action returns once the app has answered it in 3 "
           f"runners + the rich label's refusal sentence and draw on 4 arms "
+          f"+ the polish pass's ground and rule per arm "
           f"+ spec hash against 2 interpreters")

@@ -890,6 +890,41 @@ export class Widget extends Handle {
     return this;
   }
 
+  // The named acts (docs/rich-text-plan.md §18): each is `format` with its
+  // name, over this widget's own selection; removal stays `unformat` and
+  // the block kinds stay `setBlock`.
+
+  /** Bold this textarea's current selection — `format("bold")` under its
+   * own name, what a toolbar button sends. */
+  bold(): this {
+    return this.format("bold");
+  }
+
+  /** Italicize the current selection. */
+  italic(): this {
+    return this.format("italic");
+  }
+
+  /** Underline the current selection. */
+  underline(): this {
+    return this.format("underline");
+  }
+
+  /** Strike the current selection through. */
+  strike(): this {
+    return this.format("strike");
+  }
+
+  /** Make the current selection monospaced code. */
+  code(): this {
+    return this.format("code");
+  }
+
+  /** Make the current selection a link to `url`. */
+  link(url: string): this {
+    return this.format("link", url);
+  }
+
   /** One attribute over a BYTE RANGE of this document, the selection left
    * exactly where the user put it (docs/rich-text-plan.md §17). A DOCUMENT
    * WRITE like applyEdit rather than a toolbar act: nothing is echoed and

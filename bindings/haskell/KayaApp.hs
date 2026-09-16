@@ -109,7 +109,7 @@ module KayaApp
     cancelNotification,
     onNotificationActivation,
     notificationResult,
-    link,
+    linkRoute,
     linkOpened,
     -- Exported for guests/haskell's link-route check, which reads the
     -- parked declaration's bytes back before any transaction runs.
@@ -139,13 +139,13 @@ module KayaApp
     blockName,
     documentOf,
     mark,
-    bold,
-    italic,
-    underline,
-    strike,
-    code,
-    -- `link` is the app-links route declarator; a run's is suffixed, the
-    -- way `focusWidget` is.
+    -- A run's mark is suffixed, the way `focusWidget` is: the plain names
+    -- are the widget's own acts (docs\/rich-text-plan.md §18).
+    boldRun,
+    italicRun,
+    underlineRun,
+    strikeRun,
+    codeRun,
     linkRun,
     blockRun,
     attrAt,
@@ -158,6 +158,13 @@ module KayaApp
     setDocument,
     applyEdit,
     formatText,
+    -- The named acts (docs\/rich-text-plan.md §18).
+    bold,
+    italic,
+    underline,
+    strike,
+    code,
+    link,
     unformat,
     -- docs\/rich-text-plan.md §17: the ranged act, a document write
     -- beside the selection act.
@@ -1907,7 +1914,7 @@ onNotificationActivation app handler =
   writeIORef (appNotificationActivation app) (Just handler)
 
 -- | Declare a link ROUTE and the handler that answers it
--- (docs/app-links-plan.md §4): @link app \"task\/{key}\" f@ matches
+-- (docs/app-links-plan.md §4): @linkRoute app \"task\/{key}\" f@ matches
 -- @\<scheme\>:\/\/task\/t1@ and calls f with
 -- @Map.fromList [(\"key\", \"t1\")]@. Segments split on @\/@, @{name}@
 -- captures one segment, a literal segment matches itself; the query's
@@ -1925,8 +1932,8 @@ onNotificationActivation app handler =
 -- malformed one, a duplicate — and it faults at apply with the whole
 -- sentence, where every other declaration refusal in kaya lands
 -- (tools\/check-sugar-surface.py refuses a reason spelled here).
-link :: App -> String -> (Map.Map String String -> IO ()) -> IO ()
-link app pattern handler = do
+linkRoute :: App -> String -> (Map.Map String String -> IO ()) -> IO ()
+linkRoute app pattern handler = do
   taken <- readIORef (appNextLinkRoute app)
   let route = taken + 1
   writeIORef (appNextLinkRoute app) route
@@ -1956,7 +1963,7 @@ linkOpened app route url params = do
                 ++ " matched route "
                 ++ show route
                 ++ " and reached no handler — none is registered for it"
-                ++ " (KayaApp.link)"
+                ++ " (KayaApp.linkRoute)"
             )
 
 -- | Check one accept-list entry and return it. Ids reach every
@@ -2380,20 +2387,22 @@ documentOf :: String -> Document
 documentOf text = Document text []
 
 -- THE DOCUMENT COMES LAST, so a declaration composes:
--- @blockRun (13, 24) Heading2 . bold (0, 6) $ documentOf text@.
+-- @blockRun (13, 24) Heading2 . boldRun (0, 6) $ documentOf text@.
 
 mark :: (Int, Int) -> String -> String -> Document -> Document
 mark (start, stop) name value doc =
   doc {docRuns = docRuns doc ++ [Run start stop name value]}
 
-bold, italic, underline, strike, code :: (Int, Int) -> Document -> Document
-bold range = mark range "bold" "true"
-italic range = mark range "italic" "true"
-underline range = mark range "underline" "true"
-strike range = mark range "strike" "true"
-code range = mark range "code" "true"
+-- | A run's marks, suffixed: the plain names are the widget's own acts.
+boldRun, italicRun, underlineRun, strikeRun, codeRun ::
+  (Int, Int) -> Document -> Document
+boldRun range = mark range "bold" "true"
+italicRun range = mark range "italic" "true"
+underlineRun range = mark range "underline" "true"
+strikeRun range = mark range "strike" "true"
+codeRun range = mark range "code" "true"
 
--- | A run's link; 'link' itself declares an app-link route.
+-- | A run's link; 'link' itself is the widget's act.
 linkRun :: (Int, Int) -> String -> Document -> Document
 linkRun range url = mark range "link" url
 
@@ -2613,6 +2622,27 @@ applyEdit app (Widget n) e = emitBIO $ do
 formatText :: Widget -> String -> String -> Build ()
 formatText (Widget n) name value =
   emitB (W.txFormatText n 0 0 0 0 [W.VStr name, W.VStr value])
+
+-- | The named acts (docs\/rich-text-plan.md §18): 'formatText' with its
+-- own name over the widget's selection. A run's mark is 'boldRun' and
+-- its siblings, the app-links route declarator 'linkRoute'.
+bold :: Widget -> Build ()
+bold w = formatText w "bold" "true"
+
+italic :: Widget -> Build ()
+italic w = formatText w "italic" "true"
+
+underline :: Widget -> Build ()
+underline w = formatText w "underline" "true"
+
+strike :: Widget -> Build ()
+strike w = formatText w "strike" "true"
+
+code :: Widget -> Build ()
+code w = formatText w "code" "true"
+
+link :: Widget -> String -> Build ()
+link w url = formatText w "link" url
 
 -- | Take an attribute off the widget's current selection.
 unformat :: Widget -> String -> Build ()
@@ -4510,13 +4540,13 @@ data App = App
     -- a result whose id has none above (docs/tasks-s9-plan.md R1). A
     -- relaunched process never called showNotification.
     appNotificationActivation :: IORef (Maybe (Word64 -> Word32 -> IO ())),
-    -- NOT one-shot either: a route declared by 'link' answers every URL
-    -- that matches it, for the life of the process
+    -- NOT one-shot either: a route declared by 'linkRoute' answers every
+    -- URL that matches it, for the life of the process
     -- (docs/app-links-plan.md §4), and the core owns the pattern table —
     -- nothing is kept here but the handler.
     appLinkHandlers :: IORef (Map.Map Word64 (Map.Map String String -> IO ())),
     appNextLinkRoute :: IORef Word64,
-    -- 'link' may be called before the first transaction, so its record
+    -- 'linkRoute' may be called before the first transaction, so its record
     -- waits here for one ('buildTx' drains it head-first).
     appPendingRoutes :: IORef [Builder],
     -- The undo ledger's two reports, keyed by WINDOW. NOT one-shot: a

@@ -46,7 +46,7 @@ main = kayaMain $ \app -> buildTx app $ do
               let doc =
                     mark (14, 18) "code" "true"
                       . linkRun (7, 12) "https://kaya.dev"
-                      . bold (0, 6)
+                      . boldRun (0, 6)
                       $ documentOf docSource
                   title =
                     mark (13, 19) "italic" "true" (documentOf "Heading with italic")

@@ -3524,6 +3524,21 @@ final class KayaAppTx {
         tx.formatText(w.id, 0, 0, 0, 0, [.str(name), .str(value)])
     }
 
+    /// The named acts (the review page's ruling 1 — docs/rich-text-plan.md
+    /// §18): each is `format` with its name, over the widget's own
+    /// selection; removal stays `unformat`, the block kinds stay `setBlock`.
+    func bold(_ w: KayaWidget) { format(w, "bold", "true") }
+
+    func italic(_ w: KayaWidget) { format(w, "italic", "true") }
+
+    func underline(_ w: KayaWidget) { format(w, "underline", "true") }
+
+    func strike(_ w: KayaWidget) { format(w, "strike", "true") }
+
+    func code(_ w: KayaWidget) { format(w, "code", "true") }
+
+    func link(_ w: KayaWidget, _ url: String) { format(w, "link", url) }
+
     /// Take an attribute off the widget's current selection.
     func unformat(_ w: KayaWidget, _ name: String) {
         tx.formatText(w.id, 1, 0, 0, 0, [.str(name), .str("")])

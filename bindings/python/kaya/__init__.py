@@ -831,6 +831,37 @@ class Widget(_Handle):
                                               [str(name), ""]))
         return self
 
+    # The named acts (docs/rich-text-plan.md §18): each is `format` with
+    # its name, over this widget's own selection; removal stays
+    # `unformat` and the block kinds stay `set_block`.
+
+    def bold(self):
+        """Bold this textarea's current selection — `format("bold")` under
+        its own name, what a toolbar button sends. Returns the widget."""
+        return self.format("bold")
+
+    def italic(self):
+        """Italicize the current selection. Returns the widget."""
+        return self.format("italic")
+
+    def underline(self):
+        """Underline the current selection. Returns the widget."""
+        return self.format("underline")
+
+    def strike(self):
+        """Strike the current selection through. Returns the widget."""
+        return self.format("strike")
+
+    def code(self):
+        """Make the current selection monospaced code. Returns the
+        widget."""
+        return self.format("code")
+
+    def link(self, url):
+        """Make the current selection a link to `url`. Returns the
+        widget."""
+        return self.format("link", url)
+
     def format_range(self, span, name, value="true"):
         """One attribute over a BYTE RANGE of this document, the selection
         left exactly where the user put it (docs/rich-text-plan.md §17).

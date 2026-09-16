@@ -96,8 +96,8 @@ let () =
 let () =
   let app = create () in
   let seen = ref [] in
-  link app ~pattern:"task/{key}" ~f:(fun params -> seen := !seen @ [ ("task", params) ]);
-  link app ~pattern:"{section}" ~f:(fun params -> seen := !seen @ [ ("section", params) ]);
+  link_route app ~pattern:"task/{key}" ~f:(fun params -> seen := !seen @ [ ("task", params) ]);
+  link_route app ~pattern:"{section}" ~f:(fun params -> seen := !seen @ [ ("section", params) ]);
 
   (* CASE 1: the declaration is the generated record, parked, and the ids
      come from the binding's own counter starting at 1. *)
@@ -143,7 +143,7 @@ let () =
     "a route this process never declared reached a handler";
   let want =
     "kaya: link dev.kaya.aurora.notes://task/t2 matched route 9 and reached \
-     no handler — none is registered for it (Kaya_app.link)"
+     no handler — none is registered for it (Kaya_app.link_route)"
   in
   check
     (String.trim said = want)

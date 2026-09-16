@@ -12454,7 +12454,7 @@ nothing in the commit touches android. Instrument on the next sighting: log
 the back-gate's successive `backState` readings so the record says WHAT
 moved (a recreated picker, a settling animation, or a stale list entry).
 
-## A plain Compose textarea reports marked text through text_changed where the mac never does (found 2026-09-11, invariant 1)
+## ~~A plain Compose textarea reports marked text through text_changed where the mac never does (found 2026-09-11, invariant 1)~~ CLOSED 2026-09-15 — the collector's composing suppression is keyed on nothing now (every Compose field holds marked text back from text_changed and the mirror), and tools/scenes/ranges.steps D5 is the step that sees it on five lanes: the plain field's live composition is the word "alpha", and a Find re-declared over the mirror reads three where a leak reads four. Android green standalone; the matrix that follows is its record (docs/rich-text-plan.md §18).
 KEY: marked text, composing, text_changed, snapshotFlow, plain textarea compose
 
 Promoted 2026-09-15 out of the struck rich text entry above, whose body
@@ -12464,6 +12464,20 @@ while the mac's `setMarkedText` notifies nothing; the rich arm suppresses
 it for `rich` fields (R5) and the plain field diverges on every backend.
 Close with its own scene step and the suppression widened to plain fields
 uniformly.
+
+## A WinUI window under the dark appearance paints its RichEditBox dark and nothing else (found 2026-09-15 by the polish pass, pre-existing)
+KEY: KAYA_APPEARANCE dark winui, RequestedTheme, root background, RichEditBox ground, polish-dark
+
+Photographed on the guest with `KAYA_APPEARANCE=dark` on the richtext
+scene (the polish pass's capture, viewed): the RichEditBox draws a
+#616161 ground with black AutoColor text while the window's root stays
+white and its labels and buttons never paint; `ActualTheme()` reports
+Dark. No lane can see it — `expect_appearance` reads the toolkit back and
+the `canvasdark-*` leg samples the canvas alone, so a root that ignored
+the requested theme is green on every windows leg. Read from a hand run
+before any hypothesis: whether the root's background brush follows
+`RequestedTheme`, and whether the missing text is unpainted or painted
+white on white.
 
 ## The stamped-occurrence doors other than click still forward a torn-down copy's tag (found 2026-09-14)
 KEY: stamped_tag_is_live, torn-down copy, dead copy, lingering registry, toggled dead copy, set_value dead copy

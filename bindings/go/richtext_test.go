@@ -390,6 +390,41 @@ func TestFormatRangeRefusesANegativeOffsetByName(t *testing.T) {
 	})
 }
 
+// THE NAMED ACTS (docs/rich-text-plan.md §18): sugar and nothing else —
+// each writes the record Tx.Format writes under its own name, Link
+// carrying the URL where the flags carry "true".
+func TestNamedActsWriteTheRecordFormatWrites(t *testing.T) {
+	acts := []struct{ verb, name, value string }{
+		{"Bold", "bold", "true"},
+		{"Italic", "italic", "true"},
+		{"Underline", "underline", "true"},
+		{"Strike", "strike", "true"},
+		{"Code", "code", "true"},
+		{"Link", "link", "https://kaya.dev"},
+	}
+	NewApp().Build(func(tx *Tx) {
+		w := tx.Textarea(nil).Rich()
+		before := len(tx.records)
+		tx.Bold(w)
+		tx.Italic(w)
+		tx.Underline(w)
+		tx.Strike(w)
+		tx.Code(w)
+		tx.Link(w, "https://kaya.dev")
+		got := tx.records[before:]
+		if len(got) != len(acts) {
+			t.Fatalf("the six named acts wrote %d records, want %d", len(got), len(acts))
+		}
+		for i, act := range acts {
+			want := TxFormatText(w.id, 0, 0, 0, 0, []any{act.name, act.value})
+			if !bytes.Equal(got[i], want) {
+				t.Errorf("%s(w) wrote %x, want Format(w, %q, %q)'s %x",
+					act.verb, got[i], act.name, act.value, want)
+			}
+		}
+	})
+}
+
 // THE RICH LABEL (docs/rich-text-plan.md R8, §15): Rich is a Widget method,
 // so nothing else in this binding says it reaches a LABEL. The CREATE record
 // is read beside the prop, since prop 32 on a textarea proves nothing here.

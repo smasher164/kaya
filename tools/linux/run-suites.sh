@@ -1528,10 +1528,11 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
     # THE RICH TEXT SCENE (docs/rich-text-plan.md R9). Rust alone until the
     # eight other bindings spell Document/Edit/Format. Pooled beside undo
-    # and ranges, whose `type` and `compose` it shares; no a11y-leg.sh —
-    # every read it makes is the CORE's document, not the bus.
+    # and ranges, whose `type` and `compose` it shares. Through a11y-leg.sh
+    # since 2026-09-15: its code-run step reads expect_highlights off the
+    # bus (§18), and check-steps holds that route.
     run "$proto" richtext-rust env KAYA_SELFTEST=richtext \
-        "$CARGO_TARGET_DIR/debug/examples/richtext"
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/richtext"
     # The app-owned undo scene, rust alone and pooled beside richtext for
     # its reasons (docs/rich-text-plan.md §14).
     run "$proto" ownundo-rust env KAYA_SELFTEST=ownundo \

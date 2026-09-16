@@ -770,6 +770,39 @@ let () =
       fail "a SELECTION act moved the fold (%s) — the widget echoes that \
             one back, and the fold moves when it arrives"
         (show_runs runs));
+  (* THE NAMED ACTS (docs/rich-text-plan.md §18): each is [format] with
+     its own name, so each queues the bytes the general act queues —
+     compared here because the scenes drive [format] itself and an act
+     that sent another name, or a ranged record, would pass every lane. *)
+  let one_record what call =
+    match format_records call with
+    | [ r ] -> r
+    | l -> fail "%s queued %d format_text records, wanted one" what (List.length l)
+  in
+  List.iter
+    (fun (what, act, name, value) ->
+      let got = one_record what act in
+      let want = one_record (Printf.sprintf "format %S %S" name value)
+          (fun () -> format editor name value)
+      in
+      if got <> want then
+        fail "%s queued %S, wanted %S — the bytes format editor %S %S queues"
+          what got want name value)
+    [
+      ("bold", (fun () -> bold editor), "bold", "true");
+      ("italic", (fun () -> italic editor), "italic", "true");
+      ("underline", (fun () -> underline editor), "underline", "true");
+      ("strike", (fun () -> strike editor), "strike", "true");
+      ("code", (fun () -> code editor), "code", "true");
+      ("link", (fun () -> link editor "https://kaya.dev"), "link",
+       "https://kaya.dev");
+    ];
+  (match fold () with
+  | [] -> ()
+  | runs ->
+      fail "a named act moved the fold (%s) — a selection act is echoed \
+            back, and the fold moves when it arrives"
+        (show_runs runs));
   fmt "format_range"
     (fun () -> format_range editor (4, 7) "italic" "true")
     (0, 1, 4L, 7L);

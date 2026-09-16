@@ -135,6 +135,31 @@ main = do
       ("a SELECTION act moved the fold (" ++ show runs
          ++ ") — the widget echoes that one back, and the fold moves when "
          ++ "it arrives")
+  -- THE NAMED ACTS (docs/rich-text-plan.md §18): each is 'formatText'
+  -- with its own name, so each stages the bytes the general act stages —
+  -- compared here because the scenes drive 'formatText' itself, and an
+  -- act that sent another name, or a ranged record, would pass every lane.
+  let stagedBytes body = BL.toStrict . toLazyByteString . snd <$> stageTx app body
+  mapM_
+    (\(what, body, name, value) -> do
+      got <- stagedBytes body
+      want <- stagedBytes (formatText editor name value)
+      check (got == want)
+        (what ++ " staged " ++ show got ++ ", wanted " ++ show want
+           ++ " — the bytes formatText " ++ show name ++ " " ++ show value
+           ++ " stages"))
+    [ ("bold", bold editor, "bold", "true")
+    , ("italic", italic editor, "italic", "true")
+    , ("underline", underline editor, "underline", "true")
+    , ("strike", strike editor, "strike", "true")
+    , ("code", code editor, "code", "true")
+    , ("link", link editor "https://kaya.dev", "link", "https://kaya.dev")
+    ]
+  runsNow >>= \runs ->
+    check (null runs)
+      ("a named act moved the fold (" ++ show runs
+         ++ ") — a selection act is echoed back, and the fold moves when "
+         ++ "it arrives")
   act "formatTextRange" (formatTextRange app editor (4, 7) "italic" "true")
     (0, 1, 4, 7)
   runsNow >>= \runs ->

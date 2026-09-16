@@ -366,6 +366,10 @@ fn highlight_tag(buffer: &gtk4::TextBuffer) -> gtk4::TextTag {
     }
     let tag = gtk4::TextTag::new(Some(HIGHLIGHT_TAG));
     tag.set_background(Some("#ffe066"));
+    // Full height is the attribute the highlights read keys on: a code
+    // run's ground is a bg-color too, and a highlight over a code run
+    // must still read as one (docs/rich-text-plan.md §18).
+    tag.set_background_full_height(true);
     table.add(&tag);
     tag
 }
@@ -453,6 +457,27 @@ const RICH_PREFIX: &str = "kaya-rich-";
 const RICH_BLOCK_PREFIX: &str = "kaya-rich-block-";
 const RICH_LINK_PREFIX: &str = "kaya-rich-link-";
 
+/// A GROUND IS THE THEME'S OWN COLOUR (docs/rich-text-plan.md §18). A
+/// GtkTextTag takes a GdkRGBA and never a CSS token, and every resolver that
+/// could turn `@borders` into one went deprecated in 4.10 — so Adwaita's own
+/// recipe for that token, `alpha(currentColor, …)`, is computed here against
+/// the widget's resolved foreground (`gtk_widget_get_color`, the one live
+/// read). No literal, and both appearances follow with no `is_dark` branch.
+const CODE_GROUND_ALPHA: f32 = 0.09;
+const QUOTE_GROUND_ALPHA: f32 = 0.05;
+const QUOTE_RULE_ALPHA: f32 = 0.33;
+
+/// The quote's own geometry: the rule stands in the gutter the tag's left
+/// margin opens, so the two numbers move together.
+const QUOTE_MARGIN: i32 = 20;
+const QUOTE_RULE_WIDTH: f32 = 3.0;
+const QUOTE_RULE_INSET: f32 = 6.0;
+
+fn rich_ground(widget: &impl IsA<gtk4::Widget>, alpha: f32) -> gdk::RGBA {
+    let fg = widget.as_ref().color();
+    gdk::RGBA::new(fg.red(), fg.green(), fg.blue(), alpha)
+}
+
 /// Typing attributes armed over a collapsed caret and spent by the next
 /// insertion (docs/rich-text-plan.md R4). Held as the TAG names the arm will
 /// apply, so the closure that inherits them needs no link table.
@@ -493,9 +518,10 @@ fn rich_attr_of(tag_name: &str, links: &HashMap<String, String>) -> Option<(Stri
 /// The tag this buffer wears for `name=value`, minted with the display
 /// properties DERIVED from the key — never the other way round.
 fn rich_tag(
-    buffer: &gtk4::TextBuffer, links: &mut HashMap<String, String>, name: &str, value: &str,
+    view: &gtk4::TextView, buffer: &gtk4::TextBuffer, links: &mut HashMap<String, String>,
+    name: &str, value: &str,
 ) -> gtk4::TextTag {
-    use gtk4::prelude::{TextBufferExt, TextTagExt};
+    use gtk4::prelude::TextBufferExt;
     let tag_name = match name {
         "block" => format!("{RICH_BLOCK_PREFIX}{value}"),
         "link" => match links.iter().find(|(_, url)| url.as_str() == value) {
@@ -513,19 +539,37 @@ fn rich_tag(
         return tag;
     }
     let tag = gtk4::TextTag::new(Some(&tag_name));
-    match name {
+    style_rich_tag(view, &tag, &tag_name);
+    table.add(&tag);
+    tag
+}
+
+/// THE RESTYLE: everything a rich tag draws, off the tag's OWN NAME — the
+/// arm's rule that the tag is the key, so the mint and an appearance flip
+/// take one function (docs/rich-text-plan.md §18). The grounds are RGBA and
+/// an RGBA cannot track a theme, which is why `restyle_rich_grounds` exists.
+fn style_rich_tag(view: &gtk4::TextView, tag: &gtk4::TextTag, tag_name: &str) {
+    use gtk4::prelude::TextTagExt;
+    let Some(name) = rich_tag_attr_name(tag_name) else { return };
+    match name.as_str() {
         "bold" => tag.set_weight(700),
         "italic" => tag.set_style(gtk4::pango::Style::Italic),
         "underline" => tag.set_underline(gtk4::pango::Underline::Single),
         "strike" => tag.set_strikethrough(true),
-        "code" => tag.set_family(Some("monospace")),
+        // A CODE RUN WEARS A GROUND (§18): the platform's own subtle fill
+        // behind the monospace, and the one thing on this backend that also
+        // reaches the accessibility tree as a `bg-color` run.
+        "code" => {
+            tag.set_family(Some("monospace"));
+            tag.set_background_rgba(Some(&rich_ground(view, CODE_GROUND_ALPHA)));
+        }
         "link" => {
             tag.set_underline(gtk4::pango::Underline::Single);
             tag.set_foreground(Some("#1c71d8"));
         }
         // A heading is size plus weight on every platform (R3); the three
         // multipliers are the mac arm's own.
-        "block" => match value {
+        "block" => match tag_name.strip_prefix(RICH_BLOCK_PREFIX).unwrap_or_default() {
             "heading1" => {
                 tag.set_scale(1.6);
                 tag.set_weight(700);
@@ -538,19 +582,205 @@ fn rich_tag(
                 tag.set_scale(1.15);
                 tag.set_weight(700);
             }
+            // THE QUOTE'S TINT, with its rule drawn in the view's own
+            // snapshot layer (§18, KayaRichTextView below): a GtkTextTag has
+            // no paragraph border, and `paragraph-background` is the whole
+            // ground it does have.
             "quote" => {
-                tag.set_left_margin(20);
+                tag.set_left_margin(QUOTE_MARGIN);
                 tag.set_indent(0);
+                tag.set_paragraph_background_rgba(Some(&rich_ground(
+                    view,
+                    QUOTE_GROUND_ALPHA,
+                )));
             }
-            "code_block" => tag.set_family(Some("monospace")),
+            "code_block" => {
+                tag.set_family(Some("monospace"));
+                tag.set_paragraph_background_rgba(Some(&rich_ground(
+                    view,
+                    CODE_GROUND_ALPHA,
+                )));
+            }
             // `body` draws nothing and still wears a tag: the mirror
             // spells it as a run, so the read-back has to find one.
             _ => {}
         },
         _ => {}
     }
-    table.add(&tag);
-    tag
+}
+
+/// An appearance flip re-derives every ground, the way the accent's own
+/// notify re-lowers its sheet (§18): a tag's RGBA and a label's Pango
+/// attribute were both computed against the colour the theme had then.
+fn restyle_rich_grounds() {
+    glib::idle_add_local_once(|| {
+        CORE.with_borrow_mut(|core| {
+            let Some(core) = core.as_mut() else { return };
+            let rich: Vec<u64> = core.rich.borrow().iter().copied().collect();
+            for id in rich {
+                let Some(NativeWidget::Textarea(_, view)) = core.widgets.get(&WidgetId(id))
+                else {
+                    continue;
+                };
+                let view = view.clone();
+                for (tag, tag_name) in rich_tags(&view.buffer()) {
+                    style_rich_tag(&view, &tag, &tag_name);
+                }
+                view.queue_draw();
+            }
+            let labels: Vec<(u64, Vec<crate::protocol::NativeRun>)> =
+                core.label_runs.iter().map(|(id, runs)| (*id, runs.clone())).collect();
+            for (id, runs) in labels {
+                if let Some(NativeWidget::Label(label)) = core.widgets.get(&WidgetId(id)) {
+                    let label = label.clone();
+                    draw_rich_label(&label, &label.text().to_string(), &runs);
+                }
+            }
+        });
+    });
+}
+
+/// A CLICK OVER A LINK OPENS IT (docs/rich-text-plan.md §18), through the door
+/// the role-link LABEL takes on this platform — GtkLinkButton's `activate-link`
+/// default, which is `gtk_show_uri` and whose launcher is GtkUriLauncher. A
+/// GtkTextTag carries no URL, so the tag under the pointer is the key into the
+/// arm's own side table; a release with a SELECTION standing is a drag's end
+/// and not a click.
+fn install_rich_link_click(view: &gtk4::TextView, id: u64) {
+    use gtk4::prelude::WidgetExt;
+    let click = gtk4::GestureClick::new();
+    click.set_button(gdk::BUTTON_PRIMARY);
+    click.connect_released(move |gesture, presses, x, y| {
+        use gtk4::prelude::{EventControllerExt, TextBufferExt, TextTagExt, TextViewExt};
+        if presses != 1 {
+            return;
+        }
+        let Some(view) = gesture.widget().and_downcast::<gtk4::TextView>() else {
+            return;
+        };
+        if view.buffer().has_selection() {
+            return;
+        }
+        let (bx, by) =
+            view.window_to_buffer_coords(gtk4::TextWindowType::Widget, x as i32, y as i32);
+        let Some(at) = view.iter_at_location(bx, by) else {
+            return;
+        };
+        let Some(tag_name) = at
+            .tags()
+            .iter()
+            .filter_map(|tag| tag.name())
+            .find(|name| name.starts_with(RICH_LINK_PREFIX))
+            .map(|name| name.to_string())
+        else {
+            return;
+        };
+        let window = view.root().and_downcast::<gtk4::Window>();
+        // The URL is CORE's, and an event handler may not assume CORE is free.
+        glib::idle_add_local_once(move || {
+            let url = CORE.with_borrow(|core| {
+                core.as_ref()
+                    .and_then(|core| core.rich_links.get(&id))
+                    .and_then(|links| links.get(&tag_name))
+                    .cloned()
+            });
+            let Some(url) = url else { return };
+            gtk4::UriLauncher::new(&url).launch(
+                window.as_ref(),
+                gio::Cancellable::NONE,
+                move |opened| {
+                    if let Err(why) = opened {
+                        kaya_diag!("KAYA_DIAG rich link {url}: {why}");
+                    }
+                },
+            );
+        });
+    });
+    view.add_controller(click);
+}
+
+/// THE QUOTE'S RULE (docs/rich-text-plan.md §18): a GtkTextTag has no
+/// paragraph border, so the leading bar every editor draws is painted in the
+/// text view's own BELOW_TEXT layer. GTK hands that layer a snapshot already
+/// translated into BUFFER coordinates, which is why the walk below carries no
+/// scroll arithmetic; it covers the visible band alone.
+mod rich_view {
+    use super::{
+        QUOTE_MARGIN, QUOTE_RULE_ALPHA, QUOTE_RULE_INSET, QUOTE_RULE_WIDTH, RICH_BLOCK_PREFIX,
+        rich_ground,
+    };
+    use gtk4::glib;
+    use gtk4::prelude::*;
+    use gtk4::subclass::prelude::*;
+
+    #[derive(Default)]
+    pub struct KayaRichTextViewInner;
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for KayaRichTextViewInner {
+        const NAME: &'static str = "KayaRichTextView";
+        type Type = KayaRichTextView;
+        type ParentType = gtk4::TextView;
+    }
+
+    impl ObjectImpl for KayaRichTextViewInner {}
+    impl WidgetImpl for KayaRichTextViewInner {}
+
+    impl TextViewImpl for KayaRichTextViewInner {
+        fn snapshot_layer(&self, layer: gtk4::TextViewLayer, snapshot: gtk4::Snapshot) {
+            self.parent_snapshot_layer(layer, snapshot.clone());
+            if layer != gtk4::TextViewLayer::BelowText {
+                return;
+            }
+            let view = self.obj();
+            let Some(tag) =
+                view.buffer().tag_table().lookup(&format!("{RICH_BLOCK_PREFIX}quote"))
+            else {
+                return;
+            };
+            let colour = rich_ground(&*view, QUOTE_RULE_ALPHA);
+            // The tag's own left margin REPLACES the view's for the lines it
+            // covers (GtkTextAttributes), so the gutter the rule stands in is
+            // the tag's 20 and not a sum.
+            let x = (QUOTE_MARGIN as f32 - QUOTE_RULE_INSET - QUOTE_RULE_WIDTH).max(0.0);
+            let band = view.visible_rect();
+            let bottom = band.y() + band.height();
+            let (mut line, _) = view.line_at_y(band.y());
+            loop {
+                let (y, height) = view.line_yrange(&line);
+                if y > bottom {
+                    break;
+                }
+                if height > 0 && line.has_tag(&tag) {
+                    snapshot.append_color(
+                        &colour,
+                        &gtk4::graphene::Rect::new(
+                            x,
+                            y as f32,
+                            QUOTE_RULE_WIDTH,
+                            height as f32,
+                        ),
+                    );
+                }
+                if !line.forward_line() {
+                    break;
+                }
+            }
+        }
+    }
+
+    glib::wrapper! {
+        pub struct KayaRichTextView(ObjectSubclass<KayaRichTextViewInner>)
+            @extends gtk4::TextView, gtk4::Widget,
+            @implements gtk4::Accessible, gtk4::Buildable, gtk4::ConstraintTarget,
+                gtk4::Scrollable;
+    }
+
+    impl Default for KayaRichTextView {
+        fn default() -> Self {
+            glib::Object::new()
+        }
+    }
 }
 
 /// Every kaya rich tag this buffer knows, tag and name.
@@ -609,8 +839,8 @@ fn buffer_rich_runs(buffer: &gtk4::TextBuffer, links: &HashMap<String, String>) 
 /// Put `runs` (guest CHARACTER offsets, the unit the core converts to for this
 /// backend) on the buffer, replacing whatever the range wore.
 fn set_rich_runs(
-    buffer: &gtk4::TextBuffer, links: &mut HashMap<String, String>, raw: &str,
-    from: i32, to: i32, runs: &[crate::protocol::NativeRun], base: i32,
+    view: &gtk4::TextView, buffer: &gtk4::TextBuffer, links: &mut HashMap<String, String>,
+    raw: &str, from: i32, to: i32, runs: &[crate::protocol::NativeRun], base: i32,
 ) {
     use gtk4::prelude::TextBufferExt;
     let (start, stop) = (buffer.iter_at_offset(from), buffer.iter_at_offset(to));
@@ -618,7 +848,7 @@ fn set_rich_runs(
         buffer.remove_tag(&tag, &start, &stop);
     }
     for run in runs {
-        let tag = rich_tag(buffer, links, &run.name, &run.value);
+        let tag = rich_tag(view, buffer, links, &run.name, &run.value);
         let s = buffer.iter_at_offset(base + buffer_offset(raw, run.start));
         let e = buffer.iter_at_offset(base + buffer_offset(raw, run.end));
         buffer.apply_tag(&tag, &s, &e);
@@ -638,20 +868,43 @@ fn label_byte_of(text: &str, chars: u64) -> u32 {
         .unwrap_or(text.len() as u32)
 }
 
-/// The Pango attribute one kaya inline attribute is, as a TRAIT over whatever
+/// The Pango attributes one kaya inline attribute is, as TRAITS over whatever
 /// font the label's role left it — never a whole font description, which is
 /// what would throw the heading's and caption's own size away.
 /// `link` is absent on purpose: it takes GtkLabel's markup door instead.
-fn label_rich_attr(name: &str) -> Option<gtk4::pango::Attribute> {
+///
+/// A CODE RUN WEARS THE SAME GROUND THE TEXTAREA'S TAG DOES
+/// (docs/rich-text-plan.md §18): Pango keeps the colour and its alpha in two
+/// attributes, so the ground is two of the three this run carries.
+fn label_rich_attrs(label: &gtk4::Label, name: &str) -> Vec<gtk4::pango::Attribute> {
     use gtk4::pango;
-    Some(match name {
-        "bold" => pango::AttrInt::new_weight(pango::Weight::Bold).into(),
-        "italic" => pango::AttrInt::new_style(pango::Style::Italic).into(),
-        "underline" => pango::AttrInt::new_underline(pango::Underline::Single).into(),
-        "strike" => pango::AttrInt::new_strikethrough(true).into(),
-        "code" => pango::AttrString::new_family("monospace").into(),
-        _ => return None,
-    })
+    let one = |attr: pango::Attribute| vec![attr];
+    match name {
+        "bold" => one(pango::AttrInt::new_weight(pango::Weight::Bold).into()),
+        "italic" => one(pango::AttrInt::new_style(pango::Style::Italic).into()),
+        "underline" => one(pango::AttrInt::new_underline(pango::Underline::Single).into()),
+        "strike" => one(pango::AttrInt::new_strikethrough(true).into()),
+        "code" => {
+            let ground = rich_ground(label, CODE_GROUND_ALPHA);
+            vec![
+                pango::AttrString::new_family("monospace").into(),
+                pango::AttrColor::new_background(
+                    pango_channel(ground.red()),
+                    pango_channel(ground.green()),
+                    pango_channel(ground.blue()),
+                )
+                .into(),
+                pango::AttrInt::new_background_alpha(pango_channel(ground.alpha())).into(),
+            ]
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// A GdkRGBA channel as Pango's own 16-bit one. An alpha of 0 is Pango's
+/// "fully transparent", so the ground's own alpha may never round to it.
+fn pango_channel(value: f32) -> u16 {
+    (value.clamp(0.0, 1.0) * f32::from(u16::MAX)).round().max(1.0) as u16
 }
 
 /// Put `text` and `runs` (CODE POINT offsets) on a rich label.
@@ -699,12 +952,11 @@ fn draw_rich_label(label: &gtk4::Label, text: &str, runs: &[crate::protocol::Nat
     }
     let attrs = gtk4::pango::AttrList::new();
     for run in runs {
-        let Some(mut attr) = label_rich_attr(&run.name) else {
-            continue;
-        };
-        attr.set_start_index(label_byte_of(text, run.start));
-        attr.set_end_index(label_byte_of(text, run.end));
-        attrs.insert(attr);
+        for mut attr in label_rich_attrs(label, &run.name) {
+            attr.set_start_index(label_byte_of(text, run.start));
+            attr.set_end_index(label_byte_of(text, run.end));
+            attrs.insert(attr);
+        }
     }
     label.set_attributes(Some(&attrs));
 }
@@ -908,10 +1160,11 @@ fn rich_format_selection(
     core: &mut CoreState, id: WidgetId, name: &str, value: &str, removed: bool,
 ) -> Option<String> {
     use gtk4::prelude::TextBufferExt;
-    let buffer = match core.widgets.get(&id) {
-        Some(NativeWidget::Textarea(_, view)) => view.buffer(),
+    let view = match core.widgets.get(&id) {
+        Some(NativeWidget::Textarea(_, view)) => view.clone(),
         _ => return Some(format!("widget {} is no textarea", id.0)),
     };
+    let buffer = view.buffer();
     if !core.rich.borrow().contains(&id.0) {
         return Some(format!("widget {} is not a rich textarea", id.0));
     }
@@ -953,7 +1206,7 @@ fn rich_format_selection(
             pending.borrow_mut().entry(id.0).or_default().off.insert(name.to_owned());
         } else {
             let links = core.rich_links.entry(id.0).or_default();
-            let armed = rich_tag(&buffer, links, name, value)
+            let armed = rich_tag(&view, &buffer, links, name, value)
                 .name()
                 .map(|n| n.to_string());
             let mut map = pending.borrow_mut();
@@ -977,7 +1230,7 @@ fn rich_format_selection(
     }
     if !removed {
         let links = core.rich_links.entry(id.0).or_default();
-        let tag = rich_tag(&buffer, links, name, value);
+        let tag = rich_tag(&view, &buffer, links, name, value);
         buffer.apply_tag(&tag, &start, &stop);
     }
     let range = crate::protocol::TextRange::new(
@@ -1067,10 +1320,11 @@ fn rich_format_range(
         core.label_runs.insert(id.0, next);
         return None;
     }
-    let buffer = match core.widgets.get(&id) {
-        Some(NativeWidget::Textarea(_, view)) => view.buffer(),
+    let view = match core.widgets.get(&id) {
+        Some(NativeWidget::Textarea(_, view)) => view.clone(),
         _ => return Some(format!("widget {} is no textarea", id.0)),
     };
+    let buffer = view.buffer();
     if !core.rich.borrow().contains(&id.0) {
         return Some(format!("widget {} is not a rich textarea", id.0));
     }
@@ -1096,7 +1350,7 @@ fn rich_format_range(
     }
     if !removed {
         let links = core.rich_links.entry(id.0).or_default();
-        let tag = rich_tag(&buffer, links, name, value);
+        let tag = rich_tag(&view, &buffer, links, name, value);
         buffer.apply_tag(&tag, &start, &stop);
     }
     None
@@ -9654,7 +9908,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
 // The multi-line editor: GtkTextView, the entry's exact
 // contract — the buffer's `changed` fires for programmatic
 // set_text too, so the split rides apply_quiet.
-                    let view = gtk4::TextView::new();
+                    // KayaRichTextView AND NOT GtkTextView: the quote's rule
+                    // is drawn in the view's own snapshot layer
+                    // (docs/rich-text-plan.md §18). Every other site keeps the
+                    // parent type, which a subclass answers to.
+                    let view: gtk4::TextView =
+                        rich_view::KayaRichTextView::default().upcast();
                     // THE SIZING CONTRACT: the editor takes its LAYOUT size
                     // and its content scrolls inside it. A bare GtkTextView
                     // grows to its content instead (400 lines, a 6400px widget,
@@ -9681,6 +9940,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     let dirty = core.native_dirty.clone();
                     let wid = id.0;
                     let buffer = view.buffer();
+                    install_rich_link_click(&view, wid);
                     // A WEAK ref, not the view: the handler lives on the
                     // buffer the view owns, so a strong one would be a
                     // cycle that outlives the window.
@@ -10922,10 +11182,11 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 core.label_runs.insert(id.0, runs);
                 return;
             }
-            let buffer = match core.widgets.get(&id) {
-                Some(NativeWidget::Textarea(_, view)) => view.buffer(),
+            let view = match core.widgets.get(&id) {
+                Some(NativeWidget::Textarea(_, view)) => view.clone(),
                 _ => return,
             };
+            let buffer = view.buffer();
             let previous =
                 lf(buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).to_string());
             core.apply_quiet.set(true);
@@ -10938,7 +11199,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             core.rich_links.remove(&id.0);
             core.rich_pending.borrow_mut().remove(&id.0);
             let links = core.rich_links.entry(id.0).or_default();
-            set_rich_runs(&buffer, links, &raw, 0, end, &runs, 0);
+            set_rich_runs(&view, &buffer, links, &raw, 0, end, &runs, 0);
             note_quiet_text_write(core, id, &previous, &text);
         }
         // ONE EDIT, with the core's own post-edit selection (R5). Never a
@@ -10963,10 +11224,11 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 core.label_runs.insert(id.0, spliced);
                 return;
             }
-            let buffer = match core.widgets.get(&id) {
-                Some(NativeWidget::Textarea(_, view)) => view.buffer(),
+            let view = match core.widgets.get(&id) {
+                Some(NativeWidget::Textarea(_, view)) => view.clone(),
                 _ => return,
             };
+            let buffer = view.buffer();
             let raw = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).to_string();
             let from = buffer_offset(&raw, range.start);
             let to = buffer_offset(&raw, range.stop);
@@ -10980,7 +11242,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             let width = inserted.chars().count() as i32;
             let links = core.rich_links.entry(id.0).or_default();
             // The runs address `inserted`, so the conversion walks IT.
-            set_rich_runs(&buffer, links, &inserted, from, from + width, &runs, from);
+            set_rich_runs(&view, &buffer, links, &inserted, from, from + width, &runs, from);
             let after = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).to_string();
             let ins = buffer.iter_at_offset(buffer_offset(&after, selection.start));
             let bound = buffer.iter_at_offset(buffer_offset(&after, selection.stop));
@@ -13978,6 +14240,9 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 // drawing (docs/canvas-plan.md §6), and the core
                 // re-rasters on it exactly as it does on a scale change.
                 schedule_presentation_report();
+                // A rich ground is an RGBA on a tag, computed against the
+                // colour the theme had (docs/rich-text-plan.md §18).
+                restyle_rich_grounds();
             });
         }
         let primary_chrome = {
@@ -19250,7 +19515,9 @@ fn atspi_range_read(index: usize, read: RangeRead) -> Option<String> {
                     let Ok((attrs, start, stop)) = text.get_attribute_run(at, false).await else {
                         return None;
                     };
-                    if stop > start && attrs.contains_key("bg-color") {
+                    if stop > start
+                        && attrs.get("bg-full-height").map(String::as_str) == Some("true")
+                    {
                         // THE COVERED TEXT COMES FROM THE PLATFORM: the offsets
                         // alone would be this read agreeing with the lowering's
                         // own conversion, two symmetric mistakes cancelling.

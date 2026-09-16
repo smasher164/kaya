@@ -5155,6 +5155,36 @@ public final class KayaApp {
             emit(KayaWire.txFormatText(w.id, 0, 0, 0, 0, new Object[] { name, value }));
         }
 
+        /**
+         * The named acts (the review page's ruling 1 —
+         * docs/rich-text-plan.md §18): each is {@link #format} with its
+         * name, over the widget's own selection; removal stays
+         * {@link #unformat}, the block kinds stay {@link #setBlock}.
+         */
+        public void bold(Widget w) {
+            format(w, "bold", "true");
+        }
+
+        public void italic(Widget w) {
+            format(w, "italic", "true");
+        }
+
+        public void underline(Widget w) {
+            format(w, "underline", "true");
+        }
+
+        public void strike(Widget w) {
+            format(w, "strike", "true");
+        }
+
+        public void code(Widget w) {
+            format(w, "code", "true");
+        }
+
+        public void link(Widget w, String url) {
+            format(w, "link", url);
+        }
+
         /** Take an attribute off the widget's current selection. */
         public void unformat(Widget w, String name) {
             emit(KayaWire.txFormatText(w.id, 1, 0, 0, 0, new Object[] { name, "" }));

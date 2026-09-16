@@ -690,8 +690,8 @@ LINK_REGISTRAR = [
     ("csharp", "bindings/csharp/KayaApp.cs", r"public void Link\("),
     ("java", "bindings/java/dev/kaya/KayaApp.java", r"public void link\("),
     ("swift", "bindings/swift/KayaApp.swift", r"^    func link\("),
-    ("haskell", "bindings/haskell/KayaApp.hs", r"^link ::"),
-    ("ocaml", "bindings/ocaml/kaya_app.ml", r"^let link app "),
+    ("haskell", "bindings/haskell/KayaApp.hs", r"^linkRoute ::"),
+    ("ocaml", "bindings/ocaml/kaya_app.ml", r"^let link_route app "),
     ("js", "bindings/js/kaya/index.ts", r"^export function link\("),
 ]
 
@@ -842,8 +842,8 @@ LINK_SPELLINGS = [
     ("csharp", "bindings/csharp/KayaApp.cs", "App.Link"),
     ("java", "bindings/java/dev/kaya/KayaApp.java", "KayaApp.link"),
     ("swift", "bindings/swift/KayaApp.swift", "KayaApp.link"),
-    ("haskell", "bindings/haskell/KayaApp.hs", "KayaApp.link"),
-    ("ocaml", "bindings/ocaml/kaya_app.ml", "Kaya_app.link"),
+    ("haskell", "bindings/haskell/KayaApp.hs", "KayaApp.linkRoute"),
+    ("ocaml", "bindings/ocaml/kaya_app.ml", "Kaya_app.link_route"),
     ("js", "bindings/js/kaya/index.ts", "kaya.link"),
 ]
 
@@ -2791,6 +2791,51 @@ RICH_WRITE_NAMES = {"format": {"haskell": "formatText"},
                     "format_range": {"haskell": "formatTextRange"}}
 
 
+# The comment strippers live here, above the rich census, which reads the
+# named acts' BODIES through them (a docstring quoting `format("bold")`
+# satisfied the body clause and hid the real body from its negative,
+# measured 2026-09-15).
+def _c_like(s):
+    s = re.sub(r"/\*.*?\*/", "", s, flags=re.S)
+    return "\n".join(re.sub(r"//.*", "", ln) for ln in s.split("\n"))
+
+
+def _python_like(s):
+    s = re.sub(r'"""(?:.|\n)*?"""', "", s)
+    s = re.sub(r"'''(?:.|\n)*?'''", "", s)
+    return "\n".join(re.sub(r"#.*", "", ln) for ln in s.split("\n"))
+
+
+def _ocaml_like(s):
+    """(* … *) nests, so this counts rather than matching."""
+    keep, depth, i = [], 0, 0
+    while i < len(s):
+        if s.startswith("(*", i):
+            depth += 1
+            i += 2
+        elif s.startswith("*)", i) and depth:
+            depth -= 1
+            i += 2
+        else:
+            if not depth:
+                keep.append(s[i])
+            i += 1
+    return "".join(keep)
+
+
+def _haskell_like(s):
+    s = re.sub(r"\{-(?:.|\n)*?-\}", "", s)
+    return "\n".join(re.sub(r"--.*", "", ln) for ln in s.split("\n"))
+
+
+STRIP = {
+    "rust": _c_like,
+    "python": _python_like, "go": _c_like, "csharp": _c_like,
+    "java": _c_like, "swift": _c_like, "ocaml": _ocaml_like,
+    "haskell": _haskell_like, "js": _c_like,
+}
+
+
 def rich_findings(what, rows, text_for=read_rel):
     """One part of the rich surface over nine bindings. `text_for` is the
     reader, so the negatives below drive THIS census rather than a
@@ -2804,6 +2849,8 @@ def rich_findings(what, rows, text_for=read_rel):
                        f"rich textarea's '{what}': {rel} is gone, so the "
                        f"census read nothing there")
             continue
+        if what in RICH_ACT_PARTS:
+            text = STRIP[lang](text)
         if not grep_e(pattern, text):
             out.append(f"check-sugar-surface: {lang} has no sugar for the "
                        f"rich textarea's '{what}' (wanted /{pattern}/ in "
@@ -2935,6 +2982,39 @@ def rich_write_rows(snake, pascal, camel):
     ]
 
 
+RICH_ACT_PARTS = ("bold", "italic", "underline", "strike", "code", "link")
+
+
+def rich_act_rows(snake, pascal, camel):
+    """The NAMED ACTS (docs/rich-text-plan.md §18): `bold(widget)` and its
+    five siblings on the transaction, ANCHORED ON THE WIDGET ARGUMENT —
+    every binding's Document builder also spells `bold(range)`, and a row
+    that read the bare name would be satisfied by it (measured: three
+    columns green before any act existed)."""
+    F = RICH_FILES
+    link = snake == "link"
+    # AND THE BODY: each act is one line calling `format` with a literal
+    # name and value, so the row reads that literal after the signature —
+    # a signature alone is green over `bold` spelled "bolder", or "false",
+    # in one binding, which no scene drives (§18; the body negative below).
+    # Python's and JS's `format` default the value to "true", so the literal
+    # name followed by the call's close is that binding's honest spelling.
+    body = (rf'(?s:.{{0,400}}?"{snake}".{{0,40}}?\b(?:url|href|uri)\b)' if link
+            else rf'(?s:.{{0,400}}?"{snake}"(?:.{{0,24}}?"true"|\)))')
+    return [
+        ("rust", F["rust"], rf"pub fn {snake}\(&mut self, widget: WidgetId" + body),
+        ("python", F["python"],
+         (rf"    def {snake}\(self, url" if link else rf"    def {snake}\(self\)") + body),
+        ("go", F["go"], rf"func \(tx \*Tx\) {pascal}\(w Widget" + body),
+        ("csharp", F["csharp"], rf"public void {pascal}\(Widget w" + body),
+        ("java", F["java"], rf"public void {camel}\(Widget w" + body),
+        ("swift", F["swift"], rf"func {camel}\(_ w: KayaWidget" + body),
+        ("haskell", F["haskell"], rf"^{camel} :: Widget ->" + body),
+        ("ocaml", F["ocaml"], rf"^let {snake} \(Widget id\)" + body),
+        ("js", F["js"], (rf"^  {camel}\(url" if link else rf"^  {camel}\(\): this") + body),
+    ]
+
+
 def rich_document_rows(snake, pascal, camel):
     """The mirror READ — the binding's own fold, addressed by widget. Not
     a transaction verb: it answers a value, which is why each row names
@@ -2976,6 +3056,14 @@ RICH_PARTS = [
     ("apply_edit", rich_write_rows,
      ("apply_edit", "ApplyEdit", "applyEdit")),
     ("format", rich_write_rows, ("format", "Format", "format")),
+    # The named acts (ruling 1, docs/rich-text-plan.md §18): six writes
+    # spelled exactly as `format` is, the name swapped.
+    ("bold", rich_act_rows, ("bold", "Bold", "bold")),
+    ("italic", rich_act_rows, ("italic", "Italic", "italic")),
+    ("underline", rich_act_rows, ("underline", "Underline", "underline")),
+    ("strike", rich_act_rows, ("strike", "Strike", "strike")),
+    ("code", rich_act_rows, ("code", "Code", "code")),
+    ("link", rich_act_rows, ("link", "Link", "link")),
     ("unformat", rich_write_rows, ("unformat", "Unformat", "unformat")),
     # docs/rich-text-plan.md §17: the ranged act beside the selection act.
     ("format_range", rich_write_rows, ("format_range", "FormatRange", "formatRange")),
@@ -3107,6 +3195,58 @@ for _what, _rows_of, _names in RICH_PARTS:
                           f"the perturbation is a copy of the text")
         rich_negatives += 1
     print(f"check-sugar-surface: rich rename negatives, '{_what}': "
+          + (" ".join(_counts) if _counts
+             else "none — no binding spells it yet"))
+# THE BODY NEGATIVE for the named acts: the rename above proves each row
+# reads the NAME; this proves it reads the VALUE the body sends — every act
+# matched on the tree has its value turned to "false" in a copy (or, for
+# the defaulted spellings, a "false" appended; for link, the attribute
+# respelled) and the census must name that binding alone.
+def rich_act_body_perturb(text, pattern, snake):
+    out, at, applied = [], 0, 0
+    for found in re.finditer(pattern, text, re.M):
+        said = found.group(0)
+        if snake == "link":
+            said, n = sub_count(r'"link"', '"hyperlink"', said)
+        elif '"true"' in said:
+            head, sep, tail = said.rpartition('"true"')
+            said, n = head + '"false"' + tail, 1
+        else:
+            said, n = sub_count(rf'"{snake}"\)', f'"{snake}", "false")', said)
+        applied += n
+        out.append(text[at:found.start()])
+        out.append(said)
+        at = found.end()
+    out.append(text[at:])
+    return "".join(out), applied
+
+
+for _what, _rows_of, _names in RICH_PARTS:
+    if _rows_of is not rich_act_rows:
+        continue
+    _rows = _rows_of(*_names)
+    _counts = []
+    for _lang, _rel, _pattern in _rows:
+        _text = STRIP[_lang](read_rel(_rel))
+        if not grep_e(_pattern, _text):
+            continue
+        _doctored, _n = rich_act_body_perturb(_text, _pattern, _names[0])
+        _counts.append(f"{_lang}={_n}")
+        if _n < 1:
+            selftest_exit(f"check-sugar-surface: self-test failed — the "
+                          f"{_lang} '{_what}' body negative perturbed "
+                          f"NOTHING in {_rel}")
+        _fired = [m for m in rich_findings(
+            _what, _rows,
+            text_for=lambda rel, _r=_rel, _d=_doctored: (
+                _d if rel == _r else read_rel(rel)))
+            if m.startswith(f"check-sugar-surface: {_lang} has no sugar")]
+        if len(_fired) != 1:
+            selftest_exit(f"check-sugar-surface: self-test failed — "
+                          f"turning {_lang}'s '{_what}' value produced "
+                          f"{len(_fired)} findings for {_lang}, not 1")
+        rich_negatives += 1
+    print(f"check-sugar-surface: rich act body negatives, '{_what}': "
           + (" ".join(_counts) if _counts
              else "none — no binding spells it yet"))
 # THE EDIT SOURCE VOCABULARY (the review page's ruling 3, 2026-09-14): the
@@ -5952,45 +6092,6 @@ check_menus("js", "bindings/js/kaya/index.ts", [
 # AND THE SPELLING HAS TO BE IN CODE, so the patterns run against copies
 # with comments and docstrings stripped: measured 2026-08-19, Go's
 # constructor renamed to `PanesXX` still passed off its doc comment.
-def _c_like(s):
-    s = re.sub(r"/\*.*?\*/", "", s, flags=re.S)
-    return "\n".join(re.sub(r"//.*", "", ln) for ln in s.split("\n"))
-
-
-def _python_like(s):
-    s = re.sub(r'"""(?:.|\n)*?"""', "", s)
-    s = re.sub(r"'''(?:.|\n)*?'''", "", s)
-    return "\n".join(re.sub(r"#.*", "", ln) for ln in s.split("\n"))
-
-
-def _ocaml_like(s):
-    """(* … *) nests, so this counts rather than matching."""
-    keep, depth, i = [], 0, 0
-    while i < len(s):
-        if s.startswith("(*", i):
-            depth += 1
-            i += 2
-        elif s.startswith("*)", i) and depth:
-            depth -= 1
-            i += 2
-        else:
-            if not depth:
-                keep.append(s[i])
-            i += 1
-    return "".join(keep)
-
-
-def _haskell_like(s):
-    s = re.sub(r"\{-(?:.|\n)*?-\}", "", s)
-    return "\n".join(re.sub(r"--.*", "", ln) for ln in s.split("\n"))
-
-
-STRIP = {
-    "rust": _c_like,
-    "python": _python_like, "go": _c_like, "csharp": _c_like,
-    "java": _c_like, "swift": _c_like, "ocaml": _ocaml_like,
-    "haskell": _haskell_like, "js": _c_like,
-}
 
 # A NONCE IN A COMMENT, PER LANGUAGE: the raw file must satisfy the token
 # and the stripped one must not. Planted rather than borrowed from a real
