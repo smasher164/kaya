@@ -11721,7 +11721,7 @@ caught it) and the failing step's own `offers=`/`answered` pair — a full
 `offers` with `answered nothing` is a transfer failure, an empty or stale
 `offers` is the selection not having reached this client.
 
-## WATCH — windows `portfolio_python` under a matrix: six `reporting a row window failed: 0x88000FA8` faults after the scene's last step (first sighting 2026-09-07) — REOPENED 2026-09-15, second sighting on the guarded build (was CLOSED 2026-09-07: reproduced on the VM under load with the call named (`band.UpdateLayout`), the mechanism read and fixed — a popped screen's tables stay registered until the app's destroy lands and the resize's LayoutUpdated scheduled reports for their detached bands; a report skips a band outside the tree now (docs/traps.md).)
+## ~~WATCH — windows `portfolio_python` under a matrix: six `reporting a row window failed: 0x88000FA8` faults after the scene's last step (first sighting 2026-09-07)~~ CLOSED 2026-09-16 AT THE CAUSE, READ UNDER LOAD: 5 faults in 50 hand runs on the VM under the mac and linux lanes looping, the band in the tree by every read the platform offers (`band loaded true parent yes xamlroot true`) and no cycle line — neither earlier cause — and every fault inside a ~50-pass RAMP where the table's own container grid gains 2.0 dip per layout pass (faulting runs stamp 157-177 columns, settled ones 55-67; every ancestor and the XamlRoot pinned at 900 the whole way). 0x88000FA8 there is what the platform says: the layout under `band.UpdateLayout()` did not complete that turn, and the band's next LayoutUpdated reports. A report round failing with that code is ABANDONED, said out loud with the measured state, for at most 8 consecutive rounds per table; a success clears the count, the 9th and every other HRESULT still fault (the bound is load-bearing: kaya's UnhandledException handler prints XAML's cycle sentence and SetHandled(true), so an unbounded skip would green a never-completing layout). GUARD on the path the lane cannot avoid: winui::tests' `an_incomplete_layout_is_skipped_until_the_bound_and_nothing_else_is`, run on the guest by deploy-win's unit phase (33/33), three watched negatives. 50 runs under the same load: 50 PASS, 3 ramping, 2 printing the abandoned line. The ramp itself is the next entry. (Was: REOPENED 2026-09-15 on the guarded build; before that CLOSED 2026-09-07: reproduced on the VM under load with the call named (`band.UpdateLayout`), the mechanism read and fixed — a popped screen's tables stay registered until the app's destroy lands and the resize's LayoutUpdated scheduled reports for their detached bands; a report skips a band outside the tree now (docs/traps.md).)
 KEY: portfolio_python, 0x88000FA8, reporting a row window failed, row window report, table_report_once, windows fold
 
 Matrix #25: the windows lane's `portfolio_python` leg passed every step
@@ -12577,6 +12577,24 @@ the model's (..) after Nms` whenever it had to wait. No lane alone reaches
 the race; the matrix is the proof, and the diag line is the instrument that
 says how far behind Compose was when it does.
 Bundle: ~/.local/state/kaya/flightrec/runs/20260916T085035Z-097444/bundles/android-ownundo-compose.
+
+## The WinUI table's container grid gains 2.0 dip per layout pass for ~50 passes after a resize — a layout storm, and what made the row-window fault reachable (found 2026-09-16 under the layout-fault loop)
+KEY: 2px ramp, layout storm, container grid ramp, 157 columns stamped, KAYA_WINUI_STAMP_TRACE, portfolio_python resize, table chrome width
+
+Measured while closing the entry above: on `portfolio_python`'s last
+resize the table's OWN container grid grows by exactly 2.0 dip on each of
+~50 consecutive layout passes before it settles — a ~2.5x layout storm on
+one resize (faulting runs stamped 157-177 columns against 55-67 settled),
+with every ancestor and the XamlRoot pinned at 900.0 the whole way, so the
+ramp is inside the table's chrome, not above it. It is the only state in
+which `band.UpdateLayout` ever answered 0x88000FA8, and the bounded skip
+above lives with it rather than removing it. The next instrument goes
+inside the table's chrome (which element asks for two more pixels each
+pass — a border, a padding, a scrollbar reservation — read from
+`KAYA_WINUI_STAMP_TRACE=1`'s stamps with the chrome's own widths beside
+them), the agent's notes §6 carry the evidence
+(tmp/openlist/notes-layout.md in the 2026-09-16 job), and the fix is
+whatever makes the grid's first post-resize measure its last.
 
 ## The stamped-occurrence doors other than click still forward a torn-down copy's tag (found 2026-09-14)
 KEY: stamped_tag_is_live, torn-down copy, dead copy, lingering registry, toggled dead copy, set_value dead copy

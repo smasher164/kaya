@@ -3705,15 +3705,112 @@ fn table_scroll_to(host: &ScrollViewer, id: u64, offset: f64) -> windows_core::R
     Ok(())
 }
 
+/// What the band WAS when a report round failed — abandoned or faulted alike.
+/// Three matrix sightings of `band.UpdateLayout: (0x88000FA8)` named an HRESULT
+/// and no state, and the state is what told the two causes apart
+/// (docs/deferred.md, the row-window WATCH). Every field is read here and now;
+/// a read that fails prints its own error rather than a blank.
+fn table_fault_state(id: u64, round: usize) -> String {
+    let Some((host, band, wrap, grid, folded, rows, dirty, probes, applied, floors)) =
+        TABLES.with_borrow(|t| {
+            t.get(&id).map(|w| {
+                (
+                    w.host.clone(),
+                    w.band.clone(),
+                    w.wrap.clone(),
+                    w.grid.clone(),
+                    w.folded.len(),
+                    w.rows.len(),
+                    w.dirty,
+                    w.probes,
+                    w.applied.clone(),
+                    w.floors.clone(),
+                )
+            })
+        })
+    else {
+        return format!(" | table {id} round {round}: no longer in TABLES");
+    };
+    let num = |r: windows_core::Result<f64>| r.map_or_else(|e| format!("<{e}>"), |v| format!("{v:.1}"));
+    let flag = |r: windows_core::Result<bool>| r.map_or_else(|e| format!("<{e}>"), |v| v.to_string());
+    let round_to = |v: &[f64]| v.iter().map(|w| (w * 10.0).round() / 10.0).collect::<Vec<_>>();
+    let passes = LAYOUT_PASSES.with_borrow(|n| n.get(&id).copied().unwrap_or(0));
+    format!(
+        " | table {id} round {round} pass {passes}: band loaded {} parent {} size {}x{} \
+         | host loaded {} parent {} size {}x{} | wrap loaded {} size {}x{} folded {folded} \
+         | grid loaded {} parent {} | xamlroot band {} host {} \
+         | rows {rows} dirty {dirty} probes {probes} widths {:?} floors {:?}",
+        flag(band.IsLoaded()),
+        band.Parent().map_or_else(|e| format!("<{e}>"), |_| "yes".to_owned()),
+        num(band.ActualWidth()),
+        num(band.ActualHeight()),
+        flag(host.IsLoaded()),
+        host.Parent().map_or_else(|e| format!("<{e}>"), |_| "yes".to_owned()),
+        num(host.ActualWidth()),
+        num(host.ActualHeight()),
+        flag(wrap.IsLoaded()),
+        num(wrap.ActualWidth()),
+        num(wrap.ActualHeight()),
+        flag(grid.IsLoaded()),
+        grid.Parent().map_or_else(|e| format!("<{e}>"), |_| "yes".to_owned()),
+        band.XamlRoot().is_ok(),
+        host.XamlRoot().is_ok(),
+        round_to(&applied),
+        round_to(&floors),
+    )
+}
+
+/// What a XAML layout read answers once the layout under it did not complete
+/// (docs/traps.md, 0x88000FA8; docs/deferred.md, the row-window WATCH).
+const LAYOUT_INCOMPLETE: windows_core::HRESULT = windows_core::HRESULT(0x8800_0FA8u32 as i32);
+
+/// How many CONSECUTIVE rounds one table may lose to an incomplete layout
+/// before the leg dies of it — consecutive, because a report that succeeds is
+/// proof the layout completes and a lifetime count would fault a healthy app
+/// that had merely been resized often enough. A layout still MOVING completes
+/// on a later pass and the band's own LayoutUpdated brings the report back; a
+/// layout that never completes has to redden the leg, and XAML's own cycle
+/// announcement is only a sentence the unhandled handler prints and swallows.
+/// Measured on the VM under the mac and linux lanes' load: five reproductions,
+/// at most ONE such round per table per run, inside a ~50-pass resize ramp.
+const TABLE_LAYOUT_SKIPS: u32 = 8;
+
+thread_local! {
+    static LAYOUT_SKIPS: std::cell::RefCell<std::collections::HashMap<u64, u32>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// Whether a failed report round is one XAML has not finished laying out — so
+/// nothing may be read this turn and the next pass reports — or a fault.
+fn report_round_is_transient(code: windows_core::HRESULT, already: u32) -> bool {
+    code == LAYOUT_INCOMPLETE && already < TABLE_LAYOUT_SKIPS
+}
+
 /// Drive one table's report to a fixpoint. Each round acts on at most one
 /// thing and answers whether it moved, so a settled tier costs one round.
 fn table_settle(core: &mut CoreState, id: u64) {
-    for _ in 0..TABLE_SETTLE_ROUNDS {
+    for round in 0..TABLE_SETTLE_ROUNDS {
         match table_report_once(core, id) {
-            Ok(true) => continue,
-            Ok(false) => return,
+            Ok(moved) => {
+                LAYOUT_SKIPS.with_borrow_mut(|n| n.remove(&id));
+                if moved {
+                    continue;
+                }
+                return;
+            }
             Err(e) => {
-                crate::fault::report(format!("kaya: reporting a row window failed: {e}"));
+                let state = table_fault_state(id, round);
+                let already = LAYOUT_SKIPS.with_borrow(|n| n.get(&id).copied().unwrap_or(0));
+                if report_round_is_transient(e.code(), already) {
+                    LAYOUT_SKIPS.with_borrow_mut(|n| *n.entry(id).or_insert(0) += 1);
+                    eprintln!(
+                        "kaya: row window report abandoned, XAML had not finished \
+                         laying out ({e}), {} of {TABLE_LAYOUT_SKIPS}{state}",
+                        already + 1
+                    );
+                    return;
+                }
+                crate::fault::report(format!("kaya: reporting a row window failed: {e}{state}"));
                 return;
             }
         }
@@ -23797,6 +23894,40 @@ fn shell_open(url: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// THE ROW WINDOW'S TWO FAILURES ARE NOT ONE (docs/deferred.md, the
+    /// row-window WATCH; docs/traps.md, 0x88000FA8). NO LANE CAN SEE THIS: the
+    /// transient arm fires on a starved host inside a resize ramp — five
+    /// reproductions in fifty runs on the VM under the mac and linux lanes'
+    /// load, none in a hundred quiet ones — and the bound behind it fires only
+    /// on a layout that never completes, which nothing in the tree produces on
+    /// purpose. Both arms are decided here, out of the platform's own code and
+    /// a count, so both are readable without a Windows layout at all.
+    #[test]
+    fn an_incomplete_layout_is_skipped_until_the_bound_and_nothing_else_is() {
+        let other = windows_core::HRESULT(0x8007_000Eu32 as i32);
+        for already in 0..TABLE_LAYOUT_SKIPS {
+            assert!(
+                report_round_is_transient(LAYOUT_INCOMPLETE, already),
+                "round {already} of {TABLE_LAYOUT_SKIPS} is a layout still moving"
+            );
+            assert!(
+                !report_round_is_transient(other, already),
+                "only the layout code is transient, at round {already}"
+            );
+        }
+        assert!(
+            !report_round_is_transient(LAYOUT_INCOMPLETE, TABLE_LAYOUT_SKIPS),
+            "a layout that never completes reddens the leg at the bound"
+        );
+        assert!(
+            !report_round_is_transient(LAYOUT_INCOMPLETE, TABLE_LAYOUT_SKIPS + 1),
+            "and stays red past it"
+        );
+        // The number the arm keys on is the platform's, not a constant this
+        // file is free to drift: it is the code five reproductions read back.
+        assert_eq!(LAYOUT_INCOMPLETE.0 as u32, 0x8800_0FA8);
+    }
 
     fn reg_delete_tree(key: &str) {
         use windows::Win32::System::Registry::{RegDeleteTreeW, HKEY_CURRENT_USER};
