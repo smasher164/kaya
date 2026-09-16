@@ -1032,7 +1032,7 @@ nothing asks for that today (`select_range` is a live-zone verb and stays
 one). What B needs settled: the document's bytes on the wire are the
 record's field VALUE, so a 15,000-row list of rich notes carries 15,000
 documents in the model — the same as 15,000 strings today, and the
-virtualizer stamps only the window (docs/dynamic-tables §virtualization).
+virtualizer stamps only the window (docs/virtualization-plan.md).
 
 THE RULING FOR THE MAINTAINER: B — a stamped copy's document is a Blob
 field bound through a new template-zone `document` prop, written by
