@@ -7117,6 +7117,64 @@ private func kayaAnyTarget(_ spec: Substring) -> KayaNode? {
 
 /// The text kinds by prefix — entry, textarea, search — for the verbs that
 /// drive or read a field's text (harness.rs routes the same three).
+/// THE TEXT VIEW MOUNTS AFTER THE NODE (docs/deferred.md, the iOS richrows
+/// format red of matrix 25): a copy the core re-stamps under an undo has its
+/// node in the scene at once and its UITextView only after the next render,
+/// and a `format` or `compose` that looked once read "no text view" 43ms
+/// after the redo on a loaded phone. An action waits for the view the way
+/// an observation retries, bounded; the wait is printed when it was needed.
+#if !os(macOS)
+    /// THE LIVE TREE IS THE REGISTRY (docs/traps.md, the iOS menu re-host):
+    /// a window that declares a menu is re-hosted, every text view is made
+    /// twice, the registry written by lifecycle callbacks pointed at the set
+    /// that died, and the set that lives never updated again. The view that
+    /// carries the node's id in the window's own hierarchy is the one the
+    /// user sees; the registry is only the fast path in front of this walk.
+    private func kayaLiveUITextView(_ nodeId: UInt64) -> UITextView? {
+        if let view = kayaUITextViews[nodeId]?.view, view.window != nil { return view }
+        func walk(_ view: UIView) -> UITextView? {
+            if let owned = view as? KayaTextView, owned.nodeId == nodeId { return owned }
+            for child in view.subviews {
+                if let found = walk(child) { return found }
+            }
+            return nil
+        }
+        for scene in UIApplication.shared.connectedScenes {
+            guard let windowScene = scene as? UIWindowScene else { continue }
+            for window in windowScene.windows {
+                if let found = walk(window) {
+                    kayaUITextViews[nodeId] = KayaWeakTextView(found)
+                    return found
+                }
+            }
+        }
+        return nil
+    }
+#endif
+
+private func kayaAwaitTextView(_ spec: Substring) {
+    let deadline = Date().addingTimeInterval(3.0)
+    var waited = 0
+    while Date() < deadline {
+        let mounted = DispatchQueue.main.sync { () -> Bool in
+            guard let node = kayaTextTarget(spec) else { return false }
+            #if os(macOS)
+                return kayaMacTextViews[node.id]?.view != nil
+            #else
+                return kayaLiveUITextView(node.id) != nil
+            #endif
+        }
+        if mounted { break }
+        Thread.sleep(forTimeInterval: 0.02)
+        waited += 20
+    }
+    if waited > 0 {
+        FileHandle.standardError.write(
+            "KAYA_DIAG \(Date().timeIntervalSince1970) \(spec): the text view mounted \(waited)ms after the act was asked for\n"
+                .data(using: .utf8)!)
+    }
+}
+
 private func kayaTextTarget(_ spec: Substring) -> KayaNode? {
     if spec.hasPrefix("textarea") { return kayaTarget(spec, "textarea", kayaScene.textareas) }
     if spec.hasPrefix("label") { return kayaTarget(spec, "label", kayaScene.labels) }
@@ -9729,6 +9787,7 @@ private func kayaRunScript(_ script: String) {
                 // `format <target> <start:end> <name>[=<value>] [off]`, bytes:
                 // select the range, then the widget's own act (R9).
                 kayaAwaitQuiet()
+                kayaAwaitTextView(parts[1])
                 let answered = kayaAnswers()
                 let formatted = DispatchQueue.main.sync { () -> String? in
                     guard parts.count >= 4 else {
@@ -9747,8 +9806,8 @@ private func kayaRunScript(_ script: String) {
                         }
                         let text = view.string
                     #else
-                        guard let view = kayaUITextViews[node.id]?.view else {
-                            return "no text view for \(parts[1])"
+                        guard let view = kayaLiveUITextView(node.id) else {
+                            return "no text view for \(parts[1]) in the window's own hierarchy"
                         }
                         let text = view.text ?? ""
                     #endif
@@ -9806,7 +9865,7 @@ private func kayaRunScript(_ script: String) {
                             if mine != core { return (core, mine) }
                         }
                     #else
-                        if let view = kayaUITextViews[node.id]?.view,
+                        if let view = kayaLiveUITextView(node.id),
                             view.markedTextRange == nil
                         {
                             let storage = view.textStorage
@@ -9837,6 +9896,7 @@ private func kayaRunScript(_ script: String) {
                 // UNCOMMITTED and invisible to the app.
                 let marked = kayaQuoted(Array(parts[2...]))
                 kayaAwaitQuiet()
+                kayaAwaitTextView(parts[1])
                 let answered = kayaAnswers()
                 #if os(macOS)
                     let composed = DispatchQueue.main.sync { () -> String? in
@@ -20406,11 +20466,30 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
             view.contentInsetAdjustmentBehavior = .never
             view.nodeId = node.id
             view.rich = node.rich
+            // REGISTERED AT CREATION, not at the first update: an act that
+            // resolves the view between the two reads "no text view", and the
+            // registry's weak entry is what the format/compose waits read
+            // (docs/deferred.md, the iOS richrows format WATCH, 2026-09-16).
+            kayaUITextViews[node.id] = KayaWeakTextView(view)
             kayaPinPlainText(view)
             return view
         }
 
+        static func dismantleUIView(_ view: UITextView, coordinator: Coordinator) {
+            if let owned = view as? KayaTextView {
+                let cleared = kayaUITextViews[owned.nodeId]?.view === view
+                if cleared { kayaUITextViews[owned.nodeId] = nil }
+            }
+        }
+
         func updateUIView(_ view: UITextView, context: Context) {
+            // THE REGISTRY FOLLOWS THE LIVE TREE: a window that declares a menu
+            // is re-hosted on iOS and every text view is made twice with one
+            // set dismantled, and the set that lives is the one SwiftUI keeps
+            // updating — so every update re-registers its view, and a
+            // dismantled view, which never updates again, cannot win
+            // (docs/deferred.md, the iOS richrows format WATCH, 2026-09-16).
+            kayaUITextViews[node.id] = KayaWeakTextView(view)
             context.coordinator.node = node
             if let own = view as? KayaTextView {
                 own.nodeId = node.id
@@ -20749,7 +20828,7 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
         _ selection: NSRange
     ) {
         node.richRuns = kayaSpliceRuns(node.richRuns, range, (inserted as NSString).length, runs)
-        guard let view = kayaUITextViews[node.id]?.view, view.markedTextRange == nil,
+        guard let view = kayaLiveUITextView(node.id), view.markedTextRange == nil,
             NSMaxRange(range) <= view.textStorage.length
         else {
             node.richSeq += 1
@@ -20785,7 +20864,7 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
         guard kayaRichNames.contains(name) else { return "\(name) is not a rich attribute" }
         let key = kayaRichKey(name)
         let off = removed || (name == "block" && value == "body")
-        if let view = kayaUITextViews[node.id]?.view as? KayaTextView {
+        if let view = kayaLiveUITextView(node.id) as? KayaTextView {
             let storage = view.textStorage
             guard NSMaxRange(range) <= storage.length else {
                 return "range \(range) is past the \(storage.length)-unit text"
@@ -20817,7 +20896,7 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
     ) -> String? {
         guard node.rich else { return "widget \(node.id) is not a rich textarea" }
         guard kayaRichNames.contains(name) else { return "\(name) is not a rich attribute" }
-        guard let view = kayaUITextViews[node.id]?.view as? KayaTextView else {
+        guard let view = kayaLiveUITextView(node.id) as? KayaTextView else {
             return "widget \(node.id) has no text view yet"
         }
         if view.markedTextRange != nil {

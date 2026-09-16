@@ -12618,9 +12618,15 @@ created; seeding N latched metrics report(s): ...`) and the breakpoint's
 miss prints the scene's own metrics map. The next sighting reads those two
 lines. The python guest runs INSIDE the iOS app, so the report preceding
 the first batch is the normal order there, not the anomaly.
+MATRIX 25 (3011da1e) printed the instrument on a PASSING leg in the other
+order — `core scene created; seeding 0 latched metrics report(s)` and then
+the breakpoint's `NO metrics latched ... the scene holds metrics for 0
+window(s)`, the report arriving after the scene and applying at once — so
+that pair is the benign order and reads nothing; the sighting's order
+(`latched; no scene yet` first) is the one to read the seed line against.
 Bundle: ~/.local/state/kaya/flightrec/runs/20260916T102305Z-027911/bundles/ios-portfolio-python.
 
-## bindings/go's seventeen `_test.go` files are run by no gate (found 2026-09-16 in passing by the blob-undo pass)
+## ~~bindings/go's seventeen `_test.go` files are run by no gate (found 2026-09-16 in passing by the blob-undo pass)~~ CLOSED 2026-09-16, the same day: tools/go-typecheck.py runs `go test -count=1 -v ./bindings/go/...` from the root after its vet (151 tests, floor 100, since a filter that matches nothing exits 0) and its negative turns one byte of richrows_test.go's hand-derived document blob in the vet negative's own module copy, pointed at the real target through CGO_LDFLAGS, and demands the red — watched firing on the first run; check-gates' census unchanged, the gate keeps its name.
 KEY: go test unrun, bindings/go _test.go, go-typecheck go test, richrows_test.go, richtext_test.go, app_test.go
 
 tools/go-typecheck.py runs `go vet` over the module and nothing runs

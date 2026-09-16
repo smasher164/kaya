@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import os
 import pathlib
 import sys
 
@@ -73,4 +74,44 @@ if bad.returncode == 0 or "duplicate key" not in bad.stderr:
 else:
     print("go-typecheck: watched refusing: a scene row declared twice (duplicate key)")
 
-g.verdict(f"the Go module compiles: {len(packages)} packages")
+# THE MODULE'S OWN TESTS, which no gate ran until 2026-09-16 (docs/deferred.md,
+# "bindings/go's seventeen _test.go files are run by no gate"): the named
+# acts' byte checks, the richrows document-blob negatives, the table,
+# typeface, symbol and notification tests passed only when an agent ran
+# them by hand. The cgo half links target/debug's libkaya by a
+# ${SRCDIR}-relative path and the test binary loads deps/libkaya.dylib by
+# its install name, relative to the cwd — so this runs from the root, after
+# the sweep's own libkaya build (gates.py builds first; standalone, build
+# it yourself). A count floor, since a filter that matches nothing exits 0.
+TEST_FLOOR = 100
+tested = subprocess.run(["go", "test", "-count=1", "-v", "./bindings/go/..."],
+                        cwd=ROOT, capture_output=True, text=True, check=False)
+passed = tested.stdout.count("--- PASS:")
+if tested.returncode != 0:
+    g.finding("go test ./bindings/go/... failed:\n"
+              + "\n".join(l for l in tested.stdout.splitlines() if "FAIL" in l or "panic" in l)[:3000]
+              + "\n" + tested.stderr.strip()[:1500])
+g.counted("Go tests passed", passed, floor=TEST_FLOOR)
+# Its negative, on the copy the vet negative already made: one byte of the
+# hand-derived document blob turned, the copy pointed at the REAL target
+# through CGO_LDFLAGS (its own ${SRCDIR}/../../target has nothing), and
+# the one test that holds the bytes must go red.
+blob_test = scratch / "bindings/go/richrows_test.go"
+blob_test.write_text(
+    g.doctor("the document blob's first byte turned", blob_test.read_text(encoding="utf-8"),
+             r"var referenceDocumentBlob = \[\]byte\{\n\t0x09,", "var referenceDocumentBlob = []byte{\n\t0x0a,"),
+    encoding="utf-8")
+env = dict(os.environ)
+env["CGO_LDFLAGS"] = f"-L{ROOT / 'target/debug'} -Wl,-rpath,{ROOT / 'target/debug'}"
+# cwd stays the root so the dylib's install name resolves; the package path
+# names the copy.
+red = subprocess.run(["go", "test", "-count=1", str(scratch / "bindings/go"), "-run",
+                      "TestADocumentFieldIsABlobOfTheWireRulesList"],
+                     cwd=ROOT, env=env, capture_output=True, text=True, check=False)
+if red.returncode == 0 or "FAIL" not in red.stdout + red.stderr:
+    g.finding("the go test negative did not fire: a turned blob byte was not refused "
+              f"(rc {red.returncode}): {(red.stdout + red.stderr).strip()[:600]}")
+else:
+    print("go-typecheck: watched refusing: the document blob's first byte turned (go test red)")
+
+g.verdict(f"the Go module compiles and its tests pass: {len(packages)} packages, {passed} tests")

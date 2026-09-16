@@ -11366,3 +11366,34 @@ only passed because `formatText` happens to contain `format`. The fakes
 map now carries every per-binding override for the row, so a negative
 that finds nothing to rename is impossible by construction rather than by
 luck.
+
+## A window that declares a menu is re-hosted on iOS, and the text-view registry pointed at the set that died (measured 2026-09-16)
+
+Matrix 25's iOS `richrows-swiftui` leg failed `format textarea@body[a]`
+with `no text view` the moment the scene's guest gained an Edit menu; the
+same leg had passed four matrices without one. The first reading — a copy
+re-stamped under the undo, its view not yet mounted — was WRONG, and a
+bounded wait for the view still failed (the wait read a view after 2260ms,
+the act read none a moment later). The instrument that read it: a
+`KAYA_DIAG textview made/dismantled node=N` at the representable's
+makeUIView and dismantleUIView, censused over the whole iOS lane — every
+scene with a MENU (editor, notes, ownundo, tasks, links, richrows) makes
+its text views TWICE and dismantles one set, both inside the first 140ms;
+every scene without one makes each view once. A window that declares a
+menu is re-hosted on iOS, and the interpreter's `kayaUITextViews`
+registry, keyed by node id and written once at creation, was left pointing
+at whichever set was made last — not the set SwiftUI keeps. `type` never
+noticed, since it drives the focused responder; `format` and `compose` read
+the registry and were the first verbs to meet a menu over a stamped
+textarea. Re-writing the registry on every update was NOT enough — the
+set that lives never updated again after the re-host, so its entries
+stayed cleared (timestamped: the second-made pair dismantled at +30ms, the
+first pair alive and unregistered, an act 2.2s later reading `no entry`).
+THE LIVE TREE IS THE REGISTRY NOW: `kayaLiveUITextView(nodeId)` walks the
+window scenes' own hierarchies for the `KayaTextView` carrying the node's
+id, the registry is only the fast path in front of it, and every iOS read
+of that registry — the two verbs and the apply path's three — goes through
+the walk; the verbs also wait for the view bounded at 3s
+(`kayaAwaitTextView`) with the wait printed. The lesson for the next
+registry: a weak entry written by lifecycle callbacks is a guess about
+which of two trees SwiftUI kept; the tree itself is not.
