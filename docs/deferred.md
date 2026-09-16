@@ -12652,6 +12652,19 @@ exclusive block where the notes leg types. `wpn_reread()` follows every
 banner-off site now, the packaged one included. The lane re-run alone on
 that is the proof.
 
+THE FIFTH RED, matrix 21 (9fd9735c): the lane alone had passed with no
+wait printed, and under the matrix the toast held the foreground for the
+whole 15s wait again, with the notify guest's own window in the sampler two
+seconds before it — a pooled notify leg's toast outliving the leg into the
+exclusive block, bannering despite the row (why the row did not hold there
+is unread; the standalone run says it does). So the runner no longer relies
+on the row alone: `dismiss_toasts()` at the exclusive funnel, after the pool
+is joined and before the hold, clears every kaya AUMID's toast history in
+the console session (tools/guest/dismiss-toasts.ps1 through its .cmd and
+the hidden task, notify-ready's route) and prints what each held, since
+clearing a history takes its banner down. The lane alone on that, then the
+matrix, are the proof.
+
 ## WATCH — the iOS dark canvas leg read LIGHT pixels under a matrix, once (first sighting 2026-09-14)
 KEY: canvasdark-swift, expect_ink dark, KAYA_APPEARANCE, kayaCanvasAppearance, traitCollection, appearance flake
 

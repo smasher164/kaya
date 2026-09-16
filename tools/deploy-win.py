@@ -908,6 +908,7 @@ def deploy_artifacts():
                ROOT / "tools/guest/relaunch-launch.ps1",
                ROOT / "tools/guest/relaunch-link.ps1",
                ROOT / "tools/guest/notify-ready.ps1",
+               ROOT / "tools/guest/dismiss-toasts.ps1",
                ROOT / "tools/guest/dnd-witness.ps1"])
 
 
@@ -1976,6 +1977,43 @@ def _leg_worker(name):
                    out=log)
 
 
+def dismiss_toasts():
+    """EVERY KAYA TOAST DOWN before an exclusive leg types: a pooled notify
+    leg's banner outlives the leg by its display time, into the exclusive
+    block, and a banner that is up blocks SetForegroundWindow outright — the
+    notes leg read `a notification toast held the foreground for 15000ms`
+    under matrix 21 with the notify guest's window in its sampler two
+    seconds before (docs/deferred.md, the PopupHost WATCH). Clearing an
+    AUMID's history takes its banner down; asked in the console session
+    through the same hidden task as notify-ready.cmd."""
+    aumids = list(NOTIFY_AUMIDS)
+    if PACKAGE_FAMILY:
+        aumids += [f"{PACKAGE_FAMILY[0]}!{scene}"
+                   for scene in sorted(set(lane.PACKAGED_LEGS.values()))]
+    # '~', never ';' or ',': both are cmd argument delimiters and %~1 in the
+    # stub would carry the first AUMID alone (measured: one of three).
+    joined = "~".join(aumids)
+    run_ssh("del C:\\kaya\\out_dismisstoasts.txt 2>nul & schtasks /create /tn "
+            f'kaya_dismisstoasts /tr "wscript C:\\kaya\\run-hidden-args.vbs '
+            f'dismiss-toasts.cmd {joined}" /sc once /st 00:00 /it /rl highest /f '
+            ">nul && schtasks /run /tn kaya_dismisstoasts >nul")
+    out = ""
+    for tries in range(41):
+        out = (run_ssh_out("cmd /c type C:\\kaya\\out_dismisstoasts.txt")
+               or "").replace("\r", "")
+        if "DISMISSTOASTSDONE" in out:
+            break
+        if tries == 40:
+            print("deploy-win: the toast dismissal never answered; the exclusive "
+                  "leg runs against whatever is up.", file=sys.stderr)
+            print(f"  What it had written: {out!r}", file=sys.stderr)
+            return
+        time.sleep(0.5)
+    for line in out.splitlines():
+        if line.startswith("dismiss-toasts:"):
+            print(f"== {line} ==")
+
+
 def run_suite(name):
     # THE MATRIX-WIDE TOKEN (tools/lib/exclusive.py), taken on the host for a
     # leg that runs on the VM.
@@ -1988,6 +2026,7 @@ def run_suite(name):
     if name in lane.EXCLUSIVE:
         for t in _leg_threads:
             t.join()
+        dismiss_toasts()
         with exclusive.hold("windows", name):
             _leg_worker(name)
         return
