@@ -83,7 +83,14 @@ in docs/deferred.md.
   hypothesis, and a fault sentence that names no call is the first thing
   to fix (docs/traps.md, the row-window fault of 2026-09-07 — a guard was
   proposed from a mechanism the code contradicted, before the bundle was
-  opened).
+  opened). AND A BUNDLE THAT COULD NOT NAME THE CAUSE IS THE DEFECT TO FIX
+  (the maintainer, 2026-09-16): when the read needed something the bundle
+  does not carry — a desktop picture, a toast's text, a screenshot on a
+  phone, a diagnostic line between two others — the recorder grows that
+  section for the next sighting, proven by forcing a red leg and reading
+  it back, and no WATCH entry is filed in its place. A watch is for a
+  cause the recorder already carries everything about and still needs a
+  second sighting to settle.
 - A FEATURE SLICE ENDS WITH A REVIEW PAGE: captures of the change on
   every lane, each one viewed before it is published, on an artifact the
   maintainer reviews (the search field's page is the shape). A feature
@@ -518,6 +525,28 @@ in docs/deferred.md.
    and holds validate-all to handing the directory, the container launch
    to naming its path, and the sweep to yielding. Six watched negatives,
    counts printed),
+   `tools/check-flightrec.py` (A RED LEG'S BUNDLE NAMES ITS CAUSE ON
+   EVERY LANE, or says what it measured instead (the maintainer's
+   2026-09-16 ruling): the bundle shape is ONE declaration —
+   tools/lib/flightrec_lane.py's `SECTIONS` for the four python lanes,
+   tools/lib/flightrec.sh's `FLIGHTREC_SECTIONS_LINUX` for the container
+   — every lane owes a reader the leg's own log, the verb trace and A
+   PICTURE of what the user would have seen, every declared section is
+   REACHED by that lane's own collect (a section nothing writes is
+   marked by finish() and then looks exactly like one the platform could
+   not answer, which is the lie this pass came from), a `.skip` file has
+   ONE writer per half and never an empty sentence (the windows notes
+   bundle of 2026-09-16 carried a zero-byte shot marker and its reader
+   could not tell "no picture was possible" from "nobody tried"), each
+   lane closes with finish() rather than a bare report, and THE PICTURES
+   ARE TAKEN WHERE THE DEVICE IS STILL THE LEG'S — the phones hand their
+   device back to the pool and the linux lane REBOOTS the leg's display,
+   both before the bundle is built, so a capture moved into drain()
+   photographs another leg's scene or an empty desktop and still
+   produces a plausible PNG. Beside them the windows verb-trace file,
+   held across the three places that name it (check-steps' launcher
+   line, the recorder's pull, deploy-win's pre-leg delete). Nine watched
+   negatives, counts printed),
    `tools/check-diagnostics.py` (a why-not may not print a sentence it
    cannot NOT print. Any function named `*WhyNot`/`*why_not`/`*Reason`
    is read as a diagnostic by that name alone; one answer, or an answer

@@ -101,6 +101,12 @@ GATES = [
     ("check-slider-commit", ["tools/check-slider-commit.py"], True, ""),
     ("check-search", ["tools/check-search.py"], True, ""),
     ("check-exclusive", ["tools/check-exclusive.py"], True, ""),
+    # A red leg's bundle names its cause on every lane, or says what it
+    # measured instead: one declared section list, every section reached
+    # by its lane's own collect, one writer of a `.skip` and never an
+    # empty one, and the pictures taken while the device is still the
+    # leg's (the maintainer's 2026-09-16 ruling).
+    ("check-flightrec", ["tools/check-flightrec.py"], True, ""),
     # A why-not that can print only one sentence prints it for every
     # cause it cannot name, and the reader believes it.
     ("check-diagnostics", ["tools/check-diagnostics.py"], True, ""),

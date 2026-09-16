@@ -96,6 +96,73 @@ flightrec_mark() { # <bundle> <name> <state> <bytes>
     printf '%s %s %s\n' "$2" "$3" "$4" >>"$1/MANIFEST"
 }
 
+# THE LINUX LANE'S SECTIONS — the shell row of tools/lib/flightrec_lane.py's
+# SECTIONS table, which is the other four lanes'. tools/check-flightrec.py
+# holds the two spellings to ONE list and reads this lane's collect for
+# each name.
+# shellcheck disable=SC2034
+FLIGHTREC_SECTIONS_LINUX="leg-log verb-trace shot desktop xvfb"
+
+# flightrec_skip <bundle> <name> <sentence...>
+#
+# THE ONE WRITER OF A .skip FILE, so no marker can be left without a
+# sentence: an empty marker is a diagnostic that cannot discriminate
+# (invariant 3), and one was measured empty on the windows notes bundle
+# of 2026-09-16. A caller that names no reason gets a sentence saying
+# exactly that, because that is the bug it is.
+flightrec_skip() {
+    local bundle="$1" name="$2"
+    shift 2
+    [ -n "$bundle" ] && [ -d "$bundle" ] || return 0
+    local why="$*"
+    if [ -z "${why// /}" ]; then
+        why="flightrec: section $name was skipped and the collect path named no reason — that is a bug in the recorder, not something measured about this leg"
+    fi
+    printf '%s\n' "$why" >"$bundle/$name.skip"
+    flightrec_mark "$bundle" "$name" skip 0
+    return 0
+}
+
+# flightrec_adopt_shot <bundle> <name> <file> <reason-if-absent> [<when-file>]
+#
+# A PICTURE the leg's own runner took, by bytes. The `when` file's
+# sentence says what moment the picture is of — a photograph nobody can
+# date answers a question it was never asked.
+flightrec_adopt_shot() {
+    local bundle="$1" name="$2" src="$3" why="$4" when="${5:-}"
+    [ -n "$bundle" ] && [ -d "$bundle" ] || return 0
+    if [ ! -s "$src" ]; then
+        flightrec_skip "$bundle" "$name" "$why"
+        return 0
+    fi
+    cp "$src" "$bundle/$name.png" 2>/dev/null || true
+    [ -z "$when" ] || [ ! -f "$when" ] || cp "$when" "$bundle/$name.when" 2>/dev/null || true
+    local bytes
+    bytes="$(wc -c <"$bundle/$name.png" 2>/dev/null | tr -d ' ')"
+    [ -n "$bytes" ] || bytes=0
+    flightrec_mark "$bundle" "$name" ok "$bytes"
+    return 0
+}
+
+# flightrec_finish <bundle> <sections...> — close a bundle: every section
+# the lane declares is present or carries a sentence, then the report. A
+# section the collect path never reached at all looks exactly like one
+# that was never needed, so it is MARKED here rather than left absent.
+flightrec_finish() {
+    local bundle="$1"
+    shift
+    [ -n "$bundle" ] && [ -d "$bundle" ] || return 0
+    local name
+    for name in "$@"; do
+        if ! grep -q "^$name " "$bundle/MANIFEST" 2>/dev/null; then
+            flightrec_skip "$bundle" "$name" \
+                "flightrec: the linux lane's collect never reached section $name on this leg — no branch of it wrote or skipped the section, so nothing here was measured about it"
+        fi
+    done
+    flightrec_bundle_report "$bundle"
+    return 0
+}
+
 # flightrec_section <bundle> <name> <tool-or-empty> <cmd...>
 #
 # THE HONEST SKIP IS THE POINT. A capture tool this host does not have
@@ -107,9 +174,8 @@ flightrec_section() {
     shift 3
     [ -n "$bundle" ] && [ -d "$bundle" ] || return 0
     if [ -n "$tool" ] && ! command -v "$tool" >/dev/null 2>&1; then
-        printf 'flightrec: %s is not on this host — section %s not collected\n' \
-            "$tool" "$name" >"$bundle/$name.skip"
-        flightrec_mark "$bundle" "$name" skip 0
+        flightrec_skip "$bundle" "$name" \
+            "flightrec: $tool is not on this host — section $name not collected"
         return 0
     fi
     local out="$bundle/$name.txt" rc=0
@@ -137,11 +203,11 @@ flightrec_section() {
 # flightrec_adopt <bundle> <name> <file> — take a file a sampler already
 # wrote into the bundle, under the manifest.
 flightrec_adopt() {
-    local bundle="$1" name="$2" src="$3"
+    local bundle="$1" name="$2" src="$3" why="${4:-}"
     [ -n "$bundle" ] && [ -d "$bundle" ] || return 0
     if [ ! -f "$src" ]; then
-        printf 'flightrec: nothing was sampled for section %s\n' "$name" >"$bundle/$name.skip"
-        flightrec_mark "$bundle" "$name" skip 0
+        flightrec_skip "$bundle" "$name" \
+            "${why:-flightrec: nothing was sampled for section $name ($src)}"
         return 0
     fi
     cp "$src" "$bundle/$name.txt" 2>/dev/null || true
@@ -189,6 +255,20 @@ PY
     set -- $counts
     echo "flightrec: bundle $bundle — $1 sections ($2 ok, $3 skipped," \
         "$4 empty, $5 error), $bytes bytes (cap $FLIGHTREC_BUNDLE_CAP)"
+    # AND EVERY SECTION BY NAME, with a skip's own sentence: a reader who
+    # has to open the directory to learn what the bundle holds has
+    # already lost the minute this line exists to save.
+    local kaya_sec kaya_state kaya_bytes kaya_why
+    if [ -f "$bundle/MANIFEST" ]; then
+        while read -r kaya_sec kaya_state kaya_bytes; do
+            [ -n "$kaya_sec" ] || continue
+            kaya_why=""
+            if [ "$kaya_state" = skip ] && [ -f "$bundle/$kaya_sec.skip" ]; then
+                kaya_why=" — $(tr '\n' ' ' <"$bundle/$kaya_sec.skip")"
+            fi
+            echo "flightrec:   $kaya_sec $kaya_state $kaya_bytes$kaya_why"
+        done <"$bundle/MANIFEST"
+    fi
     if [ "$bytes" -gt "$FLIGHTREC_BUNDLE_CAP" ] 2>/dev/null; then
         echo "flightrec: bundle $bundle is OVER its cap — the section caps did not hold it" >&2
     fi

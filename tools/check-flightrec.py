@@ -1,0 +1,403 @@
+#!/usr/bin/env python3
+import pathlib
+import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
+from kaya_gate import Gate, dev_shell_or_die
+
+dev_shell_or_die()
+
+# A RED LEG'S BUNDLE NAMES ITS CAUSE ON EVERY LANE, or says what it
+# measured instead (CLAUDE.md's flight-recorder rule, the maintainer's
+# 2026-09-16 ruling). The shape is one declaration —
+# tools/lib/flightrec_lane.py's SECTIONS for the four python lanes and
+# tools/lib/flightrec.sh's FLIGHTREC_SECTIONS_LINUX for the container —
+# and this gate holds five things no lane can fail:
+#
+#  1. every lane declares the three sections a reader always wants (the
+#     leg's own log, the verb trace, and a PICTURE of what the user would
+#     have seen), and the two declarations are one list;
+#  2. every declared section is REACHED by that lane's own collect — a
+#     section nothing writes is marked by finish() and looks, in the
+#     bundle, exactly like one the platform could not answer, which is
+#     the lie this pass came from;
+#  3. a `.skip` file is written through ONE writer per half and never
+#     with an empty sentence (the windows notes bundle of 2026-09-16
+#     carried a zero-byte shot marker: the reader could not tell "no
+#     picture was possible" from "nobody tried");
+#  4. each lane's failure path ends in finish(), never in a bare
+#     bundle_report — the unreached-section marking is finish()'s;
+#  5. the pictures are taken WHERE THE DEVICE IS STILL THE LEG'S: the
+#     phones hand their device back to the pool and the linux lane
+#     REBOOTS the leg's display, both before the bundle is built, so a
+#     capture moved into drain() photographs somebody else's scene or an
+#     empty desktop — and would still produce a plausible PNG.
+#
+# Beside them the windows launcher's verb-trace path, held against the
+# name the recorder pulls: check-steps holds the launcher line alone, and
+# nothing held the two ends together.
+
+import ast
+import re
+
+gate = Gate("check-flightrec")
+
+LANE_PY = "tools/lib/flightrec_lane.py"
+LANE_SH = "tools/lib/flightrec.sh"
+LINUX = "tools/linux/run-suites.sh"
+IOS = "tools/ios/run-sim.py"
+ANDROID = "tools/android/run-emulator.py"
+WIN = "tools/deploy-win.py"
+STEPS = "tools/check-steps.py"
+
+# The recorder class whose body IS each python lane's collect path.
+RECORDERS = {"mac": "MacRecorder", "windows": "WinRecorder",
+             "ios": "IosRecorder", "android": "AndroidRecorder"}
+
+# What every lane owes a reader, whatever its platform.
+UNIVERSAL = ("leg-log", "verb-trace", "shot")
+
+
+def sources():
+    return {rel: gate.read(rel) for rel in
+            (LANE_PY, LANE_SH, LINUX, IOS, ANDROID, WIN,
+             STEPS)}
+
+
+def py_block(text, name):
+    """One class or function's source, by name."""
+    lines = text.splitlines(keepends=True)
+    for node in ast.walk(ast.parse(text)):
+        if isinstance(node, (ast.ClassDef, ast.FunctionDef)) \
+                and node.name == name:
+            return "".join(lines[node.lineno - 1:node.end_lineno])
+    return ""
+
+
+def sh_block(text, start, end):
+    """The text between two markers, or "" when either is missing."""
+    a = text.find(start)
+    if a < 0:
+        return ""
+    b = text.find(end, a)
+    return text[a:b + len(end)] if b >= 0 else ""
+
+
+def declared(src):
+    """The five lanes' section lists: the python table and the shell row,
+    as ONE mapping."""
+    out = {}
+    for node in ast.walk(ast.parse(src[LANE_PY])):
+        if isinstance(node, ast.Assign) \
+                and any(getattr(t, "id", "") == "SECTIONS"
+                        for t in node.targets):
+            out = {k: tuple(v) for k, v in ast.literal_eval(node.value).items()}
+    row = re.search(r'FLIGHTREC_SECTIONS_LINUX="([^"]*)"', src[LANE_SH])
+    if row:
+        out["linux"] = tuple(row.group(1).split())
+    return out
+
+
+# ---------------------------------------------------------------- 1 + 2
+
+def census_sections(src):
+    found = []
+    table = declared(src)
+    for lane in ("mac", "windows", "ios", "android", "linux"):
+        if lane not in table:
+            found.append(f"{lane}: no section list is declared for this lane "
+                         f"— {LANE_PY}'s SECTIONS and {LANE_SH}'s "
+                         f"FLIGHTREC_SECTIONS_LINUX are the two halves")
+            continue
+        for want in UNIVERSAL:
+            if want not in table[lane]:
+                found.append(
+                    f"{lane}: declares no `{want}` section. Every lane owes "
+                    f"a reader the leg's own log, the verb trace and a "
+                    f"picture of what the user would have seen; a platform "
+                    f"that cannot take one says so in the section's own "
+                    f"skip sentence, it does not drop the section")
+    for lane, names in sorted(table.items()):
+        if lane == "linux":
+            body = sh_block(src[LINUX], 'bundle="$(flightrec_bundle linux',
+                            "flightrec_finish")
+            if not body:
+                found.append(f"linux: {LINUX}'s drain no longer opens a "
+                             f"bundle and closes it with flightrec_finish, "
+                             f"so this gate can read no collect path")
+                continue
+            reached = [n for n in names
+                       if re.search(r'\$bundle" ' + re.escape(n) + r'(?![\w-])',
+                                    body)]
+        else:
+            body = py_block(src[LANE_PY], RECORDERS[lane])
+            if not body:
+                found.append(f"{lane}: no {RECORDERS[lane]} in {LANE_PY}")
+                continue
+            reached = [n for n in names if f'"{n}"' in body]
+        for name in names:
+            if name not in reached:
+                found.append(
+                    f"{lane}: section `{name}` is declared and no branch of "
+                    f"that lane's collect names it, so every bundle carries "
+                    f"finish()'s marker for it and nothing measured")
+    return found
+
+
+# -------------------------------------------------------------------- 3
+
+def census_skips(src):
+    found = []
+    rest = src[LANE_PY].replace(py_block(src[LANE_PY], "skip"), "")
+    for m in re.finditer(r'\.skip"[^\n]*\n?[^\n]*write_text', rest):
+        found.append(
+            f"{LANE_PY}: a `.skip` file is written outside skip() "
+            f"({m.group(0).splitlines()[0].strip()}) — skip() is the one "
+            f"writer, and it is what refuses an empty marker")
+    sh_skip = sh_block(src[LANE_SH], "flightrec_skip() {", "\n}\n")
+    sh_rest = src[LANE_SH].replace(sh_skip, "")
+    for m in re.finditer(r'>"?\$bundle/\$?\{?name\}?\.skip"?', sh_rest):
+        found.append(
+            f"{LANE_SH}: a `.skip` file is written outside flightrec_skip "
+            f"({m.group(0)}) — that function is the one writer")
+    # AND NO CALL MAY NAME AN EMPTY SENTENCE. The fallback inside skip()
+    # catches it at run time; this catches it before the lane runs.
+    for rel in (LANE_PY,):
+        for node in ast.walk(ast.parse(src[rel])):
+            if not isinstance(node, ast.Call):
+                continue
+            if getattr(node.func, "attr", "") != "skip" or len(node.args) < 3:
+                continue
+            why = node.args[2]
+            if isinstance(why, ast.Constant) and not str(why.value).strip():
+                found.append(
+                    f"{rel}:{node.lineno}: skip() is called with an empty "
+                    f"sentence — an empty marker is a diagnostic that cannot "
+                    f"discriminate (invariant 3)")
+    for call in sh_calls(src[LANE_SH], "flightrec_skip") \
+            + sh_calls(src[LINUX], "flightrec_skip"):
+        if len(call) < 4 or not call[3].strip(' "\''):
+            found.append(
+                f"flightrec_skip is called with no sentence ({' '.join(call)}) "
+                f"— the caller must say what was measured")
+    return found
+
+
+def sh_calls(text, name):
+    """Every call of a shell function, `\\`-continuations joined, as a
+    list of its whitespace-separated words."""
+    out = []
+    joined = text.replace("\\\n", " ")
+    for line in joined.splitlines():
+        line = line.strip()
+        if line.startswith(name + " "):
+            out.append(line.split(None, 3))
+    return out
+
+
+# -------------------------------------------------------------------- 4
+
+def census_finish(src):
+    found = []
+    for lane, cls in RECORDERS.items():
+        body = py_block(src[LANE_PY], cls)
+        if "self.finish(" not in body:
+            found.append(
+                f"{lane}: {cls} never calls finish(), so a section its "
+                f"collect stopped writing is silently absent from the "
+                f"bundle instead of marked with a sentence")
+        if "self.bundle_report(" in body:
+            found.append(
+                f"{lane}: {cls} calls bundle_report() directly — finish() "
+                f"is the one caller, because it is what fills the sections "
+                f"the collect never reached BEFORE the report counts them")
+    body = sh_block(src[LINUX], 'bundle="$(flightrec_bundle linux',
+                    "flightrec_finish")
+    if "flightrec_bundle_report" in body:
+        found.append(
+            f"linux: {LINUX}'s drain calls flightrec_bundle_report directly "
+            f"— flightrec_finish is the one caller")
+    return found
+
+
+# -------------------------------------------------------------------- 5
+
+def census_when(src):
+    """The pictures are taken while the device is still this leg's."""
+    found = []
+    run_one = sh_block(src[LINUX], "run_one() {", "\n}\n")
+    for shot, reboot, arm in (
+            ("flightrec_shot_x11", 'x11_display_boot "$kaya_display"', "x11"),
+            ("flightrec_shot_wayland", 'wayland_session_boot "$kaya_slot"',
+             "wayland")):
+        at, back = run_one.find(shot), run_one.find(reboot)
+        if at < 0:
+            found.append(
+                f"linux/{arm}: run_one takes no picture on the failure path "
+                f"({shot}) — the display is rebooted below, so a shot taken "
+                f"anywhere later is of a fresh empty session")
+        elif back < 0:
+            found.append(f"linux/{arm}: run_one no longer reboots the "
+                         f"session ({reboot}); re-read this clause")
+        elif at > back:
+            found.append(
+                f"linux/{arm}: run_one photographs the session AFTER "
+                f"{reboot} — that picture is of the new display, not the "
+                f"leg's")
+    for rel, leg_fn, drain_fn in ((IOS, "run_swiftui_on", "drain"),
+                                  (ANDROID, "run_apk_on", "drain")):
+        lane = "ios" if rel == IOS else "android"
+        if "device_capture(" not in py_block(src[rel], leg_fn):
+            found.append(
+                f"{lane}: {leg_fn} does not call device_capture() — the "
+                f"device goes back to the pool when it returns, so a "
+                f"capture after it photographs another leg's scene")
+        if "device_capture(" in py_block(src[rel], drain_fn):
+            found.append(
+                f"{lane}: {drain_fn} calls device_capture() — by then the "
+                f"device is back in the pool")
+    return found
+
+
+# -------------------------------------------------------------------- 6
+
+def census_vtrace(src):
+    """ONE PATH, THREE PLACES. check-steps holds every windows launcher
+    to a `set KAYA_VERB_TRACE=…\\<leg>-vtrace.txt` line (its own
+    verb_trace_line, with its own exemptions and its packaged
+    outer/inner pair — that census is NOT repeated here), and nothing
+    held that spelling against the file the recorder PULLS or against
+    the one deploy-win clears before the leg. Either end moving alone
+    leaves `verb-trace.skip` on every red windows leg, which is what the
+    2026-09-16 notes bundle carried."""
+    found = []
+    pull = re.search(r'self\.pull\(bundle, leg, "([^"]+)", "verb-trace"',
+                     src[LANE_PY])
+    line = re.search(r'return f"set KAYA_VERB_TRACE='
+                     r'C:\\\\kaya\\\\flightrec\\\\\{leg\}-([^"]+)"',
+                     src[STEPS])
+    if not pull or not line:
+        found.append(
+            f"{LANE_PY if not pull else STEPS}: the windows verb-trace "
+            f"file is no longer named where this clause reads it (the "
+            f"recorder's pull of the `verb-trace` section, and "
+            f"check-steps' verb_trace_line)")
+        return found
+    if pull.group(1) != line.group(1):
+        found.append(
+            f"the windows launchers write "
+            f"C:\\kaya\\flightrec\\<leg>-{line.group(1)} (check-steps' "
+            f"verb_trace_line) and the recorder pulls "
+            f"C:/kaya/flightrec/<leg>-{pull.group(1)} — one of the two "
+            f"moved, so every red windows leg's bundle would read "
+            f"verb-trace.skip")
+    if f"-{pull.group(1)} " not in src[WIN].replace("\\\\", "\\"):
+        found.append(
+            f"{WIN}: does not delete C:\\kaya\\flightrec\\<leg>-"
+            f"{pull.group(1)} before the leg — a trace left by the same "
+            f"leg of a PREVIOUS lane run would be pulled and read as this "
+            f"leg's")
+    return found
+
+
+# ---------------------------------------------------------------- run it
+
+REAL = sources()
+CENSUSES = (("sections", census_sections), ("skip writers", census_skips),
+            ("finish", census_finish), ("capture point", census_when),
+            ("windows verb trace", census_vtrace))
+TABLE = declared(REAL)
+gate.counted("lanes declaring a bundle shape", list(TABLE), floor=5)
+gate.counted("sections declared across the five lanes",
+             [s for names in TABLE.values() for s in names], floor=25)
+for label, fn in CENSUSES:
+    for line in fn(REAL):
+        gate.finding(line, at=label)
+
+
+def doctored(rel, pattern, repl, label, *, flags=re.M, want=1):
+    src = dict(REAL)
+    src[rel] = gate.doctor(label, REAL[rel], pattern, repl, flags=flags,
+                           want=want)
+    return src
+
+
+# N1: a section the collect stops writing.
+n1 = doctored(LANE_PY, r'self\.section\(bundle, "unified-log", \[',
+              'self.section(bundle, "unified-nope", [',
+              "N1 renamed the mac unified-log section away")
+gate.negative("N1 a mac section the collect stopped writing",
+              lambda: census_sections(n1), want="`unified-log` is declared")
+
+# N2: the same, on the lane whose runner is shell.
+n2 = doctored(LINUX, r'flightrec_section "\$bundle" xvfb ""',
+              'flightrec_section "$bundle" xvfbnope ""',
+              "N2 renamed the linux xvfb section away")
+gate.negative("N2 a linux section the collect stopped writing",
+              lambda: census_sections(n2), want="`xvfb` is declared")
+
+# N3: a lane that declares no picture at all — the state every lane but
+# the mac and windows was in before this pass.
+n3 = doctored(LANE_PY, r'"ios": \("leg-log", "verb-trace", "shot", ',
+              '"ios": ("leg-log", "verb-trace", ',
+              "N3 dropped the iOS shot from the declaration")
+gate.negative("N3 a lane declaring no picture",
+              lambda: census_sections(n3), want="declares no `shot` section")
+
+# N4: a skip writer's sentence blanked, in each half.
+n4 = doctored(LANE_PY, r'self\.skip\(bundle, "desktop-shot",\n\s+"flightrec: '
+                       r'the window list would not build AND "\n\s+"`screen'
+                       r'capture -x -o` took no picture — this "\n\s+"bundle '
+                       r'has no image of any kind"\)',
+              'self.skip(bundle, "desktop-shot", "")',
+              "N4 blanked a python skip sentence")
+gate.negative("N4 a python skip with no sentence",
+              lambda: census_skips(n4), want="empty sentence")
+
+n5 = doctored(LINUX, r'flightrec_adopt "\$bundle" desktop \\\n'
+                     r'\s+"\$FLIGHTREC_SCRATCH/\$name\.desktop\.txt" \\\n'
+                     r'\s+"[^"]*"',
+              'flightrec_skip "$bundle" desktop ""',
+              "N5 blanked a shell skip sentence")
+gate.negative("N5 a shell skip with no sentence",
+              lambda: census_skips(n5), want="called with no sentence")
+
+# N6: a .skip written past the one writer.
+n6 = doctored(LANE_PY, r'self\.skip\(bundle, "windows", no_list\)',
+              '(bundle / "windows.skip").write_text("x", encoding="utf-8")',
+              "N6 wrote a .skip past the one writer")
+gate.negative("N6 a .skip written outside skip()",
+              lambda: census_skips(n6), want="outside skip()")
+
+# N7: a lane that stops closing its bundle with finish(). The mac's
+# finish() is in _capture, which mac_leg calls, so the whole class is
+# what this clause reads.
+n7 = doctored(LANE_PY, r'self\.finish\(bundle, out=out\)\n'
+                       r'(\s+)def mac_leg',
+              r'self.bundle_report(bundle, out=out)\n\1def mac_leg',
+              "N7 replaced the mac finish() with a bare report")
+gate.negative("N7 a lane that never marks its unreached sections",
+              lambda: census_finish(n7), want="never calls finish()")
+
+# N8: the picture moved to after the display reboot — a PNG of a fresh
+# empty session, which passes every "is it a plausible image" test.
+n8 = doctored(LINUX, r'                flightrec_shot_x11 "\$name-\$proto" '
+                     r'"\$kaya_display"\n',
+              "", "N8 moved the x11 shot off the failure path")
+gate.negative("N8 a linux picture taken after the reboot",
+              lambda: census_when(n8), want="takes no picture")
+
+# N9: a launcher whose verb-trace path drifts from the one pulled.
+n9 = dict(REAL)
+n9[LANE_PY] = gate.doctor("N9 renamed the verb-trace file the recorder pulls",
+                          REAL[LANE_PY],
+                          r'self\.pull\(bundle, leg, "vtrace\.txt", '
+                          r'"verb-trace",',
+                          'self.pull(bundle, leg, "vtrace-elsewhere.txt", '
+                          '"verb-trace",')
+gate.negative("N9 the recorder pulling a verb trace no launcher writes",
+              lambda: census_vtrace(n9), want="vtrace-elsewhere.txt")
+
+gate.negatives_ran(9)
+gate.verdict(f"{len(TABLE)} lanes, "
+             f"{sum(len(v) for v in TABLE.values())} sections")

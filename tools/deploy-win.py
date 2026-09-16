@@ -1863,8 +1863,25 @@ def run_one_suite(name, slot, log):
         print(f"{name}: skipped — the VM was declared unreachable earlier "
               f"in this lane", file=log)
         return False
-    run_ssh(f"del C:\\kaya\\out_{name}.txt 2>nul & "
-            f"del C:\\kaya\\flightrec\\{name}-vtrace.txt 2>nul & schtasks /create /tn "
+    # AND THE DIRECTORY EXISTS BEFORE THE GUEST WRITES INTO IT: the verb
+    # trace is opened by the guest with create+append, which fails
+    # SILENTLY when C:\kaya\flightrec is not there — every leg would then
+    # dump its ring into nothing and every red bundle would read
+    # verb-trace.skip. Only flightrec.ps1 makes that directory today, so
+    # a lane whose sampler task did not start has none. No `if`: cmd runs
+    # everything after an `&` inside it (check-steps' cmd-precedence
+    # clause).
+    #
+    # EVERY ARTIFACT THIS LEG'S BUNDLE WILL PULL, cleared next: a file
+    # left by the same leg of a PREVIOUS lane run reads as a fresh
+    # capture (the trap tools/guest/shot.cmd records, one directory over).
+    run_ssh(f"mkdir C:\\kaya\\flightrec 2>nul & "
+            f"del C:\\kaya\\out_{name}.txt 2>nul & "
+            f"del C:\\kaya\\flightrec\\{name}-vtrace.txt "
+            f"C:\\kaya\\flightrec\\{name}-shot.png "
+            f"C:\\kaya\\flightrec\\{name}-desktop.png "
+            f"C:\\kaya\\flightrec\\{name}-shotwhy.txt "
+            f"C:\\kaya\\flightrec\\{name}-fgtext.txt 2>nul & schtasks /create /tn "
             f'kaya_{name} /tr "wscript C:\\kaya\\run-hidden.vbs '
             f'run_{name}.cmd {slot}" /sc once /st 00:00 /it /rl highest /f '
             f">nul && schtasks /run /tn kaya_{name} >nul", log=log)

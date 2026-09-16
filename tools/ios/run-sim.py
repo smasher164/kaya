@@ -1741,6 +1741,10 @@ def run_swiftui_on(udid, slot, app, bundle_id, name, selftest, scene,
     else:
         ok = "KAYA_SELFTEST: OK" in out
     if not ok:
+        # THE PICTURE FIRST: a container lookup and two file copies sit
+        # between here and the screen, and what is on it is the one
+        # thing that does not keep.
+        device_capture(udid, pathlib.Path(app).stem, name, log)
         pull_container_files(udid, bundle_id, name, log)
         if drive_log.is_file():
             with open(drive_log, "r", encoding="utf-8",
@@ -1778,6 +1782,56 @@ def run_swiftui_on(udid, slot, app, bundle_id, name, selftest, scene,
                   f"target/validate-failures/ios-{name}-simdrive.log",
                   file=log)
     return ok
+
+
+def device_capture(udid, executable, name, log):
+    """A PICTURE OF THE SIMULATOR AND THE APP'S OWN LOG SLICE, at fail
+    time, beside the leg's log for the flight recorder to adopt
+    (IosRecorder.ios_leg). HERE AND NOT IN drain(): by then the device is
+    back in the pool and another leg may be driving it, so the picture
+    would be of somebody else's scene.
+
+    WHAT THE PICTURE IS OF IS WRITTEN DOWN, because `simctl launch
+    --console-pty` returns only when the guest EXITS: on an assertion the
+    app is already leaving, so this is the screen a moment after it went,
+    and on a hang killed by the 120s `timeout` the app is still up. A
+    reader who is not told which is reading a guess."""
+    shot = (LEGS_DIR / f"{name}.log").with_suffix(".shot.png")
+    got = run(["xcrun", "simctl", "io", udid, "screenshot", str(shot)],
+              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if got.returncode == 0 and shot.is_file() and shot.stat().st_size:
+        (LEGS_DIR / f"{name}.log").with_suffix(".shotwhen").write_text(
+            f"`simctl io {udid} screenshot`, taken the moment this leg was "
+            f"judged failed. The guest's own process has already exited "
+            f"unless the runner's `timeout 120` killed it — `simctl launch "
+            f"--console-pty` returns at exit — so a kaya window here "
+            f"outlived the verdict and an empty home screen is the app "
+            f"having left, not the app having drawn nothing.\n",
+            encoding="utf-8")
+        print(f"run-sim: {name} kept a simulator screenshot "
+              f"({shot.stat().st_size} bytes)", file=log)
+    else:
+        shot.unlink(missing_ok=True)
+        booted = udid in out_of(["xcrun", "simctl", "list", "devices",
+                                 "booted"])
+        where = ("is still booted, so the call itself failed" if booted
+                 else "is NOT in the booted list, which is the cause")
+        print(f"run-sim: {name}: `simctl io {udid} screenshot` exited "
+              f"{got.returncode} and left no file; that device {where}",
+              file=log)
+    # The app's own slice of the simulator's log: the crash reporter, the
+    # system's view of a launch that never mounted, and anything the
+    # runtime said about the process the leg log cannot carry.
+    applog = (LEGS_DIR / f"{name}.log").with_suffix(".applog")
+    with open(applog, "w", encoding="utf-8", errors="replace") as af:
+        run(["timeout", "60", "xcrun", "simctl", "spawn", udid, "log",
+             "show", "--last", "2m", "--style", "compact", "--predicate",
+             f'process == "{executable}"'], stdout=af,
+            stderr=subprocess.STDOUT, **TEXT)
+    if not applog.stat().st_size:
+        applog.unlink()
+        print(f"run-sim: {name}: `simctl spawn {udid} log show` for "
+              f"process {executable!r} answered nothing", file=log)
 
 
 def pull_container_files(udid, bundle_id, name, log):

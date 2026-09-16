@@ -424,6 +424,32 @@ run() {
     done
 }
 
+# WHAT THE USER WOULD HAVE SEEN, and the window tree under it. Both
+# sessions are headless, so this is the only picture this lane can ever
+# have; it is taken the moment the leg's own process is gone and BEFORE
+# the display is rebooted, and the .when sentence says exactly that,
+# because a photograph nobody can date answers a question it was never
+# asked. Written into the recorder's scratch; drain() adopts them.
+flightrec_shot_x11() { # <leg> <display-number>
+    local dpy="$2" out="$FLIGHTREC_SCRATCH/$1"
+    DISPLAY=":$dpy" import -window root "$out.shot.png" 2>/dev/null || true
+    DISPLAY=":$dpy" xwininfo -root -tree >"$out.desktop.txt" 2>&1 || true
+    printf 'the x11 root window of display :%s, grabbed by `import` the moment the leg exited and before this display was rebooted; the guest process is already gone, so an app window here is one that outlived it\n' \
+        "$dpy" >"$out.shotwhen"
+    return 0
+}
+
+flightrec_shot_wayland() { # <leg> <xdg-runtime-dir>
+    local dir="$2" out="$FLIGHTREC_SCRATCH/$1"
+    XDG_RUNTIME_DIR="$dir" WAYLAND_DISPLAY="$(cat "$dir/socket" 2>/dev/null)" \
+        grim "$out.shot.png" 2>/dev/null || true
+    XDG_RUNTIME_DIR="$dir" SWAYSOCK="$(cat "$dir/ipc" 2>/dev/null)" \
+        swaymsg -t get_tree >"$out.desktop.txt" 2>&1 || true
+    printf 'the headless sway output of %s, grabbed by `grim` the moment the leg exited and before this session was rebooted; the guest process is already gone, so a surface here is one that outlived it\n' \
+        "$dir" >"$out.shotwhen"
+    return 0
+}
+
 # Recording mode (KAYA_RECORD=1): every leg runs inside its own Xvfb and
 # is filmed there by record-leg.sh. 24-bit screens either way; x11grab
 # cannot encode the 8-bit default.
@@ -462,6 +488,11 @@ run_one() {
                 KAYA_VERB_TRACE="$LEGS_DIR/$name-$proto.vtrace" timeout 180 "$@"
             local kaya_rc=$?
             if [ "$kaya_rc" -ne 0 ]; then
+                # THE PICTURE IS TAKEN HERE, NOT IN drain(): the reboot
+                # two lines down replaces this display with an empty one,
+                # so a shot at bundle time photographs a fresh desktop
+                # and says nothing about the leg.
+                flightrec_shot_x11 "$name-$proto" "$kaya_display"
                 # A failed leg may leave windows behind; the next leg on
                 # this display must not meet them. Reboot it, still under
                 # the claim.
@@ -488,6 +519,8 @@ run_one() {
                 KAYA_VERB_TRACE="$LEGS_DIR/$name-$proto.vtrace" timeout 180 "$@"
             local kaya_rc=$?
             if [ "$kaya_rc" -ne 0 ]; then
+                # Before the reboot, for the x11 arm's reason above.
+                flightrec_shot_wayland "$name-$proto" "$kaya_wl"
                 wayland_session_boot "$kaya_slot"
             fi
             rmdir "$LEGS_DIR/.wl-$kaya_slot" 2>/dev/null
@@ -548,8 +581,20 @@ drain() {
                 flightrec_section "$bundle" xvfb "" \
                     sh -c 'cat /tmp/xvfb-*.log 2>/dev/null'
                 # crates/kaya/src/vtrace.rs; run_one names the file.
-                flightrec_adopt "$bundle" verb-trace "$LEGS_DIR/$name.vtrace"
-                flightrec_bundle_report "$bundle"
+                flightrec_adopt "$bundle" verb-trace "$LEGS_DIR/$name.vtrace" \
+                    "flightrec: the guest wrote no verb trace ($LEGS_DIR/$name.vtrace). The ring is dumped by the harness on a FAILED verdict and by the step watchdog, so a leg killed before either — the 180s timeout, a crash, a GTK abort — leaves none"
+                # THE PICTURE AND THE WINDOW TREE, taken by run_one at the
+                # moment the leg exited (the display is rebooted right
+                # after, so here is too late).
+                flightrec_adopt_shot "$bundle" shot \
+                    "$FLIGHTREC_SCRATCH/$name.shot.png" \
+                    "flightrec: no picture of this leg's display — the leg ran in serial mode (which keeps no per-leg state), or the session's screenshooter (import on x11, grim on wayland) failed; the desktop section beside this file is the window tree that was there" \
+                    "$FLIGHTREC_SCRATCH/$name.shotwhen"
+                flightrec_adopt "$bundle" desktop \
+                    "$FLIGHTREC_SCRATCH/$name.desktop.txt" \
+                    "flightrec: no window tree was read for this leg's session (xwininfo on x11, swaymsg -t get_tree on wayland) — the leg ran in serial mode, or the session was already gone"
+                # shellcheck disable=SC2086
+                flightrec_finish "$bundle" $FLIGHTREC_SECTIONS_LINUX
             fi
         fi
         flightrec_leg linux "$name" "$verdict" "$secs" \

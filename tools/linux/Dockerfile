@@ -223,6 +223,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
           /opt/kaya-portal/dbus-1/services/ \
     && test ! -e /usr/share/dbus-1/services/org.freedesktop.portal.Desktop.service
 
+# THE FLIGHT RECORDER'S WAYLAND CAMERA. Both of this lane's sessions are
+# headless, so a failed leg's bundle has no picture unless the runner
+# takes one: x11 has `import` (imagemagick, above) and wayland has
+# nothing in the image until now — wlroots hands a screenshot out over
+# wlr-screencopy and `grim` is its client. Verified present at build, so
+# a dropped package is a red HERE and not a lane's worth of skipped shots
+# (tools/linux/run-suites.sh's flightrec_shot_wayland).
+#
+# A trailing layer on purpose, per the note above.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    grim \
+    && rm -rf /var/lib/apt/lists/* \
+    && command -v grim
+
 COPY gtk-settings.ini /etc/gtk-4.0/settings.ini
 COPY 99-kaya-font.gschema.override \
     /usr/share/glib-2.0/schemas/99-kaya-font.gschema.override

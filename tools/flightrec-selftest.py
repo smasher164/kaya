@@ -23,6 +23,8 @@ import re
 import shutil
 import subprocess
 
+import flightrec_lane
+
 g = Gate("flightrec-selftest")
 
 
@@ -110,11 +112,14 @@ def drive(lane_mod, journal_home, tmp, leg_name="alwaysfail",
     return r.returncode, r.stdout + r.stderr
 
 
-# Every section the mac capture is supposed to account for. A section
-# that stops being collected must be a RED here, not a quietly shorter
-# bundle — which is the whole failure class this file exists for.
-WANT_SECTIONS = "sampler sample verb-trace leg-log windowserver windows " \
-                "shot unified-log"
+# Every section the mac capture is supposed to account for, READ OUT OF
+# THE RECORDER'S OWN DECLARATION rather than retyped: a section that
+# stops being collected must be a RED here, not a quietly shorter
+# bundle — which is the whole failure class this file exists for — and a
+# second copy of the list would drift the day one is added
+# (tools/check-flightrec.py holds the declaration against each lane's
+# collect).
+WANT_SECTIONS = " ".join(flightrec_lane.SECTIONS["mac"])
 
 
 def check_bundle(home):
@@ -135,9 +140,26 @@ def sections_present(manifest):
     return " ".join(s for s in WANT_SECTIONS.split() if s not in seen)
 
 
-def doctor_file(label, path, pattern, repl):
+# finish()'s own words for a section no branch of the collect path
+# reached. A section that stops being collected is MARKED now rather
+# than silently absent, so "present in the manifest" is no longer the
+# question — "was it measured" is.
+UNREACHED = "never reached section"
+
+
+def sections_unreached(manifest):
+    out = []
+    for name in WANT_SECTIONS.split():
+        marker = pathlib.Path(manifest).parent / f"{name}.skip"
+        if marker.is_file() and UNREACHED in marker.read_text(
+                encoding="utf-8", errors="replace"):
+            out.append(name)
+    return " ".join(out)
+
+
+def doctor_file(label, path, pattern, repl, flags=re.M):
     text = g.doctor(label, path.read_text(encoding="utf-8"), pattern,
-                    repl, flags=re.M)
+                    repl, flags=flags)
     path.write_text(text, encoding="utf-8")
 
 
@@ -215,6 +237,12 @@ missing = sections_present(manifest)
 if missing:
     print(manifest.read_text(encoding="utf-8"), file=sys.stderr)
     fail(f"N0: the bundle is missing sections: {missing}")
+unreached = sections_unreached(manifest)
+if unreached:
+    print(manifest.read_text(encoding="utf-8"), file=sys.stderr)
+    fail(f"N0: the collect path never reached these sections, so the "
+         f"bundle carries a marker about them and no measurement: "
+         f"{unreached}")
 manifest_text = manifest.read_text(encoding="utf-8")
 count = len(manifest_text.splitlines())
 print(f"flightrec-selftest: N0 bundle accounted for {count} "
@@ -264,15 +292,50 @@ doctor_file("N1 removed the windowserver section",
             r'self\._text_section\(bundle, "windowserver",\s*'
             r'"\\n"\.join\(wanted\) \+ "\\n"\)',
             "pass")
-drive(n1 / "flightrec_lane.py", n1 / "journal", n1)
+_, n1_log = drive(n1 / "flightrec_lane.py", n1 / "journal", n1)
 manifest = check_bundle(n1 / "journal")
-missing = sections_present(manifest)
-if "windowserver" in missing:
-    print("flightrec-selftest: N1 refused — the missing section was "
-          "named")
-else:
+unreached = sections_unreached(manifest)
+if "windowserver" not in unreached:
+    print(manifest.read_text(encoding="utf-8"), file=sys.stderr)
     fail(f"N1: a bundle with the windowserver section deleted was "
-         f"accepted (missing='{missing}')")
+         f"accepted (unreached='{unreached}', "
+         f"missing='{sections_present(manifest)}')")
+# AND THE READER IS TOLD, on the line the runner prints: the marker is
+# no use to someone who never opens the directory.
+if "windowserver skip" not in n1_log or UNREACHED not in n1_log:
+    print(n1_log, file=sys.stderr)
+    fail("N1: the bundle report did not print the unreached section and "
+         "its sentence, so a reader would see a shorter bundle and no "
+         "reason")
+print("flightrec-selftest: N1 refused — the section the collect stopped "
+      "writing is marked, with a sentence, and printed")
+
+# --- N1b: AN EMPTY MARKER IS A DIAGNOSTIC THAT CANNOT DISCRIMINATE. The
+# windows notes bundle of 2026-09-16 carried a zero-byte shot marker, and
+# the reader could not tell "no picture was possible" from "nobody tried".
+# skip() is the one writer of a .skip file and answers a caller that names
+# no reason with a sentence saying THAT. -------------------------------
+n1b = T / "n1b"
+n1b.mkdir()
+shutil.copy(REAL_LANE, n1b / "flightrec_lane.py")
+doctor_file("N1b blanked the sample section's skip sentence",
+            n1b / "flightrec_lane.py",
+            r'self\.adopt\(bundle, "sample", scratch / "sample\.txt",'
+            r'.*?worth a stack"\)',
+            'self.skip(bundle, "sample", "")', flags=re.S)
+drive(n1b / "flightrec_lane.py", n1b / "journal", n1b)
+manifest = check_bundle(n1b / "journal")
+marker = manifest.parent / "sample.skip"
+marker_text = marker.read_text(encoding="utf-8") if marker.is_file() else ""
+if not marker_text.strip():
+    fail("N1b: a skip with no sentence left an EMPTY marker — the class "
+         "this clause exists for")
+if "named no reason" not in marker_text:
+    print(marker_text, file=sys.stderr)
+    fail("N1b: the fallback sentence does not say that the recorder, not "
+         "the leg, is what went wrong")
+print("flightrec-selftest: N1b refused — a reasonless skip wrote the "
+      "sentence that names itself a bug")
 
 # --- N2: the honest skip. A capture tool this host does not have must
 # leave a .skip naming it, never a silently absent section. ------------
@@ -477,4 +540,4 @@ if after_sha != before_sha:
     fail("REFUSING A VERDICT — this self-test modified the tree it was "
          "testing")
 print(f"flightrec-selftest: the tree is unchanged ({before_sha})")
-g.verdict("9 clauses, 5 watched perturbations, the worker pinned")
+g.verdict("10 clauses, 6 watched perturbations, the worker pinned")

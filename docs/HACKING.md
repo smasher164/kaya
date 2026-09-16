@@ -105,7 +105,7 @@ afternoon twice, 2026-09-07). The routes:
 | run one Rust guest on a warm emulator | `adb -s emulator-5554 shell am start -W -n dev.kaya.rusthost/.MainActivity --es KAYA_SELFTEST <scene> --es KAYA_SELFTEST_SCRIPT '<steps folded with ;>'`; the pool stays booted between runs THE SINGLE QUOTES AROUND THE FOLDED SCRIPT ARE LOAD-BEARING: the device shell reads each `;` as a command separator without them (`shlex.quote` the script). |
 | run one leg on the VM | `tools/deploy-win.py akhil@192.168.64.2 <leg>` (per-leg names are the grammar; `python` is the milestone2 python leg, not the python suite) |
 | hold a scene still for a capture | give the guest its own steps through `KAYA_SELFTEST_SCRIPT` (the mac lane sets it from tools/scenes in `lanes.mac.leg_env`, so build that env and replace the one key) with `settle 9000` where the photograph goes; the tree stays untouched |
-| read a failed leg | the flight recorder's bundle first: `~/.local/state/kaya/flightrec/runs/<run>/bundles/<lane>-<leg>/` (leg-log, verb-trace, the lane's samplers) |
+| read a failed leg | the flight recorder's bundle first: `~/.local/state/kaya/flightrec/runs/<run>/bundles/<lane>-<leg>/` — the leg log, the verb trace, a PICTURE of what the user would have seen, and each lane's own sections, every one present or carrying a sentence saying what was measured instead; the leg's log prints them all with their sizes. The table is in "The flight recorder's bundle, lane by lane" below |
 
 ## The regeneration workflow (any spec.rs change)
 
@@ -344,6 +344,54 @@ and each lane prints its own instruments under a failed leg's log:
   named before the leg with both hashes; the leg's own language is built
   the lane's way on every run (docs/traps.md 2026-09-14), so the refusal
   is about a guest ANOTHER language staged.
+
+## The flight recorder's bundle, lane by lane (2026-09-16)
+
+Every failed leg prints `flightrec: bundle <path>` and then ONE LINE PER
+SECTION with its state, its size and, for a skip, the sentence saying
+what was measured — so what the bundle holds is on the lane's log and
+nobody has to open the directory to find out what is missing. The shape
+is declared in ONE place per half: `SECTIONS` in
+tools/lib/flightrec_lane.py for mac, windows, ios and android, and
+`FLIGHTREC_SECTIONS_LINUX` in tools/lib/flightrec.sh for the container.
+tools/check-flightrec.py holds the two together and holds every declared
+section to a branch of its lane's own collect.
+
+| lane | sections |
+|------|----------|
+| mac | leg-log, verb-trace, shot, desktop-shot, windows, windowserver, sampler, sample, unified-log |
+| windows | leg-log, verb-trace, shot, desktop-shot, desktop, foreground, foreground-text |
+| ios | leg-log, verb-trace, shot, panic, app-log, devices |
+| android | leg-log, verb-trace, shot, logcat, devices |
+| linux | leg-log, verb-trace, shot, desktop, xvfb |
+
+- `shot` is the GUEST'S OWN window where a platform can address one (the
+  mac by window id, windows by PrintWindow on the WinUI class) and the
+  whole screen where it cannot (the phones, the container's headless
+  session). `desktop-shot` is the second picture the two desktops take
+  when the foreground at failure was NOT the guest's window — on windows
+  that is the toast case, and it is the picture docs/traps.md prescribed
+  and only a hand tool used to take.
+- WHAT A PICTURE IS OF IS WRITTEN DOWN, in `<section>.when` or in the
+  skip's sentence, and MEASURED rather than assumed: android reads
+  `pidof` before the shot, windows reads the foreground's class, the mac
+  names the window id and the second it was taken. An assertion failure
+  ends with the guest LEAVING (a verdict is published and the process
+  goes within the grace), so a fail-time picture on every lane is of the
+  screen a moment after the app left — the launcher on android, the home
+  screen on iOS, an empty root on linux. The picture IS the app in the
+  case nothing else answers, a HANG: the mac's per-leg sampler
+  photographs the live window at `KAYA_FLIGHTREC_SAMPLE_AT` (100s,
+  before the 120s kill) and the windows collect runs from deploy-win's
+  timeout path while the guest is still alive.
+- A SECTION IS NEVER SILENTLY ABSENT. `finish()` marks any section the
+  collect never reached, and `skip()` is the one writer of a `.skip`
+  file: a caller that names no reason gets a sentence saying so, because
+  an empty marker is a diagnostic that cannot discriminate.
+- `verb-trace` is the harness's own ring (crates/kaya/src/vtrace.rs and
+  its two interpreter copies), written on a FAILED verdict and by the
+  step watchdog and on no other path — so a leg that was killed, wedged
+  or crashed before publishing leaves none, and the skip says that.
 
 ## Layout forensics (when a share assertion fails)
 

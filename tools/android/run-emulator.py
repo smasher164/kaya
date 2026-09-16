@@ -1149,6 +1149,55 @@ def stage_suite_apk(label, apk, package, targets):
     return True
 
 
+def device_capture(serial, package, name, log):
+    """A PICTURE OF THE DEVICE AND ITS LOGCAT TAIL at fail time, beside
+    the leg's log for the flight recorder to adopt.
+
+    WHAT THE PICTURE IS OF IS WRITTEN DOWN AND MEASURED, not assumed:
+    this runner reads the verdict out of a logcat poll and the scene
+    exits about 300ms after printing it, so a shot taken here is a race
+    the app usually loses — 48 of 52 per-leg screenshots were the
+    launcher's WALLPAPER when this lane last tried them (measured
+    2026-07-27, which is why there were none). `pidof` answers whether
+    the app's process was still alive AT THE SHOT, which is the only
+    thing that tells a picture of the scene from a picture of the
+    launcher."""
+    shot = (LEGS_DIR / f"{name}.log").with_suffix(".shot.png")
+    alive = out_of(["adb", "-s", serial, "shell", "pidof", package]).strip()
+    got = subprocess.run(
+        ["adb", "-s", serial, "exec-out", "screencap", "-p"],
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False)
+    whose = (f"STILL ALIVE (pid {alive}), so this is its own screen"
+             if alive else
+             "ALREADY GONE, so this is whatever the system drew after it "
+             "left — most often the launcher")
+    if got.returncode == 0 and got.stdout.startswith(b"\x89PNG"):
+        shot.write_bytes(got.stdout)
+        (LEGS_DIR / f"{name}.log").with_suffix(".shotwhen").write_text(
+            f"`adb exec-out screencap -p` on {serial}, taken the moment "
+            f"this leg was judged failed. The app's process was {whose}.\n",
+            encoding="utf-8")
+        print(f"{name}: kept a device screenshot ({len(got.stdout)} bytes; "
+              f"app {'alive' if alive else 'already gone'} at the shot)",
+              file=log)
+    else:
+        shot.unlink(missing_ok=True)
+        print(f"{name}: `adb exec-out screencap -p` exited "
+              f"{got.returncode} with {len(got.stdout)} byte(s) and no PNG "
+              f"header", file=log)
+    # The tail every reader wants and no other section carries WHOLE: the
+    # crash-shaped filters above keep five heads and thirty frames, and
+    # target/validate-failures keeps the unreadable everything.
+    tail = out_of(["timeout", "20", "adb", "-s", serial, "logcat", "-d",
+                   "-t", "400"])
+    if tail.strip():
+        (LEGS_DIR / f"{name}.log").with_suffix(".logcat").write_text(
+            tail, encoding="utf-8")
+    else:
+        print(f"{name}: `adb logcat -d -t 400` answered nothing on "
+              f"{serial}", file=log)
+
+
 def run_apk_on(serial, name, apk, component, script, extras,
                remount_expect, two_act, log, rebooted=False):
     """One leg on one device, everything it prints going to its own
@@ -1444,6 +1493,15 @@ def run_apk_on(serial, name, apk, component, script, extras,
                  stdout=log, stderr=log).returncode != 0:
             failed = True
     if "KAYA_SELFTEST: OK" not in out:
+        # THE PICTURE FIRST, because it is the only evidence with a
+        # CLOCK on it: the scene exits about 300ms after its verdict and
+        # every adb round trip below spends some of that (the verb
+        # trace, the four logcat dumps). Everything else in this block
+        # reads buffers that keep. Beside the log for the flight
+        # recorder to adopt (AndroidRecorder.android_leg) — drain() is
+        # far too late, since the device goes back to the pool when this
+        # function returns.
+        device_capture(serial, package, name, log)
         # The DEVICE, first: nothing else in this log says which
         # emulator ran the leg, and the dump below is only chaseable
         # there.

@@ -10,7 +10,7 @@ scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
 ## ~~BUILD — the flight recorder: one failure is enough evidence (Akhil, 2026-08-27)~~ COMPLETE 2026-09-02: both interpreter harnesses carry the verb-trace ring, held level with the Rust one by check-verbs, and four lanes collect it into the bundle
-KEY: flightrec, flight recorder, capture bundle, journal jsonl, XDG_STATE_HOME, KAYA_FLIGHTREC_DIR, KAYA_VERB_TRACE, vtrace, verb trace, foreground sampler, PrintWindow shot, flightrec-selftest
+KEY: flightrec, flight recorder, capture bundle, journal jsonl, XDG_STATE_HOME, KAYA_FLIGHTREC_DIR, KAYA_VERB_TRACE, vtrace, verb trace, foreground sampler, PrintWindow shot, flightrec-selftest, bundle sections, SECTIONS, FLIGHTREC_SECTIONS_LINUX, desktop-shot, foreground-text, app-log, shot.when, skip sentence, check-flightrec, flightrec_skip, flightrec_finish, device_capture, screencap, simctl io screenshot, grim
 
 A leg that fails once and passes on the rerun leaves nothing behind but a
 verdict, so the next sighting starts from zero — and the ghost families
@@ -179,9 +179,39 @@ WHAT IS OPEN
 - ~~BREADTH: linux (`tools/validate-linux.py`), iOS (`tools/ios/run-sim.py`)
   and Android (`tools/android/run-emulator.py`) do not journal or capture.~~
   CLOSED 2026-09-02: all five journal since 2026-08-29; the verb trace joins the linux, iOS
-  and Android bundles 2026-09-02 (above). Android and iOS still dump
-  their at-fail logcat and simdrive evidence into target/validate-failures
-  beside the bundle; folding those in is the remaining shape.
+  and Android bundles 2026-09-02 (above).
+- ~~THE BUNDLE IS NOT THE SAME SHAPE ON FIVE LANES: three of them carry no
+  PICTURE at all, the two desktops photograph only the guest's own window,
+  and Android and iOS dump their at-fail logcat and simdrive evidence into
+  target/validate-failures beside the bundle rather than in it.~~ CLOSED
+  2026-09-16, on the maintainer's ruling that a bundle which could not name
+  the cause is the defect to fix. ONE DECLARATION of the shape
+  (`SECTIONS` in tools/lib/flightrec_lane.py, `FLIGHTREC_SECTIONS_LINUX` in
+  tools/lib/flightrec.sh), every lane carrying the leg log, the verb trace
+  and a picture; `finish()` marks any section the collect never reached and
+  `skip()` is the ONE writer of a `.skip`, answering a caller that names no
+  reason with a sentence saying so — the windows notes bundle of that
+  morning had carried a zero-byte shot marker. New per lane: iOS a
+  `simctl io screenshot` and the app's own `log show` slice, Android an
+  `adb exec-out screencap` and a `logcat -d -t 400` tail, linux a root shot
+  (`import` on x11, `grim` on wayland, the package added to the image) with
+  the window tree beside it, both taken INSIDE run_one before the display is
+  rebooted, the mac the DESKTOP when the guest owned no window, and windows
+  the console-session desktop grab plus a UIA text read of whatever holds
+  the foreground — the picture docs/traps.md's toast entry prescribed, which
+  until now only a hand tool took. The report prints one line per section
+  with its state and a skip's sentence. tools/check-flightrec.py is the
+  wall (nine watched negatives); a forced red leg on each of the five lanes
+  was read back, with the pictures decoded and viewed. WHAT A PICTURE CAN
+  BE, measured on all five: an assertion failure ends with the guest
+  LEAVING, so a fail-time shot is of the screen a moment after it left — the
+  launcher on android, the home screen on iOS, an empty root on linux — and
+  every picture now carries a `.when` sentence measuring that (android reads
+  `pidof` before the shot, windows the foreground's class). The picture is
+  the APP in the case nothing else answers, a hang: the mac's sampler shoots
+  the live window at KAYA_FLIGHTREC_SAMPLE_AT and the windows collect runs
+  from deploy-win's timeout path. A threshold sampler for the phones and
+  linux is the next turn and is deliberately not half-built.
 - ~~THE INTERPRETER RINGS.~~ DONE 2026-09-02 (above): one slice, with
   the check-verbs clause pinning the env var name, the failure-only rule
   and the line format.
@@ -189,9 +219,17 @@ WHAT IS OPEN
   with a large bundle is bounded only by the section and bundle caps
   (2 MiB / 32 MiB, both printed). A byte ceiling across the whole home is
   the obvious next turn if this ever grows teeth.
-- NOBODY RUNS THE SELF-TEST AUTOMATICALLY. It is standalone by choice (see
+- ~~NOBODY RUNS THE SELF-TEST AUTOMATICALLY. It is standalone by choice (see
   above), so the standing wall is the bundle report's own printed counts
-  on every failure. If that proves too quiet, the answer is a gate.
+  on every failure. If that proves too quiet, the answer is a gate.~~ THE
+  GATE LANDED 2026-09-16: tools/check-flightrec.py is in the sweep and
+  holds statically what the standalone self-test drives at run time (the
+  declared shape, each lane's collect reaching it, the one skip writer, the
+  finish() call, and the capture taken while the device is still the leg's).
+  tools/flightrec-selftest.py stays standalone and stays the RUNTIME half —
+  it now reads its section list out of the recorder's own declaration
+  rather than a second copy, and carries a tenth clause watching a
+  reasonless skip write the sentence that names itself a bug.
 
 ## ~~CHORE — storage cleanup: the host is nearing disk capacity (Akhil, 2026-08-27)~~
 KEY: disk cleanup, target directory size, scratchpad growth, docker prune, nix store gc, validate-failures logs
@@ -12624,6 +12662,12 @@ the breakpoint's `NO metrics latched ... the scene holds metrics for 0
 window(s)`, the report arriving after the scene and applying at once — so
 that pair is the benign order and reads nothing; the sighting's order
 (`latched; no scene yet` first) is the one to read the seed line against.
+THE REMEDY IS THE RECORDER, not this entry (the maintainer, 2026-09-16:
+a bundle that could not name the cause is the defect to fix): the iOS
+bundle carried no screenshot at all, and the flight-recorder pass of that
+day puts a simulator screenshot, the app's log tail and the verb trace on
+the iOS failure path; this entry stays as the sighting's record and closes
+on the next sighting's bundle, not on a watch.
 Bundle: ~/.local/state/kaya/flightrec/runs/20260916T102305Z-027911/bundles/ios-portfolio-python.
 
 ## ~~bindings/go's seventeen `_test.go` files are run by no gate (found 2026-09-16 in passing by the blob-undo pass)~~ CLOSED 2026-09-16, the same day: tools/go-typecheck.py runs `go test -count=1 -v ./bindings/go/...` from the root after its vet (151 tests, floor 100, since a filter that matches nothing exits 0) and its negative turns one byte of richrows_test.go's hand-derived document blob in the vet negative's own module copy, pointed at the real target through CGO_LDFLAGS, and demands the red — watched firing on the first run; check-gates' census unchanged, the gate keeps its name.
@@ -12766,6 +12810,12 @@ own text through UI Automation the moment it sees one now
 alone), which is the only thing that can name it; the next sighting's
 foreground.txt carries `toast='...'`. Matrix 22 had this leg green, so the
 toast is not every matrix's.
+THE REMEDY IS THE RECORDER (the maintainer, 2026-09-16): the bundle's
+photograph is the guest window by class and was skipped once the guest had
+exited, and the trap's own prescription — the console-session desktop
+shot through the /it task — was a hand tool; the flight-recorder pass of
+that day puts it on the failure path whenever the foreground at failure is
+not the guest's window, beside the toast's text. No further watch here.
 
 ## WATCH — the iOS dark canvas leg read LIGHT pixels under a matrix, once (first sighting 2026-09-14)
 KEY: canvasdark-swift, expect_ink dark, KAYA_APPEARANCE, kayaCanvasAppearance, traitCollection, appearance flake

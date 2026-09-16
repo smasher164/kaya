@@ -78,6 +78,9 @@ GATES = {
     "check-search": ["crates", "swift", "android"],
     # The exclusive token is wired in tools/ alone, which every key already carries.
     "check-exclusive": [],
+    # The recorder and all five lanes' collects live under tools/, which
+    # rides every key (gate_key); nothing it reads is outside it.
+    "check-flightrec": [],
     # No binding: the card is a lowering. swift/ is an input because the
     # iOS synthesized tier draws it and the mac clause reads that file.
     "check-table-card": ["crates", "swift", "android"],

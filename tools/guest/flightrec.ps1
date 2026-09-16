@@ -295,6 +295,15 @@ Emit $out '== Application event log, newest 20 errors =='
 $evt = (& wevtutil qe Application "/q:*[System[(Level=1 or Level=2)]]" /c:20 /rd:true /f:text 2>&1) -join "`r`n"
 Emit $out $evt
 
+# THE HOST READS THE TWO PICTURES' OWN SENTENCES OUT OF THIS FILE
+# (flightrec_lane.py's WinRecorder.pull_shot): a bundle section that is
+# absent must say what was MEASURED about its absence, and the host
+# cannot know why a shot was not taken. One line per picture, always
+# written, whether the picture was saved or not.
+$why = Join-Path $dir "$Leg-shotwhy.txt"
+Reset $why
+function Why($section, $text) { Emit $why "${section}: $text" }
+
 # 5. The shot: the app window by CLASS (the title is a placeholder the
 #    app replaces), through PrintWindow with PW_RENDERFULLCONTENT — a
 #    GDI-family screen copy reads DirectComposition content as BLANK and
@@ -307,7 +316,9 @@ foreach ($h in $wins) {
     if ((ClassOf $h) -eq 'WinUIDesktopWin32WindowClass') { $target = $h; break }
 }
 if ($target -eq [IntPtr]::Zero) {
-    Emit $out "no WinUIDesktopWin32WindowClass window among the $($wins.Count) visible ones -- the guest had already exited, so there was nothing to photograph. The window list above is what WAS there."
+    $sentence = "no WinUIDesktopWin32WindowClass window among the $($wins.Count) visible ones -- the guest had already exited, so there was nothing to photograph. The window list above is what WAS there."
+    Emit $out $sentence
+    Why 'shot' $sentence
 } else {
     try {
         Add-Type -AssemblyName System.Drawing
@@ -323,16 +334,81 @@ if ($target -eq [IntPtr]::Zero) {
         $g.ReleaseHdc($dc)
         $g.Dispose()
         if ($rc -eq 0) {
-            Emit $out "PrintWindow(PW_RENDERFULLCONTENT) of the ${w}x${hgt} window answered 0"
+            $sentence = "PrintWindow(PW_RENDERFULLCONTENT) of the ${w}x${hgt} window answered 0"
+            Emit $out $sentence
+            Why 'shot' $sentence
         } else {
             $bmp.Save($shot, [System.Drawing.Imaging.ImageFormat]::Png)
             Emit $out "shot saved ${w}x${hgt} -> $shot"
+            Why 'shot' "PrintWindow of the guest's ${w}x${hgt} window"
         }
         $bmp.Dispose()
     } catch {
-        Emit $out "shot failed: $($_.Exception.Message)"
+        $sentence = "shot failed: $($_.Exception.Message)"
+        Emit $out $sentence
+        Why 'shot' $sentence
     }
 }
+
+# 6. THE WHOLE CONSOLE SESSION, when the foreground is not the guest's own
+#    window. PrintWindow photographs ONE window by handle and a toast is
+#    another process's, so the picture that ended the 2026-09-16 notes
+#    search -- the desktop with the banner on it -- was a HAND tool
+#    (tools/guest/shot.cmd) and never on the failure path (docs/traps.md,
+#    "A shell toast holds the foreground"). This runs in the interactive
+#    session already (schtasks /it), which is the only session that has a
+#    desktop to copy. NOTHING IS FOREGROUNDED FIRST: shot.ps1 activates
+#    the kaya window because it wants the app, and a recorder that
+#    activates anything destroys the evidence it came for.
+Emit $out '== desktop shot =='
+$desk = Join-Path $dir "$Leg-desktop.png"
+if (Test-Path $desk) { Remove-Item $desk -Force }
+$fgIsGuest = ($fg -ne [IntPtr]::Zero) -and ((ClassOf $fg) -eq 'WinUIDesktopWin32WindowClass')
+if ($fgIsGuest) {
+    $sentence = "the foreground at collect WAS the guest's own window (hwnd=0x{0:x}), so the window shot above is the picture and no desktop grab was taken" -f [int64]$fg
+    Emit $out $sentence
+    Why 'desktop-shot' $sentence
+} else {
+    try {
+        Add-Type -AssemblyName System.Drawing
+        Add-Type -AssemblyName System.Windows.Forms
+        $vs = [System.Windows.Forms.SystemInformation]::VirtualScreen
+        $dbmp = New-Object System.Drawing.Bitmap $vs.Width, $vs.Height
+        $dg = [System.Drawing.Graphics]::FromImage($dbmp)
+        $dg.CopyFromScreen($vs.Left, $vs.Top, 0, 0, $dbmp.Size)
+        $dg.Dispose()
+        $dbmp.Save($desk, [System.Drawing.Imaging.ImageFormat]::Png)
+        $dbmp.Dispose()
+        $fgName = 'none'
+        if ($fg -ne [IntPtr]::Zero) { $fgName = ClassOf $fg }
+        Emit $out "desktop shot saved $($vs.Width)x$($vs.Height) -> $desk"
+        Why 'desktop-shot' "the whole console session at collect, $($vs.Width)x$($vs.Height); the foreground was class '$fgName', not the guest's window"
+    } catch {
+        $sentence = "desktop shot failed: $($_.Exception.Message)"
+        Emit $out $sentence
+        Why 'desktop-shot' $sentence
+    }
+}
+
+# 7. WHAT THE FOREGROUND WINDOW SAYS, in its own words. The sampler reads
+#    a toast's text the moment it sees one; this reads WHATEVER holds the
+#    foreground at collect, because the class of a blocker ("a
+#    ShellExperienceHost window titled 'New notification'") names the
+#    family and never WHOSE toast it is -- which is the question the
+#    2026-09-16 notes red left open.
+Emit $out '== foreground text =='
+$fgtext = Join-Path $dir "$Leg-fgtext.txt"
+Reset $fgtext
+if ($fg -eq [IntPtr]::Zero) {
+    Emit $fgtext 'no window held the foreground at collect, so there was nothing to read'
+} elseif ($fgIsGuest) {
+    Emit $fgtext ("the foreground was the guest's own window: " + (Describe $fg))
+    Emit $fgtext 'no shell surface was covering it, so no UI Automation walk was made'
+} else {
+    Emit $fgtext (Describe $fg)
+    Emit $fgtext ('uia: ' + (ToastText $fg))
+}
+Emit $out (Get-Content $fgtext -Raw)
 
 Emit $out 'COLLECTDONE'
 exit 0
