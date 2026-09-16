@@ -12474,6 +12474,26 @@ ledger's L half; automerge-go and @automerge/automerge 3.x on the desktop
 lanes).
 KEY: notes demo, automerge, format_range, remote mark, peer fork.
 
+## WATCH — an explorer PopupHost held the VM's foreground and the `type` verb could not take it, once (first sighting 2026-09-15)
+KEY: PopupHost, Xaml_WindowedPopupClass, SetForegroundWindow, type injection, windows foreground, notes_rust
+
+Matrix 15 on 5531fe55: the Windows `notes_rust` leg died at its first
+`type` with the arm's own sentence (`could not foreground the guest window
+for type injection after 3s`), and the bundle's foreground ring shows an
+explorer window of class `Xaml_WindowedPopupClass`, title `PopupHost`,
+visible at the leg's time — a shell flyout, which blocks every
+SetForegroundWindow grant outright, the mechanism docs/traps.md's
+foreground entry names (ESC and the ALT release were both tried by the
+dance and did not close it). The same leg passed matrices 13 and 14 and
+passed standalone a minute after (`deploy-win notes_rust`, 1s), and
+richtext_rust, which types too, passed in the same matrix. The lane also
+read 1113s of suites against its usual ~900, plausibly the same popup
+slowing every typing leg's dance; not measured. Bundle:
+~/.local/state/kaya/flightrec/runs/20260916T012604Z-002645/bundles/windows-notes_rust.
+On a second sighting: teach the dance to dismiss a PopupHost (a click on
+the desktop, or `SendMessage(WM_CLOSE)` to that class) and record which
+flyout it was (`foreground.txt` names only the class).
+
 ## WATCH — the iOS dark canvas leg read LIGHT pixels under a matrix, once (first sighting 2026-09-14)
 KEY: canvasdark-swift, expect_ink dark, KAYA_APPEARANCE, kayaCanvasAppearance, traitCollection, appearance flake
 
