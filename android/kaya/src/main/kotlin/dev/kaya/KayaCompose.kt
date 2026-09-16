@@ -763,6 +763,11 @@ object KayaSceneModel {
     // walks it into the platform focus system, and expect_focused
     // reads it back.
     var focusedId by mutableStateOf<Long?>(null)
+    /** The field the COMPOSITION has focused, written only by a field's own
+     * gain and loss — never by the focus command, which writes [focusedId]
+     * before Compose has moved (docs/deferred.md, the android `type` race,
+     * 2026-09-16). The type verb waits for the two to agree. */
+    var composeFocusedId by mutableStateOf<Long?>(null)
     /** The window content inset (wprop 8, docs/styling-plan.md D3), in
      * DP — layout, not appearance; 0 is full bleed. */
     var windowInset by mutableStateOf(16.0)
@@ -3620,6 +3625,30 @@ object KayaCompose {
                     }
                 }
             }
+        }
+        // THE COMPOSITION'S FOCUS MUST AGREE WITH THE MODEL'S before a key
+        // goes out: the focus command writes focusedId at apply while
+        // Compose moves later, and a key dispatched in between lands in the
+        // field that still has focus — then the resend below, keyed on the
+        // model's field not growing, puts a second key in the right one.
+        // Both fields read "x" and the app banked one edit it never got
+        // (ownundo-compose under matrix 22, 2026-09-16; docs/deferred.md).
+        var waited = 0
+        while (waited < 3000) {
+            val agree = onUi(activity) {
+                KayaSceneModel.composeFocusedId == KayaSceneModel.focusedId
+            }
+            if (agree == true) break
+            Thread.sleep(20)
+            waited += 20
+        }
+        if (waited > 0) {
+            val (model, composed) = onUi(activity) {
+                Pair(KayaSceneModel.focusedId, KayaSceneModel.composeFocusedId)
+            } ?: Pair(null, null)
+            Log.i("kaya", "KAYA_DIAG type: the composition's focus ($composed) " +
+                (if (composed == model) "reached the model's ($model) after ${waited}ms"
+                 else "still lags the model's ($model) after ${waited}ms; typing anyway"))
         }
         // The text before the first key, so the settle below can tell
         // "landed" from "has not started yet".
@@ -13151,7 +13180,12 @@ fun KayaTextField(
             // there would clear a focusedId the LaunchedEffect below has
             // not yet requested.
             .onFocusChanged { state ->
-                if (state.isFocused) KayaSceneModel.focusedId = node.id
+                if (state.isFocused) {
+                    KayaSceneModel.focusedId = node.id
+                    KayaSceneModel.composeFocusedId = node.id
+                } else if (KayaSceneModel.composeFocusedId == node.id) {
+                    KayaSceneModel.composeFocusedId = null
+                }
             },
         // The M3 clothes the bare foundation field does not bring:
         // container, indicator line and padding, so the two kinds look

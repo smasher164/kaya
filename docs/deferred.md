@@ -12551,6 +12551,33 @@ value in a restored record is resolved to its bytes (the core holds them)
 before the binding's record decoder sees it, in every binding, with the
 richrows guest's undo as the scene.
 
+## WATCH — android `type` under a matrix put one key in the field that still had focus and a second in the one the model named (first sighting 2026-09-16, matrix 22, `ownundo-compose`)
+KEY: ownundo-compose, type race, composeFocusedId, focusedId lag, kayaTypeAtFocus, resend, undo 1 redo 0, both fields read x
+
+Matrix 22 (3c163965), the android lane's `ownundo-compose` leg, green alone
+before and after: after `click button#0` and `expect_focused textarea#0`
+(the plain field) and `type "x"`, `expect textarea#0 "x"` passed, the
+native Edit>Undo emptied it, and then the app's own counter read `undo 1
+redo 0` where `undo 0 redo 2` had been verified two steps earlier — a NEW
+edit banked on the OWNED field and its redo stack cleared — and at the end
+the owned textarea#1 read "x". READ OFF THE VERB'S OWN RULES rather than
+guessed: `COMMAND_FOCUS` writes `KayaSceneModel.focusedId` at apply,
+`expect_focused` reads that model, and Compose moves its real focus later
+through the field's FocusRequester; `kayaTypeAtFocus` dispatches a key to
+the window (it lands in the field the COMPOSITION has focused) and RESENDS
+a key when the MODEL's field did not grow (the 2026-08-06 rule). Under
+load the first "x" landed in textarea#1, still Compose-focused, the model's
+textarea#0 did not grow, the resend put a second "x" into textarea#0 once
+Compose had moved — both fields read "x", the app banked the first as an
+edit it was never meant to get. FIX: `KayaSceneModel.composeFocusedId`,
+written only by a field's own focus gain and loss, and the type verb waits
+(bounded, 3s) for it to equal the model's focus before its first key,
+printing `KAYA_DIAG type: the composition's focus (..) reached / still lags
+the model's (..) after Nms` whenever it had to wait. No lane alone reaches
+the race; the matrix is the proof, and the diag line is the instrument that
+says how far behind Compose was when it does.
+Bundle: ~/.local/state/kaya/flightrec/runs/20260916T085035Z-097444/bundles/android-ownundo-compose.
+
 ## The stamped-occurrence doors other than click still forward a torn-down copy's tag (found 2026-09-14)
 KEY: stamped_tag_is_live, torn-down copy, dead copy, lingering registry, toggled dead copy, set_value dead copy
 
