@@ -3046,6 +3046,19 @@ The general shape, worth carrying to any GUI lane: a machine that shows
 the user things is a machine that can interrupt the harness, and the
 interruption does not look like one from inside the test.
 
+A PER-AUMID ROW IS READ ONCE (measured 2026-09-15): the banner-off rows
+the remedy above writes are cached by the per-logon `WpnUserService`, and
+a row written AFTER that service's restart is inert until the next one.
+deploy-win wrote the packaged identities' rows after the MSIX install —
+after both provisioning restarts — and the packaged tasks and notify
+legs' toasts bannered for a week of matrices, queuing into the exclusive
+block and holding the foreground through the notes leg's `type` on four
+runs (the fourth read `a notification toast held the foreground for
+15000ms`, the verb's own bounded wait). Every banner-off site is followed
+by `wpn_reread()` now. The verb's sampler line to look for is
+ShellExperienceHost's `Windows.UI.Core.CoreWindow` titled "New
+notification".
+
 ## The iOS picker is another app too, and the eyes have to go on the host
 
 `UIDocumentPickerViewController` is a REMOTE view controller. Measured

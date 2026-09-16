@@ -638,8 +638,19 @@ must_ssh('reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\'
 # it: the per-logon `WpnUserService_<luid>` caches what it had. Restarted
 # BEFORE any leg, never during one; the name carries a session suffix, so it
 # is matched by prefix.
-must_ssh('powershell -NoProfile -Command "Get-Service WpnUserService* | '
-         'Restart-Service -Force"')
+def wpn_reread():
+    """The notification platform re-reads its per-AUMID settings ONLY on a
+    restart of the per-logon WpnUserService (matched by prefix; the name
+    carries a session suffix). Every notify_banner_off site is followed by
+    this, BEFORE any leg and never during one — the packaged identities'
+    rows were written after the restarts below without one, so their toasts
+    still bannered, queued, and held the foreground through the exclusive
+    notes leg on four runs (docs/deferred.md, the PopupHost WATCH)."""
+    must_ssh('powershell -NoProfile -Command "Get-Service WpnUserService* | '
+             'Restart-Service -Force"')
+
+
+wpn_reread()
 # AND THE NOTIFICATION SERVICE IS RESTARTED, because it goes DEAF IN PLACE.
 # Measured 2026-09-09: `WpnUserService_<luid>` accepted every toast — the app
 # printed `posted 1`, `Show()` raised nothing, the AUMID key, its IconUri and
@@ -651,8 +662,7 @@ must_ssh('powershell -NoProfile -Command "Get-Service WpnUserService* | '
 # leg from FAILED to OK with nothing else moved. Idempotent and about a
 # second; the name carries a per-logon-session suffix, so it is matched by
 # prefix. BEFORE any leg, never during one.
-must_ssh('powershell -NoProfile -Command "Get-Service WpnUserService* | '
-         'Restart-Service -Force"')
+wpn_reread()
 _wpn = (run_ssh_out('powershell -NoProfile -Command "(Get-Service '
                     'WpnUserService*).Status"') or "").strip()
 if "Running" not in _wpn:
@@ -1646,6 +1656,7 @@ def package_rust_guests():
             # unpackaged one does.
             for entry in scenes:
                 notify_banner_off(f"{family}!{entry}")
+            wpn_reread()
     if "pkg-install: OK" not in out:
         print("deploy-win: the MSIX did not install, so every packaged leg "
               "would run", file=sys.stderr)

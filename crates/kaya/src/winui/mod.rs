@@ -17051,6 +17051,26 @@ impl WinUiStage {
     /// two verbs that put real keys on the SYSTEM INPUT QUEUE (`shortcut` and
     /// `type`): the queue is OS-GLOBAL, so keystrokes would otherwise land in
     /// whatever window is frontmost. A bounded confirmation poll, not a sleep.
+    /// The foreground window is a shell notification toast — the one
+    /// class+title pair the sampler read (foreground.txt in the leg's
+    /// bundle): ShellExperienceHost's `Windows.UI.Core.CoreWindow` titled
+    /// "New notification".
+    fn foreground_is_toast() -> bool {
+        let fg = unsafe { GetForegroundWindow() };
+        if fg == 0 {
+            return false;
+        }
+        let mut class = [0u16; 128];
+        let n = unsafe { GetClassNameW(fg, class.as_mut_ptr(), class.len() as i32) };
+        let class = String::from_utf16_lossy(&class[..n.max(0) as usize]);
+        if class != "Windows.UI.Core.CoreWindow" {
+            return false;
+        }
+        let mut title = [0u16; 128];
+        let n = unsafe { GetWindowTextW(fg, title.as_mut_ptr(), title.len() as i32) };
+        String::from_utf16_lossy(&title[..n.max(0) as usize]) == "New notification"
+    }
+
     fn foreground_guest(what: &str) {
         let hwnd = Self::on_ui(|core| {
             let native: IWindowNative = windows_core::Interface::cast(&core.window)?;
@@ -17074,6 +17094,22 @@ impl WinUiStage {
             "kaya: the guest window was not visible 20s after {what} injection \
              was asked for — the scene typed before the window came up"
         );
+        // A NOTIFICATION TOAST HOLDS THE FOREGROUND for its whole display
+        // and blocks SetForegroundWindow the way a menu does: the notes leg
+        // read `foreground=none` and then ShellExperienceHost's "New
+        // notification" CoreWindow in its sampler, three seconds after a
+        // notify leg's toast went up (matrix 19, 2026-09-15). A toast leaves
+        // on its own, so wait it out, bounded, and say so.
+        let toast_waited = (0..300)
+            .take_while(|_| Self::foreground_is_toast())
+            .inspect(|_| std::thread::sleep(std::time::Duration::from_millis(50)))
+            .count();
+        if toast_waited > 0 {
+            eprintln!(
+                "kaya: a notification toast held the foreground for {}ms before {what} injection",
+                toast_waited * 50
+            );
+        }
         let mut confirmed = false;
         for attempt in 0..150 {
             if unsafe { GetForegroundWindow() } == hwnd {
@@ -17109,7 +17145,8 @@ impl WinUiStage {
              injection after 3s (an ACTIVE MENU blocks SetForegroundWindow \
              outright — a Start menu or popup left open on the VM is the \
              usual cause; ESC and the ALT foreground-lock release were \
-             both tried)"
+             both tried; a notification toast was waited out for {}ms first)",
+            toast_waited * 50
         );
     }
 

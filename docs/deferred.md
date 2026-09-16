@@ -11714,7 +11714,7 @@ caught it) and the failing step's own `offers=`/`answered` pair — a full
 `offers` with `answered nothing` is a transfer failure, an empty or stale
 `offers` is the selection not having reached this client.
 
-## ~~WATCH — windows `portfolio_python` under a matrix: six `reporting a row window failed: 0x88000FA8` faults after the scene's last step (first sighting 2026-09-07)~~ CLOSED 2026-09-07: reproduced on the VM under load with the call named (`band.UpdateLayout`), the mechanism read and fixed — a popped screen's tables stay registered until the app's destroy lands and the resize's LayoutUpdated scheduled reports for their detached bands; a report skips a band outside the tree now (docs/traps.md).
+## WATCH — windows `portfolio_python` under a matrix: six `reporting a row window failed: 0x88000FA8` faults after the scene's last step (first sighting 2026-09-07) — REOPENED 2026-09-15, second sighting on the guarded build (was CLOSED 2026-09-07: reproduced on the VM under load with the call named (`band.UpdateLayout`), the mechanism read and fixed — a popped screen's tables stay registered until the app's destroy lands and the resize's LayoutUpdated scheduled reports for their detached bands; a report skips a band outside the tree now (docs/traps.md).)
 KEY: portfolio_python, 0x88000FA8, reporting a row window failed, row window report, table_report_once, windows fold
 
 Matrix #25: the windows lane's `portfolio_python` leg passed every step
@@ -11756,6 +11756,23 @@ fail ten of ten at one second with a real layout cycle — the same
 HRESULT, with `Layout cycle detected` above it — which is on
 docs/traps.md beside the first; the stamp trace it needed
 (`KAYA_WINUI_STAMP_TRACE=1`) stays as the instrument.
+
+SECOND SIGHTING 2026-09-15, matrix 19 (5dfdcca7), on the build that
+carries the IsLoaded gate: the same leg, the same step — the fault
+follows `resize_window 900x600` + `expect_folded column@summary none`,
+the scene's last two lines — and ONE fault this time, `reporting a row
+window failed: band.UpdateLayout: (0x88000FA8)`, with no `Layout cycle`
+line above it in the leg log (docs/traps.md's rule: read those lines
+before naming the cause; there were none). The windows lane ran 1134s
+against its 600 ceiling on that matrix, the slowest windows lane on the
+record, with every other windows leg but the notes toast green. Bundle:
+~/.local/state/kaya/flightrec/runs/20260916T051839Z-009718/bundles/windows-portfolio_python.
+So the gate closed the detached-band cause and a second cause remains
+that only a starved host reaches; the next step is the loop the first
+closing used (the leg on the VM under the mac and linux lanes' load,
+`KAYA_WINUI_STAMP_TRACE=1`), reading which band faulted and whether it
+was loaded. Not reproduced alone: the windows lane re-run standalone
+after the matrix is this entry's next line.
 
 ## ~~BUG — GTK: twenty `Gtk-WARNING … natural size must be >= min size` lines on the tasks scene, from kaya's own FlexLayout::measure (found 2026-09-07)~~ FIXED 2026-09-11 AT THE CAUSE, WHICH WAS NOT THE ONE NAMED: a trace inside kaya's flex measure never fired and the backtrace at the first warning under G_DEBUG=fatal-warnings had no kaya frame — the reporters were libadwaita's own GtkBoxLayout boxes asked for width-for-height at a height below their natural, by kaya's flex allocate measuring a row's children at the allocated height. The flex layout declares height-for-width and asks widths at -1 now (crates/kaya/src/gtk.rs), zero warnings on the tasks, layout, grow, grid and sizepolicy scenes, and tools/linux/run-suites.sh fails any leg whose log carries the line, with a planted-line self-test at lane start (docs/traps.md)
 KEY: natural size must be >= min size, Gtk-WARNING, FlexLayout::measure, gtk flex measure, tasks scene gtk warnings
@@ -12075,6 +12092,19 @@ before every lane run. The earlier `dnd-js-wayland` sighting (the
 stamped `y` step) most likely wore the same cause — a release before
 the begin reads as "the earlier payload stayed" — and the next one will
 say so on its driver line. Windows' `dnd_java` stays unread.
+
+FOURTH DESKTOP SIGHTING 2026-09-15, matrix 19 (5dfdcca7),
+`dnd-python-wayland` again and the wayland shape again: the first drag
+from the "hello" label read `no drop yet`, every drag after `drag ended
+none`, four drags in all, each with the driver's own line `drag began 0ms
+after the threshold` — the press, the motion past the threshold and the
+release all reached the compositor and no drop reached the target. The
+linux lane ran 715s (603 net) on a five-lane matrix; the 18 dnd legs
+re-run alone straight after passed 18 of 18, this one in 15s. Bundle:
+~/.local/state/kaya/flightrec/runs/20260916T051923Z-004131/bundles/linux-dnd-python-wayland
+(leg log, verb trace, xvfb). The cause is still unread; the next sighting
+is to be read through the GTK arm's drop-side lines, since the driver's
+side says the drag began.
 
 ## ~~WATCH — android `portfolio-python` under a matrix: the header sort click did not land (first sighting 2026-09-05)~~
 KEY: portfolio-python, header_click, Total v3, 4698 of 15003, android sort, matrix contention
@@ -12554,6 +12584,31 @@ so it runs with the pool emptied (tools/check-exclusive.py holds the name
 to a leg the lane runs). The PopupHost of the first sighting stays what
 it was — a flyout that happened to hold the foreground during that
 window — and the dismissal idea stands if a third sighting shows one.
+
+FOURTH RED 2026-09-15, matrix 19 (5dfdcca7), READ FROM THE SAMPLER: the
+notes leg failed the foreground dance at 3s with the window VISIBLE (the
+new visibility wait had passed), and foreground.txt read `foreground=none`
+and then ShellExperienceHost's `Windows.UI.Core.CoreWindow` titled "New
+notification" — a notification toast, up from a notify leg that had just
+run, holding the foreground for its display time and blocking
+SetForegroundWindow the way a menu does. The verb waits a toast out now
+(`foreground_is_toast`, bounded at 15s, the wait printed) before the
+dance; its guard is the sampler and that sentence, since a toast cannot be
+raised from a mac-side test — the windows lane re-run alone on the fix is
+the proof, recorded on the next line.
+
+THE RE-RUN FAILED THE SAME WAY, and read the cause: `a notification toast
+held the foreground for 15000ms` — the wait expired, so this was no
+passing banner but a QUEUE of them, and every other leg of the lane was
+green. deploy-win silences banners per AUMID (the toast trap's remedy) and
+the platform re-reads those rows only on a WpnUserService restart, which
+the runner does twice during provisioning — and the PACKAGED identities'
+rows (`<family>!tasks`, `<family>!notify`) are written after the install,
+after both restarts, so they were inert: every toast the packaged tasks and
+notify legs posted bannered, queued, and held the foreground into the
+exclusive block where the notes leg types. `wpn_reread()` follows every
+banner-off site now, the packaged one included. The lane re-run alone on
+that is the proof.
 
 ## WATCH — the iOS dark canvas leg read LIGHT pixels under a matrix, once (first sighting 2026-09-14)
 KEY: canvasdark-swift, expect_ink dark, KAYA_APPEARANCE, kayaCanvasAppearance, traitCollection, appearance flake
