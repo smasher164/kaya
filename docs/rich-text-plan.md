@@ -716,6 +716,19 @@ Landed as a4b10516 and bfe1a503; the matrix on that tree ALL PASS on all
 five lanes, 1,807 legs (mac 468, linux 773, windows 281, ios 138, android
 147) in 1220s.
 
+ONE LANGUAGE, BY THE MAINTAINER'S WORD (2026-09-15): the demo is the Rust
+guest and nothing more — "it just needs to be a demo that works for one
+language". Two facts measured before that word, kept so nobody measures
+them again: `@automerge/automerge` 3.4.1 (the JS line, its WASM bundled,
+no dependencies, 46 MB unpacked) indexes text in UNICODE CODE POINTS, an
+astral character being one, and expands a mark over a following insert
+as the Rust core's `After` does, with the same actor bytes giving the
+same concurrent order — a JS twin of the guest ran the shared scene green
+on the mac and linux before it was taken out as unasked-for weight; and
+automerge-go (last release 2024-10-30) has no marks, patches or cursors,
+counts positions in code points and ships prebuilt cores for darwin and
+linux only, so the bridge cannot be expressed on it.
+
 ## 17. The ranged format act (2026-09-15, the maintainer's ruling)
 
 `format_text` carries an optional range: `ranged` 0 is the act as before,

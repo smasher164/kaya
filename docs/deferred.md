@@ -12455,9 +12455,9 @@ edit). The shape: a Rust guest first (automerge-rs is the crate the probe
 used; guests/rust is the reference tier), two peers in one process — two
 kaya windows over the same document, or one window and a headless peer
 that replays a script — each edit on one side arriving on the other as an
-apply_edit with its runs, the merge visible in both; then the same app in
+apply_edit with its runs, the merge visible in both; ~~then the same app in
 Go through automerge-go and in JS on the desktop lanes (no JS on the
-phones, ruled 2026-09-03). What it would prove that no scene proves today:
+phones, ruled 2026-09-03)~~ — one language, ruled 2026-09-15. What it would prove that no scene proves today:
 the round trip through a real CRDT under concurrent edits, R5's held edit
 against a live composition, and R10's block rule against a CRDT's expand
 policy (the app applies kaya's reported runs rather than trusting the
@@ -12469,9 +12469,10 @@ and tools/scenes/notes.steps on all five lanes, automerge 0.11.0 as the
 examples' dependency, the peer a fork of the local document, undo a walk
 over heads. The remote MARK step: RULED 2026-09-15 and built as the ranged
 format act (docs/rich-text-plan.md §17, `format_range`/`unformat_range` in
-nine), the demo's peer steps 3 and 4. OPEN: the Go and JS halves (the
-ledger's L half; automerge-go and @automerge/automerge 3.x on the desktop
-lanes).
+nine), the demo's peer steps 3 and 4. ONE LANGUAGE (the maintainer,
+2026-09-15: "it just needs to be a demo that works for one language"):
+the Rust guest is the demo; the Go and JS halves this entry had sketched
+are struck (docs/rich-text-plan.md §16 keeps the two measured facts).
 KEY: notes demo, automerge, format_range, remote mark, peer fork.
 
 ## WATCH — an explorer PopupHost held the VM's foreground and the `type` verb could not take it, once (first sighting 2026-09-15)
