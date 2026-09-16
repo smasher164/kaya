@@ -24,6 +24,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import re
 import time
 
 SECTION_CAP = int(os.environ.get("KAYA_FLIGHTREC_SECTION_CAP", "2097152"))
@@ -43,7 +44,7 @@ SECTIONS = {
     "mac": ("leg-log", "verb-trace", "shot", "desktop-shot", "windows",
             "windowserver", "sampler", "sample", "unified-log"),
     "windows": ("leg-log", "verb-trace", "shot", "desktop-shot", "desktop",
-                "foreground", "foreground-text"),
+                "foreground", "foreground-text", "desktop-live", "notifications"),
     "ios": ("leg-log", "verb-trace", "shot", "panic", "app-log", "devices"),
     "android": ("leg-log", "verb-trace", "shot", "logcat", "devices"),
     "linux": ("leg-log", "verb-trace", "shot", "desktop", "xvfb"),
@@ -539,7 +540,7 @@ class WinRecorder(LaneRecorder):
         # the verb trace is the guest's own and is not touched.
         outputs = " ".join(f"C:\\kaya\\flightrec\\{leg}-{suffix}"
                            for suffix in ("collect.txt", "shot.png", "desktop.png",
-                                          "fgtext.txt", "shotwhy.txt"))
+                                          "fgtext.txt", "shotwhy.txt", "wpn.db"))
         self._ssh(f'cmd /c "del {outputs} 2>nul & exit /b 0"')
         self._ssh(f"schtasks /create /tn kayafrc_{leg} /tr \"wscript "
                   f"C:\\kaya\\run-hidden-args.vbs flightrec.cmd collect {leg}\" "
@@ -615,6 +616,77 @@ class WinRecorder(LaneRecorder):
         ring.unlink()
         self.mark(bundle, "foreground", "ok", dest.stat().st_size)
 
+    def desktop_live(self, bundle, t0):
+        ring = bundle / "foreground.txt"
+        if not ring.is_file():
+            self.skip(bundle, "desktop-live",
+                      "flightrec: no foreground ring was pulled, so no toast "
+                      "grab could be named for this leg")
+            return
+        lo, hi = t0 + self.skew, int(time.time()) + self.skew
+        newest = None
+        for line in ring.read_text(encoding="utf-8", errors="replace").splitlines():
+            m = re.match(r"at=(\d+) .*toastshot=(lane-toast-\d+\.png)", line)
+            if m and lo <= int(m.group(1)) <= hi:
+                newest = (int(m.group(1)), m.group(2), line)
+        if newest is None:
+            self.skip(bundle, "desktop-live",
+                      "flightrec: the lane sampler saw no toast hold the "
+                      "foreground during this leg, so there was no moment "
+                      "to photograph")
+            return
+        dest = bundle / "desktop-live.png"
+        got = self._scp_from(f"C:/kaya/flightrec/{newest[1]}", dest)
+        if not got or not dest.is_file() or not dest.stat().st_size:
+            if dest.is_file():
+                dest.unlink()
+            self.skip(bundle, "desktop-live",
+                      f"flightrec: the sampler named {newest[1]} for a toast "
+                      f"at guest epoch {newest[0]} but the file was gone by "
+                      f"collect (the ring keeps six)")
+            return
+        (bundle / "desktop-live.when").write_text(newest[2] + "\n", encoding="utf-8")
+        self.mark(bundle, "desktop-live", "ok", dest.stat().st_size)
+
+    def notifications(self, bundle, leg):
+        db = bundle / "notifications.db"
+        got = self._scp_from(f"C:/kaya/flightrec/{leg}-wpn.db", db)
+        if not got or not db.is_file() or not db.stat().st_size:
+            if db.is_file():
+                db.unlink()
+            self.skip(bundle, "notifications",
+                      "flightrec: the collect copied no notification database "
+                      f"(C:\\kaya\\flightrec\\{leg}-wpn.db); its own "
+                      "sentence is in desktop.txt under '== notifications =='")
+            return
+        import sqlite3
+        import datetime
+        lines = []
+        try:
+            con = sqlite3.connect(str(db))
+            cur = con.cursor()
+            handlers = {r[0]: r[1] for r in
+                        cur.execute("select RecordId, PrimaryId from NotificationHandler")}
+            rows = cur.execute("select HandlerId, Type, ArrivalTime, Payload from "
+                               "Notification order by ArrivalTime desc limit 40")
+            for hid, typ, at, payload in rows:
+                when = datetime.datetime(1601, 1, 1) + datetime.timedelta(microseconds=at / 10)
+                text = ""
+                if payload:
+                    s = payload.decode("utf-8", "replace") if isinstance(payload, bytes) else str(payload)
+                    text = " | ".join(re.findall(r"<text[^>]*>([^<]{1,120})</text>", s))[:240]
+                lines.append(f"{when:%Y-%m-%d %H:%M:%S}Z {typ:<6} {handlers.get(hid, hid)} {text}")
+            con.close()
+        except Exception as e:  # noqa: BLE001 — the section says what it could not read
+            lines.append(f"flightrec: the notification database would not render: {e}")
+        db.unlink()
+        head = ("flightrec: the platform's notification database at collect, newest first "
+                "(UTC) — only what is still in the Action Center; a banner that closed "
+                "and was not kept is not here, which is what desktop-live is for.\n")
+        (bundle / "notifications.txt").write_text(head + "\n".join(lines) + "\n",
+                                                  encoding="utf-8")
+        self.mark(bundle, "notifications", "ok", (bundle / "notifications.txt").stat().st_size)
+
     def win_leg(self, leg, verdict, secs, log, collected_already, t0,
                 out=None):
         """The one per-leg entry point. A PASS RETURNS AFTER ONE spool
@@ -647,6 +719,14 @@ class WinRecorder(LaneRecorder):
                           "desktop-shot.png", why=why.get("desktop-shot", ""))
                 self.pull(bundle, leg, "fgtext.txt", "foreground-text",
                           "foreground-text.txt")
+                # THE PICTURE AT THE MOMENT: the sampler grabs the screen the
+                # first time a toast holds the foreground and names the file
+                # on its ring line; the newest grab inside this leg's window
+                # is the banner the collect-time grab has already lost.
+                self.desktop_live(bundle, t0)
+                # WHOSE toast, in the platform's own words: the notification
+                # database the collect copied, rendered here.
+                self.notifications(bundle, leg)
                 # The Rust verb trace (crates/kaya/src/vtrace.rs), dumped by
                 # the guest on a failed verdict to the file its launcher
                 # names (since 2026-09-07; check-steps holds the line).

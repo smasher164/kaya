@@ -12830,6 +12830,29 @@ toast answered EMPTY (`toast=''`) on this red — the read must say how many
 elements it found and why none had a name, which is the sampler's next
 sentence. Still no watch: the next red's bundle carries the desktop grab.
 
+THE EIGHTH RED, matrix 28 (953d4868), READ FROM THE FIRST FULL BUNDLE: the
+console-session grab landed (2080x800, viewed) and showed a BARE desktop —
+the banner had closed in the seconds between the guest's exit and the
+collect — and the text read walked one element, none named: the shell's
+toast window exposes nothing but itself to a walk from that session. Two
+measured leads instead: the guest's per-app notification settings name
+every identity that has ever posted there (OneDrive, Defender, the shell's
+suggestion, opt-out and low-disk toasts, the Settings app, PowerShell) and
+none of them had its banner off; and the platform's own notification
+database (wpndatabase.db, copied off the guest and read with sqlite3) held
+OneDrive's toast of 11:33Z that day, Defender's of the day before, and
+Widgets tile updates at 19:57Z and 20:17Z — inside matrices 27 and 28 —
+with the Widgets button badged 2 in the picture. THREE CHANGES: the sampler
+grabs the whole screen the FIRST moment a toast window holds the
+foreground and names the file on its ring line, and the host pulls the
+newest inside the leg as `desktop-live` (the picture at the moment, which
+the collect-time grab cannot be); the collect copies the notification
+database and the host renders it as `notifications` (time, type, app,
+text), the only record that names whose toast a banner was once it has
+closed; and provisioning turns the banner off for every non-kaya identity
+that has posted (FOREIGN_TOAST_AUMIDS, the toast trap's remedy generalized),
+the platform re-read after. The next red names its toast in two sections.
+
 ## WATCH — the iOS dark canvas leg read LIGHT pixels under a matrix, once (first sighting 2026-09-14)
 KEY: canvasdark-swift, expect_ink dark, KAYA_APPEARANCE, kayaCanvasAppearance, traitCollection, appearance flake
 

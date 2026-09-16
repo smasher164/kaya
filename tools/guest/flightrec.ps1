@@ -180,6 +180,21 @@ function VisibleWindows() {
     return $found
 }
 
+# The whole virtual screen to a PNG; the collect's section 6 and the
+# sampler's toast grab both take it, so there is one copy of the rule.
+function DesktopGrab($path) {
+    Add-Type -AssemblyName System.Drawing
+    Add-Type -AssemblyName System.Windows.Forms
+    $vs = [System.Windows.Forms.SystemInformation]::VirtualScreen
+    $dbmp = New-Object System.Drawing.Bitmap $vs.Width, $vs.Height
+    $dg = [System.Drawing.Graphics]::FromImage($dbmp)
+    $dg.CopyFromScreen($vs.Left, $vs.Top, 0, 0, $dbmp.Size)
+    $dg.Dispose()
+    $dbmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+    $dbmp.Dispose()
+    return "$($vs.Width)x$($vs.Height)"
+}
+
 # ------------------------------------------------------------- sample --
 if ($Mode -eq 'sample') {
     $out = Join-Path $dir "$Leg-foreground.txt"
@@ -195,6 +210,7 @@ if ($Mode -eq 'sample') {
         $last = ''
         $lines = 1
         $t0 = Get-Date
+        $grabbed = New-Object System.Collections.ArrayList
         # STOPPED BY A FILE, not by killing powershell: a name-wide taskkill
         # would take the other legs' samplers with it. ALL.stop is the lane's
         # backstop, dropped by the runner's EXIT trap.
@@ -209,6 +225,25 @@ if ($Mode -eq 'sample') {
             if (-not (Test-Path $dir)) { break }
             $h = [KayaFR.Win]::GetForegroundWindow()
             $line = if ($h -eq [IntPtr]::Zero) { 'foreground=none' } else { Describe $h }
+            # THE PICTURE AT THE MOMENT (docs/traps.md, the toast entry): a
+            # banner is gone by the time the collect runs after the guest
+            # exits, and the eighth notes red's desktop grab showed a bare
+            # desktop. The first time each toast window holds the foreground
+            # the sampler grabs the whole screen right then and names the
+            # file on its line; the host pulls the newest inside the leg.
+            if ($line -like "*title='New notification'*" -and -not $grabbed.Contains([int64]$h)) {
+                [void]$grabbed.Add([int64]$h)
+                $stamp = [int64](Get-Date -UFormat %s)
+                $tpath = Join-Path $dir "lane-toast-$stamp.png"
+                try {
+                    $size = DesktopGrab $tpath
+                    $line = $line + " toastshot=lane-toast-$stamp.png ($size)"
+                } catch {
+                    $line = $line + " toastshot=failed: $($_.Exception.Message)"
+                }
+                Get-ChildItem $dir -Filter 'lane-toast-*.png' | Sort-Object LastWriteTime -Descending |
+                    Select-Object -Skip 6 | Remove-Item -Force -ErrorAction SilentlyContinue
+            }
             # Only CHANGES, so a lane does not write two lines a second of the
             # same window.
             if ($line -ne $last) {
@@ -417,6 +452,25 @@ if ($fg -eq [IntPtr]::Zero) {
     Emit $fgtext ('uia: ' + (ToastText $fg))
 }
 Emit $out (Get-Content $fgtext -Raw)
+
+# 8. THE NOTIFICATION DATABASE: what arrived, from whom, with its text --
+#    the platform keeps every notification still in the Action Center in
+#    a SQLite file, and it is the only record that names WHOSE toast a
+#    banner was once the banner has closed (the seventh and eighth notes
+#    reds could not, 2026-09-16). Copied as-is; the host renders it.
+Emit $out '== notifications =='
+$wpn = Join-Path $dir "$Leg-wpn.db"
+if (Test-Path $wpn) { Remove-Item $wpn -Force }
+try {
+    $src = Join-Path $env:LOCALAPPDATA 'Microsoft\Windows\Notifications\wpndatabase.db'
+    Copy-Item $src $wpn -Force
+    Emit $out "notification database copied $((Get-Item $wpn).Length) bytes -> $wpn"
+    Why 'notifications' "the platform's own database, copied at collect"
+} catch {
+    $sentence = "notification database copy failed: $($_.Exception.Message)"
+    Emit $out $sentence
+    Why 'notifications' $sentence
+}
 
 Emit $out 'COLLECTDONE'
 exit 0

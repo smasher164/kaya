@@ -631,6 +631,25 @@ def notify_banner_off(aumid):
 
 for _aumid in NOTIFY_AUMIDS:
     notify_banner_off(_aumid)
+# EVERY OTHER IDENTITY THAT HAS EVER POSTED ON THIS GUEST, read out of its
+# own notification settings and database on 2026-09-16 (docs/deferred.md,
+# the PopupHost WATCH's eighth red): OneDrive's sign-in nag (the toast
+# trap's original), Defender's summaries, the shell's suggestions, opt-out
+# and low-disk toasts, and the Widgets board — none of which a kaya toast
+# is, and any of which blocks SetForegroundWindow for its display time.
+# Banners off, delivery kept, the platform re-read after; a new poster is
+# read out of the bundle's `notifications` section, not guessed.
+FOREIGN_TOAST_AUMIDS = [
+    "Microsoft.SkyDrive.Desktop",
+    "Windows.Defender.SecurityCenter",
+    "Windows.SystemToast.Suggested",
+    "Windows.ActionCenter.SmartOptOut",
+    "Windows.SystemToast.LowDisk",
+    # The spelling the guest's own database carries, not a guess.
+    "MicrosoftWindows.Client.WebExperience_cw5n1h2txyewy!Widgets",
+]
+for _aumid in FOREIGN_TOAST_AUMIDS:
+    notify_banner_off(_aumid)
 must_ssh('reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\'
          'ContentDeliveryManager" /v SubscribedContent-338389Enabled '
          '/t REG_DWORD /d 0 /f >nul')
