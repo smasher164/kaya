@@ -530,6 +530,17 @@ class WinRecorder(LaneRecorder):
         never happened."""
         if not self._ready():
             return
+        # THE OLD ANSWER GOES FIRST (tools/deploy-win.py's run_guest_oneshot,
+        # the same trap): this polls for COLLECTDONE in a file the previous
+        # run of this leg left complete, so a second failure of the same leg
+        # returned at once with the collect never run and pulled a file nine
+        # hours old as this leg's desktop (matrix 27's notes red, 2026-09-16).
+        # Every output the collect writes is deleted before the task runs;
+        # the verb trace is the guest's own and is not touched.
+        outputs = " ".join(f"C:\\kaya\\flightrec\\{leg}-{suffix}"
+                           for suffix in ("collect.txt", "shot.png", "desktop.png",
+                                          "fgtext.txt", "shotwhy.txt"))
+        self._ssh(f'cmd /c "del {outputs} 2>nul & exit /b 0"')
         self._ssh(f"schtasks /create /tn kayafrc_{leg} /tr \"wscript "
                   f"C:\\kaya\\run-hidden-args.vbs flightrec.cmd collect {leg}\" "
                   f"/sc once /st 00:00 /it /rl highest /f >nul "

@@ -12817,6 +12817,19 @@ shot through the /it task — was a hand tool; the flight-recorder pass of
 that day puts it on the failure path whenever the foreground at failure is
 not the guest's window, beside the toast's text. No further watch here.
 
+THE SEVENTH RED, matrix 27 (f319a44e), READ FROM THE NEW BUNDLE — WHICH
+HAD NOT LANDED: the desktop grab, the foreground text and the verb trace
+all skipped as "the guest wrote no …", and the desktop window list that
+did pull read `collect at 03:28`, nine hours before the matrix: the
+collect polls for COLLECTDONE in a file a previous run of the same leg
+left complete, so it returned at once, never ran, and the pull took the
+last run's file as this leg's (the old-answer-first trap, met again). The
+collect deletes every output it writes before its task is created now, and
+check-flightrec holds that. The sampler's own UI Automation read of the
+toast answered EMPTY (`toast=''`) on this red — the read must say how many
+elements it found and why none had a name, which is the sampler's next
+sentence. Still no watch: the next red's bundle carries the desktop grab.
+
 ## WATCH — the iOS dark canvas leg read LIGHT pixels under a matrix, once (first sighting 2026-09-14)
 KEY: canvasdark-swift, expect_ink dark, KAYA_APPEARANCE, kayaCanvasAppearance, traitCollection, appearance flake
 

@@ -133,12 +133,20 @@ function ToastText($h) {
         Add-Type -AssemblyName UIAutomationClient -ErrorAction Stop
         Add-Type -AssemblyName UIAutomationTypes -ErrorAction Stop
         $root = [System.Windows.Automation.AutomationElement]::FromHandle($h)
+        if ($null -eq $root) { return 'uia: FromHandle answered nothing for this window' }
         $all = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants,
             [System.Windows.Automation.Condition]::TrueCondition)
         $names = New-Object System.Collections.ArrayList
         foreach ($el in $all) {
             $n = $el.Current.Name
             if ($n -and $n.Length -gt 0 -and -not $names.Contains($n)) { [void]$names.Add($n) }
+        }
+        # AN EMPTY READ SAYS WHAT IT WALKED (the seventh notes red read
+        # toast='' and could not tell a nameless tree from a walk that
+        # never happened): the element count and the root's own name.
+        if ($names.Count -eq 0) {
+            $rootName = $root.Current.Name
+            return "uia: $($all.Count) element(s) walked, none named; root name '$rootName' class '$($root.Current.ClassName)'"
         }
         $joined = ($names -join ' | ')
         if ($joined.Length -gt 300) { $joined = $joined.Substring(0, 300) + '...' }

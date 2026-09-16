@@ -300,12 +300,37 @@ def census_vtrace(src):
     return found
 
 
+def census_collect_fresh(src):
+    """THE OLD ANSWER GOES FIRST (docs/traps.md's run_guest_oneshot trap,
+    met again by the recorder 2026-09-16): the windows collect polls for
+    COLLECTDONE in a file a previous run of the same leg left complete, so
+    a second red of one leg returned at once with the collect never run and
+    pulled a file nine hours old as this leg's desktop. The collect deletes
+    every output it writes BEFORE the task is created."""
+    found = []
+    body = py_block(src[LANE_PY], "collect")
+    if body is None:
+        return [f"{LANE_PY}: WinRecorder.collect is not where this clause reads it"]
+    create = body.find("schtasks /create /tn kayafrc_")
+    if create < 0:
+        return [f"{LANE_PY}: WinRecorder.collect no longer creates its task by name"]
+    head = body[:create]
+    if "del " not in head or "collect.txt" not in head:
+        found.append(
+            f"{LANE_PY}: WinRecorder.collect does not delete its previous "
+            f"outputs (<leg>-collect.txt and the pictures) before creating the "
+            f"task — the poll for COLLECTDONE then answers from the last run's "
+            f"file and the collect never runs")
+    return found
+
+
 # ---------------------------------------------------------------- run it
 
 REAL = sources()
 CENSUSES = (("sections", census_sections), ("skip writers", census_skips),
             ("finish", census_finish), ("capture point", census_when),
-            ("windows verb trace", census_vtrace))
+            ("windows verb trace", census_vtrace),
+            ("windows collect freshness", census_collect_fresh))
 TABLE = declared(REAL)
 gate.counted("lanes declaring a bundle shape", list(TABLE), floor=5)
 gate.counted("sections declared across the five lanes",
@@ -398,6 +423,12 @@ n9[LANE_PY] = gate.doctor("N9 renamed the verb-trace file the recorder pulls",
 gate.negative("N9 the recorder pulling a verb trace no launcher writes",
               lambda: census_vtrace(n9), want="vtrace-elsewhere.txt")
 
-gate.negatives_ran(9)
+# N10: the collect polling an answer the previous run left.
+n10 = doctored(LANE_PY, r'        self\._ssh\(f\'cmd /c "del \{outputs\} 2>nul & exit /b 0"\'\)\n',
+               "", "N10 removed the collect's delete of its previous outputs")
+gate.negative("N10 a windows collect that polls the last run's answer",
+              lambda: census_collect_fresh(n10), want="does not delete its previous outputs")
+
+gate.negatives_ran(10)
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")
