@@ -105,83 +105,83 @@ sealed class AccountRow
     public Node Canvas(Viewbox vb, System.Action<Draw> body) => t.Canvas(vb, body);
 
     public Node Checkbox(Field<bool> f,
-        System.Action<Tx, System.Collections.Generic.List<object>, bool> onToggle = null) =>
+        System.Action<Tx, System.Collections.Generic.List<object>, bool>? onToggle = null) =>
         t.Checkbox(f, onToggle);
 
     public Node DatePicker(System.DateOnly value,
-        System.Action<Tx, System.Collections.Generic.List<object>, System.DateOnly> onDate = null) =>
+        System.Action<Tx, System.Collections.Generic.List<object>, System.DateOnly>? onDate = null) =>
         t.DatePicker(value, onDate);
 
     public Node DatePicker(Signal value,
-        System.Action<Tx, System.Collections.Generic.List<object>, System.DateOnly> onDate = null) =>
+        System.Action<Tx, System.Collections.Generic.List<object>, System.DateOnly>? onDate = null) =>
         t.DatePicker(value, onDate);
 
     public Node DatePicker(Field<System.DateOnly> f,
-        System.Action<Tx, System.Collections.Generic.List<object>, System.DateOnly> onDate = null) =>
+        System.Action<Tx, System.Collections.Generic.List<object>, System.DateOnly>? onDate = null) =>
         t.DatePicker(f, onDate);
 
     public Node TimePicker(System.TimeOnly value,
-        System.Action<Tx, System.Collections.Generic.List<object>, System.TimeOnly> onTime = null) =>
+        System.Action<Tx, System.Collections.Generic.List<object>, System.TimeOnly>? onTime = null) =>
         t.TimePicker(value, onTime);
 
     public Node TimePicker(Signal value,
-        System.Action<Tx, System.Collections.Generic.List<object>, System.TimeOnly> onTime = null) =>
+        System.Action<Tx, System.Collections.Generic.List<object>, System.TimeOnly>? onTime = null) =>
         t.TimePicker(value, onTime);
 
     public Node TimePicker(Field<System.TimeOnly> f,
-        System.Action<Tx, System.Collections.Generic.List<object>, System.TimeOnly> onTime = null) =>
+        System.Action<Tx, System.Collections.Generic.List<object>, System.TimeOnly>? onTime = null) =>
         t.TimePicker(f, onTime);
 
     public Node Entry(
-        System.Action<Tx, System.Collections.Generic.List<object>, string> onChange = null) =>
+        System.Action<Tx, System.Collections.Generic.List<object>, string>? onChange = null) =>
         t.Entry(onChange);
 
     public Node Entry(string text,
-        System.Action<Tx, System.Collections.Generic.List<object>, string> onChange = null) =>
+        System.Action<Tx, System.Collections.Generic.List<object>, string>? onChange = null) =>
         t.Entry(text, onChange);
 
     public Node Entry(Signal text,
-        System.Action<Tx, System.Collections.Generic.List<object>, string> onChange = null) =>
+        System.Action<Tx, System.Collections.Generic.List<object>, string>? onChange = null) =>
         t.Entry(text, onChange);
 
     public Node Entry(Field<string> text,
-        System.Action<Tx, System.Collections.Generic.List<object>, string> onChange = null) =>
+        System.Action<Tx, System.Collections.Generic.List<object>, string>? onChange = null) =>
         t.Entry(text, onChange);
 
     public Node Textarea(
-        System.Action<Tx, System.Collections.Generic.List<object>, string> onChange = null) =>
+        System.Action<Tx, System.Collections.Generic.List<object>, string>? onChange = null) =>
         t.Textarea(onChange);
 
     public Node Textarea(string text,
-        System.Action<Tx, System.Collections.Generic.List<object>, string> onChange = null) =>
+        System.Action<Tx, System.Collections.Generic.List<object>, string>? onChange = null) =>
         t.Textarea(text, onChange);
 
     public Node Textarea(Signal text,
-        System.Action<Tx, System.Collections.Generic.List<object>, string> onChange = null) =>
+        System.Action<Tx, System.Collections.Generic.List<object>, string>? onChange = null) =>
         t.Textarea(text, onChange);
 
     public Node Textarea(Field<string> text,
-        System.Action<Tx, System.Collections.Generic.List<object>, string> onChange = null) =>
+        System.Action<Tx, System.Collections.Generic.List<object>, string>? onChange = null) =>
         t.Textarea(text, onChange);
 
     public Node Textarea(Field<Document> document,
-        System.Action<Tx, System.Collections.Generic.List<object>, string> onChange = null) =>
+        System.Action<Tx, System.Collections.Generic.List<object>, string>? onChange = null) =>
         t.Textarea(document, onChange);
 
     public Node Search(
-        System.Action<Tx, System.Collections.Generic.List<object>, string> onChange = null) =>
+        System.Action<Tx, System.Collections.Generic.List<object>, string>? onChange = null) =>
         t.Search(onChange);
 
     public Node Search(string text,
-        System.Action<Tx, System.Collections.Generic.List<object>, string> onChange = null) =>
+        System.Action<Tx, System.Collections.Generic.List<object>, string>? onChange = null) =>
         t.Search(text, onChange);
 
     public Node Search(Signal text,
-        System.Action<Tx, System.Collections.Generic.List<object>, string> onChange = null) =>
+        System.Action<Tx, System.Collections.Generic.List<object>, string>? onChange = null) =>
         t.Search(text, onChange);
 
     public Node Search(Field<string> text,
-        System.Action<Tx, System.Collections.Generic.List<object>, string> onChange = null) =>
+        System.Action<Tx, System.Collections.Generic.List<object>, string>? onChange = null) =>
         t.Search(text, onChange);
 
     public Node Progress(double value) => t.Progress(value);
@@ -192,40 +192,40 @@ sealed class AccountRow
 
     public Node ProgressIndeterminate() => t.ProgressIndeterminate();
 
-    public Node Slider(double min, double max, double value, double? step = null, double? tickSpacing = null, System.Action<Tx, System.Collections.Generic.List<object>, double> onChange = null,
-        System.Action<Tx, System.Collections.Generic.List<object>, double> onCommit = null) =>
+    public Node Slider(double min, double max, double value, double? step = null, double? tickSpacing = null, System.Action<Tx, System.Collections.Generic.List<object>, double>? onChange = null,
+        System.Action<Tx, System.Collections.Generic.List<object>, double>? onCommit = null) =>
         t.Slider(min, max, value, step, tickSpacing, onChange, onCommit);
 
-    public Node Slider(double min, double max, Signal value, double? step = null, double? tickSpacing = null, System.Action<Tx, System.Collections.Generic.List<object>, double> onChange = null,
-        System.Action<Tx, System.Collections.Generic.List<object>, double> onCommit = null) =>
+    public Node Slider(double min, double max, Signal value, double? step = null, double? tickSpacing = null, System.Action<Tx, System.Collections.Generic.List<object>, double>? onChange = null,
+        System.Action<Tx, System.Collections.Generic.List<object>, double>? onCommit = null) =>
         t.Slider(min, max, value, step, tickSpacing, onChange, onCommit);
 
-    public Node Slider(double min, double max, Field<double> value, double? step = null, double? tickSpacing = null, System.Action<Tx, System.Collections.Generic.List<object>, double> onChange = null,
-        System.Action<Tx, System.Collections.Generic.List<object>, double> onCommit = null) =>
+    public Node Slider(double min, double max, Field<double> value, double? step = null, double? tickSpacing = null, System.Action<Tx, System.Collections.Generic.List<object>, double>? onChange = null,
+        System.Action<Tx, System.Collections.Generic.List<object>, double>? onCommit = null) =>
         t.Slider(min, max, value, step, tickSpacing, onChange, onCommit);
 
     public Node Select(string[] options, int selected,
-        System.Action<Tx, System.Collections.Generic.List<object>, int> onSelect = null) =>
+        System.Action<Tx, System.Collections.Generic.List<object>, int>? onSelect = null) =>
         t.Select(options, selected, onSelect);
 
     public Node Select(string[] options, Signal selected,
-        System.Action<Tx, System.Collections.Generic.List<object>, int> onSelect = null) =>
+        System.Action<Tx, System.Collections.Generic.List<object>, int>? onSelect = null) =>
         t.Select(options, selected, onSelect);
 
     public Node Select(string[] options, Field<double> selected,
-        System.Action<Tx, System.Collections.Generic.List<object>, int> onSelect = null) =>
+        System.Action<Tx, System.Collections.Generic.List<object>, int>? onSelect = null) =>
         t.Select(options, selected, onSelect);
 
     public Node Radio(string[] options, int selected,
-        System.Action<Tx, System.Collections.Generic.List<object>, int> onSelect = null) =>
+        System.Action<Tx, System.Collections.Generic.List<object>, int>? onSelect = null) =>
         t.Radio(options, selected, onSelect);
 
     public Node Radio(string[] options, Signal selected,
-        System.Action<Tx, System.Collections.Generic.List<object>, int> onSelect = null) =>
+        System.Action<Tx, System.Collections.Generic.List<object>, int>? onSelect = null) =>
         t.Radio(options, selected, onSelect);
 
     public Node Radio(string[] options, Field<double> selected,
-        System.Action<Tx, System.Collections.Generic.List<object>, int> onSelect = null) =>
+        System.Action<Tx, System.Collections.Generic.List<object>, int>? onSelect = null) =>
         t.Radio(options, selected, onSelect);
 
     public Node Row(System.Action body) => t.Row(body);
@@ -333,12 +333,12 @@ readonly struct AccountRowSeq
 sealed class AccountRowEnumerator : System.IDisposable
 {
     int state;
-    System.Action close;
+    System.Action? close;
     readonly RecordCollection<Account> c;
 
     internal AccountRowEnumerator(RecordCollection<Account> c) => this.c = c;
 
-    public AccountRow Current { get; private set; }
+    public AccountRow Current { get; private set; } = default!;
 
     public bool MoveNext()
     {

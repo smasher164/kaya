@@ -20,6 +20,12 @@ public final class Milestone2 {
         }
     }
 
+    /** Java lambdas cannot assign captured locals. */
+    private static final class Refs {
+        KayaApp.Collection items;
+        KayaApp.Node remove;
+    }
+
     private static int steps;
 
     public static void app() {
@@ -31,21 +37,19 @@ public final class Milestone2 {
 
             KayaApp.Collection groups = tx.collection();
 
-            // Java lambdas cannot assign captured locals.
-            KayaApp.Collection[] items = new KayaApp.Collection[1];
-            KayaApp.Node[] remove = new KayaApp.Node[1];
+            Refs refs = new Refs();
 
             tx.mount(tx.column(() -> {
                 tx.button("step", t -> { // button#0
                     steps++;
                     if (steps == 1) {
                         t.insert(groups, "g1", "Work");
-                        KayaApp.Collection todos = items[0].at("g1");
+                        KayaApp.Collection todos = refs.items.at("g1");
                         t.insert(todos, "a", "send report");
                         t.insert(todos, "b", "buy milk");
                     } else if (steps == 2) {
                         t.insert(groups, "g2", "Home");
-                        t.insert(items[0].at("g2"), "a", "water plants");
+                        t.insert(refs.items.at("g2"), "a", "water plants");
                         t.update(groups, "g1", "Office");
                     }
                     t.write(extras, steps == 1);
@@ -61,17 +65,17 @@ public final class Milestone2 {
                     group.column(() -> {
                         group.label(group.value());
 
-                        items[0] = group.collection();
-                        for (var item : group.rows(items[0])) {
+                        refs.items = group.collection();
+                        for (var item : group.rows(refs.items)) {
                             item.column(() -> {
                                 item.label(item.value());
-                                remove[0] = item.button("remove");
+                                refs.remove = item.button("remove");
                             });
                         }
                     });
                 }
             }));
-            return new Scene(status, items[0], remove[0]);
+            return new Scene(status, refs.items, refs.remove);
         });
 
         app.onClick(scene.removeButton, (tx, keys) -> {

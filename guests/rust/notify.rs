@@ -41,7 +41,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                         .title("Call the plumber")
                         .body("Reminder from the notify scene")
                         .show();
-                    tx.write(status, kaya::Value::Str(format!("posted {}", posts)));
+                    tx.write(status, format!("posted {}", posts));
                     id
                 });
                 msgs.on_notification(id, move |outcome| Msg::Answered(12, outcome));
@@ -49,7 +49,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             Msg::Cancel => {
                 ctx.apply(|tx| {
                     tx.cancel_notification(kaya::NotificationId(12));
-                    tx.write(status, kaya::Value::Str("cleared".into()));
+                    tx.write(status, "cleared");
                 });
             }
             Msg::Answered(id, outcome) => {
@@ -57,7 +57,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     NotificationOutcome::Activated => "activated",
                     NotificationOutcome::Refused => "refused",
                 };
-                ctx.apply(|tx| tx.write(status, kaya::Value::Str(format!("{word} {id}"))));
+                ctx.apply(|tx| tx.write(status, format!("{word} {id}")));
             }
         }
     }

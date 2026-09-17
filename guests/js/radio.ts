@@ -10,14 +10,13 @@ function onSelect(index: number): void {
   size.set(`size: ${OPTIONS[index]}`);
 }
 
-let size!: kaya.Signal<string>;
-
-app.window({ title: "radio" }, () => {
-  size = kaya.signal("size: Small");
+const { size } = app.window({ title: "radio" }, () => {
+  const size = kaya.signal("size: Small");
   kaya.column(() => {
     kaya.radio(OPTIONS, { selected: 0, onSelect });
     kaya.label({ bind: size });
   });
+  return { size };
 });
 
 app.run();

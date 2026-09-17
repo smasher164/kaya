@@ -1,6 +1,8 @@
 // The drag-and-drop scene (tools/scenes/dnd.steps; docs/dnd-plan.md D1, D8).
 // The root is a ROW so column#0 is the reorderable For's container.
 
+use kaya::PathKey;
+
 #[derive(kaya::KayaGen, Clone, Debug, PartialEq)]
 struct Item {
     title: String,
@@ -21,13 +23,6 @@ fn op_word(op: Option<kaya::Op>) -> &'static str {
         Some(kaya::Op::Copy) => "copy",
         Some(kaya::Op::Move) => "move",
         None => "none",
-    }
-}
-
-fn key_word(path: &kaya::Path) -> String {
-    match path.first() {
-        Some(kaya::Value::Str(s)) => s.clone(),
-        other => format!("{other:?}"),
     }
 }
 
@@ -72,6 +67,25 @@ fn read_back(file: &kaya::PickedFile) -> String {
     text
 }
 
+struct Scene {
+    items: kaya::Collection<Item>,
+    items2: kaya::Collection<Item>,
+    list: kaya::WidgetId,
+    source: kaya::WidgetId,
+    text_id: kaya::WidgetId,
+    note_id: kaya::WidgetId,
+    files_id: kaya::WidgetId,
+    rename: kaya::WidgetId,
+    source_text: kaya::SignalId,
+    text_target: kaya::SignalId,
+    note_target: kaya::SignalId,
+    files_target: kaya::SignalId,
+    drop_status: kaya::SignalId,
+    drag_status: kaya::SignalId,
+    row_label: kaya::TemplateNodeId,
+    item_label: kaya::TemplateNodeId,
+}
+
 pub(crate) fn app(ctx: kaya::AppCtx) {
     let dir = dropped_file();
     std::fs::create_dir_all(&dir).expect("failed to make the scene's directory");
@@ -88,48 +102,53 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         let text_target = tx.signal("text target");
         let note_target = tx.signal("note target");
         let files_target = tx.signal("files target");
-        let mut list = kaya::WidgetId(0);
-        let mut row_label = kaya::TemplateNodeId(0);
-        let mut item_label = kaya::TemplateNodeId(0);
-        let mut source = kaya::WidgetId(0);
-        let mut text_id = kaya::WidgetId(0);
-        let mut note_id = kaya::WidgetId(0);
-        let mut files_id = kaya::WidgetId(0);
-        let mut rename = kaya::WidgetId(0);
+        let mut list: Option<kaya::WidgetId> = None;
+        let mut row_label: Option<kaya::TemplateNodeId> = None;
+        let mut item_label: Option<kaya::TemplateNodeId> = None;
+        let mut source: Option<kaya::WidgetId> = None;
+        let mut text_id: Option<kaya::WidgetId> = None;
+        let mut note_id: Option<kaya::WidgetId> = None;
+        let mut files_id: Option<kaya::WidgetId> = None;
+        let mut rename: Option<kaya::WidgetId> = None;
         let root = tx
             .row(|tx| {
                 let rows = items.rows(tx); // column#0
-                list = rows.id();
+                let list_id = rows.id();
+                list = Some(list_id);
                 for mut row in rows {
                     let label = row.label(Item::title());
                     row.a11y_id(label, "row");
-                    row_label = label;
+                    row_label = Some(label);
                 }
-                tx.reorderable(list, true);
-                tx.a11y_id(list, "rows");
+                tx.reorderable(list_id, true);
+                tx.a11y_id(list_id, "rows");
                 tx.column(|tx| {
-                    source = tx.label(source_text).id(); // label#0
-                    tx.draggable(source)
+                    let source_id = tx.label(source_text).id(); // label#0
+                    source = Some(source_id);
+                    tx.draggable(source_id)
                         .text("hello")
                         .custom("dev.kaya/note", b"note!".to_vec())
                         .allow(kaya::Op::Copy)
                         .allow(kaya::Op::Move)
                         .declare();
-                    text_id = tx
-                        .label(text_target)
-                        .accepts(&[kaya::Accepts::Text])
-                        .drop_target(&[kaya::Op::Copy])
-                        .id(); // label#1
-                    note_id = tx
-                        .label(note_target)
-                        .accepts(&[kaya::Accepts::Custom("dev.kaya/note")])
-                        .drop_target(&[kaya::Op::Copy, kaya::Op::Move])
-                        .id(); // label#2
-                    files_id = tx
-                        .label(files_target)
-                        .accepts(&[kaya::Accepts::Files])
-                        .drop_target(&[kaya::Op::Copy])
-                        .id(); // label#3
+                    text_id = Some(
+                        tx.label(text_target)
+                            .accepts(&[kaya::Accepts::Text])
+                            .drop_target(&[kaya::Op::Copy])
+                            .id(), // label#1
+                    );
+                    note_id = Some(
+                        tx.label(note_target)
+                            .accepts(&[kaya::Accepts::Custom("dev.kaya/note")])
+                            .drop_target(&[kaya::Op::Copy, kaya::Op::Move])
+                            .id(), // label#2
+                    );
+                    files_id = Some(
+                        tx.label(files_target)
+                            .accepts(&[kaya::Accepts::Files])
+                            .drop_target(&[kaya::Op::Copy])
+                            .id(), // label#3
+                    );
                     tx.label(drop_status); // label#4
                     tx.label(drag_status); // label#5
                 });
@@ -146,10 +165,10 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     // The payload IS the row's field, resolved per copy
                     // and re-declared when it changes (§4).
                     row.draggable(label).text(Item::title()).allow(kaya::Op::Copy).declare();
-                    item_label = label;
+                    item_label = Some(label);
                 }
                 tx.a11y_id(items_list, "items");
-                rename = tx.button("rename y").id(); // button#0
+                rename = Some(tx.button("rename y").id()); // button#0
             })
             .id();
         tx.mount(root);
@@ -159,10 +178,43 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         for key in ["x", "y"] {
             tx.insert(&items2, key, Item { title: key.to_string() });
         }
-        (items, items2, list, source, text_id, note_id, files_id, rename, source_text, text_target, note_target, files_target, drop_status, drag_status, row_label, item_label)
+        Scene {
+            items,
+            items2,
+            list: list.expect("the row declared the reorderable list"),
+            source: source.expect("the column declared the drag source"),
+            text_id: text_id.expect("the column declared the text target"),
+            note_id: note_id.expect("the column declared the note target"),
+            files_id: files_id.expect("the column declared the files target"),
+            rename: rename.expect("the row declared the rename button"),
+            source_text,
+            text_target,
+            note_target,
+            files_target,
+            drop_status,
+            drag_status,
+            row_label: row_label.expect("the For declared a row label"),
+            item_label: item_label.expect("the For declared an item label"),
+        }
     });
-    let (items, items2, list, source, text_id, note_id, files_id, rename, source_text, text_target, note_target, files_target, drop_status, drag_status, row_label, item_label) =
-        scene;
+    let Scene {
+        items,
+        items2,
+        list,
+        source,
+        text_id,
+        note_id,
+        files_id,
+        rename,
+        source_text,
+        text_target,
+        note_target,
+        files_target,
+        drop_status,
+        drag_status,
+        row_label,
+        item_label,
+    } = scene;
 
     msgs.on_drop(text_id, |d| Msg::Dropped(1, d));
     msgs.on_drop(note_id, |d| Msg::Dropped(2, d));
@@ -216,7 +268,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             }),
             Msg::ItemDropped(path, d) => ctx.apply(|tx| {
                 let op = op_word(d.operation);
-                let key = key_word(&path);
+                let key = path.key::<String>(0);
                 match &d.clip {
                     kaya::Representation::Text(s) => {
                         tx.write(drop_status, format!("item {key} got text {s} ({op})"));
@@ -229,14 +281,17 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 tx.update(&items2, "y", Item { title: "yy".to_string() });
             }),
             Msg::NodeDragEnded(what, path, op) => ctx.apply(|tx| {
-                tx.write(drag_status, format!("{what} {} drag ended {}", key_word(&path), op_word(op)));
+                tx.write(drag_status, format!("{what} {} drag ended {}", path.key::<String>(0), op_word(op)));
             }),
             Msg::Reorder(d) => ctx.apply(|tx| {
                 // The moved row's key rides as the kaya-private custom
                 // representation; the anchor is the row it landed on (D8).
                 let kaya::Representation::Custom { bytes, .. } = &d.clip else { return };
                 let moved = String::from_utf8_lossy(&bytes.0).to_string();
-                let Some(kaya::Value::Str(anchor)) = d.anchor.first().cloned() else { return };
+                if d.anchor.is_empty() {
+                    return;
+                }
+                let anchor = d.anchor.key::<String>(0);
                 if d.before {
                     tx.move_before(&items, moved, anchor);
                 } else {

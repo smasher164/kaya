@@ -1,30 +1,29 @@
 (* The dirty scene, OCaml port — guests/rust/dirty.rs,
    tools/scenes/dirty.steps. *)
 
-open Kaya_wire
 open Kaya_app
 
 let () =
   let app = Kaya_app.create () in
 
   build app (fun () ->
-     let doc = signal (Str "notes") in
-     let status = signal (Str "saved") in
+     let doc = signal_str ("notes") in
+     let status = signal_str ("saved") in
 
      let on_edit () =
-       write doc (Str "notes and a line");
-       write status (Str "unsaved");
+       write doc ("notes and a line");
+       write status ("unsaved");
        window ~dirty:true ()
      in
      let on_save () =
-       write status (Str "saved");
+       write status ("saved");
        window ~dirty:false ()
      in
 
      (* NOTHING HAS EVER RUN THE DISCARD ARM: [destroy_window 0L] aborts
         the process (docs/traps.md, VETO a close but never AGREE). *)
      let close_answered choice =
-       if choice = alert_cancel then write status (Str "kept editing")
+       if choice = alert_cancel then write status ("kept editing")
        else destroy_window 0L
      in
      (* Nothing has closed yet: the veto class says so. *)

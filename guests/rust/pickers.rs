@@ -3,6 +3,8 @@
 //! PROGRAMMATICALLY (the echo negative), and a stamped date picker bound
 //! to a row's own Date field.
 
+use kaya::PathKey;
+
 #[derive(kaya::KayaGen, Clone, Debug, PartialEq)]
 struct Task {
     name: String,
@@ -15,13 +17,6 @@ enum Msg {
     Time(kaya::Time),
     RowDate(kaya::Path, kaya::Date),
     Reset,
-}
-
-fn key_word(path: &kaya::Path) -> String {
-    match path.first() {
-        Some(kaya::Value::Str(s)) => s.clone(),
-        other => format!("{other:?}"),
-    }
 }
 
 fn date(year: i32, month: u8, day: u8) -> kaya::Date {
@@ -37,7 +32,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         let date_sig = tx.signal(date(2026, 9, 4));
         let time_sig = tx.signal(kaya::Time::new(14, 30).unwrap());
         let tasks = tx.collection::<Task>();
-        let mut due_node = kaya::TemplateNodeId(0);
+        let mut due_node: Option<kaya::TemplateNodeId> = None;
         let root = tx
             .column(|tx| {
                 tx.label(date_text); // label#0
@@ -64,13 +59,14 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     row.label(Task::name());
                     let picker = row.date_picker(Task::due());
                     row.a11y_id(picker, "due");
-                    due_node = picker;
+                    due_node = Some(picker);
                 }
             })
             .id();
         tx.mount(root);
         tx.insert(&tasks, "a", Task { name: "a".into(), due: date(2026, 10, 1) });
         tx.insert(&tasks, "b", Task { name: "b".into(), due: date(2026, 11, 20) });
+        let due_node = due_node.expect("tasks template declared a row date picker");
         (date_text, time_text, row_text, date_sig, time_sig, due_node)
     });
     msgs.on_date_node(due_node, Msg::RowDate);
@@ -84,7 +80,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 tx.write(time_text, format!("time: {picked}"));
             }),
             Msg::RowDate(path, picked) => ctx.apply(|tx| {
-                tx.write(row_text, format!("row {}: {picked}", key_word(&path)));
+                tx.write(row_text, format!("row {}: {picked}", path.key::<String>(0)));
             }),
             Msg::Reset => ctx.apply(|tx| {
                 // Must NOT come back as Date/Time occurrences.

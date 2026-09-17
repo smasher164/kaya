@@ -41,7 +41,7 @@ static class FileDialogScene
                     string text;
                     try
                     {
-                        var (file, _) = files[0].Open(KayaWire.FileModeRead);
+                        var (file, _) = files[0].Open(FileAccess.Read);
                         using (file)
                         using (var reader = new StreamReader(file))
                             text = reader.ReadToEnd();

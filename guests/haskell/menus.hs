@@ -1,12 +1,14 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 -- The menus scene, Haskell port — guests/rust/menus.rs,
 -- tools/scenes/menus.steps.
 
 import Data.IORef (newIORef, readIORef, writeIORef)
 
+import Data.Text (Text)
+import qualified Data.Text as T
 import KayaApp
-import KayaWire (Value (..), kindLabel)
 
 main :: IO ()
 main = kayaMain $ \app -> do
@@ -14,12 +16,12 @@ main = kayaMain $ \app -> do
   itemsRef <- newIORef (Nothing :: Maybe Collection)
 
   (groups, itemsColl) <- buildTx app $ do
-    status <- signal (VStr "ready")
-    canExport <- signal (VBool False)
-    details <- signal (VBool False)
-    sort <- signal (VF64 0.0)
+    status <- signal (T.pack "ready")
+    canExport <- signal False
+    details <- signal False
+    sort <- signal (0.0 :: Double)
 
-    let onShare = submitTx app (writeSignal status (VStr "shared"))
+    let onShare = submitTx app (writeSignal status (T.pack "shared"))
 
     -- File and Share realize early because the extend handler needs their
     -- handles; 'pure' slots them back in.
@@ -34,13 +36,13 @@ main = kayaMain $ \app -> do
             -- idiom (docs/styling-plan.md D6).
             [ ISymbol SymbolDone,
               IShortcut "primary+s",
-              IOnActivate (submitTx app (writeSignal status (VStr "saved")))
+              IOnActivate (submitTx app (writeSignal status (T.pack "saved")))
             ],
           item "Export" [IEnabledBy canExport, ISymbol SymbolForward],
           pure share
         ]
     window
-      0
+      primary
       [ WTitle "menus",
         WMenus
           [ pure file,
@@ -55,7 +57,7 @@ main = kayaMain $ \app -> do
                       ( \on ->
                           submitTx app $
                             writeSignal status
-                              (VStr (if on then "details on" else "details off"))
+                              (T.pack (if on then "details on" else "details off"))
                       )
                   ]
               ],
@@ -67,7 +69,7 @@ main = kayaMain $ \app -> do
                   ( \index ->
                       submitTx app $
                         writeSignal status
-                          (VStr (if index == 1 then "sorted date" else "sorted name"))
+                          (T.pack (if index == 1 then "sorted date" else "sorted name"))
                   )
               ]
               [option "Name" [], option "Date" []]
@@ -83,14 +85,16 @@ main = kayaMain $ \app -> do
             [ ISymbol SymbolDelete,
               IOnActivateNode
                 ( \keys -> case keys of
-                    [VStr group, VStr itemKey] -> do
+                    [groupV, itemKeyV] -> do
+                      let group = fromWire groupV :: Text
+                          itemKey = fromWire itemKeyV :: Text
                       maybeItems <- readIORef itemsRef
                       case maybeItems of
                         Just itemsColl ->
                           submitTx app $ do
-                            remove (itemsColl `at` VStr group) (VStr itemKey)
+                            remove (itemsColl `at` group) itemKey
                             writeSignal status
-                              (VStr ("removed " ++ group ++ "/" ++ itemKey))
+                              ("removed " <> group <> "/" <> itemKey)
                         Nothing -> return ()
                     _ -> return ()
                 )
@@ -106,18 +110,18 @@ main = kayaMain $ \app -> do
       _ <- columnOf [pure itemList]
       return itemsColl
 
-    targetText <- signal (VStr "rename target")
+    targetText <- signal (T.pack "rename target")
 
     root <-
       column
         [ labelBound status, -- label#0
           buttonOn "enable export" $ -- button#0
-            submitTx app (writeSignal canExport (VBool True)),
+            submitTx app (writeSignal canExport True),
           buttonOn "reset menu state" $ -- button#1
             submitTx app $ do
-              writeSignal details (VBool False)
-              writeSignal sort (VF64 0.0)
-              writeSignal status (VStr "ready"),
+              writeSignal details False
+              writeSignal sort (0.0 :: Double)
+              writeSignal status (T.pack "ready"),
           buttonOn "extend menus" $ -- button#2
             submitTx app $ do
               setMenuPrimary share False
@@ -125,7 +129,7 @@ main = kayaMain $ \app -> do
               menuAppend
                 file
                 [item "Publish" [IPrimary True, ISymbol SymbolCopy, IOnActivate onShare]]
-              window 0 [WMenus [menu "Tools" [] [item "Inspect" [ISymbol SymbolSearch]]]],
+              window primary [WMenus [menu "Tools" [] [item "Inspect" [ISymbol SymbolSearch]]]],
           do
             target <- labelBound targetText -- label#1
             contextMenu
@@ -133,7 +137,7 @@ main = kayaMain $ \app -> do
               [ item
                   "Rename"
                   [ ISymbol SymbolEdit,
-                    IOnActivate (submitTx app (writeSignal status (VStr "renamed")))
+                    IOnActivate (submitTx app (writeSignal status (T.pack "renamed")))
                   ]
               ]
             return target,
@@ -146,5 +150,5 @@ main = kayaMain $ \app -> do
 
   -- Seeded after the mount, so the copy stamps from a closed template.
   buildTx app $ do
-    insert groups (VStr "g2") (VStr "Home")
-    insert (itemsColl `at` VStr "g2") (VStr "a") (VStr "water plants")
+    insert groups ("g2" :: Text) ("Home" :: Text)
+    insert (itemsColl `at` ("g2" :: Text)) ("a" :: Text) ("water plants" :: Text)

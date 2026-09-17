@@ -50,14 +50,10 @@ function nest(): void {
   detail.set(nested.join(""));
 }
 
-let status!: kaya.Signal<string>;
-let alive!: kaya.Signal<string>;
-let detail!: kaya.Signal<string>;
-
-app.window({ title: "background" }, () => {
-  status = kaya.signal("idle");
-  alive = kaya.signal("-");
-  detail = kaya.signal("-");
+const { status, alive, detail } = app.window({ title: "background" }, () => {
+  const status = kaya.signal("idle");
+  const alive = kaya.signal("-");
+  const detail = kaya.signal("-");
   kaya.column(() => {
     kaya.label({ bind: status }).a11yId("status"); // label#0
     kaya.label({ bind: alive }).a11yId("alive"); // label#1
@@ -68,6 +64,7 @@ app.window({ title: "background" }, () => {
     kaya.button("release", { onClick: release }); // button#2
     kaya.button("nest", { onClick: nest }); // button#3
   });
+  return { status, alive, detail };
 });
 
 app.run();

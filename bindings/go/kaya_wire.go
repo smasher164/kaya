@@ -143,9 +143,9 @@ const (
 	SectionsPresentationAuto = 0
 	SectionsPresentationBar = 1
 	SectionsPresentationSidebar = 2
-	AppearanceSystem = 0
-	AppearanceLight = 1
-	AppearanceDark = 2
+	AppearanceSystem Appearance = 0
+	AppearanceLight Appearance = 1
+	AppearanceDark Appearance = 2
 	AlertChoiceAction0 = 0
 	AlertChoiceAction1 = 1
 	AlertChoiceCancel = 4294967295
@@ -159,43 +159,43 @@ const (
 	PlatformLinux = 3
 	PlatformWindows = 4
 	PlatformAndroid = 5
-	AlignStart = 0
-	AlignCenter = 1
-	AlignEnd = 2
-	AlignStretch = 3
-	AlignBaseline = 4
-	AxisHorizontal = 0
-	AxisVertical = 1
+	AlignStart Align = 0
+	AlignCenter Align = 1
+	AlignEnd Align = 2
+	AlignStretch Align = 3
+	AlignBaseline Align = 4
+	AxisHorizontal Axis = 0
+	AxisVertical Axis = 1
 	SizeClassNone = 0
 	SizeClassCompact = 1
 	SizeClassRegular = 2
-	RoleDestructive = 1
-	RoleProminent = 2
-	RoleHeading = 3
-	RoleCaption = 4
-	RolePlain = 5
-	RoleSwitch = 6
-	RoleLink = 7
-	SymbolAdd = 1
-	SymbolRemove = 2
-	SymbolDelete = 3
-	SymbolEdit = 4
-	SymbolDone = 5
-	SymbolClose = 6
-	SymbolSearch = 7
-	SymbolSettings = 8
-	SymbolRefresh = 9
-	SymbolInfo = 10
-	SymbolWarning = 11
-	SymbolBack = 12
-	SymbolForward = 13
-	SymbolMore = 14
-	SymbolCopy = 15
-	SymbolPaste = 16
-	SymbolStar = 17
-	SymbolLock = 18
-	SymbolPerson = 19
-	SymbolHome = 20
+	RoleDestructive Role = 1
+	RoleProminent Role = 2
+	RoleHeading Role = 3
+	RoleCaption Role = 4
+	RolePlain Role = 5
+	RoleSwitch Role = 6
+	RoleLink Role = 7
+	SymbolAdd Symbol = 1
+	SymbolRemove Symbol = 2
+	SymbolDelete Symbol = 3
+	SymbolEdit Symbol = 4
+	SymbolDone Symbol = 5
+	SymbolClose Symbol = 6
+	SymbolSearch Symbol = 7
+	SymbolSettings Symbol = 8
+	SymbolRefresh Symbol = 9
+	SymbolInfo Symbol = 10
+	SymbolWarning Symbol = 11
+	SymbolBack Symbol = 12
+	SymbolForward Symbol = 13
+	SymbolMore Symbol = 14
+	SymbolCopy Symbol = 15
+	SymbolPaste Symbol = 16
+	SymbolStar Symbol = 17
+	SymbolLock Symbol = 18
+	SymbolPerson Symbol = 19
+	SymbolHome Symbol = 20
 	SourceConst = 0
 	SourceSignal = 1
 	SourceElement = 2
@@ -355,6 +355,110 @@ const (
 	occTextEdited = 29
 	occTextFormatted = 30
 )
+
+func (a Appearance) String() string {
+	switch a {
+	case AppearanceSystem:
+		return "system"
+	case AppearanceLight:
+		return "light"
+	case AppearanceDark:
+		return "dark"
+	}
+	return "Appearance(" + strconv.FormatInt(int64(a), 10) + ")"
+}
+
+func (a Align) String() string {
+	switch a {
+	case AlignStart:
+		return "start"
+	case AlignCenter:
+		return "center"
+	case AlignEnd:
+		return "end"
+	case AlignStretch:
+		return "stretch"
+	case AlignBaseline:
+		return "baseline"
+	}
+	return "Align(" + strconv.FormatInt(int64(a), 10) + ")"
+}
+
+func (a Axis) String() string {
+	switch a {
+	case AxisHorizontal:
+		return "horizontal"
+	case AxisVertical:
+		return "vertical"
+	}
+	return "Axis(" + strconv.FormatInt(int64(a), 10) + ")"
+}
+
+func (r Role) String() string {
+	switch r {
+	case RoleDestructive:
+		return "destructive"
+	case RoleProminent:
+		return "prominent"
+	case RoleHeading:
+		return "heading"
+	case RoleCaption:
+		return "caption"
+	case RolePlain:
+		return "plain"
+	case RoleSwitch:
+		return "switch"
+	case RoleLink:
+		return "link"
+	}
+	return "Role(" + strconv.FormatInt(int64(r), 10) + ")"
+}
+
+func (s Symbol) String() string {
+	switch s {
+	case SymbolAdd:
+		return "add"
+	case SymbolRemove:
+		return "remove"
+	case SymbolDelete:
+		return "delete"
+	case SymbolEdit:
+		return "edit"
+	case SymbolDone:
+		return "done"
+	case SymbolClose:
+		return "close"
+	case SymbolSearch:
+		return "search"
+	case SymbolSettings:
+		return "settings"
+	case SymbolRefresh:
+		return "refresh"
+	case SymbolInfo:
+		return "info"
+	case SymbolWarning:
+		return "warning"
+	case SymbolBack:
+		return "back"
+	case SymbolForward:
+		return "forward"
+	case SymbolMore:
+		return "more"
+	case SymbolCopy:
+		return "copy"
+	case SymbolPaste:
+		return "paste"
+	case SymbolStar:
+		return "star"
+	case SymbolLock:
+		return "lock"
+	case SymbolPerson:
+		return "person"
+	case SymbolHome:
+		return "home"
+	}
+	return "Symbol(" + strconv.FormatInt(int64(s), 10) + ")"
+}
 
 func pad8(b []byte) []byte {
 	for len(b)%8 != 0 {

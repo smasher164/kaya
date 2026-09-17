@@ -1,14 +1,13 @@
 (* The grow scene, OCaml port — guests/rust/grow.rs, tools/scenes/grow.steps. *)
 
-open Kaya_wire
 open Kaya_app
 
 let () =
   let app = Kaya_app.create () in
 
   build app (fun () ->
-     let probe = signal (Str "grow probe") in
-     let one = signal (Str "one") in
+     let probe = signal_str ("grow probe") in
+     let one = signal_str ("one") in
 
      let root =
        column

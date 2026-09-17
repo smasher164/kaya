@@ -3,7 +3,7 @@
 using System;
 
 [KayaGen]
-record Task(string Name, DateOnly Due);
+record ChoreTask(string Name, DateOnly Due);
 
 static class PickersScene
 {
@@ -22,7 +22,7 @@ static class PickersScene
             var rowText = tx.Signal("row: none");
             var dateSig = tx.Signal(new DateOnly(2026, 9, 4));
             var timeSig = tx.Signal(new TimeOnly(14, 30));
-            var tasks = TaskKaya.Collection(tx);
+            var tasks = ChoreTaskKaya.Collection(tx);
 
             tx.Mount(tx.Column(() =>
             {
@@ -57,8 +57,8 @@ static class PickersScene
                 }
             }));
 
-            tasks.Insert(tx, "a", new Task("a", new DateOnly(2026, 10, 1)));
-            tasks.Insert(tx, "b", new Task("b", new DateOnly(2026, 11, 20)));
+            tasks.Insert(tx, "a", new ChoreTask("a", new DateOnly(2026, 10, 1)));
+            tasks.Insert(tx, "b", new ChoreTask("b", new DateOnly(2026, 11, 20)));
         });
 
         System.Environment.Exit(app.Run());

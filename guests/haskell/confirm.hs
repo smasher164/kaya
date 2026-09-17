@@ -1,14 +1,16 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 -- The confirm scene, Haskell port — guests/rust/confirm.rs,
 -- tools/scenes/confirm.steps.
 
+import qualified Data.Text as T
 import KayaApp
-import KayaWire (Value (..), alertChoiceCancel)
 
 main :: IO ()
 main = kayaMain $ \app -> do
   status <- buildTx app $ do
-    window 0 [WTitle "confirm"]
-    s <- signal (VStr "no decision")
+    window primary [WTitle "confirm"]
+    s <- signal (T.pack "no decision")
     root <-
       column
         []
@@ -25,8 +27,7 @@ main = kayaMain $ \app -> do
                 ( \choice ->
                     buildTx app $
                       writeSignal s $
-                        VStr
-                          ( if choice == alertChoiceCancel
+                        T.pack ( if choice == alertChoiceCancel
                               then "kept"
                               else if choice == 1 then "archived" else "deleted"
                           )
@@ -42,7 +43,7 @@ main = kayaMain $ \app -> do
                 ( \choice ->
                     buildTx app $
                       writeSignal s $
-                        VStr (if choice == alertChoiceCancel then "held" else "ejected")
+                        T.pack (if choice == alertChoiceCancel then "held" else "ejected")
                 )
         ]
     mount root

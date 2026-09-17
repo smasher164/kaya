@@ -70,7 +70,7 @@ def answered(clip):
                 # OFF THE APP THREAD: open() blocks.
                 name = files[0].name
                 try:
-                    handle, _seekable = files[0].open(kaya.wire.FILE_MODE_READ)
+                    handle, _seekable = files[0].open(kaya.FileMode.READ)
                     with handle as f:
                         text = f.read().decode()
                 except OSError as e:

@@ -14,7 +14,7 @@ static class SaveScene
         FileStream stream;
         try
         {
-            (stream, _) = file.Open(KayaWire.FileModeRead);
+            (stream, _) = file.Open(FileAccess.Read);
         }
         catch (Exception e)
         {
@@ -39,7 +39,7 @@ static class SaveScene
         FileStream stream;
         try
         {
-            (stream, _) = file.Open(KayaWire.FileModeWrite);
+            (stream, _) = file.Open(FileAccess.Write);
         }
         catch (Exception e)
         {

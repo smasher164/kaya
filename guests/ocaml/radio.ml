@@ -1,7 +1,6 @@
 (* The radio scene, OCaml port — guests/rust/radio.rs,
    tools/scenes/radio.steps. *)
 
-open Kaya_wire
 open Kaya_app
 
 let options = [ "Small"; "Medium"; "Large" ]
@@ -11,10 +10,10 @@ let () =
 
   build app (fun () ->
      window ~title:"radio" ();
-     let size = signal (Str "size: Small") in
+     let size = signal_str ("size: Small") in
 
      let on_pick index =
-       write size (Str ("size: " ^ List.nth options index))
+       write size (("size: " ^ List.nth options index))
      in
 
      let root =

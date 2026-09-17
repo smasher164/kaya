@@ -13,6 +13,11 @@ import java.util.List;
  * TextRange.in, which converts against the text it indexes.
  */
 public final class RichText {
+    /** Java lambdas cannot assign captured locals. */
+    private static final class Refs {
+        KayaApp.Widget editor;
+    }
+
     /** THE ACCENT IS IN A {@code \}{@code u} ESCAPE: a literal's bytes
      * follow the compiler's encoding, and the Android build that also
      * compiles this directory passes no {@code -encoding}
@@ -42,21 +47,20 @@ public final class RichText {
             KayaApp.Signal<String> last = tx.signal("");
             KayaApp.Signal<String> runs = tx.signal("");
 
-            // Java lambdas cannot assign captured locals.
-            KayaApp.Widget[] editor = new KayaApp.Widget[1];
+            Refs refs = new Refs();
             tx.mount(tx.column(() -> {
-                editor[0] = tx.textarea().rich().a11yId("doc").a11yLabel("Document");
-                app.onEdit(editor[0], (t, edit) -> {
+                refs.editor = tx.textarea().rich().a11yId("doc").a11yLabel("Document");
+                app.onEdit(refs.editor, (t, edit) -> {
                     String source = edit.source() == null ? "?" : edit.source().toString();
                     t.write(last, "edit " + edit.start() + ":" + edit.stop() + " <"
                             + edit.inserted() + "> " + source + " ["
                             + spell(edit.runs()) + "]");
-                    t.write(runs, spell(app.document(editor[0]).runs()));
+                    t.write(runs, spell(app.document(refs.editor).runs()));
                 });
-                app.onFormat(editor[0], (t, act) -> {
+                app.onFormat(refs.editor, (t, act) -> {
                     t.write(last, "format " + act.start() + ":" + act.stop() + " "
                             + act.name() + "=" + (act.value() == null ? "off" : act.value()));
-                    t.write(runs, spell(app.document(editor[0]).runs()));
+                    t.write(runs, spell(app.document(refs.editor).runs()));
                 });
 
                 tx.label(last); // label#0
@@ -69,7 +73,7 @@ public final class RichText {
                                 .link(KayaApp.TextRange.in(DOC, 6, 11), URL)
                                 .block(KayaApp.TextRange.in(DOC, 12, 23),
                                         KayaApp.Block.HEADING2);
-                        t.setDocument(editor[0], doc);
+                        t.setDocument(refs.editor, doc);
                         t.write(runs, spell(doc.runs()));
                     });
                     tx.button("insert", t -> { // button#1
@@ -77,19 +81,19 @@ public final class RichText {
                                 KayaApp.Edit.insert(KayaApp.TextRange.in(DOC, 5, 5), ", big")
                                         .mark(KayaApp.TextRange.in(", big", 2, 5), "italic",
                                                 "true");
-                        t.applyEdit(editor[0], edit);
-                        t.write(runs, spell(app.document(editor[0]).runs()));
+                        t.applyEdit(refs.editor, edit);
+                        t.write(runs, spell(app.document(refs.editor).runs()));
                     });
                     tx.button("select word", t -> // button#2
-                            t.selectRange(editor[0], KayaApp.TextRange.in(DOC, 0, 5)));
-                    tx.button("unbold", t -> t.unformat(editor[0], "bold")); // button#3
+                            t.selectRange(refs.editor, KayaApp.TextRange.in(DOC, 0, 5)));
+                    tx.button("unbold", t -> t.unformat(refs.editor, "bold")); // button#3
                     tx.button("heading", t -> // button#4
-                            t.setBlock(editor[0], KayaApp.Block.HEADING1));
-                    tx.button("focus", t -> t.focus(editor[0])); // button#5
+                            t.setBlock(refs.editor, KayaApp.Block.HEADING1));
+                    tx.button("focus", t -> t.focus(refs.editor)); // button#5
                     tx.button("prefix", t -> { // button#6
-                        t.applyEdit(editor[0],
+                        t.applyEdit(refs.editor,
                                 KayaApp.Edit.insert(KayaApp.TextRange.in(DOC, 0, 0), "> "));
-                        t.write(runs, spell(app.document(editor[0]).runs()));
+                        t.write(runs, spell(app.document(refs.editor).runs()));
                     });
                 });
             }));

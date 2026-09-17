@@ -33,15 +33,11 @@ function onRemove(item: kaya.RowHandle<string>): void {
   status.set(`removed ${group}/${item.key}, ${items.at(group).size} left`);
 }
 
-let steps!: kaya.Signal<number>;
-let status!: kaya.Signal<string>;
-let groups!: kaya.Collection<string, kaya.Element>;
-let items!: kaya.Collection<string, kaya.Element>;
-
-app.window(() => {
-  steps = kaya.signal(0);
-  status = kaya.signal("step 0");
-  groups = kaya.collection();
+const { steps, status, groups, items } = app.window(() => {
+  const steps = kaya.signal(0);
+  const status = kaya.signal("step 0");
+  const groups = kaya.collection();
+  let items!: kaya.Collection<string, kaya.Element>;
 
   kaya.column(() => {
     kaya.button("step", { onClick: onStep });
@@ -63,6 +59,7 @@ app.window(() => {
       });
     }
   });
+  return { steps, status, groups, items };
 });
 
 app.run();

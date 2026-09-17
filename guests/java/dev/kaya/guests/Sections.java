@@ -1,7 +1,6 @@
 package dev.kaya.guests;
 
 import dev.kaya.KayaApp;
-import dev.kaya.KayaWire;
 
 /**
  * The sections scene from the JVM — guests/rust/sections.rs,
@@ -24,7 +23,7 @@ public final class Sections {
         app.build(tx -> {
             tx.window(0)
                     .title("sections")
-                    .sectionsPresentation(KayaWire.SECTIONS_PRESENTATION_BAR);
+                    .sectionsPresentation(KayaApp.SectionsPresentation.BAR);
             KayaApp.Signal<String> visits = tx.signal("archive: 0 visits");
 
             // A symbol names a CONCEPT (docs/styling-plan.md D6).
@@ -50,7 +49,7 @@ public final class Sections {
                 tx.button("open library", inner -> { // button#1
                     inner.createWindow(LIBRARY)
                             .title("library")
-                            .sectionsPresentation(KayaWire.SECTIONS_PRESENTATION_SIDEBAR);
+                            .sectionsPresentation(KayaApp.SectionsPresentation.SIDEBAR);
                     long shelves = inner.addSectionIn(LIBRARY, SHELVES)
                             .title("Shelves")
                             .symbol(KayaApp.Symbol.SEARCH)

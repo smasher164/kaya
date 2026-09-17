@@ -1,7 +1,6 @@
 (* The tooltips scene, OCaml port — guests/rust/tooltips.rs,
    tools/scenes/tooltips.steps, docs/tooltip-plan.md. *)
 
-open Kaya_wire
 open Kaya_app
 
 type account = { name : string; note : string } [@@deriving kaya_gen]
@@ -10,7 +9,7 @@ let () =
   let app = Kaya_app.create () in
 
   build app (fun () ->
-      let name_help = signal (Str "Your full name as it appears on the card") in
+      let name_help = signal_str ("Your full name as it appears on the card") in
       let accounts = collection_of account_record in
 
       let root =
@@ -19,7 +18,7 @@ let () =
             button ~text:"Save" ~help:"Saves the draft to disk"    (* button#0 *)
               ~a11y_id:"save"
               ~on_click:(fun () ->
-                write name_help (Str "Your name, as saved"));
+                write name_help ("Your name, as saved"));
             button ~text:"Discard" ~help:"Throws the draft away"   (* button#1 *)
               ~a11y_hint:"discard every change" ~a11y_id:"discard";
             entry ~help_bind:name_help ~a11y_id:"fullname";        (* entry#0 *)
@@ -38,9 +37,9 @@ let () =
       in
       mount root;
 
-      insert_record accounts (Str "a")
+      insert_record accounts (str_key "a")
         { name = "a"; note = "The first account, opened in March" };
-      insert_record accounts (Str "b")
+      insert_record accounts (str_key "b")
         { name = "b"; note = "The second account, opened in May" });
 
   exit (run app)

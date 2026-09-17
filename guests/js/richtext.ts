@@ -36,7 +36,7 @@ function onSeed(): void {
 }
 
 function onInsert(): void {
-  editor.applyEdit(kaya.Edit.insert(6, ", big").mark([2, 5], "italic", "true"));
+  editor.applyEdit(kaya.Edit.insert(6, ", big").mark([2, 5], "italic", true));
   runs.set(spell(editor.document().runs));
 }
 
@@ -61,13 +61,10 @@ function onPrefix(): void {
   runs.set(spell(editor.document().runs));
 }
 
-let last!: kaya.Signal<string>;
-let runs!: kaya.Signal<string>;
-let editor!: kaya.Widget;
-
-app.window({ title: "richtext" }, () => {
-  last = kaya.signal("");
-  runs = kaya.signal("");
+const { last, runs, editor } = app.window({ title: "richtext" }, () => {
+  const last = kaya.signal("");
+  const runs = kaya.signal("");
+  let editor!: kaya.Widget;
   kaya.column(() => {
     editor = kaya.textarea({ rich: true, onEdit, onFormat }); // textarea#0
     editor.a11yId("doc").a11yLabel("Document");
@@ -83,6 +80,7 @@ app.window({ title: "richtext" }, () => {
       kaya.button("prefix", { onClick: onPrefix }); // button#6
     });
   });
+  return { last, runs, editor };
 });
 
 app.run();

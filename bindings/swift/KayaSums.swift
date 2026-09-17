@@ -174,13 +174,8 @@ struct KayaSumCollection<T: KayaSumElement> {
 
     /// One arm of the template eliminator: `of` is the constructor's
     /// prototype, the body its blueprint author.
-    func arm(
-        _ prototype: T, _ body: @escaping (KayaTpl, KayaSumCase<T>) -> Void
-    ) -> KayaSumArm<T> {
-        let variant = prototype.kayaVariant
-        return KayaSumArm(variant: variant) { t in
-            body(t, KayaSumCase(variant: variant, labels: T.kayaLabels(variant: variant)))
-        }
+    func arm(_ prototype: T, _ body: @escaping (KayaTpl) -> Void) -> KayaSumArm<T> {
+        KayaSumArm(variant: prototype.kayaVariant, body: body)
     }
 }
 
@@ -189,34 +184,6 @@ struct KayaSumCollection<T: KayaSumElement> {
 struct KayaSumArm<T: KayaSumElement> {
     let variant: UInt32
     let body: (KayaTpl) -> Void
-}
-
-/// The arm's refined vocabulary: field names resolve against the
-/// constructor's associated-value labels, loudly, at declaration.
-struct KayaSumCase<T: KayaSumElement> {
-    let variant: UInt32
-    let labels: [String]
-
-    private func index(of fieldName: String) -> UInt32 {
-        guard let index = labels.firstIndex(of: fieldName) else {
-            preconditionFailure("kaya: no wire field \(fieldName) in this constructor")
-        }
-        return UInt32(index)
-    }
-
-    /// A label bound to the field named by its associated-value label.
-    func label(_ t: KayaTpl, _ fieldName: String) -> KayaNodeHandle {
-        t.label(KayaField<String>(index: index(of: fieldName)))
-    }
-
-    /// A checkbox bound to the named field, with its toggle handler
-    /// co-located (stamped keys first).
-    func checkbox(
-        _ t: KayaTpl, _ fieldName: String,
-        onToggle: ((KayaAppTx, [KayaValue], Bool) throws -> Void)? = nil
-    ) -> KayaNodeHandle {
-        t.checkbox(KayaField<Bool>(index: index(of: fieldName)), onToggle: onToggle)
-    }
 }
 
 extension KayaAppTx {

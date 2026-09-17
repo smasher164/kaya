@@ -1,7 +1,6 @@
 (* The reorder scene, OCaml port — guests/rust/reorder.rs,
    tools/scenes/reorder.steps. *)
 
-open Kaya_wire
 open Kaya_app
 
 type item = { title : string } [@@deriving kaya_gen]
@@ -34,8 +33,8 @@ let () =
          ()
      in
      mount root;
-     insert_record items (Str "a") { title = "a" };
-     insert_record items (Str "b") { title = "b" };
-     insert_record items (Str "c") { title = "c" });
+     insert_record items (str_key "a") { title = "a" };
+     insert_record items (str_key "b") { title = "b" };
+     insert_record items (str_key "c") { title = "c" });
 
   exit (run app)

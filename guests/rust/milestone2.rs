@@ -1,7 +1,7 @@
 //! The milestone-2 scene (tools/scenes/milestone2.steps). ONE OF TWO RUST
 //! GUESTS ON THE RAW EVENT SURFACE: it matches `ctx.next()` directly.
 
-use kaya::{Occurrence, Value};
+use kaya::{Occurrence, PathKey};
 
 #[derive(kaya::KayaGen, Clone, Debug, PartialEq)]
 struct Group {
@@ -83,12 +83,11 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 });
             }
             Occurrence::InstanceButtonClicked { node, path } if node == remove_button => {
-                let [Value::Str(group), Value::Str(item)] = &path[..] else {
-                    panic!("remove click carries [group, item], got {path:?}");
-                };
-                let todos = items.at(path[0].clone());
+                let group = path.key::<String>(0);
+                let item = path.key::<String>(1);
+                let todos = items.at(group.clone());
                 ctx.apply(|tx| {
-                    tx.remove(&todos, path[1].clone());
+                    tx.remove(&todos, item.clone());
                     let left = tx.len(&todos);
                     tx.write(status, format!("removed {group}/{item}, {left} left"));
                 });

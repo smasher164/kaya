@@ -27,7 +27,7 @@ dropped_dir.mkdir(parents=True, exist_ok=True)
 
 def read_back(picked):
     try:
-        handle, _seekable = picked.open(kaya.wire.FILE_MODE_READ)
+        handle, _seekable = picked.open(kaya.FileMode.READ)
         with handle as f:
             return f.read().decode()
     except OSError as e:

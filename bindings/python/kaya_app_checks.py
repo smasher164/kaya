@@ -3363,59 +3363,60 @@ finally:
     kaya.runtime.app_data_dir = _real_dir
 
 _prefs = kaya.prefs()
-_prefs.set_string("s4_str", "Sunday")
-_prefs.set_i64("s4_int", -7)
-_prefs.set_f64("s4_float", 1.5)
-_prefs.set_bool("s4_bool", True)
+_prefs.set("s4_str", "Sunday")
+_prefs.set("s4_int", -7)
+_prefs.set("s4_float", 1.5)
+_prefs.set("s4_bool", True)
 check("a string round-trips through the platform's own store",
-      _prefs.get_string("s4_str", "?") == "Sunday")
+      _prefs.get("s4_str", "?") == "Sunday")
 check("an i64 round-trips, sign and all",
-      _prefs.get_i64("s4_int", 0) == -7)
-check("an f64 round-trips", _prefs.get_f64("s4_float", 0.0) == 1.5)
-check("a bool round-trips", _prefs.get_bool("s4_bool", False) is True)
+      _prefs.get("s4_int", 0) == -7)
+check("an f64 round-trips", _prefs.get("s4_float", 0.0) == 1.5)
+check("a bool round-trips", _prefs.get("s4_bool", False) is True)
 
 # THE SIZING CALL IS TWO CALLS, so a value longer than any fixed buffer
 # comes back WHOLE — the asset_miss_sentence lesson, one surface over.
 _long = "x" * 5000
-_prefs.set_string("s4_long", _long)
+_prefs.set("s4_long", _long)
 check("a 5000-character value comes back whole (the two-call read)",
-      _prefs.get_string("s4_long", "") == _long)
+      _prefs.get("s4_long", "") == _long)
 # BYTES, NOT A C STRING: the key and the value carry their lengths, so a
 # multi-byte character survives and an embedded NUL cannot truncate.
-_prefs.set_string("s4_utf8", "Sonnabend — ✓")
+_prefs.set("s4_utf8", "Sonnabend — ✓")
 check("a non-ASCII value round-trips (length-carried, not NUL-terminated)",
-      _prefs.get_string("s4_utf8", "") == "Sonnabend — ✓")
-_prefs.set_string("s4_empty", "")
+      _prefs.get("s4_utf8", "") == "Sonnabend — ✓")
+_prefs.set("s4_empty", "")
 check("an EMPTY string is a value, not an absence",
-      _prefs.get_string("s4_empty", "fallback") == "")
+      _prefs.get("s4_empty", "fallback") == "")
 
 # A TYPED GET ON ANOTHER TYPE ANSWERS ABSENT (the semantics, §4):
 # UserDefaults would coerce and SharedPreferences would throw, and
-# neither is what kaya promises.
-check("get_i64 on a string key answers the DEFAULT",
-      _prefs.get_i64("s4_str", 42) == 42)
-check("get_string on an i64 key answers the DEFAULT",
-      _prefs.get_string("s4_int", "fallback") == "fallback")
-check("get_bool on an f64 key answers the DEFAULT",
-      _prefs.get_bool("s4_float", False) is False)
-check("get_f64 on a bool key answers the DEFAULT",
-      _prefs.get_f64("s4_bool", 9.5) == 9.5)
+# neither is what kaya promises. The DEFAULT's type picks the slot, bool
+# before int.
+check("get(i64 default) on a string key answers the DEFAULT",
+      _prefs.get("s4_str", 42) == 42)
+check("get(str default) on an i64 key answers the DEFAULT",
+      _prefs.get("s4_int", "fallback") == "fallback")
+check("get(bool default) on an f64 key answers the DEFAULT",
+      _prefs.get("s4_float", False) is False)
+check("get(f64 default) on a bool key answers the DEFAULT",
+      _prefs.get("s4_bool", 9.5) == 9.5)
 check("an absent key answers the DEFAULT",
-      _prefs.get_string("s4_never_written", "fallback") == "fallback")
+      _prefs.get("s4_never_written", "fallback") == "fallback")
 
 _prefs.remove("s4_int")
 check("remove takes the key back out",
-      _prefs.get_i64("s4_int", 42) == 42)
+      _prefs.get("s4_int", 42) == 42)
 
 # THE RESERVED PREFIX (P4). Window memory lives under `kaya.`, so a
 # guest WRITE to one is refused BINDING-SIDE, before the floor call, with
 # the sentence tools/check-sugar-surface.py freezes across all nine.
 _reserved_said = []
 for _what, _write in (
-        ("set_string", lambda: _prefs.set_string("kaya.window.0.frame", "x")),
-        ("set_i64", lambda: _prefs.set_i64("kaya.n", 1)),
-        ("set_f64", lambda: _prefs.set_f64("kaya.f", 1.0)),
-        ("set_bool", lambda: _prefs.set_bool("kaya.b", True)),
+        ("set(str)", lambda: _prefs.set("kaya.window.0.frame", "x")),
+        ("set(i64)", lambda: _prefs.set("kaya.n", 1)),
+        ("set(f64)", lambda: _prefs.set("kaya.f", 1.0)),
+        ("set(bool)", lambda: _prefs.set("kaya.b", True)),
         ("remove", lambda: _prefs.remove("kaya.window.0.frame"))):
     try:
         _write()
@@ -3423,12 +3424,12 @@ for _what, _write in (
     except ValueError as e:
         if str(e) != ('kaya: preference key "kaya.window.0.frame" is '
                       "reserved (the kaya. prefix is kaya's own)") \
-                and _what in ("set_string", "remove"):
+                and _what in ("set(str)", "remove"):
             _reserved_said.append(f"{_what} said {str(e)!r}")
 check("every write to a reserved key is refused, by name",
       _reserved_said == [])
 try:
-    _prefs.set_string("kaya.window.0.frame", "x")
+    _prefs.set("kaya.window.0.frame", "x")
     check("the reserved refusal names the key and the prefix", False)
 except ValueError as e:
     check("the reserved refusal names the key and the prefix",
@@ -3438,15 +3439,15 @@ except ValueError as e:
 # A READ of a reserved key is NOT refused: P4 reserves the prefix against
 # a guest WRITE, and kaya's own frame is no secret.
 try:
-    _prefs.get_string("kaya.window.0.frame", "unset")
+    _prefs.get("kaya.window.0.frame", "unset")
     check("a READ of a reserved key is allowed", True)
 except ValueError:
     check("a READ of a reserved key is allowed", False)
 
 _empty_said = []
 for _what, _call in (
-        ("get_string", lambda: _prefs.get_string("", "d")),
-        ("set_i64", lambda: _prefs.set_i64("", 1)),
+        ("get(str default)", lambda: _prefs.get("", "d")),
+        ("set(i64)", lambda: _prefs.set("", 1)),
         ("remove", lambda: _prefs.remove(""))):
     try:
         _call()
@@ -3463,11 +3464,11 @@ for _key in ("s4_str", "s4_int", "s4_float", "s4_bool", "s4_long",
              "s4_utf8", "s4_empty"):
     _prefs.remove(_key)
 check("the checks leave nothing of their own behind",
-      all(_prefs.get_string(k, "<gone>") == "<gone>"
+      all(_prefs.get(k, "<gone>") == "<gone>"
           for k in ("s4_str", "s4_long", "s4_utf8", "s4_empty"))
-      and _prefs.get_i64("s4_int", -1) == -1
-      and _prefs.get_f64("s4_float", -1.0) == -1.0
-      and _prefs.get_bool("s4_bool", False) is False)
+      and _prefs.get("s4_int", -1) == -1
+      and _prefs.get("s4_float", -1.0) == -1.0
+      and _prefs.get("s4_bool", False) is False)
 
 # ------------------------------------------------------------- rich text
 # THE BINDING'S DOCUMENT IS THE CORE'S, FOLDED (docs/rich-text-plan.md R1):
@@ -4031,5 +4032,79 @@ kaya.runtime.submit = _real_ship
 
 print(f"rich text: {len(_rich_checks)} checks over the fold, driven from "
       f"packed occurrence bytes through App._dispatch_loop")
+
+# ------------------------------------------------------- the idiom pass
+# F3: a call past the primary argument is refused positionally — Python
+# itself enforces this once the signature is keyword-only, so the
+# refusal is a bare TypeError, not a kaya one. Inside an open transaction
+# so a perturbed signature that ACCEPTS the call (the transposition bug
+# this guards against) reports a clean FAIL rather than crashing on an
+# unrelated state error.
+_f3_app = kaya.App()
+with _f3_app.window():
+    with _f3_app.menu("File"):
+        try:
+            kaya.item("Save", True)
+            check("a positional call past item()'s primary argument "
+                  "is refused", False)
+        except TypeError as e:
+            check("a positional call past item()'s primary argument "
+                  "is refused", "positional argument" in str(e))
+
+# F4: the closed vocabularies are enum.IntEnum now, and an unknown name
+# is refused by the SAME sentence on every one of them, including the
+# two (Align, Axis) and the new one (FileMode) no earlier check touches.
+for _cls, _bad_name, _bad_int in (
+        (kaya.Align, "bogus", 999),
+        (kaya.Axis, "bogus", 999),
+        (kaya.FileMode, "bogus", 999)):
+    try:
+        _cls(_bad_name)
+        check(f"{_cls.__name__} refuses an unknown name", False)
+    except ValueError as e:
+        check(f"{_cls.__name__} refuses an unknown name",
+              isinstance(e, kaya.KayaValueError)
+              and "must be one of" in str(e))
+    try:
+        _cls(_bad_int)
+        check(f"{_cls.__name__} refuses a number outside the vocabulary",
+              False)
+    except ValueError as e:
+        check(f"{_cls.__name__} refuses a number outside the vocabulary",
+              isinstance(e, kaya.KayaValueError) and "is not a" in str(e))
+check("kaya.FileMode.WRITE is the wire's own number",
+      kaya.FileMode.WRITE == kaya.wire.FILE_MODE_WRITE == 1)
+
+# F5: local_path is a pathlib.Path, None where the wire sent no
+# re-openable name (an empty string, never Path("") — Path("") would
+# normalize to ".", a real path).
+_picked_with_path = kaya.PickedFile(7, "a.txt", "/tmp/a.txt")
+_picked_without = kaya.PickedFile(8, "a.txt", "")
+check("PickedFile.local_path is a Path when the wire sent one",
+      _picked_with_path.local_path == kaya.pathlib.Path("/tmp/a.txt"))
+check("and None, never Path(''), when it sent none",
+      _picked_without.local_path is None)
+
+# F6: Prefs.get dispatches on the DEFAULT's type, bool before int — a
+# value written as a bool does not answer an int-defaulted get, and vice
+# versa, exactly like the other three cross-type pairs already checked.
+_prefs.set("s4_boolcheck", True)
+check("Prefs.get with an int default does not answer a value stored bool",
+      _prefs.get("s4_boolcheck", 0) == 0)
+check("Prefs.get with a bool default reads the bool back",
+      _prefs.get("s4_boolcheck", False) is True)
+_prefs.remove("s4_boolcheck")
+
+# F7: KayaError is the base every kaya-specific raise now mixes in, so
+# `except kaya.KayaError` catches a STATE error (RuntimeError's spelling)
+# same as `except RuntimeError` does.
+_state_app = kaya.App()
+try:
+    kaya.column()
+    check("except kaya.KayaError catches a state error", False)
+except kaya.KayaError as e:
+    check("except kaya.KayaError catches a state error",
+          isinstance(e, RuntimeError) and "no ambient transaction" in str(e))
+del _state_app
 
 sys.exit(1 if failures else 0)

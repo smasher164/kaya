@@ -1,9 +1,12 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 -- The align scene, Haskell port — guests/rust/align.rs,
 -- tools/scenes/align.steps.
 
 import qualified Data.ByteString as BS
+import Data.Text (Text)
+import qualified Data.Text as T
 import KayaApp
-import KayaWire (Value (..))
 
 -- A 100x20 PNG: exact pixel widths, so row@wrapped breaks onto two lines
 -- in every lane's window (docs/layout-knobs-plan.md §2).
@@ -38,23 +41,23 @@ tallPng =
 main :: IO ()
 main = kayaMain $ \app -> do
   buildTx app $ do
-    probe <- signal (VStr "align probe")
-    base <- signal (VStr "base")
-    anchor <- signal (VStr "anchor")
-    fit <- signal (VStr "fit")
-    plain <- signal (VStr "plain probe")
+    probe <- signal (T.pack "align probe")
+    base <- signal (T.pack "base")
+    anchor <- signal (T.pack "anchor")
+    fit <- signal (T.pack "fit")
+    plain <- signal (T.pack "plain probe")
 
     root <-
       column
-        [Align AlignStretch, A11yId "root"]
+        [Align AlignStretch, A11yId ("root" :: Text)]
         [ -- the center trio
           column
-            [Align AlignCenter, A11yId "centered"]
+            [Align AlignCenter, A11yId ("centered" :: Text)]
             [ labelBound probe, -- label#0
               buttonOn "mid" (return ()),
               -- the baseline trio
               row
-                [Align AlignBaseline, A11yId "baseline"]
+                [Align AlignBaseline, A11yId ("baseline" :: Text)]
                 [ labelBound base, -- label#1
                   buttonOn "tick" (return ()),
                   imageBytes tallPng
@@ -65,7 +68,7 @@ main = kayaMain $ \app -> do
             []
             [ labelBound anchor, -- label#2
               column
-                [Grow 1, Align AlignStretch, A11yId "fitcol"]
+                [Grow 1, Align AlignStretch, A11yId ("fitcol" :: Text)]
                 [ labelBound fit, -- label#3
                   buttonOn "wide" (return ())
                 ]
@@ -73,19 +76,19 @@ main = kayaMain $ \app -> do
           -- row@plain: NO align, so the core's centre default is what the
           -- scene reads
           row
-            [A11yId "plain"]
-            [ labelBound plain [A11yId "plainlabel"], -- label#4
+            [A11yId ("plain" :: Text)]
+            [ labelBound plain [A11yId ("plainlabel" :: Text)], -- label#4
               imageBytes tallPng
             ],
           -- column@knobs: NO align; fill opts one child out of its
           -- default and one in
           column
-            [A11yId "knobs"]
-            [ textarea [Fill False, A11yId "optout"],
-              button "fills" [Fill True, A11yId "fills"],
+            [A11yId ("knobs" :: Text)]
+            [ textarea [Fill False, A11yId ("optout" :: Text)],
+              button "fills" [Fill True, A11yId ("fills" :: Text)],
               -- row@wrapped: six exact-width images flow onto two lines
               row
-                [Wrap True, A11yId "wrapped"]
+                [Wrap True, A11yId ("wrapped" :: Text)]
                 (replicate 6 (imageBytes widePng))
             ]
         ]

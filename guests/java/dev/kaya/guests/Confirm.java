@@ -1,7 +1,6 @@
 package dev.kaya.guests;
 
 import dev.kaya.KayaApp;
-import dev.kaya.KayaWire;
 
 /**
  * The confirm scene from the JVM — guests/rust/confirm.rs,
@@ -24,9 +23,9 @@ public final class Confirm {
                             .action("Archive")
                             .cancel("Keep")
                             .onResult((tx2, choice) -> {
-                                if (choice == KayaWire.ALERT_CHOICE_CANCEL) {
+                                if (choice == KayaApp.AlertChoice.CANCEL) {
                                     tx2.write(status, "kept");
-                                } else if (choice == 1) {
+                                } else if (choice == KayaApp.AlertChoice.ACTION1) {
                                     tx2.write(status, "archived");
                                 } else {
                                     tx2.write(status, "deleted");
@@ -42,7 +41,7 @@ public final class Confirm {
                             .cancel("Hold")
                             .onResult((tx2, choice) -> {
                                 tx2.write(status,
-                                        choice == KayaWire.ALERT_CHOICE_CANCEL
+                                        choice == KayaApp.AlertChoice.CANCEL
                                                 ? "held" : "ejected");
                             })
                             .show();

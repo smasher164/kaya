@@ -1,34 +1,39 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE DeriveAnyClass #-}
 
 -- The reorder scene, Haskell port — guests/rust/reorder.rs,
 -- tools/scenes/reorder.steps.
 
-import Data.Proxy (Proxy (..))
 import GHC.Generics (Generic)
 
+import Data.Text (Text)
 import KayaApp
-import KayaWire (Value (..))
 
-data Item = Item {title :: String} deriving (Generic)
+data Item = Item {title :: Text}
+  deriving stock (Generic)
+  deriving anyclass (KayaRecord)
 
-instance KayaRecord Item
 
 main :: IO ()
 main = kayaMain $ \app -> do
   buildTx app $ do
-    items <- collectionOf (Proxy :: Proxy Item)
+    items <- collectionOf @Item
 
     let onRotate = submitTx app $ do
           entries <- recordItems items
-          let (firstKey, _) = head entries
-          moveToEnd (recordHandle items) firstKey
+          case entries of
+            (firstKey, _) : _ -> moveToEnd (recordHandle items) firstKey
+            [] -> return ()
         onLift = submitTx app $ do
           -- Keys, never indices.
           entries <- recordItems items
-          let (lastKey, _) = last entries
-          moveToFront (recordHandle items) lastKey
+          case reverse entries of
+            (lastKey, _) : _ -> moveToFront (recordHandle items) lastKey
+            [] -> return ()
 
     root <-
       row
@@ -37,4 +42,4 @@ main = kayaMain $ \app -> do
           each (recordHandle items) $ label (field @"title" @Item)
         ]
     mount root
-    mapM_ (\k -> insertRecord items (VStr k) (Item k)) ["a", "b", "c"]
+    mapM_ (\k -> insertRecord items k (Item k)) ["a", "b", "c"]

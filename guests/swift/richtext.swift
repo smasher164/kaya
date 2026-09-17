@@ -11,8 +11,8 @@ let document = "Héllo world\nSecond line"
 func spell(_ runs: [KayaRun]) -> String {
     runs.map { run in
         run.value == "true"
-            ? "\(run.start):\(run.end) \(run.name)"
-            : "\(run.start):\(run.end) \(run.name)=\(run.value)"
+            ? "\(run.range.lowerBound):\(run.range.upperBound) \(run.name)"
+            : "\(run.range.lowerBound):\(run.range.upperBound) \(run.name)=\(run.value)"
     }.joined(separator: "|")
 }
 
@@ -34,7 +34,7 @@ app.build { tx in
                 let mirror = spell(app.document(editor).runs)
                 t.write(
                     last,
-                    .str("edit \(edit.start):\(edit.end) <\(edit.inserted)> "
+                    .str("edit \(edit.range.lowerBound):\(edit.range.upperBound) <\(edit.inserted)> "
                         + "\(edit.source?.name ?? "?") [\(spell(edit.runs))]"))
                 t.write(runs, .str(mirror))
             },
@@ -42,7 +42,7 @@ app.build { tx in
                 let mirror = spell(app.document(editor).runs)
                 t.write(
                     last,
-                    .str("format \(act.start):\(act.end) \(act.name)="
+                    .str("format \(act.range.lowerBound):\(act.range.upperBound) \(act.name)="
                         + "\(act.value ?? "off")"))
                 t.write(runs, .str(mirror))
             })

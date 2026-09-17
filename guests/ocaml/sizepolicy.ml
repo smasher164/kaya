@@ -1,7 +1,6 @@
 (* The sizepolicy scene, OCaml port — guests/rust/sizepolicy.rs,
    tools/scenes/sizepolicy.steps. *)
 
-(* No [open Kaya_wire]: this scene names no wire value constructor. *)
 open Kaya_app
 
 (* The declared box of the two CONSTANT-mode canvases: the one number

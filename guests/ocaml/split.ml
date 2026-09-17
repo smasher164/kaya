@@ -1,7 +1,6 @@
 (* The split scene, OCaml port — guests/rust/split.rs,
    tools/scenes/split.steps. *)
 
-open Kaya_wire
 open Kaya_app
 
 let detail = 7L
@@ -11,12 +10,12 @@ let () =
 
   build app (fun () ->
      window ~title:"split" ~panes:2 ();
-     let s = signal (Str "list pane") in
+     let s = signal_str ("list pane") in
      let on_detail () =
        push_entry ~title:"detail"
-         ~on_popped:(fun () -> write s (Str "popped detail"))
+         ~on_popped:(fun () -> write s ("popped detail"))
          detail;
-       (let caption = signal (Str "detail pane") in
+       (let caption = signal_str ("detail pane") in
         let pane = column [ label ~a11y_id:"detail" ~bind:caption ] () in
         mount_in detail pane)
      in

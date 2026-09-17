@@ -38,18 +38,16 @@ function onToggle(todo: kaya.RowHandle<kaya.Fields<typeof Todo.schema>>, checked
   todo.done = checked;
 }
 
-let field!: kaya.Widget;
-let todos!: kaya.Collection<kaya.Fields<typeof Todo.schema>, kaya.Row<typeof Todo.schema>>;
-
-app.window({ title: "todos" }, () => {
+const { field, todos } = app.window({ title: "todos" }, () => {
   app.menu("Edit", () => {
     kaya.item("Undo", { role: kaya.ROLE_UNDO });
     kaya.item("Redo", { role: kaya.ROLE_REDO });
   });
 
-  todos = kaya.collection(Todo);
+  const todos = kaya.collection(Todo);
   const itemsLeft = todos.derive(itemsLeftText);
 
+  let field!: kaya.Widget;
   kaya.column(() => {
     field = kaya.entry({ onChange });
     kaya.button("Add", { onClick: onAdd });
@@ -62,6 +60,7 @@ app.window({ title: "todos" }, () => {
       });
     }
   });
+  return { field, todos };
 });
 
 app.run();

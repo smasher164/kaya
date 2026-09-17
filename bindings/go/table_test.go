@@ -267,7 +267,7 @@ func TestANestedRecordCollectionIsDeclaredInTheTemplateAndAddressedTyped(t *test
 			// The row surface embeds *Tpl and Tpl.tx is unexported, so this free
 			// function is the only way into the template zone from here.
 			positions = TplCollectionOf[string, nestedPosition](account.Tpl)
-			nested := account.Rows(positions.Collection)
+			nested := account.Rows(positions.Coll)
 			for row := range nested.All() {
 				row.Row(func() {
 					positions.Label(row.Tpl, nestedSymbol)
@@ -325,7 +325,7 @@ func TestANestedRecordCollectionIsDeclaredInTheTemplateAndAddressedTyped(t *test
 		accounts := tx.Collection()
 		for account := range tx.Rows(accounts).All() {
 			inner = TplCollectionOf[string, nestedPosition](account.Tpl)
-			for row := range account.Rows(inner.Collection).All() {
+			for row := range account.Rows(inner.Coll).All() {
 				row.Row(func() { inner.Label(row.Tpl, nestedSymbol) })
 			}
 		}

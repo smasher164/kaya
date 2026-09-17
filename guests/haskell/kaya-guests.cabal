@@ -10,15 +10,33 @@ build-type: Simple
 
 common shared
   default-language: GHC2021
-  build-depends: base, bytestring, containers
-  ghc-options: -threaded -O
+  -- `text`: KayaApp's public surface is Text, not String (the idiom
+  -- pass's F3), so every guest that names the type in a signature (a
+  -- record field, most of them) needs it too, not just the library.
+  build-depends: base, bytestring, containers, text
+  -- -Wall -Wcompat, MINUS -Wname-shadowing: turning the full set on found
+  -- 91 shadowing sites (a guest's own `text`/`items`/`label`/`entry`/...
+  -- lambda or `let` parameter reusing a KayaApp sugar name in the SAME
+  -- file, never the same expression — lexically safe, and idiomatic
+  -- Haskell projects commonly special-case this exact warning out of
+  -- -Wall for that reason). A rename sweep at that scale across the
+  -- binding and every guest was judged disproportionate risk for a
+  -- style-only warning under this pass's time budget — recorded here
+  -- rather than silently dropped; every OTHER -Wall/-Wcompat warning
+  -- (unused imports, unused top-level bindings, duplicate exports,
+  -- unused matches, partial head/tail/last uses) was fixed, not
+  -- suppressed.
+  ghc-options: -threaded -O -Wall -Wcompat -Wno-name-shadowing
 
 library
   import: shared
   -- `time` for the picker types: KayaApp's Date/Time field instances are
-  -- Day and TimeOfDay (docs/datetime-plan.md D2).
-  build-depends: time
-  exposed-modules: KayaApp, KayaRuntime, KayaWire
+  -- Day and TimeOfDay (docs/datetime-plan.md D2). `mtl`/`transformers`
+  -- for Build/Tpl's State-derived Monad (the idiom pass's F7) — both are
+  -- GHC boot packages on this toolchain, so this costs nothing beyond
+  -- base.
+  build-depends: time, mtl, transformers
+  exposed-modules: KayaApp, Kaya.Core, KayaRuntime, KayaWire
   hs-source-dirs: ../../bindings/haskell
   c-sources: ../../bindings/haskell/kaya_hs_stubs.c
   extra-libraries: kaya

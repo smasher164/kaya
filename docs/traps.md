@@ -9187,11 +9187,14 @@ neither can see the other's gap.
 
 ## Three more record-generator traps from the first typed date field (measured 2026-09-04)
 
-C#: guests/csharp/kaya-guests.csproj sets `ImplicitUsings=disable` and
-every generated `*Kaya.cs` begins at the type declaration with no using
-block, so a field declared `DateOnly Due` read back verbatim emits a
-`Field<DateOnly>` that does not resolve — the generator QUALIFIES
-(`System.DateOnly`) where it reads the parameter list. Java:
+C#: every generated `*Kaya.cs` begins at the type declaration with no
+using block, so a field declared `DateOnly Due` read back verbatim emits a
+`Field<DateOnly>` that resolves only through the consuming project's
+usings — the generator QUALIFIES (`System.DateOnly`) where it reads the
+parameter list, by its own choice and independent of the project's
+switches (guests/csharp/kaya-guests.csproj had `ImplicitUsings=disable`
+when this was found; the idiom pass of 2026-09-16 turned it on, and the
+generator still qualifies everything it emits). Java:
 `KayaRecords.fieldOf` resolves `Todo::done` by building a prototype record
 and a probe copy per field with a SENTINEL in that slot, so a new
 `KayaFieldType` needs `defaultValue` and `sentinelValue` arms too, or the
@@ -11397,3 +11400,115 @@ the walk; the verbs also wait for the view bounded at 3s
 (`kayaAwaitTextView`) with the wait printed. The lesson for the next
 registry: a weak entry written by lifecycle callbacks is a guess about
 which of two trees SwiftUI kept; the tree itself is not.
+
+## Tx's !Send guarantee is incidental, not designed (2026-09-16)
+
+`Tx` cannot cross threads because it borrows `AppCtx`, which holds
+`Cell`/`RefCell` and is therefore `!Sync`; nobody put a marker or an
+explicit bound on `Tx` for it. An innocent refactor one layer down (a
+`Cell` swapped for an atomic) would delete the guarantee silently, which
+is why a `compile_fail` doctest on the `Tx` struct in crates/kaya/src/app.rs
+pins `assert_send::<kaya::Tx<'static>>()` rather than trusting the
+interior-mutability choice to stay put. Two rules the doctest obeys, worth
+keeping when it is next touched: a `compile_fail` that dies of an
+UNRELATED compile error pins nothing (this crate has shipped that mistake
+before), so every `compile_fail` in app.rs pairs with a plain doctest that
+compiles the same code with the one gated call removed; and the `Tx`
+doctest names `Tx<'static>` on purpose, since a shorter lifetime would also
+trip the `'static` bound that `thread::spawn`-shaped code needs and the
+test would pass for the wrong reason. Found by the idiom pass's Rust
+comment strip, which moved the reasoning here and left the pointer.
+
+## The Obj.magic file_descr cast (2026-09-16)
+
+`Unix.file_descr` has no public `int -> file_descr` constructor and is
+deliberately abstract for Windows' sake, but on every POSIX target this
+binding runs (macOS, Linux) it IS an int at runtime, so
+bindings/ocaml/kaya_runtime.ml's `open_picked` coerces the core's
+descriptor with `Obj.magic` — the same coercion `lwt_unix` and
+`ocaml-uring` use for the same reason. It would break silently if the
+Unix module ever changed the descriptor's representation on POSIX, and no
+gate can see that (check-targets does not reach OCaml, and nothing reads
+kaya_runtime.ml's body for it). The one-line pointer above the cast is
+the whole comment; this entry is the reasoning.
+
+## `open Kaya_wire` resolves nothing under the guests' ppx stanza (measured 2026-09-16)
+
+Under guests/ocaml/dune's `(executables … (preprocess (pps kaya_ppx)))`
+stanza, a guest that writes `open Kaya_wire` and then an UNQUALIFIED
+function from it (`tx_collection_insert …`) fails `dune build` with
+"Unbound value tx_collection_insert" — while the same file compiles clean
+standalone through `ocamlfind ocamlc` against the library's `.cmi`
+directory, and compiles clean under dune once every name is fully
+qualified (`Kaya_wire.tx_collection_insert`). The open's effect is dropped
+somewhere between the ppx pass and the compile of the `.pp.ml`; the
+mechanism was not found (the marshalled `.pp.ml` carries no `Kaya_wire`
+string at all). Why nobody noticed for two months: every guest that seemed
+to rely on that open ALSO opened Kaya_app, and the wire's value
+CONSTRUCTORS (`Str`, `I64`) resolve by type-directed disambiguation with
+no open at all whenever the expected type is known — a11y.ml, grid.ml and
+progress.ml used bare constructors with only `open Kaya_app` and always
+compiled. Only a guest reaching a plain FUNCTION through the open (no
+disambiguation for functions) meets the dead open; encodebench.ml is the
+one guest shaped that way and is fully qualified now. Since the idiom pass
+no guest opens Kaya_wire (the wire-tag clause in check-sugar-surface
+refuses it), so the shape can only recur in a check or bench. Unchased
+past the workaround; a ppxlib/dune-internals reader could settle it.
+
+## The hand-rolled Functor/Applicative/Monad instances this replaced predated mtl/transformers being on the toolchain (2026-09-16)
+
+bindings/haskell/KayaApp.hs carried `Build`/`Tpl` as a hand-rolled State
+monad with its own Functor/Applicative/Monad instances, on the stated
+premise that the binding depends on nothing beyond GHC's boot libraries.
+The premise was checkable and false on this toolchain: `nix develop -c
+ghc-pkg list` shows mtl and transformers global. The idiom pass put
+`Build`/`Tpl` on `Control.Monad.State.Strict`. A premise about the
+toolchain is measured with ghc-pkg, not remembered.
+
+## `-XCPP` on the GHC command line applies to every module in the compilation (2026-09-16)
+
+Compiling a single probe file that needs `-DCASE=n` with a blanket `-XCPP`
+on the command line ran the C preprocessor over KayaRuntime.hs too, where a
+backslash inside a string literal was read as a CPP line continuation and
+produced an unrelated lexical error that looked like the probe firing for
+the wrong reason. The probe file's own `{-# LANGUAGE CPP #-}` pragma is
+enough; pass only `-DCASE=n` on the command line, never `-XCPP`.
+
+## `cabal build` reports "Up to date" after a ghc-options change (2026-09-16)
+
+Editing only a .cabal file's `ghc-options` (adding `-Wall -Wcompat`) left
+`cabal build` saying "Up to date" with zero warnings at every verbosity on
+cabal with ghc 9.10.3; the flag change did not invalidate the modules'
+build plan. `cabal clean` first, then the warnings appear. The idiom pass's
+first "clean" -Wall run was silently stale.
+
+## A guest launched without the pool's timeout wrapper opens its undeclared window at another size (measured 2026-09-16)
+
+validate-mac runs every leg as `timeout 120 <argv>`; tools/run-leg.py ran
+the bare argv until 2026-09-16, and the same python guest opened its
+undeclared window at 900x600 bare and at 540x330 under the wrapper —
+measured on align with `expect_window_size 1x1` in a scratch
+KAYA_SELFTEST_SCRIPT, whose refusal prints the real size. Six 100-pixel
+images fit one 900-wide line, so align-python failed by hand alone while
+every matrix passed it, and three agents read it as a pre-existing red on
+main. Bare, go opened at 480x360 and the bundled rust example at 540x330
+either way. Not window memory (act one clears the selftest suite), not
+the binding (HEAD's fails the same), not KAYA_WIN_SLOT (recording-only;
+it tiles declared sizes too and fails the `window` scene in every
+language). The AppKit reason behind the wrapper's effect is not measured;
+the rule is that a hand run launches exactly as the pool does, which
+run-leg.py now does and check-gates N18 holds.
+
+## A shadow that links a directory and then writes below it writes the real tree (measured 2026-09-16)
+
+check-sugar-surface's record probe stages a scratch repo root by linking
+every sibling of its quarry and writing the doctored copy at the quarry's
+path. Its hops were hard-coded to the quarry being bindings/haskell/KayaApp.hs;
+when the idiom pass's split moved the quarry to bindings/haskell/Kaya/Core.hs,
+the `Kaya` directory was linked whole and the doctored copy was written
+THROUGH the link into the working tree — the real Core.hs carried the
+probe's last doctoring (`at (RecordCollection c) _ = RecordCollection c`,
+the key dropped) for one run, read as a regression the next. Every write
+into a shadow goes through one guarded writer now (`shadow_write`), which
+refuses a leaf under a symlinked hop, with its own watched negative. A
+perturbation must never be able to reach the tree it perturbs a copy of.

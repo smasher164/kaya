@@ -3,7 +3,6 @@
    (docs/search-plan.md S9): the visible set is a diff of removes and
    inserts by key. *)
 
-open Kaya_wire
 open Kaya_app
 
 type item = { name : string } [@@deriving kaya_gen]
@@ -21,7 +20,7 @@ let () =
 
   build app (fun () ->
      let items = collection_of item_record in
-     let count = signal (Str (Printf.sprintf "%d items" (List.length names))) in
+     let count = signal_str ((Printf.sprintf "%d items" (List.length names))) in
 
      let on_query text =
        let query = String.lowercase_ascii text in
@@ -31,25 +30,24 @@ let () =
        List.iter
          (fun name ->
            if not (List.mem name wanted) then
-             remove (record_handle items) (Str name))
+             remove (record_handle items) (str_key name))
          !visible;
        List.iter
          (fun name ->
            if not (List.mem name !visible) then
-             insert_record items (Str name) { name })
+             insert_record items (str_key name) { name })
          wanted;
        (* Insertion order is arrival order, so a row coming back lands
           last; walking the wanted keys to the end in order puts the list
           back in [names] order. *)
        List.iter
-         (fun name -> move_to_end (record_handle items) (Str name))
+         (fun name -> move_to_end (record_handle items) (str_key name))
          wanted;
        write count
-         (Str
-            (if query = "" then Printf.sprintf "%d items" (List.length names)
-             else
-               Printf.sprintf "%d of %d match" (List.length wanted)
-                 (List.length names)));
+         (if query = "" then Printf.sprintf "%d items" (List.length names)
+          else
+            Printf.sprintf "%d of %d match" (List.length wanted)
+              (List.length names));
        visible := wanted
      in
 
@@ -72,6 +70,6 @@ let () =
          ()
      in
      mount root;
-     List.iter (fun name -> insert_record items (Str name) { name }) names);
+     List.iter (fun name -> insert_record items (str_key name) { name }) names);
 
   exit (run app)

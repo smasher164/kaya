@@ -1,24 +1,26 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 -- The toolbar scene, Haskell port — guests/rust/toolbar.rs,
 -- tools/scenes/toolbar.steps.
 
 import Data.IORef (newIORef, readIORef, writeIORef)
 
+import qualified Data.Text as T
 import KayaApp
-import KayaWire (Value (..))
 
 main :: IO ()
 main = kayaMain $ \app -> do
   saveEnabledRef <- newIORef True
 
   buildTx app $ do
-    status <- signal (VStr "ready")
+    status <- signal (T.pack "ready")
     -- Written against the MENU ITEM: the promoted button IS that item.
-    canSave <- signal (VBool True)
+    canSave <- signal (True)
 
     -- CATALOG PREORDER DECIDES PROMOTION — menubar-append order, then
     -- children depth-first, so every host promotes [Save, Find].
     window
-      0
+      primary
       [ WTitle "toolbar",
         WMenus
           [ menu
@@ -32,12 +34,12 @@ main = kayaMain $ \app -> do
                     IPrimary True,
                     IEnabledBy canSave,
                     IShortcut "primary+s",
-                    IOnActivate (submitTx app (writeSignal status (VStr "saved")))
+                    IOnActivate (submitTx app (writeSignal status (T.pack "saved")))
                   ],
                 item
                   "Export"
                   [ ISymbol SymbolForward,
-                    IOnActivate (submitTx app (writeSignal status (VStr "exported")))
+                    IOnActivate (submitTx app (writeSignal status (T.pack "exported")))
                   ]
               ],
             menu
@@ -47,7 +49,7 @@ main = kayaMain $ \app -> do
                   "Find"
                   [ ISymbol SymbolSearch,
                     IPrimary True,
-                    IOnActivate (submitTx app (writeSignal status (VStr "found")))
+                    IOnActivate (submitTx app (writeSignal status (T.pack "found")))
                   ],
                 item "Replace" [ISymbol SymbolEdit]
               ],
@@ -67,6 +69,6 @@ main = kayaMain $ \app -> do
             -- button#0
             saveEnabled <- not <$> readIORef saveEnabledRef
             writeIORef saveEnabledRef saveEnabled
-            submitTx app (writeSignal canSave (VBool saveEnabled))
+            submitTx app (writeSignal canSave (saveEnabled))
         ]
     mount root

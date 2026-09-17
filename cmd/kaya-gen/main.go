@@ -235,7 +235,7 @@ func generateSum(w func(string, ...any), pkg *ast.Package, iface *ast.InterfaceT
 		w("\t%s func(kaya.SumCase[%s, %s]),", lowerFirst(v.name), key, v.name)
 	}
 	w(") kaya.Widget {")
-	w("\trows := tx.Rows(c.Collection)")
+	w("\trows := tx.Rows(c.Coll)")
 	w("\tfor row := range rows.All() {")
 	for _, v := range variants {
 		w("\t\tc.Case[%s](row.Tpl, %s)", v.name, lowerFirst(v.name))
@@ -451,7 +451,7 @@ func generateRecord(w func(string, ...any), strct *ast.StructType, name, key str
 	w("")
 	w("func (r %sRow) SetDropTarget(n kaya.Node, ops ...kaya.Op) { r.t.SetDropTarget(n, ops...) }", lowerFirst(name))
 	w("")
-	w("func (r %sRow) SetRole(n kaya.Node, role int64) { r.t.SetRole(n, role) }", lowerFirst(name))
+	w("func (r %sRow) SetRole(n kaya.Node, role kaya.Role) { r.t.SetRole(n, role) }", lowerFirst(name))
 	w("")
 	w("func (r %sRow) SetInset(n kaya.Node, pad float64) { r.t.SetInset(n, pad) }", lowerFirst(name))
 	w("")
@@ -460,7 +460,7 @@ func generateRecord(w func(string, ...any), strct *ast.StructType, name, key str
 	w("// once with the typed row surface (exact-index tokens, no probes);")
 	w("// stamping is the core's replay.")
 	w("func %sRows(tx *kaya.Tx, c kaya.RecordCollection[%s, %s]) *%sRowsFor {", name, key, name, lowerFirst(name))
-	w("\treturn &%sRowsFor{tx.Rows(c.Collection), c}", lowerFirst(name))
+	w("\treturn &%sRowsFor{tx.Rows(c.Coll), c}", lowerFirst(name))
 	w("}")
 	w("")
 	w("// The embedded *kaya.Rows carries Widget(); the two chain methods")

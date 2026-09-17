@@ -95,7 +95,7 @@ static class ClipboardScene
                             string text;
                             try
                             {
-                                var (file, _) = picked.Open(KayaWire.FileModeRead);
+                                var (file, _) = picked.Open(FileAccess.Read);
                                 using (file)
                                 using (var reader = new StreamReader(file))
                                     text = reader.ReadToEnd();

@@ -21,7 +21,7 @@ static class PostKaya
     /// is the refinement, fresh at write time — a stale occurrence
     /// folds into ?. — and each setter's update carries Note
     /// as its witness, asserted again by the scene.</summary>
-    public static PostNotePatch AsNote(Tx tx, SumCollection<Post> c, object key) =>
+    public static PostNotePatch? AsNote(Tx tx, SumCollection<Post> c, object key) =>
         tx != null && c.Get(tx, key) is Note
             ? new PostNotePatch(tx, c, key) : null;
 
@@ -29,7 +29,7 @@ static class PostKaya
     /// is the refinement, fresh at write time — a stale occurrence
     /// folds into ?. — and each setter's update carries Todo
     /// as its witness, asserted again by the scene.</summary>
-    public static PostTodoPatch AsTodo(Tx tx, SumCollection<Post> c, object key) =>
+    public static PostTodoPatch? AsTodo(Tx tx, SumCollection<Post> c, object key) =>
         tx != null && c.Get(tx, key) is Todo
             ? new PostTodoPatch(tx, c, key) : null;
 

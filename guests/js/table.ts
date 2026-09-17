@@ -31,10 +31,8 @@ function onSort(column: number): void {
   items.setColumns(["Name", "Size"], { sort: indicator });
 }
 
-let items!: kaya.Collection<ItemFields, kaya.Row<typeof Item.schema>>;
-
-app.window(() => {
-  items = kaya.collection(Item);
+const { items } = app.window(() => {
+  const items = kaya.collection(Item);
   // The root is a row: the For's container is the only column.
   kaya.row(() => {
     // Grown on purpose: ungrown, a table hugs its rows.
@@ -52,6 +50,7 @@ app.window(() => {
   ] as const) {
     items.insert(key, Item({ name, size }));
   }
+  return { items };
 });
 
 app.run();

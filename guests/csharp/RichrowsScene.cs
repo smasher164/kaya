@@ -30,13 +30,10 @@ static class RichrowsScene
 
     static string KeyText(object key) => key is string s ? s : $"{key}";
 
-    static Note Row(Tx tx, RecordCollection<Note> notes, object key)
-    {
-        foreach (KeyValuePair<object, Note> entry in notes.Items(tx))
-            if (Equals(entry.Key, key))
-                return entry.Value;
-        throw new InvalidOperationException($"richrows: no row {key}");
-    }
+    static Note Row(Tx tx, RecordCollection<Note> notes, object key) =>
+        notes.TryGet(tx, key, out var note)
+            ? note
+            : throw new InvalidOperationException($"richrows: no row {key}");
 
     public static void Run()
     {
@@ -44,7 +41,7 @@ static class RichrowsScene
 
         Signal last = default;
         Signal view = default;
-        RecordCollection<Note> notes = null;
+        RecordCollection<Note>? notes = null;
 
         app.Build(tx =>
         {
@@ -58,7 +55,7 @@ static class RichrowsScene
             // lands in.
             void Restored(Tx t, string label, UndoDelta delta)
             {
-                Note note = Row(t, notes, "b");
+                Note note = Row(t, notes!, "b");
                 t.Write(view, $"{note.Body.Text} | {Spell(note.Body.Runs)}");
             }
             tx.Window(title: "richrows", menus: new[] { edit },

@@ -241,7 +241,7 @@ func generateSum(_ name: String, _ cases: [Case]) -> String {
     line("        c,")
     line("        arms: [")
     for c in cases {
-        line("            c.arm(\(zeroCall(".\(c.name)", c.fields))) { t, _ in \(c.name)(\(name)\(upper(c.name))Arm(t: t)) },")
+        line("            c.arm(\(zeroCall(".\(c.name)", c.fields))) { t in \(c.name)(\(name)\(upper(c.name))Arm(t: t)) },")
     }
     line("        ])")
     line("}")

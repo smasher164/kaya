@@ -14,7 +14,7 @@ async function askDelete(): Promise<void> {
     actions: ["Delete", "Archive"],
     cancel: "Keep",
   });
-  if (choice === kaya.CANCEL) status.set("kept");
+  if (choice === null) status.set("kept");
   else if (choice === 1) status.set("archived");
   else status.set("deleted");
 }
@@ -26,18 +26,17 @@ async function askEject(): Promise<void> {
     actions: ["Eject"],
     cancel: "Hold",
   });
-  status.set(choice === kaya.CANCEL ? "held" : "ejected");
+  status.set(choice === null ? "held" : "ejected");
 }
 
-let status!: kaya.Signal<string>;
-
-app.window({ title: "confirm" }, () => {
-  status = kaya.signal("no decision");
+const { status } = app.window({ title: "confirm" }, () => {
+  const status = kaya.signal("no decision");
   kaya.column(() => {
     kaya.label({ bind: status }); // label#0
     kaya.button("delete", { onClick: askDelete });
     kaya.button("eject", { onClick: askEject });
   });
+  return { status };
 });
 
 app.run();

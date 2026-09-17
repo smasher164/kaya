@@ -1,7 +1,6 @@
 (* The adaptive scene, OCaml port — guests/rust/adaptive.rs,
    tools/scenes/adaptive.steps. *)
 
-open Kaya_wire
 open Kaya_app
 
 let () =
@@ -11,11 +10,11 @@ let () =
      (* Above the breakpoint, so the resize half crosses it both ways. *)
      window ~title:"adaptive" ~width:900.0 ~height:600.0 ();
 
-     let alpha = signal (Str "alpha") in
-     let longer = signal (Str "a longer label") in
-     let steady = signal (Str "steady") in
-     let one = signal (Str "one") in
-     let two = signal (Str "a wider two") in
+     let alpha = signal_str ("alpha") in
+     let longer = signal_str ("a longer label") in
+     let steady = signal_str ("steady") in
+     let one = signal_str ("one") in
+     let two = signal_str ("a wider two") in
 
      (* row#0: the flip subject, realized ahead because the handler needs
         its handle. *)
@@ -44,7 +43,7 @@ let () =
            grid ~columns:3 ~a11y_id:"sheet" ~columns_when:(Compact, 1)
              (List.map
                 (fun text ->
-                  let cell = signal (Str text) in
+                  let cell = signal_str (text) in
                   fun () -> label ~bind:cell () (* label#5..#10 *))
                 [ "c1"; "c2"; "c3"; "c4"; "c5"; "c6" ]);
            (* grid@fit: no count, a 240-point floor, the WIDTH decides

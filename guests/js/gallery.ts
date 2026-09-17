@@ -26,16 +26,11 @@ function onQuarter(): void {
   pos.set(0.25);
 }
 
-let urgent!: kaya.Signal<boolean>;
-let status!: kaya.Signal<string>;
-let volume!: kaya.Signal<string>;
-let pos!: kaya.Signal<number>;
-
-app.window(() => {
-  urgent = kaya.signal(false);
-  status = kaya.fmt`urgent: ${urgent}`;
-  volume = kaya.signal("volume: 50%");
-  pos = kaya.signal(0.5);
+const { urgent, status, volume, pos } = app.window(() => {
+  const urgent = kaya.signal(false);
+  const status = kaya.fmt`urgent: ${urgent}`;
+  const volume = kaya.signal("volume: 50%");
+  const pos = kaya.signal(0.5);
 
   kaya.column(() => {
     kaya.row(() => {
@@ -59,6 +54,7 @@ app.window(() => {
       kaya.slider({ value: 0.5, min: 0, max: 1 }).a11yId("level");
     });
   });
+  return { urgent, status, volume, pos };
 });
 
 app.run();

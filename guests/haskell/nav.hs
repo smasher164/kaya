@@ -1,8 +1,10 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 -- The nav scene, Haskell port — guests/rust/nav.rs, tools/scenes/nav.steps.
 
 import Data.Word (Word64)
+import qualified Data.Text as T
 import KayaApp
-import KayaWire (Value (..))
 
 detailId, settingsId :: Word64
 detailId = 7
@@ -11,8 +13,8 @@ settingsId = 8
 main :: IO ()
 main = kayaMain $ \app -> do
   status <- buildTx app $ do
-    window 0 [WTitle "nav"]
-    s <- signal (VStr "at root")
+    window primary [WTitle "nav"]
+    s <- signal (T.pack "at root")
     root <-
       column
         []
@@ -22,12 +24,12 @@ main = kayaMain $ \app -> do
               pushEntry
                 detailId
                 [ ETitle "detail",
-                  EOnPopped (buildTx app (writeSignal s (VStr "popped detail")))
+                  EOnPopped (buildTx app (writeSignal s (T.pack "popped detail")))
                 ]
-              caption <- signal (VStr "detail pane")
+              caption <- signal (T.pack "detail pane")
               pane <- column [] [labelBound caption]
               mountIn detailId pane
-              writeSignal s (VStr "pushed detail"),
+              writeSignal s (T.pack "pushed detail"),
           buttonOn "open settings" $
             buildTx app $ do
               -- Nothing has popped, so no entry_popped follows this pop.
@@ -37,14 +39,14 @@ main = kayaMain $ \app -> do
                   EInterceptBack True,
                   EOnBack
                     ( buildTx app $ do
-                        writeSignal s (VStr "back requested")
+                        writeSignal s (T.pack "back requested")
                         popEntry
                     )
                 ]
-              caption <- signal (VStr "settings pane")
+              caption <- signal (T.pack "settings pane")
               pane <- column [] [labelBound caption]
               mountIn settingsId pane
-              writeSignal s (VStr "pushed settings")
+              writeSignal s (T.pack "pushed settings")
         ]
     mount root
     return s

@@ -1,11 +1,14 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 -- The gallery scene, Haskell port — guests/rust/gallery.rs,
 -- tools/scenes/gallery.steps.
 
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BC
 
+import Data.Text (Text)
+import qualified Data.Text as T
 import KayaApp
-import KayaWire (Value (..))
 
 {- A 2x2 RGB PNG, 75 bytes, embedded as source. -}
 testPng :: BS.ByteString
@@ -21,20 +24,20 @@ testPng =
 main :: IO ()
 main = kayaMain $ \app -> do
   buildTx app $ do
-    status <- signal (VStr "urgent: false")
-    volume <- signal (VStr "volume: 50%")
-    pos <- signal (VF64 0.5)
+    status <- signal (T.pack "urgent: false")
+    volume <- signal (T.pack "volume: 50%")
+    pos <- signal (0.5 :: Double)
 
     let onUrgent checked =
           submitTx app $
             writeSignal status
-              (VStr ("urgent: " ++ if checked then "true" else "false"))
+              (T.pack ("urgent: " ++ if checked then "true" else "false"))
         onVolume v =
           -- Integer percent, so every language's formatting agrees.
           submitTx app $
             writeSignal volume
-              (VStr ("volume: " ++ show (round (v * 100) :: Int) ++ "%"))
-        onQuarter = submitTx app $ writeSignal pos (VF64 0.25)
+              (T.pack ("volume: " ++ show (round (v * 100) :: Int) ++ "%"))
+        onQuarter = submitTx app $ writeSignal pos (0.25 :: Double)
 
     root <-
       column
@@ -44,11 +47,11 @@ main = kayaMain $ \app -> do
               labelBound volume,
               buttonOn "quarter" onQuarter
             ],
-          search [Placeholder "Search", A11yId "find"],
+          search [Placeholder ("Search" :: Text), A11yId ("find" :: Text)],
           {- Deliberately invalid bytes: a decode failure reads 0x0. -}
           row [imageBytes testPng, imageBytes (BC.pack "not an image")],
           {- The labelled row: the control's accessibility name IS the
              label's text, with no A11yLabel of its own. -}
-          labeled "Level" [sliderOn 0 1 0.5 (const (return ())) [A11yId "level"]]
+          labeled ("Level" :: Text) [sliderOn 0 1 0.5 (const (return ())) [A11yId ("level" :: Text)]]
         ]
     mount root

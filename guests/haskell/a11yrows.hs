@@ -1,8 +1,10 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 -- The a11yrows scene, Haskell port — guests/rust/a11yrows.rs,
 -- tools/scenes/a11yrows.steps.
 
+import qualified Data.Text as T
 import KayaApp
-import KayaWire (Value (..))
 
 main :: IO ()
 main = kayaMain $ \app -> do
@@ -26,7 +28,7 @@ main = kayaMain $ \app -> do
     mount root
 
     -- The keys are the app's own: a scalar collection has no minter here.
-    insert notes (VStr "a") (VStr "First note")
-    insert notes (VStr "b") (VStr "Second note")
-    insert heads (VStr "h1") (VStr "Heading one")
-    insert heads (VStr "h2") (VStr "Heading two")
+    insert notes (T.pack "a") (T.pack "First note")
+    insert notes (T.pack "b") (T.pack "Second note")
+    insert heads (T.pack "h1") (T.pack "Heading one")
+    insert heads (T.pack "h2") (T.pack "Heading two")

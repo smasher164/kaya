@@ -72,14 +72,14 @@ static class AbortCheck
 
     static uint HeaderValueCount(byte[] rec) => BitConverter.ToUInt32(rec, 32);
 
-    static string HeaderFirstValue(byte[] rec) =>
+    static string? HeaderFirstValue(byte[] rec) =>
         BitConverter.ToUInt32(rec, 40) == KayaWire.ValueStr
             ? System.Text.Encoding.UTF8.GetString(rec, 48, (int)BitConverter.ToUInt32(rec, 44))
             : null;
 
-    static byte[] LastHeaderRecord(List<byte[]> records, int from)
+    static byte[]? LastHeaderRecord(List<byte[]> records, int from)
     {
-        byte[] found = null;
+        byte[]? found = null;
         for (int i = from; i < records.Count; i++)
             if (RecKind(records[i]) == KayaWire.TxKindSetColumnHeaders)
                 found = records[i];
@@ -148,11 +148,11 @@ static class AbortCheck
             });
             var bar = LastHeaderRecord(tx.Records, before);
             Check(bar != null, "the template-zone Columns queued no set_column_headers");
-            Check(HeaderTarget(bar) == table.Id,
+            Check(HeaderTarget(bar!) == table.Id,
                 "the template bar must target the nested For's TEMPLATE NODE");
-            Check(HeaderPathLen(bar) == 0 && HeaderCount(bar) == 2,
+            Check(HeaderPathLen(bar!) == 0 && HeaderCount(bar!) == 2,
                 "the template bar is path_len 0 with one value per column");
-            Check(HeaderValueCount(bar) == 2 && HeaderFirstValue(bar) == "Ticker",
+            Check(HeaderValueCount(bar!) == 2 && HeaderFirstValue(bar!) == "Ticker",
                 "with no key path the values are the titles alone");
             app.OnSort(table, (t, keys, column) =>
                 t.Columns(table, keys, titles, Sort.Asc(column)));
@@ -164,11 +164,11 @@ static class AbortCheck
             tx.Columns(table, new List<object> { "brokerage" }, titles, Sort.Desc(1));
             var bar = LastHeaderRecord(tx.Records, before);
             Check(bar != null, "the keyed Columns queued no set_column_headers");
-            Check(HeaderTarget(bar) == table.Id,
+            Check(HeaderTarget(bar!) == table.Id,
                 "a keyed re-declaration still targets the template node");
-            Check(HeaderPathLen(bar) == 1 && HeaderCount(bar) == 2,
+            Check(HeaderPathLen(bar!) == 1 && HeaderCount(bar!) == 2,
                 "path_len counts the copy's keys, count the columns");
-            Check(HeaderValueCount(bar) == 3 && HeaderFirstValue(bar) == "brokerage",
+            Check(HeaderValueCount(bar!) == 3 && HeaderFirstValue(bar!) == "brokerage",
                 "the copy's KEYS come first, then the titles");
         });
     }
@@ -197,11 +197,11 @@ static class AbortCheck
             });
             var bar = LastHeaderRecord(tx.Records, before);
             Check(bar != null, "the façade's Columns queued no set_column_headers");
-            Check(HeaderTarget(bar) == table.Id,
+            Check(HeaderTarget(bar!) == table.Id,
                 "the façade's bar must target the Node its own Each handed back");
-            Check(HeaderPathLen(bar) == 0 && HeaderCount(bar) == 2,
+            Check(HeaderPathLen(bar!) == 0 && HeaderCount(bar!) == 2,
                 "the façade's bar is path_len 0 with one value per column");
-            Check(HeaderValueCount(bar) == 2 && HeaderFirstValue(bar) == "Ticker",
+            Check(HeaderValueCount(bar!) == 2 && HeaderFirstValue(bar!) == "Ticker",
                 "with no key path the values are the titles alone");
 
             // ROUTE TWO: the Tpl twin, whose nested cells are the row façade's
@@ -220,7 +220,7 @@ static class AbortCheck
             });
             var twin = LastHeaderRecord(tx.Records, before);
             Check(twin != null, "the twin's nested For queued no set_column_headers");
-            Check(HeaderTarget(twin) == typed.Id,
+            Check(HeaderTarget(twin!) == typed.Id,
                 "the twin hands back the nested For's TEMPLATE NODE, which the bar names");
             var (open, close) = TemplateWindow(tx.Records, before, typed.Id);
             Check(open > 0, "the twin queued no create_for for the nested collection");
@@ -240,7 +240,7 @@ static class AbortCheck
             var accounts = tx.Collection();
             int before = tx.Records.Count;
             Node table = default;
-            RecordCollection<TableItem> positions = null;
+            RecordCollection<TableItem>? positions = null;
             tx.Each(accounts, account =>
             {
                 // The TEMPLATE zone's own constructor: `tx.CollectionOf` is the
@@ -253,13 +253,13 @@ static class AbortCheck
                 }));
             });
 
-            byte[] birth = null;
+            byte[]? birth = null;
             for (int i = before; i < tx.Records.Count; i++)
                 if (RecKind(tx.Records[i]) == KayaWire.TxKindCreateCollection)
                     birth = tx.Records[i];
             Check(birth != null, "the template-zone CollectionOf queued no create_collection");
-            Check(BitConverter.ToUInt32(birth, 16) == 1
-                    && BitConverter.ToUInt32(birth, 24) == 2,
+            Check(BitConverter.ToUInt32(birth!, 16) == 1
+                    && BitConverter.ToUInt32(birth!, 24) == 2,
                 "the nested collection must be born with the RECORD schema (one "
                     + "variant of two fields); the scalar schema compiles and "
                     + "leaves every row one string wide");
@@ -274,24 +274,24 @@ static class AbortCheck
 
             // `At` KEEPS T: the untyped narrowing puts the row's fields out of reach.
             int atInsert = tx.Records.Count;
-            positions.At("brokerage").Insert(tx, "aapl", new TableItem("AAPL", "10"));
-            byte[] insert = null;
+            positions!.At("brokerage").Insert(tx, "aapl", new TableItem("AAPL", "10"));
+            byte[]? insert = null;
             for (int i = atInsert; i < tx.Records.Count; i++)
                 if (RecKind(tx.Records[i]) == KayaWire.TxKindCollectionInsert)
                     insert = tx.Records[i];
             Check(insert != null, "the typed At queued no collection_insert");
-            Check(BitConverter.ToUInt32(insert, 16) == 1,
+            Check(BitConverter.ToUInt32(insert!, 16) == 1,
                 "the record insert must carry path_len 1: a narrowing that drops "
                     + "the key writes the PARENT's table with no error anywhere");
-            Check(ContainsAscii(insert, "AAPL") && ContainsAscii(insert, "10"),
+            Check(ContainsAscii(insert!, "AAPL") && ContainsAscii(insert!, "10"),
                 "the insert must carry both of the record's fields");
 
-            var copy = positions.At("brokerage").Items(tx);
+            var copy = positions!.At("brokerage").Items(tx);
             Check(copy.Count == 1 && Equals(copy[0].Key, "aapl")
                     && copy[0].Value.Name == "AAPL",
                 "the copy's model must hold a TableItem — the typed At is what "
                     + "keeps the mirror's entries records rather than bare values");
-            Check(positions.Items(tx).Count == 0,
+            Check(positions!.Items(tx).Count == 0,
                 "the collection's OWN table must stay empty; the write was "
                     + "addressed to a copy");
         });
@@ -336,7 +336,7 @@ static class AbortCheck
             "a Document field's blob is\n  " + got + "\nand the wire's rules say\n  "
                 + DocumentBlobHex);
 
-        RecordCollection<Richrows.Note> notes = null;
+        RecordCollection<Richrows.Note>? notes = null;
         Node body = default;
         app.Build(tx =>
         {
@@ -355,7 +355,7 @@ static class AbortCheck
             held => KayaApp.FoldEdit(held, edit.Start, edit.Stop, edit.Inserted, edit.Marks));
         app.Build(tx =>
         {
-            var items = notes.Items(tx);
+            var items = notes!.Items(tx);
             Check(items.Count == 1, "the row-document probe lost its row");
             Document folded = items[0].Value.Body;
             Check(folded.Text == live.Text,
@@ -372,7 +372,7 @@ static class AbortCheck
         // fault (docs/rich-text-plan.md §19).
         app.FoldRowDocument(body.Id, new List<object> { "gone" },
             held => KayaApp.FoldEdit(held, 0, 0, "x", new List<TextRun>()));
-        app.Build(tx => Check(notes.Items(tx).Count == 1,
+        app.Build(tx => Check(notes!.Items(tx).Count == 1,
             "folding into a row that is gone invented one"));
 
         // AN UNDO RESTORES THE FIELD FROM ITS BYTES, never from the handle
@@ -383,14 +383,14 @@ static class AbortCheck
         var undone = new UndoDelta();
         undone.Entries.Add(new UndoEntry
         {
-            Collection = notes.Collection.Id,
+            Collection = notes!.Collection.Id,
             Key = "a",
             State = (0u, new List<object> { "a", KayaApp.DocumentBlob(doc) }),
         });
         app.AbsorbUndo(undone);
         app.Build(tx =>
         {
-            Document restored = notes.Items(tx)[0].Value.Body;
+            Document restored = notes!.Items(tx)[0].Value.Body;
             Check(restored.Text == doc.Text && Spell(restored.Runs) == Spell(doc.Runs),
                 "a restored row's Document field read \"" + restored.Text + "\" / "
                     + Spell(restored.Runs) + ", the bytes say \"" + doc.Text + "\" / "
@@ -409,7 +409,7 @@ static class AbortCheck
 
         string Elsewhere(Action body)
         {
-            string message = null;
+            string? message = null;
             var t = new Thread(() =>
             {
                 try
@@ -446,6 +446,49 @@ static class AbortCheck
         app.DrainPosted();
         Check(ran, "Post from another thread did not reach the app thread");
         app.Build(tx => tx.Write(probe, "after all"));
+    }
+
+    // THE IDIOM PASS'S THREE GUARDS: a wire int this build does not know
+    // is refused naming it (AlertChoices/NotificationOutcomes.FromWire,
+    // EditSources.FromWire's shape), TryGet answers present and absent
+    // keys, and a disposed Tx refuses the one chokepoint every write goes
+    // through.
+    static void WireGuards(KayaApp app)
+    {
+        bool threw = false;
+        string got = "";
+        try { AlertChoices.FromWire(99); }
+        catch (InvalidOperationException e) { threw = true; got = e.Message; }
+        Check(threw && got.Contains("99"),
+            $"an unknown alert choice was not refused naming it: \"{got}\"");
+
+        threw = false;
+        got = "";
+        try { NotificationOutcomes.FromWire(99); }
+        catch (InvalidOperationException e) { threw = true; got = e.Message; }
+        Check(threw && got.Contains("99"),
+            $"an unknown notification outcome was not refused naming it: \"{got}\"");
+
+        RecordCollection<Todo>? found = default;
+        app.Build(tx =>
+        {
+            found = tx.CollectionOf<Todo>();
+            found.Insert(tx, "present", new Todo("here", false));
+        });
+        app.Build(tx =>
+        {
+            Check(found!.TryGet(tx, "present", out var todo) && todo.Title == "here",
+                "TryGet did not find a key the collection holds");
+            Check(!found.TryGet(tx, "absent", out _),
+                "TryGet found a key the collection does not hold");
+        });
+
+        var dead = new Tx(app);
+        dead.Dispose();
+        bool disposed = false;
+        try { _ = dead.Records; }
+        catch (ObjectDisposedException) { disposed = true; }
+        Check(disposed, "a disposed Tx did not refuse a write");
     }
 
     public static void Run()
@@ -578,12 +621,12 @@ static class AbortCheck
             tx.Menu(file, items: new[] { tx.Item("Publish") });
             Check(CountKind(tx.Records, before, KayaWire.TxKindMenuItemCreate) == 1,
                 "reopen queued the wrong create count");
-            byte[] append = null;
+            byte[]? append = null;
             for (int i = before; i < tx.Records.Count; i++)
                 if (RecKind(tx.Records[i]) == KayaWire.TxKindMenuItemAppend)
                     append = tx.Records[i];
             Check(append != null, "reopen queued no append");
-            Check(BitConverter.ToUInt64(append, 8) == file.Id,
+            Check(BitConverter.ToUInt64(append!, 8) == file.Id,
                 "reopen did not seat under the retained parent");
             Check(CountKind(tx.Records, before, KayaWire.TxKindMenubarAppend) == 0,
                 "reopen re-anchored the bar");
@@ -607,7 +650,7 @@ static class AbortCheck
             Check(threw, "a second Undoable must refuse — one name per step");
         });
 
-        RecordCollection<Todo> notes = default;
+        RecordCollection<Todo>? notes = default;
         app.Build(tx =>
         {
             notes = tx.CollectionOf<Todo>();
@@ -618,32 +661,32 @@ static class AbortCheck
         // "a" gone (an undone insert), "b" restored, "c" back from nothing.
         undone.Entries.Add(new UndoEntry
         {
-            Collection = notes.Collection.Id,
+            Collection = notes!.Collection.Id,
             Key = "a",
             State = null,
         });
         undone.Entries.Add(new UndoEntry
         {
-            Collection = notes.Collection.Id,
+            Collection = notes!.Collection.Id,
             Key = "b",
             State = (0u, new List<object> { "tea", true }),
         });
         undone.Entries.Add(new UndoEntry
         {
-            Collection = notes.Collection.Id,
+            Collection = notes!.Collection.Id,
             Key = "c",
             State = (0u, new List<object> { "cocoa", false }),
         });
         undone.Orders.Add(new UndoOrder
         {
-            Collection = notes.Collection.Id,
+            Collection = notes!.Collection.Id,
             Keys = new List<object> { "c", "b" },
         });
         undone.Signals.Add(new UndoSignal(counter.Id, "restored"));
         app.AbsorbUndo(undone);
         app.Build(tx =>
         {
-            var items = notes.Items(tx);
+            var items = notes!.Items(tx);
             Check(!items.Exists(e => Equals(e.Key, "a")),
                 "the undo fold did not drop the entry the payload says is gone");
             Check(items.Exists(e => Equals(e.Key, "c")),
@@ -685,6 +728,8 @@ static class AbortCheck
         RowDocument(app);
 
         WrongThread(app);
+
+        WireGuards(app);
 
         Console.WriteLine("csharp abort check: OK");
     }

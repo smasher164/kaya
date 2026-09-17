@@ -113,6 +113,10 @@ env.update(lane.leg_env(ROOT, scene, lang, appearance))
 second = scene in lane.RELAUNCH_DOOR
 if second:
     lane.clear_act2(ROOT, env)
+# THE POOL'S OWN LAUNCH: validate-mac runs every leg under `timeout 120`, and
+# a guest launched bare opens its undeclared window at another size
+# (docs/traps.md, "A guest launched without the pool's timeout wrapper").
+argv = ["timeout", "120", *argv]
 print(f"run-leg: {scene}-{lang}: {' '.join(argv)}", flush=True)
 log = ROOT / f"target/run-leg-{scene}-{lang}.log"
 if second:

@@ -46,6 +46,8 @@ import qualified Data.ByteString.Lazy as BL
 import Data.ByteString.Unsafe (unsafeUseAsCStringLen)
 import Data.IORef (IORef, mkWeakIORef, newIORef, readIORef, writeIORef)
 import Data.Int (Int32, Int64)
+import Data.Text (Text)
+import qualified Data.Text as T
 import Data.Word (Word16, Word32, Word64, Word8)
 import Foreign.C.Types (CBool (..), CInt (..), CSize (..))
 import Foreign.Marshal.Alloc (alloca, allocaBytes, mallocBytes)
@@ -438,7 +440,7 @@ data UndoDelta = UndoDelta
 data UndoText = UndoText
   { utId :: !Word64,
     utPath :: ![Value],
-    utText :: !String
+    utText :: !Text
   }
 
 -- | One collection entry's restored state; 'ueState' is Nothing when
@@ -465,7 +467,7 @@ emptyUndoDelta = UndoDelta [] [] [] []
 -- Str label, then ONE flat value list read as those four runs in order
 -- (kaya.h, KAYA_OCCURRENCE_UNDONE; crates\/kaya\/src\/wire.rs
 -- undo_body).
-parseUndo :: Ptr Word8 -> IO (Word64, String, UndoDelta)
+parseUndo :: Ptr Word8 -> IO (Word64, Text, UndoDelta)
 parseUndo rec = do
   window <- peekByteOff rec 8 :: IO Word64
   signals <- peekByteOff rec 16 :: IO Word32
@@ -488,7 +490,7 @@ parseUndo rec = do
   -- The Values block's own header is {u32 count, u32 reserved}.
   flat <- readValues count (afterLabel + 8) []
   let label = case labelValue of
-        VStr s -> s
+        VStr s -> T.pack s
         other -> error ("kaya: undo label is " ++ show other ++ ", wanted a string")
       int (VI64 n) = n
       int other = error ("kaya: undo delta wanted an integer, got " ++ show other)
@@ -505,7 +507,7 @@ parseUndo rec = do
             plen = fromIntegral (int pathLen)
             (path, textOnly) = splitAt plen mine
          in case textOnly of
-              [VStr s] -> (UndoText (fromIntegral (int ident)) path s, rest')
+              [VStr s] -> (UndoText (fromIntegral (int ident)) path (T.pack s), rest')
               _ -> error "kaya: undo text is truncated or not a string"
       text _ = error "kaya: undo text is truncated"
       entry (size : collection : present : variant : pathLen : rest) =
@@ -576,7 +578,7 @@ pollOccurrence = do
               if kind == occKindUndone || kind == occKindRedone
                 then do
                   (w, label, delta) <- parseUndo (dat `plusPtr` at)
-                  return (Just (kind, w, [], Just (VStr label), Nothing, Nothing, Just delta, []))
+                  return (Just (kind, w, [], Just (VStr (T.unpack label)), Nothing, Nothing, Just delta, []))
                 else do
                   ordinary <- parseOccurrence occurrenceBlob (dat `plusPtr` at)
                   return

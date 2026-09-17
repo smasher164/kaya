@@ -39,12 +39,11 @@ func App() *kaya.App {
 	var notes kaya.RecordCollection[string, Note]
 
 	row := func(tx *kaya.Tx, key string) Note {
-		for _, entry := range notes.Items(tx) {
-			if entry.Key == key {
-				return entry.Value
-			}
+		note, ok := notes.Get(tx, key)
+		if !ok {
+			panic(fmt.Sprintf("richrows: no row %q", key))
 		}
-		panic(fmt.Sprintf("richrows: no row %q", key))
+		return note
 	}
 
 	// An undo or redo moved the row back: the app reads ITS OWN mirror of

@@ -35,7 +35,7 @@ static class UndoScene
 
         Signal status = default, history = default, keys = default, notes = default;
         Widget field = default;
-        RecordCollection<Todo> todos = null;
+        RecordCollection<Todo>? todos = null;
 
         string draft = "";
         var rowNotes = new SortedDictionary<long, string>();

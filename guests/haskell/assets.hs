@@ -1,10 +1,12 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 -- The assets scene, Haskell port — guests/rust/assets.rs,
 -- tools/scenes/assets.steps.
 
 import qualified Data.ByteString as BS
 
+import qualified Data.Text as T
 import KayaApp
-import KayaWire (Value (..))
 
 -- Deliberately absent, and a LEGAL name: the answer is the census sentence.
 missingName :: String
@@ -45,11 +47,11 @@ main = kayaMain $ \app -> do
         markName ++ " " ++ present ++ ", " ++ fontName ++ ": "
           ++ show (BS.length fontBytes) ++ " bytes, " ++ verdict
   buildTx app $ do
-    window 0 [WTitle "assets", WSize 480 360]
+    window primary [WTitle "assets", WSize 480 360]
 
-    title <- signal (VStr "assets")
-    found <- signal (VStr census)
-    sizes <- signal (VStr summary)
+    title <- signal (T.pack "assets")
+    found <- signal (T.pack census)
+    sizes <- signal (T.pack summary)
 
     root <-
       column

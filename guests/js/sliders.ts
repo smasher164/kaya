@@ -12,11 +12,6 @@ function spelled(v: number): string {
   return v.toFixed(6).replace(/0+$/, "").replace(/\.$/, "");
 }
 
-let levelText!: kaya.Signal<string>;
-let commitText!: kaya.Signal<string>;
-let volumeText!: kaya.Signal<string>;
-let rowText!: kaya.Signal<string>;
-let pos!: kaya.Signal<number>;
 let commits = 0;
 
 function onLevel(value: number): void {
@@ -41,12 +36,12 @@ function onReset(): void {
   pos.set(25);
 }
 
-app.window({}, () => {
-  levelText = kaya.signal("value: 50");
-  commitText = kaya.signal("commits: 0");
-  volumeText = kaya.signal("volume: 0.5");
-  rowText = kaya.signal("row: none");
-  pos = kaya.signal(50);
+const { levelText, commitText, volumeText, rowText, pos } = app.window({}, () => {
+  const levelText = kaya.signal("value: 50");
+  const commitText = kaya.signal("commits: 0");
+  const volumeText = kaya.signal("volume: 0.5");
+  const rowText = kaya.signal("row: none");
+  const pos = kaya.signal(50);
   const tracks = kaya.collection(Track);
   kaya.column(() => {
     kaya.label({ bind: levelText }); // label#0
@@ -66,6 +61,7 @@ app.window({}, () => {
   });
   tracks.insert("a", Track({ name: "a", level: 70 }));
   tracks.insert("b", Track({ name: "b", level: 20 }));
+  return { levelText, commitText, volumeText, rowText, pos };
 });
 
 app.run();

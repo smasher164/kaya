@@ -1,5 +1,6 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeApplications #-}
 
 {- The dynamic-table spelling, TYPECHECKED. tools/check-sugar-surface.py
@@ -17,13 +18,13 @@
 
 module NestedTable where
 
-import Data.Proxy (Proxy (..))
+import Data.Text (Text)
 import GHC.Generics (Generic)
 
 import KayaApp
 import KayaWire (Value (..))
 
-data Position = Position {symbol :: String, shares :: String}
+data Position = Position {symbol :: Text, shares :: Text}
   deriving (Generic)
 
 instance KayaRecord Position
@@ -39,7 +40,7 @@ nested app = do
       -- nested collection, AND record-typed: the row's two cells are the
       -- record's two fields rather than the one string a scalar
       -- collection's element can be.
-      positions <- collectionOf (Proxy :: Proxy Position)
+      positions <- collectionOf @Position
       (t, _) <-
         forEach (recordHandle positions) $
           rowOf

@@ -16,10 +16,6 @@ const undo: kaya.Document[] = [];
 const redo: kaya.Document[] = [];
 let current = new kaya.Document("");
 
-let status!: kaya.Signal<string>;
-let native!: kaya.Widget;
-let owned!: kaya.Widget;
-
 function publish(): void {
   status.set(`undo ${undo.length} redo ${redo.length}`);
   owned.canUndo(undo.length > 0);
@@ -51,13 +47,15 @@ function onRedo(): void {
   publish();
 }
 
-app.window({ title: "ownundo" }, () => {
+const { status, native, owned } = app.window({ title: "ownundo" }, () => {
   app.menu("Edit", () => {
     kaya.item("Undo", { role: kaya.ROLE_UNDO, onActivate: onUndo });
     kaya.item("Redo", { role: kaya.ROLE_REDO, onActivate: onRedo });
   });
 
-  status = kaya.signal("undo 0 redo 0");
+  const status = kaya.signal("undo 0 redo 0");
+  let native!: kaya.Widget;
+  let owned!: kaya.Widget;
 
   kaya.column(() => {
     kaya.label({ bind: status }).a11yId("status"); // label#0
@@ -70,6 +68,7 @@ app.window({ title: "ownundo" }, () => {
       kaya.button("focus owned", { onClick: () => owned.focus() }); // button#1
     });
   });
+  return { status, native, owned };
 });
 
 app.run();

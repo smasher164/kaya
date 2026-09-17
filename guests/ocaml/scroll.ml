@@ -1,7 +1,6 @@
 (* The scroll scene, OCaml port — guests/rust/scroll.rs,
    tools/scenes/scroll.steps. *)
 
-open Kaya_wire
 open Kaya_app
 
 let () =
@@ -10,11 +9,11 @@ let () =
   let status = ref None in
   build app (fun () ->
      window ~title:"scroll" ();
-     let s = signal (Str "at top") in
+     let s = signal_str ("at top") in
      status := Some s;
-     let on_bottom () = write s (Str "bottom clicked") in
+     let on_bottom () = write s ("bottom clicked") in
      let row i () =
-       let caption = signal (Str (Printf.sprintf "row %d" i)) in
+       let caption = signal_str ((Printf.sprintf "row %d" i)) in
        label ~bind:caption ()
      in
      let root =

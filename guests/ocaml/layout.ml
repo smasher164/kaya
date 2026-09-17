@@ -1,18 +1,17 @@
 (* The layout scene, OCaml port — guests/rust/layout.rs,
    tools/scenes/layout.steps. *)
 
-open Kaya_wire
 open Kaya_app
 
 let () =
   let app = Kaya_app.create () in
 
   build app (fun () ->
-     let probe = signal (Str "Layout probe") in
-     let tail = signal (Str "tail") in
-     let mixed = signal (Str "mixed") in
-     let nested = signal (Str "nested") in
-     let deep = signal (Str "deep") in
+     let probe = signal_str ("Layout probe") in
+     let tail = signal_str ("tail") in
+     let mixed = signal_str ("mixed") in
+     let nested = signal_str ("nested") in
+     let deep = signal_str ("deep") in
 
      let root =
        column

@@ -3,20 +3,19 @@
    first word is what makes a UTF-16 reader fail
    (docs/ranges-units.md). *)
 
-open Kaya_wire
 open Kaya_app
 
 let doc_source = "Héllo world\nSecond line"
 
 (* The core's spelling of runs ([expect_runs]), so the binding's document
    and the core's mirror are compared as one string. *)
-let spell runs =
+let spell (runs : Run.t list) =
   String.concat "|"
     (List.map
-       (fun r ->
-         if r.r_value = "true" then
-           Printf.sprintf "%d:%d %s" r.r_start r.r_stop r.r_name
-         else Printf.sprintf "%d:%d %s=%s" r.r_start r.r_stop r.r_name r.r_value)
+       (fun (r : Run.t) ->
+         if r.value = "true" then
+           Printf.sprintf "%d:%d %s" r.start r.stop r.name
+         else Printf.sprintf "%d:%d %s=%s" r.start r.stop r.name r.value)
        runs)
 
 let () =
@@ -24,8 +23,8 @@ let () =
 
   build app (fun () ->
       window ~title:"richtext" ();
-      let last = signal (Str "") in
-      let runs = signal (Str "") in
+      let last = signal_str ("") in
+      let runs = signal_str ("") in
 
       let editor =
         textarea ~rich:true ~a11y_id:"doc" ~a11y_label:"Document" ()
@@ -33,24 +32,22 @@ let () =
       (* The two handlers read the editor's own folded document, so they
          are registered once it exists. *)
       on_edit app editor (fun e ->
-          let mirror = spell (document editor).d_runs in
+          let mirror = spell (document editor).runs in
           write last
-            (Str
-               (Printf.sprintf "edit %d:%d <%s> %s [%s]" e.e_start e.e_stop
-                  e.e_inserted
-                  (match e.e_source with
-                  | Some s -> edit_source_name s
-                  | None -> "?")
-                  (spell e.e_runs)));
-          write runs (Str mirror));
+            (Printf.sprintf "edit %d:%d <%s> %s [%s]" e.start e.stop
+               e.inserted
+               (match e.source with
+               | Some s -> edit_source_name s
+               | None -> "?")
+               (spell e.runs));
+          write runs mirror);
       on_format app editor (fun act ->
-          let mirror = spell (document editor).d_runs in
+          let mirror = spell (document editor).runs in
           write last
-            (Str
-               (Printf.sprintf "format %d:%d %s=%s" act.f_start act.f_stop
-                  act.f_name
-                  (Option.value act.f_value ~default:"off")));
-          write runs (Str mirror));
+            (Printf.sprintf "format %d:%d %s=%s" act.start act.stop
+               act.name
+               (Option.value act.value ~default:"off"));
+          write runs mirror);
 
       mount
         (column
@@ -70,14 +67,14 @@ let () =
                        |> Document.block (13, 24) Heading2
                      in
                      set_document editor doc;
-                     write runs (Str (spell doc.d_runs)));
+                     write runs ((spell doc.runs)));
                  (* button#1 — the app's own edit, italic over the
                     inserted word *)
                  button ~text:"insert"
                    ~on_click:(fun () ->
                      apply_edit editor
                        (Edit.insert 6 ", big" |> Edit.mark (2, 5) "italic" "true");
-                     write runs (Str (spell (document editor).d_runs)));
+                     write runs ((spell (document editor).runs)));
                  (* button#2 — select the first word, for the toolbar act *)
                  button ~text:"select word"
                    ~on_click:(fun () -> select_range editor (0, 6));
@@ -94,7 +91,7 @@ let () =
                  button ~text:"prefix"
                    ~on_click:(fun () ->
                      apply_edit editor (Edit.insert 0 "> ");
-                     write runs (Str (spell (document editor).d_runs)));
+                     write runs ((spell (document editor).runs)));
                ];
            ]
            ()));

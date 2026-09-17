@@ -10,14 +10,13 @@ function onSelect(index: number): void {
   picked.set(`picked: ${OPTIONS[index]}`);
 }
 
-let picked!: kaya.Signal<string>;
-
-app.window({ title: "select" }, () => {
-  picked = kaya.signal("picked: Red");
+const { picked } = app.window({ title: "select" }, () => {
+  const picked = kaya.signal("picked: Red");
   kaya.column(() => {
     kaya.select(OPTIONS, { selected: 0, onSelect });
     kaya.label({ bind: picked });
   });
+  return { picked };
 });
 
 app.run();

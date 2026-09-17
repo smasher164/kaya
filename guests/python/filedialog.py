@@ -33,7 +33,7 @@ def picked(files):
     def worker():
         count = len(files)
         try:
-            handle, seekable = files[0].open(kaya.wire.FILE_MODE_READ)
+            handle, seekable = files[0].open(kaya.FileMode.READ)
             with handle as f:
                 text = f.read().decode()
         except OSError as e:

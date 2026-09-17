@@ -28,7 +28,7 @@ destination = None
 def read_back(picked):
     """Read a handle back through kaya, with Python's own file API."""
     try:
-        handle, _seekable = picked.open(kaya.wire.FILE_MODE_READ)
+        handle, _seekable = picked.open(kaya.FileMode.READ)
     except OSError as e:
         return f"open failed: {e}"
     try:
@@ -40,10 +40,10 @@ def read_back(picked):
 
 def write_back(picked, text):
     """Write `text` through a handle and report what the file says
-    afterwards. FILE_MODE_WRITE truncates, on a picked file and on a
+    afterwards. kaya.FileMode.WRITE truncates, on a picked file and on a
     save destination alike — the destination only adds the create."""
     try:
-        handle, _seekable = picked.open(kaya.wire.FILE_MODE_WRITE)
+        handle, _seekable = picked.open(kaya.FileMode.WRITE)
     except OSError as e:
         # Without the create a save destination cannot be opened
         # (docs/save-plan.md D1).

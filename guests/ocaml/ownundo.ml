@@ -1,7 +1,6 @@
 (* The app-owned undo scene, OCaml port — guests/rust/ownundo.rs,
    tools/scenes/ownundo.steps (docs/rich-text-plan.md R6, §14). *)
 
-open Kaya_wire
 open Kaya_app
 
 let () =
@@ -15,7 +14,7 @@ let () =
   let current = ref (Document.create "") in
 
   build app (fun () ->
-      let status = signal (Str "undo 0 redo 0") in
+      let status = signal_str ("undo 0 redo 0") in
 
       let native =
         textarea ~rich:true ~a11y_id:"native" ~a11y_label:"Native" ()
@@ -27,9 +26,8 @@ let () =
 
       let publish () =
         write status
-          (Str
-             (Printf.sprintf "undo %d redo %d" (List.length !undo)
-                (List.length !redo)));
+          (Printf.sprintf "undo %d redo %d" (List.length !undo)
+             (List.length !redo));
         can_undo owned (!undo <> []);
         can_redo owned (!redo <> [])
       in
@@ -66,8 +64,8 @@ let () =
           [
             menu ~label:"Edit"
               [
-                item ~label:"Undo" ~role:role_undo ~on_activate:on_undo;
-                item ~label:"Redo" ~role:role_redo ~on_activate:on_redo;
+                item ~label:"Undo" ~role:Menu_role.Undo ~on_activate:on_undo;
+                item ~label:"Redo" ~role:Menu_role.Redo ~on_activate:on_redo;
               ];
           ]
         ();

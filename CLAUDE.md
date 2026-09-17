@@ -443,7 +443,17 @@ in docs/deferred.md.
    printed per part). The reader carries its own floor: a rust column of
    ZERO refuses a verdict, because Rust is the reference the patterns
    were calibrated against and a census that reads nothing agrees with
-   everything),
+   everything.
+   AND THE WIRE STOPS AT THE BINDING BOUNDARY SINCE 2026-09-16 (the idiom
+   survey's naive-port test, DESIGN.md's Binding conventions): no
+   hand-written guest names a wire constructor or constant — `VStr`,
+   `Str "…"`, `Value::Str`, `KayaWire.`, `wire.` — in any of the nine,
+   the generated record surfaces read out of tools/gen-guests.py's own
+   GENERATED list, a check or bench that packs the wire on purpose exempt
+   by name and held to a file that still exists, a floor of forty guests
+   per language. Nine watched negatives, planted 1 / blank 0, counts
+   printed; the clause was red by 122 findings on the tree it was written
+   against, which is the shipped state it exists to refuse),
    `tools/check-universal-props.py` (the lowering-side sibling: every
    backend applies the universal a11y props to every kind — Compose
    per-arm, SwiftUI's one wrapper unbypassed, GTK/WinUI's apply arm
@@ -801,7 +811,13 @@ in docs/deferred.md.
    `canvas-*` is the unset proof and `canvasdark-*` the set proof, on all
    five lanes, and the tasks scene's Dark-then-System round trip),
    `tools/check-abort.py` (uniform abort
-   semantics, all languages),
+   semantics, all languages. AND THE IDIOM PASS'S COMPILE-TIME WALLS
+   SINCE 2026-09-16: the OCaml fixtures under bindings/ocaml/checks/negatives
+   (a bool into a string signal, a string where Menu_role.t is taken, a
+   bare value where a key is) must each fail to compile on the one line
+   their finding names, and the Haskell KayaValue probe's four cases must
+   each be refused by the class itself, never by a syntax error — both
+   run here because a negative nobody runs is a guard nobody walks into),
    `tools/check-tx-liveness.py` (a transaction is usable only inside
    the build or handler that made it, on the app thread — the HANDLE
    bindings refuse a closed one at a single write chokepoint, the

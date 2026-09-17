@@ -1,6 +1,9 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE DeriveAnyClass #-}
 
 -- The table scene, Haskell port — guests/rust/table.rs,
 -- tools/scenes/table.steps.
@@ -8,22 +11,23 @@
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.List (sortBy)
 import Data.Ord (comparing)
-import Data.Proxy (Proxy (..))
 import GHC.Generics (Generic)
 
+import Data.Text (Text)
+import qualified Data.Text as T
 import KayaApp
-import KayaWire (Value (..))
 
-data TableItem = TableItem {name :: String, size :: String} deriving (Generic)
+data TableItem = TableItem {name :: Text, size :: Text}
+  deriving stock (Generic)
+  deriving anyclass (KayaRecord)
 
-instance KayaRecord TableItem
 
 main :: IO ()
 main = kayaMain $ \app -> do
   -- The guest's sort policy; the platform never has one.
   sorted <- newIORef (Nothing :: Maybe (Int, Bool))
   (items, table) <- buildTx app $ do
-    items <- collectionOf (Proxy :: Proxy TableItem)
+    items <- collectionOf @TableItem
     -- The root is a row so the For's container is the scene's only
     -- column-kind widget (the reorder scene's rule).
     (table, _) <-
@@ -39,7 +43,7 @@ main = kayaMain $ \app -> do
     root <- row [pure table]
     mount root
     mapM_
-      (\(k, n, s) -> insertRecord items (VStr k) (TableItem n s))
+      (\(k, n, s) -> insertRecord items (T.pack k) (TableItem n s))
       [("b", "banana", "30"), ("a", "apple", "10"), ("c", "cherry", "20")]
     return (items, table)
   onSort app table $ \column -> do

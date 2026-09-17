@@ -1,6 +1,5 @@
 (* The feed scene, OCaml port — guests/rust/feed.rs, tools/scenes/feed.steps. *)
 
-open Kaya_wire
 open Kaya_app
 
 type post =
@@ -14,14 +13,14 @@ let () =
   build app (fun () ->
      let feed = sum_of post_sum in
      let done_count =
-       sum_derive feed (fun entries ->
+       sum_derive signal_str feed (fun entries ->
            let n =
              List.length
                (List.filter
                   (fun (_, p) -> match p with Todo { done_; _ } -> done_ | _ -> false)
                   entries)
            in
-           Str (Printf.sprintf "%d done" n))
+           Printf.sprintf "%d done" n)
      in
      let on_promote () =
        let entries = sum_items feed in
@@ -59,8 +58,8 @@ let () =
          ()
      in
      mount root;
-     sum_insert feed (Str "a") (Note { text = "jot one" });
-     sum_insert feed (Str "b") (Todo { title = "buy milk"; done_ = false });
-     sum_insert feed (Str "c") (Note { text = "jot two" }));
+     sum_insert feed (str_key "a") (Note { text = "jot one" });
+     sum_insert feed (str_key "b") (Todo { title = "buy milk"; done_ = false });
+     sum_insert feed (str_key "c") (Note { text = "jot two" }));
 
   exit (run app)

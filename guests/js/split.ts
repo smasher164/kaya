@@ -21,15 +21,14 @@ function openDetail(): void {
   });
 }
 
-let status!: kaya.Signal<string>;
-
-app.window({ title: "split", panes: 2 }, () => {
-  status = kaya.signal("list pane");
+const { status } = app.window({ title: "split", panes: 2 }, () => {
+  const status = kaya.signal("list pane");
   kaya.column(() => {
     // Authored ids: an index read passes for an empty arm.
     kaya.label({ bind: status }).a11yId("list"); // label#0
     kaya.button("open detail", { onClick: openDetail }); // button#0
   });
+  return { status };
 });
 
 app.run();

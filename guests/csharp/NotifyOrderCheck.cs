@@ -27,8 +27,8 @@ static class NotifyOrderCheck
     public static void Run()
     {
         var app = new KayaApp();
-        var oneShot = new List<uint>();
-        var process = new List<(ulong, uint)>();
+        var oneShot = new List<NotificationOutcome>();
+        var process = new List<(ulong, NotificationOutcome)>();
         app.OnNotificationActivation((tx, id, outcome) => process.Add((id, outcome)));
         app.Build(tx => tx.ShowNotification(
             12, title: "bound at the show",
@@ -36,20 +36,20 @@ static class NotifyOrderCheck
 
         // CASE 1: an id WITH a one-shot handler is answered by it, and the
         // process-level handler is not consulted at all.
-        app.NotificationResult(12, KayaWire.NotificationOutcomeActivated);
-        Check(oneShot.Count == 1 && oneShot[0] == KayaWire.NotificationOutcomeActivated,
+        app.NotificationResult(12, NotificationOutcome.Activated);
+        Check(oneShot.Count == 1 && oneShot[0] == NotificationOutcome.Activated,
             "the one-shot handler did not answer");
         Check(process.Count == 0,
             "the process-level handler answered an id that HAD a one-shot handler");
 
         // CASE 2: an id this process never showed — the relaunch case.
-        app.NotificationResult(77, KayaWire.NotificationOutcomeActivated);
-        Check(process.Count == 1 && process[0] == (77ul, KayaWire.NotificationOutcomeActivated),
+        app.NotificationResult(77, NotificationOutcome.Activated);
+        Check(process.Count == 1 && process[0] == (77ul, NotificationOutcome.Activated),
             "a result with no one-shot handler did not reach the process-level one");
 
         // CASE 3: it does NOT retire.
-        app.NotificationResult(78, KayaWire.NotificationOutcomeRefused);
-        Check(process.Count == 2 && process[1] == (78ul, KayaWire.NotificationOutcomeRefused),
+        app.NotificationResult(78, NotificationOutcome.Refused);
+        Check(process.Count == 2 && process[1] == (78ul, NotificationOutcome.Refused),
             "the process-level handler retired after its first result");
 
         // AND THE DROP IS ANNOUNCED, compared in full: a drop nobody
@@ -61,7 +61,7 @@ static class NotifyOrderCheck
         Console.SetError(said);
         try
         {
-            app.NotificationResult(41, KayaWire.NotificationOutcomeRefused);
+            app.NotificationResult(41, NotificationOutcome.Refused);
         }
         finally
         {

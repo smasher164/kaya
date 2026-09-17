@@ -1,7 +1,6 @@
 (* The align scene, OCaml port — guests/rust/align.rs,
    tools/scenes/align.steps. *)
 
-open Kaya_wire
 open Kaya_app
 
 (* A 100x20 PNG: exact pixel widths, so row@wrapped breaks onto two lines
@@ -32,11 +31,11 @@ let () =
   let app = Kaya_app.create () in
 
   build app (fun () ->
-     let probe = signal (Str "align probe") in
-     let base = signal (Str "base") in
-     let anchor = signal (Str "anchor") in
-     let fit = signal (Str "fit") in
-     let plain = signal (Str "plain probe") in
+     let probe = signal_str ("align probe") in
+     let base = signal_str ("base") in
+     let anchor = signal_str ("anchor") in
+     let fit = signal_str ("fit") in
+     let plain = signal_str ("plain probe") in
 
      let root =
        column ~a11y_id:"root" ~align:Stretch

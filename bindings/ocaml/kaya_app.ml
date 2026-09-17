@@ -6,7 +6,13 @@
    child form, realized left to right ([List.iter]'s specified order —
    never OCaml's unspecified list-literal order). *)
 
-type signal = Signal of int64
+(* A phantom-typed signal handle — the [field] idiom (below) extended to
+   signals: [enc] is the one place a signal's value crosses onto the
+   wire, so [signal_str]/[signal_bool]/[signal_i64]/[signal_f64] and
+   [write] can never mismatch a signal's declared type against what it
+   is written. *)
+type 'a signal = { sig_id : int64; sig_enc : 'a -> Kaya_wire.value }
+
 type widget = Widget of int64
 type node = Node of int64
 
@@ -35,8 +41,10 @@ let capabilities () =
     notifications = Int64.logand bits Kaya_runtime.cap_notifications <> 0L;
   }
 
-(* The app's OWN writable directory (docs/tasks-s4-plan.md P1):
-   Application Support/<id> on macOS, Documents on iOS, the files
+
+(* The app's own directory: /data/data/<id>/files on Android,
+   ~/Library/Application Support/<id> on macOS, the app's sandboxed
+   directory on iOS, /data/user/0/<id>/files -- no, this is the actual
    directory on Android, $XDG_DATA_HOME/<id> on Linux,
    %LOCALAPPDATA%\<id> on Windows. Created on first ask.
 
@@ -44,7 +52,7 @@ let capabilities () =
    written the standard way. Settings are small and typed and belong in
    [prefs].
 
-   RAISES where the platform has handed no directory over — an error
+   RAISES where the platform has handed no directory over -- an error
    state a guest cannot plan around, so all nine bindings refuse rather
    than answering an absent value (ruled 2026-09-09). *)
 let app_data_dir () =
@@ -57,7 +65,7 @@ let app_data_dir () =
 
 (* The app's preferences store (docs/tasks-s4-plan.md P2/P3): a small
    typed key-value record under the app's id, the platform's own where
-   the platform has one — UserDefaults on Apple, SharedPreferences on
+   the platform has one -- UserDefaults on Apple, SharedPreferences on
    Android, a key file on Linux and Windows.
 
    A PULL, NOT A SIGNAL: a setting is read when the app builds and
@@ -130,7 +138,7 @@ let the_prefs =
     remove = (fun key -> Kaya_runtime.pref_remove (pref_write_key key));
   }
 
-(* The app's preferences store — one per process. *)
+(* The app's preferences store -- one per process. *)
 let prefs () = the_prefs
 
 (* A live menu item: its OWN id space (the c_menu_item counter) behind its
@@ -156,6 +164,27 @@ type instance = {
      the core holds. *)
   entries : (Kaya_wire.value * (int * Kaya_wire.value list)) list;
 }
+
+(* A collection entry's key: a string or a minted int64, the only two
+   shapes [insert]/[insert_fresh] ever produce. The guest-facing type for
+   every key a guest spells or reads back — never the wire's own sum. *)
+type key = Str_key of string | Int_key of int64
+
+let key_of_wire = function
+  | Kaya_wire.Str s -> Str_key s
+  | Kaya_wire.I64 n -> Int_key n
+  | _ -> invalid_arg "kaya: a collection key is a string or an int64"
+
+let key_to_wire = function
+  | Str_key s -> Kaya_wire.Str s
+  | Int_key n -> Kaya_wire.I64 n
+
+let str_key s = Str_key s
+let int_key n = Int_key n
+
+let key_text = function
+  | Str_key s -> s
+  | Int_key n -> Int64.to_string n
 
 (* One file the picker answered with: a handle to redeem, a display
    name, and [local_path] — a RE-OPENABLE NAME, empty unless
@@ -183,43 +212,49 @@ let asset_bytes = Kaya_runtime.asset_bytes
 let asset_close = Kaya_runtime.asset_close
 
 (* One collection entry's restored state, as the core states it. *)
-type undo_entry = {
-  ue_collection : int64;
-  (* The instance path: one key per enclosing For, empty at top level. *)
-  ue_path : Kaya_wire.value list;
-  ue_key : Kaya_wire.value;
-  ue_state : (int * Kaya_wire.value list) option;
-}
+module Undo_entry = struct
+  type t = {
+    collection : int64;
+    (* The instance path: one key per enclosing For, empty at top level. *)
+    path : key list;
+    key : key;
+    state : (int * Kaya_wire.value list) option;
+  }
+end
+
 
 (* One collection instance's restored key order — present only for the
    instances whose order the step changed, because position is the one
    thing per-entry statements cannot carry. *)
-type undo_order = {
-  uo_collection : int64;
-  uo_path : Kaya_wire.value list;
-  uo_keys : Kaya_wire.value list;
-}
+module Undo_order = struct
+  type t = { collection : int64; path : key list; keys : key list }
+end
+
 
 (* One text field's restored contents, and the FIELD'S OWN NAME beside
-   it. [ut_path] EMPTY means [ut_id] is a live widget's id; a non-empty
+   it. [path] EMPTY means [id] is a live widget's id; a non-empty
    path means it is a TEMPLATE NODE's id and the path is the stamped
    copy's keys, outermost first. *)
-type undo_text = {
-  ut_id : int64;
-  ut_path : Kaya_wire.value list;
-  ut_text : string;
-}
+module Undo_text = struct
+  type t = { id : int64; path : key list; text : string }
+end
+
+type undo_text = Undo_text.t
 
 (* WHAT THE CORE PUT BACK, and a STATEMENT of it rather than a replay of
    ops: every run says what a thing now IS, so applying it twice is the same
    as applying it once. APPLYING AN INVERSE EMITS NOTHING ELSE (the echo
    doctrine), so this is the ONLY thing an app hears about the step. *)
-type undo_delta = {
-  ud_signals : (int64 * Kaya_wire.value) list;
-  ud_texts : undo_text list;
-  ud_entries : undo_entry list;
-  ud_orders : undo_order list;
-}
+module Undo_delta = struct
+  type t = {
+    signals : (int64 * Kaya_wire.value) list;
+    texts : Undo_text.t list;
+    entries : Undo_entry.t list;
+    orders : Undo_order.t list;
+  }
+end
+
+type undo_delta = Undo_delta.t
 
 (* One representation, arriving. Bytes ride as [string], OCaml's own
    binary buffer. [Image] may be a RE-ENCODE of what was copied, so
@@ -247,7 +282,7 @@ type op = Op.t
 type dropped = {
   point : float * float;
   operation : op option;
-  anchor : Kaya_wire.value list;
+  anchor : key list;
   before : bool;
   clip : representation option;
 }
@@ -258,13 +293,62 @@ type dropped = {
    this binding converts nothing. A RANGE IS THE RANGES SUGAR'S PAIR,
    [(start, stop)], half-open. *)
 
-(* One attribute over one span; [r_value] is "true" for the flags, a URL
+(* One paragraph kind; drawn, never stored (docs/rich-text-plan.md R3). *)
+type block =
+  | Body
+  | Heading1
+  | Heading2
+  | Heading3
+  | Quote
+  | Code_block
+
+let block_name = function
+  | Body -> "body"
+  | Heading1 -> "heading1"
+  | Heading2 -> "heading2"
+  | Heading3 -> "heading3"
+  | Quote -> "quote"
+  | Code_block -> "code_block"
+
+(* One attribute over one span; [value] is "true" for the flags, a URL
    for [link], a kind for [block]. *)
-type run = { r_start : int; r_stop : int; r_name : string; r_value : string }
+module Run = struct
+  type t = { start : int; stop : int; name : string; value : string }
+end
+
+type run = Run.t
 
 (* A [rich] textarea's text and runs, kept current by the binding from
    the edits it delivers. *)
-type document = { d_text : string; d_runs : run list }
+module Document = struct
+  type t = { text : string; runs : Run.t list }
+
+  let create text = { text; runs = [] }
+
+  (* THE DOCUMENT COMES LAST, so a declaration reads as a pipeline:
+     [Document.create doc |> Document.bold (0, 6) |> ...]. *)
+  let mark (start, stop) name value doc =
+    { doc with runs = doc.runs @ [ { Run.start; stop; name; value } ] }
+
+  let bold range doc = mark range "bold" "true" doc
+  let italic range doc = mark range "italic" "true" doc
+  let underline range doc = mark range "underline" "true" doc
+  let strike range doc = mark range "strike" "true" doc
+  let code range doc = mark range "code" "true" doc
+  let link range url doc = mark range "link" url doc
+
+  (* A paragraph's kind; the range covers whole paragraphs or is refused. *)
+  let block range kind doc = mark range "block" (block_name kind) doc
+
+  let attr_at doc byte name =
+    Option.map
+      (fun (r : Run.t) -> r.value)
+      (List.find_opt
+         (fun (r : Run.t) -> r.name = name && r.start <= byte && byte < r.stop)
+         doc.runs)
+end
+
+type document = Document.t
 
 (* What provoked an edit the widget reports (docs/rich-text-plan.md §13). *)
 type edit_source = User | Ime_commit | Paste | Native_undo | Drop
@@ -289,42 +373,38 @@ let edit_source_of_wire n =
           not know"
          n)
 
-(* Replace [e_start..e_stop] with [e_inserted], whose runs carry offsets
-   RELATIVE to the inserted text. [e_source] is what provoked an edit the
+(* Replace [start..stop] with [inserted], whose runs carry offsets
+   RELATIVE to the inserted text. [source] is what provoked an edit the
    widget delivered and [None] on one the app builds. *)
-type edit = {
-  e_start : int;
-  e_stop : int;
-  e_inserted : string;
-  e_runs : run list;
-  e_source : edit_source option;
-}
+module Edit = struct
+  type t = {
+    start : int;
+    stop : int;
+    inserted : string;
+    runs : Run.t list;
+    source : edit_source option;
+  }
 
-(* A toolbar act over a range; [f_value = None] is the attribute taken
+  let insert at text = { start = at; stop = at; inserted = text; runs = []; source = None }
+
+  let delete (start, stop) = { start; stop; inserted = ""; runs = []; source = None }
+
+  let replace (start, stop) text = { start; stop; inserted = text; runs = []; source = None }
+
+  (* One attribute over the INSERTED text's own offsets. *)
+  let mark (start, stop) name value e =
+    { e with runs = e.runs @ [ { Run.start; stop; name; value } ] }
+end
+
+type edit = Edit.t
+
+(* A toolbar act over a range; [value = None] is the attribute taken
    off. *)
-type format_act = {
-  f_start : int;
-  f_stop : int;
-  f_name : string;
-  f_value : string option;
-}
+module Format = struct
+  type t = { start : int; stop : int; name : string; value : string option }
+end
 
-(* One paragraph kind; drawn, never stored (docs/rich-text-plan.md R3). *)
-type block =
-  | Body
-  | Heading1
-  | Heading2
-  | Heading3
-  | Quote
-  | Code_block
-
-let block_name = function
-  | Body -> "body"
-  | Heading1 -> "heading1"
-  | Heading2 -> "heading2"
-  | Heading3 -> "heading3"
-  | Quote -> "quote"
-  | Code_block -> "code_block"
+type format_act = Format.t
 
 type app = {
   (* Work handed over by other threads, waiting to run as transactions
@@ -806,18 +886,32 @@ let time_of_packed packed =
   let hour, minute = Kaya_wire.unpack_time packed in
   { hour; minute }
 
-(* A date or a time as a signal's value. *)
-let date_value d = Kaya_wire.I64 (pack_date d)
-let time_value t = Kaya_wire.I64 (pack_time t)
-
-let signal initial =
+(* The one place a signal is minted: [enc] is recorded once, on the
+   handle, so every later write goes through the same wire tag the
+   signal was declared with. Internal — a guest reaches this only
+   through the four typed constructors below. *)
+let signal_of (enc : 'a -> Kaya_wire.value) (initial : 'a) : 'a signal =
   let tx = the_tx () in
   tx.app.c_signal <- Int64.add tx.app.c_signal 1L;
   let id = tx.app.c_signal in
-  emit tx (Kaya_wire.tx_create_signal id initial);
-  Signal id
+  emit tx (Kaya_wire.tx_create_signal id (enc initial));
+  { sig_id = id; sig_enc = enc }
 
-let write (Signal id) value = emit (the_tx ()) (Kaya_wire.tx_write_signal id value)
+let signal_str (s : string) : string signal = signal_of (fun s -> Kaya_wire.Str s) s
+let signal_bool (b : bool) : bool signal = signal_of (fun b -> Kaya_wire.Bool b) b
+let signal_i64 (n : int64) : int64 signal = signal_of (fun n -> Kaya_wire.I64 n) n
+let signal_f64 (x : float) : float signal = signal_of (fun x -> Kaya_wire.F64 x) x
+
+(* A date or a time as its own signal — packed the same way
+   [date_field]/[time_field] pack a record field. *)
+let signal_date (d : date) : date signal =
+  signal_of (fun d -> Kaya_wire.I64 (pack_date d)) d
+
+let signal_time (t : time) : time signal =
+  signal_of (fun t -> Kaya_wire.I64 (pack_time t)) t
+
+let write (s : 'a signal) (v : 'a) : unit =
+  emit (the_tx ()) (Kaya_wire.tx_write_signal s.sig_id (s.sig_enc v))
 
 let widget kind =
   let tx = the_tx () in
@@ -875,9 +969,9 @@ let set_a11y_hint (Widget id) value =
 
 (* The SIGNAL-SOURCED forms of the trio, spelled as [bind_text] is; the
    constructors take them as [?a11y_id_bind] and [?a11y_label_bind]. *)
-let bind_a11y_id (Widget id) (Signal s) = emit (the_tx ()) (Kaya_wire.tx_bind_a11y_id id s)
-let bind_a11y_label (Widget id) (Signal s) = emit (the_tx ()) (Kaya_wire.tx_bind_a11y_label id s)
-let bind_a11y_hint (Widget id) (Signal s) = emit (the_tx ()) (Kaya_wire.tx_bind_a11y_hint id s)
+let bind_a11y_id (Widget id) (s : string signal) = emit (the_tx ()) (Kaya_wire.tx_bind_a11y_id id s.sig_id)
+let bind_a11y_label (Widget id) (s : string signal) = emit (the_tx ()) (Kaya_wire.tx_bind_a11y_label id s.sig_id)
+let bind_a11y_hint (Widget id) (s : string signal) = emit (the_tx ()) (Kaya_wire.tx_bind_a11y_hint id s.sig_id)
 
 (* A widget's HELP TEXT: one short sentence saying what the control is or
    does (docs/tooltip-plan.md T1). Universal. The platform picks the
@@ -885,7 +979,7 @@ let bind_a11y_hint (Widget id) (Signal s) = emit (the_tx ()) (Kaya_wire.tx_bind_
    and hands the text to its assistive reader; an authored hint wins the
    hint slot (T3). *)
 let set_help (Widget id) value = emit (the_tx ()) (Kaya_wire.tx_set_help id value)
-let bind_help (Widget id) (Signal s) = emit (the_tx ()) (Kaya_wire.tx_bind_help id s)
+let bind_help (Widget id) (s : string signal) = emit (the_tx ()) (Kaya_wire.tx_bind_help id s.sig_id)
 
 (* The PROMPT a text field shows while it is empty (docs/search-plan.md
    S3): the platform's own placeholder, never part of the text and never
@@ -893,15 +987,15 @@ let bind_help (Widget id) (Signal s) = emit (the_tx ()) (Kaya_wire.tx_bind_help 
 let set_placeholder (Widget id) value =
   emit (the_tx ()) (Kaya_wire.tx_set_placeholder id value)
 
-let bind_placeholder (Widget id) (Signal s) =
-  emit (the_tx ()) (Kaya_wire.tx_bind_placeholder id s)
+let bind_placeholder (Widget id) (s : string signal) =
+  emit (the_tx ()) (Kaya_wire.tx_bind_placeholder id s.sig_id)
 
 (* The DESTINATION a [Link] label opens (docs/tasks-s2-plan.md T3): the
    platform's own opener takes it and nothing is emitted. *)
 let set_href (Widget id) value = emit (the_tx ()) (Kaya_wire.tx_set_href id value)
 
-let bind_href (Widget id) (Signal s) =
-  emit (the_tx ()) (Kaya_wire.tx_bind_href id s)
+let bind_href (Widget id) (s : string signal) =
+  emit (the_tx ()) (Kaya_wire.tx_bind_href id s.sig_id)
 
 (* The three universal props as they ride every constructor: applied
    together, in one place, so a new constructor cannot pick up [~grow]
@@ -1040,9 +1134,8 @@ let platform_wire = function
   | Windows -> Int64.of_int Kaya_wire.platform_windows
   | Android -> Int64.of_int Kaya_wire.platform_android
 
-let bind_text (Widget id) (Signal s) = emit (the_tx ()) (Kaya_wire.tx_bind_text id s)
+let bind_text (Widget id) (s : string signal) = emit (the_tx ()) (Kaya_wire.tx_bind_text id s.sig_id)
 let set_checked (Widget id) checked = emit (the_tx ()) (Kaya_wire.tx_set_checked id checked)
-let bind_checked (Widget id) (Signal s) = emit (the_tx ()) (Kaya_wire.tx_bind_checked id s)
 
 (* An image's content: one registration copy of the encoded bytes into core-
    owned memory. *)
@@ -1057,9 +1150,9 @@ let set_source_asset (Widget id) a =
   let tx = the_tx () in
   emit tx (Kaya_wire.tx_set_source id (Kaya_runtime.asset_blob a))
 
-let bind_source (Widget id) (Signal s) =
+let bind_source (Widget id) (s : bytes signal) =
   let tx = the_tx () in
-  emit tx (Kaya_wire.tx_bind_source id s)
+  emit tx (Kaya_wire.tx_bind_source id s.sig_id)
 
 (* Drop an entry's content now (the field stays authoritative). *)
 let clear (Widget id) = emit (the_tx ()) (Kaya_wire.tx_widget_command id Kaya_wire.command_clear)
@@ -1101,91 +1194,28 @@ let reveal_range (Widget id) (start, stop) =
     (Kaya_wire.tx_reveal_range id (Int64.of_int start) (Int64.of_int stop))
 
 (* --- Rich text: the document, its edits, the widget's own acts ------
-   (docs/rich-text-plan.md R1). The offsets are the ranges' own unit. *)
-
-module Document = struct
-  type t = document
-
-  let create text = { d_text = text; d_runs = [] }
-
-  (* THE DOCUMENT COMES LAST, so a declaration reads as a pipeline:
-     [Document.create doc |> Document.bold (0, 6) |> ...]. *)
-  let mark (start, stop) name value doc =
-    {
-      doc with
-      d_runs =
-        doc.d_runs
-        @ [ { r_start = start; r_stop = stop; r_name = name; r_value = value } ];
-    }
-
-  let bold range doc = mark range "bold" "true" doc
-  let italic range doc = mark range "italic" "true" doc
-  let underline range doc = mark range "underline" "true" doc
-  let strike range doc = mark range "strike" "true" doc
-  let code range doc = mark range "code" "true" doc
-  let link range url doc = mark range "link" url doc
-
-  (* A paragraph's kind; the range covers whole paragraphs or is refused. *)
-  let block range kind doc = mark range "block" (block_name kind) doc
-
-  let attr_at doc byte name =
-    Option.map
-      (fun r -> r.r_value)
-      (List.find_opt
-         (fun r -> r.r_name = name && r.r_start <= byte && byte < r.r_stop)
-         doc.d_runs)
-end
-
-module Edit = struct
-  type t = edit
-
-  let insert at text =
-    { e_start = at; e_stop = at; e_inserted = text; e_runs = []; e_source = None }
-
-  let delete (start, stop) =
-    { e_start = start; e_stop = stop; e_inserted = ""; e_runs = []; e_source = None }
-
-  let replace (start, stop) text =
-    {
-      e_start = start;
-      e_stop = stop;
-      e_inserted = text;
-      e_runs = [];
-      e_source = None;
-    }
-
-  (* One attribute over the INSERTED text's own offsets. *)
-  let mark (start, stop) name value e =
-    {
-      e with
-      e_runs =
-        e.e_runs
-        @ [ { r_start = start; r_stop = stop; r_name = name; r_value = value } ];
-    }
-end
+   (docs/rich-text-plan.md R1). The offsets are the ranges' own unit.
+   [Run], [Document], [Edit] and [Format] are declared earlier, beside
+   [block]/[block_name], the one thing [Document.block] needs. *)
 
 (* Four values per run — start, stop, name, value — the shape both
    writes and both occurrences carry. *)
-let run_values runs =
+let run_values (runs : Run.t list) =
   List.concat_map
-    (fun r ->
+    (fun (r : Run.t) ->
       [
-        Kaya_wire.I64 (Int64.of_int r.r_start);
-        Kaya_wire.I64 (Int64.of_int r.r_stop);
-        Kaya_wire.Str r.r_name;
-        Kaya_wire.Str r.r_value;
+        Kaya_wire.I64 (Int64.of_int r.start);
+        Kaya_wire.I64 (Int64.of_int r.stop);
+        Kaya_wire.Str r.name;
+        Kaya_wire.Str r.value;
       ])
     runs
 
-let rec runs_of_values = function
+let rec runs_of_values values : Run.t list =
+  match values with
   | Kaya_wire.I64 start :: Kaya_wire.I64 stop :: Kaya_wire.Str name
     :: Kaya_wire.Str value :: rest ->
-      {
-        r_start = Int64.to_int start;
-        r_stop = Int64.to_int stop;
-        r_name = name;
-        r_value = value;
-      }
+      { Run.start = Int64.to_int start; stop = Int64.to_int stop; name; value }
       :: runs_of_values rest
   | _ -> []
 
@@ -1193,13 +1223,13 @@ let rec runs_of_values = function
    §19): the field's Blob bytes are ONE flat value list — the text, then
    four values per run — the bytes [set_rich_text] already ships
    (crates/kaya/src/wire.rs, [document_blob] / [read_document_blob]). *)
-let document_blob doc =
+let document_blob (doc : Document.t) =
   let b = Buffer.create 64 in
   Kaya_wire.encode_values b
-    (Kaya_wire.Str doc.d_text :: run_values doc.d_runs);
+    (Kaya_wire.Str doc.text :: run_values doc.runs);
   Buffer.contents b
 
-let document_of_blob bytes =
+let document_of_blob bytes : Document.t =
   if String.length bytes < 8 then
     invalid_arg
       (Printf.sprintf "kaya: a document blob carries its count first; this one is %d byte(s)"
@@ -1214,8 +1244,7 @@ let document_of_blob bytes =
     at := next
   done;
   match List.rev !values with
-  | Kaya_wire.Str text :: rest ->
-      { d_text = text; d_runs = runs_of_values rest }
+  | Kaya_wire.Str text :: rest -> { Document.text; runs = runs_of_values rest }
   | _ ->
       invalid_arg
         (Printf.sprintf
@@ -1224,116 +1253,115 @@ let document_of_blob bytes =
 
 (* The core's normal form (crates/kaya/src/scene.rs, [RichDoc::normalize]),
    so the mirror and the core's document spell one string. *)
-let normalize_runs runs =
-  let names = List.sort_uniq compare (List.map (fun r -> r.r_name) runs) in
+let normalize_runs (runs : Run.t list) : Run.t list =
+  let names = List.sort_uniq compare (List.map (fun (r : Run.t) -> r.name) runs) in
   let per_name name =
     let painted =
       List.fold_left
-        (fun painted run ->
-          if run.r_start >= run.r_stop then painted
+        (fun painted (run : Run.t) ->
+          if run.start >= run.stop then painted
           else
             List.concat_map
-              (fun old ->
-                if old.r_stop <= run.r_start || old.r_start >= run.r_stop then [ old ]
+              (fun (old : Run.t) ->
+                if old.stop <= run.start || old.start >= run.stop then [ old ]
                 else
-                  (if old.r_start < run.r_start then [ { old with r_stop = run.r_start } ]
+                  (if old.start < run.start then [ { old with Run.stop = run.start } ]
                    else [])
                   @
-                  if old.r_stop > run.r_stop then [ { old with r_start = run.r_stop } ]
+                  if old.stop > run.stop then [ { old with Run.start = run.stop } ]
                   else [])
               painted
             @ [ run ])
         []
-        (List.filter (fun r -> r.r_name = name) runs)
+        (List.filter (fun (r : Run.t) -> r.name = name) runs)
     in
     let sorted =
-      List.stable_sort (fun a b -> compare a.r_start b.r_start) painted
+      List.stable_sort (fun (a : Run.t) (b : Run.t) -> compare a.start b.start) painted
     in
     List.rev
       (List.fold_left
-         (fun merged run ->
+         (fun merged (run : Run.t) ->
            match merged with
-           | last :: rest when last.r_stop = run.r_start && last.r_value = run.r_value
+           | (last : Run.t) :: rest when last.stop = run.start && last.value = run.value
              ->
-               { last with r_stop = run.r_stop } :: rest
+               { last with Run.stop = run.stop } :: rest
            | _ -> run :: merged)
          [] sorted)
   in
   List.stable_sort
-    (fun a b -> compare (a.r_start, a.r_name) (b.r_start, b.r_name))
+    (fun (a : Run.t) (b : Run.t) -> compare (a.start, a.name) (b.start, b.name))
     (List.concat_map per_name names)
 
-let the_document app id =
+let the_document app id : Document.t =
   match Hashtbl.find_opt app.documents id with
   | Some doc -> doc
-  | None -> { d_text = ""; d_runs = [] }
+  | None -> { text = ""; runs = [] }
 
 (* The core's own fold rule, over ANY document — a live mirror or a
    stamped copy's row field (crates/kaya/src/app.rs, [fold_edit];
    docs/rich-text-plan.md §19). *)
-let fold_edit doc (start, stop) inserted runs =
-  let len = String.length doc.d_text in
+let fold_edit (doc : Document.t) (start, stop) inserted (runs : Run.t list) : Document.t =
+  let len = String.length doc.text in
   let boundary at =
-    at = len || Char.code doc.d_text.[at] land 0xc0 <> 0x80
+    at = len || Char.code doc.text.[at] land 0xc0 <> 0x80
   in
   if start < 0 || start > stop || stop > len || not (boundary start)
      || not (boundary stop)
   then
     (* A mirror out of step with the core would splice garbage. *)
-    { d_text = inserted; d_runs = runs }
+    { Document.text = inserted; runs }
   else begin
     let shift = String.length inserted - (stop - start) in
     let kept =
       List.concat_map
-        (fun run ->
-          (if run.r_start < start then [ { run with r_stop = min run.r_stop start } ]
+        (fun (run : Run.t) ->
+          (if run.start < start then [ { run with Run.stop = min run.stop start } ]
            else [])
           @
-          if run.r_stop > stop then
+          if run.stop > stop then
             [
               {
                 run with
-                r_start = max run.r_start stop + shift;
-                r_stop = run.r_stop + shift;
+                Run.start = max run.start stop + shift;
+                stop = run.stop + shift;
               };
             ]
           else [])
-        doc.d_runs
+        doc.runs
     in
     let landed =
       List.map
-        (fun run ->
-          { run with r_start = run.r_start + start; r_stop = run.r_stop + start })
+        (fun (run : Run.t) ->
+          { run with Run.start = run.start + start; stop = run.stop + start })
         runs
     in
     let text =
-      String.sub doc.d_text 0 start ^ inserted
-      ^ String.sub doc.d_text stop (len - stop)
+      String.sub doc.text 0 start ^ inserted
+      ^ String.sub doc.text stop (len - stop)
     in
-    { d_text = text; d_runs = normalize_runs (kept @ landed) }
+    { Document.text; runs = normalize_runs (kept @ landed) }
   end
 
 (* The core's [fold_format], over any document. *)
-let fold_format doc (start, stop) name value =
+let fold_format (doc : Document.t) (start, stop) name value : Document.t =
   if start >= stop then doc
   else begin
     let kept =
       List.concat_map
-        (fun run ->
-          if run.r_name <> name || run.r_stop <= start || run.r_start >= stop then
+        (fun (run : Run.t) ->
+          if run.name <> name || run.stop <= start || run.start >= stop then
             [ run ]
           else
-            (if run.r_start < start then [ { run with r_stop = start } ] else [])
-            @ if run.r_stop > stop then [ { run with r_start = stop } ] else [])
-        doc.d_runs
+            (if run.start < start then [ { run with Run.stop = start } ] else [])
+            @ if run.stop > stop then [ { run with Run.start = stop } ] else [])
+        doc.runs
     in
     let painted =
       match value with
-      | Some v ->
-          kept @ [ { r_start = start; r_stop = stop; r_name = name; r_value = v } ]
+      | Some v -> kept @ [ { Run.start; stop; name; value = v } ]
       | None -> kept
     in
-    { doc with d_runs = normalize_runs painted }
+    { doc with runs = normalize_runs painted }
   end
 
 (* One delivered act, into the live mirror (crates/kaya/src/app.rs,
@@ -1363,10 +1391,10 @@ let fold_row_document app node path fold =
       let entry (k, (variant, values)) =
         if k <> key then (k, (variant, values))
         else
-          let doc =
+          let doc : Document.t =
             match List.nth_opt values field with
             | Some (Kaya_wire.Str bytes) -> document_of_blob bytes
-            | _ -> { d_text = ""; d_runs = [] }
+            | _ -> { text = ""; runs = [] }
           in
           let packed = Kaya_wire.Str (document_blob (fold doc)) in
           ( k,
@@ -1398,23 +1426,23 @@ let set_own_undo (Widget id) on =
 
 (* Replace a [rich] textarea's whole document: echoes nothing and, like
    [set_text], spends the native undo history (docs/undo-plan.md D7). *)
-let set_document (Widget id) doc =
+let set_document (Widget id) (doc : Document.t) =
   let tx = the_tx () in
   Hashtbl.replace tx.app.documents id doc;
   emit tx
-    (Kaya_wire.tx_set_rich_text id (List.length doc.d_runs) (run_values doc.d_runs)
-       (Kaya_wire.Str doc.d_text))
+    (Kaya_wire.tx_set_rich_text id (List.length doc.runs) (run_values doc.runs)
+       (Kaya_wire.Str doc.text))
 
 (* One edit into a [rich] textarea: echoes nothing, never resets undo,
    and is held rather than refused mid-composition (R5). THE MIRROR TAKES
    IT AS IT IS SENT, so the app's document is ahead of the widget's until
    a live composition ends (docs/rich-text-plan.md §7). *)
-let apply_edit (Widget id) e =
+let apply_edit (Widget id) (e : Edit.t) =
   let tx = the_tx () in
-  absorb_edit tx.app id (e.e_start, e.e_stop) e.e_inserted e.e_runs;
+  absorb_edit tx.app id (e.start, e.stop) e.inserted e.runs;
   emit tx
-    (Kaya_wire.tx_apply_edit id (Int64.of_int e.e_start) (Int64.of_int e.e_stop)
-       (List.length e.e_runs) (run_values e.e_runs) (Kaya_wire.Str e.e_inserted))
+    (Kaya_wire.tx_apply_edit id (Int64.of_int e.start) (Int64.of_int e.stop)
+       (List.length e.runs) (run_values e.runs) (Kaya_wire.Str e.inserted))
 
 (* Format the widget's CURRENT SELECTION through its own act — what a
    toolbar button sends; the widget answers through [~on_format]. Over a
@@ -1446,7 +1474,7 @@ let unformat (Widget id) name =
 let ranged_act_bounds app id (start, stop) name =
   if name <> "block" then (start, stop)
   else
-    let text = (the_document app id).d_text in
+    let text = (the_document app id).text in
     let len = String.length text in
     let start = min start len and stop = min stop len in
     let rec back i = if i <= 0 then 0 else if text.[i - 1] = '\n' then i else back (i - 1) in
@@ -1624,8 +1652,8 @@ let slider ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help
   emit tx (Kaya_wire.tx_set_max id max);
   Option.iter (fun v -> emit tx (Kaya_wire.tx_set_step id v)) step;
   Option.iter (fun v -> emit tx (Kaya_wire.tx_set_tick_spacing id v)) tick_spacing;
-  (match bind with
-  | Some (Signal s) -> emit tx (Kaya_wire.tx_bind_value id s)
+  (match (bind : float signal option) with
+  | Some s -> emit tx (Kaya_wire.tx_bind_value id s.sig_id)
   | None -> emit tx (Kaya_wire.tx_set_value id value));
   (match on_change with
   | Some handler -> Hashtbl.replace tx.app.widget_values id handler
@@ -1731,7 +1759,7 @@ let date_picker ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind
       ignore (pack_date d);
       emit tx (Kaya_wire.tx_set_date id d.year d.month d.day))
     value;
-  Option.iter (fun (Signal s) -> emit tx (Kaya_wire.tx_bind_date id s)) bind;
+  Option.iter (fun (s : date signal) -> emit tx (Kaya_wire.tx_bind_date id s.sig_id)) bind;
   (match on_change with
   | Some handler ->
       Hashtbl.replace tx.app.widget_dates id (fun packed ->
@@ -1759,7 +1787,7 @@ let time_picker ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind
       ignore (pack_time t);
       emit tx (Kaya_wire.tx_set_time id t.hour t.minute))
     value;
-  Option.iter (fun (Signal s) -> emit tx (Kaya_wire.tx_bind_time id s)) bind;
+  Option.iter (fun (s : time signal) -> emit tx (Kaya_wire.tx_bind_time id s.sig_id)) bind;
   (match on_change with
   | Some handler ->
       Hashtbl.replace tx.app.widget_times id (fun packed ->
@@ -1806,28 +1834,6 @@ let fill_rule_wire = function
   | Nonzero -> Int64.of_int Kaya_wire.fill_rule_nonzero
   | Even_odd -> Int64.of_int Kaya_wire.fill_rule_even_odd
 
-(* SVG's [text-anchor]: which end of the run sits at the anchor point.
-   Spelled [Anchor_*] because [Start] and [End] are already [align]'s. *)
-type text_align = Anchor_start | Anchor_middle | Anchor_end
-
-let text_align_wire = function
-  | Anchor_start -> Int64.of_int Kaya_wire.text_align_start
-  | Anchor_middle -> Int64.of_int Kaya_wire.text_align_middle
-  | Anchor_end -> Int64.of_int Kaya_wire.text_align_end
-
-(* SVG's [dominant-baseline]: which horizontal line of the run sits at
-   the anchor point. *)
-type text_baseline = Alphabetic | Middle | Top | Bottom
-
-let text_baseline_wire = function
-  | Alphabetic -> Int64.of_int Kaya_wire.text_baseline_alphabetic
-  | Middle -> Int64.of_int Kaya_wire.text_baseline_middle
-  | Top -> Int64.of_int Kaya_wire.text_baseline_top
-  | Bottom -> Int64.of_int Kaya_wire.text_baseline_bottom
-
-(* The box this drawing is written in, so a chart can compute its own
-   extents without the app carrying the numbers twice. *)
-let viewbox d = d.d_viewbox
 
 let draw_op d code operands =
   d.d_ops <- List.rev_append (Kaya_wire.I64 (Int64.of_int code) :: operands) d.d_ops
@@ -1843,38 +1849,10 @@ let line_to d x y =
 (* Close the current subpath. *)
 let close d = draw_op d Kaya_wire.draw_op_close []
 
-(* [move_to] the first point and [line_to] the rest — the chart's own
-   shape, spelled once. *)
-let polyline d points =
-  List.iteri (fun i (x, y) -> if i = 0 then move_to d x y else line_to d x y) points
-
-(* Stroke the built path and clear it. [~width] is in device-independent
-   points and does NOT carry the viewbox stretch, so a 1pt gridline is
-   1pt at every canvas size (docs/canvas-plan.md §3.2). *)
-let stroke d ~paint ~width =
-  draw_op d Kaya_wire.draw_op_stroke
-    [ Kaya_wire.I64 (paint_wire paint); Kaya_wire.F64 width ]
-
 (* Fill the built path and clear it. *)
 let fill d ~paint ?(rule = Nonzero) () =
   draw_op d Kaya_wire.draw_op_fill
     [ Kaya_wire.I64 (paint_wire paint); Kaya_wire.I64 (fill_rule_wire rule) ]
-
-(* Select the face for subsequent text ops. [~asset] is an ordinary asset
-   name; [""] is kaya's own embedded default face, which is why a canvas
-   can always draw text (§4.2). [~size] is in device-independent points. *)
-let font d ?(asset = "") ~size ?(weight = 400) () =
-  draw_op d Kaya_wire.draw_op_font
-    [ Kaya_wire.Str asset; Kaya_wire.F64 size;
-      Kaya_wire.I64 (Int64.of_int weight) ]
-
-(* Draw ONE LINE with its anchor at (x, y). A line break in [s] is
-   refused by the core (docs/canvas-plan.md §3.3). *)
-let text d x y s ~paint ?(align = Anchor_start) ?(baseline = Alphabetic) () =
-  draw_op d Kaya_wire.draw_op_text
-    [ Kaya_wire.F64 x; Kaya_wire.F64 y; Kaya_wire.I64 (paint_wire paint);
-      Kaya_wire.I64 (text_align_wire align);
-      Kaya_wire.I64 (text_baseline_wire baseline); Kaya_wire.Str s ]
 
 (* One drawing, recorded and framed: keys FIRST, then the op stream —
    TX 46's Values order (docs/canvas-plan.md §3.1). *)
@@ -1935,25 +1913,6 @@ let canvas ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help
   Option.iter (fun body -> emit tx (drawing_record id [] viewbox body)) draw;
   w
 
-(* DECLARE the whole drawing on a canvas, replacing whatever was declared
-   before. The function reads as immediate-mode drawing and records: one
-   atomic record is queued when it returns. *)
-let draw (Widget id) ~f =
-  let tx = the_tx () in
-  match Hashtbl.find_opt tx.app.canvas_viewboxes id with
-  | None ->
-    invalid_arg
-      "kaya: draw on a widget that is not a canvas this app declared -- a \
-       drawing is a declaration against the canvas it draws on \
-       (docs/canvas-plan.md §2.1)"
-  | Some vb -> emit tx (drawing_record id [] vb f)
-
-(* Re-declare ONE stamped copy's drawing: [node] is the canvas template
-   node and [keys] the copy's key path outermost first. An empty [keys]
-   re-declares the drawing every copy is born with, which is what
-   [Tpl.canvas ~draw] spells at declaration time (§3.1). *)
-let draw_at (Node id) keys ~viewbox ~f =
-  emit (the_tx ()) (drawing_record id keys viewbox f)
 
 (* A container from its children. A child is a PARTIALLY APPLIED creator
    — omitting the trailing [()] leaves a [unit -> widget] thunk, so the
@@ -2089,19 +2048,20 @@ let collection () =
 
 (* The instance of this collection inside the copy keyed by [key] of
    the next enclosing For; chain for deeper nesting. *)
-let at c key = { c with cpath = c.cpath @ [ key ] }
+let at c (key : key) = { c with cpath = c.cpath @ [ key_to_wire key ] }
 
 let assert_root c =
   if c.cpath <> [] then
     invalid_arg "kaya: for_each binds the collection itself, not an instance — drop the at"
 
-let insert c key value =
+let insert c (k : key) (value : string) =
   let tx = the_tx () in
+  let key = key_to_wire k in
   (* ABSORPTION, the one path every explicit key travels: a numeric key
      at or above the minter's counter carries it up ([insert_fresh]). *)
   absorb_key tx.app c.cid c.cpath key;
-  model_set tx c.cid c.cpath key 0 [ value ];
-  emit tx (Kaya_wire.tx_collection_insert c.cid c.cpath key 0 [ value ]);
+  model_set tx c.cid c.cpath key 0 [ Kaya_wire.Str value ];
+  emit tx (Kaya_wire.tx_collection_insert c.cid c.cpath key 0 [ Kaya_wire.Str value ]);
   recompute_derived tx c.cid c.cpath
 
 (* Insert a value under a key the binding authors, and hand the key back.
@@ -2109,20 +2069,22 @@ let insert c key value =
    [I64] and is counter+1. MIXING IS SAFE BY ABSORPTION, and NO DECREMENT
    IS EXPRESSIBLE — a history walk never moves the counter, and an
    abandoned transaction does not move it back either. *)
-let insert_fresh c value =
+let insert_fresh c (value : string) =
   let tx = the_tx () in
   let key = mint_key tx.app c.cid c.cpath in
-  insert c (Kaya_wire.I64 key) value;
+  insert c (Int_key key) value;
   key
 
-let update c key value =
+let update c (k : key) (value : string) =
   let tx = the_tx () in
-  model_set tx c.cid c.cpath key 0 [ value ];
-  emit tx (Kaya_wire.tx_collection_update c.cid c.cpath key 0 [ value ]);
+  let key = key_to_wire k in
+  model_set tx c.cid c.cpath key 0 [ Kaya_wire.Str value ];
+  emit tx (Kaya_wire.tx_collection_update c.cid c.cpath key 0 [ Kaya_wire.Str value ]);
   recompute_derived tx c.cid c.cpath
 
-let remove c key =
+let remove c (k : key) =
   let tx = the_tx () in
+  let key = key_to_wire k in
   model_remove tx c.cid c.cpath key;
   emit tx (Kaya_wire.tx_collection_remove c.cid c.cpath key);
   recompute_derived tx c.cid c.cpath
@@ -2132,6 +2094,8 @@ let entry_keys tx cid path =
   | Some i -> List.map fst i.entries
   | None -> []
 
+(* The raw, wire-keyed mover every typed move below wraps — kept
+   internal so the membership checks below stay in one representation. *)
 let move_entry c key before =
   let tx = the_tx () in
   let keys = entry_keys tx c.cid c.cpath in
@@ -2148,21 +2112,24 @@ let move_entry c key before =
   end
 
 (* Reposition an entry before another's. *)
-let move_before c key anchor = move_entry c key (Some anchor)
+let move_before c (key : key) (anchor : key) =
+  move_entry c (key_to_wire key) (Some (key_to_wire anchor))
 
 (* Reposition an entry at the end of its collection. *)
-let move_to_end c key = move_entry c key None
+let move_to_end c (key : key) = move_entry c (key_to_wire key) None
 
 (* Reposition an entry at the front. *)
-let move_to_front c key =
+let move_to_front c (key : key) =
   let tx = the_tx () in
   match entry_keys tx c.cid c.cpath with
   | [] -> invalid_arg "kaya: move of missing key"
-  | first :: _ -> move_entry c key (Some first)
+  | first :: _ -> move_entry c (key_to_wire key) (Some first)
 
 (* Reposition an entry directly after another's. *)
-let move_after c key anchor =
+let move_after c (key : key) (anchor : key) =
   let tx = the_tx () in
+  let key = key_to_wire key in
+  let anchor = key_to_wire anchor in
   let keys = entry_keys tx c.cid c.cpath in
   if not (List.mem key keys) then invalid_arg "kaya: move of missing key";
   if not (List.mem anchor keys) then invalid_arg "kaya: move after missing key";
@@ -2181,11 +2148,18 @@ let move_after c key anchor =
 
 (* The model: what this guest wrote, exactly — the fold of every patch
    so far (this transaction's included), in insertion order. *)
-let items c =
+let items c : (key * string) list =
   let tx = the_tx () in
   guard_mirror_read ();
   match List.find_opt (fun i -> i.path = c.cpath) (instances_of tx.app c.cid) with
-  | Some i -> List.map (fun (k, (_, vs)) -> (k, List.hd vs)) i.entries
+  | Some i ->
+      List.map
+        (fun (k, (_, vs)) ->
+          ( key_of_wire k,
+            match List.hd vs with
+            | Kaya_wire.Str s -> s
+            | _ -> invalid_arg "kaya: a scalar collection's element is a string" ))
+        i.entries
   | None -> []
 
 (* count reads through items, so the mirror-read guard fires there. *)
@@ -2280,8 +2254,9 @@ let collection_of rt =
   emit tx (Kaya_wire.tx_create_collection id [ rt.rt_schema ]);
   { rc_handle = { cid = id; cpath = [] }; rc_type = rt }
 
-let insert_record rc key value =
+let insert_record rc (k : key) value =
   let tx = the_tx () in
+  let key = key_to_wire k in
   let fields = rc.rc_type.rt_to_values value in
   (* ABSORPTION, on the one path every explicit key of a record
      collection travels — see [insert_fresh]. *)
@@ -2297,11 +2272,12 @@ let insert_record rc key value =
 let insert_record_fresh rc value =
   let tx = the_tx () in
   let key = mint_key tx.app rc.rc_handle.cid rc.rc_handle.cpath in
-  insert_record rc (Kaya_wire.I64 key) value;
+  insert_record rc (Int_key key) value;
   key
 
-let update_record rc key value =
+let update_record rc (k : key) value =
   let tx = the_tx () in
+  let key = key_to_wire k in
   let fields = rc.rc_type.rt_to_values value in
   model_set tx rc.rc_handle.cid rc.rc_handle.cpath key 0 fields;
   emit tx
@@ -2311,8 +2287,9 @@ let update_record rc key value =
 
 (* One field's delta: the rest of the record never travels; the
    model's copy updates the same slot. *)
-let update_field rc key fd value =
+let update_field rc (k : key) fd value =
   let tx = the_tx () in
+  let key = key_to_wire k in
   let mv = fd.fd_to_value value in
   let current =
     match
@@ -2335,21 +2312,39 @@ let update_field rc key fd value =
   recompute_derived tx rc.rc_handle.cid rc.rc_handle.cpath
 
 (* The typed model: what this guest wrote, in insertion order. *)
-let record_items rc =
+let record_items rc : (key * 'a) list =
   let tx = the_tx () in
   guard_mirror_read ();
   match
     List.find_opt (fun i -> i.path = rc.rc_handle.cpath) (instances_of tx.app rc.rc_handle.cid)
   with
-  | Some i -> List.map (fun (k, (_, vs)) -> (k, rc.rc_type.rt_of_values vs)) i.entries
+  | Some i ->
+      List.map (fun (k, (_, vs)) -> (key_of_wire k, rc.rc_type.rt_of_values vs)) i.entries
   | None -> []
 
-(* A signal recomputed from this collection's entries after every mutation,
-   written into the same transaction — the items-left label with no handler
-   remembering to update it. *)
-let derive rc compute =
+(* One row by its key — the [get]/[find_opt] shape over a record
+   collection, so a guest stops hand-rolling [List.assoc_opt] over
+   [record_items]. *)
+let record_get rc (k : key) =
   let tx = the_tx () in
-  let s = signal (compute (record_items rc)) in
+  guard_mirror_read ();
+  match
+    List.find_opt (fun i -> i.path = rc.rc_handle.cpath) (instances_of tx.app rc.rc_handle.cid)
+  with
+  | Some i ->
+      Option.map
+        (fun (_, vs) -> rc.rc_type.rt_of_values vs)
+        (List.assoc_opt (key_to_wire k) i.entries)
+  | None -> None
+
+(* A signal recomputed from this collection's entries after every
+   mutation, written into the same transaction — the items-left label
+   with no handler remembering to update it. [mk] is one of the typed
+   signal constructors ([signal_str] and so on), so the derived signal's
+   type is the type [compute] answers. *)
+let derive mk rc compute =
+  let tx = the_tx () in
+  let s = mk (compute (record_items rc)) in
   tx.pending_derived <-
     (rc.rc_handle.cid, fun () -> write s (compute (record_items rc)))
     :: tx.pending_derived;
@@ -2418,12 +2413,23 @@ let app_identity () =
   emit (the_tx ())
     (Kaya_wire.tx_set_app_identity 0 (Kaya_wire.Str "") (Kaya_wire.Str ""))
 
+(* The window's ADVISORY sections hint (docs/multicolumn-plan.md): the
+   width/height decide the actual presentation, this only nudges it. *)
+module Sections_presentation = struct
+  type t = Auto | Bar | Sidebar
+
+  let wire = function
+    | Auto -> Int64.of_int Kaya_wire.sections_presentation_auto
+    | Bar -> Int64.of_int Kaya_wire.sections_presentation_bar
+    | Sidebar -> Int64.of_int Kaya_wire.sections_presentation_sidebar
+end
+
 (* Set a window's attributes in one construct — the attribute set is
    EXACTLY [create_window]'s; the primary differs only in having no
    creation moment, since the process owns it. *)
 let window ?title ?width ?height ?inset ?veto_close ?dirty ?remember_frame
     ?panes
-    ?sections_presentation ?appearance
+    ?(sections_presentation : Sections_presentation.t option) ?appearance
     ?on_close_requested ?on_closed ?on_undone ?on_redone ?menus ?(id = 0L) () =
   let tx = the_tx () in
   Option.iter (fun t -> emit tx (Kaya_wire.tx_set_window_title id t)) title;
@@ -2450,7 +2456,8 @@ let window ?title ?width ?height ?inset ?veto_close ?dirty ?remember_frame
     (fun v -> emit tx (Kaya_wire.tx_set_window_panes id (Int64.of_int v)))
     panes;
   Option.iter
-    (fun p -> emit tx (Kaya_wire.tx_set_window_sections_presentation id p))
+    (fun p ->
+      emit tx (Kaya_wire.tx_set_window_sections_presentation id (Sections_presentation.wire p)))
     sections_presentation;
   (* [~appearance] is the app's OWN light/dark choice, applied
      process-wide from the default window (docs/tasks-s2b-plan.md
@@ -2534,7 +2541,7 @@ let add_section ?(window = 0L) ?title ?symbol ?badge ?badge_bind ?on_selected id
      clears. *)
   Option.iter (fun c -> emit tx (Kaya_wire.tx_set_section_badge id c)) badge;
   Option.iter
-    (fun (Signal s) -> emit tx (Kaya_wire.tx_bind_section_badge id s))
+    (fun (s : float signal) -> emit tx (Kaya_wire.tx_bind_section_badge id s.sig_id))
     badge_bind;
   Option.iter
     (fun f -> Hashtbl.replace tx.app.section_selected id f)
@@ -2870,13 +2877,6 @@ let draggable ?text ?html ?image ?(files = []) ?(custom = [])
        (if empty then 0 else operation_mask operations)
        0 0 (List.rev !values))
 
-(* DECLARE that a widget receives drops, performing these operations;
-   naming NONE withdraws it. WHAT it takes is its [set_accepts] list,
-   which must be declared first — a destination has one vocabulary, not
-   two (docs/dnd-plan.md D1). *)
-let set_drop_target (Widget id) operations =
-  emit (the_tx ()) (Kaya_wire.tx_set_drop_target id (operation_mask operations) 0 [])
-
 (* ONE STAMPED COPY's drag declaration (docs/dnd-plan.md §4): the
    template node and the copy's keys, outermost first. The per-row payload
    an app declares after the row's insert; it overrides the template's own
@@ -2915,6 +2915,14 @@ let draggable_at ?text ?html ?image ?(files = []) ?(custom = [])
        0
        (keys @ List.rev !values))
 
+(* DECLARE that a widget receives drops, performing these operations;
+   naming NONE withdraws it. WHAT it takes is its [set_accepts] list,
+   which must be declared first — a destination has one vocabulary, not
+   two (docs/dnd-plan.md D1). *)
+let set_drop_target (Widget id) operations =
+  emit (the_tx ()) (Kaya_wire.tx_set_drop_target id (operation_mask operations) 0 [])
+
+
 (* [draggable_at]'s twin: ONE stamped copy receives drops with these
    operations, taking what the template's [set_accepts] names. *)
 let set_drop_target_at (Node id) ~keys operations =
@@ -2933,10 +2941,12 @@ let set_reorderable (Widget id) enabled =
    0xFFFFFFFF as an OCaml int32 (-1l). *)
 let alert_cancel = Kaya_wire.alert_choice_cancel
 
-(* A notification's two outcomes (docs/tasks-s3-plan.md N1). Dismissal is
-   not one of them: two platforms never report it. *)
-let notification_activated = Kaya_wire.notification_outcome_activated
-let notification_refused = Kaya_wire.notification_outcome_refused
+
+(* [Kaya_runtime.open_picked]'s mode: read, write (truncates; a save
+   destination only adds the create) or both. *)
+let file_mode_read = Kaya_wire.file_mode_read
+let file_mode_write = Kaya_wire.file_mode_write
+let file_mode_read_write = Kaya_wire.file_mode_read_write
 
 
 
@@ -2946,6 +2956,22 @@ let mount (Widget root) = emit (the_tx ()) (Kaya_wire.tx_mount 0L root)
 (* --- Menus: the command vocabulary (DESIGN.md, Menus) ---------------
    The curried-children convention extends to items; the window
    construct's [~menus] is the bar anchor, [context_menu] the noun's. *)
+
+(* The closed standard-command vocabulary the core enforces at runtime
+   (crates/kaya/src/scene.rs, MENU_ROLES) — a module because [symbol]
+   already owns the constructor [Copy] ([Op] beside it is the same
+   precedent for drag operations). *)
+module Menu_role = struct
+  type t = Settings | Cut | Copy | Paste | Undo | Redo
+
+  let wire = function
+    | Settings -> "settings"
+    | Cut -> "cut"
+    | Copy -> "copy"
+    | Paste -> "paste"
+    | Undo -> "undo"
+    | Redo -> "redo"
+end
 
 (* Create one item in the menu-item id space. Menu records are live-zone
    only: items are live and shared across stamped copies — build the
@@ -2970,7 +2996,7 @@ let menu_prop_tail id ?enabled ?bind_enabled ?icon ?symbol () =
   let tx = the_tx () in
   Option.iter (fun e -> emit tx (Kaya_wire.tx_set_menu_enabled id e)) enabled;
   Option.iter
-    (fun (Signal s) -> emit tx (Kaya_wire.tx_bind_menu_enabled id s))
+    (fun (s : bool signal) -> emit tx (Kaya_wire.tx_bind_menu_enabled id s.sig_id))
     bind_enabled;
   Option.iter
     (fun data ->
@@ -2989,12 +3015,16 @@ let item ?shortcut ?enabled ?bind_enabled ?icon ?symbol ?primary ?role
   let tx = the_tx () in
   let id = alloc_menu_item Kaya_wire.menu_kind_action (Some label) in
   Option.iter (fun s -> emit tx (Kaya_wire.tx_set_menu_shortcut id s)) shortcut;
-  Option.iter (fun r -> emit tx (Kaya_wire.tx_set_menu_role id r)) role;
+  Option.iter
+    (fun (r : Menu_role.t) -> emit tx (Kaya_wire.tx_set_menu_role id (Menu_role.wire r)))
+    role;
   menu_prop_tail id ?enabled ?bind_enabled ?icon ?symbol ();
   Option.iter (fun p -> emit tx (Kaya_wire.tx_set_menu_primary id p)) primary;
   Option.iter (fun f -> Hashtbl.replace tx.app.menu_activated id f) on_activate;
   Option.iter
-    (fun f -> Hashtbl.replace tx.app.menu_activated_node id f)
+    (fun f ->
+      Hashtbl.replace tx.app.menu_activated_node id (fun keys ->
+          f (List.map key_of_wire keys)))
     on_activate_node;
   MenuItem id
 
@@ -3009,12 +3039,14 @@ let toggle ?checked ?bind_checked ?enabled ?bind_enabled ?icon ?symbol
   Option.iter (fun s -> emit tx (Kaya_wire.tx_set_menu_shortcut id s)) shortcut;
   Option.iter (fun c -> emit tx (Kaya_wire.tx_set_menu_checked id c)) checked;
   Option.iter
-    (fun (Signal s) -> emit tx (Kaya_wire.tx_bind_menu_checked id s))
+    (fun (s : bool signal) -> emit tx (Kaya_wire.tx_bind_menu_checked id s.sig_id))
     bind_checked;
   menu_prop_tail id ?enabled ?bind_enabled ?icon ?symbol ();
   Option.iter (fun f -> Hashtbl.replace tx.app.menu_toggled id f) on_toggle;
   Option.iter
-    (fun f -> Hashtbl.replace tx.app.menu_toggled_node id f)
+    (fun f ->
+      Hashtbl.replace tx.app.menu_toggled_node id (fun keys on ->
+          f (List.map key_of_wire keys) on))
     on_toggle_node;
   MenuItem id
 
@@ -3063,12 +3095,14 @@ let radio_group ?value ?bind_value ?enabled ?bind_enabled ?icon ?symbol
     (fun v -> emit tx (Kaya_wire.tx_set_menu_value id (float_of_int v)))
     value;
   Option.iter
-    (fun (Signal s) -> emit tx (Kaya_wire.tx_bind_menu_value id s))
+    (fun (s : float signal) -> emit tx (Kaya_wire.tx_bind_menu_value id s.sig_id))
     bind_value;
   menu_prop_tail id ?enabled ?bind_enabled ?icon ?symbol ();
   Option.iter (fun f -> Hashtbl.replace tx.app.menu_selected id f) on_select;
   Option.iter
-    (fun f -> Hashtbl.replace tx.app.menu_selected_node id f)
+    (fun f ->
+      Hashtbl.replace tx.app.menu_selected_node id (fun keys i ->
+          f (List.map key_of_wire keys) i))
     on_select_node;
   MenuItem id
 
@@ -3096,36 +3130,6 @@ let context_catalog children =
 let set_menu_label (MenuItem id) text =
   emit (the_tx ()) (Kaya_wire.tx_set_menu_label id text)
 
-let bind_menu_label (MenuItem id) (Signal s) =
-  emit (the_tx ()) (Kaya_wire.tx_bind_menu_label id s)
-
-let set_menu_enabled (MenuItem id) on =
-  emit (the_tx ()) (Kaya_wire.tx_set_menu_enabled id on)
-
-let bind_menu_enabled (MenuItem id) (Signal s) =
-  emit (the_tx ()) (Kaya_wire.tx_bind_menu_enabled id s)
-
-let set_menu_checked (MenuItem id) on =
-  emit (the_tx ()) (Kaya_wire.tx_set_menu_checked id on)
-
-let bind_menu_checked (MenuItem id) (Signal s) =
-  emit (the_tx ()) (Kaya_wire.tx_bind_menu_checked id s)
-
-let set_menu_value (MenuItem id) index =
-  emit (the_tx ()) (Kaya_wire.tx_set_menu_value id (float_of_int index))
-
-let bind_menu_value (MenuItem id) (Signal s) =
-  emit (the_tx ()) (Kaya_wire.tx_bind_menu_value id s)
-
-let set_menu_icon (MenuItem id) data =
-  emit (the_tx ())
-    (Kaya_wire.tx_set_menu_icon id (Kaya_runtime.register_blob data))
-
-(* The SEMANTIC icon on a retained item — the dynamic spelling of the
-   constructors' [~symbol]. *)
-let set_menu_symbol (MenuItem id) s =
-  emit (the_tx ()) (Kaya_wire.tx_set_menu_symbol id (symbol_wire s))
-
 (* The phone-bar promotion hint (actions only — root-checked).
    Flipping it recomputes the promoted set deterministically; INERT on
    desktops — not a toolbar grammar. *)
@@ -3137,36 +3141,8 @@ let set_menu_primary (MenuItem id) on =
    offer, so Paste stays dead and the paste hook never fires, with
    nothing to see anywhere. *)
 let accept_text = "text"
-let accept_html = "html"
 let accept_image = "image"
 let accept_files = "files"
-
-let role_settings = "settings"
-
-(* The three clipboard commands. They lower to the platform's own, act on
-   the FOCUSED widget, and work out their own enablement from what the
-   clipboard offers and what that widget accepts. *)
-let role_cut = "cut"
-let role_copy = "copy"
-let role_paste = "paste"
-
-(* The two history commands. ONE Edit>Undo covers both tiers: it asks the
-   focused text widget's own stack first and the window's ledger otherwise,
-   and works out its own enablement from the same question, live at
-   activation (docs/undo-plan.md D1, D6). *)
-let role_undo = "undo"
-let role_redo = "redo"
-
-(* Declare a retained action a standard command (actions only — root-
-   checked). *)
-let set_menu_role (MenuItem id) name =
-  emit (the_tx ()) (Kaya_wire.tx_set_menu_role id name)
-
-(* The shortcut of any LEAF command (window-anchored only), canonicalized
-   by [Kaya_wire.canonicalize_shortcut]. It fires the SAME
-   menu_activated occurrence as a click. *)
-let set_menu_shortcut (MenuItem id) spelling =
-  emit (the_tx ()) (Kaya_wire.tx_set_menu_shortcut id spelling)
 
 (* Reopen a RETAINED grouping node and append more children — the
    append-at-any-time discipline: [menu_append file [ item ~label:"Publish"
@@ -3174,9 +3150,6 @@ let set_menu_shortcut (MenuItem id) spelling =
 let menu_append (MenuItem id) children =
   realize_menu_children (the_tx ()) id children
 
-(* A template body: the same declaration vocabulary with template-node
-   ids, plus element bindings. *)
-type tpl = { tpl_tx : tx }
 
 let alloc_node tx =
   tx.app.c_widget <- Int64.add tx.app.c_widget 1L;
@@ -3234,14 +3207,15 @@ let columns ?(on_sort : (int -> unit) option) (Widget id) titles sort =
    outermost first; an empty [keys] re-declares the template-wide bar. The
    core walls a keyed target whose template bar was never declared
    (docs/tables-plan.md). *)
-let columns_at (Node id) keys titles sort =
+let columns_at (Node id) (keys : key list) titles sort =
   let tx = the_tx () in
+  let wire_keys = List.map key_to_wire keys in
   emit tx
     (Kaya_wire.tx_set_column_headers id
        (Int32.to_int sort.sort_column land 0xFFFFFFFF)
        (Int32.to_int sort.sort_direction)
        (List.length titles) (List.length keys)
-       (keys @ List.map (fun t -> Kaya_wire.Str t) titles))
+       (wire_keys @ List.map (fun t -> Kaya_wire.Str t) titles))
 
 (* Sums: a variant type whose constructors carry inline records. *)
 type 'a sum_type = {
@@ -3253,7 +3227,6 @@ type 'a sum_type = {
 
 type 'a sum_collection = { sc_handle : collection; sc_type : 'a sum_type }
 
-let sum_handle sc = sc.sc_handle
 
 let sum_of st =
   let tx = the_tx () in
@@ -3268,8 +3241,9 @@ let sum_of st =
   { sc_handle = { cid = id; cpath = [] }; sc_type = st }
 
 (* Insert witnesses the value's own constructor onto the wire. *)
-let sum_insert sc key value =
+let sum_insert sc (k : key) value =
   let tx = the_tx () in
+  let key = key_to_wire k in
   let variant = sc.sc_type.st_variant value in
   let fields = sc.sc_type.st_to_values value in
   (* ABSORPTION, on the one path every explicit key of a sum collection
@@ -3282,18 +3256,12 @@ let sum_insert sc key value =
        (encode_fields (List.nth sc.sc_type.st_schemas variant) fields));
   recompute_derived tx sc.sc_handle.cid sc.sc_handle.cpath
 
-(* [insert_fresh] for a sum collection: the value's own constructor is still
-   what is witnessed onto the wire; only the key comes from the binding. *)
-let sum_insert_fresh sc value =
-  let tx = the_tx () in
-  let key = mint_key tx.app sc.sc_handle.cid sc.sc_handle.cpath in
-  sum_insert sc (Kaya_wire.I64 key) value;
-  key
 
 (* Update replaces a record wholesale; a different constructor than
    the entry's current one restamps its copy in place. *)
-let sum_update sc key value =
+let sum_update sc (k : key) value =
   let tx = the_tx () in
+  let key = key_to_wire k in
   let variant = sc.sc_type.st_variant value in
   let fields = sc.sc_type.st_to_values value in
   model_set tx sc.sc_handle.cid sc.sc_handle.cpath key variant fields;
@@ -3305,7 +3273,7 @@ let sum_update sc key value =
 
 (* The typed model, in insertion order; [match] eliminates the
    values. *)
-let sum_items sc =
+let sum_items sc : (key * 'a) list =
   let tx = the_tx () in
   guard_mirror_read ();
   match
@@ -3314,12 +3282,14 @@ let sum_items sc =
       (instances_of tx.app sc.sc_handle.cid)
   with
   | Some i ->
-      List.map (fun (k, (v, vs)) -> (k, sc.sc_type.st_of_values v vs)) i.entries
+      List.map
+        (fun (k, (v, vs)) -> (key_of_wire k, sc.sc_type.st_of_values v vs))
+        i.entries
   | None -> []
 
 (* The entry's current value — the scrutinee for the match that
    precedes a patch. *)
-let sum_get sc key =
+let sum_get sc (k : key) =
   let tx = the_tx () in
   guard_mirror_read ();
   match
@@ -3330,15 +3300,16 @@ let sum_get sc key =
   | Some i ->
       Option.map
         (fun (v, vs) -> sc.sc_type.st_of_values v vs)
-        (List.assoc_opt key i.entries)
+        (List.assoc_opt (key_to_wire k) i.entries)
   | None -> None
 
 (* The witnessed field write, called by the generated per-constructor
    patches: the match that produced the write names the variant, and
    the model refuses a drifted entry — the guard is checked, not
    trusted. *)
-let sum_update_field sc key ~variant fd value =
+let sum_update_field sc (k : key) ~variant fd value =
   let tx = the_tx () in
+  let key = key_to_wire k in
   let mv = fd.fd_to_value value in
   let stored, current =
     match
@@ -3365,9 +3336,9 @@ let sum_update_field sc key ~variant fd value =
   recompute_derived tx sc.sc_handle.cid sc.sc_handle.cpath
 
 (* The collection-derived signal, over the sum's entries. *)
-let sum_derive sc compute =
+let sum_derive mk sc compute =
   let tx = the_tx () in
-  let s = signal (compute (sum_items sc)) in
+  let s = mk (compute (sum_items sc)) in
   tx.pending_derived <-
     (sc.sc_handle.cid, fun () -> write s (compute (sum_items sc)))
     :: tx.pending_derived;
@@ -3395,11 +3366,11 @@ let each_sum sc arms () =
   Widget id
 
 (* A When over a Bool signal: stamps on true, unstamps on false. *)
-let when_ (Signal sid) body () =
+let when_ (s : bool signal) body () =
   let tx = the_tx () in
   tx.app.c_widget <- Int64.add tx.app.c_widget 1L;
   let id = tx.app.c_widget in
-  emit tx (Kaya_wire.tx_create_when id sid);
+  emit tx (Kaya_wire.tx_create_when id s.sig_id);
   (* The body's result is its blueprint root, already recorded —
      discarded, so bodies END with the root and the partial
      application is a child. *)
@@ -3482,8 +3453,8 @@ module Tpl = struct
     let set_a11y_id (Node id) value =
       emit (the_tx ()) (Kaya_wire.tx_set_a11y_id id value)
 
-    let bind_a11y_id (Node id) (Signal s) =
-      emit (the_tx ()) (Kaya_wire.tx_bind_a11y_id id s)
+    let bind_a11y_id (Node id) (s : string signal) =
+      emit (the_tx ()) (Kaya_wire.tx_bind_a11y_id id s.sig_id)
 
     (* A (_, string) field only: Prop::A11yId is Str in the spec and the
        scene refuses a field whose column type differs, so the phantom
@@ -3494,8 +3465,8 @@ module Tpl = struct
     let set_a11y_label (Node id) value =
       emit (the_tx ()) (Kaya_wire.tx_set_a11y_label id value)
 
-    let bind_a11y_label (Node id) (Signal s) =
-      emit (the_tx ()) (Kaya_wire.tx_bind_a11y_label id s)
+    let bind_a11y_label (Node id) (s : string signal) =
+      emit (the_tx ()) (Kaya_wire.tx_bind_a11y_label id s.sig_id)
 
     (* THE SOURCE THIS SLICE EXISTS FOR: each stamped copy speaks its OWN
        row's name to assistive tech. *)
@@ -3504,7 +3475,7 @@ module Tpl = struct
 
     let set_help (Node id) value = emit (the_tx ()) (Kaya_wire.tx_set_help id value)
 
-    let bind_help (Node id) (Signal s) = emit (the_tx ()) (Kaya_wire.tx_bind_help id s)
+    let bind_help (Node id) (s : string signal) = emit (the_tx ()) (Kaya_wire.tx_bind_help id s.sig_id)
 
     (* The row's own field as the copy's help — the source the zone
        exists for. *)
@@ -3516,8 +3487,8 @@ module Tpl = struct
     let set_placeholder (Node id) value =
       emit (the_tx ()) (Kaya_wire.tx_set_placeholder id value)
 
-    let bind_placeholder (Node id) (Signal s) =
-      emit (the_tx ()) (Kaya_wire.tx_bind_placeholder id s)
+    let bind_placeholder (Node id) (s : string signal) =
+      emit (the_tx ()) (Kaya_wire.tx_bind_placeholder id s.sig_id)
 
     let bind_placeholder_field ?(level = 0) (Node id) (fd : (_, string) field) =
       emit (the_tx ()) (Kaya_wire.tx_bind_placeholder_element ~level ~field:fd.fd_index id)
@@ -3526,8 +3497,8 @@ module Tpl = struct
     let set_href (Node id) value =
       emit (the_tx ()) (Kaya_wire.tx_set_href id value)
 
-    let bind_href (Node id) (Signal s) =
-      emit (the_tx ()) (Kaya_wire.tx_bind_href id s)
+    let bind_href (Node id) (s : string signal) =
+      emit (the_tx ()) (Kaya_wire.tx_bind_href id s.sig_id)
 
     let bind_href_field ?(level = 0) (Node id) (fd : (_, string) field) =
       emit (the_tx ()) (Kaya_wire.tx_bind_href_element ~level ~field:fd.fd_index id)
@@ -3538,8 +3509,8 @@ module Tpl = struct
     let set_a11y_hint (Node id) value =
       emit (the_tx ()) (Kaya_wire.tx_set_a11y_hint id value)
 
-    let bind_a11y_hint (Node id) (Signal s) =
-      emit (the_tx ()) (Kaya_wire.tx_bind_a11y_hint id s)
+    let bind_a11y_hint (Node id) (s : string signal) =
+      emit (the_tx ()) (Kaya_wire.tx_bind_a11y_hint id s.sig_id)
 
     let bind_a11y_hint_field ?(level = 0) (Node id) (fd : (_, string) field) =
       emit (the_tx ()) (Kaya_wire.tx_bind_a11y_hint_element ~level ~field:fd.fd_index id)
@@ -3574,24 +3545,20 @@ module Tpl = struct
        A signal is app-wide, so every stamped copy reads the SAME value:
        one download's fraction on every row's bar. *)
 
-    let bind_text (Node id) (Signal s) = emit (the_tx ()) (Kaya_wire.tx_bind_text id s)
+    let bind_text (Node id) (s : string signal) = emit (the_tx ()) (Kaya_wire.tx_bind_text id s.sig_id)
 
-    let bind_checked (Node id) (Signal s) =
-      emit (the_tx ()) (Kaya_wire.tx_bind_checked id s)
+    let bind_checked (Node id) (s : bool signal) =
+      emit (the_tx ()) (Kaya_wire.tx_bind_checked id s.sig_id)
 
-    let bind_value (Node id) (Signal s) = emit (the_tx ()) (Kaya_wire.tx_bind_value id s)
+    let bind_value (Node id) (s : float signal) = emit (the_tx ()) (Kaya_wire.tx_bind_value id s.sig_id)
 
-    let bind_source (Node id) (Signal s) =
-      emit (the_tx ()) (Kaya_wire.tx_bind_source id s)
+    let bind_source (Node id) (s : bytes signal) =
+      emit (the_tx ()) (Kaya_wire.tx_bind_source id s.sig_id)
 
     (* --- The element leg ---------------------------------------------
        The source only this zone has: the row's own data. [level] says
        how many Fors up the element sits (0 = nearest). *)
 
-    (* Bind text to the element of the enclosing For, [level] Fors up
-       (0 = nearest). *)
-    let bind_text_element ?(level = 0) (Node id) =
-      emit (the_tx ()) (Kaya_wire.tx_bind_text_element ~level id)
 
     (* Bind a label's text to one field of the element; a (_, string)
        field only — the phantom pins it at compile time. *)
@@ -3669,11 +3636,13 @@ module Tpl = struct
      grandparent-scope target is not expressible (docs/tables-plan.md).
      ONE [~on_sort] answers every copy, keys before the column. *)
   let columns
-      ?(on_sort : (Kaya_wire.value list -> int -> unit) option)
+      ?(on_sort : (key list -> int -> unit) option)
       (Node id) titles sort =
     let tx = the_tx () in
     Option.iter
-      (fun handler -> Hashtbl.replace tx.app.node_sorts id handler)
+      (fun handler ->
+        Hashtbl.replace tx.app.node_sorts id (fun keys col ->
+            handler (List.map key_of_wire keys) col))
       on_sort;
     (* path_len 0 against a TEMPLATE NODE: every copy's bar, stored on
        the site and applied at each stamp. *)
@@ -3762,10 +3731,10 @@ module Tpl = struct
      [set_drop_target] reads. *)
   let set_accepts n kinds = Floor.set_accepts n kinds
 
-  let when_ (Signal sid) body () =
+  let when_ (s : bool signal) body () =
     let tx = the_tx () in
     let id = alloc_node tx in
-    emit tx (Kaya_wire.tx_create_when id sid);
+    emit tx (Kaya_wire.tx_create_when id s.sig_id);
     let result = in_tpl_scope tx.app body in
     emit tx (Kaya_wire.tx_template_end ());
     (Node id, result)
@@ -3794,7 +3763,8 @@ module Tpl = struct
     (match on_click with
     | Some handler ->
         let (Node id) = n in
-        Hashtbl.replace (the_tx ()).app.node_handlers id handler
+        Hashtbl.replace (the_tx ()).app.node_handlers id (fun keys ->
+            handler (List.map key_of_wire keys))
     | None -> ());
     n
 
@@ -3835,7 +3805,8 @@ module Tpl = struct
     (match on_change with
     | Some handler ->
         let (Node id) = n in
-        Hashtbl.replace (the_tx ()).app.node_changes id handler
+        Hashtbl.replace (the_tx ()).app.node_changes id (fun keys s ->
+            handler (List.map key_of_wire keys) s)
     | None -> ());
     n
 
@@ -3899,7 +3870,8 @@ module Tpl = struct
     (match on_change with
     | Some handler ->
         let (Node id) = n in
-        Hashtbl.replace (the_tx ()).app.node_changes id handler
+        Hashtbl.replace (the_tx ()).app.node_changes id (fun keys s ->
+            handler (List.map key_of_wire keys) s)
     | None -> ());
     n
 
@@ -3924,7 +3896,8 @@ module Tpl = struct
     (match on_change with
     | Some handler ->
         let (Node id) = n in
-        Hashtbl.replace (the_tx ()).app.node_changes id handler
+        Hashtbl.replace (the_tx ()).app.node_changes id (fun keys s ->
+            handler (List.map key_of_wire keys) s)
     | None -> ());
     n
 
@@ -3964,12 +3937,14 @@ module Tpl = struct
     (match on_change with
     | Some handler ->
         let (Node id) = n in
-        Hashtbl.replace (the_tx ()).app.node_values id handler
+        Hashtbl.replace (the_tx ()).app.node_values id (fun keys v ->
+            handler (List.map key_of_wire keys) v)
     | None -> ());
     (match on_commit with
     | Some handler ->
         let (Node id) = n in
-        Hashtbl.replace (the_tx ()).app.node_commits id handler
+        Hashtbl.replace (the_tx ()).app.node_commits id (fun keys v ->
+            handler (List.map key_of_wire keys) v)
     | None -> ());
     n
 
@@ -4002,7 +3977,7 @@ module Tpl = struct
     | Some handler ->
         let (Node id) = n in
         Hashtbl.replace (the_tx ()).app.node_values id (fun keys v ->
-            handler keys (int_of_float v))
+            handler (List.map key_of_wire keys) (int_of_float v))
     | None -> ());
     n
 
@@ -4035,7 +4010,7 @@ module Tpl = struct
     | Some handler ->
         let (Node id) = n in
         Hashtbl.replace (the_tx ()).app.node_values id (fun keys v ->
-            handler keys (int_of_float v))
+            handler (List.map key_of_wire keys) (int_of_float v))
     | None -> ());
     n
 
@@ -4058,7 +4033,8 @@ module Tpl = struct
     (match on_toggle with
     | Some handler ->
         let (Node id) = n in
-        Hashtbl.replace (the_tx ()).app.node_toggles id handler
+        Hashtbl.replace (the_tx ()).app.node_toggles id (fun keys on ->
+            handler (List.map key_of_wire keys) on)
     | None -> ());
     n
 
@@ -4083,13 +4059,13 @@ module Tpl = struct
           (Kaya_wire.tx_set_date id d.year d.month d.day))
       value;
     Option.iter
-      (fun (Signal s) -> emit (the_tx ()) (Kaya_wire.tx_bind_date id s))
+      (fun (s : date signal) -> emit (the_tx ()) (Kaya_wire.tx_bind_date id s.sig_id))
       bind;
     Option.iter (fun fd -> Floor.bind_date_field ~level n fd) bind_field;
     (match on_change with
     | Some handler ->
         Hashtbl.replace (the_tx ()).app.node_dates id (fun keys packed ->
-            handler keys (date_of_packed packed))
+            handler (List.map key_of_wire keys) (date_of_packed packed))
     | None -> ());
     n
 
@@ -4115,13 +4091,13 @@ module Tpl = struct
           (Kaya_wire.tx_set_time id t.hour t.minute))
       value;
     Option.iter
-      (fun (Signal s) -> emit (the_tx ()) (Kaya_wire.tx_bind_time id s))
+      (fun (s : time signal) -> emit (the_tx ()) (Kaya_wire.tx_bind_time id s.sig_id))
       bind;
     Option.iter (fun fd -> Floor.bind_time_field ~level n fd) bind_field;
     (match on_change with
     | Some handler ->
         Hashtbl.replace (the_tx ()).app.node_times id (fun keys packed ->
-            handler keys (time_of_packed packed))
+            handler (List.map key_of_wire keys) (time_of_packed packed))
     | None -> ());
     n
 
@@ -4141,7 +4117,7 @@ module Tpl = struct
     Option.iter (fun fd -> Floor.bind_source_field ~level n fd) bind_field;
     n
 
-  (* A canvas per stamped copy — a sparkline in a table cell
+  (* A canvas per stamped copy -- a sparkline in a table cell
      (docs/canvas-plan.md §3.1). The drawing is declared with the node, so
      every copy is born with it; [draw_at] re-declares one copy's. *)
   let canvas ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
@@ -4154,6 +4130,7 @@ module Tpl = struct
     let (Node id) = n in
     emit (the_tx ()) (drawing_record id [] viewbox draw);
     n
+
 
   (* Containers, the outer-zone convention: children are partially
      applied creators ([unit -> node] thunks), realized left to
@@ -4270,8 +4247,9 @@ let on_click app (Widget id) (handler : unit -> unit) =
 
 (* Register a click handler for a template node; it also receives the
    stamped copy's keys, outermost first. *)
-let on_click_node app (Node id) (handler : Kaya_wire.value list -> unit) =
-  Hashtbl.replace app.node_handlers id handler
+let on_click_node app (Node id) (handler : key list -> unit) =
+  Hashtbl.replace app.node_handlers id (fun keys ->
+      handler (List.map key_of_wire keys))
 
 (* Take pasted content at a live widget. *)
 let on_paste app (Widget id) (handler : representation -> unit) =
@@ -4280,8 +4258,9 @@ let on_paste app (Widget id) (handler : representation -> unit) =
 (* A paste onto a stamped copy: the handler also receives the copy's key
    path, outermost first. *)
 let on_paste_node app (Node id)
-    (handler : Kaya_wire.value list -> representation -> unit) =
-  Hashtbl.replace app.node_pastes id handler
+    (handler : key list -> representation -> unit) =
+  Hashtbl.replace app.node_pastes id (fun keys rep ->
+      handler (List.map key_of_wire keys) rep)
 
 (* Take dropped content at a live widget, or a reorderable For's
    landings (docs/dnd-plan.md D8). Only fires for a widget that declared
@@ -4297,14 +4276,16 @@ let on_drag_ended app (Widget id) (handler : op option -> unit) =
 (* A drop on a stamped copy: the handler also receives the copy's key
    path, outermost first (docs/dnd-plan.md §4). *)
 let on_drop_node app (Node id)
-    (handler : Kaya_wire.value list -> dropped -> unit) =
-  Hashtbl.replace app.node_drops id handler
+    (handler : key list -> dropped -> unit) =
+  Hashtbl.replace app.node_drops id (fun keys d ->
+      handler (List.map key_of_wire keys) d)
 
 (* A stamped copy of this node — a reorderable row is one — finished its
    drag; the copy's keys first. *)
 let on_drag_ended_node app (Node id)
-    (handler : Kaya_wire.value list -> op option -> unit) =
-  Hashtbl.replace app.node_drag_ended id handler
+    (handler : key list -> op option -> unit) =
+  Hashtbl.replace app.node_drag_ended id (fun keys op ->
+      handler (List.map key_of_wire keys) op)
 
 (* Register a change handler for a live entry: the widget owns its text
    and reports each edit here; the app folds it into its own state —
@@ -4312,10 +4293,6 @@ let on_drag_ended_node app (Node id)
 let on_change app (Widget id) (handler : string -> unit) =
   Hashtbl.replace app.widget_changes id handler
 
-(* Register a change handler for a template entry; it also receives the
-   stamped copy's keys, outermost first. *)
-let on_change_node app (Node id) (handler : Kaya_wire.value list -> string -> unit) =
-  Hashtbl.replace app.node_changes id handler
 
 (* One addressed user edit of a [rich] textarea (docs/rich-text-plan.md
    R1); [~on_change] still fires beside it. The registration twin of
@@ -4334,66 +4311,26 @@ let on_format app (Widget id) (handler : format_act -> unit) =
    document field has already taken the act when this fires, so the
    handler reads the ROW and never the widget. *)
 let on_edit_node app (Node id)
-    (handler : Kaya_wire.value list -> edit -> unit) =
-  Hashtbl.replace app.node_edits id handler
+    (handler : key list -> edit -> unit) =
+  Hashtbl.replace app.node_edits id (fun keys e ->
+      handler (List.map key_of_wire keys) e)
 
 let on_format_node app (Node id)
-    (handler : Kaya_wire.value list -> format_act -> unit) =
-  Hashtbl.replace app.node_formats id handler
+    (handler : key list -> format_act -> unit) =
+  Hashtbl.replace app.node_formats id (fun keys act ->
+      handler (List.map key_of_wire keys) act)
 
-(* Register a toggle handler for a live checkbox: the box owns its
-   checked bit and reports each flip here; the app folds it into its
-   own state. *)
-let on_toggle app (Widget id) (handler : bool -> unit) =
-  Hashtbl.replace app.widget_toggles id handler
-
-(* Register a change handler for a live slider: the bar owns its
-   position and reports each move with the new value — the entry's
-   uncontrolled contract, with a float. *)
-let on_value_changed app (Widget id) (handler : float -> unit) =
-  Hashtbl.replace app.widget_values id handler
-
-(* Register a toggle handler for a template checkbox; it also receives
-   the stamped copy's keys, outermost first. *)
-let on_toggle_node app (Node id) (handler : Kaya_wire.value list -> bool -> unit) =
-  Hashtbl.replace app.node_toggles id handler
-
-(* Register a change handler for a template slider or choice widget; it also
-   receives the stamped copy's keys, outermost first. *)
-let on_value_changed_node app (Node id)
-    (handler : Kaya_wire.value list -> float -> unit) =
-  Hashtbl.replace app.node_values id handler
-
-(* The value a live slider's gesture SETTLED ON — once per release or key
+(* The value a live slider's gesture SETTLED ON -- once per release or key
    move, after that gesture's moves (docs/slider-plan.md S2). *)
 let on_value_committed app (Widget id) (handler : float -> unit) =
   Hashtbl.replace app.widget_commits id handler
 
 (* A stamped slider's settled value, the copy's keys first. *)
 let on_value_committed_node app (Node id)
-    (handler : Kaya_wire.value list -> float -> unit) =
-  Hashtbl.replace app.node_commits id handler
+    (handler : key list -> float -> unit) =
+  Hashtbl.replace app.node_commits id (fun keys v ->
+      handler (List.map key_of_wire keys) v)
 
-(* Register a pick handler for a live date picker: the control owns its
-   value and reports each COMMITTED pick here; a programmatic write never
-   echoes (docs/datetime-plan.md D7). *)
-let on_date app (Widget id) (handler : date -> unit) =
-  Hashtbl.replace app.widget_dates id (fun packed -> handler (date_of_packed packed))
-
-(* Register a pick handler for a live time picker. *)
-let on_time app (Widget id) (handler : time -> unit) =
-  Hashtbl.replace app.widget_times id (fun packed -> handler (time_of_packed packed))
-
-(* Register a pick handler for a template date picker; it also receives
-   the stamped copy's keys, outermost first. *)
-let on_date_node app (Node id) (handler : Kaya_wire.value list -> date -> unit) =
-  Hashtbl.replace app.node_dates id (fun keys packed ->
-      handler keys (date_of_packed packed))
-
-(* Register a pick handler for a template time picker, keys first. *)
-let on_time_node app (Node id) (handler : Kaya_wire.value list -> time -> unit) =
-  Hashtbl.replace app.node_times id (fun keys packed ->
-      handler keys (time_of_packed packed))
 
 (* Run everything posted, each as its own transaction, in order. *)
 let drain_posted app =
@@ -4489,7 +4426,8 @@ let decode_undo body =
         | [ Kaya_wire.Str s ] -> s
         | _ -> ""
       in
-      texts (n - 1) ({ ut_id = id; ut_path = path; ut_text = text } :: acc)
+      texts (n - 1)
+        ({ Undo_text.id; path = List.map key_of_wire path; text } :: acc)
     end
   in
   let rec entries n acc =
@@ -4511,7 +4449,12 @@ let decode_undo body =
         if Int64.logand flags 1L <> 0L then Some (variant, fields) else None
       in
       entries (n - 1)
-        ({ ue_collection = collection; ue_path = path; ue_key = key; ue_state = state }
+        ({
+           Undo_entry.collection;
+           path = List.map key_of_wire path;
+           key = key_of_wire key;
+           state;
+         }
         :: acc)
     end
   in
@@ -4524,7 +4467,12 @@ let decode_undo body =
       let path = take_n (int ()) in
       let keys = take_n (start + size - !pos) in
       orders (n - 1)
-        ({ uo_collection = collection; uo_path = path; uo_keys = keys } :: acc)
+        ({
+           Undo_order.collection;
+           path = List.map key_of_wire path;
+           keys = List.map key_of_wire keys;
+         }
+        :: acc)
     end
   in
   let ud_signals = signals n_signals [] in
@@ -4532,43 +4480,50 @@ let decode_undo body =
   let ud_entries = entries n_entries [] in
   let ud_orders = orders n_orders [] in
   if !pos <> count then failwith "kaya: undo delta has trailing values";
-  (label, { ud_signals; ud_texts; ud_entries; ud_orders })
+  (label, { Undo_delta.signals = ud_signals; texts = ud_texts; entries = ud_entries; orders = ud_orders })
 
-(* Fold an undo's payload into the collection mirror. *)
-let absorb_undo app delta =
+(* Fold an undo's payload into the collection mirror. The delta's own
+   path/key fields are the guest-facing typed [key]; the model
+   underneath is keyed by the wire's raw value, so every use here
+   converts back at the boundary. *)
+let absorb_undo app (delta : Undo_delta.t) =
   List.iter
-    (fun e ->
-      let instances = instances_of app e.ue_collection in
+    (fun (e : Undo_entry.t) ->
+      let path = List.map key_to_wire e.path in
+      let key = key_to_wire e.key in
+      let instances = instances_of app e.collection in
       let instances =
-        if List.exists (fun i -> i.path = e.ue_path) instances then instances
-        else instances @ [ { path = e.ue_path; entries = [] } ]
+        if List.exists (fun i -> i.path = path) instances then instances
+        else instances @ [ { path; entries = [] } ]
       in
-      Hashtbl.replace app.model e.ue_collection
+      Hashtbl.replace app.model e.collection
         (List.map
            (fun i ->
-             if i.path <> e.ue_path then i
+             if i.path <> path then i
              else
-               match e.ue_state with
+               match e.state with
                | Some state ->
-                   if List.mem_assoc e.ue_key i.entries then
+                   if List.mem_assoc key i.entries then
                      {
                        i with
                        entries =
                          List.map
-                           (fun (k, v) -> (k, if k = e.ue_key then state else v))
+                           (fun (k, v) -> (k, if k = key then state else v))
                            i.entries;
                      }
-                   else { i with entries = i.entries @ [ (e.ue_key, state) ] }
+                   else { i with entries = i.entries @ [ (key, state) ] }
                | None ->
-                   { i with entries = List.filter (fun (k, _) -> k <> e.ue_key) i.entries })
+                   { i with entries = List.filter (fun (k, _) -> k <> key) i.entries })
            instances))
-    delta.ud_entries;
+    delta.entries;
   List.iter
-    (fun o ->
-      Hashtbl.replace app.model o.uo_collection
+    (fun (o : Undo_order.t) ->
+      let path = List.map key_to_wire o.path in
+      let keys = List.map key_to_wire o.keys in
+      Hashtbl.replace app.model o.collection
         (List.map
            (fun i ->
-             if i.path <> o.uo_path then i
+             if i.path <> path then i
              else
                (* The payload's order first, then anything it does not
                   name: an entry the delta never mentions is one this
@@ -4577,14 +4532,14 @@ let absorb_undo app delta =
                  List.filter_map
                    (fun k ->
                      Option.map (fun v -> (k, v)) (List.assoc_opt k i.entries))
-                   o.uo_keys
+                   keys
                in
                let rest =
-                 List.filter (fun (k, _) -> not (List.mem k o.uo_keys)) i.entries
+                 List.filter (fun (k, _) -> not (List.mem k keys)) i.entries
                in
                { i with entries = named @ rest })
-           (instances_of app o.uo_collection)))
-    delta.ud_orders
+           (instances_of app o.collection)))
+    delta.orders
 
 let dispatch_loop app =
   (* Claim the thread before the first occurrence: every build after
@@ -4643,13 +4598,13 @@ let dispatch_loop app =
            match tail with
            | Kaya_wire.I64 source :: Kaya_wire.I64 start :: Kaya_wire.I64 stop
              :: Kaya_wire.Str inserted :: values ->
-               let e =
+               let e : Edit.t =
                  {
-                   e_start = Int64.to_int start;
-                   e_stop = Int64.to_int stop;
-                   e_inserted = inserted;
-                   e_runs = runs_of_values values;
-                   e_source = Some (edit_source_of_wire (Int64.to_int source));
+                   Edit.start = Int64.to_int start;
+                   stop = Int64.to_int stop;
+                   inserted;
+                   runs = runs_of_values values;
+                   source = Some (edit_source_of_wire (Int64.to_int source));
                  }
                in
                (* A STAMPED COPY FOLDS INTO ITS ROW and a live widget
@@ -4657,13 +4612,13 @@ let dispatch_loop app =
                   (docs/rich-text-plan.md §19). *)
                (match keys with
                | [] ->
-                   absorb_edit app id (e.e_start, e.e_stop) e.e_inserted e.e_runs;
+                   absorb_edit app id (e.start, e.stop) e.inserted e.runs;
                    (match Hashtbl.find_opt app.widget_edits id with
                    | Some handler -> dispatch app (fun () -> handler e)
                    | None -> ())
                | keys ->
                    fold_row_document app id keys (fun doc ->
-                       fold_edit doc (e.e_start, e.e_stop) e.e_inserted e.e_runs);
+                       fold_edit doc (e.start, e.stop) e.inserted e.runs);
                    (match Hashtbl.find_opt app.node_edits id with
                    | Some handler -> dispatch app (fun () -> handler keys e)
                    | None -> ()))
@@ -4672,25 +4627,25 @@ let dispatch_loop app =
            match tail with
            | Kaya_wire.I64 removed :: Kaya_wire.I64 start :: Kaya_wire.I64 stop
              :: Kaya_wire.Str name :: Kaya_wire.Str value :: _ ->
-               let act =
+               let act : Format.t =
                  {
-                   f_start = Int64.to_int start;
-                   f_stop = Int64.to_int stop;
-                   f_name = name;
-                   f_value = (if removed = 0L then Some value else None);
+                   Format.start = Int64.to_int start;
+                   stop = Int64.to_int stop;
+                   name;
+                   value = (if removed = 0L then Some value else None);
                  }
                in
                (match keys with
                | [] ->
-                   absorb_format app id (act.f_start, act.f_stop) act.f_name
-                     act.f_value;
+                   absorb_format app id (act.start, act.stop) act.name
+                     act.value;
                    (match Hashtbl.find_opt app.widget_formats id with
                    | Some handler -> dispatch app (fun () -> handler act)
                    | None -> ())
                | keys ->
                    fold_row_document app id keys (fun doc ->
-                       fold_format doc (act.f_start, act.f_stop) act.f_name
-                         act.f_value);
+                       fold_format doc (act.start, act.stop) act.name
+                         act.value);
                    (match Hashtbl.find_opt app.node_formats id with
                    | Some handler -> dispatch app (fun () -> handler keys act)
                    | None -> ()))
@@ -4874,7 +4829,7 @@ let dispatch_loop app =
                  {
                    point = (d.Kaya_wire.dv_x, d.Kaya_wire.dv_y);
                    operation = operation_of d.Kaya_wire.dv_operation;
-                   anchor = d.Kaya_wire.dv_anchor;
+                   anchor = List.map key_of_wire d.Kaya_wire.dv_anchor;
                    before = d.Kaya_wire.dv_before;
                    clip =
                      representation_of

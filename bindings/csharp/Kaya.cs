@@ -19,8 +19,8 @@ public readonly record struct PickedFile(ulong Handle, string Name, string Local
     /// Redeem the handle for a real FileStream, plus whether it seeks.
     /// BLOCKS, and may block for a long time, so call it from a thread
     /// you chose and post the result back.
-    public (FileStream File, bool Seekable) Open(uint mode = 0)
-        => Kaya.OpenPicked(Handle, mode);
+    public (FileStream File, bool Seekable) Open(FileAccess access = FileAccess.Read)
+        => Kaya.OpenPicked(Handle, access);
 }
 
 /// One open asset: the bytes of a file the app's own BUILD shipped, held
@@ -201,7 +201,7 @@ sealed class UndoEntry
     public ulong Collection;
     /// The instance path: one key per enclosing For, empty at top level.
     public List<object> Path = new();
-    public object Key;
+    public required object Key;
     public (uint Variant, List<object> Fields)? State;
 }
 
@@ -309,17 +309,18 @@ static class Kaya
     /// disposing the stream closes it exactly once; the core hands back
     /// the OS's own handle, never a CRT descriptor (docs/traps.md: The
     /// capability that had no Windows expression).
-    public static (FileStream File, bool Seekable) OpenPicked(ulong handle, uint mode)
+    public static (FileStream File, bool Seekable) OpenPicked(ulong handle, FileAccess access)
     {
+        uint mode = access switch
+        {
+            FileAccess.Read => 0,
+            FileAccess.Write => 1,
+            FileAccess.ReadWrite => 2,
+            _ => throw new ArgumentOutOfRangeException(nameof(access)),
+        };
         int rc = kaya_open_picked(handle, mode, out long raw, out uint seekable);
         if (rc != 0)
             throw new IOException($"kaya: opening the picked file failed (code {rc})");
-        var access = mode switch
-        {
-            0 => FileAccess.Read,
-            1 => FileAccess.Write,
-            _ => FileAccess.ReadWrite,
-        };
         var safe = new SafeFileHandle((IntPtr)raw, ownsHandle: true);
         return (new FileStream(safe, access), seekable != 0);
     }
@@ -333,7 +334,7 @@ static class Kaya
     {
         NativeLibrary.SetDllImportResolver(typeof(Kaya).Assembly, (name, _, _) =>
         {
-            string env = Environment.GetEnvironmentVariable("KAYA_LIB");
+            string? env = Environment.GetEnvironmentVariable("KAYA_LIB");
             if (name == "kaya" && env != null && NativeLibrary.TryLoad(env, out IntPtr handle))
                 return handle;
             return IntPtr.Zero;
@@ -409,7 +410,7 @@ static class Kaya
 
     [DllImport("kaya")]
     static extern nuint kaya_asset_why_not(
-        byte[] name, nuint nameLen, byte[] into, nuint cap);
+        byte[] name, nuint nameLen, byte[]? into, nuint cap);
 
     /// Open an asset by name; 0 is the MISS, and AssetMissSentence says
     /// why. The core answers a value rather than raising, because a panic
@@ -599,7 +600,7 @@ static class Kaya
     /// checked BEFORE it is called. `id` is the WINDOW: the ledger is per
     /// window (docs/undo-plan.md).
     static bool ParseUndo(
-        byte[] rec, out ushort kind, out ulong id, out List<object> keys, out object payload)
+        byte[] rec, out ushort kind, out ulong id, out List<object> keys, out object? payload)
     {
         kind = BitConverter.ToUInt16(rec, 4);
         keys = new List<object>();
@@ -692,7 +693,7 @@ static class Kaya
     /// new state (bool) for OccKindToggled, null for clicks. Waiting is a
     /// separate call: the app thread also runs closures posted elsewhere.
     public static unsafe bool PollOccurrence(
-        out ushort kind, out ulong id, out List<object> keys, out object payload)
+        out ushort kind, out ulong id, out List<object> keys, out object? payload)
     {
         uint* head = (uint*)ring.Head;
         uint* tail = (uint*)ring.Tail;

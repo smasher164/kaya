@@ -1,10 +1,12 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 -- The sections scene, Haskell port — guests/rust/sections.rs,
 -- tools/scenes/sections.steps.
 
 import Data.IORef (modifyIORef', newIORef, readIORef)
 import Data.Word (Word64)
+import qualified Data.Text as T
 import KayaApp
-import KayaWire (Value (..))
 
 feedId, archiveId :: Word64
 feedId = 7
@@ -21,8 +23,8 @@ main :: IO ()
 main = kayaMain $ \app -> do
   visitTally <- newIORef (0 :: Int)
   _ <- buildTx app $ do
-    window 0 [WTitle "sections", WSectionsPresentation 1]
-    visits <- signal (VStr "archive: 0 visits")
+    window primary [WTitle "sections", WSectionsPresentation 1]
+    visits <- signal (T.pack "archive: 0 visits")
     -- A symbol names a CONCEPT (docs/styling-plan.md D6).
     addSection feedId [STitle "Feed", SSymbol SymbolHome]
     addSection
@@ -34,14 +36,14 @@ main = kayaMain $ \app -> do
               modifyIORef' visitTally (+ 1)
               n <- readIORef visitTally
               buildTx app $
-                writeSignal visits (VStr ("archive: " ++ show n ++ " visits"))
+                writeSignal visits (T.pack ("archive: " ++ show n ++ " visits"))
           )
       ]
     feedRoot <-
       column
         []
         [ do
-            ready <- signal (VStr "feed ready")
+            ready <- signal (T.pack "feed ready")
             labelBound ready, -- label#0
           buttonOn "to archive" $
             -- Programmatic selection does NOT echo: 'SOnSelected' must not fire.
@@ -55,7 +57,7 @@ main = kayaMain $ \app -> do
                 column
                   []
                   [ do
-                      ready <- signal (VStr "shelves ready")
+                      ready <- signal (T.pack "shelves ready")
                       labelBound ready -- label#2
                   ]
               mountIn shelvesId shelvesRoot
@@ -63,7 +65,7 @@ main = kayaMain $ \app -> do
                 column
                   []
                   [ do
-                      ready <- signal (VStr "loans ready")
+                      ready <- signal (T.pack "loans ready")
                       labelBound ready -- label#3
                   ]
               mountIn loansId loansRoot

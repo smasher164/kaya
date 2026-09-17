@@ -62,13 +62,15 @@ app.build { tx in
     let noteTarget = tx.signal(.str("note target"))
     let filesTarget = tx.signal(.str("files target"))
 
-    var source = KayaWidget(id: 0)
-    var textID = KayaWidget(id: 0)
-    var noteWidget = KayaWidget(id: 0)
-    var filesWidget = KayaWidget(id: 0)
-    var list = KayaWidget(id: 0)
-    var rowLabel = KayaNodeHandle(id: 0)
-    var itemLabel = KayaNodeHandle(id: 0)
+    // A widget parents at CREATION, so these vars ride out through the
+    // builder closure (docs/traps.md, result builders).
+    var source: KayaWidget!
+    var textID: KayaWidget!
+    var noteWidget: KayaWidget!
+    var filesWidget: KayaWidget!
+    var list: KayaWidget!
+    var rowLabel: KayaNodeHandle!
+    var itemLabel: KayaNodeHandle!
     let root = tx.row {
         list = itemEach(tx, items) { row in
             rowLabel = row.label(row.title)

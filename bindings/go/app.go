@@ -932,16 +932,20 @@ func (w Widget) ColumnsWhen(when SizeClass, columns int) Widget {
 	return w
 }
 
+// Align is a container's cross-axis child placement (AlignStart..
+// AlignBaseline).
+type Align int64
+
 // SetAlign sets a container's cross-axis child placement — one of the
 // generated align constants. Containers only; baseline is rows-only,
 // and the root rejects misuse. The chain is the declarative spelling.
-func (tx *Tx) SetAlign(w Widget, mode int64) {
-	tx.emit(TxSetAlign(w.id, mode))
+func (tx *Tx) SetAlign(w Widget, mode Align) {
+	tx.emit(TxSetAlign(w.id, int64(mode)))
 }
 
 // Align sets this container's cross-axis child placement at
 // construction. Same transaction discipline as Grow.
-func (w Widget) Align(mode int64) Widget {
+func (w Widget) Align(mode Align) Widget {
 	if w.tx == nil || w.tx.closed {
 		panic("kaya: Align on a widget outside its build transaction — use Tx.SetAlign inside a live transaction")
 	}
@@ -949,12 +953,15 @@ func (w Widget) Align(mode int64) Widget {
 	return w
 }
 
+// Axis is a container's arrangement axis: AxisHorizontal or AxisVertical.
+type Axis int64
+
 // SetAxis sets a container's arrangement axis — AxisHorizontal or
 // AxisVertical. One node, two constructor spellings: a widget created
 // as a row stays addressable as row#N whatever its axis says today
 // (docs/adaptive-layout-plan.md D1, D2).
-func (tx *Tx) SetAxis(w Widget, axis int64) {
-	tx.emit(TxSetAxis(w.id, axis))
+func (tx *Tx) SetAxis(w Widget, axis Axis) {
+	tx.emit(TxSetAxis(w.id, int64(axis)))
 }
 
 // SetSpacing sets a container's inter-child gap (main axis, DIP;
@@ -1164,17 +1171,21 @@ func (w Widget) BindHref(s Signal[string]) Widget {
 	return w
 }
 
+// Role is a widget's semantic emphasis (RoleDestructive..RoleLink).
+// MenuRole is the MENU tier's separate, string-based vocabulary — the
+// two types keep them apart.
+type Role int64
+
 // SetRole sets a widget's SEMANTIC EMPHASIS — what it MEANS, never how
 // it looks (docs/styling-plan.md D4). The vocabulary is closed and the
-// root refuses a misfit at declare time. (The Role* STRING constants
-// further down are the MENU tier's; the types keep them apart.)
-func (tx *Tx) SetRole(w Widget, role int64) {
-	tx.emit(TxSetRole(w.id, role))
+// root refuses a misfit at declare time.
+func (tx *Tx) SetRole(w Widget, role Role) {
+	tx.emit(TxSetRole(w.id, int64(role)))
 }
 
 // Role sets this widget's semantic emphasis at construction. Same
 // transaction discipline as Grow.
-func (w Widget) Role(role int64) Widget {
+func (w Widget) Role(role Role) Widget {
 	if w.tx == nil || w.tx.closed {
 		panic("kaya: Role on a widget outside its build transaction — use Tx.SetRole inside a live transaction")
 	}
@@ -3728,12 +3739,16 @@ func (w WindowRef) SectionsPresentation(hint int64) WindowRef {
 	return w
 }
 
+// Appearance is a window's light/dark choice: AppearanceSystem,
+// AppearanceLight or AppearanceDark.
+type Appearance int64
+
 // Appearance is the app's OWN light/dark choice, applied process-wide
 // from the default window (AppearanceSystem/Light/Dark;
 // docs/tasks-s2b-plan.md R1-R3). System defers to the harness knob and
 // then to the OS; Light and Dark win over both.
-func (w WindowRef) Appearance(mode int64) WindowRef {
-	w.tx.emit(TxSetWindowAppearance(w.id, mode))
+func (w WindowRef) Appearance(mode Appearance) WindowRef {
+	w.tx.emit(TxSetWindowAppearance(w.id, int64(mode)))
 	return w
 }
 
@@ -3893,10 +3908,14 @@ func (r SectionRef) Title(title string) SectionRef {
 	return r
 }
 
+// Symbol is the semantic-icon vocabulary (SymbolAdd..SymbolHome),
+// shared by SectionRef.Symbol and MenuItem.Symbol.
+type Symbol int64
+
 // Symbol sets the switcher item's SEMANTIC ICON, the same closed
 // vocabulary MenuItem.Symbol takes. Const-only.
-func (r SectionRef) Symbol(symbol int64) SectionRef {
-	r.tx.emit(TxSetSectionSymbol(r.id, symbol))
+func (r SectionRef) Symbol(symbol Symbol) SectionRef {
+	r.tx.emit(TxSetSectionSymbol(r.id, int64(symbol)))
 	return r
 }
 
@@ -4080,8 +4099,8 @@ func (m MenuItem) Icon(data []byte) MenuItem {
 // BACKWARD and FORWARD IN READING ORDER, never left and right;
 // SymbolDelete is the wastebasket, SymbolRemove takes an item out of a
 // list, SymbolClose is the ✕. Closed vocabulary, const-only.
-func (m MenuItem) Symbol(symbol int64) MenuItem {
-	m.chain().emit(TxSetMenuSymbol(m.id, symbol))
+func (m MenuItem) Symbol(symbol Symbol) MenuItem {
+	m.chain().emit(TxSetMenuSymbol(m.id, int64(symbol)))
 	return m
 }
 
@@ -4092,9 +4111,6 @@ func (m MenuItem) Primary(on bool) MenuItem {
 	return m
 }
 
-// RoleSettings names the app's settings command — the closed
-// standard-command vocabulary (DESIGN.md, Menus).
-//
 // A NAMED VOCABULARY FOR THE CLOSED HALF. A MISTYPED BARE STRING IS
 // SILENT: it becomes a custom format id no clipboard will ever offer,
 // so Paste stays dead and the paste hook never fires.
@@ -4105,7 +4121,16 @@ const (
 	AcceptFiles = "files"
 )
 
-const RoleSettings = "settings"
+// MenuRole is the standard-command vocabulary MenuItem.Role takes —
+// separate from the widget-level Role, an int64, by its own type as well
+// as its own underlying kind.
+type MenuRole string
+
+func (r MenuRole) String() string { return string(r) }
+
+// RoleSettings names the app's settings command — the closed
+// standard-command vocabulary (DESIGN.md, Menus).
+const RoleSettings MenuRole = "settings"
 
 // The three clipboard commands. They lower to the platform's own, act on
 // the FOCUSED widget, and work out their own enablement.
@@ -4114,9 +4139,9 @@ const RoleSettings = "settings"
 // widget knows what is selected. Tx.Copy and Tx.ReadClipboard are for
 // overriding that default and for targets with no native behaviour.
 const (
-	RoleCut   = "cut"
-	RoleCopy  = "copy"
-	RolePaste = "paste"
+	RoleCut   MenuRole = "cut"
+	RoleCopy  MenuRole = "copy"
+	RolePaste MenuRole = "paste"
 )
 
 // The two history commands: they ask the FOCUSED widget FIRST, so
@@ -4124,19 +4149,19 @@ const (
 // action (docs/undo-plan.md D6). An app that names no group still gets
 // working text undo from these items.
 const (
-	RoleUndo = "undo"
-	RoleRedo = "redo"
+	RoleUndo MenuRole = "undo"
+	RoleRedo MenuRole = "redo"
 )
 
 // Role declares this action a standard command (actions only). The
 // declaration is uniform; PLACEMENT is each host's business. One item
 // per role, and a role NEVER invents a chord — spell Shortcut too if
 // the app wants one. Const-only.
-func (m MenuItem) Role(name string) MenuItem {
+func (m MenuItem) Role(role MenuRole) MenuItem {
 	if m.ctx {
 		panic("kaya: a context item takes no role — a role names a standard command in the window catalog")
 	}
-	m.chain().emit(TxSetMenuRole(m.id, name))
+	m.chain().emit(TxSetMenuRole(m.id, string(role)))
 	return m
 }
 
@@ -4598,8 +4623,8 @@ func (t *Tpl) SetDropTarget(n Node, ops ...Op) {
 // CONST ONLY, like SetAccepts: what a copy MEANS is a fact about the
 // PROTOTYPE. No kind wall here deliberately — the root refuses a misfit
 // at DECLARE time, naming both the role and the kind.
-func (t *Tpl) SetRole(n Node, role int64) {
-	t.tx.emit(TxSetRole(n.id, role))
+func (t *Tpl) SetRole(n Node, role Role) {
+	t.tx.emit(TxSetRole(n.id, int64(role)))
 }
 
 // SetInset pads a stamped CONTAINER — DIP between its bounds and its

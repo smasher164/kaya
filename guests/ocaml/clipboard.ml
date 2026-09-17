@@ -1,7 +1,6 @@
 (* The clipboard scene, OCaml port — guests/rust/clipboard.rs,
    tools/scenes/clipboard.steps. *)
 
-open Kaya_wire
 open Kaya_app
 
 (* A real 4x4 PNG: a foreign decoder asserts its size. *)
@@ -57,28 +56,28 @@ let () =
           [
             menu ~label:"Edit"
               [
-                item ~label:"Cut" ~role:role_cut;
-                item ~label:"Copy" ~role:role_copy;
-                item ~label:"Paste" ~role:role_paste;
+                item ~label:"Cut" ~role:Menu_role.Cut;
+                item ~label:"Copy" ~role:Menu_role.Copy;
+                item ~label:"Paste" ~role:Menu_role.Paste;
               ];
           ]
         ();
 
-      let status = signal (Str "ready") in
-      let row_status = signal (Str "") in
+      let status = signal_str ("ready") in
+      let row_status = signal_str ("") in
       let notes = collection () in
 
       let answered clip =
         match clip with
-        | None -> write status (Str "empty")
-        | Some (Text text) -> write status (Str (Printf.sprintf "text %s" text))
-        | Some (Html html) -> write status (Str (Printf.sprintf "html %s" html))
+        | None -> write status ("empty")
+        | Some (Text text) -> write status ((Printf.sprintf "text %s" text))
+        | Some (Html html) -> write status ((Printf.sprintf "html %s" html))
         | Some (Custom (id, body)) ->
-            write status (Str (Printf.sprintf "custom %s %s" id body))
+            write status ((Printf.sprintf "custom %s %s" id body))
         | Some (Image bytes) ->
             copy ~image:bytes ();
-            write status (Str "image")
-        | Some (Files []) -> write status (Str "files none")
+            write status ("image")
+        | Some (Files []) -> write status ("files none")
         | Some (Files (first :: _)) ->
             let worker () =
               (* OFF THE APP THREAD: [open_picked] blocks. *)
@@ -96,16 +95,16 @@ let () =
               in
               post app (fun () ->
                   write status
-                    (Str (Printf.sprintf "files %s %s" first.name text)))
+                    (Printf.sprintf "files %s %s" first.name text))
             in
             ignore (Thread.create worker ());
-            write status (Str "reading")
+            write status ("reading")
       in
 
       let copy_rich () =
         copy ~text:"kaya clip" ~html:"<b>kaya</b> clip" ~image:pixel_png
           ~custom:[ (note_id, note_bytes) ] ();
-        write status (Str "copied")
+        write status ("copied")
       in
       let read_custom () =
         ignore (read_clipboard ~on_result:answered [ note_id ])
@@ -140,8 +139,8 @@ let () =
               on_paste app w (fun clip ->
                   match clip with
                   | Text text ->
-                      write status (Str (Printf.sprintf "pasted %s" text))
-                  | _ -> write status (Str "pasted other"));
+                      write status ((Printf.sprintf "pasted %s" text))
+                  | _ -> write status ("pasted other"));
               rich := Some w;
               w)
             (* entry#0 *);
@@ -158,28 +157,27 @@ let () =
                   let note = entry ~accepts:[ accept_text ] () in
                   on_paste_node app note (fun keys clip ->
                       let key =
-                        match keys with Str k :: _ -> k | _ -> "no key"
+                        match keys with k :: _ -> key_text k | _ -> "no key"
                       in
                       match clip with
                       | Text text ->
                           write row_status
-                            (Str (Printf.sprintf "row %s pasted %s" key text))
+                            (Printf.sprintf "row %s pasted %s" key text)
                       | other ->
                           write row_status
-                            (Str
-                               (Printf.sprintf "row %s pasted %s" key
-                                  (match other with
-                                  | Html _ -> "html"
-                                  | Image _ -> "image"
-                                  | Files _ -> "files"
-                                  | Custom _ -> "custom"
-                                  | Text _ -> "text"))));
+                            (Printf.sprintf "row %s pasted %s" key
+                               (match other with
+                               | Html _ -> "html"
+                               | Image _ -> "image"
+                               | Files _ -> "files"
+                               | Custom _ -> "custom"
+                               | Text _ -> "text")));
                   note))
             (* entry#2 once r1 stamps *);
           ]
           ()
       in
       mount root;
-      insert notes (Str "r1") (Str ""));
+      insert notes (str_key "r1") "");
 
   exit (run app)

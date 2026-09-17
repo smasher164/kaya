@@ -7,9 +7,6 @@ const app = new kaya.App();
 
 let saveEnabled = true;
 
-let status!: kaya.Signal<string>;
-let canSave!: kaya.Signal<boolean>;
-
 function onToggleSave(): void {
   saveEnabled = !saveEnabled;
   canSave.set(saveEnabled);
@@ -27,10 +24,10 @@ function onExport(): void {
   status.set("exported");
 }
 
-app.window({ title: "toolbar" }, () => {
-  status = kaya.signal("ready");
+const { status, canSave } = app.window({ title: "toolbar" }, () => {
+  const status = kaya.signal("ready");
   // Written against the MENU ITEM: the promoted button IS that item.
-  canSave = kaya.signal(true);
+  const canSave = kaya.signal(true);
 
   // CATALOG PREORDER DECIDES PROMOTION.
   app.menu("File", () => {
@@ -53,6 +50,7 @@ app.window({ title: "toolbar" }, () => {
     kaya.label({ bind: status }); // label#0
     kaya.button("toggle save", { onClick: onToggleSave }); // button#0
   });
+  return { status, canSave };
 });
 
 app.run();

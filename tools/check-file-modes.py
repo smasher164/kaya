@@ -202,12 +202,13 @@ PASSTHROUGH = {
         "fdToHandle over the raw fd; the Word32 goes to C",
     "bindings/haskell/KayaApp.hs": "re-exports openPicked",
     "bindings/ocaml/kaya_runtime.ml": "Ctypes hands the int to C",
+    "bindings/ocaml/kaya_runtime.mli": "the interface over the Ctypes pass-through",
     "bindings/swift/KayaApp.swift":
         "defaults to FILE_MODE_READ and passes it on",
     "bindings/python/kaya/__init__.py":
-        "defaults to wire.FILE_MODE_READ and passes it on",
+        "defaults to FileMode.READ and passes it on",
     "bindings/js/kaya/index.ts":
-        "defaults to wire.FILE_MODE_READ and passes it on",
+        "defaults to FileMode.READ and passes it on",
     "bindings/js/kaya/runtime.ts":
         "hands the number to the addon; refuses win32 by name",
     "crates/kaya/src/node.rs":
@@ -381,14 +382,14 @@ def check(root):
     if fn is None:
         gone(CSHARP, "the picked-file opener", "OpenPicked(ulong …)")
     else:
-        arms = {int(number): access for number, access in
-                re.findall(r"(\d+)\s*=>\s*FileAccess\.(\w+)", fn)}
-        fallback = re.search(r"_\s*=>\s*FileAccess\.(\w+)", fn)
-        if not arms and not fallback:
-            gone(CSHARP, "the mode switch", "N => FileAccess.X")
+        # The public API takes System.IO.FileAccess since the idiom pass
+        # (2026-09-16), so OpenPicked's switch runs FileAccess => number.
+        arms = {int(number): access for access, number in
+                re.findall(r"FileAccess\.(\w+)\s*=>\s*(\d+)", fn)}
+        if not arms:
+            gone(CSHARP, "the mode switch", "FileAccess.X => N")
         for name, number in known.items():
-            have = arms.get(number) or (fallback.group(1) if fallback
-                                        else None)
+            have = arms.get(number)
             if have != FILE_ACCESS[name]:
                 bad.append(
                     f'{CSHARP}: mode {number} is the spec\'s "{name}" '
@@ -571,8 +572,8 @@ g.negative("a SwiftUI opener whose name moved", lambda: check(s),
 # N4 — a binding that switches on the number and gets one arm wrong.
 s = fresh("csharp")
 doctor_shadow("the C# access perturbation", s,
-              "bindings/csharp/Kaya.cs", r"0 => FileAccess\.Read",
-              "0 => FileAccess.Write")
+              "bindings/csharp/Kaya.cs", r"FileAccess\.Read => 0",
+              "FileAccess.Write => 0")
 g.negative("a C# binding that opens read mode for writing",
            lambda: check(s), want="rather than FileAccess.Read")
 

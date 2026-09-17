@@ -1,28 +1,32 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE DeriveAnyClass #-}
 
 -- The tooltips scene, Haskell port — guests/rust/tooltips.rs,
 -- tools/scenes/tooltips.steps, docs/tooltip-plan.md.
 
-import Data.Proxy (Proxy (..))
 import GHC.Generics (Generic)
 
+import Data.Text (Text)
+import qualified Data.Text as T
 import KayaApp
-import KayaWire (Value (..))
 
-data Account = Account {name :: String, note :: String} deriving (Generic)
+data Account = Account {name :: Text, note :: Text}
+  deriving stock (Generic)
+  deriving anyclass (KayaRecord)
 
-instance KayaRecord Account
 
 main :: IO ()
 main = kayaMain $ \app -> do
   _ <- buildTx app $ do
-    nameHelp <- signal (VStr "Your full name as it appears on the card")
-    accounts <- collectionOf (Proxy :: Proxy Account)
+    nameHelp <- signal (T.pack "Your full name as it appears on the card")
+    accounts <- collectionOf @Account
 
     let onSave =
-          submitTx app $ writeSignal nameHelp (VStr "Your name, as saved")
+          submitTx app $ writeSignal nameHelp (T.pack "Your name, as saved")
 
     (rows, _) <- forEach (recordHandle accounts) $
       withTplAttrs
@@ -33,23 +37,23 @@ main = kayaMain $ \app -> do
 
     root <-
       column
-        [Help "The settings for this account", A11yId "settings"] -- column#0
-        [ buttonOn "Save" onSave [Help "Saves the draft to disk", A11yId "save"], -- button#0
+        [Help ("The settings for this account" :: Text), A11yId ("settings" :: Text)] -- column#0
+        [ buttonOn "Save" onSave [Help ("Saves the draft to disk" :: Text), A11yId ("save" :: Text)], -- button#0
           buttonOn -- button#1
             "Discard"
             (return ())
-            [ Help "Throws the draft away",
-              A11yHint "discard every change",
-              A11yId "discard"
+            [ Help ("Throws the draft away" :: Text),
+              A11yHint ("discard every change" :: Text),
+              A11yId ("discard" :: Text)
             ],
-          entryOn (const (return ())) [Help nameHelp, A11yId "fullname"], -- entry#0
+          entryOn (const (return ())) [Help nameHelp, A11yId ("fullname" :: Text)], -- entry#0
           sliderOn 0.0 1.0 0.5 (const (return ())) -- slider#0
-            [Help "How loud the preview plays", A11yId "volume"],
+            [Help ("How loud the preview plays" :: Text), A11yId ("volume" :: Text)],
           pure rows
         ]
     mount root
 
-    insertRecord accounts (VStr "a") (Account "a" "The first account, opened in March")
-    insertRecord accounts (VStr "b") (Account "b" "The second account, opened in May")
+    insertRecord accounts (T.pack "a") (Account "a" "The first account, opened in March")
+    insertRecord accounts (T.pack "b") (Account "b" "The second account, opened in May")
     return ()
   return ()

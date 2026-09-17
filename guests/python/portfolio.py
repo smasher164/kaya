@@ -1,6 +1,8 @@
 """The portfolio app (docs/portfolio-plan.md). The two screens TIE OUT, and
 the view writes no windowing code: it inserts and reads every row it has."""
 
+import csv
+import io
 import sys
 from dataclasses import dataclass
 
@@ -74,11 +76,10 @@ def money(cents):
 
 
 def read_ledger():
-    with kaya.asset(LEDGER) as csv:
-        lines = csv.bytes().decode("ascii").splitlines()
+    with kaya.asset(LEDGER) as asset:
+        rows = list(csv.reader(io.StringIO(asset.bytes().decode("ascii"))))
     out = []
-    for line in lines[1:]:
-        date, account, ticker, side, qty, _price, total = line.split(",")
+    for date, account, ticker, side, qty, _price, total in rows[1:]:
         out.append((date, account, ticker, side, int(qty), int(total)))
     return out
 
@@ -86,11 +87,10 @@ def read_ledger():
 def read_history():
     """The price walk: every day, every ticker. Returns the days in file
     order and each ticker's series against them."""
-    with kaya.asset(HISTORY) as csv:
-        lines = csv.bytes().decode("ascii").splitlines()
+    with kaya.asset(HISTORY) as asset:
+        rows = list(csv.reader(io.StringIO(asset.bytes().decode("ascii"))))
     days, series = [], {}
-    for line in lines[1:]:
-        date, ticker, cents = line.split(",")
+    for date, ticker, cents in rows[1:]:
         if not days or days[-1] != date:
             days.append(date)
         series.setdefault(ticker, []).append(int(cents))

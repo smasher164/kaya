@@ -1,7 +1,6 @@
 (* The identity scene, OCaml port — guests/rust/identity.rs,
    tools/scenes/identity.steps. *)
 
-open Kaya_wire
 open Kaya_app
 
 let () =
@@ -20,8 +19,8 @@ let () =
        ~menus:[ menu ~label:"File" [ item ~label:"Save" ~symbol:Done ~primary:true ] ]
        ();
 
-     let heading = signal (Str "identity") in
-     let status = signal (Str "ready") in
+     let heading = signal_str ("identity") in
+     let status = signal_str ("ready") in
 
      let root =
        column
@@ -31,7 +30,7 @@ let () =
            entry ~on_change:(fun text -> draft := text) (* entry#0 *);
            button ~text:"Go"
              ~on_click:(fun () ->
-               write status (Str (Printf.sprintf "clicked %s" !draft)))
+               write status ((Printf.sprintf "clicked %s" !draft)))
              (* button#0 *);
          ]
          ()
@@ -42,7 +41,7 @@ let () =
          title an app WROTE. *)
      if (capabilities ()).aux_windows then begin
        create_window ~width:360.0 ~height:240.0 1L;
-       let caption = signal (Str "no title of its own") in
+       let caption = signal_str ("no title of its own") in
        let aux = column [ label ~bind:caption (* label#2 *) ] () in
        mount_in 1L aux
      end);

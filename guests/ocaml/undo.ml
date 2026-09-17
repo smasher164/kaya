@@ -1,6 +1,5 @@
 (* The undo scene, OCaml port — guests/rust/undo.rs, tools/scenes/undo.steps. *)
 
-open Kaya_wire
 open Kaya_app
 
 type todo = { title : string } [@@deriving kaya_gen]
@@ -14,7 +13,7 @@ module Notes = Map.Make (Int64)
 
 let row_key path =
   match path with
-  | I64 n :: _ -> n
+  | Int_key n :: _ -> n
   | _ -> invalid_arg "kaya: undo scene expects minted (I64) keys"
 
 let put_note notes key text =
@@ -33,8 +32,8 @@ let note_list notes =
 let fold_texts draft notes texts =
   List.iter
     (fun (t : undo_text) ->
-      if t.ut_path = [] then draft := t.ut_text
-      else notes := put_note !notes (row_key t.ut_path) t.ut_text)
+      if t.path = [] then draft := t.text
+      else notes := put_note !notes (row_key t.path) t.text)
     texts
 
 let () =
@@ -44,16 +43,16 @@ let () =
   let row_notes = ref Notes.empty in
 
   build app (fun () ->
-      let status = signal (Str "no todos") in
-      let history = signal (Str "history empty") in
-      let keys = signal (Str "no keys") in
-      let notes = signal (Str "no notes") in
+      let status = signal_str ("no todos") in
+      let history = signal_str ("history empty") in
+      let keys = signal_str ("no keys") in
+      let notes = signal_str ("no notes") in
       let todos = collection_of todo_record in
 
       let key_list () =
         let spell (key, _) =
           match key with
-          | I64 n -> Int64.to_string n
+          | Int_key n -> Int64.to_string n
           | _ -> invalid_arg "kaya: undo scene expects minted (I64) keys"
         in
         match List.map spell (record_items todos) with
@@ -69,14 +68,14 @@ let () =
         let d = !draft in
         if d = "" then begin
           let total = count (record_handle todos) in
-          write status (Str (Printf.sprintf "nothing to add, %d total" total))
+          write status ((Printf.sprintf "nothing to add, %d total" total))
         end
         else begin
           undoable (Printf.sprintf "add %s" d);
           ignore (insert_record_fresh todos { title = d });
           let total = count (record_handle todos) in
-          write status (Str (Printf.sprintf "added %s, %d total" d total));
-          write keys (Str (key_list ()));
+          write status ((Printf.sprintf "added %s, %d total" d total));
+          write keys ((key_list ()));
           focus field;
           (* [clear] inside an undoable group is refused at apply
              (docs/undo-plan.md D4). [post], not a nested [build]: a handler
@@ -90,37 +89,37 @@ let () =
         | [] ->
             let total = count (record_handle todos) in
             write status
-              (Str (Printf.sprintf "nothing to remove, %d total" total))
+              (Printf.sprintf "nothing to remove, %d total" total)
         | (key, todo) :: _ ->
             undoable (Printf.sprintf "remove %s" todo.title);
             remove (record_handle todos) key;
             let total = count (record_handle todos) in
             write status
-              (Str (Printf.sprintf "removed %s, %d total" todo.title total));
-            write keys (Str (key_list ()))
+              (Printf.sprintf "removed %s, %d total" todo.title total);
+            write keys ((key_list ()))
       in
 
       let on_star () =
         undoable "star";
-        write status (Str "starred")
+        write status ("starred")
       in
 
       let on_focus () = focus field in
 
       let on_note path text =
         row_notes := put_note !row_notes (row_key path) text;
-        write notes (Str (note_list !row_notes))
+        write notes ((note_list !row_notes))
       in
 
-      let took_back verb step delta =
+      let took_back verb step (delta : undo_delta) =
         (* A programmatic write never echoes, so the delta is the ONLY
            notification for text an undo restored. *)
-        fold_texts draft row_notes delta.ud_texts;
+        fold_texts draft row_notes delta.texts;
         let total = count (record_handle todos) in
         write history
-          (Str (Printf.sprintf "%s %s, %d total" verb (what step) total));
-        write keys (Str (key_list ()));
-        write notes (Str (note_list !row_notes))
+          (Printf.sprintf "%s %s, %d total" verb (what step) total);
+        write keys ((key_list ()));
+        write notes ((note_list !row_notes))
       in
 
       window ~title:"undo"
@@ -128,8 +127,8 @@ let () =
           [
             menu ~label:"Edit"
               [
-                item ~label:"Undo" ~role:role_undo;
-                item ~label:"Redo" ~role:role_redo;
+                item ~label:"Undo" ~role:Menu_role.Undo;
+                item ~label:"Redo" ~role:Menu_role.Redo;
               ];
           ]
         ~on_undone:(took_back "undid") ~on_redone:(took_back "redid") ();

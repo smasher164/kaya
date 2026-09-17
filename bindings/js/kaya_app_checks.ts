@@ -96,6 +96,25 @@ if (isMainThread) {
   const sorted = [...ids].sort((a, b) => a - b);
   check("one id space for widgets and nodes", sorted.every((id, i) => id === sorted[0]! + i) && ids.length === 6);
 
+  // F1 (idiom pass): window/build/pushEntry/addSection thread the body's
+  // return value back out, generic in T — no more `let x!: T` plus an
+  // assign-inside-the-body.
+  check("build(body) returns the body's value", app.build(() => 42) === 42);
+  check("window(body) returns the body's value (the single-arg overload)", app.window(() => "w") === "w");
+  check(
+    "window(opts, body) returns the body's value",
+    app.window({ windowId: 2620 }, () => { kaya.column(() => { kaya.label("idiom"); }); return "wo"; }) === "wo",
+  );
+  check("window(opts) with no body returns nothing to destructure (void)", app.window({ windowId: 2620, dirty: true }) === undefined);
+  check(
+    "pushEntry(id, opts, body) returns the body's value",
+    app.pushEntry(5170, { title: "idiom entry" }, () => { kaya.column(() => { kaya.label("idiom entry"); }); return "e"; }) === "e",
+  );
+  check(
+    "addSection(id, opts, body) returns the body's value",
+    app.addSection(5171, { title: "idiom section" }, () => { kaya.column(() => { kaya.label("idiom section"); }); return "s"; }) === "s",
+  );
+
   // -------------------------------------------------------- the model
   app.build(() => {
     const k1 = todos.insertFresh(Todo({ title: "a", done: false }));
@@ -278,7 +297,7 @@ if (isMainThread) {
   check("fmt refuses a row's field", throws(() => app.window(() => { kaya.column(() => { for (const todo of todos) { kaya.fmt`${todo.title}`; } }); }), /bound with/));
 
   // ----------------------------------------------------- promise dialogs
-  let promised: Promise<number> | null = null;
+  let promised: Promise<number | null> | null = null;
   app.build(() => { promised = kaya.showAlert({ title: "t", message: "m", actions: ["A"], cancel: "C" }); });
   const alertId = (app as unknown as { _counters: { alert: number } })._counters.alert;
   const alertBytes = new Uint8Array(24);
@@ -290,10 +309,41 @@ if (isMainThread) {
   shipped.length = 0;
   fire(wire.parse_occurrence(alertBytes));
   const choice = await promised!;
-  count.set(choice + 100);
+  count.set((choice ?? -1) + 100);
   await Promise.resolve();
   // Two records: the write, and the formatted signal above recomputing.
   check("showAlert without onResult is a promise of the choice, and its continuation is a transaction", choice === 1 && shipped.length === 1 && shipped[0]!.length === 2);
+
+  // A native dismissal (the wire's own ALERT_CHOICE_CANCEL sentinel)
+  // answers null, never the sentinel number (F3).
+  let cancelPromised: Promise<number | null> | null = null;
+  app.build(() => { cancelPromised = kaya.showAlert({ title: "t", message: "m", actions: ["A"], cancel: "C" }); });
+  const cancelAlertId = (app as unknown as { _counters: { alert: number } })._counters.alert;
+  const cancelBytes = new Uint8Array(24);
+  const cv = new DataView(cancelBytes.buffer);
+  cv.setUint32(0, 24, true);
+  cv.setUint16(4, wire.OCC_ALERT_RESULT, true);
+  cv.setBigUint64(8, BigInt(cancelAlertId), true);
+  cv.setUint32(16, wire.ALERT_CHOICE_CANCEL, true);
+  fire(wire.parse_occurrence(cancelBytes));
+  const cancelChoice = await cancelPromised!;
+  check("a native alert dismissal answers null, not the wire sentinel", cancelChoice === null);
+
+  // F4 (idiom pass): pickFile answers PickedFile | null, saveFile's own
+  // shape — cancel (the platform's empty file list) resolves to null,
+  // never the array the guest would otherwise have to unwrap by hand.
+  let filePromised: Promise<K.PickedFile | null> | null = null;
+  app.build(() => { filePromised = kaya.pickFile(); });
+  const fileDialogId = (app as unknown as { _counters: { file_dialog: number } })._counters.file_dialog;
+  const fdBytes = new Uint8Array(24);
+  const fv = new DataView(fdBytes.buffer);
+  fv.setUint32(0, 24, true);
+  fv.setUint16(4, wire.OCC_FILE_DIALOG_RESULT, true);
+  fv.setBigUint64(8, BigInt(fileDialogId), true);
+  fv.setUint32(16, 0, true);
+  fire(wire.parse_occurrence(fdBytes));
+  const pickedFile = await filePromised!;
+  check("pickFile() resolves to null on cancel (the empty file list), not []", pickedFile === null);
 
   // ------------------------------------------------------------ the sum
   app.build(() => {
@@ -447,8 +497,9 @@ if (isMainThread) {
   const collId = (todos as unknown as { _id: number })._id;
   const onOccurrence = (app as unknown as { _onOccurrence: (o: W.Occurrence) => void })._onOccurrence.bind(app);
   let undoneLabel = "";
+  let undoneDelta: K.UndoDelta | null = null;
   app.build(() => {
-    app.window({ onUndone: (label) => { undoneLabel = label; } });
+    app.window({ onUndone: (label, delta) => { undoneLabel = label; undoneDelta = delta; } });
   });
   const restored = packUndo(0, "add e", [[collId, [], 10, null], [collId, [], 2, [0, ["b-restored", true]]]], [[collId, [], [1, 8, 2]]], [[count.id, 42]]);
   onOccurrence(wire.parse_occurrence(restored));
@@ -457,6 +508,17 @@ if (isMainThread) {
   check("an undo reorders the mirror by the payload's list", JSON.stringify(todos.keys().slice(0, 3)) === JSON.stringify([1, 8, 2]));
   check("an undo moves the signal cache", (count as unknown as { _mirror: number })._mirror === 42);
   check("the onUndone handler fires with the label", undoneLabel === "add e");
+  // F5 (idiom pass): UndoDelta's fields are named, and signals/entries/
+  // orders carry the RESOLVED handle, not a bare id.
+  check("UndoDelta.signals.signal is the resolved Signal handle, not a bare id", undoneDelta!.signals[0]!.signal === count);
+  check(
+    "UndoDelta.entries carries the resolved Collection and a named {key, state}",
+    undoneDelta!.entries.some((e) => e.collection === todos && e.key === 2 && e.state !== null && e.state.variant === 0 && e.state.fields[0] === "b-restored"),
+  );
+  check(
+    "UndoDelta.orders carries the resolved Collection and named {keys}",
+    undoneDelta!.orders.some((o) => o.collection === todos && JSON.stringify(o.keys) === JSON.stringify([1, 8, 2])),
+  );
 
   // ------------------------------------------------- the drag surface
   // (docs/dnd-plan.md D1, D3, §4). THE TEMPLATE ZONE: one handle serves
@@ -758,6 +820,50 @@ if (isMainThread) {
   check("addSection({badge: signal}) binds the section prop instead", badgeRecords.includes(JSON.stringify([...wire.tx_bind_section_badge(5151, badgeSignal.id)])) && !badgeRecords.includes(JSON.stringify([...wire.tx_set_section_badge(5151, 0)])));
   check("zero is a badge value and not an absent one (it CLEARS)", JSON.stringify([...wire.tx_set_section_badge(5150, 0)]) !== JSON.stringify([...wire.tx_set_section_badge(5150, 3)]));
 
+  // F3 (idiom pass): sectionsPresentation/appearance are the dual
+  // Value|Name vocab() pattern (like Align/Axis/Role/Symbol/Platform);
+  // an unknown name is refused BY NAME, at the call.
+  shipped.length = 0;
+  app.window({ windowId: 2610, sectionsPresentation: "sidebar", appearance: "dark" }, () => {
+    kaya.column(() => { kaya.label("idiom vocab"); });
+  });
+  const vocabRecords = shipped.flat().map((r) => JSON.stringify([...r]));
+  check(
+    "sectionsPresentation accepts its string name, packing the same value as the constant",
+    vocabRecords.includes(JSON.stringify([...wire.tx_set_window_sections_presentation(2610, kaya.SECTIONS_SIDEBAR)])),
+  );
+  check(
+    "appearance accepts its string name, packing the same value as the constant",
+    vocabRecords.includes(JSON.stringify([...wire.tx_set_window_appearance(2610, kaya.APPEARANCE_DARK)])),
+  );
+  check(
+    "an unknown sectionsPresentation name is refused, naming the vocabulary",
+    throws(
+      () => app.window({ windowId: 2611, sectionsPresentation: "unknown" as unknown as K.SectionsPresentationName }, () => { kaya.column(() => { kaya.label("x"); }); }),
+      /sectionsPresentation/,
+    ),
+  );
+  check(
+    "an unknown appearance name is refused, naming the vocabulary",
+    throws(
+      () => app.window({ windowId: 2612, appearance: "purple" as unknown as K.AppearanceName }, () => { kaya.column(() => { kaya.label("x"); }); }),
+      /appearance/,
+    ),
+  );
+  check(
+    "an unknown menu role is refused by name — MenuRole has no numeric wire form to fall back on",
+    throws(
+      () =>
+        app.window({ windowId: 2613 }, () => {
+          app.menu("Idiom", () => {
+            kaya.item("X", { role: "quit" as unknown as K.MenuRole });
+          });
+          kaya.column(() => { kaya.label("y"); });
+        }),
+      /role/,
+    ),
+  );
+
   // ------------------------------------------------ notifications (N1)
   // The alert's grammar without a window: the handler binds AT THE SHOW,
   // fires once and RETIRES; the id is the guest's, so it may be posted
@@ -903,14 +1009,14 @@ if (isMainThread) {
   // moment the first transaction lands, so a route that shipped after
   // the scene's own records would miss the cold door. No scene can read
   // the order back — the core applies both in one batch either way.
-  app.build(() => { kaya.createWindow(1900); });
+  app.build(() => { kaya.showWindow(1900); });
   check("the parked declarations lead the transaction that ships them",
     shipped.length === 1 && shipped[0]!.length > 2
     && JSON.stringify([...shipped[0]![0]!]) === JSON.stringify([...wire.tx_declare_link_route(1, "task/{key}")])
     && JSON.stringify([...shipped[0]![1]!]) === JSON.stringify([...wire.tx_declare_link_route(2, "{section}")]));
   check("and the pending list is empty afterwards", linkApp._pendingRecords.length === 0);
   shipped.length = 0;
-  app.build(() => { kaya.link("note/{key}", () => {}); kaya.createWindow(1901); });
+  app.build(() => { kaya.link("note/{key}", () => {}); kaya.showWindow(1901); });
   check("a route declared INSIDE a transaction rides it, at its head",
     shipped.length === 1 && shipped[0]!.length > 1
     && JSON.stringify([...shipped[0]![0]!]) === JSON.stringify([...wire.tx_declare_link_route(3, "note/{key}")]));
@@ -1345,6 +1451,28 @@ if (isMainThread) {
       rangedWrites.some((r) => sameBytes(r, wire.tx_format_text(quietEditor.id, 1, 0, 0, 0, ["link", ""]))),
   );
   richCheck("the app's own Document takes a ranged act AS IT SENDS, since nothing is echoed to move it", spell(quietEditor.document().runs) === "2:5 italic");
+
+  // F2 (idiom pass): mark/format/formatRange take a JS boolean for a flag
+  // attribute, coerced to the wire's own "true"/"false" string — a boolean
+  // and the old string spelling must pack IDENTICAL bytes. `.format()` is
+  // the SELECTION act (no fold into the document mirror, unlike
+  // formatRange), so this cannot disturb quietEditor's document, which
+  // the block-act checks below still read exactly.
+  shipped.length = 0;
+  app.build(() => {
+    quietEditor.format("starred", true);
+    quietEditor.format("starred", "true");
+    quietEditor.format("starred", false);
+    new kaya.Document("x").mark([0, 1], "starred", true);
+  });
+  const boolWrites = shipped.flat();
+  richCheck(
+    "format(name, true) packs the same bytes as format(name, \"true\")",
+    sameBytes(boolWrites[0]!, wire.tx_format_text(quietEditor.id, 0, 0, 0, 0, ["starred", "true"])) &&
+      sameBytes(boolWrites[1]!, wire.tx_format_text(quietEditor.id, 0, 0, 0, 0, ["starred", "true"])),
+  );
+  richCheck("format(name, false) packs the wire's \"false\", not the string \"true\"", sameBytes(boolWrites[2]!, wire.tx_format_text(quietEditor.id, 0, 0, 0, 0, ["starred", "false"])));
+  richCheck("Document.mark(span, name, true) packs a run whose value is the wire's \"true\"", new kaya.Document("x").mark([0, 1], "starred", true).runs[0]!.value === "true");
 
   // A RANGED `block` COVERS THE WHOLE PARAGRAPHS IT TOUCHES, as the core
   // snaps it — on the wire and in the fold alike — and `body` is the removal.

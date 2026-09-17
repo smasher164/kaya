@@ -9,10 +9,8 @@ function bottomClicked(): void {
   status.set("bottom clicked");
 }
 
-let status!: kaya.Signal<string>;
-
-app.window({ title: "scroll" }, () => {
-  status = kaya.signal("at top");
+const { status } = app.window({ title: "scroll" }, () => {
+  const status = kaya.signal("at top");
   kaya.column(() => {
     kaya.label({ bind: status }); // label#0
     kaya.scroll({ grow: 1 }, () => {
@@ -25,6 +23,7 @@ app.window({ title: "scroll" }, () => {
       });
     });
   });
+  return { status };
 });
 
 app.run();

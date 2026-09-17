@@ -1,7 +1,6 @@
 (* The confirm scene, OCaml port — guests/rust/confirm.rs,
    tools/scenes/confirm.steps. *)
 
-open Kaya_wire
 open Kaya_app
 
 let () =
@@ -10,7 +9,7 @@ let () =
   let status = ref None in
   build app (fun () ->
      window ~title:"confirm" ();
-     let s = signal (Str "no decision") in
+     let s = signal_str ("no decision") in
      status := Some s;
      let delete_answered choice =
        match !status with
@@ -20,13 +19,13 @@ let () =
              else if choice = 1 then "archived"
              else "deleted"
            in
-           write s (Str text)
+           write s (text)
        | None -> ()
      in
      let eject_answered choice =
        match !status with
        | Some s ->
-           write s (Str (if choice = alert_cancel then "held" else "ejected"))
+           write s ((if choice = alert_cancel then "held" else "ejected"))
        | None -> ()
      in
      let on_delete () =

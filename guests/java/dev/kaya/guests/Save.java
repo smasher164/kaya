@@ -1,7 +1,6 @@
 package dev.kaya.guests;
 
 import dev.kaya.KayaApp;
-import dev.kaya.KayaWire;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -116,7 +115,7 @@ public final class Save {
 
     /** Read a handle back with Java's own stream API. */
     private static String readBack(KayaApp.PickedFile file) {
-        try (KayaApp.Opened opened = file.open(KayaWire.FILE_MODE_READ)) {
+        try (KayaApp.Opened opened = file.open(KayaApp.FileMode.READ)) {
             return new String(opened.stream().readAllBytes(), StandardCharsets.UTF_8);
         } catch (IOException e) {
             return "open failed: " + e.getMessage();
@@ -126,7 +125,7 @@ public final class Save {
     /** Write through a handle and report what the file says AFTERWARDS.
      * FILE_MODE_WRITE truncates, and the stream closes before the reopen. */
     private static String writeBack(KayaApp.PickedFile file, String bytes) {
-        try (KayaApp.Opened opened = file.open(KayaWire.FILE_MODE_WRITE)) {
+        try (KayaApp.Opened opened = file.open(KayaApp.FileMode.WRITE)) {
             opened.sink().write(bytes.getBytes(StandardCharsets.UTF_8));
         } catch (IOException e) {
             // Verbatim to the label: without the core's create a destination

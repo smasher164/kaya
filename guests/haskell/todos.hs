@@ -1,28 +1,32 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE DeriveAnyClass #-}
 
 -- The todos scene, Haskell port — guests/rust/todos.rs,
 -- tools/scenes/todos.steps.
 
 import Data.IORef (newIORef, readIORef, writeIORef)
-import Data.Proxy (Proxy (..))
 import GHC.Generics (Generic)
 
+import Data.Text (Text)
+import qualified Data.Text as T
 import KayaApp
-import KayaWire (Value (..))
 
-data Todo = Todo {title :: String, done :: Bool} deriving (Generic)
+data Todo = Todo {title :: Text, done :: Bool}
+  deriving stock (Generic)
+  deriving anyclass (KayaRecord)
 
-instance KayaRecord Todo
 
 main :: IO ()
 main = kayaMain $ \app -> do
-  draftRef <- newIORef ""
+  draftRef <- newIORef ("" :: Text)
 
   buildTx app $ do
     window
-      0
+      primary
       [ WTitle "todos",
         WMenus
           [ menu
@@ -34,22 +38,22 @@ main = kayaMain $ \app -> do
           ]
       ]
 
-    todos <- collectionOf (Proxy :: Proxy Todo)
+    todos <- collectionOf @Todo
     -- The derive's write rides each mutation's transaction, so nothing here
     -- registers 'WOnUndone'.
     itemsLeft <-
       derive todos $ \entries ->
         let n = length (filter (not . done . snd) entries)
-         in VStr (if n == 1 then "1 item left" else show n ++ " items left")
+         in T.pack (if n == 1 then "1 item left" else show n ++ " items left")
 
     entryField <- entryOn (writeIORef draftRef)
 
     let onAdd = do
           draft <- readIORef draftRef
-          if null draft
+          if T.null draft
             then return ()
             else do
-              undoableTx app ("add " ++ draft) $ do
+              undoableTx app ("add " <> draft) $ do
                 _ <- insertFresh todos (Todo draft False)
                 return ()
               -- 'clearWidget' inside a group is refused at apply
@@ -57,9 +61,10 @@ main = kayaMain $ \app -> do
               submitTx app $ do
                 clearWidget entryField
                 focusWidget entryField
-        onToggle keys checked =
+        onToggle (key : _) checked =
           submitTx app $
-            patch todos (head keys) [set (field @"done" @Todo) checked]
+            patch todos key [set (field @"done" @Todo) checked]
+        onToggle [] _ = error "kaya: onToggle's key path is never empty"
 
     root <-
       column

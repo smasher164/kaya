@@ -15,15 +15,13 @@ function onGo(): void {
   status.set(`clicked ${draft}`);
 }
 
-let status!: kaya.Signal<string>;
-
-app.window({ title: "typeface", width: 480, height: 360 }, () => {
+const { status } = app.window({ title: "typeface", width: 480, height: 360 }, () => {
   // BEFORE THE FIRST MOUNT: the scope mounts on exit.
   const font = kaya.asset("fonts/sora-wght.ttf");
   kaya.brandTypeface("Sora", { font });
   font.close();
   const heading = kaya.signal("typeface");
-  status = kaya.signal("ready");
+  const status = kaya.signal("ready");
   kaya.column(() => {
     // A heading OVERRIDES the root font: a root-only lowering shows here.
     kaya.label({ bind: heading }).role(kaya.Role.HEADING).a11yId("title"); // label#0
@@ -33,6 +31,7 @@ app.window({ title: "typeface", width: 480, height: 360 }, () => {
     kaya.textarea(); // textarea#0
     kaya.button("Go", { onClick: onGo }); // button#0
   });
+  return { status };
 });
 
 app.run();

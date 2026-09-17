@@ -25,8 +25,8 @@ static class ConfirmScene
                         cancel: "Keep",
                         onResult: (tx, choice) => tx.Write(status, choice switch
                         {
-                            0u => "deleted",
-                            1u => "archived",
+                            AlertChoice.Action0 => "deleted",
+                            AlertChoice.Action1 => "archived",
                             _ => "kept",
                         }));
                 });
@@ -38,7 +38,7 @@ static class ConfirmScene
                         action0: "Eject", cancel: "Hold",
                         onResult: (tx, choice) => tx.Write(
                             status,
-                            choice == KayaWire.AlertChoiceCancel ? "held" : "ejected"));
+                            choice == AlertChoice.Cancel ? "held" : "ejected"));
                 });
             }));
         });

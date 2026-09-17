@@ -1,21 +1,24 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 -- The select scene, Haskell port — guests/rust/select.rs,
 -- tools/scenes/select.steps.
 
+import Data.Text (Text)
+import qualified Data.Text as T
 import KayaApp
-import KayaWire (Value (..))
 
-options :: [String]
+options :: [Text]
 options = ["Red", "Green", "Blue"]
 
 main :: IO ()
 main = kayaMain $ \app -> do
   _ <- buildTx app $ do
-    window 0 [WTitle "select"]
-    picked <- signal (VStr "picked: Red")
+    window primary [WTitle "select"]
+    picked <- signal (T.pack "picked: Red")
 
     let onPick index =
           submitTx app $
-            writeSignal picked (VStr ("picked: " ++ options !! index))
+            writeSignal picked ("picked: " <> options !! index)
 
     root <-
       column

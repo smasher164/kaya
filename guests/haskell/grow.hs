@@ -1,3 +1,5 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 {- The grow conformance scene, Haskell port — see guests/rust/grow.rs.
    Every child of the column and of the row is a grower, so each split
    is exactly weight/Σweight: 1,2,1 divide the column 25/50/25 and the
@@ -6,14 +8,14 @@
    The textarea's handler is a no-op because 'textareaOn' is the only
    spelling this binding has. -}
 
+import qualified Data.Text as T
 import KayaApp
-import KayaWire (Value (..))
 
 main :: IO ()
 main = kayaMain $ \app -> do
   buildTx app $ do
-    probe <- signal (VStr "grow probe")
-    one <- signal (VStr "one")
+    probe <- signal (T.pack "grow probe")
+    one <- signal (T.pack "one")
 
     root <-
       column

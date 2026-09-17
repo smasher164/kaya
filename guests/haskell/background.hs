@@ -1,10 +1,13 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 -- The background scene, Haskell port — guests/rust/background.rs,
 -- tools/scenes/background.steps.
 
 import Control.Concurrent (forkIO, newEmptyMVar, takeMVar, tryPutMVar)
 import Data.IORef (modifyIORef', newIORef, readIORef)
+import Data.Text (Text)
+import qualified Data.Text as T
 import KayaApp
-import KayaWire (Value (..))
 
 main :: IO ()
 main = kayaMain $ \app -> do
@@ -13,17 +16,17 @@ main = kayaMain $ \app -> do
   nestedRef <- newIORef ""
 
   _ <- buildTx app $ do
-    window 0 [WTitle "background"]
-    status <- signal (VStr "idle")
-    alive <- signal (VStr "-")
-    detail <- signal (VStr "-")
+    window primary [WTitle "background"]
+    status <- signal (T.pack "idle")
+    alive <- signal (T.pack "-")
+    detail <- signal (T.pack "-")
 
     root <-
       column
         []
-        [ labelBound status [A11yId "status"], -- label#0
-          labelBound alive [A11yId "alive"], -- label#1
-          labelBound detail [A11yId "nested"], -- label#2
+        [ labelBound status [A11yId ("status" :: Text)], -- label#0
+          labelBound alive [A11yId ("alive" :: Text)], -- label#1
+          labelBound detail [A11yId ("nested" :: Text)], -- label#2
           buttonOn
             "start" -- button#0
             ( do
@@ -34,13 +37,13 @@ main = kayaMain $ \app -> do
                     ( \step -> post app $ do
                         modifyIORef' postedRef (++ step)
                         seen <- readIORef postedRef
-                        buildTx app (writeSignal status (VStr seen))
+                        buildTx app (writeSignal status (T.pack seen))
                     )
                     ["1", "2", "3"]
-                buildTx app (writeSignal status (VStr "working"))
+                buildTx app (writeSignal status (T.pack "working"))
             )
             [],
-          buttonOn "ping" (buildTx app (writeSignal alive (VStr "alive"))) [], -- button#1
+          buttonOn "ping" (buildTx app (writeSignal alive (T.pack "alive"))) [], -- button#1
           -- tryPutMVar, NOT putMVar: putMVar BLOCKS on a full MVar, so a
           -- second release click would wedge the APP THREAD (docs/deferred.md,
           -- the blocking-release entry).
@@ -52,10 +55,10 @@ main = kayaMain $ \app -> do
                 post app $ do
                   modifyIORef' nestedRef (++ "b")
                   seen <- readIORef nestedRef
-                  buildTx app (writeSignal detail (VStr seen))
+                  buildTx app (writeSignal detail (T.pack seen))
                 modifyIORef' nestedRef (++ "c")
                 seen <- readIORef nestedRef
-                buildTx app (writeSignal detail (VStr seen))
+                buildTx app (writeSignal detail (T.pack seen))
             )
             []
         ]

@@ -4,13 +4,12 @@ import * as kaya from "kaya-gui";
 
 const app = new kaya.App();
 
-let status!: kaya.Signal<string>;
-
-app.window({ title: "panels" }, () => {
-  status = kaya.signal("two panels");
+const { status } = app.window({ title: "panels" }, () => {
+  const status = kaya.signal("two panels");
   kaya.column(() => {
     kaya.label({ bind: status }); // label#0
   });
+  return { status };
 });
 
 const INSPECTOR = 1;

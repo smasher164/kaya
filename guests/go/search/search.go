@@ -38,7 +38,7 @@ func App() *kaya.App {
 				// membership changed move (docs/search-plan.md S9).
 				for _, name := range visible {
 					if !has(wanted, name) {
-						tx.Remove(items.Collection, name)
+						tx.Remove(items.Coll, name)
 					}
 				}
 				for _, name := range wanted {

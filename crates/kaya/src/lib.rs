@@ -103,6 +103,7 @@ pub use app::{
     // (docs/tasks-s4-plan.md P1, P3).
     Prefs, app_data_dir, prefs,
     Field, ForScope, KayaCases, KayaField, KayaPatch, KayaRecord, KayaSum, MenuAnchor, MenuItemRef,
+    PathKey,
     MenuItems, MenuRef, MenuSource, Messages, OptionRef, PropToken, RadioGroupRef, RadioOptions,
     CatalogHome, MenuRole, Platform, Role, SizeClass, Sort, Symbol, ToggleRef, Tpl, TplSource, Tx,
     ValueKind,

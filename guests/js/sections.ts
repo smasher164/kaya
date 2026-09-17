@@ -25,7 +25,7 @@ function goArchive(): void {
 function openLibrary(): void {
   // An aux window, reached only by the desktop tail's click, so the phones
   // never see a createWindow their host rejects.
-  kaya.createWindow(LIBRARY);
+  kaya.showWindow(LIBRARY);
   app.window({
     windowId: LIBRARY, title: "library",
     sectionsPresentation: kaya.SECTIONS_SIDEBAR,
@@ -44,11 +44,10 @@ function openLibrary(): void {
   });
 }
 
-let visits!: kaya.Signal<string>;
-
 // With sections the window has no root: NOTHING MOUNTS here.
-app.window({ title: "sections", sectionsPresentation: kaya.SECTIONS_BAR }, () => {
-  visits = kaya.signal("archive: 0 visits");
+const { visits } = app.window({ title: "sections", sectionsPresentation: kaya.SECTIONS_BAR }, () => {
+  const visits = kaya.signal("archive: 0 visits");
+  return { visits };
 });
 
 // SF Symbols are licensed to Apple platforms: no shared asset exists.

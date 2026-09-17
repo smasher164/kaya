@@ -17,16 +17,15 @@ function onClear(): void {
   editor.focus();
 }
 
-let lines!: kaya.Signal<string>;
-let editor!: kaya.Widget;
-
-app.window({ title: "textarea" }, () => {
-  lines = kaya.signal("0 lines");
+const { lines, editor } = app.window({ title: "textarea" }, () => {
+  const lines = kaya.signal("0 lines");
+  let editor!: kaya.Widget;
   kaya.column(() => {
     editor = kaya.textarea({ onChange: onEdit });
     kaya.label({ bind: lines });
     kaya.button("clear", { onClick: onClear });
   });
+  return { lines, editor };
 });
 
 app.run();

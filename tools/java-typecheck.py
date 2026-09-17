@@ -529,9 +529,9 @@ swapped = TMP / "swapped" / "KayaApp.java"
 swapped.write_text(
     g.doctor("notify-order negative consulted the process handler first",
              swapped.read_text(encoding="utf-8"),
-             r"BiConsumer<Tx, Integer> handler = notifications\.remove\(id\);\n"
+             r"BiConsumer<Tx, NotificationOutcome> handler = notifications\.remove\(id\);\n"
              r"        if \(handler != null\) \{",
-             "BiConsumer<Tx, Integer> handler = notifications.remove(id);\n"
+             "BiConsumer<Tx, NotificationOutcome> handler = notifications.remove(id);\n"
              "        if (handler != null && notificationActivation == null) {"),
     encoding="utf-8")
 
@@ -563,5 +563,140 @@ if notify_after != notify_before:
     fail("FAIL — bindings/java/dev/kaya/KayaApp.java changed during "
          "the notify-order negative. It must only ever doctor the copy "
          "in the scratch directory.")
+
+# THE CHOICE FACTORIES' REFUSAL: AlertChoice.fromWire and
+# NotificationOutcome.fromWire resolve every wire number they define and
+# refuse, by name, any they do not — EditSource.fromWire's shape, on the
+# two closed vocabularies a guest reads back off an alert or a
+# notification result. NO NATIVES: both factories are pure, so this runs
+# straight off TMP/classes.
+(TMP / "choiceclasses").mkdir()
+if run_javac("-encoding", "UTF-8", "-cp", TMP / "classes", "-d",
+             TMP / "choiceclasses",
+             "tools/checks/java-choices/dev/kaya/ChoiceFromWireCheck.java") != 0:
+    fail("FAIL — the choice-from-wire exerciser did not compile.")
+
+if run_java("-cp", f"{TMP / 'classes'}:{TMP / 'choiceclasses'}",
+            "dev.kaya.ChoiceFromWireCheck") != 0:
+    fail("FAIL — AlertChoice.fromWire or NotificationOutcome.fromWire "
+         "did not resolve every wire number they define, or did not "
+         "refuse an unknown one by name.")
+
+# ITS WATCHED NEGATIVE: AlertChoice.fromWire's refusal removed in a
+# COPY — an unknown number silently resolves to the first constant
+# instead of throwing — the substitution COUNTED, and the same
+# exerciser required to fail for the RIGHT reason.
+(TMP / "noRefusal").mkdir()
+for p in sorted((ROOT / "bindings" / "java" / "dev" / "kaya").glob("*.java")):
+    (TMP / "noRefusal" / p.name).write_bytes(p.read_bytes())
+choice_before = hashlib.sha256(
+    (ROOT / "bindings" / "java" / "dev" / "kaya"
+     / "KayaApp.java").read_bytes()).hexdigest()
+
+no_refusal = TMP / "noRefusal" / "KayaApp.java"
+no_refusal.write_text(
+    g.doctor("choice-from-wire negative removed AlertChoice's refusal",
+             no_refusal.read_text(encoding="utf-8"),
+             r"throw new IllegalStateException\(\"kaya: alert choice \" \+ number\n"
+             r" *\+ \", which this build does not know\"\);",
+             "return values()[0];"),
+    encoding="utf-8")
+
+if run_javac("-encoding", "UTF-8", "-d", TMP / "norefusalclasses",
+             "bindings/java-desktop/dev/kaya/KayaRing.java",
+             *sorted((TMP / "noRefusal").glob("*.java"))) != 0:
+    fail("FAIL — the no-refusal KayaApp copy did not compile.")
+
+if run_java("-cp", f"{TMP / 'norefusalclasses'}:{TMP / 'choiceclasses'}",
+            "dev.kaya.ChoiceFromWireCheck", log=TMP / "norefusal.log") == 0:
+    fail("FAIL — the choice-from-wire exerciser PASSED against an "
+         "AlertChoice.fromWire that silently resolves an unknown number "
+         "instead of refusing it. It is therefore not exercising the "
+         "refusal, and the clause above is green for some other reason.")
+norefusal_log = (TMP / "norefusal.log").read_text(encoding="utf-8",
+                                                   errors="replace")
+if "rather than refused" not in norefusal_log:
+    print("java-typecheck: FAIL — the no-refusal copy failed, but NOT "
+          "by silently accepting the unknown choice, so the negative "
+          "did not watch the refusal. What it printed:")
+    print(norefusal_log)
+    raise SystemExit(1)
+
+choice_after = hashlib.sha256(
+    (ROOT / "bindings" / "java" / "dev" / "kaya"
+     / "KayaApp.java").read_bytes()).hexdigest()
+if choice_after != choice_before:
+    fail("FAIL — bindings/java/dev/kaya/KayaApp.java changed during "
+         "the choice-from-wire negative. It must only ever doctor the "
+         "copy in the scratch directory.")
+
+# THE KEYED READ: KayaRecords.Collection.get answers the entry a key
+# names, or null for one it does not — SumCollection.get's shape, which
+# Collection lacked. NO NATIVES: the build throws its own sentinel
+# before returning, so the transaction rolls back instead of reaching
+# KayaRing.submit.
+(TMP / "keyedclasses").mkdir()
+if run_javac("-encoding", "UTF-8", "-cp", TMP / "classes", "-d",
+             TMP / "keyedclasses",
+             "tools/checks/java-keyed/dev/kaya/guests/KeyedGetCheck.java") != 0:
+    fail("FAIL — the keyed-get exerciser did not compile.")
+
+if run_java("-cp", f"{TMP / 'classes'}:{TMP / 'keyedclasses'}",
+            "dev.kaya.guests.KeyedGetCheck") != 0:
+    fail("FAIL — Collection.get did not answer the inserted record for "
+         "its key, did not answer null for a missing one, or "
+         "updateField's missing-key refusal (which reads through get) "
+         "did not name the key.")
+
+# ITS WATCHED NEGATIVE: get's key comparison replaced by `true` in a
+# COPY — every key answers the FIRST entry — the substitution COUNTED,
+# and the same exerciser required to fail for the RIGHT reason.
+(TMP / "wrongKey").mkdir()
+for p in sorted((ROOT / "bindings" / "java" / "dev" / "kaya").glob("*.java")):
+    (TMP / "wrongKey" / p.name).write_bytes(p.read_bytes())
+keyed_before = hashlib.sha256(
+    (ROOT / "bindings" / "java" / "dev" / "kaya"
+     / "KayaRecords.java").read_bytes()).hexdigest()
+
+wrong_key = TMP / "wrongKey" / "KayaRecords.java"
+wrong_key.write_text(
+    g.doctor("keyed-get negative ignored the key",
+             wrong_key.read_text(encoding="utf-8"),
+             r"if \(java\.util\.Objects\.equals\(entry\.key, key\)\) \{\n"
+             r"(\s+)return \(T\) entry\.value;",
+             r"if (true) {\n\1return (T) entry.value;"),
+    encoding="utf-8")
+
+if run_javac("-encoding", "UTF-8", "-d", TMP / "wrongkeyclasses",
+             "bindings/java-desktop/dev/kaya/KayaRing.java",
+             *sorted((TMP / "wrongKey").glob("*.java")),
+             *sorted(str(p.relative_to(ROOT))
+                     for p in (ROOT / "guests" / "java" / "dev" / "kaya"
+                               / "guests").glob("*.java")),
+             "tools/checks/java-keyed/dev/kaya/guests/KeyedGetCheck.java") != 0:
+    fail("FAIL — the wrong-key KayaRecords copy did not compile.")
+
+if run_java("-cp", str(TMP / "wrongkeyclasses"),
+            "dev.kaya.guests.KeyedGetCheck", log=TMP / "wrongkey.log") == 0:
+    fail("FAIL — the keyed-get exerciser PASSED against a get() that "
+         "ignores the key and always answers the first entry. It is "
+         "therefore not exercising the lookup, and the clause above is "
+         "green for some other reason.")
+wrongkey_log = (TMP / "wrongkey.log").read_text(encoding="utf-8",
+                                                 errors="replace")
+if "did not answer null" not in wrongkey_log:
+    print("java-typecheck: FAIL — the wrong-key copy failed, but NOT by "
+          "answering the first entry for a missing key, so the negative "
+          "did not watch the lookup. What it printed:")
+    print(wrongkey_log)
+    raise SystemExit(1)
+
+keyed_after = hashlib.sha256(
+    (ROOT / "bindings" / "java" / "dev" / "kaya"
+     / "KayaRecords.java").read_bytes()).hexdigest()
+if keyed_after != keyed_before:
+    fail("FAIL — bindings/java/dev/kaya/KayaRecords.java changed during "
+         "the keyed-get negative. It must only ever doctor the copy in "
+         "the scratch directory.")
 
 g.verdict()

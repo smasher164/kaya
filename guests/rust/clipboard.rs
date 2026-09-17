@@ -3,6 +3,8 @@
 
 use std::io::Read;
 
+use kaya::PathKey;
+
 /// The phones must use the shared collections, not the temp dir: the
 /// OUTSIDE process cannot see an app's private cache.
 #[cfg(target_os = "android")]
@@ -71,7 +73,8 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             m.item("Cut").role(kaya::MenuRole::Cut).id();
             m.item("Copy").role(kaya::MenuRole::Copy).id();
             m.item("Paste").role(kaya::MenuRole::Paste).id();
-        });
+        })
+        .id();
         let status = tx.signal("ready");
         let row_status = tx.signal("");
         let mut rich_field = None;
@@ -159,10 +162,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 ctx.apply(|tx| tx.write(status, format!("pasted {other:?}")));
             }
             Msg::RowPasted(path, kaya::Representation::Text(text)) => {
-                let key = match path.first() {
-                    Some(kaya::Value::Str(k)) => k.clone(),
-                    other => format!("{other:?}"),
-                };
+                let key = path.key::<String>(0);
                 ctx.apply(|tx| tx.write(row_status, format!("row {key} pasted {text}")));
             }
             Msg::RowPasted(path, other) => {

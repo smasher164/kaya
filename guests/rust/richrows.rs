@@ -3,6 +3,8 @@
 //! §19). The app writes a copy's document by patching its row, and a copy's
 //! own act folds into the row the app reads back.
 
+use kaya::PathKey;
+
 #[derive(kaya::KayaGen, Clone, Debug, PartialEq)]
 struct Note {
     title: String,
@@ -32,13 +34,6 @@ fn spell(runs: &[kaya::Run]) -> String {
         })
         .collect::<Vec<_>>()
         .join("|")
-}
-
-fn key_text(key: &kaya::Value) -> String {
-    match key {
-        kaya::Value::Str(s) => s.clone(),
-        other => format!("{other:?}"),
-    }
 }
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
@@ -98,11 +93,9 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     msgs.on_undone(kaya::DEFAULT_WINDOW, |_, _| Msg::Restored);
     msgs.on_redone(kaya::DEFAULT_WINDOW, |_, _| Msg::Restored);
 
-    let row = |tx: &kaya::Tx<'_>, key: &kaya::Value| -> Note {
-        tx.items(&notes)
-            .into_iter()
-            .find(|(k, _)| k == key)
-            .map(|(_, note)| note)
+    let row = |tx: &kaya::Tx<'_>, key: &str| -> Note {
+        notes
+            .get(tx, key)
             .unwrap_or_else(|| panic!("richrows: no row {key:?}"))
     };
     while let Some(msg) = msgs.next(&ctx) {
@@ -110,23 +103,22 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             // The row's field already carries the copy's act when this
             // fires: the app reads the row, never the widget.
             Msg::Acted(path) => ctx.apply(|tx| {
-                let note = row(tx, &path[0]);
-                let shown = format!("{}: {}", key_text(&path[0]), spell(&note.body.runs));
+                let key = path.key::<String>(0);
+                let note = row(tx, &key);
+                let shown = format!("{key}: {}", spell(&note.body.runs));
                 tx.write(last, shown);
             }),
             Msg::Patch => ctx.apply(|tx| {
                 tx.undoable("patch b");
-                notes
-                    .patch(tx, kaya::Value::Str("b".to_owned()))
-                    .body(kaya::Document::new("Patched").mark(0..7, "italic", "true"));
+                notes.patch(tx, "b").body(kaya::Document::new("Patched").mark(0..7, "italic", "true"));
             }),
             Msg::Read => ctx.apply(|tx| {
-                let note = row(tx, &kaya::Value::Str("a".to_owned()));
+                let note = row(tx, "a");
                 let shown = format!("{} | {}", note.body.text, spell(&note.body.runs));
                 tx.write(view, shown);
             }),
             Msg::Restored => ctx.apply(|tx| {
-                let note = row(tx, &kaya::Value::Str("b".to_owned()));
+                let note = row(tx, "b");
                 let shown = format!("{} | {}", note.body.text, spell(&note.body.runs));
                 tx.write(view, shown);
             }),

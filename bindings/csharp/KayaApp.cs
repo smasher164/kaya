@@ -14,8 +14,10 @@ readonly struct Signal
     /// write batched into the same transaction.
     public Signal Derive(Func<object, object> compute)
     {
-        var app = KayaApp.Ambient;
-        var tx = app?.CurrentTx ?? throw new InvalidOperationException(
+        var app = KayaApp.Ambient
+            ?? throw new InvalidOperationException(
+                "kaya: a derived signal is minted inside a transaction (build or handler)");
+        var tx = app.CurrentTx ?? throw new InvalidOperationException(
             "kaya: a derived signal is minted inside a transaction (build or handler)");
         var source = this;
         var d = tx.Signal(compute(app.SignalMirrors[source.Id]));
@@ -74,7 +76,7 @@ readonly struct Signal
 
     public static Signal operator >=(Signal s, object v) => s.Ge(v);
 
-    public override bool Equals(object obj) => obj is Signal other && Id == other.Id;
+    public override bool Equals(object? obj) => obj is Signal other && Id == other.Id;
 
     public override int GetHashCode() => Id.GetHashCode();
 
@@ -259,7 +261,7 @@ static class EditSources
 readonly record struct TextRun(long Start, long Stop, string Name, string Value);
 
 /// A toolbar act over a range; Value null is the attribute taken off.
-readonly record struct Format(long Start, long Stop, string Name, string Value);
+readonly record struct Format(long Start, long Stop, string Name, string? Value);
 
 /// A `rich` textarea's text and runs, kept current by the binding from
 /// every edit it delivers (docs/rich-text-plan.md R1). Read the app's
@@ -306,7 +308,7 @@ sealed class Document
         Mark(range, "block", kind.Name());
 
     /// The attribute covering one UTF-8 byte offset, or null.
-    public string AttrAt(long byteOffset, string name)
+    public string? AttrAt(long byteOffset, string name)
     {
         foreach (TextRun run in Marks)
             if (run.Name == name && run.Start <= byteOffset && byteOffset < run.Stop)
@@ -389,7 +391,7 @@ sealed class Edit
 {
     internal readonly List<TextRun> Marks = new List<TextRun>();
 
-    internal Edit(long start, long stop, string inserted, List<TextRun> runs,
+    internal Edit(long start, long stop, string inserted, List<TextRun>? runs,
         EditSource? source = null)
     {
         Start = start;
@@ -510,10 +512,10 @@ sealed class ContextCatalog
 /// there is no element arm).
 readonly struct TextSource
 {
-    internal readonly string Text;
+    internal readonly string? Text;
     internal readonly Signal? Bind;
 
-    TextSource(string text, Signal? bind)
+    TextSource(string? text, Signal? bind)
     {
         Text = text;
         Bind = bind;
@@ -672,12 +674,12 @@ enum Platform : long
 sealed class KayaInstance
 {
     internal readonly List<object> Path;
-    internal List<KeyValuePair<object, object>> Entries = new();
+    internal List<KeyValuePair<object, object?>> Entries = new();
 
     internal KayaInstance(IEnumerable<object> path) => Path = new List<object>(path);
 
     internal KayaInstance Clone() =>
-        new(Path) { Entries = new List<KeyValuePair<object, object>>(Entries) };
+        new(Path) { Entries = new List<KeyValuePair<object, object?>>(Entries) };
 }
 
 /// WHAT THIS HOST CAN DO — crates/kaya/src/app.rs carries the canonical
@@ -763,6 +765,59 @@ enum TextBaseline : long
     Middle = KayaWire.TextBaselineMiddle,
     Top = KayaWire.TextBaselineTop,
     Bottom = KayaWire.TextBaselineBottom,
+}
+
+/// An alert's answer: one of up to two named actions, or the platform's
+/// own dismissal (Escape, a titlebar close, tapping outside a sheet).
+enum AlertChoice : uint
+{
+    Action0 = 0,
+    Action1 = 1,
+    Cancel = KayaWire.AlertChoiceCancel,
+}
+
+static class AlertChoices
+{
+    /// The wire's number, refused naming one this build does not know
+    /// (EditSources.FromWire's shape).
+    internal static AlertChoice FromWire(uint choice) => choice switch
+    {
+        0 => AlertChoice.Action0,
+        1 => AlertChoice.Action1,
+        KayaWire.AlertChoiceCancel => AlertChoice.Cancel,
+        _ => throw new InvalidOperationException(
+            $"kaya: alert_result carries choice {choice}, which this build "
+                + "does not know"),
+    };
+}
+
+/// A posted notification's outcome (docs/tasks-s3-plan.md N1, N2).
+enum NotificationOutcome : uint
+{
+    Activated = KayaWire.NotificationOutcomeActivated,
+    Refused = KayaWire.NotificationOutcomeRefused,
+}
+
+static class NotificationOutcomes
+{
+    /// The wire's number, refused naming one this build does not know
+    /// (EditSources.FromWire's shape).
+    internal static NotificationOutcome FromWire(uint outcome) => outcome switch
+    {
+        KayaWire.NotificationOutcomeActivated => NotificationOutcome.Activated,
+        KayaWire.NotificationOutcomeRefused => NotificationOutcome.Refused,
+        _ => throw new InvalidOperationException(
+            $"kaya: notification_result carries outcome {outcome}, which this "
+                + "build does not know"),
+    };
+}
+
+/// A window's sections chrome (docs/tasks-s2b-plan.md).
+enum SectionsPresentation : long
+{
+    Auto = KayaWire.SectionsPresentationAuto,
+    Bar = KayaWire.SectionsPresentationBar,
+    Sidebar = KayaWire.SectionsPresentationSidebar,
 }
 
 /// <summary>The drawing scope's recorder. The calls read as
@@ -911,7 +966,7 @@ sealed class KayaApp
     /// one-shot handler bound at the show first, retiring with the
     /// result; else the process-level one, which does not; else the drop
     /// is announced.
-    internal void NotificationResult(ulong id, uint outcome)
+    internal void NotificationResult(ulong id, NotificationOutcome outcome)
     {
         if (notifications.Remove(id, out var fn))
             Dispatch(tx => fn(tx, outcome));
@@ -919,7 +974,7 @@ sealed class KayaApp
             Dispatch(tx => act(tx, id, outcome));
         else
         {
-            string word = outcome == KayaWire.NotificationOutcomeActivated
+            string word = outcome == NotificationOutcome.Activated
                 ? "activated" : "refused";
             Console.Error.WriteLine(
                 $"kaya: notification {id} outcome {word} reached no "
@@ -1030,15 +1085,15 @@ sealed class KayaApp
     // history is walked as often as the user likes.
     internal readonly Dictionary<ulong, Action<Tx, string, UndoDelta>> undone = new();
     internal readonly Dictionary<ulong, Action<Tx, string, UndoDelta>> redone = new();
-    internal readonly Dictionary<ulong, Action<Tx, uint>> alerts = new();
+    internal readonly Dictionary<ulong, Action<Tx, AlertChoice>> alerts = new();
 
     // One-shot, keyed by the GUEST's notification id (the alert's
     // grammar; many may be live at once).
-    internal readonly Dictionary<ulong, Action<Tx, uint>> notifications = new();
+    internal readonly Dictionary<ulong, Action<Tx, NotificationOutcome>> notifications = new();
     // NOT one-shot, and not keyed at all: the process-level handler for
     // a result whose id has none above (docs/tasks-s9-plan.md R1). A
     // relaunched process never called ShowNotification.
-    internal Action<Tx, ulong, uint>? notificationActivation;
+    internal Action<Tx, ulong, NotificationOutcome>? notificationActivation;
     // NOT one-shot either: a route declared by Link answers every URL
     // that matches it, for the life of the process
     // (docs/app-links-plan.md §4), and the core owns the pattern table —
@@ -1081,11 +1136,11 @@ sealed class KayaApp
     // model keeps, per collection id. Registered where the type is known
     // (KayaRecords.CollectionOf, KayaSums.SumOf, the scalar
     // Tx.Collection), because only an undo travels this direction.
-    internal readonly Dictionary<ulong, Func<uint, List<object>, object, object>> Rehydrate = new();
+    internal readonly Dictionary<ulong, Func<uint, List<object>, object?, object?>> Rehydrate = new();
     // The ambient app/tx pair exists because the comparison operators
     // are static and a Signal is only an id (one app per guest process).
-    internal static KayaApp Ambient;
-    internal Tx CurrentTx;
+    internal static KayaApp? Ambient;
+    internal Tx? CurrentTx;
     internal readonly Dictionary<ulong, object> SignalMirrors = new();
     internal readonly Dictionary<ulong, List<Action<Tx>>> SignalDeps = new();
     // The ambient parent stack: containers push their id around their
@@ -1139,7 +1194,7 @@ sealed class KayaApp
         return true;
     }
 
-    internal KayaInstance InstanceOf(ulong coll, IReadOnlyList<object> path)
+    internal KayaInstance? InstanceOf(ulong coll, IReadOnlyList<object> path)
     {
         if (!Model.TryGetValue(coll, out var instances))
             return null;
@@ -1212,12 +1267,12 @@ sealed class KayaApp
             int at = instance.Entries.FindIndex(e => Equals(e.Key, entry.Key));
             if (entry.State is { } state)
             {
-                object current = at >= 0 ? instance.Entries[at].Value : null;
-                object value =
+                object? current = at >= 0 ? instance.Entries[at].Value : null;
+                object? value =
                     Rehydrate.TryGetValue(entry.Collection, out var rehydrate)
                         ? rehydrate(state.Variant, state.Fields, current)
                         : (state.Fields.Count > 0 ? state.Fields[0] : null);
-                var pair = new KeyValuePair<object, object>(entry.Key, value);
+                var pair = new KeyValuePair<object, object?>(entry.Key, value);
                 if (at >= 0)
                     instance.Entries[at] = pair;
                 else
@@ -1235,7 +1290,7 @@ sealed class KayaApp
                 continue;
             // Position by the payload's list, keeping anything it does
             // not name at the end.
-            var sorted = new List<KeyValuePair<object, object>>(instance.Entries.Count);
+            var sorted = new List<KeyValuePair<object, object?>>(instance.Entries.Count);
             foreach (var key in order.Keys)
             {
                 int at = instance.Entries.FindIndex(e => Equals(e.Key, key));
@@ -1255,7 +1310,7 @@ sealed class KayaApp
     public void Build(Action<Tx> build)
     {
         RequireAppThread();
-        var tx = new Tx(this);
+        using var tx = new Tx(this);
         CurrentTx = tx;
         try
         {
@@ -1264,7 +1319,6 @@ sealed class KayaApp
         catch
         {
             tx.Rollback();
-            tx.Close();
             throw;
         }
         finally
@@ -1272,7 +1326,6 @@ sealed class KayaApp
             CurrentTx = null;
         }
         tx.SubmitIfAny();
-        tx.Close();
     }
 
     public void OnClick(Widget w, Action<Tx> handler) => widgetHandlers[w.Id] = handler;
@@ -1283,7 +1336,7 @@ sealed class KayaApp
     /// whole of a process the platform RELAUNCHED for a tap, since it
     /// never called ShowNotification. It does not retire, and a one-shot
     /// handler for the same id still wins.</summary>
-    public void OnNotificationActivation(Action<Tx, ulong, uint> handler) =>
+    public void OnNotificationActivation(Action<Tx, ulong, NotificationOutcome> handler) =>
         notificationActivation = handler;
 
     /// <summary>Declare a link ROUTE and the handler that answers it
@@ -1319,7 +1372,7 @@ sealed class KayaApp
     /// core, and hands over the captures).
     /// The payload is ONE FLAT RUN of Str values: the url, then the
     /// params in name/value pairs (KayaWire's arm).
-    static IReadOnlyDictionary<string, string> LinkParamsOf(object payload)
+    static IReadOnlyDictionary<string, string> LinkParamsOf(object? payload)
     {
         var captured = new Dictionary<string, string>();
         if (payload is List<object> flat)
@@ -1329,7 +1382,7 @@ sealed class KayaApp
     }
 
     /// The URL as delivered, for the drop sentence alone.
-    static string LinkUrlOf(object payload) =>
+    static string LinkUrlOf(object? payload) =>
         payload is List<object> flat && flat.Count > 0 ? (string)flat[0] : "";
 
     /// The link_opened decision, in a method of its own because the ring
@@ -1576,15 +1629,14 @@ sealed class KayaApp
             return;
         object key = keys[^1];
         int at = instance.Entries.FindIndex(e => Equals(e.Key, key));
-        if (at < 0 || instance.Entries[at].Value == null)
+        if (at < 0 || instance.Entries[at].Value is not { } record)
             return;
-        object record = instance.Entries[at].Value;
         var info = RecordInfo.Of(record.GetType());
         if (info.FieldOfWire(record, bind.Field) is not Document held)
             return;
         var doc = new global::Document(held.Text, new List<TextRun>(held.Marks));
         fold(doc);
-        instance.Entries[at] = new KeyValuePair<object, object>(
+        instance.Entries[at] = new KeyValuePair<object, object?>(
             key, info.WithField(record, bind.Field, doc));
     }
 
@@ -1784,7 +1836,7 @@ sealed class KayaApp
     /// the app-facing record; a tail that does not say what the record
     /// declares is the core disagreeing with this binding, so it refuses
     /// naming what it read.
-    static Edit EditOf(List<object> tail)
+    static Edit EditOf(List<object>? tail)
     {
         if (tail == null || tail.Count < 4 || (tail.Count - 4) % 4 != 0)
             throw new InvalidOperationException(
@@ -1798,7 +1850,7 @@ sealed class KayaApp
             tail[3] as string ?? "", runs, EditSources.FromWire((uint)tail[0]));
     }
 
-    static Format FormatOf(List<object> tail)
+    static Format FormatOf(List<object>? tail)
     {
         if (tail == null || tail.Count != 5)
             throw new InvalidOperationException(
@@ -1830,12 +1882,12 @@ sealed class KayaApp
             // this thread back, it looks here before anywhere else.
             DrainPosted();
             if (!Kaya.PollOccurrence(
-                out ushort kind, out ulong id, out List<object> keys, out object payload))
+                out ushort kind, out ulong id, out List<object> keys, out object? payload))
             {
                 if (!Kaya.WaitOccurrences()) return; // shutdown
                 continue;
             }
-            string text = payload as string;
+            string? text = payload as string;
             bool isChecked = payload is bool b && b;
             // THE CANVAS'S TWO ASKS ARE ANSWERED HERE AND NEVER HANDED
             // OVER (docs/canvas-plan.md §3.2.1). No registration means
@@ -1877,12 +1929,12 @@ sealed class KayaApp
             else if (kind == KayaWire.OccKindTextChanged && keys.Count == 0)
             {
                 if (widgetChanges.TryGetValue(id, out var fn))
-                    Dispatch(tx => fn(tx, text));
+                    Dispatch(tx => fn(tx, text!));
             }
             else if (kind == KayaWire.OccKindTextChanged)
             {
                 if (nodeChanges.TryGetValue(id, out var fn))
-                    Dispatch(tx => fn(tx, keys, text));
+                    Dispatch(tx => fn(tx, keys, text!));
             }
             // THE MIRROR FOLLOWS FIRST, and unconditionally — before the
             // handler lookup, so a rich textarea nobody registered for
@@ -2009,7 +2061,7 @@ sealed class KayaApp
                 // One-shot: the registration retires with the result;
                 // payload is the parsed u32 choice.
                 if (alerts.Remove(id, out var fn))
-                    Dispatch(tx => fn(tx, payload is uint c ? c : 0));
+                    Dispatch(tx => fn(tx, AlertChoices.FromWire(payload is uint c ? c : 0)));
             }
             else if (kind == KayaWire.OccKindLinkOpened)
             {
@@ -2023,7 +2075,7 @@ sealed class KayaApp
             }
             else if (kind == KayaWire.OccKindNotificationResult)
             {
-                NotificationResult(id, payload is uint o ? o : 0);
+                NotificationResult(id, NotificationOutcomes.FromWire(payload is uint o ? o : 0));
             }
             else if (kind == KayaWire.OccKindFileDialogResult)
             {
@@ -2054,7 +2106,7 @@ sealed class KayaApp
             // that registered no handler still keeps its mirror in step.
             else if (kind == KayaWire.OccKindUndone || kind == KayaWire.OccKindRedone)
             {
-                var step = (UndoStep)payload;
+                var step = (UndoStep)payload!;
                 AbsorbUndo(step.Delta);
                 var table = kind == KayaWire.OccKindUndone ? undone : redone;
                 // NOT one-shot: a history is walked as often as the user
@@ -2169,7 +2221,7 @@ sealed class KayaApp
 
 /// One transaction: everything queued inside Build (or a handler)
 /// applies atomically when it returns.
-sealed class Tx
+sealed class Tx : IDisposable
 {
     internal readonly KayaApp App;
 
@@ -2189,21 +2241,18 @@ sealed class Tx
     }
 
     // Set when Build finishes with this transaction, committed or not.
-    bool closed;
+    bool disposed;
 
     /// A Tx is valid ONLY inside the Build or handler that made it, on
     /// the app thread. To mutate from anywhere else, post.
     internal void Alive()
     {
-        if (closed)
-            throw new InvalidOperationException(
-                "kaya: transaction is over — a Tx is only usable inside the Build or "
-                    + "handler that created it; to mutate from a background thread use App.Post");
+        ObjectDisposedException.ThrowIf(disposed, this);
         KayaApp.RequireAppThread();
     }
 
     /// Called by Build on the way out, on every path.
-    internal void Close() => closed = true;
+    public void Dispose() => disposed = true;
 
     // How to undo this transaction's model edits: a snapshot per
     // touched collection, taken on first touch.
@@ -2218,7 +2267,7 @@ sealed class Tx
     // plus the mirror journal (what to restore on rollback; absent =
     // the mirror was created this transaction).
     readonly List<(ulong Source, Action<Tx> Recompute)> pendingSignalDeps = new();
-    readonly Dictionary<ulong, (bool Existed, object Old)> signalJournal = new();
+    readonly Dictionary<ulong, (bool Existed, object? Old)> signalJournal = new();
 
     internal Tx(KayaApp app) => App = app;
 
@@ -2267,7 +2316,7 @@ sealed class Tx
         foreach (var (id, (existed, old)) in signalJournal)
         {
             if (existed)
-                App.SignalMirrors[id] = old;
+                App.SignalMirrors[id] = old!;
             else
                 App.SignalMirrors.Remove(id);
         }
@@ -2310,11 +2359,11 @@ sealed class Tx
         {
             if (Equals(instance.Entries[i].Key, key))
             {
-                instance.Entries[i] = new KeyValuePair<object, object>(key, value);
+                instance.Entries[i] = new KeyValuePair<object, object?>(key, value);
                 return;
             }
         }
-        instance.Entries.Add(new KeyValuePair<object, object>(key, value));
+        instance.Entries.Add(new KeyValuePair<object, object?>(key, value));
     }
 
     void ModelRemove(ulong coll, IReadOnlyList<object> path, object key)
@@ -2334,7 +2383,7 @@ sealed class Tx
         var instance = App.InstanceOf(coll, path);
         // Both validated before anything mutates.
         int pos = instance == null ? -1 : instance.Entries.FindIndex(e => Equals(e.Key, key));
-        if (pos < 0)
+        if (instance == null || pos < 0)
             throw new InvalidOperationException($"kaya: move of missing key {key}");
         if (before.Length > 0 && !instance.Entries.Exists(e => Equals(e.Key, before[0])))
             throw new InvalidOperationException($"kaya: move before missing key {before[0]}");
@@ -2700,7 +2749,7 @@ sealed class Tx
         // A silent document write moves the fold, as ApplyEdit does
         // (docs/rich-text-plan.md §17).
         TextRange at = App.RangedActBounds(w.Id, range, name);
-        string mark = name == "block" && value == "body" ? null : value;
+        string? mark = name == "block" && value == "body" ? null : value;
         App.AbsorbFormat(w.Id, new Format((long)at.Start, (long)at.Stop, name, mark));
         Records.Add(KayaWire.TxFormatText(
             w.Id, mark == null ? 1u : 0u, 1, at.Start, at.Stop,
@@ -2735,7 +2784,7 @@ sealed class Tx
     /// `role:` is this button's semantic emphasis (Role.Destructive,
     /// Role.Prominent). It changes nothing about what pressing the
     /// button does.
-    public Widget Button(string text = null, Action<Tx> onClick = null, double? grow = null,
+    public Widget Button(string? text = null, Action<Tx>? onClick = null, double? grow = null,
         Role? role = null)
     {
         var w = Widget(KayaWire.KindButton);
@@ -2746,7 +2795,7 @@ sealed class Tx
         return w;
     }
 
-    public Widget Entry(Action<Tx, string> onChange = null, double? grow = null)
+    public Widget Entry(Action<Tx, string>? onChange = null, double? grow = null)
     {
         var w = Widget(KayaWire.KindEntry);
         if (onChange != null) App.OnChange(w, onChange);
@@ -2760,7 +2809,7 @@ sealed class Tx
     /// (docs/rich-text-plan.md R1). `ownUndo: true` turns the platform's
     /// own undo stack off on this widget and routes Edit>Undo to the
     /// app's Undo item (docs/rich-text-plan.md R6, §14).
-    public Widget Textarea(Action<Tx, string> onChange = null, double? grow = null,
+    public Widget Textarea(Action<Tx, string>? onChange = null, double? grow = null,
         bool rich = false, bool ownUndo = false)
     {
         var w = Widget(KayaWire.KindTextarea);
@@ -2775,7 +2824,7 @@ sealed class Tx
     /// platform's search chrome, filtering on every keystroke
     /// (docs/search-plan.md). The clear affordance arrives at onChange
     /// with "".
-    public Widget Search(Action<Tx, string> onChange = null, double? grow = null)
+    public Widget Search(Action<Tx, string>? onChange = null, double? grow = null)
     {
         var w = Widget(KayaWire.KindSearch);
         if (onChange != null) App.OnChange(w, onChange);
@@ -2788,7 +2837,7 @@ sealed class Tx
     /// accessibility heading trait, which is why it is a role and not a
     /// font size. `rich: true` draws the label's attribute runs over the
     /// role's own font, read-only (docs/rich-text-plan.md R8, §15).
-    public Widget Label(string text = null, Signal? bind = null, double? grow = null,
+    public Widget Label(string? text = null, Signal? bind = null, double? grow = null,
         Role? role = null, bool rich = false)
     {
         var w = Widget(KayaWire.KindLabel);
@@ -2803,13 +2852,13 @@ sealed class Tx
     /// A label wearing the heading role, in one word (the h1 tradition):
     /// the platform's heading text style AND the accessibility heading
     /// trait, and on a grouped screen the section-header seat.
-    public Widget Heading(string text = null, Signal? bind = null, double? grow = null) =>
+    public Widget Heading(string? text = null, Signal? bind = null, double? grow = null) =>
         Label(text, bind, grow, Role.Heading);
 
     /// A label wearing the caption role: the platform's footnote tier
     /// under the content it explains, and on a grouped screen the
     /// section-footer seat. The heading's counterpart.
-    public Widget Caption(string text = null, Signal? bind = null, double? grow = null) =>
+    public Widget Caption(string? text = null, Signal? bind = null, double? grow = null) =>
         Label(text, bind, grow, Role.Caption);
 
     /// A progress bar: display-only, like Label and Image. value is
@@ -2888,7 +2937,7 @@ sealed class Tx
     /// handler's own writes cannot loop back at it.
     public Widget Slider(double min = 0.0, double max = 1.0, double value = 0.0,
         double? step = null, double? tickSpacing = null,
-        Action<Tx, double> onChange = null, Action<Tx, double> onCommit = null,
+        Action<Tx, double>? onChange = null, Action<Tx, double>? onCommit = null,
         double? grow = null, Signal? bind = null)
     {
         var w = Widget(KayaWire.KindSlider);
@@ -2909,7 +2958,7 @@ sealed class Tx
     /// against the option count). onSelect receives each USER pick's new
     /// index; programmatic writes never echo.
     public Widget Select(string[] options, int selected = 0,
-        Action<Tx, int> onSelect = null, double? grow = null)
+        Action<Tx, int>? onSelect = null, double? grow = null)
     {
         var w = Widget(KayaWire.KindSelect);
         App.Parents.Add(w.Id);
@@ -2927,7 +2976,7 @@ sealed class Tx
     }
 
     public Widget Radio(string[] options, int selected = 0,
-        Action<Tx, int> onSelect = null, double? grow = null)
+        Action<Tx, int>? onSelect = null, double? grow = null)
     {
         var w = Widget(KayaWire.KindRadio);
         App.Parents.Add(w.Id);
@@ -2944,8 +2993,8 @@ sealed class Tx
         return w;
     }
 
-    public Widget Checkbox(string text = null, bool? isChecked = null,
-        Action<Tx, bool> onToggle = null, double? grow = null)
+    public Widget Checkbox(string? text = null, bool? isChecked = null,
+        Action<Tx, bool>? onToggle = null, double? grow = null)
     {
         var w = Widget(KayaWire.KindCheckbox);
         if (text != null) SetText(w, text);
@@ -2962,7 +3011,7 @@ sealed class Tx
     /// `min`/`max` are the inclusive range and a pick past a bound lands
     /// on the bound.
     public Widget DatePicker(DateOnly value = default, DateOnly? min = null,
-        DateOnly? max = null, Action<Tx, DateOnly> onDate = null, double? grow = null,
+        DateOnly? max = null, Action<Tx, DateOnly>? onDate = null, double? grow = null,
         Signal? bind = null)
     {
         var w = Widget(KayaWire.KindDatePicker);
@@ -2979,7 +3028,7 @@ sealed class Tx
     /// `step` is the minute granularity (1, 5, 10, 15 or 30) and a pick
     /// snaps to it.
     public Widget TimePicker(TimeOnly value = default, int? step = null,
-        Action<Tx, TimeOnly> onTime = null, double? grow = null, Signal? bind = null)
+        Action<Tx, TimeOnly>? onTime = null, double? grow = null, Signal? bind = null)
     {
         var w = Widget(KayaWire.KindTimePicker);
         if (step is int m) Records.Add(KayaWire.TxSetMinuteStep(w.Id, m));
@@ -2994,7 +3043,7 @@ sealed class Tx
     /// decodes natively, and decode failure renders the placeholder,
     /// never a crash. The caller's array is free to drop the moment this
     /// returns.
-    public Widget Image(byte[] source = null, Signal? bind = null, double? grow = null)
+    public Widget Image(byte[]? source = null, Signal? bind = null, double? grow = null)
     {
         var w = Widget(KayaWire.KindImage);
         if (source != null) SetSource(w, source);
@@ -3429,13 +3478,13 @@ sealed class Tx
 
     /// The model: what this guest wrote, exactly — the fold of every
     /// patch so far (this transaction's included), in insertion order.
-    public List<KeyValuePair<object, object>> Items(Collection c)
+    public List<KeyValuePair<object, object?>> Items(Collection c)
     {
         GuardMirrorRead();
         var instance = App.InstanceOf(c.Id, c.Path);
         return instance == null
-            ? new List<KeyValuePair<object, object>>()
-            : new List<KeyValuePair<object, object>>(instance.Entries);
+            ? new List<KeyValuePair<object, object?>>()
+            : new List<KeyValuePair<object, object?>>(instance.Entries);
     }
 
     public int Count(Collection c)
@@ -3574,7 +3623,7 @@ sealed class Tx
         string? title = null, double? width = null, double? height = null,
         bool? vetoClose = null, uint? panes = null, bool? dirty = null,
         bool? rememberFrame = null,
-        double? inset = null, long? sectionsPresentation = null,
+        double? inset = null, SectionsPresentation? sectionsPresentation = null,
         long? appearance = null,
         Action<Tx>? onCloseRequested = null, Action<Tx>? onClosed = null,
         Action<Tx, string, UndoDelta>? onUndone = null,
@@ -3593,7 +3642,7 @@ sealed class Tx
             Records.Add(KayaWire.TxSetWindowRememberFrame(id, rf));
         if (inset is { } ins) Records.Add(KayaWire.TxSetWindowInset(id, ins));
         if (sectionsPresentation is { } sp)
-            Records.Add(KayaWire.TxSetWindowSectionsPresentation(id, sp));
+            Records.Add(KayaWire.TxSetWindowSectionsPresentation(id, (long)sp));
         // The app's OWN light/dark choice, applied process-wide from the
         // default window (docs/tasks-s2b-plan.md R1-R3).
         if (appearance is { } ap)
@@ -3626,7 +3675,7 @@ sealed class Tx
         ulong id, string? title = null, double? width = null, double? height = null,
         bool? vetoClose = null, uint? panes = null, bool? dirty = null,
         bool? rememberFrame = null,
-        double? inset = null, long? sectionsPresentation = null,
+        double? inset = null, SectionsPresentation? sectionsPresentation = null,
         long? appearance = null,
         Action<Tx>? onCloseRequested = null, Action<Tx>? onClosed = null,
         Action<Tx, string, UndoDelta>? onUndone = null,
@@ -3641,14 +3690,14 @@ sealed class Tx
 
     /// Request a modal alert (the request/result grammar). The result
     /// handler rides the REQUEST and retires with its one answer — choice
-    /// is an action index (0 or 1) or KayaWire.AlertChoiceCancel, every
-    /// platform-native dismissal. Up to two actions (the platform floor);
-    /// the cancel label is required. One alert may be live per process;
-    /// show the next from the handler.
+    /// is AlertChoice.Action0, .Action1 or .Cancel, the last of them
+    /// every platform-native dismissal. Up to two actions (the platform
+    /// floor); the cancel label is required. One alert may be live per
+    /// process; show the next from the handler.
     public ulong ShowAlert(
         string title = "", string message = "",
         string? action0 = null, string? action1 = null,
-        string? cancel = null, Action<Tx, uint>? onResult = null,
+        string? cancel = null, Action<Tx, AlertChoice>? onResult = null,
         ulong window = 0)
     {
         if (action1 != null && action0 == null)
@@ -3670,14 +3719,13 @@ sealed class Tx
     /// Post a local notification with a GUEST-CHOSEN id
     /// (docs/tasks-s3-plan.md N1, N2): the alert's grammar without a
     /// window — the platform shows it outside the app. onResult fires
-    /// exactly once and retires, with
-    /// KayaWire.NotificationOutcomeActivated when the user opened it and
-    /// KayaWire.NotificationOutcomeRefused when the platform would not
-    /// post it. `at` is a UNIX time in seconds handed to the OS scheduler
+    /// exactly once and retires, with NotificationOutcome.Activated when
+    /// the user opened it and .Refused when the platform would not post
+    /// it. `at` is a UNIX time in seconds handed to the OS scheduler
     /// where one exists; 0 posts now. Many may be live at once.
     public ulong ShowNotification(
         ulong notification, string title = "", string body = "",
-        ulong at = 0, Action<Tx, uint>? onResult = null)
+        ulong at = 0, Action<Tx, NotificationOutcome>? onResult = null)
     {
         if (string.IsNullOrEmpty(title))
             throw new ArgumentException(
@@ -3957,7 +4005,7 @@ sealed class Tx
         if (label.Bind is Signal s)
             Records.Add(KayaWire.TxBindMenuLabel(m.Id, s.Id));
         else
-            Records.Add(KayaWire.TxSetMenuLabel(m.Id, label.Text));
+            Records.Add(KayaWire.TxSetMenuLabel(m.Id, label.Text!));
     }
 
     void MenuEnabled(MenuItem m, BoolSource enabled)
@@ -3986,7 +4034,7 @@ sealed class Tx
 
     // The tail every item kind shares: `symbol` rides here beside `icon`,
     // so no kind can forget one of them.
-    void MenuTail(MenuItem m, BoolSource? enabled, byte[] icon, Symbol? symbol = null)
+    void MenuTail(MenuItem m, BoolSource? enabled, byte[]? icon, Symbol? symbol = null)
     {
         if (enabled is { } e) MenuEnabled(m, e);
         if (icon != null) Records.Add(KayaWire.TxSetMenuIcon(m.Id, Kaya.RegisterBlob(icon)));
@@ -3996,7 +4044,7 @@ sealed class Tx
     void MenuSymbol(MenuItem m, Symbol symbol) =>
         Records.Add(KayaWire.TxSetMenuSymbol(m.Id, (long)symbol));
 
-    void MenuAppendAll(MenuItem parent, MenuItem[] children)
+    void MenuAppendAll(MenuItem parent, MenuItem[]? children)
     {
         if (children == null)
             return;
@@ -4039,9 +4087,9 @@ sealed class Tx
     /// occurrence for a menu click OR its shortcut. The shortcut is
     /// canonicalized by the binding's one parser; the root judges its
     /// anchor (window catalogs only).
-    public MenuItem Item(TextSource label, string shortcut = null,
-        BoolSource? enabled = null, byte[] icon = null, Symbol? symbol = null,
-        bool primary = false, string role = null, Action<Tx> onActivate = null)
+    public MenuItem Item(TextSource label, string? shortcut = null,
+        BoolSource? enabled = null, byte[]? icon = null, Symbol? symbol = null,
+        bool primary = false, string? role = null, Action<Tx>? onActivate = null)
     {
         var m = NewMenuItem(KayaWire.MenuKindAction, label);
         if (shortcut != null) Records.Add(KayaWire.TxSetMenuShortcut(m.Id, shortcut));
@@ -4057,7 +4105,7 @@ sealed class Tx
     /// path, outermost first. Context items take no shortcuts
     /// (root-checked).
     public MenuItem Item(TextSource label, Action<Tx, List<object>> onActivate,
-        BoolSource? enabled = null, byte[] icon = null, Symbol? symbol = null)
+        BoolSource? enabled = null, byte[]? icon = null, Symbol? symbol = null)
     {
         var m = NewMenuItem(KayaWire.MenuKindAction, label);
         MenuTail(m, enabled, icon, symbol);
@@ -4069,8 +4117,8 @@ sealed class Tx
     /// flips emit menu_toggled (the handler receives the new state);
     /// programmatic isChecked writes are QUIET (the echo doctrine).
     public MenuItem Toggle(TextSource label, BoolSource? isChecked = null,
-        BoolSource? enabled = null, byte[] icon = null, Symbol? symbol = null,
-        string shortcut = null, Action<Tx, bool> onToggle = null)
+        BoolSource? enabled = null, byte[]? icon = null, Symbol? symbol = null,
+        string? shortcut = null, Action<Tx, bool>? onToggle = null)
     {
         var m = NewMenuItem(KayaWire.MenuKindToggle, label);
         if (isChecked is { } c) MenuChecked(m, c);
@@ -4083,7 +4131,7 @@ sealed class Tx
     /// The template-node flavor of Toggle: the copy's keys, then the
     /// new state.
     public MenuItem Toggle(TextSource label, Action<Tx, List<object>, bool> onToggle,
-        BoolSource? isChecked = null, BoolSource? enabled = null, byte[] icon = null,
+        BoolSource? isChecked = null, BoolSource? enabled = null, byte[]? icon = null,
         Symbol? symbol = null)
     {
         var m = NewMenuItem(KayaWire.MenuKindToggle, label);
@@ -4096,7 +4144,7 @@ sealed class Tx
     /// One labeled radio option, appended in declaration order — the
     /// order IS the index vocabulary the group's value selects over.
     public MenuItem Option(TextSource label, BoolSource? enabled = null,
-        byte[] icon = null, Symbol? symbol = null, string shortcut = null)
+        byte[]? icon = null, Symbol? symbol = null, string? shortcut = null)
     {
         var m = NewMenuItem(KayaWire.MenuKindRadioOption, label);
         if (shortcut != null) Records.Add(KayaWire.TxSetMenuShortcut(m.Id, shortcut));
@@ -4113,7 +4161,7 @@ sealed class Tx
     /// menu appends them in order. Disabling a menu disables its
     /// subtree (the inherited-disabled contract).
     public MenuItem Menu(TextSource label, BoolSource? enabled = null,
-        byte[] icon = null, Symbol? symbol = null, MenuItem[] items = null)
+        byte[]? icon = null, Symbol? symbol = null, MenuItem[]? items = null)
     {
         var m = NewMenuItem(KayaWire.MenuKindMenu, label);
         MenuAppendAll(m, items);
@@ -4128,9 +4176,9 @@ sealed class Tx
     /// isChecked/value writes are configuration and stay QUIET.
     public void Menu(MenuItem item, TextSource? label = null,
         BoolSource? enabled = null, BoolSource? isChecked = null,
-        IndexSource? value = null, byte[] icon = null, Symbol? symbol = null,
-        bool? primary = null, string shortcut = null, string role = null,
-        MenuItem[] items = null)
+        IndexSource? value = null, byte[]? icon = null, Symbol? symbol = null,
+        bool? primary = null, string? shortcut = null, string? role = null,
+        MenuItem[]? items = null)
     {
         MenuAppendAll(item, items);
         if (label is { } l) MenuLabel(item, l);
@@ -4150,8 +4198,8 @@ sealed class Tx
     /// selected 0-based index (programmatic writes are quiet); onSelect
     /// receives each USER pick's new index.
     public MenuItem RadioGroup(TextSource label, MenuItem[] options,
-        IndexSource? value = null, BoolSource? enabled = null, byte[] icon = null,
-        Symbol? symbol = null, Action<Tx, int> onSelect = null)
+        IndexSource? value = null, BoolSource? enabled = null, byte[]? icon = null,
+        Symbol? symbol = null, Action<Tx, int>? onSelect = null)
     {
         var m = NewMenuItem(KayaWire.MenuKindRadioGroup, label);
         MenuAppendAll(m, options);
@@ -4165,7 +4213,7 @@ sealed class Tx
     /// the new index.
     public MenuItem RadioGroup(TextSource label, MenuItem[] options,
         Action<Tx, List<object>, int> onSelect, IndexSource? value = null,
-        BoolSource? enabled = null, byte[] icon = null, Symbol? symbol = null)
+        BoolSource? enabled = null, byte[]? icon = null, Symbol? symbol = null)
     {
         var m = NewMenuItem(KayaWire.MenuKindRadioGroup, label);
         MenuAppendAll(m, options);
@@ -4528,7 +4576,7 @@ sealed class Tpl
         return n;
     }
 
-    public Node Checkbox(Field<bool> f, Action<Tx, List<object>, bool> onToggle = null)
+    public Node Checkbox(Field<bool> f, Action<Tx, List<object>, bool>? onToggle = null)
     {
         var n = Widget(KayaWire.KindCheckbox);
         BindCheckedField(n, 0, f);
@@ -4539,7 +4587,7 @@ sealed class Tpl
     /// A date picker in the blueprint whose VALUE comes from any
     /// addressable source — a constant per copy, a signal, or the row's
     /// own DateOnly field. Picks carry the stamped copy's keys first.
-    public Node DatePicker(DateOnly value, Action<Tx, List<object>, DateOnly> onDate = null)
+    public Node DatePicker(DateOnly value, Action<Tx, List<object>, DateOnly>? onDate = null)
     {
         var n = Widget(KayaWire.KindDatePicker);
         tx.Records.Add(KayaWire.TxSetDate(n.Id, value.Year, value.Month, value.Day));
@@ -4547,7 +4595,7 @@ sealed class Tpl
         return n;
     }
 
-    public Node DatePicker(Signal value, Action<Tx, List<object>, DateOnly> onDate = null)
+    public Node DatePicker(Signal value, Action<Tx, List<object>, DateOnly>? onDate = null)
     {
         var n = Widget(KayaWire.KindDatePicker);
         tx.Records.Add(KayaWire.TxBindDate(n.Id, value.Id));
@@ -4555,7 +4603,7 @@ sealed class Tpl
         return n;
     }
 
-    public Node DatePicker(Field<DateOnly> f, Action<Tx, List<object>, DateOnly> onDate = null)
+    public Node DatePicker(Field<DateOnly> f, Action<Tx, List<object>, DateOnly>? onDate = null)
     {
         var n = Widget(KayaWire.KindDatePicker);
         BindDateField(n, 0, f);
@@ -4565,7 +4613,7 @@ sealed class Tpl
 
     /// A time picker in the blueprint: the date picker's three sources,
     /// hours and minutes.
-    public Node TimePicker(TimeOnly value, Action<Tx, List<object>, TimeOnly> onTime = null)
+    public Node TimePicker(TimeOnly value, Action<Tx, List<object>, TimeOnly>? onTime = null)
     {
         var n = Widget(KayaWire.KindTimePicker);
         tx.Records.Add(KayaWire.TxSetTime(n.Id, value.Hour, value.Minute));
@@ -4573,7 +4621,7 @@ sealed class Tpl
         return n;
     }
 
-    public Node TimePicker(Signal value, Action<Tx, List<object>, TimeOnly> onTime = null)
+    public Node TimePicker(Signal value, Action<Tx, List<object>, TimeOnly>? onTime = null)
     {
         var n = Widget(KayaWire.KindTimePicker);
         tx.Records.Add(KayaWire.TxBindTime(n.Id, value.Id));
@@ -4581,7 +4629,7 @@ sealed class Tpl
         return n;
     }
 
-    public Node TimePicker(Field<TimeOnly> f, Action<Tx, List<object>, TimeOnly> onTime = null)
+    public Node TimePicker(Field<TimeOnly> f, Action<Tx, List<object>, TimeOnly>? onTime = null)
     {
         var n = Widget(KayaWire.KindTimePicker);
         BindTimeField(n, 0, f);
@@ -4595,28 +4643,28 @@ sealed class Tpl
     /// with that copy's keys, outermost first. The three below SEED the
     /// copy instead — seeding does not make it controlled, and a later
     /// write to the source replaces what the user typed, quietly.
-    public Node Entry(Action<Tx, List<object>, string> onChange = null)
+    public Node Entry(Action<Tx, List<object>, string>? onChange = null)
     {
         var n = Widget(KayaWire.KindEntry);
         if (onChange != null) tx.App.OnChange(n, onChange);
         return n;
     }
 
-    public Node Entry(string text, Action<Tx, List<object>, string> onChange = null)
+    public Node Entry(string text, Action<Tx, List<object>, string>? onChange = null)
     {
         var n = Entry(onChange);
         SetText(n, text);
         return n;
     }
 
-    public Node Entry(Signal text, Action<Tx, List<object>, string> onChange = null)
+    public Node Entry(Signal text, Action<Tx, List<object>, string>? onChange = null)
     {
         var n = Entry(onChange);
         tx.Records.Add(KayaWire.TxBindText(n.Id, text.Id));
         return n;
     }
 
-    public Node Entry(Field<string> text, Action<Tx, List<object>, string> onChange = null)
+    public Node Entry(Field<string> text, Action<Tx, List<object>, string>? onChange = null)
     {
         var n = Entry(onChange);
         BindTextField(n, 0, text);
@@ -4626,28 +4674,28 @@ sealed class Tpl
     /// A multi-line editor in the blueprint: Entry's contract over the
     /// platform's real multi-line control, with the same four arms for
     /// the same reason.
-    public Node Textarea(Action<Tx, List<object>, string> onChange = null)
+    public Node Textarea(Action<Tx, List<object>, string>? onChange = null)
     {
         var n = Widget(KayaWire.KindTextarea);
         if (onChange != null) tx.App.OnChange(n, onChange);
         return n;
     }
 
-    public Node Textarea(string text, Action<Tx, List<object>, string> onChange = null)
+    public Node Textarea(string text, Action<Tx, List<object>, string>? onChange = null)
     {
         var n = Textarea(onChange);
         SetText(n, text);
         return n;
     }
 
-    public Node Textarea(Signal text, Action<Tx, List<object>, string> onChange = null)
+    public Node Textarea(Signal text, Action<Tx, List<object>, string>? onChange = null)
     {
         var n = Textarea(onChange);
         tx.Records.Add(KayaWire.TxBindText(n.Id, text.Id));
         return n;
     }
 
-    public Node Textarea(Field<string> text, Action<Tx, List<object>, string> onChange = null)
+    public Node Textarea(Field<string> text, Action<Tx, List<object>, string>? onChange = null)
     {
         var n = Textarea(onChange);
         BindTextField(n, 0, text);
@@ -4661,7 +4709,7 @@ sealed class Tpl
     /// widget's fold into its mirror, so the app writes a copy's document
     /// by patching the row and reads it back off the row.
     public Node Textarea(Field<Document> document,
-        Action<Tx, List<object>, string> onChange = null)
+        Action<Tx, List<object>, string>? onChange = null)
     {
         var n = Textarea(onChange);
         tx.Records.Add(KayaWire.TxSetRich(n.Id, true));
@@ -4672,28 +4720,28 @@ sealed class Tpl
     /// A search field in the blueprint: Entry's contract under the
     /// platform's search chrome, with the same four arms for the same
     /// reason (docs/search-plan.md).
-    public Node Search(Action<Tx, List<object>, string> onChange = null)
+    public Node Search(Action<Tx, List<object>, string>? onChange = null)
     {
         var n = Widget(KayaWire.KindSearch);
         if (onChange != null) tx.App.OnChange(n, onChange);
         return n;
     }
 
-    public Node Search(string text, Action<Tx, List<object>, string> onChange = null)
+    public Node Search(string text, Action<Tx, List<object>, string>? onChange = null)
     {
         var n = Search(onChange);
         SetText(n, text);
         return n;
     }
 
-    public Node Search(Signal text, Action<Tx, List<object>, string> onChange = null)
+    public Node Search(Signal text, Action<Tx, List<object>, string>? onChange = null)
     {
         var n = Search(onChange);
         tx.Records.Add(KayaWire.TxBindText(n.Id, text.Id));
         return n;
     }
 
-    public Node Search(Field<string> text, Action<Tx, List<object>, string> onChange = null)
+    public Node Search(Field<string> text, Action<Tx, List<object>, string>? onChange = null)
     {
         var n = Search(onChange);
         BindTextField(n, 0, text);
@@ -4741,8 +4789,8 @@ sealed class Tpl
     /// describe the prototype, so every copy shares them.
     public Node Slider(double min, double max, double value,
         double? step = null, double? tickSpacing = null,
-        Action<Tx, List<object>, double> onChange = null,
-        Action<Tx, List<object>, double> onCommit = null)
+        Action<Tx, List<object>, double>? onChange = null,
+        Action<Tx, List<object>, double>? onCommit = null)
     {
         var n = SliderOf(min, max, step, tickSpacing, onChange, onCommit);
         tx.Records.Add(KayaWire.TxSetValue(n.Id, value));
@@ -4751,8 +4799,8 @@ sealed class Tpl
 
     public Node Slider(double min, double max, Signal value,
         double? step = null, double? tickSpacing = null,
-        Action<Tx, List<object>, double> onChange = null,
-        Action<Tx, List<object>, double> onCommit = null)
+        Action<Tx, List<object>, double>? onChange = null,
+        Action<Tx, List<object>, double>? onCommit = null)
     {
         var n = SliderOf(min, max, step, tickSpacing, onChange, onCommit);
         tx.Records.Add(KayaWire.TxBindValue(n.Id, value.Id));
@@ -4761,8 +4809,8 @@ sealed class Tpl
 
     public Node Slider(double min, double max, Field<double> value,
         double? step = null, double? tickSpacing = null,
-        Action<Tx, List<object>, double> onChange = null,
-        Action<Tx, List<object>, double> onCommit = null)
+        Action<Tx, List<object>, double>? onChange = null,
+        Action<Tx, List<object>, double>? onCommit = null)
     {
         var n = SliderOf(min, max, step, tickSpacing, onChange, onCommit);
         BindValueField(n, 0, value);
@@ -4770,8 +4818,8 @@ sealed class Tpl
     }
 
     Node SliderOf(double min, double max, double? step, double? tickSpacing,
-        Action<Tx, List<object>, double> onChange,
-        Action<Tx, List<object>, double> onCommit)
+        Action<Tx, List<object>, double>? onChange,
+        Action<Tx, List<object>, double>? onCommit)
     {
         var n = Widget(KayaWire.KindSlider);
         tx.Records.Add(KayaWire.TxSetMin(n.Id, min));
@@ -4790,31 +4838,31 @@ sealed class Tpl
     /// verbatim, so a per-copy option LIST would be a per-copy blueprint
     /// (docs/sugar-pass-plan.md §2).
     public Node Select(string[] options, int selected,
-        Action<Tx, List<object>, int> onSelect = null) =>
+        Action<Tx, List<object>, int>? onSelect = null) =>
         Choice(KayaWire.KindSelect, options, selected, onSelect);
 
     public Node Select(string[] options, Signal selected,
-        Action<Tx, List<object>, int> onSelect = null) =>
+        Action<Tx, List<object>, int>? onSelect = null) =>
         Choice(KayaWire.KindSelect, options, selected, onSelect);
 
     public Node Select(string[] options, Field<double> selected,
-        Action<Tx, List<object>, int> onSelect = null) =>
+        Action<Tx, List<object>, int>? onSelect = null) =>
         Choice(KayaWire.KindSelect, options, selected, onSelect);
 
     public Node Radio(string[] options, int selected,
-        Action<Tx, List<object>, int> onSelect = null) =>
+        Action<Tx, List<object>, int>? onSelect = null) =>
         Choice(KayaWire.KindRadio, options, selected, onSelect);
 
     public Node Radio(string[] options, Signal selected,
-        Action<Tx, List<object>, int> onSelect = null) =>
+        Action<Tx, List<object>, int>? onSelect = null) =>
         Choice(KayaWire.KindRadio, options, selected, onSelect);
 
     public Node Radio(string[] options, Field<double> selected,
-        Action<Tx, List<object>, int> onSelect = null) =>
+        Action<Tx, List<object>, int>? onSelect = null) =>
         Choice(KayaWire.KindRadio, options, selected, onSelect);
 
     Node Choice(uint kind, string[] options, int selected,
-        Action<Tx, List<object>, int> onSelect)
+        Action<Tx, List<object>, int>? onSelect)
     {
         var n = ChoiceOf(kind, options, onSelect);
         tx.Records.Add(KayaWire.TxSetValue(n.Id, selected));
@@ -4822,7 +4870,7 @@ sealed class Tpl
     }
 
     Node Choice(uint kind, string[] options, Signal selected,
-        Action<Tx, List<object>, int> onSelect)
+        Action<Tx, List<object>, int>? onSelect)
     {
         var n = ChoiceOf(kind, options, onSelect);
         tx.Records.Add(KayaWire.TxBindValue(n.Id, selected.Id));
@@ -4830,7 +4878,7 @@ sealed class Tpl
     }
 
     Node Choice(uint kind, string[] options, Field<double> selected,
-        Action<Tx, List<object>, int> onSelect)
+        Action<Tx, List<object>, int>? onSelect)
     {
         var n = ChoiceOf(kind, options, onSelect);
         BindValueField(n, 0, selected);
@@ -4839,7 +4887,7 @@ sealed class Tpl
 
     /// The option children and the handler — everything a choice widget
     /// has before its selected index.
-    Node ChoiceOf(uint kind, string[] options, Action<Tx, List<object>, int> onSelect)
+    Node ChoiceOf(uint kind, string[] options, Action<Tx, List<object>, int>? onSelect)
     {
         var n = Widget(kind);
         tx.App.Parents.Add(n.Id);

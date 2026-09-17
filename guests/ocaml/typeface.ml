@@ -1,7 +1,6 @@
 (* The typeface scene, OCaml port — guests/rust/typeface.rs,
    tools/scenes/typeface.steps. *)
 
-open Kaya_wire
 open Kaya_app
 
 let () =
@@ -17,8 +16,8 @@ let () =
      asset_close font;
      window ~title:"typeface" ~width:480.0 ~height:360.0 ();
 
-     let heading = signal (Str "typeface") in
-     let status = signal (Str "ready") in
+     let heading = signal_str ("typeface") in
+     let status = signal_str ("ready") in
 
      let root =
        column
@@ -33,7 +32,7 @@ let () =
            textarea (* textarea#0 *);
            button ~text:"Go"
              ~on_click:(fun () ->
-               write status (Str (Printf.sprintf "clicked %s" !draft)))
+               write status ((Printf.sprintf "clicked %s" !draft)))
              (* button#0 *);
          ]
          ()

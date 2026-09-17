@@ -39,7 +39,7 @@ static class DndScene
     {
         try
         {
-            var (stream, _) = file.Open(KayaWire.FileModeRead);
+            var (stream, _) = file.Open(FileAccess.Read);
             using (stream)
             using (var reader = new StreamReader(stream))
                 return reader.ReadToEnd();

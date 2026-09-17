@@ -133,9 +133,9 @@ func TestSetAxisWritesTheAxisPropConstant(t *testing.T) {
 		t.Fatalf("SetAxis wrote widget %d prop %d source %d, want %d/%d/%d",
 			p.widget, p.prop, p.source, row, PropAxis, SourceConst)
 	}
-	if p.tag != ValueI64 || p.i64 != AxisVertical {
+	if p.tag != ValueI64 || p.i64 != int64(AxisVertical) {
 		t.Fatalf("the axis rode as tag %d value %d, want i64 AxisVertical (%d)",
-			p.tag, p.i64, AxisVertical)
+			p.tag, p.i64, int64(AxisVertical))
 	}
 }
 

@@ -1,15 +1,18 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 -- The identity scene, Haskell port — guests/rust/identity.rs,
 -- tools/scenes/identity.steps.
 
 import Control.Monad (when)
 import Data.IORef (newIORef, readIORef, writeIORef)
 
+import Data.Text (Text)
+import qualified Data.Text as T
 import KayaApp
-import KayaWire (Value (..))
 
 main :: IO ()
 main = kayaMain $ \app -> do
-  draftRef <- newIORef ""
+  draftRef <- newIORef ("" :: Text)
   caps <- capabilities
   buildTx app $ do
     -- BEFORE THE FIRST MOUNT, per the declared-once wall. NO ARGUMENTS:
@@ -19,14 +22,14 @@ main = kayaMain $ \app -> do
     -- ONE PROMOTED COMMAND, and not about commands: Windows mints its custom
     -- caption from the first promotion, taking the system icon with it.
     window
-      0
+      primary
       [ WTitle "identity",
         WSize 480 360,
         WMenus [menu "File" [] [item "Save" [ISymbol SymbolDone, IPrimary True]]]
       ]
 
-    heading <- signal (VStr "identity")
-    status <- signal (VStr "ready")
+    heading <- signal (T.pack "identity")
+    status <- signal (T.pack "ready")
 
     root <-
       column
@@ -38,7 +41,7 @@ main = kayaMain $ \app -> do
             "Go"
             ( do
                 draft <- readIORef draftRef
-                submitTx app (writeSignal status (VStr ("clicked " ++ draft)))
+                submitTx app (writeSignal status ("clicked " <> draft))
             )
         ]
     mount root
@@ -47,6 +50,6 @@ main = kayaMain $ \app -> do
     -- app WROTE.
     when (auxWindows caps) $ do
       createWindow 1 [WSize 360 240]
-      caption <- signal (VStr "no title of its own")
+      caption <- signal (T.pack "no title of its own")
       aux <- column [] [labelBound caption] -- label#2
       mountIn 1 aux

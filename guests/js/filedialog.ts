@@ -29,15 +29,7 @@ function deliver(): void {
   app.post(() => status.set(text));
 }
 
-function picked(files: kaya.PickedFile[]): void {
-  if (files.length === 0) {
-    // The empty list IS cancel.
-    status.set("cancelled");
-    return;
-  }
-
-  const count = files.length;
-  const file = files[0]!;
+function readOne(count: number, file: kaya.PickedFile): void {
   let text: string;
   try {
     // The addon reads over the platform handle (docs/js-plan.md §6).
@@ -52,6 +44,24 @@ function picked(files: kaya.PickedFile[]): void {
   status.set("reading");
 }
 
+function picked(files: kaya.PickedFile[]): void {
+  if (files.length === 0) {
+    // The empty list IS cancel.
+    status.set("cancelled");
+    return;
+  }
+  readOne(files.length, files[0]!);
+}
+
+function pickedOne(file: kaya.PickedFile | null): void {
+  if (file === null) {
+    // pickFile's null IS cancel.
+    status.set("cancelled");
+    return;
+  }
+  readOne(1, file);
+}
+
 function release(): void {
   released = true;
   deliver();
@@ -64,19 +74,18 @@ async function ask(): Promise<void> {
 }
 
 async function askOne(): Promise<void> {
-  picked(await kaya.pickFile({ filters: [["Text", "txt"]] }));
+  pickedOne(await kaya.pickFile({ filters: [["Text", "txt"]] }));
 }
 
-let status!: kaya.Signal<string>;
-
-app.window({ title: "filedialog" }, () => {
-  status = kaya.signal("no file");
+const { status } = app.window({ title: "filedialog" }, () => {
+  const status = kaya.signal("no file");
   kaya.column(() => {
     kaya.label({ bind: status }).a11yId("status"); // label#0
     kaya.button("open", { onClick: ask }); // button#0
     kaya.button("open one", { onClick: askOne }); // button#1
     kaya.button("release", { onClick: release }); // button#2
   });
+  return { status };
 });
 
 app.run();

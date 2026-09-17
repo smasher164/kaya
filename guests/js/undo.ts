@@ -33,10 +33,10 @@ function noteList(): string {
 /** The empty path is the draft, a path names a row, and AN EMPTY NOTE IS
  * NO NOTE: a field restored to "" must REMOVE the key. */
 function foldTexts(texts: kaya.UndoDelta["texts"]): void {
-  for (const [_ident, path, text] of texts) {
+  for (const { path, text } of texts) {
     if (path.length === 0) draft = text;
-    else if (!text) rowNotes.delete(path[0] as kaya.Key);
-    else rowNotes.set(path[0] as kaya.Key, text);
+    else if (!text) rowNotes.delete(path[0]!);
+    else rowNotes.set(path[0]!, text);
   }
 }
 
@@ -107,24 +107,18 @@ function redone(label: string, delta: kaya.UndoDelta): void {
   notes.set(noteList());
 }
 
-let status!: kaya.Signal<string>;
-let history!: kaya.Signal<string>;
-let keys!: kaya.Signal<string>;
-let notes!: kaya.Signal<string>;
-let field!: kaya.Widget;
-let todos!: kaya.Collection<kaya.Fields<typeof Todo.schema>, kaya.Row<typeof Todo.schema>>;
-
-app.window({ title: "undo", onUndone: undone, onRedone: redone }, () => {
+const { status, history, keys, notes, field, todos } = app.window({ title: "undo", onUndone: undone, onRedone: redone }, () => {
   app.menu("Edit", () => {
     kaya.item("Undo", { role: kaya.ROLE_UNDO });
     kaya.item("Redo", { role: kaya.ROLE_REDO });
   });
 
-  status = kaya.signal("no todos");
-  history = kaya.signal("history empty");
-  keys = kaya.signal("no keys");
-  notes = kaya.signal("no notes");
-  todos = kaya.collection(Todo);
+  const status = kaya.signal("no todos");
+  const history = kaya.signal("history empty");
+  const keys = kaya.signal("no keys");
+  const notes = kaya.signal("no notes");
+  const todos = kaya.collection(Todo);
+  let field!: kaya.Widget;
 
   kaya.column(() => {
     kaya.label({ bind: status }).a11yId("status"); // label#0
@@ -147,6 +141,7 @@ app.window({ title: "undo", onUndone: undone, onRedone: redone }, () => {
 
   // The scene types with real keystrokes: something must hold focus.
   field.focus();
+  return { status, history, keys, notes, field, todos };
 });
 
 app.run();

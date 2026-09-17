@@ -11,18 +11,19 @@ import java.util.List;
  */
 public final class Ownundo {
     /** The app's own history: the document before each user edit, and the
-     * documents an undo took away. Static because a Java lambda cannot
-     * assign a captured local. */
-    private static final List<KayaApp.Document> UNDO = new ArrayList<>();
-
-    private static final List<KayaApp.Document> REDO = new ArrayList<>();
-
-    private static KayaApp.Document current = new KayaApp.Document("");
+     * documents an undo took away. A named holder, not static fields —
+     * this scene's history has no reason to outlive its one app(). */
+    private static final class State {
+        KayaApp.Widget nativeArea, owned;
+        final List<KayaApp.Document> undo = new ArrayList<>();
+        final List<KayaApp.Document> redo = new ArrayList<>();
+        KayaApp.Document current = new KayaApp.Document("");
+    }
 
     public static void app() {
         KayaApp app = new KayaApp();
 
-        KayaApp.Widget[] widgets = new KayaApp.Widget[2];
+        State s = new State();
 
         app.build(tx -> {
             KayaApp.WindowRef win = tx.window(0).title("ownundo");
@@ -31,40 +32,40 @@ public final class Ownundo {
             KayaApp.Signal<String> status = tx.signal("undo 0 redo 0");
 
             edit.item("Undo").role(KayaApp.ROLE_UNDO).onActivate(t -> {
-                if (UNDO.isEmpty()) {
+                if (s.undo.isEmpty()) {
                     return;
                 }
-                KayaApp.Document before = UNDO.remove(UNDO.size() - 1);
-                REDO.add(current);
-                current = before;
-                t.setDocument(widgets[1], before);
-                publish(t, status, widgets[1]);
+                KayaApp.Document before = s.undo.remove(s.undo.size() - 1);
+                s.redo.add(s.current);
+                s.current = before;
+                t.setDocument(s.owned, before);
+                publish(t, status, s);
             });
             edit.item("Redo").role(KayaApp.ROLE_REDO).onActivate(t -> {
-                if (REDO.isEmpty()) {
+                if (s.redo.isEmpty()) {
                     return;
                 }
-                KayaApp.Document after = REDO.remove(REDO.size() - 1);
-                UNDO.add(current);
-                current = after;
-                t.setDocument(widgets[1], after);
-                publish(t, status, widgets[1]);
+                KayaApp.Document after = s.redo.remove(s.redo.size() - 1);
+                s.undo.add(s.current);
+                s.current = after;
+                t.setDocument(s.owned, after);
+                publish(t, status, s);
             });
 
             tx.mount(tx.column(() -> {
                 tx.label(status).a11yId("status"); // label#0
-                widgets[0] = tx.textarea().rich().a11yId("native").a11yLabel("Native");
-                widgets[1] = tx.textarea().rich().ownUndo()
+                s.nativeArea = tx.textarea().rich().a11yId("native").a11yLabel("Native");
+                s.owned = tx.textarea().rich().ownUndo()
                         .a11yId("owned").a11yLabel("Owned");
-                app.onEdit(widgets[1], (t, e) -> {
-                    UNDO.add(current);
-                    current = app.document(widgets[1]);
-                    REDO.clear();
-                    publish(t, status, widgets[1]);
+                app.onEdit(s.owned, (t, e) -> {
+                    s.undo.add(s.current);
+                    s.current = app.document(s.owned);
+                    s.redo.clear();
+                    publish(t, status, s);
                 });
                 tx.row(() -> {
-                    tx.button("focus native", t -> t.focus(widgets[0])); // button#0
-                    tx.button("focus owned", t -> t.focus(widgets[1]));  // button#1
+                    tx.button("focus native", t -> t.focus(s.nativeArea)); // button#0
+                    tx.button("focus owned", t -> t.focus(s.owned));  // button#1
                 });
             }));
         });
@@ -72,11 +73,10 @@ public final class Ownundo {
         app.dispatchLoop();
     }
 
-    private static void publish(KayaApp.Tx t, KayaApp.Signal<String> status,
-            KayaApp.Widget owned) {
-        t.write(status, "undo " + UNDO.size() + " redo " + REDO.size());
-        t.canUndo(owned, !UNDO.isEmpty());
-        t.canRedo(owned, !REDO.isEmpty());
+    private static void publish(KayaApp.Tx t, KayaApp.Signal<String> status, State s) {
+        t.write(status, "undo " + s.undo.size() + " redo " + s.redo.size());
+        t.canUndo(s.owned, !s.undo.isEmpty());
+        t.canRedo(s.owned, !s.redo.isEmpty());
     }
 
     private Ownundo() {}

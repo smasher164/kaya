@@ -3,6 +3,8 @@
 //! PROGRAMMATICALLY (the echo negative), a continuous one with ticks, and a
 //! stamped stepped slider bound to a row's own field.
 
+use kaya::PathKey;
+
 #[derive(kaya::KayaGen, Clone, Debug, PartialEq)]
 struct Track {
     name: String,
@@ -18,13 +20,6 @@ enum Msg {
     Reset,
 }
 
-fn key_word(path: &kaya::Path) -> String {
-    match path.first() {
-        Some(kaya::Value::Str(s)) => s.clone(),
-        other => format!("{other:?}"),
-    }
-}
-
 pub(crate) fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::new();
     let mut commits = 0u32;
@@ -35,7 +30,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         let row_text = tx.signal("row: none");
         let pos = tx.signal(50.0);
         let tracks = tx.collection::<Track>();
-        let mut level_node = kaya::TemplateNodeId(0);
+        let mut level_node: Option<kaya::TemplateNodeId> = None;
         let root = tx
             .column(|tx| {
                 tx.label(level_text); // label#0
@@ -64,13 +59,14 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     let slider = row.slider(0.0, 100.0, Track::level());
                     row.step(slider, 10.0);
                     row.a11y_id(slider, "level");
-                    level_node = slider;
+                    level_node = Some(slider);
                 }
             })
             .id();
         tx.mount(root);
         tx.insert(&tracks, "a", Track { name: "a".into(), level: 70.0 });
         tx.insert(&tracks, "b", Track { name: "b".into(), level: 20.0 });
+        let level_node = level_node.expect("tracks template declared a row slider");
         (level_text, commit_text, volume_text, row_text, pos, level_node)
     });
     msgs.on_commit_node(level_node, Msg::RowLevel);
@@ -90,7 +86,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 tx.write(volume_text, format!("volume: {v}"));
             }),
             Msg::RowLevel(path, v) => ctx.apply(|tx| {
-                tx.write(row_text, format!("row {}: {v}", key_word(&path)));
+                tx.write(row_text, format!("row {}: {v}", path.key::<String>(0)));
             }),
             Msg::Reset => ctx.apply(|tx| {
                 // Must NOT come back as a value or a commit occurrence.

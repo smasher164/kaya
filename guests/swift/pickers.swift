@@ -9,11 +9,13 @@ struct Task: KayaGen {
 }
 
 func day(_ d: KayaDate) -> String {
-    String(format: "%04d-%02d-%02d", d.year!, d.month!, d.day!)
+    let (y, m, dd) = d.kayaYMD
+    return String(format: "%04d-%02d-%02d", y, m, dd)
 }
 
 func clock(_ t: KayaTime) -> String {
-    String(format: "%02d:%02d", t.hour!, t.minute!)
+    let (h, m) = t.kayaHM
+    return String(format: "%02d:%02d", h, m)
 }
 
 let app = KayaApp()

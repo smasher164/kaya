@@ -1,29 +1,30 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 -- The commands scene, Haskell port — guests/rust/commands.rs,
 -- tools/scenes/commands.steps.
 
 import Data.IORef (modifyIORef', newIORef, readIORef)
 
+import qualified Data.Text as T
 import KayaApp
-import KayaWire (Value (..))
 
 main :: IO ()
 main = kayaMain $ \app -> do
   settingsRef <- newIORef (0 :: Int)
 
   buildTx app $ do
-    status <- signal (VStr "ready")
-    details <- signal (VBool False)
-    sort <- signal (VF64 0.0)
+    status <- signal (T.pack "ready")
+    details <- signal (False)
+    sort <- signal (0.0 :: Double)
 
     let onSettings = do
           modifyIORef' settingsRef (+ 1)
           n <- readIORef settingsRef
-          submitTx app (writeSignal status (VStr ("settings " ++ show n)))
+          submitTx app (writeSignal status (T.pack ("settings " ++ show n)))
 
     window
-      0
+      primary
       [ WTitle "commands",
         WMenus
           [ -- Reload sits beside Settings so this menu is not left empty
@@ -51,7 +52,7 @@ main = kayaMain $ \app -> do
                       ( \on ->
                           submitTx app $
                             writeSignal status
-                              (VStr (if on then "details on" else "details off"))
+                              (T.pack (if on then "details on" else "details off"))
                       )
                   ],
                 radioGroup
@@ -61,7 +62,7 @@ main = kayaMain $ \app -> do
                       ( \index ->
                           submitTx app $
                             writeSignal status
-                              (VStr (if index == 1 then "sorted date" else "sorted name"))
+                              (T.pack (if index == 1 then "sorted date" else "sorted name"))
                       )
                   ]
                   [ option "Name" [IShortcut "primary+1"],

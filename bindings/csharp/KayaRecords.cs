@@ -21,11 +21,11 @@ sealed class Field<V>
 
 sealed class RecordInfo
 {
-    internal uint[] Schema;
+    internal required uint[] Schema;
     // Getters covers every parameter: reconstruction needs the guest-only ones.
-    internal int[] WireToCtor;
-    internal Func<object, object>[] Getters;
-    internal ConstructorInfo Ctor;
+    internal required int[] WireToCtor;
+    internal required Func<object, object>[] Getters;
+    internal required ConstructorInfo Ctor;
 
     static uint? WireTag(Type t) =>
         t == typeof(string) ? KayaWire.ValueStr
@@ -61,11 +61,11 @@ sealed class RecordInfo
         var getters = new Func<object, object>[parameters.Length];
         for (int i = 0; i < parameters.Length; i++)
         {
-            var property = t.GetProperty(parameters[i].Name,
+            var property = t.GetProperty(parameters[i].Name!,
                 BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase)
                 ?? throw new ArgumentException(
                     $"kaya: {t.Name}.{parameters[i].Name} has no matching property — use a record");
-            getters[i] = property.GetValue;
+            getters[i] = obj => property.GetValue(obj)!;
             var tag = WireTag(parameters[i].ParameterType);
             if (tag is uint wire)
             {
@@ -97,7 +97,7 @@ sealed class RecordInfo
     /// carrying a blob field re-registers.
     internal object EncodeField(uint wireIndex, object value)
     {
-        string name = Ctor.GetParameters()[WireToCtor[wireIndex]].Name;
+        string name = Ctor.GetParameters()[WireToCtor[wireIndex]].Name!;
         if (value is DateOnly or TimeOnly) return KayaRecords.ScalarWire(value);
         if (Schema[wireIndex] == KayaWire.ValueBlob)
         {
@@ -121,14 +121,14 @@ sealed class RecordInfo
     /// core states them, back into the object the model keeps.
     /// Guest-only parameters never travelled, so they come from the entry
     /// the mirror still holds, or the type's default (an undone remove).
-    internal object FromWire(IReadOnlyList<object> fields, object current)
+    internal object FromWire(IReadOnlyList<object> fields, object? current)
     {
         var parameters = Ctor.GetParameters();
-        var args = new object[parameters.Length];
+        var args = new object?[parameters.Length];
         bool sameShape = current != null && current.GetType() == Ctor.DeclaringType;
         for (int i = 0; i < args.Length; i++)
             args[i] = sameShape
-                ? Getters[i](current)
+                ? Getters[i](current!)
                 : (parameters[i].ParameterType.IsValueType
                     ? Activator.CreateInstance(parameters[i].ParameterType)
                     : null);
@@ -185,7 +185,7 @@ sealed class RecordCollection<T>
         new RecordCollection<T>(Collection.At(key), Info);
 
     public void Insert(Tx tx, object key, T value) =>
-        tx.InsertRecordRaw(Collection, key, value, 0, Info.WireFields(value));
+        tx.InsertRecordRaw(Collection, key, value!, 0, Info.WireFields(value!));
 
     /// Insert under a key the binding authors, and hand the key back.
     /// The contract, in full, is on Tx.InsertFresh.
@@ -197,7 +197,7 @@ sealed class RecordCollection<T>
     }
 
     public void Update(Tx tx, object key, T value) =>
-        tx.UpdateRecordRaw(Collection, key, value, 0, Info.WireFields(value));
+        tx.UpdateRecordRaw(Collection, key, value!, 0, Info.WireFields(value!));
 
     /// One field's delta by selector: the rest of the record never
     /// travels.
@@ -207,14 +207,10 @@ sealed class RecordCollection<T>
     /// UpdateField over a pre-resolved token.
     public void UpdateField<V>(Tx tx, object key, Field<V> f, V value)
     {
-        object current = null;
-        foreach (var entry in tx.Items(Collection))
-            if (Equals(entry.Key, key))
-                current = entry.Value;
-        if (current == null)
+        if (!TryGet(tx, key, out var current))
             throw new InvalidOperationException($"kaya: update of missing key {key}");
-        tx.UpdateFieldRaw(Collection, key, Info.WithField(current, f.Index, value), 0,
-            f.Index, Info.EncodeField(f.Index, value));
+        tx.UpdateFieldRaw(Collection, key, Info.WithField(current!, f.Index, value!), 0,
+            f.Index, Info.EncodeField(f.Index, value!));
     }
 
     /// MoveBefore repositions an entry before another's. Keys, never
@@ -252,17 +248,17 @@ sealed class RecordCollection<T>
 
     /// A checkbox bound to the field the selector names.
     public Node Checkbox(Tpl t, Expression<Func<T, bool>> selector,
-        Action<Tx, List<object>, bool> onToggle = null) =>
+        Action<Tx, List<object>, bool>? onToggle = null) =>
         t.Checkbox(KayaRecords.FieldOf(selector), onToggle);
 
     /// A date picker bound to the DateOnly field the selector names.
     public Node DatePicker(Tpl t, Expression<Func<T, DateOnly>> selector,
-        Action<Tx, List<object>, DateOnly> onDate = null) =>
+        Action<Tx, List<object>, DateOnly>? onDate = null) =>
         t.DatePicker(KayaRecords.FieldOf(selector), onDate);
 
     /// A time picker bound to the TimeOnly field the selector names.
     public Node TimePicker(Tpl t, Expression<Func<T, TimeOnly>> selector,
-        Action<Tx, List<object>, TimeOnly> onTime = null) =>
+        Action<Tx, List<object>, TimeOnly>? onTime = null) =>
         t.TimePicker(KayaRecords.FieldOf(selector), onTime);
 
     /// An image bound to the byte[] field the selector names.
@@ -274,9 +270,28 @@ sealed class RecordCollection<T>
     {
         var items = new List<KeyValuePair<object, T>>();
         foreach (var entry in tx.Items(Collection))
-            items.Add(new KeyValuePair<object, T>(entry.Key, (T)entry.Value));
+            items.Add(new KeyValuePair<object, T>(entry.Key, (T)entry.Value!));
         return items;
     }
+
+    /// The typed model as an insertion-ordered map: O(1) keyed reads
+    /// over what Items keeps a list of
+    /// (System.Collections.Generic.OrderedDictionary, .NET 9+).
+    public OrderedDictionary<object, T> Snapshot(Tx tx)
+    {
+        var snap = new OrderedDictionary<object, T>();
+        foreach (var entry in Items(tx))
+            snap[entry.Key] = entry.Value;
+        return snap;
+    }
+
+    /// The entry at `key`, or false if it is missing.
+    public bool TryGet(Tx tx, object key, out T value) =>
+        Snapshot(tx).TryGetValue(key, out value!);
+
+    /// The entry at `key`; throws (the indexer's own contract) if it is
+    /// missing.
+    public T this[Tx tx, object key] => Snapshot(tx)[key];
 }
 
 /// An open patch on one entry; Set chains.
@@ -340,13 +355,13 @@ static class KayaRecords
         _ => v,
     };
 
-    internal static DateOnly DateOf(object packed)
+    internal static DateOnly DateOf(object? packed)
     {
         var (year, month, day) = KayaWire.UnpackDate(packed is long l ? l : 0L);
         return new DateOnly(year, month, day);
     }
 
-    internal static TimeOnly TimeOf(object packed)
+    internal static TimeOnly TimeOf(object? packed)
     {
         var (hour, minute) = KayaWire.UnpackTime(packed is long l ? l : 0L);
         return new TimeOnly(hour, minute);

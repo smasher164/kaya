@@ -6,18 +6,18 @@ import * as kaya from "kaya-gui";
 const app = new kaya.App();
 
 let vertical = false;
-let dash!: kaya.Widget;
 
 function flip(): void {
   vertical = !vertical;
   dash.axis(vertical ? "vertical" : "horizontal");
 }
 
-app.window({ title: "adaptive", width: 900, height: 600 }, () => {
+const { dash } = app.window({ title: "adaptive", width: 900, height: 600 }, () => {
   const alpha = kaya.signal("alpha");
   const longer = kaya.signal("a longer label");
   const steady = kaya.signal("steady");
 
+  let dash!: kaya.Widget;
   kaya.column(() => {
     dash = kaya.row(() => {
       // row#0: the flip subject.
@@ -56,6 +56,7 @@ app.window({ title: "adaptive", width: 900, height: 600 }, () => {
     });
     fit.columnsAuto(240).a11yId("fit");
   });
+  return { dash };
 });
 
 app.run();

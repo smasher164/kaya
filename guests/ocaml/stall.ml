@@ -1,7 +1,6 @@
 (* The stall scene, OCaml port — guests/rust/stall.rs,
    tools/scenes/stall.steps. *)
 
-open Kaya_wire
 open Kaya_app
 
 (* Past the watchdog's one-second threshold. *)
@@ -16,11 +15,11 @@ let () =
 
   build app (fun () ->
       window ~title:"stall" ();
-      let status = signal (Str "ready") in
+      let status = signal_str ("ready") in
 
       (* DELIBERATELY WRONG, and the only place in this repo that is. *)
       let block () = Thread.delay block_seconds in
-      let ping () = write status (Str "pinged") in
+      let ping () = write status ("pinged") in
       let wedge () = Thread.delay wedge_seconds in
 
       (* Children are THUNKS: omitting the trailing unit leaves one

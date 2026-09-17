@@ -25,6 +25,13 @@ if let trap = ProcessInfo.processInfo.environment["KAYA_GUARD_TRAP"] {
             // preconditionFailure — uncatchable, so it is pinned the
             // same way as the mirror-read guard: the child must die.
             _ = tx.item("Bad", shortcut: "ctrl+s")
+        case "ymd":
+            // kayaYMD refuses a KayaDate missing year, month or day —
+            // uncatchable, pinned the same way as the shortcut parser's.
+            _ = DateComponents(year: 2026, month: 9).kayaYMD
+        case "hm":
+            // kayaHM refuses a KayaTime missing hour or minute.
+            _ = DateComponents(hour: 14).kayaHM
         default:
             FileHandle.standardError.write(Data("unknown KAYA_GUARD_TRAP: \(trap)\n".utf8))
         }
@@ -258,7 +265,8 @@ struct RowNote: KayaRecord {
 }
 
 func spellRuns(_ runs: [KayaRun]) -> String {
-    runs.map { "\($0.start):\($0.end) \($0.name)=\($0.value)" }.joined(separator: "|")
+    runs.map { "\($0.range.lowerBound):\($0.range.upperBound) \($0.name)=\($0.value)" }
+        .joined(separator: "|")
 }
 
 let documentBlobHex =
@@ -284,7 +292,7 @@ precondition(
 
 // ONE EDIT, through the ONE fold: the live mirror's answer is the row
 // field's answer.
-let rowMarks = [KayaRun(start: 0, end: 1, name: "code", value: "true")]
+let rowMarks = [KayaRun(range: 0..<1, name: "code", value: "true")]
 var rowLive = rowDoc
 kayaFoldEdit(&rowLive, 3, 3, "!", rowMarks)
 
@@ -339,9 +347,11 @@ precondition(
 
 // The trap side, via re-exec (see the KAYA_GUARD_TRAP branch at the
 // top): a mirror read inside a For or When body being declared must
-// kill the process — and so must an alias shortcut hitting the
-// binding's one parser (its rejection is a preconditionFailure).
-for mode in ["for", "when", "shortcut"] {
+// kill the process, an alias shortcut hitting the binding's one parser
+// must too (its rejection is a preconditionFailure), and so must
+// kayaYMD/kayaHM over a DateComponents missing the fields a KayaDate or
+// KayaTime guarantees.
+for mode in ["for", "when", "shortcut", "ymd", "hm"] {
     let child = Process()
     child.executableURL = URL(fileURLWithPath: CommandLine.arguments[0])
     var env = ProcessInfo.processInfo.environment
@@ -356,7 +366,7 @@ for mode in ["for", "when", "shortcut"] {
     }
     child.waitUntilExit()
     let died = child.terminationReason == .uncaughtSignal || child.terminationStatus != 0
-    precondition(died, "mirror read inside a \(mode) body did not trap")
+    precondition(died, "guard trap \(mode) did not fire")
 }
 
 print("swift abort check: OK")

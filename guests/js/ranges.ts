@@ -94,11 +94,9 @@ function onSelectFirst(): void {
   if (hits.length > 0) editor.selectRange(hits[0]!);
 }
 
-let status!: kaya.Signal<string>;
-let editor!: kaya.Widget;
-
-app.window({ title: "ranges" }, () => {
-  status = kaya.signal("0 matches");
+const { status, editor } = app.window({ title: "ranges" }, () => {
+  const status = kaya.signal("0 matches");
+  let editor!: kaya.Widget;
   kaya.column(() => {
     // Every range assertion finds this control by its authored id.
     editor = kaya.textarea({ onChange: onEdit }); // textarea#0
@@ -111,6 +109,7 @@ app.window({ title: "ranges" }, () => {
       kaya.button("select first", { onClick: onSelectFirst }); // button#3
     });
   });
+  return { status, editor };
 });
 
 app.run();

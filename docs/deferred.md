@@ -2071,6 +2071,98 @@ unpicked.
 
 ## Bindings / ergonomics
 
+- **IDIOM PASS — the nine bindings read as their own language, not as a
+  port (survey 2026-09-16, Akhil's rulings the same night).** The survey
+  (nine read-only auditors, one per language, the sugar tier plus every
+  guest first committed on or after 2026-08-25) answered the maintainer's
+  question — "are our bindings a naive port of one language to another?"
+  — with NO: all nine mostly idiomatic, no ratified spelling challenged.
+  What leaks is THE WIRE: its value constructors, integer vocabularies,
+  sentinel ints, string-spelled booleans and flat spans reached guests in
+  eight of nine bindings — the census of tracked hand-written guests
+  naming a wire tag read haskell 51/54, ocaml 50/52, rust 10/57, csharp
+  10/65, java 7/52, python 5/54, go/js/swift 0. The second pattern was
+  the compiler not asked to do the language's own checking (JDK 17,
+  Swift 5 language mode, nullable off, no -Wall, no type hints). 65
+  findings: 54 spelling, 1 semantics, 10 capability. The record is the
+  review page (kaya Idiom Survey, 2026-09-16) and the coordinator's
+  synthesis beside the nine auditors' notes.
+  THE PASS (in flight): one implementer per language lands every
+  spelling finding — the wire stops at the binding boundary in nine
+  spellings, one keyed read of a row in all nine (Rust, Go and C# had
+  none), handles out of a scope (JS scope bodies return their value;
+  Rust Option/struct returns; Swift IUO; Java holder classes), and the
+  per-language self-consistency items — plus the OCaml .mli files and
+  the Haskell module split (Akhil: "why are we deferring the haskell
+  split?"), the Rust public surface's decision-log doc comments STRIPPED
+  (Akhil: no rustdoc, no junk in comments; what a future session needs
+  moves to md files). The guard on the wall everyone walks into:
+  tools/check-sugar-surface.py's wire-tag clause refuses a wire
+  constructor or constant in any hand-written guest, nine watched
+  negatives (planted 1 / blank 0), and was red on the pre-pass tree by
+  122 findings — the shipped state.
+  FOUND EN ROUTE, open: a red leg from a hand `tools/run-leg.py` run has
+  no flight-recorder bundle (neither run-leg.py nor tools/lib/lanes/mac.py
+  names the recorder), so the "read the bundle first" rule has nothing to
+  read on the inner loop and a hand-run red can only be re-run; the mac
+  lane's own collect should wrap the hand run too (S) — and the same
+  runner launched the guest bare where the pool wraps it in `timeout 120`,
+  under which an undeclared window opens at another size: align-python
+  read as a pre-existing red by three agents (fixed 2026-09-16, check-gates
+  N18, docs/traps.md "A guest launched without the pool's timeout
+  wrapper"). One sighting of a
+  clipboard-csharp paste reading "fr√•n" for "från" under eight-way host
+  contention, clean on re-run — the non-ASCII clipboard seed class.
+  Also open from the Haskell arm: a bare (non-record) `Collection`'s
+  `insert`/`update` are typed `(KayaValue k, KayaValue v)` while every
+  bare collection the binding mints hard-codes its wire schema to one
+  Text field, so a `v` other than `Text` type-checks and sends a tag the
+  schema never declared — every guest passes Text today; pin `v` to Text
+  or thread the schema into the type. The `instance KayaValue W.Value`
+  identity instance is the escape hatch that lets a key read from
+  `recordItems` round-trip into a write without spelling the wire; a
+  `RecordKey a` phantom would narrow it without breaking a guest.
+  THE WINDOWS TOAST CLASS, third bundle (matrix #30 on this tree,
+  2026-09-16 22:43 local, windows-notes_rust): the guest's own wait read
+  "a notification toast held the foreground for 15000ms before type
+  injection" and gave up; the bundle's foreground text is
+  ShellExperienceHost 'New notification' with "1 element(s) walked, none
+  named" (UIA reads no text off the toast), the notification database
+  holds only the Widgets TILE from 25 minutes earlier (a banner that
+  closed and was not kept leaves no row), and the toast-moment picture was
+  SKIPPED because the sampler's first sight of the toast fell one second
+  BEFORE the leg's window (ring samples 117-118 against a leg starting at
+  118). So the bundle names the class and not the sender. THE RECORDER
+  GROWTH THIS NEEDS (the 2026-09-16 ruling, not a watch): the guest's
+  foreground wait knows the exact moment — the WinUI arm should take the
+  console-session picture itself on its first sight of the toast (the
+  shot.cmd route the sampler already uses), so the picture is the guest's
+  and not the sampler's cadence's. M; unbuilt. The lane was re-run alone
+  for the tree's verdict.
+  RULED FOR LATER SLICES, each its own entry when it starts:
+  - R1 ASYNC DIALOGS beyond JS for Swift, C#, Java and Rust under one
+    rule — no handler given, a dialog answers a future; the continuation
+    runs on the app thread as its own transaction — with Python, Haskell
+    and OCaml stated as the carve-out (no native async runtime on the app
+    thread), the way docs/js-plan.md §4 names the languages that cannot
+    spell the implicit transaction. Python's `await` form is the survey's
+    one SEMANTICS finding and is not taken.
+  - R2 ROW HANDLES IN PYTHON, the twin of JS's rule 3: `todo.done =
+    checked` is the patch through `__setattr__`, refused by name on a
+    typo; the other seven keep `patch`, stated as the carve-out where
+    the language cannot intercept assignment.
+  - R3 THE TOOLCHAIN: JDK 21 (pattern switch over the sealed sums,
+    virtual threads; touches nine gradle modules), Swift 6 language mode
+    with strict concurrency (the binding becomes a package target),
+    Python type hints with a shipped py.typed and a pyright gate.
+  - R4 NOT TAKEN: a Roslyn source generator for C# and an attached macro
+    for Swift (the checked-in generated files are held by gen-guests
+    --check); Go's must-use diagnostic through runtime.AddCleanup (a
+    GC-time warning is nondeterministic).
+  KEY: idiom pass, idiom survey, wire-tag clause, naive port, keyed read,
+  async dialogs, row handles python, JDK 21, Swift 6, py.typed, kaya_app.mli,
+  Haskell module split, decision log comments
+
 - Component functions as the reusable named unit (Solid's model, slot
   proxies = the function signature) — mostly ratification for the
   typed languages; Python validates at record time.

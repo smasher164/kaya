@@ -298,7 +298,7 @@ func TestTemplatePropsCarryTheirOwnPropAndSource(t *testing.T) {
 		{"SetRole", func(_ *Tx, tp *Tpl, n Node) setProp {
 			tp.SetRole(n, RoleHeading)
 			return setProp{widget: n.id, prop: PropRole, source: SourceConst,
-				tag: ValueI64, i64: RoleHeading}
+				tag: ValueI64, i64: int64(RoleHeading)}
 		}},
 		{"SetInset", func(_ *Tx, tp *Tpl, n Node) setProp {
 			tp.SetInset(n, 8)
@@ -327,7 +327,7 @@ func TestRecordSurfaceResolvesAPropProjectionToItsOwnField(t *testing.T) {
 	var props []setProp
 	app.Build(func(tx *Tx) {
 		c := CollectionOf[string, propRec](tx)
-		for row := range tx.Rows(c.Collection).All() {
+		for row := range tx.Rows(c.Coll).All() {
 			n := row.Widget(KindEntry)
 			before := len(tx.records)
 			c.A11yLabel(row.Tpl, n, func(r *propRec) *string { return &r.Note })

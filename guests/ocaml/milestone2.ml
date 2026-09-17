@@ -1,7 +1,6 @@
 (* The milestone2 scene, OCaml port — guests/rust/milestone2.rs,
    tools/scenes/milestone2.steps. *)
 
-open Kaya_wire
 open Kaya_app
 
 let () =
@@ -10,8 +9,8 @@ let () =
   let steps = ref 0 in
   let status, items, remove_button =
     build app (fun () ->
-       let status = signal (Str "step 0") in
-       let extras = signal (Bool false) in
+       let status = signal_str ("step 0") in
+       let extras = signal_bool (false) in
 
        let groups = collection () in
        (* Both Fors keep their results because the central registration
@@ -37,18 +36,18 @@ let () =
          let () =
            match n with
            | 1 ->
-               insert groups (Str "g1") (Str "Work");
-               let todos = at items (Str "g1") in
-               insert todos (Str "a") (Str "send report");
-               insert todos (Str "b") (Str "buy milk")
+               insert groups (str_key "g1") "Work";
+               let todos = at items (str_key "g1") in
+               insert todos (str_key "a") "send report";
+               insert todos (str_key "b") "buy milk"
            | 2 ->
-               insert groups (Str "g2") (Str "Home");
-               insert (at items (Str "g2")) (Str "a") (Str "water plants");
-               update groups (Str "g1") (Str "Office")
+               insert groups (str_key "g2") "Home";
+               insert (at items (str_key "g2")) (str_key "a") "water plants";
+               update groups (str_key "g1") "Office"
            | _ -> ()
          in
-         write extras (Bool (n = 1));
-         write status (Str (Printf.sprintf "step %d" n))
+         write extras ((n = 1));
+         write status ((Printf.sprintf "step %d" n))
        in
 
        let root =
@@ -67,11 +66,11 @@ let () =
 
   on_click_node app remove_button (fun keys ->
       match keys with
-      | [ Str group; Str item ] ->
-          let todos = at items (Str group) in
-          remove todos (Str item);
+      | [ Str_key group; Str_key item ] ->
+          let todos = at items (str_key group) in
+          remove todos (str_key item);
           let left = count todos in
-          write status (Str (Printf.sprintf "removed %s/%s, %d left" group item left))
+          write status ((Printf.sprintf "removed %s/%s, %d left" group item left))
       | _ -> ());
 
   exit (run app)

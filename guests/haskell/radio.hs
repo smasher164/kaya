@@ -1,21 +1,24 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 -- The radio scene, Haskell port — guests/rust/radio.rs,
 -- tools/scenes/radio.steps.
 
+import Data.Text (Text)
+import qualified Data.Text as T
 import KayaApp
-import KayaWire (Value (..))
 
-options :: [String]
+options :: [Text]
 options = ["Small", "Medium", "Large"]
 
 main :: IO ()
 main = kayaMain $ \app -> do
   _ <- buildTx app $ do
-    window 0 [WTitle "radio"]
-    size <- signal (VStr "size: Small")
+    window primary [WTitle "radio"]
+    size <- signal (T.pack "size: Small")
 
     let onPick index =
           submitTx app $
-            writeSignal size (VStr ("size: " ++ options !! index))
+            writeSignal size ("size: " <> options !! index)
 
     root <-
       column

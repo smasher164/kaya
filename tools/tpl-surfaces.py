@@ -791,8 +791,9 @@ def table_ocaml(_):
     # The TYPE is the half that says which zone the handler serves: the
     # live one takes the column alone, this one the copy's key path first.
     registered = tpl_columns and re.search(
-        r"\?\(on_sort : \(Kaya_wire\.value list -> int -> unit\) option\).*?"
-        r"Hashtbl\.replace tx\.app\.node_sorts id handler",
+        r"\?\(on_sort : \(key list -> int -> unit\) option\).*?"
+        r"Hashtbl\.replace tx\.app\.node_sorts id \(fun keys col ->\s*"
+        r"handler \(List\.map key_of_wire keys\) col\)",
         tpl_columns,
         re.S,
     )
@@ -810,12 +811,13 @@ def table_ocaml(_):
         got.add("on_sort")
 
     keyed = ocaml_binding(
-        outside, r"^let columns_at \(Node id\) keys titles sort =", ""
+        outside, r"^let columns_at \(Node id\) \(keys : key list\) titles sort =", ""
     )
     if keyed and re.search(
+        r"List\.map key_to_wire keys.*?"
         r"Kaya_wire\.tx_set_column_headers id\b.*?"
         r"\(List\.length titles\) \(List\.length keys\).*?"
-        r"\(keys @ List\.map \(fun t -> Kaya_wire\.Str t\) titles\)",
+        r"\(wire_keys @ List\.map \(fun t -> Kaya_wire\.Str t\) titles\)",
         keyed,
         re.S,
     ):
@@ -885,14 +887,15 @@ def haskell_scope(src, header_re):
 
 def table_haskell(_):
     src = read("bindings/haskell/KayaApp.hs")
+    core = read("bindings/haskell/Kaya/Core.hs")
     # THE ZONE IS THE SCOPE, not the name: a constructor identical in
     # both zones keeps ONE name and dispatches on it, so the template half
     # of each point is the arm inside the TEMPLATE instance, read by its
     # scope. The LOCATORS are the three the file cannot lose while still
     # being KayaApp.hs, so a deleted spelling names ITSELF rather than
     # reporting a broken reader.
-    declare = haskell_scope(src, r"^class Monad m => Declare m where")
-    tpl_zone = haskell_scope(src, r"^instance Declare Tpl where")
+    declare = haskell_scope(core, r"^class Monad m => Declare m where")
+    tpl_zone = haskell_scope(core, r"^instance Declare Tpl where")
     loop = haskell_decl(src, "dispatchLoop")
     if declare is None or tpl_zone is None or loop is None:
         return None
@@ -902,12 +905,12 @@ def table_haskell(_):
     # makes the bar zone-spanning rather than live-only, and the template
     # instance's arm is what proves the TEMPLATE zone got it.
     if re.search(
-        r"^\s+columns\s*::\s*El m\s*->\s*\[String\]\s*->\s*Sort\s*->\s*m \(\)",
+        r"^\s+columns\s*::\s*El m\s*->\s*\[Text\]\s*->\s*Sort\s*->\s*m \(\)",
         declare,
         re.M,
     ) and re.search(
         r"^\s+columns \(Node n\) titles sort =.*?emitT\b.*?W\.txSetColumnHeaders\b.*?"
-        r"\(fromIntegral \(length titles\)\)\s*0\s*\(map W\.VStr titles\)",
+        r"\(fromIntegral \(length titles\)\)\s*0\s*\(map \(W\.VStr \. T\.unpack\) titles\)",
         tpl_zone,
         re.M | re.S,
     ):
@@ -949,13 +952,13 @@ def table_haskell(_):
 
     keyed = haskell_decl(src, "columnsAt")
     if keyed and re.search(
-        r"^columnsAt\s*::\s*Node\s*->\s*\[W\.Value\]\s*->\s*\[String\]\s*->\s*"
+        r"^columnsAt\s*::\s*Node\s*->\s*\[W\.Value\]\s*->\s*\[Text\]\s*->\s*"
         r"Sort\s*->\s*Build \(\)",
         keyed,
         re.M,
     ) and re.search(
         r"\(fromIntegral \(length titles\)\)\s*\(fromIntegral \(length keys\)\).*?"
-        r"\(keys \+\+ map W\.VStr titles\)",
+        r"\(keys \+\+ map \(W\.VStr \. T\.unpack\) titles\)",
         keyed,
         re.S,
     ):
@@ -1256,7 +1259,7 @@ def record_go(_):
         src,
         r"^func \(c RecordCollection\[K, T\]\) At\(key any\) RecordCollection\[K, T\] \{",
     )
-    if at and "c.Collection.At(key)" in at:
+    if at and "c.Coll.At(key)" in at:
         got.add("record instance addressing")
     return got
 
@@ -1426,7 +1429,7 @@ def record_js(_):
 
 
 def record_haskell(_):
-    src = read("bindings/haskell/KayaApp.hs")
+    src = read("bindings/haskell/Kaya/Core.hs")
     declare = haskell_scope(src, r"^class Monad m => Declare m where")
     tpl_zone = haskell_scope(src, r"^instance Declare Tpl where")
     if declare is None or tpl_zone is None:
@@ -1437,12 +1440,12 @@ def record_haskell(_):
     if (
         birth
         and re.search(
-            r"^\s+collectionOf\s*::\s*KayaRecord a\s*=>\s*Proxy a\s*->\s*"
+            r"^\s+collectionOfProxy\s*::\s*KayaRecord a\s*=>\s*Proxy a\s*->\s*"
             r"m \(RecordCollection a\)",
             declare,
             re.M,
         )
-        and re.search(r"^\s+collectionOf\b.*\bnewRecordCollection\b", tpl_zone, re.M)
+        and re.search(r"^\s+collectionOfProxy\b.*\bnewRecordCollection\b", tpl_zone, re.M)
         and "kayaSchema p" in birth
     ):
         got.add("nested record collection")
@@ -1454,7 +1457,7 @@ def record_haskell(_):
     if (
         handle
         and record_at
-        and re.search(r"^\s+at\s*::\s*c\s*->\s*W\.Value\s*->\s*c", handle, re.M)
+        and re.search(r"^\s+at\s*::\s*KayaValue k\s*=>\s*c\s*->\s*k\s*->\s*c", handle, re.M)
         # The KEY THREADED THROUGH, not just a RecordCollection handed
         # back: `at (RecordCollection c) _ = RecordCollection c` typechecks
         # everywhere and addresses the parent instead of the copy.
@@ -1493,8 +1496,8 @@ RECORD_ZONES = [
      "the module-level `collection(type)` and Collection.at "
      "(bindings/js/kaya/index.ts)"),
     ("haskell", record_haskell,
-     "Declare's `collectionOf` + instance CollectionHandle "
-     "(RecordCollection a) (bindings/haskell/KayaApp.hs)"),
+     "Declare's `collectionOfProxy` + instance CollectionHandle "
+     "(RecordCollection a) (bindings/haskell/Kaya/Core.hs)"),
 ]
 
 
@@ -1688,7 +1691,7 @@ def sources_haskell(_):
     got = set()
     if re.search(rf"^instance {cls} Signal\b", src, re.M):
         got.add("signal")
-    if re.search(rf"^instance {cls} \(KField String\)", src, re.M):
+    if re.search(rf"^instance {cls} \(KField Text\)", src, re.M):
         got.add("field")
     return got
 

@@ -1,20 +1,23 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 -- The milestone2 scene, Haskell port — guests/rust/milestone2.rs,
 -- tools/scenes/milestone2.steps.
 
 import Data.IORef (atomicModifyIORef', newIORef)
 
+import Data.Text (Text)
+import qualified Data.Text as T
 import KayaApp
-import KayaWire (Value (..))
 
 main :: IO ()
 main = kayaMain $ \app -> do
   stepsRef <- newIORef (0 :: Int)
 
   (status, items, removeButton) <- buildTx app $ do
-    status <- signal (VStr "step 0")
-    extras <- signal (VBool False)
+    status <- signal (T.pack "step 0")
+    extras <- signal False
 
-    (banner, _) <- when_ extras (label "extras on")
+    (banner, _) <- when_ extras (label ("extras on" :: Text))
 
     groups <- collection
     (groupList, (items, removeButton)) <- forEach groups $ do
@@ -32,17 +35,17 @@ main = kayaMain $ \app -> do
           submitTx app $ do
             case n of
               1 -> do
-                insert groups (VStr "g1") (VStr "Work")
-                let todos = items `at` VStr "g1"
-                insert todos (VStr "a") (VStr "send report")
-                insert todos (VStr "b") (VStr "buy milk")
+                insert groups ("g1" :: Text) ("Work" :: Text)
+                let todos = items `at` ("g1" :: Text)
+                insert todos ("a" :: Text) ("send report" :: Text)
+                insert todos ("b" :: Text) ("buy milk" :: Text)
               2 -> do
-                insert groups (VStr "g2") (VStr "Home")
-                insert (items `at` VStr "g2") (VStr "a") (VStr "water plants")
-                update groups (VStr "g1") (VStr "Office")
+                insert groups ("g2" :: Text) ("Home" :: Text)
+                insert (items `at` ("g2" :: Text)) ("a" :: Text) ("water plants" :: Text)
+                update groups ("g1" :: Text) ("Office" :: Text)
               _ -> return ()
-            writeSignal extras (VBool (n == 1))
-            writeSignal status (VStr ("step " ++ show n))
+            writeSignal extras (n == 1)
+            writeSignal status (T.pack ("step " ++ show n))
 
     root <-
       column
@@ -55,10 +58,12 @@ main = kayaMain $ \app -> do
     return (status, items, removeButton)
 
   onClick app removeButton $ \keys -> case keys of
-    [VStr group, VStr item] ->
-      submitTx app $ do
-        let todos = items `at` VStr group
-        remove todos (VStr item)
-        left <- count todos
-        writeSignal status (VStr ("removed " ++ group ++ "/" ++ item ++ ", " ++ show left ++ " left"))
+    [groupV, itemV] ->
+      let group = fromWire groupV :: Text
+          item = fromWire itemV :: Text
+       in submitTx app $ do
+            let todos = items `at` group
+            remove todos item
+            left <- count todos
+            writeSignal status ("removed " <> group <> "/" <> item <> ", " <> T.pack (show left) <> " left")
     _ -> return ()

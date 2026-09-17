@@ -22,10 +22,8 @@ function onSettings(): void {
   status.set(`settings ${settingsCount}`);
 }
 
-let status!: kaya.Signal<string>;
-
-app.window({ title: "commands" }, () => {
-  status = kaya.signal("ready");
+const { status } = app.window({ title: "commands" }, () => {
+  const status = kaya.signal("ready");
   const details = kaya.signal(false);
   const sort = kaya.signal(0);
 
@@ -46,6 +44,7 @@ app.window({ title: "commands" }, () => {
   kaya.column(() => {
     kaya.label({ bind: status }); // label#0
   });
+  return { status };
 });
 
 app.run();

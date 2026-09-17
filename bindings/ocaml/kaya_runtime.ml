@@ -242,6 +242,7 @@ let open_picked handle mode =
   if rc <> 0l then
     failwith
       (Printf.sprintf "kaya: opening the picked file failed (code %ld)" rc);
+  (* docs/traps.md: the Obj.magic file_descr cast. *)
   let fd : Unix.file_descr =
     Obj.magic (Int64.to_int (Ctypes.( !@ ) raw))
   in

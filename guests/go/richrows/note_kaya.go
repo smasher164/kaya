@@ -124,7 +124,7 @@ func (r noteRow) Draggable(n kaya.Node) kaya.TplDragRef { return r.t.Draggable(n
 
 func (r noteRow) SetDropTarget(n kaya.Node, ops ...kaya.Op) { r.t.SetDropTarget(n, ops...) }
 
-func (r noteRow) SetRole(n kaya.Node, role int64) { r.t.SetRole(n, role) }
+func (r noteRow) SetRole(n kaya.Node, role kaya.Role) { r.t.SetRole(n, role) }
 
 func (r noteRow) SetInset(n kaya.Node, pad float64) { r.t.SetInset(n, pad) }
 
@@ -133,7 +133,7 @@ func (r noteRow) SetInset(n kaya.Node, pad float64) { r.t.SetInset(n, pad) }
 // once with the typed row surface (exact-index tokens, no probes);
 // stamping is the core's replay.
 func NoteRows(tx *kaya.Tx, c kaya.RecordCollection[string, Note]) *noteRowsFor {
-	return &noteRowsFor{tx.Rows(c.Collection), c}
+	return &noteRowsFor{tx.Rows(c.Coll), c}
 }
 
 // The embedded *kaya.Rows carries Widget(); the two chain methods

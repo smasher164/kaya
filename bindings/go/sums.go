@@ -14,9 +14,10 @@ type sumVariant struct {
 }
 
 // SumCollection is a Collection whose entries are one of several
-// constructor structs behind the sealed interface T, keyed by K.
+// constructor structs behind the sealed interface T, keyed by K. Coll is
+// a named field, not embedded: see RecordCollection.
 type SumCollection[K Key, T any] struct {
-	Collection
+	Coll     Collection
 	variants []sumVariant
 }
 
@@ -70,27 +71,27 @@ func (c SumCollection[K, T]) variantOf(t reflect.Type) (uint32, *recordInfo) {
 // reaches the fresh-key minter here too.
 func (c SumCollection[K, T]) Insert(tx *Tx, key K, value T) {
 	variant, info := c.variantOf(reflect.TypeOf(value))
-	tx.insertEntry(c.Collection, key, variant, value, info.values(value))
+	tx.insertEntry(c.Coll, key, variant, value, info.values(value))
 }
 
 // handle is the plain (collection, path) handle the minter counts per.
-func (c SumCollection[K, T]) handle() Collection { return c.Collection }
+func (c SumCollection[K, T]) handle() Collection { return c.Coll }
 
 // Update replaces a record wholesale; a different constructor than the
 // entry's current one restamps its copy in place.
 func (c SumCollection[K, T]) Update(tx *Tx, key K, value T) {
 	variant, info := c.variantOf(reflect.TypeOf(value))
-	tx.app.modelSet(c.id, c.path, key, value)
+	tx.app.modelSet(c.Coll.id, c.Coll.path, key, value)
 	tx.emit(
-		TxCollectionUpdate(c.id, c.path, key, variant, info.values(value)))
-	tx.recomputeDerived(c.id, c.path)
+		TxCollectionUpdate(c.Coll.id, c.Coll.path, key, variant, info.values(value)))
+	tx.recomputeDerived(c.Coll.id, c.Coll.path)
 }
 
 // Items is the typed model, in insertion order; the values are the
 // constructor structs behind T.
 func (c SumCollection[K, T]) Items(tx *Tx) []RecordEntry[K, T] {
 	tx.app.guardMirrorRead()
-	in := tx.app.instanceOf(c.id, c.path)
+	in := tx.app.instanceOf(c.Coll.id, c.Coll.path)
 	if in == nil {
 		return nil
 	}
@@ -105,7 +106,7 @@ func (c SumCollection[K, T]) Items(tx *Tx) []RecordEntry[K, T] {
 func (c SumCollection[K, T]) Get(tx *Tx, key K) (T, bool) {
 	tx.app.guardMirrorRead()
 	var zero T
-	in := tx.app.instanceOf(c.id, c.path)
+	in := tx.app.instanceOf(c.Coll.id, c.Coll.path)
 	if in == nil {
 		return zero, false
 	}
@@ -121,7 +122,7 @@ func (c SumCollection[K, T]) Get(tx *Tx, key K) (T, bool) {
 // caller just matched, and the model refuses if the entry holds another.
 func (c SumCollection[K, T]) UpdateField[V any, F any](tx *Tx, key K, sel func(*V) *F, value F) {
 	variant, info := c.variantOf(reflect.TypeFor[V]())
-	in := tx.app.instanceOf(c.id, c.path)
+	in := tx.app.instanceOf(c.Coll.id, c.Coll.path)
 	if in == nil {
 		panic("kaya: update of a missing instance")
 	}
@@ -138,12 +139,12 @@ func (c SumCollection[K, T]) UpdateField[V any, F any](tx *Tx, key K, sel func(*
 		}
 		rv := reflect.ValueOf(&record).Elem()
 		rv.Field(info.indexes[f.index]).Set(reflect.ValueOf(value))
-		tx.app.modelSet(c.id, c.path, key, any(record).(T))
+		tx.app.modelSet(c.Coll.id, c.Coll.path, key, any(record).(T))
 		// Through the encoder: a blob field registers its bytes at
 		// encode time (handles are single-submit).
 		tx.emit(
-			TxCollectionUpdateField(c.id, c.path, key, f.index, variant, info.encode(f.index, value)))
-		tx.recomputeDerived(c.id, c.path)
+			TxCollectionUpdateField(c.Coll.id, c.Coll.path, key, f.index, variant, info.encode(f.index, value)))
+		tx.recomputeDerived(c.Coll.id, c.Coll.path)
 		return
 	}
 	panic(fmt.Sprintf("kaya: update of missing key %v", key))
@@ -152,7 +153,7 @@ func (c SumCollection[K, T]) UpdateField[V any, F any](tx *Tx, key K, sel func(*
 // Derive is the collection-derived signal, over the sum's entries.
 func (c SumCollection[K, T]) Derive[V Scalar](tx *Tx, compute func(items []RecordEntry[K, T]) V) Signal[V] {
 	s := tx.Signal(compute(c.Items(tx)))
-	tx.pendingDerived = append(tx.pendingDerived, pendingDerived{c.id, func(tx *Tx) {
+	tx.pendingDerived = append(tx.pendingDerived, pendingDerived{c.Coll.id, func(tx *Tx) {
 		tx.Write(s, compute(c.Items(tx)))
 	}})
 	return s
@@ -457,7 +458,7 @@ func (sc SumCase[K, V]) SetDropTarget(n Node, ops ...Op) { sc.t.SetDropTarget(n,
 
 // SetRole declares what a copy of this arm MEANS; const only, since an
 // arm is the shape its rows share (Tpl.SetRole).
-func (sc SumCase[K, V]) SetRole(n Node, role int64) { sc.t.SetRole(n, role) }
+func (sc SumCase[K, V]) SetRole(n Node, role Role) { sc.t.SetRole(n, role) }
 
 // SetInset pads a container this arm stamps; containers only, const
 // only (Tpl.SetInset).

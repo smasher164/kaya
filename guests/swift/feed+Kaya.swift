@@ -111,8 +111,8 @@ func postEachSum(
     tx.eachSum(
         c,
         arms: [
-            c.arm(.note(text: "")) { t, _ in note(PostNoteArm(t: t)) },
-            c.arm(.todo(title: "", done: false)) { t, _ in todo(PostTodoArm(t: t)) },
+            c.arm(.note(text: "")) { t in note(PostNoteArm(t: t)) },
+            c.arm(.todo(title: "", done: false)) { t in todo(PostTodoArm(t: t)) },
         ])
 }
 

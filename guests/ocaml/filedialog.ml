@@ -1,7 +1,6 @@
 (* The filedialog scene, OCaml port — guests/rust/filedialog.rs,
    tools/scenes/filedialog.steps. *)
 
-open Kaya_wire
 open Kaya_app
 
 (* A plain Mutex + Condition: kaya supplies no waiting primitive. *)
@@ -30,13 +29,13 @@ let () =
 
   build app (fun () ->
       window ~title:"filedialog" ();
-      let status = signal (Str "no file") in
+      let status = signal_str ("no file") in
 
       let picked files =
         match files with
         | [] ->
             (* The empty list IS cancel: no worker, no release. *)
-            write status (Str "cancelled")
+            write status ("cancelled")
         | first :: _ ->
             let count = List.length files in
             let worker () =
@@ -59,11 +58,11 @@ let () =
               done;
               Mutex.unlock release_lock;
               post app (fun () ->
-                  write status (Str (Printf.sprintf "%d %s" count text)))
+                  write status ((Printf.sprintf "%d %s" count text)))
             in
             ignore (Thread.create worker ());
             (* The handler RETURNED without reading. *)
-            write status (Str "reading")
+            write status ("reading")
       in
 
       let ask () =

@@ -1,5 +1,7 @@
 //! The menus conformance scene (tools/scenes/menus.steps).
 
+use kaya::PathKey;
+
 #[derive(kaya::KayaGen, Clone, Debug, PartialEq)]
 struct Task {
     title: String,
@@ -145,11 +147,10 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 tx.write(status, "renamed");
             }),
             Msg::Remove(path) => {
-                let [kaya::Value::Str(group), kaya::Value::Str(item)] = &path[..] else {
-                    panic!("remove carries [group, item], got {path:?}");
-                };
+                let group = path.key::<String>(0);
+                let item = path.key::<String>(1);
                 ctx.apply(|tx| {
-                    tx.remove(&items.at(path[0].clone()), path[1].clone());
+                    tx.remove(&items.at(group.clone()), item.clone());
                     tx.write(status, format!("removed {group}/{item}"));
                 });
             }

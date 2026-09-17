@@ -150,6 +150,7 @@ public final class KayaSums {
 
         /** A toggle handler's shape: the stamped copy's key, then the
          * new state. */
+        @FunctionalInterface
         public interface ToggleHandler<K> {
             void accept(KayaApp.Tx tx, K key, boolean checked);
         }

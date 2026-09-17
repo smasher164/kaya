@@ -1,7 +1,6 @@
 (* The assets scene, OCaml port — guests/rust/assets.rs,
    tools/scenes/assets.steps. *)
 
-open Kaya_wire
 open Kaya_app
 
 (* Deliberately absent, and a LEGAL name: the answer is the census sentence. *)
@@ -44,15 +43,14 @@ let () =
        if complaint = "" then "no complaint" else first_line complaint
      in
 
-     let title = signal (Str "assets") in
-     let found = signal (Str census) in
+     let title = signal_str ("assets") in
+     let found = signal_str (census) in
      (* [%d] renders an OCaml int with no separator and no locale. *)
      let present = if mark_length > 0 then "present" else "missing" in
      let sizes =
-       signal
-         (Str
-            (Printf.sprintf "%s %s, %s: %d bytes, %s" mark_name present
-               font_name font_length verdict))
+       signal_str
+         (Printf.sprintf "%s %s, %s: %d bytes, %s" mark_name present
+            font_name font_length verdict)
      in
 
      let root =

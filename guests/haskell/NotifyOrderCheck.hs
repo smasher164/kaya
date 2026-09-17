@@ -1,3 +1,5 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 -- The process-level notification handler's DISPATCH ORDER
 -- (docs/tasks-s9-plan.md R1), run rather than read. A tap on a reminder
 -- after the app has exited relaunches the process, and THAT process never
@@ -9,7 +11,7 @@
 
 import Control.Monad (unless)
 import Data.ByteString.Builder (toLazyByteString)
-import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
+import Data.IORef (modifyIORef', newIORef, readIORef)
 import qualified Data.Map.Strict as Map
 import Data.Word (Word32, Word64)
 import GHC.IO.Handle (hDuplicate, hDuplicateTo)

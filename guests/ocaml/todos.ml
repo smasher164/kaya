@@ -1,7 +1,6 @@
 (* The todos scene, OCaml port — guests/rust/todos.rs,
    tools/scenes/todos.steps. *)
 
-open Kaya_wire
 open Kaya_app
 
 type todo = { title : string; done_ : bool } [@@deriving kaya_gen]
@@ -14,9 +13,9 @@ let () =
   build app (fun () ->
      let todos = collection_of todo_record in
      let items_left =
-       derive todos (fun entries ->
+       derive signal_str todos (fun entries ->
            let n = List.length (List.filter (fun (_, t) -> not t.done_) entries) in
-           Str (if n = 1 then "1 item left" else Printf.sprintf "%d items left" n))
+           if n = 1 then "1 item left" else Printf.sprintf "%d items left" n)
      in
      let field = entry ~on_change:(fun text -> draft := text) () in
      let on_add () =
@@ -42,8 +41,8 @@ let () =
          [
            menu ~label:"Edit"
              [
-               item ~label:"Undo" ~role:role_undo;
-               item ~label:"Redo" ~role:role_redo;
+               item ~label:"Undo" ~role:Menu_role.Undo;
+               item ~label:"Redo" ~role:Menu_role.Redo;
              ];
          ]
        ();

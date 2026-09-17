@@ -83,21 +83,16 @@ function onReorder(d: kaya.Dropped): void {
   else items.moveAfter(moved, anchor as kaya.Key);
 }
 
-let items!: kaya.Collection<kaya.Fields<typeof Item.schema>, kaya.Row<typeof Item.schema>>;
-let source!: kaya.Widget;
-let dropStatus!: kaya.Signal<string>;
-let dragStatus!: kaya.Signal<string>;
-let sourceText!: kaya.Signal<string>;
-
-app.window({ title: "dnd" }, () => {
-  items = kaya.collection(Item);
+const { items, source, dropStatus, dragStatus, sourceText } = app.window({ title: "dnd" }, () => {
+  const items = kaya.collection(Item);
   const items2 = kaya.collection(Item);
-  dropStatus = kaya.signal("no drop yet");
-  dragStatus = kaya.signal("no drag yet");
-  sourceText = kaya.signal("hello");
+  const dropStatus = kaya.signal("no drop yet");
+  const dragStatus = kaya.signal("no drag yet");
+  const sourceText = kaya.signal("hello");
   const textTarget = kaya.signal("text target");
   const noteTarget = kaya.signal("note target");
   const filesTarget = kaya.signal("files target");
+  let source!: kaya.Widget;
   kaya.row(() => {
     for (const item of items.rows({ reorderable: true, onDrop: onReorder, a11yId: "rows" })) {
       kaya.label({ bind: item.title }).a11yId("row").onDragEnded(nodeDragEnded("row"));
@@ -147,6 +142,7 @@ app.window({ title: "dnd" }, () => {
   for (const key of ["x", "y"]) {
     items2.insert(key, Item({ title: key }));
   }
+  return { items, source, dropStatus, dragStatus, sourceText };
 });
 
 app.run();

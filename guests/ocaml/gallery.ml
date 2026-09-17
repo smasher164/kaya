@@ -1,7 +1,6 @@
 (* The gallery scene, OCaml port — guests/rust/gallery.rs,
    tools/scenes/gallery.steps. *)
 
-open Kaya_wire
 open Kaya_app
 
 (* A 2x2 RGB PNG, 75 bytes, embedded as source. *)
@@ -17,21 +16,21 @@ let () =
   let app = Kaya_app.create () in
 
   build app (fun () ->
-     let status = signal (Str "urgent: false") in
-     let volume = signal (Str "volume: 50%") in
-     let pos = signal (F64 0.5) in
+     let status = signal_str ("urgent: false") in
+     let volume = signal_str ("volume: 50%") in
+     let pos = signal_f64 (0.5) in
 
      let on_urgent checked =
-       write status (Str (Printf.sprintf "urgent: %b" checked))
+       write status ((Printf.sprintf "urgent: %b" checked))
      in
      let on_volume v =
        (* Integer percent, so every language's formatting agrees. *)
        write volume
-         (Str (Printf.sprintf "volume: %d%%"
-                 (int_of_float (Float.round (v *. 100.)))))
+         (Printf.sprintf "volume: %d%%"
+            (int_of_float (Float.round (v *. 100.))))
      in
      (* A programmatic write must NOT come back as an occurrence. *)
-     let on_quarter () = write pos (F64 0.25) in
+     let on_quarter () = write pos (0.25) in
 
      let root =
        column

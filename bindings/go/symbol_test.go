@@ -19,7 +19,7 @@ import (
 
 // Every value the root accepts, in wire order. A constant that drifted
 // from crates/kaya/src/spec.rs dies here, not as a missing glyph.
-var theVocabulary = []int64{
+var theVocabulary = []Symbol{
 	SymbolAdd, SymbolRemove, SymbolDelete, SymbolEdit, SymbolDone,
 	SymbolClose, SymbolSearch, SymbolSettings, SymbolRefresh, SymbolInfo,
 	SymbolWarning, SymbolBack, SymbolForward, SymbolMore, SymbolCopy,

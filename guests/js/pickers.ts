@@ -15,12 +15,6 @@ function clock(t: kaya.CivilTime): string {
   return `${String(t.hour).padStart(2, "0")}:${String(t.minute).padStart(2, "0")}`;
 }
 
-let dateText!: kaya.Signal<string>;
-let timeText!: kaya.Signal<string>;
-let rowText!: kaya.Signal<string>;
-let dateSig!: kaya.Signal<kaya.CivilDate>;
-let timeSig!: kaya.Signal<kaya.CivilTime>;
-
 function onDate(picked: kaya.CivilDate): void {
   dateText.set(`date: ${day(picked)}`);
 }
@@ -38,12 +32,12 @@ function onReset(): void {
   timeSig.set({ hour: 9, minute: 0 });
 }
 
-app.window({}, () => {
-  dateText = kaya.signal("date: none");
-  timeText = kaya.signal("time: none");
-  rowText = kaya.signal("row: none");
-  dateSig = kaya.signal<kaya.CivilDate>({ year: 2026, month: 9, day: 4 });
-  timeSig = kaya.signal<kaya.CivilTime>({ hour: 14, minute: 30 });
+const { dateText, timeText, rowText, dateSig, timeSig } = app.window({}, () => {
+  const dateText = kaya.signal("date: none");
+  const timeText = kaya.signal("time: none");
+  const rowText = kaya.signal("row: none");
+  const dateSig = kaya.signal<kaya.CivilDate>({ year: 2026, month: 9, day: 4 });
+  const timeSig = kaya.signal<kaya.CivilTime>({ hour: 14, minute: 30 });
   const tasks = kaya.collection(Task);
   kaya.column(() => {
     kaya.label({ bind: dateText }); // label#0
@@ -62,6 +56,7 @@ app.window({}, () => {
   });
   tasks.insert("a", Task({ name: "a", due: { year: 2026, month: 10, day: 1 } }));
   tasks.insert("b", Task({ name: "b", due: { year: 2026, month: 11, day: 20 } }));
+  return { dateText, timeText, rowText, dateSig, timeSig };
 });
 
 app.run();

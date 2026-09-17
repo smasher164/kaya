@@ -113,20 +113,17 @@ function rowPasted(row: kaya.RowHandle<string>, clip: kaya.Clip | null): void {
   else rowStatus.set(`row ${row.key} pasted ${String(clip)}`);
 }
 
-let status!: kaya.Signal<string>;
-let rowStatus!: kaya.Signal<string>;
-let rich!: kaya.Widget;
-let plain!: kaya.Widget;
-
-app.window({ title: "clipboard" }, () => {
+const { status, rowStatus, rich, plain } = app.window({ title: "clipboard" }, () => {
   app.menu("Edit", () => {
     kaya.item("Cut", { role: kaya.ROLE_CUT });
     kaya.item("Copy", { role: kaya.ROLE_COPY });
     kaya.item("Paste", { role: kaya.ROLE_PASTE });
   });
 
-  status = kaya.signal("ready");
-  rowStatus = kaya.signal("");
+  const status = kaya.signal("ready");
+  const rowStatus = kaya.signal("");
+  let rich!: kaya.Widget;
+  let plain!: kaya.Widget;
   kaya.column(() => {
     kaya.label({ bind: status }).a11yId("status"); // label#0
     kaya.button("copy", { onClick: copyRich }); // button#0
@@ -151,6 +148,7 @@ app.window({ title: "clipboard" }, () => {
     }
     rows.insert("r1", ""); // entry#2
   });
+  return { status, rowStatus, rich, plain };
 });
 
 app.run();

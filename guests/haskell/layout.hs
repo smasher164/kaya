@@ -1,3 +1,5 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 {- The layout scene, Haskell port — the native-default observation
    vehicle; see guests/rust/layout.rs for the axes it stresses.
 
@@ -5,17 +7,17 @@
    order, which legitimately differs per language. The grow contract is
    asserted in the grow scene instead. -}
 
+import qualified Data.Text as T
 import KayaApp
-import KayaWire (Value (..))
 
 main :: IO ()
 main = kayaMain $ \app -> do
   buildTx app $ do
-    probe <- signal (VStr "Layout probe")
-    tailSig <- signal (VStr "tail")
-    mixed <- signal (VStr "mixed")
-    nested <- signal (VStr "nested")
-    deep <- signal (VStr "deep")
+    probe <- signal (T.pack "Layout probe")
+    tailSig <- signal (T.pack "tail")
+    mixed <- signal (T.pack "mixed")
+    nested <- signal (T.pack "nested")
+    deep <- signal (T.pack "deep")
 
     root <-
       column

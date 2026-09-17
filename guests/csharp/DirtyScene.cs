@@ -23,7 +23,7 @@ static class DirtyScene
                     {
                         // Aborts if it ever runs (docs/traps.md, an app can VETO a
                         // close but cannot AGREE to one).
-                        if (choice == KayaWire.AlertChoiceCancel)
+                        if (choice == AlertChoice.Cancel)
                             inner.Write(status, "kept editing");
                         else
                             inner.DestroyWindow(0);

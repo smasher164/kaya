@@ -1,3 +1,5 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 -- The grid scene, Haskell port — guests/rust/grid.rs, tools/scenes/grid.steps.
 
 import KayaApp
@@ -5,7 +7,7 @@ import KayaApp
 main :: IO ()
 main = kayaMain $ \app -> do
   _ <- buildTx app $ do
-    window 0 [WTitle "grid"]
+    window primary [WTitle "grid"]
     root <-
       column
         []

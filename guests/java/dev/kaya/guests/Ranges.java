@@ -10,6 +10,11 @@ import java.util.List;
  * tools/scenes/ranges.steps.
  */
 public final class Ranges {
+    /** Java lambdas cannot assign captured locals. */
+    private static final class Refs {
+        KayaApp.Widget editor;
+    }
+
     /** The document, frozen. THE CJK WORD IS IN {@code \}{@code u} ESCAPES: a
      * literal's bytes follow the compiler's encoding, and the Android build
      * that also compiles this directory passes no {@code -encoding}. */
@@ -78,13 +83,12 @@ public final class Ranges {
             tx.window(0).title("ranges");
             KayaApp.Signal<String> status = tx.signal("0 matches");
 
-            // Java lambdas cannot assign captured locals.
-            KayaApp.Widget[] editor = new KayaApp.Widget[1];
+            Refs refs = new Refs();
             tx.mount(tx.column(() -> {
                 // Every range assertion finds this control by its authored id.
-                editor[0] = tx.textarea().a11yId("doc").a11yLabel("Document"); // textarea#0
-                tx.setText(editor[0], DOC);
-                app.onChange(editor[0], (t, text) -> {
+                refs.editor = tx.textarea().a11yId("doc").a11yLabel("Document"); // textarea#0
+                tx.setText(refs.editor, DOC);
+                app.onChange(refs.editor, (t, text) -> {
                     doc = text;
                     // A declared set is bound to the text it was declared against.
                     t.write(status, "0 matches");
@@ -93,25 +97,25 @@ public final class Ranges {
                 tx.row(() -> {
                     tx.button("find", t -> { // button#0
                         List<KayaApp.TextRange> hits = findAll(doc, NEEDLE);
-                        t.highlightRanges(editor[0], hits);
+                        t.highlightRanges(refs.editor, hits);
                         // The SECOND match, so a leg can tell the selection apart
                         // from "the first thing found".
                         if (hits.size() > 1) {
-                            t.selectRange(editor[0], hits.get(1));
+                            t.selectRange(refs.editor, hits.get(1));
                         }
                         t.write(status, hits.size() + " matches");
                     });
                     tx.button("reveal last", t -> { // button#1
                         List<KayaApp.TextRange> hits = findAll(doc, NEEDLE);
                         if (!hits.isEmpty()) {
-                            t.revealRange(editor[0], hits.get(hits.size() - 1));
+                            t.revealRange(refs.editor, hits.get(hits.size() - 1));
                         }
                     });
-                    tx.button("focus editor", t -> t.focus(editor[0])); // button#2
+                    tx.button("focus editor", t -> t.focus(refs.editor)); // button#2
                     tx.button("select first", t -> { // button#3
                         List<KayaApp.TextRange> hits = findAll(doc, NEEDLE);
                         if (!hits.isEmpty()) {
-                            t.selectRange(editor[0], hits.get(0));
+                            t.selectRange(refs.editor, hits.get(0));
                         }
                     });
                 });

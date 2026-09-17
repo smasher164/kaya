@@ -303,6 +303,17 @@ public final class KayaRecords {
             tx.updateRecordRaw(handle, key, value, 0, info.wireFields(value));
         }
 
+        /** The entry's current value, or null for a missing key. */
+        @SuppressWarnings("unchecked")
+        public T get(KayaApp.Tx tx, K key) {
+            for (KayaApp.Entry entry : tx.items(handle)) {
+                if (java.util.Objects.equals(entry.key, key)) {
+                    return (T) entry.value;
+                }
+            }
+            return null;
+        }
+
         /**
          * One field's delta by selector: the rest of the record never
          * travels.
@@ -314,12 +325,7 @@ public final class KayaRecords {
 
         /** updateField over a pre-resolved token. */
         public <V> void updateField(KayaApp.Tx tx, K key, Field<V> f, V value) {
-            Object current = null;
-            for (KayaApp.Entry entry : tx.items(handle)) {
-                if (entry.key.equals(key)) {
-                    current = entry.value;
-                }
-            }
+            Object current = get(tx, key);
             if (current == null) {
                 throw new IllegalStateException("kaya: update of missing key " + key);
             }
@@ -363,6 +369,7 @@ public final class KayaRecords {
 
         /** A template checkbox's typed toggle handler: the stamped
          * copy's key (this collection's K), then the new state. */
+        @FunctionalInterface
         public interface ToggleHandler<K> {
             void accept(KayaApp.Tx tx, K key, boolean checked);
         }
@@ -397,11 +404,13 @@ public final class KayaRecords {
 
         /** A template date picker's typed pick handler: the stamped
          * copy's key (this collection's K), then the committed date. */
+        @FunctionalInterface
         public interface DateHandler<K> {
             void accept(KayaApp.Tx tx, K key, LocalDate date);
         }
 
         /** A template time picker's typed pick handler. */
+        @FunctionalInterface
         public interface TimeHandler<K> {
             void accept(KayaApp.Tx tx, K key, LocalTime time);
         }

@@ -17,8 +17,8 @@ function save(): void {
   app.window({ dirty: false });
 }
 
-function answered(choice: number): void {
-  if (choice === kaya.CANCEL) {
+function answered(choice: number | null): void {
+  if (choice === null) {
     // Answering a dialog is not saving: the mark stays up.
     status.set("kept editing");
   } else {
@@ -40,19 +40,17 @@ async function closeAsked(): Promise<void> {
   );
 }
 
-let doc!: kaya.Signal<string>;
-let status!: kaya.Signal<string>;
-
 // Dirty is NOT declared here: the script reads the clean window first.
-app.window({ title: "dirty", vetoClose: true, onCloseRequested: closeAsked }, () => {
-  doc = kaya.signal("notes");
-  status = kaya.signal("saved");
+const { doc, status } = app.window({ title: "dirty", vetoClose: true, onCloseRequested: closeAsked }, () => {
+  const doc = kaya.signal("notes");
+  const status = kaya.signal("saved");
   kaya.column(() => {
     kaya.label({ bind: doc }); // label#0
     kaya.label({ bind: status }); // label#1
     kaya.button("edit", { onClick: edit }); // button#0
     kaya.button("save", { onClick: save }); // button#1
   });
+  return { doc, status };
 });
 
 app.run();

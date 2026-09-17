@@ -1,3 +1,5 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 -- The progress scene, Haskell port — guests/rust/progress.rs,
 -- tools/scenes/progress.steps.
 
@@ -6,7 +8,7 @@ import KayaApp
 main :: IO ()
 main = kayaMain $ \app -> do
   _ <- buildTx app $ do
-    window 0 [WTitle "progress"]
+    window primary [WTitle "progress"]
     root <-
       column
         []

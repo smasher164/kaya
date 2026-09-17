@@ -213,13 +213,7 @@ impl<K> Field<K> {
 }
 
 impl Field<StrKind> {
-    /// THE WHOLE ELEMENT OF A SCALAR COLLECTION, as a source.
-    ///
-    /// A template constructor's element source is a FIELD addressed by
-    /// index off a record; a scalar collection has no record — its element
-    /// IS the value, which `Field` at index 0 already spells, so this and
-    /// the floor call put the same bytes on the wire. `StrKind` only, since
-    /// `String` is the sole non-derived `KayaSum` implementor.
+    /// The whole element of a scalar collection, as a source.
     pub const fn element() -> Self {
         Field::new(0)
     }
@@ -267,10 +261,7 @@ impl KayaField for String {
     }
 }
 
-/// A stamped copy's document is a record FIELD (docs/rich-text-plan.md §19):
-/// a Blob holding `wire::document_blob`'s list, so a `Document` field binds
-/// through the template zone as a String field does and a copy's document is
-/// written by patching its row.
+/// A stamped copy's document is a record field (docs/rich-text-plan.md §19).
 impl KayaField for Document {
     type Kind = BlobKind;
     fn to_value(&self) -> Value {
@@ -370,6 +361,18 @@ impl KayaField for crate::Time {
                 .unwrap_or_else(|why| panic!("kaya: a Time field holds {n}, which is not one: {why}")),
             other => panic!("kaya: expected a Time field (I64 on the wire), model holds {other:?}"),
         }
+    }
+}
+
+/// Type-directed key extraction from a row's path — `KayaField`'s own
+/// conversion applied to `Path` itself: `path.key::<String>(0)`.
+pub trait PathKey {
+    fn key<K: KayaField>(&self, level: usize) -> K;
+}
+
+impl PathKey for Path {
+    fn key<K: KayaField>(&self, level: usize) -> K {
+        K::from_value(&self[level])
     }
 }
 
@@ -535,6 +538,18 @@ impl<T: KayaSum> Collection<T> {
         signal
     }
 
+    /// One entry by key, or `None` if it is absent.
+    pub fn get(&self, tx: &Tx<'_>, key: impl Into<Value>) -> Option<T> {
+        let key = key.into();
+        tx.ctx
+            .model
+            .borrow()
+            .get(&self.id)
+            .and_then(|instances| instances.iter().find(|i| i.path == self.path))
+            .and_then(|i| i.entries.iter().find(|(k, _, _)| *k == key))
+            .map(|(_, variant, record)| T::from_parts(*variant, record))
+    }
+
     /// The instance of this collection inside the copy keyed by `key`
     /// of the next enclosing For; chain for deeper nesting.
     pub fn at(&self, key: impl Into<Value>) -> Collection<T> {
@@ -597,10 +612,6 @@ pub struct Poster {
 
 impl Poster {
     /// Queue `body` to run as a transaction on the app thread, soon.
-    ///
-    /// The app thread runs it after whatever it is doing now, so posting
-    /// from inside a handler queues for after and never nests. Posts run
-    /// in the order they were made. After shutdown this is a no-op.
     pub fn post(&self, body: impl for<'a, 'b> FnOnce(&'a mut Tx<'b>) + Send + 'static) {
         self.queue.lock().unwrap().push(Box::new(body));
         // The app thread is parked in recv(); posted work is not an
@@ -609,21 +620,12 @@ impl Poster {
     }
 }
 
-/// WHAT THIS HOST CAN DO — the canonical note for all nine bindings. A
-/// guest asks HERE, never its own `#[cfg(target_os)]`, which is a second
-/// copy of a rule the core holds. NAMED BOOLEANS, NEVER THE BITS.
-///
-/// CAPABILITIES INFORM; WALLS REFUSE: the core's wall makes a call illegal
-/// (scene.rs's `CreateWindow` arm). Constant for the process's life.
+/// This host's capabilities, constant for the process's life.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Capabilities {
-    /// The host can materialize a surface beside the primary one:
-    /// [`Tx::create_window`] and mounting a root into it. Clear on iOS
-    /// and Android, where `create_window` aborts at the root.
+    /// Whether [`Tx::create_window`] can materialize a second window.
     pub aux_windows: bool,
-    /// This process can post a local notification the desktop will show
-    /// and remember (docs/tasks-s3-plan.md N6): a bundle on macOS, a
-    /// registry on Linux, a permission on the phones.
+    /// Whether this process can post a local notification (docs/tasks-s3-plan.md N6).
     pub notifications: bool,
 }
 
@@ -638,17 +640,7 @@ pub fn capabilities() -> Capabilities {
     }
 }
 
-/// The app's own writable directory (docs/tasks-s4-plan.md P1), created
-/// on first ask: Application Support/<id> on macOS, Documents on iOS,
-/// `$XDG_DATA_HOME/<id>` on Linux, `%LOCALAPPDATA%\<id>` on Windows, the
-/// files directory on Android. THE APP'S DOCUMENT GOES HERE and kaya has
-/// no opinion about its format — a SQLite database through rusqlite is the
-/// standard answer (P1). Under `KAYA_SELFTEST` it is scratch and act one
-/// empties it.
-///
-/// Panics only where there is no directory to answer with — Android before
-/// attach — which is a program that asked before the platform handed the
-/// core a container.
+/// The app's own writable directory (docs/tasks-s4-plan.md P1).
 pub fn app_data_dir() -> std::path::PathBuf {
     // THE SENTENCE IS FROZEN IN NINE (tools/check-sugar-surface.py's prefs
     // clause): the state with no directory is one a guest cannot plan
@@ -660,18 +652,12 @@ pub fn app_data_dir() -> std::path::PathBuf {
     )
 }
 
-/// The preference store (docs/tasks-s4-plan.md P3): small typed settings
-/// under the app's own id, in the platform's own store where the platform
-/// has one. Take it at startup and keep it — it holds nothing.
-///
-/// A key under the `kaya.` prefix is kaya's own (window memory) and a
-/// write to one panics naming the key.
+/// The preference store (docs/tasks-s4-plan.md P3).
 pub fn prefs() -> Prefs {
     Prefs { _private: () }
 }
 
-/// The handle [`prefs`] answers. Reads take the default the caller
-/// supplies; a key holding another type reads as absent.
+/// The handle [`prefs`] answers.
 #[derive(Clone, Copy, Debug)]
 pub struct Prefs {
     _private: (),
@@ -1293,10 +1279,6 @@ impl AppCtx {
     }
 
     /// A handle for reaching this app thread from another thread.
-    ///
-    /// `AppCtx` itself cannot travel: it holds `Cell`s and `RefCell`s, so
-    /// it is `!Sync`, deliberately — a shareable one would legalize
-    /// another thread mutating the model while a transaction is open here.
     pub fn poster(&self) -> Poster {
         Poster {
             queue: Arc::clone(&self.posted),
@@ -1550,19 +1532,15 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
         self
     }
 
-    /// THE GRID THAT FITS (docs/layout-knobs-plan.md §3): as many columns
-    /// as fit this grid's width at `min_width` DIP each, sharing the
-    /// extra — `columns` 0 with the floor beside it. An explicit
-    /// `columns_when` still wins while its class holds.
+    /// As many columns as fit this grid's width at `min_width` DIP each
+    /// (docs/layout-knobs-plan.md §3).
     pub fn columns_auto(self, min_width: f64) -> Self {
         self.tx.columns_auto(self.id, min_width);
         self
     }
 
-    /// A ROW THAT FLOWS (docs/layout-knobs-plan.md §2): children keep their
-    /// natural size and move onto the next line when the row runs out of
-    /// width, leading-aligned, the row's `spacing` on both axes. No child
-    /// of a wrapping row may grow; the root refuses one by name.
+    /// A row that flows onto the next line when it runs out of width
+    /// (docs/layout-knobs-plan.md §2).
     pub fn wrap(self, on: bool) -> Self {
         self.tx.wrap(self.id, on);
         self
@@ -1605,23 +1583,14 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
         self
     }
 
-    /// THIS CANVAS REFUSES COERCION: it draws at its viewbox and is placed
-    /// in whatever track layout gives it (docs/canvas-plan.md §3.2.1, ruling
-    /// 2) — an intrinsic size and a strictly 1:1 blit, with no raster-once
-    /// promise. The other two policies are HANDLERS
-    /// ([`Messages::on_draw`], [`Messages::on_tick`]); a canvas that
-    /// declares nothing is `scale`.
+    /// This canvas draws at its viewbox with no coercion (docs/canvas-plan.md §3.2.1).
     pub fn fixed(self) -> Self {
         self.tx.size_policy(self.id, crate::wire::SIZE_POLICY_FIXED);
         self
     }
 
-    /// THIS CANVAS'S DRAWING IS A FUNCTION OF ITS SIZE (docs/canvas-plan.md
-    /// §3.2.1): PROVIDING THE HANDLER IS THE DECLARATION, so this registers
-    /// the closure AND puts the policy on the wire. `f` draws in the size it
-    /// is handed, which becomes its viewbox. THE BINDING OPENS THE
-    /// TRANSACTION, not the guest (tools/check-ambient-tx.py). LATEST-WINS,
-    /// so a drag-resize storm cannot queue.
+    /// This canvas's drawing is a function of its size (docs/canvas-plan.md
+    /// §3.2.1); the binding opens the transaction, not the guest (tools/check-ambient-tx.py).
     pub fn on_draw<M>(
         self,
         msgs: &Messages<M>,
@@ -1717,9 +1686,8 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
         self
     }
 
-    /// SEMANTIC EMPHASIS (docs/styling-plan.md D4): what this widget
-    /// MEANS, never how it looks. The root refuses a role on a kind it
-    /// does not fit, at declare time, naming both sides.
+    /// Semantic emphasis: what this widget means, never how it looks
+    /// (docs/styling-plan.md D4).
     pub fn role(self, role: crate::Role) -> Self {
         self.tx.set(self.id, Prop::Role, role as i64);
         self
@@ -1778,14 +1746,8 @@ impl<R> From<Widget<'_, '_, R>> for WidgetId {
 }
 
 /// An open asset: the bytes of one file the app's build put where the
-/// running program can find it, asked for by the same name on five platforms
-/// (docs/assets-plan.md). WHERE the name resolves lives once, in
-/// [`crate::assets`].
-///
-/// Not a handle: Rust IS the core, so this holds the `Arc<[u8]>` and the
-/// release is the `Arc`'s. Reading is READ-ONLY structurally — no mode
-/// argument anywhere on this surface, so `tools/check-file-modes.py`'s bug
-/// class cannot occur.
+/// running program can find it (docs/assets-plan.md). Read-only
+/// structurally, so `tools/check-file-modes.py`'s bug class cannot occur.
 pub struct Asset {
     bytes: Arc<[u8]>,
 }
@@ -1799,9 +1761,7 @@ impl Asset {
     }
 
     /// The asset as something `std::io::Read` + `Seek`, for a parser that
-    /// wants a stream rather than a slice. BINDING-SIDE SUGAR with zero
-    /// core surface (docs/assets-plan.md): no file descriptor exists
-    /// anywhere in the asset surface.
+    /// wants a stream rather than a slice (docs/assets-plan.md).
     pub fn reader(&self) -> std::io::Cursor<Vec<u8>> {
         std::io::Cursor::new(self.bytes.to_vec())
     }
@@ -1835,10 +1795,7 @@ impl std::fmt::Debug for Asset {
 }
 
 /// What can become a blob on the wire: bytes the app computed, or an
-/// [`Asset`] the core read. The impls differ in one way, which is the point
-/// of the asset route: a byte spelling COPIES into a fresh `Arc` (the
-/// caller owns those bytes and may edit them after the call), while
-/// `Asset` CLONES the `Arc` it already holds.
+/// [`Asset`] the core read.
 pub trait BlobSource {
     /// The bytes this source contributes to the transaction's blob table.
     /// `Arc<[u8]>` because the protocol's `Blob` is crate-private.
@@ -1851,9 +1808,8 @@ impl BlobSource for [u8] {
     }
 }
 
-/// The owned byte spelling, alongside `[u8]`'s, because `&some_vec` does
-/// NOT reach `&dyn BlobSource` on its own: Rust will deref-coerce and it
-/// will unsize, but it does not chain the two.
+/// The owned byte spelling, alongside `[u8]`'s (Rust does not chain
+/// deref-coercion with unsizing, so `&some_vec` needs its own impl).
 impl BlobSource for Vec<u8> {
     fn blob_bytes(&self) -> Arc<[u8]> {
         Arc::from(&self[..])
@@ -1874,38 +1830,21 @@ impl From<&Asset> for crate::protocol::Blob {
 
 /// A transaction under construction. Everything queues locally; commit
 /// sends the batch and rings the doorbell once. Dropping a Tx without
-/// committing abandons its records — and rolls the model back with them,
-/// so reads never show writes that were never sent.
+/// committing abandons its records and rolls the model back with them.
 ///
-/// # A `Tx` never leaves the app thread
-///
-/// It borrows [`AppCtx`], which is `!Sync`, so `Tx` is `!Send` and the
-/// compiler refuses to move one onto another thread. A guest may post a
-/// closure to the app thread and capture ids on the way, but the
-/// transaction itself stays put.
-///
-/// NOBODY DESIGNED THIS — it falls out of the interior mutability above,
-/// and an innocent refactor (swapping a `Cell` for an atomic, say) would
-/// delete the guard in silence. So it is pinned here.
+/// `Tx` never leaves the app thread (docs/traps.md, "Tx's !Send guarantee
+/// is incidental"):
 ///
 /// ```compile_fail
 /// fn assert_send<T: Send>() {}
 /// assert_send::<kaya::Tx<'static>>();
 /// ```
 ///
-/// A `compile_fail` that dies of an unrelated error pins nothing (this
-/// crate has shipped that mistake), so the same assertion must PASS for
-/// the ids a posted closure is meant to carry:
-///
 /// ```
 /// fn assert_send<T: Send>() {}
 /// assert_send::<kaya::SignalId>();
 /// assert_send::<kaya::WidgetId>();
 /// ```
-///
-/// Note the failing case says `Tx<'static>`: with a shorter lifetime it
-/// would also fail the `'static` bound of anything like `thread::spawn`,
-/// and the test would pass for the wrong reason.
 pub struct Tx<'a> {
     ctx: &'a AppCtx,
     ops: Vec<TxOp>,
@@ -2062,13 +2001,9 @@ impl<'a> Tx<'a> {
         }
     }
 
-    /// The model: what this guest wrote, exactly — the fold of every
-    /// committed patch plus this transaction's own, in insertion order.
+    /// The model: what this guest wrote, exactly.
     ///
-    /// The borrow checker is the record-time mirror-read guard: a template
-    /// body cannot read the model, because the template records once and
-    /// replays, so a read would bake today's value into the blueprint as
-    /// dead data. Bind a signal, use the element's field, or `derive`:
+    /// The borrow checker is the record-time mirror-read guard:
     ///
     /// ```compile_fail
     /// fn zone_rule(tx: &mut kaya::Tx<'_>, todos: &kaya::Collection<String>) {
@@ -2077,9 +2012,6 @@ impl<'a> Tx<'a> {
     ///     });
     /// }
     /// ```
-    ///
-    /// The for-statement tracer holds the same wall — a `Row` borrows the
-    /// transaction for as long as it lives:
     ///
     /// ```compile_fail
     /// fn zone_rule(tx: &mut kaya::Tx<'_>, todos: &kaya::Collection<String>) {
@@ -2113,12 +2045,8 @@ impl<'a> Tx<'a> {
             .unwrap_or(0)
     }
 
-    /// Make this transaction ONE undoable step, under `label` — a NAMED
-    /// GROUP, not every transaction (docs/undo-plan.md D2, D8). Callable
-    /// anywhere in the chain, with the marker still riding at the head. A
-    /// GROUP MAY HOLD signal writes and collection deltas (focus is
-    /// permitted and not restored); anything else fails at apply naming the
-    /// op. The app hears the result as [`Messages::on_undone`].
+    /// Make this transaction one undoable step, under `label`
+    /// (docs/undo-plan.md D2, D8).
     pub fn undoable(&mut self, label: impl Into<String>) {
         self.undoable_in(crate::protocol::DEFAULT_WINDOW, label);
     }
@@ -2209,10 +2137,8 @@ impl<'a> Tx<'a> {
         WindowRef { tx: self, window }
     }
 
-    /// REQUEST the app's brand accent (docs/styling-plan.md D1/D2): one hex
-    /// is the whole call. Set ONCE, before the first mount — the root
-    /// refuses a second or late write. The app never writes a foreground or
-    /// a contrast variant; the core derives both.
+    /// Request the app's brand accent: one hex is the whole call
+    /// (docs/styling-plan.md D1/D2).
     pub fn brand_accent(&mut self, seed: u32) {
         self.ops.push(TxOp::SetBrandAccent { seed, light: None, dark: None });
     }
@@ -2223,13 +2149,8 @@ impl<'a> Tx<'a> {
         self.ops.push(TxOp::SetBrandAccent { seed, light, dark });
     }
 
-    /// Open an [`Asset`] — a file the app's own BUILD shipped beside it.
-    ///
-    /// TAKES `&self` DELIBERATELY: opening an asset queues no op and touches
-    /// no model, so `tx.brand_typeface_with("Sora", &[],
-    /// Some(&tx.asset(name)))` compiles. A miss panics with
-    /// [`crate::assets::asset_why_not`]'s sentence VERBATIM, and it reads on
-    /// EVERY call: no cache, no watch, no reload.
+    /// Open an [`Asset`] — a file the app's own build shipped beside it. A
+    /// miss panics with [`crate::assets::asset_why_not`]'s sentence.
     pub fn asset(&self, name: &str) -> Asset {
         match crate::assets::read(name) {
             Ok(bytes) => Asset { bytes: Arc::from(bytes) },
@@ -2239,22 +2160,14 @@ impl<'a> Tx<'a> {
         }
     }
 
-    /// Why [`Tx::asset`] would fail for this name — the sentence it would
-    /// raise, handed over without raising; `""` means it resolves. Line 1 is
-    /// the same on every platform and is the one a scene freezes; line 2
-    /// names the resolved place. It MEASURES rather than predicts
-    /// (docs/deferred.md, the assets entry).
+    /// Why [`Tx::asset`] would fail for this name, without raising; `""`
+    /// means it resolves (docs/deferred.md, the assets entry).
     pub fn asset_miss_sentence(&self, name: &str) -> String {
         crate::assets::asset_why_not(name)
     }
 
-    /// REQUEST the app's brand typeface (docs/styling-plan.md Slice 2b).
-    /// THE FAMILY, NEVER THE SCALE. Set ONCE, before the first mount, the
-    /// accent's wall verbatim.
-    ///
-    /// A family a platform does not have leaves that platform's own typeface
-    /// in place: every font API renders SOMETHING for a name it cannot
-    /// match, so the lowerings gate on the family being installed.
+    /// Request the app's brand typeface: the family, never the scale
+    /// (docs/styling-plan.md Slice 2b).
     pub fn brand_typeface(&mut self, family: &str) {
         self.ops.push(TxOp::SetBrandTypeface(TypefaceRequest {
             family: family.to_string(),
@@ -2263,13 +2176,8 @@ impl<'a> Tx<'a> {
         }));
     }
 
-    /// The per-platform form, plus the font-FILE form: `family` is the
-    /// default and `platforms` overrides it, while `font` ships a font file
-    /// whose bytes the backend registers with its platform's app-font API,
-    /// taking the family that registration names over any name above.
-    ///
-    /// THE PAIRS TRAVEL UNRESOLVED: this binding cannot know its platform,
-    /// but every lowering IS one.
+    /// The per-platform form, plus the font-file form: `family` is the
+    /// default and `platforms` overrides it, while `font` ships a font file.
     ///
     /// `font` is a [`BlobSource`], so both spellings fit:
     ///
@@ -2294,20 +2202,9 @@ impl<'a> Tx<'a> {
         }));
     }
 
-    /// DECLARE the app's identity (docs/app-identity-plan.md,
-    /// docs/tasks-s3-plan.md N4). NO ARGUMENTS: the name it goes by, the
-    /// picture that stands for it and the reverse-DNS id it registers under
-    /// are the asset root's own `identity.toml`, which the BUILD already
-    /// reads, and the core reads the same file here. Set ONCE, before the
-    /// first mount.
-    ///
-    /// STILL AN EXPLICIT CALL, because declaring an identity is a POLICY —
-    /// a declared app is a Dock app on macOS (ruling 1) — so an app that
-    /// wants the platform's own identity declares none at all.
-    ///
-    /// ONE PICTURE, FIVE PLATFORMS. THE BYTES ARE NEVER INSPECTED between
-    /// the manifest and the platform's own decoder, which is why the
-    /// identity scene reads what the DECODER produced.
+    /// Declare the app's identity (docs/app-identity-plan.md,
+    /// docs/tasks-s3-plan.md N4): no arguments, reads the asset root's own
+    /// `identity.toml`.
     pub fn app_identity(&mut self) {
         self.ops.push(TxOp::SetAppIdentity(crate::protocol::AppIdentity {
             name: String::new(),
@@ -2494,12 +2391,9 @@ impl<'a> Tx<'a> {
         r
     }
 
-    /// Ask the platform WHERE TO SAVE — the picker's twin, on the same
-    /// one-live-dialog slot; [`Messages::on_saved`] binds the handler and
-    /// cancel arrives as `None`. `suggested_name` is only what the dialog
-    /// OPENS with: read the name you GOT. WHAT YOU GET BACK OPENS EMPTY —
-    /// the handle's open CREATES and [`FileMode::Write`] yields an empty
-    /// file on every platform (docs/save-plan.md D1).
+    /// Ask the platform where to save; [`Messages::on_saved`] binds the
+    /// handler and cancel arrives as `None`. The handle opens empty
+    /// (docs/save-plan.md D1).
     pub fn save_file(&mut self, suggested_name: impl Into<String>) -> SaveDialogRef<'_, 'a> {
         let dialog = self.ctx.alloc_file_dialog();
         SaveDialogRef {
@@ -2603,12 +2497,9 @@ impl<'a> Tx<'a> {
         }
     }
 
-    /// WHAT THIS WIDGET ACCEPTS FROM A PASTE: the closed kinds by name
+    /// What this widget accepts from a paste: the closed kinds by name
     /// (`text`, `html`, `image`, `files`) and any custom format ids, space
-    /// separated. ONE DECLARATION, THREE JOBS: whether Paste is live while
-    /// this widget is focused, what may reach its paste hook, and on Android
-    /// the native registration. A TEXT WIDGET THAT DECLARES NOTHING still
-    /// pastes — the platform inserts and the change handler reports it.
+    /// separated.
     pub fn accepts(&mut self, widget: WidgetId, list: &str) {
         self.set(widget, Prop::Accepts, list);
     }
@@ -2753,12 +2644,9 @@ impl<'a> Tx<'a> {
         self.set(widget, Prop::Text, text);
     }
 
-    /// DECLARE the decorated ranges of a textarea, replacing whatever was
-    /// declared before; an empty set is the clear, and kaya ships no search
-    /// (docs/ranges-plan.md §3). THE OFFSETS ARE RUST STRING INDICES.
-    /// APP-OWNED AND NEVER TRACKED: the first edit of any kind drops the
-    /// set. An offset past the end, or one splitting a character, fails
-    /// loudly HERE — the five platforms answer five ways and one aborts.
+    /// Declare the decorated ranges of a textarea, replacing whatever was
+    /// declared before (docs/ranges-plan.md §3). Offsets are Rust string
+    /// indices; an invalid one fails loudly here.
     pub fn highlight_ranges(
         &mut self,
         widget: WidgetId,
@@ -2774,12 +2662,8 @@ impl<'a> Tx<'a> {
     }
 
     /// Put the textarea's selection at one range (an empty range is a
-    /// caret). Same offsets and validation as [`Tx::highlight_ranges`].
-    ///
-    /// REFUSED WHILE THE USER IS COMPOSING, in every backend, because
-    /// honouring it commits the composition mid-word (docs/ranges-plan.md
-    /// D4). A no-op rather than an error: composition state is on no kaya
-    /// channel, so an app cannot avoid the race.
+    /// caret); refused as a no-op while the user is composing
+    /// (docs/ranges-plan.md D4).
     pub fn select_range(&mut self, widget: WidgetId, range: std::ops::Range<usize>) {
         self.ops.push(TxOp::SelectRange {
             widget,
@@ -3046,10 +2930,8 @@ impl<'a> Tx<'a> {
         Widget { id: w, out: (), tx: self }
     }
 
-    /// WHAT THIS CANVAS DOES WITH A TRACK THAT IS NOT ITS VIEWBOX
-    /// (docs/canvas-plan.md §3.2.1) — the dynamic path behind
-    /// [`Widget::fixed`] and behind [`Messages::on_draw`]/[`Messages::on_tick`],
-    /// which is where a guest declares this rather than here.
+    /// What this canvas does with a track that is not its viewbox
+    /// (docs/canvas-plan.md §3.2.1).
     pub fn size_policy(&mut self, w: WidgetId, policy: u32) {
         self.ops.push(TxOp::SetSizePolicy { widget: w, policy });
     }
@@ -3238,11 +3120,7 @@ impl<'a> Tx<'a> {
 
     /// Insert a record under a key the binding authors, and hand the key
     /// back — for data with no identity of its own (DESIGN.md, the update
-    /// algebra). ONE COUNTER PER COLLECTION INSTANCE, starting at 0; the
-    /// minted key is `I64` and is counter+1. MIXING IS SAFE BY ABSORPTION:
-    /// an explicit `insert` whose key is an I64 at or above the counter
-    /// carries it up. NO DECREMENT IS EXPRESSIBLE — not by undo, not by an
-    /// abandoned transaction — so a fresh key is fresh forever.
+    /// algebra). The minted key only increases, even across undo.
     pub fn insert_fresh<T: KayaSum>(
         &mut self,
         instance: &Collection<T>,
@@ -3693,11 +3571,9 @@ impl<'a> Tx<'a> {
         body(&mut items)
     }
 
-    /// Build a context catalog UNANCHORED — free root items for a
-    /// template-node anchor. The protocol forbids creating menu items
-    /// inside a template scope, so the catalog is built here and
-    /// [`Tpl::context_menu`] attaches it inside the template. The borrow
-    /// checker holds that zone wall:
+    /// Build a context catalog unanchored — free root items for a
+    /// template-node anchor, attached by [`Tpl::context_menu`] inside the
+    /// template. The borrow checker holds that zone wall:
     ///
     /// ```compile_fail
     /// fn zone_rule(tx: &mut kaya::Tx<'_>, groups: &kaya::Collection<String>) {
@@ -4104,12 +3980,10 @@ mod for_scope {
 }
 
 /// The zone a For is being traced in: the live tree (a [`Tx`]) or another
-/// template's body (a [`Tpl`] or a [`Row`]). The zones differ in one thing —
-/// a For declared inside a template is itself a template node — and the id
-/// comes from the same counter either way (DESIGN.md, Binding conventions).
+/// template's body (a [`Tpl`] or a [`Row`]).
 ///
-/// Taking a scope does NOT hand the transaction back to the guest; the one
-/// method that could is sealed away. Pinned rather than trusted:
+/// Taking a scope does not hand the transaction back to the guest; the one
+/// method that could is sealed away:
 ///
 /// ```compile_fail
 /// fn zone_rule(t: &mut kaya::Tpl<'_, '_>, todos: &kaya::Collection<String>) {
@@ -4847,11 +4721,8 @@ impl<M> Messages<M> {
     }
 
     /// A stamped copy's paste, with the copy's key path — the node flavor
-    /// of [`Self::on_paste`] (docs/tpl-props-plan.md §1).
-    ///
-    /// Fires only for copies whose TEMPLATE declared what it accepts
-    /// (`Tpl::accepts`); without a declaration the platform's own insertion
-    /// happens and the instance change handler reports it.
+    /// of [`Self::on_paste`] (docs/tpl-props-plan.md §1). Fires only for
+    /// copies whose template declared what it accepts (`Tpl::accepts`).
     pub fn on_paste_node(
         &self,
         n: TemplateNodeId,
@@ -5043,16 +4914,9 @@ impl<M> Messages<M> {
         *self.notification_activation.borrow_mut() = Some(Box::new(f));
     }
 
-    /// Bind a handler to one APP-LINK ROUTE (docs/app-links-plan.md L2):
-    /// `kaya://task/{key}` reaching this process — running, or started by
-    /// the link itself — answers with the app's own message, the captures
-    /// and the query in hand.
-    ///
-    /// DECLARE ROUTES AT STARTUP, before or inside the app's first
-    /// transaction: the declaration rides that transaction, and the core
-    /// matches a link that STARTED the process the moment it lands. A
-    /// malformed or repeated pattern faults at the declaration.
-    /// Process-level and persistent — a route never retires.
+    /// Bind a handler to one app-link route (docs/app-links-plan.md L2);
+    /// declare routes at startup, before or inside the app's first
+    /// transaction.
     pub fn link(&self, pattern: &str, f: impl Fn(&LinkParams) -> M + 'static) {
         let route = NEXT_ROUTE.fetch_add(1, Ordering::Relaxed);
         self.links.borrow_mut().insert(route, Box::new(f));
@@ -5065,9 +4929,8 @@ impl<M> Messages<M> {
             });
     }
 
-    /// Bind the one-shot result handler to a file-dialog request. Cancel
-    /// arrives as an EMPTY list — no platform can confirm an empty
-    /// selection, so it needs no sentinel.
+    /// Bind the one-shot result handler to a file-dialog request; cancel
+    /// arrives as an empty list.
     pub fn on_files(
         &self,
         dialog: crate::protocol::FileDialogId,
@@ -5076,9 +4939,8 @@ impl<M> Messages<M> {
         self.dialogs.borrow_mut().insert(dialog.0, Box::new(f));
     }
 
-    /// Bind the one-shot result handler to a save-dialog request. CANCEL
-    /// IS `None`: the wire's "one locator or none" is a fact of the
-    /// request, not something every app should re-derive from a length.
+    /// Bind the one-shot result handler to a save-dialog request; cancel
+    /// arrives as `None`.
     pub fn on_saved(
         &self,
         dialog: crate::protocol::FileDialogId,
@@ -5089,13 +4951,8 @@ impl<M> Messages<M> {
             .insert(dialog.0, Box::new(move |files| f(files.into_iter().next())));
     }
 
-    /// Content arriving at this widget because the USER pasted.
-    ///
-    /// A GESTURE IS ITS OWN AUTHORISATION: iOS raises no prompt for a
-    /// paste, and Android's and Wayland's focus rules are satisfied by
-    /// construction, so this delivers free what
-    /// [`Tx::read_clipboard`] pays a permission prompt for. Fires only for
-    /// widgets that DECLARED what they accept ([`Tx::accepts`]).
+    /// Content arriving at this widget because the user pasted; fires
+    /// only for widgets that declared what they accept ([`Tx::accepts`]).
     pub fn on_paste(
         &self,
         w: WidgetId,
@@ -5177,13 +5034,8 @@ impl<M> Messages<M> {
         );
     }
 
-    /// Bind the undone handler to ONE window: fires each time kaya routes an
-    /// undo there, with the group's label (EMPTY for a typing episode) and
-    /// what the core put back. Not one-shot, and per window because the
-    /// ledger is. THE DELTA IS THE ONLY NOTIFICATION — applying an inverse
-    /// is a programmatic write, so the echo doctrine silences every
-    /// occurrence it would cause — and the binding has already folded it
-    /// into its collection mirror.
+    /// Bind the undone handler to one window: fires each time kaya routes an
+    /// undo there, with the group's label and what the core put back.
     pub fn on_undone(
         &self,
         window: WindowId,
@@ -5412,6 +5264,7 @@ pub struct AlertRef<'t, 'a> {
 
 /// A file-picker request under construction — the alert chain's shape,
 /// terminated by `show`.
+#[must_use = "a file dialog shows nothing until .show()"]
 pub struct FileDialogRef<'t, 'a> {
     tx: &'t mut Tx<'a>,
     spec: crate::protocol::FileDialogSpec,
@@ -5445,6 +5298,7 @@ impl FileDialogRef<'_, '_> {
 /// terminated by `show`. The suggested name is not optional and rides the
 /// constructor: a save dialog with no name in its box is one the platform
 /// will not let the user complete.
+#[must_use = "a save dialog shows nothing until .show()"]
 pub struct SaveDialogRef<'t, 'a> {
     tx: &'t mut Tx<'a>,
     spec: crate::protocol::SaveDialogSpec,
@@ -5474,9 +5328,8 @@ impl SaveDialogRef<'_, '_> {
 }
 
 /// The copy chain: a clip record under construction. Each method fills one
-/// representation, and the terminal puts it on the clipboard. A RECORD AND
-/// NOT A LIST: a second `text` call replaces the field rather than needing
-/// a duplicate check.
+/// representation, and the terminal puts it on the clipboard; a second
+/// `text` call replaces the field.
 #[must_use = "a copy chain puts nothing on the clipboard until .send()"]
 pub struct CopyRef<'t, 'a> {
     tx: &'t mut Tx<'a>,
@@ -5841,6 +5694,7 @@ impl AlertRef<'_, '_> {
 
 /// A local notification under construction (docs/tasks-s3-plan.md N1):
 /// the alert's chain without a window, and `at` for the OS scheduler.
+#[must_use = "a notification posts nothing until .show()"]
 pub struct NotificationRef<'t, 'a> {
     tx: &'t mut Tx<'a>,
     spec: crate::protocol::NotificationSpec,
@@ -5964,25 +5818,17 @@ impl WindowRef<'_, '_> {
         self
     }
 
-    /// The CEILING on how many of this window's stack entries present side
-    /// by side: 1 is the serial stack, 2 and 3 are columns on a wide enough
-    /// window, the shallowest shed first as it narrows
-    /// (docs/multicolumn-plan.md). No argument for WHICH entries show — the
-    /// stack's order is the priority order — and the live count is the
-    /// platform's own judgment where it has one. The root refuses 0 and
-    /// anything above 3.
+    /// The ceiling on how many of this window's stack entries present side
+    /// by side (docs/multicolumn-plan.md); the root refuses 0 and anything
+    /// above 3.
     pub fn panes(self, ceiling: u32) -> Self {
         self.tx
             .set_window_prop(self.window, WindowProp::Panes, i64::from(ceiling));
         self
     }
 
-    /// Say this surface holds UNSAVED WORK: the backend shows its platform's
+    /// Say this surface holds unsaved work: the backend shows its platform's
     /// own affordance, and nothing on the phones (docs/dirty-plan.md D2/D4).
-    ///
-    /// STATE, NOT CHROME: the title you declared is left alone, and it ARMS
-    /// NOTHING — "unsaved changes, close anyway?" is `veto_close` plus a
-    /// dialog, which is yours to compose.
     pub fn dirty(self, on: bool) -> Self {
         self.tx.set_window_prop(self.window, WindowProp::Dirty, on);
         self
@@ -6182,9 +6028,8 @@ fn normalize_shortcut(spelling: &str) -> String {
     canonical
 }
 
-/// One of the TWO addressable sources a menu property binds to: a constant
-/// or a signal. Menu items are not collection elements, and the missing
-/// `Field` conversion IS that rule, at compile time:
+/// One of the two addressable sources a menu property binds to: a constant
+/// or a signal, enforced at compile time by a missing `Field` conversion:
 ///
 /// ```compile_fail
 /// fn zone_rule(title: kaya::Field<<String as kaya::KayaField>::Kind>) {
@@ -6270,10 +6115,8 @@ mod menu_sealed {
 /// rule (shortcuts). Sealed: the three anchors below are the vocabulary.
 pub trait MenuAnchor: menu_sealed::Sealed {}
 
-/// The anchors where a shortcut may be spelled: a shortcut needs a window
-/// catalog as its native dispatch home, so [`ContextAnchor`] deliberately
-/// lacks this — a shortcut on a context item is a COMPILE error where the
-/// anchor is known:
+/// The anchors where a shortcut may be spelled — refused at compile time
+/// where the anchor is known to lack one ([`ContextAnchor`]):
 ///
 /// ```compile_fail
 /// fn zone_rule(m: &mut kaya::MenuItems<'_, '_, kaya::ContextAnchor>) {
@@ -6297,8 +6140,7 @@ pub trait MenuAnchor: menu_sealed::Sealed {}
 /// }
 /// ```
 ///
-/// Those four are honest only if the same code MINUS the gated call
-/// compiles — a compile_fail that dies of an unrelated error pins nothing:
+/// The same code minus the gated call must still compile:
 ///
 /// ```
 /// fn legal_context_forms(m: &mut kaya::MenuItems<'_, '_, kaya::ContextAnchor>) {
@@ -6361,9 +6203,8 @@ enum ItemSlot {
 }
 
 /// The menu-children builder: the body-closure proxy every grouping slot
-/// hands out. Its creators are the closed child grammar — `item`, `toggle`,
-/// `menu`, `radio_group`, `separator`; a radio option is NOT in it, so a
-/// loose option is a compile error:
+/// hands out. A radio option is not in its grammar, so a loose option is
+/// a compile error:
 ///
 /// ```compile_fail
 /// fn zone_rule(m: &mut kaya::MenuItems<'_, '_, kaya::BarAnchor>) {
@@ -6540,12 +6381,9 @@ pub enum Role {
     Link = 7,
 }
 
-/// WHICH PLATFORM A PER-PLATFORM BRAND VALUE IS FOR (spec enum "platform";
-/// docs/styling-plan.md Slice 2b): one entry per backend roster row.
-///
-/// AN APP NAMES THESE, IT NEVER ASKS WHICH ONE IT IS. There is no
-/// `Platform::current()`: a binding cannot answer that (the JVM says
-/// "Linux" on Android), and every row travels to every backend anyway.
+/// Which platform a per-platform brand value is for (spec enum "platform";
+/// docs/styling-plan.md Slice 2b). There is no `Platform::current()` — a
+/// binding cannot answer that (the JVM says "Linux" on Android).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Platform {
     Mac = 1,
@@ -6555,12 +6393,10 @@ pub enum Platform {
     Android = 5,
 }
 
-/// THE SEMANTIC ICON VOCABULARY (spec enum "symbol";
-/// docs/styling-plan.md D6): an app names a CONCEPT and each backend draws
-/// its own platform's glyph; the Blob `icon` slot stays for app-specific art.
-///
-/// THE DISCRIMINANTS ARE WIRE VALUES AND ARE APPEND-ONLY. A new concept
-/// takes 21; renumbering silently redraws every shipped app's menus.
+/// The semantic icon vocabulary (spec enum "symbol"; docs/styling-plan.md
+/// D6): an app names a concept and each backend draws its own platform's
+/// glyph. The discriminants are wire values and append-only — a new
+/// concept takes 21.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Symbol {
     Add = 1,
@@ -6595,8 +6431,7 @@ pub enum Symbol {
     Home = 20,
 }
 
-/// One entry of an accept list: a closed kind, or a custom format id. A SUM
-/// AND NOT A MASK, because half the set is open-ended.
+/// One entry of an accept list: a closed kind, or a custom format id.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Accepts<'a> {
     Text,
@@ -6628,19 +6463,14 @@ impl Accepts<'_> {
 pub enum MenuRole {
     /// The app's settings command.
     Settings,
-    /// The three standard clipboard commands: they act on the FOCUSED
-    /// widget, lower to the platform's own command, and configure their own
-    /// enablement. NOT sugar over `copy` — kaya has no selection API, so
-    /// only the widget knows what is selected.
+    /// The three standard clipboard commands: they act on the focused
+    /// widget and lower to the platform's own command.
     Cut,
     Copy,
     Paste,
-    /// The two history commands (docs/undo-plan.md D6). They ask the FOCUSED
-    /// widget first — a text field with its own edit history answers before
-    /// the app's ledger — and enablement is that same question. AN APP OPTS
-    /// IN TO THE OTHER TIER BY NAMING ITS STEPS ([`Tx::undoable`]); one that
-    /// names none still gets text undo, because the first tier is the
-    /// platform's.
+    /// The two history commands (docs/undo-plan.md D6): they ask the
+    /// focused widget first, and an app opts into its own tier by naming
+    /// its steps ([`Tx::undoable`]).
     Undo,
     Redo,
 }
@@ -7523,12 +7353,8 @@ impl<'b> Tpl<'_, 'b> {
         self.apply_source(node, Prop::A11yHint, src.into().inner);
     }
 
-    /// What every stamped copy accepts from a paste. CONST ONLY, because an
-    /// accept list describes the PROTOTYPE.
-    ///
-    /// THIS SETTER IS THE PASTE HOOK'S KEYSTONE: every backend gates the
-    /// paste occurrence on the focused widget's accept list, so without it
-    /// `on_paste_node` registers a handler that can never fire
+    /// What every stamped copy accepts from a paste; const only. Without
+    /// it, `on_paste_node` registers a handler that can never fire
     /// (docs/tpl-props-plan.md §1).
     pub fn accepts(&mut self, node: TemplateNodeId, kinds: &[crate::Accepts<'_>]) {
         let list: Vec<&str> = kinds.iter().map(|k| k.token()).collect();
@@ -7536,10 +7362,8 @@ impl<'b> Tpl<'_, 'b> {
     }
 
     /// Every stamped copy of `node` drags this payload, each
-    /// representation a constant or the ROW'S OWN FIELD (docs/dnd-plan.md
+    /// representation a constant or the row's own field (docs/dnd-plan.md
     /// §4); one copy's override is [`Tx::draggable_at`] after its insert.
-    /// The copy's identity — its keys — reaches the app through
-    /// `on_drag_ended_node`.
     pub fn draggable(&mut self, node: TemplateNodeId) -> TplDragRef<'_, 'b> {
         TplDragRef {
             tx: self.tx,
@@ -7807,8 +7631,8 @@ mod tests {
     }
     use std::sync::mpsc;
 
-    use super::{AppCtx, KayaRecord, KayaSum, Poster, Tx};
-    use crate::protocol::{Value, ValueType};
+    use super::{AppCtx, KayaRecord, KayaSum, PathKey, Poster, Tx};
+    use crate::protocol::{Path, Value, ValueType};
     use kaya_derive::KayaGen;
 
     #[derive(KayaGen, Clone, Debug, PartialEq)]
@@ -8027,6 +7851,59 @@ mod tests {
             tx.items(&todos),
             vec![(Value::from("a"), Todo { title: "oat milk".into(), done: true })]
         );
+    }
+
+    #[test]
+    fn path_key_extracts_the_typed_field() {
+        let path: Path = vec![Value::Str("a".into())];
+        assert_eq!(path.key::<String>(0), "a".to_string());
+    }
+
+    #[test]
+    #[should_panic(expected = "kaya: expected a Str field, model holds I64(3)")]
+    fn path_key_on_the_wrong_type_panics_naming_the_level_and_type() {
+        let path: Path = vec![Value::I64(3)];
+        let _: String = path.key(0);
+    }
+
+    #[test]
+    fn collection_get_reads_one_row_present_and_absent() {
+        let (occ_tx, occ_rx) = mpsc::channel();
+        let (tx_tx, _tx_rx) = mpsc::channel();
+        drop(occ_tx);
+        let ctx = AppCtx::new(occ_rx, tx_tx, no_wake());
+
+        let mut tx = ctx.begin();
+        let todos = tx.collection::<Todo>();
+        tx.insert(&todos, "a", Todo { title: "milk".into(), done: false });
+
+        assert_eq!(todos.get(&tx, "a"), Some(Todo { title: "milk".into(), done: false }));
+        assert_eq!(todos.get(&tx, "missing"), None);
+    }
+
+    /// The request-builder types that only take effect at their terminal
+    /// `.show()` carry `#[must_use]`, so a dropped chain is a compiler
+    /// warning rather than a silent no-op.
+    #[test]
+    fn dialog_and_notification_refs_are_must_use() {
+        let source = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/app.rs"))
+            .expect("app.rs reads back");
+        let lines: Vec<&str> = source.lines().collect();
+        let mut found = 0;
+        for name in ["FileDialogRef", "SaveDialogRef", "NotificationRef"] {
+            let decl = format!("pub struct {name}");
+            let idx = lines
+                .iter()
+                .position(|l| l.contains(&decl))
+                .unwrap_or_else(|| panic!("{name} not declared in app.rs"));
+            assert!(
+                idx > 0 && lines[idx - 1].contains("#[must_use"),
+                "{name} is missing #[must_use] on the line above its declaration"
+            );
+            found += 1;
+        }
+        println!("dialog_and_notification_refs_are_must_use: {found} refs checked");
+        assert_eq!(found, 3);
     }
 
     /// A move is a keyed reposition: the model reorders (items reads

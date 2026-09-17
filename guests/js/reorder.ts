@@ -16,10 +16,8 @@ function onLift(): void {
   items.moveToFront(items.keys().at(-1)!);
 }
 
-let items!: kaya.Collection<kaya.Fields<typeof Item.schema>, kaya.Row<typeof Item.schema>>;
-
-app.window(() => {
-  items = kaya.collection(Item);
+const { items } = app.window(() => {
+  const items = kaya.collection(Item);
   kaya.row(() => {
     kaya.button("rotate", { onClick: onRotate });
     kaya.button("lift", { onClick: onLift });
@@ -30,6 +28,7 @@ app.window(() => {
   for (const key of ["a", "b", "c"]) {
     items.insert(key, Item({ title: key }));
   }
+  return { items };
 });
 
 app.run();

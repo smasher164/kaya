@@ -19,30 +19,28 @@ function spell(runs: readonly kaya.Run[]): string {
 }
 
 function onSeed(): void {
-  const doc = new kaya.Document(DOC).bold([0, 6]).link([7, 12], "https://kaya.dev").mark([14, 18], "code", "true");
-  const title = new kaya.Document("Heading with italic").mark([13, 19], "italic", "true");
+  const doc = new kaya.Document(DOC).bold([0, 6]).link([7, 12], "https://kaya.dev").mark([14, 18], "code", true);
+  const title = new kaya.Document("Heading with italic").mark([13, 19], "italic", true);
   body.setDocument(doc);
   heading.setDocument(title);
   runs.set(spell(doc.runs));
 }
 
 function onInsert(): void {
-  body.applyEdit(kaya.Edit.insert(6, ", big").mark([2, 5], "italic", "true"));
+  body.applyEdit(kaya.Edit.insert(6, ", big").mark([2, 5], "italic", true));
   runs.set(spell(body.document().runs));
 }
 
 function onMark(): void {
-  body.formatRange([1, 4], "italic", "true");
+  body.formatRange([1, 4], "italic", true);
   body.unformatRange([0, 3], "bold"); // "Hé": byte 2 is inside the é
   runs.set(spell(body.document().runs));
 }
 
-let runs!: kaya.Signal<string>;
-let body!: kaya.Widget;
-let heading!: kaya.Widget;
-
-app.window({ title: "richlabel" }, () => {
-  runs = kaya.signal("");
+const { runs, body, heading } = app.window({ title: "richlabel" }, () => {
+  const runs = kaya.signal("");
+  let body!: kaya.Widget;
+  let heading!: kaya.Widget;
   kaya.column(() => {
     const bodyText = kaya.signal("");
     const headingText = kaya.signal("Heading with italic");
@@ -55,6 +53,7 @@ app.window({ title: "richlabel" }, () => {
       kaya.button("mark", { onClick: onMark }); // button#2
     });
   });
+  return { runs, body, heading };
 });
 
 app.run();

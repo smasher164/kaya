@@ -14,8 +14,8 @@ let title = "Heading with italic"
 func spell(_ runs: [KayaRun]) -> String {
     runs.map { run in
         run.value == "true"
-            ? "\(run.start):\(run.end) \(run.name)"
-            : "\(run.start):\(run.end) \(run.name)=\(run.value)"
+            ? "\(run.range.lowerBound):\(run.range.upperBound) \(run.name)"
+            : "\(run.range.lowerBound):\(run.range.upperBound) \(run.name)=\(run.value)"
     }.joined(separator: "|")
 }
 

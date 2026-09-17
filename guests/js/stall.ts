@@ -33,16 +33,15 @@ function ping(): void {
   status.set("pinged");
 }
 
-let status!: kaya.Signal<string>;
-
-app.window({ title: "stall" }, () => {
-  status = kaya.signal("ready");
+const { status } = app.window({ title: "stall" }, () => {
+  const status = kaya.signal("ready");
   kaya.column(() => {
     kaya.label({ bind: status }).a11yId("status"); // label#0
     kaya.button("block", { onClick: block }); // button#0
     kaya.button("ping", { onClick: ping }); // button#1
     kaya.button("wedge", { onClick: wedge }); // button#2
   });
+  return { status };
 });
 
 app.run();

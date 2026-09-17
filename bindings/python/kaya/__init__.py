@@ -4,6 +4,7 @@ tier-1 sugar (DESIGN.md, "the shape of an app").
 
 import dataclasses
 import datetime
+import enum
 import io
 import operator
 import pathlib
@@ -14,6 +15,34 @@ import types
 
 from . import runtime
 from . import wire
+
+
+class KayaError(Exception):
+    """Base for every kaya-specific failure. Mixed into the builtin the
+    call site already raises (state -> RuntimeError, a wrong argument
+    type -> TypeError, a bad-but-right-typed value -> ValueError, a
+    missing field or collection key -> KeyError), so every existing
+    `except RuntimeError`/`TypeError`/`ValueError`/`KeyError` keeps
+    working unchanged, and `except kaya.KayaError` catches all of them."""
+
+
+class KayaStateError(KayaError, RuntimeError):
+    """No ambient transaction, the wrong thread, a transaction already
+    closed — a state failure."""
+
+
+class KayaTypeError(KayaError, TypeError):
+    """The wrong Python type for an argument."""
+
+
+class KayaValueError(KayaError, ValueError):
+    """A right-typed but out-of-domain value: an unknown role or
+    symbol, a range a widget refuses."""
+
+
+class KayaKeyError(KayaError, KeyError):
+    """A missing record field or collection key."""
+
 
 # The wire-representable field types; any other field type is guest-only.
 # bool before int — bool IS an int in Python. A date and a time ride the
@@ -42,7 +71,7 @@ def _date_parts(what, value):
     IS a `datetime.date`: a picker holds no instant, and dropping the time
     silently is the zone-conversion bug genre (docs/datetime-plan.md §0)."""
     if isinstance(value, datetime.datetime) or not isinstance(value, datetime.date):
-        raise TypeError(
+        raise KayaTypeError(
             f"kaya: {what} is a datetime.date (year, month, day), not "
             f"{type(value).__name__} — a picker carries civil components, "
             "never an instant"
@@ -53,7 +82,7 @@ def _date_parts(what, value):
 def _time_parts(what, value):
     """A civil time's hour and minute; seconds are not a picker value (D3)."""
     if not isinstance(value, datetime.time):
-        raise TypeError(
+        raise KayaTypeError(
             f"kaya: {what} is a datetime.time (hour, minute), not "
             f"{type(value).__name__}"
         )
@@ -92,7 +121,7 @@ def _wire_scalar(value):
     """A signal's value on the wire: a date or a time packs, everything
     else travels as itself."""
     if isinstance(value, datetime.datetime):
-        raise TypeError(
+        raise KayaTypeError(
             "kaya: a signal carries a civil date or time, not a "
             "datetime.datetime — a picker holds no instant "
             "(docs/datetime-plan.md §0)"
@@ -108,7 +137,7 @@ def _text_value(what, text):
     """The UTF-8 wall: text properties are str, never bytes — image
     bytes have their own channel."""
     if not isinstance(text, str):
-        raise TypeError(
+        raise KayaTypeError(
             f"kaya: {what} takes str, not {type(text).__name__} — encoded "
             "image bytes belong on kaya.image(source=...)"
         )
@@ -126,7 +155,7 @@ def _text_range(what, span):
     """
     if isinstance(span, range):
         if span.step != 1:
-            raise ValueError(
+            raise KayaValueError(
                 f"kaya: {what} takes a contiguous range — {span!r} counts in "
                 f"steps of {span.step}"
             )
@@ -134,18 +163,18 @@ def _text_range(what, span):
     elif isinstance(span, (tuple, list)) and len(span) == 2:
         start, stop = span
     else:
-        raise TypeError(
+        raise KayaTypeError(
             f"kaya: {what} takes a text range — range(start, stop), or a "
             f"(start, stop) pair of UTF-8 byte offsets — not {span!r}"
         )
     for name, offset in (("start", start), ("stop", stop)):
         if isinstance(offset, bool) or not isinstance(offset, int):
-            raise TypeError(
+            raise KayaTypeError(
                 f"kaya: {what}: a range's {name} is a UTF-8 byte offset (int), "
                 f"not {type(offset).__name__}"
             )
         if offset < 0:
-            raise ValueError(
+            raise KayaValueError(
                 f"kaya: {what}: a range's {name} is {offset} — offsets count "
                 "from the start of the text and kaya has no end-relative "
                 "spelling (str.find answers -1 for no match; test for it)"
@@ -167,7 +196,7 @@ def _require_app_thread():
     open one — silently, and interleaved (tools/check-tx-liveness.py).
     """
     if _app_thread is not None and threading.get_ident() != _app_thread:
-        raise RuntimeError(
+        raise KayaStateError(
             "kaya: a transaction belongs to the app thread — this is "
             f"thread {threading.get_ident()}, the app thread is "
             f"{_app_thread}. To mutate from a background thread use "
@@ -201,7 +230,7 @@ def _ship(records):
 
 def _records():
     if _tx is None:
-        raise RuntimeError(
+        raise KayaStateError(
             "kaya: no ambient transaction — declare inside `with app.window():` "
             "or mutate inside a handler (or `with app.build():`)"
         )
@@ -240,7 +269,7 @@ def _guard_tracer_escape():
     """Element tracers are record-time blueprints; one captured into a
     handler names the template, not any stamped copy's data."""
     if not (_recording or _tpl_depth > 0):
-        raise RuntimeError(
+        raise KayaStateError(
             "kaya: element tracers exist at record time only — a handler "
             "receives the stamped copy's keys and reads the model "
             "(get()/items()), never the tracer"
@@ -254,7 +283,7 @@ def _auto_parent(child_id):
 
 def _guard_mirror_read(what):
     if _recording or _tpl_depth > 0:
-        raise RuntimeError(
+        raise KayaStateError(
             f"kaya: {what} reads a mirror snapshot, which would freeze this "
             "branch at record time — bind the signal (or use kaya.when / "
             "kaya.for_each) in templates; read mirrors in handlers"
@@ -270,7 +299,7 @@ def _no_truth_value(what):
     `progress(indeterminate=el)` wrote a spinning bar on every row with
     nothing raised.
     """
-    raise RuntimeError(
+    raise KayaStateError(
         f"kaya: {what} has no truth value — bind it "
         "(checkbox(checked=el.field)) or, for per-constructor branches, "
         "declare a sum and its case arms; handlers read the model "
@@ -350,7 +379,7 @@ class Signal:
     def __bool__(self):
         # Python cannot overload statement branching, so an `if` on a
         # signal cannot trace to a template.
-        raise RuntimeError(
+        raise KayaStateError(
             "kaya: a signal has no truth value at record time — branch "
             "with `with kaya.when(sig):` (build the condition with "
             "sig.eq(...) / sig == ...); handlers fold occurrences into "
@@ -368,7 +397,7 @@ class _Derived(Signal):
         self._source = source
 
     def set(self, value):
-        raise RuntimeError("kaya: derived signals are written by their source")
+        raise KayaStateError("kaya: derived signals are written by their source")
 
     def _recompute(self):
         new = self._compute(self._source._mirror)
@@ -392,7 +421,7 @@ class _CollectionDerived(Signal):
         self._compute = compute
 
     def set(self, value):
-        raise RuntimeError("kaya: derived signals are written by their source")
+        raise KayaStateError("kaya: derived signals are written by their source")
 
     def _recompute(self):
         new = self._compute(dict(self._coll._mirror()))
@@ -421,7 +450,7 @@ def _prop_source(what, handle, value, const, signal, element):
         # A scalar collection's element IS the value: level, field 0.
         return element(handle.id, value._level())
     if isinstance(value, _CaseElement):
-        raise TypeError(
+        raise KayaTypeError(
             f"kaya: {what} takes a str, a Signal or one of the row's "
             f"fields (row.title), not {type(value).__name__} — inside a "
             "case arm project the field: .a11y_label(note.text)"
@@ -558,7 +587,7 @@ class _Handle:
                 # Without this the kind coerces to a repr and
                 # `_accept_list` complains about a space in a format id —
                 # a true sentence about the wrong problem.
-                raise TypeError(
+                raise KayaTypeError(
                     f"kaya: accepts takes constant kinds, not "
                     f"{type(kind).__name__} — an accept list describes "
                     "the control and not the row; rows that take "
@@ -591,7 +620,7 @@ class _Handle:
         _app._register(self, wire.OCC_PASTED, fn)
         return self
 
-    def draggable(self, text=None, html=None, image=None, files=(),
+    def draggable(self, *, text=None, html=None, image=None, files=(),
                   custom=None, operations=None):
         """DECLARE what this widget hands over when dragged: a clip in
         the shapes `copy` takes, plus the operations it allows.
@@ -969,7 +998,7 @@ class Node(_Handle):
         activation carries that copy's key path. An item takes exactly
         ONE anchor, so a second attach raises here."""
         if catalog._attached:
-            raise RuntimeError(
+            raise KayaStateError(
                 "kaya: a context catalog takes exactly one anchor"
             )
         catalog._attached = True
@@ -1016,7 +1045,7 @@ class _Cases:
         for variant, spec in enumerate(self._coll._variants):
             if spec.cls is cls:
                 return _CaseScope(self._for_index, self._coll, variant)
-        raise TypeError(
+        raise KayaTypeError(
             f"kaya: {cls.__name__} is not a constructor of this collection's union"
         )
 
@@ -1106,7 +1135,7 @@ class _BoundCollection:
         """A signal the binding recomputes from this collection's entries
         after every mutation, batched into the same transaction."""
         if self._path:
-            raise RuntimeError(
+            raise KayaStateError(
                 "kaya: derive on the collection itself, not an instance — drop the at()"
             )
         derived = _CollectionDerived(_app._next("signal"), self, compute)
@@ -1129,7 +1158,7 @@ class _BoundCollection:
         """Re-declare this collection instance's header bar after sorting."""
         handle = getattr(self._owner, "_for_handle", None)
         if handle is None:
-            raise RuntimeError(
+            raise KayaStateError(
                 "kaya: set_columns before columns() — the header bar "
                 "is declared with the For, then re-declared here"
             )
@@ -1199,10 +1228,10 @@ class _BoundCollection:
         entry = self._mirror()[key]
         variant, spec = self._owner._variant_for(entry)
         if spec.fields is None:
-            raise TypeError("kaya: patch() needs a record collection")
+            raise KayaTypeError("kaya: patch() needs a record collection")
         for name, value in fields.items():
             if name not in spec.fields:
-                raise KeyError(
+                raise KayaKeyError(
                     f"kaya: {type(entry).__name__} has no wire field {name!r}"
                 )
             index = spec.fields[name]
@@ -1229,16 +1258,16 @@ class _BoundCollection:
         """Reposition an entry at the front."""
         keys = list(self._mirror())
         if not keys:
-            raise KeyError(f"kaya: move of missing key {key!r}")
+            raise KayaKeyError(f"kaya: move of missing key {key!r}")
         self._move(key, [keys[0]])
 
     def move_after(self, key, anchor):
         """Reposition an entry directly after another's."""
         keys = list(self._mirror())
         if key not in keys:
-            raise KeyError(f"kaya: move of missing key {key!r}")
+            raise KayaKeyError(f"kaya: move of missing key {key!r}")
         if anchor not in keys:
-            raise KeyError(f"kaya: move after missing key {anchor!r}")
+            raise KayaKeyError(f"kaya: move after missing key {anchor!r}")
         if key == anchor:
             return
         at = keys.index(anchor)
@@ -1252,9 +1281,9 @@ class _BoundCollection:
         # The same checks the scene makes, made where the guest can see
         # the stack.
         if key not in mirror:
-            raise KeyError(f"kaya: move of missing key {key!r}")
+            raise KayaKeyError(f"kaya: move of missing key {key!r}")
         if before and before[0] not in mirror:
-            raise KeyError(f"kaya: move before missing key {before[0]!r}")
+            raise KayaKeyError(f"kaya: move before missing key {before[0]!r}")
         if before and before[0] == key:
             return  # moving before itself: order unchanged, nothing travels
         _records().append(
@@ -1381,7 +1410,7 @@ class _Variant:
             self.encoders.append(_FIELD_ENCODERS.get(f.type, _identity))
             self.decoders.append(_FIELD_DECODERS.get(f.type, _identity))
         if not self.schema:
-            raise TypeError(f"kaya: {cls.__name__} has no wire-typed fields")
+            raise KayaTypeError(f"kaya: {cls.__name__} has no wire-typed fields")
 
 
 class Sort:
@@ -1438,21 +1467,21 @@ class Collection(_BoundCollection):
         """In template position, `for t in todos:` traces to a For — the
         loop body runs ONCE, authoring the blueprint."""
         if not (_recording or _tpl_depth > 0):
-            raise TypeError(
+            raise KayaTypeError(
                 "kaya: `for t in coll:` is template tracing, record time "
                 "only — handlers iterate the model with items()"
             )
         if len(self._variants) > 1:
             # A for-loop body is one arm, but a sum's template is a
             # record of case arms.
-            raise TypeError(
+            raise KayaTypeError(
                 "kaya: a sum collection's template is its case arms — "
                 "use `with kaya.for_each(c) as cases:` and one "
                 "`with cases.case(Cls) as el:` per constructor"
             )
         return _ForTrace(self)
 
-    def rows(self, grow=None, align=None, a11y_id=None, reorderable=False,
+    def rows(self, *, grow=None, align=None, a11y_id=None, reorderable=False,
              on_drop=None):
         """The configured spelling of the ordinary For loop:
         `for item in items.rows(grow=1, align="stretch"):`.
@@ -1503,7 +1532,7 @@ class Collection(_BoundCollection):
         for variant, spec in enumerate(self._variants):
             if spec.cls is None or isinstance(value, spec.cls):
                 return variant, spec
-        raise TypeError(
+        raise KayaTypeError(
             f"kaya: {type(value).__name__} is not a constructor of this "
             "collection's union"
         )
@@ -1628,7 +1657,7 @@ class _ForTrace:
             # Traces close innermost-first; anything else means the
             # loop bodies interleaved template scopes.
             if not _open_traces or _open_traces[-1] is not self:
-                raise RuntimeError(
+                raise KayaStateError(
                     "kaya: nested for-loops over collections must close "
                     "innermost-first"
                 )
@@ -1685,7 +1714,7 @@ def pop_entry(window=0):
     _records().append(wire.tx_pop_entry(int(window)))
 
 
-def select_section(section_id, window=0):
+def select_section(section_id, *, window=0):
     """Select a section programmatically: configuration, never echoes
     on_selected. The section must already be added."""
     _records().append(wire.tx_select_section(int(window), int(section_id)))
@@ -1714,7 +1743,7 @@ NOTIFICATION_ACTIVATED = wire.NOTIFICATION_OUTCOME_ACTIVATED
 NOTIFICATION_REFUSED = wire.NOTIFICATION_OUTCOME_REFUSED
 
 
-def show_alert(title="", message="", actions=(), cancel=None,
+def show_alert(title="", *, message="", actions=(), cancel=None,
                on_result=None, window=0):
     """Request a modal alert: up to two action labels (the platform
     floor) plus the REQUIRED cancel label, the slot every
@@ -1723,10 +1752,10 @@ def show_alert(title="", message="", actions=(), cancel=None,
     the next from the handler."""
     actions = list(actions)
     if len(actions) > 2:
-        raise ValueError(
+        raise KayaValueError(
             "an alert carries at most 2 actions (the platform floor)")
     if not cancel:
-        raise ValueError(
+        raise KayaValueError(
             "the cancel slot always exists and needs a name — pass cancel=")
     action0 = actions[0] if len(actions) >= 1 else ""
     action1 = actions[1] if len(actions) == 2 else ""
@@ -1740,7 +1769,7 @@ def show_alert(title="", message="", actions=(), cancel=None,
     return alert_id
 
 
-def show_notification(notification, title="", body="", at=0,
+def show_notification(notification, *, title="", body="", at=0,
                       on_result=None):
     """Post a local notification (docs/tasks-s3-plan.md N1, N2): the
     alert's grammar without a window — the platform shows it outside
@@ -1750,7 +1779,7 @@ def show_notification(notification, title="", body="", at=0,
     UNIX time in seconds handed to the OS scheduler where one exists;
     0 posts now. Ids are the GUEST's, and many may be live at once."""
     if not title:
-        raise ValueError(
+        raise KayaValueError(
             "a notification needs a title — pass title=")
     notification = int(notification)
     app = _app
@@ -1800,7 +1829,7 @@ def link(pattern, f):
     (tools/check-sugar-surface.py refuses a reason spelled here). The
     one check below is the one a dynamic language cannot avoid."""
     if not isinstance(pattern, str):
-        raise TypeError(
+        raise KayaTypeError(
             f"kaya: link() takes a route pattern as str ('task/{{key}}'), "
             f"not {type(pattern).__name__}")
     app = _app
@@ -1850,9 +1879,44 @@ class _ColumnsTrace:
             raise
 
 
+class FileMode(enum.IntEnum):
+    """A picked file's open mode. Plain names accepted too —
+    `picked.open("write")`."""
+
+    READ = wire.FILE_MODE_READ
+    WRITE = wire.FILE_MODE_WRITE
+    READ_WRITE = wire.FILE_MODE_READ_WRITE
+
+    @classmethod
+    def _missing_(cls, value):
+        if isinstance(value, str):
+            try:
+                return cls[value.upper()]
+            except KeyError:
+                raise KayaValueError(
+                    f"kaya: file mode must be one of "
+                    f"{sorted(m.name.lower() for m in cls)}, got {value!r}"
+                ) from None
+        raise KayaValueError(
+            f"kaya: {value} is not a file mode — the vocabulary is "
+            f"{sorted(m.name.lower() for m in cls)} "
+            "(kaya.FileMode.READ/WRITE/READ_WRITE)"
+        )
+
+
+def _file_mode_value(mode):
+    # bool BEFORE int, which it subclasses.
+    if isinstance(mode, bool) or not isinstance(mode, (str, int)):
+        raise KayaTypeError(
+            f"kaya: file mode takes kaya.FileMode.READ or its name, not "
+            f"{type(mode).__name__}"
+        )
+    return FileMode(mode)
+
+
 class PickedFile:
     """One picked file: a handle to redeem, a display name, and
-    `local_path` — a RE-OPENABLE NAME, empty unless re-opening it
+    `local_path` — a RE-OPENABLE NAME, `None` unless re-opening it
     actually works, which measurement puts at the three desktops and
     neither phone (DESIGN.md, File dialogs)."""
 
@@ -1861,9 +1925,9 @@ class PickedFile:
     def __init__(self, handle, name, local_path):
         self.handle = handle
         self.name = name
-        self.local_path = local_path
+        self.local_path = pathlib.Path(local_path) if local_path else None
 
-    def open(self, mode=wire.FILE_MODE_READ):
+    def open(self, mode=FileMode.READ):
         """Redeem the handle: returns `(file, seekable)`.
 
         BLOCKS, possibly for a long time, so call it from a thread you
@@ -1871,13 +1935,13 @@ class PickedFile:
         that is the only place the answer exists — an Android provider
         may hand back a pipe.
         """
-        return runtime.open_picked(self.handle, mode)
+        return runtime.open_picked(self.handle, _file_mode_value(mode))
 
     def __repr__(self):
         return f"PickedFile(name={self.name!r}, local_path={self.local_path!r})"
 
 
-def pick_files(filters=(), on_result=None, window=0):
+def pick_files(*, filters=(), on_result=None, window=0):
     """Ask the platform for files. THE PICK, NOT THE OPEN — the result
     carries handles you redeem later.
 
@@ -1888,14 +1952,14 @@ def pick_files(filters=(), on_result=None, window=0):
     return _pick(True, filters, on_result, window)
 
 
-def pick_file(filters=(), on_result=None, window=0):
+def pick_file(*, filters=(), on_result=None, window=0):
     """The single-file spelling. The floor always returns a LIST; this
     only asks the platform for one, so the handler receives zero or one
     file."""
     return _pick(False, filters, on_result, window)
 
 
-def save_file(suggested_name, filters=(), on_result=None, window=0):
+def save_file(suggested_name, *, filters=(), on_result=None, window=0):
     """Ask the platform WHERE TO SAVE. The picker's twin, out of the same
     one-live-dialog slot.
 
@@ -2089,7 +2153,7 @@ def _drag_slot(handle, keys, what, value):
     does, and every stamped copy resolves it from its own record.
     """
     if isinstance(value, Signal):
-        raise TypeError(
+        raise KayaTypeError(
             f"kaya: a drag payload's {what} cannot be a signal — a "
             "payload is app-updated state, re-declared when it changes "
             "(docs/dnd-plan.md D1), and inside a For's body it binds a "
@@ -2099,19 +2163,19 @@ def _drag_slot(handle, keys, what, value):
     elif isinstance(value, Element):
         level, field = value._level(), 0
     elif isinstance(value, _CaseElement):
-        raise TypeError(
+        raise KayaTypeError(
             f"kaya: a drag payload's {what} takes one of the row's "
             "fields (row.title), not a case element — inside a case arm "
             "project the field (docs/dnd-plan.md §4)")
     else:
         return None
     if keys:
-        raise RuntimeError(
+        raise KayaStateError(
             f"kaya: draggable_at names ONE stamped copy, whose payload is "
             f"already resolved — bind {what} to the row's field in the "
             "For's body instead (docs/dnd-plan.md §4)")
     if not isinstance(handle, Node):
-        raise RuntimeError(
+        raise KayaStateError(
             f"kaya: a live widget's drag payload cannot bind {what} to a "
             "row's field — a live widget is one thing on screen and has "
             "no row (docs/dnd-plan.md §4)")
@@ -2123,7 +2187,7 @@ def _template_zone_only(handle, what):
     template node the copy was stamped from — a live widget is exactly
     one thing on screen and has no keys (docs/dnd-plan.md §4)."""
     if not isinstance(handle, Node):
-        raise RuntimeError(
+        raise KayaStateError(
             f"kaya: {what} names ONE STAMPED COPY — it takes a template "
             "node and that copy's keys, and a live widget is one thing on "
             "screen (docs/dnd-plan.md §4)")
@@ -2138,7 +2202,7 @@ def _operations(operations):
         elif op == OP_MOVE:
             mask |= wire.DRAG_OP_MOVE
         else:
-            raise ValueError(
+            raise KayaValueError(
                 f"kaya: {op!r} is not a drag operation — copy and move are "
                 "the vocabulary, and link and ask are refused "
                 "(docs/dnd-plan.md D3)")
@@ -2197,7 +2261,7 @@ _BLOCK_NAMES = ("body", "heading1", "heading2", "heading3", "quote",
 def _block_value(kind):
     name = str(kind)
     if name not in _BLOCK_NAMES:
-        raise ValueError(
+        raise KayaValueError(
             f"kaya: {kind!r} is not a block kind — one of "
             f"{list(_BLOCK_NAMES)} (docs/rich-text-plan.md R3)")
     return name
@@ -2302,7 +2366,7 @@ def _encode_document_field(value):
     blob a stamped copy's `document` prop reads, registered like any
     other blob field's bytes."""
     if not isinstance(value, Document):
-        raise TypeError(
+        raise KayaTypeError(
             f"kaya: a Document field takes a kaya.Document, not "
             f"{type(value).__name__}")
     return wire.BlobHandle(runtime.register_blob(_document_bytes(value)))
@@ -2313,7 +2377,7 @@ def _decode_document_field(data):
     carries the field as a blob, redeemed to bytes by the decoder
     (crates/kaya/src/wire.rs, `read_document_blob`)."""
     if not isinstance(data, (bytes, bytearray)):
-        raise TypeError(
+        raise KayaTypeError(
             f"kaya: a restored Document field carries bytes, not "
             f"{type(data).__name__}")
     count = int.from_bytes(data[0:4], "little")
@@ -2322,7 +2386,7 @@ def _decode_document_field(data):
         value, at = wire.parse_value(data, at)
         values.append(value)
     if not values or not isinstance(values[0], str):
-        raise ValueError(
+        raise KayaValueError(
             "kaya: a document blob starts with its text; this one holds "
             f"{len(values)} value(s)")
     runs = [Run(*values[i:i + 4]) for i in range(1, len(values), 4)]
@@ -2361,7 +2425,7 @@ _EDIT_SOURCES = {
 def _edit_source(source):
     name = _EDIT_SOURCES.get(int(source))
     if name is None:
-        raise ValueError(
+        raise KayaValueError(
             f"kaya: text_edited carries edit source {int(source)}, which "
             f"this build does not know")
     return name
@@ -2554,7 +2618,7 @@ def _accept_list(kinds):
     for kind in kinds:
         kind = str(kind)
         if not kind or " " in kind:
-            raise ValueError(
+            raise KayaValueError(
                 f"kaya: {kind!r} is not an accept-list entry — the closed "
                 "kinds are 'text', 'html', 'image' and 'files', and a "
                 "custom format id reaches the platform's own registry "
@@ -2563,7 +2627,7 @@ def _accept_list(kinds):
     return " ".join(out)
 
 
-def copy(text=None, html=None, image=None, files=(), custom=None):
+def copy(*, text=None, html=None, image=None, files=(), custom=None):
     """Put ONE clip on the system clipboard, offered in as many
     representations as you fill in.
 
@@ -2593,7 +2657,7 @@ def copy(text=None, html=None, image=None, files=(), custom=None):
     _records().append(wire.tx_copy(present, len(files), len(custom), reps))
 
 
-def read_clipboard(accepting, on_result=None):
+def read_clipboard(accepting, *, on_result=None):
     """Read the clipboard OUTSIDE any paste gesture — THE PRIVILEGED ONE.
 
     THE PLATFORMS HAVE MADE IT EXPENSIVE: iOS 16 PROMPTS when the content
@@ -2732,7 +2796,7 @@ def _menu_create(kind, label=None):
     live-zone only (a template body records a blueprint — build the
     catalog outside and attach with node.context_menu)."""
     if _tpl_depth > 0:
-        raise RuntimeError(
+        raise KayaStateError(
             "kaya: menu items are live — build the context catalog in "
             "the live zone (kaya.context_catalog) and attach it inside "
             "the template with node.context_menu(catalog)"
@@ -2752,7 +2816,7 @@ def _menu_seat(item):
     """Seat a just-created item under the open scope's anchor and
     return the scope (for the shortcut rule)."""
     if not _menu_scopes:
-        raise RuntimeError(
+        raise KayaStateError(
             "kaya: menu items declare inside a menu scope — "
             "app.menu()/app.radio_group() for the window catalog, "
             "widget.context_menu() or kaya.context_catalog() for a "
@@ -2803,13 +2867,13 @@ def _menu_require_catalog(scope):
     root rejects either on a context anchor, and this says so at the call
     site."""
     if not scope._shortcut_ok:
-        raise ValueError(
+        raise KayaValueError(
             "kaya: a context item takes no shortcut — a shortcut "
             "needs a window catalog as its native dispatch home"
         )
 
 
-def item(label, shortcut=None, enabled=None, icon=None, symbol=None,
+def item(label, *, shortcut=None, enabled=None, icon=None, symbol=None,
          primary=None, role=None, on_activate=None):
     """An action — a leaf command firing exactly one menu_activated
     occurrence, whether from a click or its shortcut. On a template-node
@@ -2829,7 +2893,7 @@ def item(label, shortcut=None, enabled=None, icon=None, symbol=None,
         it.primary(primary)
     if role is not None:
         if not scope._shortcut_ok:
-            raise ValueError(
+            raise KayaValueError(
                 "kaya: a context item takes no role — a role names a "
                 "standard command in the window catalog"
             )
@@ -2839,7 +2903,7 @@ def item(label, shortcut=None, enabled=None, icon=None, symbol=None,
     return it
 
 
-def toggle(label, checked=None, enabled=None, icon=None, symbol=None,
+def toggle(label, *, checked=None, enabled=None, icon=None, symbol=None,
            shortcut=None, on_toggle=None):
     """A toggle — a stateful leaf: user flips emit menu_toggled (the
     handler receives the new state, template-node copies the stamped keys
@@ -2862,7 +2926,7 @@ def toggle(label, checked=None, enabled=None, icon=None, symbol=None,
     return it
 
 
-def option(label, enabled=None, icon=None, symbol=None, shortcut=None):
+def option(label, *, enabled=None, icon=None, symbol=None, shortcut=None):
     """One labeled radio option, appended in declaration order — the
     order IS the index vocabulary the group's value selects over."""
     it = _menu_create(wire.MENU_KIND_RADIO_OPTION, label)
@@ -2885,7 +2949,7 @@ def separator():
     _menu_seat(it)
 
 
-def menu(label, enabled=None, icon=None, symbol=None):
+def menu(label, *, enabled=None, icon=None, symbol=None):
     """A NESTED menu — grouping, never navigation (one nested level is
     the cap, root-checked). Bar-level menus are `app.menu`."""
     it = _menu_create(wire.MENU_KIND_MENU, label)
@@ -2899,7 +2963,7 @@ def menu(label, enabled=None, icon=None, symbol=None):
     return _MenuScope(("item", it.id), scope._shortcut_ok, value=it)
 
 
-def radio_group(label, value=None, enabled=None, icon=None, symbol=None,
+def radio_group(label, *, value=None, enabled=None, icon=None, symbol=None,
                 on_select=None):
     """A NESTED radio group, declaring only kaya.option children.
     `value` is the selected 0-based index; programmatic writes are quiet,
@@ -2945,20 +3009,20 @@ def _accent(what, value):
     wall, in one sentence every language gets (invariant 1).
     """
     if isinstance(value, bool) or not isinstance(value, int):
-        raise TypeError(
+        raise KayaTypeError(
             f"kaya: brand accent {what} takes one packed sRGB int "
             f"(0x3584E4), not {type(value).__name__} — brand is identity, "
             "set once before the first mount, so it is never a signal"
         )
     if not 0 <= value <= 0xFFFFFFFF:
-        raise ValueError(
+        raise KayaValueError(
             f"kaya: brand accent {what} is {value:#x}, which does not fit "
             "the wire's u32 — the accent is one packed sRGB hex (0x3584E4)"
         )
     return value
 
 
-def brand_accent(seed, light=None, dark=None):
+def brand_accent(seed, *, light=None, dark=None):
     """REQUEST the app's brand accent (docs/styling-plan.md D1/D2): one
     hex is the whole call, `light`/`dark` a per-appearance variant, and
     whatever an appearance does not state is filled from the seed.
@@ -2978,7 +3042,7 @@ def brand_accent(seed, light=None, dark=None):
     ))
 
 
-class Platform:
+class Platform(enum.IntEnum):
     """WHICH PLATFORM A PER-PLATFORM BRAND VALUE IS FOR (spec enum
     "platform"; docs/styling-plan.md Slice 2b), closed. Plain names
     accepted too.
@@ -2993,6 +3057,23 @@ class Platform:
     LINUX = wire.PLATFORM_LINUX
     WINDOWS = wire.PLATFORM_WINDOWS
     ANDROID = wire.PLATFORM_ANDROID
+
+    @classmethod
+    def _missing_(cls, value):
+        if isinstance(value, str):
+            try:
+                return cls[value.upper()]
+            except KeyError:
+                raise KayaValueError(
+                    f"kaya: brand_typeface: {value!r} is not a platform — "
+                    f"the vocabulary is "
+                    f"{sorted(m.name.lower() for m in cls)}"
+                ) from None
+        raise KayaValueError(
+            f"kaya: brand_typeface: {value} is not a platform — the "
+            f"vocabulary is {sorted(m.name.lower() for m in cls)} "
+            "(kaya.Platform.MAC/IOS/LINUX/WINDOWS/ANDROID)"
+        )
 
 
 class SizeClass:
@@ -3034,29 +3115,15 @@ def _platform_value(platform):
     WHAT STAYS THE ROOT'S, deliberately: naming one platform TWICE (two
     spellings of the same row are two dict keys) and an empty family.
     """
-    if isinstance(platform, str):
-        try:
-            return _PLATFORM_NAMES[platform]
-        except KeyError:
-            raise ValueError(
-                f"kaya: brand_typeface: {platform!r} is not a platform — the "
-                f"vocabulary is {sorted(_PLATFORM_NAMES)}"
-            ) from None
     # bool BEFORE int, which it subclasses: `{True: "Georgia"}` would
     # otherwise read as platform 1, mac.
-    if isinstance(platform, bool) or not isinstance(platform, int):
-        raise TypeError(
+    if isinstance(platform, bool) or not isinstance(platform, (str, int)):
+        raise KayaTypeError(
             f"kaya: brand_typeface: a per-platform key is kaya.Platform.LINUX "
             f"or its name, not {type(platform).__name__} — an app names the "
             "platforms it has a family for; it never asks which one it is"
         )
-    if platform not in _PLATFORM_NAMES.values():
-        raise ValueError(
-            f"kaya: brand_typeface: {platform} is not a platform — the "
-            f"vocabulary is {sorted(_PLATFORM_NAMES)} "
-            "(kaya.Platform.MAC/IOS/LINUX/WINDOWS/ANDROID)"
-        )
-    return platform
+    return Platform(platform)
 
 
 class Asset:
@@ -3110,7 +3177,7 @@ class Asset:
 
     def _alive(self, what):
         if not self._handle:
-            raise RuntimeError(
+            raise KayaStateError(
                 f"kaya: {what} on a closed asset ({self._name!r}) — the "
                 "handle was released, and the bytes it borrowed are the "
                 "core's. Read inside the `with`, or keep the bytes rather "
@@ -3152,7 +3219,7 @@ def asset(name):
     READS: no cache, no watch, no reload.
     """
     if not isinstance(name, str):
-        raise TypeError(
+        raise KayaTypeError(
             f"kaya: asset() takes a name as str ('fonts/sora-wght.ttf'), "
             f"not {type(name).__name__} — a relative path under the asset "
             "root, spelled with `/` on every platform"
@@ -3161,7 +3228,7 @@ def asset(name):
     if handle:
         return Asset(handle, name)
     sentence = runtime.asset_miss_sentence(name)
-    raise RuntimeError(sentence or (
+    raise KayaStateError(sentence or (
         # Reachable only if the two calls disagree: the open answered a
         # miss and the why-not answered that it resolves.
         f"kaya: asset({name!r}) did not open, and the core's own why-not "
@@ -3178,7 +3245,7 @@ def asset_miss_sentence(name):
     line a scene freezes; line 2 names the resolved place.
     """
     if not isinstance(name, str):
-        raise TypeError(
+        raise KayaTypeError(
             f"kaya: asset_miss_sentence() takes a name as str "
             f"('fonts/sora-wght.ttf'), not {type(name).__name__} — a "
             "relative path under the asset root, spelled with `/` on "
@@ -3201,7 +3268,7 @@ def _typeface_family(what, family):
     the ROOT's, so every language reads the same one (invariant 1).
     """
     if not isinstance(family, str):
-        raise TypeError(
+        raise KayaTypeError(
             f"kaya: brand_typeface {what} takes a family NAME as str "
             f"('Georgia'), not {type(family).__name__} — a font FILE's bytes "
             "ride the font= slot, which is a different thing"
@@ -3209,7 +3276,7 @@ def _typeface_family(what, family):
     return family
 
 
-def brand_typeface(family, platforms=None, font=None):
+def brand_typeface(family, platforms=None, *, font=None):
     """REQUEST the app's brand typeface (docs/styling-plan.md Slice 2b):
     one family name is the whole call, and every platform that has that
     family installed uses it.
@@ -3224,7 +3291,7 @@ def brand_typeface(family, platforms=None, font=None):
     pairs = []
     if platforms is not None:
         if not isinstance(platforms, dict):
-            raise TypeError(
+            raise KayaTypeError(
                 f"kaya: brand_typeface platforms= takes a mapping of platform "
                 f"to family — {{kaya.Platform.LINUX: 'DejaVu Serif'}} — not "
                 f"{type(platforms).__name__}"
@@ -3236,7 +3303,7 @@ def brand_typeface(family, platforms=None, font=None):
                 f"family for {_PLATFORM_NAME_OF.get(tag, tag)}", value))
     if font is not None and not isinstance(font, (Asset, bytes, bytearray,
                                                   memoryview)):
-        raise TypeError(
+        raise KayaTypeError(
             f"kaya: brand_typeface font= takes a font FILE's bytes, not "
             f"{type(font).__name__} — a family NAME is the first argument, "
             "and a font the app's BUILD shipped is kaya.asset('fonts/...')"
@@ -3274,7 +3341,7 @@ the platform's own identity declares none at all.
 _UNDO_GROUP_TAG = wire.TX_UNDO_GROUP.to_bytes(2, "little")
 
 
-def undoable(label, window=0):
+def undoable(label, *, window=0):
     """Make THIS transaction one undoable step in `window`'s history,
     under `label` (docs/undo-plan.md D2).
 
@@ -3285,7 +3352,7 @@ def undoable(label, window=0):
     """
     text = _text_value("undoable", label)
     if not text:
-        raise ValueError(
+        raise KayaValueError(
             "kaya: an undo group needs a name — the EMPTY label is taken: "
             "it is how a typing episode identifies itself on the same "
             "occurrence, so an anonymous group would be indistinguishable "
@@ -3293,7 +3360,7 @@ def undoable(label, window=0):
         )
     records = _records()
     if records and records[0][4:6] == _UNDO_GROUP_TAG:
-        raise RuntimeError(
+        raise KayaStateError(
             "kaya: this transaction is already an undo group — one name "
             "per step"
         )
@@ -3341,7 +3408,7 @@ def app_data_dir():
     """
     answer = runtime.app_data_dir()
     if answer is None:
-        raise RuntimeError(
+        raise KayaStateError(
             "kaya: app_data_dir asked before the platform handed one "
             "over (Android before attach)")
     return pathlib.Path(answer)
@@ -3350,7 +3417,7 @@ def app_data_dir():
 def _pref_key(key):
     key = str(key)
     if not key:
-        raise ValueError("kaya: a preference key must not be empty")
+        raise KayaValueError("kaya: a preference key must not be empty")
     return key
 
 
@@ -3359,7 +3426,7 @@ def _pref_write_key(key):
     (docs/tasks-s4-plan.md P4: window memory lives under `kaya.`)."""
     key = _pref_key(key)
     if key.startswith("kaya."):
-        raise ValueError(
+        raise KayaValueError(
             f'kaya: preference key "{key}" is reserved '
             "(the kaya. prefix is kaya's own)")
     return key
@@ -3378,33 +3445,41 @@ class Prefs:
     thread.
     """
 
-    def get_string(self, key, default):
-        value = runtime.pref_get_string(_pref_key(key))
+    def get(self, key, default):
+        """Read a preference, DISPATCHING ON `default`'s TYPE — bool
+        before int, since bool subclasses int. Answers `default` when
+        the key is absent or holds another type (§4)."""
+        if isinstance(default, bool):
+            value = runtime.pref_get_bool(_pref_key(key))
+        elif isinstance(default, int):
+            value = runtime.pref_get_i64(_pref_key(key))
+        elif isinstance(default, float):
+            value = runtime.pref_get_f64(_pref_key(key))
+        elif isinstance(default, str):
+            value = runtime.pref_get_string(_pref_key(key))
+        else:
+            raise KayaTypeError(
+                f"kaya: a preference's default is a bool, int, float or "
+                f"str, not {type(default).__name__}"
+            )
         return default if value is None else value
 
-    def get_i64(self, key, default):
-        value = runtime.pref_get_i64(_pref_key(key))
-        return default if value is None else value
-
-    def get_f64(self, key, default):
-        value = runtime.pref_get_f64(_pref_key(key))
-        return default if value is None else value
-
-    def get_bool(self, key, default):
-        value = runtime.pref_get_bool(_pref_key(key))
-        return default if value is None else value
-
-    def set_string(self, key, value):
-        runtime.pref_set_string(_pref_write_key(key), str(value))
-
-    def set_i64(self, key, value):
-        runtime.pref_set_i64(_pref_write_key(key), int(value))
-
-    def set_f64(self, key, value):
-        runtime.pref_set_f64(_pref_write_key(key), float(value))
-
-    def set_bool(self, key, value):
-        runtime.pref_set_bool(_pref_write_key(key), bool(value))
+    def set(self, key, value):
+        """Write a preference, dispatching on `value`'s type — bool
+        before int."""
+        if isinstance(value, bool):
+            runtime.pref_set_bool(_pref_write_key(key), value)
+        elif isinstance(value, int):
+            runtime.pref_set_i64(_pref_write_key(key), value)
+        elif isinstance(value, float):
+            runtime.pref_set_f64(_pref_write_key(key), value)
+        elif isinstance(value, str):
+            runtime.pref_set_string(_pref_write_key(key), value)
+        else:
+            raise KayaTypeError(
+                f"kaya: a preference's value is a bool, int, float or "
+                f"str, not {type(value).__name__}"
+            )
 
     def remove(self, key):
         runtime.pref_remove(_pref_write_key(key))
@@ -3447,7 +3522,7 @@ def collection(record_type=None):
     return handle
 
 
-class Align:
+class Align(enum.IntEnum):
     """The align enum: a container's cross-axis child placement. Plain
     names accepted too — `align="center"`."""
 
@@ -3457,17 +3532,23 @@ class Align:
     STRETCH = wire.ALIGN_STRETCH
     BASELINE = wire.ALIGN_BASELINE
 
+    @classmethod
+    def _missing_(cls, value):
+        if isinstance(value, str):
+            try:
+                return cls[value.upper()]
+            except KeyError:
+                raise KayaValueError(
+                    f"kaya: align must be one of "
+                    f"{sorted(m.name.lower() for m in cls)}, got {value!r}"
+                ) from None
+        raise KayaValueError(
+            f"kaya: {value} is not an align — the vocabulary is "
+            f"{sorted(m.name.lower() for m in cls)}"
+        )
 
-_ALIGN_NAMES = {
-    "start": wire.ALIGN_START,
-    "center": wire.ALIGN_CENTER,
-    "end": wire.ALIGN_END,
-    "stretch": wire.ALIGN_STRETCH,
-    "baseline": wire.ALIGN_BASELINE,
-}
 
-
-class Axis:
+class Axis(enum.IntEnum):
     """The axis enum: a container's arrangement direction — row and
     column are one node whose constructor names the initial value
     (docs/adaptive-layout-plan.md D1). Plain names accepted too."""
@@ -3475,36 +3556,45 @@ class Axis:
     HORIZONTAL = wire.AXIS_HORIZONTAL
     VERTICAL = wire.AXIS_VERTICAL
 
-
-_AXIS_NAMES = {
-    "horizontal": wire.AXIS_HORIZONTAL,
-    "vertical": wire.AXIS_VERTICAL,
-}
+    @classmethod
+    def _missing_(cls, value):
+        if isinstance(value, str):
+            try:
+                return cls[value.upper()]
+            except KeyError:
+                raise KayaValueError(
+                    f"kaya: axis must be one of "
+                    f"{sorted(m.name.lower() for m in cls)}, got {value!r}"
+                ) from None
+        raise KayaValueError(
+            f"kaya: {value} is not an axis — the vocabulary is "
+            f"{sorted(m.name.lower() for m in cls)}"
+        )
 
 
 def _axis_value(axis):
-    if isinstance(axis, str):
-        try:
-            return _AXIS_NAMES[axis]
-        except KeyError:
-            raise ValueError(
-                f"axis must be one of {sorted(_AXIS_NAMES)}, got {axis!r}"
-            ) from None
-    return int(axis)
+    # bool BEFORE int, which it subclasses: `axis(True)` would otherwise
+    # read as 1, vertical.
+    if isinstance(axis, bool) or not isinstance(axis, (str, int)):
+        raise KayaTypeError(
+            f"kaya: axis takes kaya.Axis.VERTICAL or its name, not "
+            f"{type(axis).__name__}"
+        )
+    return Axis(axis)
 
 
 def _align_value(align):
-    if isinstance(align, str):
-        try:
-            return _ALIGN_NAMES[align]
-        except KeyError:
-            raise ValueError(
-                f"align must be one of {sorted(_ALIGN_NAMES)}, got {align!r}"
-            ) from None
-    return int(align)
+    # bool BEFORE int, which it subclasses: `align(True)` would otherwise
+    # read as 1, center.
+    if isinstance(align, bool) or not isinstance(align, (str, int)):
+        raise KayaTypeError(
+            f"kaya: align takes kaya.Align.CENTER or its name, not "
+            f"{type(align).__name__}"
+        )
+    return Align(align)
 
 
-class Role:
+class Role(enum.IntEnum):
     """The role enum: SEMANTIC EMPHASIS, the closed vocabulary
     (docs/styling-plan.md D4). Plain names accepted too.
 
@@ -3524,16 +3614,22 @@ class Role:
     SWITCH = wire.ROLE_SWITCH
     LINK = wire.ROLE_LINK
 
-
-_ROLE_NAMES = {
-    "destructive": wire.ROLE_DESTRUCTIVE,
-    "prominent": wire.ROLE_PROMINENT,
-    "heading": wire.ROLE_HEADING,
-    "caption": wire.ROLE_CAPTION,
-    "plain": wire.ROLE_PLAIN,
-    "switch": wire.ROLE_SWITCH,
-    "link": wire.ROLE_LINK,
-}
+    @classmethod
+    def _missing_(cls, value):
+        if isinstance(value, str):
+            try:
+                return cls[value.upper()]
+            except KeyError:
+                raise KayaValueError(
+                    f"kaya: role must be one of "
+                    f"{sorted(m.name.lower() for m in cls)}, got {value!r}"
+                ) from None
+        raise KayaValueError(
+            f"kaya: {value} is not a role — the vocabulary is "
+            f"{sorted(m.name.lower() for m in cls)} "
+            "(kaya.Role.DESTRUCTIVE/PROMINENT/HEADING/CAPTION/PLAIN/"
+            "SWITCH/LINK)"
+        )
 
 
 def _role_value(role):
@@ -3542,33 +3638,18 @@ def _role_value(role):
     What stays the ROOT's is the PAIRING — whether this role fits the
     kind it was written on — which no handle here knows.
     """
-    if isinstance(role, str):
-        try:
-            return _ROLE_NAMES[role]
-        except KeyError:
-            raise ValueError(
-                f"kaya: role must be one of {sorted(_ROLE_NAMES)}, got "
-                f"{role!r}"
-            ) from None
     # bool BEFORE int, which it subclasses: `role(True)` would otherwise
     # read as 1, the destructive role.
-    if isinstance(role, bool) or not isinstance(role, int):
-        raise TypeError(
+    if isinstance(role, bool) or not isinstance(role, (str, int)):
+        raise KayaTypeError(
             f"kaya: role takes kaya.Role.HEADING or its name, not "
             f"{type(role).__name__} — a role says what a widget MEANS and "
             "is declared once, so no binding binds one to a signal"
         )
-    if role not in _ROLE_NAMES.values():
-        raise ValueError(
-            f"kaya: {role} is not a role — the vocabulary is "
-            f"{sorted(_ROLE_NAMES)} "
-            "(kaya.Role.DESTRUCTIVE/PROMINENT/HEADING/CAPTION/PLAIN/"
-            "SWITCH/LINK)"
-        )
-    return role
+    return Role(role)
 
 
-class Symbol:
+class Symbol(enum.IntEnum):
     """THE SEMANTIC ICON VOCABULARY (spec enum "symbol";
     docs/styling-plan.md D6). An app names a CONCEPT and each backend
     draws its own platform's glyph; plain names accepted too.
@@ -3603,6 +3684,21 @@ class Symbol:
     PERSON = wire.SYMBOL_PERSON
     HOME = wire.SYMBOL_HOME
 
+    @classmethod
+    def _missing_(cls, value):
+        if isinstance(value, str):
+            try:
+                return cls[value.upper()]
+            except KeyError:
+                raise KayaValueError(
+                    f"kaya: symbol must be one of {sorted(_SYMBOL_NAMES)}, "
+                    f"got {value!r}"
+                ) from None
+        raise KayaValueError(
+            f"kaya: {value} is not a symbol — the vocabulary is "
+            f"{sorted(_SYMBOL_NAMES)} (kaya.Symbol.COPY and friends)"
+        )
+
 
 #: DERIVED from the class rather than typed again: a drifted second
 #: table draws the wrong concept with nothing raised.
@@ -3616,29 +3712,16 @@ _SYMBOL_NAMES = {
 def _symbol_value(symbol):
     """One symbol, from either spelling, refused here if it is neither.
     The ROOT keeps its own wall and the PAIRING too."""
-    if isinstance(symbol, str):
-        try:
-            return _SYMBOL_NAMES[symbol]
-        except KeyError:
-            raise ValueError(
-                f"kaya: symbol must be one of {sorted(_SYMBOL_NAMES)}, got "
-                f"{symbol!r}"
-            ) from None
     # bool BEFORE int, which it subclasses: `symbol(True)` would
     # otherwise read as 1, the `add` glyph.
-    if isinstance(symbol, bool) or not isinstance(symbol, int):
-        raise TypeError(
+    if isinstance(symbol, bool) or not isinstance(symbol, (str, int)):
+        raise KayaTypeError(
             f"kaya: symbol takes kaya.Symbol.COPY or its name, not "
             f"{type(symbol).__name__} — a symbol names a CONCEPT the "
             "platform draws, and is declared once, so no binding binds "
             "one to a signal"
         )
-    if symbol not in _SYMBOL_NAMES.values():
-        raise ValueError(
-            f"kaya: {symbol} is not a symbol — the vocabulary is "
-            f"{sorted(_SYMBOL_NAMES)} (kaya.Symbol.COPY and friends)"
-        )
-    return symbol
+    return Symbol(symbol)
 
 
 def _set_align(handle, align):
@@ -3675,7 +3758,7 @@ def scroll(grow=None):
     return _Container(handle)
 
 
-def grid(columns, grow=None, spacing=None, inset=None, columns_when=None):
+def grid(columns, *, grow=None, spacing=None, inset=None, columns_when=None):
     """A grid container laying its children out row-major into `columns`
     columns — each column at its NATURAL width, aligned across rows.
     `spacing` is the inter-cell gap on both axes; `inset` its own
@@ -3695,13 +3778,13 @@ def grid(columns, grow=None, spacing=None, inset=None, columns_when=None):
             or not isinstance(columns_when[1], int)
             or isinstance(columns_when[1], bool)
         ):
-            raise TypeError(
+            raise KayaTypeError(
                 f"kaya: columns_when takes a (size class, count) pair — "
                 f"kaya.COMPACT is the only class today — not "
                 f"{columns_when!r} (docs/adaptive-layout-plan.md D6.2)"
             )
         if _tpl_depth > 0:
-            raise TypeError(
+            raise KayaTypeError(
                 "kaya: columns_when is live-only — a breakpoint's setters "
                 "name live widgets, and a template grid is a blueprint "
                 "stamped per entry (docs/adaptive-layout-plan.md D6.2)"
@@ -3720,7 +3803,7 @@ def grid(columns, grow=None, spacing=None, inset=None, columns_when=None):
     return _Container(handle)
 
 
-def labeled(label, grow=None, spacing=None, inset=None):
+def labeled(label, *, grow=None, spacing=None, inset=None):
     """A LABELLED ROW (docs/forms-plan.md): `label` names the one control
     declared inside, with an optional trailing button after it. A column
     of nothing but these renders as the platform's form.
@@ -3742,7 +3825,7 @@ def spacer(grow=1.0):
     return handle
 
 
-def column(grow=None, spacing=None, align=None, inset=None):
+def column(*, grow=None, spacing=None, align=None, inset=None):
     """A column container: parents everything declared inside it. `grow`
     is its flex weight; `spacing` its inter-child gap (main axis, DIP,
     default 8); `inset` its own padding."""
@@ -3754,7 +3837,7 @@ def column(grow=None, spacing=None, align=None, inset=None):
     return _Container(handle)
 
 
-def button(text=None, bind=None, on_click=None, grow=None):
+def button(text=None, bind=None, *, on_click=None, grow=None):
     """A button; `text` for a constant caption, `bind` for one the row
     supplies — a Signal, the enclosing For's element, or one of its
     fields (`row.title`).
@@ -3767,7 +3850,7 @@ def button(text=None, bind=None, on_click=None, grow=None):
         _records().append(wire.tx_set_text(handle.id, _text_value("button text", text)))
     if bind is not None:
         if _tpl_depth == 0:
-            raise TypeError(
+            raise KayaTypeError(
                 "kaya: button bind is template-only — a live button's caption "
                 "is a constant in all eight bindings (docs/tpl-props-plan.md "
                 "F5). Bind inside `with kaya.for_each(c) as row:`; live, pass "
@@ -3784,7 +3867,7 @@ def button(text=None, bind=None, on_click=None, grow=None):
         else:
             # Python's equivalent of not compiling: raise, rather than
             # bind nothing in silence.
-            raise TypeError(
+            raise KayaTypeError(
                 f"kaya: button bind takes a Signal, the enclosing For's "
                 f"element, or one of its fields (row.title), not "
                 f"{type(bind).__name__} — inside a case arm project the "
@@ -3796,7 +3879,7 @@ def button(text=None, bind=None, on_click=None, grow=None):
     return handle
 
 
-def row(grow=None, spacing=None, align=None, inset=None, stack_when=None):
+def row(*, grow=None, spacing=None, align=None, inset=None, stack_when=None):
     """A row container: column turned sideways. `grow` is its flex
     weight; `spacing` its inter-child gap (main axis, DIP, default 8);
     `inset` its own padding.
@@ -3808,14 +3891,14 @@ def row(grow=None, spacing=None, align=None, inset=None, stack_when=None):
     handle = _widget(wire.KIND_ROW)
     if stack_when is not None:
         if stack_when is not COMPACT:
-            raise TypeError(
+            raise KayaTypeError(
                 f"kaya: stack_when takes a size class — kaya.COMPACT is "
                 f"the only class today — not {stack_when!r}. The raw-width "
                 "breakpoint (stack_below=N) is gone; kaya owns the numbers "
                 "(docs/adaptive-layout-plan.md D3)"
             )
         if _tpl_depth > 0:
-            raise TypeError(
+            raise KayaTypeError(
                 "kaya: stack_when is live-only — a breakpoint's setters "
                 "name live widgets, and a template row is a blueprint "
                 "stamped per entry (docs/adaptive-layout-plan.md D3)"
@@ -3835,7 +3918,7 @@ def row(grow=None, spacing=None, align=None, inset=None, stack_when=None):
     return _Container(handle)
 
 
-def checkbox(text=None, checked=None, on_toggle=None, grow=None):
+def checkbox(text=None, *, checked=None, on_toggle=None, grow=None):
     """A labeled on/off box. The box owns its checked bit: `on_toggle`
     receives the new state (template copies get the stamped keys first)
     and the app folds it into its own model."""
@@ -3858,7 +3941,7 @@ def checkbox(text=None, checked=None, on_toggle=None, grow=None):
     return handle
 
 
-def progress(value=None, indeterminate=None, grow=None):
+def progress(value=None, *, indeterminate=None, grow=None):
     """A progress bar: display-only. `value` is the determinate fraction
     (0..=1); `indeterminate=True` switches to the platform's activity
     mode and the fraction is ignored while it is on."""
@@ -3880,7 +3963,7 @@ def progress(value=None, indeterminate=None, grow=None):
     return handle
 
 
-def select(options, selected=0, on_select=None, grow=None):
+def select(options, *, selected=0, on_select=None, grow=None):
     """A dropdown select over fixed options; each becomes a label child.
     UNCONTROLLED: the widget owns its selection and reports each USER
     pick to `on_select`; programmatic writes never echo."""
@@ -3900,7 +3983,7 @@ def select(options, selected=0, on_select=None, grow=None):
     return handle
 
 
-def radio(options, selected=0, on_select=None, grow=None):
+def radio(options, *, selected=0, on_select=None, grow=None):
     """A radio group over fixed options — `select`'s contract in its
     inline presentation."""
     handle = _widget(wire.KIND_RADIO)
@@ -3919,7 +4002,7 @@ def radio(options, selected=0, on_select=None, grow=None):
     return handle
 
 
-def slider(value=None, min=None, max=None, step=None, tick_spacing=None,
+def slider(value=None, *, min=None, max=None, step=None, tick_spacing=None,
            on_change=None, on_commit=None, grow=None):
     """A slider over a numeric range. UNCONTROLLED: the widget owns its
     position and reports each change to `on_change` and each settled
@@ -3961,13 +4044,13 @@ def _picker_field(what, value, want):
     and an int one share the I64 tag, so nothing below this can tell them
     apart (docs/datetime-plan.md D10)."""
     if value._type is not want:
-        raise TypeError(
+        raise KayaTypeError(
             f"kaya: {what} binds a {want.__name__} field, not "
             f"{getattr(value._type, '__name__', value._type)}"
         )
 
 
-def date_picker(value=None, min=None, max=None, on_change=None, grow=None):
+def date_picker(value=None, *, min=None, max=None, on_change=None, grow=None):
     """A date picker over civil dates — `datetime.date`, never an instant
     (docs/datetime-plan.md). UNCONTROLLED: the control owns its value and
     reports each COMMITTED pick to `on_change`, template copies getting the
@@ -4001,7 +4084,7 @@ def date_picker(value=None, min=None, max=None, on_change=None, grow=None):
     return handle
 
 
-def time_picker(value=None, step=None, on_change=None, grow=None):
+def time_picker(value=None, *, step=None, on_change=None, grow=None):
     """A time picker over civil times — `datetime.time`, hours and minutes
     (seconds are not a picker value). `step` is the minute granularity: 1,
     5, 10, 15 or 30, and a pick snaps to it."""
@@ -4029,7 +4112,7 @@ def time_picker(value=None, step=None, on_change=None, grow=None):
     return handle
 
 
-def entry(text=None, on_change=None, grow=None, placeholder=None):
+def entry(text=None, *, on_change=None, grow=None, placeholder=None):
     """A single-line text field. UNCONTROLLED: the widget owns its text
     and reports each edit to `on_change`, template copies getting the
     stamped keys first. There is no read-back."""
@@ -4050,13 +4133,13 @@ def _bind_document(handle, field):
     `document` without it — then the binding, and the node is recorded so
     a copy's own edit or format act folds into the row."""
     if not isinstance(field, FieldRef):
-        raise TypeError(
+        raise KayaTypeError(
             f"kaya: textarea document= takes a Document field of the "
             f"enclosing For's element (el.body), not "
             f"{type(field).__name__} — a LIVE textarea's document is "
             "set_document(doc), which names the widget")
     if field._type is not Document:
-        raise TypeError(
+        raise KayaTypeError(
             "kaya: textarea document= takes a kaya.Document field; this "
             f"one is {getattr(field._type, '__name__', field._type)}")
     handle.rich(True)
@@ -4065,7 +4148,7 @@ def _bind_document(handle, field):
     _app._document_binds[handle.id] = (field._element._coll, field._index)
 
 
-def textarea(text=None, on_change=None, grow=None, placeholder=None,
+def textarea(text=None, *, on_change=None, grow=None, placeholder=None,
              rich=False, own_undo=False, on_edit=None, on_format=None,
              document=None):
     """A multi-line text editor: the entry's uncontrolled contract over
@@ -4107,7 +4190,7 @@ def textarea(text=None, on_change=None, grow=None, placeholder=None,
     return handle
 
 
-def search(text=None, on_change=None, grow=None, placeholder=None):
+def search(text=None, *, on_change=None, grow=None, placeholder=None):
     """A search field (docs/search-plan.md): the entry's uncontrolled
     contract under the platform's search chrome, filtering on every
     keystroke. The clear affordance reaches `on_change` with ""."""
@@ -4122,7 +4205,7 @@ def search(text=None, on_change=None, grow=None, placeholder=None):
     return handle
 
 
-def label(text=None, bind=None, grow=None, href=None, rich=False):
+def label(text=None, bind=None, *, grow=None, href=None, rich=False):
     """A label; `text` for a constant, `bind` for a Signal or an
     Element (the enclosing For's, levels computed). `href=` with
     `role="link"` is the destination the platform opens
@@ -4147,7 +4230,7 @@ def label(text=None, bind=None, grow=None, href=None, rich=False):
         # Without this arm the call binds NOTHING and says nothing — a
         # `cases.case(...)` arm hands over the refined proxy, which is
         # not an `Element`.
-        raise TypeError(
+        raise KayaTypeError(
             f"kaya: label bind takes a Signal, the enclosing For's element, "
             f"or one of its fields (el.title), not {type(bind).__name__} — "
             "inside a case arm project the field: kaya.label(bind=note.text)"
@@ -4160,20 +4243,20 @@ def label(text=None, bind=None, grow=None, href=None, rich=False):
     return handle
 
 
-def heading(text=None, bind=None, grow=None):
+def heading(text=None, bind=None, *, grow=None):
     """A label wearing the heading role: the platform's heading text
     style AND the accessibility heading trait, and on a grouped screen
     the section-header seat (docs/styling-plan.md D4)."""
     return label(text=text, bind=bind, grow=grow).role("heading")
 
 
-def caption(text=None, bind=None, grow=None):
+def caption(text=None, bind=None, *, grow=None):
     """A label wearing the caption role: the platform's footnote text
     tier, and on a grouped screen the section-footer seat."""
     return label(text=text, bind=bind, grow=grow).role("caption")
 
 
-def image(source=None, grow=None):
+def image(source=None, *, grow=None):
     """An image displaying encoded bytes: the toolkit decodes natively,
     and a decode failure renders the placeholder, never a crash. `source`
     is encoded bytes, an `Asset`, a Signal, or an element field."""
@@ -4191,7 +4274,7 @@ def image(source=None, grow=None):
                 wire.tx_set_source(handle.id, _blob_of(source))
             )
         else:
-            raise TypeError(
+            raise KayaTypeError(
                 f"kaya: image source takes encoded bytes, an asset the "
                 f"app's build shipped (kaya.asset('icons/...')), a Signal "
                 f"or an element field, not {type(source).__name__} — text "
@@ -4232,7 +4315,7 @@ def _draw_vocab(table, what, name):
     try:
         return table[name]
     except (KeyError, TypeError):
-        raise ValueError(
+        raise KayaValueError(
             f"kaya: {name!r} is not a canvas {what}; the vocabulary is "
             + ", ".join(sorted(table))
         ) from None
@@ -4317,7 +4400,7 @@ class _DrawScope:
     def __enter__(self):
         viewbox = _canvas_viewboxes.get(self._handle.id)
         if viewbox is None:
-            raise RuntimeError(
+            raise KayaStateError(
                 f"kaya: draw() on widget {self._handle.id} — that is not a "
                 "canvas this app declared; a drawing is a declaration "
                 "against the canvas it draws on (docs/canvas-plan.md §2.1)"
@@ -4349,13 +4432,13 @@ def _size_policy(handle, fixed, on_draw, on_tick):
     if len(declared) > 1:
         # Simultaneous keywords have no order, so two policies is a
         # question this cannot answer.
-        raise ValueError(
+        raise KayaValueError(
             "kaya: a canvas declares ONE size policy, not "
             + " and ".join(declared)
             + " (docs/canvas-plan.md §3.2.1)"
         )
     if isinstance(handle, Node):
-        raise RuntimeError(
+        raise KayaStateError(
             "kaya: the size policy is a LIVE-ZONE declaration in this "
             "slice — a canvas inside a row template keeps `scale` "
             "(docs/deferred.md, the template-zone size policy entry)"
@@ -4369,7 +4452,7 @@ def _size_policy(handle, fixed, on_draw, on_tick):
     _records().append(wire.tx_set_size_policy(handle.id, policy))
 
 
-def canvas(viewbox, grow=None, fixed=None, on_draw=None, on_tick=None):
+def canvas(viewbox, *, grow=None, fixed=None, on_draw=None, on_tick=None):
     """A drawing surface. `viewbox` is the (width, height) coordinate
     system the ops are written in AND the canvas's natural size in
     points (docs/canvas-plan.md §3.2). Declare what it draws with
@@ -4402,7 +4485,7 @@ def for_each(coll):
     # A For binds the collection itself — its template stamps per entry
     # of every instance — so handing it an at(...) handle is a bug.
     if not isinstance(coll, Collection):
-        raise TypeError(
+        raise KayaTypeError(
             "kaya: for_each binds the collection itself, not an instance "
             "— drop the .at(...)"
         )
@@ -4446,7 +4529,7 @@ def _window_props(window, title, width, height, veto_close, dirty,
         records.append(wire.tx_set_window_inset(window, float(inset)))
     if width is not None or height is not None:
         if width is None or height is None:
-            raise ValueError("kaya: window width and height travel together")
+            raise KayaValueError("kaya: window width and height travel together")
         records.append(wire.tx_set_window_width(window, float(width)))
         records.append(wire.tx_set_window_height(window, float(height)))
 
@@ -4461,7 +4544,7 @@ class _LiveWindow:
     """
 
     def __enter__(self):
-        raise RuntimeError(
+        raise KayaStateError(
             "kaya: the window construct's props are already in this "
             "transaction — inside a handler (or `with app.build():`) the "
             "construct is a PLAIN CALL, `app.window(dirty=True)`. The "
@@ -4590,7 +4673,7 @@ class _TxScope:
                 self._app._back_requested[self._window] = self._on_back
             return self
         if _tx is not None:
-            raise RuntimeError("kaya: transactions do not nest")
+            raise KayaStateError("kaya: transactions do not nest")
         _tx = []
         _journal = {}
         _pending_root = None
@@ -4618,7 +4701,7 @@ class _TxScope:
                     _journal = None
                 return False
             if root is None:
-                raise RuntimeError(
+                raise KayaStateError(
                     "kaya: push_entry()/add_section() body declared no "
                     "root container")
             _tx.append(wire.tx_mount(self._window, root.id))
@@ -4653,7 +4736,7 @@ class _TxScope:
             # does not iterate entries.
             for restore in journal.values():
                 restore()
-            raise RuntimeError(
+            raise KayaStateError(
                 "kaya: a `for t in coll:` template never closed — the "
                 "loop body must run to completion (no break/return); "
                 "conditional rendering is kaya.when"
@@ -4782,7 +4865,7 @@ class App:
         if on_redone is not None:
             self._redone[int(window_id)] = on_redone
 
-    def create_window(self, window_id, title=None, width=None, height=None,
+    def create_window(self, window_id, *, title=None, width=None, height=None,
                       veto_close=None, dirty=None, remember_frame=None,
                       panes=None,
                       sections_presentation=None, appearance=None,
@@ -4810,7 +4893,7 @@ class App:
             sections_presentation=sections_presentation,
             appearance=appearance, inset=inset)
 
-    def window(self, title=None, width=None, height=None, veto_close=None,
+    def window(self, title=None, *, width=None, height=None, veto_close=None,
                dirty=None, remember_frame=None, panes=None,
                sections_presentation=None,
                appearance=None,
@@ -4883,7 +4966,7 @@ class App:
         outside handlers."""
         return _TxScope(self, mount_on_exit=False)
 
-    def push_entry(self, entry_id, title=None, intercept_back=None,
+    def push_entry(self, entry_id, *, title=None, intercept_back=None,
                    on_popped=None, on_back=None):
         """A navigation entry's scene scope (DESIGN.md, Navigation): the
         single top-level container mounts INTO IT on exit. Entry ids are
@@ -4899,7 +4982,7 @@ class App:
             title=title, intercept_back=intercept_back,
             on_popped=on_popped, on_back=on_back)
 
-    def add_section(self, section_id, title=None, symbol=None, badge=None,
+    def add_section(self, section_id, *, title=None, symbol=None, badge=None,
                     on_selected=None, window=0):
         """A section's scene scope (DESIGN.md, Sections): the single
         top-level container mounts INTO IT on exit. The set is
@@ -4920,7 +5003,7 @@ class App:
             title=title, symbol=None if symbol is None else _symbol_value(symbol),
             badge=badge, on_selected=on_selected, host_window=window)
 
-    def menu(self, label, enabled=None, icon=None, symbol=None, window=0):
+    def menu(self, label, *, enabled=None, icon=None, symbol=None, window=0):
         """A top-level menu in `window`'s command catalog (DESIGN.md,
         Menus). Yields the retained handle, which append() reopens at any
         time; disabling the menu disables its subtree."""
@@ -4934,7 +5017,7 @@ class App:
             it.symbol(symbol)
         return _MenuScope(("item", it.id), shortcut_ok=True, value=it)
 
-    def radio_group(self, label, value=None, enabled=None, icon=None,
+    def radio_group(self, label, *, value=None, enabled=None, icon=None,
                     symbol=None, on_select=None, window=0):
         """A BAR-LEVEL radio group, declaring only kaya.option children.
         `value` is the selected 0-based index; programmatic writes are

@@ -14,6 +14,11 @@ public final class Undo {
     @KayaGen(key = "Long")
     record UndoTodo(String title) {}
 
+    /** Java lambdas cannot assign captured locals. */
+    private static final class Refs {
+        KayaApp.Widget field;
+    }
+
     private static String draft = "";
 
     /** What is typed in the ROWS, by key. SORTED, because the string it makes
@@ -105,21 +110,21 @@ public final class Undo {
                 t.write(notes, noteList());
             });
 
-            KayaApp.Widget[] field = new KayaApp.Widget[1];
+            Refs refs = new Refs();
             KayaApp.Widget root = tx.column(() -> {
                 tx.label(status).a11yId("status"); // label#0
                 tx.label(history).a11yId("history"); // label#1
                 tx.label(keys).a11yId("keys"); // label#2
                 tx.label(notes).a11yId("notes"); // label#3
-                field[0] = tx.entry((t, text) -> draft = text).a11yId("draft"); // entry#0
-                tx.button("add", t -> add(t, app, status, keys, todos, field[0])); // button#0
+                refs.field = tx.entry((t, text) -> draft = text).a11yId("draft"); // entry#0
+                tx.button("add", t -> add(t, app, status, keys, todos, refs.field)); // button#0
                 tx.button("star", t -> { // button#1
                     t.undoable("star");
                     t.write(status, "starred");
                 });
                 // No handler moves the cursor on its own, so the SCRIPT decides
                 // focus.
-                tx.button("focus", t -> t.focus(field[0])); // button#2
+                tx.button("focus", t -> t.focus(refs.field)); // button#2
                 tx.button("remove", t -> remove(t, status, keys, todos)); // button#3
                 for (var row : UndoTodoKaya.rows(tx, todos)) {
                     row.row(() -> {
@@ -137,7 +142,7 @@ public final class Undo {
                 }
             });
             // The scene types with REAL keystrokes, so something must hold focus.
-            tx.focus(field[0]);
+            tx.focus(refs.field);
             tx.mount(root);
         });
 

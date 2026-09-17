@@ -7,6 +7,11 @@ import dev.kaya.KayaApp;
  * tools/scenes/adaptive.steps.
  */
 public final class Adaptive {
+    /** Java lambdas cannot assign captured locals. */
+    private static final class Refs {
+        KayaApp.Widget dash;
+    }
+
     private static boolean vertical;
 
     public static void app() {
@@ -19,11 +24,10 @@ public final class Adaptive {
             KayaApp.Signal<String> longer = tx.signal("a longer label");
             KayaApp.Signal<String> steady = tx.signal("steady");
 
-            // Java lambdas cannot assign captured locals.
-            KayaApp.Widget[] dash = new KayaApp.Widget[1];
+            Refs refs = new Refs();
 
             tx.mount(tx.column(() -> {
-                dash[0] = tx.row(() -> { // row#0: the flip subject.
+                refs.dash = tx.row(() -> { // row#0: the flip subject.
                     tx.label(alpha); // label#0
                     tx.label(longer); // label#1
                 }).a11yId("dash");
@@ -33,7 +37,7 @@ public final class Adaptive {
                 }).a11yId("steady");
                 tx.button("flip", t -> { // button#0
                     vertical = !vertical;
-                    t.setAxis(dash[0],
+                    t.setAxis(refs.dash,
                         vertical ? KayaApp.Axis.VERTICAL : KayaApp.Axis.HORIZONTAL);
                 });
                 // row#1: the breakpoint subject, which no handler touches.

@@ -1,7 +1,6 @@
 (* The a11yrows scene, OCaml port — guests/rust/a11yrows.rs,
    tools/scenes/a11yrows.steps. *)
 
-open Kaya_wire
 open Kaya_app
 
 let () =
@@ -29,9 +28,9 @@ let () =
          ()
      in
      mount root;
-     ignore (insert_fresh notes (Str "First note"));
-     ignore (insert_fresh notes (Str "Second note"));
-     ignore (insert_fresh heads (Str "Heading one"));
-     ignore (insert_fresh heads (Str "Heading two")));
+     ignore (insert_fresh notes "First note");
+     ignore (insert_fresh notes "Second note");
+     ignore (insert_fresh heads "Heading one");
+     ignore (insert_fresh heads "Heading two"));
 
   exit (run app)

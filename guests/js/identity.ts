@@ -9,8 +9,6 @@ const UNTITLED = 1;
 
 let draft = "";
 
-let status!: kaya.Signal<string>;
-
 function onChange(text: string): void {
   draft = text;
 }
@@ -19,7 +17,7 @@ function onGo(): void {
   status.set(`clicked ${draft}`);
 }
 
-app.window({ title: "identity", width: 480, height: 360 }, () => {
+const { status } = app.window({ title: "identity", width: 480, height: 360 }, () => {
   // BEFORE THE FIRST MOUNT: the scope mounts on exit. NO ARGUMENTS: the
   // name, the mark and the id are the manifest's (docs/tasks-s3-plan.md N4).
   kaya.appIdentity();
@@ -31,13 +29,14 @@ app.window({ title: "identity", width: 480, height: 360 }, () => {
   });
 
   const heading = kaya.signal("identity");
-  status = kaya.signal("ready");
+  const status = kaya.signal("ready");
   kaya.column(() => {
     kaya.label({ bind: heading }); // label#0
     kaya.label({ bind: status }); // label#1
     kaya.entry({ onChange }); // entry#0
     kaya.button("Go", { onClick: onGo }); // button#0
   });
+  return { status };
 });
 
 // No title at all: an empty string is a title an app WROTE. The host is

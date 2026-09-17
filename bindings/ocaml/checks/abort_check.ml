@@ -9,20 +9,22 @@ exception Handler_bug
 
 let fail fmt = Printf.ksprintf (fun msg -> prerr_endline msg; exit 1) fmt
 
-let show_key = function
+let show_wire_value = function
   | Str s -> s
   | Bool b -> string_of_bool b
   | I64 n -> Int64.to_string n
   | F64 x -> string_of_float x
   | Blob h -> Printf.sprintf "blob:%Ld" h
 
+let show_keys keys = String.concat "; " (List.map key_text keys)
+
 let entry_keys app todos =
   build app (fun () -> List.map fst (items todos))
 
 let expect app todos want what =
   let got = entry_keys app todos in
-  if got <> List.map (fun k -> Str k) want then
-    fail "%s: [%s]" what (String.concat "; " (List.map show_key got))
+  if got <> List.map str_key want then
+    fail "%s: [%s]" what (show_keys got)
 
 (* What a record deriver generates, spelled by hand so this check needs
    no ppx. The blob's MODEL value is the guest's own bytes as a binary
@@ -92,8 +94,8 @@ let () =
     build app
       (fun () ->
        let todos = collection () in
-       insert todos (Str "a") (Str "one");
-       insert todos (Str "b") (Str "two");
+       insert todos (str_key "a") "one";
+       insert todos (str_key "b") "two";
        todos)
   in
 
@@ -101,8 +103,8 @@ let () =
      mirror and re-raise. *)
   (match
      build app (fun () ->
-         insert todos (Str "c") (Str "three");
-         remove todos (Str "a");
+         insert todos (str_key "c") "three";
+         remove todos (str_key "a");
          raise Handler_bug)
    with
   | () -> fail "build swallowed the exception — the tx boundary must propagate"
@@ -112,10 +114,10 @@ let () =
   (* The dispatch discipline: a raising handler is logged and the loop
      continues. *)
   dispatch app (fun () ->
-      insert todos (Str "d") (Str "four");
+      insert todos (str_key "d") "four";
       raise Handler_bug);
   expect app todos [ "a"; "b" ] "dispatch abort leaked into the mirror";
-  build app (fun () -> insert todos (Str "c") (Str "three"));
+  build app (fun () -> insert todos (str_key "c") "three");
   expect app todos [ "a"; "b"; "c" ] "post-abort commit broken";
 
   (* An aborted transaction abandons its derived registrations with
@@ -124,7 +126,7 @@ let () =
   dispatch app (fun () ->
       let rc = collection_of check_todo_rt in
       let _count =
-        derive rc (fun entries -> I64 (Int64.of_int (List.length entries)))
+        derive signal_i64 rc (fun entries -> Int64.of_int (List.length entries))
       in
       rc_cid := (record_handle rc).cid;
       raise Handler_bug);
@@ -135,12 +137,12 @@ let () =
   (* The blob field round trip: the model keeps the guest's own bytes. *)
   let pics = build app (fun () -> collection_of check_todo_rt) in
   let png = Bytes.of_string "not really a png" in
-  build app (fun () -> insert_record pics (Str "p") { ct_title = "pic"; ct_pic = png });
+  build app (fun () -> insert_record pics (str_key "p") { ct_title = "pic"; ct_pic = png });
   (match build app (fun () -> record_items pics) with
-  | [ (Str "p", { ct_title = "pic"; ct_pic }) ] when ct_pic = png -> ()
+  | [ (Str_key "p", { ct_title = "pic"; ct_pic }) ] when ct_pic = png -> ()
   | _ -> fail "blob field did not round-trip through the model");
   let png2 = Bytes.of_string "different bytes" in
-  build app (fun () -> update_field pics (Str "p") check_todo_ct_pic png2);
+  build app (fun () -> update_field pics (str_key "p") check_todo_ct_pic png2);
   (match build app (fun () -> record_items pics) with
   | [ (_, { ct_pic; _ }) ] when ct_pic = png2 -> ()
   | _ -> fail "blob update_field did not update the model's copy");
@@ -156,7 +158,7 @@ let () =
   | exception Failure _ -> ());
   expect app todos [ "a"; "b"; "c" ] "For-body read abort leaked into the mirror";
 
-  let visible = build app (fun () -> signal (Bool false)) in
+  let visible = build app (fun () -> signal_bool false) in
   (match
      build app (fun () ->
          let _ = when_ visible (fun () -> count todos) () in
@@ -470,7 +472,7 @@ let () =
     | [ r ] -> header_fields r
     | l -> fail "%s queued %d header records, not one" what (List.length l)
   in
-  let show_values vs = String.concat "; " (List.map show_key vs) in
+  let show_values vs = String.concat "; " (List.map show_wire_value vs) in
   let accounts = build app (fun () -> collection ()) in
   let sorted_at = ref [] in
   let node, template_bar =
@@ -522,7 +524,7 @@ let () =
     build app (fun () ->
         let tx = the_tx () in
         let before = List.length tx.records in
-        columns_at node [ Str "acct-a" ] [ "Symbol"; "Qty" ] (sort_desc 1);
+        columns_at node [ str_key "acct-a" ] [ "Symbol"; "Qty" ] (sort_desc 1);
         one_header "columns_at" (queued_since tx before))
   in
   (match keyed_bar with
@@ -545,7 +547,7 @@ let () =
       fail "Tpl.columns ~on_sort registered nothing under the template node"
   | Some handler -> handler [ Str "acct-a" ] 1);
   (match !sorted_at with
-  | [ ([ Str "acct-a" ], 1) ] -> ()
+  | [ ([ Str_key "acct-a" ], 1) ] -> ()
   | l ->
       fail
         "the copy's sort handler saw [%s], wanted one request carrying its \
@@ -553,7 +555,7 @@ let () =
         (String.concat ", "
            (List.map
               (fun (keys, column) ->
-                Printf.sprintf "([%s], %d)" (show_values keys) column)
+                Printf.sprintf "([%s], %d)" (show_keys keys) column)
               l)));
 
   (* The LIVE half of the same labelled argument, which no OCaml scene
@@ -677,8 +679,8 @@ let () =
         let tx = the_tx () in
         let before = List.length tx.records in
         insert_record
-          (record_at nested_positions (Str "brokerage"))
-          (Str "aapl") ("AAPL", "10");
+          (record_at nested_positions (str_key "brokerage"))
+          (str_key "aapl") ("AAPL", "10");
         queued_since tx before)
   in
   (match
@@ -699,10 +701,10 @@ let () =
         (List.length l));
   (match
      build app (fun () ->
-         ( record_items (record_at nested_positions (Str "brokerage")),
+         ( record_items (record_at nested_positions (str_key "brokerage")),
            record_items nested_positions ))
    with
-  | [ (Str "aapl", ("AAPL", "10")) ], [] -> ()
+  | [ (Str_key "aapl", ("AAPL", "10")) ], [] -> ()
   | copy, own ->
       fail
         "the copy's model holds %d entr(y/ies) and the collection's own table \
@@ -726,7 +728,7 @@ let () =
       (Kaya_wire.edit_source_native_undo, "native_undo");
       (Kaya_wire.edit_source_drop, "drop");
     ];
-  if (Edit.insert 0 "x").e_source <> None then
+  if (Edit.insert 0 "x").source <> None then
     fail "an app-built edit carries a source — nothing on the wire carries \
           one downward";
   (match edit_source_of_wire 99 with
@@ -768,12 +770,12 @@ let () =
           (List.length l)
   in
   let editor = build app (fun () -> textarea ~rich:true ()) in
-  let fold () = (build app (fun () -> document editor)).d_runs in
-  let show_runs runs =
+  let fold () : Run.t list = (build app (fun () -> document editor)).runs in
+  let show_runs (runs : Run.t list) =
     String.concat ", "
       (List.map
-         (fun r ->
-           Printf.sprintf "%d..%d %s=%s" r.r_start r.r_stop r.r_name r.r_value)
+         (fun (r : Run.t) ->
+           Printf.sprintf "%d..%d %s=%s" r.start r.stop r.name r.value)
          runs)
   in
   build app (fun () -> set_document editor (Document.create "one\ntwo\nthree"));
@@ -823,7 +825,7 @@ let () =
     (fun () -> format_range editor (4, 7) "italic" "true")
     (0, 1, 4L, 7L);
   (match fold () with
-  | [ { r_start = 4; r_stop = 7; r_name = "italic"; r_value = "true" } ] -> ()
+  | [ { start = 4; stop = 7; name = "italic"; value = "true" } ] -> ()
   | runs ->
       fail "the fold after format_range holds [%s], wanted 4..7 italic=true"
         (show_runs runs));
@@ -832,8 +834,8 @@ let () =
   fmt "format_range block"
     (fun () -> format_range editor (5, 6) "block" "heading1")
     (0, 1, 4L, 7L);
-  (match List.filter (fun r -> r.r_name = "block") (fold ()) with
-  | [ { r_start = 4; r_stop = 7; r_value = "heading1"; _ } ] -> ()
+  (match List.filter (fun (r : Run.t) -> r.name = "block") (fold ()) with
+  | [ { start = 4; stop = 7; value = "heading1"; _ } ] -> ()
   | runs ->
       fail "the fold after a ranged block act holds [%s], wanted 4..7 \
             block=heading1"
@@ -896,20 +898,20 @@ let () =
   | other ->
       fail "a Document field's model value is %s, wanted the blob's bytes \
             as a binary Str"
-        (show_key other));
+        (show_wire_value other));
   (match document_of_blob reference with
-  | { d_text = "abc"; d_runs = [ a; b ] }
-    when (a.r_start, a.r_stop, a.r_name, a.r_value) = (0, 1, "bold", "true")
-         && (b.r_start, b.r_stop, b.r_name, b.r_value) = (1, 3, "link", "u") ->
+  | { text = "abc"; runs = [ a; b ] }
+    when (a.Run.start, a.stop, a.name, a.value) = (0, 1, "bold", "true")
+         && (b.Run.start, b.stop, b.name, b.value) = (1, 3, "link", "u") ->
       ()
   | doc ->
-      fail "the reference list read back as %S [%s]" doc.d_text
+      fail "the reference list read back as %S [%s]" doc.text
         (String.concat ", "
            (List.map
-              (fun r ->
-                Printf.sprintf "%d..%d %s=%s" r.r_start r.r_stop r.r_name
-                  r.r_value)
-              doc.d_runs)));
+              (fun (r : Run.t) ->
+                Printf.sprintf "%d..%d %s=%s" r.start r.stop r.name
+                  r.value)
+              doc.runs)));
 
   (* AND THE FOLD REACHES THE ROW: a stamped copy's edit folds into its
      row's field by the rule the LIVE mirror folds by, so the two
@@ -930,7 +932,7 @@ let () =
               node := n)
             ()
         in
-        insert_record notes (Str "a") { cn_title = "a"; cn_body = seed };
+        insert_record notes (str_key "a") { cn_title = "a"; cn_body = seed };
         (notes, !node))
   in
   let range, inserted, runs = edit in
@@ -942,7 +944,7 @@ let () =
   absorb_edit row_app live_id range inserted runs;
   let mirrored = build row_app (fun () -> document live) in
   let rowed =
-    match List.assoc_opt (Str "a") (build row_app (fun () -> record_items notes)) with
+    match List.assoc_opt (str_key "a") (build row_app (fun () -> record_items notes)) with
     | Some note -> note.cn_body
     | None -> fail "the row vanished before the fold could be read back"
   in
@@ -950,7 +952,7 @@ let () =
     fail
       "the row's field folded to %S [%s] where the live mirror folded to \
        %S [%s] — one rule, two documents"
-      rowed.d_text (show_runs rowed.d_runs) mirrored.d_text
-      (show_runs mirrored.d_runs);
+      rowed.text (show_runs rowed.runs) mirrored.text
+      (show_runs mirrored.runs);
 
   print_endline "ocaml abort check: OK"

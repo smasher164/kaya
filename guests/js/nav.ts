@@ -39,15 +39,14 @@ function openSettings(): void {
   status.set("pushed settings");
 }
 
-let status!: kaya.Signal<string>;
-
-app.window({ title: "nav" }, () => {
-  status = kaya.signal("at root");
+const { status } = app.window({ title: "nav" }, () => {
+  const status = kaya.signal("at root");
   kaya.column(() => {
     kaya.label({ bind: status }); // label#0
     kaya.button("open detail", { onClick: openDetail }); // button#0
     kaya.button("open settings", { onClick: openSettings }); // button#1
   });
+  return { status };
 });
 
 app.run();

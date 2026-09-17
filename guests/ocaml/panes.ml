@@ -1,7 +1,6 @@
 (* The panes scene, OCaml port — guests/rust/panes.rs,
    tools/scenes/panes.steps. *)
 
-open Kaya_wire
 open Kaya_app
 
 let content = 7L
@@ -15,13 +14,13 @@ let () =
 
      let on_detail () =
        push_entry ~title:"detail" detail;
-       let caption = signal (Str "detail pane") in
+       let caption = signal_str ("detail pane") in
        let pane = column [ label ~a11y_id:"detail" ~bind:caption ] () in
        mount_in detail pane
      in
      let on_content () =
        push_entry ~title:"content" content;
-       let caption = signal (Str "content pane") in
+       let caption = signal_str ("content pane") in
        let pane =
          column
            [
@@ -33,7 +32,7 @@ let () =
        mount_in content pane
      in
 
-     let caption = signal (Str "root pane") in
+     let caption = signal_str ("root pane") in
      let root =
        column
          [

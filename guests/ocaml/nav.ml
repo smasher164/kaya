@@ -1,6 +1,5 @@
 (* The nav scene, OCaml port — guests/rust/nav.rs, tools/scenes/nav.steps. *)
 
-open Kaya_wire
 open Kaya_app
 
 let detail = 7L
@@ -12,28 +11,28 @@ let () =
   let status = ref None in
   build app (fun () ->
      window ~title:"nav" ();
-     let s = signal (Str "at root") in
+     let s = signal_str ("at root") in
      status := Some s;
      let on_detail () =
        push_entry ~title:"detail"
-         ~on_popped:(fun () -> write s (Str "popped detail"))
+         ~on_popped:(fun () -> write s ("popped detail"))
          detail;
-       (let caption = signal (Str "detail pane") in
+       (let caption = signal_str ("detail pane") in
         let pane = column [ label ~bind:caption ] () in
         mount_in detail pane;
-        write s (Str "pushed detail"))
+        write s ("pushed detail"))
         
      in
      let on_settings () =
        push_entry ~title:"settings" ~intercept_back:true
          ~on_back_requested:(fun () ->
-           write s (Str "back requested");
+           write s ("back requested");
            pop_entry ())
          settings;
-       (let caption = signal (Str "settings pane") in
+       (let caption = signal_str ("settings pane") in
         let pane = column [ label ~bind:caption ] () in
         mount_in settings pane;
-        write s (Str "pushed settings"))
+        write s ("pushed settings"))
         
      in
      let root =

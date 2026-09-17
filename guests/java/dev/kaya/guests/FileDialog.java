@@ -1,7 +1,6 @@
 package dev.kaya.guests;
 
 import dev.kaya.KayaApp;
-import dev.kaya.KayaWire;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -104,7 +103,7 @@ public final class FileDialog {
         Thread worker = new Thread(() -> {
             String text;
             try {
-                KayaApp.Opened opened = files.get(0).open(KayaWire.FILE_MODE_READ);
+                KayaApp.Opened opened = files.get(0).open(KayaApp.FileMode.READ);
                 try (InputStream in = opened.stream()) {
                     text = new String(in.readAllBytes(), StandardCharsets.UTF_8);
                 }

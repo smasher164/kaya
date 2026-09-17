@@ -1,7 +1,6 @@
 (* The sections scene, OCaml port — guests/rust/sections.rs,
    tools/scenes/sections.steps. *)
 
-open Kaya_wire
 open Kaya_app
 
 let feed = 7L
@@ -20,16 +19,14 @@ let () =
   build app (fun () ->
      let () =
        window ~title:"sections"
-         ~sections_presentation:
-           (Int64.of_int Kaya_wire.sections_presentation_bar)
+         ~sections_presentation:Sections_presentation.Bar
          ()
      in
-     let visits = signal (Str "archive: 0 visits") in
+     let visits = signal_str ("archive: 0 visits") in
      let on_archive_shown () =
        incr visit_count;
        write visits
-         (Str (Printf.sprintf "archive: %d visits" !visit_count))
-        
+         (Printf.sprintf "archive: %d visits" !visit_count)
      in
      (* A symbol names a CONCEPT (docs/styling-plan.md D6). *)
      add_section ~title:"Feed" ~symbol:Home feed;
@@ -41,21 +38,20 @@ let () =
      in
      let open_library () =
        create_window ~title:"library"
-         ~sections_presentation:
-           (Int64.of_int Kaya_wire.sections_presentation_sidebar)
+         ~sections_presentation:Sections_presentation.Sidebar
          library;
        add_section ~window:library ~title:"Shelves" ~symbol:Search shelves;
        add_section ~window:library ~title:"Loans" ~symbol:Lock loans;
-       let shelves_ready = signal (Str "shelves ready") in
+       let shelves_ready = signal_str ("shelves ready") in
        let shelves_root =
          column [ label ~bind:shelves_ready (* label#2 *) ] ()
        in
        mount_in shelves shelves_root;
-       let loans_ready = signal (Str "loans ready") in
+       let loans_ready = signal_str ("loans ready") in
        let loans_root = column [ label ~bind:loans_ready (* label#3 *) ] () in
        mount_in loans loans_root
      in
-     let ready = signal (Str "feed ready") in
+     let ready = signal_str ("feed ready") in
      let feed_root =
        column
          [

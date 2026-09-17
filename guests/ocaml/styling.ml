@@ -1,7 +1,6 @@
 (* The styling scene, OCaml port — guests/rust/styling.rs,
    tools/scenes/styling.steps. *)
 
-open Kaya_wire
 open Kaya_app
 
 let () =
@@ -14,11 +13,11 @@ let () =
 
      (* [title], not [heading]: the bare constructor of that name builds
         label#0 below. *)
-     let title = signal (Str "Sections") in
-     let status = signal (Str "ready") in
+     let title = signal_str ("Sections") in
+     let status = signal_str ("ready") in
 
-     let on_delete () = write status (Str "deleted") in
-     let on_save () = write status (Str "saved") in
+     let on_delete () = write status ("deleted") in
+     let on_save () = write status ("saved") in
 
      let root =
        column

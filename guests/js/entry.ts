@@ -24,14 +24,11 @@ function onAdd(): void {
   field.focus();
 }
 
-let status!: kaya.Signal<string>;
-let todos!: kaya.Collection<string, kaya.Element>;
-let field!: kaya.Widget;
+const { status, todos, field } = app.window(() => {
+  const status = kaya.signal("no todos");
+  const todos = kaya.collection();
 
-app.window(() => {
-  status = kaya.signal("no todos");
-  todos = kaya.collection();
-
+  let field!: kaya.Widget;
   kaya.column(() => {
     field = kaya.entry({ onChange });
     kaya.button("add", { onClick: onAdd });
@@ -40,6 +37,7 @@ app.window(() => {
       kaya.label({ bind: todo });
     }
   });
+  return { status, todos, field };
 });
 
 app.run();

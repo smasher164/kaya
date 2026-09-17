@@ -1,7 +1,6 @@
 package dev.kaya.guests;
 
 import dev.kaya.KayaApp;
-import dev.kaya.KayaWire;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -16,6 +15,11 @@ import java.nio.file.Paths;
  */
 public final class Clipboard {
     private Clipboard() {}
+
+    /** Java lambdas cannot assign captured locals. */
+    private static final class Refs {
+        KayaApp.Widget rich, plain;
+    }
 
     /** A 4x4 PNG: a foreign decoder asserts its size, so this must stay
      * a valid encoded image. */
@@ -106,12 +110,12 @@ public final class Clipboard {
                                 .onResult((t, clip) -> answered(app, status, t, clip))
                                 .send());
 
-                KayaApp.Widget[] fields = new KayaApp.Widget[2];
-                tx.button("focus rich", inner -> inner.focus(fields[0])); // button#5
-                tx.button("focus plain", inner -> inner.focus(fields[1])); // button#6
+                Refs fields = new Refs();
+                tx.button("focus rich", inner -> inner.focus(fields.rich)); // button#5
+                tx.button("focus plain", inner -> inner.focus(fields.plain)); // button#6
 
-                fields[0] = tx.entry().accepts(KayaApp.ACCEPT_TEXT).a11yId("rich"); // entry#0
-                app.onPaste(fields[0], (t, clip) -> {
+                fields.rich = tx.entry().accepts(KayaApp.ACCEPT_TEXT).a11yId("rich"); // entry#0
+                app.onPaste(fields.rich, (t, clip) -> {
                     if (clip instanceof KayaApp.Representation.Text text) {
                         t.write(status, "pasted " + text.value());
                         return;
@@ -119,7 +123,7 @@ public final class Clipboard {
                     t.write(status, "pasted " + clip);
                 });
 
-                fields[1] = tx.entry().a11yId("plain"); // entry#1
+                fields.plain = tx.entry().a11yId("plain"); // entry#1
 
                 // The accept list must be declared on the TEMPLATE, or the node
                 // hook can never fire (docs/tpl-props-plan.md §1).
@@ -176,7 +180,7 @@ public final class Clipboard {
                 // OFF THE APP THREAD: open blocks.
                 String text;
                 try {
-                    KayaApp.Opened opened = file.open(KayaWire.FILE_MODE_READ);
+                    KayaApp.Opened opened = file.open(KayaApp.FileMode.READ);
                     try (InputStream in = opened.stream()) {
                         text = new String(in.readAllBytes(), StandardCharsets.UTF_8);
                     }

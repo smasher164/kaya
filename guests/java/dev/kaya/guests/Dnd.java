@@ -2,7 +2,6 @@ package dev.kaya.guests;
 
 import dev.kaya.KayaApp;
 import dev.kaya.KayaGen;
-import dev.kaya.KayaWire;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -22,6 +21,13 @@ import java.util.function.BiConsumer;
 public final class Dnd {
     @KayaGen(key = "String")
     record DndItem(String title) {}
+
+    /** Java lambdas cannot assign captured locals. */
+    private static final class Refs {
+        KayaApp.Widget sourceLabel, textTargetLabel, noteTargetLabel,
+                filesTargetLabel, rowsWidget;
+        KayaApp.Node rowNode, itemNode;
+    }
 
     private static final String NOTE_ID = "dev.kaya/note";
 
@@ -84,7 +90,7 @@ public final class Dnd {
     }
 
     private static String readBack(KayaApp.PickedFile file) {
-        try (InputStream in = file.open(KayaWire.FILE_MODE_READ).stream()) {
+        try (InputStream in = file.open(KayaApp.FileMode.READ).stream()) {
             return new String(in.readAllBytes(), StandardCharsets.UTF_8);
         } catch (IOException e) {
             return "open failed: " + e.getMessage();
@@ -105,8 +111,7 @@ public final class Dnd {
             var noteTarget = tx.signal("note target");
             var filesTarget = tx.signal("files target");
 
-            KayaApp.Widget[] made = new KayaApp.Widget[5];
-            KayaApp.Node[] nodes = new KayaApp.Node[2];
+            Refs refs = new Refs();
             tx.window(0).title("dnd");
             tx.mount(tx.row(() -> {
                 // The For opens when rows() is called, so it is minted
@@ -114,22 +119,22 @@ public final class Dnd {
                 // and the template's end is refused by the core.
                 var rows = DndItemKaya.rows(tx, items);
                 for (var row : rows) {
-                    nodes[0] = row.label(row.title);
-                    row.setA11yId(nodes[0], "row");
+                    refs.rowNode = row.label(row.title);
+                    row.setA11yId(refs.rowNode, "row");
                 }
-                made[3] = rows.handle;
-                tx.setA11yId(made[3], "rows");
+                refs.rowsWidget = rows.handle;
+                tx.setA11yId(refs.rowsWidget, "rows");
                 tx.column(() -> {
-                    made[0] = tx.label(sourceText); // label#0
-                    made[1] = tx.label(textTarget); // label#1
-                    tx.setAccepts(made[1], KayaApp.ACCEPT_TEXT);
-                    tx.setDropTarget(made[1], KayaApp.Op.COPY);
-                    made[2] = tx.label(noteTarget); // label#2
-                    tx.setAccepts(made[2], NOTE_ID);
-                    tx.setDropTarget(made[2], KayaApp.Op.COPY, KayaApp.Op.MOVE);
-                    made[4] = tx.label(filesTarget); // label#3
-                    tx.setAccepts(made[4], KayaApp.ACCEPT_FILES);
-                    tx.setDropTarget(made[4], KayaApp.Op.COPY);
+                    refs.sourceLabel = tx.label(sourceText); // label#0
+                    refs.textTargetLabel = tx.label(textTarget); // label#1
+                    tx.setAccepts(refs.textTargetLabel, KayaApp.ACCEPT_TEXT);
+                    tx.setDropTarget(refs.textTargetLabel, KayaApp.Op.COPY);
+                    refs.noteTargetLabel = tx.label(noteTarget); // label#2
+                    tx.setAccepts(refs.noteTargetLabel, NOTE_ID);
+                    tx.setDropTarget(refs.noteTargetLabel, KayaApp.Op.COPY, KayaApp.Op.MOVE);
+                    refs.filesTargetLabel = tx.label(filesTarget); // label#3
+                    tx.setAccepts(refs.filesTargetLabel, KayaApp.ACCEPT_FILES);
+                    tx.setDropTarget(refs.filesTargetLabel, KayaApp.Op.COPY);
                     tx.label(dropStatus); // label#4
                     tx.label(dragStatus); // label#5
                 });
@@ -139,34 +144,34 @@ public final class Dnd {
                 // the field changes — column#2.
                 var itemRows = DndItemKaya.rows(tx, items2);
                 for (var row : itemRows) {
-                    nodes[1] = row.label(row.title);
-                    row.setA11yId(nodes[1], "item");
-                    row.setAccepts(nodes[1], KayaApp.ACCEPT_TEXT);
-                    row.setDropTarget(nodes[1], KayaApp.Op.COPY);
-                    row.draggable(nodes[1]).text(row.title).allow(KayaApp.Op.COPY).declare();
+                    refs.itemNode = row.label(row.title);
+                    row.setA11yId(refs.itemNode, "item");
+                    row.setAccepts(refs.itemNode, KayaApp.ACCEPT_TEXT);
+                    row.setDropTarget(refs.itemNode, KayaApp.Op.COPY);
+                    row.draggable(refs.itemNode).text(row.title).allow(KayaApp.Op.COPY).declare();
                 }
                 tx.setA11yId(itemRows.handle, "items");
                 tx.button("rename y", t -> // button#0
                         items2.update(t, "y", new DndItem("yy")));
             }));
-            KayaApp.Widget source = made[0];
+            KayaApp.Widget source = refs.sourceLabel;
             tx.draggable(source)
                     .text("hello")
                     .custom(NOTE_ID, "note!".getBytes(StandardCharsets.UTF_8))
                     .allow(KayaApp.Op.COPY)
                     .allow(KayaApp.Op.MOVE)
                     .declare();
-            tx.setReorderable(made[3], true);
+            tx.setReorderable(refs.rowsWidget, true);
 
-            app.onDrop(made[1], dropped(app, "text target", textTarget, dropStatus,
+            app.onDrop(refs.textTargetLabel, dropped(app, "text target", textTarget, dropStatus,
                     sourceText, source));
-            app.onDrop(made[2], dropped(app, "note target", noteTarget, dropStatus,
+            app.onDrop(refs.noteTargetLabel, dropped(app, "note target", noteTarget, dropStatus,
                     sourceText, source));
-            app.onDrop(made[4], dropped(app, "files target", filesTarget, dropStatus,
+            app.onDrop(refs.filesTargetLabel, dropped(app, "files target", filesTarget, dropStatus,
                     sourceText, source));
             app.onDragEnded(source, (t, op) ->
                     t.write(dragStatus, "drag ended " + word(op)));
-            app.onDrop(nodes[1], (t, keys, d) -> {
+            app.onDrop(refs.itemNode, (t, keys, d) -> {
                 String op = word(d.operation());
                 if (d.clip() instanceof KayaApp.Representation.Text text) {
                     t.write(dropStatus, "item " + keyWord(keys) + " got text "
@@ -176,11 +181,11 @@ public final class Dnd {
                             + op + ")");
                 }
             });
-            app.onDragEnded(nodes[1], nodeEnded("item", dragStatus));
-            app.onDragEnded(nodes[0], nodeEnded("row", dragStatus));
+            app.onDragEnded(refs.itemNode, nodeEnded("item", dragStatus));
+            app.onDragEnded(refs.rowNode, nodeEnded("row", dragStatus));
             // The moved row's key rides as the kaya-private custom
             // representation; the anchor is the row it landed on (D8).
-            app.onDrop(made[3], (t, d) -> {
+            app.onDrop(refs.rowsWidget, (t, d) -> {
                 if (!(d.clip() instanceof KayaApp.Representation.Custom moved)
                         || d.anchor().isEmpty()
                         || !(d.anchor().get(0) instanceof String anchor)) {

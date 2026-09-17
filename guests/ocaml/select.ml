@@ -1,7 +1,6 @@
 (* The select scene, OCaml port — guests/rust/select.rs,
    tools/scenes/select.steps. *)
 
-open Kaya_wire
 open Kaya_app
 
 let options = [ "Red"; "Green"; "Blue" ]
@@ -11,10 +10,10 @@ let () =
 
   build app (fun () ->
      window ~title:"select" ();
-     let picked = signal (Str "picked: Red") in
+     let picked = signal_str ("picked: Red") in
 
      let on_pick index =
-       write picked (Str ("picked: " ^ List.nth options index))
+       write picked (("picked: " ^ List.nth options index))
      in
 
      let root =

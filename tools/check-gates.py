@@ -322,7 +322,19 @@ flightrec_lib_text = (root / "tools" / "lib" / "flightrec.sh").read_text(
     encoding="utf-8")
 flightrec_pylib_text = (root / "tools" / "lib" / "flightrec_lane.py"
                         ).read_text(encoding="utf-8")
+def hand_run_problem(text):
+    """tools/run-leg.py launches a leg the way validate-mac's pool does,
+    under `timeout 120`: a guest launched bare opens its undeclared window
+    at another size and a width premise fails by hand alone (docs/traps.md,
+    "A guest launched without the pool's timeout wrapper")."""
+    if 'argv = ["timeout", "120", *argv]' not in text:
+        return ("tools/run-leg.py must launch the leg under the pool's own "
+                "`timeout 120` wrapper")
+    return None
+
+
 matrix_text = (root / "tools" / "validate-all.py").read_text(encoding="utf-8")
+run_leg_text = (root / "tools" / "run-leg.py").read_text(encoding="utf-8")
 android_text = (root / "tools" / "android" / "run-emulator.py").read_text(
     encoding="utf-8")
 ios_text = (root / "tools" / "ios" / "run-sim.py").read_text(encoding="utf-8")
@@ -638,6 +650,9 @@ if problem is not None:
 problem = ios_pool_problem(ios_text, probe_text)
 if problem is not None:
     fail(problem)
+problem = hand_run_problem(run_leg_text)
+if problem is not None:
+    fail(problem)
 for problem in lane_contract_problems(lane_texts, flightrec_lib_text,
                                       flightrec_pylib_text):
     fail(problem)
@@ -706,6 +721,17 @@ else:
     elif not any("deploy-win" in x and "journals no leg" in x
                  for x in problems):
         fail("self-test N17 failed for another reason: " + "; ".join(problems))
+
+# N18 — the hand runner launching bare must be named.
+doctored, n = re.subn(r'(?m)^argv = \["timeout", "120", \*argv\]\n', "",
+                      run_leg_text, count=1)
+print(f"check-gates: self-test N18 removed the hand runner's timeout wrapper, "
+      f"{n} substitution(s)")
+if n != 1:
+    fail("self-test N18 did not remove exactly one wrapper line — the "
+         "hand-run clause is not reading tools/run-leg.py")
+elif hand_run_problem(doctored) is None:
+    fail("self-test N18: a hand runner launching bare passed")
 
 # The driver's own arithmetic: an under-run, a failing gate and a
 # missing script must each come back red, watched on every run.

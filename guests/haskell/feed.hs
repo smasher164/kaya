@@ -1,49 +1,56 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE DeriveAnyClass #-}
 
 -- The feed scene, Haskell port — guests/rust/feed.rs, tools/scenes/feed.steps.
 
-import Data.Proxy (Proxy (..))
 import GHC.Generics (Generic)
 
+import Data.Text (Text)
+import qualified Data.Text as T
 import KayaApp
-import KayaWire (Value (..))
 
-data Note = Note {text :: String} deriving (Generic)
+data Note = Note {text :: Text}
+  deriving stock (Generic)
+  deriving anyclass (KayaRecord)
 
-data Todo = Todo {title :: String, done :: Bool} deriving (Generic)
+data Todo = Todo {title :: Text, done :: Bool}
+  deriving stock (Generic)
+  deriving anyclass (KayaRecord)
 
-data Post = PNote Note | PTodo Todo deriving (Generic)
+data Post = PNote Note | PTodo Todo
+  deriving stock (Generic)
+  deriving anyclass (KayaSum)
 
-instance KayaRecord Note
 
-instance KayaRecord Todo
 
-instance KayaSum Post
 
 main :: IO ()
 main = kayaMain $ \app -> do
   buildTx app $ do
-    feed <- sumCollectionOf (Proxy :: Proxy Post)
+    feed <- sumCollectionOf @Post
     doneCount <-
       sumDerive feed $ \entries ->
         let n = length [() | (_, PTodo (Todo _ True)) <- entries]
-         in VStr (show n ++ " done")
+         in T.pack (show n ++ " done")
 
     let onPromote = submitTx app $ do
           entries <- sumItems feed
           case [(k, note) | (k, PNote note) <- entries] of
             (key, Note t) : _ -> sumUpdate feed key (PTodo (Todo t True))
             [] -> pure ()
-        onToggle keys checked = submitTx app $ do
+        onToggle (key : _) checked = submitTx app $ do
           -- The case is the refinement, and the generated patch witnesses it:
           -- a stale occurrence lands in the other arm.
-          entry <- sumGet feed (head keys)
+          entry <- sumGet feed key
           case entry of
             Just p@(PTodo _) ->
-              sumPatch feed (head keys) p [set (field @"done" @Todo) checked]
+              sumPatch feed key p [set (field @"done" @Todo) checked]
             _ -> pure ()
+        onToggle [] _ = error "kaya: onToggle's key path is never empty"
 
     root <-
       row
@@ -63,6 +70,6 @@ main = kayaMain $ \app -> do
             ]
         ]
     mount root
-    sumInsert feed (VStr "a") (PNote (Note "jot one"))
-    sumInsert feed (VStr "b") (PTodo (Todo "buy milk" False))
-    sumInsert feed (VStr "c") (PNote (Note "jot two"))
+    sumInsert feed (T.pack "a") (PNote (Note "jot one"))
+    sumInsert feed (T.pack "b") (PTodo (Todo "buy milk" False))
+    sumInsert feed (T.pack "c") (PNote (Note "jot two"))

@@ -45,7 +45,7 @@ sealed class SumCollection<T>
 
     void InsertOrUpdate(Tx tx, object key, T value, bool insert)
     {
-        var (variant, info) = VariantOf(value.GetType());
+        var (variant, info) = VariantOf(value!.GetType());
         if (insert)
             tx.InsertRecordRaw(Collection, key, value, variant, info.WireFields(value));
         else
@@ -57,19 +57,28 @@ sealed class SumCollection<T>
     {
         var items = new List<KeyValuePair<object, T>>();
         foreach (var entry in tx.Items(Collection))
-            items.Add(new KeyValuePair<object, T>(entry.Key, (T)entry.Value));
+            items.Add(new KeyValuePair<object, T>(entry.Key, (T)entry.Value!));
         return items;
     }
 
+    /// The typed model as an insertion-ordered map: O(1) keyed reads
+    /// over what Items keeps a list of
+    /// (System.Collections.Generic.OrderedDictionary, .NET 9+).
+    public OrderedDictionary<object, T> Snapshot(Tx tx)
+    {
+        var snap = new OrderedDictionary<object, T>();
+        foreach (var entry in Items(tx))
+            snap[entry.Key] = entry.Value;
+        return snap;
+    }
+
+    /// The entry at `key`, or false if it is missing.
+    public bool TryGet(Tx tx, object key, out T value) =>
+        Snapshot(tx).TryGetValue(key, out value!);
+
     /// The entry's current value — the scrutinee for the pattern match
     /// that precedes a patch — or default for a missing key.
-    public T Get(Tx tx, object key)
-    {
-        foreach (var entry in tx.Items(Collection))
-            if (Equals(entry.Key, key))
-                return (T)entry.Value;
-        return default;
-    }
+    public T? Get(Tx tx, object key) => TryGet(tx, key, out var value) ? value : default;
 
     /// The witnessed field write: V names the constructor the caller
     /// just matched, and the write throws if the entry holds a
@@ -78,15 +87,14 @@ sealed class SumCollection<T>
         where V : T
     {
         var (variant, info) = VariantOf(typeof(V));
-        object current = Get(tx, key);
-        if (current == null)
+        if (!TryGet(tx, key, out var current) || current == null)
             throw new InvalidOperationException($"kaya: update of missing key {key}");
         if (current.GetType() != typeof(V))
             throw new InvalidOperationException(
                 $"kaya: update_field witnessed {typeof(V).Name} but {key} holds {current.GetType().Name}");
         var f = KayaRecords.FieldOf(selector);
-        tx.UpdateFieldRaw(Collection, key, info.WithField(current, f.Index, value), variant,
-            f.Index, info.EncodeField(f.Index, value));
+        tx.UpdateFieldRaw(Collection, key, info.WithField(current, f.Index, value!), variant,
+            f.Index, info.EncodeField(f.Index, value!));
     }
 
     /// The collection-derived signal, over the sum's entries.
@@ -143,7 +151,7 @@ sealed class SumCase<V>
 
     /// A checkbox bound to the field the selector names.
     public Node Checkbox(Tpl t, Expression<Func<V, bool>> selector,
-        Action<Tx, List<object>, bool> onToggle = null) =>
+        Action<Tx, List<object>, bool>? onToggle = null) =>
         t.Checkbox(KayaRecords.FieldOf(selector), onToggle);
 }
 

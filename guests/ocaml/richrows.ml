@@ -4,46 +4,40 @@
    writes a copy's document by patching its row, and a copy's own act
    folds into the row the app reads back. *)
 
-open Kaya_wire
 open Kaya_app
 
 type note = { title : string; body : document } [@@deriving kaya_gen]
 
 (* The core's spelling of runs ([expect_runs]), so the row's field and the
    core's mirror are compared as one string. *)
-let spell runs =
+let spell (runs : Run.t list) =
   String.concat "|"
     (List.map
-       (fun r ->
-         if r.r_value = "true" then
-           Printf.sprintf "%d:%d %s" r.r_start r.r_stop r.r_name
-         else Printf.sprintf "%d:%d %s=%s" r.r_start r.r_stop r.r_name r.r_value)
+       (fun (r : Run.t) ->
+         if r.value = "true" then
+           Printf.sprintf "%d:%d %s" r.start r.stop r.name
+         else Printf.sprintf "%d:%d %s=%s" r.start r.stop r.name r.value)
        runs)
-
-let key_text = function
-  | Str s -> s
-  | I64 n -> Int64.to_string n
-  | _ -> "?"
 
 let () =
   let app = Kaya_app.create () in
 
   build app (fun () ->
       let notes = collection_of note_record in
-      let last = signal (Str "") in
-      let view = signal (Str "") in
+      let last = signal_str ("") in
+      let view = signal_str ("") in
 
       let row_of key =
-        match List.assoc_opt key (record_items notes) with
+        match record_get notes key with
         | Some note -> note
         | None -> failwith (Printf.sprintf "richrows: no row %s" (key_text key))
       in
       (* An undo or redo moved the row back: the app reads ITS OWN mirror
          of row b, which is the fold a restored Blob field lands in. *)
       let restored _step _delta =
-        let note = row_of (Str "b") in
+        let note = row_of (str_key "b") in
         write view
-          (Str (Printf.sprintf "%s | %s" note.body.d_text (spell note.body.d_runs)))
+          (Printf.sprintf "%s | %s" note.body.text (spell note.body.runs))
       in
 
       window ~title:"richrows"
@@ -51,8 +45,8 @@ let () =
           [
             menu ~label:"Edit"
               [
-                item ~label:"Undo" ~role:role_undo;
-                item ~label:"Redo" ~role:role_redo;
+                item ~label:"Undo" ~role:Menu_role.Undo;
+                item ~label:"Redo" ~role:Menu_role.Redo;
               ];
           ]
         ~on_undone:restored ~on_redone:restored ();
@@ -63,7 +57,7 @@ let () =
         let key = List.hd keys in
         let note = row_of key in
         write last
-          (Str (Printf.sprintf "%s: %s" (key_text key) (spell note.body.d_runs)))
+          (Printf.sprintf "%s: %s" (key_text key) (spell note.body.runs))
       in
 
       mount
@@ -79,15 +73,14 @@ let () =
                      undoable "patch b";
                      note_patch
                        ~body:(Document.create "Patched" |> Document.italic (0, 7))
-                       notes (Str "b"));
+                       notes (str_key "b"));
                  (* button#1 — the row the copy's own act folded into *)
                  button ~text:"read a"
                    ~on_click:(fun () ->
-                     let note = row_of (Str "a") in
+                     let note = row_of (str_key "a") in
                      write view
-                       (Str
-                          (Printf.sprintf "%s | %s" note.body.d_text
-                             (spell note.body.d_runs))));
+                       (Printf.sprintf "%s | %s" note.body.text
+                          (spell note.body.runs)));
                ];
              each (record_handle notes) (fun () ->
                  Tpl.(
@@ -106,12 +99,12 @@ let () =
            ]
            ());
 
-      insert_record notes (Str "a")
+      insert_record notes (str_key "a")
         {
           title = "a";
           body = Document.create "Héllo world" |> Document.bold (0, 6);
         };
-      insert_record notes (Str "b")
+      insert_record notes (str_key "b")
         {
           title = "b";
           body =

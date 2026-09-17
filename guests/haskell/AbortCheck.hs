@@ -1,6 +1,9 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE DeriveAnyClass #-}
 
 -- The Haskell uniform-abort guard. Run headless by tools/check-abort.py.
 
@@ -12,20 +15,19 @@ import Data.ByteString.Builder (toLazyByteString)
 import qualified Data.ByteString.Char8 as BC
 import qualified Data.ByteString.Lazy as BL
 import Data.List (isInfixOf)
-import Data.Proxy (Proxy (..))
 import GHC.Generics (Generic)
 import System.Exit (exitFailure)
 import System.IO (hPutStrLn, stderr)
 
+import Data.Text (Text)
 import KayaApp
 import KayaWire (Value (..))
 import qualified KayaWire as W
 
 -- A record with a DOCUMENT field (docs/rich-text-plan.md §19).
-data CheckNote = CheckNote {cnTitle :: String, cnBody :: Document}
-  deriving (Generic)
-
-instance KayaRecord CheckNote
+data CheckNote = CheckNote {cnTitle :: Text, cnBody :: Document}
+  deriving stock (Generic)
+  deriving anyclass (KayaRecord)
 
 failWith :: String -> IO a
 failWith msg = hPutStrLn stderr msg >> exitFailure
@@ -68,7 +70,7 @@ main = do
   -- shortcut parser must reject aliases, and an abort must leave the app usable.
   file <- buildTx app $ do
     f <- menu "File" [] [item "Save" [IShortcut "PRIMARY+S"]]
-    window 0 [WMenus [pure f]]
+    window primary [WMenus [pure f]]
     return f
 
   badShortcut <-
@@ -109,7 +111,7 @@ main = do
   unless (editSource (insertEdit 0 "x") == Nothing) $
     failWith "an app-built edit carries a source — nothing on the wire carries one downward"
   unknown <- try (evaluate (editSourceName (editSourceOfWire 99)))
-  case (unknown :: Either SomeException String) of
+  case (unknown :: Either SomeException Text) of
     Right s ->
       failWith ("edit source 99 read as " ++ show s ++ " instead of being refused")
     Left e ->
@@ -249,7 +251,7 @@ main = do
       oneEdit = Edit 0 6 "Hey" [] Nothing
   rowApp <- newApp
   (rowNotes, rowNode) <- buildTx rowApp $ do
-    notes <- collectionOf (Proxy :: Proxy CheckNote)
+    notes <- collectionOf @CheckNote
     (_, node) <- forEach (recordHandle notes) (textareaRichBound (field @"cnBody" @CheckNote))
     insertRecord notes (VStr "a") (CheckNote "a" seed)
     return (notes, node)
@@ -266,5 +268,19 @@ main = do
         ( "the row's field folded to " ++ show (cnBody note)
             ++ " where the live mirror folded to " ++ show mirrored
             ++ " — one rule, two documents" )
+
+  -- THE KEYED READ (docs/deferred.md, the idiom pass's keyed-read entry):
+  -- 'getRecord' is 'recordItems' narrowed to one key, so it must agree
+  -- with a 'lookup' over the same table on both a present key and an
+  -- absent one — the single-row read `recordItems` \/ `lookup` forced a
+  -- guest to spell out before this entry.
+  gotA <- buildTx rowApp (getRecord rowNotes (VStr "a"))
+  case gotA of
+    Just note -> check (cnTitle note == "a") ("getRecord \"a\" read title " ++ show (cnTitle note) ++ ", wanted \"a\"")
+    Nothing -> failWith "getRecord found no row at a present key"
+  gotMissing <- buildTx rowApp (getRecord rowNotes (VStr "no-such-key"))
+  case gotMissing of
+    Nothing -> return ()
+    Just _ -> failWith "getRecord found a row at an absent key"
 
   putStrLn "haskell abort check: OK"

@@ -238,6 +238,12 @@ with scratch_dir("check-abort-") as tmp:
          ["dune", "exec", "--root", ".",
           "bindings/ocaml/checks/notify_order_check.exe"],
          tmp / "ml-notify.log", echo=("notify-order:", "link-route:"))
+    # The typed-signal, variant-role and typed-key refusals of the idiom
+    # pass (docs/deferred.md, the idiom-pass entry): three fixtures that
+    # must NOT compile, each on the one line its finding is about.
+    step("ocaml-negatives",
+         ["python3", "bindings/ocaml/checks/negatives.py"],
+         tmp / "ml-negatives.log", echo=("negatives:",))
 
     # A PRIVATE build tree, never the shared dist-newstyle: the repo is
     # mounted into the linux container, so wiping the shared one destroys
@@ -288,6 +294,30 @@ with scratch_dir("check-abort-") as tmp:
     if "Couldn't match" not in (tmp / "hs-guard.log").read_text(
             encoding="utf-8"):
         fail("haskell-guard-fixture", tmp / "hs-guard.log")
+    # The KayaValue wall (the idiom pass's typed signals and keys): four
+    # numbered cases, each compiled alone and each refused by the class,
+    # never by a syntax or scope error. The probe carries its own CPP
+    # pragma; `-XCPP` on the command line would preprocess every module
+    # (docs/traps.md).
+    for case in ("1", "2", "3", "4"):
+        log = tmp / f"hs-kayavalue-{case}.log"
+        with log.open("w", encoding="utf-8") as out:
+            probe = subprocess.run(
+                ["ghc", "-fno-code", "-XGHC2021", f"-DCASE={case}",
+                 "-ibindings/haskell", "-iguests/haskell",
+                 "-hidir", str(tmp / "hs-kayavalue"),
+                 "-odir", str(tmp / "hs-kayavalue"),
+                 "guests/haskell/checks/KayaValueNegative.hs"],
+                cwd=ROOT, env=ENV, stdout=out, stderr=subprocess.STDOUT,
+                check=False)
+        text = log.read_text(encoding="utf-8", errors="replace")
+        if probe.returncode == 0:
+            print(f"check-abort: haskell KayaValue probe case {case} COMPILED "
+                  f"— the typed-value wall fell", file=sys.stderr)
+            sys.exit(1)
+        if "No instance for" not in text or "KayaValue Unsupported" not in text:
+            fail(f"haskell-kayavalue-case-{case}", log)
+    print("check-abort: haskell KayaValue probe refused 4/4 cases by the class")
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -398,8 +428,8 @@ with scratch_dir("check-abort-neg-") as tmp:
         "    <OutputType>Exe</OutputType>\n"
         "    <TargetFramework>net10.0</TargetFramework>\n"
         "    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>\n"
-        "    <Nullable>disable</Nullable>\n"
-        "    <ImplicitUsings>disable</ImplicitUsings>\n"
+        "    <Nullable>enable</Nullable>\n"
+        "    <ImplicitUsings>enable</ImplicitUsings>\n"
         "  </PropertyGroup>\n"
         "</Project>\n", encoding="utf-8")
     step("csharp-notify-swapped-build",
@@ -445,6 +475,7 @@ with scratch_dir("check-abort-neg-") as tmp:
     # --- Haskell ------------------------------------------------------
     hs = stage("haskell",
                [("binding/KayaApp.hs", "bindings/haskell/KayaApp.hs"),
+                ("binding/Kaya/Core.hs", "bindings/haskell/Kaya/Core.hs"),
                 ("binding/KayaRuntime.hs", "bindings/haskell/KayaRuntime.hs"),
                 ("binding/KayaWire.hs", "bindings/haskell/KayaWire.hs"),
                 ("binding/kaya_hs_stubs.c",
@@ -459,10 +490,11 @@ with scratch_dir("check-abort-neg-") as tmp:
         "\n"
         "executable kaya-notify-order-check\n"
         "  default-language: GHC2021\n"
-        "  build-depends: base, bytestring, containers, time, directory\n"
+        "  build-depends: base, bytestring, containers, text, time, mtl, "
+        "transformers, directory\n"
         "  ghc-options: -threaded\n"
         "  main-is: NotifyOrderCheck.hs\n"
-        "  other-modules: KayaApp, KayaRuntime, KayaWire\n"
+        "  other-modules: KayaApp, Kaya.Core, KayaRuntime, KayaWire\n"
         "  hs-source-dirs: . binding\n"
         "  c-sources: binding/kaya_hs_stubs.c\n"
         "  extra-libraries: kaya\n", encoding="utf-8")

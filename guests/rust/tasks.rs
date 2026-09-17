@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 
-use kaya::WindowId;
+use kaya::{KayaField, PathKey, WindowId};
 
 /// THE APP'S OWN DOCUMENT (docs/tasks-s4-plan.md P1/P7): a SQLite database
 /// under `kaya::app_data_dir()`, through rusqlite with the engine compiled
@@ -367,31 +367,19 @@ fn today() -> kaya::Date {
 }
 
 fn date_field(d: Option<kaya::Date>) -> String {
-    d.map_or(String::new(), |d| format!("{:04}-{:02}-{:02}", d.year, d.month, d.day))
+    d.map_or(String::new(), |d| d.to_string())
 }
 
 fn parse_date(s: &str) -> Option<kaya::Date> {
-    let mut it = s.split('-');
-    let y = it.next()?.parse().ok()?;
-    let m = it.next()?.parse().ok()?;
-    let d = it.next()?.parse().ok()?;
-    kaya::Date::new(y, m, d).ok()
+    (!s.is_empty()).then(|| s.parse().ok()).flatten()
 }
 
 fn time_field(t: Option<kaya::Time>) -> String {
-    t.map_or(String::new(), |t| format!("{:02}:{:02}", t.hour, t.minute))
+    t.map_or(String::new(), |t| t.to_string())
 }
 
 fn parse_time(s: &str) -> Option<kaya::Time> {
-    let (h, m) = s.split_once(':')?;
-    kaya::Time::new(h.parse().ok()?, m.parse().ok()?).ok()
-}
-
-fn key_of(path: &kaya::Path) -> String {
-    match path.first() {
-        Some(kaya::Value::Str(s)) => s.clone(),
-        other => panic!("tasks: a row key that is not a string: {other:?}"),
-    }
+    (!s.is_empty()).then(|| s.parse().ok()).flatten()
 }
 
 // Five sections on purpose (docs/tasks-plan.md R4): the Logbook is a
@@ -618,9 +606,7 @@ impl App {
         self.tasks.clear();
         for (list, coll) in self.lists.clone() {
             for (key, row) in tx.items(&coll) {
-                if let kaya::Value::Str(k) = key {
-                    self.tasks.insert(k, (list, row));
-                }
+                self.tasks.insert(String::from_value(&key), (list, row));
             }
         }
         // The rows a filter holds out of their collections are model too.
@@ -636,10 +622,7 @@ impl App {
             let order: Vec<String> = tx
                 .items(&lines)
                 .into_iter()
-                .filter_map(|(k, _)| match k {
-                    kaya::Value::Str(s) => Some(s),
-                    _ => None,
-                })
+                .map(|(k, _)| String::from_value(&k))
                 .collect();
             self.order.insert(project, order);
         }
@@ -763,7 +746,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         ];
         let mut lists = Vec::new();
         let mut counts = BTreeMap::new();
-        let mut quick = kaya::WidgetId(0);
+        let mut quick: Option<kaya::WidgetId> = None;
         let today_badge = tx.signal(0.0);
         let link_note = tx.signal("");
         for (list, window, name, symbol) in sections {
@@ -809,8 +792,9 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     }
                     if list == List::Inbox {
                         tx.row(|tx| {
-                            quick = tx.entry().a11y_id("quick").grow(1.0).id();
-                            msgs.on_change(quick, Msg::Draft);
+                            let id = tx.entry().a11y_id("quick").grow(1.0).id();
+                            quick = Some(id);
+                            msgs.on_change(id, Msg::Draft);
                             let add = tx.button("Add").a11y_id("add").id();
                             msgs.on_click(add, Msg::Add);
                         })
@@ -871,6 +855,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             })
             .id();
         tx.mount_in(projects_section, projects_root);
+        let quick = quick.expect("the Inbox section declared the quick-add field");
         (lists, projects_coll, quick, counts, today_badge, link_note)
     });
     msgs.on_undone(kaya::DEFAULT_WINDOW, |_, _| Msg::Resync);
@@ -1032,7 +1017,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 app.draft.clear();
             }
             Msg::Toggle(path, checked) => {
-                let key = key_of(&path);
+                let key = path.key::<String>(0);
                 let Some((was, row)) = app.tasks.get(&key).cloned() else { continue };
                 let row = TaskRow { done: checked, ..row };
                 let project = row.project.clone();
@@ -1049,7 +1034,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 });
                 ctx.apply(|tx| app.sync_reminder(tx, &msgs, &key, &row));
             }
-            Msg::Details(path) => open_details(&mut app, &ctx, &msgs, key_of(&path)),
+            Msg::Details(path) => open_details(&mut app, &ctx, &msgs, path.key::<String>(0)),
             Msg::Notes(text) => {
                 let Some(key) = app.detail.as_ref().map(|d| d.key.clone()) else { continue };
                 let Some((_, row)) = app.tasks.get(&key).cloned() else { continue };
@@ -1192,24 +1177,22 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 }
             }
             Msg::OpenProject(path) => {
-                let project = key_of(&path);
+                let project = path.key::<String>(0);
                 let Some(name) = app.projects.get(&project).cloned() else { continue };
                 let order = app.order.get(&project).cloned().unwrap_or_default();
                 let titles: Vec<(String, String)> = order
                     .iter()
                     .filter_map(|k| app.tasks.get(k).map(|(_, r)| (k.clone(), r.title.clone())))
                     .collect();
-                let (lines, padd) = ctx.apply(|tx| {
+                let lines = ctx.apply(|tx| {
                     let entry = tx.push_entry_in(PROJECTS, PROJECT).title(&name).id();
                     let lines = tx.collection::<Line>();
-                    let mut pquick = kaya::WidgetId(0);
-                    let mut padd = kaya::WidgetId(0);
                     let root = tx
                         .column(|tx| {
                             tx.row(|tx| {
-                                pquick = tx.entry().a11y_id("pquick").grow(1.0).id();
+                                let pquick = tx.entry().a11y_id("pquick").grow(1.0).id();
                                 msgs.on_change(pquick, Msg::ProjectDraft);
-                                padd = tx.button("Add").a11y_id("padd").id();
+                                let padd = tx.button("Add").a11y_id("padd").id();
                                 msgs.on_click(padd, Msg::ProjectAdd);
                             })
                             .id();
@@ -1229,9 +1212,8 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                         tx.insert(&lines, key.clone(), Line { title: title.clone() });
                     }
                     msgs.on_entry_popped(entry, Msg::ProjectPopped);
-                    (lines, (pquick, padd))
+                    lines
                 });
-                let _ = padd;
                 app.open_project = Some((project, lines));
                 app.pdraft.clear();
             }
@@ -1266,7 +1248,10 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 let Some((project, lines)) = app.open_project.clone() else { continue };
                 let kaya::Representation::Custom { bytes, .. } = &d.clip else { continue };
                 let moved = String::from_utf8_lossy(&bytes.0).to_string();
-                let Some(kaya::Value::Str(anchor)) = d.anchor.first().cloned() else { continue };
+                if d.anchor.is_empty() {
+                    continue;
+                }
+                let anchor = d.anchor.key::<String>(0);
                 ctx.apply(|tx| {
                     tx.undoable("reorder");
                     if d.before {
@@ -1277,10 +1262,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     let order: Vec<String> = tx
                         .items(&lines)
                         .into_iter()
-                        .filter_map(|(k, _)| match k {
-                            kaya::Value::Str(s) => Some(s),
-                            _ => None,
-                        })
+                        .map(|(k, _)| String::from_value(&k))
                         .collect();
                     app.order.insert(project.clone(), order);
                 });

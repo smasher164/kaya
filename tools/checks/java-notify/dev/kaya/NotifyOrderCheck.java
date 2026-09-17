@@ -39,10 +39,12 @@ public final class NotifyOrderCheck {
         }
         KayaRing.attach();
 
+        record Seen(long id, KayaApp.NotificationOutcome outcome) {}
+
         KayaApp app = new KayaApp();
-        List<Integer> oneShot = new ArrayList<>();
-        List<long[]> process = new ArrayList<>();
-        app.onNotificationActivation((tx, id, outcome) -> process.add(new long[] {id, outcome}));
+        List<KayaApp.NotificationOutcome> oneShot = new ArrayList<>();
+        List<Seen> process = new ArrayList<>();
+        app.onNotificationActivation((tx, id, outcome) -> process.add(new Seen(id, outcome)));
         app.build((java.util.function.Consumer<KayaApp.Tx>) tx ->
                 tx.showNotification(12)
                         .title("bound at the show")
@@ -53,21 +55,21 @@ public final class NotifyOrderCheck {
         // process-level handler is not consulted at all.
         app.notificationResult(12, KayaWire.NOTIFICATION_OUTCOME_ACTIVATED);
         check(oneShot.size() == 1
-                        && oneShot.get(0) == KayaWire.NOTIFICATION_OUTCOME_ACTIVATED,
+                        && oneShot.get(0) == KayaApp.NotificationOutcome.ACTIVATED,
                 "the one-shot handler did not answer: " + oneShot);
         check(process.isEmpty(),
                 "the process-level handler answered an id that HAD a one-shot handler");
 
         // CASE 2: an id this process never showed — the relaunch case.
         app.notificationResult(77, KayaWire.NOTIFICATION_OUTCOME_ACTIVATED);
-        check(process.size() == 1 && process.get(0)[0] == 77
-                        && process.get(0)[1] == KayaWire.NOTIFICATION_OUTCOME_ACTIVATED,
+        check(process.size() == 1 && process.get(0).id() == 77
+                        && process.get(0).outcome() == KayaApp.NotificationOutcome.ACTIVATED,
                 "a result with no one-shot handler did not reach the process-level one");
 
         // CASE 3: it does NOT retire.
         app.notificationResult(78, KayaWire.NOTIFICATION_OUTCOME_REFUSED);
-        check(process.size() == 2 && process.get(1)[0] == 78
-                        && process.get(1)[1] == KayaWire.NOTIFICATION_OUTCOME_REFUSED,
+        check(process.size() == 2 && process.get(1).id() == 78
+                        && process.get(1).outcome() == KayaApp.NotificationOutcome.REFUSED,
                 "the process-level handler retired after its first result");
 
         // AND THE DROP IS ANNOUNCED, compared in full: a drop nobody

@@ -1,7 +1,6 @@
 (* The table scene, OCaml port — guests/rust/table.rs,
    tools/scenes/table.steps. *)
 
-open Kaya_wire
 open Kaya_app
 
 type table_item = { name : string; size : string } [@@deriving kaya_gen]
@@ -55,8 +54,8 @@ let () =
         column-kind widget (the reorder scene's rule). *)
      let root = row [ w table ] () in
      mount root;
-     insert_record items (Str "b") { name = "banana"; size = "30" };
-     insert_record items (Str "a") { name = "apple"; size = "10" };
-     insert_record items (Str "c") { name = "cherry"; size = "20" });
+     insert_record items (str_key "b") { name = "banana"; size = "30" };
+     insert_record items (str_key "a") { name = "apple"; size = "10" };
+     insert_record items (str_key "c") { name = "cherry"; size = "20" });
 
   exit (run app)

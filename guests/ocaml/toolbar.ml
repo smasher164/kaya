@@ -1,7 +1,6 @@
 (* The toolbar scene, OCaml port — guests/rust/toolbar.rs,
    tools/scenes/toolbar.steps. *)
 
-open Kaya_wire
 open Kaya_app
 
 let () =
@@ -10,9 +9,9 @@ let () =
   let save_enabled = ref true in
 
   build app (fun () ->
-     let status = signal (Str "ready") in
+     let status = signal_str ("ready") in
      (* Written against the MENU ITEM: the promoted button IS that item. *)
-     let can_save = signal (Bool true) in
+     let can_save = signal_bool (true) in
 
      (* CATALOG PREORDER DECIDES PROMOTION — menubar-append order, then
         children depth-first, so every host promotes [Save, Find]. *)
@@ -25,14 +24,14 @@ let () =
                   catalog; [Done] is the checkmark idiom (docs/styling-plan.md D6). *)
                item ~label:"Save" ~symbol:Done ~primary:true
                  ~bind_enabled:can_save ~shortcut:"primary+s"
-                 ~on_activate:(fun () -> write status (Str "saved"));
+                 ~on_activate:(fun () -> write status ("saved"));
                item ~label:"Export" ~symbol:Forward ~on_activate:(fun () ->
-                   write status (Str "exported"));
+                   write status ("exported"));
              ];
            menu ~label:"Edit"
              [
                item ~label:"Find" ~symbol:Search ~primary:true
-                 ~on_activate:(fun () -> write status (Str "found"));
+                 ~on_activate:(fun () -> write status ("found"));
                item ~label:"Replace" ~symbol:Edit;
              ];
            menu ~label:"View"
@@ -47,7 +46,7 @@ let () =
            button ~text:"toggle save"
              ~on_click:(fun () ->
                save_enabled := not !save_enabled;
-               write can_save (Bool !save_enabled)) (* button#0 *);
+               write can_save (!save_enabled)) (* button#0 *);
          ]
          ()
      in

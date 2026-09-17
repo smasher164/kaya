@@ -1,7 +1,6 @@
 package dev.kaya.guests;
 
 import dev.kaya.KayaApp;
-import dev.kaya.KayaWire;
 
 /**
  * The dirty scene from the JVM — guests/rust/dirty.rs, tools/scenes/dirty.steps.
@@ -22,7 +21,7 @@ public final class Dirty {
                         .action("Discard")
                         .cancel("Keep Editing")
                         .onResult((t2, choice) -> {
-                            if (choice == KayaWire.ALERT_CHOICE_CANCEL) {
+                            if (choice == KayaApp.AlertChoice.CANCEL) {
                                 t2.write(status, "kept editing");
                             } else {
                                 // Aborts if it ever runs (docs/traps.md, an app

@@ -2,7 +2,6 @@
    tools/scenes/dnd.steps. THE ROOT IS A ROW so column#0 is the
    reorderable For's container. *)
 
-open Kaya_wire
 open Kaya_app
 
 type item = { title : string } [@@deriving kaya_gen]
@@ -14,7 +13,7 @@ let word = function
   | Some Op.Move -> "move"
   | None -> "none"
 
-let key_word = function Str s :: _ -> s | _ -> ""
+let key_word = function k :: _ -> key_text k | _ -> ""
 
 (* The file the scene drops as a FOREIGN source (D6), written by the guest
    at $TMP/kaya-dnd-$PID/dropped.txt — the picker and clipboard scenes'
@@ -46,12 +45,12 @@ let () =
   build app (fun () ->
       let items = collection_of item_record in
       let items2 = collection_of item_record in
-      let drop_status = signal (Str "no drop yet") in
-      let drag_status = signal (Str "no drag yet") in
-      let source_text = signal (Str "hello") in
-      let text_target = signal (Str "text target") in
-      let note_target = signal (Str "note target") in
-      let files_target = signal (Str "files target") in
+      let drop_status = signal_str ("no drop yet") in
+      let drag_status = signal_str ("no drag yet") in
+      let source_text = signal_str ("hello") in
+      let text_target = signal_str ("text target") in
+      let note_target = signal_str ("note target") in
+      let files_target = signal_str ("files target") in
       let source = ref None in
       let list = ref None in
       let row_label = ref None in
@@ -61,13 +60,12 @@ let () =
         let op = word d.operation in
         (match d.clip with
         | Some (Text text) ->
-            write drop_status (Str (Printf.sprintf "%s got text %s (%s)" name text op));
-            write target (Str text)
+            write drop_status ((Printf.sprintf "%s got text %s (%s)" name text op));
+            write target (text)
         | Some (Custom (id, body)) ->
             write drop_status
-              (Str
-                 (Printf.sprintf "%s got %s %d bytes (%s)" name id
-                    (String.length body) op))
+              (Printf.sprintf "%s got %s %d bytes (%s)" name id
+                 (String.length body) op)
         | Some (Files files) ->
             (* A dropped file IS a picked file (D6): read it back through
                the same table the picker fills. *)
@@ -78,18 +76,18 @@ let () =
                      Printf.sprintf "%s %s" f.name (read_back f))
                    files)
             in
-            write drop_status (Str (Printf.sprintf "%s got %s (%s)" name said op))
-        | _ -> write drop_status (Str (Printf.sprintf "%s got other (%s)" name op)));
+            write drop_status ((Printf.sprintf "%s got %s (%s)" name said op))
+        | _ -> write drop_status ((Printf.sprintf "%s got other (%s)" name op)));
         (* A same-app MOVE removes its original in the same batch (D2). *)
         if d.operation = Some Op.Move then begin
-          write source_text (Str "moved out");
+          write source_text ("moved out");
           Option.iter (fun w -> draggable w ()) !source
         end
       in
 
       (* The bound payload follows the row's record (docs/dnd-plan.md §4). *)
       let on_rename () =
-        update_record items2 (Str "y") { title = "yy" }
+        update_record items2 (str_key "y") { title = "yy" }
       in
 
       window ~title:"dnd" ();
@@ -164,11 +162,11 @@ let () =
           draggable ~text:"hello" ~custom:[ (note_id, "note!") ]
             ~operations:[ Op.Copy; Op.Move ] w ();
           on_drag_ended app w (fun op ->
-              write drag_status (Str (Printf.sprintf "drag ended %s" (word op)))))
+              write drag_status ((Printf.sprintf "drag ended %s" (word op)))))
         !source;
       let node_ended what keys op =
         write drag_status
-          (Str (Printf.sprintf "%s %s drag ended %s" what (key_word keys) (word op)))
+          (Printf.sprintf "%s %s drag ended %s" what (key_word keys) (word op))
       in
       Option.iter (fun n -> on_drag_ended_node app n (node_ended "row")) !row_label;
       Option.iter
@@ -179,12 +177,11 @@ let () =
               match d.clip with
               | Some (Text text) ->
                   write drop_status
-                    (Str
-                       (Printf.sprintf "item %s got text %s (%s)" (key_word keys) text
-                          op))
+                    (Printf.sprintf "item %s got text %s (%s)" (key_word keys) text
+                       op)
               | _ ->
                   write drop_status
-                    (Str (Printf.sprintf "item %s got other (%s)" (key_word keys) op))))
+                    (Printf.sprintf "item %s got other (%s)" (key_word keys) op)))
         !item_label;
       (* The moved row's key rides as the kaya-private custom
          representation; the anchor is the row it landed on (D8). *)
@@ -193,16 +190,16 @@ let () =
           set_reorderable w true;
           on_drop app w (fun (d : dropped) ->
               match (d.clip, d.anchor) with
-              | Some (Custom (_, key)), Str anchor :: _ ->
-                  if d.before then move_before (record_handle items) (Str key) (Str anchor)
-                  else move_after (record_handle items) (Str key) (Str anchor)
+              | Some (Custom (_, key)), Str_key anchor :: _ ->
+                  if d.before then move_before (record_handle items) (str_key key) (str_key anchor)
+                  else move_after (record_handle items) (str_key key) (str_key anchor)
               | _ -> ()))
         !list;
-      insert_record items (Str "a") { title = "a" };
-      insert_record items (Str "b") { title = "b" };
-      insert_record items (Str "c") { title = "c" };
+      insert_record items (str_key "a") { title = "a" };
+      insert_record items (str_key "b") { title = "b" };
+      insert_record items (str_key "c") { title = "c" };
       List.iter
-        (fun key -> insert_record items2 (Str key) { title = key })
+        (fun key -> insert_record items2 (str_key key) { title = key })
         [ "x"; "y" ]);
 
   exit (run app)

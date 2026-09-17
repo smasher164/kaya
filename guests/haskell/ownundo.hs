@@ -1,17 +1,20 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 -- The app-owned undo scene, Haskell port — guests/rust/ownundo.rs,
 -- tools/scenes/ownundo.steps (docs/rich-text-plan.md R6, §14).
 
 import Data.IORef (newIORef, readIORef, writeIORef)
 
+import Data.Text (Text)
+import qualified Data.Text as T
 import KayaApp
-import KayaWire (Value (..))
 
 -- The label and the two live answers the route reads, in one transaction.
 publishIn :: Signal -> Widget -> [Document] -> [Document] -> Build ()
 publishIn status owned undos redos = do
   writeSignal
     status
-    (VStr ("undo " ++ show (length undos) ++ " redo " ++ show (length redos)))
+    (T.pack ("undo " ++ show (length undos) ++ " redo " ++ show (length redos)))
   canUndo owned (not (null undos))
   canRedo owned (not (null redos))
 
@@ -25,12 +28,12 @@ main = kayaMain $ \app -> do
   currentRef <- newIORef (documentOf "")
 
   (owned, status) <- buildTx app $ do
-    status <- signal (VStr "undo 0 redo 0")
+    status <- signal (T.pack "undo 0 redo 0")
 
     -- Realized here because the menu handlers below need their handles.
-    native <- textarea [Rich True, A11yId "native", A11yLabel "Native"]
+    native <- textarea [Rich True, A11yId ("native" :: Text), A11yLabel ("Native" :: Text)]
     owned <-
-      textarea [Rich True, OwnUndo True, A11yId "owned", A11yLabel "Owned"]
+      textarea [Rich True, OwnUndo True, A11yId ("owned" :: Text), A11yLabel ("Owned" :: Text)]
 
     let onUndo = do
           undos <- readIORef undoRef
@@ -62,7 +65,7 @@ main = kayaMain $ \app -> do
                 publishIn status owned undos' rest
 
     window
-      0
+      primary
       [ WTitle "ownundo",
         WMenus
           [ menu
@@ -77,7 +80,7 @@ main = kayaMain $ \app -> do
     root <-
       column
         []
-        [ labelBound status [A11yId "status"], -- label#0
+        [ labelBound status [A11yId ("status" :: Text)], -- label#0
           pure native, -- textarea#0
           pure owned, -- textarea#1
           row

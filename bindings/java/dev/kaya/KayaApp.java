@@ -306,7 +306,7 @@ public final class KayaApp {
             new java.util.HashMap<>();
     // One-shot, keyed by the GUEST's notification id (the alert's
     // grammar; many may be live at once).
-    private final java.util.Map<Long, BiConsumer<Tx, Integer>> notifications =
+    private final java.util.Map<Long, BiConsumer<Tx, NotificationOutcome>> notifications =
             new java.util.HashMap<>();
     // NOT one-shot, and not keyed at all: the process-level handler for
     // a result whose id has none above (docs/tasks-s9-plan.md R1). A
@@ -323,7 +323,7 @@ public final class KayaApp {
     // scope, not private: tools/checks/java-notify reads the bytes back.
     final java.util.List<byte[]> pendingRecords = new java.util.ArrayList<>();
 
-    private final java.util.Map<Long, BiConsumer<Tx, Integer>> alerts =
+    private final java.util.Map<Long, BiConsumer<Tx, AlertChoice>> alerts =
             new java.util.HashMap<>();
     private long nextAlert;
     private long nextFileDialog;
@@ -372,6 +372,7 @@ public final class KayaApp {
 
     /** A template entry's change handler: the stamped copy's keys, then
      * the entry's new text. */
+    @FunctionalInterface
     public interface ChangeHandler {
         void accept(Tx tx, List<Object> keys, String text);
     }
@@ -379,36 +380,42 @@ public final class KayaApp {
     /** A stamped copy's edit handler: the copy's keys, then the edit.
      * The row's Document field already carries it (docs/rich-text-plan.md
      * §19). */
+    @FunctionalInterface
     public interface EditHandler {
         void accept(Tx tx, List<Object> keys, Edit edit);
     }
 
     /** A stamped copy's format handler, EditHandler's twin one act
      * over. */
+    @FunctionalInterface
     public interface FormatHandler {
         void accept(Tx tx, List<Object> keys, Format act);
     }
 
     /** A template widget's paste handler: the stamped copy's keys, then
      * the one representation that arrived. */
+    @FunctionalInterface
     public interface PasteHandler {
         void accept(Tx tx, List<Object> keys, Representation clip);
     }
 
     /** A template widget's drop handler: the stamped copy's keys, then
      * what the drop delivered (docs/dnd-plan.md §4). */
+    @FunctionalInterface
     public interface DropHandler {
         void accept(Tx tx, List<Object> keys, Dropped drop);
     }
 
     /** A template widget's drag-ended handler: the stamped copy's keys,
      * then what its drag settled on — null for cancelled or refused. */
+    @FunctionalInterface
     public interface DragEndedHandler {
         void accept(Tx tx, List<Object> keys, Op operation);
     }
 
     /** A template checkbox's toggle handler: the stamped copy's keys,
      * then the box's new state. */
+    @FunctionalInterface
     public interface ToggleHandler {
         void accept(Tx tx, List<Object> keys, boolean checked);
     }
@@ -417,18 +424,21 @@ public final class KayaApp {
      * stamped copy's keys, then the new value — a choice widget's being
      * its 0-based option index, widened, because the wire carries every
      * Value as an F64. */
+    @FunctionalInterface
     public interface ValueHandler {
         void accept(Tx tx, List<Object> keys, double value);
     }
 
     /** A template date picker's pick handler: the stamped copy's keys,
      * then the COMMITTED date (docs/datetime-plan.md D7). */
+    @FunctionalInterface
     public interface DateHandler {
         void accept(Tx tx, List<Object> keys, LocalDate date);
     }
 
     /** A template time picker's pick handler: the copy's keys, then the
      * committed time. */
+    @FunctionalInterface
     public interface TimeHandler {
         void accept(Tx tx, List<Object> keys, LocalTime time);
     }
@@ -436,27 +446,62 @@ public final class KayaApp {
     /** A nested table's header-click handler: the stamped copy's keys,
      * then the 0-based column. The keys ARE part of the message — they
      * name the copy whose bar {@link Tx#columnsAt} must re-declare. */
+    @FunctionalInterface
     public interface SortHandler {
         void accept(Tx tx, List<Object> keys, int column);
+    }
+
+    /** A notification's answer: the wire's two outcomes. */
+    public enum NotificationOutcome {
+        ACTIVATED(KayaWire.NOTIFICATION_OUTCOME_ACTIVATED, "activated"),
+        REFUSED(KayaWire.NOTIFICATION_OUTCOME_REFUSED, "refused");
+
+        final int wire;
+        final String spelling;
+
+        NotificationOutcome(int wire, String spelling) {
+            this.wire = wire;
+            this.spelling = spelling;
+        }
+
+        @Override
+        public String toString() {
+            return spelling;
+        }
+
+        /** The wire's number, refused naming one this build does not
+         * know. */
+        static NotificationOutcome fromWire(int number) {
+            for (NotificationOutcome o : values()) {
+                if (o.wire == number) {
+                    return o;
+                }
+            }
+            throw new IllegalStateException("kaya: outcome " + number
+                    + " is not a notification outcome this build knows");
+        }
     }
 
     /** The process-level notification handler: the notification's id,
      * then the outcome. The id IS part of the message — a relaunched
      * process has no registration to correlate it with
      * (docs/tasks-s9-plan.md R1). */
+    @FunctionalInterface
     public interface NotificationActivationHandler {
-        void accept(Tx tx, long notification, int outcome);
+        void accept(Tx tx, long notification, NotificationOutcome outcome);
     }
 
     /** A link route's handler: the captures the core read out of the
      * URL, by name (docs/app-links-plan.md §4). The URL itself is not
      * handed over — kaya matches once, in the core. */
+    @FunctionalInterface
     public interface LinkHandler {
         void accept(Tx tx, java.util.Map<String, String> params);
     }
 
     /** A node-anchored radio group's pick handler: the stamped copy's
      * keys, then the new 0-based option index. */
+    @FunctionalInterface
     public interface MenuSelectHandler {
         void accept(Tx tx, List<Object> keys, int index);
     }
@@ -464,6 +509,7 @@ public final class KayaApp {
     /** A {@code redraw} canvas's drawing, as a function of the size
      * layout assigned it (docs/canvas-plan.md §3.2.1). NO Tx: a drawing
      * is not an app edit — the binding submits the one record itself. */
+    @FunctionalInterface
     public interface DrawHandler {
         void accept(Draw d, Viewbox size);
     }
@@ -473,6 +519,7 @@ public final class KayaApp {
      * re-imports exactly the jitter Choreographer's frame time and
      * CADisplayLink's targetTimestamp were built to remove
      * (docs/canvas-plan.md §15.4). */
+    @FunctionalInterface
     public interface TickHandler {
         void accept(Draw d, Viewbox size, double time);
     }
@@ -515,6 +562,7 @@ public final class KayaApp {
 
     /** An undo's or a redo's handler: the group's authored label (EMPTY
      * for a typing episode) and what the core put back. */
+    @FunctionalInterface
     public interface UndoHandler {
         void accept(Tx tx, String label, UndoDelta delta);
     }
@@ -633,6 +681,39 @@ public final class KayaApp {
         }
     }
 
+    /** The alert's answer: one of the (at most two) actions, or the
+     * always-present cancel — the wire's three choices. */
+    public enum AlertChoice {
+        ACTION0(KayaWire.ALERT_CHOICE_ACTION0, "action0"),
+        ACTION1(KayaWire.ALERT_CHOICE_ACTION1, "action1"),
+        CANCEL(KayaWire.ALERT_CHOICE_CANCEL, "cancel");
+
+        final int wire;
+        final String spelling;
+
+        AlertChoice(int wire, String spelling) {
+            this.wire = wire;
+            this.spelling = spelling;
+        }
+
+        @Override
+        public String toString() {
+            return spelling;
+        }
+
+        /** The wire's number, refused naming one this build does not
+         * know. */
+        static AlertChoice fromWire(int number) {
+            for (AlertChoice c : values()) {
+                if (c.wire == number) {
+                    return c;
+                }
+            }
+            throw new IllegalStateException("kaya: alert choice " + number
+                    + ", which this build does not know");
+        }
+    }
+
     /** The alert chain: accumulates the one atomic SHOW_ALERT record and
      * sends it at show(). A chain that never calls show() sends
      * nothing. */
@@ -645,7 +726,7 @@ public final class KayaApp {
         private String message = "";
         private final java.util.ArrayList<String> actions = new java.util.ArrayList<>();
         private String cancel = "";
-        private BiConsumer<Tx, Integer> onResult;
+        private BiConsumer<Tx, AlertChoice> onResult;
 
         AlertRef(Tx tx, KayaApp app, long id) {
             this.tx = tx;
@@ -686,7 +767,7 @@ public final class KayaApp {
         }
 
         /** Bind the one-shot result handler to THIS request. */
-        public AlertRef onResult(BiConsumer<Tx, Integer> handler) {
+        public AlertRef onResult(BiConsumer<Tx, AlertChoice> handler) {
             this.onResult = handler;
             return this;
         }
@@ -720,7 +801,7 @@ public final class KayaApp {
         private long at;
         private String title = "";
         private String body = "";
-        private BiConsumer<Tx, Integer> onResult;
+        private BiConsumer<Tx, NotificationOutcome> onResult;
 
         NotificationRef(Tx tx, KayaApp app, long id) {
             this.tx = tx;
@@ -745,10 +826,8 @@ public final class KayaApp {
             return this;
         }
 
-        /** Bind the one-shot result handler to THIS request: the
-         * outcome is KayaWire.NOTIFICATION_OUTCOME_ACTIVATED or
-         * KayaWire.NOTIFICATION_OUTCOME_REFUSED. */
-        public NotificationRef onResult(BiConsumer<Tx, Integer> handler) {
+        /** Bind the one-shot result handler to THIS request. */
+        public NotificationRef onResult(BiConsumer<Tx, NotificationOutcome> handler) {
             this.onResult = handler;
             return this;
         }
@@ -876,22 +955,39 @@ public final class KayaApp {
         return String.join(" ", kinds);
     }
 
+    /** How a picked file is redeemed (docs/save-plan.md): which half(s)
+     * {@link Opened} carries. Guest-chosen, never wire-borne, so there
+     * is no {@code fromWire} — the enum itself is the validation. */
+    public enum FileMode {
+        READ(KayaWire.FILE_MODE_READ),
+        WRITE(KayaWire.FILE_MODE_WRITE),
+        READ_WRITE(KayaWire.FILE_MODE_READ_WRITE);
+
+        final int wire;
+
+        FileMode(int wire) {
+            this.wire = wire;
+        }
+    }
+
     /** One file the picker answered with. localPath is a RE-OPENABLE
      * NAME, empty unless re-opening actually works — the three desktops
-     * and neither phone (DESIGN.md, File dialogs). */
+     * and neither phone (DESIGN.md, File dialogs). EMPTY IS THIS FIELD'S
+     * null: a record component says its absence in-band rather than
+     * through a second sentinel. */
     public record PickedFile(long handle, String name, String localPath) {
         /**
          * Redeem the handle for real streams, plus whether it seeks.
-         * THE MODE DECIDES: {@code FILE_MODE_READ} a reading half only,
-         * {@code FILE_MODE_WRITE} a writing half only (already truncated
-         * by the core's open), {@code FILE_MODE_READ_WRITE} both.
+         * THE MODE DECIDES: {@link FileMode#READ} a reading half only,
+         * {@link FileMode#WRITE} a writing half only (already truncated
+         * by the core's open), {@link FileMode#READ_WRITE} both.
          * BLOCKS, possibly for a long time (a cloud provider may
          * download the file), so call it off the app thread. Seekable
          * rides the OPEN, not the pick: a provider may hand back a pipe.
          */
-        public Opened open(int mode) throws java.io.IOException {
+        public Opened open(FileMode mode) throws java.io.IOException {
             int[] seekable = new int[1];
-            java.io.FileDescriptor fd = KayaRing.openPicked(handle, mode, seekable);
+            java.io.FileDescriptor fd = KayaRing.openPicked(handle, mode.wire, seekable);
             return new Opened(fd, mode, seekable[0] != 0);
         }
     }
@@ -908,31 +1004,28 @@ public final class KayaApp {
         private final java.io.InputStream in;
         private final java.io.OutputStream out;
         private final boolean seekable;
-        private final int mode;
+        private final FileMode mode;
 
-        Opened(java.io.FileDescriptor fd, int mode, boolean seekable) {
+        Opened(java.io.FileDescriptor fd, FileMode mode, boolean seekable) {
             this.mode = mode;
             this.seekable = seekable;
             switch (mode) {
-                case KayaWire.FILE_MODE_READ -> {
+                case READ -> {
                     this.in = new java.io.FileInputStream(fd);
                     this.out = null;
                 }
-                case KayaWire.FILE_MODE_WRITE -> {
+                case WRITE -> {
                     this.in = null;
                     this.out = new java.io.FileOutputStream(fd);
                 }
-                case KayaWire.FILE_MODE_READ_WRITE -> {
+                case READ_WRITE -> {
                     // Both over the SAME descriptor: one file offset,
                     // and closing either closes it once (the JDK's
                     // FileDescriptor tracks its parents).
                     this.in = new java.io.FileInputStream(fd);
                     this.out = new java.io.FileOutputStream(fd);
                 }
-                default -> throw new IllegalArgumentException(
-                        "kaya: " + mode + " is not a file mode — pass "
-                        + "KayaWire.FILE_MODE_READ, FILE_MODE_WRITE or "
-                        + "FILE_MODE_READ_WRITE");
+                default -> throw new AssertionError(mode);
             }
         }
 
@@ -941,9 +1034,9 @@ public final class KayaApp {
             if (in == null) {
                 throw new IllegalStateException(
                         "kaya: this file was opened with "
-                        + "KayaWire.FILE_MODE_WRITE, which has no reading half"
-                        + " — open it again with FILE_MODE_READ to read what "
-                        + "you wrote, or with FILE_MODE_READ_WRITE to do both "
+                        + "FileMode.WRITE, which has no reading half"
+                        + " — open it again with FileMode.READ to read what "
+                        + "you wrote, or with FileMode.READ_WRITE to do both "
                         + "through one handle");
             }
             return in;
@@ -960,9 +1053,9 @@ public final class KayaApp {
             if (out == null) {
                 throw new IllegalStateException(
                         "kaya: this file was opened with "
-                        + "KayaWire.FILE_MODE_READ, which has no writing half"
-                        + " — open it again with FILE_MODE_WRITE (which "
-                        + "truncates) or FILE_MODE_READ_WRITE to write through "
+                        + "FileMode.READ, which has no writing half"
+                        + " — open it again with FileMode.WRITE (which "
+                        + "truncates) or FileMode.READ_WRITE to write through "
                         + "it");
             }
             return out;
@@ -972,7 +1065,7 @@ public final class KayaApp {
             return seekable;
         }
 
-        public int mode() {
+        public FileMode mode() {
             return mode;
         }
 
@@ -1149,20 +1242,17 @@ public final class KayaApp {
      * not; else the drop is announced.
      */
     void notificationResult(long id, int outcome) {
-        BiConsumer<Tx, Integer> handler = notifications.remove(id);
+        NotificationOutcome result = NotificationOutcome.fromWire(outcome);
+        BiConsumer<Tx, NotificationOutcome> handler = notifications.remove(id);
         if (handler != null) {
-            dispatch(tx -> handler.accept(tx, outcome));
+            dispatch(tx -> handler.accept(tx, result));
         } else if (notificationActivation != null) {
             NotificationActivationHandler act = notificationActivation;
-            dispatch(tx -> act.accept(tx, id, outcome));
+            dispatch(tx -> act.accept(tx, id, result));
         } else {
-            String word =
-                    outcome == KayaWire.NOTIFICATION_OUTCOME_ACTIVATED
-                            ? "activated"
-                            : "refused";
             System.err.println(
                     "kaya: notification " + id + " outcome "
-                            + word + " reached no handler — none was "
+                            + result + " reached no handler — none was "
                             + "bound at the show and no process-level handler "
                             + "is registered "
                             + "(KayaApp.onNotificationActivation)");
@@ -1764,6 +1854,20 @@ public final class KayaApp {
         }
     }
 
+    /** A window's advisory sections presentation — guest-chosen, never
+     * wire-borne, so there is no {@code fromWire}. */
+    public enum SectionsPresentation {
+        AUTO(KayaWire.SECTIONS_PRESENTATION_AUTO),
+        BAR(KayaWire.SECTIONS_PRESENTATION_BAR),
+        SIDEBAR(KayaWire.SECTIONS_PRESENTATION_SIDEBAR);
+
+        final int wire;
+
+        SectionsPresentation(int wire) {
+            this.wire = wire;
+        }
+    }
+
     public static final class WindowRef {
         private final Tx tx;
         private final KayaApp app;
@@ -1880,11 +1984,10 @@ public final class KayaApp {
             return this;
         }
 
-        /** The window's ADVISORY sections hint
-         * (KayaWire.SECTIONS_PRESENTATION_AUTO/BAR/SIDEBAR — the
-         * width/height precedent; phones ignore it by physics). */
-        public WindowRef sectionsPresentation(long hint) {
-            tx.emit(KayaWire.txSetWindowSectionsPresentation(id, hint));
+        /** The window's ADVISORY sections hint — the width/height
+         * precedent; phones ignore it by physics. */
+        public WindowRef sectionsPresentation(SectionsPresentation hint) {
+            tx.emit(KayaWire.txSetWindowSectionsPresentation(id, hint.wire));
             return this;
         }
 
@@ -5582,8 +5685,8 @@ public final class KayaApp {
         /**
          * Request a modal alert (the request/result grammar). The
          * result handler rides the REQUEST and retires with its one
-         * answer — choice is an action index (0 or 1) or
-         * KayaWire.ALERT_CHOICE_CANCEL, every platform-native dismissal.
+         * answer — {@link AlertChoice#ACTION0}, {@link AlertChoice#ACTION1}
+         * or {@link AlertChoice#CANCEL}, every platform-native dismissal.
          * Up to two actions (the platform floor); the cancel label is
          * required. One alert may be live per process.
          */
@@ -8002,11 +8105,11 @@ public final class KayaApp {
                     dispatch(handler);
                 }
             } else if (occ.kind == KayaWire.OCC_KIND_ALERT_RESULT) {
-                // One-shot: the registration retires with the result;
-                // payload is the parsed choice (Integer).
-                BiConsumer<Tx, Integer> handler = alerts.remove(occ.id);
+                // One-shot: the registration retires with the result.
+                BiConsumer<Tx, AlertChoice> handler = alerts.remove(occ.id);
                 if (handler != null) {
-                    dispatch(tx -> handler.accept(tx, (Integer) occ.payload));
+                    AlertChoice choice = AlertChoice.fromWire((Integer) occ.payload);
+                    dispatch(tx -> handler.accept(tx, choice));
                 }
             } else if (occ.kind == KayaWire.OCC_KIND_LINK_OPENED) {
                 // occ.id is the ROUTE the core matched

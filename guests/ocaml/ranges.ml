@@ -1,7 +1,6 @@
 (* The ranges scene, OCaml port — guests/rust/ranges.rs,
    tools/scenes/ranges.steps. *)
 
-open Kaya_wire
 open Kaya_app
 
 (* The document, 813 bytes, byte-identical to every other guest's copy. A
@@ -69,7 +68,7 @@ let () =
 
   build app (fun () ->
       window ~title:"ranges" ();
-      let status = signal (Str "0 matches") in
+      let status = signal_str ("0 matches") in
 
       (* Every range assertion finds this control by its authored id. *)
       let editor =
@@ -78,7 +77,7 @@ let () =
             doc := text;
             (* A declared set is bound to the text it was declared against
                (D2), so the app must search again. *)
-            write status (Str "0 matches"))
+            write status ("0 matches"))
           ()
       in
       set_text editor doc_source;
@@ -101,7 +100,7 @@ let () =
                      | Some second -> select_range editor second
                      | None -> ());
                      write status
-                       (Str (Printf.sprintf "%d matches" (List.length hits))));
+                       (Printf.sprintf "%d matches" (List.length hits)));
                  (* button#1 — reveal last *)
                  button ~text:"reveal last"
                    ~on_click:(fun () ->

@@ -1,7 +1,6 @@
 (* The background scene, OCaml port — guests/rust/background.rs,
    tools/scenes/background.steps. *)
 
-open Kaya_wire
 open Kaya_app
 
 let release_lock = Mutex.create ()
@@ -15,9 +14,9 @@ let () =
 
   build app (fun () ->
       window ~title:"background" ();
-      let status = signal (Str "idle") in
-      let alive = signal (Str "-") in
-      let detail = signal (Str "-") in
+      let status = signal_str ("idle") in
+      let alive = signal_str ("-") in
+      let detail = signal_str ("-") in
 
       let start () =
         let worker () =
@@ -31,13 +30,13 @@ let () =
             (fun step ->
               post app (fun () ->
                   posted := !posted ^ step;
-                  write status (Str !posted)))
+                  write status (!posted)))
             [ "1"; "2"; "3" ]
         in
         ignore (Thread.create worker ());
-        write status (Str "working")
+        write status ("working")
       in
-      let ping () = write alive (Str "alive") in
+      let ping () = write alive ("alive") in
       (* THIS RELEASE TAKES A LOCK ON THE APP THREAD, unlike every other
          guest's: OCaml's stdlib has no lock-free latch. It is bounded. *)
       let release () =
@@ -50,9 +49,9 @@ let () =
         nested := !nested ^ "a";
         post app (fun () ->
             nested := !nested ^ "b";
-            write detail (Str !nested));
+            write detail (!nested));
         nested := !nested ^ "c";
-        write detail (Str !nested)
+        write detail (!nested)
       in
 
       (* Children are THUNKS: omitting the trailing unit leaves one

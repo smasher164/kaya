@@ -91,6 +91,26 @@ func kayaTime(packed: Int64) -> KayaTime {
     return KayaTime(hour: parts.hour, minute: parts.minute)
 }
 
+extension DateComponents {
+    /// The (year, month, day) a KayaDate guarantees — the read-side twin
+    /// of `kayaPackedDate`'s validation, named rather than a bare `!` at
+    /// every display call site.
+    var kayaYMD: (year: Int, month: Int, day: Int) {
+        guard let year, let month, let day else {
+            preconditionFailure("kaya: not a KayaDate (missing year, month or day)")
+        }
+        return (year, month, day)
+    }
+
+    /// The (hour, minute) a KayaTime guarantees.
+    var kayaHM: (hour: Int, minute: Int) {
+        guard let hour, let minute else {
+            preconditionFailure("kaya: not a KayaTime (missing hour or minute)")
+        }
+        return (hour, minute)
+    }
+}
+
 extension KayaValue {
     /// A civil date on the wire — what a date signal carries.
     static func date(_ d: KayaDate) -> KayaValue { .i64(kayaPackedDate("a date", d)) }

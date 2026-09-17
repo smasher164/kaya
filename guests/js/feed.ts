@@ -31,10 +31,8 @@ function onToggle(post: kaya.RowHandle<Post>, checked: boolean): void {
   if (post instanceof Todo) post.done = checked;
 }
 
-let feed!: kaya.Collection<Post, kaya.Cases>;
-
-app.window(() => {
-  feed = kaya.collection([Note, Todo]);
+const { feed } = app.window(() => {
+  const feed = kaya.collection([Note, Todo]);
   const doneCount = feed.derive(doneCountText);
   kaya.row(() => {
     kaya.button("promote", { onClick: onPromote });
@@ -54,6 +52,7 @@ app.window(() => {
   feed.insert("a", Note({ text: "jot one" }));
   feed.insert("b", Todo({ title: "buy milk", done: false }));
   feed.insert("c", Note({ text: "jot two" }));
+  return { feed };
 });
 
 app.run();

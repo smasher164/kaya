@@ -379,6 +379,20 @@ family (C#, Java, Swift, Haskell) — the handle names the creator either
 way. The body runs ONCE to trace the template in every spelling; the
 loop is the fiction that reads as the intent.
 
+**The wire stops at the binding boundary** (ruled 2026-09-16, after
+the idiom survey). A guest never names a wire constructor or constant:
+the sugar types the value — a typed signal and a typed key, an enum for
+every closed vocabulary (alert choice, file mode, notification outcome,
+sections presentation, appearance, role, symbol), a boolean where the
+wire carries the string "true", a range where it carries two offsets —
+and the encoding is the binding's business alone. The survey measured
+the breach before the rule: 51 of 54 Haskell and 50 of 52 OCaml guests
+spelled `VStr`/`Str "…"`, and the C#, Java and Python dialog scenes
+compared the wire's integers by their KayaWire names.
+`tools/check-sugar-surface.py`'s wire-tag clause holds it in all nine,
+the C floor out of its walk by design (the floor IS the wire) and a
+check or bench that packs the wire on purpose exempt by name.
+
 **One id space for widgets and template nodes.** Every binding mints
 live widget ids and template node ids from ONE monotone counter per app
 — signals, collections, alerts/dialogs and menu items keep their own —

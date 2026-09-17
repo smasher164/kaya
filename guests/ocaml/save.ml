@@ -1,6 +1,5 @@
 (* The save scene, OCaml port — guests/rust/save.rs, tools/scenes/save.steps. *)
 
-open Kaya_wire
 open Kaya_app
 
 (* The pid keeps legs apart, and [Filename.get_temp_dir_name] honours TMPDIR
@@ -65,20 +64,20 @@ let () =
 
   build app (fun () ->
       window ~title:"save" ();
-      let status = signal (Str "no file") in
+      let status = signal_str ("no file") in
 
       let work job =
         ignore
           (Thread.create
              (fun () ->
                let text = job () in
-               post app (fun () -> write status (Str text)))
+               post app (fun () -> write status (text)))
              ())
       in
 
       let opened files =
         match files with
-        | [] -> write status (Str "open cancelled")
+        | [] -> write status ("open cancelled")
         | first :: _ ->
             source := Some first;
             work (fun () -> "opened " ^ read_back first)
@@ -87,7 +86,7 @@ let () =
       let saved destination_file =
         match destination_file with
         | None ->
-            write status (Str "save cancelled")
+            write status ("save cancelled")
         | Some file ->
             destination := Some file;
             work (fun () -> "saved " ^ write_back file "third draft")
@@ -101,7 +100,7 @@ let () =
            crashed guest masks the real failure (docs/deferred.md, save-jvm
            WATCH). *)
         match !source with
-        | None -> write status (Str "nothing open to save")
+        | None -> write status ("nothing open to save")
         | Some file ->
             work (fun () -> "saved " ^ write_back file "second draft")
       in
@@ -114,7 +113,7 @@ let () =
             work (fun () ->
                 Printf.sprintf "reopened %s %s" (read_back first)
                   (read_back second))
-        | _ -> write status (Str "nothing to reopen")
+        | _ -> write status ("nothing to reopen")
       in
 
       let root =

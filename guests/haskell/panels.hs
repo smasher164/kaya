@@ -1,14 +1,16 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 -- The panels scene, Haskell port — guests/rust/panels.rs,
 -- tools/scenes/panels.steps.
 
+import qualified Data.Text as T
 import KayaApp
-import KayaWire (Value (..))
 
 main :: IO ()
 main = kayaMain $ \app -> do
   status <- buildTx app $ do
-    window 0 [WTitle "panels"]
-    s <- signal (VStr "two panels")
+    window primary [WTitle "panels"]
+    s <- signal (T.pack "two panels")
 
     root <- column [] [labelBound s] -- label#0
     mount root
@@ -20,11 +22,11 @@ main = kayaMain $ \app -> do
         WVetoClose True,
         WOnCloseRequested
           ( buildTx app $ do
-              writeSignal s (VStr "close requested")
+              writeSignal s (T.pack "close requested")
               destroyWindow 1
           )
       ]
-    caption <- signal (VStr "inspector pane")
+    caption <- signal (T.pack "inspector pane")
     aux <- column [] [labelBound caption] -- label#1
     mountIn 1 aux
     return s

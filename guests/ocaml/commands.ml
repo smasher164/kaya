@@ -1,7 +1,6 @@
 (* The commands scene, OCaml port — guests/rust/commands.rs,
    tools/scenes/commands.steps. *)
 
-open Kaya_wire
 open Kaya_app
 
 let () =
@@ -9,9 +8,9 @@ let () =
   let settings_count = ref 0 in
 
   build app (fun () ->
-     let status = signal (Str "ready") in
-     let details = signal (Bool false) in
-     let sort = signal (F64 0.0) in
+     let status = signal_str ("ready") in
+     let details = signal_bool (false) in
+     let sort = signal_f64 (0.0) in
 
      window ~title:"commands"
        ~menus:
@@ -21,12 +20,12 @@ let () =
              [
                item ~label:"Reload";
                item ~label:"Settings…" ~shortcut:"primary+comma"
-                 ~role:role_settings
+                 ~role:Menu_role.Settings
                  ~on_activate:(fun () ->
                    (* Fires twice on purpose: the chord and the declared
                       path. *)
                    incr settings_count;
-                   write status (Str (Printf.sprintf "settings %d" !settings_count)));
+                   write status ((Printf.sprintf "settings %d" !settings_count)));
              ];
            (* Option order IS the index vocabulary: Name = 0, Date = 1. *)
            menu ~label:"View"
@@ -35,11 +34,11 @@ let () =
                  ~shortcut:"primary+backslash"
                  ~on_toggle:(fun on ->
                    write status
-                     (Str (if on then "details on" else "details off")));
+                     (if on then "details on" else "details off"));
                radio_group ~label:"Sort" ~bind_value:sort
                  ~on_select:(fun index ->
                    write status
-                     (Str (if index = 1 then "sorted date" else "sorted name")))
+                     (if index = 1 then "sorted date" else "sorted name"))
                  [
                    option ~label:"Name" ~shortcut:"primary+1";
                    option ~label:"Date" ~shortcut:"primary+2";

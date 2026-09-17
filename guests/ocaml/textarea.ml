@@ -1,7 +1,6 @@
 (* The textarea scene, OCaml port — guests/rust/textarea.rs,
    tools/scenes/textarea.steps. *)
 
-open Kaya_wire
 open Kaya_app
 
 let count text =
@@ -13,13 +12,13 @@ let () =
 
   let lines, editor =
     build app (fun () ->
-       let lines = signal (Str "0 lines") in
+       let lines = signal_str ("0 lines") in
        window ~title:"textarea" ();
 
        (* The editor realizes here because the clear button's handler needs
           its handle. *)
        let editor =
-         textarea ~on_change:(fun text -> write lines (Str (count text))) ()
+         textarea ~on_change:(fun text -> write lines ((count text))) ()
        in
        let root =
          column

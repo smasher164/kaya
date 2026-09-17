@@ -24,10 +24,6 @@ function onActed(note: kaya.RowHandle<NoteFields>): void {
   last.set(`${String(note.key)}: ${spell(note.body.runs)}`);
 }
 
-let notes!: kaya.Collection<NoteFields, kaya.Row<typeof Note.schema>>;
-let last!: kaya.Signal<string>;
-let view!: kaya.Signal<string>;
-
 /** An undo or redo moved the row back: the app reads ITS OWN mirror of
  * row b, which is the fold a restored Blob field lands in. */
 function onRestored(): void {
@@ -35,14 +31,14 @@ function onRestored(): void {
   view.set(`${note.body.text} | ${spell(note.body.runs)}`);
 }
 
-app.window({ title: "richrows", onUndone: onRestored, onRedone: onRestored }, () => {
+const { notes, last, view } = app.window({ title: "richrows", onUndone: onRestored, onRedone: onRestored }, () => {
   app.menu("Edit", () => {
     kaya.item("Undo", { role: kaya.ROLE_UNDO });
     kaya.item("Redo", { role: kaya.ROLE_REDO });
   });
-  notes = kaya.collection(Note);
-  last = kaya.signal("");
-  view = kaya.signal("");
+  const notes = kaya.collection(Note);
+  const last = kaya.signal("");
+  const view = kaya.signal("");
   kaya.column(() => {
     kaya.label({ bind: last }); // label#0
     kaya.label({ bind: view }); // label#1
@@ -50,7 +46,7 @@ app.window({ title: "richrows", onUndone: onRestored, onRedone: onRestored }, ()
       kaya.button("patch b", {
         onClick: () => {
           kaya.undoable("patch b");
-          notes.patch("b", { body: new kaya.Document("Patched").mark([0, 7], "italic", "true") });
+          notes.patch("b", { body: new kaya.Document("Patched").mark([0, 7], "italic", true) });
         },
       });
       kaya.button("read a", {
@@ -67,8 +63,9 @@ app.window({ title: "richrows", onUndone: onRestored, onRedone: onRestored }, ()
       });
     }
   });
-  notes.insert("a", Note({ title: "a", body: new kaya.Document("Héllo world").mark([0, 6], "bold", "true") }));
+  notes.insert("a", Note({ title: "a", body: new kaya.Document("Héllo world").mark([0, 6], "bold", true) }));
   notes.insert("b", Note({ title: "b", body: new kaya.Document("Second note").mark([7, 11], "link", "https://kaya.dev") }));
+  return { notes, last, view };
 });
 
 app.run();

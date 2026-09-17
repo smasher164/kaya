@@ -52,12 +52,11 @@ function work(job: () => string): void {
   app.post(() => status.set(text));
 }
 
-function picked(files: kaya.PickedFile[]): void {
-  if (files.length === 0) {
+function picked(file: kaya.PickedFile | null): void {
+  if (file === null) {
     status.set("open cancelled");
     return;
   }
-  const file = files[0]!;
   source = file;
   work(() => `opened ${readBack(file)}`);
 }
@@ -103,10 +102,8 @@ function reopen(): void {
   work(() => `reopened ${readBack(first)} ${readBack(second)}`);
 }
 
-let status!: kaya.Signal<string>;
-
-app.window({ title: "save" }, () => {
-  status = kaya.signal("no file");
+const { status } = app.window({ title: "save" }, () => {
+  const status = kaya.signal("no file");
   kaya.column(() => {
     kaya.label({ bind: status }).a11yId("status"); // label#0
     kaya.button("open", { onClick: openFile }); // button#0
@@ -114,6 +111,7 @@ app.window({ title: "save" }, () => {
     kaya.button("save as", { onClick: saveAs }); // button#2
     kaya.button("reopen", { onClick: reopen }); // button#3
   });
+  return { status };
 });
 
 app.run();

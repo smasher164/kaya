@@ -1,10 +1,13 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 -- The save scene, Haskell port — guests/rust/save.rs, tools/scenes/save.steps.
 
 import Control.Concurrent (forkIO)
 import Control.Exception (SomeException, try)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.Text (Text)
+import qualified Data.Text as T
 import KayaApp
-import KayaWire (Value (..), fileModeRead, fileModeWrite)
 import System.Directory (createDirectoryIfMissing, getTemporaryDirectory)
 import System.FilePath ((</>))
 import System.IO (hClose, hGetContents', hPutStr)
@@ -13,7 +16,7 @@ import System.Posix.Process (getProcessID)
 -- | Read a handle back through kaya, with GHC's own IO.
 readBack :: PickedFile -> IO String
 readBack file = do
-  opened <- try (openPicked file fileModeRead)
+  opened <- try (openPicked file FileModeRead)
   case opened of
     Left e -> return ("open failed: " ++ show (e :: SomeException))
     Right (h, _seekable) -> do
@@ -24,10 +27,10 @@ readBack file = do
         Right text -> return text
 
 -- | Write through a handle and report what the FILE says afterwards.
--- 'fileModeWrite' truncates; a destination only adds the create.
+-- 'FileModeWrite' truncates; a destination only adds the create.
 writeBack :: PickedFile -> String -> IO String
 writeBack file text = do
-  opened <- try (openPicked file fileModeWrite)
+  opened <- try (openPicked file FileModeWrite)
   case opened of
     Left e -> return ("save failed: " ++ show (e :: SomeException))
     Right (h, _seekable) -> do
@@ -61,23 +64,23 @@ main = kayaMain $ \app -> do
   destRef <- newIORef Nothing
 
   _ <- buildTx app $ do
-    window 0 [WTitle "save"]
-    status <- signal (VStr "no file")
+    window primary [WTitle "save"]
+    status <- signal (T.pack "no file")
 
     -- Off the app thread, because openPicked blocks.
     let work job = do
           _ <- forkIO $ do
             text <- job
-            post app (buildTx app (writeSignal status (VStr text)))
+            post app (buildTx app (writeSignal status (T.pack text)))
           return ()
 
         picked files = case files of
-          [] -> buildTx app (writeSignal status (VStr "open cancelled"))
+          [] -> buildTx app (writeSignal status (T.pack "open cancelled"))
           (first : _) -> do
             writeIORef sourceRef (Just first)
             work (("opened " ++) <$> readBack first)
 
-        saved Nothing = buildTx app (writeSignal status (VStr "save cancelled"))
+        saved Nothing = buildTx app (writeSignal status (T.pack "save cancelled"))
         saved (Just file) = do
           writeIORef destRef (Just file)
           work (("saved " ++) <$> writeBack file "third draft")
@@ -85,7 +88,7 @@ main = kayaMain $ \app -> do
     root <-
       column
         []
-        [ labelBound status [A11yId "status"], -- label#0
+        [ labelBound status [A11yId ("status" :: Text)], -- label#0
           -- NO FILTERS: with allowedContentTypes set a save panel appends the
           -- first allowed extension to an extension-less name.
           buttonOn "open" (buildTx app (pickFile [] picked)) [], -- button#0
@@ -94,7 +97,7 @@ main = kayaMain $ \app -> do
             ( do
                 file <- held sourceRef
                 case file of
-                  Nothing -> buildTx app (writeSignal status (VStr "nothing open to save"))
+                  Nothing -> buildTx app (writeSignal status (T.pack "nothing open to save"))
                   Just f -> work (("saved " ++) <$> writeBack f "second draft")
             )
             [],
@@ -109,7 +112,7 @@ main = kayaMain $ \app -> do
                     one <- readBack one'
                     two <- readBack two'
                     return ("reopened " ++ one ++ " " ++ two)
-                  _ -> buildTx app (writeSignal status (VStr "nothing to reopen"))
+                  _ -> buildTx app (writeSignal status (T.pack "nothing to reopen"))
             )
             []
         ]

@@ -20,7 +20,7 @@ static class SectionsScene
         app.Build(tx =>
         {
             tx.Window(title: "sections",
-                sectionsPresentation: KayaWire.SectionsPresentationBar);
+                sectionsPresentation: SectionsPresentation.Bar);
             visits = tx.Signal("archive: 0 visits");
 
             // A symbol names a CONCEPT (docs/styling-plan.md D6).
@@ -44,7 +44,7 @@ static class SectionsScene
                 tx.Button("open library", onClick: inner => // button#1
                 {
                     inner.CreateWindow(Library, title: "library",
-                        sectionsPresentation: KayaWire.SectionsPresentationSidebar);
+                        sectionsPresentation: SectionsPresentation.Sidebar);
                     inner.AddSection(Shelves, title: "Shelves",
                         symbol: Symbol.Search, window: Library);
                     inner.AddSection(Loans, title: "Loans",

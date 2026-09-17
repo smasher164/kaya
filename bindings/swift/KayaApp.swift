@@ -767,8 +767,10 @@ func kayaEditFromTail(_ tail: [KayaValue]) -> KayaEdit {
         }
         edit.source = known
     }
-    if case .i64(let start) = tail[1] { edit.start = Int(start) }
-    if case .i64(let stop) = tail[2] { edit.end = Int(stop) }
+    var start = edit.range.lowerBound, stop = edit.range.upperBound
+    if case .i64(let s) = tail[1] { start = Int(s) }
+    if case .i64(let e) = tail[2] { stop = Int(e) }
+    edit.range = start..<stop
     if case .str(let inserted) = tail[3] { edit.inserted = inserted }
     edit.runs = kayaRunsFromValues(Array(tail[4...]))
     return edit
@@ -776,12 +778,14 @@ func kayaEditFromTail(_ tail: [KayaValue]) -> KayaEdit {
 
 /// A text_formatted tail: removed, start, stop, name, value.
 func kayaFormatFromTail(_ tail: [KayaValue]) -> KayaFormat {
-    var act = KayaFormat(start: 0, end: 0, name: "", value: nil)
+    var act = KayaFormat(range: 0..<0, name: "", value: nil)
     guard tail.count >= 5 else { return act }
     var removed = false
     if case .i64(let flag) = tail[0] { removed = flag != 0 }
-    if case .i64(let start) = tail[1] { act.start = Int(start) }
-    if case .i64(let stop) = tail[2] { act.end = Int(stop) }
+    var start = act.range.lowerBound, stop = act.range.upperBound
+    if case .i64(let s) = tail[1] { start = Int(s) }
+    if case .i64(let e) = tail[2] { stop = Int(e) }
+    act.range = start..<stop
     if case .str(let name) = tail[3] { act.name = name }
     if case .str(let value) = tail[4], !removed { act.value = value }
     return act
@@ -790,7 +794,8 @@ func kayaFormatFromTail(_ tail: [KayaValue]) -> KayaFormat {
 /// The same four, on the way down.
 func kayaRunValues(_ runs: [KayaRun]) -> [KayaValue] {
     runs.flatMap { run -> [KayaValue] in
-        [.i64(Int64(run.start)), .i64(Int64(run.end)), .str(run.name), .str(run.value)]
+        [.i64(Int64(run.range.lowerBound)), .i64(Int64(run.range.upperBound)),
+         .str(run.name), .str(run.value)]
     }
 }
 
@@ -806,7 +811,7 @@ func kayaRunsFromValues(_ flat: [KayaValue]) -> [KayaRun] {
             i += 4
             continue
         }
-        runs.append(KayaRun(start: Int(start), end: Int(end), name: name, value: value))
+        runs.append(KayaRun(range: Int(start)..<Int(end), name: name, value: value))
         i += 4
     }
     return runs
@@ -1533,8 +1538,41 @@ struct KayaPrefs {
         return raw
     }
 
-    func getString(_ name: String, _ def: String) -> String {
-        let raw = KayaPrefs.key(name)
+    /// One typed get, resolved by the call site's inferred type — the
+    /// generic entry point `UserDefaults` itself grew (return-type
+    /// inference) in place of a get<Type> family, and the shape
+    /// `@AppStorage` wraps.
+    func get<V: KayaPrefValue>(_ name: String, default def: V) -> V {
+        V.kayaPrefGet(KayaPrefs.key(name), default: def)
+    }
+
+    func set<V: KayaPrefValue>(_ name: String, _ value: V) {
+        V.kayaPrefSet(KayaPrefs.writeKey(name), value)
+    }
+
+    subscript<V: KayaPrefValue>(name: String, default def: V) -> V {
+        get { get(name, default: def) }
+        nonmutating set { set(name, newValue) }
+    }
+
+    func remove(_ name: String) {
+        let raw = KayaPrefs.writeKey(name)
+        raw.withUnsafeBufferPointer { k in
+            kaya_pref_remove(k.baseAddress, UInt(k.count))
+        }
+    }
+}
+
+/// The four wire-storable primitive types a preference may hold
+/// (docs/tasks-s4-plan.md P2/P3); `KayaPrefs.get`/`set` resolve to one
+/// of these four by the call site's inferred type.
+protocol KayaPrefValue {
+    static func kayaPrefGet(_ raw: [UInt8], default def: Self) -> Self
+    static func kayaPrefSet(_ raw: [UInt8], _ value: Self)
+}
+
+extension String: KayaPrefValue {
+    static func kayaPrefGet(_ raw: [UInt8], default def: String) -> String {
         var len = UInt(0)
         let present = raw.withUnsafeBufferPointer { k in
             kaya_pref_get_string(k.baseAddress, UInt(k.count), nil, 0, &len)
@@ -1552,35 +1590,7 @@ struct KayaPrefs {
         return String(decoding: out[0..<Int(len)], as: UTF8.self)
     }
 
-    func getI64(_ name: String, _ def: Int64) -> Int64 {
-        let raw = KayaPrefs.key(name)
-        var out: Int64 = 0
-        let present = raw.withUnsafeBufferPointer { k in
-            kaya_pref_get_i64(k.baseAddress, UInt(k.count), &out)
-        }
-        return present == 0 ? def : out
-    }
-
-    func getF64(_ name: String, _ def: Double) -> Double {
-        let raw = KayaPrefs.key(name)
-        var out: Double = 0
-        let present = raw.withUnsafeBufferPointer { k in
-            kaya_pref_get_f64(k.baseAddress, UInt(k.count), &out)
-        }
-        return present == 0 ? def : out
-    }
-
-    func getBool(_ name: String, _ def: Bool) -> Bool {
-        let raw = KayaPrefs.key(name)
-        var out: UInt8 = 0
-        let present = raw.withUnsafeBufferPointer { k in
-            kaya_pref_get_bool(k.baseAddress, UInt(k.count), &out)
-        }
-        return present == 0 ? def : out != 0
-    }
-
-    func setString(_ name: String, _ value: String) {
-        let raw = KayaPrefs.writeKey(name)
+    static func kayaPrefSet(_ raw: [UInt8], _ value: String) {
         let packed = Array(value.utf8)
         raw.withUnsafeBufferPointer { k in
             packed.withUnsafeBufferPointer { v in
@@ -1589,32 +1599,52 @@ struct KayaPrefs {
             }
         }
     }
+}
 
-    func setI64(_ name: String, _ value: Int64) {
-        let raw = KayaPrefs.writeKey(name)
+extension Int64: KayaPrefValue {
+    static func kayaPrefGet(_ raw: [UInt8], default def: Int64) -> Int64 {
+        var out: Int64 = 0
+        let present = raw.withUnsafeBufferPointer { k in
+            kaya_pref_get_i64(k.baseAddress, UInt(k.count), &out)
+        }
+        return present == 0 ? def : out
+    }
+
+    static func kayaPrefSet(_ raw: [UInt8], _ value: Int64) {
         raw.withUnsafeBufferPointer { k in
             kaya_pref_set_i64(k.baseAddress, UInt(k.count), value)
         }
     }
+}
 
-    func setF64(_ name: String, _ value: Double) {
-        let raw = KayaPrefs.writeKey(name)
+extension Double: KayaPrefValue {
+    static func kayaPrefGet(_ raw: [UInt8], default def: Double) -> Double {
+        var out: Double = 0
+        let present = raw.withUnsafeBufferPointer { k in
+            kaya_pref_get_f64(k.baseAddress, UInt(k.count), &out)
+        }
+        return present == 0 ? def : out
+    }
+
+    static func kayaPrefSet(_ raw: [UInt8], _ value: Double) {
         raw.withUnsafeBufferPointer { k in
             kaya_pref_set_f64(k.baseAddress, UInt(k.count), value)
         }
     }
+}
 
-    func setBool(_ name: String, _ value: Bool) {
-        let raw = KayaPrefs.writeKey(name)
-        raw.withUnsafeBufferPointer { k in
-            kaya_pref_set_bool(k.baseAddress, UInt(k.count), value ? 1 : 0)
+extension Bool: KayaPrefValue {
+    static func kayaPrefGet(_ raw: [UInt8], default def: Bool) -> Bool {
+        var out: UInt8 = 0
+        let present = raw.withUnsafeBufferPointer { k in
+            kaya_pref_get_bool(k.baseAddress, UInt(k.count), &out)
         }
+        return present == 0 ? def : out != 0
     }
 
-    func remove(_ name: String) {
-        let raw = KayaPrefs.writeKey(name)
+    static func kayaPrefSet(_ raw: [UInt8], _ value: Bool) {
         raw.withUnsafeBufferPointer { k in
-            kaya_pref_remove(k.baseAddress, UInt(k.count))
+            kaya_pref_set_bool(k.baseAddress, UInt(k.count), value ? 1 : 0)
         }
     }
 }
@@ -1627,8 +1657,7 @@ struct KayaPrefs {
 /// One attribute over one span; `value` is "true" for the flags, a URL
 /// for `link`, a kind for `block`.
 struct KayaRun: Equatable {
-    var start: Int
-    var end: Int
+    var range: Range<Int>
     var name: String
     var value: String
 }
@@ -1679,8 +1708,7 @@ struct KayaDocument: Equatable {
 
     func mark(_ range: Range<Int>, _ name: String, _ value: String) -> KayaDocument {
         var next = self
-        next.runs.append(KayaRun(start: range.lowerBound, end: range.upperBound,
-                                 name: name, value: value))
+        next.runs.append(KayaRun(range: range, name: name, value: value))
         return next
     }
 
@@ -1697,15 +1725,14 @@ struct KayaDocument: Equatable {
     }
 
     func attr(at byte: Int, _ name: String) -> String? {
-        runs.first { $0.name == name && $0.start <= byte && byte < $0.end }?.value
+        runs.first { $0.name == name && $0.range.contains(byte) }?.value
     }
 }
 
-/// Replace `start..<end` with `inserted`, whose `runs` carry offsets
-/// RELATIVE to the inserted text.
+/// Replace `range` with `inserted`, whose `runs` carry offsets RELATIVE to
+/// the inserted text.
 struct KayaEdit: Equatable {
-    var start: Int = 0
-    var end: Int = 0
+    var range: Range<Int> = 0..<0
     var inserted: String = ""
     var runs: [KayaRun] = []
     /// What provoked it; nil on an edit the app builds, and ignored by
@@ -1713,30 +1740,28 @@ struct KayaEdit: Equatable {
     var source: KayaEditSource? = nil
 
     static func insert(at: Int, _ text: String) -> KayaEdit {
-        KayaEdit(start: at, end: at, inserted: text, runs: [])
+        KayaEdit(range: at..<at, inserted: text, runs: [])
     }
 
     static func delete(_ range: Range<Int>) -> KayaEdit {
-        KayaEdit(start: range.lowerBound, end: range.upperBound, inserted: "", runs: [])
+        KayaEdit(range: range, inserted: "", runs: [])
     }
 
     static func replace(_ range: Range<Int>, _ text: String) -> KayaEdit {
-        KayaEdit(start: range.lowerBound, end: range.upperBound, inserted: text, runs: [])
+        KayaEdit(range: range, inserted: text, runs: [])
     }
 
     /// One attribute over the INSERTED text's own offsets.
     func mark(_ range: Range<Int>, _ name: String, _ value: String) -> KayaEdit {
         var next = self
-        next.runs.append(KayaRun(start: range.lowerBound, end: range.upperBound,
-                                 name: name, value: value))
+        next.runs.append(KayaRun(range: range, name: name, value: value))
         return next
     }
 }
 
 /// A toolbar act over a range; `value` nil is the attribute taken off.
 struct KayaFormat: Equatable {
-    var start: Int
-    var end: Int
+    var range: Range<Int>
     var name: String
     var value: String?
 }
@@ -1760,22 +1785,20 @@ func kayaFoldEdit(
     let shift = insertedBytes.count - (end - start)
     var next: [KayaRun] = []
     for run in doc.runs {
-        if run.start < start {
+        if run.range.lowerBound < start {
             var head = run
-            head.end = min(run.end, start)
+            head.range = head.range.lowerBound..<min(run.range.upperBound, start)
             next.append(head)
         }
-        if run.end > end {
+        if run.range.upperBound > end {
             var tail = run
-            tail.start = max(run.start, end) + shift
-            tail.end = run.end + shift
+            tail.range = (max(run.range.lowerBound, end) + shift)..<(run.range.upperBound + shift)
             next.append(tail)
         }
     }
     for run in runs {
         var moved = run
-        moved.start += start
-        moved.end += start
+        moved.range = (run.range.lowerBound + start)..<(run.range.upperBound + start)
         next.append(moved)
     }
     bytes.replaceSubrange(start..<end, with: insertedBytes)
@@ -1791,23 +1814,23 @@ func kayaFoldFormat(
     if start >= end { return }
     var next: [KayaRun] = []
     for run in doc.runs {
-        if run.name != name || run.end <= start || run.start >= end {
+        if run.name != name || run.range.upperBound <= start || run.range.lowerBound >= end {
             next.append(run)
             continue
         }
-        if run.start < start {
+        if run.range.lowerBound < start {
             var head = run
-            head.end = start
+            head.range = head.range.lowerBound..<start
             next.append(head)
         }
-        if run.end > end {
+        if run.range.upperBound > end {
             var tail = run
-            tail.start = end
+            tail.range = end..<tail.range.upperBound
             next.append(tail)
         }
     }
     if let value {
-        next.append(KayaRun(start: start, end: end, name: name, value: value))
+        next.append(KayaRun(range: start..<end, name: name, value: value))
     }
     doc.runs = kayaNormalizeRuns(next)
 }
@@ -1845,9 +1868,9 @@ func kayaDocumentBlob(_ doc: KayaDocument) -> Data {
     str(doc.text)
     pad()
     for run in doc.runs {
-        i64(run.start)
+        i64(run.range.lowerBound)
         pad()
-        i64(run.end)
+        i64(run.range.upperBound)
         pad()
         str(run.name)
         pad()
@@ -1891,7 +1914,7 @@ func kayaDocumentOfBlob(_ bytes: Data) -> KayaDocument {
         guard case .i64(let start) = values[i], case .i64(let end) = values[i + 1],
               case .str(let name) = values[i + 2], case .str(let value) = values[i + 3]
         else { break }
-        doc.runs.append(KayaRun(start: Int(start), end: Int(end), name: name, value: value))
+        doc.runs.append(KayaRun(range: Int(start)..<Int(end), name: name, value: value))
         i += 4
     }
     return doc
@@ -1904,39 +1927,42 @@ func kayaNormalizeRuns(_ runs: [KayaRun]) -> [KayaRun] {
     for name in Set(runs.map(\.name)).sorted() {
         var painted: [KayaRun] = []
         for run in runs where run.name == name {
-            if run.start >= run.end { continue }
+            if run.range.lowerBound >= run.range.upperBound { continue }
             var kept: [KayaRun] = []
             for old in painted {
-                if old.end <= run.start || old.start >= run.end {
+                if old.range.upperBound <= run.range.lowerBound
+                    || old.range.lowerBound >= run.range.upperBound {
                     kept.append(old)
                     continue
                 }
-                if old.start < run.start {
+                if old.range.lowerBound < run.range.lowerBound {
                     var head = old
-                    head.end = run.start
+                    head.range = head.range.lowerBound..<run.range.lowerBound
                     kept.append(head)
                 }
-                if old.end > run.end {
+                if old.range.upperBound > run.range.upperBound {
                     var tail = old
-                    tail.start = run.end
+                    tail.range = run.range.upperBound..<tail.range.upperBound
                     kept.append(tail)
                 }
             }
             kept.append(run)
             painted = kept
         }
-        painted.sort { $0.start < $1.start }
+        painted.sort { $0.range.lowerBound < $1.range.lowerBound }
         var merged: [KayaRun] = []
         for run in painted {
-            if let last = merged.last, last.end == run.start, last.value == run.value {
-                merged[merged.count - 1].end = run.end
+            if let last = merged.last, last.range.upperBound == run.range.lowerBound,
+                last.value == run.value {
+                merged[merged.count - 1].range =
+                    merged[merged.count - 1].range.lowerBound..<run.range.upperBound
             } else {
                 merged.append(run)
             }
         }
         out.append(contentsOf: merged)
     }
-    out.sort { ($0.start, $0.name) < ($1.start, $1.name) }
+    out.sort { ($0.range.lowerBound, $0.name) < ($1.range.lowerBound, $1.name) }
     return out
 }
 
@@ -2984,7 +3010,7 @@ final class KayaApp {
             // (docs/rich-text-plan.md R1).
             case (UInt16(KAYA_OCCURRENCE_TEXT_EDITED), true):
                 let edit = kayaEditFromTail(tail)
-                absorbEdit(id, edit.start, edit.end, edit.inserted, edit.runs)
+                absorbEdit(id, edit.range.lowerBound, edit.range.upperBound, edit.inserted, edit.runs)
                 if let handler = widgetEdits[id] {
                     dispatch { try build { tx in try handler(tx, edit) } }
                 }
@@ -2993,21 +3019,21 @@ final class KayaApp {
             case (UInt16(KAYA_OCCURRENCE_TEXT_EDITED), false):
                 let edit = kayaEditFromTail(tail)
                 foldRowDocument(id, keys) { doc in
-                    kayaFoldEdit(&doc, edit.start, edit.end, edit.inserted, edit.runs)
+                    kayaFoldEdit(&doc, edit.range.lowerBound, edit.range.upperBound, edit.inserted, edit.runs)
                 }
                 if let handler = nodeEdits[id] {
                     dispatch { try build { tx in try handler(tx, keys, edit) } }
                 }
             case (UInt16(KAYA_OCCURRENCE_TEXT_FORMATTED), true):
                 let act = kayaFormatFromTail(tail)
-                absorbFormat(id, act.start, act.end, act.name, act.value)
+                absorbFormat(id, act.range.lowerBound, act.range.upperBound, act.name, act.value)
                 if let handler = widgetFormats[id] {
                     dispatch { try build { tx in try handler(tx, act) } }
                 }
             case (UInt16(KAYA_OCCURRENCE_TEXT_FORMATTED), false):
                 let act = kayaFormatFromTail(tail)
                 foldRowDocument(id, keys) { doc in
-                    kayaFoldFormat(&doc, act.start, act.end, act.name, act.value)
+                    kayaFoldFormat(&doc, act.range.lowerBound, act.range.upperBound, act.name, act.value)
                 }
                 if let handler = nodeFormats[id] {
                     dispatch { try build { tx in try handler(tx, keys, act) } }
@@ -3698,9 +3724,10 @@ final class KayaAppTx {
     /// so the app's document is ahead of the widget's until a live
     /// composition ends (§7).
     func applyEdit(_ w: KayaWidget, _ edit: KayaEdit) {
-        app.absorbEdit(w.id, edit.start, edit.end, edit.inserted, edit.runs)
-        tx.applyEdit(w.id, UInt64(edit.start), UInt64(edit.end), UInt32(edit.runs.count),
-                     kayaRunValues(edit.runs), .str(edit.inserted))
+        app.absorbEdit(w.id, edit.range.lowerBound, edit.range.upperBound, edit.inserted, edit.runs)
+        tx.applyEdit(
+            w.id, UInt64(edit.range.lowerBound), UInt64(edit.range.upperBound),
+            UInt32(edit.runs.count), kayaRunValues(edit.runs), .str(edit.inserted))
     }
 
     /// Format the widget's CURRENT SELECTION through its own act — what

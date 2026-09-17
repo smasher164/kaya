@@ -26,9 +26,11 @@ type Key interface {
 }
 
 // RecordCollection is a Collection whose entries are T records keyed by
-// K.
+// K. Coll is a named field, not embedded: the untyped Collection floor
+// (Tx.Insert, Tx.Update, Tx.Items, ...) stays one field-access away
+// rather than promoted onto every RecordCollection.
 type RecordCollection[K Key, T any] struct {
-	Collection
+	Coll Collection
 	info *recordInfo
 }
 
@@ -289,12 +291,11 @@ func newRecordCollection[K Key, T any](tx *Tx) RecordCollection[K, T] {
 }
 
 // At is the instance of this collection inside the copy keyed by key of
-// the next enclosing For; chain for deeper nesting. IT SHADOWS THE
-// EMBEDDED Collection's At and keeps K and T: the promoted one hands
-// back a bare Collection, and every record mutation takes a
-// RecordCollection.
+// the next enclosing For; chain for deeper nesting. Keeps K and T: the
+// untyped Collection.At hands back a bare Collection, and every record
+// mutation takes a RecordCollection.
 func (c RecordCollection[K, T]) At(key any) RecordCollection[K, T] {
-	return RecordCollection[K, T]{c.Collection.At(key), c.info}
+	return RecordCollection[K, T]{c.Coll.At(key), c.info}
 }
 
 // restoreKey coerces an undone entry's wire key to the type the model
@@ -409,12 +410,12 @@ func (info *recordInfo) encode(field uint32, v any) any {
 // fields positionally. Through Tx.insertEntry — the one insert path, so
 // an explicit numeric key reaches the fresh-key minter here too.
 func (c RecordCollection[K, T]) Insert(tx *Tx, key K, value T) {
-	tx.insertEntry(c.Collection, key, 0, value, c.info.values(value))
+	tx.insertEntry(c.Coll, key, 0, value, c.info.values(value))
 }
 
 // handle is the plain (collection, path) handle the minter counts per.
 // Unexported, so FreshCollection below is closed to kaya's own types.
-func (c RecordCollection[K, T]) handle() Collection { return c.Collection }
+func (c RecordCollection[K, T]) handle() Collection { return c.Coll }
 
 // FreshCollection is a typed collection InsertFresh can mint into: one
 // whose keys ARE the minted I64. THE KEY TYPE IS THE WALL — a
@@ -440,37 +441,37 @@ func InsertFresh[T any, C FreshCollection[T]](tx *Tx, c C, value T) int64 {
 
 // Update replaces a record wholesale; UpdateField is the one-field way.
 func (c RecordCollection[K, T]) Update(tx *Tx, key K, value T) {
-	tx.app.modelSet(c.id, c.path, key, value)
-	tx.emit(TxCollectionUpdate(c.id, c.path, key, 0, c.info.values(value)))
-	tx.recomputeDerived(c.id, c.path)
+	tx.app.modelSet(c.Coll.id, c.Coll.path, key, value)
+	tx.emit(TxCollectionUpdate(c.Coll.id, c.Coll.path, key, 0, c.info.values(value)))
+	tx.recomputeDerived(c.Coll.id, c.Coll.path)
 }
 
 // MoveBefore repositions an entry before another's. Keys, never
 // indices; a missing key or anchor panics at the call site, and moving
 // an entry before itself is a no-op.
 func (c RecordCollection[K, T]) MoveBefore(tx *Tx, key, anchor K) {
-	tx.MoveBefore(c.Collection, key, anchor)
+	tx.MoveBefore(c.Coll, key, anchor)
 }
 
 // MoveToEnd repositions an entry at the end of its collection.
 func (c RecordCollection[K, T]) MoveToEnd(tx *Tx, key K) {
-	tx.MoveToEnd(c.Collection, key)
+	tx.MoveToEnd(c.Coll, key)
 }
 
 // MoveToFront repositions an entry at the front.
 func (c RecordCollection[K, T]) MoveToFront(tx *Tx, key K) {
-	tx.MoveToFront(c.Collection, key)
+	tx.MoveToFront(c.Coll, key)
 }
 
 // MoveAfter repositions an entry directly after another's.
 func (c RecordCollection[K, T]) MoveAfter(tx *Tx, key, anchor K) {
-	tx.MoveAfter(c.Collection, key, anchor)
+	tx.MoveAfter(c.Coll, key, anchor)
 }
 
 // Items is the typed model, in insertion order.
 func (c RecordCollection[K, T]) Items(tx *Tx) []RecordEntry[K, T] {
 	tx.app.guardMirrorRead()
-	in := tx.app.instanceOf(c.id, c.path)
+	in := tx.app.instanceOf(c.Coll.id, c.Coll.path)
 	if in == nil {
 		return nil
 	}
@@ -481,6 +482,23 @@ func (c RecordCollection[K, T]) Items(tx *Tx) []RecordEntry[K, T] {
 	return out
 }
 
+// Get is the entry's current value. ok is false for a missing key —
+// SumCollection.Get's comma-ok, over a record collection.
+func (c RecordCollection[K, T]) Get(tx *Tx, key K) (T, bool) {
+	tx.app.guardMirrorRead()
+	var zero T
+	in := tx.app.instanceOf(c.Coll.id, c.Coll.path)
+	if in == nil {
+		return zero, false
+	}
+	for _, e := range in.entries {
+		if e.Key == key {
+			return e.Value.(T), true
+		}
+	}
+	return zero, false
+}
+
 // UpdateField sends one field's delta — the rest of the record never
 // travels — and mutates the same field of the model's copy.
 func (c RecordCollection[K, T]) UpdateField[V any](tx *Tx, key K, project func(*T) *V, value V) {
@@ -489,7 +507,7 @@ func (c RecordCollection[K, T]) UpdateField[V any](tx *Tx, key K, project func(*
 
 // UpdateFieldAt is UpdateField over a pre-resolved token.
 func (c RecordCollection[K, T]) UpdateFieldAt[V any](tx *Tx, key K, f Field[V], value V) {
-	in := tx.app.instanceOf(c.id, c.path)
+	in := tx.app.instanceOf(c.Coll.id, c.Coll.path)
 	if in == nil {
 		panic("kaya: update of a missing instance")
 	}
@@ -500,19 +518,19 @@ func (c RecordCollection[K, T]) UpdateFieldAt[V any](tx *Tx, key K, f Field[V], 
 			rv.Field(c.info.indexes[f.index]).Set(reflect.ValueOf(value))
 			// Through modelSet so the journal snapshots the collection
 			// before this transaction's first touch.
-			tx.app.modelSet(c.id, c.path, key, record)
+			tx.app.modelSet(c.Coll.id, c.Coll.path, key, record)
 			break
 		}
 	}
-	tx.emit(TxCollectionUpdateField(c.id, c.path, key, f.index, 0, c.info.encode(f.index, value)))
-	tx.recomputeDerived(c.id, c.path)
+	tx.emit(TxCollectionUpdateField(c.Coll.id, c.Coll.path, key, f.index, 0, c.info.encode(f.index, value)))
+	tx.recomputeDerived(c.Coll.id, c.Coll.path)
 }
 
 // Derive returns a signal the binding recomputes from this collection's
 // entries after every mutation, written into the same transaction.
 func (c RecordCollection[K, T]) Derive[V Scalar](tx *Tx, compute func(items []RecordEntry[K, T]) V) Signal[V] {
 	s := tx.Signal(compute(c.Items(tx)))
-	tx.pendingDerived = append(tx.pendingDerived, pendingDerived{c.id, func(tx *Tx) {
+	tx.pendingDerived = append(tx.pendingDerived, pendingDerived{c.Coll.id, func(tx *Tx) {
 		tx.Write(s, compute(c.Items(tx)))
 	}})
 	return s

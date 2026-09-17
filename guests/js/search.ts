@@ -28,12 +28,9 @@ function onQuery(text: string): void {
   visible = wanted;
 }
 
-let items!: kaya.Collection<kaya.Fields<typeof Item.schema>, kaya.Row<typeof Item.schema>>;
-let count!: kaya.Signal<string>;
-
-app.window(() => {
-  items = kaya.collection(Item);
-  count = kaya.signal(`${ITEMS.length} items`);
+const { items, count } = app.window(() => {
+  const items = kaya.collection(Item);
+  const count = kaya.signal(`${ITEMS.length} items`);
 
   kaya.column(() => {
     kaya.search({ placeholder: "Search", onChange: onQuery }).a11yId("find").a11yLabel("Find items");
@@ -45,6 +42,7 @@ app.window(() => {
   });
 
   for (const name of ITEMS) items.insert(name, Item({ name }));
+  return { items, count };
 });
 
 app.run();

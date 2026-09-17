@@ -156,7 +156,7 @@ func TestHeadingAndCaptionSugarIsALabelWearingItsRole(t *testing.T) {
 	recRows := func(body func(RecordCollection[string, sugarRec], *Tpl)) func(*Tx) {
 		return func(tx *Tx) {
 			c := CollectionOf[string, sugarRec](tx)
-			for row := range tx.Rows(c.Collection).All() {
+			for row := range tx.Rows(c.Coll).All() {
 				body(c, row.Tpl)
 			}
 		}
@@ -164,7 +164,7 @@ func TestHeadingAndCaptionSugarIsALabelWearingItsRole(t *testing.T) {
 	sumRows := func(body func(SumCase[string, sugarNote])) func(*Tx) {
 		return func(tx *Tx) {
 			c := SumOf[string, any](tx, sugarNote{}, sugarTodo{})
-			for row := range tx.Rows(c.Collection).All() {
+			for row := range tx.Rows(c.Coll).All() {
 				c.Case[sugarNote](row.Tpl, body)
 				c.Case[sugarTodo](row.Tpl, func(SumCase[string, sugarTodo]) {})
 			}
@@ -175,7 +175,7 @@ func TestHeadingAndCaptionSugarIsALabelWearingItsRole(t *testing.T) {
 
 	for _, c := range []struct {
 		name  string
-		want  int64
+		want  Role
 		build func(*Tx)
 	}{
 		{"Tx.HeadingText", RoleHeading, func(tx *Tx) { tx.HeadingText("Sections") }},
@@ -203,7 +203,7 @@ func TestHeadingAndCaptionSugarIsALabelWearingItsRole(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			got := sugarRole(t, c.build)
-			if got.source != SourceConst || got.tag != ValueI64 || got.i64 != c.want {
+			if got.source != SourceConst || got.tag != ValueI64 || got.i64 != int64(c.want) {
 				t.Errorf("%s recorded %+v, want a const i64 role %d", c.name, got, c.want)
 			}
 		})

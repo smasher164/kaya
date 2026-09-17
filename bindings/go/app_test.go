@@ -85,7 +85,7 @@ func TestAbortRestoresModelShipsNothingAndContinues(t *testing.T) {
 		})
 		panic("handler bug")
 	})
-	if n := len(app.derived[rc.id]); n != 0 {
+	if n := len(app.derived[rc.Coll.id]); n != 0 {
 		t.Fatalf("aborted tx leaked %d derived registrations", n)
 	}
 }
@@ -594,7 +594,7 @@ func TestAnUndoneDeltaRestoresRecordsNotWireFields(t *testing.T) {
 		todos.Insert(tx, "t1", checkTodo{Title: "milk"})
 	})
 	app.absorbUndo(UndoDelta{Entries: []UndoEntry{
-		{Collection: todos.id, Key: "t1", Present: true, Record: []any{"tea"}},
+		{Collection: todos.Coll.id, Key: "t1", Present: true, Record: []any{"tea"}},
 	}})
 	app.Build(func(tx *Tx) {
 		items := todos.Items(tx)

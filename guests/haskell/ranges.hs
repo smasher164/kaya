@@ -1,19 +1,20 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 -- The ranges scene, Haskell port — guests/rust/ranges.rs,
 -- tools/scenes/ranges.steps.
 
 import qualified Data.ByteString as BS
-import Data.ByteString.Builder (stringUtf8, toLazyByteString)
-import qualified Data.ByteString.Lazy as BL
 import Data.IORef (newIORef, readIORef, writeIORef)
-import Data.List (intercalate)
 
+import Data.Text (Text)
+import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
 import KayaApp
-import KayaWire (Value (..))
 
 -- Frozen — 813 bytes, byte-identical to every other guest's copy.
-docSource :: String
+docSource :: Text
 docSource =
-  intercalate
+  T.intercalate
     "\n"
     [ "line 00: 日本語 preface",
       "line 01: gamma kappa",
@@ -57,16 +58,16 @@ docSource =
       "line 39: the last line"
     ]
 
-needle :: String
+needle :: Text
 needle = "alpha"
 
 -- The binding encodes with this same encoder, so these are the exact bytes
 -- the offsets index.
-utf8 :: String -> BS.ByteString
-utf8 = BL.toStrict . toLazyByteString . stringUtf8
+utf8 :: Text -> BS.ByteString
+utf8 = TE.encodeUtf8
 
 -- The whole search: literal, forward, non-overlapping, in the byte domain.
-findAll :: String -> String -> [(Int, Int)]
+findAll :: Text -> Text -> [(Int, Int)]
 findAll haystack pattern = go 0 (utf8 haystack)
   where
     pat = utf8 pattern
@@ -84,9 +85,9 @@ main = kayaMain $ \app -> do
   docRef <- newIORef docSource
 
   buildTx app $ do
-    window 0 [WTitle "ranges"]
+    window primary [WTitle "ranges"]
     -- Bound before the widgets that close over it.
-    status <- signal (VStr "0 matches")
+    status <- signal (T.pack "0 matches")
 
     -- Every range assertion finds this control by its authored id.
     editor <-
@@ -95,9 +96,9 @@ main = kayaMain $ \app -> do
             writeIORef docRef text
             -- A declared set is bound to the text it was declared against
             -- (docs/ranges-plan.md D2).
-            submitTx app (writeSignal status (VStr "0 matches"))
+            submitTx app (writeSignal status (T.pack "0 matches"))
         )
-        [A11yId "doc", A11yLabel "Document"]
+        [A11yId ("doc" :: Text), A11yLabel ("Document" :: Text)]
     setText editor docSource
 
     root <-
@@ -116,7 +117,7 @@ main = kayaMain $ \app -> do
                       case drop 1 hits of
                         second : _ -> selectRange editor second
                         [] -> return ()
-                      writeSignal status (VStr (show (length hits) ++ " matches"))
+                      writeSignal status (T.pack (show (length hits) ++ " matches"))
                 ),
               buttonOn -- button#1
                 "reveal last"

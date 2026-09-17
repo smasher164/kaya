@@ -54,22 +54,14 @@ function onRework(): void {
   });
 }
 
-let status!: kaya.Signal<string>;
-let canExport!: kaya.Signal<boolean>;
-let details!: kaya.Signal<boolean>;
-let sort!: kaya.Signal<number>;
-let file!: kaya.MenuItem;
-let share!: kaya.MenuItem;
-let items!: kaya.Collection<kaya.Fields<typeof Task.schema>, kaya.Row<typeof Task.schema>>;
-let groups!: kaya.Collection<string, kaya.Element>;
+const { status, canExport, details, sort, file, share, items, groups } = app.window({ title: "menus" }, () => {
+  const status = kaya.signal("ready");
+  const canExport = kaya.signal(false);
+  const details = kaya.signal(false);
+  const sort = kaya.signal(0);
 
-app.window({ title: "menus" }, () => {
-  status = kaya.signal("ready");
-  canExport = kaya.signal(false);
-  details = kaya.signal(false);
-  sort = kaya.signal(0);
-
-  file = app.menu("File", { enabled: canExport }, () => {
+  let share!: kaya.MenuItem;
+  const file = app.menu("File", { enabled: canExport }, () => {
     // The vocabulary has no `save` glyph, so `done` is the spelling.
     kaya.item("Save", { symbol: kaya.Symbol.DONE, shortcut: "primary+s", onActivate: onSave });
     kaya.item("Export", { enabled: canExport, symbol: kaya.Symbol.FORWARD });
@@ -86,11 +78,12 @@ app.window({ title: "menus" }, () => {
     kaya.option("Date");
   });
 
-  groups = kaya.collection();
+  const groups = kaya.collection();
   const catalog = kaya.contextCatalog(() => {
     kaya.item("Remove", { symbol: kaya.Symbol.DELETE, onActivate: onRemove });
   });
 
+  let items!: kaya.Collection<kaya.Fields<typeof Task.schema>, kaya.Row<typeof Task.schema>>;
   kaya.column(() => {
     kaya.label({ bind: status }); // label#0
     kaya.button("enable export", { onClick: onEnableExport }); // button#0
@@ -113,6 +106,7 @@ app.window({ title: "menus" }, () => {
       });
     }
   });
+  return { status, canExport, details, sort, file, share, items, groups };
 });
 
 // Seed after mount: the stamp path attaches the shared catalog and keys.
