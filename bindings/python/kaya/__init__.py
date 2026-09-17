@@ -2,6 +2,8 @@
 tier-1 sugar (DESIGN.md, "the shape of an app").
 """
 
+from __future__ import annotations
+
 import dataclasses
 import datetime
 import enum
@@ -12,9 +14,22 @@ import sys
 import threading
 import traceback
 import types
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from typing import (IO, Any, Generic, Literal, NoReturn, TypeVar, cast,
+                    overload)
 
 from . import runtime
 from . import wire
+
+#: A collection's element type: the dataclass a record collection was
+#: declared with, or `str` for a scalar one.
+T = TypeVar("T")
+#: A signal's value.
+V = TypeVar("V")
+#: A derived value: what a `compute` answers.
+R = TypeVar("R")
+#: A prop setter's own handle, so a chain keeps the zone's type.
+H = TypeVar("H", bound="_Handle")
 
 
 class KayaError(Exception):
@@ -47,26 +62,27 @@ class KayaKeyError(KayaError, KeyError):
 # The wire-representable field types; any other field type is guest-only.
 # bool before int — bool IS an int in Python. A date and a time ride the
 # I64 tag in packed decimal (docs/datetime-plan.md D2/D10).
-_WIRE_TYPES = [(bool, wire.VALUE_BOOL), (int, wire.VALUE_I64),
+_WIRE_TYPES: list[tuple[type, int]] = [
+               (bool, wire.VALUE_BOOL), (int, wire.VALUE_I64),
                (float, wire.VALUE_F64), (str, wire.VALUE_STR),
                (bytes, wire.VALUE_BLOB), (datetime.date, wire.VALUE_I64),
                (datetime.time, wire.VALUE_I64)]
 
 
-def _wire_tag(py_type):
+def _wire_tag(py_type: object) -> int | None:
     for ty, tag in _WIRE_TYPES:
         if py_type is ty:
             return tag
     return None
 
 
-def _encode_blob_field(value):
+def _encode_blob_field(value: bytes) -> wire.BlobHandle:
     """A blob field's wire value; handles are single-submit, so every
     mutation carrying a blob field re-registers."""
     return wire.BlobHandle(runtime.register_blob(value))
 
 
-def _date_parts(what, value):
+def _date_parts(what: str, value: object) -> tuple[int, int, int]:
     """A civil date's components. `datetime.datetime` is refused though it
     IS a `datetime.date`: a picker holds no instant, and dropping the time
     silently is the zone-conversion bug genre (docs/datetime-plan.md §0)."""
@@ -79,7 +95,7 @@ def _date_parts(what, value):
     return value.year, value.month, value.day
 
 
-def _time_parts(what, value):
+def _time_parts(what: str, value: object) -> tuple[int, int]:
     """A civil time's hour and minute; seconds are not a picker value (D3)."""
     if not isinstance(value, datetime.time):
         raise KayaTypeError(
@@ -89,35 +105,37 @@ def _time_parts(what, value):
     return value.hour, value.minute
 
 
-def _encode_date_field(value):
+def _encode_date_field(value: datetime.date) -> int:
     return wire.pack_date(*_date_parts("a Date field", value))
 
 
-def _encode_time_field(value):
+def _encode_time_field(value: datetime.time) -> int:
     return wire.pack_time(*_time_parts("a Time field", value))
 
 
-def _decode_date_field(packed):
+def _decode_date_field(packed: int) -> datetime.date:
     return datetime.date(*wire.unpack_date(packed))
 
 
-def _decode_time_field(packed):
+def _decode_time_field(packed: int) -> datetime.time:
     return datetime.time(*wire.unpack_time(packed))
 
 
-def _identity(value):
+def _identity(value: Any) -> Any:
     return value
 
 
 # Per-FIELD-TYPE codecs: the tag alone cannot tell a Date field from an
 # int one (both are I64 on the wire).
-_FIELD_ENCODERS = {bytes: _encode_blob_field, datetime.date: _encode_date_field,
-                   datetime.time: _encode_time_field}
-_FIELD_DECODERS = {datetime.date: _decode_date_field,
-                   datetime.time: _decode_time_field}
+_FIELD_ENCODERS: dict[Any, Callable[[Any], Any]] = {
+    bytes: _encode_blob_field, datetime.date: _encode_date_field,
+    datetime.time: _encode_time_field}
+_FIELD_DECODERS: dict[Any, Callable[[Any], Any]] = {
+    datetime.date: _decode_date_field,
+    datetime.time: _decode_time_field}
 
 
-def _wire_scalar(value):
+def _wire_scalar(value: Any) -> Any:
     """A signal's value on the wire: a date or a time packs, everything
     else travels as itself."""
     if isinstance(value, datetime.datetime):
@@ -133,7 +151,7 @@ def _wire_scalar(value):
     return value
 
 
-def _text_value(what, text):
+def _text_value(what: str, text: object) -> str:
     """The UTF-8 wall: text properties are str, never bytes — image
     bytes have their own channel."""
     if not isinstance(text, str):
@@ -144,7 +162,7 @@ def _text_value(what, text):
     return text
 
 
-def _text_range(what, span):
+def _text_range(what: str, span: object) -> tuple[int, int]:
     """One text range, normalized to the (start, stop) pair the wire
     carries — `range(start, stop)` or a plain pair.
 
@@ -181,14 +199,17 @@ def _text_range(what, span):
             )
     return start, stop
 
-_app = None  # the process's App: one core per process, so one of these
-_tx = None  # the ambient transaction's record list, when one is open
+# `cast` rather than `App | None`: there is one App per process and every
+# call below runs inside it, so an Optional here would be 60-odd
+# unreachable None checks in the binding's own body.
+_app = cast("App", None)  # the process's App: one core per process
+_tx: "list[bytes] | None" = None  # the ambient transaction's records
 # None until the dispatch loop starts, which is why module-scope
 # declaration on the main thread still works.
-_app_thread = None
+_app_thread: "int | None" = None
 
 
-def _require_app_thread():
+def _require_app_thread() -> None:
     """The Python spelling of a rule the other bindings get from types.
 
     `_tx` is a module GLOBAL, not thread-local, so a transaction opened
@@ -202,23 +223,26 @@ def _require_app_thread():
             f"{_app_thread}. To mutate from a background thread use "
             "app.post(fn), which runs fn as a transaction over there."
         )
-_parents = []  # the container stack; None marks a template body's floor
-_menu_scopes = []  # open menu scopes: creators seat under the top
-_for_stack = []  # depth indices of enclosing Fors, for element levels
+#: the container stack; None marks a template body's floor
+_parents: "list[int | None]" = []
+#: open menu scopes: creators seat under the top
+_menu_scopes: "list[_MenuScope[Any]]" = []
+_for_stack: "list[int]" = []  # depth indices of enclosing Fors, for levels
 # Tracers whose template scope is still open; a break leaves one behind,
 # caught at transaction exit.
-_open_traces = []
-_for_collections = []  # the enclosing Fors' collections, for mirror parentage
+_open_traces: "list[_ForTrace[Any]]" = []
+_for_collections: "list[Collection[Any]]" = []  # for mirror parentage
 _tpl_depth = 0  # 0 = live zone; >0 = declaring a blueprint
 # Each canvas's declared viewbox, so a redraw in a LATER transaction does
 # not have to repeat it (docs/canvas-plan.md §2.2).
-_canvas_viewboxes = {}
-_pending_root = None  # the top-level container window() will mount
+_canvas_viewboxes: "dict[int, tuple[float, float]]" = {}
+_pending_root: "_Handle | None" = None  # the container window() will mount
 _recording = False  # inside window(): mirror reads would freeze branches
-_journal = None  # per-transaction mirror undo, run if the tx is abandoned
+#: per-transaction mirror undo, run if the tx is abandoned
+_journal: "dict[int, Callable[[], None]] | None" = None
 
 
-def _ship(records):
+def _ship(records: Sequence[bytes]) -> None:
     """Submit one transaction, the pending link-route declarations ahead
     of it, in declaration order (docs/app-links-plan.md §4; Rust's
     PENDING_ROUTES drained head-first by Tx::commit is the shape)."""
@@ -228,7 +252,7 @@ def _ship(records):
         runtime.submit(*records)
 
 
-def _records():
+def _records() -> list[bytes]:
     if _tx is None:
         raise KayaStateError(
             "kaya: no ambient transaction — declare inside `with app.window():` "
@@ -237,7 +261,7 @@ def _records():
     return _tx
 
 
-def _journal_once(obj, restore):
+def _journal_once(obj: object, restore: Callable[[], None]) -> None:
     """Record how to undo obj's mirror state, once per transaction: a
     handler that raises abandons its records and the mirrors both."""
     # Keyed by id(): signals overload __eq__ into derived signals, so an
@@ -246,7 +270,7 @@ def _journal_once(obj, restore):
         _journal[id(obj)] = restore
 
 
-def _journal_instances(coll):
+def _journal_instances(coll: Collection[Any]) -> None:
     """_journal_once for the one restore whose SNAPSHOT costs O(model).
 
     THE SNAPSHOT IS TAKEN INSIDE THE `not in` TEST, never before it:
@@ -265,7 +289,7 @@ def _journal_instances(coll):
     _journal[id(coll)] = restore
 
 
-def _guard_tracer_escape():
+def _guard_tracer_escape() -> None:
     """Element tracers are record-time blueprints; one captured into a
     handler names the template, not any stamped copy's data."""
     if not (_recording or _tpl_depth > 0):
@@ -276,7 +300,7 @@ def _guard_tracer_escape():
         )
 
 
-def _row_owner(what):
+def _row_owner(what: str) -> Collection[Any]:
     """The collection a stamped registration's Row handle reads: the
     innermost For open right now (DESIGN.md, Binding conventions)."""
     if not _for_collections:
@@ -289,12 +313,12 @@ def _row_owner(what):
     return _for_collections[-1]
 
 
-def _auto_parent(child_id):
+def _auto_parent(child_id: int) -> None:
     if _parents and _parents[-1] is not None:
         _records().append(wire.tx_add_child(_parents[-1], child_id))
 
 
-def _guard_mirror_read(what):
+def _guard_mirror_read(what: str) -> None:
     if _recording or _tpl_depth > 0:
         raise KayaStateError(
             f"kaya: {what} reads a mirror snapshot, which would freeze this "
@@ -303,7 +327,7 @@ def _guard_mirror_read(what):
         )
 
 
-def _no_truth_value(what):
+def _no_truth_value(what: str) -> NoReturn:
     """A template body runs ONCE, so a branch taken on the row's data
     freezes one row's answer into every copy.
 
@@ -320,13 +344,18 @@ def _no_truth_value(what):
     )
 
 
-class Signal:
-    def __init__(self, id, initial=None):
-        self.id = id
-        self._mirror = initial
-        self._dependents = []
+class Signal(Generic[V]):
+    """One scalar the core renders from: the app writes it, the platform
+    draws it, and there is no read back (DESIGN.md, "the shape of an
+    app"). `.eq(...)` and friends answer a DERIVED signal this binding
+    recomputes; `==` is the same call in operator spelling."""
 
-    def set(self, value):
+    def __init__(self, id: int, initial: Any = None) -> None:
+        self.id = id
+        self._mirror: Any = initial
+        self._dependents: list[_Derived[Any]] = []
+
+    def set(self, value: V) -> None:
         old = self._mirror
         _journal_once(self, lambda: setattr(self, "_mirror", old))
         _records().append(wire.tx_write_signal(self.id, _wire_scalar(value)))
@@ -337,59 +366,62 @@ class Signal:
     # No read method, deliberately: signals are a render pipe, not a
     # state bus. The mirror feeds derivations and skips no-op writes.
 
-    def _derive(self, compute):
+    def _derive(self, compute: Callable[[Any], R]) -> Signal[R]:
         derived = _Derived(_app._next("signal"), self, compute)
         _app._signals[derived.id] = derived
         _records().append(wire.tx_create_signal(derived.id, derived._mirror))
         self._dependents.append(derived)
         return derived
 
-    def eq(self, other):
+    def eq(self, other: object) -> Signal[bool]:
         """A derived Bool signal: this value == other."""
         return self._derive(lambda v: v == other)
 
-    def ne(self, other):
+    def ne(self, other: object) -> Signal[bool]:
         return self._derive(lambda v: v != other)
 
-    def lt(self, other):
+    def lt(self, other: Any) -> Signal[bool]:
         return self._derive(lambda v: v < other)
 
-    def gt(self, other):
+    def gt(self, other: Any) -> Signal[bool]:
         return self._derive(lambda v: v > other)
 
-    def le(self, other):
+    def le(self, other: Any) -> Signal[bool]:
         return self._derive(lambda v: v <= other)
 
-    def ge(self, other):
+    def ge(self, other: Any) -> Signal[bool]:
         return self._derive(lambda v: v >= other)
 
-    def fmt(self, template):
+    def fmt(self, template: str) -> Signal[str]:
         """A derived Str signal: template.format(value)."""
         return self._derive(lambda v: template.format(v))
 
     # `count == 0` is `count.eq(0)`, so == no longer answers identity —
     # which is why signals keep identity hashing.
-    __hash__ = object.__hash__
+    __hash__: Callable[[object], int] = object.__hash__
 
-    def __eq__(self, other):
+    # `-> Any`, not `-> Signal[bool]`: object.__eq__ answers bool and an
+    # override may not widen it. `.eq(...)` is the spelling that keeps the
+    # type; `==` is the sugar, and it is where Python's own surface runs out.
+    def __eq__(self, other: object) -> Any:
         return self.eq(other)
 
-    def __ne__(self, other):
+    def __ne__(self, other: object) -> Any:
         return self.ne(other)
 
-    def __lt__(self, other):
+    def __lt__(self, other: Any) -> Signal[bool]:
         return self.lt(other)
 
-    def __gt__(self, other):
+    def __gt__(self, other: Any) -> Signal[bool]:
         return self.gt(other)
 
-    def __le__(self, other):
+    def __le__(self, other: Any) -> Signal[bool]:
         return self.le(other)
 
-    def __ge__(self, other):
+    def __ge__(self, other: Any) -> Signal[bool]:
         return self.ge(other)
 
-    def __bool__(self):
+    def __bool__(self) -> NoReturn:
         # Python cannot overload statement branching, so an `if` on a
         # signal cannot trace to a template.
         raise KayaStateError(
@@ -400,19 +432,20 @@ class Signal:
         )
 
 
-class _Derived(Signal):
+class _Derived(Signal[V]):
     """Binding-maintained: recomputed when the source is written, the
     write batched into the same transaction."""
 
-    def __init__(self, id, source, compute):
+    def __init__(self, id: int, source: Signal[Any],
+                 compute: Callable[[Any], V]) -> None:
         super().__init__(id, compute(source._mirror))
-        self._compute = compute
+        self._compute: Callable[[Any], Any] = compute
         self._source = source
 
-    def set(self, value):
+    def set(self, value: V) -> NoReturn:
         raise KayaStateError("kaya: derived signals are written by their source")
 
-    def _recompute(self):
+    def _recompute(self) -> None:
         new = self._compute(self._source._mirror)
         if new != self._mirror:
             old = self._mirror
@@ -423,20 +456,21 @@ class _Derived(Signal):
                 derived._recompute()
 
 
-class _CollectionDerived(Signal):
+class _CollectionDerived(Signal[V]):
     """Binding-maintained from a collection: recomputed after every
     mutation of the live-zone instance, batched into the same
     transaction."""
 
-    def __init__(self, id, coll, compute):
+    def __init__(self, id: int, coll: _BoundCollection[Any],
+                 compute: Callable[[Any], V]) -> None:
         super().__init__(id, compute(dict(coll._mirror())))
         self._coll = coll
-        self._compute = compute
+        self._compute: Callable[[Any], Any] = compute
 
-    def set(self, value):
+    def set(self, value: V) -> NoReturn:
         raise KayaStateError("kaya: derived signals are written by their source")
 
-    def _recompute(self):
+    def _recompute(self) -> None:
         new = self._compute(dict(self._coll._mirror()))
         if new != self._mirror:
             old = self._mirror
@@ -447,7 +481,9 @@ class _CollectionDerived(Signal):
                 derived._recompute()
 
 
-def _prop_source(what, handle, value, const, signal, element):
+def _prop_source(what: str, handle: _Handle, value: Any,
+                 const: Callable[..., bytes], signal: Callable[..., bytes],
+                 element: Callable[..., bytes]) -> bytes:
     """One prop write from whichever source the guest handed over: a
     constant, a Signal, or the enclosing For's element.
 
@@ -480,10 +516,10 @@ class _Handle:
     call: the enclosing For's element exists only inside a template.
     """
 
-    def __init__(self, id):
+    def __init__(self, id: int) -> None:
         self.id = id
 
-    def a11y_id(self, ident):
+    def a11y_id(self: H, ident: TextSource) -> H:
         """Set this widget's accessibility IDENTIFIER: a stable authored
         key automation addresses it by, and which is NEVER spoken.
 
@@ -495,7 +531,7 @@ class _Handle:
             wire.tx_bind_a11y_id, wire.tx_bind_a11y_id_element))
         return self
 
-    def a11y_hint(self, hint):
+    def a11y_hint(self: H, hint: TextSource) -> H:
         """Set what ACTIVATING this widget does. Write a VERB PHRASE:
         VoiceOver speaks it as written, TalkBack prefixes "double tap
         to". Activation kinds only. Returns the handle."""
@@ -504,7 +540,7 @@ class _Handle:
             wire.tx_bind_a11y_hint, wire.tx_bind_a11y_hint_element))
         return self
 
-    def a11y_label(self, label):
+    def a11y_label(self: H, label: TextSource) -> H:
         """Set this widget's accessibility LABEL: what an assistive
         client speaks for it. Separate from `a11y_id` — an automation key
         is not a spoken name. Setting it OVERRIDES what the platform
@@ -514,7 +550,7 @@ class _Handle:
             wire.tx_bind_a11y_label, wire.tx_bind_a11y_label_element))
         return self
 
-    def help(self, text):
+    def help(self: H, text: TextSource) -> H:
         """Set this widget's HELP TEXT: one short sentence saying what it
         is or does. The platform decides the surface — a tooltip on the
         desktops, nothing visible on the iPhone — and hands it to the
@@ -526,7 +562,7 @@ class _Handle:
             wire.tx_bind_help, wire.tx_bind_help_element))
         return self
 
-    def placeholder(self, text):
+    def placeholder(self: H, text: TextSource) -> H:
         """Set the PROMPT this field shows while its text is empty
         (docs/search-plan.md S3): the platform's own placeholder, never
         part of the text and never emitted. Entry, textarea and search
@@ -536,7 +572,7 @@ class _Handle:
             wire.tx_bind_placeholder, wire.tx_bind_placeholder_element))
         return self
 
-    def href(self, url):
+    def href(self: H, url: TextSource) -> H:
         """Set the DESTINATION a `role="link"` label opens
         (docs/tasks-s2-plan.md T3): the platform's own opener takes it and
         nothing is emitted. Returns the handle."""
@@ -545,7 +581,7 @@ class _Handle:
             wire.tx_bind_href, wire.tx_bind_href_element))
         return self
 
-    def fill(self, on):
+    def fill(self: H, on: bool) -> H:
         """Whether this widget spans its container's cross axis — a
         column's width, a row's height — whatever the container's
         `align` (docs/layout-knobs-plan.md §1). Unset, the kind's own
@@ -553,7 +589,7 @@ class _Handle:
         _records().append(wire.tx_set_fill(self.id, bool(on)))
         return self
 
-    def rich(self, on=True):
+    def rich(self: H, on: bool = True) -> H:
         """This textarea carries ATTRIBUTE RUNS (docs/rich-text-plan.md
         R1): `set_document`, `apply_edit`, `format`, and the `on_edit`
         and `on_format` deltas. Off, none of that exists and the widget
@@ -561,7 +597,7 @@ class _Handle:
         _records().append(wire.tx_set_rich(self.id, bool(on)))
         return self
 
-    def own_undo(self, on=True):
+    def own_undo(self: H, on: bool = True) -> H:
         """The app owns this rich textarea's undo (docs/rich-text-plan.md
         R6, §14): the native stack is off, and Edit>Undo/Redo reach the
         app through the role item's own `on_activate` while `can_undo` /
@@ -569,7 +605,7 @@ class _Handle:
         _records().append(wire.tx_set_own_undo(self.id, bool(on)))
         return self
 
-    def columns_auto(self, min_width):
+    def columns_auto(self: H, min_width: float) -> H:
         """THE GRID THAT FITS (docs/layout-knobs-plan.md §3): as many
         columns as fit this grid's width at `min_width` DIP each, sharing
         the extra. An explicit `columns_when` still wins while its class
@@ -578,7 +614,7 @@ class _Handle:
         _records().append(wire.tx_set_min_column_width(self.id, float(min_width)))
         return self
 
-    def wrap(self, on):
+    def wrap(self: H, on: bool) -> H:
         """A ROW THAT FLOWS (docs/layout-knobs-plan.md §2): children keep
         their natural size and move onto the next line when the row runs
         out of width, leading-aligned, the row's `spacing` on both axes.
@@ -586,7 +622,7 @@ class _Handle:
         _records().append(wire.tx_set_wrap(self.id, bool(on)))
         return self
 
-    def accepts(self, *kinds):
+    def accepts(self: H, *kinds: str) -> H:
         """Declare what this widget takes from a paste — the closed kinds
         by name plus any custom format ids.
 
@@ -610,7 +646,7 @@ class _Handle:
         _records().append(wire.tx_set_accepts(self.id, _accept_list(kinds)))
         return self
 
-    def role(self, role):
+    def role(self: H, role: Role | str) -> H:
         """Declare what this widget MEANS — never how it looks
         (docs/styling-plan.md D4). Plain names accepted too.
 
@@ -623,7 +659,7 @@ class _Handle:
         _records().append(wire.tx_set_role(self.id, _role_value(role)))
         return self
 
-    def on_paste(self, fn):
+    def on_paste(self: H, fn: Handler) -> H:
         """Take pasted content here: fn(clip), or fn(row, clip) for a
         stamped copy — the copy's `Row` first, as on_change delivers.
 
@@ -633,8 +669,12 @@ class _Handle:
         _app._register(self, wire.OCC_PASTED, fn)
         return self
 
-    def draggable(self, *, text=None, html=None, image=None, files=(),
-                  custom=None, operations=None):
+    def draggable(self: H, *, text: TextSource | None = None,
+                  html: TextSource | None = None,
+                  image: bytes | Source | None = None,
+                  files: Sequence[PickedFile] = (),
+                  custom: Mapping[str, bytes] | None = None,
+                  operations: Sequence[str] | None = None) -> H:
         """DECLARE what this widget hands over when dragged: a clip in
         the shapes `copy` takes, plus the operations it allows.
 
@@ -648,8 +688,12 @@ class _Handle:
         return self._draggable((), text, html, image, files, custom,
                                operations)
 
-    def draggable_at(self, *keys, text=None, html=None, image=None,
-                     files=(), custom=None, operations=None):
+    def draggable_at(self: H, *keys: Key, text: TextSource | None = None,
+                     html: TextSource | None = None,
+                     image: bytes | Source | None = None,
+                     files: Sequence[PickedFile] = (),
+                     custom: Mapping[str, bytes] | None = None,
+                     operations: Sequence[str] | None = None) -> H:
         """ONE stamped copy's drag declaration (docs/dnd-plan.md §4): the
         copy's keys, outermost first, then the payload `draggable` takes.
 
@@ -660,15 +704,18 @@ class _Handle:
         return self._draggable(keys, text, html, image, files, custom,
                                operations)
 
-    def _draggable(self, keys, text, html, image, files, custom,
-                   operations):
-        reps = []
+    def _draggable(self: H, keys: Sequence[Key], text: TextSource | None,
+                   html: TextSource | None, image: bytes | Source | None,
+                   files: Sequence[PickedFile],
+                   custom: Mapping[str, bytes] | None,
+                   operations: Sequence[str] | None) -> H:
+        reps: list[Any] = []
         bound = 0
         present = 0
         custom = dict(custom or {})
         files = list(files)
 
-        def slot(what, value):
+        def slot(what: str, value: Any) -> bool:
             """Append one representation, bound or constant, and say
             which it was — the slot IS its index in `reps`."""
             nonlocal bound
@@ -689,7 +736,8 @@ class _Handle:
         if image is not None:
             present |= wire.CLIP_IMAGE
             if not slot("image", image):
-                reps.append(wire.BlobHandle(runtime.register_blob(image)))
+                reps.append(wire.BlobHandle(
+                    runtime.register_blob(cast("bytes", image))))
         if html is not None:
             present |= wire.CLIP_HTML
             if not slot("html", html):
@@ -707,7 +755,7 @@ class _Handle:
             bound, [*keys, *reps]))
         return self
 
-    def drop_target(self, *operations):
+    def drop_target(self: H, *operations: str) -> H:
         """DECLARE that this widget receives drops, performing these
         operations; naming NONE withdraws the declaration.
 
@@ -720,17 +768,17 @@ class _Handle:
             wire.tx_set_drop_target(self.id, _operations(operations), 0, []))
         return self
 
-    def drop_target_at(self, *keys, operations=()):
+    def drop_target_at(self: H, *keys: Key, operations: Sequence[str] = ()) -> H:
         """ONE stamped copy's drop declaration, `draggable_at`'s twin;
         the copy's accept list is the template's `accepts`. Returns the
         handle."""
         _template_zone_only(self, "drop_target_at")
-        keys = list(keys)
+        path = list(keys)
         _records().append(wire.tx_set_drop_target(
-            self.id, _operations(operations), len(keys), keys))
+            self.id, _operations(operations), len(path), path))
         return self
 
-    def on_drop(self, fn):
+    def on_drop(self: H, fn: Handler) -> H:
         """Take dropped content here: fn(dropped), with the `Dropped` of
         docs/dnd-plan.md D1, or fn(row, dropped) for a stamped copy —
         the copy's `Row` first, as on_paste delivers. ONLY FIRES FOR A
@@ -739,7 +787,7 @@ class _Handle:
         _app._register(self, wire.OCC_DROPPED, fn)
         return self
 
-    def on_drag_ended(self, fn):
+    def on_drag_ended(self: H, fn: Handler) -> H:
         """A drag that began here has ended: fn(operation), OP_COPY,
         OP_MOVE or None for cancelled or refused — fn(row, operation)
         for a stamped copy, which is how a reorderable row's own end
@@ -747,7 +795,7 @@ class _Handle:
         _app._register(self, wire.OCC_DRAG_ENDED, fn)
         return self
 
-    def draw(self, *keys):
+    def draw(self, *keys: Key) -> _DrawScope:
         """DECLARE the whole drawing on a canvas, replacing whatever was
         declared before: `with chart.draw() as d: ...`.
 
@@ -764,17 +812,17 @@ class Widget(_Handle):
     # template is declared, never mutated, and its declarative spelling
     # is the constructor kwarg, which serves both zones.
 
-    def clear(self):
+    def clear(self) -> None:
         """Drop an entry's content now (the field stays authoritative)."""
         _records().append(wire.tx_widget_command(self.id, wire.COMMAND_CLEAR))
 
-    def focus(self):
+    def focus(self) -> None:
         """Give this widget the keyboard focus."""
         _records().append(wire.tx_widget_command(self.id, wire.COMMAND_FOCUS))
 
     # The text-range surface (docs/ranges-plan.md D1).
 
-    def set_text(self, text):
+    def set_text(self, text: str) -> Widget:
         """Put text into a text widget programmatically — the "open a
         document into the editor" write.
 
@@ -785,7 +833,7 @@ class Widget(_Handle):
         _records().append(wire.tx_set_text(self.id, _text_value("set_text", text)))
         return self
 
-    def highlight_ranges(self, ranges):
+    def highlight_ranges(self, ranges: Sequence[Span]) -> None:
         """DECLARE this textarea's decorated ranges, replacing whatever
         was declared before; an empty set is the clear.
 
@@ -801,7 +849,7 @@ class Widget(_Handle):
             wire.tx_highlight_ranges(self.id, len(flat) // 2, flat)
         )
 
-    def select_range(self, span):
+    def select_range(self, span: Span) -> None:
         """Put this textarea's selection at one range (an empty range is
         a caret). Same offsets and validation as `highlight_ranges`.
 
@@ -812,7 +860,7 @@ class Widget(_Handle):
         start, stop = _text_range("select_range", span)
         _records().append(wire.tx_select_range(self.id, start, stop))
 
-    def reveal_range(self, span):
+    def reveal_range(self, span: Span) -> None:
         """Scroll this textarea so a range is inside the viewport. A pure
         effect: no state moves, the selection is untouched, and undo does
         not put the scroll position back."""
@@ -823,7 +871,7 @@ class Widget(_Handle):
     # declares the widget and is on _Handle, since a template declares it
     # too.
 
-    def set_document(self, document):
+    def set_document(self, document: Document) -> Widget:
         """Replace this `rich` textarea's WHOLE document — text and runs
         in one write.
 
@@ -837,7 +885,7 @@ class Widget(_Handle):
             document.text))
         return self
 
-    def apply_edit(self, edit):
+    def apply_edit(self, edit: Edit) -> Widget:
         """One edit into this `rich` textarea — the app's own or a
         collaborator's: replace `start..end` with the edit's text and its
         runs, the selection kept by R5's rule.
@@ -853,7 +901,7 @@ class Widget(_Handle):
             _flat_runs(edit.runs), edit.inserted))
         return self
 
-    def format(self, name, value=True):
+    def format(self, name: str, value: bool | str = True) -> Widget:
         """Format this `rich` textarea's CURRENT SELECTION through the
         widget's own act — what a toolbar button sends.
 
@@ -868,7 +916,7 @@ class Widget(_Handle):
             [str(name), _text_value("format value", value)]))
         return self
 
-    def unformat(self, name):
+    def unformat(self, name: str) -> Widget:
         """Take an attribute off this textarea's current selection.
         Returns the widget."""
         _records().append(wire.tx_format_text(self.id, 1, 0, 0, 0,
@@ -879,34 +927,35 @@ class Widget(_Handle):
     # its name, over this widget's own selection; removal stays
     # `unformat` and the block kinds stay `set_block`.
 
-    def bold(self):
+    def bold(self) -> Widget:
         """Bold this textarea's current selection — `format("bold")` under
         its own name, what a toolbar button sends. Returns the widget."""
         return self.format("bold")
 
-    def italic(self):
+    def italic(self) -> Widget:
         """Italicize the current selection. Returns the widget."""
         return self.format("italic")
 
-    def underline(self):
+    def underline(self) -> Widget:
         """Underline the current selection. Returns the widget."""
         return self.format("underline")
 
-    def strike(self):
+    def strike(self) -> Widget:
         """Strike the current selection through. Returns the widget."""
         return self.format("strike")
 
-    def code(self):
+    def code(self) -> Widget:
         """Make the current selection monospaced code. Returns the
         widget."""
         return self.format("code")
 
-    def link(self, url):
+    def link(self, url: str) -> Widget:
         """Make the current selection a link to `url`. Returns the
         widget."""
         return self.format("link", url)
 
-    def format_range(self, span, name, value=True):
+    def format_range(self, span: Span, name: str,
+                     value: bool | str = True) -> Widget:
         """One attribute over a BYTE RANGE of this document, the selection
         left exactly where the user put it (docs/rich-text-plan.md §17).
 
@@ -928,7 +977,7 @@ class Widget(_Handle):
             [name, "" if removed else value]))
         return self
 
-    def unformat_range(self, span, name):
+    def unformat_range(self, span: Span, name: str) -> Widget:
         """`format_range`'s removal: take an attribute off a byte range,
         the selection untouched. Returns the widget."""
         start, stop = _text_range("unformat_range", span)
@@ -939,54 +988,54 @@ class Widget(_Handle):
                                               [name, ""]))
         return self
 
-    def set_block(self, kind):
+    def set_block(self, kind: str) -> Widget:
         """Make the selection's whole paragraphs `kind` (kaya.Block;
         plain names accepted). `body` clears. Returns the widget."""
         return self.format("block", _block_value(kind))
 
-    def can_undo(self, on):
+    def can_undo(self, on: bool) -> Widget:
         """Whether this `own_undo` textarea's app has something to undo —
         what Edit>Undo's enablement reads while it is focused
         (docs/rich-text-plan.md R6, §14). Returns the widget."""
         _records().append(wire.tx_set_can_undo(self.id, bool(on)))
         return self
 
-    def can_redo(self, on):
+    def can_redo(self, on: bool) -> Widget:
         """Redo's twin. Returns the widget."""
         _records().append(wire.tx_set_can_redo(self.id, bool(on)))
         return self
 
-    def document(self):
+    def document(self) -> Document:
         """This `rich` textarea's document, as this binding has folded it
         from the deltas (docs/rich-text-plan.md R1) — a copy, so writing
         to it moves nothing. Empty until the first write or edit."""
         return _app._document(self.id)
 
-    def grow(self, weight):
+    def grow(self, weight: float) -> None:
         """Set this widget's flex weight within its row/column: 0 is
         natural size, positive weights divide the leftover main-axis
         space."""
         _records().append(wire.tx_set_grow(self.id, float(weight)))
 
-    def align(self, mode):
+    def align(self, mode: Align | str) -> None:
         """Set this container's cross-axis child placement (see
         kaya.Align; strings accepted). Containers only — the scene
         rejects it anywhere else; baseline is rows-only."""
         _records().append(wire.tx_set_align(self.id, _align_value(mode)))
 
-    def axis(self, mode):
+    def axis(self, mode: Axis | str) -> None:
         """Set this container's arrangement direction (see kaya.Axis;
         strings accepted) — the user-driven orientation toggle
         (docs/adaptive-layout-plan.md D2). Row/column only. The widget
         stays what its constructor made it."""
         _records().append(wire.tx_set_axis(self.id, _axis_value(mode)))
 
-    def spacing(self, gap):
+    def spacing(self, gap: float) -> None:
         """Set this container's inter-child gap (main axis, DIP; the
         normalized default is 8). Containers only."""
         _records().append(wire.tx_set_spacing(self.id, float(gap)))
 
-    def inset(self, pad):
+    def inset(self, pad: float) -> None:
         """Set this container's own padding: DIP between its bounds and
         its children, uniform on all four sides. Containers only, and a
         negative one is refused.
@@ -996,10 +1045,25 @@ class Widget(_Handle):
         once and never mutated (tools/checks/py-node-props.py)."""
         _records().append(wire.tx_set_inset(self.id, float(pad)))
 
-    def context_menu(self):
+    def context_menu(self,
+                     catalog: ContextCatalog | None = None) -> _MenuScope[None]:
         """The live-widget context anchor: the command vocabulary scoped
         to a NOUN. No shortcuts here — a shortcut needs a window catalog
-        as its native dispatch home."""
+        as its native dispatch home.
+
+        `catalog` is the TEMPLATE NODE's spelling and is refused here: one
+        constructor serves both zones in this binding, so the two anchors
+        share a signature and the zone is what tells them apart
+        (tools/py-typecheck.py; bindings/python/kaya_app_checks.py holds
+        the refusal)."""
+        if catalog is not None:
+            raise KayaStateError(
+                "kaya: a live widget's context anchor takes no catalog — "
+                "the catalog is the TEMPLATE node's spelling "
+                "(node.context_menu(catalog)), where the live-built items "
+                "are shared by every stamped copy; live, this with-block "
+                "IS the anchor"
+            )
         return _MenuScope(("widget", self.id), shortcut_ok=False)
 
 
@@ -1009,7 +1073,7 @@ class Node(_Handle):
     ITS OWN CLASS, NOT AN ALIAS: `App._register` reads the handle's type
     to decide which handler table a callback lands in."""
 
-    def context_menu(self, catalog):
+    def context_menu(self, catalog: ContextCatalog) -> None:
         """Attach a live-zone-built context catalog to this template
         node: every stamped copy shows the same catalog, and each
         activation carries that copy's key path. An item takes exactly
@@ -1026,21 +1090,25 @@ class Node(_Handle):
             _records().append(wire.tx_context_attach_node(self.id, root))
 
 
-class Element:
+class Element(Generic[T]):
     """The element of an enclosing For: what a stamped copy's bindings
-    read. For a record collection, `element.title` projects one field."""
+    read. For a record collection, `element.title` projects one field.
 
-    def __init__(self, for_index, coll):
+    A guest never NAMES this type: `for todo in todos:` hands out the
+    RECORD (DESIGN.md, Binding conventions), so `todo.title` reads as the
+    field's own type and every prop takes that type beside a FieldRef."""
+
+    def __init__(self, for_index: int, coll: Collection[Any]) -> None:
         self._for_index = for_index
         self._coll = coll
 
-    def _level(self):
+    def _level(self) -> int:
         return len(_for_stack) - 1 - self._for_index
 
-    def __bool__(self):
+    def __bool__(self) -> NoReturn:
         _no_truth_value("an element")
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> FieldRef[Any]:
         if name.startswith("_"):
             raise AttributeError(name)
         _guard_tracer_escape()
@@ -1057,11 +1125,11 @@ class _Cases:
     el:` block per constructor, in any order. The scene holds the arms to
     TOTALITY at declaration."""
 
-    def __init__(self, for_index, coll):
+    def __init__(self, for_index: int, coll: Collection[Any]) -> None:
         self._for_index = for_index
         self._coll = coll
 
-    def case(self, cls):
+    def case(self, cls: type[R]) -> _CaseScope[R]:
         for variant, spec in enumerate(self._coll._variants):
             if spec.cls is cls:
                 return _CaseScope(self._for_index, self._coll, variant)
@@ -1070,17 +1138,21 @@ class _Cases:
         )
 
 
-class _CaseScope:
-    def __init__(self, for_index, coll, variant):
+class _CaseScope(Generic[T]):
+    def __init__(self, for_index: int, coll: Collection[Any],
+                 variant: int) -> None:
         self._for_index = for_index
         self._coll = coll
         self._variant = variant
 
-    def __enter__(self):
+    def __enter__(self) -> T:
         _records().append(wire.tx_variant_case(self._variant))
-        return _CaseElement(self._for_index, self._coll, self._variant)
+        # The refined proxy, typed as the CONSTRUCTOR it refines — Element's
+        # own ORM convention, one arm down.
+        return cast("T", _CaseElement(self._for_index, self._coll,
+                                      self._variant))
 
-    def __exit__(self, exc_type, exc, tb):
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> Literal[False]:
         return False
 
 
@@ -1088,18 +1160,19 @@ class _CaseElement:
     """The element proxy refined to one constructor: field projections
     resolve against that variant's schema."""
 
-    def __init__(self, for_index, coll, variant):
+    def __init__(self, for_index: int, coll: Collection[Any],
+                 variant: int) -> None:
         self._for_index = for_index
         self._coll = coll
         self._variant = variant
 
-    def _level(self):
+    def _level(self) -> int:
         return len(_for_stack) - 1 - self._for_index
 
-    def __bool__(self):
+    def __bool__(self) -> NoReturn:
         _no_truth_value("an element")
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> FieldRef[Any]:
         if name.startswith("_"):
             raise AttributeError(name)
         _guard_tracer_escape()
@@ -1113,37 +1186,59 @@ class _CaseElement:
         return FieldRef(self, index, spec.types[index])
 
 
-class FieldRef:
+class FieldRef(Generic[T]):
     """One field of an element: index plus level, ready to bind. `_type` is
     the schema's python type, which is what tells a Date field from the
     int it shares a wire tag with."""
 
-    def __init__(self, element, index, py_type=None):
+    def __init__(self, element: Element[Any] | _CaseElement, index: int,
+                 py_type: Any = None) -> None:
         self._element = element
         self._index = index
         self._type = py_type
 
-    def _level(self):
+    def _level(self) -> int:
         return self._element._level()
 
-    def __bool__(self):
+    def __bool__(self) -> NoReturn:
         _no_truth_value("an element's field")
 
 
-class _BoundCollection:
+#: A collection key: the wire's scalar, as a guest spells it.
+Key = int | str | float
+
+#: Where a prop's value comes from other than a constant: a signal, the
+#: enclosing For's element, or one of its fields. A FIELD READS AS ITS OWN
+#: TYPE — `for todo in todos:` hands out the record (DESIGN.md, Binding
+#: conventions) — so every prop below takes the field's value type as well.
+Source = Signal[Any] | FieldRef[Any] | Element[Any]
+TextSource = str | Source
+FlagSource = bool | Source
+NumberSource = float | Source
+
+#: One text range, in UTF-8 BYTE offsets: `range(start, stop)` or the pair.
+Span = range | tuple[int, int]
+
+#: A handler registered on a widget OR on a template node: a stamped copy's
+#: `Row` arrives FIRST (DESIGN.md, Binding conventions), so the arity is the
+#: ZONE's and one spelling spans both.
+Handler = Callable[..., object]
+
+
+class _BoundCollection(Generic[T]):
     """One instance of a collection: the table inside the copy selected
     by `path` (the empty path for a live-zone collection)."""
 
-    def __init__(self, owner, path):
+    def __init__(self, owner: Collection[T], path: list[Key]) -> None:
         self._owner = owner
         self._path = path
 
-    def _mirror(self):
+    def _mirror(self) -> dict[Key, T]:
         owner = self._owner
         _journal_instances(owner)
         return owner._instances.setdefault(tuple(self._path), {})
 
-    def _encode(self, value):
+    def _encode(self, value: T) -> tuple[int, list[Any]]:
         """The entry's constructor index and wire fields, in that
         variant's schema order; only wire fields travel."""
         variant, spec = self._owner._variant_for(value)
@@ -1151,7 +1246,7 @@ class _BoundCollection:
             return variant, [value]
         return variant, [e(g(value)) for g, e in zip(spec.getters, spec.encoders)]
 
-    def derive(self, compute):
+    def derive(self, compute: Callable[[dict[Key, T]], R]) -> Signal[R]:
         """A signal the binding recomputes from this collection's entries
         after every mutation, batched into the same transaction."""
         if self._path:
@@ -1167,14 +1262,14 @@ class _BoundCollection:
         )
         return derived
 
-    def _recompute_derived(self):
+    def _recompute_derived(self) -> None:
         # Deriveds hang off root handles, so nested-instance mutations
         # cannot change their input.
         if not self._path:
             for derived in self._owner._derived:
                 derived._recompute()
 
-    def set_columns(self, *titles, sort=None):
+    def set_columns(self, *titles: str, sort: Sort | None = None) -> None:
         """Re-declare this collection instance's header bar after sorting."""
         handle = getattr(self._owner, "_for_handle", None)
         if handle is None:
@@ -1190,7 +1285,7 @@ class _BoundCollection:
             )
         )
 
-    def _absorb_key(self, key):
+    def _absorb_key(self, key: Key) -> None:
         """An explicit key, shown to the minter on its way into the
         table: a numeric key at or above the counter carries it up.
 
@@ -1203,7 +1298,7 @@ class _BoundCollection:
         if key > self._owner._fresh.get(path, 0):
             self._owner._fresh[path] = key
 
-    def insert(self, key, value):
+    def insert(self, key: Key, value: T) -> None:
         variant, fields = self._encode(value)
         # ABSORPTION, on the one path every explicit key travels, so
         # hand-chosen and minted keys share one space in either order.
@@ -1215,7 +1310,7 @@ class _BoundCollection:
         self._mirror()[key] = value
         self._recompute_derived()
 
-    def insert_fresh(self, value):
+    def insert_fresh(self, value: T) -> int:
         """Insert a record under a key the binding authors, and hand the
         key back — `key = todos.insert_fresh(Todo(title=draft))`.
 
@@ -1231,7 +1326,7 @@ class _BoundCollection:
         self.insert(key, value)
         return key
 
-    def update(self, key, value):
+    def update(self, key: Key, value: T) -> None:
         variant, fields = self._encode(value)
         _records().append(
             wire.tx_collection_update(self._owner._id, self._path, key,
@@ -1240,7 +1335,7 @@ class _BoundCollection:
         self._mirror()[key] = value
         self._recompute_derived()
 
-    def patch(self, key, **fields):
+    def patch(self, key: Key, **fields: Any) -> None:
         """Field-level deltas: `todos.patch(k, done=True)` sends one
         update_field per kwarg and mutates the model instance in place.
         On a sum the entry's CURRENT CONSTRUCTOR is the witness — a kwarg
@@ -1264,24 +1359,24 @@ class _BoundCollection:
             setattr(entry, name, value)
         self._recompute_derived()
 
-    def move_before(self, key, anchor):
+    def move_before(self, key: Key, anchor: Key) -> None:
         """Reposition an entry before another's key. Keys, never indices;
         a missing key or anchor raises at the call site, and moving an
         entry before itself is a no-op."""
         self._move(key, [anchor])
 
-    def move_to_end(self, key):
+    def move_to_end(self, key: Key) -> None:
         """Reposition an entry at the end of its collection."""
         self._move(key, [])
 
-    def move_to_front(self, key):
+    def move_to_front(self, key: Key) -> None:
         """Reposition an entry at the front."""
         keys = list(self._mirror())
         if not keys:
             raise KayaKeyError(f"kaya: move of missing key {key!r}")
         self._move(key, [keys[0]])
 
-    def move_after(self, key, anchor):
+    def move_after(self, key: Key, anchor: Key) -> None:
         """Reposition an entry directly after another's."""
         keys = list(self._mirror())
         if key not in keys:
@@ -1296,7 +1391,7 @@ class _BoundCollection:
             return  # already directly after the anchor
         self._move(key, [] if succ is None else [succ])
 
-    def _move(self, key, before):
+    def _move(self, key: Key, before: list[Key]) -> None:
         mirror = self._mirror()
         # The same checks the scene makes, made where the guest can see
         # the stack.
@@ -1325,7 +1420,7 @@ class _BoundCollection:
             mirror[key] = value
         self._recompute_derived()
 
-    def remove(self, key):
+    def remove(self, key: Key) -> None:
         _records().append(wire.tx_collection_remove(self._owner._id, self._path, key))
         self._mirror().pop(key, None)
         self._recompute_derived()
@@ -1335,63 +1430,69 @@ class _BoundCollection:
         for child in self._owner._children:
             child._purge(prefix)
 
-    def change(self):
+    def change(self) -> _Draft[T]:
         """A draft scope for bulk mutation: `d[key] = value` inserts or
         updates, `del d[key]` removes, reads see the draft's own writes.
         THE SCOPE IS SYNTAX, NOT A BARRIER."""
         return _Draft(self)
 
-    def get(self, key, default=None):
+    @overload
+    def get(self, key: Key) -> T | None: ...
+
+    @overload
+    def get(self, key: Key, default: R) -> T | R: ...
+
+    def get(self, key: Key, default: Any = None) -> Any:
         """The entry's current value — the model's copy. Template
         position raises."""
         _guard_mirror_read("get()")
         return self._mirror().get(key, default)
 
-    def items(self):
+    def items(self) -> list[tuple[Key, T]]:
         """The model: what this guest wrote, in insertion order.
         Template position raises."""
         _guard_mirror_read("items()")
         return list(self._mirror().items())
 
-    def keys(self):
+    def keys(self) -> list[Key]:
         _guard_mirror_read("keys()")
         return list(self._mirror().keys())
 
-    def __len__(self):
+    def __len__(self) -> int:
         _guard_mirror_read("len()")
         return len(self._mirror())
 
-    def __contains__(self, key):
+    def __contains__(self, key: object) -> bool:
         _guard_mirror_read("membership")
         return key in self._mirror()
 
 
-class _Draft:
+class _Draft(Generic[T]):
     """Records natural mutations as patches; see change()."""
 
-    def __init__(self, bound):
+    def __init__(self, bound: _BoundCollection[T]) -> None:
         self._bound = bound
 
-    def __enter__(self):
+    def __enter__(self) -> _Draft[T]:
         return self
 
-    def __exit__(self, exc_type, exc, tb):
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> Literal[False]:
         return False
 
-    def __setitem__(self, key, value):
+    def __setitem__(self, key: Key, value: T) -> None:
         if key in self._bound._mirror():
             self._bound.update(key, value)
         else:
             self._bound.insert(key, value)
 
-    def __delitem__(self, key):
+    def __delitem__(self, key: Key) -> None:
         self._bound.remove(key)
 
-    def __getitem__(self, key):
+    def __getitem__(self, key: Key) -> T:
         _guard_mirror_read("draft reads")
         return self._bound._mirror()[key]
 
-    def __contains__(self, key):
+    def __contains__(self, key: object) -> bool:
         _guard_mirror_read("draft membership")
         return key in self._bound._mirror()
 
@@ -1401,24 +1502,27 @@ class _Variant:
     fields in declaration order, and precompiled accessors. cls None is
     the scalar."""
 
-    def __init__(self, cls):
+    def __init__(self, cls: type | None) -> None:
         self.cls = cls
+        # `cls`, `fields` and `getters` are None TOGETHER and are the
+        # scalar test every reader below makes; the codec lists are simply
+        # empty there, so no reader has to prove they are present.
+        self.fields: dict[str, int] | None = None
+        self.schema: list[int] = [wire.VALUE_STR]
+        # Whatever the dataclass field's annotation evaluated to: a type
+        # here, a string under a guest's own `from __future__ import
+        # annotations` — `_wire_tag` compares it by identity either way.
+        self.types: list[Any] = []
+        self.getters: list[Callable[[Any], Any]] | None = None
+        # Blob fields register their bytes at encode time, dates and times
+        # pack (docs/datetime-plan.md D10); the rest are identity.
+        self.encoders: list[Callable[[Any], Any]] = []
+        self.decoders: list[Callable[[Any], Any]] = []
         if cls is None:
-            self.fields = None
-            self.schema = [wire.VALUE_STR]
-            self.types = None
-            self.getters = None
-            self.encoders = None
-            self.decoders = None
             return
         self.fields = {}
         self.schema = []
-        self.types = []
         self.getters = []
-        # Blob fields register their bytes at encode time, dates and times
-        # pack (docs/datetime-plan.md D10); the rest are identity.
-        self.encoders = []
-        self.decoders = []
         for f in dataclasses.fields(cls):
             tag = _wire_tag(f.type)
             if tag is None:
@@ -1440,17 +1544,21 @@ class Sort:
 
     __slots__ = ("sorted", "direction")
 
-    def __init__(self, sorted, direction):
-        self.sorted = sorted
-        self.direction = direction
+    #: The no-indicator bar, assigned below the class (the wire's u32
+    #: none-sentinel); declared here so the name is part of the surface.
+    NONE: Sort
+
+    def __init__(self, sorted: int, direction: int) -> None:
+        self.sorted: int = sorted
+        self.direction: int = direction
 
     @staticmethod
-    def asc(column):
+    def asc(column: int) -> Sort:
         """Ascending on `column` (0-based, in the declared order)."""
         return Sort(column, 0)
 
     @staticmethod
-    def desc(column):
+    def desc(column: int) -> Sort:
         """Descending on `column`."""
         return Sort(column, 1)
 
@@ -1459,15 +1567,27 @@ class Sort:
 Sort.NONE = Sort(0xFFFF_FFFF, 0)
 
 
-class Collection(_BoundCollection):
-    def __init__(self, id, record_type=None):
+class Collection(_BoundCollection[T]):
+    """A keyed table of records the core stamps a template over: the
+    declaration handle, and the live-zone instance of itself. `at(...)`
+    names one instance inside a stamped copy."""
+
+    #: The For node a columns() trace closed over, set there and read by
+    #: set_columns through getattr — declared, never assigned here, so its
+    #: ABSENCE is still what "columns() has not run" means.
+    _for_handle: int
+
+    def __init__(self, id: int,
+                 record_type: type[T] | types.UnionType | None = None) -> None:
         self._id = id
-        self._instances = {}
-        self._children = []  # collections declared inside our template
-        self._derived = []  # signals recomputed from this collection
+        self._instances: dict[tuple[Key, ...], dict[Key, T]] = {}
+        #: collections declared inside our template
+        self._children: list[Collection[Any]] = []
+        #: the signals this collection recomputes after every mutation
+        self._derived: list[_CollectionDerived[Any]] = []
         # Highest I64 key each INSTANCE has minted or absorbed. Not in
         # the rollback journal, on purpose — see insert_fresh.
-        self._fresh = {}
+        self._fresh: dict[tuple[Key, ...], int] = {}
         self._record_type = record_type
         # The type is the schema: a dataclass is the one-variant case, a
         # union of dataclasses the sum, in declaration order.
@@ -1483,7 +1603,7 @@ class Collection(_BoundCollection):
         self._fields = only.fields if only else None
         super().__init__(self, [])
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[T]:
         """In template position, `for t in todos:` traces to a For — the
         loop body runs ONCE, authoring the blueprint."""
         if not (_recording or _tpl_depth > 0):
@@ -1501,8 +1621,10 @@ class Collection(_BoundCollection):
             )
         return _ForTrace(self)
 
-    def rows(self, *, grow=None, align=None, a11y_id=None, reorderable=False,
-             on_drop=None):
+    def rows(self, *, grow: float | None = None,
+             align: Align | str | None = None,
+             a11y_id: TextSource | None = None, reorderable: bool = False,
+             on_drop: Handler | None = None) -> Iterator[T]:
         """The configured spelling of the ordinary For loop:
         `for item in items.rows(grow=1, align="stretch"):`.
 
@@ -1511,7 +1633,7 @@ class Collection(_BoundCollection):
         container, with the moved row's key in the clip and the row it
         landed on as the anchor, and the app confirms with a move
         (docs/dnd-plan.md D8)."""
-        trace = iter(self)
+        trace = cast("_ForTrace[T]", iter(self))
         trace._grow = grow
         trace._align = align
         trace._a11y_id = a11y_id
@@ -1519,7 +1641,9 @@ class Collection(_BoundCollection):
         trace._on_drop = on_drop
         return trace
 
-    def columns(self, *titles, sort=None, on_sort=None, grow=None, a11y_id=None):
+    def columns(self, *titles: str, sort: Sort | None = None,
+                on_sort: Handler | None = None, grow: float | None = None,
+                a11y_id: TextSource | None = None) -> Iterator[T]:
         """Declare the column header bar on this collection's For — the
         table spelling of the same loop.
 
@@ -1530,7 +1654,7 @@ class Collection(_BoundCollection):
         (docs/tables-plan.md)."""
         return _ColumnsTrace(self, list(titles), sort or Sort.NONE, on_sort, grow, a11y_id)
 
-    def _decode(self, variant, fields, current):
+    def _decode(self, variant: int, fields: Sequence[Any], current: Any) -> Any:
         """Rebuild a model value from an undo delta's wire record.
 
         An entry the mirror still holds is UPDATED IN PLACE, so a
@@ -1539,7 +1663,7 @@ class Collection(_BoundCollection):
         spec = self._variants[variant]
         if spec.cls is None:
             return fields[0]
-        names = list(spec.fields)  # schema order == wire order
+        names = list(cast("dict[str, int]", spec.fields))  # schema order
         restored = [d(v) for d, v in zip(spec.decoders, fields)]
         if isinstance(current, spec.cls):
             for name, value in zip(names, restored):
@@ -1547,7 +1671,7 @@ class Collection(_BoundCollection):
             return current
         return spec.cls(**dict(zip(names, restored)))
 
-    def _variant_for(self, value):
+    def _variant_for(self, value: Any) -> tuple[int, _Variant]:
         """The constructor a model value holds."""
         for variant, spec in enumerate(self._variants):
             if spec.cls is None or isinstance(value, spec.cls):
@@ -1557,12 +1681,12 @@ class Collection(_BoundCollection):
             "collection's union"
         )
 
-    def at(self, *path):
+    def at(self, *path: Key) -> _BoundCollection[T]:
         """The instance of this (template-declared) collection inside
         the copy selected by `path` — one key per enclosing For."""
         return _BoundCollection(self, list(path))
 
-    def _purge(self, prefix):
+    def _purge(self, prefix: tuple[Key, ...]) -> None:
         _journal_instances(self)
         for path in [p for p in self._instances if p[: len(prefix)] == prefix]:
             del self._instances[path]
@@ -1577,7 +1701,7 @@ _ROW_VERBS = ("remove", "update", "patch", "move_before", "move_after",
               "move_to_end", "move_to_front")
 
 
-class Row:
+class Row(Generic[T]):
     """THE ROW A STAMPED HANDLER IS ABOUT (DESIGN.md, Binding
     conventions; docs/js-plan.md §4 rule 3, the JS twin).
 
@@ -1596,7 +1720,7 @@ class Row:
 
     __slots__ = ("_owner", "_bound", "_key", "_path", "_spec")
 
-    def __init__(self, owner, keys):
+    def __init__(self, owner: Collection[T], keys: Sequence[Key]) -> None:
         bound = owner.at(*keys[:-1])
         entry = bound._mirror().get(keys[-1])
         if entry is None:
@@ -1612,37 +1736,39 @@ class Row:
         object.__setattr__(self, "_spec", spec)
 
     @property
-    def __class__(self):
+    def __class__(self) -> type:  # pyright: ignore[reportIncompatibleMethodOverride]
         # What `isinstance` reads once `type()` has failed — the variant
-        # the entry IS, so a row that has left matches none.
+        # the entry IS, so a row that has left matches none. Python's type
+        # system has no per-instance class, so the override is asserted
+        # here and nowhere else.
         entry = self._entry()
         if entry is None:
             return Row
         spec = self._owner._variant_for(entry)[1]
         return Row if spec.cls is None else spec.cls
 
-    def _entry(self):
+    def _entry(self) -> T | None:
         return self._bound._mirror().get(self._key)
 
-    def _spec_now(self):
+    def _spec_now(self) -> _Variant | None:
         entry = self._entry()
         if entry is None:
             return self._spec
         return self._owner._variant_for(entry)[1]
 
-    def _field_names(self):
+    def _field_names(self) -> tuple[str, ...]:
         spec = self._spec_now()
         if spec is None:
             return ()
         return ("value",) if spec.fields is None else tuple(spec.fields)
 
-    def _named(self):
+    def _named(self) -> str:
         spec = self._spec_now()
         if spec is None:
             return "a row that has left its collection"
-        return "a scalar row" if spec.fields is None else spec.cls.__name__
+        return "a scalar row" if spec.cls is None else spec.cls.__name__
 
-    def _no_field(self, name):
+    def _no_field(self, name: str) -> str:
         names = self._field_names()
         return (
             f"kaya: {self._named()} has no field {name!r} — the fields are "
@@ -1650,33 +1776,33 @@ class Row:
             "fields and moves or removes its row, nothing else"
         )
 
-    def _remove(self):
+    def _remove(self) -> None:
         self._bound.remove(self._key)
 
-    def _update(self, value):
+    def _update(self, value: T) -> None:
         self._bound.update(self._key, value)
 
-    def _patch(self, **fields):
+    def _patch(self, **fields: Any) -> None:
         self._bound.patch(self._key, **fields)
 
-    def _move_before(self, anchor):
+    def _move_before(self, anchor: Key) -> None:
         self._bound.move_before(self._key, anchor)
 
-    def _move_after(self, anchor):
+    def _move_after(self, anchor: Key) -> None:
         self._bound.move_after(self._key, anchor)
 
-    def _move_to_end(self):
+    def _move_to_end(self) -> None:
         self._bound.move_to_end(self._key)
 
-    def _move_to_front(self):
+    def _move_to_front(self) -> None:
         self._bound.move_to_front(self._key)
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> Any:
         if name in self._field_names():
             entry = self._entry()
             if entry is None:
                 return None
-            spec = self._spec_now()
+            spec = cast("_Variant", self._spec_now())
             return entry if spec.fields is None else getattr(entry, name)
         if name in _ROW_VERBS:
             return getattr(self, "_" + name)
@@ -1692,9 +1818,9 @@ class Row:
             raise AttributeError(name)
         raise KayaKeyError(self._no_field(name))
 
-    def __setattr__(self, name, value):
+    def __setattr__(self, name: str, value: Any) -> None:
         if name in self._field_names():
-            spec = self._spec_now()
+            spec = cast("_Variant", self._spec_now())
             if spec.fields is None:
                 self._bound.update(self._key, value)
             else:
@@ -1702,36 +1828,49 @@ class Row:
             return
         raise KayaKeyError(self._no_field(name))
 
-    def __dir__(self):
+    def __dir__(self) -> list[str]:
         return sorted({*self._field_names(), *_ROW_VALUES, *_ROW_VERBS})
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         entry = self._entry()
         return f"Row({self._key!r}) {entry!r}" if entry is not None else (
             f"Row({self._key!r}) <gone>")
 
 
-class _Scope:
-    """Common context-manager plumbing for containers and templates."""
+class _Scope(Generic[T]):
+    """Common context-manager plumbing for containers and templates.
 
-    def __enter__(self):
+    `T` is what the `with` block's target receives."""
+
+    def _enter(self) -> T:
+        """What the block opens with; every subclass answers it."""
+        raise NotImplementedError
+
+    def _exit(self) -> None:
+        """What closing the block records; every subclass answers it."""
+        raise NotImplementedError
+
+    def __enter__(self) -> T:
         return self._enter()
 
-    def __exit__(self, exc_type, exc, tb):
+    def __exit__(self, exc_type: Any, exc: Any,
+                 tb: Any) -> Literal[False]:
         if exc_type is None:
             self._exit()
         return False
 
 
-class _Container(_Scope):
-    def __init__(self, handle):
-        self.handle = handle
+class _Container(_Scope["Widget"]):
+    """A container's with-block: everything declared inside parents to it."""
 
-    def _enter(self):
+    def __init__(self, handle: Widget) -> None:
+        self.handle: Widget = handle
+
+    def _enter(self) -> Widget:
         _parents.append(self.handle.id)
         return self.handle
 
-    def _exit(self):
+    def _exit(self) -> None:
         global _pending_root
         _parents.pop()
         at_live_top = _tpl_depth == 0 and (not _parents or _parents[-1] is None)
@@ -1740,11 +1879,13 @@ class _Container(_Scope):
 
 
 class _Labeled(_Container):
-    def __init__(self, handle, text):
+    """A labelled row's with-block: the label first, then the body."""
+
+    def __init__(self, handle: Widget, text: TextSource) -> None:
         super().__init__(handle)
         self._label = text
 
-    def _enter(self):
+    def _enter(self) -> Widget:
         handle = super()._enter()
         if isinstance(self._label, str):
             label(text=self._label)
@@ -1753,16 +1894,24 @@ class _Labeled(_Container):
         return handle
 
 
-class _Template(_Scope):
-    def __init__(self, opener, target_id, is_for, coll=None):
+class _Template(_Scope[T]):
+    """A For or When template's with-block: the body authors the
+    blueprint ONCE and the core stamps it."""
+
+    #: The For/When node itself, minted when the block opens.
+    handle: Widget
+
+    def __init__(self, opener: Callable[[int, int], bytes], target_id: int,
+                 is_for: bool, coll: Collection[Any] | None = None) -> None:
         self._opener = opener
         self._target_id = target_id
         self._is_for = is_for
-        self._coll = coll
+        # `when()` passes none; only the For arm below reads it.
+        self._coll = cast("Collection[Any]", coll)
 
-    def _enter(self):
+    def _enter(self) -> T:
         global _tpl_depth
-        self.handle = _alloc_widget_or_node()
+        self.handle = cast("Widget", _alloc_widget_or_node())
         # The add_child must land after template_end: inside the
         # blueprint it would cross zones.
         self._parent = _parents[-1] if _parents else None
@@ -1773,11 +1922,12 @@ class _Template(_Scope):
             _for_stack.append(len(_for_stack))
             _for_collections.append(self._coll)
             if len(self._coll._variants) > 1:
-                return _Cases(_for_stack[-1], self._coll)
-            return Element(_for_stack[-1], self._coll)
-        return None
+                return cast("T", _Cases(_for_stack[-1], self._coll))
+            # The ORM convention: the tracer stands in for the record.
+            return cast("T", Element(_for_stack[-1], self._coll))
+        return cast("T", None)
 
-    def _exit(self):
+    def _exit(self) -> None:
         global _tpl_depth
         if self._is_for:
             _for_stack.pop()
@@ -1789,25 +1939,25 @@ class _Template(_Scope):
             _records().append(wire.tx_add_child(self._parent, self.handle.id))
 
 
-class _ForTrace:
+class _ForTrace(Generic[T]):
     """The for-statement tracer: opens the For template, hands the body
     one element tracer, and closes the template when the loop asks for a
     second. THE BODY RUNS ONCE — stamping is the core's replay."""
 
-    def __init__(self, coll):
-        self._template = _Template(
+    def __init__(self, coll: Collection[T]) -> None:
+        self._template: _Template[T] = _Template(
             wire.tx_create_for, coll._id, is_for=True, coll=coll)
-        self._grow = None
-        self._align = None
-        self._a11y_id = None
+        self._grow: float | None = None
+        self._align: Align | str | None = None
+        self._a11y_id: TextSource | None = None
         self._reorderable = False
-        self._on_drop = None
+        self._on_drop: Handler | None = None
         self._state = 0
 
-    def __iter__(self):
+    def __iter__(self) -> _ForTrace[T]:
         return self
 
-    def __next__(self):
+    def __next__(self) -> T:
         if self._state == 0:
             self._state = 1
             element = self._template._enter()
@@ -1844,44 +1994,51 @@ class _ForTrace:
 
 def _alloc_widget_or_node():
     # One counter for both (DESIGN.md, Binding conventions).
+    #
+    # DELIBERATELY UNANNOTATED, and the `return Node(...)` below is
+    # LITERAL: tools/checks/py-node-props.py reads this statement to prove
+    # the two zones are told apart here and nowhere else. Its callers cast
+    # to the LIVE handle, which is the type a guest holds — one
+    # constructor serves both zones in this binding
+    # (tools/py-typecheck.py).
     if _tpl_depth > 0:
         return Node(_app._next("widget"))
     return Widget(_app._next("widget"))
 
 
-def _widget(kind):
-    handle = _alloc_widget_or_node()
+def _widget(kind: int) -> Widget:
+    handle = cast("Widget", _alloc_widget_or_node())
     _records().append(wire.tx_create_widget(handle.id, kind))
     _auto_parent(handle.id)
     return handle
 
 
-def create_window(window_id):
+def create_window(window_id: int) -> None:
     """Create an auxiliary window (capability-gated: a phone host
     rejects it at the root). Materializes hidden; mounting presents."""
     _records().append(wire.tx_create_window(int(window_id)))
 
 
-def destroy_window(window_id):
+def destroy_window(window_id: int) -> None:
     """Close and forget an auxiliary window — also the veto grammar's
     confirmation after on_close_requested."""
     _records().append(wire.tx_destroy_window(int(window_id)))
 
 
-def pop_entry(window=0):
+def pop_entry(window: int = 0) -> None:
     """Pop the window's top navigation entry and forget its tree —
     also the back-veto grammar's confirmation after
     on_back_requested. Popping an empty stack is a scene error."""
     _records().append(wire.tx_pop_entry(int(window)))
 
 
-def select_section(section_id, *, window=0):
+def select_section(section_id: int, *, window: int = 0) -> None:
     """Select a section programmatically: configuration, never echoes
     on_selected. The section must already be added."""
     _records().append(wire.tx_select_section(int(window), int(section_id)))
 
 
-def _vocab_missing(cls, value, what, hint):
+def _vocab_missing(cls: Any, value: Any, what: str, hint: str) -> Any:
     """Every closed vocabulary's `_missing_`, once: a plain name is
     accepted, anything else is refused NAMING the vocabulary."""
     if isinstance(value, str):
@@ -1907,7 +2064,7 @@ class SectionsPresentation(enum.IntEnum):
     SIDEBAR = wire.SECTIONS_PRESENTATION_SIDEBAR
 
     @classmethod
-    def _missing_(cls, value):
+    def _missing_(cls, value: object) -> Any:
         return _vocab_missing(cls, value, "a sections presentation",
                               "kaya.SectionsPresentation.BAR")
 
@@ -1922,7 +2079,7 @@ class Appearance(enum.IntEnum):
     DARK = wire.APPEARANCE_DARK
 
     @classmethod
-    def _missing_(cls, value):
+    def _missing_(cls, value: object) -> Any:
         return _vocab_missing(cls, value, "an appearance",
                               "kaya.Appearance.DARK")
 
@@ -1937,7 +2094,7 @@ class AlertChoice(enum.IntEnum):
     CANCEL = wire.ALERT_CHOICE_CANCEL
 
     @classmethod
-    def _missing_(cls, value):
+    def _missing_(cls, value: object) -> Any:
         return _vocab_missing(cls, value, "an alert choice",
                               "kaya.AlertChoice.CANCEL")
 
@@ -1950,13 +2107,15 @@ class NotificationOutcome(enum.IntEnum):
     REFUSED = wire.NOTIFICATION_OUTCOME_REFUSED
 
     @classmethod
-    def _missing_(cls, value):
+    def _missing_(cls, value: object) -> Any:
         return _vocab_missing(cls, value, "a notification outcome",
                               "kaya.NotificationOutcome.ACTIVATED")
 
 
-def show_alert(title="", *, message="", actions=(), cancel=None,
-               on_result=None, window=0):
+def show_alert(title: str = "", *, message: str = "",
+               actions: Sequence[str] = (), cancel: str | None = None,
+               on_result: Callable[[AlertChoice], object] | None = None,
+               window: int = 0) -> int:
     """Request a modal alert: up to two action labels (the platform
     floor) plus the REQUIRED cancel label, the slot every
     platform-native dismissal resolves to. on_result(choice) fires
@@ -1981,8 +2140,10 @@ def show_alert(title="", *, message="", actions=(), cancel=None,
     return alert_id
 
 
-def show_notification(notification, *, title="", body="", at=0,
-                      on_result=None):
+def show_notification(notification: int, *, title: str = "", body: str = "",
+                      at: int = 0,
+                      on_result: Callable[[NotificationOutcome], object] | None = None
+                      ) -> int:
     """Post a local notification (docs/tasks-s3-plan.md N1, N2): the
     alert's grammar without a window — the platform shows it outside
     the app. on_result(outcome) fires exactly once and retires, with
@@ -2002,13 +2163,14 @@ def show_notification(notification, *, title="", body="", at=0,
     return notification
 
 
-def cancel_notification(notification):
+def cancel_notification(notification: int) -> None:
     """Withdraw a pending or delivered notification (a reminder that was
     cleared). No answer follows; an unknown id is ignored."""
     _records().append(wire.tx_cancel_notification(int(notification)))
 
 
-def on_notification_activation(f):
+def on_notification_activation(
+        f: Callable[[int, NotificationOutcome], object]) -> None:
     """Register the PROCESS-LEVEL notification handler
     (docs/tasks-s9-plan.md R1): f(notification, outcome) receives every
     result whose id has no one-shot handler bound at the show — which is
@@ -2019,7 +2181,7 @@ def on_notification_activation(f):
     _app._notification_activation = f
 
 
-def link(pattern, f):
+def link(pattern: str, f: Callable[[dict[str, str]], object]) -> None:
     """Declare a link ROUTE and the handler that answers it
     (docs/app-links-plan.md §4): `kaya.link("task/{key}", f)` matches
     `<scheme>://task/t1` and calls `f({"key": "t1"})`. Segments split on
@@ -2050,26 +2212,29 @@ def link(pattern, f):
     app._pending_records.append(wire.tx_declare_link_route(route, pattern))
 
 
-class _ColumnsTrace:
+class _ColumnsTrace(Generic[T]):
     """columns()'s wrapper over the for-statement tracer. The header
     declaration is emitted when the template CLOSES: the core validates
     the row template against the declared arity, so it must follow the
     bodies."""
 
-    def __init__(self, coll, titles, sort, on_sort, grow=None, a11y_id=None):
+    def __init__(self, coll: Collection[T], titles: list[str], sort: Sort,
+                 on_sort: Handler | None, grow: float | None = None,
+                 a11y_id: TextSource | None = None) -> None:
         self._coll = coll
         self._titles = titles
         self._sort = sort
         self._on_sort = on_sort
         self._grow = grow
         self._a11y_id = a11y_id
-        self._trace = None
+        # Set by __iter__, which the for-statement always runs first.
+        self._trace = cast("_ForTrace[T]", None)
 
-    def __iter__(self):
-        self._trace = iter(self._coll)
+    def __iter__(self) -> _ColumnsTrace[T]:
+        self._trace = cast("_ForTrace[T]", iter(self._coll))
         return self
 
-    def __next__(self):
+    def __next__(self) -> T:
         try:
             return next(self._trace)
         except StopIteration:
@@ -2100,7 +2265,7 @@ class FileMode(enum.IntEnum):
     READ_WRITE = wire.FILE_MODE_READ_WRITE
 
     @classmethod
-    def _missing_(cls, value):
+    def _missing_(cls, value: object) -> Any:
         if isinstance(value, str):
             try:
                 return cls[value.upper()]
@@ -2116,7 +2281,7 @@ class FileMode(enum.IntEnum):
         )
 
 
-def _file_mode_value(mode):
+def _file_mode_value(mode: FileMode | str | int) -> FileMode:
     # bool BEFORE int, which it subclasses.
     if isinstance(mode, bool) or not isinstance(mode, (str, int)):
         raise KayaTypeError(
@@ -2134,12 +2299,14 @@ class PickedFile:
 
     __slots__ = ("handle", "name", "local_path")
 
-    def __init__(self, handle, name, local_path):
-        self.handle = handle
-        self.name = name
-        self.local_path = pathlib.Path(local_path) if local_path else None
+    def __init__(self, handle: int, name: str, local_path: str | None) -> None:
+        self.handle: int = handle
+        self.name: str = name
+        self.local_path: pathlib.Path | None = (
+            pathlib.Path(local_path) if local_path else None)
 
-    def open(self, mode=FileMode.READ):
+    def open(self, mode: FileMode | str | int = FileMode.READ
+             ) -> tuple[IO[bytes], bool]:
         """Redeem the handle: returns `(file, seekable)`.
 
         BLOCKS, possibly for a long time, so call it from a thread you
@@ -2149,11 +2316,13 @@ class PickedFile:
         """
         return runtime.open_picked(self.handle, _file_mode_value(mode))
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"PickedFile(name={self.name!r}, local_path={self.local_path!r})"
 
 
-def pick_files(*, filters=(), on_result=None, window=0):
+def pick_files(*, filters: Sequence[tuple[str, str | Sequence[str]]] = (),
+               on_result: Callable[[list[PickedFile]], object] | None = None,
+               window: int = 0) -> int:
     """Ask the platform for files. THE PICK, NOT THE OPEN — the result
     carries handles you redeem later.
 
@@ -2164,14 +2333,19 @@ def pick_files(*, filters=(), on_result=None, window=0):
     return _pick(True, filters, on_result, window)
 
 
-def pick_file(*, filters=(), on_result=None, window=0):
+def pick_file(*, filters: Sequence[tuple[str, str | Sequence[str]]] = (),
+              on_result: Callable[[list[PickedFile]], object] | None = None,
+              window: int = 0) -> int:
     """The single-file spelling. The floor always returns a LIST; this
     only asks the platform for one, so the handler receives zero or one
     file."""
     return _pick(False, filters, on_result, window)
 
 
-def save_file(suggested_name, *, filters=(), on_result=None, window=0):
+def save_file(suggested_name: str,
+              *, filters: Sequence[tuple[str, str | Sequence[str]]] = (),
+              on_result: Callable[[PickedFile | None], object] | None = None,
+              window: int = 0) -> int:
     """Ask the platform WHERE TO SAVE. The picker's twin, out of the same
     one-live-dialog slot.
 
@@ -2186,7 +2360,9 @@ def save_file(suggested_name, *, filters=(), on_result=None, window=0):
     app = _app
     dialog_id = app._next("file_dialog")
     if on_result is not None:
-        def one(files, _handler=on_result):
+        def one(files: list[PickedFile],
+                _handler: Callable[[PickedFile | None], object] = on_result
+                ) -> None:
             _handler(files[0] if files else None)
         app._file_dialog_handlers[dialog_id] = one
     _records().append(wire.tx_show_save_dialog(
@@ -2194,7 +2370,7 @@ def save_file(suggested_name, *, filters=(), on_result=None, window=0):
     return dialog_id
 
 
-def _filters(filters):
+def _filters(filters: Sequence[tuple[str, str | Sequence[str]]]) -> list[str]:
     """The advisory filter encoding BOTH dialogs share: alternating
     label and space-separated extensions."""
     flat = []
@@ -2206,7 +2382,10 @@ def _filters(filters):
     return flat
 
 
-def _pick(multiple, filters, on_result, window):
+def _pick(multiple: bool,
+          filters: Sequence[tuple[str, str | Sequence[str]]],
+          on_result: Callable[[list[PickedFile]], object] | None,
+          window: int) -> int:
     app = _app
     dialog_id = app._next("file_dialog")
     if on_result is not None:
@@ -2232,23 +2411,27 @@ class Representation:
     __slots__ = ()
 
     class Text:
+        """Plain text."""
+
         __slots__ = ("text",)
         __match_args__ = ("text",)
 
-        def __init__(self, text):
-            self.text = text
+        def __init__(self, text: str) -> None:
+            self.text: str = text
 
-        def __repr__(self):
+        def __repr__(self) -> str:
             return f"Text({self.text!r})"
 
     class Html:
+        """An HTML fragment, as the source app wrote it."""
+
         __slots__ = ("html",)
         __match_args__ = ("html",)
 
-        def __init__(self, html):
-            self.html = html
+        def __init__(self, html: str) -> None:
+            self.html: str = html
 
-        def __repr__(self):
+        def __repr__(self) -> str:
             return f"Html({self.html!r})"
 
     class Image:
@@ -2259,10 +2442,10 @@ class Representation:
         __slots__ = ("bytes",)
         __match_args__ = ("bytes",)
 
-        def __init__(self, data):
-            self.bytes = data
+        def __init__(self, data: bytes) -> None:
+            self.bytes: bytes = data
 
-        def __repr__(self):
+        def __repr__(self) -> str:
             return f"Image({len(self.bytes)} bytes)"
 
     class Files:
@@ -2272,10 +2455,10 @@ class Representation:
         __slots__ = ("files",)
         __match_args__ = ("files",)
 
-        def __init__(self, files):
-            self.files = files
+        def __init__(self, files: list[PickedFile]) -> None:
+            self.files: list[PickedFile] = files
 
-        def __repr__(self):
+        def __repr__(self) -> str:
             return f"Files({self.files!r})"
 
     class Custom:
@@ -2284,15 +2467,20 @@ class Representation:
         __slots__ = ("id", "bytes")
         __match_args__ = ("id", "bytes")
 
-        def __init__(self, id, data):
-            self.id = id
-            self.bytes = data
+        def __init__(self, id: str, data: bytes) -> None:
+            self.id: str = id
+            self.bytes: bytes = data
 
-        def __repr__(self):
+        def __repr__(self) -> str:
             return f"Custom({self.id!r}, {len(self.bytes)} bytes)"
 
 
-def _representation(payload):
+#: One arriving representation: the sum `copy` is the record of.
+Clip = (Representation.Text | Representation.Html | Representation.Image
+        | Representation.Files | Representation.Custom)
+
+
+def _representation(payload: tuple[int, list[Any]]) -> Clip | None:
     """Turn the decoder's (clip kind, values) into the sum, or None.
 
     EMPTY IS THE UNIVERSAL NO: a denied iOS prompt, an unfocused reader
@@ -2327,20 +2515,21 @@ class Dropped:
     __slots__ = ("point", "operation", "anchor", "before", "clip")
     __match_args__ = ("clip", "operation")
 
-    def __init__(self, point, operation, anchor, before, clip):
-        self.point = point
-        self.operation = operation
-        self.anchor = anchor
-        self.before = before
-        self.clip = clip
+    def __init__(self, point: tuple[float, float], operation: str | None,
+                 anchor: list[Key], before: bool, clip: Clip | None) -> None:
+        self.point: tuple[float, float] = point
+        self.operation: str | None = operation
+        self.anchor: list[Key] = anchor
+        self.before: bool = before
+        self.clip: Clip | None = clip
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (f"Dropped(point={self.point!r}, operation={self.operation!r}, "
                 f"anchor={self.anchor!r}, before={self.before!r}, "
                 f"clip={self.clip!r})")
 
 
-def _operation(mask):
+def _operation(mask: int) -> str | None:
     """The drag_op word, or None for a cancelled or refused drag."""
     if mask == wire.DRAG_OP_COPY:
         return OP_COPY
@@ -2349,14 +2538,15 @@ def _operation(mask):
     return None
 
 
-def _dropped(payload):
+def _dropped(payload: tuple[Any, ...]) -> Dropped:
     """Turn the decoder's drop tuple into the sum-carrying handle."""
     operation, before, point, anchor, clip, values = payload
     return Dropped(point, _operation(operation), list(anchor), before,
                    _representation((clip, values)))
 
 
-def _drag_slot(handle, keys, what, value):
+def _drag_slot(handle: _Handle, keys: Sequence[Key], what: str,
+               value: Any) -> int | None:
     """One drag representation's source (docs/dnd-plan.md §4): the row's
     own field, packed as `level << 32 | field` for the slot it fills, or
     None for a constant the caller writes itself.
@@ -2394,7 +2584,7 @@ def _drag_slot(handle, keys, what, value):
     return (level << 32) | field
 
 
-def _template_zone_only(handle, what):
+def _template_zone_only(handle: _Handle, what: str) -> None:
     """A keyed drag declaration names ONE STAMPED COPY, so it takes the
     template node the copy was stamped from — a live widget is exactly
     one thing on screen and has no keys (docs/dnd-plan.md §4)."""
@@ -2405,7 +2595,7 @@ def _template_zone_only(handle, what):
             "screen (docs/dnd-plan.md §4)")
 
 
-def _operations(operations):
+def _operations(operations: Sequence[str]) -> int:
     """The drag_op mask a guest's words name; empty withdraws."""
     mask = 0
     for op in operations:
@@ -2441,13 +2631,18 @@ class UndoDelta:
 
     __slots__ = ("signals", "texts", "entries", "orders")
 
-    def __init__(self, signals, texts, entries, orders):
-        self.signals = signals
-        self.texts = texts
-        self.entries = entries
-        self.orders = orders
+    def __init__(self, signals: list[tuple[int, Any]],
+                 texts: list[tuple[int, tuple[Key, ...], str]],
+                 entries: list[tuple[int, tuple[Key, ...], Key,
+                                     tuple[int, list[Any]] | None]],
+                 orders: list[tuple[int, tuple[Key, ...], list[Key]]]) -> None:
+        self.signals: list[tuple[int, Any]] = signals
+        self.texts: list[tuple[int, tuple[Key, ...], str]] = texts
+        self.entries: list[tuple[int, tuple[Key, ...], Key,
+                                 tuple[int, list[Any]] | None]] = entries
+        self.orders: list[tuple[int, tuple[Key, ...], list[Key]]] = orders
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (f"UndoDelta(signals={self.signals!r}, texts={self.texts!r}, "
                 f"entries={self.entries!r}, orders={self.orders!r})")
 
@@ -2470,7 +2665,7 @@ _BLOCK_NAMES = ("body", "heading1", "heading2", "heading3", "quote",
                 "code_block")
 
 
-def _block_value(kind):
+def _block_value(kind: object) -> str:
     name = str(kind)
     if name not in _BLOCK_NAMES:
         raise KayaValueError(
@@ -2484,11 +2679,11 @@ def _block_value(kind):
 FLAG_VALUE = "true"
 
 
-def _flag_wire(on):
+def _flag_wire(on: bool) -> str:
     return FLAG_VALUE if on else "false"
 
 
-def _decoded_span(what, start, stop):
+def _decoded_span(what: str, start: int, stop: int) -> range:
     """A span the CORE sent, refused BY NAME if its ends are out of
     order. No scene reaches it — the core always sends ordered spans —
     and a reversed one means the mirror and the core disagree."""
@@ -2507,25 +2702,26 @@ class Run:
 
     __slots__ = ("range", "name", "value")
 
-    def __init__(self, start, end, name, value):
-        self.range = range(int(start), int(end))
-        self.name = str(name)
-        self.value = str(value)
+    def __init__(self, start: int, end: int, name: object,
+                 value: object) -> None:
+        self.range: range = range(int(start), int(end))
+        self.name: str = str(name)
+        self.value: str = str(value)
 
     @property
-    def is_flag(self):
+    def is_flag(self) -> bool:
         """A flag attribute, on: bold, italic, underline, strike, code."""
         return self.value == FLAG_VALUE
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         return (isinstance(other, Run)
                 and (self.range, self.name, self.value)
                 == (other.range, other.name, other.value))
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return hash((self.range.start, self.range.stop, self.name, self.value))
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (f"Run(start={self.range.start!r}, end={self.range.stop!r}, "
                 f"name={self.name!r}, value={self.value!r})")
 
@@ -2541,11 +2737,12 @@ class Document:
 
     __slots__ = ("text", "runs")
 
-    def __init__(self, text="", runs=None):
-        self.text = _text_value("Document text", text)
-        self.runs = list(runs) if runs else []
+    def __init__(self, text: str = "",
+                 runs: Sequence[Run] | None = None) -> None:
+        self.text: str = _text_value("Document text", text)
+        self.runs: list[Run] = list(runs) if runs else []
 
-    def mark(self, span, name, value):
+    def mark(self, span: Span, name: str, value: bool | str) -> Document:
         """One attribute over one range. `value` takes a bool for a flag
         attribute, coerced to the wire's own string here at the
         boundary. Returns the document."""
@@ -2555,45 +2752,45 @@ class Document:
         self.runs.append(Run(start, stop, name, value))
         return self
 
-    def bold(self, span):
+    def bold(self, span: Span) -> Document:
         return self.mark(span, "bold", "true")
 
-    def italic(self, span):
+    def italic(self, span: Span) -> Document:
         return self.mark(span, "italic", "true")
 
-    def underline(self, span):
+    def underline(self, span: Span) -> Document:
         return self.mark(span, "underline", "true")
 
-    def strike(self, span):
+    def strike(self, span: Span) -> Document:
         return self.mark(span, "strike", "true")
 
-    def code(self, span):
+    def code(self, span: Span) -> Document:
         return self.mark(span, "code", "true")
 
-    def link(self, span, url):
+    def link(self, span: Span, url: str) -> Document:
         return self.mark(span, "link", url)
 
-    def block(self, span, kind):
+    def block(self, span: Span, kind: str) -> Document:
         """A paragraph's kind; the range covers whole paragraphs or the
         core refuses it, naming the byte."""
         return self.mark(span, "block", _block_value(kind))
 
-    def attr_at(self, byte, name):
+    def attr_at(self, byte: int, name: str) -> str | None:
         """The value `name` carries at a byte offset, or None."""
         for run in self.runs:
             if run.name == name and run.range.start <= byte < run.range.stop:
                 return run.value
         return None
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         return (isinstance(other, Document)
                 and self.text == other.text and self.runs == other.runs)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"Document(text={self.text!r}, runs={self.runs!r})"
 
 
-def _document_bytes(document):
+def _document_bytes(document: Document) -> bytes:
     """A Document's wire bytes: ONE flat value list — the text, then four
     values per run (crates/kaya/src/wire.rs, `document_blob`)."""
     values = [document.text]
@@ -2602,7 +2799,7 @@ def _document_bytes(document):
     return wire._enc.values(values)
 
 
-def _encode_document_field(value):
+def _encode_document_field(value: object) -> wire.BlobHandle:
     """A Document field's wire value (docs/rich-text-plan.md §19): the
     blob a stamped copy's `document` prop reads, registered like any
     other blob field's bytes."""
@@ -2613,7 +2810,7 @@ def _encode_document_field(value):
     return wire.BlobHandle(runtime.register_blob(_document_bytes(value)))
 
 
-def _decode_document_field(data):
+def _decode_document_field(data: object) -> Document:
     """`_document_bytes`' inverse, for a row an undo restored: the delta
     carries the field as a blob, redeemed to bytes by the decoder
     (crates/kaya/src/wire.rs, `read_document_blob`)."""
@@ -2663,7 +2860,7 @@ _EDIT_SOURCES = {
 }
 
 
-def _edit_source(source):
+def _edit_source(source: int) -> str:
     name = _EDIT_SOURCES.get(int(source))
     if name is None:
         raise KayaValueError(
@@ -2680,27 +2877,28 @@ class Edit:
 
     __slots__ = ("range", "inserted", "runs", "source")
 
-    def __init__(self, start, end, inserted="", runs=None):
-        self.range = range(int(start), int(end))
-        self.inserted = _text_value("Edit text", inserted)
-        self.runs = list(runs) if runs else []
-        self.source = None
+    def __init__(self, start: int, end: int, inserted: str = "",
+                 runs: Sequence[Run] | None = None) -> None:
+        self.range: range = range(int(start), int(end))
+        self.inserted: str = _text_value("Edit text", inserted)
+        self.runs: list[Run] = list(runs) if runs else []
+        self.source: str | None = None
 
     @classmethod
-    def insert(cls, at, text):
+    def insert(cls, at: int, text: str) -> Edit:
         return cls(at, at, text)
 
     @classmethod
-    def delete(cls, span):
+    def delete(cls, span: Span) -> Edit:
         start, stop = _text_range("Edit.delete", span)
         return cls(start, stop, "")
 
     @classmethod
-    def replace(cls, span, text):
+    def replace(cls, span: Span, text: str) -> Edit:
         start, stop = _text_range("Edit.replace", span)
         return cls(start, stop, text)
 
-    def mark(self, span, name, value):
+    def mark(self, span: Span, name: str, value: bool | str) -> Edit:
         """One attribute over the INSERTED text's own offsets. `value`
         takes a bool for a flag attribute, coerced to the wire's own
         string here at the boundary. Returns the edit."""
@@ -2710,12 +2908,12 @@ class Edit:
         self.runs.append(Run(start, stop, name, value))
         return self
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         return (isinstance(other, Edit)
                 and (self.range, self.inserted, self.runs, self.source)
                 == (other.range, other.inserted, other.runs, other.source))
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (f"Edit(start={self.range.start!r}, end={self.range.stop!r}, "
                 f"inserted={self.inserted!r}, runs={self.runs!r}, "
                 f"source={self.source!r})")
@@ -2727,27 +2925,28 @@ class Format:
 
     __slots__ = ("range", "name", "value")
 
-    def __init__(self, start, end, name, value):
-        self.range = range(int(start), int(end))
-        self.name = str(name)
-        self.value = None if value is None else str(value)
+    def __init__(self, start: int, end: int, name: object,
+                 value: object) -> None:
+        self.range: range = range(int(start), int(end))
+        self.name: str = str(name)
+        self.value: str | None = None if value is None else str(value)
 
     @property
-    def is_flag(self):
+    def is_flag(self) -> bool:
         """A flag attribute, on."""
         return self.value == FLAG_VALUE
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         return (isinstance(other, Format)
                 and (self.range, self.name, self.value)
                 == (other.range, other.name, other.value))
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (f"Format(start={self.range.start!r}, end={self.range.stop!r}, "
                 f"name={self.name!r}, value={self.value!r})")
 
 
-def _normalize_runs(runs):
+def _normalize_runs(runs: Sequence[Run]) -> list[Run]:
     """The core's normal form (crates/kaya/src/scene.rs, RichDoc::
     normalize), so the mirror and the core's document spell one string."""
     out = []
@@ -2781,7 +2980,7 @@ def _normalize_runs(runs):
     return out
 
 
-def _runs_from(flat):
+def _runs_from(flat: Sequence[Any]) -> list[Run]:
     """The decoder's flat run tail, read in FOURS. A reversed span is
     refused naming the record (`_decoded_span`)."""
     out = []
@@ -2791,7 +2990,7 @@ def _runs_from(flat):
     return out
 
 
-def _flat_runs(runs):
+def _flat_runs(runs: Sequence[Run]) -> list[Any]:
     """`_runs_from`'s inverse: the wire's four values per run."""
     flat = []
     for run in runs:
@@ -2799,7 +2998,7 @@ def _flat_runs(runs):
     return flat
 
 
-def _on_boundary(data, at):
+def _on_boundary(data: bytes, at: int) -> bool:
     """Whether a byte offset falls on a code-point boundary of `data`
     (Rust's str::is_char_boundary, in the unit the wire counts): past the
     end is not one."""
@@ -2808,7 +3007,8 @@ def _on_boundary(data, at):
     return at == len(data) or (data[at] & 0xC0) != 0x80
 
 
-def _fold_edit(doc, start, stop, inserted, runs):
+def _fold_edit(doc: Document, start: int, stop: int, inserted: str,
+               runs: Sequence[Run]) -> None:
     """One edit folded into a document: runs before it keep, runs after it
     shift, a run the edit falls inside is cut, and the inserted text's own
     runs land relative to the edit (crates/kaya/src/app.rs, fold_edit)."""
@@ -2837,7 +3037,8 @@ def _fold_edit(doc, start, stop, inserted, runs):
     doc.runs = _normalize_runs(nxt)
 
 
-def _fold_format(doc, start, stop, name, value):
+def _fold_format(doc: Document, start: int, stop: int, name: str,
+                 value: str | None) -> None:
     """One toolbar act folded into a document: the attribute put over the
     range or taken off it, clipping THIS attribute's runs and no other
     (crates/kaya/src/app.rs, fold_format)."""
@@ -2857,7 +3058,7 @@ def _fold_format(doc, start, stop, name, value):
     doc.runs = _normalize_runs(nxt)
 
 
-def _accept_list(kinds):
+def _accept_list(kinds: Sequence[Any]) -> str:
     """Join an accept list: the closed kinds by name plus any custom ids,
     space separated.
 
@@ -2877,7 +3078,9 @@ def _accept_list(kinds):
     return " ".join(out)
 
 
-def copy(*, text=None, html=None, image=None, files=(), custom=None):
+def copy(*, text: str | None = None, html: str | None = None,
+         image: bytes | None = None, files: Sequence[PickedFile] = (),
+         custom: Mapping[str, bytes] | None = None) -> None:
     """Put ONE clip on the system clipboard, offered in as many
     representations as you fill in.
 
@@ -2907,7 +3110,9 @@ def copy(*, text=None, html=None, image=None, files=(), custom=None):
     _records().append(wire.tx_copy(present, len(files), len(custom), reps))
 
 
-def read_clipboard(accepting, *, on_result=None):
+def read_clipboard(accepting: Sequence[str], *,
+                   on_result: Callable[[Clip | None], object] | None = None
+                   ) -> int:
     """Read the clipboard OUTSIDE any paste gesture — THE PRIVILEGED ONE.
 
     THE PLATFORMS HAVE MADE IT EXPENSIVE: iOS 16 PROMPTS when the content
@@ -2936,10 +3141,10 @@ class MenuItem:
     """A live menu item in its OWN id space, never a widget or node id.
     One command identity: exactly one parent or anchor, forever."""
 
-    def __init__(self, id):
+    def __init__(self, id: int) -> None:
         self.id = id
 
-    def label(self, value):
+    def label(self, value: TextSource) -> None:
         """Rename the item: constant text or a bound Str signal.
         Label writes never emit anything."""
         if isinstance(value, Signal):
@@ -2948,7 +3153,7 @@ class MenuItem:
             _records().append(
                 wire.tx_set_menu_label(self.id, _text_value("menu label", value)))
 
-    def enabled(self, value):
+    def enabled(self, value: bool | Signal[Any]) -> None:
         """Whether the item is enabled (default true): a constant or a
         bound Bool signal. Disabling a grouping node disables its
         subtree."""
@@ -2957,7 +3162,7 @@ class MenuItem:
         else:
             _records().append(wire.tx_set_menu_enabled(self.id, bool(value)))
 
-    def checked(self, value):
+    def checked(self, value: bool | Signal[Any]) -> None:
         """A toggle's state (toggle items only — root-checked). The
         programmatic write is QUIET: no menu_toggled echo."""
         if isinstance(value, Signal):
@@ -2965,7 +3170,7 @@ class MenuItem:
         else:
             _records().append(wire.tx_set_menu_checked(self.id, bool(value)))
 
-    def value(self, v):
+    def value(self, v: float | Signal[Any]) -> None:
         """A radio group's selected option index (radio groups only —
         root-checked). QUIET, like checked."""
         if isinstance(v, Signal):
@@ -2973,40 +3178,41 @@ class MenuItem:
         else:
             _records().append(wire.tx_set_menu_value(self.id, float(v)))
 
-    def icon(self, data):
+    def icon(self, data: bytes) -> None:
         """The item's icon (the blob channel): used by phone promotion,
         ignored where native menu dress has no icons. Const-only."""
         _records().append(
             wire.tx_set_menu_icon(self.id, runtime.register_blob(data)))
 
-    def symbol(self, symbol):
+    def symbol(self, symbol: Symbol | str) -> None:
         """The item's SEMANTIC ICON (`kaya.Symbol`, or its name): the
         closed concept vocabulary each backend maps to its own platform's
         symbol set. No symbol on a separator. Const-only."""
         _records().append(
             wire.tx_set_menu_symbol(self.id, _symbol_value(symbol)))
 
-    def primary(self, on):
+    def primary(self, on: bool) -> None:
         """The phone-bar promotion hint (actions only — root-checked).
         INERT on desktops. Const-only."""
         _records().append(wire.tx_set_menu_primary(self.id, bool(on)))
 
-    def role(self, name):
+    def role(self, name: MenuRole | str) -> None:
         """Declare this action a standard command (actions only).
         PLACEMENT is each host's business. One item per role, and a role
         NEVER invents a chord. Const-only."""
         _records().append(wire.tx_set_menu_role(self.id, MenuRole(name).value))
 
-    def shortcut(self, spelling):
+    def shortcut(self, spelling: str) -> None:
         """The shortcut of any LEAF command (window-anchored only),
         canonicalized by wire.canonicalize_shortcut. It fires the SAME
         menu_activated occurrence as a click. Const-only."""
         _records().append(wire.tx_set_menu_shortcut(self.id, spelling))
 
-    def append(self):
+    def append(self) -> _MenuScope[MenuItem]:
         """Reopen this RETAINED grouping node. The root re-validates each
         appended subtree in the item's real anchor context."""
-        return _MenuScope(("item", self.id), shortcut_ok=True, value=self)
+        return _MenuScope(("item", self.id), shortcut_ok=True,
+                          value=cast("MenuItem", self))
 
 
 class ContextCatalog:
@@ -3014,35 +3220,47 @@ class ContextCatalog:
     menu items are live and shared across stamped copies, so it is built
     in the LIVE zone and node.context_menu(catalog) attaches it."""
 
-    def __init__(self):
-        self._roots = []
+    def __init__(self) -> None:
+        self._roots: list[int] = []
         self._attached = False
-        self._owner = None  # the For the attach found (Row's owner)
+        #: the For the attach found (Row's owner)
+        self._owner: Collection[Any] | None = None
 
 
-class _MenuScope(_Scope):
+class _MenuScope(_Scope[T]):
     """A with-block whose creators seat under one menu anchor. on_exit
     runs after the block's children recorded, which is THE RADIO VALUE'S
     SEAT: the selected index must land AFTER the options it
     addresses."""
 
-    def __init__(self, seat, shortcut_ok, value=None, on_exit=None):
+    @overload
+    def __init__(self: _MenuScope[None], seat: tuple[str, Any],
+                 shortcut_ok: bool) -> None: ...
+
+    @overload
+    def __init__(self: _MenuScope[R], seat: tuple[str, Any],
+                 shortcut_ok: bool, value: R,
+                 on_exit: Callable[[], None] | None = None) -> None: ...
+
+    def __init__(self, seat: tuple[str, Any], shortcut_ok: bool,
+                 value: Any = None,
+                 on_exit: Callable[[], None] | None = None) -> None:
         self._seat = seat  # ("item", id) | ("widget", id) | ("free", catalog)
         self._shortcut_ok = shortcut_ok
         self._value = value
         self._on_exit = on_exit
 
-    def _enter(self):
+    def _enter(self) -> T:
         _menu_scopes.append(self)
         return self._value
 
-    def _exit(self):
+    def _exit(self) -> None:
         _menu_scopes.pop()
         if self._on_exit is not None:
             self._on_exit()
 
 
-def _menu_create(kind, label=None):
+def _menu_create(kind: int, label: TextSource | None = None) -> MenuItem:
     """Create one menu item in its own id space; menu records are
     live-zone only (a template body records a blueprint — build the
     catalog outside and attach with node.context_menu)."""
@@ -3063,7 +3281,7 @@ def _menu_create(kind, label=None):
     return item
 
 
-def _menu_seat(item):
+def _menu_seat(item: MenuItem) -> _MenuScope[Any]:
     """Seat a just-created item under the open scope's anchor and
     return the scope (for the shortcut rule)."""
     if not _menu_scopes:
@@ -3118,12 +3336,12 @@ class MenuRole(str, enum.Enum):
     REDO = "redo"
 
     @classmethod
-    def _missing_(cls, value):
+    def _missing_(cls, value: object) -> Any:
         return _vocab_missing(cls, value, "a menu role", "kaya.MenuRole.UNDO")
 
 
 
-def _menu_require_catalog(scope):
+def _menu_require_catalog(scope: _MenuScope[Any]) -> None:
     """A chord and a role both need a window catalog as their home: the
     root rejects either on a context anchor, and this says so at the call
     site."""
@@ -3134,8 +3352,11 @@ def _menu_require_catalog(scope):
         )
 
 
-def item(label, *, shortcut=None, enabled=None, icon=None, symbol=None,
-         primary=None, role=None, on_activate=None):
+def item(label: TextSource, *, shortcut: str | None = None,
+         enabled: bool | Signal[Any] | None = None, icon: bytes | None = None,
+         symbol: Symbol | str | None = None, primary: bool | None = None,
+         role: MenuRole | str | None = None,
+         on_activate: Handler | None = None) -> MenuItem:
     """An action — a leaf command firing exactly one menu_activated
     occurrence, whether from a click or its shortcut. On a template-node
     catalog the handler receives the stamped copy's `Row` first."""
@@ -3164,8 +3385,11 @@ def item(label, *, shortcut=None, enabled=None, icon=None, symbol=None,
     return it
 
 
-def toggle(label, *, checked=None, enabled=None, icon=None, symbol=None,
-           shortcut=None, on_toggle=None):
+def toggle(label: TextSource, *, checked: bool | Signal[Any] | None = None,
+           enabled: bool | Signal[Any] | None = None,
+           icon: bytes | None = None, symbol: Symbol | str | None = None,
+           shortcut: str | None = None,
+           on_toggle: Handler | None = None) -> MenuItem:
     """A toggle — a stateful leaf: user flips emit menu_toggled (the
     handler receives the new state, template-node copies their `Row`
     first); programmatic checked writes are quiet."""
@@ -3187,7 +3411,9 @@ def toggle(label, *, checked=None, enabled=None, icon=None, symbol=None,
     return it
 
 
-def option(label, *, enabled=None, icon=None, symbol=None, shortcut=None):
+def option(label: TextSource, *, enabled: bool | Signal[Any] | None = None,
+           icon: bytes | None = None, symbol: Symbol | str | None = None,
+           shortcut: str | None = None) -> MenuItem:
     """One labeled radio option, appended in declaration order — the
     order IS the index vocabulary the group's value selects over."""
     it = _menu_create(wire.MENU_KIND_RADIO_OPTION, label)
@@ -3204,13 +3430,15 @@ def option(label, *, enabled=None, icon=None, symbol=None, shortcut=None):
     return it
 
 
-def separator():
+def separator() -> None:
     """Native grouping chrome: no label, no props, no handle kept."""
     it = _menu_create(wire.MENU_KIND_SEPARATOR)
     _menu_seat(it)
 
 
-def menu(label, *, enabled=None, icon=None, symbol=None):
+def menu(label: TextSource, *, enabled: bool | Signal[Any] | None = None,
+         icon: bytes | None = None,
+         symbol: Symbol | str | None = None) -> _MenuScope[MenuItem]:
     """A NESTED menu — grouping, never navigation (one nested level is
     the cap, root-checked). Bar-level menus are `app.menu`."""
     it = _menu_create(wire.MENU_KIND_MENU, label)
@@ -3224,8 +3452,11 @@ def menu(label, *, enabled=None, icon=None, symbol=None):
     return _MenuScope(("item", it.id), scope._shortcut_ok, value=it)
 
 
-def radio_group(label, *, value=None, enabled=None, icon=None, symbol=None,
-                on_select=None):
+def radio_group(label: TextSource, *, value: float | Signal[Any] | None = None,
+                enabled: bool | Signal[Any] | None = None,
+                icon: bytes | None = None,
+                symbol: Symbol | str | None = None,
+                on_select: Handler | None = None) -> _MenuScope[MenuItem]:
     """A NESTED radio group, declaring only kaya.option children.
     `value` is the selected 0-based index; programmatic writes are quiet,
     and on_select receives each USER pick's new index."""
@@ -3246,7 +3477,7 @@ def radio_group(label, *, value=None, enabled=None, icon=None, symbol=None,
                       on_exit=on_exit)
 
 
-def context_catalog():
+def context_catalog() -> _MenuScope[ContextCatalog]:
     """Build a context catalog UNANCHORED — free root items for a
     template-node anchor, built in the LIVE zone. Context items take no
     shortcuts."""
@@ -3254,14 +3485,14 @@ def context_catalog():
     return _MenuScope(("free", catalog), shortcut_ok=False, value=catalog)
 
 
-def window_size(width, height):
+def window_size(width: float, height: float) -> None:
     """Request the primary surface's content size (DIP). ADVISORY on
     every platform — a request, never a guarantee."""
     _records().append(wire.tx_set_window_width(0, float(width)))
     _records().append(wire.tx_set_window_height(0, float(height)))
 
 
-def _accent(what, value):
+def _accent(what: str, value: object) -> int:
     """The wire field's domain, and NOTHING SEMANTIC. A bool is excluded
     BEFORE int, which it subclasses: `True` would silently become the
     colour 0x000001.
@@ -3283,7 +3514,8 @@ def _accent(what, value):
     return value
 
 
-def brand_accent(seed, *, light=None, dark=None):
+def brand_accent(seed: int, *, light: int | None = None,
+                 dark: int | None = None) -> None:
     """REQUEST the app's brand accent (docs/styling-plan.md D1/D2): one
     hex is the whole call, `light`/`dark` a per-appearance variant, and
     whatever an appearance does not state is filled from the seed.
@@ -3320,7 +3552,7 @@ class Platform(enum.IntEnum):
     ANDROID = wire.PLATFORM_ANDROID
 
     @classmethod
-    def _missing_(cls, value):
+    def _missing_(cls, value: object) -> Any:
         if isinstance(value, str):
             try:
                 return cls[value.upper()]
@@ -3344,11 +3576,11 @@ class SizeClass:
     narrower than 600 points everywhere else.
     """
 
-    def __init__(self, tag, name):
+    def __init__(self, tag: int, name: str) -> None:
         self._tag = tag
         self._name = name
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"kaya.{self._name}"
 
 
@@ -3369,7 +3601,7 @@ _PLATFORM_NAMES = {
 _PLATFORM_NAME_OF = {value: name for name, value in _PLATFORM_NAMES.items()}
 
 
-def _platform_value(platform):
+def _platform_value(platform: Platform | str | int) -> Platform:
     """One platform tag, from either spelling, refused here if it is
     neither.
 
@@ -3401,42 +3633,42 @@ class Asset:
 
     __slots__ = ("_handle", "_name")
 
-    def __init__(self, handle, name):
+    def __init__(self, handle: int, name: str) -> None:
         self._handle = handle
         self._name = name
 
     @property
-    def name(self):
+    def name(self) -> str:
         """The name this asset was asked for — what `asset(name)` was
         given, not a path. Android has no path to hand back."""
         return self._name
 
-    def bytes(self):
+    def bytes(self) -> bytes:
         """The asset's bytes, copied out of core memory. RAISES if the
         asset is closed rather than answering `b""`."""
         self._alive("bytes()")
         return runtime.asset_bytes(self._handle)
 
-    def reader(self):
+    def reader(self) -> io.BytesIO:
         """The asset as a file-like object: `io.BytesIO` over a copy of
         the bytes."""
         return io.BytesIO(self.bytes())
 
-    def _blob(self):
+    def _blob(self) -> int:
         """Register the core's own bytes into the pending table and
         return the handle the next submit consumes — no copy, nothing
         through Python."""
         self._alive("a blob redemption")
         return runtime.asset_blob(self._handle)
 
-    def close(self):
+    def close(self) -> None:
         """Release the core's handle. Idempotent, and the finalizer
         calls it too."""
         handle, self._handle = self._handle, 0
         if handle:
             runtime.asset_release(handle)
 
-    def _alive(self, what):
+    def _alive(self, what: str) -> None:
         if not self._handle:
             raise KayaStateError(
                 f"kaya: {what} on a closed asset ({self._name!r}) — the "
@@ -3445,18 +3677,18 @@ class Asset:
                 "than the asset."
             )
 
-    def __len__(self):
+    def __len__(self) -> int:
         self._alive("len()")
         return runtime.asset_len(self._handle)
 
-    def __enter__(self):
+    def __enter__(self) -> Asset:
         return self
 
-    def __exit__(self, *_exc):
+    def __exit__(self, *_exc: Any) -> Literal[False]:
         self.close()
         return False
 
-    def __del__(self):
+    def __del__(self) -> None:
         # Deliberately SILENT: interpreter teardown can already have
         # torn down what close() reaches, and a raising finalizer prints
         # an unraisable-exception warning.
@@ -3465,12 +3697,12 @@ class Asset:
         except Exception:
             pass
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         state = "closed" if not self._handle else f"{len(self)} bytes"
         return f"Asset(name={self._name!r}, {state})"
 
 
-def asset(name):
+def asset(name: str) -> Asset:
     """Open an asset — a file the app's own BUILD shipped beside it,
     named by a relative path under the asset root.
 
@@ -3498,7 +3730,7 @@ def asset(name):
     ))
 
 
-def asset_miss_sentence(name):
+def asset_miss_sentence(name: str) -> str:
     """Why `asset(name)` would fail — the sentence it would raise, handed
     over without raising. `""` means the name resolves.
 
@@ -3515,14 +3747,14 @@ def asset_miss_sentence(name):
     return runtime.asset_miss_sentence(name)
 
 
-def _blob_of(source):
+def _blob_of(source: Asset | bytes | bytearray | memoryview) -> int:
     """The one place a blob-taking consumer turns its argument into a
     handle: an `Asset` redeems, bytes register."""
     return source._blob() if isinstance(source, Asset) \
         else runtime.register_blob(source)
 
 
-def _typeface_family(what, family):
+def _typeface_family(what: str, family: object) -> str:
     """The wire field's domain and NOTHING SEMANTIC.
 
     THE EMPTY FAMILY IS DELIBERATELY NOT REFUSED HERE — that sentence is
@@ -3537,7 +3769,10 @@ def _typeface_family(what, family):
     return family
 
 
-def brand_typeface(family, platforms=None, *, font=None):
+def brand_typeface(family: str,
+                   platforms: Mapping[Platform | str | int, str] | None = None,
+                   *, font: Asset | bytes | bytearray | memoryview | None = None
+                   ) -> None:
     """REQUEST the app's brand typeface (docs/styling-plan.md Slice 2b):
     one family name is the whole call, and every platform that has that
     family installed uses it.
@@ -3579,7 +3814,7 @@ def brand_typeface(family, platforms=None, *, font=None):
     ))
 
 
-def app_identity():
+def app_identity() -> None:
     """DECLARE the app's identity (docs/app-identity-plan.md,
 docs/tasks-s3-plan.md N4). NO ARGUMENTS: the name it goes by, the
 picture that stands for it and the reverse-DNS id it registers under
@@ -3602,7 +3837,7 @@ the platform's own identity declares none at all.
 _UNDO_GROUP_TAG = wire.TX_UNDO_GROUP.to_bytes(2, "little")
 
 
-def undoable(label, *, window=0):
+def undoable(label: str, *, window: int = 0) -> None:
     """Make THIS transaction one undoable step in `window`'s history,
     under `label` (docs/undo-plan.md D2).
 
@@ -3644,7 +3879,7 @@ class Capabilities:
     notifications: bool
 
 
-def capabilities():
+def capabilities() -> Capabilities:
     """This host's capabilities, constant for the life of the process."""
     bits = runtime.capability_bits()
     return Capabilities(
@@ -3652,7 +3887,7 @@ def capabilities():
         notifications=bool(bits & runtime.CAP_NOTIFICATIONS))
 
 
-def app_data_dir():
+def app_data_dir() -> pathlib.Path:
     """The app's OWN writable directory (docs/tasks-s4-plan.md P1):
     Application Support/<id> on macOS, Documents on iOS, the files
     directory on Android, $XDG_DATA_HOME/<id> on Linux,
@@ -3675,14 +3910,14 @@ def app_data_dir():
     return pathlib.Path(answer)
 
 
-def _pref_key(key):
+def _pref_key(key: object) -> str:
     key = str(key)
     if not key:
         raise KayaValueError("kaya: a preference key must not be empty")
     return key
 
 
-def _pref_write_key(key):
+def _pref_write_key(key: object) -> str:
     """A guest may READ any key and WRITE any key kaya has not reserved
     (docs/tasks-s4-plan.md P4: window memory lives under `kaya.`)."""
     key = _pref_key(key)
@@ -3706,7 +3941,19 @@ class Prefs:
     thread.
     """
 
-    def get(self, key, default):
+    @overload
+    def get(self, key: str, default: bool) -> bool: ...
+
+    @overload
+    def get(self, key: str, default: int) -> int: ...
+
+    @overload
+    def get(self, key: str, default: float) -> float: ...
+
+    @overload
+    def get(self, key: str, default: str) -> str: ...
+
+    def get(self, key: str, default: bool | int | float | str) -> Any:
         """Read a preference, DISPATCHING ON `default`'s TYPE — bool
         before int, since bool subclasses int. Answers `default` when
         the key is absent or holds another type (§4)."""
@@ -3725,7 +3972,7 @@ class Prefs:
             )
         return default if value is None else value
 
-    def set(self, key, value):
+    def set(self, key: str, value: bool | int | float | str) -> None:
         """Write a preference, dispatching on `value`'s type — bool
         before int."""
         if isinstance(value, bool):
@@ -3742,20 +3989,22 @@ class Prefs:
                 f"str, not {type(value).__name__}"
             )
 
-    def remove(self, key):
+    def remove(self, key: str) -> None:
         runtime.pref_remove(_pref_write_key(key))
 
 
 _PREFS = Prefs()
 
 
-def prefs():
+def prefs() -> Prefs:
     """The app's preferences store — one per process."""
     return _PREFS
 
 
-def signal(initial):
-    handle = Signal(_app._next("signal"), initial)
+def signal(initial: V) -> Signal[V]:
+    """Declare a signal holding `initial` — the app's write channel for
+    one scalar the platform draws."""
+    handle: Signal[V] = Signal(_app._next("signal"), initial)
     # By id, for the undo path: a restored value arrives as a signal id
     # and has to reach the binding's own cache (App._absorb_undo).
     _app._signals[handle.id] = handle
@@ -3763,11 +4012,27 @@ def signal(initial):
     return handle
 
 
-def collection(record_type=None):
+@overload
+def collection() -> Collection[str]: ...
+
+
+@overload
+def collection(record_type: type[T]) -> Collection[T]: ...
+
+
+@overload
+def collection(record_type: types.UnionType) -> Collection[Any]: ...
+
+
+def collection(record_type: Any = None) -> Collection[Any]:
     """Declare a collection. With no argument, a scalar (str) table —
     the one-field case. With a dataclass, a record collection: the
     dataclass IS the schema (wire-typed fields, declaration order), and
-    `element.field` / `patch(key, field=...)` project it."""
+    `element.field` / `patch(key, field=...)` project it.
+
+    A SUM's element type is `Any`: `Note | Todo` in a value position is
+    `types.UnionType`, which carries no member types, so the case arms'
+    own `cases.case(Cls)` is what names a constructor there."""
     handle = Collection(_app._next("collection"), record_type)
     # THE UNDO PATH ARRIVES BY ID, not by handle, so the binding needs
     # the way back.
@@ -3794,7 +4059,7 @@ class Align(enum.IntEnum):
     BASELINE = wire.ALIGN_BASELINE
 
     @classmethod
-    def _missing_(cls, value):
+    def _missing_(cls, value: object) -> Any:
         if isinstance(value, str):
             try:
                 return cls[value.upper()]
@@ -3818,7 +4083,7 @@ class Axis(enum.IntEnum):
     VERTICAL = wire.AXIS_VERTICAL
 
     @classmethod
-    def _missing_(cls, value):
+    def _missing_(cls, value: object) -> Any:
         if isinstance(value, str):
             try:
                 return cls[value.upper()]
@@ -3833,7 +4098,7 @@ class Axis(enum.IntEnum):
         )
 
 
-def _axis_value(axis):
+def _axis_value(axis: Axis | str | int) -> Axis:
     # bool BEFORE int, which it subclasses: `axis(True)` would otherwise
     # read as 1, vertical.
     if isinstance(axis, bool) or not isinstance(axis, (str, int)):
@@ -3844,7 +4109,7 @@ def _axis_value(axis):
     return Axis(axis)
 
 
-def _align_value(align):
+def _align_value(align: Align | str | int) -> Align:
     # bool BEFORE int, which it subclasses: `align(True)` would otherwise
     # read as 1, center.
     if isinstance(align, bool) or not isinstance(align, (str, int)):
@@ -3876,7 +4141,7 @@ class Role(enum.IntEnum):
     LINK = wire.ROLE_LINK
 
     @classmethod
-    def _missing_(cls, value):
+    def _missing_(cls, value: object) -> Any:
         if isinstance(value, str):
             try:
                 return cls[value.upper()]
@@ -3893,7 +4158,7 @@ class Role(enum.IntEnum):
         )
 
 
-def _role_value(role):
+def _role_value(role: Role | str | int) -> Role:
     """One role, from either spelling, refused here if it is neither.
 
     What stays the ROOT's is the PAIRING — whether this role fits the
@@ -3946,7 +4211,7 @@ class Symbol(enum.IntEnum):
     HOME = wire.SYMBOL_HOME
 
     @classmethod
-    def _missing_(cls, value):
+    def _missing_(cls, value: object) -> Any:
         if isinstance(value, str):
             try:
                 return cls[value.upper()]
@@ -3970,7 +4235,7 @@ _SYMBOL_NAMES = {
 }
 
 
-def _symbol_value(symbol):
+def _symbol_value(symbol: Symbol | str | int) -> Symbol:
     """One symbol, from either spelling, refused here if it is neither.
     The ROOT keeps its own wall and the PAIRING too."""
     # bool BEFORE int, which it subclasses: `symbol(True)` would
@@ -3985,32 +4250,32 @@ def _symbol_value(symbol):
     return Symbol(symbol)
 
 
-def _set_align(handle, align):
+def _set_align(handle: _Handle, align: Align | str | None) -> None:
     if align is None:
         return
     _records().append(wire.tx_set_align(handle.id, _align_value(align)))
 
 
-def _set_spacing(handle, spacing):
+def _set_spacing(handle: _Handle, spacing: float | None) -> None:
     if spacing is None:
         return
     _records().append(wire.tx_set_spacing(handle.id, float(spacing)))
 
 
-def _set_inset(handle, inset):
+def _set_inset(handle: _Handle, inset: float | None) -> None:
     if inset is None:
         return
     _records().append(wire.tx_set_inset(handle.id, float(inset)))
 
 
-def _set_grow(handle, grow):
+def _set_grow(handle: _Handle, grow: float | None) -> None:
     # Every constructor takes `grow=`, the declarative spelling of
     # Widget.grow.
     if grow is not None:
         _records().append(wire.tx_set_grow(handle.id, float(grow)))
 
 
-def scroll(grow=None):
+def scroll(grow: float | None = None) -> _Container:
     """A vertical scroll viewport parenting EXACTLY ONE child. Give it
     `grow` so the enclosing track CONSTRAINS it — an unconstrained
     viewport hugs its content and nothing overflows."""
@@ -4019,7 +4284,9 @@ def scroll(grow=None):
     return _Container(handle)
 
 
-def grid(columns, *, grow=None, spacing=None, inset=None, columns_when=None):
+def grid(columns: float, *, grow: float | None = None,
+         spacing: float | None = None, inset: float | None = None,
+         columns_when: tuple[SizeClass, int] | None = None) -> _Container:
     """A grid container laying its children out row-major into `columns`
     columns — each column at its NATURAL width, aligned across rows.
     `spacing` is the inter-cell gap on both axes; `inset` its own
@@ -4064,7 +4331,9 @@ def grid(columns, *, grow=None, spacing=None, inset=None, columns_when=None):
     return _Container(handle)
 
 
-def labeled(label, *, grow=None, spacing=None, inset=None):
+def labeled(label: TextSource, *, grow: float | None = None,
+            spacing: float | None = None,
+            inset: float | None = None) -> _Labeled:
     """A LABELLED ROW (docs/forms-plan.md): `label` names the one control
     declared inside, with an optional trailing button after it. A column
     of nothing but these renders as the platform's form.
@@ -4078,7 +4347,7 @@ def labeled(label, *, grow=None, spacing=None, inset=None):
     return _Labeled(handle, label)
 
 
-def spacer(grow=1.0):
+def spacer(grow: float = 1.0) -> Widget:
     """A spacer: an empty grown column consuming the leftover main-axis
     space between its siblings."""
     handle = _widget(wire.KIND_COLUMN)
@@ -4086,7 +4355,9 @@ def spacer(grow=1.0):
     return handle
 
 
-def column(*, grow=None, spacing=None, align=None, inset=None):
+def column(*, grow: float | None = None, spacing: float | None = None,
+           align: Align | str | None = None,
+           inset: float | None = None) -> _Container:
     """A column container: parents everything declared inside it. `grow`
     is its flex weight; `spacing` its inter-child gap (main axis, DIP,
     default 8); `inset` its own padding."""
@@ -4098,7 +4369,9 @@ def column(*, grow=None, spacing=None, align=None, inset=None):
     return _Container(handle)
 
 
-def button(text=None, bind=None, *, on_click=None, grow=None):
+def button(text: str | None = None, bind: TextSource | None = None, *,
+           on_click: Handler | None = None,
+           grow: float | None = None) -> Widget:
     """A button; `text` for a constant caption, `bind` for one the row
     supplies — a Signal, the enclosing For's element, or one of its
     fields (`row.title`).
@@ -4140,7 +4413,9 @@ def button(text=None, bind=None, *, on_click=None, grow=None):
     return handle
 
 
-def row(*, grow=None, spacing=None, align=None, inset=None, stack_when=None):
+def row(*, grow: float | None = None, spacing: float | None = None,
+        align: Align | str | None = None, inset: float | None = None,
+        stack_when: SizeClass | None = None) -> _Container:
     """A row container: column turned sideways. `grow` is its flex
     weight; `spacing` its inter-child gap (main axis, DIP, default 8);
     `inset` its own padding.
@@ -4179,7 +4454,9 @@ def row(*, grow=None, spacing=None, align=None, inset=None, stack_when=None):
     return _Container(handle)
 
 
-def checkbox(text=None, *, checked=None, on_toggle=None, grow=None):
+def checkbox(text: str | None = None, *, checked: FlagSource | None = None,
+             on_toggle: Handler | None = None,
+             grow: float | None = None) -> Widget:
     """A labeled on/off box. The box owns its checked bit: `on_toggle`
     receives the new state (template copies get their `Row` first, and
     `todo.done = checked` is the fold) and the app folds it into its own
@@ -4196,14 +4473,17 @@ def checkbox(text=None, *, checked=None, on_toggle=None, grow=None):
                                              checked._index)
             )
         else:
-            _records().append(wire.tx_set_checked(handle.id, checked))
+            _records().append(
+                wire.tx_set_checked(handle.id, cast("bool", checked)))
     if on_toggle is not None:
         _app._register(handle, wire.OCC_TOGGLED, on_toggle)
     _set_grow(handle, grow)
     return handle
 
 
-def progress(value=None, *, indeterminate=None, grow=None):
+def progress(value: NumberSource | None = None, *,
+             indeterminate: bool | None = None,
+             grow: float | None = None) -> Widget:
     """A progress bar: display-only. `value` is the determinate fraction
     (0..=1); `indeterminate=True` switches to the platform's activity
     mode and the fraction is ignored while it is on."""
@@ -4217,7 +4497,8 @@ def progress(value=None, *, indeterminate=None, grow=None):
                                            value._index)
             )
         else:
-            _records().append(wire.tx_set_value(handle.id, float(value)))
+            _records().append(
+                wire.tx_set_value(handle.id, float(cast("float", value))))
     if indeterminate is not None:
         _records().append(
             wire.tx_set_indeterminate(handle.id, bool(indeterminate)))
@@ -4225,7 +4506,9 @@ def progress(value=None, *, indeterminate=None, grow=None):
     return handle
 
 
-def select(options, *, selected=0, on_select=None, grow=None):
+def select(options: Sequence[str], *, selected: float | Signal[Any] = 0,
+           on_select: Handler | None = None,
+           grow: float | None = None) -> Widget:
     """A dropdown select over fixed options; each becomes a label child.
     UNCONTROLLED: the widget owns its selection and reports each USER
     pick to `on_select`; programmatic writes never echo."""
@@ -4245,7 +4528,9 @@ def select(options, *, selected=0, on_select=None, grow=None):
     return handle
 
 
-def radio(options, *, selected=0, on_select=None, grow=None):
+def radio(options: Sequence[str], *, selected: float | Signal[Any] = 0,
+          on_select: Handler | None = None,
+          grow: float | None = None) -> Widget:
     """A radio group over fixed options — `select`'s contract in its
     inline presentation."""
     handle = _widget(wire.KIND_RADIO)
@@ -4264,8 +4549,11 @@ def radio(options, *, selected=0, on_select=None, grow=None):
     return handle
 
 
-def slider(value=None, *, min=None, max=None, step=None, tick_spacing=None,
-           on_change=None, on_commit=None, grow=None):
+def slider(value: NumberSource | None = None, *, min: float | None = None,
+           max: float | None = None, step: float | None = None,
+           tick_spacing: float | None = None,
+           on_change: Handler | None = None, on_commit: Handler | None = None,
+           grow: float | None = None) -> Widget:
     """A slider over a numeric range. UNCONTROLLED: the widget owns its
     position and reports each change to `on_change` and each settled
     gesture to `on_commit`, template copies getting their `Row`
@@ -4292,7 +4580,8 @@ def slider(value=None, *, min=None, max=None, step=None, tick_spacing=None,
                                            value._index)
             )
         else:
-            _records().append(wire.tx_set_value(handle.id, value))
+            _records().append(
+                wire.tx_set_value(handle.id, cast("float", value)))
     if on_change is not None:
         _app._register(handle, wire.OCC_VALUE_CHANGED, on_change)
     if on_commit is not None:
@@ -4301,7 +4590,7 @@ def slider(value=None, *, min=None, max=None, step=None, tick_spacing=None,
     return handle
 
 
-def _picker_field(what, value, want):
+def _picker_field(what: str, value: FieldRef[Any], want: type) -> None:
     """A picker's template source, held to the field TYPE — a Date field
     and an int one share the I64 tag, so nothing below this can tell them
     apart (docs/datetime-plan.md D10)."""
@@ -4312,7 +4601,11 @@ def _picker_field(what, value, want):
         )
 
 
-def date_picker(value=None, *, min=None, max=None, on_change=None, grow=None):
+def date_picker(value: datetime.date | Source | None = None, *,
+                min: datetime.date | None = None,
+                max: datetime.date | None = None,
+                on_change: Handler | None = None,
+                grow: float | None = None) -> Widget:
     """A date picker over civil dates — `datetime.date`, never an instant
     (docs/datetime-plan.md). UNCONTROLLED: the control owns its value and
     reports each COMMITTED pick to `on_change`, template copies getting
@@ -4346,7 +4639,9 @@ def date_picker(value=None, *, min=None, max=None, on_change=None, grow=None):
     return handle
 
 
-def time_picker(value=None, *, step=None, on_change=None, grow=None):
+def time_picker(value: datetime.time | Source | None = None, *,
+                step: float | None = None, on_change: Handler | None = None,
+                grow: float | None = None) -> Widget:
     """A time picker over civil times — `datetime.time`, hours and minutes
     (seconds are not a picker value). `step` is the minute granularity: 1,
     5, 10, 15 or 30, and a pick snaps to it."""
@@ -4374,7 +4669,9 @@ def time_picker(value=None, *, step=None, on_change=None, grow=None):
     return handle
 
 
-def entry(text=None, *, on_change=None, grow=None, placeholder=None):
+def entry(text: str | None = None, *, on_change: Handler | None = None,
+          grow: float | None = None,
+          placeholder: TextSource | None = None) -> Widget:
     """A single-line text field. UNCONTROLLED: the widget owns its text
     and reports each edit to `on_change`, template copies getting their
     `Row` first. There is no read-back."""
@@ -4389,7 +4686,7 @@ def entry(text=None, *, on_change=None, grow=None, placeholder=None):
     return handle
 
 
-def _bind_document(handle, field):
+def _bind_document(handle: Widget, field: object) -> None:
     """A stamped copy's document, bound to a `Document` FIELD of its row
     (docs/rich-text-plan.md §19): `rich` FIRST — the core refuses
     `document` without it — then the binding, and the node is recorded so
@@ -4410,9 +4707,12 @@ def _bind_document(handle, field):
     _app._document_binds[handle.id] = (field._element._coll, field._index)
 
 
-def textarea(text=None, *, on_change=None, grow=None, placeholder=None,
-             rich=False, own_undo=False, on_edit=None, on_format=None,
-             document=None):
+def textarea(text: str | None = None, *, on_change: Handler | None = None,
+             grow: float | None = None,
+             placeholder: TextSource | None = None, rich: bool = False,
+             own_undo: bool = False, on_edit: Handler | None = None,
+             on_format: Handler | None = None,
+             document: Document | FieldRef[Any] | None = None) -> Widget:
     """A multi-line text editor: the entry's uncontrolled contract over
     the platform's real multi-line editor.
 
@@ -4452,7 +4752,9 @@ def textarea(text=None, *, on_change=None, grow=None, placeholder=None,
     return handle
 
 
-def search(text=None, *, on_change=None, grow=None, placeholder=None):
+def search(text: str | None = None, *, on_change: Handler | None = None,
+           grow: float | None = None,
+           placeholder: TextSource | None = None) -> Widget:
     """A search field (docs/search-plan.md): the entry's uncontrolled
     contract under the platform's search chrome, filtering on every
     keystroke. The clear affordance reaches `on_change` with ""."""
@@ -4467,7 +4769,9 @@ def search(text=None, *, on_change=None, grow=None, placeholder=None):
     return handle
 
 
-def label(text=None, bind=None, *, grow=None, href=None, rich=False):
+def label(text: str | None = None, bind: TextSource | None = None, *,
+          grow: float | None = None, href: TextSource | None = None,
+          rich: bool = False) -> Widget:
     """A label; `text` for a constant, `bind` for a Signal or an
     Element (the enclosing For's, levels computed). `href=` with
     `role="link"` is the destination the platform opens
@@ -4505,20 +4809,23 @@ def label(text=None, bind=None, *, grow=None, href=None, rich=False):
     return handle
 
 
-def heading(text=None, bind=None, *, grow=None):
+def heading(text: str | None = None, bind: TextSource | None = None, *,
+            grow: float | None = None) -> Widget:
     """A label wearing the heading role: the platform's heading text
     style AND the accessibility heading trait, and on a grouped screen
     the section-header seat (docs/styling-plan.md D4)."""
     return label(text=text, bind=bind, grow=grow).role("heading")
 
 
-def caption(text=None, bind=None, *, grow=None):
+def caption(text: str | None = None, bind: TextSource | None = None, *,
+            grow: float | None = None) -> Widget:
     """A label wearing the caption role: the platform's footnote text
     tier, and on a grouped screen the section-footer seat."""
     return label(text=text, bind=bind, grow=grow).role("caption")
 
 
-def image(source=None, *, grow=None):
+def image(source: bytes | bytearray | memoryview | Asset | Source | None = None,
+          *, grow: float | None = None) -> Widget:
     """An image displaying encoded bytes: the toolkit decodes natively,
     and a decode failure renders the placeholder, never a crash. `source`
     is encoded bytes, an `Asset`, a Signal, or an element field."""
@@ -4573,7 +4880,7 @@ _TEXT_BASELINES = {
 }
 
 
-def _draw_vocab(table, what, name):
+def _draw_vocab(table: Mapping[str, int], what: str, name: str) -> int:
     try:
         return table[name]
     except (KeyError, TypeError):
@@ -4588,28 +4895,28 @@ class Draw:
     drawing, but ONE record is submitted when the scope closes
     (docs/canvas-plan.md §2.1)."""
 
-    def __init__(self, viewbox):
+    def __init__(self, viewbox: tuple[float, float]) -> None:
         self.viewbox = viewbox
-        self._ops = []
+        self._ops: list[Any] = []
 
-    def _op(self, code, *operands):
+    def _op(self, code: int, *operands: Any) -> Draw:
         self._ops.append(code)
         self._ops.extend(operands)
         return self
 
-    def move_to(self, x, y):
+    def move_to(self, x: float, y: float) -> Draw:
         """Start a subpath at (x, y)."""
         return self._op(wire.DRAW_OP_MOVE_TO, float(x), float(y))
 
-    def line_to(self, x, y):
+    def line_to(self, x: float, y: float) -> Draw:
         """Extend the current subpath to (x, y)."""
         return self._op(wire.DRAW_OP_LINE_TO, float(x), float(y))
 
-    def close(self):
+    def close(self) -> Draw:
         """Close the current subpath."""
         return self._op(wire.DRAW_OP_CLOSE)
 
-    def polyline(self, points):
+    def polyline(self, points: Sequence[tuple[float, float]]) -> Draw:
         """`move_to` the first point and `line_to` the rest."""
         for i, (x, y) in enumerate(points):
             if i == 0:
@@ -4618,7 +4925,7 @@ class Draw:
                 self.line_to(x, y)
         return self
 
-    def stroke(self, paint, width=1.0):
+    def stroke(self, paint: str, width: float = 1.0) -> Draw:
         """Stroke the built path and clear it. `width` is in
         device-independent points and does NOT carry the viewbox stretch
         (docs/canvas-plan.md §3.2)."""
@@ -4626,20 +4933,20 @@ class Draw:
                         _draw_vocab(_PAINTS, "paint role", paint),
                         float(width))
 
-    def fill(self, paint, rule="nonzero"):
+    def fill(self, paint: str, rule: str = "nonzero") -> Draw:
         """Fill the built path and clear it."""
         return self._op(wire.DRAW_OP_FILL,
                         _draw_vocab(_PAINTS, "paint role", paint),
                         _draw_vocab(_FILL_RULES, "fill rule", rule))
 
-    def font(self, size, asset="", weight=400):
+    def font(self, size: float, asset: str = "", weight: int = 400) -> Draw:
         """Select the face for subsequent text ops. `asset` is an
         ordinary asset name; `""` is kaya's own embedded default face."""
         return self._op(wire.DRAW_OP_FONT, str(asset), float(size),
                         int(weight))
 
-    def text(self, x, y, s, paint="axis", align="start",
-             baseline="alphabetic"):
+    def text(self, x: float, y: float, s: str, paint: str = "axis",
+             align: str = "start", baseline: str = "alphabetic") -> Draw:
         """Draw ONE LINE with its anchor at (x, y). A line break in `s`
         is refused by the core (docs/canvas-plan.md §3.3)."""
         return self._op(wire.DRAW_OP_TEXT, float(x), float(y),
@@ -4654,12 +4961,13 @@ class _DrawScope:
     """`_Handle.draw`'s with-block: records through `Draw`, submits one
     `set_drawing` on exit. Nothing is emitted when the body raises."""
 
-    def __init__(self, handle, keys):
+    def __init__(self, handle: _Handle, keys: Sequence[Key]) -> None:
         self._handle = handle
         self._keys = list(keys)
-        self._draw = None
+        # Set by __enter__; a scope is never used without its `with`.
+        self._draw = cast("Draw", None)
 
-    def __enter__(self):
+    def __enter__(self) -> Draw:
         viewbox = _canvas_viewboxes.get(self._handle.id)
         if viewbox is None:
             raise KayaStateError(
@@ -4670,7 +4978,8 @@ class _DrawScope:
         self._draw = Draw(viewbox)
         return self._draw
 
-    def __exit__(self, exc_type, exc, tb):
+    def __exit__(self, exc_type: Any, exc: Any,
+                 tb: Any) -> Literal[False]:
         if exc_type is not None:
             return False
         w, h = self._draw.viewbox
@@ -4682,7 +4991,9 @@ class _DrawScope:
         return False
 
 
-def _size_policy(handle, fixed, on_draw, on_tick):
+def _size_policy(handle: Widget, fixed: bool | None,
+                 on_draw: Callable[..., object] | None,
+                 on_tick: Callable[..., object] | None) -> None:
     """WHAT THIS CANVAS DOES WITH A TRACK THAT IS NOT ITS VIEWBOX
     (docs/canvas-plan.md §3.2.1). `scale` is spelled by declaring
     nothing. THE HANDLER IS THE DECLARATION: registering it and putting
@@ -4710,11 +5021,16 @@ def _size_policy(handle, fixed, on_draw, on_tick):
     else:
         policy = (wire.SIZE_POLICY_REDRAW if on_draw is not None
                   else wire.SIZE_POLICY_TICK)
-        _app._register_draw(handle, policy, on_draw or on_tick)
+        _app._register_draw(
+            handle, policy, cast("Callable[..., object]", on_draw or on_tick))
     _records().append(wire.tx_set_size_policy(handle.id, policy))
 
 
-def canvas(viewbox, *, grow=None, fixed=None, on_draw=None, on_tick=None):
+def canvas(viewbox: tuple[float, float], *, grow: float | None = None,
+           fixed: bool | None = None,
+           on_draw: Callable[[Draw, tuple[float, float]], object] | None = None,
+           on_tick: Callable[[Draw, tuple[float, float], float], object] | None = None
+           ) -> Widget:
     """A drawing surface. `viewbox` is the (width, height) coordinate
     system the ops are written in AND the canvas's natural size in
     points (docs/canvas-plan.md §3.2). Declare what it draws with
@@ -4741,7 +5057,7 @@ def canvas(viewbox, *, grow=None, fixed=None, on_draw=None, on_tick=None):
     return handle
 
 
-def for_each(coll):
+def for_each(coll: Collection[T]) -> _Template[T]:
     """A For over `coll`: the with-block declares the template, and the
     target yields the element — `with kaya.for_each(c) as element:`."""
     # A For binds the collection itself — its template stamps per entry
@@ -4754,15 +5070,18 @@ def for_each(coll):
     return _Template(wire.tx_create_for, coll._id, is_for=True, coll=coll)
 
 
-def when(sig):
+def when(sig: Signal[Any]) -> _Template[None]:
     """A When over a Bool signal: stamps its template on true, unstamps
     on false."""
     return _Template(wire.tx_create_when, sig.id, is_for=False)
 
 
-def _window_props(window, title, width, height, veto_close, dirty,
-                  panes, sections_presentation, appearance, inset,
-                  remember_frame):
+def _window_props(window: int, title: str | None, width: float | None,
+                  height: float | None, veto_close: bool | None,
+                  dirty: bool | None, panes: int | None,
+                  sections_presentation: SectionsPresentation | str | int | None,
+                  appearance: Appearance | str | int | None,
+                  inset: float | None, remember_frame: bool | None) -> None:
     """The window construct's props — ONE place, so the scene scope and
     the live call cannot drift apart."""
     records = _records()
@@ -4805,7 +5124,7 @@ class _LiveWindow:
     "transactions do not nest", which is true and unhelpful.
     """
 
-    def __enter__(self):
+    def __enter__(self) -> NoReturn:
         raise KayaStateError(
             "kaya: the window construct's props are already in this "
             "transaction — inside a handler (or `with app.build():`) the "
@@ -4814,19 +5133,29 @@ class _LiveWindow:
             "its own and mounts a root, which a handler must not do."
         )
 
-    def __exit__(self, exc_type, exc, tb):
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> Literal[False]:
         return False
 
 
 class _TxScope:
-    def __init__(self, app, mount_on_exit, title=None, width=None, height=None,
-                 window=0, create=False, veto_close=None, dirty=None,
-                 remember_frame=None, panes=None,
-                 sections_presentation=None, appearance=None,
-                 inset=None, push=False,
-                 intercept_back=None, on_popped=None, on_back=None,
-                 section=False, on_selected=None, host_window=0,
-                 symbol=None, badge=None):
+    """One ambient transaction's with-block: the scene scope that mounts
+    on exit, the build that does not, and the push/section nesting."""
+
+    def __init__(self, app: App, mount_on_exit: bool, title: str | None = None,
+                 width: float | None = None, height: float | None = None,
+                 window: int = 0, create: bool = False,
+                 veto_close: bool | None = None, dirty: bool | None = None,
+                 remember_frame: bool | None = None, panes: int | None = None,
+                 sections_presentation: SectionsPresentation | str | int | None = None,
+                 appearance: Appearance | str | int | None = None,
+                 inset: float | None = None, push: bool = False,
+                 intercept_back: bool | None = None,
+                 on_popped: Callable[[], object] | None = None,
+                 on_back: Callable[[], object] | None = None,
+                 section: bool = False,
+                 on_selected: Callable[[], object] | None = None,
+                 host_window: int = 0, symbol: Symbol | None = None,
+                 badge: float | Signal[Any] | None = None) -> None:
         # FIRST, so __del__ below can read them even if this __init__
         # raises on one of its own conversions.
         self._entered = False
@@ -4857,7 +5186,7 @@ class _TxScope:
         self._symbol = symbol
         self._badge = badge
 
-    def __del__(self):
+    def __del__(self) -> None:
         # A construct BUILT AND NEVER ENTERED emits nothing and says
         # nothing. Guarded because __del__ can run while the interpreter
         # is tearing stderr down.
@@ -4875,7 +5204,7 @@ class _TxScope:
         except Exception:
             pass
 
-    def __enter__(self):
+    def __enter__(self) -> _TxScope:
         global _tx, _pending_root, _recording, _journal
         self._entered = True
         _require_app_thread()
@@ -4949,7 +5278,8 @@ class _TxScope:
             self._remember_frame)
         return self
 
-    def __exit__(self, exc_type, exc, tb):
+    def __exit__(self, exc_type: Any, exc: Any,
+                 tb: Any) -> Literal[False]:
         global _tx, _recording, _journal, _pending_root
         if self._section or self._push:
             # Submit only if this scope opened its own transaction:
@@ -4966,16 +5296,16 @@ class _TxScope:
                 raise KayaStateError(
                     "kaya: push_entry()/add_section() body declared no "
                     "root container")
-            _tx.append(wire.tx_mount(self._window, root.id))
+            _records().append(wire.tx_mount(self._window, root.id))
             if not self._nested:
-                records, _tx = _tx, None
+                records, _tx = cast("list[bytes]", _tx), None
                 _journal = None
                 _ship(records)
             return False
         global _tpl_depth
         _recording = False
-        records, _tx = _tx, None
-        journal, _journal = _journal, None
+        records, _tx = cast("list[bytes]", _tx), None
+        journal, _journal = cast("dict[int, Callable[[], None]]", _journal), None
         abandoned, _open_traces[:] = list(_open_traces), []
         # An abandoned transaction must not leave a menu scope armed for
         # the next one.
@@ -5012,7 +5342,11 @@ class _TxScope:
 
 
 class App:
-    def __init__(self):
+    """The process's app: the scene scopes (`window`, `build`,
+    `push_entry`, `add_section`), the window command catalog, and the
+    occurrence loop `run()` drives."""
+
+    def __init__(self) -> None:
         global _app
         # No "node" space: template nodes draw from "widget" (DESIGN.md,
         # Binding conventions).
@@ -5020,70 +5354,76 @@ class App:
                           "alert": 0, "menu_item": 0, "file_dialog": 0,
                           "clipboard": 0, "link_route": 0}
         # The wire routes by path_len, not by number, so two dicts.
-        self._widget_handlers = {}
-        self._alert_handlers = {}
+        self._widget_handlers: dict[tuple[int, int], Handler] = {}
+        self._alert_handlers: dict[int, Callable[[AlertChoice], object]] = {}
         # One-shot, keyed by the GUEST's notification id (the alert's
         # grammar; many may be live at once).
-        self._notification_handlers = {}
+        self._notification_handlers: dict[
+            int, Callable[[NotificationOutcome], object]] = {}
         # NOT one-shot, and not keyed at all: the process-level handler
         # for a result whose id has none above (docs/tasks-s9-plan.md
         # R1). A relaunched process never called show.
-        self._notification_activation = None
+        self._notification_activation: Callable[
+            [int, NotificationOutcome], object] | None = None
         # NOT one-shot either: a route declared by link() answers every
         # URL that matches it, for the life of the process
         # (docs/app-links-plan.md §4), and the core owns the pattern
         # table — nothing is kept here but the handler.
-        self._link_handlers = {}
+        self._link_handlers: dict[
+            int, Callable[[dict[str, str]], object]] = {}
         # link() may be called before the first transaction, so its
         # record waits here for one (_ship drains it head-first).
-        self._pending_records = []
-        self._file_dialog_handlers = {}
+        self._pending_records: list[bytes] = []
+        self._file_dialog_handlers: dict[
+            int, Callable[[list[PickedFile]], object]] = {}
         # One-shot, keyed by request id (the alert's grammar).
-        self._clipboard_handlers = {}
+        self._clipboard_handlers: dict[
+            int, Callable[[Clip | None], object]] = {}
         # Menu items are their own id space, so their own table.
-        self._menu_handlers = {}
+        self._menu_handlers: dict[tuple[int, int], Handler] = {}
         # Per-entry navigation handlers, keyed by entry surface id.
-        self._entry_popped = {}
-        self._back_requested = {}
-        self._section_selected = {}
+        self._entry_popped: dict[int, Callable[[], object]] = {}
+        self._back_requested: dict[int, Callable[[], object]] = {}
+        self._section_selected: dict[int, Callable[[], object]] = {}
         # Per-window lifecycle handlers, keyed by window id.
-        self._close_requested = {}
-        self._window_closed = {}
+        self._close_requested: dict[int, Callable[[], object]] = {}
+        self._window_closed: dict[int, Callable[[], object]] = {}
         # NOT one-shot: a history is walked as often as the user likes.
-        self._undone = {}
-        self._redone = {}
+        self._undone: dict[int, Callable[[str, UndoDelta], object]] = {}
+        self._redone: dict[int, Callable[[str, UndoDelta], object]] = {}
         # By core id, for the undo path: an `undone` payload names them
         # rather than handing back handles.
-        self._collections = {}
-        self._signals = {}
-        self._node_handlers = {}
+        self._collections: dict[int, Collection[Any]] = {}
+        self._signals: dict[int, Signal[Any]] = {}
+        self._node_handlers: dict[tuple[int, int], Handler] = {}
         # The For a stamped registration belongs to, by node id, and the
         # catalog a free context item was built in: together they name
         # the collection a Row handle reads and writes.
-        self._node_owners = {}
-        self._item_catalogs = {}
+        self._node_owners: dict[int, Collection[Any]] = {}
+        self._item_catalogs: dict[int, ContextCatalog] = {}
         # Its own table because these do not fold an occurrence into app
         # state: they answer the ask with a drawing the guest never sees
         # (docs/canvas-plan.md §3.2.1).
-        self._draw_handlers = {}
+        self._draw_handlers: dict[
+            int, tuple[Widget, Callable[..., object]]] = {}
         # The rich mirror, by LIVE widget id (docs/rich-text-plan.md R1).
         # Outside the rollback journal, as the Rust binding's is: an edge
         # the widget and the core have taken is not the app's to undo.
-        self._documents = {}
+        self._documents: dict[int, Document] = {}
         # Template node -> (collection, field index) per bound `document`,
         # so a stamped copy's act folds into its row (§19).
-        self._document_binds = {}
+        self._document_binds: dict[int, tuple[Collection[Any], int]] = {}
         # THE ONLY STATE HERE TOUCHED FROM ANOTHER THREAD, and the only
         # reason App carries a lock.
         self._post_lock = threading.Lock()
-        self._posted = []
+        self._posted: list[tuple[Callable[..., object], tuple[Any, ...]]] = []
         _app = self
 
-    def _next(self, space):
+    def _next(self, space: str) -> int:
         self._counters[space] += 1
         return self._counters[space]
 
-    def _register(self, handle, kind, fn):
+    def _register(self, handle: _Handle, kind: int, fn: Handler) -> None:
         if isinstance(handle, Node):
             # THE ROW HANDLE'S OWNER: the innermost For open at
             # registration (docs/js-plan.md §4 rule 3).
@@ -5092,7 +5432,7 @@ class App:
         else:
             self._widget_handlers[(kind, handle.id)] = fn
 
-    def _row_args(self, ident, keys):
+    def _row_args(self, ident: int, keys: Sequence[Key]) -> list[Any]:
         """The row a stamped occurrence names, as a handle."""
         if not keys:
             return []
@@ -5104,7 +5444,8 @@ class App:
             return list(keys)
         return [Row(owner, keys)]
 
-    def _register_draw(self, handle, policy, fn):
+    def _register_draw(self, handle: Widget, policy: int,
+                       fn: Callable[..., object]) -> None:
         """The registration half of `canvas(on_draw=)`/`(on_tick=)`.
 
         THE HANDLER IS WIDENED HERE, never switched on the record kind: a
@@ -5117,7 +5458,8 @@ class App:
             fn = lambda d, size, _time: drawn(d, size)  # noqa: E731
         self._draw_handlers[handle.id] = (handle, fn)
 
-    def _answer_canvas(self, ident, kind, values):
+    def _answer_canvas(self, ident: int, kind: int,
+                       values: Sequence[Any]) -> None:
         """ANSWER ONE CANVAS ASK: draw at the size the core assigned and
         submit that drawing (docs/canvas-plan.md §3.2.1). The binding
         opens the transaction (tools/check-ambient-tx.py) and the ask
@@ -5139,7 +5481,10 @@ class App:
                 fn(d, size, time)
         self._dispatch(answer)
 
-    def _register_history(self, window_id, on_undone, on_redone):
+    def _register_history(self, window_id: int,
+                          on_undone: Callable[[str, UndoDelta], object] | None,
+                          on_redone: Callable[[str, UndoDelta], object] | None
+                          ) -> None:
         """Seat a surface's two history handlers. Per window and NOT
         one-shot: both outlive every step."""
         if on_undone is not None:
@@ -5147,13 +5492,20 @@ class App:
         if on_redone is not None:
             self._redone[int(window_id)] = on_redone
 
-    def create_window(self, window_id, *, title=None, width=None, height=None,
-                      veto_close=None, dirty=None, remember_frame=None,
-                      panes=None,
-                      sections_presentation=None, appearance=None,
-                      inset=None,
-                      on_close_requested=None, on_closed=None,
-                      on_undone=None, on_redone=None):
+    def create_window(self, window_id: int, *, title: str | None = None,
+                      width: float | None = None, height: float | None = None,
+                      veto_close: bool | None = None,
+                      dirty: bool | None = None,
+                      remember_frame: bool | None = None,
+                      panes: int | None = None,
+                      sections_presentation: SectionsPresentation | str | int | None = None,
+                      appearance: Appearance | str | int | None = None,
+                      inset: float | None = None,
+                      on_close_requested: Callable[[], object] | None = None,
+                      on_closed: Callable[[], object] | None = None,
+                      on_undone: Callable[[str, UndoDelta], object] | None = None,
+                      on_redone: Callable[[str, UndoDelta], object] | None = None
+                      ) -> _TxScope:
         """An auxiliary surface's scene scope: create_window plus its
         props on entry, and the single top-level container mounts INTO IT
         on exit. Capability-gated — a phone host rejects at the root.
@@ -5175,12 +5527,18 @@ class App:
             sections_presentation=sections_presentation,
             appearance=appearance, inset=inset)
 
-    def window(self, title=None, *, width=None, height=None, veto_close=None,
-               dirty=None, remember_frame=None, panes=None,
-               sections_presentation=None,
-               appearance=None,
-               inset=None, on_close_requested=None, on_closed=None,
-               on_undone=None, on_redone=None, window_id=0):
+    def window(self, title: str | None = None, *, width: float | None = None,
+               height: float | None = None, veto_close: bool | None = None,
+               dirty: bool | None = None, remember_frame: bool | None = None,
+               panes: int | None = None,
+               sections_presentation: SectionsPresentation | str | int | None = None,
+               appearance: Appearance | str | int | None = None,
+               inset: float | None = None,
+               on_close_requested: Callable[[], object] | None = None,
+               on_closed: Callable[[], object] | None = None,
+               on_undone: Callable[[str, UndoDelta], object] | None = None,
+               on_redone: Callable[[str, UndoDelta], object] | None = None,
+               window_id: int = 0) -> _TxScope | _LiveWindow:
         """The scene scope: an ambient transaction whose single top-level
         container mounts into the default window on exit. `title` names
         the surface; `width`/`height` request content size in DIP
@@ -5243,13 +5601,15 @@ class App:
             sections_presentation=sections_presentation,
             appearance=appearance, inset=inset)
 
-    def build(self):
+    def build(self) -> _TxScope:
         """An ambient transaction without the mount — for mutations
         outside handlers."""
         return _TxScope(self, mount_on_exit=False)
 
-    def push_entry(self, entry_id, *, title=None, intercept_back=None,
-                   on_popped=None, on_back=None):
+    def push_entry(self, entry_id: int, *, title: str | None = None,
+                   intercept_back: bool | None = None,
+                   on_popped: Callable[[], object] | None = None,
+                   on_back: Callable[[], object] | None = None) -> _TxScope:
         """A navigation entry's scene scope (DESIGN.md, Navigation): the
         single top-level container mounts INTO IT on exit. Entry ids are
         guest-allocated in the shared surface namespace.
@@ -5264,8 +5624,11 @@ class App:
             title=title, intercept_back=intercept_back,
             on_popped=on_popped, on_back=on_back)
 
-    def add_section(self, section_id, *, title=None, symbol=None, badge=None,
-                    on_selected=None, window=0):
+    def add_section(self, section_id: int, *, title: str | None = None,
+                    symbol: Symbol | str | None = None,
+                    badge: float | Signal[Any] | None = None,
+                    on_selected: Callable[[], object] | None = None,
+                    window: int = 0) -> _TxScope:
         """A section's scene scope (DESIGN.md, Sections): the single
         top-level container mounts INTO IT on exit. The set is
         append-only and switching is SELECTION, not lifecycle.
@@ -5285,7 +5648,10 @@ class App:
             title=title, symbol=None if symbol is None else _symbol_value(symbol),
             badge=badge, on_selected=on_selected, host_window=window)
 
-    def menu(self, label, *, enabled=None, icon=None, symbol=None, window=0):
+    def menu(self, label: TextSource, *,
+             enabled: bool | Signal[Any] | None = None,
+             icon: bytes | None = None, symbol: Symbol | str | None = None,
+             window: int = 0) -> _MenuScope[MenuItem]:
         """A top-level menu in `window`'s command catalog (DESIGN.md,
         Menus). Yields the retained handle, which append() reopens at any
         time; disabling the menu disables its subtree."""
@@ -5299,8 +5665,13 @@ class App:
             it.symbol(symbol)
         return _MenuScope(("item", it.id), shortcut_ok=True, value=it)
 
-    def radio_group(self, label, *, value=None, enabled=None, icon=None,
-                    symbol=None, on_select=None, window=0):
+    def radio_group(self, label: TextSource, *,
+                    value: float | Signal[Any] | None = None,
+                    enabled: bool | Signal[Any] | None = None,
+                    icon: bytes | None = None,
+                    symbol: Symbol | str | None = None,
+                    on_select: Handler | None = None,
+                    window: int = 0) -> _MenuScope[MenuItem]:
         """A BAR-LEVEL radio group, declaring only kaya.option children.
         `value` is the selected 0-based index; programmatic writes are
         quiet, and on_select receives each USER pick's new index."""
@@ -5321,7 +5692,7 @@ class App:
         return _MenuScope(("item", it.id), shortcut_ok=True, value=it,
                           on_exit=on_exit)
 
-    def _dispatch(self, handler, *args):
+    def _dispatch(self, handler: Callable[..., object], *args: Any) -> None:
         """One handler dispatch, INSIDE an ambient transaction. An
         exception crossing the build boundary — which rolled the mirrors
         back and dropped the records — is logged and the loop moves on;
@@ -5341,7 +5712,7 @@ class App:
                 file=sys.stderr,
             )
 
-    def post(self, fn, *args):
+    def post(self, fn: Callable[..., object], *args: Any) -> None:
         """Run fn as a transaction on the app thread, soon. THE ONE method
         safe to call from another thread.
 
@@ -5356,7 +5727,7 @@ class App:
         # about it.
         runtime.wake()
 
-    def _absorb_undo(self, delta):
+    def _absorb_undo(self, delta: UndoDelta) -> None:
         """Fold an undo's payload into the collection mirrors; the
         payload is core-authoritative, so nothing here re-derives.
 
@@ -5410,23 +5781,25 @@ class App:
     # (crates/kaya/src/app.rs, absorb_edit/absorb_format), and the seed a
     # set_document write leaves.
 
-    def _document(self, widget):
+    def _document(self, widget: int) -> Document:
         doc = self._documents.get(widget)
         if doc is None:
             return Document()
         return Document(doc.text, [Run(r.range.start, r.range.stop, r.name, r.value)
                                    for r in doc.runs])
 
-    def _seed_document(self, widget, document):
+    def _seed_document(self, widget: int, document: Document) -> None:
         self._documents[widget] = Document(
             document.text,
             [Run(r.range.start, r.range.stop, r.name, r.value) for r in document.runs])
 
-    def _absorb_edit(self, widget, start, stop, inserted, runs):
+    def _absorb_edit(self, widget: int, start: int, stop: int, inserted: str,
+                     runs: Sequence[Run]) -> None:
         _fold_edit(self._documents.setdefault(widget, Document()),
                    start, stop, inserted, runs)
 
-    def _ranged_act_bounds(self, widget, start, stop, name):
+    def _ranged_act_bounds(self, widget: int, start: int, stop: int,
+                           name: str) -> tuple[int, int]:
         """A ranged act's range in the fold's text: a `block` covers the
         whole paragraphs it touches, as the core snaps it
         (docs/rich-text-plan.md §17)."""
@@ -5438,11 +5811,13 @@ class App:
         nl = data.find(b"\n", stop)
         return data.rfind(b"\n", 0, start) + 1, len(data) if nl < 0 else nl
 
-    def _absorb_format(self, widget, start, stop, name, value):
+    def _absorb_format(self, widget: int, start: int, stop: int, name: str,
+                       value: str | None) -> None:
         _fold_format(self._documents.setdefault(widget, Document()),
                      start, stop, name, value)
 
-    def _fold_row_document(self, node, keys, fold):
+    def _fold_row_document(self, node: int, keys: Sequence[Key],
+                           fold: Callable[[Document], None]) -> None:
         """A stamped copy's edit or format act reaches its ROW's Document
         field (docs/rich-text-plan.md §19): the node was bound to
         (collection, field) by the template textarea's `document=`, and
@@ -5470,7 +5845,7 @@ class App:
         fold(doc)
         setattr(entry, name, doc)
 
-    def _drain_posted(self):
+    def _drain_posted(self) -> None:
         """Run everything posted, each as its own transaction, in order.
 
         The batch is taken and the lock released BEFORE any of it runs,
@@ -5482,7 +5857,7 @@ class App:
         for fn, args in batch:
             self._dispatch(fn, *args)
 
-    def _dispatch_loop(self):
+    def _dispatch_loop(self) -> None:
         global _app_thread
         _app_thread = threading.get_ident()
         while True:
@@ -5646,7 +6021,7 @@ class App:
                         self._fold_row_document(
                             ident, keys,
                             lambda doc: _fold_format(doc, start, stop, name,
-                                                     arg.value))
+                                                     cast("Format", arg).value))
                     else:
                         self._absorb_format(ident, start, stop, name,
                                             arg.value)
@@ -5702,7 +6077,7 @@ class App:
                 args.append(payload)
             self._dispatch(handler, *args)
 
-    def run(self):
+    def run(self) -> int:
         """Block until the app ends; returns the exit code. On the
         desktops the calling thread (the process main thread) enters the
         core and a spawned thread dispatches occurrences; on the hosted

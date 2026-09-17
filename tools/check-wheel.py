@@ -16,12 +16,18 @@ import os
 import subprocess
 
 SMOKE = """\
+import importlib.resources
+
 import kaya
 import kaya.wire
 import kaya.runtime
 
 assert isinstance(kaya.wire.SPEC_HASH, int)
 assert hasattr(kaya, "collection") and hasattr(kaya, "for_each")
+# PEP 561: the hints only reach a guest if the marker SHIPS
+# (tools/py-typecheck.py is what they are for).
+assert importlib.resources.files("kaya").joinpath("py.typed").is_file(), \
+    "the installed kaya package ships no py.typed"
 """
 
 with scratch_dir("check-wheel-") as tmp:

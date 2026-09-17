@@ -1,0 +1,5 @@
+{
+  "include": ["kaya"],
+  "typeCheckingMode": "standard",
+  "pythonVersion": "3.10"
+}

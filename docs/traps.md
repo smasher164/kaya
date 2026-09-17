@@ -11577,3 +11577,17 @@ a row assertion with `isinstance(arg, kaya.Row)`, tolerate an empty list
 where a byte comparison pops one — and the watch script demands the
 NAMED check's FAIL line, never a non-zero exit. The same shape waits in
 every binding's checks file.
+
+## pyright over a SHADOW copy of bindings/python scores the REAL tree (2026-09-17)
+
+The dev shell exports `PYTHONPATH=$PWD/bindings/python`, and pyright
+resolves `import kaya` through PYTHONPATH before the project's own
+`extraPaths`. So tools/py-typecheck.py's first completeness negative —
+one public annotation removed from a shadow copy under scratch — came
+back 100% with the doctoring in hand: `--verifytypes kaya` had found the
+real package and scored it. Any gate that runs a Python tool over a copy
+of the binding has this hole. The fix is two-sided and both halves are in
+the gate: PYTHONPATH pinned at the tree being read for every subprocess,
+and the completeness reader REFUSING a score whose reported
+`packageRootDirectory` is not under that tree (an unpinned run reports
+the root as "" and scores 0, which reads as red rather than as green).

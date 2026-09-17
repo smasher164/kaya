@@ -119,6 +119,7 @@ GATES = {
                         "guests/swift", "swift"],
     "java-typecheck": ["bindings/java", "bindings/java-desktop", "guests/java"],
     "js-typecheck": ["bindings/js", "guests/js"],
+    "py-typecheck": ["bindings/python", "guests/python"],
     "go-typecheck": ["go.mod", "go.sum", "bindings/go", "guests/go", "cmd", "crates/kaya/include"],
     # The five ARTIFACT gates: sources here, the built file below.
     "check-abort": ["crates", "bindings", "guests"],

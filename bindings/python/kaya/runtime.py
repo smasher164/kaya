@@ -2,10 +2,13 @@
 occurrence loop. Hand-written; wire.py beside it is generated.
 """
 
+from __future__ import annotations
+
 import ctypes
 import os
 import pathlib
 import sys
+from typing import IO, Any
 
 from . import wire
 from .wire import OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, parse_occurrence
@@ -19,7 +22,7 @@ from .wire import SPEC_HASH
 HOSTED_ENTRY = sys.platform in ("ios", "android")
 
 
-def _find_library():
+def _find_library() -> str:
     if lib := os.environ.get("KAYA_LIB"):
         return lib
     name = {"darwin": "libkaya.dylib", "win32": "kaya.dll"}.get(
@@ -33,7 +36,7 @@ def _find_library():
     raise FileNotFoundError(f"{name} not found; build with cargo or set KAYA_LIB")
 
 
-def _load_library():
+def _load_library() -> ctypes.CDLL:
     # The one platform-dispatched step (docs/python-mobile-plan.md §D3):
     # iOS needs -force_load on libkaya.a or dlsym answers NULL, and
     # Android must load by soname, never ctypes.util.find_library.
@@ -127,7 +130,7 @@ CAP_AUX_WINDOWS = 1
 CAP_NOTIFICATIONS = 2
 
 
-def capability_bits():
+def capability_bits() -> int:
     """The raw capability word."""
     return _lib.kaya_capabilities()
 
@@ -135,7 +138,7 @@ def capability_bits():
 _occ_record = ctypes.POINTER(ctypes.c_uint8)()
 
 
-def _occurrence_blob(handle):
+def _occurrence_blob(handle: int) -> bytes:
     """Redeem an occurrence blob for its bytes, and release it.
 
     COPY THEN RELEASE, in that order: the pointer borrows core memory
@@ -153,14 +156,14 @@ def _occurrence_blob(handle):
 wire.occurrence_blob = _occurrence_blob
 
 
-def submit(*records):
+def submit(*records: bytes) -> None:
     """Submit one transaction: the concatenation of packed records,
     applied atomically."""
     tx = b"".join(records)
     _lib.kaya_submit(tx, len(tx))
 
 
-def register_blob(data):
+def register_blob(data: bytes | bytearray | memoryview) -> int:
     """Register bulk payload bytes with the core, returning the handle
     the next submit consumes whether referenced or not."""
     if not isinstance(data, (bytes, bytearray, memoryview)):
@@ -178,16 +181,19 @@ def register_blob(data):
 _OCCURRENCE_SHUTDOWN = 0
 _OCCURRENCE_WOKEN = 1
 
-# A distinct object rather than None, which already means shutdown.
-WOKEN = object()
+# A distinct object rather than None, which already means shutdown. Typed
+# `Any` because it rides next_occurrence's own return slot: the consumer
+# tests it BY IDENTITY before unpacking the tuple (App._dispatch_loop), and
+# a sentinel is the one place a dynamic type is the honest one.
+WOKEN: Any = object()
 
 
-def wake():
+def wake() -> None:
     """Return the app thread from next_occurrence. Safe from any thread."""
     _lib.kaya_wake()
 
 
-def next_occurrence():
+def next_occurrence() -> tuple[int, Any, list[Any], Any] | None:
     """Block for the next occurrence; None when the core has shut down,
     WOKEN when a background thread has queued work for the app thread.
 
@@ -212,19 +218,19 @@ def next_occurrence():
             return kind, ident, keys, payload
 
 
-def run():
+def run() -> int:
     """Enter the core on the calling thread (must be the process main
     thread); returns the exit code when the app ends."""
     return _lib.kaya_run()
 
 
-def asset_open(name):
+def asset_open(name: str) -> int:
     """Open an asset by name; 0 is the MISS, and asset_miss_sentence says why."""
     raw = name.encode("utf-8")
     return _lib.kaya_asset_open(raw, len(raw))
 
 
-def asset_bytes(handle):
+def asset_bytes(handle: int) -> bytes:
     """An open asset's bytes, copied out of core memory.
 
     THE COPY IS NOT AVOIDABLE: a `memoryview` over the borrowed pointer
@@ -235,20 +241,20 @@ def asset_bytes(handle):
     return b"" if not data else ctypes.string_at(data, length.value)
 
 
-def asset_len(handle):
+def asset_len(handle: int) -> int:
     """An open asset's byte count. 0 means the HANDLE is dead, never the
     file: the core refuses a zero-byte asset at the open."""
     return _lib.kaya_asset_len(handle)
 
 
-def asset_blob(handle):
+def asset_blob(handle: int) -> int:
     """Register this asset's bytes into the pending table and get the
     handle the next submit consumes; the bytes never enter Python.
     """
     return _lib.kaya_asset_blob(handle)
 
 
-def asset_release(handle):
+def asset_release(handle: int) -> None:
     """Drop an open asset. Idempotent, so a double close and a finalizer
     after one cost nothing."""
     _lib.kaya_asset_release(handle)
@@ -258,7 +264,7 @@ def asset_release(handle):
 # reads any *why_not by that name and holds it to the measured-branch
 # rule, which crates/kaya/src/assets.rs satisfies. This only copies that
 # sentence's bytes.
-def asset_miss_sentence(name):
+def asset_miss_sentence(name: str) -> str:
     """The core's sentence for why `asset(name)` would fail — empty when
     it would succeed.
 
@@ -275,7 +281,7 @@ def asset_miss_sentence(name):
     return out.raw[:min(written, needed)].decode("utf-8", "replace")
 
 
-def open_picked(handle, mode):
+def open_picked(handle: int, mode: int) -> tuple[IO[bytes], bool]:
     """Redeem a picked handle for a real file object, plus whether it
     seeks: `(file, seekable)`.
 
@@ -303,7 +309,7 @@ def open_picked(handle, mode):
     return os.fdopen(fd, modes[mode]), bool(seekable.value)
 
 
-def app_data_dir():
+def app_data_dir() -> str | None:
     """The app's own writable directory, or None before one exists
     (docs/tasks-s4-plan.md §4). SIZED, THEN READ, asset_miss_sentence's
     two-call shape."""
@@ -315,12 +321,12 @@ def app_data_dir():
     return out.raw[:min(written, needed)].decode("utf-8", "replace")
 
 
-def _key(key):
+def _key(key: str) -> tuple[bytes, int]:
     raw = key.encode("utf-8")
     return raw, len(raw)
 
 
-def pref_get_string(key):
+def pref_get_string(key: str) -> str | None:
     """The stored string, or None when the key is absent or holds
     another type."""
     raw, n = _key(key)
@@ -336,7 +342,7 @@ def pref_get_string(key):
     return out.raw[:length.value].decode("utf-8", "replace")
 
 
-def pref_get_i64(key):
+def pref_get_i64(key: str) -> int | None:
     raw, n = _key(key)
     out = ctypes.c_int64(0)
     if not _lib.kaya_pref_get_i64(raw, n, ctypes.byref(out)):
@@ -344,7 +350,7 @@ def pref_get_i64(key):
     return out.value
 
 
-def pref_get_f64(key):
+def pref_get_f64(key: str) -> float | None:
     raw, n = _key(key)
     out = ctypes.c_double(0.0)
     if not _lib.kaya_pref_get_f64(raw, n, ctypes.byref(out)):
@@ -352,7 +358,7 @@ def pref_get_f64(key):
     return out.value
 
 
-def pref_get_bool(key):
+def pref_get_bool(key: str) -> bool | None:
     raw, n = _key(key)
     out = ctypes.c_uint8(0)
     if not _lib.kaya_pref_get_bool(raw, n, ctypes.byref(out)):
@@ -360,27 +366,27 @@ def pref_get_bool(key):
     return out.value != 0
 
 
-def pref_set_string(key, value):
+def pref_set_string(key: str, value: str) -> None:
     raw, n = _key(key)
     packed = value.encode("utf-8")
     _lib.kaya_pref_set_string(raw, n, packed, len(packed))
 
 
-def pref_set_i64(key, value):
+def pref_set_i64(key: str, value: int) -> None:
     raw, n = _key(key)
     _lib.kaya_pref_set_i64(raw, n, value)
 
 
-def pref_set_f64(key, value):
+def pref_set_f64(key: str, value: float) -> None:
     raw, n = _key(key)
     _lib.kaya_pref_set_f64(raw, n, value)
 
 
-def pref_set_bool(key, value):
+def pref_set_bool(key: str, value: bool) -> None:
     raw, n = _key(key)
     _lib.kaya_pref_set_bool(raw, n, 1 if value else 0)
 
 
-def pref_remove(key):
+def pref_remove(key: str) -> None:
     raw, n = _key(key)
     _lib.kaya_pref_remove(raw, n)

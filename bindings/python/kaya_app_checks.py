@@ -873,6 +873,20 @@ with app.build():
     except RuntimeError:
         check("a context catalog takes exactly one anchor", True)
 
+    # THE LIVE ANCHOR TAKES NO CATALOG. The two anchors share one
+    # signature because ONE constructor serves both zones here, so the
+    # type checker cannot tell them apart (tools/py-typecheck.py) and
+    # this refusal is the wall instead.
+    with kaya.column():
+        live = kaya.label("live")
+    try:
+        live.context_menu(catalog)
+        check("a live widget's context anchor refuses a catalog", False)
+    except RuntimeError as refused:
+        check("a live widget's context anchor refuses a catalog",
+              "takes no catalog" in str(refused)
+              and "node.context_menu(catalog)" in str(refused))
+
 # The rest of the menu guard layer (menus-plan §6). A fresh App keeps
 # the module-global _app pointed at what these blocks assert.
 app_menu = kaya.App()

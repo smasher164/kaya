@@ -238,6 +238,11 @@ GATES = [
     ("java-typecheck", ["tools/java-typecheck.py"], True, ""),
     ("js-typecheck", ["tools/js-typecheck.py"], True, ""),
     ("go-typecheck", ["tools/go-typecheck.py"], True, ""),
+    # js-typecheck's opposite number one binding over: pyright over the
+    # python binding and every python guest, plus --verifytypes over the
+    # public surface. Needs no wheel and no workspace link — it reads
+    # sources — so it takes no AFTER row.
+    ("py-typecheck", ["tools/py-typecheck.py"], True, ""),
 ]
 
 # Gate scripts on disk that are deliberately NOT in the sweep. The

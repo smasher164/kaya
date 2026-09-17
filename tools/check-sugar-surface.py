@@ -1286,7 +1286,7 @@ def check_pref_entry(snake, pascal, camel, findings=None):
     pref_want("rust", "crates/kaya/src/app.rs", f"entry '{snake}'",
               f"^pub fn {snake}\\(\\)", findings)
     pref_want("python", "bindings/python/kaya/__init__.py",
-              f"entry '{snake}'", f"^def {snake}\\(\\):", findings)
+              f"entry '{snake}'", f"^def {snake}\\(\\)", findings)
     pref_want("go", "bindings/go/app.go", f"entry '{snake}'",
               f"^func {pascal}\\(\\)", findings)
     pref_want("csharp", "bindings/csharp/KayaApp.cs", f"entry '{snake}'",
@@ -1399,9 +1399,10 @@ PREF_OWN_PATTERNS = {
         "Bool conformance": r"static func kayaPrefGet\(_ raw: \[UInt8\], default def: Bool\)",
     },
     "python": {
-        "get": r"^    def get\(self, key, default\)",
-        "set": r"^    def set\(self, key, value\)",
-        "remove": r"^    def remove\(self, key\)",
+        # The implementation, never one of `get`'s four overloads.
+        "get": r"^    def get\(self, key: str, default: bool \| int \| float \| str\)",
+        "set": r"^    def set\(self, key: str, value:",
+        "remove": r"^    def remove\(self, key: str\)",
     },
 }
 
@@ -1455,7 +1456,8 @@ PREF_METHOD_CUTS = {
     "rust": ("crates/kaya/src/app.rs", r"pub fn get_bool\(&self",
              "pub fn getBoolXX(&self", "rust's prefs handle has no 'get_bool'"),
     "python": ("bindings/python/kaya/__init__.py",
-               r"    def set\(self, key, value\)", "    def setXX(self, key, value)",
+               r"    def set\(self, key: str, value:",
+               "    def setXX(self, key: str, value:",
                "python's prefs handle has no 'set'"),
     "csharp": ("bindings/csharp/KayaApp.cs",
                r"public void Remove\(string key\) => Kaya\.PrefRemove",
@@ -1735,7 +1737,7 @@ def check_table_on_sort(snake, pascal, camel, findings=None):
     want_table("rust", "crates/kaya/src/app.rs", snake,
                f"pub fn {snake}(<[^>]*>)?\\(", findings)
     want_table("python", "bindings/python/kaya/__init__.py", snake,
-               f"def columns\\(self.*{snake}=", findings)
+               f"def columns\\(self[\\s\\S]*?{snake}[\\s]*[:=]", findings)
     want_table("go", "bindings/go/app.go", snake,
                f"func \\(a \\*App\\) {pascal}\\(", findings)
     want_table("csharp", "bindings/csharp/KayaApp.cs", snake,
@@ -1815,7 +1817,7 @@ def check_role_sugar(snake, pascal, camel, findings=None):
               f"pub fn {snake}\\(&mut self, src: impl "
               f"Into<TplSource<StrKind>>\\)", findings)
     want_role("python", "bindings/python/kaya/__init__.py", snake,
-              f"^def {snake}\\(text=None, bind=None, \\*, grow=None\\)",
+              f"^def {snake}\\(text[^,]*, bind[^,]*, \\*,[\\s\\S]{{0,80}}grow",
               findings)
     want_role("go-live", "bindings/go/app.go", snake,
               f"func \\(tx \\*Tx\\) {pascal}Text\\(text string\\) "
@@ -1960,7 +1962,7 @@ def check_policy_fixed(snake, pascal, camel, findings=None):
     # The keyword on the constructor, WITH its default: `fixed` alone
     # would match the parameter list of anything.
     want_policy("python", "bindings/python/kaya/__init__.py", snake,
-                f"def canvas\\(viewbox.*{snake}=None", findings)
+                f"def canvas\\(viewbox[\\s\\S]*?{snake}[\\s]*[:=]", findings)
     want_policy("go", "bindings/go/app.go", snake,
                 f"func \\(w Widget\\) {pascal}\\(\\) Widget", findings)
     want_policy("csharp", "bindings/csharp/KayaApp.cs", snake,
@@ -1990,7 +1992,7 @@ def check_policy_handler(snake, pascal, camel, hsarg, findings=None):
     want_policy("rust", "crates/kaya/src/app.rs", snake,
                 f"pub fn {snake}<M>\\(", findings)
     want_policy("python", "bindings/python/kaya/__init__.py", snake,
-                f"def canvas\\(viewbox.*{snake}=None", findings)
+                f"def canvas\\(viewbox[\\s\\S]*?{snake}[\\s]*[:=]", findings)
     want_policy("go", "bindings/go/app.go", snake,
                 f"func \\(w Widget\\) {pascal}\\(fn func\\(d \\*Draw, "
                 f"size Viewbox", findings)
@@ -2183,7 +2185,7 @@ def check_slider_prop(snake, pascal, camel, findings=None):
     # the keyword INSIDE the signature, which `[^)]*` reaches across the
     # line break python wraps it at.
     want_slider("python", F["python"], snake,
-                rf"def slider\([^)]*{snake}=None", findings)
+                rf"def slider\([^)]*{snake}[\s]*[:=]", findings)
     want_slider("go-live", F["go"], snake,
                 rf"func \(w Widget\) {pascal}\([a-z]+ float64\) Widget",
                 findings)
@@ -2233,7 +2235,7 @@ def check_slider_commit(snake, pascal, camel, ml, findings=None):
     want_slider("rust-tpl", F["rust"], snake,
                 rf"pub fn {snake}_node\(&self, n: TemplateNodeId", findings)
     want_slider("python", F["python"], snake,
-                rf"def slider\([^)]*{snake}=None", findings)
+                rf"def slider\([^)]*{snake}[\s]*[:=]", findings)
     want_slider("go-live", F["go"], snake,
                 rf"func \(a \*App\) {pascal}\(w Widget", findings)
     want_slider("go-tpl", F["go"], snake,
@@ -2314,7 +2316,7 @@ def check_dnd_draggable(snake, pascal, camel, findings=None):
     want_dnd("rust", "crates/kaya/src/app.rs", snake,
              f"pub fn {snake}\\(&mut self, widget: WidgetId\\)", findings)
     want_dnd("python", "bindings/python/kaya/__init__.py", snake,
-             f"def {snake}\\(self, \\*, text=None", findings)
+             f"def {snake}\\(self[^,]*, \\*, text[\\s]*[:=]", findings)
     want_dnd("go", "bindings/go/app.go", snake,
              f"func \\(tx \\*Tx\\) {pascal}\\(w Widget\\) DragRef", findings)
     want_dnd("csharp", "bindings/csharp/KayaApp.cs", snake,
@@ -2343,7 +2345,7 @@ def check_dnd_drop_target(snake, pascal, camel, findings=None):
              f"pub fn {snake}\\(&mut self, widget: WidgetId, ops: "
              f"&\\[Op\\]\\)", findings)
     want_dnd("python", "bindings/python/kaya/__init__.py", snake,
-             f"def {snake}\\(self, \\*operations\\)", findings)
+             f"def {snake}\\(self[^,]*, \\*operations[^)]*\\)", findings)
     want_dnd("go", "bindings/go/app.go", snake,
              f"func \\(tx \\*Tx\\) Set{pascal}\\(w Widget, ops \\.\\.\\.Op\\)",
              findings)
@@ -2374,7 +2376,7 @@ def check_dnd_reorderable(snake, pascal, camel, findings=None):
     # The keyword on the For's own configured spelling, WITH its default
     # — python's on_sort convention one surface over.
     want_dnd("python", "bindings/python/kaya/__init__.py", snake,
-             f"{snake}=False", findings)
+             f"{snake}: bool = False", findings)
     want_dnd("go", "bindings/go/app.go", snake,
              f"func \\(tx \\*Tx\\) Set{pascal}\\(container Widget, "
              f"enabled bool\\)", findings)
@@ -2403,7 +2405,7 @@ def check_dnd_handler(snake, pascal, camel, payload, findings=None):
     want_dnd("rust", "crates/kaya/src/app.rs", snake,
              f"pub fn {snake}\\(&self, w: WidgetId", findings)
     want_dnd("python", "bindings/python/kaya/__init__.py", snake,
-             f"def {snake}\\(self, fn\\)", findings)
+             f"def {snake}\\(self[^,]*, fn[^)]*\\)", findings)
     # App-registered in the registry family, where this binding's own
     # click handler is registered.
     want_dnd("go", "bindings/go/app.go", snake,
@@ -2491,7 +2493,7 @@ def check_dnd_tpl_declaration(snake, pascal, camel, hs, findings=None):
     want_dnd("rust", "crates/kaya/src/app.rs", snake,
              f"pub fn {snake}\\(&mut self, node: TemplateNodeId\\)", findings)
     want_dnd("python", "bindings/python/kaya/__init__.py", snake,
-             f"def {snake}\\(self, \\*, text=None", findings)
+             f"def {snake}\\(self[^,]*, \\*, text[\\s]*[:=]", findings)
     want_dnd("go", "bindings/go/app.go", snake,
              f"func \\(t \\*Tpl\\) {pascal}\\(n Node\\) TplDragRef", findings)
     want_dnd("csharp", "bindings/csharp/KayaApp.cs", snake,
@@ -2521,7 +2523,7 @@ def check_dnd_tpl_drop_target(snake, pascal, camel, hs, findings=None):
              f"pub fn {snake}\\(&mut self, node: TemplateNodeId, "
              f"ops: &\\[Op\\]\\)", findings)
     want_dnd("python", "bindings/python/kaya/__init__.py", snake,
-             f"def {snake}\\(self, \\*operations\\)", findings)
+             f"def {snake}\\(self[^,]*, \\*operations[^)]*\\)", findings)
     want_dnd("go", "bindings/go/app.go", snake,
              f"func \\(t \\*Tpl\\) Set{pascal}\\(n Node, ops \\.\\.\\.Op\\)",
              findings)
@@ -2552,7 +2554,7 @@ def check_dnd_keyed_source(snake, pascal, camel, hs, findings=None):
              f"pub fn {snake}_at\\(&mut self, node: TemplateNodeId, "
              f"path: &Path\\)", findings)
     want_dnd("python", "bindings/python/kaya/__init__.py", snake,
-             f"def {snake}_at\\(self, \\*keys, text=None", findings)
+             f"def {snake}_at\\(self[^,]*, \\*keys[^,]*, text[\\s]*[:=]", findings)
     want_dnd("go", "bindings/go/app.go", snake,
              f"func \\(tx \\*Tx\\) {pascal}At\\(n Node, keys \\[\\]any\\) "
              f"DragRef", findings)
@@ -2582,7 +2584,7 @@ def check_dnd_keyed_target(snake, pascal, camel, hs, findings=None):
              f"pub fn {snake}_at\\(&mut self, node: TemplateNodeId, "
              f"path: &Path, ops: &\\[Op\\]\\)", findings)
     want_dnd("python", "bindings/python/kaya/__init__.py", snake,
-             f"def {snake}_at\\(self, \\*keys, operations=\\(\\)\\)", findings)
+             f"def {snake}_at\\(self[^,]*, \\*keys[^,]*, operations[^)]*\\(\\)\\)", findings)
     want_dnd("go", "bindings/go/app.go", snake,
              f"func \\(tx \\*Tx\\) Set{pascal}At\\(n Node, keys \\[\\]any, "
              f"ops \\.\\.\\.Op\\)", findings)
@@ -2671,7 +2673,7 @@ def check_dnd_node_handler(snake, pascal, camel, payload, findings=None):
     want_dnd("rust", "crates/kaya/src/app.rs", snake,
              f"pub fn {snake}_node\\(", findings)
     want_dnd("python", "bindings/python/kaya/__init__.py", snake,
-             f"def {snake}\\(self, fn\\)", findings)
+             f"def {snake}\\(self[^,]*, fn[^)]*\\)", findings)
     want_dnd("go", "bindings/go/app.go", snake,
              f"func \\(a \\*App\\) {pascal}Node\\(n Node, "
              f"fn func\\(\\*Tx, \\[\\]any, {go_ty}\\)\\)", findings)
@@ -2929,7 +2931,7 @@ def rich_prop_rows(snake, pascal, camel):
     F = RICH_FILES
     return [
         ("rust", F["rust"], rf"pub fn {snake}\(self\) -> Self"),
-        ("python", F["python"], rf"def textarea\([^)]*\b{snake}="),
+        ("python", F["python"], rf"def textarea\([^)]*\b{snake}\s*[:=]"),
         ("go", F["go"], rf"func \(w Widget\) {pascal}\("),
         ("csharp", F["csharp"],
          rf"public Widget Textarea\([\s\S]{{0,200}}?bool {camel}\b"),
@@ -2956,7 +2958,7 @@ def rich_label_rows(snake, pascal, camel):
     F = RICH_FILES
     return [
         ("rust", F["rust"], rf"pub fn {snake}\(self\) -> Self"),
-        ("python", F["python"], rf"def label\([^)]*\b{snake}="),
+        ("python", F["python"], rf"def label\([^)]*\b{snake}\s*[:=]"),
         ("go", F["go"], rf"func \(w Widget\) {pascal}\("),
         ("csharp", F["csharp"],
          rf"public Widget Label\([\s\S]{{0,200}}?bool {camel}\b"),
@@ -3012,7 +3014,7 @@ def rich_handler_rows(snake, pascal, camel):
     F = RICH_FILES
     return [
         ("rust", F["rust"], rf"pub fn {snake}\(&self, w: WidgetId"),
-        ("python", F["python"], rf"def textarea\([^)]*\b{snake}="),
+        ("python", F["python"], rf"def textarea\([^)]*\b{snake}\s*[:=]"),
         ("go", F["go"], rf"func \(a \*App\) {pascal}\(w Widget"),
         ("csharp", F["csharp"], rf"public void {pascal}\(Widget w"),
         ("java", F["java"], rf"public void {camel}\(Widget w"),
@@ -3954,7 +3956,7 @@ def tpl_table_probe():
         surface_want = (f"python's TEMPLATE-zone table cannot spell "
                         f"{point}")
         text, n = scoped(
-            py, "class Collection(_BoundCollection):", "class _Scope:",
+            py, "class Collection(_BoundCollection[T]):", "class _Scope(Generic[T]):",
             f"        trace.{field} = {arg}",
             f"        trace.{field} = None")
         if n != 1:
@@ -3979,19 +3981,19 @@ def tpl_table_probe():
                 f"surface-named:{surface_want in surface.stdout} "
                 f"checks-rc:{checks.returncode} "
                 f"checks-named:{check_want in checks.stdout}")
-        text, n = scoped(py, "class _ForTrace:",
+        text, n = scoped(py, "class _ForTrace(Generic[T]):",
                          "def _alloc_widget_or_node", emitter, broken)
         run_leaf(f"python-rows-{name}-emitter", src, PY_CHAIN,
                  text or py, n, surface_want)
 
-    text, n = scoped(py, "class Collection(_BoundCollection):",
-                     "class _Scope:", "    def columns(",
+    text, n = scoped(py, "class Collection(_BoundCollection[T]):",
+                     "class _Scope(Generic[T]):", "    def columns(",
                      "    def columns_removed(")
     run_leaf("python-columns", src, PY_CHAIN, text or py, n,
              "python's TEMPLATE-zone table cannot spell columns")
 
     text, n = scoped(
-        py, "class _ColumnsTrace:", "class PickedFile:",
+        py, "class _ColumnsTrace(Generic[T]):", "class PickedFile:",
         "                _app._register(handle, "
         "wire.OCC_SORT_REQUESTED, self._on_sort)",
         "                _app._register(handle, wire.OCC_SORT_REMOVED, "
@@ -4011,7 +4013,7 @@ def tpl_table_probe():
              "python's TEMPLATE-zone table cannot spell keyed "
              "re-declaration")
 
-    old = "class _BoundCollection:"
+    old = "class _BoundCollection(Generic[T]):"
     n = py.count(old)
     run_leaf("python-reader", src, PY_CHAIN,
              py.replace(old, "class _BoundCollectionRemoved:")
@@ -5830,7 +5832,7 @@ if floor_out != "applied=1 rc=1 named=True":
 # gate until a guest failed to compile.
 check("rust", "crates/kaya/src/app.rs", "grow", r"fn grow\(self")
 check("python", "bindings/python/kaya/__init__.py", "grow",
-      r"def grow\(self, weight\)")
+      r"def grow\(self, weight[^)]*\)")
 check("go", "bindings/go/app.go", "grow",
       r"func \(w Widget\) Grow\(")
 check("csharp", "bindings/csharp/KayaApp.cs", "grow",
@@ -5850,7 +5852,7 @@ check("js", "bindings/js/kaya/index.ts", "grow", r"^  grow\(weight: number\)")
 check("rust", "crates/kaya/src/app.rs", "spacing",
       r"fn spacing\(self")
 check("python", "bindings/python/kaya/__init__.py", "spacing",
-      r"def spacing\(self, gap\)")
+      r"def spacing\(self, gap[^)]*\)")
 check("go", "bindings/go/app.go", "spacing",
       r"func \(w Widget\) Spacing\(")
 check("csharp", "bindings/csharp/KayaApp.cs", "spacing",
@@ -5870,7 +5872,7 @@ check("js", "bindings/js/kaya/index.ts", "spacing", r"^  spacing\(gap: number\)"
 # The align prop's layer-3 spelling, same rule again.
 check("rust", "crates/kaya/src/app.rs", "align", r"fn align\(self")
 check("python", "bindings/python/kaya/__init__.py", "align",
-      r"def align\(self, mode\)")
+      r"def align\(self, mode[^)]*\)")
 check("go", "bindings/go/app.go", "align",
       r"func \(w Widget\) Align\(")
 check("csharp", "bindings/csharp/KayaApp.cs", "align",
@@ -5896,7 +5898,7 @@ check("js", "bindings/js/kaya/index.ts", "align", r"^  align\(mode: AlignValue")
 check("rust", "crates/kaya/src/app.rs", "a11y_id",
       r"fn a11y_id\(self")
 check("python", "bindings/python/kaya/__init__.py", "a11y_id",
-      r"def a11y_id\(self, ident\)")
+      r"def a11y_id\(self[^,]*, ident[^)]*\)")
 check("go", "bindings/go/app.go", "a11y_id",
       r"func \(w Widget\) A11yID\(")
 check("csharp", "bindings/csharp/KayaApp.cs", "a11y_id",
@@ -5916,7 +5918,7 @@ check("js", "bindings/js/kaya/index.ts", "a11y_id", r"^  a11yId\(ident:")
 check("rust", "crates/kaya/src/app.rs", "a11y_label",
       r"fn a11y_label\(self")
 check("python", "bindings/python/kaya/__init__.py", "a11y_label",
-      r"def a11y_label\(self, label\)")
+      r"def a11y_label\(self[^,]*, label[^)]*\)")
 check("go", "bindings/go/app.go", "a11y_label",
       r"func \(w Widget\) A11yLabel\(")
 check("csharp", "bindings/csharp/KayaApp.cs", "a11y_label",
@@ -5945,7 +5947,7 @@ def check_str_prop(snake, pascal, camel, findings=None, arg="text"):
     check("rust", "crates/kaya/src/app.rs", snake,
           rf"fn {snake}\(self", findings)
     check("python", "bindings/python/kaya/__init__.py", snake,
-          rf"def {snake}\(self, {arg}\)", findings)
+          rf"def {snake}\(self[^,]*, {arg}[^)]*\)", findings)
     check("go", "bindings/go/app.go", snake,
           rf"func \(w Widget\) {pascal}\(", findings)
     check("csharp", "bindings/csharp/KayaApp.cs", snake,
@@ -6000,7 +6002,7 @@ print(f"check-sugar-surface: chained-str-prop fake-name negatives "
 check("rust", "crates/kaya/src/app.rs", "a11y_hint",
       r"fn a11y_hint\(self")
 check("python", "bindings/python/kaya/__init__.py", "a11y_hint",
-      r"def a11y_hint\(self, hint\)")
+      r"def a11y_hint\(self[^,]*, hint[^)]*\)")
 check("go", "bindings/go/app.go", "a11y_hint",
       r"func \(w Widget\) A11yHint\(")
 check("csharp", "bindings/csharp/KayaApp.cs", "a11y_hint",
@@ -6093,7 +6095,7 @@ check("js", "bindings/js/kaya/index.ts", "read_clipboard", r"^export function re
 check("rust", "crates/kaya/src/app.rs", "accepts",
       r"pub fn accepts\(self")
 check("python", "bindings/python/kaya/__init__.py", "accepts",
-      r"def accepts\(self, \*kinds\)")
+      r"def accepts\(self[^,]*, \*kinds[^)]*\)")
 check("go", "bindings/go/app.go", "accepts",
       r"func \(w Widget\) Accepts\(")
 check("csharp", "bindings/csharp/KayaApp.cs", "accepts",
@@ -6111,7 +6113,7 @@ check("js", "bindings/js/kaya/index.ts", "accepts", r"^  accepts\(\.\.\.kinds: s
 check("rust", "crates/kaya/src/app.rs", "on_paste",
       r"pub fn on_paste\(")
 check("python", "bindings/python/kaya/__init__.py", "on_paste",
-      r"def on_paste\(self, fn\)")
+      r"def on_paste\(self[^,]*, fn[^)]*\)")
 check("go", "bindings/go/app.go", "on_paste",
       r"func \(a \*App\) OnPaste\(")
 check("csharp", "bindings/csharp/KayaApp.cs", "on_paste",
@@ -6497,7 +6499,7 @@ check_styling_point(
 # parentheses rather than stopping at the name.
 check_styling_point(
     "app_identity",
-    r"pub fn app_identity\(&mut self\)", r"^def app_identity\(\):",
+    r"pub fn app_identity\(&mut self\)", r"^def app_identity\(\)",
     r"func \(tx \*Tx\) AppIdentity\(\)", r"public void AppIdentity\(\)",
     r"public void appIdentity\(\)", r"func appIdentity\(\)",
     r"^appIdentity :: Build \(\)", r"^let app_identity \(\) =",
@@ -6544,7 +6546,7 @@ check_styling_point(
 check_styling_point(
     "role",
     r"pub fn role\(self, role: crate::Role\)",
-    r"def role\(self, role\)", r"func \(w Widget\) Role\(",
+    r"def role\(self[^,]*, role[^)]*\)", r"func \(w Widget\) Role\(",
     r"public void SetRole\(", r"public Widget role\(",
     r"func setRole\(", r"Role :: Role -> Attr",
     r"let (label|button) [^=]*\?role|let set_role \(Widget id\)",
@@ -6558,7 +6560,7 @@ check_styling_point(
 check_styling_point(
     "sectioned aux window",
     r"pub fn add_section_in\(",
-    r"def add_section\(self, section_id, \*, title=None, symbol=None,",
+    r"def add_section\(self, section_id[^,]*,\s*\*,\s*title[^,]*,\s*symbol[^,]*,",
     r"func \(tx \*Tx\) AddSectionIn\(", r"AddSection\([^)]*window",
     r"public SectionRef addSectionIn\(|addSectionIn\(",
     r"func addSection\(", r"^addSectionIn ::",
@@ -6576,8 +6578,8 @@ check_styling_point(
 check_styling_point(
     "section badge",
     r"pub fn badge\(self, count: impl Into<LiveSource<F64Kind>>\)",
-    r"def add_section\(self, section_id, \*, title=None, symbol=None, "
-    r"badge=None,",
+    r"def add_section\(self, section_id[^,]*,\s*\*,\s*title[^,]*,"
+    r"\s*symbol[^,]*,\s*badge[^,]*,",
     r"func \(r SectionRef\) Badge\(count float64\) SectionRef",
     r"double\? badge = null, Signal\? badgeSignal = null,",
     r"public SectionRef badge\(double count\)",
@@ -6609,7 +6611,7 @@ check_styling_point(
 check_styling_point(
     "container inset",
     r"pub fn inset\(&mut self, widget: WidgetId",
-    r"def inset\(self, pad\)", r"func \(w Widget\) Inset\(",
+    r"def inset\(self, pad[^)]*\)", r"func \(w Widget\) Inset\(",
     r"public void SetInset\(", r"public Widget inset\(",
     r"func setInset\(", r"Inset :: Double -> Attr",
     r"let set_inset \(Widget id\)|let (row|column|grid) [^=]*\?inset",
@@ -6894,9 +6896,9 @@ def check_window_handler(h, findings=None):
     # primary's set and the auxiliary's are the same set or one of
     # them is wrong (DESIGN.md, Binding conventions).
     want("python", REGIONS["python-window"], h,
-         rf"[ (,]on_{h}=None", f"{WH_PY} (App.window)", findings)
+         rf"[ (,]on_{h}\s*[:=]", f"{WH_PY} (App.window)", findings)
     want("python", REGIONS["python-create-window"], h,
-         rf"[ (,]on_{h}=None", f"{WH_PY} (App.create_window)",
+         rf"[ (,]on_{h}\s*[:=]", f"{WH_PY} (App.create_window)",
          findings)
     want("csharp", REGIONS["csharp-window"], h,
          rf"\? on{pascal} = null", f"{WH_CS} (Tx.Window)", findings)
@@ -7854,7 +7856,7 @@ ROW_HANDLE_ROWS = {
            r"else bound\.patch\(key, \{ \[prop\]: v \}\);",
            "else bound.patch(key, {});"),
     "python": ("bindings/python/kaya/__init__.py",
-               r"^class Row:", r"^class _Scope:",
+               r"^class Row\(Generic\[T\]\):", r"^class _Scope\(Generic\[T\]\):",
                r"self\._bound\.patch\(self\._key, \*\*\{name: value\}\)",
                "object.__setattr__(self, name, value)"),
 }

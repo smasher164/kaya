@@ -2261,14 +2261,36 @@ unpicked.
   - R3 THE TOOLCHAIN: JDK 21 (pattern switch over the sealed sums,
     virtual threads; touches nine gradle modules), Swift 6 language mode
     with strict concurrency (the binding becomes a package target),
-    Python type hints with a shipped py.typed and a pyright gate.
+    ~~Python type hints with a shipped py.typed and a pyright gate~~ —
+    THE PYTHON THIRD LANDED 2026-09-17 (one Opus agent; the job's
+    tmp/idiom/notes-r3py.md): ~330 signatures over the public surface,
+    `py.typed` held by check-wheel's smoke through the INSTALLED package,
+    wire.py's hints from tools/kaya-bindgen/src/python.rs's emitter,
+    tools/py-typecheck.py as the sweep's 61st gate (binding and guests at
+    `standard`, `--verifytypes` at a 100% floor over 992 exported
+    symbols, nine guest diagnostics exempted by file, rule and count, two
+    watched negatives); guest errors 92 -> 9 with NOT ONE GUEST BYTE
+    MOVED, binding 130 -> 0; the one runtime change is `Widget.
+    context_menu` refusing a catalog by name where it died of a
+    TypeError. DESIGN.md's Binding conventions state the typing rulings
+    (the element typed as the record, the bound props' value types, the
+    two language limits). Small opens from it: (a) `coll[key]` as the
+    Python keyed read that answers T and raises on a miss — four of the
+    nine exemptions are `get()`'s `T | None` on keys the scene inserted
+    itself, and `__getitem__` is the dict idiom the collection already
+    half-speaks (`__len__`, `__contains__`, `keys`, `items`); (b) a sum
+    collection's element is typed `Any`, and a distinct runtime class for
+    sum collections would let `cases.case(Note)` narrow; (c) a live
+    `bind="x"` literal type-checks and raises. JDK 21 and Swift 6 mode
+    remain.
   - R4 NOT TAKEN: a Roslyn source generator for C# and an attached macro
     for Swift (the checked-in generated files are held by gen-guests
     --check); Go's must-use diagnostic through runtime.AddCleanup (a
     GC-time warning is nondeterministic).
   KEY: idiom pass, idiom survey, wire-tag clause, naive port, keyed read,
-  async dialogs, row handles python, JDK 21, Swift 6, py.typed, kaya_app.mli,
-  Haskell module split, decision log comments
+  async dialogs, row handles python, JDK 21, Swift 6, py.typed, kaya_app. FIFTH BUNDLE (matrix #35 on the R3 tree, 2026-09-17 13:54 local, windows-notes_rust, 19s): the same shape to the byte — 15000ms of toast in the guest's own sentence, the bundle's foreground text ShellExperienceHost 'New notification' with one element walked and none named, desktop-live SKIPPED because the lane sampler's two sights of the CoreWindow fell outside the leg's window, the database holding the Widgets TILE alone (19:26:21Z, eighty minutes before the leg), and the leg green standalone a minute later (1s). Five bundles that name the class and not the sender is the recorder's defect (the 2026-09-16 ruling), so the growth is charged now rather than filed again: the guest's own wait copies the notification database and takes the desktop picture AT THE MOMENT it first sees the toast, the recorder pulls both as a toast-moment section, and the wait outlasts a long toast (25s is the platform's own long duration; 15s cannot).mli,
+  Haskell module split, decision log comments, py-typecheck, verifytypes,
+  EXEMPT table, coll[key], sum element Any
 
 - Component functions as the reusable named unit (Solid's model, slot
   proxies = the function signature) — mostly ratification for the

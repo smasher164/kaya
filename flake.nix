@@ -181,6 +181,10 @@
             # takes three of its rules straight off ruff's (BLE001,
             # S602/S604/S605, PLR1722).
             ruff
+            # pyright is tsc's opposite number: tools/py-typecheck.py runs
+            # it over the python binding and every python guest, and reads
+            # --verifytypes for the public surface's completeness.
+            pyright
             # AddressSanitizer's compiler (see asanClang above):
             # tools/check-c-bounds.py's companion mode, by that name.
             asanClang

@@ -451,6 +451,29 @@ would be a silent no-op, which is worse than a key.
 at the one line where the write leaves through the collection's own
 `patch`.
 
+**The Python binding is typed** (2026-09-17, the R3 ruling's Python
+third). Every public name in `kaya` carries a hint, the package ships
+`py.typed`, and tools/py-typecheck.py runs pyright over the binding and
+every guest — the checker a Python guest never otherwise met, since
+`kaya.button("Add", on_clik=...)` used to be found by a lane, minutes in.
+The element inside `for todo in todos:` is typed as the RECORD, the way
+an ORM types its proxies: `todo.done` is a `bool` to the checker while
+the runtime object stays the tracer, so a misspelled field is refused by
+name and no guest writes an ascription — the noise census over the
+guests is zero casts, zero ignores, zero ascriptions, held there by the
+rule that a guest which cannot type-check has a wrong hint in the
+binding, never a missing cast. The props that take a bound field take
+the field's value type beside a Signal, a FieldRef or an element
+(`TextSource`, `FlagSource`, `NumberSource`), which costs one honesty
+stated here: a LIVE `kaya.label(bind="x")` type-checks and raises at run
+time, since the same word is the template zone's row-bound value. Two
+limits the language sets: a sum collection's element is `Any`, because
+`Note | Todo` in a value position is a `types.UnionType` that carries no
+member types; and the binding checks at `standard`, since strict asks
+for `Any` on the very parameters its isinstance walls exist to refuse.
+What the checker cannot see is exempted by file, rule and COUNT in the
+gate, never by a rule turned off.
+
 **One id space for widgets and template nodes.** Every binding mints
 live widget ids and template node ids from ONE monotone counter per app
 — signals, collections, alerts/dialogs and menu items keep their own —

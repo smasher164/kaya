@@ -1,0 +1,6 @@
+{
+  "include": ["../../guests/python"],
+  "extraPaths": ["."],
+  "typeCheckingMode": "standard",
+  "pythonVersion": "3.10"
+}

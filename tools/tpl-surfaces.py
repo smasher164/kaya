@@ -981,7 +981,7 @@ def table_python(_):
 
     got = set()
     columns = re.search(
-        r"^\s{4}def columns\([^\n]*\bon_sort=None[^\n]*\):.*?"
+        r"^\s{4}def columns\([^)]*?\bon_sort:[^)]*?\)[^\n]*:.*?"
         r"return _ColumnsTrace\(self,.*?\bon_sort\b",
         collection,
         re.M | re.S,
@@ -1004,7 +1004,7 @@ def table_python(_):
         got.add("on_sort")
 
     rows = re.search(
-        r"^\s{4}def rows\((.*?)\):\n(.*?)(?=^\s{4}def |\Z)",
+        r"^\s{4}def rows\((.*?)\)[^\n]*:\n(.*?)(?=^\s{4}def |\Z)",
         collection,
         re.M | re.S,
     )
@@ -1030,7 +1030,8 @@ def table_python(_):
             ),
         )
         for point, arg, field, emitter in row_points:
-            handed_off = f"{arg}=None" in args and f"trace.{field} = {arg}" in body
+            handed_off = (re.search(rf"\b{re.escape(arg)}:[^,]*?= None", args)
+                          and f"trace.{field} = {arg}" in body)
             emitted = re.search(
                 rf"if self\.{field} is not None:.*?{emitter}",
                 for_trace,
@@ -1381,8 +1382,10 @@ def record_python(_):
     # AMBIENT: one module-level constructor serves both zones, and the
     # open-For edge is what makes the template one a NESTED collection
     # rather than a second live table.
+    # The IMPLEMENTATION, past the three overloads that share its name.
     ctor = re.search(
-        r"^def collection\(record_type=None\):(.*?)(?=^def |\Z)", src, re.M | re.S)
+        r"^def collection\(record_type: Any = None\)[^\n]*:(.*?)(?=^def |\Z)",
+        src, re.M | re.S)
     if ctor and 'Collection(_app._next("collection"), record_type)' in ctor.group(1) \
             and "_for_collections[-1]._children.append(handle)" in ctor.group(1):
         got.add("nested record collection")
@@ -1391,7 +1394,7 @@ def record_python(_):
     # _BoundCollection built from anything else would encode the copy's
     # entries against no schema.
     at = re.search(
-        r"^\s{4}def at\(self, \*path\):(.*?)(?=^\s{4}def |\Z)",
+        r"^\s{4}def at\(self, \*path[^)]*\)[^\n]*:(.*?)(?=^\s{4}def |\Z)",
         collection,
         re.M | re.S,
     )
@@ -1703,11 +1706,11 @@ def sources_python(_):
     # element encoder is the silent-nothing arm this binding has already
     # shipped once.
     src = read("bindings/python/kaya/__init__.py")
-    m = re.search(r"^def button\(([^)]*)\):\n(.*?)(?=^def )", src, re.S | re.M)
+    m = re.search(r"^def button\(([^)]*)\)[^\n]*:\n(.*?)(?=^def )", src, re.S | re.M)
     if m is None:
         return None
     params, body = m.group(1), m.group(2)
-    if not re.search(r"\bbind=", params):
+    if not re.search(r"\bbind\s*[:=]", params):
         return set()
     got = set()
     if "wire.tx_bind_text(" in body:

@@ -7,7 +7,11 @@ Python bool, int, float, str, and BlobHandle, mapped to the kaya
 value types.
 """
 
+from __future__ import annotations
+
 import struct
+from collections.abc import Callable, Sequence
+from typing import Any, cast
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
 SPEC_HASH = 0x3854759c1c5d028c
@@ -353,7 +357,7 @@ OCC_TEXT_EDITED = 29
 OCC_TEXT_FORMATTED = 30
 
 
-def _pad(b):
+def _pad(b: bytes) -> bytes:
     return b + b"\0" * (-len(b) % 8)
 
 
@@ -365,15 +369,19 @@ class BlobHandle:
 
     __slots__ = ("handle",)
 
-    def __init__(self, handle):
-        self.handle = handle
+    def __init__(self, handle: int) -> None:
+        self.handle: int = handle
+
+
+#: One kaya value at the wire tier: what every packer below takes.
+Value = bool | int | float | str | BlobHandle
 
 
 class _enc:
     """Encoders, namespaced so no generated parameter can shadow them."""
 
     @staticmethod
-    def value(v):
+    def value(v: Value) -> bytes:
         """Encode a Python scalar as a kaya value."""
         if isinstance(v, bool):
             return _pad(struct.pack("<II", VALUE_BOOL, 1) + bytes([v]))
@@ -388,13 +396,13 @@ class _enc:
 
 
     @staticmethod
-    def values(vals):
+    def values(vals: Sequence[Value]) -> bytes:
         """Encode a counted value sequence: a key path or a record."""
         return struct.pack("<II", len(vals), 0) + b"".join(_enc.value(v) for v in vals)
 
 
     @staticmethod
-    def variant_schemas(variants):
+    def variant_schemas(variants: Sequence[Sequence[int]]) -> bytes:
         """Encode a collection's element sum: per variant, a counted list of VALUE_* tags. A record collection is the one-variant case."""
         body = struct.pack("<II", len(variants), 0)
         for schema in variants:
@@ -402,949 +410,949 @@ class _enc:
         return _pad(body)
 
 
-def record(kind, body):
+def record(kind: int, body: bytes) -> bytes:
     """Frame one record."""
     body = _pad(body)
     return struct.pack("<IHH", 8 + len(body), kind, 0) + body
 
 
-def pack_date(year, month, day):
+def pack_date(year: int, month: int, day: int) -> int:
     """A civil date as the wire's I64: year * 10000 + month * 100 + day."""
     return year * 10000 + month * 100 + day
 
 
-def unpack_date(packed):
+def unpack_date(packed: int) -> tuple[int, int, int]:
     """A wire date as (year, month, day)."""
     return packed // 10000, packed // 100 % 100, packed % 100
 
 
-def pack_time(hour, minute):
+def pack_time(hour: int, minute: int) -> int:
     """A civil time as the wire's I64: hour * 100 + minute."""
     return hour * 100 + minute
 
 
-def unpack_time(packed):
+def unpack_time(packed: int) -> tuple[int, int]:
     """A wire time as (hour, minute)."""
     return packed // 100, packed % 100
 
 
-def tx_create_signal(signal_id, initial):
+def tx_create_signal(signal_id: int, initial: Value) -> bytes:
     """Create a signal holding `initial`."""
     return record(TX_CREATE_SIGNAL, struct.pack("<Q", signal_id) + _enc.value(initial))
 
-def tx_write_signal(signal_id, value):
+def tx_write_signal(signal_id: int, value: Value) -> bytes:
     """Replace a signal's value; keep-latest per batch."""
     return record(TX_WRITE_SIGNAL, struct.pack("<Q", signal_id) + _enc.value(value))
 
-def tx_create_widget(widget_id, kind):
+def tx_create_widget(widget_id: int, kind: int) -> bytes:
     """Create a live widget, or declare a template node inside a scope."""
     return record(TX_CREATE_WIDGET, struct.pack("<Q", widget_id) + struct.pack("<I", kind) + struct.pack("<I", 0))
 
-def tx_add_child(parent, child):
+def tx_add_child(parent: int, child: int) -> bytes:
     """Append `child` to `parent` (same zone only)."""
     return record(TX_ADD_CHILD, struct.pack("<Q", parent) + struct.pack("<Q", child))
 
-def tx_mount(window, root):
+def tx_mount(window: int, root: int) -> bytes:
     """Mount a root into a window (0 = the default window)."""
     return record(TX_MOUNT, struct.pack("<Q", window) + struct.pack("<Q", root))
 
-def tx_create_collection(collection_id, variants):
+def tx_create_collection(collection_id: int, variants: Sequence[Sequence[int]]) -> bytes:
     """Declare a collection and its schema: one ordered field-type list per variant of the element sum. A record collection is the one-variant case and a scalar collection the one-variant one-field case. Variants are indices; names never travel. A blueprint when inside a template."""
     return record(TX_CREATE_COLLECTION, struct.pack("<Q", collection_id) + _enc.variant_schemas(variants))
 
-def tx_collection_insert(collection_id, path, key, variant, fields):
+def tx_collection_insert(collection_id: int, path: Sequence[Value], key: Value, variant: int, fields: Sequence[Value]) -> bytes:
     """Insert an entry into the instance at `path`; the fields match `variant`'s schema positionally. Stamps a copy from that variant's case."""
     return record(TX_COLLECTION_INSERT, struct.pack("<Q", collection_id) + _enc.values(path) + _enc.value(key) + struct.pack("<I", variant) + struct.pack("<I", 0) + _enc.values(fields))
 
-def tx_collection_update(collection_id, path, key, variant, fields):
+def tx_collection_update(collection_id: int, path: Sequence[Value], key: Value, variant: int, fields: Sequence[Value]) -> bytes:
     """Replace an entry's record; every element binding follows. A different `variant` than the entry's current one tears down its stamped copy and restamps from the new variant's case, in place."""
     return record(TX_COLLECTION_UPDATE, struct.pack("<Q", collection_id) + _enc.values(path) + _enc.value(key) + struct.pack("<I", variant) + struct.pack("<I", 0) + _enc.values(fields))
 
-def tx_collection_remove(collection_id, path, key):
+def tx_collection_remove(collection_id: int, path: Sequence[Value], key: Value) -> bytes:
     """Remove an entry; its stamped copy tears down."""
     return record(TX_COLLECTION_REMOVE, struct.pack("<Q", collection_id) + _enc.values(path) + _enc.value(key))
 
-def tx_create_for(id, collection_id):
+def tx_create_for(id: int, collection_id: int) -> bytes:
     """A For over a collection; opens a template scope until template_end."""
     return record(TX_CREATE_FOR, struct.pack("<Q", id) + struct.pack("<Q", collection_id))
 
-def tx_create_when(id, signal_id):
+def tx_create_when(id: int, signal_id: int) -> bytes:
     """A When over a Bool signal; opens a template scope until template_end."""
     return record(TX_CREATE_WHEN, struct.pack("<Q", id) + struct.pack("<Q", signal_id))
 
-def tx_template_end():
+def tx_template_end() -> bytes:
     """Close the innermost template scope."""
     return record(TX_TEMPLATE_END, b"")
 
-def tx_collection_move(collection_id, path, key, before):
+def tx_collection_move(collection_id: int, path: Sequence[Value], key: Value, before: Sequence[Value]) -> bytes:
     """Move an entry so it sits before the entry whose key is the one value in `before`, or to the end when `before` is empty. Keys, never indices: order is data, and indices would race the very deltas that change them."""
     return record(TX_COLLECTION_MOVE, struct.pack("<Q", collection_id) + _enc.values(path) + _enc.value(key) + _enc.values(before))
 
-def tx_collection_update_field(collection_id, path, key, field, variant, value):
+def tx_collection_update_field(collection_id: int, path: Sequence[Value], key: Value, field: int, variant: int, value: Value) -> bytes:
     """Set one field of an entry's record; only bindings on that field re-resolve. `variant` is the discriminant the guest witnessed in the match that produced this write — the scene asserts it against the entry's stored variant, so a drifted model fails loudly; it never changes a constructor (update does)."""
     return record(TX_COLLECTION_UPDATE_FIELD, struct.pack("<Q", collection_id) + _enc.values(path) + _enc.value(key) + struct.pack("<I", field) + struct.pack("<I", variant) + _enc.value(value))
 
-def tx_variant_case(variant):
+def tx_variant_case(variant: int) -> bytes:
     """Inside a For over a sum: the records that follow (until the next variant_case or template_end) are the blueprint for this variant. Cases must be total at template_end; an empty case renders a constructor as nothing, explicitly."""
     return record(TX_VARIANT_CASE, struct.pack("<I", variant) + struct.pack("<I", 0))
 
-def tx_widget_command(widget_id, command):
+def tx_widget_command(widget_id: int, command: int) -> bytes:
     """A one-shot command aimed at a live widget: momentary, fire-and-forget, never state at rest — the app's sanctioned crossing into widget-owned state (clear, focus). The widget answers through its normal occurrence path; nothing is recorded and nothing replays on rebuild. The command enum is the closed vocabulary; each verb is admitted by a real artifact, per the escalation policy."""
     return record(TX_WIDGET_COMMAND, struct.pack("<Q", widget_id) + struct.pack("<I", command) + struct.pack("<I", 0))
 
-def tx_create_window(window_id):
+def tx_create_window(window_id: int) -> bytes:
     """Create an auxiliary window (capability-gated: a host without KAYA_CAP_AUX_WINDOWS rejects it at the root). Materializes hidden; mounting a root presents it. Ids are guest-allocated, below the internal bit; 0 is the primary and always exists."""
     return record(TX_CREATE_WINDOW, struct.pack("<Q", window_id))
 
-def tx_destroy_window(window_id):
+def tx_destroy_window(window_id: int) -> bytes:
     """Close and forget an auxiliary window: the native window and its views are released wholesale, and the scene forgets the mounted tree (widget ids are never reused, so stale entries are inert). The primary is not destroyable: the process owns it."""
     return record(TX_DESTROY_WINDOW, struct.pack("<Q", window_id))
 
-def tx_show_alert(window, alert, actions, title, message, action0, action1, cancel):
+def tx_show_alert(window: int, alert: int, actions: int, title: Value, message: Value, action0: Value, action1: Value, cancel: Value) -> bytes:
     """Request a modal alert over a live window (0 = primary): the request/result grammar's first client (DESIGN.md, Presentation contexts). One atomic record: title, message, `actions` action labels (0..=2 — the platform floor; ContentDialog's three slots are two actions plus close), and the always-present cancel slot, which is what EVERY platform-native dismissal (Esc, back, outside tap) resolves to. All five Values are Str; action slots beyond `actions` ride empty and are ignored. Alert ids are guest-chosen; one alert may be live per process, and the id retires when its result fires."""
     return record(TX_SHOW_ALERT, struct.pack("<Q", window) + struct.pack("<Q", alert) + struct.pack("<I", actions) + struct.pack("<I", 0) + _enc.value(title) + _enc.value(message) + _enc.value(action0) + _enc.value(action1) + _enc.value(cancel))
 
-def tx_push_entry(window, entry):
+def tx_push_entry(window: int, entry: int) -> bytes:
     """Push a navigation entry onto `window`'s stack (0 = the primary surface; no capability gate — every host materializes a serial stack natively). Entry ids share the surface namespace with windows: one guest-side allocator, and mount's target field addresses either. Materializes covered/incoming; mounting a root into it presents it. The covered root below stays alive — retained until popped (DESIGN.md, Navigation)."""
     return record(TX_PUSH_ENTRY, struct.pack("<Q", window) + struct.pack("<Q", entry))
 
-def tx_pop_entry(window):
+def tx_pop_entry(window: int) -> bytes:
     """Pop the top navigation entry from `window`'s stack and forget its mounted tree, exactly as destroy_window does (ids are never reused, so stale targets fail loudly). Popping an empty stack is a scene error. Multi-pop is binding sugar: N of these in one transaction, animated by backends as the NET stack change per batch."""
     return record(TX_POP_ENTRY, struct.pack("<Q", window))
 
-def tx_set_entry_prop(entry, prop, source):
+def tx_set_entry_prop(entry: int, prop: int, source: int) -> bytes:
     """Bind a navigation-entry property (ENTRY_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — entries are not collection elements."""
     return record(TX_SET_ENTRY_PROP, struct.pack("<Q", entry) + struct.pack("<I", prop) + struct.pack("<I", source))
 
-def tx_add_section(window, section):
+def tx_add_section(window: int, section: int) -> bytes:
     """Append a section to `window`'s section set (0 = the primary surface; no capability gate — every platform has a sections idiom). Section ids share the surface namespace with windows and entries: one guest-side allocator, and mount's target field addresses any of them. The first section added becomes the selected one; the set is APPEND-ONLY — this grammar has no destruction verbs by design, and every section's root is retained while covered (DESIGN.md, Sections)."""
     return record(TX_ADD_SECTION, struct.pack("<Q", window) + struct.pack("<Q", section))
 
-def tx_select_section(window, section):
+def tx_select_section(window: int, section: int) -> bytes:
     """Select a section programmatically: configuration, not a user act — it never echoes section_selected (the echo doctrine). The section must already be added to `window`; switching is SELECTION, not lifecycle — the covered root stays alive."""
     return record(TX_SELECT_SECTION, struct.pack("<Q", window) + struct.pack("<Q", section))
 
-def tx_set_section_prop(section, prop, source):
+def tx_set_section_prop(section: int, prop: int, source: int) -> bytes:
     """Bind a section property (SECTION_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — sections are not collection elements."""
     return record(TX_SET_SECTION_PROP, struct.pack("<Q", section) + struct.pack("<I", prop) + struct.pack("<I", source))
 
-def tx_menu_item_create(item, kind):
+def tx_menu_item_create(item: int, kind: int) -> bytes:
     """Create a menu item of `kind` (menu_kind) in the menu-item id space — its own guest allocator (c_menu_item), distinct from every widget, node, and surface space. Items are live, append-only, and never removed in v1 (DESIGN.md, Menus)."""
     return record(TX_MENU_ITEM_CREATE, struct.pack("<Q", item) + struct.pack("<I", kind) + struct.pack("<I", 0))
 
-def tx_menu_item_append(parent, child):
+def tx_menu_item_append(parent: int, child: int) -> bytes:
     """Append `child` under grouping node `parent`. Single-parent: an item acquires exactly one parent or anchor and ids are never reused. The closed parent/child grammar (menu accepts menu/radio_group/action/toggle/separator; radio_group accepts only radio_option; leaves accept nothing) and the depth cap are validated at the root."""
     return record(TX_MENU_ITEM_APPEND, struct.pack("<Q", parent) + struct.pack("<Q", child))
 
-def tx_menubar_append(window, item):
+def tx_menubar_append(window: int, item: int) -> bytes:
     """Append a top-level grouping node (menu or radio_group) to `window`'s command catalog — the window anchor, riding the window construct under the window-attribute unification rule (0 = the primary surface). The bar accepts only grouping nodes; duplicate shortcuts within the window's catalog are a root error."""
     return record(TX_MENUBAR_APPEND, struct.pack("<Q", window) + struct.pack("<Q", item))
 
-def tx_context_attach(widget, item):
+def tx_context_attach(widget: int, item: int) -> bytes:
     """Attach a context catalog rooted at `item` to a live widget — the same command vocabulary scoped to a noun. The editable text controls (entry, textarea) reject attachment (their native edit menus are dress), a context root cannot be a radio_option, and a shortcut anywhere in the subtree is a root error (shortcuts need a window catalog home)."""
     return record(TX_CONTEXT_ATTACH, struct.pack("<Q", widget) + struct.pack("<Q", item))
 
-def tx_context_attach_node(node, item):
+def tx_context_attach_node(node: int, item: int) -> bytes:
     """Attach a context catalog to a template node (the Tpl zone): every stamped copy shows the same catalog, and an activation carries that copy's key path — the keys ARE the noun (the on_click_node encoding). Same rejections as context_attach."""
     return record(TX_CONTEXT_ATTACH_NODE, struct.pack("<Q", node) + struct.pack("<Q", item))
 
-def tx_set_menu_prop(item, prop, source):
+def tx_set_menu_prop(item: int, prop: int, source: int) -> bytes:
     """Bind a menu property (MENU_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — menu items are not collection elements — and icon/primary/ shortcut reject SOURCE_SIGNAL (const-only). label and enabled fan out through the signal-write path; the domain of a signal-bound value is validated on the COMPLETE coalesced value at the transaction barrier."""
     return record(TX_SET_MENU_PROP, struct.pack("<Q", item) + struct.pack("<I", prop) + struct.pack("<I", source))
 
-def tx_show_file_dialog(window, dialog, multiple, filters):
+def tx_show_file_dialog(window: int, dialog: int, multiple: int, filters: Sequence[Value]) -> bytes:
     """Request the platform's file picker over a live window (0 = primary), on the alert's request/result grammar (DESIGN.md, File dialogs). Dialog ids are guest-chosen; one dialog may be live per process, and the id retires when its result fires. `multiple` is 0 or 1 — every backend supports both, spelled four ways (a flag on SwiftUI and AppKit, a different METHOD on GTK and WinUI, a different CONTRACT on Android). `filters` is advisory and rides as alternating Str values, a label then its space-separated extensions: every platform treats them as a default view rather than a guarantee, so the guest still validates what it got."""
     return record(TX_SHOW_FILE_DIALOG, struct.pack("<Q", window) + struct.pack("<Q", dialog) + struct.pack("<I", multiple) + struct.pack("<I", 0) + _enc.values(filters))
 
-def tx_copy(present, file_count, custom_count, reps):
+def tx_copy(present: int, file_count: int, custom_count: int, reps: Sequence[Value]) -> bytes:
     """Put one clip on the system clipboard, offered in several REPRESENTATIONS at once (DESIGN.md, Clipboard; docs/clipboard-plan.md). A clip is not a string: every platform models it as one item available in several types, and the consumer takes the richest it understands — so an app offers html AND text, and pasting into Pages keeps the formatting while a plain field still works. A RECORD RATHER THAN A LIST, which is what makes at-most-one-per-kind structural instead of a runtime duplicate check. `present` is a mask over the `clip` enum for the single-valued kinds; the two plural ones carry counts. `reps` holds the populated ones in the CANONICAL ORDER, which kaya fixes once because richness is a property of the kind rather than of the app's intent, and the wire's preference order (macOS type order, X11 TARGETS) has to be right whoever wrote the guest. THE ORDER IS DESCENDING CLIP VALUE, which is descending richness, so a backend writes what it is handed in the order it is handed: `custom_count` pairs of Str id and I64 blob, `file_count` I64 handles, I64 image blob, Str html, Str text. Files are the SAME CAPABILITY the picker returns — a handle redeemed with kaya_open_picked — so copying a file and picking one are one currency and the bytes never move through kaya."""
     return record(TX_COPY, struct.pack("<I", present) + struct.pack("<I", file_count) + struct.pack("<I", custom_count) + struct.pack("<I", 0) + _enc.values(reps))
 
-def tx_read_clipboard(request, accepting):
+def tx_read_clipboard(request: int, accepting: Value) -> bytes:
     """Read the clipboard OUTSIDE any paste gesture, on the alert's request/result grammar. `accepting` is an ACCEPT LIST, the same space-separated Str the widget prop carries: the closed kinds by name plus any custom ids, which are open and so could never be a mask. The answer carries the first match by canonical richness, so exactly one representation is ever materialised. THIS IS THE PRIVILEGED ONE, and it is named for what it is rather than for pasting. A user's paste arrives at the widget's hook and costs nothing; this asks without a gesture, which the platforms have deliberately made expensive — iOS 16 PROMPTS when the content came from another app, and the read blocks until the user answers (measured); Android returns nothing unless the app has focus; Wayland delivers no offer to an unfocused client. Reaching for a thing called paste in an editor would have cost a permission prompt for content the hook delivers free, which is why this name is not that one. An empty answer covers denied, absent, and nothing-we-accept alike."""
     return record(TX_READ_CLIPBOARD, struct.pack("<Q", request) + _enc.value(accepting))
 
-def tx_undo_group(window, label):
+def tx_undo_group(window: int, label: Value) -> bytes:
     """Mark this transaction as ONE undoable step in `window`'s ledger, under `label` (a non-empty Str, validated at the root like every other authored grammar). MUST BE THE FIRST RECORD OF THE BATCH and may appear once: a transaction is a bare list with no header, so per-transaction metadata has nowhere else to live, and head-of-batch is the one position that cannot be ambiguous (docs/undo-plan.md D2). A WIRE FACT AND NOT A BINDING CONVENTION, so both interpreters and check-verbs see it and a binding that forgets to emit it fails a byte-compared scene instead of grouping wrong in silence.  THE UNDOABLE SET IS THE REACTIVE HALF (D4): a marked batch may hold signal writes and the five collection deltas, whose inverse the core derives from state it already keeps. PURE EFFECTS — focus today, scroll when it lands — are permitted and simply not restored (A2): undo restores state, not where you were looking. Anything else (const prop sets, create/destroy/mount, window/nav/section/menu structure, clear, commands, dialog and clipboard requests) is REFUSED at apply, loudly, naming the op — an app that wants a widget property undoable binds it to a signal, which is the reactive doctrine saying what it already said. A refused group leaves the scene exactly as it was.  The window is explicit because the core cannot derive it: a signal write names no surface, and the scene keeps no widget-to-window map. 0 is the primary."""
     return record(TX_UNDO_GROUP, struct.pack("<Q", window) + _enc.value(label))
 
-def tx_highlight_ranges(widget_id, count, ranges):
+def tx_highlight_ranges(widget_id: int, count: int, ranges: Sequence[Value]) -> bytes:
     """DECLARE the set of decorated ranges on a textarea, replacing whatever was declared before (docs/ranges-plan.md D1/D2). `ranges` holds 2*`count` I64 values — start then end, in UTF-8 BYTE offsets into the widget's current guest-visible text; an empty set is the clear.  THE OFFSET UNIT AND ITS THREE RULES, once, here, because four of the five platforms answer a malformed offset differently and one of them ABORTS THE PROCESS (docs/ranges-units.md §3: an out-of-range NSTextStorage attribute is an NSRangeException, exit 134). The core refuses before lowering: `start <= end`, `end <= text.len()`, and both endpoints on a CODE-POINT boundary. A GRAPHEME split is deliberately NOT refused and is the stated carve-out — the platforms disagree about what a grapheme is (java.text.BreakIterator counts the ZWJ family as 11 clusters where .NET and Swift count 5, measured), so a core that refused by its own table would refuse ranges three platforms honor. The range covers exactly the code points it names; a platform may widen what it PAINTS to the whole cluster.  APP-OWNED AND NEVER TRACKED. kaya adjusts nothing across edits: a declared set is bound to the text it was declared against, and a backend paints it only while the widget still holds that text — the first keystroke, programmatic write or native undo drops the set with nothing said. The app re-declares from the fold `text_changed` already drives, which is the same uncontrolled contract the text itself has. Range tracking is editor-component work and lives in the app.  TEXTAREA ONLY this milestone. The entry is deferred with measured per-platform reasons (docs/deferred.md): GTK's entry highlight rides absolute byte offsets that do not follow edits and is not readable over AT-SPI, macOS destroys an entry's highlight the moment it loses focus (the field editor is the window's, not the field's), and no consumer wants it — an editor's find bar decorates a document."""
     return record(TX_HIGHLIGHT_RANGES, struct.pack("<Q", widget_id) + struct.pack("<I", count) + struct.pack("<I", 0) + _enc.values(ranges))
 
-def tx_select_range(widget_id, start, stop):
+def tx_select_range(widget_id: int, start: int, stop: int) -> bytes:
     """Put the textarea's SELECTION at one range (UTF-8 byte offsets, validated exactly as highlight_ranges is). `start == end` is a caret and is legal — every platform's text object models a degenerate range.  ITS OWN RECORD RATHER THAN A `widget_command`, which it otherwise is exactly (momentary, fire-and-forget, the app's sanctioned crossing into widget-owned state): that record's layout has nowhere to put offsets, and growing it two U64s would hang two dead fields on `clear` and `focus` and make `focus(w, 0, 0)` representable.  REFUSED DURING AN INPUT-METHOD COMPOSITION, in every backend, under the reason `ime_composition` (docs/ranges-plan.md D4). Measured on macOS: honoring it COMMITS the marked text into the document and into the app's model mid-word, which is data loss shaped like a feature, and it shifts every later offset by the committed length. A refusal here is a NO-OP AND NOT A PANIC — unlike undo's D4, which refuses an app-programming error the app can fix. Composition state is on no kaya channel and never will be (there are no widget mirror reads), so the same app code is correct one millisecond and refused the next; the app that wants the selection waits for the composition to end, which `text_changed` announces anyway. HIGHLIGHT and REVEAL do not disturb a composition and are not refused (measured, same probe)."""
     return record(TX_SELECT_RANGE, struct.pack("<Q", widget_id) + struct.pack("<Q", start) + struct.pack("<Q", stop))
 
-def tx_reveal_range(widget_id, start, stop):
+def tx_reveal_range(widget_id: int, start: int, stop: int) -> bytes:
     """Scroll the textarea so a range is inside the viewport (UTF-8 byte offsets, validated exactly as highlight_ranges is). A PURE EFFECT: it moves no state, the selection is untouched, and per docs/undo-plan.md A2 undo does not restore it — undo restores state, not where you were looking, which is why it is permitted inside an undo group and simply not inverted.  WHAT `inside the viewport` MEANS IS THE PLATFORM'S, not kaya's: each backend calls its own scroll-to-range (scrollRangeToVisible, ScrollIntoView, gtk_text_view_scroll_to_iter, bringIntoView), so how much context lands around the range is native behaviour. The observable kaya fixes is containment, which is the only thing every platform agrees on."""
     return record(TX_REVEAL_RANGE, struct.pack("<Q", widget_id) + struct.pack("<Q", start) + struct.pack("<Q", stop))
 
-def tx_show_save_dialog(window, dialog, suggested_name, filters):
+def tx_show_save_dialog(window: int, dialog: int, suggested_name: Value, filters: Sequence[Value]) -> bytes:
     """Request the platform's save dialog over a live window (0 = primary), on the SAME request/result grammar as the open picker (docs/save-plan.md D2): guest-chosen dialog ids out of the one id space, one dialog live per process whichever kind it is, and the answer arriving as a file_dialog_result whose id retires there. `filters` is the picker's advisory encoding unchanged — alternating Str values, a label then its space-separated extensions. `suggested_name` is the name the dialog opens with, which every platform takes (nameFieldStringValue, GtkFileDialog's initial name, IFileSaveDialog's SetFileName, EXTRA_TITLE, the export controller's filename) and none guarantees: the user renames it, and Android may append an extension matching the mime type, so a guest reads the name it GOT rather than the name it asked for.  THE ANSWER IS EXACTLY ONE LOCATOR OR NONE, and there is no `multiple` twin of the picker's flag: no platform's save dialog names two destinations. Cancel is the empty answer, the picker's rule verbatim.  WHAT THE DESTINATION IS FOR is the decision with the semantics in it (docs/save-plan.md D1): the result's handle opens with CREATE, so opening a name the dialog invented succeeds and yields an EMPTY file on every platform. Android and iOS hand back a document that already exists; macOS, GTK and Windows hand back a name for a file nobody has made (measured: macOS does not even truncate on Replace). The core absorbs that, not the guest, and NOT a fourth file mode — creation is a property of the destination the dialog promised, never of the caller's intent, and a mode would let a guest ask for it on a file it merely opened."""
     return record(TX_SHOW_SAVE_DIALOG, struct.pack("<Q", window) + struct.pack("<Q", dialog) + _enc.value(suggested_name) + _enc.values(filters))
 
-def tx_set_brand_accent(seed, mask, light, dark):
+def tx_set_brand_accent(seed: int, mask: int, light: int, dark: int) -> bytes:
     """REQUEST the app's brand accent (docs/styling-plan.md D1/D2). `seed` is one packed sRGB (0xRRGGBB) — the only value most apps write; `mask` says which per-appearance overrides are present (bit 0 = light, bit 1 = dark) and `light`/`dark` carry them when set, 0 otherwise. Per-PLATFORM values never ride the wire: the binding resolves its platform at runtime and sends one resolved trio (values may vary per platform; code and wire shape never do).  A REQUEST, uniformly: a platform may let its user override the app's accent — macOS does today (an app accent applies only while the system accent is multicolor), and the semantics does not change if another platform grows the preference. The app states a brand; the platform stays the judge of its chrome.  SET ONCE, before the first mount: the root refuses a second write and a late one — brand is identity, not state, and a slot that could flip at runtime would promise a theme- switching surface the vocabulary deliberately does not have.  The app NEVER writes a foreground and NEVER writes contrast variants; the core derives fill/on-fill/standalone and a hover/pressed ramp per appearance (the danger-band clamp, docs/styling-plan.md D1) and hands every backend VALUES. Backends do not re-derive — except Compose, which receives the SEED as well because Material 3's own documented flow derives a full role scheme from it, and kaya defers to the platform's derivation where one exists."""
     return record(TX_SET_BRAND_ACCENT, struct.pack("<I", seed) + struct.pack("<I", mask) + struct.pack("<I", light) + struct.pack("<I", dark))
 
-def tx_set_brand_typeface(mask, family, platforms, font):
+def tx_set_brand_typeface(mask: int, family: Value, platforms: Sequence[Value], font: Value) -> bytes:
     """REQUEST the app's brand typeface (docs/styling-plan.md D6, Slice 2b). `family` is the default family name every platform falls back to; `platforms` carries the optional per-platform overrides as PAIRS — an I64 platform tag from the `platform` enum, then that platform's family as a Str — and `mask` bit 0 says a `font` BLOB is present (an empty Str rides in its slot when it is not).  THE FAMILY, NEVER THE SCALE (ratified DESIGN.md): sizes, weights, metrics and the whole type ramp stay the platform's. Substituting a family into the platform's own ramp is what makes the swap safe, and it is the role tier — not a font size — that carries emphasis.  PER-PLATFORM VALUES RIDE THE WIRE, unlike the accent's, and the asymmetry is the design (Slice 2b): a BINDING cannot know its platform — the JVM says "Linux" on Android — but a LOWERING is its platform, so each backend picks its own row out of `platforms` and no platform id is ever needed on the guest side. A colour resolves to one number a binding can compute anywhere; a family name has to survive to the backend that will look it up.  FONT BYTES RIDE THE BLOB CHANNEL, register-then-resolve: when `font` carries bytes the backend hands them to its platform's app-font API (CTFontManager, fontconfig, the Compose/DWrite routes), reads back the family name the registration produced, and the NAME machinery takes over unchanged — one resolution, one observation, one fallback for both forms. A registered blob's own family wins over `family` on the backend that registered it.  SET ONCE, before the first mount — the accent's wall verbatim, and for its reason: a typeface that could flip at runtime would promise the theme-switching surface the vocabulary deliberately does not have.  THE RISK IS THE SILENT FALLBACK. Every platform's font API renders SOMETHING for a family it does not have, so a typo is invisible to every other observation: each backend gates on the family being PRESENT and otherwise leaves the platform default in place, and `expect_typeface` reads the RESOLVED family off the real views rather than echoing the request."""
     return record(TX_SET_BRAND_TYPEFACE, struct.pack("<I", mask) + struct.pack("<I", 0) + _enc.value(family) + _enc.values(platforms) + _enc.value(font))
 
-def tx_set_app_identity(mask, name, icon):
+def tx_set_app_identity(mask: int, name: Value, icon: Value) -> bytes:
     """DECLARE the app's identity — the name it goes by and the picture that stands for it (docs/app-identity-plan.md, ratified 2026-08-18). `name` is a Str; `mask` bit 0 says an `icon` BLOB is present, and an empty Str rides its slot when it is not — the typeface's mask-plus-always-written-slot convention, copied rather than reinvented, so the two records decode the same way and one mask/slot disagreement test covers the shape.  A TRANSACTION VERB AND NOT A WINDOW PROP, because identity is per-APP where WINDOW_PROPS is per-window. `title` already lives there and is the WINDOW's title; the identity name is a different thing and the vocabulary must not conflate them (on Windows the two meet in one string, and it is the backend's single caption writer that composes them, never two authors).  ONE PICTURE, FIVE ROUTES. The same PNG reaches the macOS Dock, the Windows taskbar/alt-tab and caption, an X11 window's _NET_WM_ICON, the Android launcher and the iOS Home Screen — each by its platform's own route, some at runtime off these bytes and some at build time off the same file in the tree. One PNG goes in and each lowering converts (NSImage(data:), BitmapImage.SetSource, an HICON, a GdkTexture); no .ico, no .icns, no per-platform artwork on the wire.  THE FOUR WALLS ARE THE BRAND'S, VERBATIM, and for the brand's reasons. SET ONCE: a second write dies in the root, in every language at once. BEFORE THE FIRST MOUNT: so no backend shows an unidentified frame it must repaint. EMPTY IS REFUSED: an app that wants the platform's own identity declares none at all, and an empty string would sail through five lowerings indistinguishable from a default. NOT UNDOABLE: identity is not state.  THE BYTES ARE NOT INSPECTED IN THE CORE — the typeface's rule transfers exactly. Whether a blob is an image is a question only the platform's own decoder can answer, and a guess that disagreed with the decoder would be worse than no answer. Each backend decodes, and the observation reports what the DECODER produced (a size, sampled pixels) rather than echoing the request, so bytes that are not an image fail exactly like an icon that never applied."""
     return record(TX_SET_APP_IDENTITY, struct.pack("<I", mask) + struct.pack("<I", 0) + _enc.value(name) + _enc.value(icon))
 
-def tx_set_column_headers(widget_id, sorted, direction, count, path_len, titles):
+def tx_set_column_headers(widget_id: int, sorted: int, direction: int, count: int, path_len: int, titles: Sequence[Value]) -> bytes:
     """DECLARE the column header bar on a For's container, replacing whatever was declared before (docs/tables-plan.md). `titles` holds `count` Str values, one per column in visual order; `sorted` is the 0-based index of the column showing the sort indicator, or u32::MAX for none (alert_choice's cancel-sentinel precedent); `direction` is 0 ascending, 1 descending, read only when `sorted` names a column.  ONE RECORD FOR THE WHOLE BAR, titles and indicator together, because the header's state is one declaration: a sort flip re-sends a handful of short strings and buys atomicity — no window where new titles show a stale indicator. A dedicated record and not a prop because a prop carries ONE Value and titles are many, with spaces (`accepts`' space-separated trick is out); the carrier is highlight_ranges' count-plus-Values shape.  THE TARGET IS THE FOR'S CONTAINER — there is no List widget; a For materializes as a Column and this record is what turns that container into a table where the size class and the platform have the idiom (DESIGN.md's column-props ruling). The root refuses a target that is not a For container, a `count` of 0, an empty title, a `sorted` outside 0..count that is not the sentinel, and a `direction` past 1.  PATH ADDRESSING (dynamic tables, docs/tables-plan.md): the Values carry `path_len` KEY values FIRST, then the `count` titles — sort_requested's identity convention pointed the other way. path_len 0 with a live For's container id is the flat case above; path_len 0 with a nested For's TEMPLATE NODE id declares the bar for EVERY copy (stored on the site, applied at each stamp); path_len > 0 with the template node id and keys outermost-first re-declares ONE stamped copy's bar — the per-copy sort indicator. A keyed target that names no stamped copy is refused loudly.  ROWS MUST FIT THE COLUMNS: with N columns declared, every stamped row's template root must be a Row with exactly N children, checked at stamp time in the core so every backend inherits the wall — a mismatched template dies naming the row and both counts instead of rendering N-1 cells under N headers on some platforms and not others.  THE INDICATOR IS THE GUEST'S: a header click emits sort_requested and changes nothing; the guest reorders its collection by key and re-declares this record with the new indicator. Configuration, not an occurrence source — the echo doctrine. Not undoable: the header bar is not state, and the order underneath it already rides collection_move's undo run."""
     return record(TX_SET_COLUMN_HEADERS, struct.pack("<Q", widget_id) + struct.pack("<I", sorted) + struct.pack("<I", direction) + struct.pack("<I", count) + struct.pack("<I", path_len) + _enc.values(titles))
 
-def tx_set_drawing(widget_id, vb_w, vb_h, count, path_len, ops):
+def tx_set_drawing(widget_id: int, vb_w: Value, vb_h: Value, count: int, path_len: int, ops: Sequence[Value]) -> bytes:
     """DECLARE the whole drawing on a canvas widget, replacing whatever was declared before (docs/canvas-plan.md §3.1). `ops` holds `path_len` KEY values FIRST, then `count` op values — set_column_headers' convention verbatim, and what lets a canvas live inside a For row template: path_len 0 with a live widget id is the flat case, path_len 0 with a template node id declares the drawing for every stamped copy, path_len > 0 re-declares one copy's.  THE OP STREAM IS A FLAT RUN OF TAGGED VALUES: an i64 `draw_op` opcode followed by its operands (§3.3). `vb_w`/`vb_h` are the VIEWBOX — the coordinate system the guest draws in AND the canvas's natural size in device-independent points — which is what keeps one op stream identical on five platforms (§3.2, invariant 6).  ONE RECORD FOR THE WHOLE DRAWING, never a patch, on set_column_headers' reasoning: a half-updated chart is the same defect as new titles under a stale indicator. NOT UNDOABLE: a drawing renders app state, it is not state.  THE CORE RASTERIZES AND THE BACKEND BLITS (ruling 1). No backend interprets an op, so every refusal in §3.5 happens in the only place that draws."""
     return record(TX_SET_DRAWING, struct.pack("<Q", widget_id) + _enc.value(vb_w) + _enc.value(vb_h) + struct.pack("<I", count) + struct.pack("<I", path_len) + _enc.values(ops))
 
-def tx_set_size_policy(widget_id, policy):
+def tx_set_size_policy(widget_id: int, policy: int) -> bytes:
     """WHAT THIS CANVAS DOES WITH A TRACK THAT IS NOT ITS VIEWBOX (`size_policy`; docs/canvas-plan.md §3.2.1). A drawing is a FUNCTION OF SIZE and `redraw`/`tick` say so: the core hands the canvas the size it was assigned, through draw_requested/tick, and rasterizes what comes back at that size. `scale` and `fixed` DECLARE THE FUNCTION CONSTANT, which is what lets the core answer a size change by itself — `scale` re-rasterizes the held display list under a UNIFORM FIT with a letterbox, `fixed` never adapts at all.  NOT SENT FOR `scale`: it is the default a guest that declares nothing gets. THE GUEST NEVER SPELLS THIS NUMBER — the binding lowers `fixed` (the one true property) and the presence of an on_draw/on_tick handler; a canvas with no policy record is `scale`.  LIVE CANVASES ONLY in this slice: a template node is refused by name (docs/deferred.md's template-zone size policy entry)."""
     return record(TX_SET_SIZE_POLICY, struct.pack("<Q", widget_id) + struct.pack("<I", policy) + struct.pack("<I", 0))
 
-def tx_create_breakpoint(window, size_class, count, setters):
+def tx_create_breakpoint(window: int, size_class: Value, count: int, setters: Sequence[Value]) -> bytes:
     """A size-class breakpoint on a window: while the window's size class equals `size_class` (i64; SIZE_CLASS_COMPACT is the only class a guest may name today), the core applies the setter list; leaving the class it restores the guest-authored value, or the widget's own default where the guest never wrote one — the adaptation is a DIFF against the base declaration (docs/adaptive-layout-plan.md D3, size classes ruled 2026-08-31). The guest NEVER writes a width: iOS answers with the platform's own size class, and every other platform derives it from the latched width at the kaya-owned SIZE_CLASS_COMPACT_BELOW boundary.  THE CORE EVALUATES THE CONDITION, never the platform's breakpoint machinery and never a guest round trip: width and platform class are LATCHED from the backend's metrics reports, a breakpoint declared before any report applies at the first — the phone that never resizes — and a same-metrics report moves nothing.  `setters` is count triples flat: widgets (i64), then props (i64), then values, thirds by position. Setters may name `axis` only until the settable-prop ruling widens the list; anything else fails the batch by name."""
     return record(TX_CREATE_BREAKPOINT, struct.pack("<Q", window) + _enc.value(size_class) + struct.pack("<I", count) + struct.pack("<I", 0) + _enc.values(setters))
 
-def tx_set_drag_source(widget, present, file_count, custom_count, operations, path_len, bound, reps):
+def tx_set_drag_source(widget: int, present: int, file_count: int, custom_count: int, operations: int, path_len: int, bound: int, reps: Sequence[Value]) -> bytes:
     """DECLARE that `widget` can be dragged, and what it hands over (docs/dnd-plan.md D1): the copy record's body — a clip in several representations, descending clip value, `present` a mask over the single-valued kinds and the two plural ones counted — plus `operations`, a mask over the drag_op enum naming what the source allows (copy 1, move 2). App-updated state: a widget whose payload changes re-declares, and a `present` of zero with no files and no custom ids withdraws the declaration. The core answers every hover from this and the destination's own declaration with no app round trip (D2). `path_len` keys after the header address ONE stamped copy the way set_column_headers' do. INSIDE A FOR'S BODY the widget is a template node and `bound` is a mask over the reps' slot indices (canonical order: custom id and bytes per pair, then files, image, html, text): a bound slot carries an i64 `level << 32 | field` — set_property's element source — and every stamped copy resolves it from its own row, re-declaring when that field changes (docs/dnd-plan.md §4). A live widget refuses a bound slot by name; a file slot never binds."""
     return record(TX_SET_DRAG_SOURCE, struct.pack("<Q", widget) + struct.pack("<I", present) + struct.pack("<I", file_count) + struct.pack("<I", custom_count) + struct.pack("<I", operations) + struct.pack("<I", path_len) + struct.pack("<I", bound) + _enc.values(reps))
 
-def tx_set_drop_target(widget, operations, path_len, keys):
+def tx_set_drop_target(widget: int, operations: int, path_len: int, keys: Sequence[Value]) -> bytes:
     """DECLARE that `widget` receives drops, with `operations` a mask over the drag_op enum naming what it will perform (copy 1, move 2; copy alone by default). WHAT it accepts is the existing `accepts` prop — the same list a paste consults, so a widget declares its vocabulary once. The hover verdict is the intersection of the source's operations with these, over a type the accept list names; a foreign source into kaya is always answered copy (D2). A zero mask withdraws the declaration. Keys as in set_drag_source."""
     return record(TX_SET_DROP_TARGET, struct.pack("<Q", widget) + struct.pack("<I", operations) + struct.pack("<I", path_len) + _enc.values(keys))
 
-def tx_set_reorderable(container, enabled):
+def tx_set_reorderable(container: int, enabled: int) -> bytes:
     """Make every stamped row of a live For draggable within its own collection (docs/dnd-plan.md D8): each row is a source whose payload is its key, and a destination that accepts only its own collection's rows. The drop arrives as `dropped` with the ANCHOR — the key of the row it landed on and a before/onto bit — and the app confirms with the collection_move it already has; the core reorders nothing on its own. `enabled` 0 withdraws it."""
     return record(TX_SET_REORDERABLE, struct.pack("<Q", container) + struct.pack("<I", enabled) + struct.pack("<I", 0))
 
-def tx_show_notification(notification, at, title, body):
+def tx_show_notification(notification: int, at: int, title: Value, body: Value) -> bytes:
     """Post a local notification (docs/tasks-s3-plan.md N1, N2): the alert grammar without a window — the platform shows it outside the app, and the one answer is notification_result when the user activates it or the platform refuses to post. `at` is a UNIX time in seconds handed to the OS scheduler where one exists (0 = now); title and body are Str values. Ids are guest-chosen; many may be live, and an id retires on its result or its cancel."""
     return record(TX_SHOW_NOTIFICATION, struct.pack("<Q", notification) + struct.pack("<Q", at) + _enc.value(title) + _enc.value(body))
 
-def tx_cancel_notification(notification):
+def tx_cancel_notification(notification: int) -> bytes:
     """Withdraw a pending or delivered notification by id (a reminder that was cleared). No answer follows; an unknown id is ignored."""
     return record(TX_CANCEL_NOTIFICATION, struct.pack("<Q", notification))
 
-def tx_declare_link_route(route, pattern):
+def tx_declare_link_route(route: int, pattern: Value) -> bytes:
     """Declare one app-link route (docs/app-links-plan.md §4): `route` is the app's own id for it, `pattern` a Str. The MATCH HAPPENS ONCE, IN THE CORE — the patterns come here so a URL the platform hands over is turned into a route and its captures by one matcher rather than by nine. The grammar: segments split on `/`, a literal segment matches itself, `{name}` captures one segment. REFUSED AT THE DECLARATION, a fault like every other declaration refusal: an empty pattern, an empty segment, a brace a segment never closes, and a pattern already declared. Routes are declared at startup, before or inside the app's first transaction: the core matches a link that STARTED the process once that transaction lands."""
     return record(TX_DECLARE_LINK_ROUTE, struct.pack("<Q", route) + _enc.value(pattern))
 
-def tx_set_rich_text(widget_id, count, runs, text):
+def tx_set_rich_text(widget_id: int, count: int, runs: Sequence[Value], text: Value) -> bytes:
     """The WHOLE attributed document of a `rich` textarea (docs/rich-text-plan.md R1): the text as the payload, and `runs` holding 4*`count` values read in FOURS — I64 start, I64 end, Str name, Str value — each run one attribute over one range in UTF-8 BYTE offsets into that text, validated at the ranges' chokepoint (docs/ranges-units.md §7) and allowed to overlap (bold and italic over one range are two runs). A CONFIGURATION WRITE: it echoes nothing, and it resets the widget's native undo history where that tier is on (docs/undo-plan.md D7). The vocabulary is wire::RICH_ATTRS; a `block` run must start and end on paragraph boundaries. Refused on a textarea that is not `rich`."""
     return record(TX_SET_RICH_TEXT, struct.pack("<Q", widget_id) + struct.pack("<I", count) + struct.pack("<I", 0) + _enc.values(runs) + _enc.value(text))
 
-def tx_apply_edit(widget_id, start, stop, count, runs, text):
+def tx_apply_edit(widget_id: int, start: int, stop: int, count: int, runs: Sequence[Value], text: Value) -> bytes:
     """ONE edit into a `rich` textarea, the app's own or a collaborator's (docs/rich-text-plan.md R1, R5): replace `start..end` (UTF-8 byte offsets into the widget's current text, validated as a range is) with the payload text, whose attribute runs are `runs` in fours as set_rich_text's, with offsets RELATIVE to the inserted text. Keeps the selection: unchanged before the edit, shifted after it, a caret at `start` ending AFTER the insertion. Echoes nothing and never resets undo. QUEUED while an input-method composition is live and applied when it ends, since a refusal would drop a collaborator's edit."""
     return record(TX_APPLY_EDIT, struct.pack("<Q", widget_id) + struct.pack("<Q", start) + struct.pack("<Q", stop) + struct.pack("<I", count) + struct.pack("<I", 0) + _enc.values(runs) + _enc.value(text))
 
-def tx_format_text(widget_id, removed, ranged, start, stop, attr):
+def tx_format_text(widget_id: int, removed: int, ranged: int, start: int, stop: int, attr: Sequence[Value]) -> bytes:
     """Format a `rich` textarea's CURRENT SELECTION through the widget's own act — what an app's toolbar button sends (docs/rich-text-plan.md R1): `attr` is two Str values, name then value; `removed` 1 takes the attribute off. `ranged` 1 formats `start..stop` (UTF-8 bytes) INSTEAD of the selection, which stays where it is: a document write, echoed by nothing, legal on a rich label too (docs/rich-text-plan.md §17, the notes demo's remote mark). The widget answers with text_formatted over the range it formatted, which is how the mirror moves; a collapsed selection arms the typing attribute and answers nothing until the next edit. A `block` act covers the selection's whole paragraphs, and `block` with value `body` removes. Refused on a textarea that is not `rich` and for a name outside wire::RICH_ATTRS."""
     return record(TX_FORMAT_TEXT, struct.pack("<Q", widget_id) + struct.pack("<I", removed) + struct.pack("<I", ranged) + struct.pack("<Q", start) + struct.pack("<Q", stop) + _enc.values(attr))
 
 
-def tx_set_text(widget_id, text):
+def tx_set_text(widget_id: int, text: str) -> bytes:
     """set_property with a constant text value (str)."""
     return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_TEXT, SOURCE_CONST) + _enc.value(text))
 
 
-def tx_bind_text(widget_id, signal_id):
+def tx_bind_text(widget_id: int, signal_id: int) -> bytes:
     """set_property with a signal-bound text value."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_TEXT, SOURCE_SIGNAL, signal_id))
 
 
-def tx_bind_text_element(widget_id, level=0, field=0):
+def tx_bind_text_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_TEXT, SOURCE_ELEMENT, level, field))
 
 
-def tx_set_checked(widget_id, checked):
+def tx_set_checked(widget_id: int, checked: bool) -> bytes:
     """set_property with a constant checked value (bool)."""
     return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_CHECKED, SOURCE_CONST) + _enc.value(checked))
 
 
-def tx_bind_checked(widget_id, signal_id):
+def tx_bind_checked(widget_id: int, signal_id: int) -> bytes:
     """set_property with a signal-bound checked value."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_CHECKED, SOURCE_SIGNAL, signal_id))
 
 
-def tx_bind_checked_element(widget_id, level=0, field=0):
+def tx_bind_checked_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_CHECKED, SOURCE_ELEMENT, level, field))
 
 
-def tx_set_value(widget_id, value):
+def tx_set_value(widget_id: int, value: float) -> bytes:
     """set_property with a constant value value (float)."""
     return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_VALUE, SOURCE_CONST) + _enc.value(value))
 
 
-def tx_bind_value(widget_id, signal_id):
+def tx_bind_value(widget_id: int, signal_id: int) -> bytes:
     """set_property with a signal-bound value value."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_VALUE, SOURCE_SIGNAL, signal_id))
 
 
-def tx_bind_value_element(widget_id, level=0, field=0):
+def tx_bind_value_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_VALUE, SOURCE_ELEMENT, level, field))
 
 
-def tx_set_min(widget_id, min):
+def tx_set_min(widget_id: int, min: float) -> bytes:
     """set_property with a constant min value (float)."""
     return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_MIN, SOURCE_CONST) + _enc.value(min))
 
 
-def tx_bind_min(widget_id, signal_id):
+def tx_bind_min(widget_id: int, signal_id: int) -> bytes:
     """set_property with a signal-bound min value."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_MIN, SOURCE_SIGNAL, signal_id))
 
 
-def tx_bind_min_element(widget_id, level=0, field=0):
+def tx_bind_min_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_MIN, SOURCE_ELEMENT, level, field))
 
 
-def tx_set_max(widget_id, max):
+def tx_set_max(widget_id: int, max: float) -> bytes:
     """set_property with a constant max value (float)."""
     return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_MAX, SOURCE_CONST) + _enc.value(max))
 
 
-def tx_bind_max(widget_id, signal_id):
+def tx_bind_max(widget_id: int, signal_id: int) -> bytes:
     """set_property with a signal-bound max value."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_MAX, SOURCE_SIGNAL, signal_id))
 
 
-def tx_bind_max_element(widget_id, level=0, field=0):
+def tx_bind_max_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_MAX, SOURCE_ELEMENT, level, field))
 
 
-def tx_set_source(widget_id, handle):
+def tx_set_source(widget_id: int, handle: int) -> bytes:
     """set_property with a constant source value (a kaya_blob_register handle, consumed by the next submit)."""
     return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_SOURCE, SOURCE_CONST) + _enc.value(BlobHandle(handle)))
 
 
-def tx_bind_source(widget_id, signal_id):
+def tx_bind_source(widget_id: int, signal_id: int) -> bytes:
     """set_property with a signal-bound source value."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_SOURCE, SOURCE_SIGNAL, signal_id))
 
 
-def tx_bind_source_element(widget_id, level=0, field=0):
+def tx_bind_source_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_SOURCE, SOURCE_ELEMENT, level, field))
 
 
-def tx_set_grow(widget_id, grow):
+def tx_set_grow(widget_id: int, grow: float) -> bytes:
     """set_property with a constant grow value (float)."""
     return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_GROW, SOURCE_CONST) + _enc.value(grow))
 
 
-def tx_bind_grow(widget_id, signal_id):
+def tx_bind_grow(widget_id: int, signal_id: int) -> bytes:
     """set_property with a signal-bound grow value."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_GROW, SOURCE_SIGNAL, signal_id))
 
 
-def tx_bind_grow_element(widget_id, level=0, field=0):
+def tx_bind_grow_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_GROW, SOURCE_ELEMENT, level, field))
 
 
-def tx_set_spacing(widget_id, spacing):
+def tx_set_spacing(widget_id: int, spacing: float) -> bytes:
     """set_property with a constant spacing value (float)."""
     return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_SPACING, SOURCE_CONST) + _enc.value(spacing))
 
 
-def tx_bind_spacing(widget_id, signal_id):
+def tx_bind_spacing(widget_id: int, signal_id: int) -> bytes:
     """set_property with a signal-bound spacing value."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_SPACING, SOURCE_SIGNAL, signal_id))
 
 
-def tx_bind_spacing_element(widget_id, level=0, field=0):
+def tx_bind_spacing_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_SPACING, SOURCE_ELEMENT, level, field))
 
 
-def tx_set_align(widget_id, align):
+def tx_set_align(widget_id: int, align: int) -> bytes:
     """set_property with a constant align value (int)."""
     return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_ALIGN, SOURCE_CONST) + _enc.value(int(align)))
 
 
-def tx_bind_align(widget_id, signal_id):
+def tx_bind_align(widget_id: int, signal_id: int) -> bytes:
     """set_property with a signal-bound align value."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_ALIGN, SOURCE_SIGNAL, signal_id))
 
 
-def tx_bind_align_element(widget_id, level=0, field=0):
+def tx_bind_align_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_ALIGN, SOURCE_ELEMENT, level, field))
 
 
-def tx_set_indeterminate(widget_id, indeterminate):
+def tx_set_indeterminate(widget_id: int, indeterminate: bool) -> bytes:
     """set_property with a constant indeterminate value (bool)."""
     return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_INDETERMINATE, SOURCE_CONST) + _enc.value(indeterminate))
 
 
-def tx_bind_indeterminate(widget_id, signal_id):
+def tx_bind_indeterminate(widget_id: int, signal_id: int) -> bytes:
     """set_property with a signal-bound indeterminate value."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_INDETERMINATE, SOURCE_SIGNAL, signal_id))
 
 
-def tx_bind_indeterminate_element(widget_id, level=0, field=0):
+def tx_bind_indeterminate_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_INDETERMINATE, SOURCE_ELEMENT, level, field))
 
 
-def tx_set_columns(widget_id, columns):
+def tx_set_columns(widget_id: int, columns: float) -> bytes:
     """set_property with a constant columns value (float)."""
     return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_COLUMNS, SOURCE_CONST) + _enc.value(columns))
 
 
-def tx_bind_columns(widget_id, signal_id):
+def tx_bind_columns(widget_id: int, signal_id: int) -> bytes:
     """set_property with a signal-bound columns value."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_COLUMNS, SOURCE_SIGNAL, signal_id))
 
 
-def tx_bind_columns_element(widget_id, level=0, field=0):
+def tx_bind_columns_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_COLUMNS, SOURCE_ELEMENT, level, field))
 
 
-def tx_set_a11y_id(widget_id, a11y_id):
+def tx_set_a11y_id(widget_id: int, a11y_id: str) -> bytes:
     """set_property with a constant a11y_id value (str)."""
     return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_A11Y_ID, SOURCE_CONST) + _enc.value(a11y_id))
 
 
-def tx_bind_a11y_id(widget_id, signal_id):
+def tx_bind_a11y_id(widget_id: int, signal_id: int) -> bytes:
     """set_property with a signal-bound a11y_id value."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_A11Y_ID, SOURCE_SIGNAL, signal_id))
 
 
-def tx_bind_a11y_id_element(widget_id, level=0, field=0):
+def tx_bind_a11y_id_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_A11Y_ID, SOURCE_ELEMENT, level, field))
 
 
-def tx_set_a11y_label(widget_id, a11y_label):
+def tx_set_a11y_label(widget_id: int, a11y_label: str) -> bytes:
     """set_property with a constant a11y_label value (str)."""
     return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_A11Y_LABEL, SOURCE_CONST) + _enc.value(a11y_label))
 
 
-def tx_bind_a11y_label(widget_id, signal_id):
+def tx_bind_a11y_label(widget_id: int, signal_id: int) -> bytes:
     """set_property with a signal-bound a11y_label value."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_A11Y_LABEL, SOURCE_SIGNAL, signal_id))
 
 
-def tx_bind_a11y_label_element(widget_id, level=0, field=0):
+def tx_bind_a11y_label_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_A11Y_LABEL, SOURCE_ELEMENT, level, field))
 
 
-def tx_set_a11y_hint(widget_id, a11y_hint):
+def tx_set_a11y_hint(widget_id: int, a11y_hint: str) -> bytes:
     """set_property with a constant a11y_hint value (str)."""
     return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_A11Y_HINT, SOURCE_CONST) + _enc.value(a11y_hint))
 
 
-def tx_bind_a11y_hint(widget_id, signal_id):
+def tx_bind_a11y_hint(widget_id: int, signal_id: int) -> bytes:
     """set_property with a signal-bound a11y_hint value."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_A11Y_HINT, SOURCE_SIGNAL, signal_id))
 
 
-def tx_bind_a11y_hint_element(widget_id, level=0, field=0):
+def tx_bind_a11y_hint_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_A11Y_HINT, SOURCE_ELEMENT, level, field))
 
 
-def tx_set_accepts(widget_id, accepts):
+def tx_set_accepts(widget_id: int, accepts: str) -> bytes:
     """set_property with a constant accepts value (str)."""
     return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_ACCEPTS, SOURCE_CONST) + _enc.value(accepts))
 
 
-def tx_bind_accepts(widget_id, signal_id):
+def tx_bind_accepts(widget_id: int, signal_id: int) -> bytes:
     """set_property with a signal-bound accepts value."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_ACCEPTS, SOURCE_SIGNAL, signal_id))
 
 
-def tx_bind_accepts_element(widget_id, level=0, field=0):
+def tx_bind_accepts_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_ACCEPTS, SOURCE_ELEMENT, level, field))
 
 
-def tx_set_role(widget_id, role):
+def tx_set_role(widget_id: int, role: int) -> bytes:
     """set_property with a constant role value (int)."""
     return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_ROLE, SOURCE_CONST) + _enc.value(int(role)))
 
 
-def tx_bind_role(widget_id, signal_id):
+def tx_bind_role(widget_id: int, signal_id: int) -> bytes:
     """set_property with a signal-bound role value."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_ROLE, SOURCE_SIGNAL, signal_id))
 
 
-def tx_bind_role_element(widget_id, level=0, field=0):
+def tx_bind_role_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_ROLE, SOURCE_ELEMENT, level, field))
 
 
-def tx_set_inset(widget_id, inset):
+def tx_set_inset(widget_id: int, inset: float) -> bytes:
     """set_property with a constant inset value (float)."""
     return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_INSET, SOURCE_CONST) + _enc.value(inset))
 
 
-def tx_bind_inset(widget_id, signal_id):
+def tx_bind_inset(widget_id: int, signal_id: int) -> bytes:
     """set_property with a signal-bound inset value."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_INSET, SOURCE_SIGNAL, signal_id))
 
 
-def tx_bind_inset_element(widget_id, level=0, field=0):
+def tx_bind_inset_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_INSET, SOURCE_ELEMENT, level, field))
 
 
-def tx_set_axis(widget_id, axis):
+def tx_set_axis(widget_id: int, axis: int) -> bytes:
     """set_property with a constant axis value (int)."""
     return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_AXIS, SOURCE_CONST) + _enc.value(int(axis)))
 
 
-def tx_bind_axis(widget_id, signal_id):
+def tx_bind_axis(widget_id: int, signal_id: int) -> bytes:
     """set_property with a signal-bound axis value."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_AXIS, SOURCE_SIGNAL, signal_id))
 
 
-def tx_bind_axis_element(widget_id, level=0, field=0):
+def tx_bind_axis_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_AXIS, SOURCE_ELEMENT, level, field))
 
 
-def tx_set_date(widget_id, year, month, day):
+def tx_set_date(widget_id: int, year: int, month: int, day: int) -> bytes:
     """set_property with a constant date value (a civil date, packed YYYYMMDD)."""
     return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_DATE, SOURCE_CONST) + _enc.value(pack_date(year, month, day)))
 
 
-def tx_bind_date(widget_id, signal_id):
+def tx_bind_date(widget_id: int, signal_id: int) -> bytes:
     """set_property with a signal-bound date value."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_DATE, SOURCE_SIGNAL, signal_id))
 
 
-def tx_bind_date_element(widget_id, level=0, field=0):
+def tx_bind_date_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_DATE, SOURCE_ELEMENT, level, field))
 
 
-def tx_set_time(widget_id, hour, minute):
+def tx_set_time(widget_id: int, hour: int, minute: int) -> bytes:
     """set_property with a constant time value (a civil time, packed HHMM)."""
     return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_TIME, SOURCE_CONST) + _enc.value(pack_time(hour, minute)))
 
 
-def tx_bind_time(widget_id, signal_id):
+def tx_bind_time(widget_id: int, signal_id: int) -> bytes:
     """set_property with a signal-bound time value."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_TIME, SOURCE_SIGNAL, signal_id))
 
 
-def tx_bind_time_element(widget_id, level=0, field=0):
+def tx_bind_time_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_TIME, SOURCE_ELEMENT, level, field))
 
 
-def tx_set_min_date(widget_id, year, month, day):
+def tx_set_min_date(widget_id: int, year: int, month: int, day: int) -> bytes:
     """set_property with a constant min_date value (a civil date, packed YYYYMMDD)."""
     return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_MIN_DATE, SOURCE_CONST) + _enc.value(pack_date(year, month, day)))
 
 
-def tx_bind_min_date(widget_id, signal_id):
+def tx_bind_min_date(widget_id: int, signal_id: int) -> bytes:
     """set_property with a signal-bound min_date value."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_MIN_DATE, SOURCE_SIGNAL, signal_id))
 
 
-def tx_bind_min_date_element(widget_id, level=0, field=0):
+def tx_bind_min_date_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_MIN_DATE, SOURCE_ELEMENT, level, field))
 
 
-def tx_set_max_date(widget_id, year, month, day):
+def tx_set_max_date(widget_id: int, year: int, month: int, day: int) -> bytes:
     """set_property with a constant max_date value (a civil date, packed YYYYMMDD)."""
     return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_MAX_DATE, SOURCE_CONST) + _enc.value(pack_date(year, month, day)))
 
 
-def tx_bind_max_date(widget_id, signal_id):
+def tx_bind_max_date(widget_id: int, signal_id: int) -> bytes:
     """set_property with a signal-bound max_date value."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_MAX_DATE, SOURCE_SIGNAL, signal_id))
 
 
-def tx_bind_max_date_element(widget_id, level=0, field=0):
+def tx_bind_max_date_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_MAX_DATE, SOURCE_ELEMENT, level, field))
 
 
-def tx_set_minute_step(widget_id, minute_step):
+def tx_set_minute_step(widget_id: int, minute_step: float) -> bytes:
     """set_property with a constant minute_step value (float)."""
     return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_MINUTE_STEP, SOURCE_CONST) + _enc.value(minute_step))
 
 
-def tx_bind_minute_step(widget_id, signal_id):
+def tx_bind_minute_step(widget_id: int, signal_id: int) -> bytes:
     """set_property with a signal-bound minute_step value."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_MINUTE_STEP, SOURCE_SIGNAL, signal_id))
 
 
-def tx_bind_minute_step_element(widget_id, level=0, field=0):
+def tx_bind_minute_step_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_MINUTE_STEP, SOURCE_ELEMENT, level, field))
 
 
-def tx_set_step(widget_id, step):
+def tx_set_step(widget_id: int, step: float) -> bytes:
     """set_property with a constant step value (float)."""
     return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_STEP, SOURCE_CONST) + _enc.value(step))
 
 
-def tx_bind_step(widget_id, signal_id):
+def tx_bind_step(widget_id: int, signal_id: int) -> bytes:
     """set_property with a signal-bound step value."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_STEP, SOURCE_SIGNAL, signal_id))
 
 
-def tx_bind_step_element(widget_id, level=0, field=0):
+def tx_bind_step_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_STEP, SOURCE_ELEMENT, level, field))
 
 
-def tx_set_tick_spacing(widget_id, tick_spacing):
+def tx_set_tick_spacing(widget_id: int, tick_spacing: float) -> bytes:
     """set_property with a constant tick_spacing value (float)."""
     return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_TICK_SPACING, SOURCE_CONST) + _enc.value(tick_spacing))
 
 
-def tx_bind_tick_spacing(widget_id, signal_id):
+def tx_bind_tick_spacing(widget_id: int, signal_id: int) -> bytes:
     """set_property with a signal-bound tick_spacing value."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_TICK_SPACING, SOURCE_SIGNAL, signal_id))
 
 
-def tx_bind_tick_spacing_element(widget_id, level=0, field=0):
+def tx_bind_tick_spacing_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_TICK_SPACING, SOURCE_ELEMENT, level, field))
 
 
-def tx_set_help(widget_id, help):
+def tx_set_help(widget_id: int, help: str) -> bytes:
     """set_property with a constant help value (str)."""
     return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_HELP, SOURCE_CONST) + _enc.value(help))
 
 
-def tx_bind_help(widget_id, signal_id):
+def tx_bind_help(widget_id: int, signal_id: int) -> bytes:
     """set_property with a signal-bound help value."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_HELP, SOURCE_SIGNAL, signal_id))
 
 
-def tx_bind_help_element(widget_id, level=0, field=0):
+def tx_bind_help_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_HELP, SOURCE_ELEMENT, level, field))
 
 
-def tx_set_fill(widget_id, fill):
+def tx_set_fill(widget_id: int, fill: bool) -> bytes:
     """set_property with a constant fill value (bool)."""
     return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_FILL, SOURCE_CONST) + _enc.value(fill))
 
 
-def tx_bind_fill(widget_id, signal_id):
+def tx_bind_fill(widget_id: int, signal_id: int) -> bytes:
     """set_property with a signal-bound fill value."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_FILL, SOURCE_SIGNAL, signal_id))
 
 
-def tx_bind_fill_element(widget_id, level=0, field=0):
+def tx_bind_fill_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_FILL, SOURCE_ELEMENT, level, field))
 
 
-def tx_set_min_column_width(widget_id, min_column_width):
+def tx_set_min_column_width(widget_id: int, min_column_width: float) -> bytes:
     """set_property with a constant min_column_width value (float)."""
     return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_MIN_COLUMN_WIDTH, SOURCE_CONST) + _enc.value(min_column_width))
 
 
-def tx_bind_min_column_width(widget_id, signal_id):
+def tx_bind_min_column_width(widget_id: int, signal_id: int) -> bytes:
     """set_property with a signal-bound min_column_width value."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_MIN_COLUMN_WIDTH, SOURCE_SIGNAL, signal_id))
 
 
-def tx_bind_min_column_width_element(widget_id, level=0, field=0):
+def tx_bind_min_column_width_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_MIN_COLUMN_WIDTH, SOURCE_ELEMENT, level, field))
 
 
-def tx_set_wrap(widget_id, wrap):
+def tx_set_wrap(widget_id: int, wrap: bool) -> bytes:
     """set_property with a constant wrap value (bool)."""
     return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_WRAP, SOURCE_CONST) + _enc.value(wrap))
 
 
-def tx_bind_wrap(widget_id, signal_id):
+def tx_bind_wrap(widget_id: int, signal_id: int) -> bytes:
     """set_property with a signal-bound wrap value."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_WRAP, SOURCE_SIGNAL, signal_id))
 
 
-def tx_bind_wrap_element(widget_id, level=0, field=0):
+def tx_bind_wrap_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_WRAP, SOURCE_ELEMENT, level, field))
 
 
-def tx_set_placeholder(widget_id, placeholder):
+def tx_set_placeholder(widget_id: int, placeholder: str) -> bytes:
     """set_property with a constant placeholder value (str)."""
     return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_PLACEHOLDER, SOURCE_CONST) + _enc.value(placeholder))
 
 
-def tx_bind_placeholder(widget_id, signal_id):
+def tx_bind_placeholder(widget_id: int, signal_id: int) -> bytes:
     """set_property with a signal-bound placeholder value."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_PLACEHOLDER, SOURCE_SIGNAL, signal_id))
 
 
-def tx_bind_placeholder_element(widget_id, level=0, field=0):
+def tx_bind_placeholder_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_PLACEHOLDER, SOURCE_ELEMENT, level, field))
 
 
-def tx_set_href(widget_id, href):
+def tx_set_href(widget_id: int, href: str) -> bytes:
     """set_property with a constant href value (str)."""
     return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_HREF, SOURCE_CONST) + _enc.value(href))
 
 
-def tx_bind_href(widget_id, signal_id):
+def tx_bind_href(widget_id: int, signal_id: int) -> bytes:
     """set_property with a signal-bound href value."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_HREF, SOURCE_SIGNAL, signal_id))
 
 
-def tx_bind_href_element(widget_id, level=0, field=0):
+def tx_bind_href_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_HREF, SOURCE_ELEMENT, level, field))
 
 
-def tx_set_rich(widget_id, rich):
+def tx_set_rich(widget_id: int, rich: bool) -> bytes:
     """set_property with a constant rich value (bool)."""
     return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_RICH, SOURCE_CONST) + _enc.value(rich))
 
 
-def tx_bind_rich(widget_id, signal_id):
+def tx_bind_rich(widget_id: int, signal_id: int) -> bytes:
     """set_property with a signal-bound rich value."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_RICH, SOURCE_SIGNAL, signal_id))
 
 
-def tx_bind_rich_element(widget_id, level=0, field=0):
+def tx_bind_rich_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_RICH, SOURCE_ELEMENT, level, field))
 
 
-def tx_set_own_undo(widget_id, own_undo):
+def tx_set_own_undo(widget_id: int, own_undo: bool) -> bytes:
     """set_property with a constant own_undo value (bool)."""
     return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_OWN_UNDO, SOURCE_CONST) + _enc.value(own_undo))
 
 
-def tx_bind_own_undo(widget_id, signal_id):
+def tx_bind_own_undo(widget_id: int, signal_id: int) -> bytes:
     """set_property with a signal-bound own_undo value."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_OWN_UNDO, SOURCE_SIGNAL, signal_id))
 
 
-def tx_bind_own_undo_element(widget_id, level=0, field=0):
+def tx_bind_own_undo_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_OWN_UNDO, SOURCE_ELEMENT, level, field))
 
 
-def tx_set_can_undo(widget_id, can_undo):
+def tx_set_can_undo(widget_id: int, can_undo: bool) -> bytes:
     """set_property with a constant can_undo value (bool)."""
     return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_CAN_UNDO, SOURCE_CONST) + _enc.value(can_undo))
 
 
-def tx_bind_can_undo(widget_id, signal_id):
+def tx_bind_can_undo(widget_id: int, signal_id: int) -> bytes:
     """set_property with a signal-bound can_undo value."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_CAN_UNDO, SOURCE_SIGNAL, signal_id))
 
 
-def tx_bind_can_undo_element(widget_id, level=0, field=0):
+def tx_bind_can_undo_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_CAN_UNDO, SOURCE_ELEMENT, level, field))
 
 
-def tx_set_can_redo(widget_id, can_redo):
+def tx_set_can_redo(widget_id: int, can_redo: bool) -> bytes:
     """set_property with a constant can_redo value (bool)."""
     return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_CAN_REDO, SOURCE_CONST) + _enc.value(can_redo))
 
 
-def tx_bind_can_redo(widget_id, signal_id):
+def tx_bind_can_redo(widget_id: int, signal_id: int) -> bytes:
     """set_property with a signal-bound can_redo value."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_CAN_REDO, SOURCE_SIGNAL, signal_id))
 
 
-def tx_bind_can_redo_element(widget_id, level=0, field=0):
+def tx_bind_can_redo_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_CAN_REDO, SOURCE_ELEMENT, level, field))
 
 
-def tx_set_document(widget_id, handle):
+def tx_set_document(widget_id: int, handle: int) -> bytes:
     """set_property with a constant document value (a kaya_blob_register handle, consumed by the next submit)."""
     return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_DOCUMENT, SOURCE_CONST) + _enc.value(BlobHandle(handle)))
 
 
-def tx_bind_document(widget_id, signal_id):
+def tx_bind_document(widget_id: int, signal_id: int) -> bytes:
     """set_property with a signal-bound document value."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_DOCUMENT, SOURCE_SIGNAL, signal_id))
 
 
-def tx_bind_document_element(widget_id, level=0, field=0):
+def tx_bind_document_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_DOCUMENT, SOURCE_ELEMENT, level, field))
 
 
-def tx_set_window_title(window, title):
+def tx_set_window_title(window: int, title: str) -> bytes:
     """set_window_prop with a constant title value (str); window 0, the primary surface."""
     return record(TX_SET_WINDOW_PROP, struct.pack("<QII", window, WPROP_TITLE, SOURCE_CONST) + _enc.value(title))
 
 
-def tx_bind_window_title(window, signal_id):
+def tx_bind_window_title(window: int, signal_id: int) -> bytes:
     """set_window_prop with a signal-bound title value; window 0, the primary surface."""
     return record(TX_SET_WINDOW_PROP, struct.pack("<QIIQ", window, WPROP_TITLE, SOURCE_SIGNAL, signal_id))
 
 
-def tx_set_window_width(window, width):
+def tx_set_window_width(window: int, width: float) -> bytes:
     """set_window_prop with a constant width value (float); window 0, the primary surface."""
     return record(TX_SET_WINDOW_PROP, struct.pack("<QII", window, WPROP_WIDTH, SOURCE_CONST) + _enc.value(width))
 
 
-def tx_bind_window_width(window, signal_id):
+def tx_bind_window_width(window: int, signal_id: int) -> bytes:
     """set_window_prop with a signal-bound width value; window 0, the primary surface."""
     return record(TX_SET_WINDOW_PROP, struct.pack("<QIIQ", window, WPROP_WIDTH, SOURCE_SIGNAL, signal_id))
 
 
-def tx_set_window_height(window, height):
+def tx_set_window_height(window: int, height: float) -> bytes:
     """set_window_prop with a constant height value (float); window 0, the primary surface."""
     return record(TX_SET_WINDOW_PROP, struct.pack("<QII", window, WPROP_HEIGHT, SOURCE_CONST) + _enc.value(height))
 
 
-def tx_bind_window_height(window, signal_id):
+def tx_bind_window_height(window: int, signal_id: int) -> bytes:
     """set_window_prop with a signal-bound height value; window 0, the primary surface."""
     return record(TX_SET_WINDOW_PROP, struct.pack("<QIIQ", window, WPROP_HEIGHT, SOURCE_SIGNAL, signal_id))
 
 
-def tx_set_window_veto_close(window, veto_close):
+def tx_set_window_veto_close(window: int, veto_close: bool) -> bytes:
     """set_window_prop with a constant veto_close value (bool); window 0, the primary surface."""
     return record(TX_SET_WINDOW_PROP, struct.pack("<QII", window, WPROP_VETO_CLOSE, SOURCE_CONST) + _enc.value(veto_close))
 
 
-def tx_bind_window_veto_close(window, signal_id):
+def tx_bind_window_veto_close(window: int, signal_id: int) -> bytes:
     """set_window_prop with a signal-bound veto_close value; window 0, the primary surface."""
     return record(TX_SET_WINDOW_PROP, struct.pack("<QIIQ", window, WPROP_VETO_CLOSE, SOURCE_SIGNAL, signal_id))
 
 
-def tx_set_window_sections_presentation(window, sections_presentation):
+def tx_set_window_sections_presentation(window: int, sections_presentation: int) -> bytes:
     """set_window_prop with a constant sections_presentation value (int); window 0, the primary surface."""
     return record(TX_SET_WINDOW_PROP, struct.pack("<QII", window, WPROP_SECTIONS_PRESENTATION, SOURCE_CONST) + _enc.value(int(sections_presentation)))
 
 
-def tx_bind_window_sections_presentation(window, signal_id):
+def tx_bind_window_sections_presentation(window: int, signal_id: int) -> bytes:
     """set_window_prop with a signal-bound sections_presentation value; window 0, the primary surface."""
     return record(TX_SET_WINDOW_PROP, struct.pack("<QIIQ", window, WPROP_SECTIONS_PRESENTATION, SOURCE_SIGNAL, signal_id))
 
 
-def tx_set_window_panes(window, panes):
+def tx_set_window_panes(window: int, panes: int) -> bytes:
     """set_window_prop with a constant panes value (int); window 0, the primary surface."""
     return record(TX_SET_WINDOW_PROP, struct.pack("<QII", window, WPROP_PANES, SOURCE_CONST) + _enc.value(int(panes)))
 
 
-def tx_bind_window_panes(window, signal_id):
+def tx_bind_window_panes(window: int, signal_id: int) -> bytes:
     """set_window_prop with a signal-bound panes value; window 0, the primary surface."""
     return record(TX_SET_WINDOW_PROP, struct.pack("<QIIQ", window, WPROP_PANES, SOURCE_SIGNAL, signal_id))
 
 
-def tx_set_window_dirty(window, dirty):
+def tx_set_window_dirty(window: int, dirty: bool) -> bytes:
     """set_window_prop with a constant dirty value (bool); window 0, the primary surface."""
     return record(TX_SET_WINDOW_PROP, struct.pack("<QII", window, WPROP_DIRTY, SOURCE_CONST) + _enc.value(dirty))
 
 
-def tx_bind_window_dirty(window, signal_id):
+def tx_bind_window_dirty(window: int, signal_id: int) -> bytes:
     """set_window_prop with a signal-bound dirty value; window 0, the primary surface."""
     return record(TX_SET_WINDOW_PROP, struct.pack("<QIIQ", window, WPROP_DIRTY, SOURCE_SIGNAL, signal_id))
 
 
-def tx_set_window_inset(window, inset):
+def tx_set_window_inset(window: int, inset: float) -> bytes:
     """set_window_prop with a constant inset value (float); window 0, the primary surface."""
     return record(TX_SET_WINDOW_PROP, struct.pack("<QII", window, WPROP_INSET, SOURCE_CONST) + _enc.value(inset))
 
 
-def tx_bind_window_inset(window, signal_id):
+def tx_bind_window_inset(window: int, signal_id: int) -> bytes:
     """set_window_prop with a signal-bound inset value; window 0, the primary surface."""
     return record(TX_SET_WINDOW_PROP, struct.pack("<QIIQ", window, WPROP_INSET, SOURCE_SIGNAL, signal_id))
 
 
-def tx_set_window_appearance(window, appearance):
+def tx_set_window_appearance(window: int, appearance: int) -> bytes:
     """set_window_prop with a constant appearance value (int); window 0, the primary surface."""
     return record(TX_SET_WINDOW_PROP, struct.pack("<QII", window, WPROP_APPEARANCE, SOURCE_CONST) + _enc.value(int(appearance)))
 
 
-def tx_bind_window_appearance(window, signal_id):
+def tx_bind_window_appearance(window: int, signal_id: int) -> bytes:
     """set_window_prop with a signal-bound appearance value; window 0, the primary surface."""
     return record(TX_SET_WINDOW_PROP, struct.pack("<QIIQ", window, WPROP_APPEARANCE, SOURCE_SIGNAL, signal_id))
 
 
-def tx_set_window_remember_frame(window, remember_frame):
+def tx_set_window_remember_frame(window: int, remember_frame: bool) -> bytes:
     """set_window_prop with a constant remember_frame value (bool); window 0, the primary surface."""
     return record(TX_SET_WINDOW_PROP, struct.pack("<QII", window, WPROP_REMEMBER_FRAME, SOURCE_CONST) + _enc.value(remember_frame))
 
 
-def tx_bind_window_remember_frame(window, signal_id):
+def tx_bind_window_remember_frame(window: int, signal_id: int) -> bytes:
     """set_window_prop with a signal-bound remember_frame value; window 0, the primary surface."""
     return record(TX_SET_WINDOW_PROP, struct.pack("<QIIQ", window, WPROP_REMEMBER_FRAME, SOURCE_SIGNAL, signal_id))
 
 
-def tx_set_entry_title(entry, title):
+def tx_set_entry_title(entry: int, title: str) -> bytes:
     """set_entry_prop with a constant title value (str)."""
     return record(TX_SET_ENTRY_PROP, struct.pack("<QII", entry, EPROP_TITLE, SOURCE_CONST) + _enc.value(title))
 
 
-def tx_bind_entry_title(entry, signal_id):
+def tx_bind_entry_title(entry: int, signal_id: int) -> bytes:
     """set_entry_prop with a signal-bound title value."""
     return record(TX_SET_ENTRY_PROP, struct.pack("<QIIQ", entry, EPROP_TITLE, SOURCE_SIGNAL, signal_id))
 
 
-def tx_set_entry_intercept_back(entry, intercept_back):
+def tx_set_entry_intercept_back(entry: int, intercept_back: bool) -> bytes:
     """set_entry_prop with a constant intercept_back value (bool)."""
     return record(TX_SET_ENTRY_PROP, struct.pack("<QII", entry, EPROP_INTERCEPT_BACK, SOURCE_CONST) + _enc.value(intercept_back))
 
 
-def tx_bind_entry_intercept_back(entry, signal_id):
+def tx_bind_entry_intercept_back(entry: int, signal_id: int) -> bytes:
     """set_entry_prop with a signal-bound intercept_back value."""
     return record(TX_SET_ENTRY_PROP, struct.pack("<QIIQ", entry, EPROP_INTERCEPT_BACK, SOURCE_SIGNAL, signal_id))
 
 
-def tx_set_section_title(section, title):
+def tx_set_section_title(section: int, title: str) -> bytes:
     """set_section_prop with a constant title value (str)."""
     return record(TX_SET_SECTION_PROP, struct.pack("<QII", section, SPROP_TITLE, SOURCE_CONST) + _enc.value(title))
 
 
-def tx_bind_section_title(section, signal_id):
+def tx_bind_section_title(section: int, signal_id: int) -> bytes:
     """set_section_prop with a signal-bound title value."""
     return record(TX_SET_SECTION_PROP, struct.pack("<QIIQ", section, SPROP_TITLE, SOURCE_SIGNAL, signal_id))
 
 
-def tx_set_section_icon(section, handle):
+def tx_set_section_icon(section: int, handle: int) -> bytes:
     """set_section_prop with a constant icon value (a kaya_blob_register handle, consumed by the next submit)."""
     return record(TX_SET_SECTION_PROP, struct.pack("<QII", section, SPROP_ICON, SOURCE_CONST) + _enc.value(BlobHandle(handle)))
 
 
-def tx_bind_section_icon(section, signal_id):
+def tx_bind_section_icon(section: int, signal_id: int) -> bytes:
     """set_section_prop with a signal-bound icon value."""
     return record(TX_SET_SECTION_PROP, struct.pack("<QIIQ", section, SPROP_ICON, SOURCE_SIGNAL, signal_id))
 
 
-def tx_set_section_symbol(section, symbol):
+def tx_set_section_symbol(section: int, symbol: int) -> bytes:
     """set_section_prop with a constant symbol value (int)."""
     return record(TX_SET_SECTION_PROP, struct.pack("<QII", section, SPROP_SYMBOL, SOURCE_CONST) + _enc.value(int(symbol)))
 
 
-def tx_bind_section_symbol(section, signal_id):
+def tx_bind_section_symbol(section: int, signal_id: int) -> bytes:
     """set_section_prop with a signal-bound symbol value."""
     return record(TX_SET_SECTION_PROP, struct.pack("<QIIQ", section, SPROP_SYMBOL, SOURCE_SIGNAL, signal_id))
 
 
-def tx_set_section_badge(section, badge):
+def tx_set_section_badge(section: int, badge: float) -> bytes:
     """set_section_prop with a constant badge value (float)."""
     return record(TX_SET_SECTION_PROP, struct.pack("<QII", section, SPROP_BADGE, SOURCE_CONST) + _enc.value(badge))
 
 
-def tx_bind_section_badge(section, signal_id):
+def tx_bind_section_badge(section: int, signal_id: int) -> bytes:
     """set_section_prop with a signal-bound badge value."""
     return record(TX_SET_SECTION_PROP, struct.pack("<QIIQ", section, SPROP_BADGE, SOURCE_SIGNAL, signal_id))
 
@@ -1352,7 +1360,7 @@ def tx_bind_section_badge(section, signal_id):
 _SHORTCUT_NAMED_KEYS = frozenset(("enter", "escape", "delete", "left", "right", "up", "down", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "comma", "period", "slash", "backslash", "minus", "equal", "leftbracket", "rightbracket"))
 
 
-def canonicalize_shortcut(spelling):
+def canonicalize_shortcut(spelling: str) -> str:
     """Canonicalize a shortcut spelling to the wire form: lowercase
     '+'-joined tokens, modifiers ordered primary, shift, alt, then one
     key (a-z, 0-9, or the closed named set). Rejects whitespace, empty
@@ -1385,72 +1393,72 @@ def canonicalize_shortcut(spelling):
     return "+".join([m for m in ("primary", "shift", "alt") if m in seen] + [key])
 
 
-def tx_set_menu_label(item, label):
+def tx_set_menu_label(item: int, label: str) -> bytes:
     """set_menu_prop with a constant label value (str)."""
     return record(TX_SET_MENU_PROP, struct.pack("<QII", item, MPROP_LABEL, SOURCE_CONST) + _enc.value(label))
 
 
-def tx_bind_menu_label(item, signal_id):
+def tx_bind_menu_label(item: int, signal_id: int) -> bytes:
     """set_menu_prop with a signal-bound label value."""
     return record(TX_SET_MENU_PROP, struct.pack("<QIIQ", item, MPROP_LABEL, SOURCE_SIGNAL, signal_id))
 
 
-def tx_set_menu_enabled(item, enabled):
+def tx_set_menu_enabled(item: int, enabled: bool) -> bytes:
     """set_menu_prop with a constant enabled value (bool)."""
     return record(TX_SET_MENU_PROP, struct.pack("<QII", item, MPROP_ENABLED, SOURCE_CONST) + _enc.value(enabled))
 
 
-def tx_bind_menu_enabled(item, signal_id):
+def tx_bind_menu_enabled(item: int, signal_id: int) -> bytes:
     """set_menu_prop with a signal-bound enabled value."""
     return record(TX_SET_MENU_PROP, struct.pack("<QIIQ", item, MPROP_ENABLED, SOURCE_SIGNAL, signal_id))
 
 
-def tx_set_menu_checked(item, checked):
+def tx_set_menu_checked(item: int, checked: bool) -> bytes:
     """set_menu_prop with a constant checked value (bool)."""
     return record(TX_SET_MENU_PROP, struct.pack("<QII", item, MPROP_CHECKED, SOURCE_CONST) + _enc.value(checked))
 
 
-def tx_bind_menu_checked(item, signal_id):
+def tx_bind_menu_checked(item: int, signal_id: int) -> bytes:
     """set_menu_prop with a signal-bound checked value."""
     return record(TX_SET_MENU_PROP, struct.pack("<QIIQ", item, MPROP_CHECKED, SOURCE_SIGNAL, signal_id))
 
 
-def tx_set_menu_value(item, value):
+def tx_set_menu_value(item: int, value: float) -> bytes:
     """set_menu_prop with a constant value value (float)."""
     return record(TX_SET_MENU_PROP, struct.pack("<QII", item, MPROP_VALUE, SOURCE_CONST) + _enc.value(value))
 
 
-def tx_bind_menu_value(item, signal_id):
+def tx_bind_menu_value(item: int, signal_id: int) -> bytes:
     """set_menu_prop with a signal-bound value value."""
     return record(TX_SET_MENU_PROP, struct.pack("<QIIQ", item, MPROP_VALUE, SOURCE_SIGNAL, signal_id))
 
 
-def tx_set_menu_icon(item, handle):
+def tx_set_menu_icon(item: int, handle: int) -> bytes:
     """set_menu_prop with a constant icon value (a kaya_blob_register handle, consumed by the next submit)."""
     return record(TX_SET_MENU_PROP, struct.pack("<QII", item, MPROP_ICON, SOURCE_CONST) + _enc.value(BlobHandle(handle)))
 
 
-def tx_set_menu_primary(item, primary):
+def tx_set_menu_primary(item: int, primary: bool) -> bytes:
     """set_menu_prop with a constant primary value (bool)."""
     return record(TX_SET_MENU_PROP, struct.pack("<QII", item, MPROP_PRIMARY, SOURCE_CONST) + _enc.value(primary))
 
 
-def tx_set_menu_shortcut(item, shortcut):
+def tx_set_menu_shortcut(item: int, shortcut: str) -> bytes:
     """set_menu_prop with a constant shortcut value (str, canonicalized here — the one binding-tier shortcut parser)."""
     return record(TX_SET_MENU_PROP, struct.pack("<QII", item, MPROP_SHORTCUT, SOURCE_CONST) + _enc.value(canonicalize_shortcut(shortcut)))
 
 
-def tx_set_menu_role(item, role):
+def tx_set_menu_role(item: int, role: str) -> bytes:
     """set_menu_prop with a constant role value (str)."""
     return record(TX_SET_MENU_PROP, struct.pack("<QII", item, MPROP_ROLE, SOURCE_CONST) + _enc.value(role))
 
 
-def tx_set_menu_symbol(item, symbol):
+def tx_set_menu_symbol(item: int, symbol: int) -> bytes:
     """set_menu_prop with a constant symbol value (int)."""
     return record(TX_SET_MENU_PROP, struct.pack("<QII", item, MPROP_SYMBOL, SOURCE_CONST) + _enc.value(int(symbol)))
 
 
-def parse_value(buf, at):
+def parse_value(buf: bytes | bytearray, at: int) -> tuple[Value, int]:
     """Decode one value; returns (python value, next offset)."""
     vtype, vlen = struct.unpack_from("<II", buf, at)
     payload = buf[at + 8:at + 8 + vlen]
@@ -1468,12 +1476,14 @@ def parse_value(buf, at):
     raise ValueError(f"unknown value type {vtype}")
 
 
-occurrence_blob = None
+occurrence_blob: Callable[[int], bytes] = cast("Callable[[int], bytes]", None)
 """Redeem-and-release for occurrence blobs, installed by the runtime
-at import (this module loads no library of its own)."""
+at import (this module loads no library of its own). `cast` rather
+than an Optional: the runtime installs it before any occurrence is
+decoded, and every call below would otherwise be a None check."""
 
 
-def parse_representation(buf, at):
+def parse_representation(buf: bytes | bytearray, at: int) -> tuple[list[Any], int]:
     """The VALUES half of a representation: the count, then that many
     values with blobs redeemed and released.
 
@@ -1490,7 +1500,7 @@ def parse_representation(buf, at):
     return values, at
 
 
-def parse_clip(buf, at):
+def parse_clip(buf: bytes | bytearray, at: int) -> tuple[int, list[Any], int]:
     """Decode one representation: the clip kind, then its values.
 
     Returns (clip, values, next offset). `clip` is a SINGLE member
@@ -1502,7 +1512,7 @@ def parse_clip(buf, at):
     return clip, values, at
 
 
-def parse_occurrence(buf):
+def parse_occurrence(buf: bytes | bytearray) -> tuple[int, Any, list[Any], Any]:
     """Decode one occurrence record (header included).
 
     Returns (kind, id, keys, payload). keys is [] when id is a
