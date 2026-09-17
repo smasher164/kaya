@@ -62,34 +62,32 @@ app.build { tx in
     let noteTarget = tx.signal(.str("note target"))
     let filesTarget = tx.signal(.str("files target"))
 
-    // A widget parents at CREATION, so these vars ride out through the
-    // builder closure (docs/traps.md, result builders).
-    var source: KayaWidget!
-    var textID: KayaWidget!
-    var noteWidget: KayaWidget!
-    var filesWidget: KayaWidget!
-    var list: KayaWidget!
+    // The TRACE's own slots: a For's body runs once where the compiler
+    // cannot see it, and the template zone is outside the ruling.
     var rowLabel: KayaNodeHandle!
     var itemLabel: KayaNodeHandle!
-    let root = tx.row {
-        list = itemEach(tx, items) { row in
+    let (root, list, source, textID, noteWidget, filesWidget) = tx.row {
+        root -> (KayaWidget, KayaWidget, KayaWidget, KayaWidget, KayaWidget, KayaWidget) in
+        let list = itemEach(tx, items) { row in
             rowLabel = row.label(row.title)
             row.t.setA11yId(rowLabel, "row")
         }
         tx.setA11yId(list, "rows")
-        tx.column {
-            source = tx.label(bind: sourceText)  // label#0
-            textID = tx.label(bind: textTarget)  // label#1
+        let (source, textID, noteWidget, filesWidget) = tx.column {
+            _ -> (KayaWidget, KayaWidget, KayaWidget, KayaWidget) in
+            let source = tx.label(bind: sourceText)  // label#0
+            let textID = tx.label(bind: textTarget)  // label#1
             tx.setAccepts(textID, [KayaAppTx.acceptText])
             tx.setDropTarget(textID, [.copy])
-            noteWidget = tx.label(bind: noteTarget)  // label#2
+            let noteWidget = tx.label(bind: noteTarget)  // label#2
             tx.setAccepts(noteWidget, [noteID])
             tx.setDropTarget(noteWidget, [.copy, .move])
-            filesWidget = tx.label(bind: filesTarget)  // label#3
+            let filesWidget = tx.label(bind: filesTarget)  // label#3
             tx.setAccepts(filesWidget, [KayaAppTx.acceptFiles])
             tx.setDropTarget(filesWidget, [.copy])
             _ = tx.label(bind: dropStatus)  // label#4
             _ = tx.label(bind: dragStatus)  // label#5
+            return (source, textID, noteWidget, filesWidget)
         }
         // THE TEMPLATE ZONE (docs/dnd-plan.md §4): every stamped item is a
         // text destination, and its payload IS the row's own field —
@@ -105,6 +103,7 @@ app.build { tx in
         tx.button("rename y") { tx in  // button#0
             items2.update(tx, .str("y"), Item(title: "yy"))
         }
+        return (root, list, source, textID, noteWidget, filesWidget)
     }
     tx.mount(root)
     tx.draggable(source)

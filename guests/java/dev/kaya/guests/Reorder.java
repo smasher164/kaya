@@ -20,7 +20,7 @@ public final class Reorder {
         app.build(tx -> {
             var items = ItemKaya.collection(tx);
 
-            tx.mount(tx.row(() -> {
+            tx.mount(tx.row(cells -> {
                 tx.button("rotate", t -> {
                     List<KayaRecords.Entry<String, Item>> entries = items.items(t);
                     items.moveToEnd(t, entries.get(0).key);

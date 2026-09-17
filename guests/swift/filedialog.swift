@@ -29,11 +29,9 @@ try? "decoy".write(
 
 let released = DispatchSemaphore(value: 0)
 
-var status: KayaSignal!
-
 app.build { tx in
     tx.window(title: "filedialog")
-    status = tx.signal(.str("no file"))
+    let status = tx.signal(.str("no file"))
 
     func picked(_ tx: KayaAppTx, _ files: [KayaPickedFile]) throws {
         if files.isEmpty {
@@ -63,7 +61,7 @@ app.build { tx in
         try tx.write(status, .str("reading"))
     }
 
-    let root = tx.column {
+    let root = tx.column { root in
         tx.setA11yId(tx.label(bind: status), "status")  // label#0
         tx.button(
             "open",
@@ -79,6 +77,7 @@ app.build { tx in
         tx.button(
             "release",
             onClick: { _ in released.signal() })  // button#2
+        return root
     }
     tx.mount(root)
 }

@@ -11,14 +11,14 @@ public final class GridScene {
 
         app.build(tx -> {
             tx.window(0).title("grid");
-            tx.mount(tx.column(() -> {
-                tx.grid(2, () -> {
+            tx.mount(tx.column(col -> {
+                tx.grid(2, cells -> {
                     tx.label("Name:"); // label#0
                     tx.label("Ada Lovelace"); // label#1
                     tx.label("Role:"); // label#2
                     tx.label("Engine programmer"); // label#3
                 });
-                tx.row(() -> {
+                tx.row(row -> {
                     tx.button("left"); // button#0
                     tx.spacer();
                     tx.button("right"); // button#1

@@ -33,7 +33,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 msgs.on_menu_item(export, Msg::Export);
                 save
             })
-            .out;
+            .value();
         msgs.on_menu_item(save, Msg::Save);
 
         let find = tx
@@ -44,7 +44,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 m.item("Replace").symbol(kaya::Symbol::Edit).id();
                 find
             })
-            .out;
+            .value();
         msgs.on_menu_item(find, Msg::Find);
 
         tx.window(kaya::DEFAULT_WINDOW)

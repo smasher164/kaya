@@ -20,7 +20,7 @@ static class TableScene
             var items = TableItemKaya.Collection(tx);
             // The root is a Row so the For's container is the scene's only
             // column-kind widget (the reorder scene's rule).
-            tx.Mount(tx.Row(() =>
+            tx.Mount(tx.Row(root =>
             {
                 var table = TableItemKaya.Each(tx, items, row =>
                 {
@@ -49,6 +49,7 @@ static class TableScene
                     t.Columns(table, new[] { "Name", "Size" },
                         desc ? Sort.Desc(column) : Sort.Asc(column));
                 });
+                return root;
             }));
             foreach (var (key, name, size) in new[]
             {

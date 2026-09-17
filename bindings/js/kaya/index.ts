@@ -1120,7 +1120,9 @@ export class Widget extends Handle {
    * scoped to this NOUN (no shortcuts here). TEMPLATE NODE: attach a
    * live-zone-built catalog, each activation carrying that copy's key
    * path; an item takes exactly ONE anchor. */
-  contextMenu(bodyOrCatalog: (() => void) | ContextCatalog): this {
+  contextMenu(catalog: ContextCatalog): this;
+  contextMenu<T = void>(body: (anchor: Widget) => T): T;
+  contextMenu<T = void>(bodyOrCatalog: ((anchor: Widget) => T) | ContextCatalog): this | T {
     if (bodyOrCatalog instanceof ContextCatalog) {
       if (!this.isNode) {
         throw new TypeError("kaya: a live widget's context menu is declared in place — widget.contextMenu(() => {...}); a catalog attaches to a template node");
@@ -1134,8 +1136,7 @@ export class Widget extends Handle {
     if (this.isNode) {
       throw new TypeError("kaya: a template node's context menu is a catalog built in the live zone (kaya.contextCatalog) and attached with node.contextMenu(catalog)");
     }
-    new MenuScope(["widget", this.id], false).run(bodyOrCatalog);
-    return this;
+    return new MenuScope(["widget", this.id], false).run(bodyOrCatalog, this);
   }
 }
 
@@ -1740,16 +1741,17 @@ class Container {
     this.handle = handle;
   }
 
-  run(body: (() => void) | undefined): Widget {
+  run<T>(body: ((container: Widget) => T) | undefined): T {
     _parents.push(this.handle.id);
+    let out: T;
     try {
-      if (body !== undefined) body();
+      out = body !== undefined ? body(this.handle) : (undefined as T);
     } finally {
       _parents.pop();
     }
     const atLiveTop = _tplDepth === 0 && (_parents.length === 0 || _parents[_parents.length - 1] === null);
     if (atLiveTop && _parents.length === 0) _pendingRoot = this.handle;
-    return this.handle;
+    return out;
   }
 }
 
@@ -2840,8 +2842,8 @@ export class MenuItem {
 
   /** Reopen this RETAINED grouping node — the append-at-any-time
    * discipline. */
-  append(body: () => void): void {
-    new MenuScope(["item", this.id], true).run(body);
+  append<T = void>(body: (menu: MenuItem) => T): T {
+    return new MenuScope(["item", this.id], true).run(body, this);
   }
 }
 
@@ -2868,14 +2870,16 @@ class MenuScope {
     this._onExit = onExit;
   }
 
-  run(body: () => void): void {
+  run<T, A>(body: (anchor: A) => T, anchor: A): T {
     _menuScopes.push(this);
+    let out: T;
     try {
-      body();
+      out = body(anchor);
     } finally {
       _menuScopes.pop();
     }
     if (this._onExit !== null) this._onExit();
+    return out;
   }
 }
 
@@ -3010,23 +3014,22 @@ export type MenuOptions = { enabled?: boolean | Signal<boolean>; icon?: Uint8Arr
 
 /** A NESTED menu — grouping, never navigation — inside an open menu
  * scope. Bar-level menus are `app.menu`. */
-export function menu(label: string | Signal<string>, optsOrBody: MenuOptions | (() => void), body?: () => void): MenuItem {
-  const [opts, run] = optsAndBody(optsOrBody, body);
+export function menu<T = void>(label: string | Signal<string>, optsOrBody: MenuOptions | ((menu: MenuItem) => T), body?: (menu: MenuItem) => T): T {
+  const [opts, run] = optsAndBody<MenuOptions, MenuItem, T>(optsOrBody, body);
   const it = menuCreate(wire.MENU_KIND_MENU, label);
   const scope = menuSeat(it);
   if (opts.enabled !== undefined) it.enabled(opts.enabled);
   if (opts.icon !== undefined) it.icon(opts.icon);
   if (opts.symbol !== undefined) it.symbol(opts.symbol);
-  new MenuScope(["item", it.id], scope._shortcutOk).run(run);
-  return it;
+  return new MenuScope(["item", it.id], scope._shortcutOk).run(run, it);
 }
 
 export type RadioGroupOptions = MenuOptions & { value?: number | Signal<number>; onSelect?: Handler };
 
 /** A NESTED radio group, declaring only kaya.option children. `value` is
  * the selected 0-based index; onSelect receives each USER pick. */
-export function radioGroup(label: string | Signal<string>, optsOrBody: RadioGroupOptions | (() => void), body?: () => void): MenuItem {
-  const [opts, run] = optsAndBody(optsOrBody, body);
+export function radioGroup<T = void>(label: string | Signal<string>, optsOrBody: RadioGroupOptions | ((group: MenuItem) => T), body?: (group: MenuItem) => T): T {
+  const [opts, run] = optsAndBody<RadioGroupOptions, MenuItem, T>(optsOrBody, body);
   const it = menuCreate(wire.MENU_KIND_RADIO_GROUP, label);
   const scope = menuSeat(it);
   if (opts.enabled !== undefined) it.enabled(opts.enabled);
@@ -3036,19 +3039,17 @@ export function radioGroup(label: string | Signal<string>, optsOrBody: RadioGrou
   // value lands at scope exit, AFTER the option children: the index
   // addresses options, and the root judges its domain at the record.
   const value = opts.value;
-  new MenuScope(["item", it.id], scope._shortcutOk, value !== undefined ? () => it.value(value) : null).run(run);
-  return it;
+  return new MenuScope(["item", it.id], scope._shortcutOk, value !== undefined ? () => it.value(value) : null).run(run, it);
 }
 
 /** Build a context catalog UNANCHORED — free root items for a
  * template-node anchor, built in the LIVE zone. */
-export function contextCatalog(body: () => void): ContextCatalog {
+export function contextCatalog<T = void>(body: (catalog: ContextCatalog) => T): T {
   const catalog = new ContextCatalog();
-  new MenuScope(["free", catalog], false).run(body);
-  return catalog;
+  return new MenuScope(["free", catalog], false).run(body, catalog);
 }
 
-function optsAndBody<O extends object>(optsOrBody: O | (() => void) | undefined, body: (() => void) | undefined): [O, () => void] {
+function optsAndBody<O extends object, A, T>(optsOrBody: O | ((a: A) => T) | undefined, body: ((a: A) => T) | undefined): [O, (a: A) => T] {
   if (typeof optsOrBody === "function") return [{} as O, optsOrBody];
   if (body === undefined) throw new TypeError("kaya: this construct takes its body last: name(opts, () => {...})");
   return [optsOrBody ?? ({} as O), body];
@@ -3661,8 +3662,8 @@ function setGrow(handle: Handle, opts: GrowOption): void {
 
 /** A vertical scroll viewport parenting EXACTLY ONE child. Give it `grow`
  * so the enclosing track CONSTRAINS it. */
-export function scroll(optsOrBody?: GrowOption | (() => void), body?: () => void): Widget {
-  const [opts, run] = optsAndOptionalBody(optsOrBody, body);
+export function scroll<T = void>(optsOrBody?: GrowOption | ((scroll: Widget) => T), body?: (scroll: Widget) => T): T {
+  const [opts, run] = optsAndOptionalBody<GrowOption, Widget, T>(optsOrBody, body);
   const handle = widget(wire.KIND_SCROLL);
   setGrow(handle, opts);
   return new Container(handle).run(run);
@@ -3675,8 +3676,8 @@ export type GridOptions = ContainerOptions & { columnsWhen?: [SizeClass, number]
  * is a `[size class, count]` pair laying it out in that many columns
  * while the window's size class is the named one — a core-evaluated
  * breakpoint (docs/adaptive-layout-plan.md D6.2). */
-export function grid(columns: number, optsOrBody?: GridOptions | (() => void), body?: () => void): Widget {
-  const [opts, run] = optsAndOptionalBody(optsOrBody, body);
+export function grid<T = void>(columns: number, optsOrBody?: GridOptions | ((grid: Widget) => T), body?: (grid: Widget) => T): T {
+  const [opts, run] = optsAndOptionalBody<GridOptions, Widget, T>(optsOrBody, body);
   const handle = widget(wire.KIND_GRID);
   records().push(wire.tx_set_columns(handle.id, Number(columns)));
   if (opts.columnsWhen !== undefined) {
@@ -3702,14 +3703,14 @@ export type LabeledOptions = GrowOption & { spacing?: number; inset?: number };
  * nothing but these renders as the platform's form. The label is a
  * constant, a Signal, or — in a template — the enclosing For's element or
  * one of its fields. */
-export function labeled(label: string | Bindable, optsOrBody?: LabeledOptions | (() => void), body?: () => void): Widget {
-  const [opts, run] = optsAndOptionalBody(optsOrBody, body);
+export function labeled<T = void>(label: string | Bindable, optsOrBody?: LabeledOptions | ((labeled: Widget) => T), body?: (labeled: Widget) => T): T {
+  const [opts, run] = optsAndOptionalBody<LabeledOptions, Widget, T>(optsOrBody, body);
   const handle = widget(wire.KIND_LABELED);
   setLayout(handle, opts);
-  return new Container(handle).run(() => {
+  return new Container(handle).run((container) => {
     if (typeof label === "string") labelOf(label);
     else labelOf({ bind: label });
-    if (run !== undefined) run();
+    return run !== undefined ? run(container) : (undefined as T);
   });
 }
 
@@ -3721,8 +3722,8 @@ export function spacer(opts: GrowOption = {}): Widget {
 }
 
 /** A column container: parents everything declared inside its body. */
-export function column(optsOrBody?: ContainerOptions | (() => void), body?: () => void): Widget {
-  const [opts, run] = optsAndOptionalBody(optsOrBody, body);
+export function column<T = void>(optsOrBody?: ContainerOptions | ((column: Widget) => T), body?: (column: Widget) => T): T {
+  const [opts, run] = optsAndOptionalBody<ContainerOptions, Widget, T>(optsOrBody, body);
   const handle = widget(wire.KIND_COLUMN);
   setLayout(handle, opts);
   return new Container(handle).run(run);
@@ -3733,8 +3734,8 @@ export type RowOptions = ContainerOptions & { stackWhen?: SizeClass };
 /** A row container: column turned sideways. `stackWhen` stacks the
  * children vertically while the window's SIZE CLASS is the named one —
  * kaya.COMPACT — a core-evaluated breakpoint (docs/adaptive-layout-plan.md D3). */
-export function row(optsOrBody?: RowOptions | (() => void), body?: () => void): Widget {
-  const [opts, run] = optsAndOptionalBody(optsOrBody, body);
+export function row<T = void>(optsOrBody?: RowOptions | ((row: Widget) => T), body?: (row: Widget) => T): T {
+  const [opts, run] = optsAndOptionalBody<RowOptions, Widget, T>(optsOrBody, body);
   const handle = widget(wire.KIND_ROW);
   if (opts.stackWhen !== undefined) {
     if (opts.stackWhen !== COMPACT) {
@@ -3751,7 +3752,7 @@ export function row(optsOrBody?: RowOptions | (() => void), body?: () => void): 
   return new Container(handle).run(run);
 }
 
-function optsAndOptionalBody<O extends object, T = void>(optsOrBody: O | (() => T) | undefined, body: (() => T) | undefined): [O, (() => T) | undefined] {
+function optsAndOptionalBody<O extends object, A = void, T = void>(optsOrBody: O | ((a: A) => T) | undefined, body: ((a: A) => T) | undefined): [O, ((a: A) => T) | undefined] {
   if (typeof optsOrBody === "function") return [{} as O, optsOrBody];
   return [optsOrBody ?? ({} as O), body];
 }
@@ -4524,7 +4525,7 @@ export class App {
   window<T>(body: () => T): T;
   window(opts: WindowOptions): void;
   window<T>(a: WindowOptions | (() => T), b?: () => T): T | undefined {
-    const [opts, body] = optsAndOptionalBody<WindowOptions, T>(a, b);
+    const [opts, body] = optsAndOptionalBody<WindowOptions, void, T>(a, b);
     const windowId = opts.windowId ?? 0;
     if (opts.onCloseRequested !== undefined) this._closeRequested.set(windowId, opts.onCloseRequested);
     if (opts.onClosed !== undefined) this._windowClosed.set(windowId, opts.onClosed);
@@ -4587,20 +4588,19 @@ export class App {
   /** A top-level menu in the window's command catalog — the menubar rides
    * the window construct. Returns the retained handle, which
    * `.append(body)` reopens at any time. */
-  menu(label: string | Signal<string>, optsOrBody: BarMenuOptions | (() => void), body?: () => void): MenuItem {
-    const [opts, run] = optsAndBody(optsOrBody, body);
+  menu<T = void>(label: string | Signal<string>, optsOrBody: BarMenuOptions | ((menu: MenuItem) => T), body?: (menu: MenuItem) => T): T {
+    const [opts, run] = optsAndBody<BarMenuOptions, MenuItem, T>(optsOrBody, body);
     const it = menuCreate(wire.MENU_KIND_MENU, label);
     records().push(wire.tx_menubar_append(opts.window ?? 0, it.id));
     if (opts.enabled !== undefined) it.enabled(opts.enabled);
     if (opts.icon !== undefined) it.icon(opts.icon);
     if (opts.symbol !== undefined) it.symbol(opts.symbol);
-    new MenuScope(["item", it.id], true).run(run);
-    return it;
+    return new MenuScope(["item", it.id], true).run(run, it);
   }
 
   /** A BAR-LEVEL radio group, declaring only kaya.option children. */
-  radioGroup(label: string | Signal<string>, optsOrBody: BarRadioGroupOptions | (() => void), body?: () => void): MenuItem {
-    const [opts, run] = optsAndBody(optsOrBody, body);
+  radioGroup<T = void>(label: string | Signal<string>, optsOrBody: BarRadioGroupOptions | ((group: MenuItem) => T), body?: (group: MenuItem) => T): T {
+    const [opts, run] = optsAndBody<BarRadioGroupOptions, MenuItem, T>(optsOrBody, body);
     const it = menuCreate(wire.MENU_KIND_RADIO_GROUP, label);
     records().push(wire.tx_menubar_append(opts.window ?? 0, it.id));
     if (opts.enabled !== undefined) it.enabled(opts.enabled);
@@ -4608,8 +4608,7 @@ export class App {
     if (opts.symbol !== undefined) it.symbol(opts.symbol);
     if (opts.onSelect !== undefined) this._menuHandlers.set(menuKey(wire.OCC_MENU_VALUE_CHANGED, it.id), opts.onSelect);
     const value = opts.value;
-    new MenuScope(["item", it.id], true, value !== undefined ? () => it.value(value) : null).run(run);
-    return it;
+    return new MenuScope(["item", it.id], true, value !== undefined ? () => it.value(value) : null).run(run, it);
   }
 
   /** One handler dispatch, INSIDE an ambient transaction the runtime

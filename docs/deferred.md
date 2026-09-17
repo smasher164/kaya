@@ -2132,7 +2132,13 @@ unpicked.
   closed and was not kept leaves no row), and the toast-moment picture was
   SKIPPED because the sampler's first sight of the toast fell one second
   BEFORE the leg's window (ring samples 117-118 against a leg starting at
-  118). So the bundle names the class and not the sender. THE RECORDER
+  118). So the bundle names the class and not the sender. FOURTH BUNDLE
+  (matrix #33, 2026-09-17, the same leg at 20s): identical shape — 15s of
+  toast, UIA reads nothing, the sampler's first sight outside the leg's
+  window, the database holding only a Widgets TILE row stamped near the
+  lane's start (11:19:45Z today, 05:18:24Z the day before), so the
+  widgets board wakes with the session and something it raises holds the
+  foreground minutes later; the lane passes standalone every time. THE RECORDER
   GROWTH THIS NEEDS (the 2026-09-16 ruling, not a watch): the guest's
   foreground wait knows the exact moment — the WinUI arm should take the
   console-session picture itself on its first sight of the toast (the
@@ -2159,11 +2165,28 @@ unpicked.
   implementing the review in order, and check-sugar-surface's wire-alias
   census (binding-side: no re-export of a vocabulary; guest-side: no alias
   name, no C-header name, no magic-int choice compare; four planted
-  negatives plus the real-shape guest plants). OPEN FOR A RULING (the
-  review's X3): a container body receives its container and returns its
-  value in every language that takes a body, ending the five workarounds
-  for handles made inside a scope (18 JS assertions, 47 Swift IUOs, 11 Java
-  holder classes, C#'s `notes!`, Rust's Option-plus-expect).
+  negatives plus the real-shape guest plants). RULED 2026-09-17 (the review's
+  X3, the maintainer: "okay go for it"): a container body receives its
+  container and returns its value in every language that takes a body,
+  ending the six workarounds for handles made inside a scope (18 JS
+  assertions, 47 Swift IUOs, 11 Java holder classes, C#'s `notes!`, Rust's
+  Option-plus-expect, OCaml's `ref None`); DESIGN.md's Binding conventions
+  carry the ruling and the per-family spelling. LANDED the same day (the
+  job's tmp/idiom/notes-x3.md): Rust's refs carry `.value()` and
+  `Tx::container()`; JS's five containers and every menu body answer `T`
+  and receive their container; Swift's `@KayaChildren` result builder
+  gave way to `(KayaWidget) throws -> R` bodies (IUOs 47 -> 11); C# has
+  the `Action<Widget>` / `Func<Widget, T>` pair and `Build<T>` (smuggling
+  declarations 58 -> 23); Java has `Built<R>` (5 of 12 holder classes
+  gone); OCaml's containers take a child list and needed nothing but the
+  live `when_`, which answers its pair; Python, Go and Haskell re-read and
+  unchanged for the reasons DESIGN.md states. 314 legs green, 16 watched
+  negatives. Left open, small: the generated Swift `<Rec>Row` surface
+  should mark its `-> KayaNodeHandle` members `@discardableResult` (the 7
+  `_ =` the guests carry); check-sugar-surface's Swift kind row passes on
+  the template `func column(` and wants a zone-aware reader; `draw`,
+  `draw_at` and `breakpoint_when` bodies record ops and setters and answer
+  nothing, stated rather than changed.
   THE HASKELL REDO (2026-09-17, Opus, two rounds): guest ascriptions
   193 -> 0 and pack/unpack 214 -> 9 (String-by-nature boundaries), the
   surface on Text end to end, Text/Bound constructor pairs in place of the

@@ -36,7 +36,7 @@ struct KayaPosition: KayaRecord {
 func kayaNestedTableSurface(_ app: KayaApp) {
     app.build { tx in
         let accounts = tx.collection()
-        let root = tx.column {
+        let root = tx.column { root in
             tx.each(accounts) { account in
                 _ = account.column {
                     account.label(KayaField<String>(index: 0))
@@ -71,6 +71,7 @@ func kayaNestedTableSurface(_ app: KayaApp) {
                     }
                 }
             }
+            return root
         }
         tx.mount(root)
     }

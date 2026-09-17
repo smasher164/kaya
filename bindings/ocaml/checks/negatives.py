@@ -22,6 +22,8 @@ CASES = {
     "derive_witness.ml": ["Scalar.t"],
     "engine_reach.ml": ["widget_handlers"],
     "run_span.ml": ["start"],
+    # X3 (the body-value ruling, 2026-09-17).
+    "when_body_value.ml": ["widget * "],
 }
 
 

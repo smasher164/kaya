@@ -255,7 +255,6 @@ final class KayaDraw {
         self.viewbox = viewbox
     }
 
-    @discardableResult
     private func op(_ code: Int32, _ operands: KayaValue...) -> KayaDraw {
         ops.append(.i64(Int64(code)))
         ops.append(contentsOf: operands)
@@ -543,7 +542,6 @@ struct KayaWidget {
         declareDrawing(UInt32(KAYA_SIZE_POLICY_TICK), handler)
     }
 
-    @discardableResult
     private func declareDrawing(
         _ policy: UInt32, _ f: @escaping (KayaDraw, KayaViewbox, Double) -> Void
     ) -> KayaWidget {
@@ -2539,11 +2537,13 @@ final class KayaApp {
         return KayaSignal(id: signals)
     }
 
+    @discardableResult
     func nextWidget() -> KayaWidget {
         widgets += 1
         return KayaWidget(id: widgets)
     }
 
+    @discardableResult
     func nextNode() -> KayaNodeHandle {
         widgets += 1
         return KayaNodeHandle(id: widgets)
@@ -3368,27 +3368,6 @@ final class KayaApp {
 }
 
 @resultBuilder
-enum KayaChildren {
-    // Parenting happens at creation (the constructors append to the open
-    // frame); expression position only carries the value away.
-    static func buildExpression(_ w: KayaWidget) {
-        _ = w
-    }
-
-    static func buildExpression(_ n: KayaNodeHandle) {
-        _ = n
-    }
-
-    // Void statements are legal in a body: nothing rides on expression
-    // position.
-    static func buildExpression(_: Void) {}
-
-    static func buildBlock(_: Void...) {}
-
-    static func buildArray(_: [Void]) {}
-}
-
-@resultBuilder
 enum KayaNodeChildren {
     // Parenting happens at creation; see KayaChildren.
     static func buildExpression(_ n: KayaNodeHandle) {
@@ -3975,6 +3954,7 @@ final class KayaAppTx {
     /// `role:` is this button's semantic emphasis — `.destructive` or
     /// `.prominent`. It changes what the press MEANS, never what
     /// `onClick:` does.
+    @discardableResult
     func button(
         _ text: String? = nil, role: KayaRole? = nil,
         onClick: ((KayaAppTx) throws -> Void)? = nil,
@@ -3988,6 +3968,7 @@ final class KayaAppTx {
         return w
     }
 
+    @discardableResult
     func entry(
         onChange: ((KayaAppTx, String) throws -> Void)? = nil, grow: Double? = nil
     ) -> KayaWidget {
@@ -4002,6 +3983,7 @@ final class KayaAppTx {
     /// `onEdit:` and `onFormat:` answer only on one. `ownUndo:` turns the
     /// platform's own undo stack off on this widget and routes Edit>Undo
     /// to the app's Undo item (docs/rich-text-plan.md R6, §14).
+    @discardableResult
     func textarea(
         onChange: ((KayaAppTx, String) throws -> Void)? = nil,
         rich: Bool = false,
@@ -4024,6 +4006,7 @@ final class KayaAppTx {
     /// platform's search chrome (docs/search-plan.md): it filters on
     /// every keystroke and the clear affordance arrives as a change
     /// with "".
+    @discardableResult
     func search(
         onChange: ((KayaAppTx, String) throws -> Void)? = nil, grow: Double? = nil
     ) -> KayaWidget {
@@ -4037,6 +4020,7 @@ final class KayaAppTx {
     /// or `.caption`, a semantic fact and not a font size. `rich: true`
     /// draws the label's attribute runs over the role's own font,
     /// read-only (docs/rich-text-plan.md R8, §15).
+    @discardableResult
     func label(
         _ text: String? = nil, bind: KayaSignal? = nil, role: KayaRole? = nil,
         rich: Bool = false, grow: Double? = nil
@@ -4053,6 +4037,7 @@ final class KayaAppTx {
     /// A label wearing the heading role: the platform's heading text
     /// style AND the accessibility heading trait, and on a grouped screen
     /// the section-header seat.
+    @discardableResult
     func heading(
         _ text: String? = nil, bind: KayaSignal? = nil, grow: Double? = nil
     ) -> KayaWidget {
@@ -4061,6 +4046,7 @@ final class KayaAppTx {
 
     /// A label wearing the caption role: the platform's footnote tier,
     /// and on a grouped screen the section-footer seat.
+    @discardableResult
     func caption(
         _ text: String? = nil, bind: KayaSignal? = nil, grow: Double? = nil
     ) -> KayaWidget {
@@ -4069,6 +4055,7 @@ final class KayaAppTx {
 
     /// A progress bar. `value` is the determinate fraction (0..=1);
     /// `indeterminate: true` switches to the platform's activity mode.
+    @discardableResult
     func progress(
         value: Double = 0.0, indeterminate: Bool? = nil, grow: Double? = nil
     ) -> KayaWidget {
@@ -4083,6 +4070,7 @@ final class KayaAppTx {
     /// written in AND the canvas's natural size in points
     /// (docs/canvas-plan.md §3.2). Declare what it draws with `draw`;
     /// until then it is present and empty.
+    @discardableResult
     func canvas(_ viewbox: KayaViewbox, grow: Double? = nil) -> KayaWidget {
         let w = widget(UInt32(KAYA_KIND_CANVAS))
         // The viewbox rides the DRAWING on the wire, not a prop; the
@@ -4127,6 +4115,7 @@ final class KayaAppTx {
     /// handlers co-located. `step` is the granularity the thumb rests on
     /// and `tickSpacing` the distance between drawn ticks, in value units
     /// (docs/slider-plan.md S1, S5).
+    @discardableResult
     func slider(
         min: Double = 0.0, max: Double = 1.0, value: Double = 0.0,
         step: Double? = nil, tickSpacing: Double? = nil,
@@ -4155,6 +4144,7 @@ final class KayaAppTx {
     /// child — at `selected`, the initial 0-based index. `onSelect`
     /// receives each USER pick's new index; programmatic writes never
     /// echo.
+    @discardableResult
     func select(
         _ options: [String], selected: Int = 0,
         onSelect: ((KayaAppTx, Int) throws -> Void)? = nil,
@@ -4178,6 +4168,7 @@ final class KayaAppTx {
 
     /// A radio group over fixed options: `select`'s contract in its
     /// inline presentation.
+    @discardableResult
     func radio(
         _ options: [String], selected: Int = 0,
         onSelect: ((KayaAppTx, Int) throws -> Void)? = nil,
@@ -4199,6 +4190,7 @@ final class KayaAppTx {
         return w
     }
 
+    @discardableResult
     func checkbox(
         _ text: String? = nil, checked: Bool? = nil,
         onToggle: ((KayaAppTx, Bool) throws -> Void)? = nil,
@@ -4217,6 +4209,7 @@ final class KayaAppTx {
     /// control owns its value and reports each COMMITTED pick to onDate.
     /// `min`/`max` are the inclusive range and a pick past a bound lands
     /// on the bound.
+    @discardableResult
     func datePicker(
         _ value: KayaDate? = nil, min: KayaDate? = nil, max: KayaDate? = nil,
         bind: KayaSignal? = nil,
@@ -4245,6 +4238,7 @@ final class KayaAppTx {
     /// A time picker over civil times: hours and minutes, no seconds.
     /// `step` is the minute granularity (1, 5, 10, 15 or 30) and a pick
     /// snaps to it.
+    @discardableResult
     func timePicker(
         _ value: KayaTime? = nil, step: Int? = nil, bind: KayaSignal? = nil,
         onTime: ((KayaAppTx, KayaTime) throws -> Void)? = nil,
@@ -4264,6 +4258,7 @@ final class KayaAppTx {
 
     /// An image displaying encoded bytes (PNG, JPEG, ...). Decode failure
     /// renders the placeholder, never a crash.
+    @discardableResult
     func image(
         _ source: Data? = nil, bind: KayaSignal? = nil, grow: Double? = nil
     ) -> KayaWidget {
@@ -4276,6 +4271,7 @@ final class KayaAppTx {
 
     /// The ASSET form of the source slot: the same image, with the picture
     /// NAMED rather than read. THE BYTES NEVER ENTER THE GUEST'S HEAP.
+    @discardableResult
     func image(_ source: KayaAsset, grow: Double? = nil) -> KayaWidget {
         let w = widget(UInt32(KAYA_KIND_IMAGE))
         tx.setSource(w.id, source.blob())
@@ -4283,12 +4279,13 @@ final class KayaAppTx {
         return w
     }
 
-    func column(
+    @discardableResult
+    func column<R>(
         grow: Double? = nil, spacing: Double? = nil, inset: Double? = nil,
         align: KayaAlign? = nil,
-        @KayaChildren _ children: () -> Void
-    ) -> KayaWidget {
-        containerOf(
+        _ children: (KayaWidget) throws -> R
+    ) rethrows -> R {
+        try containerOf(
             UInt32(KAYA_KIND_COLUMN), children, grow: grow, spacing: spacing,
             inset: inset, align: align)
     }
@@ -4296,20 +4293,22 @@ final class KayaAppTx {
     /// A vertical scroll viewport over EXACTLY ONE child. Pass grow: so
     /// the enclosing track CONSTRAINS it — an unconstrained viewport hugs
     /// its content and nothing overflows.
-    func scroll(
-        grow: Double? = nil, @KayaChildren _ children: () -> Void
-    ) -> KayaWidget {
-        containerOf(
+    @discardableResult
+    func scroll<R>(
+        grow: Double? = nil, _ children: (KayaWidget) throws -> R
+    ) rethrows -> R {
+        try containerOf(
             UInt32(KAYA_KIND_SCROLL), children, grow: grow, spacing: nil,
             inset: nil, align: nil)
     }
 
-    func row(
+    @discardableResult
+    func row<R>(
         grow: Double? = nil, spacing: Double? = nil, inset: Double? = nil,
         align: KayaAlign? = nil,
-        @KayaChildren _ children: () -> Void
-    ) -> KayaWidget {
-        containerOf(
+        _ children: (KayaWidget) throws -> R
+    ) rethrows -> R {
+        try containerOf(
             UInt32(KAYA_KIND_ROW), children, grow: grow, spacing: spacing,
             inset: inset, align: align)
     }
@@ -4317,75 +4316,81 @@ final class KayaAppTx {
     /// A grid laying its children out row-major into `columns` columns —
     /// each column takes its NATURAL width, aligned across rows.
     /// `spacing` is the inter-cell gap on both axes.
-    func grid(
+    @discardableResult
+    func grid<R>(
         columns: Int, spacing: Double? = nil, inset: Double? = nil,
         grow: Double? = nil,
-        @KayaChildren _ children: () -> Void
-    ) -> KayaWidget {
+        _ children: (KayaWidget) throws -> R
+    ) rethrows -> R {
         let parent = widget(UInt32(KAYA_KIND_GRID))
         tx.setColumns(parent.id, Double(columns))
         if let spacing { setSpacing(parent, spacing) }
         if let inset { setInset(parent, inset) }
         if let grow { setGrow(parent, grow) }
         app.childFrames.append(KayaApp.KayaFrame(template: false))
-        children()
-        let ids = app.childFrames.removeLast().ids
-        for id in ids { tx.addChild(parent.id, id) }
-        return parent
+        defer {
+            let ids = app.childFrames.removeLast().ids
+            for id in ids { tx.addChild(parent.id, id) }
+        }
+        return try children(parent)
     }
 
     /// A LABELLED ROW (docs/forms-plan.md): the label names the one
     /// control the children declare, with an optional trailing button
     /// after it. A column of nothing but these renders as the platform's
     /// form.
-    func labeled(
+    @discardableResult
+    func labeled<R>(
         _ label: String, spacing: Double? = nil, inset: Double? = nil,
         grow: Double? = nil,
-        @KayaChildren _ children: () -> Void
-    ) -> KayaWidget {
-        labeledOf(children, spacing: spacing, inset: inset, grow: grow) {
+        _ children: (KayaWidget) throws -> R
+    ) rethrows -> R {
+        try labeledOf(children, spacing: spacing, inset: inset, grow: grow) {
             _ = self.label(label)
         }
     }
 
-    func labeled(
+    @discardableResult
+    func labeled<R>(
         _ label: KayaSignal, spacing: Double? = nil, inset: Double? = nil,
         grow: Double? = nil,
-        @KayaChildren _ children: () -> Void
-    ) -> KayaWidget {
-        labeledOf(children, spacing: spacing, inset: inset, grow: grow) {
+        _ children: (KayaWidget) throws -> R
+    ) rethrows -> R {
+        try labeledOf(children, spacing: spacing, inset: inset, grow: grow) {
             _ = self.label(bind: label)
         }
     }
 
-    private func labeledOf(
-        _ children: () -> Void, spacing: Double?, inset: Double?, grow: Double?,
+    private func labeledOf<R>(
+        _ children: (KayaWidget) throws -> R, spacing: Double?, inset: Double?, grow: Double?,
         _ name: () -> Void
-    ) -> KayaWidget {
+    ) rethrows -> R {
         let parent = widget(UInt32(KAYA_KIND_LABELED))
         if let spacing { setSpacing(parent, spacing) }
         if let inset { setInset(parent, inset) }
         if let grow { setGrow(parent, grow) }
         app.childFrames.append(KayaApp.KayaFrame(template: false))
         name()
-        children()
-        let ids = app.childFrames.removeLast().ids
-        for id in ids { tx.addChild(parent.id, id) }
-        return parent
+        defer {
+            let ids = app.childFrames.removeLast().ids
+            for id in ids { tx.addChild(parent.id, id) }
+        }
+        return try children(parent)
     }
 
     /// A spacer: PURE SUGAR for an empty grown column — it consumes
     /// the leftover main-axis space between its siblings.
+    @discardableResult
     func spacer() -> KayaWidget {
         let w = widget(UInt32(KAYA_KIND_COLUMN))
         setGrow(w, 1.0)
         return w
     }
 
-    private func containerOf(
-        _ kind: UInt32, _ children: () -> Void, grow: Double? = nil, spacing: Double? = nil,
+    private func containerOf<R>(
+        _ kind: UInt32, _ children: (KayaWidget) throws -> R, grow: Double? = nil, spacing: Double? = nil,
         inset: Double? = nil, align: KayaAlign? = nil
-    ) -> KayaWidget {
+    ) rethrows -> R {
         // Parent before children: creation order is observable (column#N)
         // and statement-shaped construction is parent-first in every
         // language.
@@ -4395,13 +4400,15 @@ final class KayaAppTx {
         if let inset { setInset(parent, inset) }
         if let align { setAlign(parent, align) }
         app.childFrames.append(KayaApp.KayaFrame(template: false))
-        children()
-        let ids = app.childFrames.removeLast().ids
-        for id in ids { tx.addChild(parent.id, id) }
-        return parent
+        defer {
+            let ids = app.childFrames.removeLast().ids
+            for id in ids { tx.addChild(parent.id, id) }
+        }
+        return try children(parent)
     }
 
     /// A For as a child: forEach whose body keeps no handles.
+    @discardableResult
     func each(_ c: KayaCollection, _ body: (KayaTpl) -> Void) -> KayaWidget {
         forEach(c) { body($0) }.0
     }
@@ -5299,6 +5306,7 @@ final class KayaTpl {
         self.tx = tx
     }
 
+    @discardableResult
     func widget(_ kind: UInt32) -> KayaNodeHandle {
         let n = tx.app.nextNode()
         defer { tx.app.parentAtCreation(node: n.id) }
@@ -5509,18 +5517,21 @@ final class KayaTpl {
     // Construction sugar, template flavor: one name per widget, the
     // argument's type picks the addressable source (constant, signal, or
     // element field); handlers receive the stamped copy's keys first.
+    @discardableResult
     func label(_ text: String) -> KayaNodeHandle {
         let n = widget(UInt32(KAYA_KIND_LABEL))
         setText(n, text)
         return n
     }
 
+    @discardableResult
     func label(_ s: KayaSignal) -> KayaNodeHandle {
         let n = widget(UInt32(KAYA_KIND_LABEL))
         tx.tx.bindText(n.id, s.id)
         return n
     }
 
+    @discardableResult
     func label(_ f: KayaField<String>) -> KayaNodeHandle {
         let n = widget(UInt32(KAYA_KIND_LABEL))
         bindTextField(n, f)
@@ -5528,18 +5539,21 @@ final class KayaTpl {
     }
 
     /// A label wearing the heading role, stamped.
+    @discardableResult
     func heading(_ text: String) -> KayaNodeHandle {
         let n = label(text)
         setRole(n, .heading)
         return n
     }
 
+    @discardableResult
     func heading(_ s: KayaSignal) -> KayaNodeHandle {
         let n = label(s)
         setRole(n, .heading)
         return n
     }
 
+    @discardableResult
     func heading(_ f: KayaField<String>) -> KayaNodeHandle {
         let n = label(f)
         setRole(n, .heading)
@@ -5547,18 +5561,21 @@ final class KayaTpl {
     }
 
     /// A label wearing the caption role, stamped.
+    @discardableResult
     func caption(_ text: String) -> KayaNodeHandle {
         let n = label(text)
         setRole(n, .caption)
         return n
     }
 
+    @discardableResult
     func caption(_ s: KayaSignal) -> KayaNodeHandle {
         let n = label(s)
         setRole(n, .caption)
         return n
     }
 
+    @discardableResult
     func caption(_ f: KayaField<String>) -> KayaNodeHandle {
         let n = label(f)
         setRole(n, .caption)
@@ -5566,12 +5583,14 @@ final class KayaTpl {
     }
 
     /// A button with its caption, in the blueprint.
+    @discardableResult
     func button(_ text: String) -> KayaNodeHandle {
         let n = widget(UInt32(KAYA_KIND_BUTTON))
         setText(n, text)
         return n
     }
 
+    @discardableResult
     func button(_ s: KayaSignal) -> KayaNodeHandle {
         let n = widget(UInt32(KAYA_KIND_BUTTON))
         tx.tx.bindText(n.id, s.id)
@@ -5580,12 +5599,14 @@ final class KayaTpl {
 
     /// A button captioned from the row's OWN field — the "Delete <that
     /// row's title>" shape, which only this zone can spell.
+    @discardableResult
     func button(_ f: KayaField<String>) -> KayaNodeHandle {
         let n = widget(UInt32(KAYA_KIND_BUTTON))
         bindTextField(n, f)
         return n
     }
 
+    @discardableResult
     func checkbox(
         _ f: KayaField<Bool>,
         onToggle: ((KayaAppTx, [KayaValue], Bool) throws -> Void)? = nil
@@ -5598,6 +5619,7 @@ final class KayaTpl {
 
     /// A date picker in the blueprint bound to the row's own Date field
     /// (docs/datetime-plan.md D10); picks carry the copy's keys first.
+    @discardableResult
     func datePicker(
         _ f: KayaField<KayaDate>,
         onDate: ((KayaAppTx, [KayaValue], KayaDate) throws -> Void)? = nil
@@ -5609,6 +5631,7 @@ final class KayaTpl {
     }
 
     /// A date picker at a constant date, the same in every stamped copy.
+    @discardableResult
     func datePicker(
         _ value: KayaDate,
         onDate: ((KayaAppTx, [KayaValue], KayaDate) throws -> Void)? = nil
@@ -5621,6 +5644,7 @@ final class KayaTpl {
     }
 
     /// A date picker whose value binds a signal.
+    @discardableResult
     func datePicker(
         _ s: KayaSignal,
         onDate: ((KayaAppTx, [KayaValue], KayaDate) throws -> Void)? = nil
@@ -5632,6 +5656,7 @@ final class KayaTpl {
     }
 
     /// A time picker bound to the row's own Time field.
+    @discardableResult
     func timePicker(
         _ f: KayaField<KayaTime>,
         onTime: ((KayaAppTx, [KayaValue], KayaTime) throws -> Void)? = nil
@@ -5643,6 +5668,7 @@ final class KayaTpl {
     }
 
     /// A time picker at a constant time.
+    @discardableResult
     func timePicker(
         _ value: KayaTime,
         onTime: ((KayaAppTx, [KayaValue], KayaTime) throws -> Void)? = nil
@@ -5655,6 +5681,7 @@ final class KayaTpl {
     }
 
     /// A time picker whose value binds a signal.
+    @discardableResult
     func timePicker(
         _ s: KayaSignal,
         onTime: ((KayaAppTx, [KayaValue], KayaTime) throws -> Void)? = nil
@@ -5668,6 +5695,7 @@ final class KayaTpl {
     /// A single-line text field per stamped copy. UNCONTROLLED, which is
     /// why the primary form takes no source at all: each edit arrives
     /// naming this node AND the copy's key path.
+    @discardableResult
     func entry(
         onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
     ) -> KayaNodeHandle {
@@ -5679,6 +5707,7 @@ final class KayaTpl {
     /// the user owns the field from the first keystroke, while a signal or
     /// a field stays LIVE and a later write REPLACES whatever the user has
     /// typed. There is no "seed once and let go" arm on the wire.
+    @discardableResult
     func entry(
         _ text: String,
         onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
@@ -5688,6 +5717,7 @@ final class KayaTpl {
         return n
     }
 
+    @discardableResult
     func entry(
         _ s: KayaSignal,
         onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
@@ -5697,6 +5727,7 @@ final class KayaTpl {
         return n
     }
 
+    @discardableResult
     func entry(
         _ f: KayaField<String>,
         onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
@@ -5708,12 +5739,14 @@ final class KayaTpl {
 
     /// A multi-line editor per stamped copy, on the entry's uncontrolled
     /// contract and with the same four spellings.
+    @discardableResult
     func textarea(
         onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
     ) -> KayaNodeHandle {
         textFieldOf(UInt32(KAYA_KIND_TEXTAREA), onChange)
     }
 
+    @discardableResult
     func textarea(
         _ text: String,
         onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
@@ -5723,6 +5756,7 @@ final class KayaTpl {
         return n
     }
 
+    @discardableResult
     func textarea(
         _ s: KayaSignal,
         onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
@@ -5732,6 +5766,7 @@ final class KayaTpl {
         return n
     }
 
+    @discardableResult
     func textarea(
         _ f: KayaField<String>,
         onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
@@ -5747,6 +5782,7 @@ final class KayaTpl {
     /// that copy's own set_rich_text. The user's acts fold into the row's
     /// field as a live widget's fold into its mirror, so the app writes a
     /// copy's document by patching the row and reads it back off the row.
+    @discardableResult
     func textarea(
         document f: KayaField<KayaDocument>,
         onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
@@ -5763,12 +5799,14 @@ final class KayaTpl {
     /// A search field per stamped copy, on the entry's uncontrolled
     /// contract under the platform's search chrome, with the same four
     /// spellings (docs/search-plan.md).
+    @discardableResult
     func search(
         onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
     ) -> KayaNodeHandle {
         textFieldOf(UInt32(KAYA_KIND_SEARCH), onChange)
     }
 
+    @discardableResult
     func search(
         _ text: String,
         onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
@@ -5778,6 +5816,7 @@ final class KayaTpl {
         return n
     }
 
+    @discardableResult
     func search(
         _ s: KayaSignal,
         onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
@@ -5787,6 +5826,7 @@ final class KayaTpl {
         return n
     }
 
+    @discardableResult
     func search(
         _ f: KayaField<String>,
         onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
@@ -5806,18 +5846,21 @@ final class KayaTpl {
     }
 
     /// A progress bar whose fraction comes from an addressable source.
+    @discardableResult
     func progress(_ value: Double) -> KayaNodeHandle {
         let n = widget(UInt32(KAYA_KIND_PROGRESS))
         tx.tx.setValue(n.id, value)
         return n
     }
 
+    @discardableResult
     func progress(_ s: KayaSignal) -> KayaNodeHandle {
         let n = widget(UInt32(KAYA_KIND_PROGRESS))
         tx.tx.bindValue(n.id, s.id)
         return n
     }
 
+    @discardableResult
     func progress(_ f: KayaField<Double>) -> KayaNodeHandle {
         let n = widget(UInt32(KAYA_KIND_PROGRESS))
         bindValueField(n, f)
@@ -5827,6 +5870,7 @@ final class KayaTpl {
     /// A progress bar in the platform's activity mode. Its own constructor
     /// rather than the live zone's `indeterminate:` flag, because here the
     /// fraction argument is what picks the source overload.
+    @discardableResult
     func progressIndeterminate() -> KayaNodeHandle {
         let n = widget(UInt32(KAYA_KIND_PROGRESS))
         tx.tx.setIndeterminate(n.id, true)
@@ -5837,6 +5881,7 @@ final class KayaTpl {
     /// PROTOTYPE and stays a pair of constants; the POSITION takes a
     /// source. A move does NOT write the row's field back — the handler
     /// decides whether the model follows.
+    @discardableResult
     func slider(
         min: Double = 0.0, max: Double = 1.0, value: Double,
         step: Double? = nil, tickSpacing: Double? = nil,
@@ -5848,6 +5893,7 @@ final class KayaTpl {
         return n
     }
 
+    @discardableResult
     func slider(
         min: Double = 0.0, max: Double = 1.0, value s: KayaSignal,
         step: Double? = nil, tickSpacing: Double? = nil,
@@ -5859,6 +5905,7 @@ final class KayaTpl {
         return n
     }
 
+    @discardableResult
     func slider(
         min: Double = 0.0, max: Double = 1.0, value f: KayaField<Double>,
         step: Double? = nil, tickSpacing: Double? = nil,
@@ -5888,6 +5935,7 @@ final class KayaTpl {
     /// A dropdown in the blueprint: the option list is the BLUEPRINT'S,
     /// the choice is the row's. `onSelect` receives the copy's key path
     /// and each USER pick's new 0-based index.
+    @discardableResult
     func select(
         _ options: [String], selected: Int = 0,
         onSelect: ((KayaAppTx, [KayaValue], Int) throws -> Void)? = nil
@@ -5897,6 +5945,7 @@ final class KayaTpl {
         return n
     }
 
+    @discardableResult
     func select(
         _ options: [String], selected s: KayaSignal,
         onSelect: ((KayaAppTx, [KayaValue], Int) throws -> Void)? = nil
@@ -5906,6 +5955,7 @@ final class KayaTpl {
         return n
     }
 
+    @discardableResult
     func select(
         _ options: [String], selected f: KayaField<Double>,
         onSelect: ((KayaAppTx, [KayaValue], Int) throws -> Void)? = nil
@@ -5917,6 +5967,7 @@ final class KayaTpl {
 
     /// A radio group in the blueprint: `select`'s contract in its inline
     /// presentation.
+    @discardableResult
     func radio(
         _ options: [String], selected: Int = 0,
         onSelect: ((KayaAppTx, [KayaValue], Int) throws -> Void)? = nil
@@ -5926,6 +5977,7 @@ final class KayaTpl {
         return n
     }
 
+    @discardableResult
     func radio(
         _ options: [String], selected s: KayaSignal,
         onSelect: ((KayaAppTx, [KayaValue], Int) throws -> Void)? = nil
@@ -5935,6 +5987,7 @@ final class KayaTpl {
         return n
     }
 
+    @discardableResult
     func radio(
         _ options: [String], selected f: KayaField<Double>,
         onSelect: ((KayaAppTx, [KayaValue], Int) throws -> Void)? = nil
@@ -5968,18 +6021,21 @@ final class KayaTpl {
 
     /// An image with constant encoded bytes: every stamped copy shows the
     /// same picture.
+    @discardableResult
     func image(_ source: Data) -> KayaNodeHandle {
         let n = widget(UInt32(KAYA_KIND_IMAGE))
         tx.tx.setSource(n.id, kayaRegisterBlob(source))
         return n
     }
 
+    @discardableResult
     func image(_ s: KayaSignal) -> KayaNodeHandle {
         let n = widget(UInt32(KAYA_KIND_IMAGE))
         tx.tx.bindSource(n.id, s.id)
         return n
     }
 
+    @discardableResult
     func image(_ f: KayaField<Data>) -> KayaNodeHandle {
         let n = widget(UInt32(KAYA_KIND_IMAGE))
         bindSourceField(n, f)
@@ -5990,6 +6046,7 @@ final class KayaTpl {
     /// (docs/canvas-plan.md §3.1). The drawing is declared with the node,
     /// so every copy is born with it; `KayaAppTx.draw(_:at:_:_:)`
     /// re-declares one copy's afterwards.
+    @discardableResult
     func canvas(_ viewbox: KayaViewbox, _ body: (KayaDraw) -> Void) -> KayaNodeHandle {
         let n = widget(UInt32(KAYA_KIND_CANVAS))
         let d = KayaDraw(viewbox: viewbox)
@@ -5999,16 +6056,19 @@ final class KayaTpl {
         return n
     }
 
+    @discardableResult
     func row(@KayaNodeChildren _ children: () -> Void) -> KayaNodeHandle {
         nodeContainerOf(UInt32(KAYA_KIND_ROW), children)
     }
 
+    @discardableResult
     func column(@KayaNodeChildren _ children: () -> Void) -> KayaNodeHandle {
         nodeContainerOf(UInt32(KAYA_KIND_COLUMN), children)
     }
 
     /// A vertical scroll viewport over EXACTLY ONE child, per stamped
     /// copy.
+    @discardableResult
     func scroll(@KayaNodeChildren _ children: () -> Void) -> KayaNodeHandle {
         nodeContainerOf(UInt32(KAYA_KIND_SCROLL), children)
     }
@@ -6016,6 +6076,7 @@ final class KayaTpl {
     /// A grid laying each copy's children out row-major into `columns`
     /// columns. The column count describes the PROTOTYPE, so it is a plain
     /// constant rather than a source.
+    @discardableResult
     func grid(columns: Int, @KayaNodeChildren _ children: () -> Void) -> KayaNodeHandle {
         let n = nodeContainerOf(UInt32(KAYA_KIND_GRID), children)
         tx.tx.setColumns(n.id, Double(columns))
@@ -6037,6 +6098,7 @@ final class KayaTpl {
         labeledOf(children) { _ = self.label(label) }
     }
 
+    @discardableResult
     func labeled(
         _ label: KayaField<String>, @KayaNodeChildren _ children: () -> Void
     ) -> KayaNodeHandle {
@@ -6057,6 +6119,7 @@ final class KayaTpl {
 
     /// A spacer: PURE SUGAR for an empty grown column, in every stamped
     /// copy.
+    @discardableResult
     func spacer() -> KayaNodeHandle {
         let n = widget(UInt32(KAYA_KIND_COLUMN))
         tx.tx.setGrow(n.id, 1.0)
@@ -6101,6 +6164,7 @@ final class KayaTpl {
     }
 
     /// A nested For as a child: forEach whose body keeps no handles.
+    @discardableResult
     func each(_ c: KayaCollection, _ body: (KayaTpl) -> Void) -> KayaNodeHandle {
         forEach(c) { body($0) }.0
     }

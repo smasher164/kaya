@@ -39,7 +39,7 @@ public final class Sections {
                     })
                     .id();
 
-            KayaApp.Widget feedRoot = tx.column(() -> {
+            KayaApp.Widget feedRoot = tx.column(col -> {
                 KayaApp.Signal<String> ready = tx.signal("feed ready");
                 tx.label(ready); // label#0
                 tx.button("to archive", inner -> { // button#0
@@ -59,13 +59,13 @@ public final class Sections {
                             .symbol(KayaApp.Symbol.LOCK)
                             .id();
 
-                    KayaApp.Widget shelvesRoot = inner.column(() -> {
+                    KayaApp.Widget shelvesRoot = inner.column(col2 -> {
                         KayaApp.Signal<String> shelvesReady = inner.signal("shelves ready");
                         inner.label(shelvesReady); // label#2
                     });
                     inner.mountIn(shelves, shelvesRoot);
 
-                    KayaApp.Widget loansRoot = inner.column(() -> {
+                    KayaApp.Widget loansRoot = inner.column(col3 -> {
                         KayaApp.Signal<String> loansReady = inner.signal("loans ready");
                         inner.label(loansReady); // label#3
                     });
@@ -74,7 +74,7 @@ public final class Sections {
             });
             tx.mountIn(feed, feedRoot);
 
-            KayaApp.Widget archiveRoot = tx.column(() -> {
+            KayaApp.Widget archiveRoot = tx.column(col4 -> {
                 tx.label(visits); // label#1
             });
             tx.mountIn(archive, archiveRoot);

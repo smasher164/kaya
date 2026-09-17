@@ -57,7 +57,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             .menu("View", |m| {
                 m.toggle("Details").checked(details).symbol(kaya::Symbol::Info).id()
             })
-            .out;
+            .value();
         msgs.on_menu_toggle(details_item, Msg::Details);
 
         // Option order IS the index.
@@ -67,15 +67,15 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 o.option("Name");
                 o.option("Date");
             })
-            .value(sort)
+            .selected(sort)
             .id();
         msgs.on_menu_select(sort_group, Msg::Sorted);
 
         let groups = tx.collection::<String>();
         // Built LIVE: the template only attaches, and keys ride activation.
-        let catalog =
+        let (catalog, remove) =
             tx.context_catalog(|m| m.item("Remove").symbol(kaya::Symbol::Delete).id());
-        msgs.on_menu_item_node(catalog.out, Msg::Remove);
+        msgs.on_menu_item_node(remove, Msg::Remove);
 
         let (root, items) = tx
             .column(|tx| {

@@ -34,7 +34,7 @@ public final class Sliders {
             KayaApp.Signal<Double> pos = tx.signal(50.0);
             var tracks = TrackKaya.collection(tx);
 
-            tx.mount(tx.column(() -> {
+            tx.mount(tx.column(col -> {
                 tx.label(levelText); // label#0
                 tx.label(commitText); // label#1
                 tx.label(volumeText); // label#2

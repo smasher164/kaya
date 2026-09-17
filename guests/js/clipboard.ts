@@ -122,9 +122,7 @@ const { status, rowStatus, rich, plain } = app.window({ title: "clipboard" }, ()
 
   const status = kaya.signal("ready");
   const rowStatus = kaya.signal("");
-  let rich!: kaya.Widget;
-  let plain!: kaya.Widget;
-  kaya.column(() => {
+  const { rich, plain } = kaya.column(() => {
     kaya.label({ bind: status }).a11yId("status"); // label#0
     kaya.button("copy", { onClick: copyRich }); // button#0
     kaya.button("read custom", { onClick: readCustom }); // button#1
@@ -135,10 +133,10 @@ const { status, rowStatus, rich, plain } = app.window({ title: "clipboard" }, ()
     kaya.button("focus plain", { onClick: () => plain.focus() }); // button#6
 
     // Declares what it takes, so a paste lands in the hook.
-    rich = kaya.entry().accepts(kaya.ACCEPT_TEXT).onPaste(pasted);
+    const rich = kaya.entry().accepts(kaya.ACCEPT_TEXT).onPaste(pasted);
     rich.a11yId("rich"); // entry#0
     // Declares nothing, so the platform inserts and onChange reports.
-    plain = kaya.entry().a11yId("plain"); // entry#1
+    const plain = kaya.entry().a11yId("plain"); // entry#1
 
     // On a STAMPED copy the accept list rides the TEMPLATE.
     kaya.label({ bind: rowStatus }).a11yId("row-status"); // label#1
@@ -147,6 +145,7 @@ const { status, rowStatus, rich, plain } = app.window({ title: "clipboard" }, ()
       kaya.entry().accepts(kaya.ACCEPT_TEXT).onPaste(rowPasted);
     }
     rows.insert("r1", ""); // entry#2
+    return { rich, plain };
   });
   return { status, rowStatus, rich, plain };
 });

@@ -15,7 +15,7 @@ public final class Radio {
             tx.window(0).title("radio");
             KayaApp.Signal<String> size = tx.signal("size: Small");
 
-            tx.mount(tx.column(() -> {
+            tx.mount(tx.column(col -> {
                 tx.radio(OPTIONS, 0, (t, index) ->
                         t.write(size, "size: " + OPTIONS[index]));
                 tx.label(size); // label#0

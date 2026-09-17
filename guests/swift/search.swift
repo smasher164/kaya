@@ -18,7 +18,7 @@ app.build { tx in
     let items = searchItemCollection(tx)
     let count = tx.signal(.str("\(names.count) items"))
 
-    let root = tx.column {
+    let root = tx.column { root in
         let find = tx.search { t, text in
             let query = text.lowercased()
             // Swift's String.contains("") is FALSE where every other
@@ -50,9 +50,10 @@ app.build { tx in
         tx.setA11yId(tx.label(bind: count), "count")
         // The For IS the list: expect_order reads its label children.
         let list = searchItemEach(tx, items) { row in
-            row.label(row.name)
+            _ = row.label(row.name)
         }
         tx.setA11yId(list, "list")
+        return root
     }
     tx.mount(root)
 

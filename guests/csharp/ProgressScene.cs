@@ -10,10 +10,11 @@ static class ProgressScene
         app.Build(tx =>
         {
             tx.Window(title: "progress");
-            tx.Mount(tx.Column(() =>
+            tx.Mount(tx.Column(root =>
             {
                 tx.Progress(value: 0.25); // progress#0
                 tx.Progress(indeterminate: true); // progress#1
+                return root;
             }));
         });
 

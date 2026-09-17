@@ -13,7 +13,7 @@ static class ReorderScene
         app.Build(tx =>
         {
             var items = ItemKaya.Collection(tx);
-            tx.Mount(tx.Row(() =>
+            tx.Mount(tx.Row(root =>
             {
                 tx.Button("rotate", t =>
                 {
@@ -27,6 +27,7 @@ static class ReorderScene
                 });
                 foreach (var row in items.Rows())
                     row.Label(row.Title);
+                return root;
             }));
             foreach (var key in new[] { "a", "b", "c" })
                 items.Insert(tx, key, new Item(key));

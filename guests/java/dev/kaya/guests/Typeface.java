@@ -22,7 +22,7 @@ public final class Typeface {
             KayaApp.Signal<String> heading = tx.signal("typeface");
             KayaApp.Signal<String> status = tx.signal("ready");
 
-            tx.mount(tx.column(() -> {
+            tx.mount(tx.column(col -> {
                 // The heading's text style OVERRIDES the root font: a root-only
                 // lowering leaves this label in the system face.
                 tx.label(heading).role(KayaApp.Role.HEADING).a11yId("title"); // label#0

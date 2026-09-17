@@ -11,15 +11,16 @@ static class GrowScene
             var probe = tx.Signal("grow probe");
             var one = tx.Signal("one");
 
-            tx.Mount(tx.Column(() =>
+            tx.Mount(tx.Column(root =>
             {
                 tx.Label(bind: probe, grow: 1); // label#0
                 tx.Textarea(grow: 2); // textarea#0
-                tx.Row(() =>
+                tx.Row(_ =>
                 {
                     tx.Label(bind: one, grow: 1); // label#1
                     tx.Button("three", grow: 3);
                 }, grow: 1, spacing: 12);
+                return root;
             }));
         });
 

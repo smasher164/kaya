@@ -17,6 +17,8 @@ public final class Save {
 
     /** The file OPENED and the destination later NAMED, held as HANDLES: the
      * phones have no re-openable path at all. */
+    /** The dialogs' own answers, which arrive in a handler long after
+     * the scene is built: not a container body smuggling its result out. */
     private static final class Handles {
         KayaApp.PickedFile source;
         KayaApp.PickedFile destination;
@@ -43,7 +45,7 @@ public final class Save {
         app.build(tx -> {
             tx.window(0).title("save");
             KayaApp.Signal<String> status = tx.signal("no file");
-            tx.mount(tx.column(() -> {
+            tx.mount(tx.column(col -> {
                 tx.label(status).a11yId("status"); // label#0
                 tx.button("open", inner -> // button#0
                         inner.pickFile()

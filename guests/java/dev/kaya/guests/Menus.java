@@ -55,7 +55,7 @@ public final class Menus {
                         t.write(status, "removed " + group + "/" + item);
                     });
 
-            tx.mount(tx.column(() -> {
+            tx.mount(tx.column(col -> {
                 tx.label(status); // label#0
                 tx.button("enable export", t -> // button#0
                         t.write(canExport, true));

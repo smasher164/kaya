@@ -28,14 +28,14 @@ const { status, todos, field } = app.window(() => {
   const status = kaya.signal("no todos");
   const todos = kaya.collection();
 
-  let field!: kaya.Widget;
-  kaya.column(() => {
-    field = kaya.entry({ onChange });
+  const field = kaya.column(() => {
+    const field = kaya.entry({ onChange });
     kaya.button("add", { onClick: onAdd });
     kaya.label({ bind: status });
     for (const todo of todos) {
       kaya.label({ bind: todo });
     }
+    return field;
   });
   return { status, todos, field };
 });

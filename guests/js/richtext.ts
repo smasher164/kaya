@@ -64,9 +64,8 @@ function onPrefix(): void {
 const { last, runs, editor } = app.window({ title: "richtext" }, () => {
   const last = kaya.signal("");
   const runs = kaya.signal("");
-  let editor!: kaya.Widget;
-  kaya.column(() => {
-    editor = kaya.textarea({ rich: true, onEdit, onFormat }); // textarea#0
+  const editor = kaya.column(() => {
+    const editor = kaya.textarea({ rich: true, onEdit, onFormat }); // textarea#0
     editor.a11yId("doc").a11yLabel("Document");
     kaya.label({ bind: last }); // label#0
     kaya.label({ bind: runs }); // label#1
@@ -79,6 +78,7 @@ const { last, runs, editor } = app.window({ title: "richtext" }, () => {
       kaya.button("focus", { onClick: onFocus }); // button#5
       kaya.button("prefix", { onClick: onPrefix }); // button#6
     });
+    return editor;
   });
   return { last, runs, editor };
 });

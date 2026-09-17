@@ -7,12 +7,10 @@ let DETAIL: UInt64 = 7
 
 let app = KayaApp()
 
-var status: KayaSignal!
-
 app.build { tx in
     tx.window(title: "split", panes: 2)
-    status = tx.signal(.str("list pane"))
-    let root = tx.column {
+    let status = tx.signal(.str("list pane"))
+    let root = tx.column { root in
         // Authored ids: an index read passes for an arm that drew nothing.
         tx.setA11yId(tx.label(bind: status), "list")  // label#0
         tx.button(
@@ -21,12 +19,14 @@ app.build { tx in
             inner.pushEntry(
                 DETAIL, title: "detail",
                 onPopped: { tx2 in tx2.write(status, .str("popped detail")) })
-            let pane = inner.column {
+            let pane = inner.column { pane in
                 let caption = inner.signal(.str("detail pane"))
                 inner.setA11yId(inner.label(bind: caption), "detail")
+                return pane
             }
             inner.mountIn(DETAIL, pane)
             })
+        return root
     }
     tx.mount(root)
 }

@@ -51,7 +51,7 @@ public final class FileDialog {
         app.build(tx -> {
             tx.window(0).title("filedialog");
             KayaApp.Signal<String> status = tx.signal("no file");
-            tx.mount(tx.column(() -> {
+            tx.mount(tx.column(col -> {
                 tx.label(status).a11yId("status"); // label#0
                 tx.button("open", inner -> // button#0
                         inner.pickFiles()

@@ -8,13 +8,12 @@ static class SplitScene
     {
         var app = new KayaApp();
 
-        Signal status = default;
-        app.Build(tx =>
+        var status = app.Build(tx =>
         {
             tx.Window(title: "split", panes: 2);
-            status = tx.Signal("list pane");
+            var status = tx.Signal("list pane");
 
-            tx.Mount(tx.Column(() =>
+            tx.Mount(tx.Column(root =>
             {
                 // Authored ids: an index read passes whether or not anything
                 // reached the screen.
@@ -23,14 +22,17 @@ static class SplitScene
                 {
                     inner.PushEntry(Detail, title: "detail",
                         onPopped: tx2 => tx2.Write(status, "popped detail"));
-                    var pane = inner.Column(() =>
+                    var pane = inner.Column(pane =>
                     {
                         var caption = inner.Signal("detail pane");
                         inner.SetA11yId(inner.Label(bind: caption), "detail");
+                        return pane;
                     });
                     inner.MountIn(Detail, pane);
                 });
+                return root;
             }));
+            return status;
         });
 
         System.Environment.Exit(app.Run());

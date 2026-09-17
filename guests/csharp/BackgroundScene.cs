@@ -14,18 +14,15 @@ static class BackgroundScene
         string posted = "";
         string nested = "";
 
-        Signal status = default;
-        Signal alive = default;
-        Signal detail = default;
 
-        app.Build(tx =>
+        var (status, alive, detail) = app.Build(tx =>
         {
             tx.Window(title: "background");
-            status = tx.Signal("idle");
-            alive = tx.Signal("-");
-            detail = tx.Signal("-");
+            var status = tx.Signal("idle");
+            var alive = tx.Signal("-");
+            var detail = tx.Signal("-");
 
-            tx.Mount(tx.Column(() =>
+            tx.Mount(tx.Column(root =>
             {
                 tx.SetA11yId(tx.Label(bind: status), "status");  // label#0
                 tx.SetA11yId(tx.Label(bind: alive), "alive");    // label#1
@@ -64,7 +61,9 @@ static class BackgroundScene
                     nested += "c";
                     inner.Write(detail, nested);
                 });
+                return root;
             }));
+            return (status, alive, detail);
         });
 
         Environment.Exit(app.Run());

@@ -23,7 +23,7 @@ static class SearchScene
             var items = SearchItemKaya.Collection(tx);
             var count = tx.Signal($"{Names.Length} items");
 
-            tx.Mount(tx.Column(() =>
+            tx.Mount(tx.Column(root =>
             {
                 var find = tx.Search(onChange: (t, text) =>
                 {
@@ -58,6 +58,7 @@ static class SearchScene
                     row.Label(row.Name);
                 });
                 tx.SetA11yId(list, "list");
+                return root;
             }));
 
             foreach (var name in Names)

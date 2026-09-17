@@ -6,11 +6,9 @@ open Kaya_app
 let () =
   let app = Kaya_app.create () in
 
-  let status = ref None in
   build app (fun () ->
      window ~title:"scroll" ();
      let s = signal Scalar.Str ("at top") in
-     status := Some s;
      let on_bottom () = write s ("bottom clicked") in
      let row i () =
        let caption = signal Scalar.Str ((Printf.sprintf "row %d" i)) in
@@ -30,7 +28,5 @@ let () =
          ()
      in
      mount root);
-
-  ignore !status;
 
   exit (run app)

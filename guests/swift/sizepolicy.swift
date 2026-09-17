@@ -47,7 +47,7 @@ func frameOf(_ time: Double) -> UInt32 {
 
 app.build { tx in
     tx.window(title: "sizepolicy", width: 480, height: 420)
-    let root = tx.column {
+    let root = tx.column { root in
         // SCALE (the default)
         let fit = tx.canvas(box, grow: 1.0)
         tx.setA11yId(fit, "fit")
@@ -71,6 +71,7 @@ app.build { tx in
         tx.setA11yId(clock, "clock")
         tx.setA11yLabel(clock, "Animated bar")
         clock.onTick { d, size, time in bar(d, size, frameOf(time)) }
+        return root
     }
     tx.mount(root)
 }

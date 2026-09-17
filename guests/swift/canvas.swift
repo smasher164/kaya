@@ -28,7 +28,7 @@ let box = KayaViewbox(300.0, 120.0)
 app.build { tx in
     tx.window(title: "canvas", width: 480, height: 360)
     let title = tx.signal(.str("portfolio value"))
-    let root = tx.column {
+    let root = tx.column { root in
         tx.label(bind: title)  // label#0
         let chart = tx.canvas(box)
         tx.setA11yId(chart, "chart")
@@ -65,6 +65,7 @@ app.build { tx in
             d.font(size: 13.0, asset: "fonts/sora-wght.ttf", weight: 700)
             d.text(plot.l + 8.0, plot.t + 3.0, "Q3", .series, align: .start, baseline: .top)
         }
+        return root
     }
     tx.mount(root)
 }

@@ -78,6 +78,10 @@ static class SaveScene
         PickedFile? source = null;
         PickedFile? destination = null;
 
+
+        // `Work` and the scene's own body both name it, so the handle is
+        // declared before the scope that makes it — C#'s zero value, not a
+        // container body smuggling its result out.
         Signal status = default;
 
         // Open blocks; Post is the one method safe from another thread.
@@ -121,7 +125,7 @@ static class SaveScene
                 Work(() => "saved " + WriteBack(dest, "third draft"));
             }
 
-            tx.Mount(tx.Column(() =>
+            tx.Mount(tx.Column(root =>
             {
                 var label = tx.Label(bind: status); // label#0
                 tx.SetA11yId(label, "status");
@@ -156,6 +160,7 @@ static class SaveScene
                     }
                     Work(() => $"reopened {ReadBack(first)} {ReadBack(second)}");
                 });
+                return root;
             }));
         });
 

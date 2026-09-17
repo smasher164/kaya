@@ -6,11 +6,10 @@ static class DirtyScene
     {
         var app = new KayaApp();
 
-        Signal doc = default, status = default;
-        app.Build(tx =>
+        var (doc, status) = app.Build(tx =>
         {
-            doc = tx.Signal("notes");
-            status = tx.Signal("saved");
+            var doc = tx.Signal("notes");
+            var status = tx.Signal("saved");
 
             // No dirty: here — the clean state is the first assertion.
             tx.Window(title: "dirty", vetoClose: true, onCloseRequested: t =>
@@ -30,7 +29,7 @@ static class DirtyScene
                     });
             });
 
-            tx.Mount(tx.Column(() =>
+            tx.Mount(tx.Column(root =>
             {
                 tx.Label(bind: doc);    // label#0
                 tx.Label(bind: status); // label#1
@@ -45,7 +44,9 @@ static class DirtyScene
                     t.Write(status, "saved");
                     t.Window(dirty: false);
                 }); // button#1
+                return root;
             }));
+            return (doc, status);
         });
 
         System.Environment.Exit(app.Run());

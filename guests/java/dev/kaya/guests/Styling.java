@@ -16,7 +16,7 @@ public final class Styling {
             tx.window(0).title("styling").size(480.0, 360.0).inset(0.0);
             KayaApp.Signal<String> status = tx.signal("ready");
 
-            tx.mount(tx.column(() -> {
+            tx.mount(tx.column(col -> {
                 // expect_ax resolves a target through its AUTHORED id.
                 tx.heading("Sections").a11yId("title"); // label#0
                 tx.label(status); // label#1

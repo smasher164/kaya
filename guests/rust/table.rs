@@ -17,25 +17,25 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     let (items, table) = ctx.apply(|tx| {
         let items = tx.collection::<Item>();
         // The root is a row: the For's container is the only column.
-        let mut table: Option<kaya::WidgetId> = None;
-        let root = tx.row(|tx| {
-            let rows = items
-                .rows(tx)
-                .columns(&["Name", "Size"], kaya::Sort::none())
-                .on_sort(&msgs, Msg::Sort);
-            let id = rows.id();
-            table = Some(id);
-            for mut row in rows {
-                // One cell per declared column: the core holds the arity.
-                row.row(|t| {
-                    t.label(Item::name());
-                    t.label(Item::size());
-                });
-            }
-            // Grown on purpose: ungrown, a table hugs its rows.
-            tx.grow(id, 1.0);
-        })
-        .id();
+        let (root, table) = tx
+            .row(|tx| {
+                let rows = items
+                    .rows(tx)
+                    .columns(&["Name", "Size"], kaya::Sort::none())
+                    .on_sort(&msgs, Msg::Sort);
+                let id = rows.id();
+                for mut row in rows {
+                    // One cell per declared column: the core holds the arity.
+                    row.row(|t| {
+                        t.label(Item::name());
+                        t.label(Item::size());
+                    });
+                }
+                // Grown on purpose: ungrown, a table hugs its rows.
+                tx.grow(id, 1.0);
+                id
+            })
+            .into_parts();
         tx.mount(root);
         for (key, name, size) in
             [("b", "banana", "30"), ("a", "apple", "10"), ("c", "cherry", "20")]
@@ -46,7 +46,6 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 Item { name: name.to_string(), size: size.to_string() },
             );
         }
-        let table = table.expect("the row declared the table");
         (items, table)
     });
 

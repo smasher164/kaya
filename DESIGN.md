@@ -406,6 +406,26 @@ the wire constructor stops inside Kaya.Core. The exception:
 outcome word because the checks drive it with wire constants and
 check-sugar-surface reads that exact signature; nothing a guest calls does.
 
+**A body receives its container and returns its value** (ruled
+2026-09-17, after the review of the idiom pass). A live-zone constructor
+that takes a body — a window, a scope, a pushed entry, a section, a column,
+a row, a grid, a scroll, a `when` — returns what its body returns, and the
+body receives its container's handle as a parameter; the template zone is
+out, since a For's body is traced once and a stamped copy hands out no
+live handle. The spelling follows the family: where props are arguments
+before the body (JS, Swift, C#) the constructor returns the body's value
+directly; where props are chained after the body (Rust, Java) the ref
+carries the value — `.value()`, `.id()`, `.into_parts()`, the `MenuRef`
+shape. Python's `with` block, Go's captured variables, and the child LIST
+that OCaml's and Haskell's containers take (children are built as values
+before the container takes them) never had the problem and change nothing;
+OCaml's one body-discarding constructor, the live `when_`, answers the pair
+of its body's value and its child position.
+Before the ruling one design decision — the constructor returned its own
+handle and discarded the body's — had six spellings of the same smuggle in
+the guests: JS `let x!: T`, Swift implicitly unwrapped optionals, Java
+holder classes, C# `notes!`, Rust `Option` plus `expect`, OCaml `ref None`.
+
 **One id space for widgets and template nodes.** Every binding mints
 live widget ids and template node ids from ONE monotone counter per app
 — signals, collections, alerts/dialogs and menu items keep their own —

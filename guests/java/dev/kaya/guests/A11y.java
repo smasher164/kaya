@@ -10,7 +10,7 @@ public final class A11y {
         KayaApp app = new KayaApp();
 
         app.build(tx -> {
-            tx.mount(tx.column(() -> {
+            tx.mount(tx.column(col -> {
                 // Deliberately not labelled: the platform must speak the caption.
                 tx.button("Save").a11yId("save").a11yHint("save the draft");
                 tx.checkbox("Details", null).a11yId("details")
@@ -29,12 +29,15 @@ public final class A11y {
                         .a11yId("color").a11yLabel("Color");
                 tx.radio(new String[] {"Small", "Large"}, 0, null)
                         .a11yId("size").a11yLabel("Size");
-                tx.grid(2, () -> {
+                tx.grid(2, cells -> {
                     tx.label("Name");
                     tx.label("Ada");
                 }).a11yId("cells").a11yLabel("Cells");
-                tx.scroll(() -> tx.label("Item")).a11yId("feed").a11yLabel("Feed");
-                tx.row(() -> {
+                tx.scroll(scrollBox -> {
+                    scrollBox.a11yId("feed").a11yLabel("Feed");
+                    tx.label("Item");
+                });
+                tx.row(row -> {
                     tx.button("Cancel").a11yId("cancel");
                     tx.button("OK").a11yId("ok");
                 }).a11yId("actions").a11yLabel("Actions");

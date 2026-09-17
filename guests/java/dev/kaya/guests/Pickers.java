@@ -34,7 +34,7 @@ public final class Pickers {
             KayaApp.Signal<LocalTime> timeSig = tx.signal(LocalTime.of(14, 30));
             var tasks = TaskKaya.collection(tx);
 
-            tx.mount(tx.column(() -> {
+            tx.mount(tx.column(col -> {
                 tx.label(dateText); // label#0
                 tx.label(timeText); // label#1
                 tx.label(rowText); // label#2

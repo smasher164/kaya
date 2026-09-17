@@ -8,11 +8,9 @@ let settings = 8L
 let () =
   let app = Kaya_app.create () in
 
-  let status = ref None in
   build app (fun () ->
      window ~title:"nav" ();
      let s = signal Scalar.Str ("at root") in
-     status := Some s;
      let on_detail () =
        push_entry ~title:"detail"
          ~on_popped:(fun () -> write s ("popped detail"))
@@ -45,7 +43,5 @@ let () =
          ()
      in
      mount root);
-
-  ignore !status;
 
   exit (run app)

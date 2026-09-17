@@ -7,15 +7,15 @@ static class PanelsScene
     {
         var app = new KayaApp();
 
-        Signal status = default;
-        app.Build(tx =>
+        var status = app.Build(tx =>
         {
             tx.Window(title: "panels");
-            status = tx.Signal("two panels");
+            var status = tx.Signal("two panels");
 
-            tx.Mount(tx.Column(() =>
+            tx.Mount(tx.Column(root =>
             {
                 tx.Label(bind: status); // label#0
+                return root;
             }));
 
             tx.CreateWindow(1, title: "inspector", width: 480, height: 320,
@@ -25,12 +25,14 @@ static class PanelsScene
                     tx2.Write(status, "close requested");
                     tx2.DestroyWindow(1);
                 });
-            var aux = tx.Column(() =>
+            var aux = tx.Column(aux =>
             {
                 var caption = tx.Signal("inspector pane");
                 tx.Label(bind: caption); // label#1
+                return aux;
             });
             tx.MountIn(1, aux);
+            return status;
         });
 
         System.Environment.Exit(app.Run());

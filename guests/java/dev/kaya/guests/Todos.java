@@ -38,7 +38,7 @@ public final class Todos {
             var todos = TodoKaya.collection(tx);
             KayaApp.Signal<String> itemsLeft = todos.derive(tx, Todos::itemsLeftText);
 
-            tx.mount(tx.column(() -> {
+            tx.mount(tx.column(col -> {
                 var field = tx.entry((t, text) -> draft = text);
                 tx.button("Add", t -> {
                     if (draft.isEmpty()) {

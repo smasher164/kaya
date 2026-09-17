@@ -13,6 +13,9 @@ public final class Ownundo {
     /** The app's own history: the document before each user edit, and the
      * documents an undo took away. A named holder, not static fields —
      * this scene's history has no reason to outlive its one app(). */
+    /** The app's OWN undo history, plus the two textareas its menu
+     * items were declared before: mutable app state and a forward
+     * reference, not a container body smuggling its result out. */
     private static final class State {
         KayaApp.Widget nativeArea, owned;
         final List<KayaApp.Document> undo = new ArrayList<>();
@@ -52,7 +55,7 @@ public final class Ownundo {
                 publish(t, status, s);
             });
 
-            tx.mount(tx.column(() -> {
+            tx.mount(tx.column(col -> {
                 tx.label(status).a11yId("status"); // label#0
                 s.nativeArea = tx.textarea().rich().a11yId("native").a11yLabel("Native");
                 s.owned = tx.textarea().rich().ownUndo()
@@ -63,7 +66,7 @@ public final class Ownundo {
                     s.redo.clear();
                     publish(t, status, s);
                 });
-                tx.row(() -> {
+                tx.row(row -> {
                     tx.button("focus native", t -> t.focus(s.nativeArea)); // button#0
                     tx.button("focus owned", t -> t.focus(s.owned));  // button#1
                 });

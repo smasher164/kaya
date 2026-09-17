@@ -33,7 +33,7 @@ static class TodosScene
                 return n == 1 ? "1 item left" : $"{n} items left";
             });
 
-            tx.Mount(tx.Column(() =>
+            tx.Mount(tx.Column(root =>
             {
                 var field = tx.Entry((t, text) => draft = text);
                 tx.Button("Add", t =>
@@ -64,6 +64,7 @@ static class TodosScene
                         row.Label(row.Title);
                     });
                 }
+                return root;
             }));
         });
 

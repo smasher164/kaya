@@ -15,10 +15,6 @@ import java.util.List;
  */
 public final class Richlabel {
     /** Java lambdas cannot assign captured locals. */
-    private static final class Refs {
-        KayaApp.Widget body, heading;
-    }
-
     /** THE ACCENT IS IN A {@code \}{@code u} ESCAPE: a literal's bytes
      * follow the compiler's encoding, and the Android build that also
      * compiles this directory passes no {@code -encoding}
@@ -49,17 +45,16 @@ public final class Richlabel {
             tx.window(0).title("richlabel");
             KayaApp.Signal<String> runs = tx.signal("");
 
-            Refs refs = new Refs();
-            tx.mount(tx.column(() -> {
+            tx.mount(tx.column(col -> {
                 KayaApp.Signal<String> bodyText = tx.signal("");
                 KayaApp.Signal<String> headingText = tx.signal(TITLE);
 
-                refs.body = tx.label(bodyText).rich().a11yId("body"); // label#0
-                refs.heading = tx.label(headingText).role(KayaApp.Role.HEADING)
+                KayaApp.Widget body = tx.label(bodyText).rich().a11yId("body"); // label#0
+                KayaApp.Widget heading = tx.label(headingText).role(KayaApp.Role.HEADING)
                         .rich().a11yId("heading"); // label#1
                 tx.label(runs).a11yId("runs"); // label#2
 
-                tx.row(() -> {
+                tx.row(row -> {
                     tx.button("seed", t -> { // button#0
                         KayaApp.Document doc = new KayaApp.Document(DOC)
                                 .bold(KayaApp.TextRange.in(DOC, 0, 5))
@@ -68,8 +63,8 @@ public final class Richlabel {
                         KayaApp.Document title = new KayaApp.Document(TITLE)
                                 .mark(KayaApp.TextRange.in(TITLE, 13, 19), "italic",
                                         true);
-                        t.setDocument(refs.body, doc);
-                        t.setDocument(refs.heading, title);
+                        t.setDocument(body, doc);
+                        t.setDocument(heading, title);
                         t.write(runs, spell(doc.runs()));
                     });
                     tx.button("insert", t -> { // button#1
@@ -77,19 +72,19 @@ public final class Richlabel {
                                 KayaApp.Edit.insert(KayaApp.TextRange.in(DOC, 5, 5), ", big")
                                         .mark(KayaApp.TextRange.in(", big", 2, 5), "italic",
                                                 true);
-                        t.applyEdit(refs.body, edit);
-                        t.write(runs, spell(app.document(refs.body).runs()));
+                        t.applyEdit(body, edit);
+                        t.write(runs, spell(app.document(body).runs()));
                     });
                     // THE RANGED ACT ON A LABEL (docs/rich-text-plan.md §17):
                     // the label's own document written by range, no selection
                     // to move; the ranges convert against the CURRENT text,
                     // which the insert moved.
                     tx.button("mark", t -> { // button#2
-                        String text = app.document(refs.body).text();
-                        t.formatRange(refs.body, KayaApp.TextRange.in(text, 1, 3), "italic",
+                        String text = app.document(body).text();
+                        t.formatRange(body, KayaApp.TextRange.in(text, 1, 3), "italic",
                                 true);
-                        t.unformatRange(refs.body, KayaApp.TextRange.in(text, 0, 2), "bold");
-                        t.write(runs, spell(app.document(refs.body).runs()));
+                        t.unformatRange(body, KayaApp.TextRange.in(text, 0, 2), "bold");
+                        t.write(runs, spell(app.document(body).runs()));
                     });
                 });
             }));

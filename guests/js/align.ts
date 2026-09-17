@@ -33,49 +33,49 @@ app.window(() => {
   const fit = kaya.signal("fit");
   const plain = kaya.signal("plain probe");
 
-  const root = kaya.column({ align: "stretch" }, () => {
-    const centered = kaya.column({ align: "center" }, () => {
+  kaya.column({ align: "stretch" }, (root) => {
+    root.a11yId("root");
+    kaya.column({ align: "center" }, (centered) => {
+      centered.a11yId("centered");
       kaya.label({ bind: probe }); // label#0
       kaya.button("mid");
-      const baseline = kaya.row({ align: "baseline" }, () => {
+      kaya.row({ align: "baseline" }, (baseline) => {
+        baseline.a11yId("baseline");
         // the baseline trio
         kaya.label({ bind: base }); // label#1
         kaya.button("tick");
         kaya.image(TALL_PNG);
       });
-      baseline.a11yId("baseline");
     });
-    centered.a11yId("centered");
     kaya.row(() => {
       // row#1: the stretch pair's host
       kaya.label({ bind: anchor }); // label#2
-      const fitcol = kaya.column({ grow: 1, align: "stretch" }, () => {
+      kaya.column({ grow: 1, align: "stretch" }, (fitcol) => {
+        fitcol.a11yId("fitcol");
         kaya.label({ bind: fit }); // label#3
         kaya.button("wide");
       });
-      fitcol.a11yId("fitcol");
     });
     // row@plain: NO align, so the core's centre default is what the scene
     // reads
-    const plainRow = kaya.row(() => {
+    kaya.row((plainRow) => {
+      plainRow.a11yId("plain");
       kaya.label({ bind: plain }).a11yId("plainlabel"); // label#4
       kaya.image(TALL_PNG);
     });
-    plainRow.a11yId("plain");
     // column@knobs: NO align; fill opts one child out of its default and
     // one in
-    const knobs = kaya.column(() => {
+    kaya.column((knobs) => {
+      knobs.a11yId("knobs");
       kaya.textarea().fill(false).a11yId("optout");
       kaya.button("fills").fill(true).a11yId("fills");
       // row@wrapped: six exact-width images flow onto two lines
-      const wrapped = kaya.row(() => {
+      kaya.row((wrapped) => {
+        wrapped.wrap(true).a11yId("wrapped");
         for (let i = 0; i < 6; i++) kaya.image(WIDE_PNG);
       });
-      wrapped.wrap(true).a11yId("wrapped");
     });
-    knobs.a11yId("knobs");
   });
-  root.a11yId("root");
 });
 
 app.run();

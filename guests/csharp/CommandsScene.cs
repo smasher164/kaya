@@ -47,9 +47,10 @@ static class CommandsScene
             });
             tx.Window(title: "commands", menus: new[] { file, view });
 
-            tx.Mount(tx.Column(() =>
+            tx.Mount(tx.Column(root =>
             {
                 tx.Label(bind: status); // label#0
+                return root;
             }));
         });
 

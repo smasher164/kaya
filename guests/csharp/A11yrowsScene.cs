@@ -9,7 +9,7 @@ static class A11yrowsScene
 
         app.Build(tx =>
         {
-            var root = tx.Column(() =>
+            var root = tx.Column(root =>
             {
                 // Element-sourced: expect_ax refuses an ambiguous authored id.
                 var notes = tx.Collection();
@@ -37,6 +37,7 @@ static class A11yrowsScene
                 }
                 heads.InsertFresh(tx, new Item("Heading one"));
                 heads.InsertFresh(tx, new Item("Heading two"));
+                return root;
             });
             tx.Mount(root);
         });

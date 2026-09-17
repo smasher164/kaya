@@ -30,7 +30,7 @@ app.build { tx in
         return .str(n == 1 ? "1 item left" : "\(n) items left")
     }
 
-    let root = tx.column {
+    let root = tx.column { root in
         let field = tx.entry { _, text in draft = text }
         tx.button("Add") { tx in
             if draft.isEmpty { return }
@@ -47,13 +47,14 @@ app.build { tx in
         }
         tx.label(bind: itemsLeft)
         for row in todos.rows {
-            row.row {
+            _ = row.row {
                 row.checkbox(row.done) { tx, keys, checked in
                     todos.patch(tx, keys[0]).set(\.done, checked)
                 }
                 row.label(row.title)
             }
         }
+        return root
     }
     tx.mount(root)
 }

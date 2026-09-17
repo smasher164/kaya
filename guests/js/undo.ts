@@ -118,14 +118,12 @@ const { status, history, keys, notes, field, todos } = app.window({ title: "undo
   const keys = kaya.signal("no keys");
   const notes = kaya.signal("no notes");
   const todos = kaya.collection(Todo);
-  let field!: kaya.Widget;
-
-  kaya.column(() => {
+  const field = kaya.column(() => {
     kaya.label({ bind: status }).a11yId("status"); // label#0
     kaya.label({ bind: history }).a11yId("history"); // label#1
     kaya.label({ bind: keys }).a11yId("keys"); // label#2
     kaya.label({ bind: notes }).a11yId("notes"); // label#3
-    field = kaya.entry({ onChange }).a11yId("draft"); // entry#0
+    const field = kaya.entry({ onChange }).a11yId("draft"); // entry#0
     kaya.button("add", { onClick: onAdd }); // button#0
     kaya.button("star", { onClick: onStar }); // button#1
     // The scene's way back to the field.
@@ -137,6 +135,7 @@ const { status, history, keys, notes, field, todos } = app.window({ title: "undo
         kaya.entry({ onChange: onNote });
       });
     }
+    return field;
   });
 
   // The scene types with real keystrokes: something must hold focus.

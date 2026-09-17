@@ -14,7 +14,7 @@ app.build { tx in
     let nameHelp = tx.signal(.str("Your full name as it appears on the card"))
     let accounts = accountCollection(tx)
 
-    let settings = tx.column {
+    let settings = tx.column { settings in
         let save = tx.button("Save") { tx in  // button#0
             tx.write(nameHelp, .str("Your name, as saved"))
         }
@@ -35,6 +35,7 @@ app.build { tx in
             row.t.setHelp(label, row.note)
             row.t.setA11yId(label, row.name)
         }
+        return settings
     }
     tx.setHelp(settings, "The settings for this account")  // column#0
     tx.setA11yId(settings, "settings")

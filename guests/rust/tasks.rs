@@ -746,6 +746,9 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         ];
         let mut lists = Vec::new();
         let mut counts = BTreeMap::new();
+        // The section LOOP's fold, not a body's slot: only the Inbox
+        // section declares a quick-add field, and each column body hands
+        // its own answer back.
         let mut quick: Option<kaya::WidgetId> = None;
         let today_badge = tx.signal(0.0);
         let link_note = tx.signal("");
@@ -774,7 +777,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 List::Anytime => "anytime_count",
                 List::Logbook => unreachable!("the logbook has no section"),
             };
-            let root = tx
+            let (root, quick_here) = tx
                 .column(|tx| {
                     // The list's search field, first, filtering this list
                     // alone (docs/search-plan.md S10).
@@ -790,16 +793,20 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                         // (docs/app-links-plan.md L4): empty otherwise.
                         tx.caption(link_note).a11y_id("link_note").id();
                     }
-                    if list == List::Inbox {
-                        tx.row(|tx| {
-                            let id = tx.entry().a11y_id("quick").grow(1.0).id();
-                            quick = Some(id);
-                            msgs.on_change(id, Msg::Draft);
-                            let add = tx.button("Add").a11y_id("add").id();
-                            msgs.on_click(add, Msg::Add);
-                        })
-                        .id();
-                    }
+                    let quick_here = if list == List::Inbox {
+                        Some(
+                            tx.row(|tx| {
+                                let id = tx.entry().a11y_id("quick").grow(1.0).id();
+                                msgs.on_change(id, Msg::Draft);
+                                let add = tx.button("Add").a11y_id("add").id();
+                                msgs.on_click(add, Msg::Add);
+                                id
+                            })
+                            .value(),
+                        )
+                    } else {
+                        None
+                    };
                     let rows = coll.rows(tx);
                     let list_column = rows.id();
                     for mut row in rows {
@@ -825,8 +832,10 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     // the section's width (R7): a hugging list hides behind
                     // rows that fill it.
                     tx.a11y_id(list_column, format!("{}_list", count_id.trim_end_matches("_count")));
+                    quick_here
                 })
-                .id();
+                .into_parts();
+            quick = quick.or(quick_here);
             tx.mount_in(section, root);
             lists.push((list, coll));
         }

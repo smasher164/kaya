@@ -43,12 +43,13 @@ static class AssetsScene
                 + Font + ": " + font.Length.ToString(CultureInfo.InvariantCulture)
                 + " bytes, " + verdict);
 
-            tx.Mount(tx.Column(() =>
+            tx.Mount(tx.Column(root =>
             {
                 tx.Label(bind: title);  // label#0
                 tx.Image(picture.Bytes()); // image#0
                 tx.Label(bind: found);  // label#1
                 tx.Label(bind: sizes);  // label#2
+                return root;
             }));
         });
 

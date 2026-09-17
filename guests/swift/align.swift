@@ -38,37 +38,41 @@ app.build { tx in
     let fit = tx.signal(.str("fit"))
     let plain = tx.signal(.str("plain probe"))
 
-    let root = tx.column(align: .stretch) {
-            let centered = tx.column(align: .center) {  // column#1: the center trio
+    let root = tx.column(align: .stretch) { root in
+            let centered = tx.column(align: .center) { centered in  // column#1: the center trio
                 tx.label(bind: probe)  // label#0
                 tx.button("mid")
-                let baseline = tx.row(align: .baseline) {  // the baseline trio
+                let baseline = tx.row(align: .baseline) { baseline in  // the baseline trio
                     tx.label(bind: base)  // label#1
                     tx.button("tick")
                     tx.image(tallPNG)
+                    return baseline
                 }
                 tx.setA11yId(baseline, "baseline")
+                return centered
             }
             tx.setA11yId(centered, "centered")
-            tx.row {  // row#1: the stretch pair's host
+            tx.row { _ in  // row#1: the stretch pair's host
                 tx.label(bind: anchor)  // label#2
                 // column#2
-                let fitcol = tx.column(grow: 1, align: .stretch) {
+                let fitcol = tx.column(grow: 1, align: .stretch) { fitcol in
                     tx.label(bind: fit)  // label#3
                     tx.button("wide")
+                    return fitcol
                 }
                 tx.setA11yId(fitcol, "fitcol")
             }
             // row@plain: NO align, so the core's centre default is what
             // the scene reads
-            let plainRow = tx.row {
+            let plainRow = tx.row { plainRow in
                 tx.setA11yId(tx.label(bind: plain), "plainlabel")  // label#4
                 tx.image(tallPNG)
+                return plainRow
             }
             tx.setA11yId(plainRow, "plain")
             // column@knobs: NO align; fill opts one child out of its
             // default and one in
-            let knobs = tx.column {
+            let knobs = tx.column { knobs in
                 let optout = tx.textarea()
                 tx.setFill(optout, false)
                 tx.setA11yId(optout, "optout")
@@ -76,16 +80,19 @@ app.build { tx in
                 tx.setFill(fills, true)
                 tx.setA11yId(fills, "fills")
                 // row@wrapped: six exact-width images flow onto two lines
-                let wrapped = tx.row {
+                let wrapped = tx.row { wrapped in
                     for _ in 0..<6 {
                         tx.image(widePNG)
                     }
+                    return wrapped
                 }
                 tx.setWrap(wrapped, true)
                 tx.setA11yId(wrapped, "wrapped")
+                return knobs
             }
             tx.setA11yId(knobs, "knobs")
-        }
+        return root
+    }
     tx.setA11yId(root, "root")
     tx.mount(root)
 }

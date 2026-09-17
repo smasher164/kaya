@@ -15,39 +15,40 @@ static class LayoutScene
             var nested = tx.Signal("nested");
             var deep = tx.Signal("deep");
 
-            tx.Mount(tx.Column(() =>
+            tx.Mount(tx.Column(root =>
             {
                 tx.Label(bind: probe); // label#0
 
-                tx.Row(() =>
+                tx.Row(_ =>
                 {
                     tx.Button("A");
                     tx.Button("longer");
                     tx.Label(bind: tail); // label#1
                 });
 
-                tx.Row(() =>
+                tx.Row(_ =>
                 {
                     tx.Checkbox("check");
                     tx.Label(bind: mixed); // label#2
                     tx.Slider(0.0, 1.0, 0.5, grow: 1);
                 });
 
-                tx.Row(() =>
+                tx.Row(_ =>
                 {
                     tx.Slider(0.0, 1.0, 0.25, grow: 1);
                     tx.Slider(0.0, 1.0, 0.75, grow: 3);
                 });
 
-                tx.Column(() =>
+                tx.Column(_ =>
                 {
                     tx.Label(bind: nested); // label#3
-                    tx.Row(() =>
+                    tx.Row(_ =>
                     {
                         tx.Label(bind: deep); // label#4
                         tx.Button("x");
                     });
                 });
+                return root;
             }));
         });
 

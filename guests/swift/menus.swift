@@ -41,6 +41,8 @@ let (groups, items) = app.build { tx -> (KayaCollection, KayaCollection) in
     tx.window(title: "menus", menus: [file, view, sortGroup])
 
     let groups = tx.collection()
+    // The TRACE's own slot: a For's body runs once where the compiler
+    // cannot see it, and the template zone is outside the ruling.
     var itemsOut: KayaCollection!
     let catalog = tx.contextCatalog(items: [
         tx.item("Remove", symbol: .delete) { t, keys in
@@ -52,7 +54,7 @@ let (groups, items) = app.build { tx -> (KayaCollection, KayaCollection) in
         }
     ])
 
-    let root = tx.column {
+    let root = tx.column { root in
         tx.label(bind: status)  // label#0
         tx.button("enable export") { t in  // button#0
             t.write(canExport, .bool(true))
@@ -95,6 +97,7 @@ let (groups, items) = app.build { tx -> (KayaCollection, KayaCollection) in
                 }
             }
         }
+        return root
     }
     tx.mount(root)
     return (groups, itemsOut)

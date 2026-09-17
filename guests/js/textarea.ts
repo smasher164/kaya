@@ -19,11 +19,11 @@ function onClear(): void {
 
 const { lines, editor } = app.window({ title: "textarea" }, () => {
   const lines = kaya.signal("0 lines");
-  let editor!: kaya.Widget;
-  kaya.column(() => {
-    editor = kaya.textarea({ onChange: onEdit });
+  const editor = kaya.column(() => {
+    const editor = kaya.textarea({ onChange: onEdit });
     kaya.label({ bind: lines });
     kaya.button("clear", { onClick: onClear });
+    return editor;
   });
   return { lines, editor };
 });

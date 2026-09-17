@@ -6,7 +6,8 @@ import * as kaya from "kaya-gui";
 const app = new kaya.App();
 
 app.window(() => {
-  const form = kaya.column(() => {
+  kaya.column((form) => {
+    form.a11yId("form").a11yLabel("Form");
     // Deliberately NOT labelled: the platform speaks the caption.
     kaya.button("Save").a11yId("save").a11yHint("save the draft");
     kaya.checkbox("Details").a11yId("details").a11yHint("show more detail");
@@ -22,25 +23,24 @@ app.window(() => {
     logo.close();
     kaya.select(["Red", "Green"]).a11yId("color").a11yLabel("Color");
     kaya.radio(["Small", "Large"]).a11yId("size").a11yLabel("Size");
-    const cells = kaya.grid(2, () => {
+    kaya.grid(2, (cells) => {
+      cells.a11yId("cells").a11yLabel("Cells");
       kaya.label("Name");
       kaya.label("Ada");
     });
-    cells.a11yId("cells").a11yLabel("Cells");
-    const feed = kaya.scroll(() => {
+    kaya.scroll((feed) => {
+      feed.a11yId("feed").a11yLabel("Feed");
       kaya.label("Item");
     });
-    feed.a11yId("feed").a11yLabel("Feed");
-    const actions = kaya.row(() => {
+    kaya.row((actions) => {
+      actions.a11yId("actions").a11yLabel("Actions");
       kaya.button("Cancel").a11yId("cancel");
       kaya.button("OK").a11yId("ok");
     });
-    actions.a11yId("actions").a11yLabel("Actions");
     const spoken = kaya.signal("Before");
     kaya.label("Spoken").a11yId("spoken").a11yLabel(spoken);
     kaya.button("Rename", { onClick: () => spoken.set("After") }).a11yId("rename");
   });
-  form.a11yId("form").a11yLabel("Form");
 });
 
 app.run();

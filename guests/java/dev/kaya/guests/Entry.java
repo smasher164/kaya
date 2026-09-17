@@ -21,11 +21,6 @@ public final class Entry {
         }
     }
 
-    /** Java lambdas cannot assign captured locals. */
-    private static final class Refs {
-        KayaApp.Widget field, add;
-    }
-
     private static String draft = "";
 
     public static void app() {
@@ -35,16 +30,17 @@ public final class Entry {
             KayaApp.Signal<String> status = tx.signal("no todos");
             KayaApp.Collection todos = tx.collection();
 
-            Refs refs = new Refs();
-            tx.mount(tx.column(() -> {
-                refs.field = tx.entry(); // entry#0
-                refs.add = tx.button("add"); // button#0
+            var built = tx.column(col -> {
+                KayaApp.Widget field = tx.entry(); // entry#0
+                KayaApp.Widget add = tx.button("add"); // button#0
                 tx.label(status); // label#0
                 for (var row : tx.rows(todos)) {
                     row.label(row.value());
                 }
-            }));
-            return new Scene(status, refs.field, refs.add, todos);
+                return new Scene(status, field, add, todos);
+            });
+            tx.mount(built.id());
+            return built.value();
         });
 
         app.onChange(scene.field, (tx, text) -> draft = text);

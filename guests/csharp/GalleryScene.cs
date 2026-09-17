@@ -13,15 +13,15 @@ static class GalleryScene
             var volume = tx.Signal("volume: 50%");
             var pos = tx.Signal(0.5);
 
-            tx.Mount(tx.Column(() =>
+            tx.Mount(tx.Column(root =>
             {
-                tx.Row(() =>
+                tx.Row(_ =>
                 {
                     tx.Checkbox("urgent", onToggle: (t, isChecked) =>
                         t.Write(status, $"urgent: {(isChecked ? "true" : "false")}"));
                     tx.Label(bind: status);
                 });
-                tx.Row(() =>
+                tx.Row(_ =>
                 {
                     // Integer percent, so every language's formatting agrees.
                     tx.Slider(0.0, 1.0, bind: pos, onChange: (t, value) =>
@@ -32,7 +32,7 @@ static class GalleryScene
                 var find = tx.Search();
                 tx.SetPlaceholder(find, "Search");
                 tx.SetA11yId(find, "find");
-                tx.Row(() =>
+                tx.Row(_ =>
                 {
                     // Invalid bytes: a decode failure is a placeholder, never a crash.
                     tx.Image(TestPng);
@@ -40,8 +40,9 @@ static class GalleryScene
                 });
                 // The labelled row: the control's accessibility name IS the
                 // label's text, with no a11yLabel of its own.
-                tx.Labeled("Level", () =>
+                tx.Labeled("Level", _ =>
                     tx.SetA11yId(tx.Slider(0.0, 1.0, 0.5), "level"));
+                return root;
             }));
         });
 

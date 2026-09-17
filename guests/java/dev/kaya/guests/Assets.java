@@ -43,7 +43,7 @@ public final class Assets {
                         MARK + (mark.bytes().length > 0 ? " present, " : " missing, ")
                                 + FONT + ": " + font.bytes().length + " bytes, " + verdict);
 
-                tx.mount(tx.column(() -> {
+                tx.mount(tx.column(col -> {
                     tx.label(title); // label#0
                     tx.image(picture.bytes()); // image#0
                     tx.label(found); // label#1

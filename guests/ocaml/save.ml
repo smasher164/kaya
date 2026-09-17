@@ -59,6 +59,8 @@ let () =
   let app = Kaya_app.create () in
 
   (* Handles, never paths: the phones hand back no re-openable name. *)
+  (* The dialogs' own answers, which arrive in a handler long after the
+     scene is built: not a container body smuggling its result out. *)
   let source : picked_file option ref = ref None in
   let destination : picked_file option ref = ref None in
 

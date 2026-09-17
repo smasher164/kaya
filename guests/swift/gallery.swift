@@ -18,14 +18,14 @@ app.build { tx in
     let volume = tx.signal(.str("volume: 50%"))
     let pos = tx.signal(.f64(0.5))
 
-    let root = tx.column {
-        tx.row {
+    let root = tx.column { root in
+        tx.row { _ in
             tx.checkbox("urgent") { t, checked in
                 t.write(status, .str("urgent: \(checked)"))
             }
             tx.label(bind: status)
         }
-        tx.row {
+        tx.row { _ in
             // Integer percent, so every language's formatting agrees.
             tx.slider(min: 0.0, max: 1.0, bind: pos) { t, value in
                 t.write(volume, .str("volume: \(Int((value * 100).rounded()))%"))
@@ -39,7 +39,7 @@ app.build { tx in
         let find = tx.search()
         tx.setPlaceholder(find, "Search")
         tx.setA11yId(find, "find")
-        tx.row {
+        tx.row { _ in
             // Invalid bytes read 0x0: decode failure is the placeholder
             // class, never a crash, on every backend.
             tx.image(testPNG)
@@ -47,9 +47,10 @@ app.build { tx in
         }
         // The labelled row: the control's accessibility name IS the
         // label's text, with no a11yLabel of its own.
-        tx.labeled("Level") {
+        tx.labeled("Level") { _ in
             tx.setA11yId(tx.slider(min: 0.0, max: 1.0, value: 0.5), "level")
         }
+        return root
     }
     tx.mount(root)
 }

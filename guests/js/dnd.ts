@@ -92,13 +92,12 @@ const { items, source, dropStatus, dragStatus, sourceText } = app.window({ title
   const textTarget = kaya.signal("text target");
   const noteTarget = kaya.signal("note target");
   const filesTarget = kaya.signal("files target");
-  let source!: kaya.Widget;
-  kaya.row(() => {
+  const source = kaya.row(() => {
     for (const item of items.rows({ reorderable: true, onDrop: onReorder, a11yId: "rows" })) {
       kaya.label({ bind: item.title }).a11yId("row").onDragEnded(nodeDragEnded("row"));
     }
-    kaya.column(() => {
-      source = kaya.label({ bind: sourceText }); // label#0
+    const source = kaya.column(() => {
+      const source = kaya.label({ bind: sourceText }); // label#0
       source
         .draggable({ text: "hello", custom: { [NOTE_ID]: new TextEncoder().encode("note!") }, operations: [kaya.OP_COPY, kaya.OP_MOVE] })
         .onDragEnded(onDragEnded);
@@ -119,6 +118,7 @@ const { items, source, dropStatus, dragStatus, sourceText } = app.window({ title
         .onDrop((d: kaya.Dropped) => onDropped("files target", filesTarget, d));
       kaya.label({ bind: dropStatus }); // label#4
       kaya.label({ bind: dragStatus }); // label#5
+      return source;
     });
     // THE TEMPLATE ZONE (docs/dnd-plan.md §4): every stamped item is a
     // text destination, and its payload IS the row's own field —
@@ -135,6 +135,7 @@ const { items, source, dropStatus, dragStatus, sourceText } = app.window({ title
     }
     // The bound payload follows the row's record (§4).
     kaya.button("rename y", { onClick: () => items2.update("y", Item({ title: "yy" })) }); // button#0
+    return source;
   });
   for (const key of ["a", "b", "c"]) {
     items.insert(key, Item({ title: key }));

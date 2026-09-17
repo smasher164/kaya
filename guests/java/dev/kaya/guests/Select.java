@@ -16,7 +16,7 @@ public final class Select {
             tx.window(0).title("select");
             KayaApp.Signal<String> picked = tx.signal("picked: Red");
 
-            tx.mount(tx.column(() -> {
+            tx.mount(tx.column(col -> {
                 tx.select(OPTIONS, 0, (t, index) ->
                         t.write(picked, "picked: " + OPTIONS[index]));
                 tx.label(picked); // label#0

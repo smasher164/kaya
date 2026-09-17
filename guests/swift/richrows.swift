@@ -56,10 +56,10 @@ app.build { tx in
     tx.window(
         title: "richrows", onUndone: restored, onRedone: restored, menus: [edit])
 
-    let root = tx.column {
+    let root = tx.column { root in
         tx.label(bind: last)  // label#0
         tx.label(bind: view)  // label#1
-        tx.row {
+        tx.row { _ in
             tx.button("patch b") { t in  // button#0
                 t.undoable("patch b")
                 notes.patch(t, .str("b")).set(
@@ -71,7 +71,7 @@ app.build { tx in
             }
         }
         for r in notes.rows {
-            r.column {
+            _ = r.column {
                 r.label(r.title)
                 let body = r.textarea(document: r.body)
                 r.t.setA11yId(body, "body")
@@ -87,6 +87,7 @@ app.build { tx in
                 }
             }
         }
+        return root
     }
     tx.mount(root)
 

@@ -15,16 +15,16 @@ public final class Panes {
         app.build(tx -> {
             tx.window(0).title("panes").panes(3);
             KayaApp.Signal<String> root = tx.signal("root pane");
-            tx.mount(tx.column(() -> {
+            tx.mount(tx.column(col -> {
                 tx.label(root).a11yId("root"); // label#0
                 tx.button("open content", inner -> { // button#0
                     long entry = inner.pushEntry(CONTENT).title("content").id();
-                    KayaApp.Widget pane = inner.column(() -> {
+                    KayaApp.Widget pane = inner.column(col2 -> {
                         KayaApp.Signal<String> caption = inner.signal("content pane");
                         inner.label(caption).a11yId("content"); // label#1
                         inner.button("open detail", deep -> { // button#1
                             long leaf = deep.pushEntry(DETAIL).title("detail").id();
-                            KayaApp.Widget detail = deep.column(() -> {
+                            KayaApp.Widget detail = deep.column(col3 -> {
                                 KayaApp.Signal<String> tail = deep.signal("detail pane");
                                 deep.label(tail).a11yId("detail"); // label#last
                             });

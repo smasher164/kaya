@@ -28,17 +28,17 @@ static class RichTextScene
     {
         var app = new KayaApp();
 
-        Signal last = default;
-        Signal runs = default;
+        // A SELF-REFERENCE, not a smuggle: the textarea's own OnEdit reads
+        // the document of the widget being declared.
         Widget editor = default;
 
-        app.Build(tx =>
+        var (last, runs) = app.Build(tx =>
         {
             tx.Window(title: "richtext");
-            last = tx.Signal("");
-            runs = tx.Signal("");
+            var last = tx.Signal("");
+            var runs = tx.Signal("");
 
-            tx.Mount(tx.Column(() =>
+            tx.Mount(tx.Column(root =>
             {
                 editor = tx.Textarea(rich: true);
                 tx.SetA11yId(editor, "doc");
@@ -61,7 +61,7 @@ static class RichTextScene
                 tx.Label(bind: last); // label#0
                 tx.Label(bind: runs); // label#1
 
-                tx.Row(() =>
+                tx.Row(_ =>
                 {
                     tx.Button("seed", onClick: t => // button#0
                     {
@@ -91,7 +91,9 @@ static class RichTextScene
                         t.Write(runs, Spell(app.Document(editor).Runs));
                     });
                 });
+                return root;
             }));
+            return (last, runs);
         });
 
         Environment.Exit(app.Run());

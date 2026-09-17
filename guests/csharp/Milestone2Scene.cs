@@ -7,19 +7,21 @@ static class Milestone2Scene
     {
         var app = new KayaApp();
 
-        Signal status = default;
+        // The TRACE's own slots: a For's body runs once where the
+        // compiler cannot see it, and the template zone is outside the
+        // ruling.
         Collection items = default;
         Node removeButton = default;
 
         int steps = 0;
-        app.Build(tx =>
+        var status = app.Build(tx =>
         {
-            status = tx.Signal("step 0");
+            var status = tx.Signal("step 0");
             var stepCount = tx.Signal(0);
 
             var groups = tx.Collection();
 
-            tx.Mount(tx.Column(() =>
+            tx.Mount(tx.Column(root =>
             {
                 tx.Button("step", t =>
                 {
@@ -58,7 +60,9 @@ static class Milestone2Scene
                         });
                     });
                 });
+                return root;
             }));
+            return status;
         });
 
         app.OnClick(removeButton, (tx, keys) =>

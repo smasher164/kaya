@@ -7,13 +7,12 @@ static class ConfirmScene
     {
         var app = new KayaApp();
 
-        Signal status = default;
-        app.Build(tx =>
+        var status = app.Build(tx =>
         {
             tx.Window(title: "confirm");
-            status = tx.Signal("no decision");
+            var status = tx.Signal("no decision");
 
-            tx.Mount(tx.Column(() =>
+            tx.Mount(tx.Column(root =>
             {
                 tx.Label(bind: status); // label#0
                 tx.Button("delete", onClick: inner =>
@@ -40,7 +39,9 @@ static class ConfirmScene
                             status,
                             choice == AlertChoice.Cancel ? "held" : "ejected"));
                 });
+                return root;
             }));
+            return status;
         });
 
         System.Environment.Exit(app.Run());

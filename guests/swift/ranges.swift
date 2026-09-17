@@ -71,12 +71,8 @@ app.build { tx in
     tx.window(title: "ranges")
     let status = tx.signal(.str("0 matches"))
 
-    // A widget parents at CREATION, so the editor rides out through this var
-    // (docs/traps.md, result builders).
-    var editor: KayaWidget! = nil
-
-    let root = tx.column {
-        editor = tx.textarea { t, text in
+    let (root, editor) = tx.column { root -> (KayaWidget, KayaWidget) in
+        let editor = tx.textarea { t, text in
             doc = text
             // A declared set is bound to the text it was declared against (D2).
             t.write(status, .str("0 matches"))
@@ -86,7 +82,7 @@ app.build { tx in
         tx.setA11yId(editor, "doc")
         tx.setA11yLabel(editor, "Document")
         tx.label(bind: status)  // label#0
-        tx.row {
+        tx.row { _ in
             tx.button("find") { t in  // button#0
                 let hits = findAll(doc, needle)
                 t.highlightRanges(editor, hits, in: doc)
@@ -109,6 +105,7 @@ app.build { tx in
                 }
             }
         }
+        return (root, editor)
     }
     tx.mount(root)
 }

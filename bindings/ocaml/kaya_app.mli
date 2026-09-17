@@ -1246,8 +1246,13 @@ val sum_derive :
    each arm a Tpl program — what the generated [<type>_each] calls. *)
 val each_sum : 'a sum_collection -> (int * (unit -> 'b)) list -> unit -> widget
 
-(* A When over a Bool signal: stamps on true, unstamps on false. *)
-val when_ : bool signal -> (unit -> 'a) -> unit -> widget
+(* A When over a Bool signal: stamps on true, unstamps on false; the
+   widget is the When's own container and the body's result rides beside
+   it, as [for_each]'s does. *)
+val when_ : bool signal -> (unit -> 'a) -> unit -> widget * 'a
+
+(* A When AS A CHILD: [when_] with the body's result thrown away. *)
+val shown : bool signal -> (unit -> 'a) -> unit -> widget
 
 (* THE TEMPLATE ZONE: every constructor here stamps once per row inside
    a [for_each]/[each_sum] body, addressing the row through the SAME

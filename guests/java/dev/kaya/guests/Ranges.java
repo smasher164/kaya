@@ -11,6 +11,8 @@ import java.util.List;
  */
 public final class Ranges {
     /** Java lambdas cannot assign captured locals. */
+    /** A SELF-REFERENCE, not a smuggle: the textarea's own onChange and
+     * every button beside it read the widget being declared. */
     private static final class Refs {
         KayaApp.Widget editor;
     }
@@ -84,7 +86,7 @@ public final class Ranges {
             KayaApp.Signal<String> status = tx.signal("0 matches");
 
             Refs refs = new Refs();
-            tx.mount(tx.column(() -> {
+            tx.mount(tx.column(col -> {
                 // Every range assertion finds this control by its authored id.
                 refs.editor = tx.textarea().a11yId("doc").a11yLabel("Document"); // textarea#0
                 tx.setText(refs.editor, DOC);
@@ -94,7 +96,7 @@ public final class Ranges {
                     t.write(status, "0 matches");
                 });
                 tx.label(status); // label#0
-                tx.row(() -> {
+                tx.row(row -> {
                     tx.button("find", t -> { // button#0
                         List<KayaApp.TextRange> hits = findAll(doc, NEEDLE);
                         t.highlightRanges(refs.editor, hits);

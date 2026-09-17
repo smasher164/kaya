@@ -15,13 +15,13 @@ public final class Gallery {
             KayaApp.Signal<String> volume = tx.signal("volume: 50%");
             KayaApp.Signal<Double> pos = tx.signal(0.5);
 
-            tx.mount(tx.column(() -> {
-                tx.row(() -> {
+            tx.mount(tx.column(col -> {
+                tx.row(row -> {
                     tx.checkbox("urgent", (t, checked) ->
                             t.write(status, "urgent: " + checked));
                     tx.label(status);
                 });
-                tx.row(() -> {
+                tx.row(row2 -> {
                     // Integer percent, so every language's formatting agrees.
                     tx.slider(0.0, 1.0, pos, (t, value) ->
                             t.write(volume, "volume: " + Math.round(value * 100) + "%"));
@@ -30,7 +30,7 @@ public final class Gallery {
                     tx.button("quarter", t -> t.write(pos, 0.25));
                 });
                 tx.search().placeholder("Search").a11yId("find");
-                tx.row(() -> {
+                tx.row(row3 -> {
                     // Invalid bytes on purpose: a decode failure reads 0x0.
                     tx.image(TEST_PNG);
                     tx.image("not an image"
@@ -38,8 +38,9 @@ public final class Gallery {
                 });
                 // The labelled row: the control's accessibility name IS the
                 // label's text, with no a11yLabel of its own.
-                tx.labeled("Level", () ->
-                        tx.slider(0.0, 1.0, 0.5, null).a11yId("level"));
+                tx.labeled("Level", field -> {
+                    tx.slider(0.0, 1.0, 0.5, null).a11yId("level");
+                });
             }));
             return null;
         });

@@ -23,11 +23,10 @@ static class FileDialogScene
 
         var released = new ManualResetEventSlim(false);
 
-        Signal status = default;
-        app.Build(tx =>
+        var status = app.Build(tx =>
         {
             tx.Window(title: "filedialog");
-            status = tx.Signal("no file");
+            var status = tx.Signal("no file");
 
             void Picked(Tx tx, List<PickedFile> files)
             {
@@ -60,7 +59,7 @@ static class FileDialogScene
                 tx.Write(status, "reading");
             }
 
-            tx.Mount(tx.Column(() =>
+            tx.Mount(tx.Column(root =>
             {
                 var label = tx.Label(bind: status); // label#0
                 tx.SetA11yId(label, "status");
@@ -74,7 +73,9 @@ static class FileDialogScene
                         filters: new[] { ("Text", "txt") },
                         onResult: Picked));
                 tx.Button("release", onClick: _ => released.Set());
+                return root;
             }));
+            return status;
         });
 
         System.Environment.Exit(app.Run());

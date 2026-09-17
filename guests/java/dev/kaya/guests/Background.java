@@ -21,7 +21,7 @@ public final class Background {
             KayaApp.Signal<String> alive = tx.signal("-");
             KayaApp.Signal<String> detail = tx.signal("-");
 
-            tx.mount(tx.column(() -> {
+            tx.mount(tx.column(col -> {
                 tx.label(status).a11yId("status"); // label#0
                 tx.label(alive).a11yId("alive"); // label#1
                 tx.label(detail).a11yId("nested"); // label#2

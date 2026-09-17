@@ -5,8 +5,6 @@ import Foundation
 
 let app = KayaApp()
 
-var status: KayaSignal!
-
 var draft = ""
 
 try app.build { tx in
@@ -20,14 +18,15 @@ try app.build { tx in
     tx.window(title: "identity", width: 480, height: 360, menus: [file])
 
     let heading = tx.signal(.str("identity"))
-    status = tx.signal(.str("ready"))
-    let root = tx.column {
+    let status = tx.signal(.str("ready"))
+    let root = tx.column { root in
         tx.label(bind: heading)  // label#0
         tx.label(bind: status)  // label#1
         tx.entry { _, text in draft = text }  // entry#0
         tx.button("Go") { t in  // button#0
             t.write(status, .str("clicked \(draft)"))
         }
+        return root
     }
     tx.mount(root)
 
@@ -35,9 +34,10 @@ try app.build { tx in
     // step that reads it (docs/app-identity-plan.md ruling 3). A runtime `if`.
     if KayaApp.capabilities().auxWindows {
         tx.createWindow(1, width: 360.0, height: 240.0)
-        let auxRoot = tx.column {
+        let auxRoot = tx.column { auxRoot in
             let caption = tx.signal(.str("no title of its own"))
             tx.label(bind: caption)  // label#2
+            return auxRoot
         }
         tx.mountIn(1, auxRoot)
     }

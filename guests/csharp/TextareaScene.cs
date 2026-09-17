@@ -17,7 +17,7 @@ static class TextareaScene
             tx.Window(title: "textarea");
             var lines = tx.Signal("0 lines");
 
-            tx.Mount(tx.Column(() =>
+            tx.Mount(tx.Column(root =>
             {
                 var editor = tx.Textarea((t, text) =>
                     t.Write(lines, Count(text)));
@@ -27,6 +27,7 @@ static class TextareaScene
                     t.Clear(editor);
                     t.Focus(editor);
                 });
+                return root;
             }));
         });
 

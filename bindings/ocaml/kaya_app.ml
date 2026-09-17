@@ -3533,12 +3533,13 @@ let when_ (s : bool signal) body () =
   tx.app.c_widget <- Int64.add tx.app.c_widget 1L;
   let id = tx.app.c_widget in
   emit tx (Kaya_wire.tx_create_when id s.sig_id);
-  (* The body's result is its blueprint root, already recorded —
-     discarded, so bodies END with the root and the partial
-     application is a child. *)
-  ignore (in_tpl_scope tx.app body);
+  let result = in_tpl_scope tx.app body in
   emit tx (Kaya_wire.tx_template_end ());
-  Widget id
+  (Widget id, result)
+
+(* A When AS A CHILD: [when_] with the body's result thrown away — the
+   [each] to its [for_each]. *)
+let shown s body () = fst (when_ s body ())
 
 module Tpl = struct
   (* The template zone, direct style like the outer zone: the ambient

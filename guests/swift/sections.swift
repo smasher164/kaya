@@ -14,13 +14,11 @@ let LOANS: UInt64 = 3
 let app = KayaApp()
 
 var visitCount = 0
-var visits: KayaSignal!
-
 app.build { tx in
     tx.window(
         title: "sections",
         sectionsPresentation: .bar)
-    visits = tx.signal(.str("archive: 0 visits"))
+    let visits = tx.signal(.str("archive: 0 visits"))
 
     // A symbol names a CONCEPT (docs/styling-plan.md D6).
     tx.addSection(FEED, title: "Feed", symbol: .home)
@@ -31,7 +29,7 @@ app.build { tx in
             inner.write(visits, .str("archive: \(visitCount) visits"))
         })
 
-    let feedRoot = tx.column {
+    let feedRoot = tx.column { feedRoot in
         let ready = tx.signal(.str("feed ready"))
         tx.label(bind: ready)  // label#0
         tx.button(
@@ -48,22 +46,26 @@ app.build { tx in
                     sectionsPresentation: .sidebar)
                 inner.addSection(SHELVES, title: "Shelves", symbol: .search, window: LIBRARY)
                 inner.addSection(LOANS, title: "Loans", symbol: .lock, window: LIBRARY)
-                let shelvesRoot = inner.column {
+                let shelvesRoot = inner.column { shelvesRoot in
                     let l = inner.signal(.str("shelves ready"))
                     inner.label(bind: l)  // label#2
+                    return shelvesRoot
                 }
                 inner.mountIn(SHELVES, shelvesRoot)
-                let loansRoot = inner.column {
+                let loansRoot = inner.column { loansRoot in
                     let l = inner.signal(.str("loans ready"))
                     inner.label(bind: l)  // label#3
+                    return loansRoot
                 }
                 inner.mountIn(LOANS, loansRoot)
             })
+        return feedRoot
     }
     tx.mountIn(FEED, feedRoot)
 
-    let archiveRoot = tx.column {
+    let archiveRoot = tx.column { archiveRoot in
         tx.label(bind: visits)  // label#1
+        return archiveRoot
     }
     tx.mountIn(ARCHIVE, archiveRoot)
 }

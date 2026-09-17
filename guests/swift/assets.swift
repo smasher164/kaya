@@ -54,11 +54,12 @@ try app.build { tx in
     let sizes = tx.signal(
         .str("\(markName) \(present), \(fontName): \(fontLength) bytes, \(verdict)"))
 
-    let root = tx.column {
+    let root = tx.column { root in
         tx.label(bind: title)  // label#0
         tx.image(pictureBytes)  // image#0
         tx.label(bind: found)  // label#1
         tx.label(bind: sizes)  // label#2
+        return root
     }
     tx.mount(root)
 }

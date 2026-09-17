@@ -15,14 +15,14 @@ public final class Nav {
         KayaApp.Signal<String> status = app.build(tx -> {
             tx.window(0).title("nav");
             KayaApp.Signal<String> s = tx.signal("at root");
-            tx.mount(tx.column(() -> {
+            tx.mount(tx.column(col -> {
                 tx.label(s); // label#0
                 tx.button("open detail", inner -> { // button#0
                     long entry = inner.pushEntry(DETAIL)
                             .title("detail")
                             .onPopped(tx2 -> tx2.write(s, "popped detail"))
                             .id();
-                    KayaApp.Widget pane = inner.column(() -> {
+                    KayaApp.Widget pane = inner.column(col2 -> {
                         KayaApp.Signal<String> caption = inner.signal("detail pane");
                         inner.label(caption);
                     });
@@ -39,7 +39,7 @@ public final class Nav {
                                 tx2.popEntry();
                             })
                             .id();
-                    KayaApp.Widget pane = inner.column(() -> {
+                    KayaApp.Widget pane = inner.column(col3 -> {
                         KayaApp.Signal<String> caption = inner.signal("settings pane");
                         inner.label(caption);
                     });

@@ -19,7 +19,7 @@ public final class Tooltips {
                 tx.signal("Your full name as it appears on the card");
             var accounts = AccountKaya.collection(tx);
 
-            KayaApp.Widget settings = tx.column(() -> {
+            KayaApp.Widget settings = tx.column(col -> {
                 tx.button("Save", t -> t.write(nameHelp, "Your name, as saved"))
                         .help("Saves the draft to disk").a11yId("save"); // button#0
                 tx.button("Discard")

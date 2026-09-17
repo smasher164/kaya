@@ -998,4 +998,28 @@ let () =
   if (Edit.replace (1, 3) "x").range <> (1, 3) then
     fail "an edit does not carry its own span";
 
+  (* X3 (ruled 2026-09-17): a body-taking live-zone constructor answers
+     what its body answered. OCaml's CONTAINERS take their children as
+     values — there is no body to discard — so the three that do take one
+     are [build], [for_each] and [when_]. The witness is the MINT ORDER:
+     ids come off one monotone counter, so the body's first node is the
+     one after the container's own. *)
+  if build app (fun () -> 7) <> 7 then
+    fail "build did not answer its body's value";
+  build app (fun () ->
+      let flag = signal Scalar.Bool true in
+      let Widget site, Node inner =
+        when_ flag (fun () -> Tpl.(label ~text:"on" ())) ()
+      in
+      if inner <> Int64.add site 1L then
+        fail "when_ did not answer its body's value (node %Ld after when %Ld)"
+          inner site;
+      let c = collection () in
+      let Widget for_site, Node row =
+        for_each c (fun () -> Tpl.(label ~bind_field:element ())) ()
+      in
+      if row <> Int64.add for_site 1L then
+        fail "for_each did not answer its body's value (node %Ld after For %Ld)"
+          row for_site);
+
   print_endline "ocaml abort check: OK"

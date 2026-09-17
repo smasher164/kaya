@@ -13,11 +13,12 @@ static class RadioScene
             tx.Window(title: "radio");
             var size = tx.Signal("size: Small");
 
-            tx.Mount(tx.Column(() =>
+            tx.Mount(tx.Column(root =>
             {
                 tx.Radio(Options, 0, (t, index) =>
                     t.Write(size, $"size: {Options[index]}"));
                 tx.Label(bind: size); // label#0
+                return root;
             }));
         });
 

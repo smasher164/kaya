@@ -30,29 +30,25 @@ static class RichlabelScene
     {
         var app = new KayaApp();
 
-        Signal runs = default;
-        Widget body = default;
-        Widget heading = default;
-
-        app.Build(tx =>
+        var (runs, body, heading) = app.Build(tx =>
         {
             tx.Window(title: "richlabel");
-            runs = tx.Signal("");
+            var runs = tx.Signal("");
 
-            tx.Mount(tx.Column(() =>
+            var (root, body, heading) = tx.Column(root =>
             {
                 Signal bodyText = tx.Signal("");
                 Signal headingText = tx.Signal(Title);
 
-                body = tx.Label(bind: bodyText, rich: true); // label#0
+                var body = tx.Label(bind: bodyText, rich: true); // label#0
                 tx.SetA11yId(body, "body");
-                heading = tx.Label(bind: headingText, role: Role.Heading, // label#1
+                var heading = tx.Label(bind: headingText, role: Role.Heading, // label#1
                     rich: true);
                 tx.SetA11yId(heading, "heading");
                 Widget mirror = tx.Label(bind: runs); // label#2
                 tx.SetA11yId(mirror, "runs");
 
-                tx.Row(() =>
+                tx.Row(_ =>
                 {
                     tx.Button("seed", onClick: t => // button#0
                     {
@@ -85,7 +81,10 @@ static class RichlabelScene
                         t.Write(runs, Spell(app.Document(body).Runs));
                     });
                 });
-            }));
+                return (root, body, heading);
+            });
+            tx.Mount(root);
+            return (runs, body, heading);
         });
 
         Environment.Exit(app.Run());

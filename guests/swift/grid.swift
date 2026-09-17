@@ -6,18 +6,19 @@ let app = KayaApp()
 
 app.build { tx in
     tx.window(title: "grid")
-    let root = tx.column {
-        tx.grid(columns: 2) {
+    let root = tx.column { root in
+        tx.grid(columns: 2) { _ in
             tx.label("Name:")  // label#0
             tx.label("Ada Lovelace")  // label#1
             tx.label("Role:")  // label#2
             tx.label("Engine programmer")  // label#3
         }
-        tx.row(grow: 1.0) {
+        tx.row(grow: 1.0) { _ in
             tx.button("left")  // button#0
             tx.spacer()
             tx.button("right")  // button#1
         }
+        return root
     }
     tx.mount(root)
 }

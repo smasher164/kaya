@@ -18,7 +18,7 @@ app.build { tx in
     let items = tableItemCollection(tx)
     // The root is a row so the For's container is the scene's only
     // column-kind widget (the reorder scene's rule).
-    let root = tx.row {
+    let root = tx.row { root in
         let table = tableItemEach(tx, items) { row in
             _ = row.row {
                 row.label(row.name)
@@ -44,6 +44,7 @@ app.build { tx in
             }
             tx.columns(table, ["Name", "Size"], desc ? .desc(column) : .asc(column))
         }
+        return root
     }
     tx.mount(root)
     for (key, name, size) in [("b", "banana", "30"), ("a", "apple", "10"), ("c", "cherry", "20")] {

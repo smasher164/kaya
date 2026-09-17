@@ -22,7 +22,7 @@ static class FeedScene
             var doneCount = feed.Derive(tx, items =>
                 $"{items.Count(e => e.Value is Todo { Done: true })} done");
 
-            tx.Mount(tx.Row(() =>
+            tx.Mount(tx.Row(root =>
             {
                 tx.Button("promote", t =>
                 {
@@ -51,6 +51,7 @@ static class FeedScene
                         });
                         todo.Label(t, x => x.Title);
                     }));
+                return root;
             }));
 
             feed.Insert(tx, "a", new Note("jot one"));

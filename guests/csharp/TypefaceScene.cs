@@ -7,19 +7,18 @@ static class TypefaceScene
     {
         var app = new KayaApp();
 
-        Signal status = default;
         string draft = "";
 
-        app.Build(tx =>
+        var status = app.Build(tx =>
         {
             // BEFORE THE FIRST MOUNT, per the set-once wall.
             using var font = tx.Asset("fonts/sora-wght.ttf");
             tx.BrandTypeface("Sora", font);
             tx.Window(title: "typeface", width: 480, height: 360);
             var heading = tx.Signal("typeface");
-            status = tx.Signal("ready");
+            var status = tx.Signal("ready");
 
-            tx.Mount(tx.Column(() =>
+            tx.Mount(tx.Column(root =>
             {
                 // The heading's text style OVERRIDES the root font: a root-only
                 // lowering leaves this label in the system face.
@@ -30,7 +29,9 @@ static class TypefaceScene
                 tx.Textarea();                        // textarea#0
                 tx.Button("Go",                       // button#0
                     onClick: t => t.Write(status, $"clicked {draft}"));
+                return root;
             }));
+            return status;
         });
 
         System.Environment.Exit(app.Run());

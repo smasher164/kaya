@@ -39,19 +39,18 @@ function onMark(): void {
 
 const { runs, body, heading } = app.window({ title: "richlabel" }, () => {
   const runs = kaya.signal("");
-  let body!: kaya.Widget;
-  let heading!: kaya.Widget;
-  kaya.column(() => {
+  const { body, heading } = kaya.column(() => {
     const bodyText = kaya.signal("");
     const headingText = kaya.signal("Heading with italic");
-    body = kaya.label({ bind: bodyText, rich: true }).a11yId("body"); // label#0
-    heading = kaya.label({ bind: headingText, rich: true }).role("heading").a11yId("heading"); // label#1
+    const body = kaya.label({ bind: bodyText, rich: true }).a11yId("body"); // label#0
+    const heading = kaya.label({ bind: headingText, rich: true }).role("heading").a11yId("heading"); // label#1
     kaya.label({ bind: runs }).a11yId("runs"); // label#2
     kaya.row(() => {
       kaya.button("seed", { onClick: onSeed }); // button#0
       kaya.button("insert", { onClick: onInsert }); // button#1
       kaya.button("mark", { onClick: onMark }); // button#2
     });
+    return { body, heading };
   });
   return { runs, body, heading };
 });

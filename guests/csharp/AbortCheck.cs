@@ -548,6 +548,37 @@ static class AbortCheck
         Check(live == 1 && site == 2 && node == 3 && after == 4,
             $"widget/node ids {live},{site},{node},{after} — want 1,2,3,4 from one counter");
 
+        // X3 (ruled 2026-09-17): a body-taking live-zone constructor answers
+        // what its body answered, and the body receives its container. The
+        // witness for "its own" is the MINT ORDER — ids come off one monotone
+        // counter, so a container's id is the one after the widget declared
+        // just before it, and a plausible-but-wrong handle cannot match.
+        var (buildValue, bodyValue, sawItsOwn, nestedSaw, others) = app.Build(tx =>
+        {
+            ulong made = 0;
+            Widget answered = tx.Column(col =>
+            {
+                var label = tx.Label("value");
+                made = label.Id;
+                return label;
+            });
+            ulong mark = tx.Label("mark").Id;
+            ulong seen = tx.Row(r => r.Id);
+            var (outerId, innerId) = tx.Column(outer => tx.Row(inner => (outer.Id, inner.Id)));
+            ulong rest = tx.Label("rest").Id;
+            bool rest_ok = tx.Grid(2, g => g.Id) == rest + 1
+                && tx.Scroll(sc => sc.Id) == rest + 2
+                && tx.Labeled("Name", lb => lb.Id) == rest + 3;
+            tx.Mount(tx.Column(root => root));
+            return (7, answered.Id == made, seen == mark + 1,
+                outerId == mark + 2 && innerId == mark + 3, rest_ok);
+        });
+        Check(buildValue == 7, "Build(body) did not answer the body's value");
+        Check(bodyValue, "Column(body) did not answer the body's value");
+        Check(sawItsOwn, "the body did not see its container");
+        Check(nestedSaw, "a nested body did not see ITS OWN container");
+        Check(others, "Grid, Scroll and Labeled do not thread the container");
+
         Collection todos = default;
         Signal counter = default;
         app.Build(tx =>

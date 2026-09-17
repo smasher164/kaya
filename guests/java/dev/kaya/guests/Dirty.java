@@ -32,7 +32,7 @@ public final class Dirty {
                         .show();
             });
 
-            tx.mount(tx.column(() -> {
+            tx.mount(tx.column(col -> {
                 tx.label(doc); // label#0
                 tx.label(status); // label#1
                 // The document and the mark are two statements.

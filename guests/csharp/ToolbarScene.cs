@@ -42,7 +42,7 @@ static class ToolbarScene
             });
             tx.Window(title: "toolbar", menus: new[] { file, edit, view });
 
-            tx.Mount(tx.Column(() =>
+            tx.Mount(tx.Column(root =>
             {
                 tx.Label(bind: status); // label#0
                 tx.Button("toggle save", t => // button#0
@@ -50,6 +50,7 @@ static class ToolbarScene
                     saveEnabled = !saveEnabled;
                     t.Write(canSave, saveEnabled);
                 });
+                return root;
             }));
         });
 

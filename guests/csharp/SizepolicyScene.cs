@@ -51,7 +51,7 @@ static class SizepolicyScene
         {
             tx.Window(title: "sizepolicy", width: 480, height: 420);
 
-            tx.Mount(tx.Column(() =>
+            tx.Mount(tx.Column(root =>
             {
                 // SCALE, the default: nothing is declared.
                 var fit = tx.Canvas(Box, grow: 1.0);
@@ -76,6 +76,7 @@ static class SizepolicyScene
                     .OnTick((d, size, time) => Bar(d, size, FrameOf(time)));
                 tx.SetA11yId(clock, "clock");
                 tx.SetA11yLabel(clock, "Animated bar");
+                return root;
             }));
         });
 

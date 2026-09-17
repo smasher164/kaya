@@ -5,16 +5,14 @@ import Foundation
 
 let app = KayaApp()
 
-var status: KayaSignal!
-
 app.build { tx in
     // BEFORE THE FIRST MOUNT, per the set-once wall (docs/styling-plan.md).
     tx.brandAccent(0x3584E4)
     tx.window(title: "styling", width: 480, height: 360, inset: 0)
 
     let heading = tx.signal(.str("Sections"))
-    status = tx.signal(.str("ready"))
-    let root = tx.column {
+    let status = tx.signal(.str("ready"))
+    let root = tx.column { root in
         // Everything the steps read back is addressed by its AUTHORED id.
         let title = tx.heading(bind: heading)  // label#0
         tx.setA11yId(title, "title")
@@ -30,6 +28,7 @@ app.build { tx in
         // Declared so every backend's caption arm runs: no universal AX
         // observable, so the walls are the arms' refusals.
         tx.caption("captioned")  // label#2
+        return root
     }
     tx.mount(root)
 }

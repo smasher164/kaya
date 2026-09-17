@@ -2688,6 +2688,32 @@ public final class KayaApp {
         }
     }
 
+    /**
+     * A just-built container: the handle and what its body answered
+     * (DESIGN.md, Binding conventions — the chain family's ref). Java
+     * needs no into_parts: nothing is consumed, so {@code id()} and
+     * {@code value()} both read the same ref.
+     */
+    public static final class Built<R> {
+        private final Widget widget;
+        private final R out;
+
+        Built(Widget widget, R out) {
+            this.widget = widget;
+            this.out = out;
+        }
+
+        /** The container itself — chain construction props on it. */
+        public Widget id() {
+            return widget;
+        }
+
+        /** What the body answered. */
+        public R value() {
+            return out;
+        }
+    }
+
     public static final class Widget {
         final long id;
         final Tx tx;
@@ -4780,18 +4806,27 @@ public final class KayaApp {
             emit(KayaWire.txBindSource(w.id, s.id));
         }
 
-        // Construction sugar: containers take their body as a
-        // Runnable and parent everything declared inside it (the
-        // ambient stack); the common constructors carry their
-        // essential prop, so the build body reads as the tree.
+        // Construction sugar: a container takes its body, hands it
+        // the container's own handle, and parents everything declared
+        // inside it (the ambient stack). The body that ANSWERS
+        // something comes back as a Built<R> carrying both — the chain
+        // family's shape (DESIGN.md, Binding conventions).
         // Statement position is the point: a for-each over a generated
         // row trace stands between siblings. Handler registration
         // stays explicit (app.onClick), the Java idiom.
-        public Widget column(Runnable body) {
+        public Widget column(java.util.function.Consumer<Widget> body) {
             return containerOf(KayaWire.KIND_COLUMN, body);
         }
 
-        public Widget row(Runnable body) {
+        public <R> Built<R> column(java.util.function.Function<Widget, R> body) {
+            return containerOf(KayaWire.KIND_COLUMN, body);
+        }
+
+        public Widget row(java.util.function.Consumer<Widget> body) {
+            return containerOf(KayaWire.KIND_ROW, body);
+        }
+
+        public <R> Built<R> row(java.util.function.Function<Widget, R> body) {
             return containerOf(KayaWire.KIND_ROW, body);
         }
 
@@ -4799,45 +4834,77 @@ public final class KayaApp {
          * it in the body; the scene rejects a second). Chain .grow(1)
          * so the enclosing track CONSTRAINS it — an unconstrained
          * viewport hugs its content and nothing overflows. */
-        public Widget scroll(Runnable body) {
+        public Widget scroll(java.util.function.Consumer<Widget> body) {
+            return containerOf(KayaWire.KIND_SCROLL, body);
+        }
+
+        public <R> Built<R> scroll(java.util.function.Function<Widget, R> body) {
             return containerOf(KayaWire.KIND_SCROLL, body);
         }
 
         /** A grid laying its children out row-major into columns
          * columns — each column takes its NATURAL width, aligned
          * across rows (the thing nested rows cannot express). */
-        public Widget grid(int columns, Runnable body) {
+        public Widget grid(int columns, java.util.function.Consumer<Widget> body) {
+            return gridOf(columns, w -> {
+                body.accept(w);
+                return null;
+            }).id();
+        }
+
+        public <R> Built<R> grid(int columns, java.util.function.Function<Widget, R> body) {
+            return gridOf(columns, body);
+        }
+
+        private <R> Built<R> gridOf(int columns, java.util.function.Function<Widget, R> body) {
             Widget parent = widget(KayaWire.KIND_GRID);
             emit(KayaWire.txSetColumns(parent.id, columns));
             parents.add(parent.id);
-            if (body != null) {
-                body.run();
+            try {
+                return new Built<>(parent, body.apply(parent));
+            } finally {
+                parents.remove(parents.size() - 1);
             }
-            parents.remove(parents.size() - 1);
-            return parent;
         }
 
         /** A LABELLED ROW (docs/forms-plan.md): the label names the one
          * control the body declares, with an optional trailing button
          * after it. A column of nothing but these renders as the
          * platform's form. */
-        public Widget labeled(String label, Runnable body) {
+        public Widget labeled(String label, java.util.function.Consumer<Widget> body) {
             return labeledOf(() -> label(label), body);
         }
 
-        public Widget labeled(Signal<String> label, Runnable body) {
+        public <R> Built<R> labeled(String label, java.util.function.Function<Widget, R> body) {
             return labeledOf(() -> label(label), body);
         }
 
-        private Widget labeledOf(Runnable name, Runnable body) {
+        public Widget labeled(Signal<String> label, java.util.function.Consumer<Widget> body) {
+            return labeledOf(() -> label(label), body);
+        }
+
+        public <R> Built<R> labeled(
+                Signal<String> label, java.util.function.Function<Widget, R> body) {
+            return labeledOf(() -> label(label), body);
+        }
+
+        private Widget labeledOf(Runnable name, java.util.function.Consumer<Widget> body) {
+            return labeledOf(name, w -> {
+                body.accept(w);
+                return null;
+            }).id();
+        }
+
+        private <R> Built<R> labeledOf(
+                Runnable name, java.util.function.Function<Widget, R> body) {
             Widget parent = widget(KayaWire.KIND_LABELED);
             parents.add(parent.id);
             name.run();
-            if (body != null) {
-                body.run();
+            try {
+                return new Built<>(parent, body.apply(parent));
+            } finally {
+                parents.remove(parents.size() - 1);
             }
-            parents.remove(parents.size() - 1);
-            return parent;
         }
 
         /** A spacer: PURE SUGAR for an empty grown column — it
@@ -4849,14 +4916,22 @@ public final class KayaApp {
             return w;
         }
 
-        private Widget containerOf(int kind, Runnable body) {
+        private Widget containerOf(int kind, java.util.function.Consumer<Widget> body) {
+            return containerOf(kind, (java.util.function.Function<Widget, Void>) w -> {
+                body.accept(w);
+                return null;
+            }).id();
+        }
+
+        private <R> Built<R> containerOf(
+                int kind, java.util.function.Function<Widget, R> body) {
             Widget parent = widget(kind);
             parents.add(parent.id);
-            if (body != null) {
-                body.run();
+            try {
+                return new Built<>(parent, body.apply(parent));
+            } finally {
+                parents.remove(parents.size() - 1);
             }
-            parents.remove(parents.size() - 1);
-            return parent;
         }
 
         public Widget button(String text) {

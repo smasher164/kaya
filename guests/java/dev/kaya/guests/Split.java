@@ -14,7 +14,7 @@ public final class Split {
         KayaApp.Signal<String> status = app.build(tx -> {
             tx.window(0).title("split").panes(2);
             KayaApp.Signal<String> s = tx.signal("list pane");
-            tx.mount(tx.column(() -> {
+            tx.mount(tx.column(col -> {
                 // Authored ids: an index read passes whether or not anything
                 // reached the screen.
                 tx.label(s).a11yId("list"); // label#0
@@ -23,7 +23,7 @@ public final class Split {
                             .title("detail")
                             .onPopped(tx2 -> tx2.write(s, "popped detail"))
                             .id();
-                    KayaApp.Widget pane = inner.column(() -> {
+                    KayaApp.Widget pane = inner.column(col2 -> {
                         KayaApp.Signal<String> caption = inner.signal("detail pane");
                         inner.label(caption).a11yId("detail");
                     });

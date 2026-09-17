@@ -5,10 +5,9 @@ import Foundation
 
 let app = KayaApp()
 
-var doc: KayaSignal!
-var status: KayaSignal!
-
 app.build { tx in
+    let doc = tx.signal(.str("notes"))
+    let status = tx.signal(.str("saved"))
     tx.window(
         title: "dirty", vetoClose: true,
         onCloseRequested: { tx in
@@ -28,9 +27,7 @@ app.build { tx in
             }
         })
 
-    doc = tx.signal(.str("notes"))
-    status = tx.signal(.str("saved"))
-    let root = tx.column {
+    let root = tx.column { root in
         tx.label(bind: doc)  // label#0
         tx.label(bind: status)  // label#1
         tx.button("edit") { tx in  // button#0
@@ -43,6 +40,7 @@ app.build { tx in
             // The mark comes DOWN as well as up.
             tx.window(dirty: false)
         }
+        return root
     }
     tx.mount(root)
 }

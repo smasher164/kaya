@@ -42,36 +42,36 @@ public final class Align {
             KayaApp.Signal<String> fit = tx.signal("fit");
             KayaApp.Signal<String> plain = tx.signal("plain probe");
 
-            tx.mount(tx.column(() -> {
-                tx.column(() -> { // the center trio
+            tx.mount(tx.column(col -> {
+                tx.column(col2 -> { // the center trio
                     tx.label(probe); // label#0
                     tx.button("mid");
-                    tx.row(() -> { // the baseline trio
+                    tx.row(row -> { // the baseline trio
                         tx.label(base); // label#1
                         tx.button("tick");
                         tx.image(TALL_PNG);
                     }).align(KayaApp.Align.BASELINE).a11yId("baseline");
                 }).align(KayaApp.Align.CENTER).a11yId("centered");
-                tx.row(() -> { // row#1: the stretch pair's host
+                tx.row(row2 -> { // row#1: the stretch pair's host
                     tx.label(anchor); // label#2
-                    tx.column(() -> {
+                    tx.column(col3 -> {
                         tx.label(fit); // label#3
                         tx.button("wide");
                     }).grow(1.0).align(KayaApp.Align.STRETCH).a11yId("fitcol");
                 });
                 // row@plain: NO align, so the core's centre default is what
                 // the scene reads
-                tx.row(() -> {
+                tx.row(row3 -> {
                     tx.label(plain).a11yId("plainlabel"); // label#4
                     tx.image(TALL_PNG);
                 }).a11yId("plain");
                 // column@knobs: NO align; fill opts one child out of its
                 // default and one in
-                tx.column(() -> {
+                tx.column(col4 -> {
                     tx.textarea().fill(false).a11yId("optout");
                     tx.button("fills").fill(true).a11yId("fills");
                     // row@wrapped: six exact-width images flow onto two lines
-                    tx.row(() -> {
+                    tx.row(row4 -> {
                         for (int i = 0; i < 6; i++) {
                             tx.image(WIDE_PNG);
                         }

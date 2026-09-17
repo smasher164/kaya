@@ -102,19 +102,15 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         let text_target = tx.signal("text target");
         let note_target = tx.signal("note target");
         let files_target = tx.signal("files target");
-        let mut list: Option<kaya::WidgetId> = None;
+        // The two TemplateNodeIds are the trace's, not a container
+        // body's: a For's loop runs once and the compiler cannot see it
+        // (the template zone is outside the body-returns-its-value rule).
         let mut row_label: Option<kaya::TemplateNodeId> = None;
         let mut item_label: Option<kaya::TemplateNodeId> = None;
-        let mut source: Option<kaya::WidgetId> = None;
-        let mut text_id: Option<kaya::WidgetId> = None;
-        let mut note_id: Option<kaya::WidgetId> = None;
-        let mut files_id: Option<kaya::WidgetId> = None;
-        let mut rename: Option<kaya::WidgetId> = None;
-        let root = tx
+        let (root, (list, source, text_id, note_id, files_id, rename)) = tx
             .row(|tx| {
                 let rows = items.rows(tx); // column#0
                 let list_id = rows.id();
-                list = Some(list_id);
                 for mut row in rows {
                     let label = row.label(Item::title());
                     row.a11y_id(label, "row");
@@ -122,36 +118,35 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 }
                 tx.reorderable(list_id, true);
                 tx.a11y_id(list_id, "rows");
-                tx.column(|tx| {
-                    let source_id = tx.label(source_text).id(); // label#0
-                    source = Some(source_id);
-                    tx.draggable(source_id)
-                        .text("hello")
-                        .custom("dev.kaya/note", b"note!".to_vec())
-                        .allow(kaya::Op::Copy)
-                        .allow(kaya::Op::Move)
-                        .declare();
-                    text_id = Some(
-                        tx.label(text_target)
+                let (source, text_id, note_id, files_id) = tx
+                    .column(|tx| {
+                        let source_id = tx.label(source_text).id(); // label#0
+                        tx.draggable(source_id)
+                            .text("hello")
+                            .custom("dev.kaya/note", b"note!".to_vec())
+                            .allow(kaya::Op::Copy)
+                            .allow(kaya::Op::Move)
+                            .declare();
+                        let text_id = tx
+                            .label(text_target)
                             .accepts(&[kaya::Accepts::Text])
                             .drop_target(&[kaya::Op::Copy])
-                            .id(), // label#1
-                    );
-                    note_id = Some(
-                        tx.label(note_target)
+                            .id(); // label#1
+                        let note_id = tx
+                            .label(note_target)
                             .accepts(&[kaya::Accepts::Custom("dev.kaya/note")])
                             .drop_target(&[kaya::Op::Copy, kaya::Op::Move])
-                            .id(), // label#2
-                    );
-                    files_id = Some(
-                        tx.label(files_target)
+                            .id(); // label#2
+                        let files_id = tx
+                            .label(files_target)
                             .accepts(&[kaya::Accepts::Files])
                             .drop_target(&[kaya::Op::Copy])
-                            .id(), // label#3
-                    );
-                    tx.label(drop_status); // label#4
-                    tx.label(drag_status); // label#5
-                });
+                            .id(); // label#3
+                        tx.label(drop_status); // label#4
+                        tx.label(drag_status); // label#5
+                        (source_id, text_id, note_id, files_id)
+                    })
+                    .value();
                 // THE TEMPLATE ZONE (docs/dnd-plan.md §4): every stamped
                 // item is a text destination, and each declares its own
                 // payload by key after its insert — column#2.
@@ -168,9 +163,10 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     item_label = Some(label);
                 }
                 tx.a11y_id(items_list, "items");
-                rename = Some(tx.button("rename y").id()); // button#0
+                let rename = tx.button("rename y").id(); // button#0
+                (list_id, source, text_id, note_id, files_id, rename)
             })
-            .id();
+            .into_parts();
         tx.mount(root);
         for key in ["a", "b", "c"] {
             tx.insert(&items, key, Item { title: key.to_string() });
@@ -181,12 +177,12 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         Scene {
             items,
             items2,
-            list: list.expect("the row declared the reorderable list"),
-            source: source.expect("the column declared the drag source"),
-            text_id: text_id.expect("the column declared the text target"),
-            note_id: note_id.expect("the column declared the note target"),
-            files_id: files_id.expect("the column declared the files target"),
-            rename: rename.expect("the row declared the rename button"),
+            list,
+            source,
+            text_id,
+            note_id,
+            files_id,
+            rename,
             source_text,
             text_target,
             note_target,

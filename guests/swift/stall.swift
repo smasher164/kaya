@@ -11,12 +11,10 @@ let wedgeSeconds = 86400.0
 
 let app = KayaApp()
 
-var status: KayaSignal!
-
 app.build { tx in
     tx.window(title: "stall")
-    status = tx.signal(.str("ready"))
-    let root = tx.column {
+    let status = tx.signal(.str("ready"))
+    let root = tx.column { root in
         tx.setA11yId(tx.label(bind: status), "status")  // label#0
 
         // DELIBERATELY WRONG, and the only place in this repo that is.
@@ -35,6 +33,7 @@ app.build { tx in
             onClick: { inner in  // button#2
                 Thread.sleep(forTimeInterval: wedgeSeconds)
             })
+        return root
     }
     tx.mount(root)
 }

@@ -6,22 +6,21 @@ static class EntryScene
     {
         var app = new KayaApp();
 
-        Signal status = default;
-        Widget field = default, add = default;
-        Collection todos = default;
-
-        app.Build(tx =>
+        var (status, field, add, todos) = app.Build(tx =>
         {
-            status = tx.Signal("no todos");
-            todos = tx.Collection();
+            var status = tx.Signal("no todos");
+            var todos = tx.Collection();
 
-            tx.Mount(tx.Column(() =>
+            var (root, field, add) = tx.Column(root =>
             {
-                field = tx.Entry();
-                add = tx.Button("add");
+                var field = tx.Entry();
+                var add = tx.Button("add");
                 tx.Label(bind: status);
                 tx.Each(todos, t => t.Label(KayaRecords.FieldAt<string>(0)));
-            }));
+                return (root, field, add);
+            });
+            tx.Mount(root);
+            return (status, field, add, todos);
         });
 
         string draft = "";

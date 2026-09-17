@@ -116,7 +116,7 @@ def check_kind(kind, findings=None):
     check("go", "bindings/go/app.go", kind,
           f"func \\(tx \\*Tx\\) {pascal}[A-Za-z]*\\(", findings)
     check("csharp", "bindings/csharp/KayaApp.cs", kind,
-          f"public Widget {pascal}[A-Za-z]*\\(", findings)
+          f"public (Widget|void|T) {pascal}[A-Za-z]*(<[^>]*>)?\\(", findings)
     check("java", "bindings/java/dev/kaya/KayaApp.java", kind,
           f"public Widget {camel}[A-Za-z]*\\(", findings)
     check("swift", "bindings/swift/KayaApp.swift", kind,
@@ -127,7 +127,7 @@ def check_kind(kind, findings=None):
     check("ocaml", "bindings/ocaml/kaya_app.ml", kind,
           f"^let {snake}[a-z_]* ", findings)
     check("js", "bindings/js/kaya/index.ts", kind,
-          f"^export function {camel}[A-Za-z]*\\(", findings)
+          f"^export function {camel}[A-Za-z]*(<[^>]*>)?\\(", findings)
 
 
 # --- THE TEXT-RANGE SURFACE, in all nine --------------------------
@@ -6229,13 +6229,13 @@ check_menus("ocaml", "bindings/ocaml/kaya_app.ml", [
 # are module-level, since the transaction is ambient and has no surface
 # to hang them on.
 check_menus("js", "bindings/js/kaya/index.ts", [
-    r"menu=^export function menu\(", r"item=^export function item\(",
+    r"menu=^export function menu(<[^>]*>)?\(", r"item=^export function item\(",
     r"toggle=^export function toggle\(",
-    r"radio_group=^export function radioGroup\(",
+    r"radio_group=^export function radioGroup(<[^>]*>)?\(",
     r"option=^export function option\(",
     r"separator=^export function separator\(",
     r"context_menu=^  contextMenu\(",
-    r"context_catalog=^export function contextCatalog\("])
+    r"context_catalog=^export function contextCatalog(<[^>]*>)?\("])
 
 # EVERY WINDOW PROP NEEDS A SUGAR SPELLING TOO. Props come from the
 # GENERATED wire file, so this tracks the spec by construction; C is
@@ -7787,6 +7787,63 @@ for _lang, _plant in WIRE_TAG_PLANT.items():
                       f"named {len(_clean)} time(s), wanted 0)")
 print("check-sugar-surface: wire-tag census watched (planted/blank): "
       + " ".join(wire_watched), file=sys.stderr)
+
+# --- A BODY RECEIVES ITS CONTAINER AND RETURNS ITS VALUE (ruled 2026-09-17,
+# DESIGN.md's Binding conventions): the six spellings of the same smuggle
+# (JS `let x!: T`, Swift IUOs, Java holder classes, C# `notes!`, Rust
+# Option-plus-expect, OCaml `ref None`) came from one constructor shape,
+# and a constructor that went back to discarding its body's value would
+# reopen all six with every lane green. One row per binding that has the
+# problem, read out of the binding's own file; a row's key token removed
+# from a copy must be named, watched on every run.
+BODY_VALUE_ROWS = {
+    "js": ("bindings/js/kaya/index.ts",
+           r"^export function column<T = void>\(", r"column<T = void>\(", "column("),
+    "swift": ("bindings/swift/KayaApp.swift",
+              r"^\s+func column<R>\(", r"func column<R>\(", "func column("),
+    "csharp": ("bindings/csharp/KayaApp.cs",
+               r"^\s+public T Column<T>\(", r"public T Column<T>\(", "public Widget Column("),
+    "rust": ("crates/kaya/src/app.rs",
+             r"^\s+pub fn into_parts\(self\) -> \(WidgetId, R\)",
+             r"pub fn into_parts\(self\) -> \(WidgetId, R\)",
+             "pub fn into_partsXX(self) -> (WidgetId, R)"),
+    "java": ("bindings/java/dev/kaya/KayaApp.java",
+             r"^\s+public static final class Built<R>", r"class Built<R>", "class BuiltXX<R>"),
+    "ocaml": ("bindings/ocaml/kaya_app.mli",
+              r"^val when_ : bool signal -> \(unit -> 'a\) -> unit -> widget \* 'a$",
+              r"unit -> widget \* 'a$", "unit -> widget"),
+}
+
+
+def body_value_findings(text_for=read_rel):
+    out = []
+    for lang, (rel, pattern, _cut, _repl) in BODY_VALUE_ROWS.items():
+        if not re.search(pattern, text_for(rel), re.M):
+            out.append(f"check-sugar-surface: {lang}'s body-taking constructor no "
+                       f"longer returns its body's value (wanted /{pattern}/ in "
+                       f"{rel}) — DESIGN.md's Binding conventions, the ruling of "
+                       f"2026-09-17")
+    return out
+
+
+for msg in body_value_findings():
+    print(msg, file=sys.stderr)
+    status = 1
+_body_watched = []
+for _lang, (_rel, _pattern, _cut, _repl) in BODY_VALUE_ROWS.items():
+    _doctored, _n = sub_count(_cut, _repl, read_rel(_rel), re.M)
+    if _n < 1:
+        selftest_exit(f"check-sugar-surface: self-test failed — the {_lang} "
+                      f"body-value negative changed nothing in {_rel}")
+    _fired = [m for m in body_value_findings(
+        lambda rel, _r=_rel, _d=_doctored: _d if rel == _r else read_rel(rel))
+        if m.startswith(f"check-sugar-surface: {_lang}'s body-taking")]
+    _body_watched.append(f"{_lang}={len(_fired)}")
+    if len(_fired) != 1:
+        selftest_exit(f"check-sugar-surface: self-test failed — cutting {_lang}'s "
+                      f"body-value spelling produced {len(_fired)} finding(s), not 1")
+print("check-sugar-surface: body-value rows watched (cut): " + " ".join(_body_watched),
+      file=sys.stderr)
 
 check_scene_sugar()
 

@@ -42,8 +42,9 @@ app.build { tx in
         ])
     tx.window(title: "commands", menus: [file, view])
 
-    let root = tx.column {
+    let root = tx.column { root in
         tx.label(bind: status)  // label#0
+        return root
     }
     tx.mount(root)
 }

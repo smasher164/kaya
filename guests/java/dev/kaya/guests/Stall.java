@@ -20,7 +20,7 @@ public final class Stall {
             tx.window(0).title("stall");
             KayaApp.Signal<String> status = tx.signal("ready");
 
-            tx.mount(tx.column(() -> {
+            tx.mount(tx.column(col -> {
                 tx.label(status).a11yId("status"); // label#0
 
                 // DELIBERATELY WRONG, and the only place in this repo that is.

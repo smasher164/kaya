@@ -66,33 +66,35 @@ static class DndScene
             var noteTarget = tx.Signal("note target");
             var filesTarget = tx.Signal("files target");
 
-            Widget source = default, textId = default, noteId = default,
-                filesId = default, list = default;
+            // The TRACE's own slots: a For's body runs once where the
+            // compiler cannot see it, and the template zone is outside
+            // the ruling.
             Node rowLabel = default, itemLabel = default;
             tx.Window(title: "dnd");
-            tx.Mount(tx.Row(() =>
+            var (root, list, source, textId, noteId, filesId) = tx.Row(root =>
             {
-                list = tx.Each(items.Collection, t =>
+                var list = tx.Each(items.Collection, t =>
                 {
                     var row = new DndItemRow(t);
                     rowLabel = row.Label(row.Title);
                     row.SetA11yId(rowLabel, "row");
                 });
                 tx.SetA11yId(list, "rows");
-                tx.Column(() =>
+                var (source, textId, noteId, filesId) = tx.Column(_ =>
                 {
-                    source = tx.Label(bind: sourceText);  // label#0
-                    textId = tx.Label(bind: textTarget);  // label#1
+                    var source = tx.Label(bind: sourceText);  // label#0
+                    var textId = tx.Label(bind: textTarget);  // label#1
                     tx.SetAccepts(textId, Tx.AcceptText);
                     tx.SetDropTarget(textId, Op.Copy);
-                    noteId = tx.Label(bind: noteTarget);  // label#2
+                    var noteId = tx.Label(bind: noteTarget);  // label#2
                     tx.SetAccepts(noteId, NoteId);
                     tx.SetDropTarget(noteId, Op.Copy, Op.Move);
-                    filesId = tx.Label(bind: filesTarget);  // label#3
+                    var filesId = tx.Label(bind: filesTarget);  // label#3
                     tx.SetAccepts(filesId, Tx.AcceptFiles);
                     tx.SetDropTarget(filesId, Op.Copy);
                     tx.Label(bind: dropStatus);  // label#4
                     tx.Label(bind: dragStatus);  // label#5
+                    return (source, textId, noteId, filesId);
                 });
                 // THE TEMPLATE ZONE (docs/dnd-plan.md §4): every stamped
                 // item is a text destination, and its payload IS the
@@ -110,7 +112,9 @@ static class DndScene
                 tx.SetA11yId(itemList, "items");
                 tx.Button("rename y", onClick: t =>                 // button#0
                     items2.Update(t, "y", new DndItem("yy")));
-            }));
+                return (root, list, source, textId, noteId, filesId);
+            });
+            tx.Mount(root);
             tx.Draggable(source)
                 .Text("hello")
                 .Custom(NoteId, Encoding.UTF8.GetBytes("note!"))

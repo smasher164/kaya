@@ -49,7 +49,7 @@ public final class SizePolicy {
         app.build(tx -> {
             tx.window(0).title("sizepolicy").size(480.0, 420.0);
 
-            tx.mount(tx.column(() -> {
+            tx.mount(tx.column(col -> {
                 // SCALE (the default)
                 KayaApp.Widget fit = tx.canvas(BOX).grow(1.0)
                         .a11yId("fit").a11yLabel("Scaled panel");

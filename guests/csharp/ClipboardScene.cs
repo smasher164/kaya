@@ -43,12 +43,13 @@ static class ClipboardScene
         File.WriteAllBytes(Path.Combine(dir, "pixel.png"), PixelPng);
         File.WriteAllText(Path.Combine(dir, "pasted.txt"), "pasted bytes");
 
-        Signal status = default;
-        Signal rowStatus = default;
+        // A handler declared before the widget it acts on (the focus
+        // buttons precede the entries): C#'s zero value, not a container
+        // body smuggling its result out.
         Widget rich = default;
         Widget plain = default;
 
-        app.Build(tx =>
+        var (status, rowStatus) = app.Build(tx =>
         {
             var edit = tx.Menu("Edit", items: new[]
             {
@@ -58,8 +59,8 @@ static class ClipboardScene
             });
             tx.Window(title: "clipboard", menus: new[] { edit });
 
-            status = tx.Signal("ready");
-            rowStatus = tx.Signal("");
+            var status = tx.Signal("ready");
+            var rowStatus = tx.Signal("");
 
             void Answered(Tx tx, Representation? clip)
             {
@@ -114,7 +115,7 @@ static class ClipboardScene
                 }
             }
 
-            tx.Mount(tx.Column(() =>
+            tx.Mount(tx.Column(root =>
             {
                 var label = tx.Label(bind: status); // label#0
                 tx.SetA11yId(label, "status");
@@ -174,7 +175,9 @@ static class ClipboardScene
                     });
                 });
                 tx.Insert(rows, "r1", "");
+                return root;
             }));
+            return (status, rowStatus);
         });
 
         Environment.Exit(app.Run());

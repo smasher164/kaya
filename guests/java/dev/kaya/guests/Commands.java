@@ -42,7 +42,7 @@ public final class Commands {
             sortGroup.value(sort).onSelect((t, index) ->
                     t.write(status, index == 1 ? "sorted date" : "sorted name"));
 
-            tx.mount(tx.column(() -> {
+            tx.mount(tx.column(col -> {
                 tx.label(status); // label#0
             }));
         });

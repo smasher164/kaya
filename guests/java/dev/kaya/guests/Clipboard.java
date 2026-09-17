@@ -17,6 +17,10 @@ public final class Clipboard {
     private Clipboard() {}
 
     /** Java lambdas cannot assign captured locals. */
+    /** A handler declared before the widget it acts on: the focus
+     * buttons precede the entries, and a Java lambda captures only an
+     * effectively-final local. Not a container body smuggling its
+     * result out. */
     private static final class Refs {
         KayaApp.Widget rich, plain;
     }
@@ -82,7 +86,7 @@ public final class Clipboard {
             KayaApp.Signal<String> rowStatus = tx.signal("");
             KayaApp.Collection notes = tx.collection();
 
-            tx.mount(tx.column(() -> {
+            tx.mount(tx.column(col -> {
                 tx.label(status).a11yId("status"); // label#0
                 tx.button("copy", inner -> { // button#0
                     inner.copy()

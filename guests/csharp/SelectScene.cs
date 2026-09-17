@@ -14,11 +14,12 @@ static class SelectScene
             tx.Window(title: "select");
             var picked = tx.Signal("picked: Red");
 
-            tx.Mount(tx.Column(() =>
+            tx.Mount(tx.Column(root =>
             {
                 tx.Select(Options, 0, (t, index) =>
                     t.Write(picked, $"picked: {Options[index]}"));
                 tx.Label(bind: picked); // label#0
+                return root;
             }));
         });
 

@@ -8,10 +8,6 @@ import dev.kaya.KayaApp;
  */
 public final class Adaptive {
     /** Java lambdas cannot assign captured locals. */
-    private static final class Refs {
-        KayaApp.Widget dash;
-    }
-
     private static boolean vertical;
 
     public static void app() {
@@ -24,31 +20,29 @@ public final class Adaptive {
             KayaApp.Signal<String> longer = tx.signal("a longer label");
             KayaApp.Signal<String> steady = tx.signal("steady");
 
-            Refs refs = new Refs();
-
-            tx.mount(tx.column(() -> {
-                refs.dash = tx.row(() -> { // row#0: the flip subject.
+            tx.mount(tx.column(col -> {
+                KayaApp.Widget dash = tx.row(row -> { // row#0: the flip subject.
                     tx.label(alpha); // label#0
                     tx.label(longer); // label#1
                 }).a11yId("dash");
                 // column#1: the control group, whose axis never moves.
-                tx.column(() -> {
+                tx.column(col2 -> {
                     tx.label(steady); // label#2
                 }).a11yId("steady");
                 tx.button("flip", t -> { // button#0
                     vertical = !vertical;
-                    t.setAxis(refs.dash,
+                    t.setAxis(dash,
                         vertical ? KayaApp.Axis.VERTICAL : KayaApp.Axis.HORIZONTAL);
                 });
                 // row#1: the breakpoint subject, which no handler touches.
-                tx.row(() -> {
+                tx.row(row2 -> {
                     KayaApp.Signal<String> one = tx.signal("one");
                     KayaApp.Signal<String> two = tx.signal("a wider two");
                     tx.label(one); // label#3
                     tx.label(two); // label#4
                 }).a11yId("narrow").stackWhen(KayaApp.SizeClass.COMPACT);
                 // grid@sheet: three columns regular, one compact (D6.2).
-                tx.grid(3, () -> {
+                tx.grid(3, cells -> {
                     for (String text : new String[] {"c1", "c2", "c3", "c4", "c5", "c6"}) {
                         tx.label(tx.signal(text)); // label#5..#10
                     }
@@ -56,7 +50,7 @@ public final class Adaptive {
                 // grid@fit: no count, a 240-point floor, the WIDTH decides
                 // (docs/layout-knobs-plan.md §3). Buttons, so the label
                 // ordinals above stay put.
-                tx.grid(3, () -> {
+                tx.grid(3, cells2 -> {
                     tx.button("f1"); // button#1
                     tx.button("f2");
                     tx.button("f3");

@@ -27,7 +27,7 @@ public final class Search {
             var items = SearchItemKaya.collection(tx);
             KayaApp.Signal<String> count = tx.signal(NAMES.length + " items");
 
-            tx.mount(tx.column(() -> {
+            tx.mount(tx.column(col -> {
                 tx.search((t, text) -> {
                     String query = text.toLowerCase(Locale.ROOT);
                     List<String> wanted = new ArrayList<>();

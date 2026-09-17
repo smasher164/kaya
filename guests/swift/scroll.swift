@@ -5,15 +5,13 @@ import Foundation
 
 let app = KayaApp()
 
-var status: KayaSignal!
-
 app.build { tx in
     tx.window(title: "scroll")
-    status = tx.signal(.str("at top"))
-    let root = tx.column {
+    let status = tx.signal(.str("at top"))
+    let root = tx.column { root in
         tx.label(bind: status)  // label#0
-        tx.scroll(grow: 1) {  // scroll#0
-            tx.column {
+        tx.scroll(grow: 1) { _ in  // scroll#0
+            tx.column { _ in
                 for i in 1...29 {
                     let caption = tx.signal(.str("row \(i)"))
                     tx.label(bind: caption)
@@ -25,6 +23,7 @@ app.build { tx in
                     })
             }
         }
+        return root
     }
     tx.mount(root)
 }

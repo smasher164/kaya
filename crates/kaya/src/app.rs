@@ -1541,8 +1541,7 @@ impl BreakpointSetters {
 /// [`Widget::id`] where the handle must outlive the chain. A container's
 /// body result rides along as `out`.
 pub struct Widget<'t, 'b, R = ()> {
-    /// The container body's own result, threaded out unchanged.
-    pub out: R,
+    out: R,
     id: WidgetId,
     tx: &'t mut Tx<'b>,
 }
@@ -1775,6 +1774,13 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
     /// borrow.
     pub fn id(self) -> WidgetId {
         self.id
+    }
+
+    /// End the chain with the BODY's own result — what the closure
+    /// returned, so a handle made inside a container reaches the
+    /// enclosing scope without an `Option` to smuggle it through.
+    pub fn value(self) -> R {
+        self.out
     }
 
     /// End the chain keeping the container body's result too.
@@ -2141,6 +2147,20 @@ impl<'a> Tx<'a> {
     /// template bodies, or no open container).
     fn current_parent(&self) -> u64 {
         self.parents.last().copied().unwrap_or(0)
+    }
+
+    /// THE CONTAINER THIS BODY IS DECLARING INTO — how a container's own
+    /// handle reaches its body in the chain family, where the closure
+    /// takes the transaction rather than the handle. Every declaration
+    /// inside the body already parents through this same ambient stack.
+    pub fn container(&self) -> WidgetId {
+        let p = self.current_parent();
+        assert!(
+            p != 0,
+            "kaya: container() outside any container body — call it inside a \
+             column/row/scroll/grid/labeled body, whose handle it answers"
+        );
+        WidgetId(p)
     }
 
     fn auto_parent(&mut self, id: u64) {
@@ -2831,8 +2851,10 @@ impl<'a> Tx<'a> {
     }
 
     /// A container takes its body as a closure and parents everything
-    /// declared inside it through the ambient stack. The body's result rides
-    /// the returned [`Widget`] as `.out`.
+    /// declared inside it through the ambient stack; [`Tx::container`]
+    /// inside the body answers this container's own handle. The chain ends
+    /// with [`Widget::id`], [`Widget::value`] for what the body returned,
+    /// or [`Widget::into_parts`] for both.
     pub fn column<R>(&mut self, body: impl FnOnce(&mut Self) -> R) -> Widget<'_, 'a, R> {
         self.container_of(WidgetKind::Column, body)
     }
@@ -3630,7 +3652,7 @@ impl<'a> Tx<'a> {
     pub fn context_catalog<R>(
         &mut self,
         body: impl FnOnce(&mut MenuItems<'_, 'a, ContextAnchor>) -> R,
-    ) -> ContextCatalog<R> {
+    ) -> (ContextCatalog, R) {
         let mut items = MenuItems {
             tx: self,
             slot: ItemSlot::Free,
@@ -3639,7 +3661,7 @@ impl<'a> Tx<'a> {
         };
         let out = body(&mut items);
         let roots = std::mem::take(&mut items.roots);
-        ContextCatalog { out, roots }
+        (ContextCatalog { roots }, out)
     }
 
     /// The prop/append proxy for a RETAINED menu item, and the
@@ -4292,7 +4314,7 @@ impl<'b> Row<'_, 'b> {
     // context_menu left tpl-surfaces.py's NOT_FORWARDED set in the same
     // change, so the pair is HELD level rather than merely level;
     // context_attach (the raw item-id/node floor) stays excluded.
-    pub fn context_menu<R>(&mut self, node: TemplateNodeId, catalog: ContextCatalog<R>) -> R {
+    pub fn context_menu(&mut self, node: TemplateNodeId, catalog: ContextCatalog) {
         self.tpl().context_menu(node, catalog)
     }
 }
@@ -6729,13 +6751,12 @@ impl<A: CatalogHome> OptionRef<'_, '_, A> {
 }
 
 /// A just-built menu grouping node's chain (bar-level or nested):
-/// `enabled`, `icon`, and the body's result riding along as `out` — the
-/// [`Widget`] shape. End with [`MenuRef::id`] or
+/// `enabled`, `icon`, and the body's result carried along — the
+/// [`Widget`] shape. End with [`MenuRef::id`], [`MenuRef::value`] or
 /// [`MenuRef::into_parts`].
-#[must_use = "end the chain with .id()/.into_parts() — the handle reopens the menu later"]
+#[must_use = "end the chain with .id()/.value()/.into_parts() — the handle reopens the menu later"]
 pub struct MenuRef<'t, 'b, R = ()> {
-    /// The children body's own result, threaded out unchanged.
-    pub out: R,
+    out: R,
     item: MenuItemId,
     tx: &'t mut Tx<'b>,
 }
@@ -6771,6 +6792,12 @@ impl<R> MenuRef<'_, '_, R> {
         self.item
     }
 
+    /// End the chain with the BODY's own result — what the closure
+    /// returned.
+    pub fn value(self) -> R {
+        self.out
+    }
+
     /// End the chain keeping the body's result too.
     pub fn into_parts(self) -> (MenuItemId, R) {
         (self.item, self.out)
@@ -6782,8 +6809,7 @@ impl<R> MenuRef<'_, '_, R> {
 /// body's result as `out`.
 #[must_use = "end the chain with .id()/.into_parts() — on_menu_select binds to the group handle"]
 pub struct RadioGroupRef<'t, 'b, R = ()> {
-    /// The options body's own result, threaded out unchanged.
-    pub out: R,
+    out: R,
     item: MenuItemId,
     tx: &'t mut Tx<'b>,
 }
@@ -6792,8 +6818,9 @@ impl<R> RadioGroupRef<'_, '_, R> {
     /// The selected option index (0-based, in option declaration
     /// order) — the Choice contract: a constant or a signal bound both
     /// ways. User picks emit `menu_value_changed`; programmatic writes
-    /// are quiet.
-    pub fn value(self, src: impl Into<MenuSource<F64Kind>>) -> Self {
+    /// are quiet. Named for the prop, not the wire, because
+    /// [`RadioGroupRef::value`] is the chain family's body terminal.
+    pub fn selected(self, src: impl Into<MenuSource<F64Kind>>) -> Self {
         src.into().apply(&mut *self.tx, self.item, MenuProp::Value);
         self
     }
@@ -6825,6 +6852,12 @@ impl<R> RadioGroupRef<'_, '_, R> {
     /// binds to.
     pub fn id(self) -> MenuItemId {
         self.item
+    }
+
+    /// End the chain with the BODY's own result — what the closure
+    /// returned.
+    pub fn value(self) -> R {
+        self.out
     }
 
     /// End the chain keeping the body's result too.
@@ -6866,8 +6899,9 @@ impl<'t, 'b> MenuItemRef<'t, 'b> {
     }
 
     /// A radio group's selected option index (radio groups only —
-    /// root-checked). QUIET, like `checked`.
-    pub fn value(self, src: impl Into<MenuSource<F64Kind>>) -> Self {
+    /// root-checked). QUIET, like `checked`; named as on
+    /// [`RadioGroupRef::selected`].
+    pub fn selected(self, src: impl Into<MenuSource<F64Kind>>) -> Self {
         src.into().apply(&mut *self.tx, self.item, MenuProp::Value);
         self
     }
@@ -6942,16 +6976,14 @@ impl<'t, 'b> MenuItemRef<'t, 'b> {
 ///     t: &mut kaya::Tpl<'_, '_>,
 ///     a: kaya::TemplateNodeId,
 ///     b: kaya::TemplateNodeId,
-///     catalog: kaya::ContextCatalog<()>,
+///     catalog: kaya::ContextCatalog,
 /// ) {
 ///     t.context_menu(a, catalog);
 ///     t.context_menu(b, catalog); // moved: one catalog, one anchor
 /// }
 /// ```
 #[must_use = "a context catalog attaches nowhere until Tpl::context_menu"]
-pub struct ContextCatalog<R = ()> {
-    /// The builder body's own result, threaded out unchanged.
-    pub out: R,
+pub struct ContextCatalog {
     roots: Vec<MenuItemId>,
 }
 
@@ -7546,12 +7578,11 @@ impl<'b> Tpl<'_, 'b> {
     /// the node must belong to this template case (root-checked). An
     /// activation carries the copy's key path, received by the `_node`
     /// handler flavors. The catalog moves in (one catalog, one anchor).
-    pub fn context_menu<R>(&mut self, node: TemplateNodeId, catalog: ContextCatalog<R>) -> R {
-        let ContextCatalog { out, roots } = catalog;
+    pub fn context_menu(&mut self, node: TemplateNodeId, catalog: ContextCatalog) {
+        let ContextCatalog { roots } = catalog;
         for item in roots {
             self.tx.ops.push(TxOp::ContextAttachNode { node, item });
         }
-        out
     }
 
     /// The floor: attach one context-catalog root to a template node.
@@ -8145,6 +8176,75 @@ mod tests {
             )),
             "the For parented into the enclosing container"
         );
+    }
+
+    /// A BODY'S VALUE ARRIVES: a container hands back what its closure
+    /// returned, so a handle made inside reaches the enclosing scope with
+    /// no `Option` slot to smuggle it through (DESIGN.md, Binding
+    /// conventions: the chain family's `.value()`/`.into_parts()`).
+    #[test]
+    fn a_container_body_hands_its_value_back() {
+        use crate::protocol::{TxOp, WidgetKind};
+
+        let (_occ_tx, occ_rx) = mpsc::channel();
+        let (tx_tx, _tx_rx) = mpsc::channel();
+        let ctx = AppCtx::new(occ_rx, tx_tx, no_wake());
+
+        let button_after = |tx: &Tx<'_>, from: usize| {
+            tx.ops[from..]
+                .iter()
+                .find_map(|op| match op {
+                    TxOp::CreateWidget { id, kind: WidgetKind::Button } => Some(*id),
+                    _ => None,
+                })
+                .expect("the body declared a button")
+        };
+
+        let mut tx = ctx.begin();
+        let at = tx.ops.len();
+        let (container, inner) = tx.column(|tx| tx.button("go").id()).into_parts();
+        assert_eq!(inner, button_after(&tx, at), "into_parts lost the body's result");
+        assert_ne!(container, inner, "the container answered its child's id");
+
+        let at = tx.ops.len();
+        let only = tx.row(|tx| tx.button("again").id()).value();
+        assert_eq!(only, button_after(&tx, at), "value() is not the body's result");
+    }
+
+    /// A BODY SEES ITS CONTAINER: the chain family's closure takes the
+    /// transaction, and [`Tx::container`] answers the handle every
+    /// declaration inside the body is parenting into — nested bodies each
+    /// seeing their own.
+    #[test]
+    fn a_container_body_sees_its_container() {
+        let (_occ_tx, occ_rx) = mpsc::channel();
+        let (tx_tx, _tx_rx) = mpsc::channel();
+        let ctx = AppCtx::new(occ_rx, tx_tx, no_wake());
+
+        let mut tx = ctx.begin();
+        let (outer, (seen_outer, inner, seen_inner)) = tx
+            .column(|tx| {
+                let seen_outer = tx.container();
+                let (inner, seen_inner) = tx.row(|tx| tx.container()).into_parts();
+                (seen_outer, inner, seen_inner)
+            })
+            .into_parts();
+        assert_eq!(seen_outer, outer, "the body saw a container that is not its own");
+        assert_eq!(seen_inner, inner, "the nested body saw the enclosing container");
+        assert_ne!(outer, inner);
+    }
+
+    /// And outside every body it refuses rather than answering 0, which is
+    /// no widget.
+    #[test]
+    #[should_panic(expected = "container() outside any container body")]
+    fn container_outside_a_body_refuses() {
+        let (_occ_tx, occ_rx) = mpsc::channel();
+        let (tx_tx, _tx_rx) = mpsc::channel();
+        let ctx = AppCtx::new(occ_rx, tx_tx, no_wake());
+
+        let tx = ctx.begin();
+        let _ = tx.container();
     }
 
     /// ONE ID SPACE: a template node draws from the widget counter, so an
@@ -8875,7 +8975,7 @@ mod tests {
                 o.option("Name");
                 o.option("Date");
             })
-            .value(1)
+            .selected(1)
             .id();
         let ops = &tx.ops[start..];
         assert_eq!(ops.len(), 10, "got {ops:?}");
@@ -8937,14 +9037,12 @@ mod tests {
         let ctx = AppCtx::new(occ_rx, tx_tx, no_wake());
 
         let mut tx = ctx.begin();
-        let catalog = tx.context_catalog(|m| m.item("Remove").id());
-        let remove = catalog.out;
+        let (catalog, remove) = tx.context_catalog(|m| m.item("Remove").id());
         let groups = tx.collection::<String>();
-        let (_list, returned) = tx.for_each(&groups, |t| {
+        let (_list, ()) = tx.for_each(&groups, |t| {
             let name = t.label("g");
-            t.context_menu(name, catalog)
+            t.context_menu(name, catalog);
         });
-        assert_eq!(returned, remove, "the catalog's out threads back through the attach");
 
         let at = |pred: &dyn Fn(&TxOp) -> bool| tx.ops.iter().position(|op| pred(op)).unwrap();
         let create_at = at(&|op| matches!(op, TxOp::MenuItemCreate { .. }));
@@ -9019,8 +9117,7 @@ mod tests {
         let (root, (target, remove)) = tx
             .column(|tx| {
                 let target = tx.label(status).id();
-                let catalog = tx.context_catalog(|m| m.item("Remove").id());
-                let remove = catalog.out;
+                let (catalog, remove) = tx.context_catalog(|m| m.item("Remove").id());
                 let _ = tx.for_each(&groups, |t| {
                     let name = t.label("g");
                     t.context_menu(name, catalog);
@@ -9045,7 +9142,7 @@ mod tests {
                 o.option("Name");
                 o.option("Date");
             })
-            .value(0)
+            .selected(0)
             .id();
         let _rename = tx.context_menu(target, |m| m.item("Rename").id());
         tx.commit();

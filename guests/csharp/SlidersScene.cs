@@ -26,7 +26,7 @@ static class SlidersScene
             var pos = tx.Signal(50.0);
             var tracks = TrackKaya.Collection(tx);
 
-            tx.Mount(tx.Column(() =>
+            tx.Mount(tx.Column(root =>
             {
                 tx.Label(bind: levelText);                         // label#0
                 tx.Label(bind: commitText);                        // label#1
@@ -59,6 +59,7 @@ static class SlidersScene
                         });
                     row.SetA11yId(level, "level");
                 }
+                return root;
             }));
 
             tracks.Insert(tx, "a", new Track("a", 70.0));

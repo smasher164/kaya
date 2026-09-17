@@ -15,7 +15,7 @@ static class TooltipsScene
             var nameHelp = tx.Signal("Your full name as it appears on the card");
             var accounts = AccountKaya.Collection(tx);
 
-            var settings = tx.Column(() =>
+            var settings = tx.Column(settings =>
             {
                 var save = tx.Button("Save",                            // button#0
                     onClick: inner => inner.Write(nameHelp, "Your name, as saved"));
@@ -37,6 +37,7 @@ static class TooltipsScene
                     row.SetHelp(label, row.Note);
                     row.SetA11yId(label, row.Name);
                 }
+                return settings;
             });
             tx.SetHelp(settings, "The settings for this account");       // column#0
             tx.SetA11yId(settings, "settings");

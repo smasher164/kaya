@@ -77,17 +77,14 @@ static class RangesScene
         var app = new KayaApp();
 
         string doc = Doc;
-        Signal status = default;
-        Widget editor = default;
-
-        app.Build(tx =>
+        var (status, editor) = app.Build(tx =>
         {
             tx.Window(title: "ranges");
-            status = tx.Signal("0 matches");
+            var status = tx.Signal("0 matches");
 
-            tx.Mount(tx.Column(() =>
+            var (root, editor) = tx.Column(root =>
             {
-                editor = tx.Textarea(onChange: (t, text) =>
+                var editor = tx.Textarea(onChange: (t, text) =>
                 {
                     doc = text;
                     t.Write(status, "0 matches");
@@ -99,7 +96,7 @@ static class RangesScene
 
                 tx.Label(bind: status); // label#0
 
-                tx.Row(() =>
+                tx.Row(_ =>
                 {
                     tx.Button("find", onClick: t => // button#0
                     {
@@ -125,7 +122,10 @@ static class RangesScene
                             t.SelectRange(editor, hits[0]);
                     });
                 });
-            }));
+                return (root, editor);
+            });
+            tx.Mount(root);
+            return (status, editor);
         });
 
         Environment.Exit(app.Run());

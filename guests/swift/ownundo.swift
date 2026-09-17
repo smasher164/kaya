@@ -12,8 +12,10 @@ var undoStack: [KayaDocument] = []
 var redoStack: [KayaDocument] = []
 var current = KayaDocument("")
 
+// The menu items are declared before the textarea their handlers write,
+// and `publish` is the helper both call: a forward reference, not a
+// container body smuggling its value out.
 var status: KayaSignal!
-var native: KayaWidget!
 var owned: KayaWidget!
 
 func publish(_ t: KayaAppTx) {
@@ -44,10 +46,10 @@ app.build { tx in
     tx.window(title: "ownundo", menus: [edit])
     status = tx.signal(.str("undo 0 redo 0"))
 
-    let root = tx.column {
+    let root = tx.column { root in
         let label = tx.label(bind: status)  // label#0
         tx.setA11yId(label, "status")
-        native = tx.textarea(rich: true)  // textarea#0
+        let native = tx.textarea(rich: true)  // textarea#0
         tx.setA11yId(native, "native")
         tx.setA11yLabel(native, "Native")
         owned = tx.textarea(  // textarea#1
@@ -60,10 +62,11 @@ app.build { tx in
             })
         tx.setA11yId(owned, "owned")
         tx.setA11yLabel(owned, "Owned")
-        tx.row {
+        tx.row { _ in
             tx.button("focus native") { t in t.focus(native) }  // button#0
             tx.button("focus owned") { t in t.focus(owned) }  // button#1
         }
+        return root
     }
     tx.mount(root)
 }

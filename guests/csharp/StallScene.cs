@@ -15,14 +15,13 @@ static class StallScene
     {
         var app = new KayaApp();
 
-        Signal status = default;
 
-        app.Build(tx =>
+        var status = app.Build(tx =>
         {
             tx.Window(title: "stall");
-            status = tx.Signal("ready");
+            var status = tx.Signal("ready");
 
-            tx.Mount(tx.Column(() =>
+            tx.Mount(tx.Column(root =>
             {
                 tx.SetA11yId(tx.Label(bind: status), "status");  // label#0
 
@@ -39,7 +38,9 @@ static class StallScene
                 {
                     Thread.Sleep(WedgeMs);
                 });
+                return root;
             }));
+            return status;
         });
 
         Environment.Exit(app.Run());

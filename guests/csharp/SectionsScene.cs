@@ -16,12 +16,11 @@ static class SectionsScene
         var app = new KayaApp();
 
         int visitCount = 0;
-        Signal visits = default;
-        app.Build(tx =>
+        var visits = app.Build(tx =>
         {
             tx.Window(title: "sections",
                 sectionsPresentation: SectionsPresentation.Bar);
-            visits = tx.Signal("archive: 0 visits");
+            var visits = tx.Signal("archive: 0 visits");
 
             // A symbol names a CONCEPT (docs/styling-plan.md D6).
             tx.AddSection(Feed, title: "Feed", symbol: Symbol.Home);
@@ -32,7 +31,7 @@ static class SectionsScene
                     inner.Write(visits, $"archive: {visitCount} visits");
                 });
 
-            var feedRoot = tx.Column(() =>
+            var feedRoot = tx.Column(feedRoot =>
             {
                 var ready = tx.Signal("feed ready");
                 tx.Label(bind: ready); // label#0
@@ -50,27 +49,32 @@ static class SectionsScene
                     inner.AddSection(Loans, title: "Loans",
                         symbol: Symbol.Lock, window: Library);
 
-                    var shelvesRoot = inner.Column(() =>
+                    var shelvesRoot = inner.Column(shelvesRoot =>
                     {
                         var ready = inner.Signal("shelves ready");
                         inner.Label(bind: ready); // label#2
+                        return shelvesRoot;
                     });
                     inner.MountIn(Shelves, shelvesRoot);
-                    var loansRoot = inner.Column(() =>
+                    var loansRoot = inner.Column(loansRoot =>
                     {
                         var ready = inner.Signal("loans ready");
                         inner.Label(bind: ready); // label#3
+                        return loansRoot;
                     });
                     inner.MountIn(Loans, loansRoot);
                 });
+                return feedRoot;
             });
             tx.MountIn(Feed, feedRoot);
 
-            var archiveRoot = tx.Column(() =>
+            var archiveRoot = tx.Column(archiveRoot =>
             {
                 tx.Label(bind: visits); // label#1
+                return archiveRoot;
             });
             tx.MountIn(Archive, archiveRoot);
+            return visits;
         });
 
         System.Environment.Exit(app.Run());

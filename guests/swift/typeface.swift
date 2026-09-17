@@ -5,8 +5,6 @@ import Foundation
 
 let app = KayaApp()
 
-var status: KayaSignal!
-
 var draft = ""
 
 try app.build { tx in
@@ -18,8 +16,8 @@ try app.build { tx in
     tx.window(title: "typeface", width: 480, height: 360)
 
     let heading = tx.signal(.str("typeface"))
-    status = tx.signal(.str("ready"))
-    let root = tx.column {
+    let status = tx.signal(.str("ready"))
+    let root = tx.column { root in
         // The heading's text style OVERRIDES the root font: a root-only
         // lowering leaves this label in the system face.
         let title = tx.label(bind: heading, role: .heading)  // label#0
@@ -31,6 +29,7 @@ try app.build { tx in
         tx.button("Go") { t in  // button#0
             t.write(status, .str("clicked \(draft)"))
         }
+        return root
     }
     tx.mount(root)
 }

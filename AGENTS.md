@@ -462,7 +462,14 @@ in docs/deferred.md.
    side refuses any such re-export of a vocabulary (four planted negatives)
    and the guest side refuses the alias names, the C header's
    `KAYA_FILE_MODE_*` family and a magic-integer alert compare
-   (`choice == 1`), the guest plants being those real shapes now),
+   (`choice == 1`), the guest plants being those real shapes now.
+   AND A BODY RETURNS ITS VALUE SINCE 2026-09-17 (DESIGN.md's Binding
+   conventions, the ruling that ended six spellings of one smuggle): one row
+   per binding that had the problem holds the value-returning shape of its
+   body-taking constructors — JS's `column<T = void>`, Swift's `column<R>`,
+   C#'s `T Column<T>`, Rust's `into_parts` on the container ref, Java's
+   `Built<R>`, OCaml's `when_` answering its pair — each cut from a copy and
+   watched named, six negatives, counts printed),
    `tools/check-universal-props.py` (the lowering-side sibling: every
    backend applies the universal a11y props to every kind — Compose
    per-arm, SwiftUI's one wrapper unbypassed, GTK/WinUI's apply arm

@@ -9,10 +9,12 @@ static class MenusScene
     {
         var app = new KayaApp();
 
-        Collection groups = default;
+        // The TRACE's own slot: a For's body runs once where the
+        // compiler cannot see it, and the template zone is outside the
+        // ruling.
         Collection items = default;
 
-        app.Build(tx =>
+        var groups = app.Build(tx =>
         {
             var status = tx.Signal("ready");
             var canExport = tx.Signal(false);
@@ -44,7 +46,7 @@ static class MenusScene
                     t.Write(status, index == 1 ? "sorted date" : "sorted name"));
             tx.Window(title: "menus", menus: new[] { file, view, sortGroup });
 
-            groups = tx.Collection();
+            var groups = tx.Collection();
             var catalog = tx.ContextCatalog(
                 tx.Item("Remove", symbol: Symbol.Delete, onActivate: (t, keys) =>
                 {
@@ -54,7 +56,7 @@ static class MenusScene
                     t.Write(status, $"removed {group}/{item}");
                 }));
 
-            tx.Mount(tx.Column(() =>
+            tx.Mount(tx.Column(root =>
             {
                 tx.Label(bind: status); // label#0
                 tx.Button("enable export", t => // button#0
@@ -99,7 +101,9 @@ static class MenusScene
                         r.ContextMenu(row, catalog);
                     });
                 }));
+                return root;
             }));
+            return groups;
         });
 
         // Seeded after the mount, so the copy stamps from a closed template.

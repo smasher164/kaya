@@ -7,16 +7,15 @@ static class StylingScene
     {
         var app = new KayaApp();
 
-        Signal status = default;
-        app.Build(tx =>
+        var status = app.Build(tx =>
         {
             // BEFORE THE FIRST MOUNT, per the set-once wall.
             tx.BrandAccent(0x3584E4);
             tx.Window(title: "styling", width: 480, height: 360, inset: 0);
             var heading = tx.Signal("Sections");
-            status = tx.Signal("ready");
+            var status = tx.Signal("ready");
 
-            tx.Mount(tx.Column(() =>
+            tx.Mount(tx.Column(root =>
             {
                 // expect_ax resolves its target through the AUTHORED id.
                 tx.SetA11yId(tx.Heading(bind: heading), "title"); // label#0
@@ -32,7 +31,9 @@ static class StylingScene
                 // Declared so every backend's caption arm runs: no universal AX
                 // observable, so the walls are the arms' refusals.
                 tx.Caption("captioned"); // label#2
+                return root;
             }));
+            return status;
         });
 
         System.Environment.Exit(app.Run());

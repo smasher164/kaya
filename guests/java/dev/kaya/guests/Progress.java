@@ -12,7 +12,7 @@ public final class Progress {
 
         app.build(tx -> {
             tx.window(0).title("progress");
-            tx.mount(tx.column(() -> {
+            tx.mount(tx.column(col -> {
                 tx.progress(0.25); // progress#0
                 tx.progressIndeterminate(); // progress#1
             }));

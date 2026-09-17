@@ -47,9 +47,8 @@ const { field, todos } = app.window({ title: "todos" }, () => {
   const todos = kaya.collection(Todo);
   const itemsLeft = todos.derive(itemsLeftText);
 
-  let field!: kaya.Widget;
-  kaya.column(() => {
-    field = kaya.entry({ onChange });
+  const field = kaya.column(() => {
+    const field = kaya.entry({ onChange });
     kaya.button("Add", { onClick: onAdd });
     kaya.label({ bind: itemsLeft });
     // The body runs ONCE, authoring the blueprint.
@@ -59,6 +58,7 @@ const { field, todos } = app.window({ title: "todos" }, () => {
         kaya.label({ bind: todo.title });
       });
     }
+    return field;
   });
   return { field, todos };
 });

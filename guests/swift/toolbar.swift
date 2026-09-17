@@ -44,12 +44,13 @@ app.build { tx in
         ])
     tx.window(title: "toolbar", menus: [file, edit, view])
 
-    let root = tx.column {
+    let root = tx.column { root in
         tx.label(bind: status)  // label#0
         tx.button("toggle save") { t in  // button#0
             saveEnabled = !saveEnabled
             t.write(canSave, .bool(saveEnabled))
         }
+        return root
     }
     tx.mount(root)
 }

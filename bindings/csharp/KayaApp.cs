@@ -1471,14 +1471,19 @@ sealed class KayaApp
     /// Run `build` with a fresh transaction and submit it atomically. A
     /// handler that throws abandons its records, and the model abandons
     /// the same writes before the exception continues.
-    public void Build(Action<Tx> build)
+    public void Build(Action<Tx> build) => Build<object?>(tx => { build(tx); return null; });
+
+    /// The same, answering what the body answered — how a handle made
+    /// inside the scope reaches the code outside it.
+    public T Build<T>(Func<Tx, T> build)
     {
         RequireAppThread();
         using var tx = new Tx(this);
         CurrentTx = tx;
+        T out_;
         try
         {
-            build(tx);
+            out_ = build(tx);
         }
         catch
         {
@@ -1490,6 +1495,7 @@ sealed class KayaApp
             CurrentTx = null;
         }
         tx.SubmitIfAny();
+        return out_;
     }
 
     public void OnClick(Widget w, Action<Tx> handler) => widgetHandlers[w.Id] = handler;
@@ -3249,8 +3255,14 @@ sealed class Tx : IDisposable
 
     /// A container parents everything declared inside its body (the
     /// ambient stack). `inset:` is this container's own padding.
-    public Widget Column(
-        Action body, double? grow = null, double? spacing = null, Align? align = null,
+    public void Column(
+        Action<Widget> body, double? grow = null, double? spacing = null, Align? align = null,
+        double? inset = null) =>
+        ContainerOf<object?>(KayaWire.KindColumn, c => { body(c); return null; },
+            grow, spacing, align, inset);
+
+    public T Column<T>(
+        Func<Widget, T> body, double? grow = null, double? spacing = null, Align? align = null,
         double? inset = null) =>
         ContainerOf(KayaWire.KindColumn, body, grow, spacing, align, inset);
 
@@ -3258,15 +3270,25 @@ sealed class Tx : IDisposable
     /// window's SIZE CLASS is the named one (SizeClass.Compact, the only
     /// class today) — a core-evaluated breakpoint, reverting on leaving
     /// the class (docs/adaptive-layout-plan.md D3).
-    public Widget Row(
-        Action body, double? grow = null, double? spacing = null, Align? align = null,
+    public void Row(
+        Action<Widget> body, double? grow = null, double? spacing = null, Align? align = null,
+        double? inset = null, SizeClass? stackWhen = null) =>
+        ContainerOf<object?>(KayaWire.KindRow, c => { body(c); return null; },
+            grow, spacing, align, inset, stackWhen);
+
+    public T Row<T>(
+        Func<Widget, T> body, double? grow = null, double? spacing = null, Align? align = null,
         double? inset = null, SizeClass? stackWhen = null) =>
         ContainerOf(KayaWire.KindRow, body, grow, spacing, align, inset, stackWhen);
 
     /// A vertical scroll viewport over EXACTLY ONE child. Pass grow: so
     /// the enclosing track CONSTRAINS it — an unconstrained viewport
     /// hugs its content and nothing overflows.
-    public Widget Scroll(Action body, double? grow = null) =>
+    public void Scroll(Action<Widget> body, double? grow = null) =>
+        ContainerOf<object?>(KayaWire.KindScroll, c => { body(c); return null; },
+            grow, null, null, null);
+
+    public T Scroll<T>(Func<Widget, T> body, double? grow = null) =>
         ContainerOf(KayaWire.KindScroll, body, grow, null, null, null);
 
     /// A grid laying its children out row-major into `columns` columns —
@@ -3275,8 +3297,13 @@ sealed class Tx : IDisposable
     /// (size class, count) pair laying it out in that many columns while
     /// the window's SIZE CLASS is the named one, reverting on leaving it
     /// (docs/adaptive-layout-plan.md D6.2).
-    public Widget Grid(int columns, Action body, double? spacing = null, double? grow = null,
-        double? inset = null, (SizeClass, int)? columnsWhen = null)
+    public void Grid(int columns, Action<Widget> body, double? spacing = null,
+        double? grow = null, double? inset = null, (SizeClass, int)? columnsWhen = null) =>
+        Grid<object?>(columns, c => { body(c); return null; }, spacing, grow, inset,
+            columnsWhen);
+
+    public T Grid<T>(int columns, Func<Widget, T> body, double? spacing = null,
+        double? grow = null, double? inset = null, (SizeClass, int)? columnsWhen = null)
     {
         var parent = Widget(KayaWire.KindGrid);
         Records.Add(KayaWire.TxSetColumns(parent.Id, columns));
@@ -3285,23 +3312,33 @@ sealed class Tx : IDisposable
         if (grow is double g) SetGrow(parent, g);
         if (inset is double pad) SetInset(parent, pad);
         App.Parents.Add(parent.Id);
-        body?.Invoke();
-        App.Parents.RemoveAt(App.Parents.Count - 1);
-        return parent;
+        try { return body(parent); }
+        finally { App.Parents.RemoveAt(App.Parents.Count - 1); }
     }
 
     /// A LABELLED ROW (docs/forms-plan.md): `label` names the one control
     /// the body declares, with an optional trailing button after it. A
     /// column of nothing but these renders as the platform's form.
-    public Widget Labeled(string label, Action body, double? spacing = null,
+    public void Labeled(string label, Action<Widget> body, double? spacing = null,
+        double? grow = null, double? inset = null) =>
+        LabeledOf<object?>(() => Label(label), c => { body(c); return null; },
+            spacing, grow, inset);
+
+    public T Labeled<T>(string label, Func<Widget, T> body, double? spacing = null,
         double? grow = null, double? inset = null) =>
         LabeledOf(() => Label(label), body, spacing, grow, inset);
 
-    public Widget Labeled(Signal label, Action body, double? spacing = null,
+    public void Labeled(Signal label, Action<Widget> body, double? spacing = null,
+        double? grow = null, double? inset = null) =>
+        LabeledOf<object?>(() => Label(bind: label), c => { body(c); return null; },
+            spacing, grow, inset);
+
+    public T Labeled<T>(Signal label, Func<Widget, T> body, double? spacing = null,
         double? grow = null, double? inset = null) =>
         LabeledOf(() => Label(bind: label), body, spacing, grow, inset);
 
-    Widget LabeledOf(Action name, Action body, double? spacing, double? grow, double? inset)
+    T LabeledOf<T>(Action name, Func<Widget, T> body, double? spacing, double? grow,
+        double? inset)
     {
         var parent = Widget(KayaWire.KindLabeled);
         if (spacing is double gap) SetSpacing(parent, gap);
@@ -3309,9 +3346,8 @@ sealed class Tx : IDisposable
         if (inset is double pad) SetInset(parent, pad);
         App.Parents.Add(parent.Id);
         name();
-        body?.Invoke();
-        App.Parents.RemoveAt(App.Parents.Count - 1);
-        return parent;
+        try { return body(parent); }
+        finally { App.Parents.RemoveAt(App.Parents.Count - 1); }
     }
 
     /// A spacer: PURE SUGAR for an empty grown column — it consumes
@@ -3323,9 +3359,9 @@ sealed class Tx : IDisposable
         return w;
     }
 
-    Widget ContainerOf(
-        uint kind, Action body, double? grow = null, double? spacing = null, Align? align = null,
-        double? inset = null, SizeClass? stackWhen = null)
+    T ContainerOf<T>(
+        uint kind, Func<Widget, T> body, double? grow = null, double? spacing = null,
+        Align? align = null, double? inset = null, SizeClass? stackWhen = null)
     {
         var parent = Widget(kind);
         if (grow is double g) SetGrow(parent, g);
@@ -3334,9 +3370,8 @@ sealed class Tx : IDisposable
         if (inset is double pad) SetInset(parent, pad);
         if (stackWhen is SizeClass when) StackWhen(parent, when);
         App.Parents.Add(parent.Id);
-        body?.Invoke();
-        App.Parents.RemoveAt(App.Parents.Count - 1);
-        return parent;
+        try { return body(parent); }
+        finally { App.Parents.RemoveAt(App.Parents.Count - 1); }
     }
 
     // One breakpoint on the primary window carrying one setter: the

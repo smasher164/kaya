@@ -51,6 +51,11 @@ let () =
       let text_target = signal Scalar.Str ("text target") in
       let note_target = signal Scalar.Str ("note target") in
       let files_target = signal Scalar.Str ("files target") in
+      (* [row_label] and [item_label] are the TRACE's own slots, which
+         the template zone puts outside the ruling; [source] and [list]
+         are handles their child thunk makes and the handlers below
+         need, and hoisting them out of the list would move the id
+         order the scene reads. *)
       let source = ref None in
       let list = ref None in
       let row_label = ref None in

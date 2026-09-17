@@ -145,7 +145,9 @@ BINDINGS = [
     dict(name="csharp", path=CS, tx_scope="sealed class Tx",
          require="internal static void RequireAppThread()",
          alive="internal void Alive()",
-         build="public void Build(Action<Tx> build)",
+         # The non-generic Build is a one-line delegate since the X3 ruling;
+         # the generic entry holds the body and the thread check.
+         build="public T Build<T>(Func<Tx, T> build)",
          dispatch="void DispatchLoop()",
          call="RequireAppThread()", claim="ClaimAppThread()",
          post="App.Post"),

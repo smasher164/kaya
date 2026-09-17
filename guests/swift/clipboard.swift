@@ -45,11 +45,6 @@ FileManager.default.createFile(
     atPath: (sceneDir as NSString).appendingPathComponent("pasted.txt"),
     contents: Data("pasted bytes".utf8))
 
-var status: KayaSignal!
-var rowStatus: KayaSignal!
-var rich: KayaWidget!
-var plain: KayaWidget!
-
 app.build { tx in
     let edit = tx.menu(
         "Edit",
@@ -60,8 +55,8 @@ app.build { tx in
         ])
     tx.window(title: "clipboard", menus: [edit])
 
-    status = tx.signal(.str("ready"))
-    rowStatus = tx.signal(.str(""))
+    let status = tx.signal(.str("ready"))
+    let rowStatus = tx.signal(.str(""))
 
     func answered(_ tx: KayaAppTx, _ clip: KayaRepresentation?) throws {
         switch clip {
@@ -103,7 +98,12 @@ app.build { tx in
         }
     }
 
-    let root = tx.column {
+    // Forward declarations, not a smuggle: the focus buttons are
+    // declared before the entries they act on, and Swift has no zero
+    // value for a handle (guests/go/clipboard uses var + zero value).
+    var rich: KayaWidget!
+    var plain: KayaWidget!
+    let root = tx.column { root in
         tx.setA11yId(tx.label(bind: status), "status")  // label#0
         tx.button(
             "copy",
@@ -174,6 +174,7 @@ app.build { tx in
             }
         }
         tx.insert(notes, .str("r1"), .str(""))
+        return root
     }
     tx.mount(root)
 }

@@ -13,10 +13,10 @@ public final class Scroll {
         app.build(tx -> {
             tx.window(0).title("scroll");
             KayaApp.Signal<String> status = tx.signal("at top");
-            tx.mount(tx.column(() -> {
+            tx.mount(tx.column(col -> {
                 tx.label(status); // label#0
-                tx.scroll(() -> { // scroll#0
-                    tx.column(() -> {
+                tx.scroll(scrollBox -> { // scroll#0
+                    tx.column(col2 -> {
                         for (int i = 1; i <= 29; i++) {
                             KayaApp.Signal<String> caption = tx.signal("row " + i);
                             tx.label(caption);

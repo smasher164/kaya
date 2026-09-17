@@ -54,19 +54,17 @@ const { status, native, owned } = app.window({ title: "ownundo" }, () => {
   });
 
   const status = kaya.signal("undo 0 redo 0");
-  let native!: kaya.Widget;
-  let owned!: kaya.Widget;
-
-  kaya.column(() => {
+  const { native, owned } = kaya.column(() => {
     kaya.label({ bind: status }).a11yId("status"); // label#0
-    native = kaya.textarea({ rich: true }); // textarea#0
+    const native = kaya.textarea({ rich: true }); // textarea#0
     native.a11yId("native").a11yLabel("Native");
-    owned = kaya.textarea({ rich: true, ownUndo: true, onEdit }); // textarea#1
+    const owned = kaya.textarea({ rich: true, ownUndo: true, onEdit }); // textarea#1
     owned.a11yId("owned").a11yLabel("Owned");
     kaya.row(() => {
       kaya.button("focus native", { onClick: () => native.focus() }); // button#0
       kaya.button("focus owned", { onClick: () => owned.focus() }); // button#1
     });
+    return { native, owned };
   });
   return { status, native, owned };
 });

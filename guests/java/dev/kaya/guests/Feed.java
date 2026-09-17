@@ -31,7 +31,7 @@ public final class Feed {
                 return n + " done";
             });
 
-            tx.mount(tx.row(() -> {
+            tx.mount(tx.row(row -> {
                 tx.button("promote", t -> {
                     for (KayaRecords.Entry<String, Post> entry : feed.items(t)) {
                         if (entry.value instanceof Note note) {

@@ -13,7 +13,7 @@ public final class Confirm {
         app.build(tx -> {
             tx.window(0).title("confirm");
             KayaApp.Signal<String> status = tx.signal("no decision");
-            tx.mount(tx.column(() -> {
+            tx.mount(tx.column(col -> {
                 tx.label(status); // label#0
                 tx.button("delete", inner -> {
                     inner.showAlert()

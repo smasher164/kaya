@@ -33,9 +33,6 @@ static class UndoScene
     {
         var app = new KayaApp();
 
-        Signal status = default, history = default, keys = default, notes = default;
-        Widget field = default;
-        RecordCollection<Todo>? todos = null;
 
         string draft = "";
         var rowNotes = new SortedDictionary<long, string>();
@@ -54,18 +51,18 @@ static class UndoScene
             }
         }
 
-        app.Build(tx =>
+        var (status, history, keys, notes, field, todos) = app.Build(tx =>
         {
             var edit = tx.Menu("Edit", items: new[]
             {
                 tx.Item("Undo", role: MenuRole.Undo),
                 tx.Item("Redo", role: MenuRole.Redo),
             });
-            status = tx.Signal("no todos");
-            history = tx.Signal("history empty");
-            keys = tx.Signal("no keys");
-            notes = tx.Signal("no notes");
-            todos = TodoKaya.Collection(tx);
+            var status = tx.Signal("no todos");
+            var history = tx.Signal("history empty");
+            var keys = tx.Signal("no keys");
+            var notes = tx.Signal("no notes");
+            var todos = TodoKaya.Collection(tx);
 
             tx.Window(title: "undo", menus: new[] { edit },
                 onUndone: (t, label, delta) =>
@@ -87,13 +84,13 @@ static class UndoScene
                     t.Write(notes, NoteList(rowNotes));
                 });
 
-            var root = tx.Column(() =>
+            var (root, field) = tx.Column(root =>
             {
                 tx.SetA11yId(tx.Label(bind: status), "status");    // label#0
                 tx.SetA11yId(tx.Label(bind: history), "history");  // label#1
                 tx.SetA11yId(tx.Label(bind: keys), "keys");        // label#2
                 tx.SetA11yId(tx.Label(bind: notes), "notes");      // label#3
-                field = tx.Entry((t, text) => draft = text);       // entry#0
+                var field = tx.Entry((t, text) => draft = text);   // entry#0
                 tx.SetA11yId(field, "draft");
                 tx.Button("add", onClick: t =>                     // button#0
                 {
@@ -150,10 +147,12 @@ static class UndoScene
                         });
                     });
                 }
+                return (root, field);
             });
             // The script types with real keystrokes, so something must hold focus.
             tx.Focus(field);
             tx.Mount(root);
+            return (status, history, keys, notes, field, todos);
         });
 
         System.Environment.Exit(app.Run());

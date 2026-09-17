@@ -7,12 +7,10 @@ let SETTINGS: UInt64 = 8
 
 let app = KayaApp()
 
-var status: KayaSignal!
-
 app.build { tx in
     tx.window(title: "nav")
-    status = tx.signal(.str("at root"))
-    let root = tx.column {
+    let status = tx.signal(.str("at root"))
+    let root = tx.column { root in
         tx.label(bind: status)  // label#0
         tx.button(
             "open detail",
@@ -20,9 +18,10 @@ app.build { tx in
             inner.pushEntry(
                 DETAIL, title: "detail",
                 onPopped: { tx2 in tx2.write(status, .str("popped detail")) })
-            let pane = inner.column {
+            let pane = inner.column { pane in
                 let caption = inner.signal(.str("detail pane"))
                 inner.label(bind: caption)
+                return pane
             }
             inner.mountIn(DETAIL, pane)
             inner.write(status, .str("pushed detail"))
@@ -37,13 +36,15 @@ app.build { tx in
                     tx2.write(status, .str("back requested"))
                     tx2.popEntry()
                 })
-            let pane = inner.column {
+            let pane = inner.column { pane in
                 let caption = inner.signal(.str("settings pane"))
                 inner.label(bind: caption)
+                return pane
             }
             inner.mountIn(SETTINGS, pane)
             inner.write(status, .str("pushed settings"))
             })
+        return root
     }
     tx.mount(root)
 }

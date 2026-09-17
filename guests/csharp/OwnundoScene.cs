@@ -10,6 +10,9 @@ static class OwnundoScene
     {
         var app = new KayaApp();
 
+        // `Publish` and the menu items both name these, and the menu is
+        // built before the textarea its handlers write: a forward
+        // reference, not a container body smuggling its result out.
         Signal status = default;
         Widget native = default, owned = default;
 
@@ -59,7 +62,7 @@ static class OwnundoScene
             tx.Window(title: "ownundo", menus: new[] { edit });
             status = tx.Signal("undo 0 redo 0");
 
-            tx.Mount(tx.Column(() =>
+            tx.Mount(tx.Column(root =>
             {
                 tx.SetA11yId(tx.Label(bind: status), "status");       // label#0
                 native = tx.Textarea(rich: true);                     // textarea#0
@@ -76,11 +79,12 @@ static class OwnundoScene
                     Publish(t);
                 });
 
-                tx.Row(() =>
+                tx.Row(_ =>
                 {
                     tx.Button("focus native", onClick: t => t.Focus(native)); // button#0
                     tx.Button("focus owned", onClick: t => t.Focus(owned));   // button#1
                 });
+                return root;
             }));
         });
 

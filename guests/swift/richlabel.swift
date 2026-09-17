@@ -25,21 +25,16 @@ app.build { tx in
     tx.window(title: "richlabel")
     let runs = tx.signal(.str(""))
 
-    // A widget parents at CREATION, so the two labels ride out through
-    // these vars (docs/traps.md, result builders).
-    var body: KayaWidget! = nil
-    var heading: KayaWidget! = nil
-
-    let root = tx.column {
+    let (root, body, heading) = tx.column { root -> (KayaWidget, KayaWidget, KayaWidget) in
         let bodyText = tx.signal(.str(""))
         let headingText = tx.signal(.str(title))
-        body = tx.label(bind: bodyText, rich: true)  // label#0
+        let body = tx.label(bind: bodyText, rich: true)  // label#0
         tx.setA11yId(body, "body")
-        heading = tx.label(bind: headingText, role: .heading, rich: true)  // label#1
+        let heading = tx.label(bind: headingText, role: .heading, rich: true)  // label#1
         tx.setA11yId(heading, "heading")
         let mirror = tx.label(bind: runs)  // label#2
         tx.setA11yId(mirror, "runs")
-        tx.row {
+        tx.row { _ in
             tx.button("seed") { t in  // button#0
                 let doc = KayaDocument(document)
                     .bold(0..<6)
@@ -63,6 +58,7 @@ app.build { tx in
                 t.write(runs, .str(spell(app.document(body).runs)))
             }
         }
+        return (root, body, heading)
     }
     tx.mount(root)
 }

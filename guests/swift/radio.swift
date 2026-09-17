@@ -11,11 +11,12 @@ app.build { tx in
     tx.window(title: "radio")
     let size = tx.signal(.str("size: Small"))
 
-    let root = tx.column {
+    let root = tx.column { root in
         tx.radio(options, selected: 0) { t, index in
             t.write(size, .str("size: \(options[index])"))
         }
         tx.label(bind: size)  // label#0
+        return root
     }
     tx.mount(root)
 }

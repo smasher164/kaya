@@ -10,18 +10,14 @@ let (status, field, add, todos) = app.build {
     let status = tx.signal(.str("no todos"))
     let todos = tx.collection()
 
-    // A widget parents at CREATION, so both handles are built inside the
-    // container body and ride out through these (docs/traps.md, result builders).
-    var field: KayaWidget! = nil
-    var add: KayaWidget! = nil
-
-    let root = tx.column {
-        field = tx.entry()  // entry#0
-        add = tx.button("add")  // button#0
+    let (root, field, add) = tx.column { root -> (KayaWidget, KayaWidget, KayaWidget) in
+        let field = tx.entry()  // entry#0
+        let add = tx.button("add")  // button#0
         tx.label(bind: status)  // label#0
         tx.each(todos) { t in
             _ = t.label(KayaField<String>(index: 0))
         }
+        return (root, field, add)
     }
     tx.mount(root)
     return (status, field, add, todos)

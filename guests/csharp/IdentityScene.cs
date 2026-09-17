@@ -9,10 +9,9 @@ static class IdentityScene
     {
         var app = new KayaApp();
 
-        Signal status = default;
         string draft = "";
 
-        app.Build(tx =>
+        var status = app.Build(tx =>
         {
             // BEFORE THE FIRST MOUNT, per the declared-once wall. NO
             // ARGUMENTS: the name, the mark and the id are the manifest's
@@ -29,15 +28,16 @@ static class IdentityScene
                 menus: new[] { file });
 
             var heading = tx.Signal("identity");
-            status = tx.Signal("ready");
+            var status = tx.Signal("ready");
 
-            tx.Mount(tx.Column(() =>
+            tx.Mount(tx.Column(root =>
             {
                 tx.Label(bind: heading);              // label#0
                 tx.Label(bind: status);               // label#1
                 tx.Entry((t, text) => draft = text);  // entry#0
                 tx.Button("Go",                       // button#0
                     onClick: t => t.Write(status, $"clicked {draft}"));
+                return root;
             }));
 
             // No title at all rather than an empty one: an empty string is a
@@ -45,13 +45,15 @@ static class IdentityScene
             if (KayaApp.Capabilities().AuxWindows)
             {
                 tx.CreateWindow(1, width: 360, height: 240);
-                var aux = tx.Column(() =>
+                var aux = tx.Column(aux =>
                 {
                     var caption = tx.Signal("no title of its own");
                     tx.Label(bind: caption); // label#2
+                    return aux;
                 });
                 tx.MountIn(1, aux);
             }
+            return status;
         });
 
         Environment.Exit(app.Run());

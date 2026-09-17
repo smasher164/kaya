@@ -14,7 +14,7 @@ public final class A11yRows {
             KayaApp.Collection notes = tx.collection();
             KayaApp.Collection heads = tx.collection();
 
-            tx.mount(tx.column(() -> {
+            tx.mount(tx.column(col -> {
                 for (var note : tx.rows(notes)) {
                     KayaApp.Node field = note.entry();
                     // Element-sourced: expect_ax refuses an ambiguous authored

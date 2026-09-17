@@ -11549,3 +11549,15 @@ lock is taken before the scene is built now, so a report in the gap waits
 and applies. An assignment through a lock guard is not atomic with the
 value's construction; take the guard first when the value's inputs are
 shared.
+
+## A mechanical `() =>` to `_ =>` rewrite changes the meaning of a single-expression body (measured 2026-09-17)
+
+When C#'s containers grew the pair `Column(Action<Widget> body)` /
+`Column<T>(Func<Widget, T> body)` for the X3 ruling, a sweep that turned
+every `() => { … }` body into `_ => { … }` also turned
+`tx.Scroll(() => tx.Label("Item"))` — a single-EXPRESSION body — into a
+`Func<Widget, T>` that answers the LABEL, so the scroll constructor's result
+changed type and value without a compile error. The mac legs caught it;
+Java's compiler caught the same shape as an overload ambiguity. A binding
+that takes the Action/Func pair is swept for single-expression container
+bodies, which bind the value-answering overload by inference.

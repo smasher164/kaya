@@ -8,7 +8,7 @@ let app = KayaApp()
 app.build { tx in
     let notes = tx.collection()
     let heads = tx.collection()
-    let root = tx.column {
+    let root = tx.column { root in
         tx.each(notes) { t in
             // Element-sourced: expect_ax refuses an ambiguous authored id
             // (docs/tpl-props-plan.md).
@@ -27,6 +27,7 @@ app.build { tx in
             }
             t.setInset(bar, 8)
         }
+        return root
     }
     tx.insertFresh(notes, .str("First note"))
     tx.insertFresh(notes, .str("Second note"))

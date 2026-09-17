@@ -49,6 +49,9 @@ let () =
          ();
 
        let groups = collection () in
+       (* The TRACE's own slot: a For's body runs once where the
+          compiler cannot see it, and the template zone is outside the
+          ruling. *)
        let items_ref = ref None in
        (* One catalog shared across every stamped copy. [items_ref] is how
           the handler reaches a collection [for_each] has not returned yet. *)

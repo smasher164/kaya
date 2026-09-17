@@ -39,17 +39,16 @@ static class RichrowsScene
     {
         var app = new KayaApp();
 
-        Signal last = default;
-        Signal view = default;
-        RecordCollection<Note> notes = default!;
-
-        app.Build(tx =>
+        var (last, view, notes) = app.Build(tx =>
         {
             var edit = tx.Menu("Edit", items: new[]
             {
                 tx.Item("Undo", role: MenuRole.Undo),
                 tx.Item("Redo", role: MenuRole.Redo),
             });
+            var notes = NoteKaya.Collection(tx);
+            var last = tx.Signal("");
+            var view = tx.Signal("");
             // An undo or redo moved the row back: the app reads ITS OWN
             // mirror of row b, which is the fold a restored Blob field
             // lands in.
@@ -60,16 +59,13 @@ static class RichrowsScene
             }
             tx.Window(title: "richrows", menus: new[] { edit },
                 onUndone: Restored, onRedone: Restored);
-            notes = NoteKaya.Collection(tx);
-            last = tx.Signal("");
-            view = tx.Signal("");
 
-            tx.Mount(tx.Column(() =>
+            tx.Mount(tx.Column(root =>
             {
                 tx.Label(bind: last); // label#0
                 tx.Label(bind: view); // label#1
 
-                tx.Row(() =>
+                tx.Row(_ =>
                 {
                     tx.Button("patch b", onClick: t => // button#0
                     {
@@ -99,6 +95,7 @@ static class RichrowsScene
                         app.OnFormat(body, (t, keys, _) => Acted(t, notes, last, keys));
                     });
                 }
+                return root;
             }));
 
             notes.Insert(tx, "a", new Note("a",
@@ -106,6 +103,7 @@ static class RichrowsScene
             notes.Insert(tx, "b", new Note("b",
                 new Document("Second note").Mark(
                     TextRange.Bytes(7, 11), "link", "https://kaya.dev")));
+            return (last, view, notes);
         });
 
         Environment.Exit(app.Run());

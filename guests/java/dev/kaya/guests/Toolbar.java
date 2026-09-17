@@ -42,7 +42,7 @@ public final class Toolbar {
             view.item("Refresh").symbol(KayaApp.Symbol.REFRESH);
             view.item("Info").symbol(KayaApp.Symbol.INFO);
 
-            tx.mount(tx.column(() -> {
+            tx.mount(tx.column(col -> {
                 tx.label(status); // label#0
                 tx.button("toggle save", t -> { // button#0
                     saveEnabled = !saveEnabled;

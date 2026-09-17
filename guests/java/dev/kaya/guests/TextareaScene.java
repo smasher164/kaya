@@ -11,10 +11,6 @@ public final class TextareaScene {
             KayaApp.Widget clear) {}
 
     /** Java lambdas cannot assign captured locals. */
-    private static final class Refs {
-        KayaApp.Widget editor, clear;
-    }
-
     private static String count(String text) {
         if (text.isEmpty()) {
             return "0 lines";
@@ -33,13 +29,14 @@ public final class TextareaScene {
             tx.window(0).title("textarea");
             KayaApp.Signal<String> lines = tx.signal("0 lines");
 
-            Refs refs = new Refs();
-            tx.mount(tx.column(() -> {
-                refs.editor = tx.textarea();
+            var built = tx.column(col -> {
+                KayaApp.Widget editor = tx.textarea();
                 tx.label(lines);
-                refs.clear = tx.button("clear");
-            }));
-            return new Scene(lines, refs.editor, refs.clear);
+                KayaApp.Widget clear = tx.button("clear");
+                return new Scene(lines, editor, clear);
+            });
+            tx.mount(built.id());
+            return built.value();
         });
 
         app.onChange(scene.editor(), (t, text) -> t.write(scene.lines(), count(text)));

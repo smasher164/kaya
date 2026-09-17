@@ -27,7 +27,7 @@ public final class Identity {
             KayaApp.Signal<String> heading = tx.signal("identity");
             KayaApp.Signal<String> status = tx.signal("ready");
 
-            tx.mount(tx.column(() -> {
+            tx.mount(tx.column(col -> {
                 tx.label(heading); // label#0
                 tx.label(status); // label#1
                 tx.entry((t, text) -> draft = text); // entry#0
@@ -38,7 +38,7 @@ public final class Identity {
             // the android leg drops the step (docs/app-identity-plan.md ruling 3).
             if (KayaApp.capabilities().auxWindows()) {
                 tx.createWindow(1).size(360.0, 240.0);
-                tx.mountIn(1, tx.column(() -> {
+                tx.mountIn(1, tx.column(col2 -> {
                     KayaApp.Signal<String> caption = tx.signal("no title of its own");
                     tx.label(caption); // label#2
                 }));

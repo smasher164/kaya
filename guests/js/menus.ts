@@ -60,12 +60,12 @@ const { status, canExport, details, sort, file, share, items, groups } = app.win
   const details = kaya.signal(false);
   const sort = kaya.signal(0);
 
-  let share!: kaya.MenuItem;
-  const file = app.menu("File", { enabled: canExport }, () => {
+  const { file, share } = app.menu("File", { enabled: canExport }, (file) => {
     // The vocabulary has no `save` glyph, so `done` is the spelling.
     kaya.item("Save", { symbol: kaya.Symbol.DONE, shortcut: "primary+s", onActivate: onSave });
     kaya.item("Export", { enabled: canExport, symbol: kaya.Symbol.FORWARD });
-    share = kaya.item("Share", { primary: true, onActivate: onShare });
+    const share = kaya.item("Share", { primary: true, onActivate: onShare });
+    return { file, share };
   });
 
   app.menu("View", () => {
@@ -79,10 +79,13 @@ const { status, canExport, details, sort, file, share, items, groups } = app.win
   });
 
   const groups = kaya.collection();
-  const catalog = kaya.contextCatalog(() => {
+  const catalog = kaya.contextCatalog((catalog) => {
     kaya.item("Remove", { symbol: kaya.Symbol.DELETE, onActivate: onRemove });
+    return catalog;
   });
 
+  // The trace's own slot: a For's body runs once where the compiler
+  // cannot see it, and the template zone is outside the ruling.
   let items!: kaya.Collection<kaya.Fields<typeof Task.schema>, kaya.Row<typeof Task.schema>>;
   kaya.column(() => {
     kaya.label({ bind: status }); // label#0

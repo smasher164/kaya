@@ -8,7 +8,7 @@ static class A11yScene
 
         app.Build(tx =>
         {
-            var form = tx.Column(() =>
+            var form = tx.Column(form =>
             {
                 // Deliberately not labelled: the platform must speak the caption.
                 var save = tx.Button("Save");
@@ -42,20 +42,26 @@ static class A11yScene
                 var size = tx.Radio(new[] { "Small", "Large" });
                 tx.SetA11yId(size, "size");
                 tx.SetA11yLabel(size, "Size");
-                var cells = tx.Grid(2, () =>
+                var cells = tx.Grid(2, cells =>
                 {
                     tx.Label("Name");
                     tx.Label("Ada");
+                    return cells;
                 });
                 tx.SetA11yId(cells, "cells");
                 tx.SetA11yLabel(cells, "Cells");
-                var feed = tx.Scroll(() => tx.Label("Item"));
+                var feed = tx.Scroll(feed =>
+                {
+                    tx.Label("Item");
+                    return feed;
+                });
                 tx.SetA11yId(feed, "feed");
                 tx.SetA11yLabel(feed, "Feed");
-                var actions = tx.Row(() =>
+                var actions = tx.Row(actions =>
                 {
                     tx.SetA11yId(tx.Button("Cancel"), "cancel");
                     tx.SetA11yId(tx.Button("OK"), "ok");
+                    return actions;
                 });
                 tx.SetA11yId(actions, "actions");
                 tx.SetA11yLabel(actions, "Actions");
@@ -66,6 +72,7 @@ static class A11yScene
                 tx.SetA11yId(
                     tx.Button("Rename", onClick: inner => inner.Write(spoken, "After")),
                     "rename");
+                return form;
             });
             tx.SetA11yId(form, "form");
             tx.SetA11yLabel(form, "Form");

@@ -9,16 +9,12 @@ let released = DispatchSemaphore(value: 0)
 var posted = ""
 var nested = ""
 
-var status: KayaSignal!
-var alive: KayaSignal!
-var detail: KayaSignal!
-
 app.build { tx in
     tx.window(title: "background")
-    status = tx.signal(.str("idle"))
-    alive = tx.signal(.str("-"))
-    detail = tx.signal(.str("-"))
-    let root = tx.column {
+    let status = tx.signal(.str("idle"))
+    let alive = tx.signal(.str("-"))
+    let detail = tx.signal(.str("-"))
+    let root = tx.column { root in
         tx.setA11yId(tx.label(bind: status), "status")  // label#0
         tx.setA11yId(tx.label(bind: alive), "alive")  // label#1
         tx.setA11yId(tx.label(bind: detail), "nested")  // label#2
@@ -58,6 +54,7 @@ app.build { tx in
                 nested += "c"
                 try inner.write(detail, .str(nested))
             })
+        return root
     }
     tx.mount(root)
 }

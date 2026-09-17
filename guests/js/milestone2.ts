@@ -37,6 +37,8 @@ const { steps, status, groups, items } = app.window(() => {
   const steps = kaya.signal(0);
   const status = kaya.signal("step 0");
   const groups = kaya.collection();
+  // The trace's own slot: a For's body runs once where the compiler
+  // cannot see it, and the template zone is outside the ruling.
   let items!: kaya.Collection<string, kaya.Element>;
 
   kaya.column(() => {

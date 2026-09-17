@@ -14,6 +14,8 @@ import java.util.List;
  */
 public final class RichText {
     /** Java lambdas cannot assign captured locals. */
+    /** A SELF-REFERENCE, not a smuggle: the textarea's own onEdit reads
+     * the document of the widget being declared. */
     private static final class Refs {
         KayaApp.Widget editor;
     }
@@ -48,7 +50,7 @@ public final class RichText {
             KayaApp.Signal<String> runs = tx.signal("");
 
             Refs refs = new Refs();
-            tx.mount(tx.column(() -> {
+            tx.mount(tx.column(col -> {
                 refs.editor = tx.textarea().rich().a11yId("doc").a11yLabel("Document");
                 app.onEdit(refs.editor, (t, edit) -> {
                     String source = edit.source() == null ? "?" : edit.source().toString();
@@ -66,7 +68,7 @@ public final class RichText {
                 tx.label(last); // label#0
                 tx.label(runs); // label#1
 
-                tx.row(() -> {
+                tx.row(row -> {
                     tx.button("seed", t -> { // button#0
                         KayaApp.Document doc = new KayaApp.Document(DOC)
                                 .bold(KayaApp.TextRange.in(DOC, 0, 5))

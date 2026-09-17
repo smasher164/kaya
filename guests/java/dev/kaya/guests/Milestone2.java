@@ -21,6 +21,8 @@ public final class Milestone2 {
     }
 
     /** Java lambdas cannot assign captured locals. */
+    /** The TRACE's own slots: a For's body runs once where the compiler
+     * cannot see it, and the template zone is outside the ruling. */
     private static final class Refs {
         KayaApp.Collection items;
         KayaApp.Node remove;
@@ -39,7 +41,7 @@ public final class Milestone2 {
 
             Refs refs = new Refs();
 
-            tx.mount(tx.column(() -> {
+            tx.mount(tx.column(col -> {
                 tx.button("step", t -> { // button#0
                     steps++;
                     if (steps == 1) {

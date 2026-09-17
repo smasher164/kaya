@@ -18,7 +18,7 @@ app.build { tx in
     let timeSig = tx.signal(.time(KayaTime(hour: 14, minute: 30)))
     let tasks = taskCollection(tx)
 
-    let root = tx.column {
+    let root = tx.column { root in
         tx.label(bind: dateText)  // label#0
         tx.label(bind: timeText)  // label#1
         tx.label(bind: rowText)  // label#2
@@ -39,13 +39,14 @@ app.build { tx in
             tx.write(timeSig, .time(KayaTime(hour: 9, minute: 0)))
         }
         for row in tasks.rows {
-            row.label(row.name)
+            _ = row.label(row.name)
             let picker = row.datePicker(row.due) { tx, keys, picked in
                 guard case .str(let key) = keys[0] else { return }
                 tx.write(rowText, .str("row \(key): \(picked)"))
             }
             row.t.setA11yId(picker, "due")
         }
+        return root
     }
     tx.mount(root)
 

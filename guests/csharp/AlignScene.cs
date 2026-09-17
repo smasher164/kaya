@@ -14,42 +14,46 @@ static class AlignScene
             var fit = tx.Signal("fit");
             var plain = tx.Signal("plain probe");
 
-            var root = tx.Column(() =>
+            var root = tx.Column(root =>
             {
-                var centered = tx.Column(() =>
+                var centered = tx.Column(centered =>
                 {
                     tx.Label(bind: probe); // label#0
                     tx.Button("mid");
-                    var baseline = tx.Row(() =>
+                    var baseline = tx.Row(baseline =>
                     {
                         tx.Label(bind: @base); // label#1
                         tx.Button("tick");
                         tx.Image(TallPng);
+                        return baseline;
                     }, align: Align.Baseline); // the baseline trio
                     tx.SetA11yId(baseline, "baseline");
+                    return centered;
                 }, align: Align.Center); // the center trio
                 tx.SetA11yId(centered, "centered");
-                tx.Row(() => // row#1: the stretch pair's host
+                tx.Row(_ => // row#1: the stretch pair's host
                 {
                     tx.Label(bind: anchor); // label#2
-                    var fitcol = tx.Column(() =>
+                    var fitcol = tx.Column(fitcol =>
                     {
                         tx.Label(bind: fit); // label#3
                         tx.Button("wide");
+                        return fitcol;
                     }, grow: 1, align: Align.Stretch);
                     tx.SetA11yId(fitcol, "fitcol");
                 });
                 // row@plain: NO align, so the core's centre default is what
                 // the scene reads
-                var plainRow = tx.Row(() =>
+                var plainRow = tx.Row(plainRow =>
                 {
                     tx.SetA11yId(tx.Label(bind: plain), "plainlabel"); // label#4
                     tx.Image(TallPng);
+                    return plainRow;
                 });
                 tx.SetA11yId(plainRow, "plain");
                 // column@knobs: NO align; fill opts one child out of its
                 // default and one in
-                var knobs = tx.Column(() =>
+                var knobs = tx.Column(knobs =>
                 {
                     var optout = tx.Textarea();
                     tx.SetFill(optout, false);
@@ -58,17 +62,20 @@ static class AlignScene
                     tx.SetFill(fills, true);
                     tx.SetA11yId(fills, "fills");
                     // row@wrapped: six exact-width images flow onto two lines
-                    var wrapped = tx.Row(() =>
+                    var wrapped = tx.Row(wrapped =>
                     {
                         for (var i = 0; i < 6; i++)
                         {
                             tx.Image(WidePng);
                         }
+                        return wrapped;
                     });
                     tx.SetWrap(wrapped, true);
                     tx.SetA11yId(wrapped, "wrapped");
+                    return knobs;
                 });
                 tx.SetA11yId(knobs, "knobs");
+                return root;
             }, align: Align.Stretch);
             tx.SetA11yId(root, "root");
             tx.Mount(root);

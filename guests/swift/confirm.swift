@@ -5,12 +5,10 @@ import Foundation
 
 let app = KayaApp()
 
-var status: KayaSignal!
-
 app.build { tx in
     tx.window(title: "confirm")
-    status = tx.signal(.str("no decision"))
-    let root = tx.column {
+    let status = tx.signal(.str("no decision"))
+    let root = tx.column { root in
         tx.label(bind: status)  // label#0
         tx.button(
             "delete",
@@ -38,6 +36,7 @@ app.build { tx in
                     tx.write(status, .str(choice == .action0 ? "ejected" : "held"))
                 }
             })
+        return root
     }
     tx.mount(root)
 }

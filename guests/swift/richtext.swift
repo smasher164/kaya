@@ -23,11 +23,11 @@ app.build { tx in
     let last = tx.signal(.str(""))
     let runs = tx.signal(.str(""))
 
-    // A widget parents at CREATION, so the editor rides out through this
-    // var (docs/traps.md, result builders).
+    // A SELF-REFERENCE, not a smuggle: the textarea's own onEdit reads
+    // the document of the widget being declared.
     var editor: KayaWidget! = nil
 
-    let root = tx.column {
+    let root = tx.column { root in
         editor = tx.textarea(
             rich: true,
             onEdit: { t, edit in
@@ -50,7 +50,7 @@ app.build { tx in
         tx.setA11yLabel(editor, "Document")
         tx.label(bind: last)  // label#0
         tx.label(bind: runs)  // label#1
-        tx.row {
+        tx.row { _ in
             tx.button("seed") { t in  // button#0
                 let doc = KayaDocument(document)
                     .bold(0..<6)
@@ -81,6 +81,7 @@ app.build { tx in
                 t.write(runs, .str(spell(app.document(editor).runs)))
             }
         }
+        return root
     }
     tx.mount(root)
 }

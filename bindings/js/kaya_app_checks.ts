@@ -68,7 +68,7 @@ if (isMainThread) {
 
     items = kaya.collection();
     check("forEach rejects instance handles", throws(() => kaya.forEach(items.at("g1") as never, () => {}), /drop the \.at/));
-    ids.push(kaya.column(() => {
+    ids.push(kaya.column((col) => {
       ids.push(kaya.forEach(items, (el) => {
         check("guard trips in template", throws(() => items.size, /freeze this branch/));
         ids.push(kaya.label({ bind: el }).id);
@@ -80,6 +80,7 @@ if (isMainThread) {
       }).id);
       field = kaya.entry({});
       ids.push(field.id);
+      return col;
     }).id);
     todos = kaya.collection(Todo);
     count = kaya.signal(0);
@@ -113,6 +114,52 @@ if (isMainThread) {
   check(
     "addSection(id, opts, body) returns the body's value",
     app.addSection(5171, { title: "idiom section" }, () => { kaya.column(() => { kaya.label("idiom section"); }); return "s"; }) === "s",
+  );
+
+  // X3 (ruled 2026-09-17): the CONTAINERS and the menu bodies do it too —
+  // the constructor returns what its body returned, and the body receives
+  // its own container, so nothing is smuggled out through `let x!: T`.
+  // The witness for "its own" is the MINT ORDER: widget ids come off one
+  // monotone counter, so a container's id is the one after the widget
+  // declared just before it, and a bogus handle cannot match.
+  app.window({ windowId: 2621 }, () => {
+    let childId = -1;
+    const returned = kaya.column(() => {
+      const made = kaya.label("value");
+      childId = made.id;
+      return made;
+    });
+    check("column(body) returns the body's value", returned instanceof kaya.Widget && returned.id === childId);
+    check("row(opts, body) returns the body's value", kaya.row({ spacing: 4 }, () => "body") === "body");
+    check("a container with no body still declares one", kaya.column({ grow: 1 }) === undefined);
+
+    const mark = kaya.label("mark").id;
+    check("the body sees its container", kaya.row((r) => r.id) === mark + 1);
+    const nested = kaya.column((outer) => kaya.row((inner) => [outer.id, inner.id] as const));
+    check("a nested body sees ITS OWN container", nested[0] === mark + 2 && nested[1] === mark + 3);
+    const rest = kaya.label("rest").id;
+    check(
+      "grid, scroll and labeled thread it too",
+      kaya.grid(2, (g) => g.id) === rest + 1
+        && kaya.scroll((sc) => sc.id) === rest + 2
+        && kaya.labeled("Name", (lb) => lb.id) === rest + 3,
+    );
+  });
+  check(
+    "menu(label, body) returns the body's value, and the body sees the menu",
+    app.window({ windowId: 2622 }, () => {
+      const seen = app.menu("Idiom", (m) => kaya.item("One").id === m.id + 1);
+      kaya.column(() => { kaya.label("menu idiom"); });
+      return seen;
+    }),
+  );
+  check(
+    "contextCatalog(body) returns the body's value, and the body sees the catalog",
+    app.window({ windowId: 2623 }, () => {
+      const answered = kaya.contextCatalog((c) => (c instanceof kaya.ContextCatalog ? 7 : 0));
+      kaya.column(() => { kaya.label("catalog idiom"); });
+      return answered === 7;
+    }),
   );
 
   // -------------------------------------------------------- the model

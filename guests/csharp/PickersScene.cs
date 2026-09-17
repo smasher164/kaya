@@ -24,7 +24,7 @@ static class PickersScene
             var timeSig = tx.Signal(new TimeOnly(14, 30));
             var tasks = ChoreTaskKaya.Collection(tx);
 
-            tx.Mount(tx.Column(() =>
+            tx.Mount(tx.Column(root =>
             {
                 tx.Label(bind: dateText);                          // label#0
                 tx.Label(bind: timeText);                          // label#1
@@ -55,6 +55,7 @@ static class PickersScene
                     });
                     row.SetA11yId(picker, "due");
                 }
+                return root;
             }));
 
             tasks.Insert(tx, "a", new ChoreTask("a", new DateOnly(2026, 10, 1)));

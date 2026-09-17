@@ -14,12 +14,13 @@ static class PanesScene
             tx.Window(title: "panes", panes: 3);
             var caption = tx.Signal("root pane");
 
-            tx.Mount(tx.Column(() =>
+            tx.Mount(tx.Column(root =>
             {
                 // Authored ids: an index read passes whether or not anything
                 // reached the screen.
                 tx.SetA11yId(tx.Label(bind: caption), "root"); // label#0
                 tx.Button("open content", onClick: OpenContent); // button#0
+                return root;
             }));
         });
 
@@ -29,11 +30,12 @@ static class PanesScene
     static void OpenContent(Tx tx)
     {
         tx.PushEntry(Content, title: "content");
-        var pane = tx.Column(() =>
+        var pane = tx.Column(pane =>
         {
             var caption = tx.Signal("content pane");
             tx.SetA11yId(tx.Label(bind: caption), "content"); // label#1
             tx.Button("open detail", onClick: OpenDetail); // button#1
+            return pane;
         });
         tx.MountIn(Content, pane);
     }
@@ -41,10 +43,11 @@ static class PanesScene
     static void OpenDetail(Tx tx)
     {
         tx.PushEntry(Detail, title: "detail");
-        var pane = tx.Column(() =>
+        var pane = tx.Column(pane =>
         {
             var caption = tx.Signal("detail pane");
             tx.SetA11yId(tx.Label(bind: caption), "detail"); // label#last
+            return pane;
         });
         tx.MountIn(Detail, pane);
     }

@@ -13,7 +13,7 @@ public final class Panels {
         KayaApp.Signal<String> status = app.build(tx -> {
             tx.window(0).title("panels");
             KayaApp.Signal<String> s = tx.signal("two panels");
-            tx.mount(tx.column(() -> {
+            tx.mount(tx.column(col -> {
                 tx.label(s); // label#0
             }));
 
@@ -25,7 +25,7 @@ public final class Panels {
                         tx2.write(s, "close requested");
                         tx2.destroyWindow(1);
                     });
-            tx.mountIn(1, tx.column(() -> {
+            tx.mountIn(1, tx.column(col2 -> {
                 KayaApp.Signal<String> caption = tx.signal("inspector pane");
                 tx.label(caption); // label#1
             }));

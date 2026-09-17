@@ -6,27 +6,19 @@ open Kaya_app
 let () =
   let app = Kaya_app.create () in
 
-  let status = ref None in
   build app (fun () ->
      window ~title:"confirm" ();
      let s = signal Scalar.Str ("no decision") in
-     status := Some s;
      let delete_answered choice =
-       match !status with
-       | Some s ->
-           let text =
-             if choice = Alert_choice.Cancel then "kept"
-             else if choice = Alert_choice.Action1 then "archived"
-             else "deleted"
-           in
-           write s (text)
-       | None -> ()
+       let text =
+         if choice = Alert_choice.Cancel then "kept"
+         else if choice = Alert_choice.Action1 then "archived"
+         else "deleted"
+       in
+       write s (text)
      in
      let eject_answered choice =
-       match !status with
-       | Some s ->
-           write s ((if choice = Alert_choice.Cancel then "held" else "ejected"))
-       | None -> ()
+       write s ((if choice = Alert_choice.Cancel then "held" else "ejected"))
      in
      let on_delete () =
        ignore

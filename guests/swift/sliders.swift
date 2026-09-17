@@ -27,7 +27,7 @@ app.build { tx in
     let pos = tx.signal(.f64(50.0))
     let tracks = trackCollection(tx)
 
-    let root = tx.column {
+    let root = tx.column { root in
         tx.label(bind: levelText)  // label#0
         tx.label(bind: commitText)  // label#1
         tx.label(bind: volumeText)  // label#2
@@ -50,7 +50,7 @@ app.build { tx in
             tx.write(pos, .f64(25.0))
         }
         for row in tracks.rows {
-            row.label(row.name)
+            _ = row.label(row.name)
             let level = row.slider(
                 min: 0.0, max: 100.0, value: row.level, step: 10.0,
                 onCommit: { tx, keys, v in
@@ -59,6 +59,7 @@ app.build { tx in
                 })
             row.t.setA11yId(level, "level")
         }
+        return root
     }
     tx.mount(root)
 

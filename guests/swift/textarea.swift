@@ -13,7 +13,7 @@ app.build { tx in
     tx.window(title: "textarea")
     let lines = tx.signal(.str("0 lines"))
 
-    let root = tx.column {
+    let root = tx.column { root in
         let editor = tx.textarea { t, text in
             t.write(lines, .str(count(text)))
         }
@@ -22,6 +22,7 @@ app.build { tx in
             t.clear(editor)
             t.focus(editor)
         }
+        return root
     }
     tx.mount(root)
 }

@@ -5,13 +5,12 @@ import Foundation
 
 let app = KayaApp()
 
-var status: KayaSignal!
-
 app.build { tx in
     tx.window(title: "panels")
-    status = tx.signal(.str("two panels"))
-    let root = tx.column {
+    let status = tx.signal(.str("two panels"))
+    let root = tx.column { root in
         tx.label(bind: status)  // label#0
+        return root
     }
     tx.mount(root)
 
@@ -21,9 +20,10 @@ app.build { tx in
             tx2.write(status, .str("close requested"))
             tx2.destroyWindow(1)
         })
-    let auxRoot = tx.column {
+    let auxRoot = tx.column { auxRoot in
         let caption = tx.signal(.str("inspector pane"))
         tx.label(bind: caption)  // label#1
+        return auxRoot
     }
     tx.mountIn(1, auxRoot)
 }

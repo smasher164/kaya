@@ -47,6 +47,9 @@ let () =
   write_file (Filename.concat scene_dir "pasted.txt") "pasted bytes";
 
   let app = Kaya_app.create () in
+  (* A handler declared before the widget it acts on: the focus buttons
+     precede the entries, and OCaml's [let] is sequential. Not a
+     container body smuggling its result out. *)
   let rich = ref None in
   let plain = ref None in
 

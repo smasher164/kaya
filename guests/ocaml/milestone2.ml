@@ -55,7 +55,7 @@ let () =
            [
              button ~text:"step" ~on_click:on_step (* button#0 *);
              label ~bind:status (* label#0 *);
-             when_ extras (fun () -> Tpl.(label ~text:"extras on" ()));
+             shown extras (fun () -> Tpl.(label ~text:"extras on" ()));
              w group_list;
            ]
            ()

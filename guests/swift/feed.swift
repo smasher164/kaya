@@ -21,7 +21,7 @@ app.build { tx in
 
     // A bare expression never reaches buildExpression, so every child is
     // declared WHERE IT STANDS (docs/traps.md, result builders).
-    let root = tx.row {
+    let root = tx.row { root in
     tx.button("promote") { tx in
         for entry in feed.items(tx) {
             if case .note(let text) = entry.value {
@@ -46,6 +46,7 @@ app.build { tx in
                 todo.label(todo.title)
             }
         })
+        return root
     }
     tx.mount(root)
     feed.insert(tx, .str("a"), .note(text: "jot one"))

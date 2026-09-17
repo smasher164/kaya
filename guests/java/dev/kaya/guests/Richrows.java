@@ -68,11 +68,11 @@ public final class Richrows {
             };
             win.onUndone(restored).onRedone(restored);
 
-            tx.mount(tx.column(() -> {
+            tx.mount(tx.column(col -> {
                 tx.label(last); // label#0
                 tx.label(view); // label#1
 
-                tx.row(() -> {
+                tx.row(row -> {
                     tx.button("patch b", t -> { // button#0
                         t.undoable("patch b");
                         NoteKaya.patch(t, notes, "b").body(

@@ -14,7 +14,8 @@ function onSave(): void {
 const { nameHelp } = app.window({}, () => {
   const nameHelp = kaya.signal("Your full name as it appears on the card");
   const accounts = kaya.collection(Account);
-  const settings = kaya.column(() => {
+  kaya.column((settings) => {
+    settings.help("The settings for this account").a11yId("settings");
     kaya.button("Save", { onClick: onSave }).help("Saves the draft to disk").a11yId("save"); // button#0
     kaya.button("Discard").help("Throws the draft away").a11yHint("discard every change").a11yId("discard"); // button#1
     kaya.entry().help(nameHelp).a11yId("fullname"); // entry#0
@@ -23,7 +24,6 @@ const { nameHelp } = app.window({}, () => {
       kaya.label({ bind: account.name }).help(account.note).a11yId(account.name);
     }
   });
-  settings.help("The settings for this account").a11yId("settings");
 
   accounts.insert("a", Account({ name: "a", note: "The first account, opened in March" }));
   accounts.insert("b", Account({ name: "b", note: "The second account, opened in May" }));

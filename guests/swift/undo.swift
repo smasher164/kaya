@@ -12,12 +12,9 @@ let app = KayaApp()
 var draft = ""
 var rowNotes: [Int64: String] = [:]
 
-var status: KayaSignal!
-var history: KayaSignal!
-var keys: KayaSignal!
-var notes: KayaSignal!
+// A handler declared before the widget it acts on: Swift has no zero
+// value for a handle (guests/go uses var + zero value).
 var field: KayaWidget!
-var todos: KayaRecordCollection<Todo>!
 
 /// kaya invents no name for a typing episode (docs/undo-plan.md D8).
 func what(_ label: String) -> String {
@@ -68,7 +65,7 @@ func foldTexts(_ texts: [KayaUndoText]) {
     }
 }
 
-app.build { tx in
+let todos: KayaRecordCollection<Todo> = app.build { tx in
     // The two items are the whole undo surface an app declares.
     let edit = tx.menu(
         "Edit",
@@ -77,6 +74,11 @@ app.build { tx in
             tx.item("Redo", role: .redo),
         ])
     // The binding has reconciled its collection mirror before this runs.
+    let status = tx.signal(.str("no todos"))
+    let history = tx.signal(.str("history empty"))
+    let keys = tx.signal(.str("no keys"))
+    let notes = tx.signal(.str("no notes"))
+    let todos = todoCollection(tx)
     tx.window(
         title: "undo",
         onUndone: { tx, label, delta in
@@ -100,13 +102,7 @@ app.build { tx in
         },
         menus: [edit])
 
-    status = tx.signal(.str("no todos"))
-    history = tx.signal(.str("history empty"))
-    keys = tx.signal(.str("no keys"))
-    notes = tx.signal(.str("no notes"))
-    todos = todoCollection(tx)
-
-    let root = tx.column {
+    let root = tx.column { root in
         tx.setA11yId(tx.label(bind: status), "status")  // label#0
         tx.setA11yId(tx.label(bind: history), "history")  // label#1
         tx.setA11yId(tx.label(bind: keys), "keys")  // label#2
@@ -153,7 +149,7 @@ app.build { tx in
             tx.write(keys, .str(keyList(tx)))
         }
         for row in todos.rows {
-            row.row {
+            _ = row.row {
                 row.label(row.title)
                 // UNBOUND on purpose: the copy owns its text and the app folds it.
                 row.t.entry { tx, path, text in
@@ -167,10 +163,12 @@ app.build { tx in
                 }
             }
         }
+        return root
     }
     // The scene types with REAL keystrokes, so something must hold focus.
     tx.focus(field)
     tx.mount(root)
+    return todos
 }
 
 app.run()

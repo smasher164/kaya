@@ -25,8 +25,6 @@ FileManager.default.createFile(
     atPath: (saveDir as NSString).appendingPathComponent("decoy"),
     contents: Data("decoy".utf8))
 
-var status: KayaSignal!
-
 // Handles, never paths — `localPath` is nil on both phones.
 var source: KayaPickedFile?
 var destination: KayaPickedFile?
@@ -66,9 +64,9 @@ func work(_ job: @escaping () -> String) {
     }
 }
 
-app.build { tx in
+let status: KayaSignal = app.build { tx in
     tx.window(title: "save")
-    status = tx.signal(.str("no file"))
+    let status = tx.signal(.str("no file"))
 
     func picked(_ tx: KayaAppTx, _ files: [KayaPickedFile]) {
         guard let file = files.first else {
@@ -90,7 +88,7 @@ app.build { tx in
         work { "saved \(writeBack(file, "third draft"))" }
     }
 
-    let root = tx.column {
+    let root = tx.column { root in
         tx.setA11yId(tx.label(bind: status), "status")  // label#0
         tx.button("open") { inner in  // button#0
             inner.pickFile(onResult: picked)
@@ -117,8 +115,10 @@ app.build { tx in
             }
             work { "reopened \(readBack(first)) \(readBack(second))" }
         }
+        return root
     }
     tx.mount(root)
+    return status
 }
 
 app.run()

@@ -9,23 +9,23 @@ static class NavScene
     {
         var app = new KayaApp();
 
-        Signal status = default;
-        app.Build(tx =>
+        var status = app.Build(tx =>
         {
             tx.Window(title: "nav");
-            status = tx.Signal("at root");
+            var status = tx.Signal("at root");
 
-            tx.Mount(tx.Column(() =>
+            tx.Mount(tx.Column(root =>
             {
                 tx.Label(bind: status); // label#0
                 tx.Button("open detail", onClick: inner => // button#0
                 {
                     inner.PushEntry(Detail, title: "detail",
                         onPopped: tx2 => tx2.Write(status, "popped detail"));
-                    var pane = inner.Column(() =>
+                    var pane = inner.Column(pane =>
                     {
                         var caption = inner.Signal("detail pane");
                         inner.Label(bind: caption);
+                        return pane;
                     });
                     inner.MountIn(Detail, pane);
                     inner.Write(status, "pushed detail");
@@ -39,15 +39,18 @@ static class NavScene
                             tx2.Write(status, "back requested");
                             tx2.PopEntry();
                         });
-                    var pane = inner.Column(() =>
+                    var pane = inner.Column(pane =>
                     {
                         var caption = inner.Signal("settings pane");
                         inner.Label(bind: caption);
+                        return pane;
                     });
                     inner.MountIn(Settings, pane);
                     inner.Write(status, "pushed settings");
                 });
+                return root;
             }));
+            return status;
         });
 
         System.Environment.Exit(app.Run());

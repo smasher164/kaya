@@ -15,10 +15,12 @@ let (status, items, removeButton) = app.build {
 
     // A node parents at CREATION, so both handles are built inside the
     // template bodies (docs/traps.md, result builders).
+    // The TRACE's own slots: a For's body runs once where the compiler
+    // cannot see it, and the template zone is outside the ruling.
     var items: KayaCollection! = nil
     var removeButton: KayaNodeHandle! = nil
 
-    let root = tx.column {
+    let root = tx.column { root in
         tx.button("step") { t in
             steps += 1
             if steps == 1 {
@@ -35,7 +37,7 @@ let (status, items, removeButton) = app.build {
             t.write(status, .str("step \(steps)"))
         }
         tx.label(bind: status)
-        tx.when(stepCount == 1) { t in t.label("extras on") }.0
+        _ = tx.when(stepCount == 1) { t in t.label("extras on") }
         tx.each(groups) { g in
             _ = g.column {
                 g.label(KayaField<String>(index: 0))
@@ -49,6 +51,7 @@ let (status, items, removeButton) = app.build {
                 }
             }
         }
+        return root
     }
     tx.mount(root)
     return (status, items, removeButton)

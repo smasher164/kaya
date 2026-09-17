@@ -26,7 +26,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     .shortcut("primary+comma")
                     .id()
             })
-            .out;
+            .value();
         msgs.on_menu_item(settings, Msg::Settings);
 
         // Option order IS the index.
@@ -43,11 +43,11 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                         o.option("Name").shortcut("primary+1");
                         o.option("Date").shortcut("primary+2");
                     })
-                    .value(sort)
+                    .selected(sort)
                     .id();
                 (details_item, sort_group)
             })
-            .out;
+            .value();
         msgs.on_menu_toggle(details_item, Msg::Details);
         msgs.on_menu_select(sort_group, Msg::Sorted);
 

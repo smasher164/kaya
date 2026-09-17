@@ -7,18 +7,17 @@ static class ScrollScene
     {
         var app = new KayaApp();
 
-        Signal status = default;
-        app.Build(tx =>
+        var status = app.Build(tx =>
         {
             tx.Window(title: "scroll");
-            status = tx.Signal("at top");
+            var status = tx.Signal("at top");
 
-            tx.Mount(tx.Column(() =>
+            tx.Mount(tx.Column(root =>
             {
                 tx.Label(bind: status); // label#0
-                tx.Scroll(() => // scroll#0
+                tx.Scroll(_ => // scroll#0
                 {
-                    tx.Column(() =>
+                    tx.Column(_ =>
                     {
                         for (int i = 1; i <= 29; i++)
                         {
@@ -29,7 +28,9 @@ static class ScrollScene
                             inner.Write(status, "bottom clicked"));
                     });
                 }, grow: 1);
+                return root;
             }));
+            return status;
         });
 
         System.Environment.Exit(app.Run());

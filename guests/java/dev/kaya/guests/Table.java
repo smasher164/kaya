@@ -25,7 +25,7 @@ public final class Table {
             var items = TableItemKaya.collection(tx);
             // The root is a row so the For's container is the scene's only
             // column-kind widget (the reorder scene's rule).
-            tx.mount(tx.row(() -> {
+            tx.mount(tx.row(cells -> {
                 var rows = TableItemKaya.rows(tx, items);
                 for (var row : rows) {
                     row.row(() -> {
