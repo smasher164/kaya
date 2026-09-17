@@ -13,9 +13,9 @@ let spell (runs : Run.t list) =
   String.concat "|"
     (List.map
        (fun (r : Run.t) ->
-         if r.value = "true" then
-           Printf.sprintf "%d:%d %s" r.start r.stop r.name
-         else Printf.sprintf "%d:%d %s=%s" r.start r.stop r.name r.value)
+         let start, stop = r.range in
+         if Run.is_flag r then Printf.sprintf "%d:%d %s" start stop r.name
+         else Printf.sprintf "%d:%d %s=%s" start stop r.name r.value)
        runs)
 
 let () =
@@ -23,8 +23,8 @@ let () =
 
   build app (fun () ->
       window ~title:"richtext" ();
-      let last = signal_str ("") in
-      let runs = signal_str ("") in
+      let last = signal Scalar.Str ("") in
+      let runs = signal Scalar.Str ("") in
 
       let editor =
         textarea ~rich:true ~a11y_id:"doc" ~a11y_label:"Document" ()
@@ -34,7 +34,7 @@ let () =
       on_edit app editor (fun e ->
           let mirror = spell (document editor).runs in
           write last
-            (Printf.sprintf "edit %d:%d <%s> %s [%s]" e.start e.stop
+            (Printf.sprintf "edit %d:%d <%s> %s [%s]" (fst e.range) (snd e.range)
                e.inserted
                (match e.source with
                | Some s -> edit_source_name s
@@ -44,7 +44,7 @@ let () =
       on_format app editor (fun act ->
           let mirror = spell (document editor).runs in
           write last
-            (Printf.sprintf "format %d:%d %s=%s" act.start act.stop
+            (Printf.sprintf "format %d:%d %s=%s" (fst act.range) (snd act.range)
                act.name
                (Option.value act.value ~default:"off"));
           write runs mirror);
@@ -73,7 +73,7 @@ let () =
                  button ~text:"insert"
                    ~on_click:(fun () ->
                      apply_edit editor
-                       (Edit.insert 6 ", big" |> Edit.mark (2, 5) "italic" "true");
+                       (Edit.insert 6 ", big" |> Edit.flag (2, 5) "italic" true);
                      write runs ((spell (document editor).runs)));
                  (* button#2 — select the first word, for the toolbar act *)
                  button ~text:"select word"

@@ -4,11 +4,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE DeriveAnyClass #-}
-{-# OPTIONS_GHC -Wno-missing-signatures #-}
--- A key path's wire tag (KayaWire.Value) has no spelling a guest may
--- write (tools/check-sugar-surface.py's wire-tag clause) — the
--- fromWire-decoding helper below is left unsigned so its argument
--- type is inferred, never named.
 
 -- The pickers scene, Haskell port — guests/rust/pickers.rs,
 -- tools/scenes/pickers.steps, docs/datetime-plan.md.
@@ -27,40 +22,40 @@ data Task = Task {name :: Text, due :: Day}
   deriving anyclass (KayaRecord)
 
 
-dayText :: Day -> String
-dayText d = let (y, m, dd) = toGregorian d in printf "%04d-%02d-%02d" y m dd
+-- printf is String by nature (Text.Printf has no Text instance), so the
+-- one conversion sits here rather than at every call.
+dayText :: Day -> Text
+dayText d = let (y, m, dd) = toGregorian d in T.pack (printf "%04d-%02d-%02d" y m dd)
 
-clockText :: TimeOfDay -> String
-clockText t = printf "%02d:%02d" (todHour t) (todMin t)
+clockText :: TimeOfDay -> Text
+clockText t = T.pack (printf "%02d:%02d" (todHour t) (todMin t))
 
--- The key path's own wire tag decoded through 'fromWire', never named:
--- the argument's type (the wire's Value) has no spelling a guest may
--- write (tools/check-sugar-surface.py's wire-tag clause).
-keyWord v = T.unpack (fromWire v :: Text)
+keyWord :: Key -> Text
+keyWord = keyText
 
 main :: IO ()
 main = kayaMain $ \app -> do
   buildTx app $ do
-    dateText <- signal (T.pack "date: none")
-    timeText <- signal (T.pack "time: none")
-    rowText <- signal (T.pack "row: none")
-    dateSig <- signal (dateValue (fromGregorian 2026 9 4))
-    timeSig <- signal (timeValue (TimeOfDay 14 30 0))
+    dateText <- signalText "date: none"
+    timeText <- signalText "time: none"
+    rowText <- signalText "row: none"
+    dateSig <- signalDate ((fromGregorian 2026 9 4))
+    timeSig <- signalTime ((TimeOfDay 14 30 0))
     tasks <- collectionOf @Task
 
     let onDate picked =
-          submitTx app $ writeSignal dateText (T.pack ("date: " ++ dayText picked))
+          submitTx app $ writeSignal dateText ("date: " <> dayText picked)
         onTime picked =
-          submitTx app $ writeSignal timeText (T.pack ("time: " ++ clockText picked))
+          submitTx app $ writeSignal timeText ("time: " <> clockText picked)
         onRowDate (key : _) picked =
           submitTx app $
             writeSignal
               rowText
-              (T.pack ("row " ++ keyWord key ++ ": " ++ dayText picked))
+              ("row " <> keyWord key <> ": " <> dayText picked)
         onRowDate [] _ = error "kaya: onRowDate's key path is never empty"
         onReset = submitTx app $ do
-          writeSignal dateSig (dateValue (fromGregorian 2026 3 1))
-          writeSignal timeSig (timeValue (TimeOfDay 9 0 0))
+          writeSignal dateSig ((fromGregorian 2026 3 1))
+          writeSignal timeSig ((TimeOfDay 9 0 0))
 
     root <-
       column
@@ -72,23 +67,23 @@ main = kayaMain $ \app -> do
             onDate
             [ MinDate (fromGregorian 2026 1 1),
               MaxDate (fromGregorian 2026 12 31),
-              A11yId ("when" :: Text),
-              A11yLabel ("Due" :: Text)
+              A11yId "when",
+              A11yLabel "Due"
             ],
           timePickerBoundOn -- time_picker#0
             timeSig
             onTime
-            [MinuteStep 15, A11yId ("at" :: Text), A11yLabel ("At" :: Text)],
+            [MinuteStep 15, A11yId "at", A11yLabel "At"],
           buttonOn "reset" onReset, -- button#0
           each (recordHandle tasks) $
             rowOf
               [ label (field @"name" @Task),
                 withTplAttrs
-                  [TplA11yId ("due" :: Text)]
+                  [TplA11yId "due"]
                   (datePicker (field @"due" @Task) onRowDate)
               ]
         ]
     mount root
 
-    insertRecord tasks (T.pack "a") (Task "a" (fromGregorian 2026 10 1))
-    insertRecord tasks (T.pack "b") (Task "b" (fromGregorian 2026 11 20))
+    insertRecord tasks "a" (Task "a" (fromGregorian 2026 10 1))
+    insertRecord tasks "b" (Task "b" (fromGregorian 2026 11 20))

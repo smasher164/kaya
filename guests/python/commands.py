@@ -33,7 +33,7 @@ with app.window(title="commands"):
     with app.menu("File"):
         kaya.item("Reload")
         kaya.item("Settings…", shortcut="primary+comma",
-                  role=kaya.ROLE_SETTINGS, on_activate=on_settings)
+                  role=kaya.MenuRole.SETTINGS, on_activate=on_settings)
 
     # Option order IS the index.
     with app.menu("View"):

@@ -58,8 +58,8 @@ static class UndoScene
         {
             var edit = tx.Menu("Edit", items: new[]
             {
-                tx.Item("Undo", role: Tx.RoleUndo),
-                tx.Item("Redo", role: Tx.RoleRedo),
+                tx.Item("Undo", role: MenuRole.Undo),
+                tx.Item("Redo", role: MenuRole.Redo),
             });
             status = tx.Signal("no todos");
             history = tx.Signal("history empty");

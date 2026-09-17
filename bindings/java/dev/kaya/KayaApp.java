@@ -470,15 +470,20 @@ public final class KayaApp {
         }
 
         /** The wire's number, refused naming one this build does not
-         * know. */
+         * know. A SWITCH over the wire's compile-time constants:
+         * {@code values()} clones the backing array on every call, and
+         * this runs once per notification result. */
         static NotificationOutcome fromWire(int number) {
-            for (NotificationOutcome o : values()) {
-                if (o.wire == number) {
-                    return o;
-                }
+            NotificationOutcome known = switch (number) {
+                case KayaWire.NOTIFICATION_OUTCOME_ACTIVATED -> ACTIVATED;
+                case KayaWire.NOTIFICATION_OUTCOME_REFUSED -> REFUSED;
+                default -> null;
+            };
+            if (known == null) {
+                throw new IllegalStateException("kaya: outcome " + number
+                        + " is not a notification outcome this build knows");
             }
-            throw new IllegalStateException("kaya: outcome " + number
-                    + " is not a notification outcome this build knows");
+            return known;
         }
     }
 
@@ -702,15 +707,21 @@ public final class KayaApp {
         }
 
         /** The wire's number, refused naming one this build does not
-         * know. */
+         * know. A SWITCH over the wire's compile-time constants:
+         * {@code values()} clones the backing array on every call, and
+         * this runs once per alert result. */
         static AlertChoice fromWire(int number) {
-            for (AlertChoice c : values()) {
-                if (c.wire == number) {
-                    return c;
-                }
+            AlertChoice known = switch (number) {
+                case KayaWire.ALERT_CHOICE_ACTION0 -> ACTION0;
+                case KayaWire.ALERT_CHOICE_ACTION1 -> ACTION1;
+                case KayaWire.ALERT_CHOICE_CANCEL -> CANCEL;
+                default -> null;
+            };
+            if (known == null) {
+                throw new IllegalStateException("kaya: alert choice " + number
+                        + ", which this build does not know");
             }
-            throw new IllegalStateException("kaya: alert choice " + number
-                    + ", which this build does not know");
+            return known;
         }
     }
 
@@ -3276,11 +3287,31 @@ public final class KayaApp {
     /** One attribute over one span, in TextRange's unit (UTF-8 bytes):
      * {@code value} is "true" for the flags, a URL for a link, a
      * {@link Block}'s own spelling for a block. */
-    public record TextRun(long start, long stop, String name, String value) {}
+    /** The wire's own spelling of a flag attribute; the boolean
+     * spellings coerce to it at the boundary and {@code isFlag} reads it
+     * back. */
+    public static final String FLAG_VALUE = "true";
+
+    /** The one place a boolean flag meets the wire's own string. */
+    static String flagWire(boolean on) {
+        return on ? FLAG_VALUE : "false";
+    }
+
+    public record TextRun(TextRange range, String name, String value) {
+        /** A flag attribute, on: bold, italic, underline, strike, code. */
+        public boolean isFlag() {
+            return FLAG_VALUE.equals(value);
+        }
+    }
 
     /** A toolbar act over a range; a null {@code value} is the attribute
      * taken off. */
-    public record Format(long start, long stop, String name, String value) {}
+    public record Format(TextRange range, String name, String value) {
+        /** A flag attribute, on. */
+        public boolean isFlag() {
+            return FLAG_VALUE.equals(value);
+        }
+    }
 
     /**
      * A {@code rich} textarea's text and runs, kept current by the
@@ -3311,8 +3342,14 @@ public final class KayaApp {
         /** Paint one attribute over one range. Every chain method below
          * is this one with a name and a value filled in. */
         public Document mark(TextRange range, String name, String value) {
-            marks.add(new TextRun(range.start, range.stop, name, value));
+            marks.add(new TextRun(range, name, value));
             return this;
+        }
+
+        /** A FLAG attribute, on or off — the boolean spelling, coerced
+         * to the wire's own string at the boundary. */
+        public Document mark(TextRange range, String name, boolean on) {
+            return mark(range, name, flagWire(on));
         }
 
         public Document bold(TextRange range) {
@@ -3348,8 +3385,8 @@ public final class KayaApp {
         /** The attribute covering one UTF-8 byte offset, or null. */
         public String attrAt(long byteOffset, String name) {
             for (TextRun run : marks) {
-                if (run.name().equals(name) && run.start() <= byteOffset
-                        && byteOffset < run.stop()) {
+                if (run.name().equals(name) && run.range().start <= byteOffset
+                        && byteOffset < run.range().stop) {
                     return run.value();
                 }
             }
@@ -3375,21 +3412,21 @@ public final class KayaApp {
             for (String name : names) {
                 List<TextRun> painted = new ArrayList<>();
                 for (TextRun run : runs) {
-                    if (!run.name().equals(name) || run.start() >= run.stop()) {
+                    if (!run.name().equals(name) || run.range().start >= run.range().stop) {
                         continue;
                     }
                     List<TextRun> kept = new ArrayList<>();
                     for (TextRun old : painted) {
-                        if (old.stop() <= run.start() || old.start() >= run.stop()) {
+                        if (old.range().stop <= run.range().start || old.range().start >= run.range().stop) {
                             kept.add(old);
                             continue;
                         }
-                        if (old.start() < run.start()) {
-                            kept.add(new TextRun(old.start(), run.start(), old.name(),
+                        if (old.range().start < run.range().start) {
+                            kept.add(new TextRun(TextRange.ofBytes(old.range().start, run.range().start), old.name(),
                                     old.value()));
                         }
-                        if (old.stop() > run.stop()) {
-                            kept.add(new TextRun(run.stop(), old.stop(), old.name(),
+                        if (old.range().stop > run.range().stop) {
+                            kept.add(new TextRun(TextRange.ofBytes(run.range().stop, old.range().stop), old.name(),
                                     old.value()));
                         }
                     }
@@ -3397,19 +3434,20 @@ public final class KayaApp {
                     painted = kept;
                 }
                 // List.sort is stable, so equal starts keep the paint order.
-                painted.sort(java.util.Comparator.comparingLong(TextRun::start));
+                painted.sort(java.util.Comparator.comparingLong(r -> r.range().start));
                 for (TextRun run : painted) {
                     TextRun last = one.isEmpty() ? null : one.get(one.size() - 1);
-                    if (last != null && last.name().equals(name) && last.stop() == run.start()
+                    if (last != null && last.name().equals(name) && last.range().stop == run.range().start
                             && last.value().equals(run.value())) {
                         one.set(one.size() - 1,
-                                new TextRun(last.start(), run.stop(), name, last.value()));
+                                new TextRun(TextRange.ofBytes(last.range().start, run.range().stop), name, last.value()));
                         continue;
                     }
                     one.add(run);
                 }
             }
-            one.sort(java.util.Comparator.comparingLong(TextRun::start)
+            one.sort(java.util.Comparator
+                    .comparingLong((TextRun r) -> r.range().start)
                     .thenComparing(TextRun::name));
             return one;
         }
@@ -3420,20 +3458,18 @@ public final class KayaApp {
      * offsets RELATIVE to the inserted text.
      */
     public static final class Edit {
-        final long start;
-        final long stop;
+        final TextRange range;
         final String inserted;
         final List<TextRun> marks = new ArrayList<>();
         final EditSource source;
 
-        Edit(long start, long stop, String inserted, List<TextRun> runs) {
-            this(start, stop, inserted, runs, null);
+        Edit(TextRange range, String inserted, List<TextRun> runs) {
+            this(range, inserted, runs, null);
         }
 
-        Edit(long start, long stop, String inserted, List<TextRun> runs,
+        Edit(TextRange range, String inserted, List<TextRun> runs,
                 EditSource source) {
-            this.start = start;
-            this.stop = stop;
+            this.range = range;
             this.inserted = inserted;
             this.source = source;
             if (runs != null) {
@@ -3450,29 +3486,30 @@ public final class KayaApp {
                         "kaya: Edit.insert takes a caret and got " + at.start + ".." + at.stop
                         + " — Edit.replace swaps a range for text");
             }
-            return new Edit(at.start, at.stop, text, null);
+            return new Edit(at, text, null);
         }
 
         public static Edit delete(TextRange range) {
-            return new Edit(range.start, range.stop, "", null);
+            return new Edit(range, "", null);
         }
 
         public static Edit replace(TextRange range, String text) {
-            return new Edit(range.start, range.stop, text, null);
+            return new Edit(range, text, null);
         }
 
         /** One attribute over the INSERTED text's own offsets. */
         public Edit mark(TextRange range, String name, String value) {
-            marks.add(new TextRun(range.start, range.stop, name, value));
+            marks.add(new TextRun(range, name, value));
             return this;
         }
 
-        public long start() {
-            return start;
+        /** A flag attribute over the inserted text, on or off. */
+        public Edit mark(TextRange range, String name, boolean on) {
+            return mark(range, name, flagWire(on));
         }
 
-        public long stop() {
-            return stop;
+        public TextRange range() {
+            return range;
         }
 
         public String inserted() {
@@ -5264,8 +5301,8 @@ public final class KayaApp {
          * composition ends (docs/rich-text-plan.md §7).
          */
         public void applyEdit(Widget w, Edit edit) {
-            absorbEdit(w.id, edit.start, edit.stop, edit.inserted, edit.marks);
-            emit(KayaWire.txApplyEdit(w.id, edit.start, edit.stop, edit.marks.size(),
+            absorbEdit(w.id, edit.range.start, edit.range.stop, edit.inserted, edit.marks);
+            emit(KayaWire.txApplyEdit(w.id, edit.range.start, edit.range.stop, edit.marks.size(),
                     flatRuns(edit.marks), edit.inserted));
         }
 
@@ -5279,6 +5316,11 @@ public final class KayaApp {
          */
         public void format(Widget w, String name, String value) {
             emit(KayaWire.txFormatText(w.id, 0, 0, 0, 0, new Object[] { name, value }));
+        }
+
+        /** A flag attribute over the selection, on or off. */
+        public void format(Widget w, String name, boolean on) {
+            format(w, name, flagWire(on));
         }
 
         /**
@@ -5322,12 +5364,17 @@ public final class KayaApp {
          * a rich label (docs/rich-text-plan.md §17). A {@code "block"}
          * name covers the range's whole paragraphs.
          */
+        /** A flag attribute over a byte range, on or off. */
+        public void formatRange(Widget w, TextRange range, String name, boolean on) {
+            formatRange(w, range, name, flagWire(on));
+        }
+
         public void formatRange(Widget w, TextRange range, String name, String value) {
             // A silent document write moves the fold, as applyEdit does
             // (docs/rich-text-plan.md §17).
             TextRange at = rangedActBounds(w.id, range, name);
             String mark = name.equals("block") && "body".equals(value) ? null : value;
-            absorbFormat(w.id, new Format(at.start, at.stop, name, mark));
+            absorbFormat(w.id, new Format(at, name, mark));
             emit(KayaWire.txFormatText(w.id, mark == null ? 1 : 0, 1, at.start, at.stop,
                     new Object[] { name, mark == null ? "" : mark }));
         }
@@ -5335,7 +5382,7 @@ public final class KayaApp {
         /** {@link #formatRange}'s removal. */
         public void unformatRange(Widget w, TextRange range, String name) {
             TextRange at = rangedActBounds(w.id, range, name);
-            absorbFormat(w.id, new Format(at.start, at.stop, name, null));
+            absorbFormat(w.id, new Format(TextRange.ofBytes(at.start, at.stop), name, null));
             emit(KayaWire.txFormatText(w.id, 1, 1, at.start, at.stop,
                     new Object[] { name, "" }));
         }
@@ -5362,8 +5409,8 @@ public final class KayaApp {
             Object[] flat = new Object[runs.size() * 4];
             for (int i = 0; i < runs.size(); i++) {
                 TextRun run = runs.get(i);
-                flat[i * 4] = run.start();
-                flat[i * 4 + 1] = run.stop();
+                flat[i * 4] = run.range().start;
+                flat[i * 4 + 1] = run.range().stop;
                 flat[i * 4 + 2] = run.name();
                 flat[i * 4 + 3] = run.value();
             }
@@ -7396,8 +7443,9 @@ public final class KayaApp {
         }
         List<TextRun> runs = new ArrayList<>();
         for (int i = 1; i + 3 < values.size(); i += 4) {
-            runs.add(new TextRun((int) (long) (Long) values.get(i),
-                    (int) (long) (Long) values.get(i + 1),
+            runs.add(new TextRun(
+                    decodedSpan("document blob run", (Long) values.get(i),
+                            (Long) values.get(i + 1)),
                     (String) values.get(i + 2), (String) values.get(i + 3)));
         }
         return new Document(text, runs);
@@ -7407,8 +7455,8 @@ public final class KayaApp {
         List<Object> values = new ArrayList<>();
         values.add(document.content);
         for (TextRun run : document.marks) {
-            values.add(run.start());
-            values.add(run.stop());
+            values.add(run.range().start);
+            values.add(run.range().stop);
             values.add(run.name());
             values.add(run.value());
         }
@@ -7474,17 +7522,21 @@ public final class KayaApp {
         long shift = put.length - (stop - start);
         List<TextRun> next = new ArrayList<>();
         for (TextRun run : doc.marks) {
-            if (run.start() < start) {
-                next.add(new TextRun(run.start(), Math.min(run.stop(), start), run.name(),
-                        run.value()));
+            if (run.range().start < start) {
+                next.add(new TextRun(
+                        TextRange.ofBytes(run.range().start,
+                                Math.min(run.range().stop, start)),
+                        run.name(), run.value()));
             }
-            if (run.stop() > stop) {
-                next.add(new TextRun(Math.max(run.start(), stop) + shift, run.stop() + shift,
+            if (run.range().stop > stop) {
+                next.add(new TextRun(
+                        TextRange.ofBytes(Math.max(run.range().start, stop) + shift,
+                                run.range().stop + shift),
                         run.name(), run.value()));
             }
         }
         for (TextRun run : runs) {
-            next.add(new TextRun(run.start() + start, run.stop() + start, run.name(),
+            next.add(new TextRun(TextRange.ofBytes(run.range().start + start, run.range().stop + start), run.name(),
                     run.value()));
         }
         byte[] merged = new byte[was.length - (int) (stop - start) + put.length];
@@ -7534,7 +7586,7 @@ public final class KayaApp {
 
     /** One delivered format, folded into the live widget's mirror. */
     private void absorbFormat(long widget, Format act) {
-        if (act.start() >= act.stop()) {
+        if (act.range().start >= act.range().stop) {
             return;
         }
         foldFormat(documents.computeIfAbsent(widget, id -> new Document("")), act);
@@ -7544,25 +7596,25 @@ public final class KayaApp {
      * take it off, clipping THIS attribute's runs
      * (AppCtx::fold_format). */
     static void foldFormat(Document doc, Format act) {
-        if (act.start() >= act.stop()) {
+        if (act.range().start >= act.range().stop) {
             return;
         }
         List<TextRun> next = new ArrayList<>();
         for (TextRun run : doc.marks) {
-            if (!run.name().equals(act.name()) || run.stop() <= act.start()
-                    || run.start() >= act.stop()) {
+            if (!run.name().equals(act.name()) || run.range().stop <= act.range().start
+                    || run.range().start >= act.range().stop) {
                 next.add(run);
                 continue;
             }
-            if (run.start() < act.start()) {
-                next.add(new TextRun(run.start(), act.start(), run.name(), run.value()));
+            if (run.range().start < act.range().start) {
+                next.add(new TextRun(TextRange.ofBytes(run.range().start, act.range().start), run.name(), run.value()));
             }
-            if (run.stop() > act.stop()) {
-                next.add(new TextRun(act.stop(), run.stop(), run.name(), run.value()));
+            if (run.range().stop > act.range().stop) {
+                next.add(new TextRun(TextRange.ofBytes(act.range().stop, run.range().stop), run.name(), run.value()));
             }
         }
         if (act.value() != null) {
-            next.add(new TextRun(act.start(), act.stop(), act.name(), act.value()));
+            next.add(new TextRun(TextRange.ofBytes(act.range().start, act.range().stop), act.name(), act.value()));
         }
         doc.marks.clear();
         doc.marks.addAll(Document.normalize(next));
@@ -7620,7 +7672,7 @@ public final class KayaApp {
         for (int at = 4; at < tail.size(); at += 4) {
             runs.add(runOf(tail, at));
         }
-        return new Edit((Long) tail.get(1), (Long) tail.get(2),
+        return new Edit(decodedSpan("text_edited", (Long) tail.get(1), (Long) tail.get(2)),
                 (String) tail.get(3), runs, EditSource.fromWire((Integer) tail.get(0)));
     }
 
@@ -7631,8 +7683,9 @@ public final class KayaApp {
                     + (tail == null ? "nothing" : tail.size()) + " values, want 5");
         }
         boolean removed = tail.get(0) instanceof Integer r && r != 0;
-        return new Format((Long) tail.get(1), (Long) tail.get(2), (String) tail.get(3),
-                removed ? null : (String) tail.get(4));
+        return new Format(
+                decodedSpan("text_formatted", (Long) tail.get(1), (Long) tail.get(2)),
+                (String) tail.get(3), removed ? null : (String) tail.get(4));
     }
 
     private static TextRun runOf(List<?> tail, int at) {
@@ -7641,7 +7694,23 @@ public final class KayaApp {
                     + describe(tail.get(at)) + " and a " + describe(tail.get(at + 1))
                     + ", want two I64");
         }
-        return new TextRun(start, stop, (String) tail.get(at + 2), (String) tail.get(at + 3));
+        return new TextRun(decodedSpan("run", start, stop), (String) tail.get(at + 2),
+                (String) tail.get(at + 3));
+    }
+
+    /** A span the CORE sent, refused BY NAME if its ends are out of
+     * order — no scene reaches it, since the core always sends ordered
+     * spans, and a reversed one means the mirror and the core
+     * disagree. */
+    static TextRange decodedSpan(String what, long start, long stop) {
+        if (start > stop) {
+            throw new IllegalStateException(
+                    "kaya: a " + what + " carries " + start + ".." + stop
+                            + ", a reversed span");
+        }
+        // The range's OWN refusal cannot name the record, and the record
+        // is what a reader of this fault needs.
+        return new TextRange(start, stop);
     }
 
     private static String describe(Object v) {
@@ -7962,7 +8031,7 @@ public final class KayaApp {
             // (docs/rich-text-plan.md R1).
             } else if (occ.kind == KayaWire.OCC_KIND_TEXT_EDITED && occ.keys.isEmpty()) {
                 Edit edit = editOf(occ.payload);
-                absorbEdit(occ.id, edit.start, edit.stop, edit.inserted, edit.marks);
+                absorbEdit(occ.id, edit.range.start, edit.range.stop, edit.inserted, edit.marks);
                 BiConsumer<Tx, Edit> handler = widgetEdits.get(occ.id);
                 if (handler != null) {
                     dispatch(tx -> {
@@ -7974,7 +8043,7 @@ public final class KayaApp {
             } else if (occ.kind == KayaWire.OCC_KIND_TEXT_EDITED) {
                 Edit edit = editOf(occ.payload);
                 foldRowDocument(occ.id, occ.keys,
-                        doc -> foldEdit(doc, edit.start, edit.stop, edit.inserted, edit.marks));
+                        doc -> foldEdit(doc, edit.range.start, edit.range.stop, edit.inserted, edit.marks));
                 EditHandler handler = nodeEdits.get(occ.id);
                 if (handler != null) {
                     dispatch(tx -> {

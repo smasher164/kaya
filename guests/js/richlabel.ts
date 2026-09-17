@@ -14,7 +14,7 @@ const DOC = "Héllo world, code";
  * and the core's mirror are compared as one string. */
 function spell(runs: readonly kaya.Run[]): string {
   return runs
-    .map((run) => (run.value === "true" ? `${run.start}:${run.end} ${run.name}` : `${run.start}:${run.end} ${run.name}=${run.value}`))
+    .map((run) => (run.isFlag ? `${run.range[0]}:${run.range[1]} ${run.name}` : `${run.range[0]}:${run.range[1]} ${run.name}=${run.value}`))
     .join("|");
 }
 

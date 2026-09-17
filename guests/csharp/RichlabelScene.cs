@@ -20,9 +20,9 @@ static class RichlabelScene
     {
         var parts = new List<string>();
         foreach (TextRun run in runs)
-            parts.Add(run.Value == "true"
-                ? $"{run.Start}:{run.Stop} {run.Name}"
-                : $"{run.Start}:{run.Stop} {run.Name}={run.Value}");
+            parts.Add(run.IsFlag
+                ? $"{run.Range.Start}:{run.Range.Stop} {run.Name}"
+                : $"{run.Range.Start}:{run.Range.Stop} {run.Name}={run.Value}");
         return string.Join("|", parts);
     }
 
@@ -59,9 +59,9 @@ static class RichlabelScene
                         var doc = new Document(Doc)
                             .Bold(TextRange.In(Doc, 0, 5))
                             .Link(TextRange.In(Doc, 6, 5), Url)
-                            .Mark(TextRange.In(Doc, 13, 4), "code", "true");
+                            .Mark(TextRange.In(Doc, 13, 4), "code", true);
                         var title = new Document(Title)
-                            .Mark(TextRange.In(Title, 13, 6), "italic", "true");
+                            .Mark(TextRange.In(Title, 13, 6), "italic", true);
                         t.SetDocument(body, doc);
                         t.SetDocument(heading, title);
                         t.Write(runs, Spell(doc.Runs));
@@ -69,7 +69,7 @@ static class RichlabelScene
                     tx.Button("insert", onClick: t => // button#1
                     {
                         var edit = Edit.Insert(TextRange.In(Doc, 5, 0), ", big")
-                            .Mark(TextRange.In(", big", 2, 3), "italic", "true");
+                            .Mark(TextRange.In(", big", 2, 3), "italic", true);
                         t.ApplyEdit(body, edit);
                         t.Write(runs, Spell(app.Document(body).Runs));
                     });
@@ -80,7 +80,7 @@ static class RichlabelScene
                     tx.Button("mark", onClick: t => // button#2
                     {
                         string text = app.Document(body).Text;
-                        t.FormatRange(body, TextRange.In(text, 1, 2), "italic", "true");
+                        t.FormatRange(body, TextRange.In(text, 1, 2), "italic", true);
                         t.UnformatRange(body, TextRange.In(text, 0, 2), "bold"); // "Hé"
                         t.Write(runs, Spell(app.Document(body).Runs));
                     });

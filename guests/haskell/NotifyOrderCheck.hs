@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 -- The process-level notification handler's DISPATCH ORDER
@@ -13,7 +14,8 @@ import Control.Monad (unless)
 import Data.ByteString.Builder (toLazyByteString)
 import Data.IORef (modifyIORef', newIORef, readIORef)
 import qualified Data.Map.Strict as Map
-import Data.Word (Word32, Word64)
+import Data.Text (Text)
+import Data.Word (Word64)
 import GHC.IO.Handle (hDuplicate, hDuplicateTo)
 import System.Directory (removeFile)
 import System.Exit (exitFailure)
@@ -47,8 +49,8 @@ saidOnStderr body = do
 main :: IO ()
 main = do
   app <- newApp
-  oneShot <- newIORef ([] :: [Word32])
-  process <- newIORef ([] :: [(Word64, Word32)])
+  oneShot <- newIORef ([] :: [NotificationOutcome])
+  process <- newIORef ([] :: [(Word64, NotificationOutcome)])
   onNotificationActivation app (\i o -> modifyIORef' process (++ [(i, o)]))
   buildTx app $
     showNotification 12 [NTitle "bound at the show"] $ \o ->
@@ -58,7 +60,7 @@ main = do
   -- process-level handler is not consulted at all.
   notificationResult app 12 W.notificationOutcomeActivated
   readIORef oneShot >>= \seen ->
-    check (seen == [W.notificationOutcomeActivated])
+    check (seen == [NotificationActivated])
       ("the one-shot handler did not answer: " ++ show seen)
   readIORef process >>= \seen ->
     check (null seen)
@@ -67,13 +69,13 @@ main = do
   -- CASE 2: an id this process never showed — the relaunch case.
   notificationResult app 77 W.notificationOutcomeActivated
   readIORef process >>= \seen ->
-    check (seen == [(77, W.notificationOutcomeActivated)])
+    check (seen == [(77, NotificationActivated)])
       "a result with no one-shot handler did not reach the process-level one"
 
   -- CASE 3: it does NOT retire.
   notificationResult app 78 W.notificationOutcomeRefused
   readIORef process >>= \seen ->
-    check (length seen == 2 && seen !! 1 == (78, W.notificationOutcomeRefused))
+    check (length seen == 2 && seen !! 1 == (78, NotificationRefused))
       "the process-level handler retired after its first result"
 
   -- AND THE DROP IS ANNOUNCED, compared in full: a drop nobody announced
@@ -102,13 +104,13 @@ main = do
   -- HERE READS A PATTERN: the core is the one parser and the one author
   -- of every declaration refusal, and it faults at apply.
   links <- newApp
-  linkSeen <- newIORef ([] :: [(String, Map.Map String String)])
+  linkSeen <- newIORef ([] :: [(String, Map.Map Text Text)])
   linkRoute links "task/{key}" (\p -> modifyIORef' linkSeen (++ [("task", p)]))
   linkRoute links "{section}" (\p -> modifyIORef' linkSeen (++ [("section", p)]))
 
   -- CASE 1: the declaration is the generated record, parked, and the ids
   -- come from the binding's own counter starting at 1.
-  parked <- readIORef (appPendingRoutes links)
+  parked <- readIORef links.appPendingRoutes
   let want1 =
         [ W.txDeclareLinkRoute 1 (W.VStr "task/{key}"),
           W.txDeclareLinkRoute 2 (W.VStr "{section}")

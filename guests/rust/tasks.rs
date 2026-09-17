@@ -371,7 +371,7 @@ fn date_field(d: Option<kaya::Date>) -> String {
 }
 
 fn parse_date(s: &str) -> Option<kaya::Date> {
-    (!s.is_empty()).then(|| s.parse().ok()).flatten()
+    s.parse().ok()
 }
 
 fn time_field(t: Option<kaya::Time>) -> String {
@@ -379,7 +379,7 @@ fn time_field(t: Option<kaya::Time>) -> String {
 }
 
 fn parse_time(s: &str) -> Option<kaya::Time> {
-    (!s.is_empty()).then(|| s.parse().ok()).flatten()
+    s.parse().ok()
 }
 
 // Five sections on purpose (docs/tasks-plan.md R4): the Logbook is a
@@ -1248,10 +1248,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 let Some((project, lines)) = app.open_project.clone() else { continue };
                 let kaya::Representation::Custom { bytes, .. } = &d.clip else { continue };
                 let moved = String::from_utf8_lossy(&bytes.0).to_string();
-                if d.anchor.is_empty() {
-                    continue;
-                }
-                let anchor = d.anchor.key::<String>(0);
+                let Some(anchor) = d.anchor.try_key::<String>(0) else { continue };
                 ctx.apply(|tx| {
                     tx.undoable("reorder");
                     if d.before {

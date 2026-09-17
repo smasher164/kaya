@@ -22,9 +22,9 @@ def spell(runs):
     """The core's spelling of runs (`expect_runs`), so the row's field and
     the core's mirror are compared as one string."""
     return "|".join(
-        f"{run.start}:{run.end} {run.name}"
-        if run.value == "true"
-        else f"{run.start}:{run.end} {run.name}={run.value}"
+        f"{run.range.start}:{run.range.stop} {run.name}"
+        if run.is_flag
+        else f"{run.range.start}:{run.range.stop} {run.name}={run.value}"
         for run in runs)
 
 
@@ -37,7 +37,7 @@ def on_acted(key, _act):
 
 def on_patch():
     kaya.undoable("patch b")
-    notes.patch("b", body=kaya.Document("Patched").mark((0, 7), "italic", "true"))
+    notes.patch("b", body=kaya.Document("Patched").mark((0, 7), "italic", True))
 
 
 def on_read():
@@ -54,8 +54,8 @@ def on_restored(_label, _delta):
 
 with app.window(title="richrows", on_undone=on_restored, on_redone=on_restored):
     with app.menu("Edit"):
-        kaya.item("Undo", role=kaya.ROLE_UNDO)
-        kaya.item("Redo", role=kaya.ROLE_REDO)
+        kaya.item("Undo", role=kaya.MenuRole.UNDO)
+        kaya.item("Redo", role=kaya.MenuRole.REDO)
 
     notes = kaya.collection(Note)
     last = kaya.signal("")
@@ -73,7 +73,7 @@ with app.window(title="richrows", on_undone=on_restored, on_redone=on_restored):
                               on_format=on_acted).a11y_id("body")
     notes.insert("a", Note(
         title="a",
-        body=kaya.Document("Héllo world").mark((0, 6), "bold", "true")))
+        body=kaya.Document("Héllo world").mark((0, 6), "bold", True)))
     notes.insert("b", Note(
         title="b",
         body=kaya.Document("Second note").mark((7, 11), "link",

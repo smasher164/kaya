@@ -14,9 +14,9 @@ let spell (runs : Run.t list) =
   String.concat "|"
     (List.map
        (fun (r : Run.t) ->
-         if r.value = "true" then
-           Printf.sprintf "%d:%d %s" r.start r.stop r.name
-         else Printf.sprintf "%d:%d %s=%s" r.start r.stop r.name r.value)
+         let start, stop = r.range in
+         if Run.is_flag r then Printf.sprintf "%d:%d %s" start stop r.name
+         else Printf.sprintf "%d:%d %s=%s" start stop r.name r.value)
        runs)
 
 let () =
@@ -24,9 +24,9 @@ let () =
 
   build app (fun () ->
       window ~title:"richlabel" ();
-      let runs = signal_str ("") in
-      let body_text = signal_str ("") in
-      let heading_text = signal_str ("Heading with italic") in
+      let runs = signal Scalar.Str ("") in
+      let body_text = signal Scalar.Str ("") in
+      let heading_text = signal Scalar.Str ("Heading with italic") in
 
       let body = label ~bind:body_text ~rich:true ~a11y_id:"body" () in
       let heading =
@@ -48,11 +48,11 @@ let () =
                        Document.create doc_source
                        |> Document.bold (0, 6)
                        |> Document.link (7, 12) "https://kaya.dev"
-                       |> Document.mark (14, 18) "code" "true"
+                       |> Document.flag (14, 18) "code" true
                      in
                      let title =
                        Document.create "Heading with italic"
-                       |> Document.mark (13, 19) "italic" "true"
+                       |> Document.flag (13, 19) "italic" true
                      in
                      set_document body doc;
                      set_document heading title;
@@ -62,7 +62,7 @@ let () =
                  button ~text:"insert"
                    ~on_click:(fun () ->
                      apply_edit body
-                       (Edit.insert 6 ", big" |> Edit.mark (2, 5) "italic" "true");
+                       (Edit.insert 6 ", big" |> Edit.flag (2, 5) "italic" true);
                      write runs ((spell (document body).runs)));
                  (* button#2 — THE RANGED ACT ON A LABEL
                     (docs/rich-text-plan.md §17): an italic over a range
@@ -70,7 +70,7 @@ let () =
                     document written by range. *)
                  button ~text:"mark"
                    ~on_click:(fun () ->
-                     format_range body (1, 4) "italic" "true";
+                     format_range_flag body (1, 4) "italic" true;
                      (* "Hé": byte 2 is inside the é *)
                      unformat_range body (0, 3) "bold";
                      write runs ((spell (document body).runs)));

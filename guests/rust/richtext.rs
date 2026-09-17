@@ -24,10 +24,10 @@ enum Msg {
 fn spell(runs: &[kaya::Run]) -> String {
     runs.iter()
         .map(|run| {
-            if run.value == "true" {
-                format!("{}:{} {}", run.start, run.end, run.name)
+            if run.is_flag() {
+                format!("{}:{} {}", run.range.start, run.range.end, run.name)
             } else {
-                format!("{}:{} {}={}", run.start, run.end, run.name, run.value)
+                format!("{}:{} {}={}", run.range.start, run.range.end, run.name, run.value)
             }
         })
         .collect::<Vec<_>>()
@@ -114,7 +114,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 });
             }
             Msg::Insert => {
-                let edit = kaya::Edit::insert(6, ", big").mark(2..5, "italic", "true");
+                let edit = kaya::Edit::insert(6, ", big").mark(2..5, "italic", true);
                 ctx.apply(|tx| tx.apply_edit(editor, &edit));
                 let mirror = spell(&ctx.document(editor).runs);
                 ctx.apply(|tx| tx.write(runs, mirror.clone()));

@@ -63,8 +63,8 @@ let () =
           ]
         ();
 
-      let status = signal_str ("ready") in
-      let row_status = signal_str ("") in
+      let status = signal Scalar.Str ("ready") in
+      let row_status = signal Scalar.Str ("") in
       let notes = collection () in
 
       let answered clip =
@@ -84,7 +84,7 @@ let () =
               let text =
                 try
                   let fd, _seekable =
-                    Kaya_runtime.open_picked first.handle file_mode_read
+                    open_picked first File_mode.Read
                   in
                   let ic = Unix.in_channel_of_descr fd in
                   let len = in_channel_length ic in
@@ -178,6 +178,6 @@ let () =
           ()
       in
       mount root;
-      insert notes (str_key "r1") "");
+      insert notes (Key.str "r1") "");
 
   exit (run app)

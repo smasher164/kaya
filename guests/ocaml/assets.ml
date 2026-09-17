@@ -43,12 +43,12 @@ let () =
        if complaint = "" then "no complaint" else first_line complaint
      in
 
-     let title = signal_str ("assets") in
-     let found = signal_str (census) in
+     let title = signal Scalar.Str ("assets") in
+     let found = signal Scalar.Str (census) in
      (* [%d] renders an OCaml int with no separator and no locale. *)
      let present = if mark_length > 0 then "present" else "missing" in
      let sizes =
-       signal_str
+       signal Scalar.Str
          (Printf.sprintf "%s %s, %s: %d bytes, %s" mark_name present
             font_name font_length verdict)
      in

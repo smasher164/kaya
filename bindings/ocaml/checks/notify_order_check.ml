@@ -33,24 +33,24 @@ let () =
 
   (* CASE 1: an id WITH a one-shot handler is answered by it, and the
      process-level handler is not consulted at all. *)
-  notification_result app 12L Kaya_wire.notification_outcome_activated;
+  notification_result app 12L Notification_outcome.Activated;
   check
-    (!one_shot = [ Kaya_wire.notification_outcome_activated ])
+    (!one_shot = [ Notification_outcome.Activated ])
     "the one-shot handler did not answer";
   check (!process = [])
     "the process-level handler answered an id that HAD a one-shot handler";
 
   (* CASE 2: an id this process never showed — the relaunch case. *)
-  notification_result app 77L Kaya_wire.notification_outcome_activated;
+  notification_result app 77L Notification_outcome.Activated;
   check
-    (!process = [ (77L, Kaya_wire.notification_outcome_activated) ])
+    (!process = [ (77L, Notification_outcome.Activated) ])
     "a result with no one-shot handler did not reach the process-level one";
 
   (* CASE 3: it does NOT retire. *)
-  notification_result app 78L Kaya_wire.notification_outcome_refused;
+  notification_result app 78L Notification_outcome.Refused;
   check
     (List.length !process = 2
-    && List.nth !process 1 = (78L, Kaya_wire.notification_outcome_refused))
+    && List.nth !process 1 = (78L, Notification_outcome.Refused))
     "the process-level handler retired after its first result";
 
   (* AND THE DROP IS ANNOUNCED, compared in full: a drop nobody announced
@@ -63,7 +63,7 @@ let () =
   let out = Unix.openfile path [ Unix.O_WRONLY; Unix.O_TRUNC ] 0o600 in
   Unix.dup2 out Unix.stderr;
   Unix.close out;
-  notification_result bare 41L Kaya_wire.notification_outcome_refused;
+  notification_result bare 41L Notification_outcome.Refused;
   flush stderr;
   Unix.dup2 saved Unix.stderr;
   Unix.close saved;
@@ -102,7 +102,7 @@ let () =
   (* CASE 1: the declaration is the generated record, parked, and the ids
      come from the binding's own counter starting at 1. *)
   check
-    (app.pending_routes
+    ((For_checks.pending_routes app)
     = [
         Kaya_wire.tx_declare_link_route 1L (Kaya_wire.Str "task/{key}");
         Kaya_wire.tx_declare_link_route 2L (Kaya_wire.Str "{section}");

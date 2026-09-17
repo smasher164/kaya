@@ -36,8 +36,8 @@ fn param(name: &str) -> String {
     }
 }
 
-// The five wire enums a Go closed-vocabulary setter takes get a named Go
-// type here rather than a bare int64, so the compiler refuses
+// The wire enums a Go closed-vocabulary setter takes get a named Go type
+// here rather than a bare int64, so the compiler refuses
 // `w.Role(kaya.AlignCenter)`. size_class is unlisted: app.go already
 // wraps it by hand with no typed constants, unchanged by this.
 fn enum_go_type(name: &str) -> Option<&'static str> {
@@ -47,6 +47,12 @@ fn enum_go_type(name: &str) -> Option<&'static str> {
         "axis" => Some("Axis"),
         "appearance" => Some("Appearance"),
         "symbol" => Some("Symbol"),
+        // The four a guest PASSES, which shipped untyped beside the five
+        // above (the idiom review's G1/X1).
+        "alert_choice" => Some("AlertChoice"),
+        "notification_outcome" => Some("NotificationOutcome"),
+        "file_mode" => Some("FileMode"),
+        "sections_presentation" => Some("SectionsPresentation"),
         _ => None,
     }
 }

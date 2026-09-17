@@ -133,7 +133,7 @@ func (r accountRow) SetInset(n kaya.Node, pad float64) { r.t.SetInset(n, pad) }
 // once with the typed row surface (exact-index tokens, no probes);
 // stamping is the core's replay.
 func AccountRows(tx *kaya.Tx, c kaya.RecordCollection[string, Account]) *accountRowsFor {
-	return &accountRowsFor{tx.Rows(c.Coll), c}
+	return &accountRowsFor{tx.Rows(c.Handle()), c}
 }
 
 // The embedded *kaya.Rows carries Widget(); the two chain methods

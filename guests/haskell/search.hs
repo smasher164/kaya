@@ -30,7 +30,7 @@ main = kayaMain $ \app -> do
   visible <- newIORef names
   buildTx app $ do
     items <- collectionOf @Item
-    count <- signal (T.pack (show (length names) ++ " items"))
+    count <- signalText (tshow (length names) <> " items")
 
     let onQuery text = do
           shown <- readIORef visible
@@ -40,26 +40,26 @@ main = kayaMain $ \app -> do
             -- A DIFF, never clear-and-refill: only the rows whose
             -- membership changed move (docs/search-plan.md S9).
             mapM_
-              (\k -> remove (recordHandle items) k)
+              (\k -> remove (recordHandle items) (textKey k))
               (filter (`notElem` wanted) shown)
             mapM_
-              (\k -> insertRecord items k (Item k))
+              (\k -> insertRecord items (textKey k) (Item k))
               (filter (`notElem` shown) wanted)
             -- Insertion order is arrival order, so a row coming back lands
             -- last; walking the wanted keys to the end in order puts the
             -- list back in `names` order.
-            mapM_ (\k -> moveToEnd (recordHandle items) k) wanted
+            mapM_ (\k -> moveToEnd (recordHandle items) (textKey k)) wanted
             writeSignal count $
               if T.null query
-                then T.pack (show (length names) ++ " items")
-                else T.pack (show (length wanted) ++ " of " ++ show (length names) ++ " match")
+                then tshow (length names) <> " items"
+                else tshow (length wanted) <> " of " <> tshow (length names) <> " match"
           writeIORef visible wanted
 
-    find <- searchOn onQuery [Placeholder ("Search" :: Text), A11yId ("find" :: Text), A11yLabel ("Find items" :: Text)]
-    countLabel <- labelBound count [A11yId ("count" :: Text)]
+    find <- searchOn onQuery [Placeholder "Search", A11yId "find", A11yLabel "Find items"]
+    countLabel <- labelBound count [A11yId "count"]
     -- The For IS the list: expect_order reads its label children.
     (list, _) <- forEach (recordHandle items) (label (field @"name" @Item))
     setA11yId list "list"
     root <- column [pure find, pure countLabel, pure list]
     mount root
-    mapM_ (\k -> insertRecord items k (Item k)) names
+    mapM_ (\k -> insertRecord items (textKey k) (Item k)) names

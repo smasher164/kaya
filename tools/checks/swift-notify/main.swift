@@ -26,8 +26,8 @@ if ProcessInfo.processInfo.environment["KAYA_LINK_DROP"] != nil {
 }
 
 let app = KayaApp()
-var oneShot: [UInt32] = []
-var process: [(UInt64, UInt32)] = []
+var oneShot: [KayaNotificationOutcome] = []
+var process: [(UInt64, KayaNotificationOutcome)] = []
 app.onNotificationActivation { _, id, outcome in process.append((id, outcome)) }
 try! app.build { tx in
     _ = tx.showNotification(
@@ -38,19 +38,19 @@ try! app.build { tx in
 // CASE 1: an id WITH a one-shot handler is answered by it, and the
 // process-level handler is not consulted at all.
 app.notificationResult(12, UInt32(KAYA_NOTIFICATION_OUTCOME_ACTIVATED))
-check(oneShot == [UInt32(KAYA_NOTIFICATION_OUTCOME_ACTIVATED)],
+check(oneShot == [.activated],
       "the one-shot handler did not answer: \(oneShot)")
 check(process.isEmpty,
       "the process-level handler answered an id that HAD a one-shot handler")
 
 // CASE 2: an id this process never showed — the relaunch case.
 app.notificationResult(77, UInt32(KAYA_NOTIFICATION_OUTCOME_ACTIVATED))
-check(process.count == 1 && process[0] == (77, UInt32(KAYA_NOTIFICATION_OUTCOME_ACTIVATED)),
+check(process.count == 1 && process[0] == (77, .activated),
       "a result with no one-shot handler did not reach the process-level one")
 
 // CASE 3: it does NOT retire.
 app.notificationResult(78, UInt32(KAYA_NOTIFICATION_OUTCOME_REFUSED))
-check(process.count == 2 && process[1] == (78, UInt32(KAYA_NOTIFICATION_OUTCOME_REFUSED)),
+check(process.count == 2 && process[1] == (78, .refused),
       "the process-level handler retired after its first result")
 
 // AND THE DROP IS ANNOUNCED, compared in full: a drop nobody announced is

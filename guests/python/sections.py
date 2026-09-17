@@ -32,7 +32,7 @@ def open_library():
     kaya.create_window(LIBRARY)
     app.window(
         window_id=LIBRARY, title="library",
-        sections_presentation=kaya.SECTIONS_SIDEBAR)
+        sections_presentation=kaya.SectionsPresentation.SIDEBAR)
     with app.add_section(SHELVES, title="Shelves", symbol=kaya.Symbol.SEARCH,
                          window=LIBRARY):
         shelves_ready = kaya.signal("shelves ready")
@@ -46,7 +46,7 @@ def open_library():
 
 
 # With sections the window has no root: NOTHING MOUNTS here.
-with app.window(title="sections", sections_presentation=kaya.SECTIONS_BAR):
+with app.window(title="sections", sections_presentation=kaya.SectionsPresentation.BAR):
     visits = kaya.signal("archive: 0 visits")
 
 # SF Symbols are licensed to Apple platforms: no shared asset exists.

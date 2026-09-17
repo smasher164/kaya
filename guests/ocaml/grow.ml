@@ -6,8 +6,8 @@ let () =
   let app = Kaya_app.create () in
 
   build app (fun () ->
-     let probe = signal_str ("grow probe") in
-     let one = signal_str ("one") in
+     let probe = signal Scalar.Str ("grow probe") in
+     let one = signal Scalar.Str ("one") in
 
      let root =
        column

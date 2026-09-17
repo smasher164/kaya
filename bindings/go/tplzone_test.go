@@ -327,7 +327,7 @@ func TestRecordSurfaceResolvesAPropProjectionToItsOwnField(t *testing.T) {
 	var props []setProp
 	app.Build(func(tx *Tx) {
 		c := CollectionOf[string, propRec](tx)
-		for row := range tx.Rows(c.Coll).All() {
+		for row := range tx.Rows(c.Handle()).All() {
 			n := row.Widget(KindEntry)
 			before := len(tx.records)
 			c.A11yLabel(row.Tpl, n, func(r *propRec) *string { return &r.Note })

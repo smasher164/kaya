@@ -64,8 +64,8 @@ def on_focus_owned():
 
 with app.window(title="ownundo"):
     with app.menu("Edit"):
-        kaya.item("Undo", role=kaya.ROLE_UNDO, on_activate=on_undo)
-        kaya.item("Redo", role=kaya.ROLE_REDO, on_activate=on_redo)
+        kaya.item("Undo", role=kaya.MenuRole.UNDO, on_activate=on_undo)
+        kaya.item("Redo", role=kaya.MenuRole.REDO, on_activate=on_redo)
 
     status = kaya.signal("undo 0 redo 0")
 

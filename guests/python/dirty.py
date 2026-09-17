@@ -21,7 +21,7 @@ def save():
 
 
 def answered(choice):
-    if choice == kaya.CANCEL:
+    if choice == kaya.AlertChoice.CANCEL:
         # Answering a dialog is not saving: the mark stays up.
         status.set("kept editing")
     else:

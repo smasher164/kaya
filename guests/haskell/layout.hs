@@ -7,17 +7,16 @@
    order, which legitimately differs per language. The grow contract is
    asserted in the grow scene instead. -}
 
-import qualified Data.Text as T
 import KayaApp
 
 main :: IO ()
 main = kayaMain $ \app -> do
   buildTx app $ do
-    probe <- signal (T.pack "Layout probe")
-    tailSig <- signal (T.pack "tail")
-    mixed <- signal (T.pack "mixed")
-    nested <- signal (T.pack "nested")
-    deep <- signal (T.pack "deep")
+    probe <- signalText "Layout probe"
+    tailSig <- signalText "tail"
+    mixed <- signalText "mixed"
+    nested <- signalText "nested"
+    deep <- signalText "deep"
 
     root <-
       column

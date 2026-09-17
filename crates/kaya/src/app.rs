@@ -368,11 +368,19 @@ impl KayaField for crate::Time {
 /// conversion applied to `Path` itself: `path.key::<String>(0)`.
 pub trait PathKey {
     fn key<K: KayaField>(&self, level: usize) -> K;
+
+    fn try_key<K: KayaField>(&self, level: usize) -> Option<K>;
 }
 
 impl PathKey for Path {
     fn key<K: KayaField>(&self, level: usize) -> K {
-        K::from_value(&self[level])
+        self.try_key(level).unwrap_or_else(|| {
+            panic!("kaya: this path has {} level(s) and level {level} was asked for", self.len())
+        })
+    }
+
+    fn try_key<K: KayaField>(&self, level: usize) -> Option<K> {
+        self.get(level).map(K::from_value)
     }
 }
 
@@ -777,6 +785,43 @@ pub struct Document {
     pub runs: Vec<Run>,
 }
 
+/// A mark or format attribute's VALUE: a `bool` for a flag attribute
+/// ("bold", "italic", …), coerced to the wire's own `FLAG_VALUE` here at
+/// the boundary, or a string for one that carries a value of its own
+/// ("link", "block"). `Into` is Rust's overload, so `mark(0..6, "bold",
+/// true)` and `mark(7..12, "link", url)` are the same call.
+pub struct AttrValue(String);
+
+impl From<bool> for AttrValue {
+    fn from(on: bool) -> Self {
+        AttrValue(if on { crate::protocol::FLAG_VALUE.to_owned() } else { "false".to_owned() })
+    }
+}
+
+impl From<&str> for AttrValue {
+    fn from(v: &str) -> Self {
+        AttrValue(v.to_owned())
+    }
+}
+
+impl From<String> for AttrValue {
+    fn from(v: String) -> Self {
+        AttrValue(v)
+    }
+}
+
+impl From<&String> for AttrValue {
+    fn from(v: &String) -> Self {
+        AttrValue(v.clone())
+    }
+}
+
+impl From<AttrValue> for String {
+    fn from(v: AttrValue) -> Self {
+        v.0
+    }
+}
+
 impl Document {
     pub fn new(text: impl Into<String>) -> Self {
         Document { text: text.into(), runs: Vec::new() }
@@ -786,13 +831,12 @@ impl Document {
         mut self,
         range: std::ops::Range<usize>,
         name: &str,
-        value: impl Into<String>,
+        value: impl Into<AttrValue>,
     ) -> Self {
         self.runs.push(Run {
-            start: range.start as u64,
-            end: range.end as u64,
+            range: range.start as u64..range.end as u64,
             name: name.to_owned(),
-            value: value.into(),
+            value: value.into().into(),
         });
         self
     }
@@ -818,7 +862,7 @@ impl Document {
     }
 
     pub fn link(self, range: std::ops::Range<usize>, url: impl Into<String>) -> Self {
-        self.mark(range, "link", url)
+        self.mark(range, "link", url.into())
     }
 
     /// A paragraph's kind; the range covers whole paragraphs or is refused.
@@ -829,7 +873,7 @@ impl Document {
     pub fn attr_at(&self, byte: usize, name: &str) -> Option<&str> {
         self.runs
             .iter()
-            .find(|r| r.name == name && (r.start as usize) <= byte && byte < r.end as usize)
+            .find(|r| r.name == name && (r.range.start as usize) <= byte && byte < r.range.end as usize)
             .map(|r| r.value.as_str())
     }
 }
@@ -842,38 +886,38 @@ fn normalize_runs(runs: Vec<Run>) -> Vec<Run> {
     for name in names {
         let mut painted: Vec<Run> = Vec::new();
         for run in runs.iter().filter(|r| r.name == name) {
-            if run.start >= run.end {
+            if run.range.start >= run.range.end {
                 continue;
             }
             let mut kept: Vec<Run> = Vec::new();
             for old in painted.drain(..) {
-                if old.end <= run.start || old.start >= run.end {
+                if old.range.end <= run.range.start || old.range.start >= run.range.end {
                     kept.push(old);
                     continue;
                 }
-                if old.start < run.start {
-                    kept.push(Run { end: run.start, ..old.clone() });
+                if old.range.start < run.range.start {
+                    kept.push(Run { range: old.range.start..run.range.start, ..old.clone() });
                 }
-                if old.end > run.end {
-                    kept.push(Run { start: run.end, ..old.clone() });
+                if old.range.end > run.range.end {
+                    kept.push(Run { range: run.range.end..old.range.end, ..old.clone() });
                 }
             }
             kept.push(run.clone());
             painted = kept;
         }
-        painted.sort_by_key(|r| r.start);
+        painted.sort_by_key(|r| r.range.start);
         let mut merged: Vec<Run> = Vec::new();
         for run in painted {
             match merged.last_mut() {
-                Some(last) if last.end == run.start && last.value == run.value => {
-                    last.end = run.end;
+                Some(last) if last.range.end == run.range.start && last.value == run.value => {
+                    last.range.end = run.range.end;
                 }
                 _ => merged.push(run),
             }
         }
         out.extend(merged);
     }
-    out.sort_by(|a, b| (a.start, &a.name).cmp(&(b.start, &b.name)));
+    out.sort_by(|a, b| (a.range.start, &a.name).cmp(&(b.range.start, &b.name)));
     out
 }
 
@@ -947,13 +991,12 @@ impl Edit {
         mut self,
         range: std::ops::Range<usize>,
         name: &str,
-        value: impl Into<String>,
+        value: impl Into<AttrValue>,
     ) -> Self {
         self.runs.push(Run {
-            start: range.start as u64,
-            end: range.end as u64,
+            range: range.start as u64..range.end as u64,
             name: name.to_owned(),
-            value: value.into(),
+            value: value.into().into(),
         });
         self
     }
@@ -1116,21 +1159,22 @@ impl AppCtx {
         let moved = |offset: u64| -> u64 { (offset as i64 + shift) as u64 };
         let mut next: Vec<Run> = Vec::new();
         for run in &doc.runs {
-            if (run.start as usize) < start {
-                next.push(Run { start: run.start, end: run.end.min(start as u64), ..run.clone() });
-            }
-            if (run.end as usize) > end {
+            if (run.range.start as usize) < start {
                 next.push(Run {
-                    start: moved(run.start.max(end as u64)),
-                    end: moved(run.end),
+                    range: run.range.start..run.range.end.min(start as u64),
+                    ..run.clone()
+                });
+            }
+            if (run.range.end as usize) > end {
+                next.push(Run {
+                    range: moved(run.range.start.max(end as u64))..moved(run.range.end),
                     ..run.clone()
                 });
             }
         }
         for run in runs {
             next.push(Run {
-                start: run.start + start as u64,
-                end: run.end + start as u64,
+                range: run.range.start + start as u64..run.range.end + start as u64,
                 ..run.clone()
             });
         }
@@ -1167,19 +1211,19 @@ impl AppCtx {
         }
         let mut next: Vec<Run> = Vec::new();
         for run in std::mem::take(&mut doc.runs) {
-            if run.name != name || run.end <= start || run.start >= end {
+            if run.name != name || run.range.end <= start || run.range.start >= end {
                 next.push(run);
                 continue;
             }
-            if run.start < start {
-                next.push(Run { end: start, ..run.clone() });
+            if run.range.start < start {
+                next.push(Run { range: run.range.start..start, ..run.clone() });
             }
-            if run.end > end {
-                next.push(Run { start: end, ..run.clone() });
+            if run.range.end > end {
+                next.push(Run { range: end..run.range.end, ..run.clone() });
             }
         }
         if let Some(value) = value {
-            next.push(Run { start, end, name: name.to_owned(), value: value.to_owned() });
+            next.push(Run { range: start..end, name: name.to_owned(), value: value.to_owned() });
         }
         doc.runs = normalize_runs(next);
     }
@@ -2699,11 +2743,11 @@ impl<'a> Tx<'a> {
     /// (docs/rich-text-plan.md R1). Over a collapsed selection the attribute
     /// is armed for the next keystroke instead. `value` is `"true"` for a
     /// flag, the URL for `link`.
-    pub fn format(&mut self, widget: WidgetId, name: &str, value: &str) {
+    pub fn format(&mut self, widget: WidgetId, name: &str, value: impl Into<AttrValue>) {
         self.ops.push(TxOp::FormatText {
             widget,
             name: name.to_owned(),
-            value: Some(value.to_owned()),
+            value: Some(value.into().into()),
             range: None,
         });
     }
@@ -2712,12 +2756,13 @@ impl<'a> Tx<'a> {
     /// where it is: a document write, echoed by nothing, legal on a rich
     /// label (docs/rich-text-plan.md §17). A `block` covers the range's whole
     /// paragraphs.
-    pub fn format_range(&mut self, widget: WidgetId, range: std::ops::Range<usize>, name: &str, value: &str) {
+    pub fn format_range(&mut self, widget: WidgetId, range: std::ops::Range<usize>, name: &str, value: impl Into<AttrValue>) {
         // A silent document write moves the binding's own fold, as apply_edit
         // does (docs/rich-text-plan.md §17); a block covers whole paragraphs,
         // as the core snaps it.
         let range = self.ctx.ranged_act_bounds(widget.0, range, name);
-        let value = if name == "block" && value == "body" { None } else { Some(value) };
+        let text: String = value.into().into();
+        let value = if name == "block" && text == "body" { None } else { Some(text.as_str()) };
         self.ctx.absorb_format(widget.0, range, name, value);
         self.ops.push(TxOp::FormatText {
             widget,
@@ -9419,5 +9464,62 @@ mod tests {
         );
         assert_eq!(msgs.next(&ctx), Some(Msg::Redid("add todo".into())));
         assert_eq!(msgs.next(&ctx), None, "unmapped folds into nothing");
+    }
+
+    // THE CORRECTION SLICE (the idiom review, 2026-09-17).
+
+    // R1: a path level that is not there is named by kaya, not by Rust's
+    // own "index out of bounds", and try_key is the door the two guests
+    // that used to pre-check `is_empty()` now take.
+    #[test]
+    fn a_path_level_that_is_not_there_is_named() {
+        let path: Vec<Value> = vec![Value::Str("a".into())];
+        assert_eq!(path.key::<String>(0), "a");
+        assert_eq!(path.try_key::<String>(1), None);
+        let said = std::panic::catch_unwind(|| path.key::<String>(1)).unwrap_err();
+        let said = said
+            .downcast_ref::<String>()
+            .cloned()
+            .unwrap_or_else(|| said.downcast_ref::<&str>().map_or(String::new(), |s| (*s).to_string()));
+        assert!(
+            said.contains("kaya:") && said.contains("1 level(s)") && said.contains("level 1"),
+            "the refusal did not name the path and the level: {said}"
+        );
+    }
+
+    // X2: a flag attribute is a BOOL on both sides, the wire's own string
+    // only at the boundary, and a run carries a RANGE.
+    #[test]
+    fn a_flag_attribute_is_a_bool_on_both_sides() {
+        let doc = super::Document::new("abcd")
+            .mark(0..2, "italic", true)
+            .link(2..4, "https://kaya.dev");
+        assert_eq!(doc.runs.len(), 2);
+        assert!(doc.runs[0].is_flag(), "a bool mark did not read back as a flag");
+        assert_eq!(doc.runs[0].value, "true", "a bool mark did not reach the wire's spelling");
+        assert!(!doc.runs[1].is_flag(), "a valued attribute read back as a flag");
+        assert_eq!(doc.runs[0].range, 0..2, "a run does not carry its own range");
+        assert_eq!(
+            super::Document::new("abcd").mark(0..2, "italic", false).runs[0].value,
+            "false"
+        );
+    }
+
+    // X2/S3: a span the wire carried with its ends out of order is refused
+    // NAMING THE RECORD — Range's own invariant is unchecked, so a reversed
+    // one would read as empty everywhere instead of as the disagreement it
+    // is. No scene reaches it.
+    #[test]
+    fn a_reversed_span_is_refused_naming_the_record() {
+        let said = std::panic::catch_unwind(|| crate::wire::decoded_span("a run", 5, 3))
+            .unwrap_err();
+        let said = said
+            .downcast_ref::<String>()
+            .cloned()
+            .unwrap_or_else(|| said.downcast_ref::<&str>().map_or(String::new(), |s| (*s).to_string()));
+        assert!(
+            said.contains("a run carries 5..3, a reversed span"),
+            "the refusal did not name the record and both ends: {said}"
+        );
     }
 }

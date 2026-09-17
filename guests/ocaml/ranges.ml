@@ -68,7 +68,7 @@ let () =
 
   build app (fun () ->
       window ~title:"ranges" ();
-      let status = signal_str ("0 matches") in
+      let status = signal Scalar.Str ("0 matches") in
 
       (* Every range assertion finds this control by its authored id. *)
       let editor =

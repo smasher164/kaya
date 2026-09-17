@@ -29,7 +29,7 @@ let () =
 
   build app (fun () ->
       window ~title:"filedialog" ();
-      let status = signal_str ("no file") in
+      let status = signal Scalar.Str ("no file") in
 
       let picked files =
         match files with
@@ -42,7 +42,7 @@ let () =
               let text =
                 try
                   let fd, _seekable =
-                    Kaya_runtime.open_picked first.handle file_mode_read
+                    open_picked first File_mode.Read
                   in
                   let ic = Unix.in_channel_of_descr fd in
                   let len = in_channel_length ic in

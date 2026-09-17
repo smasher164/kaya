@@ -16,7 +16,7 @@ app.build { tx in
         "File",
         items: [
             tx.item("Reload"),
-            tx.item("Settings…", shortcut: "primary+comma", role: KayaAppTx.roleSettings) { t in
+            tx.item("Settings…", shortcut: "primary+comma", role: .settings) { t in
                 // Fires twice on purpose: the chord and the declared path.
                 settingsCount += 1
                 t.write(status, .str("settings \(settingsCount)"))

@@ -63,7 +63,7 @@ final class PostKaya {
      * its witness, asserted again by the scene. */
     static java.util.Optional<NotePatch> asNote(KayaApp.Tx tx,
             KayaSums.SumCollection<String, Feed.Post> c, String key) {
-        return c.get(tx, key) instanceof Feed.Note
+        return c.find(tx, key).orElse(null) instanceof Feed.Note
                 ? java.util.Optional.of(new NotePatch(tx, c, key))
                 : java.util.Optional.empty();
     }
@@ -93,7 +93,7 @@ final class PostKaya {
      * its witness, asserted again by the scene. */
     static java.util.Optional<TodoPatch> asTodo(KayaApp.Tx tx,
             KayaSums.SumCollection<String, Feed.Post> c, String key) {
-        return c.get(tx, key) instanceof Feed.Todo
+        return c.find(tx, key).orElse(null) instanceof Feed.Todo
                 ? java.util.Optional.of(new TodoPatch(tx, c, key))
                 : java.util.Optional.empty();
     }

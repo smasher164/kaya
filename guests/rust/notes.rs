@@ -84,10 +84,10 @@ impl Doc {
 fn spell_fold(runs: &[kaya::Run]) -> String {
     runs.iter()
         .map(|run| {
-            if run.value == "true" {
-                format!("{}:{} {}", run.start, run.end, run.name)
+            if run.is_flag() {
+                format!("{}:{} {}", run.range.start, run.range.end, run.name)
             } else {
-                format!("{}:{} {}={}", run.start, run.end, run.name, run.value)
+                format!("{}:{} {}={}", run.range.start, run.range.end, run.name, run.value)
             }
         })
         .collect::<Vec<_>>()
@@ -147,7 +147,7 @@ fn bridge_edit(doc: &mut Doc, edit: &kaya::Edit) {
     }
     let mut want: Vec<BTreeMap<String, String>> = vec![BTreeMap::new(); len];
     for run in &edit.runs {
-        for k in run.start as usize..run.end as usize {
+        for k in run.range.start as usize..run.range.end as usize {
             want[k].insert(run.name.clone(), run.value.clone());
         }
     }

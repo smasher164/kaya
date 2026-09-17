@@ -22,7 +22,7 @@ func App() *kaya.App {
 					Action("Delete").
 					Action("Archive").
 					Cancel("Keep").
-					OnResult(func(tx *kaya.Tx, choice uint32) {
+					OnResult(func(tx *kaya.Tx, choice kaya.AlertChoice) {
 						switch choice {
 						case 0:
 							tx.Write(status, "deleted")
@@ -40,7 +40,7 @@ func App() *kaya.App {
 					Message("it is still mounted").
 					Action("Eject").
 					Cancel("Hold").
-					OnResult(func(tx *kaya.Tx, choice uint32) {
+					OnResult(func(tx *kaya.Tx, choice kaya.AlertChoice) {
 						if choice == kaya.AlertChoiceCancel {
 							tx.Write(status, "held")
 						} else {

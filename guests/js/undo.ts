@@ -109,8 +109,8 @@ function redone(label: string, delta: kaya.UndoDelta): void {
 
 const { status, history, keys, notes, field, todos } = app.window({ title: "undo", onUndone: undone, onRedone: redone }, () => {
   app.menu("Edit", () => {
-    kaya.item("Undo", { role: kaya.ROLE_UNDO });
-    kaya.item("Redo", { role: kaya.ROLE_REDO });
+    kaya.item("Undo", { role: "undo" });
+    kaya.item("Redo", { role: "redo" });
   });
 
   const status = kaya.signal("no todos");

@@ -297,7 +297,7 @@ if (isMainThread) {
   check("fmt refuses a row's field", throws(() => app.window(() => { kaya.column(() => { for (const todo of todos) { kaya.fmt`${todo.title}`; } }); }), /bound with/));
 
   // ----------------------------------------------------- promise dialogs
-  let promised: Promise<number | null> | null = null;
+  let promised: Promise<K.AlertChoice> | null = null;
   app.build(() => { promised = kaya.showAlert({ title: "t", message: "m", actions: ["A"], cancel: "C" }); });
   const alertId = (app as unknown as { _counters: { alert: number } })._counters.alert;
   const alertBytes = new Uint8Array(24);
@@ -309,14 +309,15 @@ if (isMainThread) {
   shipped.length = 0;
   fire(wire.parse_occurrence(alertBytes));
   const choice = await promised!;
-  count.set((choice ?? -1) + 100);
+  count.set(choice === "action1" ? 101 : 99);
   await Promise.resolve();
   // Two records: the write, and the formatted signal above recomputing.
-  check("showAlert without onResult is a promise of the choice, and its continuation is a transaction", choice === 1 && shipped.length === 1 && shipped[0]!.length === 2);
+  check("showAlert without onResult is a promise of the choice, and its continuation is a transaction", choice === "action1" && shipped.length === 1 && shipped[0]!.length === 2);
 
   // A native dismissal (the wire's own ALERT_CHOICE_CANCEL sentinel)
-  // answers null, never the sentinel number (F3).
-  let cancelPromised: Promise<number | null> | null = null;
+  // answers the vocabulary's own "cancel", never the sentinel number
+  // (F3, and the idiom review's J2).
+  let cancelPromised: Promise<K.AlertChoice> | null = null;
   app.build(() => { cancelPromised = kaya.showAlert({ title: "t", message: "m", actions: ["A"], cancel: "C" }); });
   const cancelAlertId = (app as unknown as { _counters: { alert: number } })._counters.alert;
   const cancelBytes = new Uint8Array(24);
@@ -327,7 +328,57 @@ if (isMainThread) {
   cv.setUint32(16, wire.ALERT_CHOICE_CANCEL, true);
   fire(wire.parse_occurrence(cancelBytes));
   const cancelChoice = await cancelPromised!;
-  check("a native alert dismissal answers null, not the wire sentinel", cancelChoice === null);
+  check("a native alert dismissal answers \"cancel\", not the wire sentinel", cancelChoice === "cancel");
+
+  // THE CORRECTION SLICE (the idiom review, 2026-09-17). Every closed
+  // vocabulary a guest passes is a string-literal union of this binding,
+  // there is no alias of a wire constant to reach one through, and a
+  // wire NUMBER this build does not know is refused naming it.
+  const unknownAlert = new Uint8Array(24);
+  const uav = new DataView(unknownAlert.buffer);
+  uav.setUint32(0, 24, true);
+  uav.setUint16(4, wire.OCC_ALERT_RESULT, true);
+  uav.setBigUint64(8, BigInt(cancelAlertId), true);
+  uav.setUint32(16, 7, true);
+  check(
+    "an alert choice this build does not know is refused naming it",
+    throws(() => { fire(wire.parse_occurrence(unknownAlert)); }, /alert result carries choice 7/),
+  );
+  const unknownOutcome = new Uint8Array(24);
+  const uov = new DataView(unknownOutcome.buffer);
+  uov.setUint32(0, 24, true);
+  uov.setUint16(4, wire.OCC_NOTIFICATION_RESULT, true);
+  uov.setBigUint64(8, BigInt(4242), true);
+  uov.setUint32(16, 9, true);
+  check(
+    "a notification outcome this build does not know is refused naming it",
+    throws(() => { fire(wire.parse_occurrence(unknownOutcome)); }, /notification result carries outcome 9/),
+  );
+  check(
+    "the wire's vocabularies are not re-exported under a kaya name",
+    (kaya as unknown as Record<string, unknown>).SECTIONS_BAR === undefined &&
+      (kaya as unknown as Record<string, unknown>).APPEARANCE_DARK === undefined &&
+      (kaya as unknown as Record<string, unknown>).ROLE_UNDO === undefined &&
+      (kaya as unknown as Record<string, unknown>).NOTIFICATION_ACTIVATED === undefined,
+  );
+  check(
+    "a file mode is a name of this binding, and an unknown one is refused",
+    throws(() => { new kaya.PickedFile(1, "n", "").open("append" as unknown as K.FileMode); }, /mode/),
+  );
+  check("a picked file with no re-openable name answers null, not an empty one", new kaya.PickedFile(1, "n", "").localPath === null);
+  check("and one with a name answers the name", new kaya.PickedFile(1, "n", "/tmp/n").localPath === "/tmp/n");
+
+  // X2: a flag attribute is a boolean on BOTH sides, and a run, an edit
+  // and a format carry a SPAN rather than two loose offsets.
+  const flagRun = kaya.run([0, 2], "italic", true);
+  check("a bool mark reaches the wire as its flag string and reads back as a boolean", flagRun.isFlag && flagRun.value === "true");
+  check("a valued attribute does not read back as a flag", !kaya.run([0, 2], "link", "u").isFlag);
+  check("a run carries its span", flagRun.range[0] === 0 && flagRun.range[1] === 2);
+  check("an edit carries its span", kaya.Edit.replace([1, 3], "x").range[1] === 3);
+  check(
+    "a reversed span is refused naming both ends",
+    throws(() => { kaya.run([5, 3], "bold", true); }, /5\.\.3, a reversed span/),
+  );
 
   // F4 (idiom pass): pickFile answers PickedFile | null, saveFile's own
   // shape — cancel (the platform's empty file list) resolves to null,
@@ -805,7 +856,7 @@ if (isMainThread) {
   // slot from every widget prop above, and it takes a count OR a signal.
   let badgeSignal!: K.Signal<number>;
   shipped.length = 0;
-  app.window({ sectionsPresentation: kaya.SECTIONS_BAR }, () => {
+  app.window({ sectionsPresentation: "bar" }, () => {
     badgeSignal = kaya.signal(0);
     kaya.column(() => { kaya.label("shell"); });
   });
@@ -830,11 +881,11 @@ if (isMainThread) {
   const vocabRecords = shipped.flat().map((r) => JSON.stringify([...r]));
   check(
     "sectionsPresentation accepts its string name, packing the same value as the constant",
-    vocabRecords.includes(JSON.stringify([...wire.tx_set_window_sections_presentation(2610, kaya.SECTIONS_SIDEBAR)])),
+    vocabRecords.includes(JSON.stringify([...wire.tx_set_window_sections_presentation(2610, wire.SECTIONS_PRESENTATION_SIDEBAR)])),
   );
   check(
     "appearance accepts its string name, packing the same value as the constant",
-    vocabRecords.includes(JSON.stringify([...wire.tx_set_window_appearance(2610, kaya.APPEARANCE_DARK)])),
+    vocabRecords.includes(JSON.stringify([...wire.tx_set_window_appearance(2610, wire.APPEARANCE_DARK)])),
   );
   check(
     "an unknown sectionsPresentation name is refused, naming the vocabulary",
@@ -881,10 +932,10 @@ if (isMainThread) {
   };
   const activated = wire.parse_occurrence(notificationBytes(12, 0));
   const refused = wire.parse_occurrence(notificationBytes(99, 1));
-  check("a packed notification_result decodes to its id and outcome", activated.kind === wire.OCC_NOTIFICATION_RESULT && activated.id === 12 && activated.keys.length === 0 && activated.payload === kaya.NOTIFICATION_ACTIVATED);
-  check("a REFUSED outcome decodes too (the click tail read past here)", refused.id === 99 && refused.payload === kaya.NOTIFICATION_REFUSED);
+  check("a packed notification_result decodes to its id and outcome", activated.kind === wire.OCC_NOTIFICATION_RESULT && activated.id === 12 && activated.keys.length === 0 && activated.payload === wire.NOTIFICATION_OUTCOME_ACTIVATED);
+  check("a REFUSED outcome decodes too (the click tail read past here)", refused.id === 99 && refused.payload === wire.NOTIFICATION_OUTCOME_REFUSED);
 
-  const notifySeen: Array<[string, number]> = [];
+  const notifySeen: Array<[string, K.NotificationOutcome]> = [];
   shipped.length = 0;
   app.build(() => {
     kaya.showNotification({ notification: 12, title: "Call the plumber", body: "a reminder", at: 1757000000, onResult: (o) => notifySeen.push(["a", o]) });
@@ -915,16 +966,16 @@ if (isMainThread) {
     fire(wire.parse_occurrence(notificationBytes(99, 1)));
   });
   check("the retired id's second result announces its drop", retiredSaid.includes("kaya: notification 12 outcome activated reached no handler"));
-  check("the handler fires with the activated outcome", notifySeen.some(([w, o]) => w === "a" && o === kaya.NOTIFICATION_ACTIVATED));
-  check("a refused post reaches the same handler slot", notifySeen.some(([w, o]) => w === "b" && o === kaya.NOTIFICATION_REFUSED));
+  check("the handler fires with the activated outcome", notifySeen.some(([w, o]) => w === "a" && o === "activated"));
+  check("a refused post reaches the same handler slot", notifySeen.some(([w, o]) => w === "b" && o === "refused"));
   check("the registration is ONE-SHOT: the second result reaches nobody", notifySeen.filter(([w]) => w === "a").length === 1);
   check("the id retires with it", !(app as unknown as { _notificationHandlers: Map<number, unknown> })._notificationHandlers.has(12));
 
   // AND THE ID IS REUSABLE once it has retired: guests own the numbers.
-  let promisedOutcome: Promise<number> | null = null;
+  let promisedOutcome: Promise<K.NotificationOutcome> | null = null;
   app.build(() => { promisedOutcome = kaya.showNotification({ notification: 12, title: "again" }); });
   fire(wire.parse_occurrence(notificationBytes(12, 1)));
-  check("an id posted again after retirement binds a FRESH handler, and with no onResult it is a PROMISE of the outcome", (await promisedOutcome!) === kaya.NOTIFICATION_REFUSED);
+  check("an id posted again after retirement binds a FRESH handler, and with no onResult it is a PROMISE of the outcome", (await promisedOutcome!) === "refused");
 
   // THE PROCESS-LEVEL HANDLER (docs/tasks-s9-plan.md R1). A tap on a
   // reminder after the app has exited relaunches the process, and THAT
@@ -934,8 +985,8 @@ if (isMainThread) {
   // process-level handler, and that handler does NOT retire. NO PROMISE
   // TWIN here, unlike showAlert and showNotification: a promise settles
   // once and this handler is explicitly not one-shot.
-  const processSeen: Array<[number, number]> = [];
-  const oneShotSeen: number[] = [];
+  const processSeen: Array<[number, K.NotificationOutcome]> = [];
+  const oneShotSeen: K.NotificationOutcome[] = [];
   kaya.onNotificationActivation((n, o) => processSeen.push([n, o]));
   app.build(() => {
     kaya.showNotification({ notification: 21, title: "bound at the show", onResult: (o) => oneShotSeen.push(o) });
@@ -943,9 +994,9 @@ if (isMainThread) {
   fire(wire.parse_occurrence(notificationBytes(21, 0)));
   fire(wire.parse_occurrence(notificationBytes(77, 0)));
   fire(wire.parse_occurrence(notificationBytes(78, 1)));
-  check("the one-shot handler WINS over the process-level one", oneShotSeen.length === 1 && oneShotSeen[0] === kaya.NOTIFICATION_ACTIVATED && !processSeen.some(([n]) => n === 21));
-  check("an id with no one-shot handler reaches the process-level one", processSeen.some(([n, o]) => n === 77 && o === kaya.NOTIFICATION_ACTIVATED));
-  check("the process-level handler does NOT retire", processSeen.length === 2 && processSeen[1]?.[0] === 78 && processSeen[1]?.[1] === kaya.NOTIFICATION_REFUSED && (app as unknown as { _notificationActivation: unknown })._notificationActivation !== undefined);
+  check("the one-shot handler WINS over the process-level one", oneShotSeen.length === 1 && oneShotSeen[0] === "activated" && !processSeen.some(([n]) => n === 21));
+  check("an id with no one-shot handler reaches the process-level one", processSeen.some(([n, o]) => n === 77 && o === "activated"));
+  check("the process-level handler does NOT retire", processSeen.length === 2 && processSeen[1]?.[0] === 78 && processSeen[1]?.[1] === "refused" && (app as unknown as { _notificationActivation: unknown })._notificationActivation !== undefined);
 
   // AND THE DROP IS ANNOUNCED, naming the id: with neither handler
   // registered there is nothing else to tell a relaunched process's
@@ -1179,7 +1230,7 @@ if (isMainThread) {
     check(name, ok);
   }
   function spell(runs: readonly K.Run[]): string {
-    return runs.map((r) => (r.value === "true" ? `${r.start}:${r.end} ${r.name}` : `${r.start}:${r.end} ${r.name}=${r.value}`)).join("|");
+    return runs.map((r) => (r.isFlag ? `${r.range[0]}:${r.range[1]} ${r.name}` : `${r.range[0]}:${r.range[1]} ${r.name}=${r.value}`)).join("|");
   }
   function frameOcc(kind: number, parts: Uint8Array[]): Uint8Array {
     const body = parts.reduce((n, p) => n + p.length, 0);
@@ -1209,7 +1260,7 @@ if (isMainThread) {
     rv.setBigUint64(8, BigInt(stop), true);
     rv.setUint32(16, runs.length, true);
     const flat: W.WireValue[] = [];
-    for (const r of runs) flat.push(new wire.I64(r.start), new wire.I64(r.end), r.name, r.value);
+    for (const r of runs) flat.push(new wire.I64(r.range[0]), new wire.I64(r.range[1]), r.name, r.value);
     const countHead = new Uint8Array(8);
     new DataView(countHead.buffer).setUint32(0, flat.length, true);
     return frameOcc(wire.OCC_TEXT_EDITED, [tag, ...keys.map((k) => valueBytes(keyOf(k))), range, countHead, ...flat.map(valueBytes), valueBytes(inserted)]);
@@ -1299,7 +1350,7 @@ if (isMainThread) {
     "a delivered text_formatted puts the attribute over the range",
     spell(editor.document().runs) === "0:6 bold|8:11 italic|12:17 link=https://kaya.dev|12:17 underline|18:29 block=heading2",
   );
-  richCheck("onFormat hears the act, `value` carrying it", JSON.stringify(formats[formats.length - 1]) === JSON.stringify({ start: 12, end: 17, name: "underline", value: "true" }));
+  richCheck("onFormat hears the act, `value` carrying it", JSON.stringify(formats[formats.length - 1]) === JSON.stringify(kaya.run([12, 17], "underline", true)));
   fire(wire.parse_occurrence(packFormatted(editor.id, 1, 12, 17, "underline", "")));
   richCheck(
     "a REMOVAL takes it off and `value` is null",
@@ -1322,7 +1373,7 @@ if (isMainThread) {
   // A DELIVERED EDIT: runs before it keep, runs after it shift, the
   // inserted text's own runs land relative to the edit — and two adjacent
   // equal runs merge (the typed byte joining the paragraph it inherited).
-  fire(wire.parse_occurrence(packEdited(editor.id, 29, 29, "x", [{ start: 0, end: 1, name: "block", value: "heading2" }])));
+  fire(wire.parse_occurrence(packEdited(editor.id, 29, 29, "x", [kaya.run([0, 1], "block", "heading2")])));
   richCheck(
     "a delivered edit shifts what follows and MERGES the inherited run",
     spell(editor.document().runs) === "0:6 bold|8:11 italic|12:17 link=https://kaya.dev|18:30 block=heading2",
@@ -1330,7 +1381,7 @@ if (isMainThread) {
   const lastEdit = edits[edits.length - 1]!;
   richCheck(
     "onEdit hears the addressed edit, its runs relative to the inserted text",
-    lastEdit.start === 29 && lastEdit.end === 29 && lastEdit.inserted === "x" && JSON.stringify(lastEdit.runs) === JSON.stringify([{ start: 0, end: 1, name: "block", value: "heading2" }]),
+    lastEdit.range[0] === 29 && lastEdit.range[1] === 29 && lastEdit.inserted === "x" && JSON.stringify(lastEdit.runs) === JSON.stringify([kaya.run([0, 1], "block", "heading2")]),
   );
 
   // AN EDIT CARRIES ITS SOURCE (the review page's ruling 3, 2026-09-14):
@@ -1342,7 +1393,7 @@ if (isMainThread) {
     "every source in the vocabulary reaches the app by name",
     edits[edits.length - 1]!.source === kaya.EditSource.PASTE && Object.values(kaya.EditSource).sort().join("|") === "drop|ime_commit|native_undo|paste|user",
   );
-  richCheck("an edit the app builds carries NO source", kaya.Edit.insert(6, ", big").source === undefined && new kaya.Edit(29, 29, "x").source === undefined);
+  richCheck("an edit the app builds carries NO source", kaya.Edit.insert(6, ", big").source === undefined && new kaya.Edit([29, 29], "x").source === undefined);
   let sourceSaid = "";
   try {
     fire(wire.parse_occurrence(packEdited(editor.id, 30, 30, "z", [], [], 9)));
@@ -1353,28 +1404,28 @@ if (isMainThread) {
 
   // THE FOLD FOLLOWS WITHOUT A HANDLER, as an undo's mirrors do: this
   // textarea registered neither delta.
-  fire(wire.parse_occurrence(packEdited(quietEditor.id, 0, 0, "hi", [{ start: 0, end: 2, name: "bold", value: "true" }])));
+  fire(wire.parse_occurrence(packEdited(quietEditor.id, 0, 0, "hi", [kaya.run([0, 2], "bold", true)])));
   richCheck("the document follows with NO handler registered", quietEditor.document().text === "hi" && spell(quietEditor.document().runs) === "0:2 bold");
 
   // A LATER RUN WINS over an earlier one of the same attribute, which is
   // how an overlapping declaration normalizes (scene.rs's paint order).
   const later = new kaya.Document("0123456789");
   later.runs = [
-    { start: 0, end: 9, name: "bold", value: "true" },
-    { start: 2, end: 4, name: "bold", value: "false" },
+    kaya.run([0, 9], "bold", true),
+    kaya.run([2, 4], "bold", "false"),
   ];
   app.build(() => {
     quietEditor.setDocument(later);
-    quietEditor.applyEdit(new kaya.Edit(0, 0, ""));
+    quietEditor.applyEdit(new kaya.Edit([0, 0], ""));
   });
   richCheck("a LATER run of one attribute paints over an earlier one", spell(quietEditor.document().runs) === "0:2 bold|2:4 bold=false|4:9 bold");
   app.build(() => {
     quietEditor.setDocument(new kaya.Document("abcd", [
-      { start: 0, end: 4, name: "italic", value: "true" },
-      { start: 0, end: 4, name: "bold", value: "true" },
-      { start: 3, end: 3, name: "code", value: "true" },
+      kaya.run([0, 4], "italic", true),
+      kaya.run([0, 4], "bold", true),
+      kaya.run([3, 3], "code", true),
     ]));
-    quietEditor.applyEdit(new kaya.Edit(0, 0, ""));
+    quietEditor.applyEdit(new kaya.Edit([0, 0], ""));
   });
   richCheck("two attributes over one range are TWO runs, ordered by name, and an empty run is dropped", spell(quietEditor.document().runs) === "0:4 bold|0:4 italic");
 
@@ -1597,14 +1648,14 @@ if (isMainThread) {
   // THE COPY'S ACT FOLDS INTO ITS ROW, by the same fold the live mirror
   // takes: the two are driven from one edit and compared.
   const liveFold = new kaya.Document("ab", [
-    { start: 0, end: 1, name: "bold", value: "true" },
-    { start: 1, end: 2, name: "link", value: "u" },
+    kaya.run([0, 1], "bold", true),
+    kaya.run([1, 2], "link", "u"),
   ]);
   app.build(() => {
     quietEditor.setDocument(liveFold);
-    quietEditor.applyEdit(new kaya.Edit(1, 1, "X", [{ start: 0, end: 1, name: "code", value: "true" }]));
+    quietEditor.applyEdit(new kaya.Edit([1, 1], "X", [kaya.run([0, 1], "code", true)]));
   });
-  fire(wire.parse_occurrence(packEdited(boundBody.id, 1, 1, "X", [{ start: 0, end: 1, name: "code", value: "true" }], ["a"])));
+  fire(wire.parse_occurrence(packEdited(boundBody.id, 1, 1, "X", [kaya.run([0, 1], "code", true)], ["a"])));
   const folded = richNotes.get("a")!.body;
   richCheck(
     "a stamped copy's edit folds into its ROW's field, as the live fold folds a widget's",

@@ -22,7 +22,7 @@ let () =
          ~sections_presentation:Sections_presentation.Bar
          ()
      in
-     let visits = signal_str ("archive: 0 visits") in
+     let visits = signal Scalar.Str ("archive: 0 visits") in
      let on_archive_shown () =
        incr visit_count;
        write visits
@@ -42,16 +42,16 @@ let () =
          library;
        add_section ~window:library ~title:"Shelves" ~symbol:Search shelves;
        add_section ~window:library ~title:"Loans" ~symbol:Lock loans;
-       let shelves_ready = signal_str ("shelves ready") in
+       let shelves_ready = signal Scalar.Str ("shelves ready") in
        let shelves_root =
          column [ label ~bind:shelves_ready (* label#2 *) ] ()
        in
        mount_in shelves shelves_root;
-       let loans_ready = signal_str ("loans ready") in
+       let loans_ready = signal Scalar.Str ("loans ready") in
        let loans_root = column [ label ~bind:loans_ready (* label#3 *) ] () in
        mount_in loans loans_root
      in
-     let ready = signal_str ("feed ready") in
+     let ready = signal Scalar.Str ("feed ready") in
      let feed_root =
        column
          [

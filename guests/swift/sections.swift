@@ -19,7 +19,7 @@ var visits: KayaSignal!
 app.build { tx in
     tx.window(
         title: "sections",
-        sectionsPresentation: Int64(KAYA_SECTIONS_PRESENTATION_BAR))
+        sectionsPresentation: .bar)
     visits = tx.signal(.str("archive: 0 visits"))
 
     // A symbol names a CONCEPT (docs/styling-plan.md D6).
@@ -45,7 +45,7 @@ app.build { tx in
             onClick: { inner in  // button#1
                 inner.createWindow(
                     LIBRARY, title: "library",
-                    sectionsPresentation: Int64(KAYA_SECTIONS_PRESENTATION_SIDEBAR))
+                    sectionsPresentation: .sidebar)
                 inner.addSection(SHELVES, title: "Shelves", symbol: .search, window: LIBRARY)
                 inner.addSection(LOANS, title: "Loans", symbol: .lock, window: LIBRARY)
                 let shelvesRoot = inner.column {

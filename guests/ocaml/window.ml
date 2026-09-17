@@ -8,7 +8,7 @@ let () =
 
   build app (fun () ->
      window ~title:"window probe" ~width:640.0 ~height:400.0 ();
-     let probe = signal_str ("window probe") in
+     let probe = signal Scalar.Str ("window probe") in
 
      let root = column [ label ~bind:probe (* label#0 *) ] () in
      mount root);

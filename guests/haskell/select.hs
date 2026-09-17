@@ -4,7 +4,6 @@
 -- tools/scenes/select.steps.
 
 import Data.Text (Text)
-import qualified Data.Text as T
 import KayaApp
 
 options :: [Text]
@@ -14,7 +13,7 @@ main :: IO ()
 main = kayaMain $ \app -> do
   _ <- buildTx app $ do
     window primary [WTitle "select"]
-    picked <- signal (T.pack "picked: Red")
+    picked <- signalText "picked: Red"
 
     let onPick index =
           submitTx app $

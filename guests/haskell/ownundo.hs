@@ -6,15 +6,14 @@
 import Data.IORef (newIORef, readIORef, writeIORef)
 
 import Data.Text (Text)
-import qualified Data.Text as T
 import KayaApp
 
 -- The label and the two live answers the route reads, in one transaction.
-publishIn :: Signal -> Widget -> [Document] -> [Document] -> Build ()
+publishIn :: Signal Text -> Widget -> [Document] -> [Document] -> Build ()
 publishIn status owned undos redos = do
   writeSignal
     status
-    (T.pack ("undo " ++ show (length undos) ++ " redo " ++ show (length redos)))
+    ("undo " <> tshow (length undos) <> " redo " <> tshow (length redos))
   canUndo owned (not (null undos))
   canRedo owned (not (null redos))
 
@@ -28,12 +27,12 @@ main = kayaMain $ \app -> do
   currentRef <- newIORef (documentOf "")
 
   (owned, status) <- buildTx app $ do
-    status <- signal (T.pack "undo 0 redo 0")
+    status <- signalText "undo 0 redo 0"
 
     -- Realized here because the menu handlers below need their handles.
-    native <- textarea [Rich True, A11yId ("native" :: Text), A11yLabel ("Native" :: Text)]
+    native <- textarea [Rich True, A11yId "native", A11yLabel "Native"]
     owned <-
-      textarea [Rich True, OwnUndo True, A11yId ("owned" :: Text), A11yLabel ("Owned" :: Text)]
+      textarea [Rich True, OwnUndo True, A11yId "owned", A11yLabel "Owned"]
 
     let onUndo = do
           undos <- readIORef undoRef
@@ -80,7 +79,7 @@ main = kayaMain $ \app -> do
     root <-
       column
         []
-        [ labelBound status [A11yId ("status" :: Text)], -- label#0
+        [ labelBound status [A11yId "status"], -- label#0
           pure native, -- textarea#0
           pure owned, -- textarea#1
           row

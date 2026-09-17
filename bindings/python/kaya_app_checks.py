@@ -3052,11 +3052,11 @@ def _packed_notification_result(ident, outcome):
 check("a packed notification_result decodes to its id and outcome",
       kaya.wire.parse_occurrence(_packed_notification_result(12, 0))
       == (kaya.wire.OCC_NOTIFICATION_RESULT, 12, [],
-          kaya.NOTIFICATION_ACTIVATED))
+          kaya.NotificationOutcome.ACTIVATED))
 check("a REFUSED outcome decodes too (the click tail read past here)",
       kaya.wire.parse_occurrence(_packed_notification_result(12, 1))
       == (kaya.wire.OCC_NOTIFICATION_RESULT, 12, [],
-          kaya.NOTIFICATION_REFUSED))
+          kaya.NotificationOutcome.REFUSED))
 
 # THE HANDLER: one-shot, and the id is free again after it retires.
 notify_seen = []
@@ -3091,9 +3091,9 @@ finally:
     kaya.runtime.next_occurrence = _real_next_n
 
 check("the handler fires with the activated outcome",
-      ("a", kaya.NOTIFICATION_ACTIVATED) in notify_seen)
+      ("a", kaya.NotificationOutcome.ACTIVATED) in notify_seen)
 check("a refused post reaches the same handler slot",
-      ("b", kaya.NOTIFICATION_REFUSED) in notify_seen)
+      ("b", kaya.NotificationOutcome.REFUSED) in notify_seen)
 check("the registration is ONE-SHOT: the second result reaches nobody",
       len([h for h in notify_seen if h[0] == "a"]) == 1)
 check("the id retires with it", 12 not in app_shot._notification_handlers)
@@ -3115,7 +3115,7 @@ try:
 finally:
     kaya.runtime.next_occurrence = _real_next_n
 check("an id posted again after retirement binds a FRESH handler",
-      reused == [kaya.NOTIFICATION_REFUSED])
+      reused == [kaya.NotificationOutcome.REFUSED])
 
 # THE PROCESS-LEVEL HANDLER (docs/tasks-s9-plan.md R1). A tap on a
 # reminder after the app has exited relaunches the process, and THAT
@@ -3150,13 +3150,13 @@ finally:
     kaya.runtime.next_occurrence = _real_next_n
 
 check("the one-shot handler WINS over the process-level one",
-      one_shot_seen == [kaya.NOTIFICATION_ACTIVATED]
-      and (12, kaya.NOTIFICATION_ACTIVATED) not in process_seen)
+      one_shot_seen == [kaya.NotificationOutcome.ACTIVATED]
+      and (12, kaya.NotificationOutcome.ACTIVATED) not in process_seen)
 check("an id with no one-shot handler reaches the process-level one",
-      (77, kaya.NOTIFICATION_ACTIVATED) in process_seen)
+      (77, kaya.NotificationOutcome.ACTIVATED) in process_seen)
 check("the process-level handler does NOT retire",
-      process_seen == [(77, kaya.NOTIFICATION_ACTIVATED),
-                       (78, kaya.NOTIFICATION_REFUSED)]
+      process_seen == [(77, kaya.NotificationOutcome.ACTIVATED),
+                       (78, kaya.NotificationOutcome.REFUSED)]
       and app_relaunch._notification_activation is not None)
 
 # AND THE DROP IS ANNOUNCED, naming the id: with neither handler
@@ -3487,8 +3487,8 @@ def rich_check(name, ok):
 
 def _spell(runs):
     return "|".join(
-        f"{r.start}:{r.end} {r.name}" if r.value == "true"
-        else f"{r.start}:{r.end} {r.name}={r.value}" for r in runs)
+        f"{r.range.start}:{r.range.stop} {r.name}" if r.is_flag
+        else f"{r.range.start}:{r.range.stop} {r.name}={r.value}" for r in runs)
 
 
 def _packed_text_edited(ident, source, start, stop, inserted, runs, keys=()):
@@ -3500,7 +3500,7 @@ def _packed_text_edited(ident, source, start, stop, inserted, runs, keys=()):
         body += kaya.wire._enc.value(key)
     flat = []
     for run in runs:
-        flat += [run.start, run.end, run.name, run.value]
+        flat += [run.range.start, run.range.stop, run.name, run.value]
     body += struct.pack("<QQII", start, stop, len(runs), 0)
     body += kaya.wire._enc.values(flat) + kaya.wire._enc.value(inserted)
     return struct.pack("<IHH", 8 + len(body),
@@ -3622,7 +3622,7 @@ rich_check("a delivered edit shifts what follows and MERGES the inherited "
               "|18:30 block=heading2")
 rich_check("on_edit hears the addressed edit, its runs relative to the "
            "inserted text",
-           (_edits[-1].start, _edits[-1].end, _edits[-1].inserted,
+           (_edits[-1].range.start, _edits[-1].range.stop, _edits[-1].inserted,
             _edits[-1].runs)
            == (29, 29, "x", [kaya.Run(0, 1, "block", "heading2")]))
 
@@ -4106,5 +4106,55 @@ except kaya.KayaError as e:
     check("except kaya.KayaError catches a state error",
           isinstance(e, RuntimeError) and "no ambient transaction" in str(e))
 del _state_app
+
+# THE CORRECTION SLICE (the idiom review, 2026-09-17).
+#
+# P1/X1: every closed vocabulary a guest passes is a typed value of this
+# binding, with FileMode's own `_missing_` — a plain name accepted, and
+# anything else refused NAMING the vocabulary.
+for _vocab, _member, _name in (
+        (kaya.AlertChoice, kaya.AlertChoice.CANCEL, "cancel"),
+        (kaya.NotificationOutcome, kaya.NotificationOutcome.ACTIVATED, "activated"),
+        (kaya.SectionsPresentation, kaya.SectionsPresentation.BAR, "bar"),
+        (kaya.Appearance, kaya.Appearance.DARK, "dark"),
+        (kaya.MenuRole, kaya.MenuRole.UNDO, "undo"),
+):
+    check(f"{_vocab.__name__} accepts its own plain name",
+          _vocab(_name) is _member)
+    try:
+        _vocab("no_such_member")
+        check(f"{_vocab.__name__} refuses a name it does not have", False)
+    except kaya.KayaValueError as e:
+        check(f"{_vocab.__name__} refuses a name it does not have",
+              "no_such_member" in str(e))
+check("the wire's vocabularies are not re-exported under a kaya name",
+      not any(hasattr(kaya, n) for n in
+              ("CANCEL", "SECTIONS_BAR", "APPEARANCE_DARK", "ROLE_UNDO",
+               "NOTIFICATION_ACTIVATED")))
+
+# X2: a flag attribute is a BOOL on both sides, the wire's own string
+# only at the boundary, and a run, an edit and a format carry a RANGE —
+# Python's own `range`, which every write side here already takes.
+_marked = (kaya.Document("abcd")
+           .mark(range(0, 2), "italic", True)
+           .link(range(2, 4), "https://kaya.dev"))
+check("a bool mark reaches the wire as its flag string and reads back as a bool",
+      _marked.runs[0].is_flag and _marked.runs[0].value == "true")
+check("a valued attribute does not read back as a flag",
+      not _marked.runs[1].is_flag)
+check("a run carries its own range", _marked.runs[0].range == range(0, 2))
+check("an edit carries its own range",
+      kaya.Edit.replace(range(1, 3), "x").range == range(1, 3))
+check("a bool mark set False reaches the wire as the wire's own word",
+      kaya.Document("ab").mark(range(0, 1), "italic", False).runs[0].value == "false")
+
+# X2/S3: a span the CORE sent with its ends out of order is refused
+# naming the record. No scene reaches it.
+try:
+    kaya._decoded_span("text_edited", 5, 3)
+    check("a reversed span the core sent is refused naming the record", False)
+except kaya.KayaValueError as e:
+    check("a reversed span the core sent is refused naming the record",
+          "text_edited carries 5..3, a reversed span" in str(e))
 
 sys.exit(1 if failures else 0)

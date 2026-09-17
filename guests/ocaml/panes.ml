@@ -14,13 +14,13 @@ let () =
 
      let on_detail () =
        push_entry ~title:"detail" detail;
-       let caption = signal_str ("detail pane") in
+       let caption = signal Scalar.Str ("detail pane") in
        let pane = column [ label ~a11y_id:"detail" ~bind:caption ] () in
        mount_in detail pane
      in
      let on_content () =
        push_entry ~title:"content" content;
-       let caption = signal_str ("content pane") in
+       let caption = signal Scalar.Str ("content pane") in
        let pane =
          column
            [
@@ -32,7 +32,7 @@ let () =
        mount_in content pane
      in
 
-     let caption = signal_str ("root pane") in
+     let caption = signal Scalar.Str ("root pane") in
      let root =
        column
          [

@@ -21,7 +21,7 @@ static class CommandsScene
             {
                 tx.Item("Reload"),
                 tx.Item("Settings…", shortcut: "primary+comma",
-                    role: Tx.RoleSettings,
+                    role: MenuRole.Settings,
                     onActivate: t =>
                     {
                         // Fires twice on purpose: the chord and the declared path.

@@ -18,8 +18,8 @@ app.build { tx in
     let edit = tx.menu(
         "Edit",
         items: [
-            tx.item("Undo", role: KayaAppTx.roleUndo),
-            tx.item("Redo", role: KayaAppTx.roleRedo),
+            tx.item("Undo", role: .undo),
+            tx.item("Redo", role: .redo),
         ])
     // NO onUndone AND NO onRedone: this scene's whole state is the collection
     // and the signal derived from it, both of which the core restores.

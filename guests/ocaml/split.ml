@@ -10,12 +10,12 @@ let () =
 
   build app (fun () ->
      window ~title:"split" ~panes:2 ();
-     let s = signal_str ("list pane") in
+     let s = signal Scalar.Str ("list pane") in
      let on_detail () =
        push_entry ~title:"detail"
          ~on_popped:(fun () -> write s ("popped detail"))
          detail;
-       (let caption = signal_str ("detail pane") in
+       (let caption = signal Scalar.Str ("detail pane") in
         let pane = column [ label ~a11y_id:"detail" ~bind:caption ] () in
         mount_in detail pane)
      in

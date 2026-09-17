@@ -7,11 +7,11 @@ let () =
   let app = Kaya_app.create () in
 
   build app (fun () ->
-     let probe = signal_str ("Layout probe") in
-     let tail = signal_str ("tail") in
-     let mixed = signal_str ("mixed") in
-     let nested = signal_str ("nested") in
-     let deep = signal_str ("deep") in
+     let probe = signal Scalar.Str ("Layout probe") in
+     let tail = signal Scalar.Str ("tail") in
+     let mixed = signal Scalar.Str ("mixed") in
+     let nested = signal Scalar.Str ("nested") in
+     let deep = signal Scalar.Str ("deep") in
 
      let root =
        column

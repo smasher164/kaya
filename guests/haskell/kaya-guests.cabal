@@ -26,6 +26,10 @@ common shared
   -- (unused imports, unused top-level bindings, duplicate exports,
   -- unused matches, partial head/tail/last uses) was fixed, not
   -- suppressed.
+  -- OverloadedRecordDot is how a guest reads kaya's own records now that
+  -- the Hungarian field prefixes are gone (r.range, doc.text, f.name);
+  -- DuplicateRecordFields lets several of them carry `name`/`value`.
+  default-extensions: OverloadedRecordDot, DuplicateRecordFields
   ghc-options: -threaded -O -Wall -Wcompat -Wno-name-shadowing
 
 library

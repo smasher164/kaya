@@ -73,8 +73,8 @@ app.build { tx in
     let edit = tx.menu(
         "Edit",
         items: [
-            tx.item("Undo", role: KayaAppTx.roleUndo),
-            tx.item("Redo", role: KayaAppTx.roleRedo),
+            tx.item("Undo", role: .undo),
+            tx.item("Redo", role: .redo),
         ])
     // The binding has reconciled its collection mirror before this runs.
     tx.window(

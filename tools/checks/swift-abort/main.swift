@@ -25,13 +25,17 @@ if let trap = ProcessInfo.processInfo.environment["KAYA_GUARD_TRAP"] {
             // preconditionFailure — uncatchable, so it is pinned the
             // same way as the mirror-read guard: the child must die.
             _ = tx.item("Bad", shortcut: "ctrl+s")
-        case "ymd":
-            // kayaYMD refuses a KayaDate missing year, month or day —
-            // uncatchable, pinned the same way as the shortcut parser's.
-            _ = DateComponents(year: 2026, month: 9).kayaYMD
-        case "hm":
-            // kayaHM refuses a KayaTime missing hour or minute.
-            _ = DateComponents(hour: 14).kayaHM
+        case "span":
+            // A span the CORE sent with its ends out of order is refused
+            // NAMING THE RECORD (the idiom review's S3) rather than
+            // trapping inside Range's own init with no kaya sentence.
+            _ = kayaDecodedSpan("text_edited", 5, 3)
+        case "choice":
+            // A closed vocabulary refuses a wire number this build does
+            // not know, naming it (X1).
+            _ = KayaAlertChoice.fromWire(7)
+        case "outcome":
+            _ = KayaNotificationOutcome.fromWire(9)
         default:
             FileHandle.standardError.write(Data("unknown KAYA_GUARD_TRAP: \(trap)\n".utf8))
         }
@@ -349,24 +353,85 @@ precondition(
 // top): a mirror read inside a For or When body being declared must
 // kill the process, an alias shortcut hitting the binding's one parser
 // must too (its rejection is a preconditionFailure), and so must
-// kayaYMD/kayaHM over a DateComponents missing the fields a KayaDate or
-// KayaTime guarantees.
-for mode in ["for", "when", "shortcut", "ymd", "hm"] {
+// a reversed span the core sent and a wire number outside a closed
+// vocabulary must too.
+// EACH TRAP IS READ BY ITS SENTENCE, not merely by the death: the
+// reversed span would kill the process either way — Range's own init has
+// a precondition — and the whole point of the guard is that the reader is
+// told which RECORD carried it, in kaya's words (invariant 3's
+// diagnostics half).
+for (mode, sentence) in [
+    ("for", "model read inside a template body"),
+    ("when", "model read inside a template body"),
+    ("shortcut", "shortcut"),
+    ("span", "a text_edited carries 5..3, a reversed span"),
+    ("choice", "an alert result carries choice 7"),
+    ("outcome", "a notification result carries outcome 9"),
+] {
     let child = Process()
     child.executableURL = URL(fileURLWithPath: CommandLine.arguments[0])
     var env = ProcessInfo.processInfo.environment
     env["KAYA_GUARD_TRAP"] = mode
     child.environment = env
     child.standardOutput = FileHandle.nullDevice
-    child.standardError = FileHandle.nullDevice
+    let pipe = Pipe()
+    child.standardError = pipe
     do {
         try child.run()
     } catch {
         preconditionFailure("could not re-exec for the \(mode) trap: \(error)")
     }
+    let said = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
     child.waitUntilExit()
     let died = child.terminationReason == .uncaughtSignal || child.terminationStatus != 0
     precondition(died, "guard trap \(mode) did not fire")
+    precondition(
+        said.contains(sentence),
+        "guard trap \(mode) fired on someone else's sentence, not \"\(sentence)\": \(said)")
 }
+
+// THE CORRECTION SLICE (the idiom review, 2026-09-17), the halves that
+// answer rather than trap.
+//
+// S1: a civil date is a TYPE, not a DateComponents alias — every
+// component non-optional, so a time cannot stand where a date is wanted,
+// and the display spelling is the type's own.
+precondition(
+    "\(KayaDate(year: 2026, month: 9, day: 4))" == "2026-09-04",
+    "a KayaDate does not spell itself: \(KayaDate(year: 2026, month: 9, day: 4))")
+precondition(
+    "\(KayaTime(hour: 14, minute: 30))" == "14:30",
+    "a KayaTime does not spell itself: \(KayaTime(hour: 14, minute: 30))")
+
+// S2: the Range carries the arithmetic the splices need, so a partial
+// edit is a call rather than a full reconstruction.
+precondition((2..<5).shifted(by: 3) == 5..<8, "Range.shifted moved the wrong bounds")
+precondition((2..<5).raised(to: 4) == 2..<4, "Range.raised moved the wrong bound")
+precondition((2..<5).lowered(to: 3) == 3..<5, "Range.lowered moved the wrong bound")
+
+// X2: a flag attribute is a BOOL on both sides, the wire's own string
+// only at the boundary.
+let marked = KayaDocument("abcd").mark(0..<2, "italic", true).link(2..<4, "https://kaya.dev")
+precondition(
+    marked.runs[0].isFlag && marked.runs[0].value == "true",
+    "a bool mark did not reach the wire as its flag string")
+precondition(!marked.runs[1].isFlag, "a valued attribute read back as a flag")
+precondition(
+    KayaEdit.insert(at: 3, "x").mark(0..<1, "code", true).runs[0].isFlag,
+    "an edit's bool mark did not read back as a flag")
+
+// C3: a picked file with no re-openable name answers nil, not an empty
+// one — the absence the type now checks.
+precondition(
+    KayaPickedFile(handle: 1, name: "n", localPath: "").localPath == nil,
+    "an absent local path is not nil")
+precondition(
+    KayaPickedFile(handle: 1, name: "n", localPath: "/tmp/n").localPath == "/tmp/n",
+    "a present local path did not survive")
+
+// S4: `Int` is the type of an integer literal, so the most obvious prefs
+// call must compile — this line IS the check.
+precondition(KayaApp.prefs().get("kaya-correction-absent", default: 7) == 7,
+    "prefs.get with an Int default did not answer the default")
 
 print("swift abort check: OK")

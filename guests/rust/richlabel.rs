@@ -15,10 +15,10 @@ enum Msg {
 fn spell(runs: &[kaya::Run]) -> String {
     runs.iter()
         .map(|run| {
-            if run.value == "true" {
-                format!("{}:{} {}", run.start, run.end, run.name)
+            if run.is_flag() {
+                format!("{}:{} {}", run.range.start, run.range.end, run.name)
             } else {
-                format!("{}:{} {}={}", run.start, run.end, run.name, run.value)
+                format!("{}:{} {}={}", run.range.start, run.range.end, run.name, run.value)
             }
         })
         .collect::<Vec<_>>()
@@ -61,8 +61,8 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 let doc = kaya::Document::new(DOC)
                     .bold(0..6)
                     .link(7..12, "https://kaya.dev")
-                    .mark(14..18, "code", "true");
-                let title = kaya::Document::new("Heading with italic").mark(13..19, "italic", "true");
+                    .mark(14..18, "code", true);
+                let title = kaya::Document::new("Heading with italic").mark(13..19, "italic", true);
                 ctx.apply(|tx| {
                     tx.set_document(body, &doc);
                     tx.set_document(heading, &title);
@@ -70,7 +70,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 });
             }
             Msg::Insert => {
-                let edit = kaya::Edit::insert(6, ", big").mark(2..5, "italic", "true");
+                let edit = kaya::Edit::insert(6, ", big").mark(2..5, "italic", true);
                 ctx.apply(|tx| tx.apply_edit(body, &edit));
                 let mirror = spell(&ctx.document(body).runs);
                 ctx.apply(|tx| tx.write(runs, mirror.clone()));
@@ -80,7 +80,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             // document written by range; the runs label is the binding's fold.
             Msg::Mark => {
                 ctx.apply(|tx| {
-                    tx.format_range(body, 1..4, "italic", "true");
+                    tx.format_range(body, 1..4, "italic", true);
                     tx.unformat_range(body, 0..3, "bold"); // "Hé": byte 2 is inside the é
                 });
                 let mirror = spell(&ctx.document(body).runs);

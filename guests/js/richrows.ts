@@ -15,7 +15,7 @@ const app = new kaya.App();
 /** The core's spelling of runs (`expect_runs`), so the row's field and
  * the core's mirror are compared as one string. */
 function spell(runs: readonly kaya.Run[]): string {
-  return runs.map((run) => (run.value === "true" ? `${run.start}:${run.end} ${run.name}` : `${run.start}:${run.end} ${run.name}=${run.value}`)).join("|");
+  return runs.map((run) => (run.isFlag ? `${run.range[0]}:${run.range[1]} ${run.name}` : `${run.range[0]}:${run.range[1]} ${run.name}=${run.value}`)).join("|");
 }
 
 // The row's field already carries the copy's act when this fires: the app
@@ -33,8 +33,8 @@ function onRestored(): void {
 
 const { notes, last, view } = app.window({ title: "richrows", onUndone: onRestored, onRedone: onRestored }, () => {
   app.menu("Edit", () => {
-    kaya.item("Undo", { role: kaya.ROLE_UNDO });
-    kaya.item("Redo", { role: kaya.ROLE_REDO });
+    kaya.item("Undo", { role: "undo" });
+    kaya.item("Redo", { role: "redo" });
   });
   const notes = kaya.collection(Note);
   const last = kaya.signal("");

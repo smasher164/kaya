@@ -671,13 +671,14 @@ def table_csharp(_):
         re.M,
     )
     live_guard = re.search(
-        r"kind == KayaWire\.OccKindSortRequested && keys\.Count == 0\)", app
+        r"case SortRequested \{ Live: true \} sortLive", app
     )
     if registration and live_guard:
         arm = re.search(
-            r"kind == KayaWire\.OccKindSortRequested\)\s*\{[^}]*?"
+            r"case SortRequested sortRow\s+when "
             + re.escape(registration.group(1))
-            + r"\.TryGetValue\(id, out var fn\)[^}]*?fn\(tx, keys, column\)",
+            + r"\.TryGetValue\(sortRow\.Id, out var onSortRow\):\s*"
+              r"Dispatch\(tx => onSortRow\(tx, sortRow\.Keys, sortRow\.Column\)\)",
             app,
             re.S,
         )
@@ -925,7 +926,7 @@ def table_haskell(_):
         r"kind == W\.occKindSortRequested ->(.*?)(?=\|\s*kind ==)", loop, re.S
     )
     routed = arm and re.search(
-        r"readIORef \(appNodeSorts app\).*?h keys column", arm.group(1), re.S
+        r"readIORef \(app\.appNodeSorts\).*?h \(keyPath keys\) column", arm.group(1), re.S
     )
     if (
         sort_class
@@ -937,7 +938,7 @@ def table_haskell(_):
             re.M,
         )
         and re.search(
-            r"^\s+type Keyed Node p\s*=\s*\[W\.Value\]\s*->\s*p\s*$",
+            r"^\s+type Keyed Node p\s*=\s*\[Key\]\s*->\s*p\s*$",
             node_sort,
             re.M,
         )
@@ -952,7 +953,7 @@ def table_haskell(_):
 
     keyed = haskell_decl(src, "columnsAt")
     if keyed and re.search(
-        r"^columnsAt\s*::\s*Node\s*->\s*\[W\.Value\]\s*->\s*\[Text\]\s*->\s*"
+        r"^columnsAt\s*::\s*Node\s*->\s*\[Key\]\s*->\s*\[Text\]\s*->\s*"
         r"Sort\s*->\s*Build \(\)",
         keyed,
         re.M,
@@ -1259,7 +1260,7 @@ def record_go(_):
         src,
         r"^func \(c RecordCollection\[K, T\]\) At\(key any\) RecordCollection\[K, T\] \{",
     )
-    if at and "c.Coll.At(key)" in at:
+    if at and "c.coll.At(key)" in at:
         got.add("record instance addressing")
     return got
 
@@ -1457,7 +1458,7 @@ def record_haskell(_):
     if (
         handle
         and record_at
-        and re.search(r"^\s+at\s*::\s*KayaValue k\s*=>\s*c\s*->\s*k\s*->\s*c", handle, re.M)
+        and re.search(r"^\s+at\s*::\s*c\s*->\s*Key\s*->\s*c", handle, re.M)
         # The KEY THREADED THROUGH, not just a RecordCollection handed
         # back: `at (RecordCollection c) _ = RecordCollection c` typechecks
         # everywhere and addresses the parent instead of the copy.
@@ -1689,7 +1690,7 @@ def sources_haskell(_):
         return None
     cls = m.group(1)
     got = set()
-    if re.search(rf"^instance {cls} Signal\b", src, re.M):
+    if re.search(rf"^instance {cls} \(Signal Text\)", src, re.M):
         got.add("signal")
     if re.search(rf"^instance {cls} \(KField Text\)", src, re.M):
         got.add("field")

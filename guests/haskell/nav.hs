@@ -3,7 +3,6 @@
 -- The nav scene, Haskell port — guests/rust/nav.rs, tools/scenes/nav.steps.
 
 import Data.Word (Word64)
-import qualified Data.Text as T
 import KayaApp
 
 detailId, settingsId :: Word64
@@ -14,7 +13,7 @@ main :: IO ()
 main = kayaMain $ \app -> do
   status <- buildTx app $ do
     window primary [WTitle "nav"]
-    s <- signal (T.pack "at root")
+    s <- signalText "at root"
     root <-
       column
         []
@@ -24,12 +23,12 @@ main = kayaMain $ \app -> do
               pushEntry
                 detailId
                 [ ETitle "detail",
-                  EOnPopped (buildTx app (writeSignal s (T.pack "popped detail")))
+                  EOnPopped (buildTx app (writeSignal s "popped detail"))
                 ]
-              caption <- signal (T.pack "detail pane")
+              caption <- signalText "detail pane"
               pane <- column [] [labelBound caption]
               mountIn detailId pane
-              writeSignal s (T.pack "pushed detail"),
+              writeSignal s "pushed detail",
           buttonOn "open settings" $
             buildTx app $ do
               -- Nothing has popped, so no entry_popped follows this pop.
@@ -39,14 +38,14 @@ main = kayaMain $ \app -> do
                   EInterceptBack True,
                   EOnBack
                     ( buildTx app $ do
-                        writeSignal s (T.pack "back requested")
+                        writeSignal s "back requested"
                         popEntry
                     )
                 ]
-              caption <- signal (T.pack "settings pane")
+              caption <- signalText "settings pane"
               pane <- column [] [labelBound caption]
               mountIn settingsId pane
-              writeSignal s (T.pack "pushed settings")
+              writeSignal s "pushed settings"
         ]
     mount root
     return s

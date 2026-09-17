@@ -15,7 +15,7 @@ struct Note: KayaGen {
 /// the core's mirror are compared as one string.
 func spell(_ runs: [KayaRun]) -> String {
     runs.map { run in
-        run.value == "true"
+        run.isFlag
             ? "\(run.range.lowerBound):\(run.range.upperBound) \(run.name)"
             : "\(run.range.lowerBound):\(run.range.upperBound) \(run.name)=\(run.value)"
     }.joined(separator: "|")
@@ -50,8 +50,8 @@ app.build { tx in
     let edit = tx.menu(
         "Edit",
         items: [
-            tx.item("Undo", role: KayaAppTx.roleUndo),
-            tx.item("Redo", role: KayaAppTx.roleRedo),
+            tx.item("Undo", role: .undo),
+            tx.item("Redo", role: .redo),
         ])
     tx.window(
         title: "richrows", onUndone: restored, onRedone: restored, menus: [edit])

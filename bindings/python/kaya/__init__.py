@@ -833,14 +833,14 @@ class Widget(_Handle):
         while an input method is composing. THE APP'S DOCUMENT TAKES IT AS
         IT IS SENT, while the widget and the core's mirror take it when the
         composition ends (docs/rich-text-plan.md §7). Returns the widget."""
-        _app._absorb_edit(self.id, edit.start, edit.end, edit.inserted,
+        _app._absorb_edit(self.id, edit.range.start, edit.range.stop, edit.inserted,
                           edit.runs)
         _records().append(wire.tx_apply_edit(
-            self.id, edit.start, edit.end, len(edit.runs),
+            self.id, edit.range.start, edit.range.stop, len(edit.runs),
             _flat_runs(edit.runs), edit.inserted))
         return self
 
-    def format(self, name, value="true"):
+    def format(self, name, value=True):
         """Format this `rich` textarea's CURRENT SELECTION through the
         widget's own act — what a toolbar button sends.
 
@@ -848,6 +848,8 @@ class Widget(_Handle):
         keystroke instead and nothing is answered until it. The widget
         reports the range it formatted to `on_format`, which is how the
         document moves. Returns the widget."""
+        if isinstance(value, bool):
+            value = _flag_wire(value)
         _records().append(wire.tx_format_text(
             self.id, 0, 0, 0, 0,
             [str(name), _text_value("format value", value)]))
@@ -891,7 +893,7 @@ class Widget(_Handle):
         widget."""
         return self.format("link", url)
 
-    def format_range(self, span, name, value="true"):
+    def format_range(self, span, name, value=True):
         """One attribute over a BYTE RANGE of this document, the selection
         left exactly where the user put it (docs/rich-text-plan.md §17).
 
@@ -901,6 +903,8 @@ class Widget(_Handle):
         too. A `block` act covers the range's whole paragraphs, and `block`
         with `body` removes. Returns the widget."""
         start, stop = _text_range("format_range", span)
+        if isinstance(value, bool):
+            value = _flag_wire(value)
         name, value = str(name), _text_value("format value", value)
         start, stop = _app._ranged_act_bounds(self.id, start, stop, name)
         removed = name == "block" and value == "body"
@@ -1720,27 +1724,78 @@ def select_section(section_id, *, window=0):
     _records().append(wire.tx_select_section(int(window), int(section_id)))
 
 
-# The presentation hint's closed set, spelled for guests.
-SECTIONS_AUTO = wire.SECTIONS_PRESENTATION_AUTO
-SECTIONS_BAR = wire.SECTIONS_PRESENTATION_BAR
-SECTIONS_SIDEBAR = wire.SECTIONS_PRESENTATION_SIDEBAR
+def _vocab_missing(cls, value, what, hint):
+    """Every closed vocabulary's `_missing_`, once: a plain name is
+    accepted, anything else is refused NAMING the vocabulary."""
+    if isinstance(value, str):
+        try:
+            return cls[value.upper()]
+        except KeyError:
+            raise KayaValueError(
+                f"kaya: {what} must be one of "
+                f"{sorted(m.name.lower() for m in cls)}, got {value!r}"
+            ) from None
+    raise KayaValueError(
+        f"kaya: {value} is not {what} — the vocabulary is "
+        f"{sorted(m.name.lower() for m in cls)} ({hint})"
+    )
 
 
-# The appearance's closed set, spelled for guests
-# (docs/tasks-s2b-plan.md R1-R3).
-APPEARANCE_SYSTEM = wire.APPEARANCE_SYSTEM
-APPEARANCE_LIGHT = wire.APPEARANCE_LIGHT
-APPEARANCE_DARK = wire.APPEARANCE_DARK
+class SectionsPresentation(enum.IntEnum):
+    """A window's ADVISORY sections hint. Plain names accepted too —
+    `sections_presentation="bar"`."""
+
+    AUTO = wire.SECTIONS_PRESENTATION_AUTO
+    BAR = wire.SECTIONS_PRESENTATION_BAR
+    SIDEBAR = wire.SECTIONS_PRESENTATION_SIDEBAR
+
+    @classmethod
+    def _missing_(cls, value):
+        return _vocab_missing(cls, value, "a sections presentation",
+                              "kaya.SectionsPresentation.BAR")
 
 
-# The alert_choice cancel sentinel. Deliberately not an index.
-CANCEL = wire.ALERT_CHOICE_CANCEL
+class Appearance(enum.IntEnum):
+    """The app's OWN light/dark choice, applied process-wide from the
+    default window (docs/tasks-s2b-plan.md R1-R3). Plain names accepted
+    too — `appearance="dark"`."""
+
+    SYSTEM = wire.APPEARANCE_SYSTEM
+    LIGHT = wire.APPEARANCE_LIGHT
+    DARK = wire.APPEARANCE_DARK
+
+    @classmethod
+    def _missing_(cls, value):
+        return _vocab_missing(cls, value, "an appearance",
+                              "kaya.Appearance.DARK")
 
 
-# A notification's two outcomes (docs/tasks-s3-plan.md N1). Dismissal is
-# not one of them: two platforms never report it.
-NOTIFICATION_ACTIVATED = wire.NOTIFICATION_OUTCOME_ACTIVATED
-NOTIFICATION_REFUSED = wire.NOTIFICATION_OUTCOME_REFUSED
+class AlertChoice(enum.IntEnum):
+    """An alert's three outcomes: the action the user pressed, by its
+    slot, or CANCEL — every platform-native dismissal. Deliberately not a
+    bare index."""
+
+    ACTION0 = wire.ALERT_CHOICE_ACTION0
+    ACTION1 = wire.ALERT_CHOICE_ACTION1
+    CANCEL = wire.ALERT_CHOICE_CANCEL
+
+    @classmethod
+    def _missing_(cls, value):
+        return _vocab_missing(cls, value, "an alert choice",
+                              "kaya.AlertChoice.CANCEL")
+
+
+class NotificationOutcome(enum.IntEnum):
+    """A notification's two outcomes (docs/tasks-s3-plan.md N1).
+    Dismissal is not one of them: two platforms never report it."""
+
+    ACTIVATED = wire.NOTIFICATION_OUTCOME_ACTIVATED
+    REFUSED = wire.NOTIFICATION_OUTCOME_REFUSED
+
+    @classmethod
+    def _missing_(cls, value):
+        return _vocab_missing(cls, value, "a notification outcome",
+                              "kaya.NotificationOutcome.ACTIVATED")
 
 
 def show_alert(title="", *, message="", actions=(), cancel=None,
@@ -2267,29 +2322,54 @@ def _block_value(kind):
     return name
 
 
+#: The wire's own spelling of a flag attribute; `_flag_wire` coerces a
+#: bool to it at the boundary and `Run.is_flag` reads it back.
+FLAG_VALUE = "true"
+
+
+def _flag_wire(on):
+    return FLAG_VALUE if on else "false"
+
+
+def _decoded_span(what, start, stop):
+    """A span the CORE sent, refused BY NAME if its ends are out of
+    order. No scene reaches it — the core always sends ordered spans —
+    and a reversed one means the mirror and the core disagree."""
+    if start > stop:
+        raise KayaValueError(
+            f"kaya: a {what} carries {start}..{stop}, a reversed span")
+    return range(start, stop)
+
+
 class Run:
     """One attribute over one span, in kaya's unit — UTF-8 BYTE offsets
-    (docs/ranges-units.md §7). `value` is "true" for the flags, a URL for
-    a link, a kind for a block."""
+    (docs/ranges-units.md §7). `range` is Python's own `range`, the type
+    every write side here already takes. `value` is a URL for a link and
+    a kind for a block; a flag attribute carries the wire's own string
+    and is read back as `is_flag`."""
 
-    __slots__ = ("start", "end", "name", "value")
+    __slots__ = ("range", "name", "value")
 
     def __init__(self, start, end, name, value):
-        self.start = int(start)
-        self.end = int(end)
+        self.range = range(int(start), int(end))
         self.name = str(name)
         self.value = str(value)
 
+    @property
+    def is_flag(self):
+        """A flag attribute, on: bold, italic, underline, strike, code."""
+        return self.value == FLAG_VALUE
+
     def __eq__(self, other):
         return (isinstance(other, Run)
-                and (self.start, self.end, self.name, self.value)
-                == (other.start, other.end, other.name, other.value))
+                and (self.range, self.name, self.value)
+                == (other.range, other.name, other.value))
 
     def __hash__(self):
-        return hash((self.start, self.end, self.name, self.value))
+        return hash((self.range.start, self.range.stop, self.name, self.value))
 
     def __repr__(self):
-        return (f"Run(start={self.start!r}, end={self.end!r}, "
+        return (f"Run(start={self.range.start!r}, end={self.range.stop!r}, "
                 f"name={self.name!r}, value={self.value!r})")
 
 
@@ -2309,8 +2389,12 @@ class Document:
         self.runs = list(runs) if runs else []
 
     def mark(self, span, name, value):
-        """One attribute over one range. Returns the document."""
+        """One attribute over one range. `value` takes a bool for a flag
+        attribute, coerced to the wire's own string here at the
+        boundary. Returns the document."""
         start, stop = _text_range("Document.mark", span)
+        if isinstance(value, bool):
+            value = _flag_wire(value)
         self.runs.append(Run(start, stop, name, value))
         return self
 
@@ -2340,7 +2424,7 @@ class Document:
     def attr_at(self, byte, name):
         """The value `name` carries at a byte offset, or None."""
         for run in self.runs:
-            if run.name == name and run.start <= byte < run.end:
+            if run.name == name and run.range.start <= byte < run.range.stop:
                 return run.value
         return None
 
@@ -2357,7 +2441,7 @@ def _document_bytes(document):
     values per run (crates/kaya/src/wire.rs, `document_blob`)."""
     values = [document.text]
     for run in document.runs:
-        values += [run.start, run.end, run.name, run.value]
+        values += [run.range.start, run.range.stop, run.name, run.value]
     return wire._enc.values(values)
 
 
@@ -2437,11 +2521,10 @@ class Edit:
     is what provoked an edit the widget delivered and None on one the app
     builds; `apply_edit` sends nothing of it."""
 
-    __slots__ = ("start", "end", "inserted", "runs", "source")
+    __slots__ = ("range", "inserted", "runs", "source")
 
     def __init__(self, start, end, inserted="", runs=None):
-        self.start = int(start)
-        self.end = int(end)
+        self.range = range(int(start), int(end))
         self.inserted = _text_value("Edit text", inserted)
         self.runs = list(runs) if runs else []
         self.source = None
@@ -2461,21 +2544,22 @@ class Edit:
         return cls(start, stop, text)
 
     def mark(self, span, name, value):
-        """One attribute over the INSERTED text's own offsets. Returns
-        the edit."""
+        """One attribute over the INSERTED text's own offsets. `value`
+        takes a bool for a flag attribute, coerced to the wire's own
+        string here at the boundary. Returns the edit."""
         start, stop = _text_range("Edit.mark", span)
+        if isinstance(value, bool):
+            value = _flag_wire(value)
         self.runs.append(Run(start, stop, name, value))
         return self
 
     def __eq__(self, other):
         return (isinstance(other, Edit)
-                and (self.start, self.end, self.inserted, self.runs,
-                     self.source)
-                == (other.start, other.end, other.inserted, other.runs,
-                    other.source))
+                and (self.range, self.inserted, self.runs, self.source)
+                == (other.range, other.inserted, other.runs, other.source))
 
     def __repr__(self):
-        return (f"Edit(start={self.start!r}, end={self.end!r}, "
+        return (f"Edit(start={self.range.start!r}, end={self.range.stop!r}, "
                 f"inserted={self.inserted!r}, runs={self.runs!r}, "
                 f"source={self.source!r})")
 
@@ -2484,21 +2568,25 @@ class Format:
     """A toolbar act over a range; `value` None is the attribute taken
     off (docs/rich-text-plan.md R1)."""
 
-    __slots__ = ("start", "end", "name", "value")
+    __slots__ = ("range", "name", "value")
 
     def __init__(self, start, end, name, value):
-        self.start = int(start)
-        self.end = int(end)
+        self.range = range(int(start), int(end))
         self.name = str(name)
         self.value = None if value is None else str(value)
 
+    @property
+    def is_flag(self):
+        """A flag attribute, on."""
+        return self.value == FLAG_VALUE
+
     def __eq__(self, other):
         return (isinstance(other, Format)
-                and (self.start, self.end, self.name, self.value)
-                == (other.start, other.end, other.name, other.value))
+                and (self.range, self.name, self.value)
+                == (other.range, other.name, other.value))
 
     def __repr__(self):
-        return (f"Format(start={self.start!r}, end={self.end!r}, "
+        return (f"Format(start={self.range.start!r}, end={self.range.stop!r}, "
                 f"name={self.name!r}, value={self.value!r})")
 
 
@@ -2509,43 +2597,48 @@ def _normalize_runs(runs):
     for name in sorted({run.name for run in runs}):
         painted = []
         for run in [r for r in runs if r.name == name]:
-            if run.start >= run.end:
+            if run.range.start >= run.range.stop:
                 continue
             kept = []
             for old in painted:
-                if old.end <= run.start or old.start >= run.end:
+                if old.range.stop <= run.range.start or old.range.start >= run.range.stop:
                     kept.append(old)
                     continue
-                if old.start < run.start:
-                    kept.append(Run(old.start, run.start, old.name, old.value))
-                if old.end > run.end:
-                    kept.append(Run(run.end, old.end, old.name, old.value))
-            kept.append(Run(run.start, run.end, run.name, run.value))
+                if old.range.start < run.range.start:
+                    kept.append(Run(old.range.start, run.range.start, old.name, old.value))
+                if old.range.stop > run.range.stop:
+                    kept.append(Run(run.range.stop, old.range.stop, old.name, old.value))
+            kept.append(Run(run.range.start, run.range.stop, run.name, run.value))
             painted = kept
-        painted.sort(key=lambda r: r.start)
+        painted.sort(key=lambda r: r.range.start)
         merged = []
         for run in painted:
-            if merged and merged[-1].end == run.start \
+            if merged and merged[-1].range.stop == run.range.start \
                     and merged[-1].value == run.value:
-                merged[-1].end = run.end
+                merged[-1].range = range(merged[-1].range.start,
+                                         run.range.stop)
             else:
-                merged.append(Run(run.start, run.end, run.name, run.value))
+                merged.append(Run(run.range.start, run.range.stop, run.name, run.value))
         out += merged
-    out.sort(key=lambda r: (r.start, r.name))
+    out.sort(key=lambda r: (r.range.start, r.name))
     return out
 
 
 def _runs_from(flat):
-    """The decoder's flat run tail, read in FOURS."""
-    return [Run(flat[i], flat[i + 1], flat[i + 2], flat[i + 3])
-            for i in range(0, len(flat), 4)]
+    """The decoder's flat run tail, read in FOURS. A reversed span is
+    refused naming the record (`_decoded_span`)."""
+    out = []
+    for i in range(0, len(flat), 4):
+        _decoded_span("run", int(flat[i]), int(flat[i + 1]))
+        out.append(Run(flat[i], flat[i + 1], flat[i + 2], flat[i + 3]))
+    return out
 
 
 def _flat_runs(runs):
     """`_runs_from`'s inverse: the wire's four values per run."""
     flat = []
     for run in runs:
-        flat += [run.start, run.end, run.name, run.value]
+        flat += [run.range.start, run.range.stop, run.name, run.value]
     return flat
 
 
@@ -2569,19 +2662,19 @@ def _fold_edit(doc, start, stop, inserted, runs):
         # A mirror out of step with the core takes the edit whole
         # rather than splicing at an offset that means nothing here.
         doc.text = inserted
-        doc.runs = [Run(r.start, r.end, r.name, r.value) for r in runs]
+        doc.runs = [Run(r.range.start, r.range.stop, r.name, r.value) for r in runs]
         return
     shift = len(added) - (stop - start)
     nxt = []
     for run in doc.runs:
-        if run.start < start:
-            nxt.append(Run(run.start, min(run.end, start), run.name,
+        if run.range.start < start:
+            nxt.append(Run(run.range.start, min(run.range.stop, start), run.name,
                            run.value))
-        if run.end > stop:
-            nxt.append(Run(max(run.start, stop) + shift, run.end + shift,
+        if run.range.stop > stop:
+            nxt.append(Run(max(run.range.start, stop) + shift, run.range.stop + shift,
                            run.name, run.value))
     for run in runs:
-        nxt.append(Run(run.start + start, run.end + start, run.name,
+        nxt.append(Run(run.range.start + start, run.range.stop + start, run.name,
                        run.value))
     doc.text = (data[:start] + added + data[stop:]).decode("utf-8")
     doc.runs = _normalize_runs(nxt)
@@ -2595,13 +2688,13 @@ def _fold_format(doc, start, stop, name, value):
         return
     nxt = []
     for run in doc.runs:
-        if run.name != name or run.end <= start or run.start >= stop:
+        if run.name != name or run.range.stop <= start or run.range.start >= stop:
             nxt.append(run)
             continue
-        if run.start < start:
-            nxt.append(Run(run.start, start, run.name, run.value))
-        if run.end > stop:
-            nxt.append(Run(stop, run.end, run.name, run.value))
+        if run.range.start < start:
+            nxt.append(Run(run.range.start, start, run.name, run.value))
+        if run.range.stop > stop:
+            nxt.append(Run(stop, run.range.stop, run.name, run.value))
     if value is not None:
         nxt.append(Run(start, stop, name, value))
     doc.runs = _normalize_runs(nxt)
@@ -2745,7 +2838,7 @@ class MenuItem:
         """Declare this action a standard command (actions only).
         PLACEMENT is each host's business. One item per role, and a role
         NEVER invents a chord. Const-only."""
-        _records().append(wire.tx_set_menu_role(self.id, name))
+        _records().append(wire.tx_set_menu_role(self.id, MenuRole(name).value))
 
     def shortcut(self, spelling):
         """The shortcut of any LEAF command (window-anchored only),
@@ -2848,18 +2941,27 @@ OP_COPY = "copy"
 OP_MOVE = "move"
 
 
-ROLE_SETTINGS = "settings"
+class MenuRole(str, enum.Enum):
+    """THE CLOSED MENU-ROLE VOCABULARY (DESIGN.md, Menus;
+    crates/kaya/src/scene.rs MENU_ROLES). SETTINGS goes in the
+    application menu on macOS and stays where the app declared it
+    everywhere else; CUT/COPY/PASTE are the gesture layer, lowering to
+    the platform's own and acting on the FOCUSED widget; UNDO/REDO ask
+    the focused widget's own history before the window's ledger
+    (docs/undo-plan.md D6). A str Enum, so the wire value IS the member
+    and a plain name is accepted too — `role="undo"`."""
 
-#: The three clipboard commands: they lower to the platform's own, act
-#: on the FOCUSED widget, and work out their own enablement.
-ROLE_CUT = "cut"
-ROLE_COPY = "copy"
-ROLE_PASTE = "paste"
+    SETTINGS = "settings"
+    CUT = "cut"
+    COPY = "copy"
+    PASTE = "paste"
+    UNDO = "undo"
+    REDO = "redo"
 
-#: The two history commands: the FOCUSED widget is asked FIRST, the
-#: window's ledger otherwise (docs/undo-plan.md D6).
-ROLE_UNDO = "undo"
-ROLE_REDO = "redo"
+    @classmethod
+    def _missing_(cls, value):
+        return _vocab_missing(cls, value, "a menu role", "kaya.MenuRole.UNDO")
+
 
 
 def _menu_require_catalog(scope):
@@ -4519,10 +4621,10 @@ def _window_props(window, title, width, height, veto_close, dirty,
         records.append(wire.tx_set_window_panes(window, int(panes)))
     if sections_presentation is not None:
         records.append(wire.tx_set_window_sections_presentation(
-            window, int(sections_presentation)))
+            window, int(SectionsPresentation(sections_presentation))))
     if appearance is not None:
         records.append(wire.tx_set_window_appearance(
-            window, int(appearance)))
+            window, int(Appearance(appearance))))
     # float() so it lands as the F64 the prop is typed as — an I64 is
     # refused for its TYPE, a true complaint about the wrong mistake.
     if inset is not None:
@@ -5132,13 +5234,13 @@ class App:
         doc = self._documents.get(widget)
         if doc is None:
             return Document()
-        return Document(doc.text, [Run(r.start, r.end, r.name, r.value)
+        return Document(doc.text, [Run(r.range.start, r.range.stop, r.name, r.value)
                                    for r in doc.runs])
 
     def _seed_document(self, widget, document):
         self._documents[widget] = Document(
             document.text,
-            [Run(r.start, r.end, r.name, r.value) for r in document.runs])
+            [Run(r.range.start, r.range.stop, r.name, r.value) for r in document.runs])
 
     def _absorb_edit(self, widget, start, stop, inserted, runs):
         _fold_edit(self._documents.setdefault(widget, Document()),
@@ -5249,7 +5351,7 @@ class App:
                 handler = self._alert_handlers.pop(ident, None)
                 if handler is not None:
                     # payload is the parsed u32 choice.
-                    self._dispatch(handler, payload)
+                    self._dispatch(handler, AlertChoice(payload))
                 continue
             if kind == wire.OCC_LINK_OPENED:
                 # ident is the ROUTE the core matched
@@ -5283,17 +5385,16 @@ class App:
                 # retiring with the result; else the process-level one,
                 # which does not; else the drop is announced.
                 # payload is the parsed u32 outcome.
+                answer = NotificationOutcome(payload)
                 handler = self._notification_handlers.pop(ident, None)
                 if handler is not None:
-                    self._dispatch(handler, payload)
+                    self._dispatch(handler, answer)
                     continue
                 activation = self._notification_activation
                 if activation is not None:
-                    self._dispatch(activation, ident, payload)
+                    self._dispatch(activation, ident, answer)
                     continue
-                outcome = ("activated"
-                           if payload == wire.NOTIFICATION_OUTCOME_ACTIVATED
-                           else "refused")
+                outcome = answer.name.lower()
                 print(
                     f"kaya: notification {ident} outcome {outcome} reached "
                     "no handler — none was bound at the show and no "
@@ -5346,6 +5447,7 @@ class App:
                 if kind == wire.OCC_TEXT_EDITED:
                     source, start, stop, inserted = payload[:4]
                     runs = _runs_from(payload[4:])
+                    _decoded_span("text_edited", int(start), int(stop))
                     arg = Edit(start, stop, inserted, runs)
                     arg.source = _edit_source(source)
                     if keys:
@@ -5357,6 +5459,7 @@ class App:
                         self._absorb_edit(ident, start, stop, inserted, runs)
                 else:
                     removed, start, stop, name, value = payload
+                    _decoded_span("text_formatted", int(start), int(stop))
                     arg = Format(start, stop, name,
                                  None if removed else value)
                     if keys:

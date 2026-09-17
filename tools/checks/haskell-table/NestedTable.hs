@@ -52,11 +52,11 @@ nested app = do
       return (t, positions)
     root <- row [pure accountList]
     mount root
-    insert accounts (VStr "brokerage") (VStr "Brokerage")
+    insert accounts "brokerage" ("Brokerage" :: Text)
     -- ONE COPY'S ROWS. `at` carries the record type across the key path,
     -- so the stamped instance is filled with records; a Collection here
     -- would take a bare Value and the row's fields would be unreachable.
-    insertRecord (positions `at` VStr "brokerage") (VStr "aapl")
+    insertRecord (positions `at` "brokerage") ("aapl")
       (Position "AAPL" "10")
     return table
   -- The keys the click carried are the keys the re-declaration takes:

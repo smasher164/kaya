@@ -11,10 +11,10 @@ using System.Text;
 using System.Threading;
 
 /// One file the picker answered with: a handle to redeem, a display
-/// name, and LocalPath — a RE-OPENABLE NAME, empty unless re-opening it
+/// name, and LocalPath — a RE-OPENABLE NAME, null unless re-opening it
 /// actually works, which measurement puts at the three desktops and
 /// neither phone (DESIGN.md, File dialogs).
-public readonly record struct PickedFile(ulong Handle, string Name, string LocalPath)
+public readonly record struct PickedFile(ulong Handle, string Name, string? LocalPath)
 {
     /// Redeem the handle for a real FileStream, plus whether it seeks.
     /// BLOCKS, and may block for a long time, so call it from a thread
@@ -147,7 +147,9 @@ abstract record Representation
                 for (int i = 0; i + 2 < clip.Values.Count; i += 3)
                 {
                     long handle = clip.Values[i] is long h ? h : 0;
-                    files.Add(new PickedFile((ulong)handle, Str(i + 1), Str(i + 2)));
+                    string local = Str(i + 2);
+                    files.Add(new PickedFile((ulong)handle, Str(i + 1),
+                        local.Length == 0 ? null : local));
                 }
                 return new Files(files);
             default: return null;

@@ -5,8 +5,6 @@
 
 import Data.IORef (atomicModifyIORef', newIORef)
 
-import Data.Text (Text)
-import qualified Data.Text as T
 import KayaApp
 
 main :: IO ()
@@ -14,10 +12,10 @@ main = kayaMain $ \app -> do
   stepsRef <- newIORef (0 :: Int)
 
   (status, items, removeButton) <- buildTx app $ do
-    status <- signal (T.pack "step 0")
-    extras <- signal False
+    status <- signalText "step 0"
+    extras <- signalBool False
 
-    (banner, _) <- when_ extras (label ("extras on" :: Text))
+    (banner, _) <- when_ extras (labelText "extras on")
 
     groups <- collection
     (groupList, (items, removeButton)) <- forEach groups $ do
@@ -35,17 +33,17 @@ main = kayaMain $ \app -> do
           submitTx app $ do
             case n of
               1 -> do
-                insert groups ("g1" :: Text) ("Work" :: Text)
-                let todos = items `at` ("g1" :: Text)
-                insert todos ("a" :: Text) ("send report" :: Text)
-                insert todos ("b" :: Text) ("buy milk" :: Text)
+                insert groups "g1" "Work"
+                let todos = items `at` "g1"
+                insert todos "a" "send report"
+                insert todos "b" "buy milk"
               2 -> do
-                insert groups ("g2" :: Text) ("Home" :: Text)
-                insert (items `at` ("g2" :: Text)) ("a" :: Text) ("water plants" :: Text)
-                update groups ("g1" :: Text) ("Office" :: Text)
+                insert groups "g2" "Home"
+                insert (items `at` "g2") "a" "water plants"
+                update groups "g1" "Office"
               _ -> return ()
             writeSignal extras (n == 1)
-            writeSignal status (T.pack ("step " ++ show n))
+            writeSignal status ("step " <> tshow n)
 
     root <-
       column
@@ -59,11 +57,11 @@ main = kayaMain $ \app -> do
 
   onClick app removeButton $ \keys -> case keys of
     [groupV, itemV] ->
-      let group = fromWire groupV :: Text
-          item = fromWire itemV :: Text
-       in submitTx app $ do
-            let todos = items `at` group
-            remove todos item
-            left <- count todos
-            writeSignal status ("removed " <> group <> "/" <> item <> ", " <> T.pack (show left) <> " left")
+      submitTx app $ do
+        let todos = items `at` groupV
+        remove todos itemV
+        left <- count todos
+        writeSignal status
+          ( "removed " <> keyText groupV <> "/" <> keyText itemV
+              <> ", " <> tshow left <> " left" )
     _ -> return ()

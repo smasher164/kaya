@@ -13,7 +13,7 @@ let () =
   build app (fun () ->
      let feed = sum_of post_sum in
      let done_count =
-       sum_derive signal_str feed (fun entries ->
+       sum_derive Scalar.Str feed (fun entries ->
            let n =
              List.length
                (List.filter
@@ -58,8 +58,8 @@ let () =
          ()
      in
      mount root;
-     sum_insert feed (str_key "a") (Note { text = "jot one" });
-     sum_insert feed (str_key "b") (Todo { title = "buy milk"; done_ = false });
-     sum_insert feed (str_key "c") (Note { text = "jot two" }));
+     sum_insert feed (Key.str "a") (Note { text = "jot one" });
+     sum_insert feed (Key.str "b") (Todo { title = "buy milk"; done_ = false });
+     sum_insert feed (Key.str "c") (Note { text = "jot two" }));
 
   exit (run app)

@@ -1,4 +1,7 @@
 {-# LANGUAGE CPP #-}
+{-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 -- A COMPILE_FAIL PROBE for F1's KayaValue class (docs/deferred.md, the
@@ -18,8 +21,8 @@
 -- in the project; wiring this into that machinery is the coordinator's,
 -- since tools/ is not this pass's to touch):
 --
---   for n in 1 2 3 4; do
---     nix develop -c ghc -fno-code -fdefer-type-errors -XCPP \
+--   for n in 1 2 3; do
+--     nix develop -c ghc -fno-code -fdefer-type-errors -XGHC2021 \
 --       -DCASE=$n -ibindings/haskell -iguests/haskell \
 --       guests/haskell/checks/KayaValueNegative.hs
 --   done
@@ -30,28 +33,37 @@
 module KayaValueNegative where
 
 import Data.Text (Text)
+import GHC.Generics (Generic)
 import KayaApp
 
 -- No 'KayaValue' instance — deliberately: this is the type under test.
 data Unsupported = Unsupported
 
+-- The element types the two derived slots below are read through.
+data Note = Note {title :: Text}
+  deriving stock (Generic)
+  deriving anyclass (KayaRecord)
+
+newtype Post = Post Note
+  deriving stock (Generic)
+  deriving anyclass (KayaSum)
+
 #if CASE == 1
--- CASE 1: signal's argument.
-bad :: Build Signal
-bad = signal Unsupported
+-- CASE 1: a collection-derived signal's computed VALUE. Signal CREATION
+-- is monomorphic now (signalText/Bool/Int/Double/Date/Time/Image), and
+-- the key slots take 'Key' (guests/haskell/checks/KeyNegative.hs is
+-- their wall), so the class's guest-facing slots are these three.
+bad :: RecordCollection Note -> Build (Signal Unsupported)
+bad c = derive c (const Unsupported)
 #elif CASE == 2
 -- CASE 2: writeSignal's argument.
-bad :: Signal -> Build ()
+bad :: Signal Unsupported -> Build ()
 bad sig = writeSignal sig Unsupported
 #elif CASE == 3
--- CASE 3: a bare collection's key (insert).
-bad :: Collection -> Build ()
-bad c = insert c Unsupported ("v" :: Text)
-#elif CASE == 4
--- CASE 4: a bare collection's value (insert) — the OTHER KayaValue slot,
--- so a wrong VALUE type is refused as loudly as a wrong KEY type.
-bad :: Collection -> Build ()
-bad c = insert c ("k" :: Text) Unsupported
+-- CASE 3: a SUM collection's derived value — the other computed slot,
+-- so a class dropped from one derive is not silently kept by the other.
+bad :: SumCollection Post -> Build (Signal Unsupported)
+bad c = sumDerive c (const Unsupported)
 #else
-#error "KayaValueNegative: pass -DCASE=1, 2, 3 or 4"
+#error "KayaValueNegative: pass -DCASE=1, 2 or 3"
 #endif

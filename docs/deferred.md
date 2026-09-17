@@ -2139,6 +2139,56 @@ unpicked.
   shot.cmd route the sampler already uses), so the picture is the guest's
   and not the sampler's cadence's. M; unbuilt. The lane was re-run alone
   for the tree's verdict.
+  THE REVIEW AND THE CORRECTION (2026-09-17): the maintainer read a Haskell
+  guest after the pass — 193 `:: Text` ascriptions and 218 pack/unpack
+  conversions where the surface had moved to Text without the constructors
+  that let a literal infer — and asked whether the pass was subpar. A
+  before/after noise census on the guests said: rust, go, java, python,
+  swift, ocaml clean; js left 18 of 92 `let x!:`; csharp added 13 `!`;
+  haskell a half-migration. An Opus review of the landed diff (35 findings,
+  the job's tmp/idiom/review-opus.md) found the pass's characteristic
+  failure — a finding diagnosed correctly, then answered site by site
+  instead of with the language's own mechanism — and the ruling's own
+  breach: roughly sixty guest sites still reach a wire constant through a
+  binding ALIAS (`kaya.SECTIONS_BAR = wire.SECTIONS_PRESENTATION_BAR`, Go's
+  untyped constant block, OCaml's `let alert_cancel = Kaya_wire.…`,
+  Swift's C-header names, `choice == 1`), which the wire-tag clause could not
+  see. IN FLIGHT: the Haskell text surface redone as a design job (monomorphic
+  attribute constructors with Bound twins, a phantom-typed Signal, the
+  prefixes and the hand-rolled State gone), one agent over the other eight
+  implementing the review in order, and check-sugar-surface's wire-alias
+  census (binding-side: no re-export of a vocabulary; guest-side: no alias
+  name, no C-header name, no magic-int choice compare; four planted
+  negatives plus the real-shape guest plants). OPEN FOR A RULING (the
+  review's X3): a container body receives its container and returns its
+  value in every language that takes a body, ending the five workarounds
+  for handles made inside a scope (18 JS assertions, 47 Swift IUOs, 11 Java
+  holder classes, C#'s `notes!`, Rust's Option-plus-expect).
+  THE HASKELL REDO (2026-09-17, Opus, two rounds): guest ascriptions
+  193 -> 0 and pack/unpack 214 -> 9 (String-by-nature boundaries), the
+  surface on Text end to end, Text/Bound constructor pairs in place of the
+  source classes, a phantom-typed Signal, `Key` at every key slot, Build
+  and Tpl on State, the field prefixes retired behind OverloadedRecordDot,
+  the partial `assertRoot` replaced by a total `rootOf`; guards:
+  KeyNegative.hs (four cases refused naming Key, a control that compiles)
+  and KayaValueNegative.hs re-homed on the class's three remaining slots,
+  both run by check-abort. Left as recorded: the internal records keep
+  their prefixes; `TplNumberSource Double` still needs an ascription for a
+  constant template fraction that no guest writes; the phantom on
+  Collection that would tell a root from a stamped instance by type is
+  written up in the redo's notes and not taken.
+  THE CORRECTION SLICE (2026-09-17, one Opus agent, eight languages in
+  order): every finding of the review's language sections and each
+  language's share of X1 (typed vocabularies, the wire aliases deleted) and
+  X2 (rich text's boolean on both sides, ranges on the read side) — 418
+  legs green on the mac lane, 38 watched negatives. Withheld by design: JS
+  J3 and Swift S5 (they are X3, the open ruling); Python P2 (ruling R3);
+  OCaml O3's prefs third (the review's "allocates per call" was wrong —
+  `the_prefs` is module-level). Two behaviour notes from the C# dispatch
+  rewrite: a `text_changed` whose payload is not a string reached the
+  handler as null and reaches it as "" now; an undone/redone occurrence
+  with no UndoStep was a hard cast and is a named refusal — both
+  unreachable while the core sends what it says.
   RULED FOR LATER SLICES, each its own entry when it starts:
   - R1 ASYNC DIALOGS beyond JS for Swift, C#, Java and Rust under one
     rule — no handler given, a dialog answers a future; the continuation
@@ -12726,7 +12776,7 @@ them), the agent's notes §6 carry the evidence
 (tmp/openlist/notes-layout.md in the 2026-09-16 job), and the fix is
 whatever makes the grid's first post-resize measure its last.
 
-## WATCH — the iOS `portfolio-python` leg laid its tables out UNFOLDED beside the summary on a phone: the metrics report latched with no scene and the breakpoint then found no metrics (first sighting 2026-09-16, matrix 23)
+## ~~WATCH — the iOS `portfolio-python` leg laid its tables out UNFOLDED beside the summary on a phone: the metrics report latched with no scene and the breakpoint then found no metrics (first sighting 2026-09-16, matrix 23)~~ CLOSED 2026-09-17 (matrix 31, the second sighting, read from its bundle with the seed instrument): the report crossed the FFI in the gap between `presentation_scene()` reading the latch and the scene reaching `PRESENTATION_SCENE` — `*SLOT.lock() = Some(presentation_scene())` builds the scene BEFORE taking the lock — so `with_window_scene` saw no scene, latched the report for a scene that had already been seeded from an empty latch, and the breakpoint found nothing. The slot's lock is taken before the scene is built now (crates/kaya/src/capi.rs, `kaya_next_commands`), held by `capi::tests::the_scene_slot_is_locked_before_the_scene_is_seeded` with its perturbation watched; docs/traps.md carries the interleaving
 KEY: portfolio-python ios unfolded, no metrics latched, presentation_scene seed, METRICS_REPORTED, breakpoint window=0 when=1, viewport 320...343pt, adaptive fold ios
 
 Matrix 23 (67d844b9), the iOS lane's `portfolio-python` leg, green on

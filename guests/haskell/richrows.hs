@@ -4,11 +4,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE DeriveAnyClass #-}
-{-# OPTIONS_GHC -Wno-missing-signatures #-}
--- A key path's wire tag (KayaWire.Value) has no spelling a guest may
--- write (tools/check-sugar-surface.py's wire-tag clause) — the
--- fromWire-decoding helper below is left unsigned so its argument
--- type is inferred, never named.
 
 -- The rich rows scene, Haskell port — guests/rust/richrows.rs,
 -- tools/scenes/richrows.steps: a rich textarea per stamped ROW whose
@@ -33,35 +28,30 @@ spell :: [Run] -> Text
 spell = T.intercalate "|" . map one
   where
     one r
-      | runValue r == "true" = span_ r <> runName r
-      | otherwise = span_ r <> runName r <> "=" <> runValue r
-    span_ r = T.pack (show (runStart r) ++ ":" ++ show (runEnd r) ++ " ")
+      | r.value == Flag True = span_ r <> r.name
+      | otherwise = span_ r <> r.name <> "=" <> markSpelling r.value
+    span_ r = tshow (fst r.range) <> ":" <> tshow (snd r.range) <> " "
 
--- The key path's own wire tag decoded through 'fromWire', never named:
--- the argument's type (the wire's Value) has no spelling a guest may
--- write (tools/check-sugar-surface.py's wire-tag clause) — inferred here
--- from its call sites instead.
-keyText v = fromWire v :: Text
-
-noteAt items key = case lookup key items of
-  Just note -> note
-  Nothing -> error ("richrows: no row " ++ T.unpack (keyText key))
+noteAt :: [(Key, Note)] -> Text -> Note
+noteAt items key = case [note | (k, note) <- items, keyText k == key] of
+  (note : _) -> note
+  [] -> error ("richrows: no row " ++ T.unpack key)
 
 main :: IO ()
 main = kayaMain $ \app -> do
   (notes, lastAct, bodyNode) <- buildTx app $ do
     notes <- collectionOf @Note
-    lastAct <- signal ("" :: Text)
-    view <- signal ("" :: Text)
+    lastAct <- signalText ""
+    view <- signalText ""
 
     -- An undo or redo moved the row back: the app reads ITS OWN mirror of
     -- row b, which is the fold a restored Blob field lands in.
     let restored _label _delta = submitTx app $ do
           items <- recordItems notes
-          let note = noteAt items (toWire ("b" :: Text))
+          let note = noteAt items "b"
           writeSignal
             view
-            (docText (body note) <> " | " <> spell (docRuns (body note)))
+            ((body note).text <> " | " <> spell (body note).runs)
     window
       primary
       [ WTitle "richrows",
@@ -86,29 +76,29 @@ main = kayaMain $ \app -> do
           buttonOn "patch b" . undoableTx app "patch b" $
             patch
               notes
-              ("b" :: Text)
+              "b"
               [set (field @"body" @Note) (italicRun (0, 7) (documentOf "Patched"))],
           -- button#1 — the row the copy's own act folded into
           buttonOn "read a" . submitTx app $ do
             items <- recordItems notes
-            let note = noteAt items (toWire ("a" :: Text))
+            let note = noteAt items "a"
             writeSignal
               view
-              (docText (body note) <> " | " <> spell (docRuns (body note)))
+              ((body note).text <> " | " <> spell (body note).runs)
         ]
     (rows, bodyNode) <- forEach (recordHandle notes) $ do
       titleLabel <- label (field @"title" @Note)
-      bodyNode <- withTplAttrs [TplA11yId ("body" :: Text)] (textareaRichBound (field @"body" @Note))
+      bodyNode <- withTplAttrs [TplA11yId "body"] (textareaRichBound (field @"body" @Note))
       _ <- columnOf [pure titleLabel, pure bodyNode]
       return bodyNode
 
     root <- column [] [pure lastLabel, pure viewLabel, pure buttons, pure rows]
     mount root
 
-    insertRecord notes ("a" :: Text) (Note "a" (boldRun (0, 6) (documentOf "Héllo world")))
+    insertRecord notes "a" (Note "a" (boldRun (0, 6) (documentOf "Héllo world")))
     insertRecord
       notes
-      ("b" :: Text)
+      "b"
       (Note "b" (linkRun (7, 11) "https://kaya.dev" (documentOf "Second note")))
     return (notes, lastAct, bodyNode)
 
@@ -117,9 +107,9 @@ main = kayaMain $ \app -> do
   let acted [] = error "kaya: acted's key path is never empty"
       acted (key : _) = submitTx app $ do
         items <- recordItems notes
-        let note = noteAt items key
+        let note = noteAt items (keyText key)
         writeSignal
           lastAct
-          (keyText key <> ": " <> spell (docRuns (body note)))
+          (keyText key <> ": " <> spell (body note).runs)
   onEditNode app bodyNode (\keys _ -> acted keys)
   onFormatNode app bodyNode (\keys _ -> acted keys)

@@ -16,9 +16,9 @@ let () =
   let app = Kaya_app.create () in
 
   build app (fun () ->
-     let status = signal_str ("urgent: false") in
-     let volume = signal_str ("volume: 50%") in
-     let pos = signal_f64 (0.5) in
+     let status = signal Scalar.Str ("urgent: false") in
+     let volume = signal Scalar.Str ("volume: 50%") in
+     let pos = signal Scalar.F64 (0.5) in
 
      let on_urgent checked =
        write status ((Printf.sprintf "urgent: %b" checked))

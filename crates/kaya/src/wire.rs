@@ -1779,6 +1779,15 @@ fn range_offset(v: &Value) -> u64 {
     }
 }
 
+/// A span the GUEST or the core sent, refused BY NAME if its ends are
+/// out of order — `Range`'s own invariant is unchecked, so a reversed
+/// one would travel and be read as empty everywhere instead of as the
+/// disagreement it is (the idiom review's S3, in Rust).
+pub(crate) fn decoded_span(what: &str, start: u64, end: u64) -> std::ops::Range<u64> {
+    assert!(start <= end, "kaya: {what} carries {start}..{end}, a reversed span");
+    start..end
+}
+
 /// A run's string half; anything else is a broken encoder.
 fn run_str(v: Value, field: &str) -> String {
     match v {
@@ -1798,8 +1807,9 @@ fn read_runs(r: &mut Reader<'_>, count: usize, op: &str) -> Vec<TextRun> {
     );
     flat.chunks_exact(4)
         .map(|four| TextRun {
-            start: range_offset(&four[0]),
-            end: range_offset(&four[1]),
+            // A REVERSED SPAN is refused naming the record rather than
+            // building a Range whose own invariants nothing checks.
+            range: decoded_span("a run", range_offset(&four[0]), range_offset(&four[1])),
             name: run_str(four[2].clone(), "a run's attribute name"),
             value: run_str(four[3].clone(), "a run's attribute value"),
         })
@@ -1816,8 +1826,8 @@ pub(crate) fn document_blob(text: &str, runs: &[TextRun]) -> Arc<[u8]> {
     let mut values = Vec::with_capacity(1 + runs.len() * 4);
     values.push(Value::Str(text.to_owned()));
     for run in runs {
-        values.push(Value::I64(run.start as i64));
-        values.push(Value::I64(run.end as i64));
+        values.push(Value::I64(run.range.start as i64));
+        values.push(Value::I64(run.range.end as i64));
         values.push(Value::Str(run.name.clone()));
         values.push(Value::Str(run.value.clone()));
     }
@@ -1851,8 +1861,9 @@ pub(crate) fn read_document_blob(bytes: &[u8]) -> (String, Vec<TextRun>) {
     let runs = rest
         .chunks_exact(4)
         .map(|four| TextRun {
-            start: range_offset(&four[0]),
-            end: range_offset(&four[1]),
+            // A REVERSED SPAN is refused naming the record rather than
+            // building a Range whose own invariants nothing checks.
+            range: decoded_span("a run", range_offset(&four[0]), range_offset(&four[1])),
             name: run_str(four[2].clone(), "a run's attribute name"),
             value: run_str(four[3].clone(), "a run's attribute value"),
         })
@@ -1867,8 +1878,8 @@ fn write_runs(b: &mut Vec<u8>, blobs: &mut Vec<Arc<[u8]>>, runs: &[TextRun]) {
     b.extend_from_slice(&((runs.len() * 4) as u32).to_le_bytes());
     b.extend_from_slice(&0u32.to_le_bytes());
     for run in runs {
-        write_value(b, &Value::I64(run.start as i64), blobs);
-        write_value(b, &Value::I64(run.end as i64), blobs);
+        write_value(b, &Value::I64(run.range.start as i64), blobs);
+        write_value(b, &Value::I64(run.range.end as i64), blobs);
         write_value(b, &Value::Str(run.name.clone()), blobs);
         write_value(b, &Value::Str(run.value.clone()), blobs);
     }

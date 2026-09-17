@@ -8,9 +8,9 @@ let () =
   let settings_count = ref 0 in
 
   build app (fun () ->
-     let status = signal_str ("ready") in
-     let details = signal_bool (false) in
-     let sort = signal_f64 (0.0) in
+     let status = signal Scalar.Str ("ready") in
+     let details = signal Scalar.Bool (false) in
+     let sort = signal Scalar.F64 (0.0) in
 
      window ~title:"commands"
        ~menus:

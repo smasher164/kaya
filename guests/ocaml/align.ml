@@ -31,11 +31,11 @@ let () =
   let app = Kaya_app.create () in
 
   build app (fun () ->
-     let probe = signal_str ("align probe") in
-     let base = signal_str ("base") in
-     let anchor = signal_str ("anchor") in
-     let fit = signal_str ("fit") in
-     let plain = signal_str ("plain probe") in
+     let probe = signal Scalar.Str ("align probe") in
+     let base = signal Scalar.Str ("base") in
+     let anchor = signal Scalar.Str ("anchor") in
+     let fit = signal Scalar.Str ("fit") in
+     let plain = signal Scalar.Str ("plain probe") in
 
      let root =
        column ~a11y_id:"root" ~align:Stretch

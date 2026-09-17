@@ -23,7 +23,7 @@ data Todo = Todo {title :: Text}
 main :: IO ()
 main = kayaMain $ \app -> do
   (status, entryField, add, todos) <- buildTx app $ do
-    status <- signal (T.pack "no todos")
+    status <- signalText "no todos"
     todos <- collectionOf @Todo
 
     -- Built ahead of the tree so the handlers below have handles to name.
@@ -40,18 +40,18 @@ main = kayaMain $ \app -> do
     mount root
     return (status, entryField, add, todos)
 
-  draftRef <- newIORef ("" :: Text)
+  draftRef <- newIORef ""
   onChange app entryField $ \text -> writeIORef draftRef text
   onClick app add $ do
     draft <- readIORef draftRef
     if T.null draft
       then submitTx app $ do
         total <- count (recordHandle todos)
-        writeSignal status (T.pack ("nothing to add, " ++ show total ++ " total"))
+        writeSignal status ("nothing to add, " <> tshow total <> " total")
       else submitTx app $ do
         _ <- insertFresh todos (Todo draft)
         total <- count (recordHandle todos)
-        writeSignal status ("added " <> draft <> ", " <> T.pack (show total) <> " total")
+        writeSignal status ("added " <> draft <> ", " <> tshow total <> " total")
         -- The clear comes back as text_changed "", so the fold empties draft.
         clearWidget entryField
         focusWidget entryField

@@ -11512,3 +11512,40 @@ the key dropped) for one run, read as a regression the next. Every write
 into a shadow goes through one guarded writer now (`shadow_write`), which
 refuses a leaf under a symlinked hop, with its own watched negative. A
 perturbation must never be able to reach the tree it perturbs a copy of.
+
+## A copy2 restore leaves a stale artifact (measured 2026-09-17)
+
+`shutil.copy2` preserves the ORIGINAL file's mtime, so an incremental
+builder (dotnet, javac, cargo, dune) sees a source restored from a saved
+copy as OLDER than the output it built from the doctored text and skips
+the rebuild: on the C# arm of the correction slice a check stayed red after
+a restore verified by sha256 until the file was touched. In the other order
+it is worse — a negative run after such a restore passes VACUOUSLY. Every
+perturb-restore touches the file after restoring, or uses a copy that
+writes a fresh mtime.
+
+## A watched negative can pass for the wrong reason when the perturbed guard is not the only one (measured 2026-09-17)
+
+Removing Swift's `kayaDecodedSpan` guard still killed the child — inside
+`Range`'s own initializer — so a trap loop that only asked whether the
+child DIED would have gone green with the guard gone. The swift-abort trap
+reads the SENTENCE per mode now; Java's `TextRange.ofBytes` had the same
+shape (it refused before the decoder did) and its decoder builds the range
+directly so its own sentence is the one that prints. A negative demands
+the refusal's own words, never just a non-zero exit.
+
+## A metrics report between the scene's seed and its publication was lost (measured 2026-09-17)
+
+`*PRESENTATION_SCENE.lock().unwrap() = Some(presentation_scene())` evaluates
+the right-hand side first: the scene is built and seeded from
+METRICS_REPORTED, THEN the slot's lock is taken. A window-metrics report
+arriving from the simulator in that gap latched itself and asked for the
+scene, found the slot empty ("latched; no scene yet, the next one is
+seeded from it"), and the scene published a moment later had already read
+an empty latch — the iOS portfolio-python leg's own log shows exactly that
+order (report, "seeding 0 latched", "latched; no scene yet", "breakpoint …
+NO metrics latched"), and the tables laid out unfolded at 375 points. The
+lock is taken before the scene is built now, so a report in the gap waits
+and applies. An assignment through a lock guard is not atomic with the
+value's construction; take the guard first when the value's inputs are
+shared.

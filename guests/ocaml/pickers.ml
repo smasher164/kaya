@@ -9,11 +9,11 @@ let () =
   let app = Kaya_app.create () in
 
   build app (fun () ->
-      let date_text = signal_str ("date: none") in
-      let time_text = signal_str ("time: none") in
-      let row_text = signal_str ("row: none") in
-      let date_sig = signal_date { year = 2026; month = 9; day = 4 } in
-      let time_sig = signal_time { hour = 14; minute = 30 } in
+      let date_text = signal Scalar.Str ("date: none") in
+      let time_text = signal Scalar.Str ("time: none") in
+      let row_text = signal Scalar.Str ("row: none") in
+      let date_sig = signal Scalar.Date { year = 2026; month = 9; day = 4 } in
+      let time_sig = signal Scalar.Time { hour = 14; minute = 30 } in
       let tasks = collection_of task_record in
 
       let root =
@@ -54,9 +54,9 @@ let () =
       in
       mount root;
 
-      insert_record tasks (str_key "a")
+      insert_record tasks (Key.str "a")
         { name = "a"; due = { year = 2026; month = 10; day = 1 } };
-      insert_record tasks (str_key "b")
+      insert_record tasks (Key.str "b")
         { name = "b"; due = { year = 2026; month = 11; day = 20 } });
 
   exit (run app)

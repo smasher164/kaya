@@ -26,10 +26,10 @@ enum Msg {
 fn spell(runs: &[kaya::Run]) -> String {
     runs.iter()
         .map(|run| {
-            if run.value == "true" {
-                format!("{}:{} {}", run.start, run.end, run.name)
+            if run.is_flag() {
+                format!("{}:{} {}", run.range.start, run.range.end, run.name)
             } else {
-                format!("{}:{} {}={}", run.start, run.end, run.name, run.value)
+                format!("{}:{} {}={}", run.range.start, run.range.end, run.name, run.value)
             }
         })
         .collect::<Vec<_>>()
@@ -76,7 +76,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             "a",
             Note {
                 title: "a".to_owned(),
-                body: kaya::Document::new("Héllo world").mark(0..6, "bold", "true"),
+                body: kaya::Document::new("Héllo world").mark(0..6, "bold", true),
             },
         );
         tx.insert(
@@ -110,7 +110,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             }),
             Msg::Patch => ctx.apply(|tx| {
                 tx.undoable("patch b");
-                notes.patch(tx, "b").body(kaya::Document::new("Patched").mark(0..7, "italic", "true"));
+                notes.patch(tx, "b").body(kaya::Document::new("Patched").mark(0..7, "italic", true));
             }),
             Msg::Read => ctx.apply(|tx| {
                 let note = row(tx, "a");

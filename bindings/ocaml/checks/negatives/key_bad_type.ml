@@ -1,4 +1,4 @@
-(* F3 negative: a collection key is the typed key (Str_key/Int_key),
+(* F3 negative: a collection key is the typed key (Key.Str/Key.Int),
    never the wire's own value — a raw Kaya_wire.value is refused at
    the typed surface. Run by ../negatives.py. *)
 open Kaya_app

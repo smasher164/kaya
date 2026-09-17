@@ -299,7 +299,7 @@ with scratch_dir("check-abort-") as tmp:
     # never by a syntax or scope error. The probe carries its own CPP
     # pragma; `-XCPP` on the command line would preprocess every module
     # (docs/traps.md).
-    for case in ("1", "2", "3", "4"):
+    for case in ("1", "2", "3"):
         log = tmp / f"hs-kayavalue-{case}.log"
         with log.open("w", encoding="utf-8") as out:
             probe = subprocess.run(
@@ -317,7 +317,31 @@ with scratch_dir("check-abort-") as tmp:
             sys.exit(1)
         if "No instance for" not in text or "KayaValue Unsupported" not in text:
             fail(f"haskell-kayavalue-case-{case}", log)
-    print("check-abort: haskell KayaValue probe refused 4/4 cases by the class")
+    print("check-abort: haskell KayaValue probe refused 3/3 cases by the class")
+    # The Key wall (the redo's `Key` at every key slot): four cases refused
+    # naming Key, and CASE 0 — the positive control — compiling clean.
+    for case in ("0", "1", "2", "3", "4"):
+        log = tmp / f"hs-key-{case}.log"
+        with log.open("w", encoding="utf-8") as out:
+            probe = subprocess.run(
+                ["ghc", "-fno-code", "-XGHC2021", f"-DCASE={case}",
+                 "-ibindings/haskell", "-iguests/haskell",
+                 "-hidir", str(tmp / "hs-key"), "-odir", str(tmp / "hs-key"),
+                 "guests/haskell/checks/KeyNegative.hs"],
+                cwd=ROOT, env=ENV, stdout=out, stderr=subprocess.STDOUT,
+                check=False)
+        text = log.read_text(encoding="utf-8", errors="replace")
+        if case == "0":
+            if probe.returncode != 0:
+                fail("haskell-key-positive-control", log)
+            continue
+        if probe.returncode == 0:
+            print(f"check-abort: haskell Key probe case {case} COMPILED — the "
+                  f"key wall fell", file=sys.stderr)
+            sys.exit(1)
+        if "Couldn't match expected type" not in text or "Key" not in text:
+            fail(f"haskell-key-case-{case}", log)
+    print("check-abort: haskell Key probe refused 4/4 cases naming Key, control clean")
 
 
 # ─────────────────────────────────────────────────────────────────────

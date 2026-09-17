@@ -13,7 +13,7 @@ module Notes = Map.Make (Int64)
 
 let row_key path =
   match path with
-  | Int_key n :: _ -> n
+  | Key.Int n :: _ -> n
   | _ -> invalid_arg "kaya: undo scene expects minted (I64) keys"
 
 let put_note notes key text =
@@ -43,16 +43,16 @@ let () =
   let row_notes = ref Notes.empty in
 
   build app (fun () ->
-      let status = signal_str ("no todos") in
-      let history = signal_str ("history empty") in
-      let keys = signal_str ("no keys") in
-      let notes = signal_str ("no notes") in
+      let status = signal Scalar.Str ("no todos") in
+      let history = signal Scalar.Str ("history empty") in
+      let keys = signal Scalar.Str ("no keys") in
+      let notes = signal Scalar.Str ("no notes") in
       let todos = collection_of todo_record in
 
       let key_list () =
         let spell (key, _) =
           match key with
-          | Int_key n -> Int64.to_string n
+          | Key.Int n -> Int64.to_string n
           | _ -> invalid_arg "kaya: undo scene expects minted (I64) keys"
         in
         match List.map spell (record_items todos) with

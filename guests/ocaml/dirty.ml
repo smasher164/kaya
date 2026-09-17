@@ -7,8 +7,8 @@ let () =
   let app = Kaya_app.create () in
 
   build app (fun () ->
-     let doc = signal_str ("notes") in
-     let status = signal_str ("saved") in
+     let doc = signal Scalar.Str ("notes") in
+     let status = signal Scalar.Str ("saved") in
 
      let on_edit () =
        write doc ("notes and a line");
@@ -23,7 +23,7 @@ let () =
      (* NOTHING HAS EVER RUN THE DISCARD ARM: [destroy_window 0L] aborts
         the process (docs/traps.md, VETO a close but never AGREE). *)
      let close_answered choice =
-       if choice = alert_cancel then write status ("kept editing")
+       if choice = Alert_choice.Cancel then write status ("kept editing")
        else destroy_window 0L
      in
      (* Nothing has closed yet: the veto class says so. *)

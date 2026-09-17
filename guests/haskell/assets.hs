@@ -5,28 +5,29 @@
 
 import qualified Data.ByteString as BS
 
+import Data.Text (Text)
 import qualified Data.Text as T
 import KayaApp
 
 -- Deliberately absent, and a LEGAL name: the answer is the census sentence.
-missingName :: String
+missingName :: Text
 missingName = "icons/nope.png"
 
-markName :: String
+markName :: Text
 markName = "icons/kaya-mark.png"
 
 -- SCENERY, and deliberately tiny: an image widget's intrinsic size drives
 -- layout and the DECLARED mark is a user-supplied source of any size
 -- (the images/ family's README). The mark is still opened.
-pictureName :: String
+pictureName :: Text
 pictureName = "images/a11y-logo.png"
 
 -- 111400 bytes, so a reader that truncated into a fixed buffer shows here.
-fontName :: String
+fontName :: Text
 fontName = "fonts/sora-wght.ttf"
 
-firstLine :: String -> String
-firstLine = takeWhile (/= '\n')
+firstLine :: Text -> Text
+firstLine = T.takeWhile (/= '\n')
 
 main :: IO ()
 main = kayaMain $ \app -> do
@@ -40,18 +41,18 @@ main = kayaMain $ \app -> do
   fontBytes <- assetBytes font
   census <- firstLine <$> assetMissSentence missingName
   complaint <- assetMissSentence fontName
-  let verdict = if null complaint then "no complaint" else firstLine complaint
+  let verdict = if T.null complaint then "no complaint" else firstLine complaint
       -- `show` on an Int consults no locale.
       present = if BS.length markBytes > 0 then "present" else "missing"
       summary =
-        markName ++ " " ++ present ++ ", " ++ fontName ++ ": "
-          ++ show (BS.length fontBytes) ++ " bytes, " ++ verdict
+        markName <> " " <> present <> ", " <> fontName <> ": "
+          <> tshow (BS.length fontBytes) <> " bytes, " <> verdict
   buildTx app $ do
     window primary [WTitle "assets", WSize 480 360]
 
-    title <- signal (T.pack "assets")
-    found <- signal (T.pack census)
-    sizes <- signal (T.pack summary)
+    title <- signalText "assets"
+    found <- signalText census
+    sizes <- signalText summary
 
     root <-
       column

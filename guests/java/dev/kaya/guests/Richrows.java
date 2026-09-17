@@ -29,9 +29,9 @@ public final class Richrows {
     private static String spell(List<KayaApp.TextRun> runs) {
         List<String> parts = new ArrayList<>();
         for (KayaApp.TextRun run : runs) {
-            parts.add(run.value().equals("true")
-                    ? run.start() + ":" + run.stop() + " " + run.name()
-                    : run.start() + ":" + run.stop() + " " + run.name() + "=" + run.value());
+            parts.add(run.isFlag()
+                    ? run.range().start + ":" + run.range().stop + " " + run.name()
+                    : run.range().start + ":" + run.range().stop + " " + run.name() + "=" + run.value());
         }
         return String.join("|", parts);
     }

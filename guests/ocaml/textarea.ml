@@ -12,7 +12,7 @@ let () =
 
   let lines, editor =
     build app (fun () ->
-       let lines = signal_str ("0 lines") in
+       let lines = signal Scalar.Str ("0 lines") in
        window ~title:"textarea" ();
 
        (* The editor realizes here because the clear button's handler needs

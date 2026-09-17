@@ -23,7 +23,7 @@ func App() *kaya.App {
 				Message("the document has unsaved changes").
 				Action("Discard").
 				Cancel("Keep Editing").
-				OnResult(func(tx *kaya.Tx, choice uint32) {
+				OnResult(func(tx *kaya.Tx, choice kaya.AlertChoice) {
 					if choice == kaya.AlertChoiceCancel {
 						tx.Write(status, "kept editing")
 						return

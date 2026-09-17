@@ -22,9 +22,9 @@ static class RichrowsScene
     {
         var parts = new List<string>();
         foreach (TextRun run in runs)
-            parts.Add(run.Value == "true"
-                ? $"{run.Start}:{run.Stop} {run.Name}"
-                : $"{run.Start}:{run.Stop} {run.Name}={run.Value}");
+            parts.Add(run.IsFlag
+                ? $"{run.Range.Start}:{run.Range.Stop} {run.Name}"
+                : $"{run.Range.Start}:{run.Range.Stop} {run.Name}={run.Value}");
         return string.Join("|", parts);
     }
 
@@ -41,21 +41,21 @@ static class RichrowsScene
 
         Signal last = default;
         Signal view = default;
-        RecordCollection<Note>? notes = null;
+        RecordCollection<Note> notes = default!;
 
         app.Build(tx =>
         {
             var edit = tx.Menu("Edit", items: new[]
             {
-                tx.Item("Undo", role: Tx.RoleUndo),
-                tx.Item("Redo", role: Tx.RoleRedo),
+                tx.Item("Undo", role: MenuRole.Undo),
+                tx.Item("Redo", role: MenuRole.Redo),
             });
             // An undo or redo moved the row back: the app reads ITS OWN
             // mirror of row b, which is the fold a restored Blob field
             // lands in.
             void Restored(Tx t, string label, UndoDelta delta)
             {
-                Note note = Row(t, notes!, "b");
+                Note note = Row(t, notes, "b");
                 t.Write(view, $"{note.Body.Text} | {Spell(note.Body.Runs)}");
             }
             tx.Window(title: "richrows", menus: new[] { edit },
@@ -76,7 +76,7 @@ static class RichrowsScene
                         t.Undoable("patch b");
                         NoteKaya.Patch(t, notes, "b").Body(
                             new Document("Patched")
-                                .Mark(TextRange.Bytes(0, 7), "italic", "true"));
+                                .Mark(TextRange.Bytes(0, 7), "italic", true));
                     });
                     tx.Button("read a", onClick: t => // button#1
                     {
@@ -102,7 +102,7 @@ static class RichrowsScene
             }));
 
             notes.Insert(tx, "a", new Note("a",
-                new Document("Héllo world").Mark(TextRange.Bytes(0, 6), "bold", "true")));
+                new Document("Héllo world").Mark(TextRange.Bytes(0, 6), "bold", true)));
             notes.Insert(tx, "b", new Note("b",
                 new Document("Second note").Mark(
                     TextRange.Bytes(7, 11), "link", "https://kaya.dev")));

@@ -17,8 +17,8 @@ def spell(runs):
     """The core's spelling of runs (`expect_runs`), so the binding's
     document and the core's mirror are compared as one string."""
     return "|".join(
-        f"{run.start}:{run.end} {run.name}" if run.value == "true"
-        else f"{run.start}:{run.end} {run.name}={run.value}"
+        f"{run.range.start}:{run.range.stop} {run.name}" if run.is_flag
+        else f"{run.range.start}:{run.range.stop} {run.name}={run.value}"
         for run in runs)
 
 
@@ -26,22 +26,22 @@ def on_seed():
     doc = (kaya.Document(DOC)
            .bold(range(0, 6))
            .link(range(7, 12), "https://kaya.dev")
-           .mark(range(14, 18), "code", "true"))
+           .mark(range(14, 18), "code", True))
     title = kaya.Document("Heading with italic").mark(
-        range(13, 19), "italic", "true")
+        range(13, 19), "italic", True)
     body.set_document(doc)
     heading.set_document(title)
     runs.set(spell(doc.runs))
 
 
 def on_insert():
-    edit = kaya.Edit.insert(6, ", big").mark(range(2, 5), "italic", "true")
+    edit = kaya.Edit.insert(6, ", big").mark(range(2, 5), "italic", True)
     body.apply_edit(edit)
     runs.set(spell(body.document().runs))
 
 
 def on_mark():
-    body.format_range(range(1, 4), "italic", "true")
+    body.format_range(range(1, 4), "italic", True)
     body.unformat_range(range(0, 3), "bold")  # "Hé": byte 2 is inside the é
     runs.set(spell(body.document().runs))
 

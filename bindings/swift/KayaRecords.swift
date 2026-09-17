@@ -35,45 +35,59 @@ extension KayaRecord {
     }
 }
 
-/// A civil date: a `DateComponents` carrying year, month and day
-/// (docs/datetime-plan.md D2 — a `Date` would need a zone). The NAME is
-/// what tells a Date record field from a Time one: both are
-/// DateComponents at run time, and kaya-swift-gen reads the declared
-/// spelling.
-typealias KayaDate = DateComponents
+/// A civil date — year, month and day, no zone and no instant
+/// (docs/datetime-plan.md D2). A TYPE of its own, not a `DateComponents`
+/// alias: every component of one is optional, so a date with no day was
+/// representable and a KayaTime passed where a KayaDate was wanted and
+/// failed at run time. kaya-swift-gen reads the declared spelling.
+struct KayaDate: Hashable, Sendable, CustomStringConvertible {
+    var year: Int
+    var month: Int
+    var day: Int
 
-/// A civil time: a `DateComponents` carrying hour and minute (D3, no
-/// seconds).
-typealias KayaTime = DateComponents
-
-/// A date's packed wire value, refused BY NAME when the components are
-/// not one.
-func kayaPackedDate(_ what: String, _ d: KayaDate) -> Int64 {
-    guard let year = d.year, let month = d.month, let day = d.day else {
-        preconditionFailure(
-            "kaya: \(what) takes a KayaDate with year, month and day — a picker carries civil components, never an instant")
+    init(year: Int, month: Int, day: Int) {
+        self.year = year
+        self.month = month
+        self.day = day
     }
-    precondition(
-        month >= 1 && month <= 12,
-        "kaya: \(what) has month \(month), which is not a month (1..12)")
-    precondition(
-        day >= 1 && day <= kayaDaysInMonth(year, month),
-        "kaya: \(what) has day \(day), which \(year)-\(month) does not have")
-    return kayaPackDate(year, month, day)
+
+    var description: String { String(format: "%04d-%02d-%02d", year, month, day) }
 }
 
-/// A time's packed wire value, refused by name when it is not one.
-func kayaPackedTime(_ what: String, _ t: KayaTime) -> Int64 {
-    guard let hour = t.hour, let minute = t.minute else {
-        preconditionFailure("kaya: \(what) takes a KayaTime with hour and minute")
+/// A civil time: hour and minute, no seconds (D3).
+struct KayaTime: Hashable, Sendable, CustomStringConvertible {
+    var hour: Int
+    var minute: Int
+
+    init(hour: Int, minute: Int) {
+        self.hour = hour
+        self.minute = minute
     }
+
+    var description: String { String(format: "%02d:%02d", hour, minute) }
+}
+
+/// A date's packed wire value. The components are non-optional by
+/// construction now; what is left is the calendar's own arithmetic.
+func kayaPackedDate(_ what: String, _ d: KayaDate) -> Int64 {
     precondition(
-        hour >= 0 && hour <= 23,
-        "kaya: \(what) has hour \(hour), which is not an hour (0..23)")
+        d.month >= 1 && d.month <= 12,
+        "kaya: \(what) has month \(d.month), which is not a month (1..12)")
     precondition(
-        minute >= 0 && minute <= 59,
-        "kaya: \(what) has minute \(minute), which is not a minute (0..59)")
-    return kayaPackTime(hour, minute)
+        d.day >= 1 && d.day <= kayaDaysInMonth(d.year, d.month),
+        "kaya: \(what) has day \(d.day), which \(d.year)-\(d.month) does not have")
+    return kayaPackDate(d.year, d.month, d.day)
+}
+
+/// A time's packed wire value.
+func kayaPackedTime(_ what: String, _ t: KayaTime) -> Int64 {
+    precondition(
+        t.hour >= 0 && t.hour <= 23,
+        "kaya: \(what) has hour \(t.hour), which is not an hour (0..23)")
+    precondition(
+        t.minute >= 0 && t.minute <= 59,
+        "kaya: \(what) has minute \(t.minute), which is not a minute (0..59)")
+    return kayaPackTime(t.hour, t.minute)
 }
 
 func kayaDaysInMonth(_ year: Int, _ month: Int) -> Int {
@@ -89,26 +103,6 @@ func kayaDate(packed: Int64) -> KayaDate {
 func kayaTime(packed: Int64) -> KayaTime {
     let parts = kayaUnpackTime(packed)
     return KayaTime(hour: parts.hour, minute: parts.minute)
-}
-
-extension DateComponents {
-    /// The (year, month, day) a KayaDate guarantees — the read-side twin
-    /// of `kayaPackedDate`'s validation, named rather than a bare `!` at
-    /// every display call site.
-    var kayaYMD: (year: Int, month: Int, day: Int) {
-        guard let year, let month, let day else {
-            preconditionFailure("kaya: not a KayaDate (missing year, month or day)")
-        }
-        return (year, month, day)
-    }
-
-    /// The (hour, minute) a KayaTime guarantees.
-    var kayaHM: (hour: Int, minute: Int) {
-        guard let hour, let minute else {
-            preconditionFailure("kaya: not a KayaTime (missing hour or minute)")
-        }
-        return (hour, minute)
-    }
 }
 
 extension KayaValue {
@@ -132,12 +126,10 @@ extension KayaField where V == String {
 
 func wireValue(_ any: Any) -> KayaValue? {
     switch any {
-    // The picker components ride the I64 tag; which packing is the
-    // VALUE'S OWN — a components with year/month/day is a date, one with
-    // hour/minute a time (docs/datetime-plan.md D2).
-    case let c as DateComponents:
-        if c.year != nil { return .i64(kayaPackedDate("a Date field", c)) }
-        return .i64(kayaPackedTime("a Time field", c))
+    // The picker types ride the I64 tag, each packed its own way — the
+    // TYPE says which now (docs/datetime-plan.md D2).
+    case let d as KayaDate: return .i64(kayaPackedDate("a Date field", d))
+    case let t as KayaTime: return .i64(kayaPackedTime("a Time field", t))
     case let s as String: return .str(s)
     case let b as Bool: return .bool(b)
     case let n as Int64: return .i64(n)

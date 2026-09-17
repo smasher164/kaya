@@ -32,9 +32,9 @@ public final class RichText {
     private static String spell(List<KayaApp.TextRun> runs) {
         List<String> parts = new ArrayList<>();
         for (KayaApp.TextRun run : runs) {
-            parts.add(run.value().equals("true")
-                    ? run.start() + ":" + run.stop() + " " + run.name()
-                    : run.start() + ":" + run.stop() + " " + run.name() + "=" + run.value());
+            parts.add(run.isFlag()
+                    ? run.range().start + ":" + run.range().stop + " " + run.name()
+                    : run.range().start + ":" + run.range().stop + " " + run.name() + "=" + run.value());
         }
         return String.join("|", parts);
     }
@@ -52,13 +52,13 @@ public final class RichText {
                 refs.editor = tx.textarea().rich().a11yId("doc").a11yLabel("Document");
                 app.onEdit(refs.editor, (t, edit) -> {
                     String source = edit.source() == null ? "?" : edit.source().toString();
-                    t.write(last, "edit " + edit.start() + ":" + edit.stop() + " <"
+                    t.write(last, "edit " + edit.range().start + ":" + edit.range().stop + " <"
                             + edit.inserted() + "> " + source + " ["
                             + spell(edit.runs()) + "]");
                     t.write(runs, spell(app.document(refs.editor).runs()));
                 });
                 app.onFormat(refs.editor, (t, act) -> {
-                    t.write(last, "format " + act.start() + ":" + act.stop() + " "
+                    t.write(last, "format " + act.range().start + ":" + act.range().stop + " "
                             + act.name() + "=" + (act.value() == null ? "off" : act.value()));
                     t.write(runs, spell(app.document(refs.editor).runs()));
                 });
@@ -80,7 +80,7 @@ public final class RichText {
                         KayaApp.Edit edit =
                                 KayaApp.Edit.insert(KayaApp.TextRange.in(DOC, 5, 5), ", big")
                                         .mark(KayaApp.TextRange.in(", big", 2, 5), "italic",
-                                                "true");
+                                                true);
                         t.applyEdit(refs.editor, edit);
                         t.write(runs, spell(app.document(refs.editor).runs()));
                     });

@@ -262,7 +262,7 @@ NOTIFICATION_RETIRES = [
     ("swift", "bindings/swift/KayaApp.swift",
      r"notifications\.removeValue\(forKey: id\)"),
     ("haskell", "bindings/haskell/KayaApp.hs",
-     r"appNotificationHandlers app\) \(Map\.delete ident"),
+     r"app\.appNotificationHandlers\) \(Map\.delete ident"),
     ("ocaml", "bindings/ocaml/kaya_app.ml",
      r"Hashtbl\.remove app\.notification_handlers id"),
     ("js", "bindings/js/kaya/index.ts",
@@ -422,12 +422,10 @@ ARM_CALLS = [
      r"\t\t\ta\.notificationResult\(id, choice\)$",
      r"a\.notificationResult\(id, choice\)", "a.dispatch(func(tx *Tx) {})"),
     ("csharp", "bindings/csharp/KayaApp.cs",
-     r"^            else if \(kind == KayaWire\.OccKindNotificationResult\)\n"
-     r"            \{\n"
-     r"                NotificationResult\(id, NotificationOutcomes\.FromWire\("
-     r"payload is uint o \? o : 0\)\);$",
-     r"NotificationResult\(id, NotificationOutcomes\.FromWire\("
-     r"payload is uint o \? o : 0\)\);", "Dispatch(tx => { });"),
+     r"^                case NotificationAnswered notified:\n"
+     r"                    NotificationResult\(notified\.Id, notified\.Outcome\);$",
+     r"NotificationResult\(notified\.Id, notified\.Outcome\);",
+     "Dispatch(tx => { });"),
     ("java", "bindings/java/dev/kaya/KayaApp.java",
      r"^            \} else if \(occ\.kind == KayaWire\.OCC_KIND_NOTIFICATION_RESULT\) \{\n"
      r"                notificationResult\(occ\.id, \(Integer\) occ\.payload\);$",
@@ -750,7 +748,7 @@ LINK_PENDING = [
     ("swift", "bindings/swift/KayaApp.swift",
      r"pendingRoutes\.declareLinkRoute\("),
     ("haskell", "bindings/haskell/KayaApp.hs",
-     r"appPendingRoutes app\) \(\+\+ \[W\.txDeclareLinkRoute"),
+     r"app\.appPendingRoutes\) \(\+\+ \[W\.txDeclareLinkRoute"),
     ("ocaml", "bindings/ocaml/kaya_app.ml",
      r"Kaya_wire\.tx_declare_link_route route"),
     ("js", "bindings/js/kaya/index.ts",
@@ -815,9 +813,10 @@ LINK_ARM_CALLS = [
      r"^\t\tcase kind == occLinkOpened:\n(?:.*\n)?\t\t\ta\.linkOpened\(",
      r"a\.linkOpened\(", "a.dispatch(func(tx *Tx) {}); _ = "),
     ("csharp", "bindings/csharp/KayaApp.cs",
-     r"^            else if \(kind == KayaWire\.OccKindLinkOpened\)\n"
-     r"(?:.*\n)*?                LinkOpened\(",
-     r"                LinkOpened\(", "                Dispatch(tx => { }); NotLinkOpened("),
+     r"^                case LinkArrived link:\n"
+     r"(?:.*\n)*?                    LinkOpened\(",
+     r"                    LinkOpened\(",
+     "                    Dispatch(tx => { }); NotLinkOpened("),
     ("java", "bindings/java/dev/kaya/KayaApp.java",
      r"^            \} else if \(occ\.kind == KayaWire\.OCC_KIND_LINK_OPENED\) \{\n"
      r"(?:.*\n)*?                linkOpened\(",
@@ -1374,7 +1373,7 @@ PREF_METHOD_PATTERNS = {
     "java": lambda s, p, c, h: f"public [A-Za-z]+ {c}\\(String ",
     "swift": lambda s, p, c, h: f"func {c}\\(_ name: String",
     "ocaml": lambda s, p, c, h: f"^  {s} : ",
-    "haskell": lambda s, p, c, h: f"{h} :: String ->",
+    "haskell": lambda s, p, c, h: f"{h} :: Text ->",
     "js": lambda s, p, c, h: f"^  {c}\\(key: string",
 }
 
@@ -1471,8 +1470,8 @@ PREF_METHOD_CUTS = {
               "swift's prefs handle has no 'set'"),
     "ocaml": ("bindings/ocaml/kaya_app.ml", r"^  get_string : ",
               "  get_stringXX : ", "ocaml's prefs handle has no 'get_string'"),
-    "haskell": ("bindings/haskell/KayaApp.hs", r"prefSetBool :: String ->",
-                "prefSetBoolXX :: String ->",
+    "haskell": ("bindings/haskell/KayaApp.hs", r"prefSetBool :: Text ->",
+                "prefSetBoolXX :: Text ->",
                 "haskell's prefs handle has no 'set_bool'"),
     "js": ("bindings/js/kaya/index.ts", r"^  getF64\(key: string",
            "  getF64XX(key: string", "js's prefs handle has no 'get_f64'"),
@@ -2567,7 +2566,7 @@ def check_dnd_keyed_source(snake, pascal, camel, hs, findings=None):
              f"func {camel}At\\(_ n: KayaNodeHandle, "
              f"at keys: \\[KayaValue\\]\\) -> KayaDragRef", findings)
     want_dnd("haskell", "bindings/haskell/KayaApp.hs", snake,
-             f"^set{hs}At :: Node -> \\[W\\.Value\\] -> Clip -> \\[Op\\] -> "
+             f"^set{hs}At :: Node -> \\[Key\\] -> Clip -> \\[Op\\] -> "
              f"Build \\(\\)", findings)
     want_dnd("ocaml", "bindings/ocaml/kaya_app.ml", snake,
              f"^let {snake}_at \\?text", findings)
@@ -2597,7 +2596,7 @@ def check_dnd_keyed_target(snake, pascal, camel, hs, findings=None):
              f"func set{pascal}At\\(_ n: KayaNodeHandle, "
              f"at keys: \\[KayaValue\\], _ ops: \\[KayaOp\\]\\)", findings)
     want_dnd("haskell", "bindings/haskell/KayaApp.hs", snake,
-             f"^set{hs}At :: Node -> \\[W\\.Value\\] -> \\[Op\\] -> "
+             f"^set{hs}At :: Node -> \\[Key\\] -> \\[Op\\] -> "
              f"Build \\(\\)", findings)
     want_dnd("ocaml", "bindings/ocaml/kaya_app.ml", snake,
              f"^let set_{snake}_at \\(Node id\\) ~keys operations", findings)
@@ -2639,7 +2638,7 @@ def check_dnd_bound(snake, pascal, camel, findings=None):
              findings)
     # A field of the TEMPLATE clip, beside the constant one it replaces.
     want_dnd("haskell", "bindings/haskell/KayaApp.hs", snake,
-             f"tplClip{pascal} :: Maybe \\(TplRep Text\\)", findings)
+             f"tpl{pascal} :: Maybe \\(TplRep Text\\)", findings)
     # A labelled argument beside the constant's, `label`'s own
     # ~bind_field convention one surface over.
     want_dnd("ocaml", "bindings/ocaml/kaya_app.ml", snake,
@@ -3067,7 +3066,7 @@ def rich_act_rows(snake, pascal, camel):
     # Python's and JS's `format` default the value to "true", so the literal
     # name followed by the call's close is that binding's honest spelling.
     body = (rf'(?s:.{{0,400}}?"{snake}".{{0,40}}?\b(?:url|href|uri)\b)' if link
-            else rf'(?s:.{{0,400}}?"{snake}"(?:.{{0,24}}?"true"|\)))')
+            else rf'(?s:.{{0,400}}?"{snake}"(?:.{{0,24}}?(?:"true"|\btrue\b|True)|\)))')
     return [
         ("rust", F["rust"], rf"pub fn {snake}\(&mut self, widget: WidgetId" + body),
         ("python", F["python"],
@@ -3278,6 +3277,13 @@ def rich_act_body_perturb(text, pattern, snake):
         elif '"true"' in said:
             head, sep, tail = said.rpartition('"true"')
             said, n = head + '"false"' + tail, 1
+        elif re.search(r"\btrue\b", said):
+            # the boolean itself, ruled 2026-09-17 (the review's X2)
+            head, sep, tail = said.rpartition("true")
+            said, n = head + "false" + tail, 1
+        elif "True" in said:
+            head, sep, tail = said.rpartition("True")
+            said, n = head + "False" + tail, 1
         else:
             said, n = sub_count(rf'"{snake}"\)', f'"{snake}", "false")', said)
         applied += n
@@ -3810,13 +3816,14 @@ def tpl_table_probe():
     # no longer say which copy fired.
     text, n = scoped(
         cs, "sealed class KayaApp", "sealed class Tx",
-        "kind == KayaWire.OccKindSortRequested && keys.Count == 0)",
-        "kind == KayaWire.OccKindSortRequested)")
+        "case SortRequested { Live: true } sortLive",
+        "case SortRequested sortLive")
     run_leaf("csharp-sort-arm", src, CS_CHAIN, text or cs, n,
              "csharp's TEMPLATE-zone table cannot spell on_sort")
 
     text, n = scoped(cs, "sealed class KayaApp", "sealed class Tx",
-                     "fn(tx, keys, column)", "fn(tx, column)")
+                     "onSortRow(tx, sortRow.Keys, sortRow.Column)",
+                     "onSortRow(tx, sortRow.Keys.GetRange(0, 0), sortRow.Column)")
     run_leaf("csharp-sort-keys", src, CS_CHAIN, text or cs, n,
              "csharp's TEMPLATE-zone table cannot spell on_sort")
 
@@ -4132,7 +4139,7 @@ def tpl_table_probe():
 
     text, n = scoped(hs, "instance HandlerTarget Node where",
                      "representationOf :: Maybe W.ClipValues",
-                     "(appNodeSorts app)", "(appSortHandlers app)")
+                     "(app.appNodeSorts)", "(app.appSortHandlers)")
     run_leaf("haskell-sort-registrar", src, HS_CHAIN, text or hs, n,
              haskell_want + "on_sort")
 
@@ -4142,7 +4149,7 @@ def tpl_table_probe():
     text, n = scoped(hs, "instance HandlerTarget Node where",
                      "representationOf :: Maybe W.ClipValues",
                      "  onSort app (Node n) handler =\n"
-                     "    modifyIORef' (appNodeSorts app) "
+                     "    modifyIORef' (app.appNodeSorts) "
                      "(Map.insert n handler)\n",
                      "")
     run_leaf("haskell-sort-arm", src, HS_CHAIN, text or hs, n,
@@ -4154,7 +4161,7 @@ def tpl_table_probe():
     # `Keyed` states that rule ONCE for all six.
     text, n = scoped(hs, "instance HandlerTarget Node where",
                      "representationOf :: Maybe W.ClipValues",
-                     "  type Keyed Node p = [W.Value] -> p",
+                     "  type Keyed Node p = [Key] -> p",
                      "  type Keyed Node p = p")
     run_leaf("haskell-sort-handler", src, HS_CHAIN, text or hs, n,
              haskell_want + "on_sort")
@@ -4163,8 +4170,8 @@ def tpl_table_probe():
         hs, "| kind == W.occKindSortRequested -> do",
         "| kind == W.occKindTextChanged -> do",
         "            _ -> do\n"
-        "              handlers <- readIORef (appNodeSorts app)\n"
-        "              dispatch (mapM_ (\\h -> h keys column) "
+        "              handlers <- readIORef (app.appNodeSorts)\n"
+        "              dispatch (mapM_ (\\h -> h (keyPath keys) column) "
         "(Map.lookup ident handlers))\n",
         "            _ -> return ()\n")
     run_leaf("haskell-sort-dispatch", src, HS_CHAIN, text or hs, n,
@@ -4544,9 +4551,11 @@ def hs_record_probe():
     # where no ghc does, so its own reading of the Tpl instance has to
     # be seen red.
     census("haskell-record-tpl",
-           "  collection = Tpl (newCollection [[W.valueStr]])\n"
-           "  collectionOfProxy p = Tpl (newRecordCollection p)\n",
-           "  collection = Tpl (newCollection [[W.valueStr]])\n",
+           "  addChild (Node p) (Node child) = emitT (W.txAddChild p child)\n"
+           "  collection = state (newCollection [[W.valueStr]])\n"
+           "  collectionOfProxy p = state (newRecordCollection p)\n",
+           "  addChild (Node p) (Node child) = emitT (W.txAddChild p child)\n"
+           "  collection = state (newCollection [[W.valueStr]])\n",
            "nested record collection")
     census("haskell-record-schema",
            "  let (c, s') = newCollection [kayaSchema p] s in "
@@ -4563,9 +4572,11 @@ def hs_record_probe():
     # The compiler half. The first is the pre-fix state exactly: the
     # template zone without the record constructor.
     compiles("haskell-tpl-method-gone",
-             "  collection = Tpl (newCollection [[W.valueStr]])\n"
-             "  collectionOfProxy p = Tpl (newRecordCollection p)\n",
-             "  collection = Tpl (newCollection [[W.valueStr]])\n",
+             "  addChild (Node p) (Node child) = emitT (W.txAddChild p child)\n"
+             "  collection = state (newCollection [[W.valueStr]])\n"
+             "  collectionOfProxy p = state (newRecordCollection p)\n",
+             "  addChild (Node p) (Node child) = emitT (W.txAddChild p child)\n"
+             "  collection = state (newCollection [[W.valueStr]])\n",
              ("Werror=missing-methods", "Declare Tpl"), False)
     compiles("haskell-record-at-gone",
              "instance CollectionHandle (RecordCollection a) where\n"
@@ -4690,9 +4701,9 @@ def record_probe():
            "\treturn newRecordCollection[K, T](theTx())",
            "go", "nested record collection")
     census("go-record-at", GO,
-           "\treturn RecordCollection[K, T]{c.Coll.At(key), "
+           "\treturn RecordCollection[K, T]{c.coll.At(key), "
            "c.info}",
-           "\treturn RecordCollection[K, T]{c.Coll, c.info}",
+           "\treturn RecordCollection[K, T]{c.coll, c.info}",
            "go", "record instance addressing")
 
     census("csharp-record-zone", CS,
@@ -4824,8 +4835,8 @@ def hs_zone_probe():
     emitT
       ( W.txSetColumnHeaders
           n
-          (sortColumn sort)
-          (sortDirection sort)
+          (sort.sortColumn)
+          (sort.sortDirection)
           (fromIntegral (length titles))
           0
           (map (W.VStr . T.unpack) titles)
@@ -4833,11 +4844,11 @@ def hs_zone_probe():
 """
 
     NODE_SORT = """  onSort app (Node n) handler =
-    modifyIORef' (appNodeSorts app) (Map.insert n handler)
+    modifyIORef' (app.appNodeSorts) (Map.insert n handler)
 """
 
     WIDGET_PASTE = """  onPaste app (Widget n) handler =
-    modifyIORef' (appWidgetPastes app) (Map.insert n handler)
+    modifyIORef' (app.appWidgetPastes) (Map.insert n handler)
 """
 
     def compiles(name, old, new, markers, doctored="app"):
@@ -4892,7 +4903,7 @@ def hs_zone_probe():
               "HandlerTarget Widget"))
     # The handler's SHAPE gone: not missing-methods, a stuck family.
     compiles("haskell-keyed-node-gone",
-             "  type Keyed Node p = [W.Value] -> p\n", "",
+             "  type Keyed Node p = [Key] -> p\n", "",
              ("Couldn", "Keyed Node"))
 
     shutil.rmtree(tmp)
@@ -5895,7 +5906,9 @@ check("java", "bindings/java/dev/kaya/KayaApp.java", "a11y_id",
 check("swift", "bindings/swift/KayaApp.swift", "a11y_id",
       r"func setA11yId\(")
 check("haskell", "bindings/haskell/KayaApp.hs", "a11y_id",
-      r"A11yId :: LiveStrSource s => s -> Attr")
+      r"A11yId :: Text -> Attr")
+check("haskell", "bindings/haskell/KayaApp.hs", "a11y_id",
+      r"A11yIdBound :: Signal Text -> Attr")
 check("ocaml", "bindings/ocaml/kaya_app.ml", "a11y_id",
       r"let set_a11y_id \(Widget id\)")
 check("js", "bindings/js/kaya/index.ts", "a11y_id", r"^  a11yId\(ident:")
@@ -5913,7 +5926,9 @@ check("java", "bindings/java/dev/kaya/KayaApp.java", "a11y_label",
 check("swift", "bindings/swift/KayaApp.swift", "a11y_label",
       r"func setA11yLabel\(")
 check("haskell", "bindings/haskell/KayaApp.hs", "a11y_label",
-      r"A11yLabel :: LiveStrSource s => s -> Attr")
+      r"A11yLabel :: Text -> Attr")
+check("haskell", "bindings/haskell/KayaApp.hs", "a11y_label",
+      r"A11yLabelBound :: Signal Text -> Attr")
 check("ocaml", "bindings/ocaml/kaya_app.ml", "a11y_label",
       r"let set_a11y_label \(Widget id\)")
 check("js", "bindings/js/kaya/index.ts", "a11y_label", r"^  a11yLabel\(label:")
@@ -5940,7 +5955,9 @@ def check_str_prop(snake, pascal, camel, findings=None, arg="text"):
     check("swift", "bindings/swift/KayaApp.swift", snake,
           rf"func set{pascal}\(", findings)
     check("haskell", "bindings/haskell/KayaApp.hs", snake,
-          rf"{pascal} :: LiveStrSource s => s -> Attr", findings)
+          rf"{pascal} :: Text -> Attr", findings)
+    check("haskell", "bindings/haskell/KayaApp.hs", snake,
+          rf"{pascal}Bound :: Signal Text -> Attr", findings)
     check("ocaml", "bindings/ocaml/kaya_app.ml", snake,
           rf"let set_{snake} \(Widget id\)", findings)
     check("js", "bindings/js/kaya/index.ts", snake,
@@ -5966,9 +5983,11 @@ fake = []
 check_str_prop("kaya_fake_help", "KayaFakeHelp", "kayaFakeHelp",
                findings=fake)
 help_fake = sum(1 for m in fake if "has no live-zone constructor" in m)
-if help_fake != 9:
+# Ten, not nine: Haskell's row is a Text constructor and its Bound twin
+# (the redo of 2026-09-17), and both fire for a prop no binding has.
+if help_fake != 10:
     selftest_exit(f"check-sugar-surface: self-test failed "
-                  f"({help_fake}/9 help patterns fired for a prop no "
+                  f"({help_fake}/10 help patterns fired for a prop no "
                   f"binding has)")
 print(f"check-sugar-surface: chained-str-prop fake-name negatives "
       f"{help_fake}/9")
@@ -5991,7 +6010,9 @@ check("java", "bindings/java/dev/kaya/KayaApp.java", "a11y_hint",
 check("swift", "bindings/swift/KayaApp.swift", "a11y_hint",
       r"func setA11yHint\(")
 check("haskell", "bindings/haskell/KayaApp.hs", "a11y_hint",
-      r"A11yHint :: LiveStrSource s => s -> Attr")
+      r"A11yHint :: Text -> Attr")
+check("haskell", "bindings/haskell/KayaApp.hs", "a11y_hint",
+      r"A11yHintBound :: Signal Text -> Attr")
 check("ocaml", "bindings/ocaml/kaya_app.ml", "a11y_hint",
       r"let set_a11y_hint \(Widget id\)")
 check("js", "bindings/js/kaya/index.ts", "a11y_hint", r"^  a11yHint\(hint:")
@@ -6082,7 +6103,7 @@ check("java", "bindings/java/dev/kaya/KayaApp.java", "accepts",
 check("swift", "bindings/swift/KayaApp.swift", "accepts",
       r"func setAccepts\(")
 check("haskell", "bindings/haskell/KayaApp.hs", "accepts",
-      r"Accepts :: \[String\] -> Attr")
+      r"Accepts :: \[Text\] -> Attr")
 check("ocaml", "bindings/ocaml/kaya_app.ml", "accepts",
       r"^let set_accepts ")
 check("js", "bindings/js/kaya/index.ts", "accepts", r"^  accepts\(\.\.\.kinds: string\[\]\)")
@@ -6495,7 +6516,7 @@ check_styling_point(
     r"func \(tx \*Tx\) Asset\(", r"public Asset Asset\(",
     r"public static Asset asset\(",
     r"init\(_ name: String\) throws",
-    r"^asset :: String -> IO Asset", r"^let asset = ",
+    r"^asset :: Text -> IO Asset", r"^let asset = ",
     r"^export function asset\(name: string\)")
 
 # The row above's other half: the sentence a miss WOULD raise, answered
@@ -6512,7 +6533,7 @@ check_styling_point(
     r"public string AssetMissSentence\(",
     r"public static String assetMissSentence\(",
     r"static func missSentence\(",
-    r"^assetMissSentence :: String -> IO String",
+    r"^assetMissSentence :: Text -> IO Text",
     r"^let asset_miss_sentence = ",
     r"^export function assetMissSentence\(")
 
@@ -6577,7 +6598,7 @@ check_styling_point(
     r"KayaWire.TxBindSectionBadge\(id, bs.Id\)",
     r"public SectionRef badge\(Signal<Double> s\)",
     r"if let badgeSignal \{ tx.bindSectionBadge\(id, badgeSignal.id\) \}",
-    r"SBadgeBound Signal",
+    r"SBadgeBound \(Signal Double\)",
     r"tx_bind_section_badge id s",
     r"wire.tx_bind_section_badge\(sectionId, opts.badge.id\)")
 
@@ -7574,19 +7595,65 @@ print("check-sugar-surface: scene-tier perturbations applied:"
 # tools/gen-guests.py's own GENERATED list so the two never disagree, and a
 # check or bench that packs the wire ON PURPOSE is exempt BY NAME with its
 # reason, each held to a file that still exists.
+MAGIC_CHOICE = r"\bchoice\s*={2,3}\s*\d"
+ALIAS_USE = (r"\bkaya\.(CANCEL|SECTIONS_[A-Z]+|APPEARANCE_[A-Z]+|ROLE_[A-Z]+|"
+             r"NOTIFICATION_[A-Z]+|FILE_MODE_[A-Z]+)\b")
 WIRE_TAG_PATTERNS = {
-    "haskell": (r"\bV(Str|I64|F64|Bool|Blob)\b|^import (qualified )?KayaWire\b",
-                ".hs"),
-    "ocaml": (r"\bKaya_wire\b|\b(Str|I64|F64|Bool|Blob) (\"|\(|-?[0-9]|true|false)",
-              ".ml"),
-    "rust": (r"\bValue::(Str|I64|F64|Bool|Blob)\b", ".rs"),
-    "go": (r"\bKayaWire\.|\bkaya\.(Str|I64|F64|Bool|Blob)\b", ".go"),
-    "csharp": (r"\bKayaWire\.", ".cs"),
-    "java": (r"\bKayaWire\.", ".java"),
-    "swift": (r"\bKayaWire\.|\bkayaWire\b", ".swift"),
-    "python": (r"\bwire\.|^from kaya(\.wire)? import wire\b", ".py"),
-    "js": (r"\bwire\.", ".ts"),
+    "haskell": (r"\bV(Str|I64|F64|Bool|Blob)\b|^import (qualified )?KayaWire\b|"
+                + MAGIC_CHOICE, ".hs"),
+    "ocaml": (r"\bKaya_wire\b|(?<![.\w])(Str|I64|F64|Bool|Blob) (\"|\(|-?[0-9]|true|false)|"
+              r"\b(alert_cancel|alert_choice_\w+|file_mode_(read|write|read_write))\b|"
+              + MAGIC_CHOICE, ".ml"),
+    "rust": (r"\bValue::(Str|I64|F64|Bool|Blob)\b|" + MAGIC_CHOICE, ".rs"),
+    "go": (r"\bKayaWire\.|\bkaya\.(Str|I64|F64|Bool|Blob)\b|" + MAGIC_CHOICE, ".go"),
+    "csharp": (r"\bKayaWire\.|" + MAGIC_CHOICE, ".cs"),
+    "java": (r"\bKayaWire\.|" + MAGIC_CHOICE, ".java"),
+    "swift": (r"\bKayaWire\.|\bkayaWire\b|\bKAYA_(FILE_MODE|SECTIONS_PRESENTATION|"
+              r"ALERT_CHOICE|NOTIFICATION_OUTCOME|APPEARANCE)_[A-Z_]+|" + MAGIC_CHOICE,
+              ".swift"),
+    "python": (r"\bwire\.|^from kaya(\.wire)? import wire\b|" + ALIAS_USE + "|"
+               + MAGIC_CHOICE, ".py"),
+    "js": (r"\bwire\.|" + ALIAS_USE + "|" + MAGIC_CHOICE, ".ts"),
 }
+# The binding's OWN re-export of a wire vocabulary is the alias the review
+# (2026-09-17, X1/X4) found roughly sixty guest sites reaching a wire
+# constant through — `kaya.SECTIONS_BAR = wire.SECTIONS_PRESENTATION_BAR`,
+# Go's untyped constant block, OCaml's `let alert_cancel = Kaya_wire.…`.
+# A vocabulary reaches a guest as the binding's typed value or not at all.
+WIRE_ALIAS_PATTERNS = {
+    "js": ("bindings/js/kaya/index.ts",
+           r"^export const \w+ = wire\.(SECTIONS_PRESENTATION|APPEARANCE|"
+           r"ALERT_CHOICE|NOTIFICATION_OUTCOME|FILE_MODE|ROLE)_"),
+    "python": ("bindings/python/kaya/__init__.py",
+               r"^[A-Z_]+ = wire\.(SECTIONS_PRESENTATION|APPEARANCE|ALERT_CHOICE|"
+               r"NOTIFICATION_OUTCOME|FILE_MODE|ROLE)_"),
+    "go": ("bindings/go/kaya_wire.go",
+           r"^\t(SectionsPresentation|AlertChoice|NotificationOutcome|FileMode|"
+           r"Appearance)\w+ = \d+$"),
+    "ocaml": ("bindings/ocaml/kaya_app.ml",
+              r"^let (alert_cancel|alert_choice_\w+|file_mode_\w+|"
+              r"sections_presentation_\w+|appearance_\w+|notification_outcome_\w+)"
+              r" = Kaya_wire\."),
+}
+WIRE_ALIAS_PLANT = {
+    "js": "export const CANCEL_PLANTED = wire.ALERT_CHOICE_CANCEL;",
+    "python": "CANCEL_PLANTED = wire.ALERT_CHOICE_CANCEL",
+    "go": "\tFileModePlanted = 7",
+    "ocaml": "let alert_choice_planted = Kaya_wire.alert_choice_cancel",
+}
+
+
+def wire_alias_findings(text_for=read_rel):
+    out = []
+    for lang, (rel, pattern) in WIRE_ALIAS_PATTERNS.items():
+        hits = [ln for ln in text_for(rel).splitlines() if re.search(pattern, ln)]
+        if hits:
+            out.append(f"check-sugar-surface: {lang} re-exports a wire vocabulary "
+                       f"under its own name ({len(hits)} line(s) in {rel}; first: "
+                       f"{hits[0].strip()[:70]!r}) — a vocabulary reaches a guest "
+                       f"as the binding's typed value or not at all")
+    return out
+
 WIRE_TAG_EXEMPT = {  # keyed by the stem lowercased with underscores dropped
     "abortcheck": "a check that packs wire records by hand to prove the abort path",
     "notifyordercheck": "a check that reads the wire's notification order records",
@@ -7661,6 +7728,22 @@ print("check-sugar-surface: wire-tag census read "
 for msg in wire_tag_findings():
     print(msg, file=sys.stderr)
     status = 1
+for msg in wire_alias_findings():
+    print(msg, file=sys.stderr)
+    status = 1
+_alias_watched = []
+for _lang, (_rel, _pattern) in WIRE_ALIAS_PATTERNS.items():
+    _planted = read_rel(_rel) + "\n" + WIRE_ALIAS_PLANT[_lang] + "\n"
+    _hits = [m for m in wire_alias_findings(
+        text_for=lambda rel, _r=_rel, _p=_planted: _p if rel == _r else "")
+        if m.startswith(f"check-sugar-surface: {_lang} re-exports")]
+    _alias_watched.append(f"{_lang}={len(_hits)}")
+    if len(_hits) != 1:
+        selftest_exit(f"check-sugar-surface: self-test failed (a wire alias "
+                      f"planted into {_rel} was named {len(_hits)} time(s), "
+                      f"wanted 1)")
+print("check-sugar-surface: wire-alias census watched (planted): "
+      + " ".join(_alias_watched), file=sys.stderr)
 
 # ITS WATCHED NEGATIVES, two per language: the first non-exempt guest is
 # read as ONLY the planted line (so the tree's own state cannot mask the
@@ -7670,8 +7753,8 @@ WIRE_TAG_PLANT = {
     "rust": "let _x = Value::Str(String::new());", "go": "var _ = KayaWire.X",
     "csharp": "var x = KayaWire.AlertChoiceCancel;",
     "java": "int x = KayaWire.ALERT_CHOICE_CANCEL;",
-    "swift": "let x = KayaWire.alertChoiceCancel",
-    "python": "x = wire.ALERT_CHOICE_CANCEL", "js": "const x = wire.CANCEL;",
+    "swift": "let x = UInt32(KAYA_FILE_MODE_WRITE)",
+    "python": "if choice == 1: pass  # kaya.CANCEL", "js": "const x = kaya.SECTIONS_BAR;",
 }
 wire_watched = []
 for _lang, _plant in WIRE_TAG_PLANT.items():

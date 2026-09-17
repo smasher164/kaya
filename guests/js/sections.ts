@@ -28,7 +28,7 @@ function openLibrary(): void {
   kaya.showWindow(LIBRARY);
   app.window({
     windowId: LIBRARY, title: "library",
-    sectionsPresentation: kaya.SECTIONS_SIDEBAR,
+    sectionsPresentation: "sidebar",
   });
   app.addSection(SHELVES, { title: "Shelves", symbol: kaya.Symbol.SEARCH, window: LIBRARY }, () => {
     const shelvesReady = kaya.signal("shelves ready");
@@ -45,7 +45,7 @@ function openLibrary(): void {
 }
 
 // With sections the window has no root: NOTHING MOUNTS here.
-const { visits } = app.window({ title: "sections", sectionsPresentation: kaya.SECTIONS_BAR }, () => {
+const { visits } = app.window({ title: "sections", sectionsPresentation: "bar" }, () => {
   const visits = kaya.signal("archive: 0 visits");
   return { visits };
 });

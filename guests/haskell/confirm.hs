@@ -3,14 +3,13 @@
 -- The confirm scene, Haskell port — guests/rust/confirm.rs,
 -- tools/scenes/confirm.steps.
 
-import qualified Data.Text as T
 import KayaApp
 
 main :: IO ()
 main = kayaMain $ \app -> do
   status <- buildTx app $ do
     window primary [WTitle "confirm"]
-    s <- signal (T.pack "no decision")
+    s <- signalText "no decision"
     root <-
       column
         []
@@ -27,10 +26,11 @@ main = kayaMain $ \app -> do
                 ( \choice ->
                     buildTx app $
                       writeSignal s $
-                        T.pack ( if choice == alertChoiceCancel
-                              then "kept"
-                              else if choice == 1 then "archived" else "deleted"
-                          )
+                        ( case choice of
+                            AlertCancel -> "kept"
+                            AlertAction 1 -> "archived"
+                            AlertAction _ -> "deleted"
+                        )
                 ),
           buttonOn "eject" $
             buildTx app $
@@ -43,7 +43,7 @@ main = kayaMain $ \app -> do
                 ( \choice ->
                     buildTx app $
                       writeSignal s $
-                        T.pack (if choice == alertChoiceCancel then "held" else "ejected")
+                        (if choice == AlertCancel then "held" else "ejected")
                 )
         ]
     mount root

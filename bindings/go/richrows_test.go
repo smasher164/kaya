@@ -73,7 +73,7 @@ func TestARowsFieldTakesTheFoldTheLiveMirrorTakes(t *testing.T) {
 	live := mirror()
 	live.seedDocument(one.id, seeded())
 
-	inserted := []TextRun{{Start: 0, End: 1, Name: "code", Value: "true"}}
+	inserted := []TextRun{{Range: TextRange{Start: 0, End: 1}, Name: "code", Value: "true"}}
 	live.absorbEdit(one.id, 1, 1, "X", inserted)
 	a.foldRowDocument(node, []any{"a"}, func(doc *Document) {
 		foldEdit(doc, 1, 1, "X", inserted)

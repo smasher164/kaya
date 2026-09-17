@@ -17,9 +17,19 @@ type sumVariant struct {
 // constructor structs behind the sealed interface T, keyed by K. Coll is
 // a named field, not embedded: see RecordCollection.
 type SumCollection[K Key, T any] struct {
-	Coll     Collection
+	coll     Collection
 	variants []sumVariant
 }
+
+// Handle is the untyped collection this typed one wraps — for the
+// generated row surfaces, which live in package kaya's consumers.
+func (c SumCollection[K, T]) Handle() Collection { return c.coll }
+
+// Remove drops the entry at key, with the copy's descendants.
+func (c SumCollection[K, T]) Remove(tx *Tx, key K) { tx.Remove(c.coll, key) }
+
+// Count is how many entries this collection holds.
+func (c SumCollection[K, T]) Count(tx *Tx) int { return len(tx.Items(c.coll)) }
 
 // SumOf declares a sum collection: one variant per prototype, in
 // order — each prototype's struct is that constructor's schema.
@@ -71,27 +81,27 @@ func (c SumCollection[K, T]) variantOf(t reflect.Type) (uint32, *recordInfo) {
 // reaches the fresh-key minter here too.
 func (c SumCollection[K, T]) Insert(tx *Tx, key K, value T) {
 	variant, info := c.variantOf(reflect.TypeOf(value))
-	tx.insertEntry(c.Coll, key, variant, value, info.values(value))
+	tx.insertEntry(c.coll, key, variant, value, info.values(value))
 }
 
 // handle is the plain (collection, path) handle the minter counts per.
-func (c SumCollection[K, T]) handle() Collection { return c.Coll }
+func (c SumCollection[K, T]) handle() Collection { return c.coll }
 
 // Update replaces a record wholesale; a different constructor than the
 // entry's current one restamps its copy in place.
 func (c SumCollection[K, T]) Update(tx *Tx, key K, value T) {
 	variant, info := c.variantOf(reflect.TypeOf(value))
-	tx.app.modelSet(c.Coll.id, c.Coll.path, key, value)
+	tx.app.modelSet(c.coll.id, c.coll.path, key, value)
 	tx.emit(
-		TxCollectionUpdate(c.Coll.id, c.Coll.path, key, variant, info.values(value)))
-	tx.recomputeDerived(c.Coll.id, c.Coll.path)
+		TxCollectionUpdate(c.coll.id, c.coll.path, key, variant, info.values(value)))
+	tx.recomputeDerived(c.coll.id, c.coll.path)
 }
 
 // Items is the typed model, in insertion order; the values are the
 // constructor structs behind T.
 func (c SumCollection[K, T]) Items(tx *Tx) []RecordEntry[K, T] {
 	tx.app.guardMirrorRead()
-	in := tx.app.instanceOf(c.Coll.id, c.Coll.path)
+	in := tx.app.instanceOf(c.coll.id, c.coll.path)
 	if in == nil {
 		return nil
 	}
@@ -106,7 +116,7 @@ func (c SumCollection[K, T]) Items(tx *Tx) []RecordEntry[K, T] {
 func (c SumCollection[K, T]) Get(tx *Tx, key K) (T, bool) {
 	tx.app.guardMirrorRead()
 	var zero T
-	in := tx.app.instanceOf(c.Coll.id, c.Coll.path)
+	in := tx.app.instanceOf(c.coll.id, c.coll.path)
 	if in == nil {
 		return zero, false
 	}
@@ -122,7 +132,7 @@ func (c SumCollection[K, T]) Get(tx *Tx, key K) (T, bool) {
 // caller just matched, and the model refuses if the entry holds another.
 func (c SumCollection[K, T]) UpdateField[V any, F any](tx *Tx, key K, sel func(*V) *F, value F) {
 	variant, info := c.variantOf(reflect.TypeFor[V]())
-	in := tx.app.instanceOf(c.Coll.id, c.Coll.path)
+	in := tx.app.instanceOf(c.coll.id, c.coll.path)
 	if in == nil {
 		panic("kaya: update of a missing instance")
 	}
@@ -139,12 +149,12 @@ func (c SumCollection[K, T]) UpdateField[V any, F any](tx *Tx, key K, sel func(*
 		}
 		rv := reflect.ValueOf(&record).Elem()
 		rv.Field(info.indexes[f.index]).Set(reflect.ValueOf(value))
-		tx.app.modelSet(c.Coll.id, c.Coll.path, key, any(record).(T))
+		tx.app.modelSet(c.coll.id, c.coll.path, key, any(record).(T))
 		// Through the encoder: a blob field registers its bytes at
 		// encode time (handles are single-submit).
 		tx.emit(
-			TxCollectionUpdateField(c.Coll.id, c.Coll.path, key, f.index, variant, info.encode(f.index, value)))
-		tx.recomputeDerived(c.Coll.id, c.Coll.path)
+			TxCollectionUpdateField(c.coll.id, c.coll.path, key, f.index, variant, info.encode(f.index, value)))
+		tx.recomputeDerived(c.coll.id, c.coll.path)
 		return
 	}
 	panic(fmt.Sprintf("kaya: update of missing key %v", key))
@@ -153,7 +163,7 @@ func (c SumCollection[K, T]) UpdateField[V any, F any](tx *Tx, key K, sel func(*
 // Derive is the collection-derived signal, over the sum's entries.
 func (c SumCollection[K, T]) Derive[V Scalar](tx *Tx, compute func(items []RecordEntry[K, T]) V) Signal[V] {
 	s := tx.Signal(compute(c.Items(tx)))
-	tx.pendingDerived = append(tx.pendingDerived, pendingDerived{c.Coll.id, func(tx *Tx) {
+	tx.pendingDerived = append(tx.pendingDerived, pendingDerived{c.coll.id, func(tx *Tx) {
 		tx.Write(s, compute(c.Items(tx)))
 	}})
 	return s

@@ -10,7 +10,6 @@
 import GHC.Generics (Generic)
 
 import Data.Text (Text)
-import qualified Data.Text as T
 import KayaApp
 
 data Note = Note {text :: Text}
@@ -35,7 +34,7 @@ main = kayaMain $ \app -> do
     doneCount <-
       sumDerive feed $ \entries ->
         let n = length [() | (_, PTodo (Todo _ True)) <- entries]
-         in T.pack (show n ++ " done")
+         in tshow n <> " done"
 
     let onPromote = submitTx app $ do
           entries <- sumItems feed
@@ -70,6 +69,6 @@ main = kayaMain $ \app -> do
             ]
         ]
     mount root
-    sumInsert feed (T.pack "a") (PNote (Note "jot one"))
-    sumInsert feed (T.pack "b") (PTodo (Todo "buy milk" False))
-    sumInsert feed (T.pack "c") (PNote (Note "jot two"))
+    sumInsert feed "a" (PNote (Note "jot one"))
+    sumInsert feed "b" (PTodo (Todo "buy milk" False))
+    sumInsert feed "c" (PNote (Note "jot two"))

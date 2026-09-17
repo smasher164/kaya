@@ -87,7 +87,7 @@ main = kayaMain $ \app -> do
   buildTx app $ do
     window primary [WTitle "ranges"]
     -- Bound before the widgets that close over it.
-    status <- signal (T.pack "0 matches")
+    status <- signalText "0 matches"
 
     -- Every range assertion finds this control by its authored id.
     editor <-
@@ -96,9 +96,9 @@ main = kayaMain $ \app -> do
             writeIORef docRef text
             -- A declared set is bound to the text it was declared against
             -- (docs/ranges-plan.md D2).
-            submitTx app (writeSignal status (T.pack "0 matches"))
+            submitTx app (writeSignal status "0 matches")
         )
-        [A11yId ("doc" :: Text), A11yLabel ("Document" :: Text)]
+        [A11yId "doc", A11yLabel "Document"]
     setText editor docSource
 
     root <-
@@ -117,7 +117,7 @@ main = kayaMain $ \app -> do
                       case drop 1 hits of
                         second : _ -> selectRange editor second
                         [] -> return ()
-                      writeSignal status (T.pack (show (length hits) ++ " matches"))
+                      writeSignal status (tshow (length hits) <> " matches")
                 ),
               buttonOn -- button#1
                 "reveal last"

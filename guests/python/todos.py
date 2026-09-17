@@ -54,8 +54,8 @@ def on_toggle(key, checked):
 
 with app.window(title="todos"):
     with app.menu("Edit"):
-        kaya.item("Undo", role=kaya.ROLE_UNDO)
-        kaya.item("Redo", role=kaya.ROLE_REDO)
+        kaya.item("Undo", role=kaya.MenuRole.UNDO)
+        kaya.item("Redo", role=kaya.MenuRole.REDO)
 
     todos = kaya.collection(Todo)
     items_left = todos.derive(items_left_text)

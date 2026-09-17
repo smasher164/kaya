@@ -1,19 +1,12 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE DerivingStrategies #-}
-{-# LANGUAGE DerivingVia #-}
-{-# LANGUAGE InstanceSigs #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE GADTs #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE DefaultSignatures #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE DefaultSignatures #-}
+{-# LANGUAGE DerivingVia #-}
+{-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE NoFieldSelectors #-}
+{-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE OverloadedStrings #-}
 -- KEEP THE PRAGMA BELOW, moved from KayaApp.hs with the code it guards
 -- (the idiom pass's F9 module split, 2026-09-16): 'applyAttr' and
 -- 'applyTplAttr' stayed in KayaApp.hs, but GRecord's and GSum's own
@@ -72,6 +65,10 @@ module Kaya.Core
     Model,
     Fresh,
     Pending (..),
+    AlertChoice (..),
+    alertChoiceOfWire,
+    NotificationOutcome (..),
+    notificationOutcomeOfWire,
     Widget (..),
     Node (..),
     Signal (..),
@@ -80,6 +77,16 @@ module Kaya.Core
     SumCollection (..),
     CollectionHandle (..),
     Declare (..),
+    -- The constructor stops here: 'textKey', 'intKey' and the literal
+    -- instances are the only ways to make one, which is what keeps
+    -- 'keyText' and 'keyInt' total.
+    Key,
+    keyValue,
+    textKey,
+    intKey,
+    keyText,
+    keyInt,
+    keyOfWire,
     KayaValue (..),
     KayaFieldType (..),
     KField (..),
@@ -94,6 +101,9 @@ module Kaya.Core
     sortNone,
     sortAsc,
     sortDesc,
+    MarkValue (..),
+    markSpelling,
+    markValueOf,
     Run (..),
     Document (..),
     Edit (..),
@@ -105,7 +115,7 @@ module Kaya.Core
     Dropped (..),
     Viewbox (..),
     DrawOp (..),
-    assertRoot,
+    rootOf,
     modelSet,
     modelRemove,
     modelMove,
@@ -125,8 +135,15 @@ module Kaya.Core
     newCollection,
     newRecordCollection,
     collectionOf,
-    signal,
+    signalText,
+    signalBool,
+    signalInt,
+    signalDouble,
+    signalDate,
+    signalTime,
+    signalImage,
     writeSignal,
+    tshow,
     recomputeDerived,
     insertEntry,
     insert,
@@ -165,8 +182,6 @@ module Kaya.Core
     packTimeOfDay,
     dayOfPacked,
     timeOfDayOfPacked,
-    dateValue,
-    timeValue,
     recordHandle,
     insertRecord,
     insertFresh,
@@ -198,18 +213,30 @@ import Data.Proxy (Proxy (..))
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
-import Data.Functor.Identity (Identity (..))
-import Control.Monad.State.Strict (State)
+import Control.Monad.State.Strict (MonadState, State, gets, modify', runState, state)
 import Control.Monad.Trans.State.Strict (StateT (..))
 import Data.Time.Calendar (Day, fromGregorian, toGregorian)
 import Data.Time.LocalTime (TimeOfDay (..))
 import Data.Word (Word32, Word64, Word8)
 import GHC.Generics
 
-import KayaRuntime (UndoDelta (..), registerBlob)
+import KayaRuntime
+  ( Key,
+    UndoDelta (..),
+    intKey,
+    keyInt,
+    keyOfWire,
+    keyText,
+    keyValue,
+    registerBlob,
+    textKey,
+  )
 import qualified KayaWire as W
 
-newtype Signal = Signal Word64
+-- | A signal, carrying the type it holds: the phantom is what lets
+-- 'writeSignal' and every @*Bound@ constructor infer a bare literal
+-- (docs\/deferred.md, the Haskell text-surface entry).
+newtype Signal v = Signal Word64
 
 newtype Widget = Widget Word64
 
@@ -224,17 +251,34 @@ data Collection = Collection Word64 [W.Value]
 class CollectionHandle c where
   -- | The instance of this collection inside the copy keyed by @key@ of
   -- the next enclosing For; chain for deeper nesting.
-  at :: KayaValue k => c -> k -> c
+  at :: c -> Key -> c
 
 instance CollectionHandle Collection where
-  at (Collection cid path) key = Collection cid (path ++ [toWire key])
+  at (Collection cid path) key = Collection cid (path ++ [keyValue key])
 
 instance CollectionHandle (RecordCollection a) where
   at (RecordCollection c) key = RecordCollection (at c key)
 
-assertRoot :: Collection -> Word64
-assertRoot (Collection cid []) = cid
-assertRoot _ = error "kaya: forEach binds the collection itself, not an instance — drop the at"
+-- | The collection ITSELF, or 'Nothing' for one of its stamped
+-- instances: a For binds a whole collection, never the copy-keyed table
+-- inside one, and this is how a caller asks which it holds.
+rootOf :: Collection -> Maybe Word64
+rootOf (Collection cid []) = Just cid
+rootOf _ = Nothing
+
+-- The three For-openers' shared refusal, in the one place that can name
+-- the verb. A TYPE would say this instead and is the ruling to take: a
+-- phantom on Collection\/RecordCollection\/SumCollection that 'at' moves
+-- from root to stamped, so 'forEach' takes only the root and the write
+-- verbs take either. That is 94 Collection mentions in this file; it was
+-- out of this pass's budget and is recorded on the ledger.
+forRoot :: String -> Collection -> Word64
+forRoot verb coll = case rootOf coll of
+  Just cid -> cid
+  Nothing ->
+    errorWithoutStackTrace
+      ( "kaya: " ++ verb ++ " binds the collection itself, not an instance "
+          ++ "— drop the at" )
 
 -- | One representation, arriving — the sum a copy is the record of.
 -- 'RImage' may be a RE-ENCODE of what was copied, so compare what the
@@ -244,7 +288,7 @@ data Representation
   | RHtml Text
   | RImage BS.ByteString
   | RFiles [PickedFile]
-  | RCustom String BS.ByteString
+  | RCustom Text BS.ByteString
 
 -- | A drag operation (docs\/dnd-plan.md D3): copy and move, nothing
 -- else; 'Nothing' is the outcome of a cancelled or refused drag.
@@ -256,11 +300,11 @@ data Op = OpCopy | OpMove
 -- coordinates, the operation the core settled on, and — for a reorder —
 -- the anchor row and the side it landed on.
 data Dropped = Dropped
-  { droppedPoint :: (Double, Double),
-    droppedOperation :: Maybe Op,
-    droppedAnchor :: [W.Value],
-    droppedBefore :: Bool,
-    droppedClip :: Maybe Representation
+  { point :: (Double, Double),
+    operation :: Maybe Op,
+    anchor :: [Key],
+    before :: Bool,
+    clip :: Maybe Representation
   }
 
 -- | One file the picker answered with: a handle to redeem, a display
@@ -268,10 +312,31 @@ data Dropped = Dropped
 -- works, which is the three desktops and neither phone (DESIGN.md, File
 -- dialogs).
 data PickedFile = PickedFile
-  { pickedHandle :: !Word64,
-    pickedName :: !String,
-    pickedLocalPath :: !String
+  { handle :: !Word64,
+    name :: !Text,
+    -- | A 'FilePath' and not 'Text': this is what @openFile@,
+    -- @removeFile@ and @(\<\/\>)@ take.
+    localPath :: !FilePath
   }
+
+-- | WHAT THE USER DID WITH AN ALERT: an action by its 0-based index, or
+-- the dismissal that names none.
+data AlertChoice = AlertAction !Int | AlertCancel
+  deriving (Eq, Show)
+
+alertChoiceOfWire :: Word32 -> AlertChoice
+alertChoiceOfWire c
+  | c == W.alertChoiceCancel = AlertCancel
+  | otherwise = AlertAction (fromIntegral c)
+
+-- | WHAT BECAME OF A NOTIFICATION (spec enum @notification_outcome@).
+data NotificationOutcome = NotificationActivated | NotificationRefused
+  deriving (Eq, Show)
+
+notificationOutcomeOfWire :: Word32 -> NotificationOutcome
+notificationOutcomeOfWire o
+  | o == W.notificationOutcomeActivated = NotificationActivated
+  | otherwise = NotificationRefused
 
 data Counters = Counters
   { cSignal :: !Word64,
@@ -314,8 +379,8 @@ data BuildState = BuildState
 
 data Pending
   = PClick !Word64 (IO ())
-  | PAlert !Word64 (Word32 -> IO ())
-  | PNotification !Word64 (Word32 -> IO ())
+  | PAlert !Word64 (AlertChoice -> IO ())
+  | PNotification !Word64 (NotificationOutcome -> IO ())
   | PFileDialog !Word64 ([PickedFile] -> IO ())
   | PClipboardRead !Word64 (Maybe Representation -> IO ())
   | PEntryPopped !Word64 (IO ())
@@ -328,23 +393,23 @@ data Pending
   | PChange !Word64 (Text -> IO ())
   | PToggle !Word64 (Bool -> IO ())
   | PValue !Word64 (Double -> IO ())
-  | PToggleNode !Word64 ([W.Value] -> Bool -> IO ())
+  | PToggleNode !Word64 ([Key] -> Bool -> IO ())
   -- The template node's document bind, recorded at the transaction
   -- boundary because the collection is BuildState's and the table is
   -- the App's (docs/rich-text-plan.md §19).
   | PDocumentBind !Word64 !Word64 !Word32 !Word32
-  | PEditNode !Word64 ([W.Value] -> Edit -> IO ())
-  | PFormatNode !Word64 ([W.Value] -> Format -> IO ())
+  | PEditNode !Word64 ([Key] -> Edit -> IO ())
+  | PFormatNode !Word64 ([Key] -> Format -> IO ())
   | PDate !Word64 (Day -> IO ())
   | PTime !Word64 (TimeOfDay -> IO ())
-  | PDateNode !Word64 ([W.Value] -> Day -> IO ())
-  | PTimeNode !Word64 ([W.Value] -> TimeOfDay -> IO ())
+  | PDateNode !Word64 ([Key] -> Day -> IO ())
+  | PTimeNode !Word64 ([Key] -> TimeOfDay -> IO ())
   | PMenuActivated !Word64 (IO ())
-  | PMenuActivatedNode !Word64 ([W.Value] -> IO ())
+  | PMenuActivatedNode !Word64 ([Key] -> IO ())
   | PMenuToggled !Word64 (Bool -> IO ())
-  | PMenuToggledNode !Word64 ([W.Value] -> Bool -> IO ())
+  | PMenuToggledNode !Word64 ([Key] -> Bool -> IO ())
   | PMenuSelected !Word64 (Int -> IO ())
-  | PMenuSelectedNode !Word64 ([W.Value] -> Int -> IO ())
+  | PMenuSelectedNode !Word64 ([Key] -> Int -> IO ())
 
 modelSet :: Word64 -> [W.Value] -> W.Value -> Word32 -> [W.Value] -> Model -> Model
 modelSet cid path key variant fields model =
@@ -353,7 +418,7 @@ modelSet cid path key variant fields model =
     value = (variant, fields)
     go [] = [Instance path [(key, value)]]
     go (i : rest)
-      | iPath i == path = i {iEntries = upsert (iEntries i)} : rest
+      | i.iPath == path = i {iEntries = upsert (i.iEntries)} : rest
       | otherwise = i : go rest
     upsert [] = [(key, value)]
     upsert ((k, v) : rest)
@@ -368,11 +433,11 @@ modelRemove children cid path key model =
   where
     prefix = path ++ [key]
     dropKey i
-      | iPath i == path = i {iEntries = filter ((/= key) . fst) (iEntries i)}
+      | i.iPath == path = i {iEntries = filter ((/= key) . fst) (i.iEntries)}
       | otherwise = i
     purge c pre m =
       foldr
-        (\kid acc -> purge kid pre (Map.adjust (filter (not . startsWith pre . iPath)) kid acc))
+        (\kid acc -> purge kid pre (Map.adjust (filter (not . startsWith pre . (.iPath))) kid acc))
         m
         (Map.findWithDefault [] c children)
     startsWith pre p = take (length pre) p == pre
@@ -383,9 +448,9 @@ modelMove :: Word64 -> [W.Value] -> W.Value -> [W.Value] -> Model -> Model
 modelMove cid path key before = Map.adjust (map go) cid
   where
     go i
-      | iPath i == path,
-        Just value <- lookup key (iEntries i) =
-          i {iEntries = place (key, value) (filter ((/= key) . fst) (iEntries i))}
+      | i.iPath == path,
+        Just value <- lookup key (i.iEntries) =
+          i {iEntries = place (key, value) (filter ((/= key) . fst) (i.iEntries))}
       | otherwise = i
     place entry rest = case before of
       (anchor : _) -> insertAt anchor entry rest
@@ -397,8 +462,8 @@ modelMove cid path key before = Map.adjust (map go) cid
 
 lookupEntries :: Word64 -> [W.Value] -> Model -> [(W.Value, (Word32, [W.Value]))]
 lookupEntries cid path model =
-  case filter ((== path) . iPath) (Map.findWithDefault [] cid model) of
-    (i : _) -> iEntries i
+  case filter ((== path) . (.iPath)) (Map.findWithDefault [] cid model) of
+    (i : _) -> i.iEntries
     [] -> []
 
 withCounter :: Word64 -> [W.Value] -> (Int64 -> (a, Int64)) -> Fresh -> (a, Fresh)
@@ -423,75 +488,76 @@ absorbKey cid path key fresh = case key of
 -- A collection declared inside a For's template is torn down with its
 -- copies: record the edge so the model purges along it.
 registerCollection :: Word64 -> BuildState -> BuildState
-registerCollection cid s = case bOpenFors s of
-  parent : _ -> s {bChildren = Map.insertWith (flip (++)) parent [cid] (bChildren s)}
+registerCollection cid s = case s.bOpenFors of
+  parent : _ -> s {bChildren = Map.insertWith (flip (++)) parent [cid] (s.bChildren)}
   [] -> s
 
--- Build/Tpl over mtl's State (docs/traps.md: the hand-rolled Functor
+-- Build and Tpl ARE mtl's State (docs/traps.md: the hand-rolled Functor
 -- \/Applicative\/Monad instances this replaced predated mtl\/transformers
--- being GHC boot packages on this toolchain). The constructor's own type
--- (BuildState -> (a, BuildState)) is unchanged, so every existing
--- 'Build $ \\s -> ...' \/ 'unBuild' call site keeps working; 'deriving via'
--- only replaces the hand-written instances.
-newtype Build a = Build {unBuild :: BuildState -> (a, BuildState)}
-  deriving (Functor, Applicative, Monad) via (State BuildState)
+-- being GHC boot packages on this toolchain). Newtype-derived down to
+-- 'MonadState', so this file writes 'state', 'gets' and 'modify'' rather
+-- than threading a BuildState by hand; 'runState' is how the two places
+-- that need the raw function get it.
+newtype Build a = Build {unBuild :: State BuildState a}
+  deriving newtype (Functor, Applicative, Monad, MonadState BuildState)
 
-newtype Tpl a = Tpl {unTpl :: BuildState -> (a, BuildState)}
-  deriving (Functor, Applicative, Monad) via (State BuildState)
+newtype Tpl a = Tpl {unTpl :: State BuildState a}
+  deriving newtype (Functor, Applicative, Monad, MonadState BuildState)
 
 emitB :: Builder -> Build ()
 emitB = emitBIO . pure
 
 emitBIO :: IO Builder -> Build ()
-emitBIO r = Build $ \s -> ((), s {bRecords = bRecords s <> r})
+emitBIO r = modify' $ \s -> s {bRecords = s.bRecords <> r}
 
 emitT :: Builder -> Tpl ()
 emitT = emitTIO . pure
 
 emitTIO :: IO Builder -> Tpl ()
-emitTIO r = Tpl $ \s -> ((), s {bRecords = bRecords s <> r})
+emitTIO r = modify' $ \s -> s {bRecords = s.bRecords <> r}
 
 allocW :: Build Word64
-allocW = Build $ \s ->
-  let c = bCounters s
-      n = cWidget c + 1
+allocW = state $ \s ->
+  let c = s.bCounters
+      n = c.cWidget + 1
    in (n, s {bCounters = c {cWidget = n}})
 
 allocN :: Tpl Word64
-allocN = Tpl $ \s ->
-  let c = bCounters s
-      n = cWidget c + 1
+allocN = state $ \s ->
+  let c = s.bCounters
+      n = c.cWidget + 1
    in (n, s {bCounters = c {cWidget = n}})
 
 -- Menu items get their OWN id space (the c_menu_item counter) — never a
 -- widget, node, or surface id.
 allocM :: Build Word64
-allocM = Build $ \s ->
-  let c = bCounters s
-      n = cMenuItem c + 1
+allocM = state $ \s ->
+  let c = s.bCounters
+      n = c.cMenuItem + 1
    in (n, s {bCounters = c {cMenuItem = n}})
 
 bracketTpl :: (BuildState -> (Word64, BuildState)) -> (Word64 -> Builder) -> Maybe Word64
            -> Tpl a -> BuildState -> ((Word64, a), BuildState)
-bracketTpl alloc opener forCid (Tpl body) s0 =
-  let (self, s1) = alloc s0
+bracketTpl alloc opener forCid body0 s0 =
+  let body = runState body0.unTpl
+      (self, s1) = alloc s0
       s2 = s1
-        { bRecords = bRecords s1 <> pure (opener self),
-          bOpenFors = maybe (bOpenFors s1) (: bOpenFors s1) forCid
+        { bRecords = s1.bRecords <> pure (opener self),
+          bOpenFors = maybe (s1.bOpenFors) (: s1.bOpenFors) forCid
         }
       (a, s3) = body s2
       s4 = s3
-        { bRecords = bRecords s3 <> pure W.txTemplateEnd,
-          bOpenFors = maybe (bOpenFors s3) (const (drop 1 (bOpenFors s3))) forCid
+        { bRecords = s3.bRecords <> pure W.txTemplateEnd,
+          bOpenFors = maybe (s3.bOpenFors) (const (drop 1 (s3.bOpenFors))) forCid
         }
    in ((self, a), s4)
 
 newCollection :: [[Word32]] -> BuildState -> (Collection, BuildState)
 newCollection variants s =
-  let c = bCounters s
-      n = cCollection c + 1
+  let c = s.bCounters
+      n = c.cCollection + 1
       s' = registerCollection n s {bCounters = c {cCollection = n}}
-   in (Collection n [], s' {bRecords = bRecords s' <> pure (W.txCreateCollection n variants)})
+   in (Collection n [], s' {bRecords = s'.bRecords <> pure (W.txCreateCollection n variants)})
 
 newRecordCollection ::
   KayaRecord a => Proxy a -> BuildState -> (RecordCollection a, BuildState)
@@ -547,7 +613,7 @@ class Monad m => Declare m where
   -- scope (docs\/tables-plan.md). Per-copy indicators are 'columnsAt'.
   columns :: El m -> [Text] -> Sort -> m ()
   -- | A When over a Bool signal: stamps on true, unstamps on false.
-  when_ :: Signal -> Tpl a -> m (El m, a)
+  when_ :: Signal Bool -> Tpl a -> m (El m, a)
 
 -- | A collection of a-records; the type is the schema —
 -- @collectionOf \@Note@, matching 'field'\'s own TypeApplications spelling.
@@ -572,29 +638,29 @@ instance Declare Build where
   setColumns (Widget n) tracks = emitB (W.txSetColumns n (fromIntegral tracks))
   setIndeterminate (Widget n) on = emitB (W.txSetIndeterminate n on)
   addChild (Widget p) (Widget child) = emitB (W.txAddChild p child)
-  collection = Build (newCollection [[W.valueStr]])
-  collectionOfProxy p = Build (newRecordCollection p)
+  collection = state (newCollection [[W.valueStr]])
+  collectionOfProxy p = state (newRecordCollection p)
   forEach coll body =
-    Build $ \s ->
-      let cid = assertRoot coll
+    state $ \s ->
+      let cid = forRoot "forEach" coll
           ((self, a), s') =
-            bracketTpl (unBuild allocW) (`W.txCreateFor` cid) (Just cid) body s
+            bracketTpl (runState allocW.unBuild) (`W.txCreateFor` cid) (Just cid) body s
        in ((Widget self, a), s')
   -- pathLen 0 against a LIVE container: the flat table's bar.
   columns (Widget n) titles sort =
     emitB
       ( W.txSetColumnHeaders
           n
-          (sortColumn sort)
-          (sortDirection sort)
+          (sort.sortColumn)
+          (sort.sortDirection)
           (fromIntegral (length titles))
           0
           (map (W.VStr . T.unpack) titles)
       )
   when_ (Signal sid) body =
-    Build $ \s ->
+    state $ \s ->
       let ((self, a), s') =
-            bracketTpl (unBuild allocW) (`W.txCreateWhen` sid) Nothing body s
+            bracketTpl (runState allocW.unBuild) (`W.txCreateWhen` sid) Nothing body s
        in ((Widget self, a), s')
 
 instance Declare Tpl where
@@ -613,29 +679,29 @@ instance Declare Tpl where
   setColumns (Node n) tracks = emitT (W.txSetColumns n (fromIntegral tracks))
   setIndeterminate (Node n) on = emitT (W.txSetIndeterminate n on)
   addChild (Node p) (Node child) = emitT (W.txAddChild p child)
-  collection = Tpl (newCollection [[W.valueStr]])
-  collectionOfProxy p = Tpl (newRecordCollection p)
+  collection = state (newCollection [[W.valueStr]])
+  collectionOfProxy p = state (newRecordCollection p)
   forEach coll body =
-    Tpl $ \s ->
-      let cid = assertRoot coll
+    state $ \s ->
+      let cid = forRoot "forEach" coll
           ((self, a), s') =
-            bracketTpl (unTpl allocN) (`W.txCreateFor` cid) (Just cid) body s
+            bracketTpl (runState allocN.unTpl) (`W.txCreateFor` cid) (Just cid) body s
        in ((Node self, a), s')
   -- pathLen 0 against a TEMPLATE NODE: every copy's bar.
   columns (Node n) titles sort =
     emitT
       ( W.txSetColumnHeaders
           n
-          (sortColumn sort)
-          (sortDirection sort)
+          (sort.sortColumn)
+          (sort.sortDirection)
           (fromIntegral (length titles))
           0
           (map (W.VStr . T.unpack) titles)
       )
   when_ (Signal sid) body =
-    Tpl $ \s ->
+    state $ \s ->
       let ((self, a), s') =
-            bracketTpl (unTpl allocN) (`W.txCreateWhen` sid) Nothing body s
+            bracketTpl (runState allocN.unTpl) (`W.txCreateWhen` sid) Nothing body s
        in ((Node self, a), s')
 
 -- | A Haskell type that can cross the wire as one signal or collection-key
@@ -644,6 +710,13 @@ instance Declare Tpl where
 class KayaValue v where
   toWire :: v -> W.Value
   fromWire :: W.Value -> v
+
+  -- | The TRANSACTION BOUNDARY's encode, where a Blob-tagged value
+  -- registers its bytes with the core in record order —
+  -- 'encodeFieldWire' is the record-field twin. Everything else travels
+  -- as 'toWire' says.
+  toWireIO :: v -> IO W.Value
+  toWireIO = pure . toWire
 
 instance KayaValue Text where
   toWire = W.VStr . T.unpack
@@ -661,96 +734,156 @@ instance KayaValue Double where
   toWire = W.VF64
   fromWire v = case v of W.VF64 x -> x; _ -> error "kaya: value is not an F64"
 
--- | The wire's own tag, as its own representation — the escape hatch a
--- key read back from 'recordItems'\/'items'\/a keyed handler's path needs
--- to round-trip into a write (insert\/update\/remove\/patch\/move*) without
--- a guest ever spelling the tag itself: opaque in, opaque out, through
--- 'fromWire' at the read and this instance at the write.
+-- | A civil date as a signal's value: the packed I64 a date picker binds
+-- to (docs\/datetime-plan.md D2), so @signalDate@ and a picker's
+-- @Signal Day@ are one type.
+instance KayaValue Day where
+  toWire = W.VI64 . packDay
+  fromWire v = case v of W.VI64 n -> dayOfPacked n; _ -> error "kaya: value is not a Date"
+
+instance KayaValue TimeOfDay where
+  toWire = W.VI64 . packTimeOfDay
+  fromWire v = case v of W.VI64 n -> timeOfDayOfPacked n; _ -> error "kaya: value is not a Time"
+
+-- | Encoded image bytes, the 'KayaFieldType' Blob instance one slot over:
+-- the model's mirror holds the bytes as a Str and the boundary registers
+-- them, which is what 'toWireIO' exists for.
+instance KayaValue BS.ByteString where
+  toWire = W.VStr . BC.unpack
+  fromWire v = case v of W.VStr s -> BC.pack s; _ -> error "kaya: value is not a Blob"
+  toWireIO = fmap W.VBlob . registerBlob
+
+-- | The wire's own tag, as its own representation — kept for the
+-- binding's own round trips; a guest reaches for 'Key'.
 instance KayaValue W.Value where
   toWire = id
   fromWire = id
 
-signal :: KayaValue v => v -> Build Signal
-signal initial = Build $ \s ->
-  let c = bCounters s
-      n = cSignal c + 1
+-- ONE CREATOR PER VALUE TYPE, deliberately: a class-polymorphic
+-- @signal@ cannot infer @signal "idle"@ under OverloadedStrings, so
+-- every guest paid an ascription or a 'T.pack' for it (docs/deferred.md,
+-- the Haskell text-surface entry). The phantom carries the type on from
+-- here, so 'writeSignal' and every @*Bound@ site infer their literals.
+newSignal :: KayaValue v => v -> Build (Signal v)
+newSignal initial = state $ \s ->
+  let c = s.bCounters
+      n = c.cSignal + 1
       s' = s {bCounters = c {cSignal = n}}
-   in (Signal n, s' {bRecords = bRecords s' <> pure (W.txCreateSignal n (toWire initial))})
+   in (Signal n, s' {bRecords = s'.bRecords <> (W.txCreateSignal n <$> toWireIO initial)})
 
-writeSignal :: KayaValue v => Signal -> v -> Build ()
-writeSignal (Signal n) v = emitB (W.txWriteSignal n (toWire v))
+-- | A text signal: a label's caption, a menu item's label, an a11y prop.
+signalText :: Text -> Build (Signal Text)
+signalText = newSignal
+
+-- | A boolean signal: a When's condition, an item's enablement or check.
+signalBool :: Bool -> Build (Signal Bool)
+signalBool = newSignal
+
+-- | A whole-number signal.
+signalInt :: Int64 -> Build (Signal Int64)
+signalInt = newSignal
+
+-- | A fractional signal: a slider's position, a progress fraction, a
+-- choice's 0-based index, a badge's count.
+signalDouble :: Double -> Build (Signal Double)
+signalDouble = newSignal
+
+-- | A civil-date signal, for a bound date picker (docs\/datetime-plan.md
+-- D2): the packing is the instance's.
+signalDate :: Day -> Build (Signal Day)
+signalDate = newSignal
+
+-- | A civil-time signal, for a bound time picker.
+signalTime :: TimeOfDay -> Build (Signal TimeOfDay)
+signalTime = newSignal
+
+-- | An image signal: the bytes register with the core at the
+-- transaction boundary, as a record's Blob field does.
+signalImage :: BS.ByteString -> Build (Signal BS.ByteString)
+signalImage = newSignal
+
+writeSignal :: KayaValue v => Signal v -> v -> Build ()
+writeSignal (Signal n) v = emitBIO (W.txWriteSignal n <$> toWireIO v)
+
+-- | @show@ into 'Text', which is what a Text-first program writes where
+-- a display string is assembled: @tshow n \<\> " items left"@.
+tshow :: Show a => a -> Text
+tshow = T.pack . show
 
 recomputeDerived :: Word64 -> [W.Value] -> BuildState -> BuildState
 recomputeDerived cid path s
   | not (null path) = s
   | otherwise =
-      let entries = lookupEntries cid [] (bModel s)
+      let entries = lookupEntries cid [] (s.bModel)
           writes =
             foldMap
               (\(sid, f) -> W.txWriteSignal sid (f entries))
-              (Map.findWithDefault [] cid (bDerived s))
-       in s {bRecords = bRecords s <> pure writes}
+              (Map.findWithDefault [] cid (s.bDerived))
+       in s {bRecords = s.bRecords <> pure writes}
 
 insertEntry :: Word64 -> [W.Value] -> W.Value -> [W.Value] -> IO Builder -> BuildState -> BuildState
 insertEntry n path key vals record s0 =
-  let s = s0 {bFresh = absorbKey n path key (bFresh s0)}
+  let s = s0 {bFresh = absorbKey n path key (s0.bFresh)}
    in recomputeDerived n path
-        s {bRecords = bRecords s <> record,
-           bModel = modelSet n path key 0 vals (bModel s)}
+        s {bRecords = s.bRecords <> record,
+           bModel = modelSet n path key 0 vals (s.bModel)}
 
-insert :: (KayaValue k, KayaValue v) => Collection -> k -> v -> Build ()
-insert (Collection n path) key value = Build $ \s ->
-  let key' = toWire key; value' = toWire value
+-- | THE VALUE SLOT IS 'Text' AND THE KEY SLOT IS NOT: a bare
+-- 'collection''s schema is one Str field, so a value literal infers,
+-- while a key is a Text the guest authored or an 'insertFresh' I64.
+insert :: Collection -> Key -> Text -> Build ()
+insert (Collection n path) key value = state $ \s ->
+  let key' = keyValue key; value' = toWire value
    in ((), insertEntry n path key' [value'] (pure (W.txCollectionInsert n path key' 0 [value'])) s)
 
-update :: (KayaValue k, KayaValue v) => Collection -> k -> v -> Build ()
-update (Collection n path) key value = Build $ \s ->
-  let key' = toWire key; value' = toWire value
+update :: Collection -> Key -> Text -> Build ()
+update (Collection n path) key value = state $ \s ->
+  let key' = keyValue key; value' = toWire value
    in ((), recomputeDerived n path
-    s {bRecords = bRecords s <> pure (W.txCollectionUpdate n path key' 0 [value']),
-       bModel = modelSet n path key' 0 [value'] (bModel s)})
+    s {bRecords = s.bRecords <> pure (W.txCollectionUpdate n path key' 0 [value']),
+       bModel = modelSet n path key' 0 [value'] (s.bModel)})
 
-remove :: KayaValue k => Collection -> k -> Build ()
-remove (Collection n path) key = Build $ \s ->
-  let key' = toWire key
+remove :: Collection -> Key -> Build ()
+remove (Collection n path) key = state $ \s ->
+  let key' = keyValue key
    in ((), recomputeDerived n path
-    s {bRecords = bRecords s <> pure (W.txCollectionRemove n path key'),
-       bModel = modelRemove (bChildren s) n path key' (bModel s)})
+    s {bRecords = s.bRecords <> pure (W.txCollectionRemove n path key'),
+       bModel = modelRemove (s.bChildren) n path key' (s.bModel)})
 
 -- | Reposition an entry before another's.
-moveBefore :: KayaValue k => Collection -> k -> k -> Build ()
-moveBefore c key anchor = moveEntry c (toWire key) [toWire anchor]
+moveBefore :: Collection -> Key -> Key -> Build ()
+moveBefore c key anchor = moveEntry c (keyValue key) [keyValue anchor]
 
 -- | Reposition an entry at the end of its collection.
-moveToEnd :: KayaValue k => Collection -> k -> Build ()
-moveToEnd c key = moveEntry c (toWire key) []
+moveToEnd :: Collection -> Key -> Build ()
+moveToEnd c key = moveEntry c (keyValue key) []
 
 -- | Reposition an entry at the front.
-moveToFront :: KayaValue k => Collection -> k -> Build ()
-moveToFront c@(Collection n path) key0 = Build $ \s ->
-  let key = toWire key0 in
-  case map fst (lookupEntries n path (bModel s)) of
+moveToFront :: Collection -> Key -> Build ()
+moveToFront c@(Collection n path) key0 = state $ \s ->
+  let key = keyValue key0 in
+  case map fst (lookupEntries n path (s.bModel)) of
     [] -> error ("kaya: move of missing key " ++ show key)
-    (first : _) -> unBuild (moveEntry c key [first]) s
+    (first : _) -> runState (moveEntry c key [first]).unBuild s
 
 -- | Reposition an entry directly after another's.
-moveAfter :: KayaValue k => Collection -> k -> k -> Build ()
-moveAfter c@(Collection n path) key0 anchor0 = Build $ \s ->
-  let key = toWire key0; anchor = toWire anchor0
-      keys = map fst (lookupEntries n path (bModel s))
+moveAfter :: Collection -> Key -> Key -> Build ()
+moveAfter c@(Collection n path) key0 anchor0 = state $ \s ->
+  let key = keyValue key0; anchor = keyValue anchor0
+      keys = map fst (lookupEntries n path (s.bModel))
    in if key `notElem` keys
         then error ("kaya: move of missing key " ++ show key)
         else case dropWhile (/= anchor) keys of
           [] -> error ("kaya: move after missing key " ++ show anchor)
           _ | key == anchor -> ((), s)
-          [_] -> unBuild (moveEntry c key []) s
+          [_] -> runState (moveEntry c key []).unBuild s
           (_ : succKey : _)
             | succKey == key -> ((), s) -- already directly after the anchor
-            | otherwise -> unBuild (moveEntry c key [succKey]) s
+            | otherwise -> runState (moveEntry c key [succKey]).unBuild s
 
 moveEntry :: Collection -> W.Value -> [W.Value] -> Build ()
-moveEntry (Collection n path) key before = Build $ \s ->
-  let keys = map fst (lookupEntries n path (bModel s))
+moveEntry (Collection n path) key before = state $ \s ->
+  let keys = map fst (lookupEntries n path (s.bModel))
    in if key `notElem` keys
         then error ("kaya: move of missing key " ++ show key)
         else case before of
@@ -760,14 +893,16 @@ moveEntry (Collection n path) key before = Build $ \s ->
             | anchor == key -> ((), s) -- moving before itself: no-op
           _ ->
             ((), recomputeDerived n path
-              s {bRecords = bRecords s <> pure (W.txCollectionMove n path key before),
-                 bModel = modelMove n path key before (bModel s)})
+              s {bRecords = s.bRecords <> pure (W.txCollectionMove n path key before),
+                 bModel = modelMove n path key before (s.bModel)})
 
 -- | The model: what this guest wrote, exactly — the fold of every
 -- patch so far (this transaction's included), in insertion order.
-items :: Collection -> Build [(W.Value, W.Value)]
-items (Collection n path) = Build $ \s ->
-  (map (\(k, (_, vs)) -> (k, scalarValue vs)) (lookupEntries n path (bModel s)), s)
+items :: Collection -> Build [(Key, Text)]
+items (Collection n path) =
+  gets (map (\(k, (_, vs)) -> (keyOfWire k, fromWire (scalarValue vs)))
+          . lookupEntries n path
+          . (.bModel))
   where
     -- A bare 'collection''s schema is the one-field '[[W.valueStr]]' newCollection
     -- always mints, so every entry's value list is a singleton by construction.
@@ -777,21 +912,39 @@ items (Collection n path) = Build $ \s ->
 count :: Collection -> Build Int
 count c = length <$> items c
 
--- | One attribute over one span; 'runValue' is @\"true\"@ for the flags,
--- a URL for @link@, a kind for @block@.
+-- | WHAT A MARK IS WORTH: the five flags are BOOLEANS, and link and block
+-- carry text. The wire spells a flag @\"true\"@ and spells OFF by leaving
+-- the run out, which is a thing no guest should have to know (the idiom
+-- review's X2).
+data MarkValue = Flag !Bool | Spelled !Text
+  deriving (Eq, Show)
+
+-- The wire's own spelling of a mark value, and its inverse.
+markSpelling :: MarkValue -> Text
+markSpelling (Flag on) = if on then "true" else "false"
+markSpelling (Spelled t) = t
+
+markValueOf :: Text -> MarkValue
+markValueOf "true" = Flag True
+markValueOf "false" = Flag False
+markValueOf t = Spelled t
+
+-- | One attribute over one RANGE of UTF-8 byte offsets, half-open — the
+-- same @(start, stop)@ pair the ranges sugar takes everywhere
+-- (docs\/ranges-units.md), so a second range type would be one spelling
+-- too many.
 data Run = Run
-  { runStart :: !Int,
-    runEnd :: !Int,
-    runName :: !Text,
-    runValue :: !Text
+  { range :: !(Int, Int),
+    name :: !Text,
+    value :: !MarkValue
   }
   deriving (Eq, Show)
 
 -- | A @rich@ textarea's text and runs, kept current by the binding from
 -- the edits it delivers.
 data Document = Document
-  { docText :: !Text,
-    docRuns :: ![Run]
+  { text :: !Text,
+    runs :: ![Run]
   }
   deriving (Eq, Show)
 
@@ -799,11 +952,10 @@ data Document = Document
 -- offsets RELATIVE to the inserted text. 'editSource' is what provoked an
 -- edit the widget delivered and 'Nothing' on one the app builds.
 data Edit = Edit
-  { editStart :: !Int,
-    editEnd :: !Int,
-    editInserted :: !Text,
-    editRuns :: ![Run],
-    editSource :: !(Maybe EditSource)
+  { range :: !(Int, Int),
+    inserted :: !Text,
+    runs :: ![Run],
+    source :: !(Maybe EditSource)
   }
   deriving (Eq, Show)
 
@@ -815,10 +967,9 @@ data EditSource = User | ImeCommit | Paste | NativeUndo | Drop
 -- | A toolbar act over a range; 'formatValue' 'Nothing' is the attribute
 -- taken off.
 data Format = Format
-  { formatStart :: !Int,
-    formatEnd :: !Int,
-    formatName :: !Text,
-    formatValue :: !(Maybe Text)
+  { range :: !(Int, Int),
+    name :: !Text,
+    value :: !(Maybe MarkValue)
   }
   deriving (Eq, Show)
 
@@ -828,16 +979,17 @@ runValues :: [Run] -> [W.Value]
 runValues =
   concatMap
     ( \r ->
-        [ W.VI64 (fromIntegral (runStart r)),
-          W.VI64 (fromIntegral (runEnd r)),
-          W.VStr (T.unpack (runName r)),
-          W.VStr (T.unpack (runValue r))
-        ]
+        let (from, to) = r.range
+         in [ W.VI64 (fromIntegral from),
+              W.VI64 (fromIntegral to),
+              W.VStr (T.unpack r.name),
+              W.VStr (T.unpack (markSpelling r.value))
+            ]
     )
 
 runsOfValues :: [W.Value] -> [Run]
-runsOfValues (W.VI64 start : W.VI64 stop : W.VStr name : W.VStr value : rest) =
-  Run (fromIntegral start) (fromIntegral stop) (T.pack name) (T.pack value)
+runsOfValues (W.VI64 from : W.VI64 to : W.VStr n : W.VStr v : rest) =
+  Run (fromIntegral from, fromIntegral to) (T.pack n) (markValueOf (T.pack v))
     : runsOfValues rest
 runsOfValues _ = []
 
@@ -850,7 +1002,7 @@ documentBlob :: Document -> BS.ByteString
 documentBlob doc =
   BL.toStrict
     ( toLazyByteString
-        (W.encodeValues (W.VStr (T.unpack (docText doc)) : runValues (docRuns doc)))
+        (W.encodeValues (W.VStr (T.unpack doc.text) : runValues doc.runs))
     )
 
 -- | @documentBlob@'s inverse, over the same 8-byte-aligned layout
@@ -906,7 +1058,7 @@ utf8Chars :: [Word8] -> Text
 utf8Chars = TE.decodeUtf8 . BS.pack
 
 pendB :: Pending -> Build ()
-pendB pending = Build $ \s -> ((), s {bPending = pending : bPending s})
+pendB pending = modify' $ \s -> s {bPending = pending : s.bPending}
 
 -- | A canvas's coordinate system AND its natural size in
 -- device-independent points (docs/canvas-plan.md §3.2). The op stream is
@@ -919,7 +1071,7 @@ data Viewbox = Viewbox Double Double
 newtype DrawOp = DrawOp [W.Value]
 
 pendT :: Pending -> Tpl ()
-pendT pending = Tpl $ \s -> ((), s {bPending = pending : bPending s})
+pendT pending = modify' $ \s -> s {bPending = pending : s.bPending}
 
 -- | A For as a child: forEach whose body keeps no handles — the common
 -- case once handlers co-locate at their constructors.
@@ -997,61 +1149,63 @@ newtype SumCollection a = SumCollection {sumHandle :: Collection}
 -- | A sum collection; the type is the variant vocabulary —
 -- @sumCollectionOf \@Feed@, matching 'collectionOf'\/'field'\'s spelling.
 sumCollectionOf :: forall a. KayaSum a => Build (SumCollection a)
-sumCollectionOf = Build $ \s ->
+sumCollectionOf = state $ \s ->
   let p = Proxy @a
-      c = bCounters s
-      n = cCollection c + 1
+      c = s.bCounters
+      n = c.cCollection + 1
       s' = registerCollection n s {bCounters = c {cCollection = n}}
    in ( SumCollection (Collection n []),
-        s' {bRecords = bRecords s' <> pure (W.txCreateCollection n (kayaVariantSchemas p))}
+        s' {bRecords = s'.bRecords <> pure (W.txCreateCollection n (kayaVariantSchemas p))}
       )
 
 -- | Insert witnesses the value's own constructor onto the wire.
-sumInsert :: forall a k. (KayaSum a, KayaValue k) => SumCollection a -> k -> a -> Build ()
-sumInsert (SumCollection (Collection n path)) key0 value = Build $ \s ->
-  let key = toWire key0
+sumInsert :: forall a. KayaSum a => SumCollection a -> Key -> a -> Build ()
+sumInsert (SumCollection (Collection n path)) key0 value = state $ \s ->
+  let key = keyValue key0
       variant = kayaSumVariant value
       vals = kayaSumToValues value
       tags = kayaVariantSchemas (Proxy :: Proxy a) !! fromIntegral variant
    in ((), recomputeDerived n path
-        s {bRecords = bRecords s <> (W.txCollectionInsert n path key variant <$> encodeFields tags vals),
-           bModel = modelSet n path key variant vals (bModel s)})
+        s {bRecords = s.bRecords <> (W.txCollectionInsert n path key variant <$> encodeFields tags vals),
+           bModel = modelSet n path key variant vals (s.bModel)})
 
 -- | Update replaces a record wholesale; a different constructor than
 -- the entry's current one restamps its copy in place.
-sumUpdate :: forall a k. (KayaSum a, KayaValue k) => SumCollection a -> k -> a -> Build ()
-sumUpdate (SumCollection (Collection n path)) key0 value = Build $ \s ->
-  let key = toWire key0
+sumUpdate :: forall a. KayaSum a => SumCollection a -> Key -> a -> Build ()
+sumUpdate (SumCollection (Collection n path)) key0 value = state $ \s ->
+  let key = keyValue key0
       variant = kayaSumVariant value
       vals = kayaSumToValues value
       tags = kayaVariantSchemas (Proxy :: Proxy a) !! fromIntegral variant
    in ((), recomputeDerived n path
-        s {bRecords = bRecords s <> (W.txCollectionUpdate n path key variant <$> encodeFields tags vals),
-           bModel = modelSet n path key variant vals (bModel s)})
+        s {bRecords = s.bRecords <> (W.txCollectionUpdate n path key variant <$> encodeFields tags vals),
+           bModel = modelSet n path key variant vals (s.bModel)})
 
 -- | The typed model, in insertion order; `case` eliminates the values.
-sumItems :: KayaSum a => SumCollection a -> Build [(W.Value, a)]
-sumItems (SumCollection (Collection n path)) = Build $ \s ->
-  (map (\(k, (v, vs)) -> (k, kayaSumFromParts v vs)) (lookupEntries n path (bModel s)), s)
+sumItems :: KayaSum a => SumCollection a -> Build [(Key, a)]
+sumItems (SumCollection (Collection n path)) =
+  gets (map (\(k, (v, vs)) -> (keyOfWire k, kayaSumFromParts v vs))
+          . lookupEntries n path
+          . (.bModel))
 
 -- | The entry's current value — the scrutinee for the match that
 -- precedes a patch.
-sumGet :: (KayaValue k, KayaSum a) => SumCollection a -> k -> Build (Maybe a)
-sumGet (SumCollection (Collection n path)) key0 = Build $ \s ->
-  let key = toWire key0 in
-  ( fmap (\(v, vs) -> kayaSumFromParts v vs)
-      (lookup key (lookupEntries n path (bModel s))),
-    s)
+sumGet :: KayaSum a => SumCollection a -> Key -> Build (Maybe a)
+sumGet (SumCollection (Collection n path)) key0 =
+  gets (fmap (\(v, vs) -> kayaSumFromParts v vs)
+          . lookup (keyValue key0)
+          . lookupEntries n path
+          . (.bModel))
 
 -- | The witnessed patch: the scrutinee the guest just matched is the
 -- witness — its constructor names the variant — and the model refuses
 -- a drifted entry, so the guard is checked, not trusted.
-sumPatch :: (KayaValue k, KayaSum a) => SumCollection a -> k -> a -> [FieldSet v] -> Build ()
-sumPatch c key0 witness = mapM_ (\(FieldSet i tag v) -> sumUpdateFieldWire c (toWire key0) (kayaSumVariant witness) i tag v)
+sumPatch :: KayaSum a => SumCollection a -> Key -> a -> [FieldSet v] -> Build ()
+sumPatch c key0 witness = mapM_ (\(FieldSet i tag v) -> sumUpdateFieldWire c (keyValue key0) (kayaSumVariant witness) i tag v)
 
 sumUpdateFieldWire :: SumCollection a -> W.Value -> Word32 -> Word32 -> Word32 -> W.Value -> Build ()
-sumUpdateFieldWire (SumCollection (Collection n path)) key variant i tag value = Build $ \s ->
-  let (stored, current) = case lookup key (lookupEntries n path (bModel s)) of
+sumUpdateFieldWire (SumCollection (Collection n path)) key variant i tag value = state $ \s ->
+  let (stored, current) = case lookup key (lookupEntries n path (s.bModel)) of
         Just (v, vs) -> (v, vs)
         Nothing -> error "kaya: update of missing key"
       updated = take (fromIntegral i) current ++ [value] ++ drop (fromIntegral i + 1) current
@@ -1059,22 +1213,22 @@ sumUpdateFieldWire (SumCollection (Collection n path)) key variant i tag value =
         then error "kaya: update_field witnessed a constructor the entry no longer holds"
         else
           ((), recomputeDerived n path
-            s {bRecords = bRecords s <> (W.txCollectionUpdateField n path key i variant <$> encodeFieldWire tag value),
-               bModel = modelSet n path key variant updated (bModel s)})
+            s {bRecords = s.bRecords <> (W.txCollectionUpdateField n path key i variant <$> encodeFieldWire tag value),
+               bModel = modelSet n path key variant updated (s.bModel)})
 
 -- | The collection-derived signal, over the sum's entries.
 sumDerive ::
   forall a v. (KayaSum a, KayaValue v) =>
-  SumCollection a -> ([(W.Value, a)] -> v) -> Build Signal
-sumDerive (SumCollection (Collection n _)) compute0 = Build $ \s ->
+  SumCollection a -> ([(Key, a)] -> v) -> Build (Signal v)
+sumDerive (SumCollection (Collection n _)) compute0 = state $ \s ->
   let compute = toWire . compute0
-      wireCompute entries = compute (map (\(k, (v, vs)) -> (k, kayaSumFromParts v vs :: a)) entries)
-      initial = wireCompute (lookupEntries n [] (bModel s))
-      c = bCounters s
-      sid = cSignal c + 1
+      wireCompute entries = compute (map (\(k, (v, vs)) -> (keyOfWire k, kayaSumFromParts v vs :: a)) entries)
+      initial = wireCompute (lookupEntries n [] (s.bModel))
+      c = s.bCounters
+      sid = c.cSignal + 1
       s' = s {bCounters = c {cSignal = sid},
-              bRecords = bRecords s <> pure (W.txCreateSignal sid initial),
-              bDerived = Map.insertWith (flip (++)) n [(sid, wireCompute)] (bDerived s)}
+              bRecords = s.bRecords <> pure (W.txCreateSignal sid initial),
+              bDerived = Map.insertWith (flip (++)) n [(sid, wireCompute)] (s.bDerived)}
    in (Signal sid, s')
 
 -- | One arm of the template eliminator: the prototype value names the
@@ -1087,7 +1241,7 @@ sumArm prototype = SumArm (kayaSumVariant prototype)
 -- | The template eliminator: a product of arms, one per constructor, handed
 -- over whole.
 eachSum :: forall a. KayaSum a => SumCollection a -> [SumArm] -> Build Widget
-eachSum (SumCollection coll) arms = Build $ \s ->
+eachSum (SumCollection coll) arms = state $ \s ->
   let count = length (kayaVariantSchemas (Proxy :: Proxy a))
       variants = map (\(SumArm v _) -> v) arms
       _checked
@@ -1096,12 +1250,13 @@ eachSum (SumCollection coll) arms = Build $ \s ->
         | length (List.nub variants) /= length variants =
             error "kaya: two arms for one constructor"
         | otherwise = ()
-      body = mapM_ (\(SumArm v (Tpl arm)) -> Tpl (\st ->
-        ((), snd (arm st {bRecords = bRecords st <> pure (W.txVariantCase v)})))) arms
+      -- Each arm opens with its own variant_case record.
+      body = mapM_ (\(SumArm v arm) -> modify' (caseOf v) >> arm) arms
+      caseOf v st = st {bRecords = st.bRecords <> pure (W.txVariantCase v)}
       ((self, _), s') =
         _checked `seq`
-        bracketTpl (unBuild allocW) (`W.txCreateFor` cid) (Just cid) body s
-      cid = assertRoot coll
+        bracketTpl (runState allocW.unBuild) (`W.txCreateFor` cid) (Just cid) body s
+      cid = forRoot "eachSum" coll
    in (Widget self, s')
 
 -- | A Haskell type that can be one record field.
@@ -1238,15 +1393,6 @@ timeOfDayOfPacked :: Int64 -> TimeOfDay
 timeOfDayOfPacked packed =
   let (h, m) = W.unpackTime packed in TimeOfDay h m 0
 
--- | A date as a signal's value — the packed Int64 'KayaValue' already
--- carries; @signal (dateValue d)@ needs no further wrapping.
-dateValue :: Day -> Int64
-dateValue = packDay
-
--- | A time as a signal's value, 'dateValue''s reason.
-timeValue :: TimeOfDay -> Int64
-timeValue = packTimeOfDay
-
 -- | A typed projection: one field of a record type, by wire position.
 newtype KField v = KField Word32
 
@@ -1277,9 +1423,9 @@ newtype RecordCollection a = RecordCollection Collection
 recordHandle :: RecordCollection a -> Collection
 recordHandle (RecordCollection c) = c
 
-insertRecord :: forall a k. (KayaRecord a, KayaValue k) => RecordCollection a -> k -> a -> Build ()
-insertRecord (RecordCollection (Collection n path)) key0 value = Build $ \s ->
-  let key = toWire key0
+insertRecord :: forall a. KayaRecord a => RecordCollection a -> Key -> a -> Build ()
+insertRecord (RecordCollection (Collection n path)) key0 value = state $ \s ->
+  let key = keyValue key0
       vals = toValues value
    in ( (),
         insertEntry n path key vals
@@ -1293,8 +1439,8 @@ insertRecord (RecordCollection (Collection n path)) key0 value = Build $ \s ->
 -- explicit numeric key at or above the counter carries it up — and NO
 -- DECREMENT IS EXPRESSIBLE, so a history walk never moves the minter.
 insertFresh :: forall a. KayaRecord a => RecordCollection a -> a -> Build Int64
-insertFresh (RecordCollection (Collection n path)) value = Build $ \s ->
-  let (mintedKey, fresh) = mintKey n path (bFresh s)
+insertFresh (RecordCollection (Collection n path)) value = state $ \s ->
+  let (mintedKey, fresh) = mintKey n path (s.bFresh)
       key = W.VI64 mintedKey
       vals = toValues value
       s' =
@@ -1303,31 +1449,31 @@ insertFresh (RecordCollection (Collection n path)) value = Build $ \s ->
           s {bFresh = fresh}
    in (mintedKey, s')
 
-updateRecord :: forall a k. (KayaRecord a, KayaValue k) => RecordCollection a -> k -> a -> Build ()
-updateRecord (RecordCollection (Collection n path)) key0 value = Build $ \s ->
-  let key = toWire key0
+updateRecord :: forall a. KayaRecord a => RecordCollection a -> Key -> a -> Build ()
+updateRecord (RecordCollection (Collection n path)) key0 value = state $ \s ->
+  let key = keyValue key0
       vals = toValues value
    in ((), recomputeDerived n path
-        s {bRecords = bRecords s <> (W.txCollectionUpdate n path key 0 <$> encodeFields (kayaSchema (Proxy :: Proxy a)) vals),
-           bModel = modelSet n path key 0 vals (bModel s)})
+        s {bRecords = s.bRecords <> (W.txCollectionUpdate n path key 0 <$> encodeFields (kayaSchema (Proxy :: Proxy a)) vals),
+           bModel = modelSet n path key 0 vals (s.bModel)})
 
 -- | One field's delta: the rest of the record never travels; the
 -- model's copy updates the same slot.
 updateField ::
-  forall v a k. (KayaFieldType v, KayaValue k) =>
-  RecordCollection a -> k -> KField v -> v -> Build ()
+  forall v a. KayaFieldType v =>
+  RecordCollection a -> Key -> KField v -> v -> Build ()
 updateField c key0 (KField i) value =
-  updateFieldWire c (toWire key0) i (fieldTag (Proxy :: Proxy v)) (toFieldValue value)
+  updateFieldWire c (keyValue key0) i (fieldTag (Proxy :: Proxy v)) (toFieldValue value)
 
 updateFieldWire :: RecordCollection a -> W.Value -> Word32 -> Word32 -> W.Value -> Build ()
-updateFieldWire (RecordCollection (Collection n path)) key i tag value = Build $ \s ->
-  let current = case lookup key (lookupEntries n path (bModel s)) of
+updateFieldWire (RecordCollection (Collection n path)) key i tag value = state $ \s ->
+  let current = case lookup key (lookupEntries n path (s.bModel)) of
         Just (_, vs) -> vs
         Nothing -> error "kaya: update of missing key"
       updated = take (fromIntegral i) current ++ [value] ++ drop (fromIntegral i + 1) current
    in ((), recomputeDerived n path
-        s {bRecords = bRecords s <> (W.txCollectionUpdateField n path key i 0 <$> encodeFieldWire tag value),
-           bModel = modelSet n path key 0 updated (bModel s)})
+        s {bRecords = s.bRecords <> (W.txCollectionUpdateField n path key i 0 <$> encodeFieldWire tag value),
+           bModel = modelSet n path key 0 updated (s.bModel)})
 
 -- | One recorded field write of an a-record: the triple travels as
 -- (index, schema tag, model value) — the tag tells the boundary whether
@@ -1339,36 +1485,41 @@ set (KField i) v = FieldSet i (fieldTag (Proxy :: Proxy v)) (toFieldValue v)
 
 -- | Typed field writes with the key spelled once: @patch todos key [set
 -- (field \@"done" \@Todo) True]@.
-patch :: KayaValue k => RecordCollection a -> k -> [FieldSet a] -> Build ()
-patch c key0 = mapM_ (\(FieldSet i tag v) -> updateFieldWire c (toWire key0) i tag v)
+patch :: RecordCollection a -> Key -> [FieldSet a] -> Build ()
+patch c key0 = mapM_ (\(FieldSet i tag v) -> updateFieldWire c (keyValue key0) i tag v)
 
 -- | The typed model: what this guest wrote, in insertion order.
-recordItems :: KayaRecord a => RecordCollection a -> Build [(W.Value, a)]
-recordItems (RecordCollection (Collection n path)) = Build $ \s ->
-  (map (\(k, (_, vs)) -> (k, fromValues vs)) (lookupEntries n path (bModel s)), s)
+recordItems :: KayaRecord a => RecordCollection a -> Build [(Key, a)]
+recordItems (RecordCollection (Collection n path)) =
+  gets (map (\(k, (_, vs)) -> (keyOfWire k, fromValues vs))
+          . lookupEntries n path
+          . (.bModel))
 
 -- | A keyed read of one row, 'Nothing' if the key holds no entry — the
 -- single-row twin of 'recordItems' (docs/deferred.md, the idiom pass's
 -- keyed-read entry).
-getRecord :: (KayaRecord a, KayaValue k) => RecordCollection a -> k -> Build (Maybe a)
-getRecord (RecordCollection (Collection n path)) key0 = Build $ \s ->
-  (fmap (\(_, vs) -> fromValues vs) (lookup (toWire key0) (lookupEntries n path (bModel s))), s)
+getRecord :: KayaRecord a => RecordCollection a -> Key -> Build (Maybe a)
+getRecord (RecordCollection (Collection n path)) key0 =
+  gets (fmap (\(_, vs) -> fromValues vs)
+          . lookup (keyValue key0)
+          . lookupEntries n path
+          . (.bModel))
 
 -- | A signal the binding recomputes from this collection's entries after
 -- every mutation, written into the same transaction — the items-left label
 -- with no handler remembering to update it.
 derive ::
   forall a v. (KayaRecord a, KayaValue v) =>
-  RecordCollection a -> ([(W.Value, a)] -> v) -> Build Signal
-derive (RecordCollection (Collection n _)) compute0 = Build $ \s ->
+  RecordCollection a -> ([(Key, a)] -> v) -> Build (Signal v)
+derive (RecordCollection (Collection n _)) compute0 = state $ \s ->
   let compute = toWire . compute0
-      wireCompute entries = compute (map (\(k, (_, vs)) -> (k, fromValues vs :: a)) entries)
-      initial = wireCompute (lookupEntries n [] (bModel s))
-      c = bCounters s
-      sid = cSignal c + 1
+      wireCompute entries = compute (map (\(k, (_, vs)) -> (keyOfWire k, fromValues vs :: a)) entries)
+      initial = wireCompute (lookupEntries n [] (s.bModel))
+      c = s.bCounters
+      sid = c.cSignal + 1
       s' = s {bCounters = c {cSignal = sid},
-              bRecords = bRecords s <> pure (W.txCreateSignal sid initial),
-              bDerived = Map.insertWith (flip (++)) n [(sid, wireCompute)] (bDerived s)}
+              bRecords = s.bRecords <> pure (W.txCreateSignal sid initial),
+              bDerived = Map.insertWith (flip (++)) n [(sid, wireCompute)] (s.bDerived)}
    in (Signal sid, s')
 
 data App = App
@@ -1386,10 +1537,10 @@ data App = App
     appSortHandlers :: IORef (Map.Map Word64 (Int -> IO ())),
     -- The node twin: a NESTED table's sort request names the template
     -- node and the copy's key path, so each stamped table sorts alone.
-    appNodeSorts :: IORef (Map.Map Word64 ([W.Value] -> Int -> IO ())),
-    appNodeHandlers :: IORef (Map.Map Word64 ([W.Value] -> IO ())),
+    appNodeSorts :: IORef (Map.Map Word64 ([Key] -> Int -> IO ())),
+    appNodeHandlers :: IORef (Map.Map Word64 ([Key] -> IO ())),
     appWidgetChanges :: IORef (Map.Map Word64 (Text -> IO ())),
-    appNodeChanges :: IORef (Map.Map Word64 ([W.Value] -> Text -> IO ())),
+    appNodeChanges :: IORef (Map.Map Word64 ([Key] -> Text -> IO ())),
     -- The rich mirror, one Document per @rich@ textarea
     -- (docs/rich-text-plan.md R1): folded from the two occurrences here
     -- and from the app's own setDocument/applyEdit as they are SENT.
@@ -1398,24 +1549,24 @@ data App = App
     -- textarea bound to a document, so a copy's act folds into its ROW
     -- (docs/rich-text-plan.md §19).
     appDocumentBinds :: IORef (Map.Map Word64 (Word64, Word32, Word32)),
-    appNodeEdits :: IORef (Map.Map Word64 ([W.Value] -> Edit -> IO ())),
-    appNodeFormats :: IORef (Map.Map Word64 ([W.Value] -> Format -> IO ())),
+    appNodeEdits :: IORef (Map.Map Word64 ([Key] -> Edit -> IO ())),
+    appNodeFormats :: IORef (Map.Map Word64 ([Key] -> Format -> IO ())),
     appWidgetEdits :: IORef (Map.Map Word64 (Edit -> IO ())),
     appWidgetFormats :: IORef (Map.Map Word64 (Format -> IO ())),
     appWidgetToggles :: IORef (Map.Map Word64 (Bool -> IO ())),
-    appNodeToggles :: IORef (Map.Map Word64 ([W.Value] -> Bool -> IO ())),
+    appNodeToggles :: IORef (Map.Map Word64 ([Key] -> Bool -> IO ())),
     appWidgetValues :: IORef (Map.Map Word64 (Double -> IO ())),
     -- The node twin of the line above: without it a stamped control's
     -- Occurrence::InstanceValueChanged matches nothing and is dropped
     -- with no error anywhere.
-    appNodeValues :: IORef (Map.Map Word64 ([W.Value] -> Double -> IO ())),
+    appNodeValues :: IORef (Map.Map Word64 ([Key] -> Double -> IO ())),
     appWidgetCommits :: IORef (Map.Map Word64 (Double -> IO ())),
-    appNodeCommits :: IORef (Map.Map Word64 ([W.Value] -> Double -> IO ())),
+    appNodeCommits :: IORef (Map.Map Word64 ([Key] -> Double -> IO ())),
     -- The pickers' committed values (docs/datetime-plan.md D7).
     appWidgetDates :: IORef (Map.Map Word64 (Day -> IO ())),
-    appNodeDates :: IORef (Map.Map Word64 ([W.Value] -> Day -> IO ())),
+    appNodeDates :: IORef (Map.Map Word64 ([Key] -> Day -> IO ())),
     appWidgetTimes :: IORef (Map.Map Word64 (TimeOfDay -> IO ())),
-    appNodeTimes :: IORef (Map.Map Word64 ([W.Value] -> TimeOfDay -> IO ())),
+    appNodeTimes :: IORef (Map.Map Word64 ([Key] -> TimeOfDay -> IO ())),
     -- Per-window lifecycle handlers, keyed by window id — handlers
     -- scope to the thing that creates them.
     appCloseRequested :: IORef (Map.Map Word64 (IO ())),
@@ -1425,19 +1576,19 @@ data App = App
     appEntryPopped :: IORef (Map.Map Word64 (IO ())),
     appSectionSelected :: IORef (Map.Map Word64 (IO ())),
     appBackRequested :: IORef (Map.Map Word64 (IO ())),
-    appAlertHandlers :: IORef (Map.Map Word64 (Word32 -> IO ())),
+    appAlertHandlers :: IORef (Map.Map Word64 (AlertChoice -> IO ())),
     -- One-shot, keyed by the GUEST's notification id (the alert's
     -- request/result grammar; many may be live at once).
-    appNotificationHandlers :: IORef (Map.Map Word64 (Word32 -> IO ())),
+    appNotificationHandlers :: IORef (Map.Map Word64 (NotificationOutcome -> IO ())),
     -- NOT one-shot, and not keyed at all: the process-level handler for
     -- a result whose id has none above (docs/tasks-s9-plan.md R1). A
     -- relaunched process never called showNotification.
-    appNotificationActivation :: IORef (Maybe (Word64 -> Word32 -> IO ())),
+    appNotificationActivation :: IORef (Maybe (Word64 -> NotificationOutcome -> IO ())),
     -- NOT one-shot either: a route declared by 'linkRoute' answers every
     -- URL that matches it, for the life of the process
     -- (docs/app-links-plan.md §4), and the core owns the pattern table —
     -- nothing is kept here but the handler.
-    appLinkHandlers :: IORef (Map.Map Word64 (Map.Map String String -> IO ())),
+    appLinkHandlers :: IORef (Map.Map Word64 (Map.Map Text Text -> IO ())),
     appNextLinkRoute :: IORef Word64,
     -- 'linkRoute' may be called before the first transaction, so its record
     -- waits here for one ('buildTx' drains it head-first).
@@ -1451,20 +1602,20 @@ data App = App
     -- its table shape: one-shot, keyed by request id.
     appClipboardReads :: IORef (Map.Map Word64 (Maybe Representation -> IO ())),
     appWidgetPastes :: IORef (Map.Map Word64 (Representation -> IO ())),
-    appNodePastes :: IORef (Map.Map Word64 ([W.Value] -> Representation -> IO ())),
+    appNodePastes :: IORef (Map.Map Word64 ([Key] -> Representation -> IO ())),
     appWidgetDrops :: IORef (Map.Map Word64 (Dropped -> IO ())),
-    appNodeDrops :: IORef (Map.Map Word64 ([W.Value] -> Dropped -> IO ())),
+    appNodeDrops :: IORef (Map.Map Word64 ([Key] -> Dropped -> IO ())),
     appDragEnded :: IORef (Map.Map Word64 (Maybe Op -> IO ())),
-    appNodeDragEnded :: IORef (Map.Map Word64 ([W.Value] -> Maybe Op -> IO ())),
+    appNodeDragEnded :: IORef (Map.Map Word64 ([Key] -> Maybe Op -> IO ())),
     -- Menu dispatch tables, keyed by MENU ITEM id — their own id space,
     -- separate from every widget/node table. The node flavors receive
     -- the stamped copy's key path.
     appMenuActivated :: IORef (Map.Map Word64 (IO ())),
-    appMenuActivatedNode :: IORef (Map.Map Word64 ([W.Value] -> IO ())),
+    appMenuActivatedNode :: IORef (Map.Map Word64 ([Key] -> IO ())),
     appMenuToggled :: IORef (Map.Map Word64 (Bool -> IO ())),
-    appMenuToggledNode :: IORef (Map.Map Word64 ([W.Value] -> Bool -> IO ())),
+    appMenuToggledNode :: IORef (Map.Map Word64 ([Key] -> Bool -> IO ())),
     appMenuSelected :: IORef (Map.Map Word64 (Int -> IO ())),
-    appMenuSelectedNode :: IORef (Map.Map Word64 ([W.Value] -> Int -> IO ())),
+    appMenuSelectedNode :: IORef (Map.Map Word64 ([Key] -> Int -> IO ())),
     -- The canvas's drawing-as-a-function-of-size (docs/canvas-plan.md
     -- §3.2.1), keyed by the canvas's widget id. 'dispatchLoop' answers
     -- the ask itself and the guest never sees it. ONE STORED SHAPE for

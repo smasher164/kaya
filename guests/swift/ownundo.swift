@@ -26,14 +26,14 @@ app.build { tx in
     let edit = tx.menu(
         "Edit",
         items: [
-            tx.item("Undo", role: KayaAppTx.roleUndo) { t in
+            tx.item("Undo", role: .undo) { t in
                 guard let before = undoStack.popLast() else { return }
                 redoStack.append(current)
                 current = before
                 t.setDocument(owned, before)
                 publish(t)
             },
-            tx.item("Redo", role: KayaAppTx.roleRedo) { t in
+            tx.item("Redo", role: .redo) { t in
                 guard let after = redoStack.popLast() else { return }
                 undoStack.append(current)
                 current = after

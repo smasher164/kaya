@@ -4,9 +4,10 @@ import dev.kaya.KayaApp;
 import dev.kaya.KayaRecords;
 
 /**
- * KayaRecords.Collection.get answers the entry a key names, or null for
- * one it does not — and updateField's missing-key refusal, which reads
- * through the same lookup, still names the key. NO NATIVES: every check
+ * KayaRecords.Collection.find answers the entry a key names, or EMPTY
+ * for one it does not, and get() throws naming the key it did not find
+ * — and updateField's missing-key refusal, which reads through the same
+ * lookup, still names the key. NO NATIVES: every check
  * runs inside one app.build and the build throws its own sentinel before
  * returning, so the transaction rolls back instead of reaching
  * KayaRing.submit (which this exerciser never attaches). Compiled and
@@ -34,9 +35,22 @@ public final class KeyedGetCheck {
                 Todos.Todo present = todos.get(tx, 1L);
                 check(present != null && present.title().equals("first"),
                         "get(1) did not answer the inserted record: " + present);
+                check(todos.find(tx, 1L).isPresent(),
+                        "find(1) did not answer the inserted record");
 
-                check(todos.get(tx, 9L) == null,
-                        "get of a missing key did not answer null");
+                check(todos.find(tx, 9L).isEmpty(),
+                        "find of a missing key did not answer empty");
+
+                boolean threw = false;
+                String missing = "";
+                try {
+                    todos.get(tx, 9L);
+                } catch (IllegalStateException e) {
+                    threw = true;
+                    missing = e.getMessage();
+                }
+                check(threw && missing.contains("9"),
+                        "get of a missing key did not throw naming the key: " + missing);
 
                 boolean refused = false;
                 String refusalMessage = "";
@@ -56,10 +70,10 @@ public final class KeyedGetCheck {
             // Expected: stops the build before it reaches submitIfAny.
         }
 
-        System.out.println("keyed-get: OK — Collection.get answers the inserted "
-                + "record for its key and null for a missing one, and updateField's "
-                + "missing-key refusal, reading through the same lookup, still names "
-                + "the key");
+        System.out.println("keyed-get: OK — Collection.find answers the inserted "
+                + "record for its key and empty for a missing one, get() throws "
+                + "naming a key it did not find, and updateField's missing-key "
+                + "refusal, reading through the same lookup, still names the key");
     }
 
     private KeyedGetCheck() {}

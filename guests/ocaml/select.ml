@@ -10,7 +10,7 @@ let () =
 
   build app (fun () ->
      window ~title:"select" ();
-     let picked = signal_str ("picked: Red") in
+     let picked = signal Scalar.Str ("picked: Red") in
 
      let on_pick index =
        write picked (("picked: " ^ List.nth options index))

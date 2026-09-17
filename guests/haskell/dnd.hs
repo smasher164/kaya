@@ -4,18 +4,12 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE DeriveAnyClass #-}
-{-# OPTIONS_GHC -Wno-missing-signatures #-}
--- A key path's wire tag (KayaWire.Value) has no spelling a guest may
--- write (tools/check-sugar-surface.py's wire-tag clause) — the
--- fromWire-decoding helper below is left unsigned so its argument
--- type is inferred, never named.
 
 -- The drag-and-drop scene, Haskell port — guests/rust/dnd.rs,
 -- tools/scenes/dnd.steps. THE ROOT IS A ROW so column#0 is the
 -- reorderable For's container.
 
 import qualified Data.ByteString.Char8 as BS
-import Data.List (intercalate)
 import GHC.Generics (Generic)
 import Control.Exception (SomeException, try)
 import System.Directory (createDirectoryIfMissing, getTemporaryDirectory)
@@ -32,18 +26,16 @@ data Item = Item {title :: Text}
   deriving anyclass (KayaRecord)
 
 
-noteFormat :: String
+noteFormat :: Text
 noteFormat = "dev.kaya/note"
 
-word :: Maybe Op -> String
+word :: Maybe Op -> Text
 word (Just OpCopy) = "copy"
 word (Just OpMove) = "move"
 word Nothing = "none"
 
--- The key path's own wire tag decoded through 'fromWire', never named:
--- the argument's type (the wire's Value) has no spelling a guest may
--- write (tools/check-sugar-surface.py's wire-tag clause).
-keyWord (k : _) = fromWire k :: Text
+keyWord :: [Key] -> Text
+keyWord (k : _) = keyText k
 keyWord [] = ""
 
 -- The file the scene drops as a FOREIGN source (D6), written by the guest
@@ -57,15 +49,15 @@ writeDroppedFile = do
   createDirectoryIfMissing True dir
   writeFile (dir </> "dropped.txt") "dropped bytes"
 
-readBack :: PickedFile -> IO String
+readBack :: PickedFile -> IO Text
 readBack f = do
   r <- try (openPicked f FileModeRead)
   case r of
-    Left e -> return ("open failed: " ++ show (e :: SomeException))
+    Left e -> return ("open failed: " <> tshow (e :: SomeException))
     Right (h, _seekable) -> do
       body <- hGetContents' h
       hClose h
-      return body
+      return (T.pack body)
 
 main :: IO ()
 main = kayaMain $ \app -> do
@@ -75,16 +67,16 @@ main = kayaMain $ \app -> do
       window primary [WTitle "dnd"]
       items <- collectionOf @Item
       items2 <- collectionOf @Item
-      dropStatus <- signal (T.pack "no drop yet")
-      dragStatus <- signal (T.pack "no drag yet")
-      sourceText <- signal (T.pack "hello")
-      textTarget <- signal (T.pack "text target")
-      noteTarget <- signal (T.pack "note target")
-      filesTarget <- signal (T.pack "files target")
+      dropStatus <- signalText "no drop yet"
+      dragStatus <- signalText "no drag yet"
+      sourceText <- signalText "hello"
+      textTarget <- signalText "text target"
+      noteTarget <- signalText "note target"
+      filesTarget <- signalText "files target"
 
       (list, rowNode) <-
         forEach (recordHandle items) $
-          withTplAttrs [TplA11yId ("row" :: Text)] (label (field @"title" @Item))
+          withTplAttrs [TplA11yId "row"] (label (field @"title" @Item))
       setA11yId list "rows"
       source <- labelBound sourceText []
       textWidget <-
@@ -101,18 +93,18 @@ main = kayaMain $ \app -> do
       (itemList, itemNode) <-
         forEach (recordHandle items2) $
           withTplAttrs
-            [ TplA11yId ("item" :: Text),
+            [ TplA11yId "item",
               TplAccepts [acceptText],
               TplDropTarget [OpCopy],
               TplDraggable
-                emptyTplClip {tplClipText = Just (TplField (field @"title" @Item))}
+                emptyTplClip {tplText = Just (TplField (field @"title" @Item))}
                 [OpCopy]
             ]
             (label (field @"title" @Item))
       setA11yId itemList "items"
       -- The bound payload follows the row's record (§4).
       renameButton <-
-        buttonOn "rename y" (submitTx app (updateRecord items2 ("y" :: Text) (Item "yy")))
+        buttonOn "rename y" (submitTx app (updateRecord items2 "y" (Item "yy")))
       root <-
         row
           [ pure list,
@@ -132,13 +124,13 @@ main = kayaMain $ \app -> do
       setDragSource
         source
         emptyClip
-          { clipText = Just "hello",
-            clipCustom = [(noteFormat, BS.pack "note!")]
+          { text = Just "hello",
+            custom = [(noteFormat, BS.pack "note!")]
           }
         [OpCopy, OpMove]
       setReorderable list True
-      mapM_ (\k -> insertRecord items k (Item k)) ["a", "b", "c"]
-      mapM_ (\k -> insertRecord items2 k (Item k)) ["x", "y"]
+      mapM_ (\k -> insertRecord items (textKey k) (Item k)) ["a", "b", "c"]
+      mapM_ (\k -> insertRecord items2 (textKey k) (Item k)) ["x", "y"]
       return
         ( items,
           items2,
@@ -154,74 +146,74 @@ main = kayaMain $ \app -> do
           sourceText
         )
   let dropped name target d = do
-        let op = word (droppedOperation d)
-        said <- case droppedClip d of
+        let op = word d.operation
+        said <- case d.clip of
           Just (RFiles files) -> do
             -- A dropped file IS a picked file (D6): read it back through
             -- the same table the picker fills.
             parts <- mapM (\f -> do
                              body <- readBack f
-                             return (pickedName f ++ " " ++ body)) files
-            return (Just (name <> " got " <> T.pack (intercalate ", " parts) <> " (" <> T.pack op <> ")"))
+                             return (f.name <> " " <> body)) files
+            return (Just (name <> " got " <> T.intercalate ", " parts <> " (" <> op <> ")"))
           _ -> return Nothing
         buildTx app $ do
-          case (droppedClip d, said) of
+          case (d.clip, said) of
             (_, Just line) -> writeSignal dropStatus line
             (Just (RText text), _) -> do
               writeSignal
                 dropStatus
-                (name <> " got text " <> text <> " (" <> T.pack op <> ")")
+                (name <> " got text " <> text <> " (" <> op <> ")")
               writeSignal target text
             (Just (RCustom cid body), _) ->
               writeSignal
                 dropStatus
                 ( name
                     <> " got "
-                    <> T.pack cid
+                    <> cid
                     <> " "
-                    <> T.pack (show (BS.length body))
+                    <> tshow (BS.length body)
                     <> " bytes ("
-                    <> T.pack op
+                    <> op
                     <> ")"
                 )
-            _ -> writeSignal dropStatus (name <> " got other (" <> T.pack op <> ")")
+            _ -> writeSignal dropStatus (name <> " got other (" <> op <> ")")
           -- A same-app MOVE removes its original in the same batch (D2).
-          if droppedOperation d == Just OpMove
+          if d.operation == Just OpMove
             then do
-              writeSignal sourceText ("moved out" :: Text)
+              writeSignal sourceText "moved out"
               setDragSource source emptyClip []
             else return ()
 
-  onDrop app (fst textPair) (dropped ("text target" :: Text) (snd textPair))
+  onDrop app (fst textPair) (dropped "text target" (snd textPair))
   onDrop app (fst notePair) (dropped "note target" (snd notePair))
   onDrop app (fst filesPair) (dropped "files target" (snd filesPair))
   onDragEnded app source $ \op ->
-    buildTx app (writeSignal dragStatus (T.pack ("drag ended " ++ word op)))
+    buildTx app (writeSignal dragStatus ("drag ended " <> word op))
   onDrop app itemNode $ \keys d -> buildTx app $ do
-    let op = word (droppedOperation d)
-    case droppedClip d of
+    let op = word d.operation
+    case d.clip of
       Just (RText text) ->
         writeSignal
           dropStatus
-          ("item " <> keyWord keys <> " got text " <> text <> " (" <> T.pack op <> ")")
+          ("item " <> keyWord keys <> " got text " <> text <> " (" <> op <> ")")
       _ ->
         writeSignal
           dropStatus
-          ("item " <> keyWord keys <> " got other (" <> T.pack op <> ")")
+          ("item " <> keyWord keys <> " got other (" <> op <> ")")
   let nodeEnded what keys op =
         buildTx app $
           writeSignal
             dragStatus
-            (T.pack what <> " " <> keyWord keys <> " drag ended " <> T.pack (word op))
+            (what <> " " <> keyWord keys <> " drag ended " <> word op)
   onDragEnded app itemNode (nodeEnded "item")
   onDragEnded app rowNode (nodeEnded "row")
   -- The moved row's key rides as the kaya-private custom representation;
   -- the anchor is the row it landed on (D8).
-  onDrop app list $ \d -> case (droppedClip d, droppedAnchor d) of
-    (Just (RCustom _ key), anchorKey : _) ->
-      let anchor = fromWire anchorKey :: Text
-       in buildTx app $
-            if droppedBefore d
-              then moveBefore (recordHandle items) (T.pack (BS.unpack key)) anchor
-              else moveAfter (recordHandle items) (T.pack (BS.unpack key)) anchor
+  onDrop app list $ \d -> case (d.clip, d.anchor) of
+    (Just (RCustom _ key), anchor : _) ->
+      buildTx app $
+        let moved = textKey (T.pack (BS.unpack key))
+         in if d.before
+              then moveBefore (recordHandle items) moved anchor
+              else moveAfter (recordHandle items) moved anchor
     _ -> return ()

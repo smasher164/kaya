@@ -13,7 +13,7 @@ let () =
   build app (fun () ->
      let todos = collection_of todo_record in
      let items_left =
-       derive signal_str todos (fun entries ->
+       derive Scalar.Str todos (fun entries ->
            let n = List.length (List.filter (fun (_, t) -> not t.done_) entries) in
            if n = 1 then "1 item left" else Printf.sprintf "%d items left" n)
      in

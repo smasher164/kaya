@@ -10,7 +10,7 @@ let () =
 
   build app (fun () ->
      window ~title:"radio" ();
-     let size = signal_str ("size: Small") in
+     let size = signal Scalar.Str ("size: Small") in
 
      let on_pick index =
        write size (("size: " ^ List.nth options index))

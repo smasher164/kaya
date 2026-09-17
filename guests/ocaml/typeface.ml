@@ -16,8 +16,8 @@ let () =
      asset_close font;
      window ~title:"typeface" ~width:480.0 ~height:360.0 ();
 
-     let heading = signal_str ("typeface") in
-     let status = signal_str ("ready") in
+     let heading = signal Scalar.Str ("typeface") in
+     let status = signal Scalar.Str ("ready") in
 
      let root =
        column

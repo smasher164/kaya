@@ -32,7 +32,7 @@ pixelPng =
     ]
 
 -- Reverse-DNS and space-free: reaches every registry VERBATIM.
-noteId :: String
+noteId :: Text
 noteId = "dev.kaya/note"
 
 -- NO QUOTES: the step grammar escapes \n, \r and \\ only.
@@ -63,13 +63,13 @@ main = kayaMain $ \app -> do
               ]
           ]
       ]
-    status <- signal (T.pack "ready")
-    rowStatus <- signal (T.pack "")
+    status <- signalText "ready"
+    rowStatus <- signalText ""
 
     -- Built before the focus buttons that close over them: Build is a PURE
     -- state monad, so nothing can reach back for them later.
-    rich <- entryOn (const (return ())) [A11yId ("rich" :: Text), Accepts [acceptText]]
-    plain <- entryOn (const (return ())) [A11yId ("plain" :: Text)]
+    rich <- entryOn (const (return ())) [A11yId "rich", Accepts [acceptText]]
+    plain <- entryOn (const (return ())) [A11yId "plain"]
 
     -- The accept list is declared on the TEMPLATE, which turns the node hook
     -- on (docs/tpl-props-plan.md §1); 'forEach' hands the node back.
@@ -83,18 +83,18 @@ main = kayaMain $ \app -> do
     root <-
       column
         []
-        [ labelBound status [A11yId ("status" :: Text)], -- label#0
+        [ labelBound status [A11yId "status"], -- label#0
           buttonOn
             "copy"
             ( buildTx app $ do
                 copy
                   emptyClip
-                    { clipText = Just "kaya clip",
-                      clipHtml = Just "<b>kaya</b> clip",
-                      clipImage = Just pixelPng,
-                      clipCustom = [(noteId, noteBytes)]
+                    { text = Just "kaya clip",
+                      html = Just "<b>kaya</b> clip",
+                      image = Just pixelPng,
+                      custom = [(noteId, noteBytes)]
                     }
-                writeSignal status (T.pack "copied")
+                writeSignal status "copied"
             )
             [], -- button#0
           buttonOn "read custom" (readWith [noteId]) [], -- button#1
@@ -105,21 +105,21 @@ main = kayaMain $ \app -> do
           buttonOn "focus plain" (buildTx app (focusWidget plain)) [], -- button#6
           pure rich, -- entry#0
           pure plain, -- entry#1
-          labelBound rowStatus [A11yId ("row-status" :: Text)], -- label#1
+          labelBound rowStatus [A11yId "row-status"], -- label#1
           pure noteList
         ]
     mount root
-    insert notes (T.pack "r1") (T.pack "")
+    insert notes "r1" ""
     return (status, rich, rowStatus, note)
 
   onPaste app rich $ \clip -> case clip of
     RText text -> buildTx app (writeSignal status ("pasted " <> text))
-    _ -> buildTx app (writeSignal status (T.pack "pasted other"))
+    _ -> buildTx app (writeSignal status "pasted other")
 
   -- The copy's own key arrives with the payload.
   onPaste app note $ \keys clip ->
     let key = case keys of
-          (k : _) -> fromWire k :: Text
+          (k : _) -> keyText k
           [] -> "?"
      in case clip of
           RText text ->
@@ -127,31 +127,31 @@ main = kayaMain $ \app -> do
           _ -> buildTx app (writeSignal rowStatus ("row " <> key <> " pasted other"))
 
 -- A pasted FILE is read OFF THE APP THREAD, because openPicked blocks.
-reader :: App -> Signal -> Maybe Representation -> IO ()
+reader :: App -> Signal Text -> Maybe Representation -> IO ()
 reader app status clip = case clip of
   Just (RFiles (first : _)) -> do
     _ <- forkIO $ do
       text <- do
         r <- try (openPicked first FileModeRead)
         case r of
-          Left e -> return ("open failed: " ++ show (e :: SomeException))
+          Left e -> return ("open failed: " <> tshow (e :: SomeException))
           Right (h, _seekable) -> do
             body <- hGetContents' h
             hClose h
-            return body
+            return (T.pack body)
       post app $
         buildTx
           app
-          (writeSignal status (T.pack ("files " ++ pickedName first ++ " " ++ text)))
-    buildTx app (writeSignal status (T.pack "reading"))
-  Just (RFiles []) -> buildTx app (writeSignal status (T.pack "files none"))
-  Nothing -> buildTx app (writeSignal status (T.pack "empty"))
+          (writeSignal status ("files " <> first.name <> " " <> text))
+    buildTx app (writeSignal status "reading")
+  Just (RFiles []) -> buildTx app (writeSignal status "files none")
+  Nothing -> buildTx app (writeSignal status "empty")
   Just (RText text) -> buildTx app (writeSignal status ("text " <> text))
   Just (RHtml html) -> buildTx app (writeSignal status ("html " <> html))
   Just (RCustom i body) ->
-    buildTx app (writeSignal status (T.pack ("custom " ++ i ++ " " ++ BC.unpack body)))
+    buildTx app (writeSignal status ("custom " <> i <> " " <> T.pack (BC.unpack body)))
   Just (RImage bytes) ->
     -- Straight back out: the image is asserted as a foreign decoder's SIZE.
     buildTx app $ do
-      copy emptyClip {clipImage = Just bytes}
-      writeSignal status (T.pack "image")
+      copy emptyClip {image = Just bytes}
+      writeSignal status "image"

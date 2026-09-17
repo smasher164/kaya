@@ -362,7 +362,7 @@ func App() *kaya.App {
 				Message("the document has unsaved changes").
 				Action("Discard").
 				Cancel("Keep Editing").
-				OnResult(func(tx *kaya.Tx, choice uint32) {
+				OnResult(func(tx *kaya.Tx, choice kaya.AlertChoice) {
 					if choice == kaya.AlertChoiceCancel {
 						return
 					}
@@ -493,7 +493,7 @@ func App() *kaya.App {
 	// block off. The widget answers through OnFormat.
 	for _, name := range []string{"bold", "italic", "underline", "strike", "code"} {
 		name := name
-		app.OnClickNode(acts[name], func(tx *kaya.Tx, _ []any) { tx.Format(buffer, name, "true") })
+		app.OnClickNode(acts[name], func(tx *kaya.Tx, _ []any) { tx.FormatFlag(buffer, name, true) })
 	}
 	for id, kind := range map[string]kaya.Block{
 		"heading1": kaya.Heading1, "heading2": kaya.Heading2, "quote": kaya.Quote, "body": kaya.Body,
@@ -504,11 +504,11 @@ func App() *kaya.App {
 	app.OnFormat(buffer, func(tx *kaya.Tx, f kaya.Format) {
 		switch {
 		case f.Removed:
-			tx.Write(status, fmt.Sprintf("%s off %d:%d", f.Name, f.Start, f.End))
+			tx.Write(status, fmt.Sprintf("%s off %d:%d", f.Name, f.Range.Start, f.Range.End))
 		case f.Name == "block":
-			tx.Write(status, fmt.Sprintf("%s %d:%d", f.Value, f.Start, f.End))
+			tx.Write(status, fmt.Sprintf("%s %d:%d", f.Value, f.Range.Start, f.Range.End))
 		default:
-			tx.Write(status, fmt.Sprintf("%s %d:%d", f.Name, f.Start, f.End))
+			tx.Write(status, fmt.Sprintf("%s %d:%d", f.Name, f.Range.Start, f.Range.End))
 		}
 	})
 

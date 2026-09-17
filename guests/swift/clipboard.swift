@@ -54,9 +54,9 @@ app.build { tx in
     let edit = tx.menu(
         "Edit",
         items: [
-            tx.item("Cut", role: KayaAppTx.roleCut),
-            tx.item("Copy", role: KayaAppTx.roleCopy),
-            tx.item("Paste", role: KayaAppTx.rolePaste),
+            tx.item("Cut", role: .cut),
+            tx.item("Copy", role: .copy),
+            tx.item("Paste", role: .paste),
         ])
     tx.window(title: "clipboard", menus: [edit])
 

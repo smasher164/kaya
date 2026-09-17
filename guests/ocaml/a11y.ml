@@ -10,7 +10,7 @@ let () =
   build app (fun () ->
      (* Safe: the blob table keeps its own reference. *)
      let mark = asset mark_name in
-     let spoken = signal_str ("Before") in
+     let spoken = signal Scalar.Str ("Before") in
      let root =
        column ~a11y_id:"form" ~a11y_label:"Form"
          [

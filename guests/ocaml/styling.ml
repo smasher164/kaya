@@ -13,8 +13,8 @@ let () =
 
      (* [title], not [heading]: the bare constructor of that name builds
         label#0 below. *)
-     let title = signal_str ("Sections") in
-     let status = signal_str ("ready") in
+     let title = signal Scalar.Str ("Sections") in
+     let status = signal Scalar.Str ("ready") in
 
      let on_delete () = write status ("deleted") in
      let on_save () = write status ("saved") in

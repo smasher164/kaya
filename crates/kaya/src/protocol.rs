@@ -1660,20 +1660,30 @@ pub struct NativeRange {
     pub stop: u64,
 }
 
+/// The wire's own spelling of a flag attribute; [`crate::AttrValue`]
+/// coerces a bool to it at the boundary and [`TextRun::is_flag`] reads
+/// it back.
+pub const FLAG_VALUE: &str = "true";
+
 /// One attribute over a half-open span in [`TextRange`]'s unit: `name` from
-/// wire::RICH_ATTRS, `value` "true" for the flags, a URL for `link`, a
-/// wire::BLOCK_KINDS name for `block`. Runs may overlap.
+/// wire::RICH_ATTRS, `value` a URL for `link`, a wire::BLOCK_KINDS name for
+/// `block`, and [`FLAG_VALUE`] for the flags — which `is_flag` reads back as
+/// a bool. Runs may overlap.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TextRun {
-    pub start: u64,
-    pub end: u64,
+    pub range: std::ops::Range<u64>,
     pub name: String,
     pub value: String,
 }
 
 impl TextRun {
     pub fn new(start: u64, end: u64, name: impl Into<String>, value: impl Into<String>) -> Self {
-        Self { start, end, name: name.into(), value: value.into() }
+        Self { range: start..end, name: name.into(), value: value.into() }
+    }
+
+    /// A flag attribute, on: bold, italic, underline, strike, code.
+    pub fn is_flag(&self) -> bool {
+        self.value == FLAG_VALUE
     }
 }
 

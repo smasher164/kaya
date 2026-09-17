@@ -13,16 +13,16 @@ app = kaya.App()
 
 
 def delete_answered(choice):
-    if choice == kaya.CANCEL:
+    if choice == kaya.AlertChoice.CANCEL:
         status.set("kept")
-    elif choice == 1:
+    elif choice == kaya.AlertChoice.ACTION1:
         status.set("archived")
     else:
         status.set("deleted")
 
 
 def eject_answered(choice):
-    status.set("held" if choice == kaya.CANCEL else "ejected")
+    status.set("held" if choice == kaya.AlertChoice.CANCEL else "ejected")
 
 
 def ask_delete():

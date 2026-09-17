@@ -14,7 +14,7 @@ let () =
   let current = ref (Document.create "") in
 
   build app (fun () ->
-      let status = signal_str ("undo 0 redo 0") in
+      let status = signal Scalar.Str ("undo 0 redo 0") in
 
       let native =
         textarea ~rich:true ~a11y_id:"native" ~a11y_label:"Native" ()

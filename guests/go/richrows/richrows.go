@@ -23,11 +23,11 @@ type Note struct {
 func spell(runs []kaya.TextRun) string {
 	parts := make([]string, 0, len(runs))
 	for _, run := range runs {
-		if run.Value == "true" {
-			parts = append(parts, fmt.Sprintf("%d:%d %s", run.Start, run.End, run.Name))
+		if run.IsFlag() {
+			parts = append(parts, fmt.Sprintf("%d:%d %s", run.Range.Start, run.Range.End, run.Name))
 			continue
 		}
-		parts = append(parts, fmt.Sprintf("%d:%d %s=%s", run.Start, run.End, run.Name, run.Value))
+		parts = append(parts, fmt.Sprintf("%d:%d %s=%s", run.Range.Start, run.Range.End, run.Name, run.Value))
 	}
 	return strings.Join(parts, "|")
 }

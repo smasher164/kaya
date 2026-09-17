@@ -3,6 +3,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq.Expressions;
 using System.Reflection;
 
@@ -274,9 +275,9 @@ sealed class RecordCollection<T>
         return items;
     }
 
-    /// The typed model as an insertion-ordered map: O(1) keyed reads
-    /// over what Items keeps a list of
-    /// (System.Collections.Generic.OrderedDictionary, .NET 9+).
+    /// The typed model as an insertion-ordered map — a COPY, for a
+    /// caller that wants one (System.Collections.Generic.OrderedDictionary,
+    /// .NET 9+). One keyed read is TryGet, which copies nothing.
     public OrderedDictionary<object, T> Snapshot(Tx tx)
     {
         var snap = new OrderedDictionary<object, T>();
@@ -285,13 +286,25 @@ sealed class RecordCollection<T>
         return snap;
     }
 
-    /// The entry at `key`, or false if it is missing.
-    public bool TryGet(Tx tx, object key, out T value) =>
-        Snapshot(tx).TryGetValue(key, out value!);
+    /// The entry at `key`, or false if it is missing: the model's own
+    /// ordered map, read in place.
+    public bool TryGet(Tx tx, object key, [MaybeNullWhen(false)] out T value)
+    {
+        if (tx.TryGetRaw(Collection, key, out var raw) && raw is T typed)
+        {
+            value = typed;
+            return true;
+        }
+        value = default;
+        return false;
+    }
 
     /// The entry at `key`; throws (the indexer's own contract) if it is
     /// missing.
-    public T this[Tx tx, object key] => Snapshot(tx)[key];
+    public T this[Tx tx, object key] =>
+        TryGet(tx, key, out var value)
+            ? value
+            : throw new KeyNotFoundException($"kaya: no entry at key {key}");
 }
 
 /// An open patch on one entry; Set chains.

@@ -6,8 +6,6 @@
 
 import Data.IORef (newIORef, readIORef, writeIORef)
 
-import Data.Text (Text)
-import qualified Data.Text as T
 import KayaApp
 
 main :: IO ()
@@ -16,12 +14,12 @@ main = kayaMain $ \app -> do
   itemsRef <- newIORef (Nothing :: Maybe Collection)
 
   (groups, itemsColl) <- buildTx app $ do
-    status <- signal (T.pack "ready")
-    canExport <- signal False
-    details <- signal False
-    sort <- signal (0.0 :: Double)
+    status <- signalText "ready"
+    canExport <- signalBool False
+    details <- signalBool False
+    sort <- signalDouble 0.0
 
-    let onShare = submitTx app (writeSignal status (T.pack "shared"))
+    let onShare = submitTx app (writeSignal status "shared")
 
     -- File and Share realize early because the extend handler needs their
     -- handles; 'pure' slots them back in.
@@ -36,7 +34,7 @@ main = kayaMain $ \app -> do
             -- idiom (docs/styling-plan.md D6).
             [ ISymbol SymbolDone,
               IShortcut "primary+s",
-              IOnActivate (submitTx app (writeSignal status (T.pack "saved")))
+              IOnActivate (submitTx app (writeSignal status "saved"))
             ],
           item "Export" [IEnabledBy canExport, ISymbol SymbolForward],
           pure share
@@ -57,7 +55,7 @@ main = kayaMain $ \app -> do
                       ( \on ->
                           submitTx app $
                             writeSignal status
-                              (T.pack (if on then "details on" else "details off"))
+                              (if on then "details on" else "details off")
                       )
                   ]
               ],
@@ -69,7 +67,7 @@ main = kayaMain $ \app -> do
                   ( \index ->
                       submitTx app $
                         writeSignal status
-                          (T.pack (if index == 1 then "sorted date" else "sorted name"))
+                          (if index == 1 then "sorted date" else "sorted name")
                   )
               ]
               [option "Name" [], option "Date" []]
@@ -86,15 +84,13 @@ main = kayaMain $ \app -> do
               IOnActivateNode
                 ( \keys -> case keys of
                     [groupV, itemKeyV] -> do
-                      let group = fromWire groupV :: Text
-                          itemKey = fromWire itemKeyV :: Text
                       maybeItems <- readIORef itemsRef
                       case maybeItems of
                         Just itemsColl ->
                           submitTx app $ do
-                            remove (itemsColl `at` group) itemKey
+                            remove (itemsColl `at` groupV) itemKeyV
                             writeSignal status
-                              ("removed " <> group <> "/" <> itemKey)
+                              ("removed " <> keyText groupV <> "/" <> keyText itemKeyV)
                         Nothing -> return ()
                     _ -> return ()
                 )
@@ -110,7 +106,7 @@ main = kayaMain $ \app -> do
       _ <- columnOf [pure itemList]
       return itemsColl
 
-    targetText <- signal (T.pack "rename target")
+    targetText <- signalText "rename target"
 
     root <-
       column
@@ -121,7 +117,7 @@ main = kayaMain $ \app -> do
             submitTx app $ do
               writeSignal details False
               writeSignal sort (0.0 :: Double)
-              writeSignal status (T.pack "ready"),
+              writeSignal status "ready",
           buttonOn "extend menus" $ -- button#2
             submitTx app $ do
               setMenuPrimary share False
@@ -137,7 +133,7 @@ main = kayaMain $ \app -> do
               [ item
                   "Rename"
                   [ ISymbol SymbolEdit,
-                    IOnActivate (submitTx app (writeSignal status (T.pack "renamed")))
+                    IOnActivate (submitTx app (writeSignal status "renamed"))
                   ]
               ]
             return target,
@@ -150,5 +146,5 @@ main = kayaMain $ \app -> do
 
   -- Seeded after the mount, so the copy stamps from a closed template.
   buildTx app $ do
-    insert groups ("g2" :: Text) ("Home" :: Text)
-    insert (itemsColl `at` ("g2" :: Text)) ("a" :: Text) ("water plants" :: Text)
+    insert groups "g2" "Home"
+    insert (itemsColl `at` "g2") "a" "water plants"

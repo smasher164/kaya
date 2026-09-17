@@ -117,9 +117,9 @@ def row_pasted(key, clip):
 
 with app.window(title="clipboard"):
     with app.menu("Edit"):
-        kaya.item("Cut", role=kaya.ROLE_CUT)
-        kaya.item("Copy", role=kaya.ROLE_COPY)
-        kaya.item("Paste", role=kaya.ROLE_PASTE)
+        kaya.item("Cut", role=kaya.MenuRole.CUT)
+        kaya.item("Copy", role=kaya.MenuRole.COPY)
+        kaya.item("Paste", role=kaya.MenuRole.PASTE)
 
     status = kaya.signal("ready")
     row_status = kaya.signal("")

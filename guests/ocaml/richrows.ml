@@ -14,9 +14,9 @@ let spell (runs : Run.t list) =
   String.concat "|"
     (List.map
        (fun (r : Run.t) ->
-         if r.value = "true" then
-           Printf.sprintf "%d:%d %s" r.start r.stop r.name
-         else Printf.sprintf "%d:%d %s=%s" r.start r.stop r.name r.value)
+         let start, stop = r.range in
+         if Run.is_flag r then Printf.sprintf "%d:%d %s" start stop r.name
+         else Printf.sprintf "%d:%d %s=%s" start stop r.name r.value)
        runs)
 
 let () =
@@ -24,8 +24,8 @@ let () =
 
   build app (fun () ->
       let notes = collection_of note_record in
-      let last = signal_str ("") in
-      let view = signal_str ("") in
+      let last = signal Scalar.Str ("") in
+      let view = signal Scalar.Str ("") in
 
       let row_of key =
         match record_get notes key with
@@ -35,7 +35,7 @@ let () =
       (* An undo or redo moved the row back: the app reads ITS OWN mirror
          of row b, which is the fold a restored Blob field lands in. *)
       let restored _step _delta =
-        let note = row_of (str_key "b") in
+        let note = row_of (Key.str "b") in
         write view
           (Printf.sprintf "%s | %s" note.body.text (spell note.body.runs))
       in
@@ -73,11 +73,11 @@ let () =
                      undoable "patch b";
                      note_patch
                        ~body:(Document.create "Patched" |> Document.italic (0, 7))
-                       notes (str_key "b"));
+                       notes (Key.str "b"));
                  (* button#1 — the row the copy's own act folded into *)
                  button ~text:"read a"
                    ~on_click:(fun () ->
-                     let note = row_of (str_key "a") in
+                     let note = row_of (Key.str "a") in
                      write view
                        (Printf.sprintf "%s | %s" note.body.text
                           (spell note.body.runs)));
@@ -99,12 +99,12 @@ let () =
            ]
            ());
 
-      insert_record notes (str_key "a")
+      insert_record notes (Key.str "a")
         {
           title = "a";
           body = Document.create "Héllo world" |> Document.bold (0, 6);
         };
-      insert_record notes (str_key "b")
+      insert_record notes (Key.str "b")
         {
           title = "b";
           body =

@@ -4,7 +4,6 @@
 -- tools/scenes/radio.steps.
 
 import Data.Text (Text)
-import qualified Data.Text as T
 import KayaApp
 
 options :: [Text]
@@ -14,7 +13,7 @@ main :: IO ()
 main = kayaMain $ \app -> do
   _ <- buildTx app $ do
     window primary [WTitle "radio"]
-    size <- signal (T.pack "size: Small")
+    size <- signalText "size: Small"
 
     let onPick index =
           submitTx app $

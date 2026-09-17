@@ -44,19 +44,19 @@ func saidOnStderr(t *testing.T, body func()) string {
 
 func TestTheOneShotNotificationHandlerWinsOverTheProcessLevelOne(t *testing.T) {
 	app := NewApp()
-	var oneShot []uint32
+	var oneShot []NotificationOutcome
 	var process [][2]uint64
-	app.OnNotificationActivation(func(tx *Tx, id uint64, outcome uint32) {
+	app.OnNotificationActivation(func(tx *Tx, id uint64, outcome NotificationOutcome) {
 		process = append(process, [2]uint64{id, uint64(outcome)})
 	})
 	app.Build(func(tx *Tx) {
 		tx.ShowNotification(12).Title("bound at the show").
-			OnResult(func(tx *Tx, outcome uint32) {
+			OnResult(func(tx *Tx, outcome NotificationOutcome) {
 				oneShot = append(oneShot, outcome)
 			}).Show()
 	})
 
-	app.notificationResult(12, NotificationOutcomeActivated)
+	app.notificationResult(12, uint32(NotificationOutcomeActivated))
 	if len(oneShot) != 1 || oneShot[0] != NotificationOutcomeActivated {
 		t.Fatalf("the one-shot handler did not answer: %v", oneShot)
 	}
@@ -68,12 +68,12 @@ func TestTheOneShotNotificationHandlerWinsOverTheProcessLevelOne(t *testing.T) {
 func TestAnUnknownNotificationIdReachesTheProcessLevelHandler(t *testing.T) {
 	app := NewApp()
 	var process [][2]uint64
-	app.OnNotificationActivation(func(tx *Tx, id uint64, outcome uint32) {
+	app.OnNotificationActivation(func(tx *Tx, id uint64, outcome NotificationOutcome) {
 		process = append(process, [2]uint64{id, uint64(outcome)})
 	})
 
 	// 77 was never shown by this process — the relaunch case exactly.
-	app.notificationResult(77, NotificationOutcomeActivated)
+	app.notificationResult(77, uint32(NotificationOutcomeActivated))
 	if len(process) != 1 || process[0] != [2]uint64{77, uint64(NotificationOutcomeActivated)} {
 		t.Fatalf("a result with no one-shot handler did not reach the process-level one: %v", process)
 	}
@@ -82,12 +82,12 @@ func TestAnUnknownNotificationIdReachesTheProcessLevelHandler(t *testing.T) {
 func TestTheProcessLevelNotificationHandlerDoesNotRetire(t *testing.T) {
 	app := NewApp()
 	var process [][2]uint64
-	app.OnNotificationActivation(func(tx *Tx, id uint64, outcome uint32) {
+	app.OnNotificationActivation(func(tx *Tx, id uint64, outcome NotificationOutcome) {
 		process = append(process, [2]uint64{id, uint64(outcome)})
 	})
 
-	app.notificationResult(77, NotificationOutcomeActivated)
-	app.notificationResult(78, NotificationOutcomeRefused)
+	app.notificationResult(77, uint32(NotificationOutcomeActivated))
+	app.notificationResult(78, uint32(NotificationOutcomeRefused))
 	if len(process) != 2 {
 		t.Fatalf("the process-level handler retired after its first result: %v", process)
 	}
@@ -105,7 +105,7 @@ func TestTheProcessLevelNotificationHandlerDoesNotRetire(t *testing.T) {
 func TestAnUnclaimedNotificationResultAnnouncesTheDrop(t *testing.T) {
 	app := NewApp()
 	said := saidOnStderr(t, func() {
-		app.notificationResult(41, NotificationOutcomeRefused)
+		app.notificationResult(41, uint32(NotificationOutcomeRefused))
 	})
 	want := "kaya: notification 41 outcome refused reached no handler — " +
 		"none was bound at the show and no process-level handler is " +

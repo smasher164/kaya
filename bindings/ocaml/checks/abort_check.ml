@@ -23,7 +23,7 @@ let entry_keys app todos =
 
 let expect app todos want what =
   let got = entry_keys app todos in
-  if got <> List.map str_key want then
+  if got <> List.map Key.str want then
     fail "%s: [%s]" what (show_keys got)
 
 (* What a record deriver generates, spelled by hand so this check needs
@@ -94,8 +94,8 @@ let () =
     build app
       (fun () ->
        let todos = collection () in
-       insert todos (str_key "a") "one";
-       insert todos (str_key "b") "two";
+       insert todos (Key.str "a") "one";
+       insert todos (Key.str "b") "two";
        todos)
   in
 
@@ -103,8 +103,8 @@ let () =
      mirror and re-raise. *)
   (match
      build app (fun () ->
-         insert todos (str_key "c") "three";
-         remove todos (str_key "a");
+         insert todos (Key.str "c") "three";
+         remove todos (Key.str "a");
          raise Handler_bug)
    with
   | () -> fail "build swallowed the exception — the tx boundary must propagate"
@@ -114,10 +114,10 @@ let () =
   (* The dispatch discipline: a raising handler is logged and the loop
      continues. *)
   dispatch app (fun () ->
-      insert todos (str_key "d") "four";
+      insert todos (Key.str "d") "four";
       raise Handler_bug);
   expect app todos [ "a"; "b" ] "dispatch abort leaked into the mirror";
-  build app (fun () -> insert todos (str_key "c") "three");
+  build app (fun () -> insert todos (Key.str "c") "three");
   expect app todos [ "a"; "b"; "c" ] "post-abort commit broken";
 
   (* An aborted transaction abandons its derived registrations with
@@ -126,23 +126,23 @@ let () =
   dispatch app (fun () ->
       let rc = collection_of check_todo_rt in
       let _count =
-        derive signal_i64 rc (fun entries -> Int64.of_int (List.length entries))
+        derive Scalar.I64 rc (fun entries -> Int64.of_int (List.length entries))
       in
-      rc_cid := (record_handle rc).cid;
+      rc_cid := For_checks.collection_id (record_handle rc);
       raise Handler_bug);
-  (match Hashtbl.find_opt app.derived !rc_cid with
+  (match Hashtbl.find_opt (For_checks.derived app) !rc_cid with
   | None | Some [] -> ()
   | Some fns -> fail "aborted tx leaked %d derived registrations" (List.length fns));
 
   (* The blob field round trip: the model keeps the guest's own bytes. *)
   let pics = build app (fun () -> collection_of check_todo_rt) in
   let png = Bytes.of_string "not really a png" in
-  build app (fun () -> insert_record pics (str_key "p") { ct_title = "pic"; ct_pic = png });
+  build app (fun () -> insert_record pics (Key.str "p") { ct_title = "pic"; ct_pic = png });
   (match build app (fun () -> record_items pics) with
-  | [ (Str_key "p", { ct_title = "pic"; ct_pic }) ] when ct_pic = png -> ()
+  | [ (Key.Str "p", { ct_title = "pic"; ct_pic }) ] when ct_pic = png -> ()
   | _ -> fail "blob field did not round-trip through the model");
   let png2 = Bytes.of_string "different bytes" in
-  build app (fun () -> update_field pics (str_key "p") check_todo_ct_pic png2);
+  build app (fun () -> update_field pics (Key.str "p") check_todo_ct_pic png2);
   (match build app (fun () -> record_items pics) with
   | [ (_, { ct_pic; _ }) ] when ct_pic = png2 -> ()
   | _ -> fail "blob update_field did not update the model's copy");
@@ -158,7 +158,7 @@ let () =
   | exception Failure _ -> ());
   expect app todos [ "a"; "b"; "c" ] "For-body read abort leaked into the mirror";
 
-  let visible = build app (fun () -> signal_bool false) in
+  let visible = build app (fun () -> signal Scalar.Bool false) in
   (match
      build app (fun () ->
          let _ = when_ visible (fun () -> count todos) () in
@@ -203,14 +203,14 @@ let () =
     m = 0 || go 0
   in
   let queued_since tx before =
-    let after = List.length tx.records in
-    List.filteri (fun i _ -> i < after - before) tx.records
+    let after = List.length (For_checks.records tx) in
+    List.filteri (fun i _ -> i < after - before) (For_checks.records tx)
   in
   let count_kind rs k = List.length (List.filter (fun r -> rec_kind r = k) rs) in
   let file =
     build app (fun () ->
         let tx = the_tx () in
-        let before = List.length tx.records in
+        let before = List.length (For_checks.records tx) in
         let file =
           menu ~label:"File" [ item ~label:"Save" ~shortcut:"PRIMARY+S" ] ()
         in
@@ -255,7 +255,7 @@ let () =
      parent, and never a new bar anchor. *)
   build app (fun () ->
       let tx = the_tx () in
-      let before = List.length tx.records in
+      let before = List.length (For_checks.records tx) in
       menu_append file [ item ~label:"Publish" ];
       let queued = queued_since tx before in
       if count_kind queued Kaya_wire.tx_kind_menu_item_create <> 1 then
@@ -298,7 +298,7 @@ let () =
   let brand_call what call =
     build app (fun () ->
         let tx = the_tx () in
-        let before = List.length tx.records in
+        let before = List.length (For_checks.records tx) in
         call ();
         brand_record what (queued_since tx before))
   in
@@ -342,7 +342,7 @@ let () =
     let got =
       build app (fun () ->
           let tx = the_tx () in
-          let before = List.length tx.records in
+          let before = List.length (For_checks.records tx) in
           ignore (call ());
           role_values (queued_since tx before))
     in
@@ -373,7 +373,7 @@ let () =
   let window_insets call =
     build app (fun () ->
         let tx = the_tx () in
-        let before = List.length tx.records in
+        let before = List.length (For_checks.records tx) in
         call ();
         insets (queued_since tx before))
   in
@@ -410,7 +410,7 @@ let () =
   let inset_call call =
     build app (fun () ->
         let tx = the_tx () in
-        let before = List.length tx.records in
+        let before = List.length (For_checks.records tx) in
         let (Widget id) = call () in
         (id, container_insets (queued_since tx before)))
   in
@@ -479,7 +479,7 @@ let () =
     build app
       (fun () ->
         let tx = the_tx () in
-        let before = List.length tx.records in
+        let before = List.length (For_checks.records tx) in
         let _, node =
           for_each accounts
             (fun () ->
@@ -523,8 +523,8 @@ let () =
   let keyed_bar =
     build app (fun () ->
         let tx = the_tx () in
-        let before = List.length tx.records in
-        columns_at node [ str_key "acct-a" ] [ "Symbol"; "Qty" ] (sort_desc 1);
+        let before = List.length (For_checks.records tx) in
+        columns_at node [ Key.str "acct-a" ] [ "Symbol"; "Qty" ] (sort_desc 1);
         one_header "columns_at" (queued_since tx before))
   in
   (match keyed_bar with
@@ -542,12 +542,12 @@ let () =
      table the keyed sort_requested arm looks in. The live [sort_handlers]
      needs no clause here: its value type is [int -> unit], so filing a
      copy handler there does not compile (watched 2026-08-24). *)
-  (match Hashtbl.find_opt app.node_sorts node_id with
+  (match Hashtbl.find_opt (For_checks.node_sorts app) node_id with
   | None ->
       fail "Tpl.columns ~on_sort registered nothing under the template node"
   | Some handler -> handler [ Str "acct-a" ] 1);
   (match !sorted_at with
-  | [ ([ Str_key "acct-a" ], 1) ] -> ()
+  | [ ([ Key.Str "acct-a" ], 1) ] -> ()
   | l ->
       fail
         "the copy's sort handler saw [%s], wanted one request carrying its \
@@ -575,7 +575,7 @@ let () =
         table)
   in
   let (Widget live_id) = live_table in
-  (match Hashtbl.find_opt app.sort_handlers live_id with
+  (match Hashtbl.find_opt (For_checks.sort_handlers app) live_id with
   | None -> fail "columns ~on_sort registered nothing at the live For"
   | Some handler -> handler 1);
   (match !live_sorted with
@@ -602,7 +602,7 @@ let () =
     build app
       (fun () ->
         let tx = the_tx () in
-        let before = List.length tx.records in
+        let before = List.length (For_checks.records tx) in
         let _, positions =
           for_each accounts
             (fun () ->
@@ -677,10 +677,10 @@ let () =
   let copy_recs =
     build app (fun () ->
         let tx = the_tx () in
-        let before = List.length tx.records in
+        let before = List.length (For_checks.records tx) in
         insert_record
-          (record_at nested_positions (str_key "brokerage"))
-          (str_key "aapl") ("AAPL", "10");
+          (record_at nested_positions (Key.str "brokerage"))
+          (Key.str "aapl") ("AAPL", "10");
         queued_since tx before)
   in
   (match
@@ -701,10 +701,10 @@ let () =
         (List.length l));
   (match
      build app (fun () ->
-         ( record_items (record_at nested_positions (str_key "brokerage")),
+         ( record_items (record_at nested_positions (Key.str "brokerage")),
            record_items nested_positions ))
    with
-  | [ (Str_key "aapl", ("AAPL", "10")) ], [] -> ()
+  | [ (Key.Str "aapl", ("AAPL", "10")) ], [] -> ()
   | copy, own ->
       fail
         "the copy's model holds %d entr(y/ies) and the collection's own table \
@@ -747,7 +747,7 @@ let () =
   let format_records call =
     build app (fun () ->
         let tx = the_tx () in
-        let before = List.length tx.records in
+        let before = List.length (For_checks.records tx) in
         call ();
         List.filter
           (fun r -> rec_kind r = Kaya_wire.tx_kind_format_text)
@@ -775,7 +775,8 @@ let () =
     String.concat ", "
       (List.map
          (fun (r : Run.t) ->
-           Printf.sprintf "%d..%d %s=%s" r.start r.stop r.name r.value)
+           Printf.sprintf "%d..%d %s=%s" (fst r.range) (snd r.range) r.name
+             r.value)
          runs)
   in
   build app (fun () -> set_document editor (Document.create "one\ntwo\nthree"));
@@ -825,7 +826,7 @@ let () =
     (fun () -> format_range editor (4, 7) "italic" "true")
     (0, 1, 4L, 7L);
   (match fold () with
-  | [ { start = 4; stop = 7; name = "italic"; value = "true" } ] -> ()
+  | [ { range = 4, 7; name = "italic"; value = "true" } ] -> ()
   | runs ->
       fail "the fold after format_range holds [%s], wanted 4..7 italic=true"
         (show_runs runs));
@@ -835,7 +836,7 @@ let () =
     (fun () -> format_range editor (5, 6) "block" "heading1")
     (0, 1, 4L, 7L);
   (match List.filter (fun (r : Run.t) -> r.name = "block") (fold ()) with
-  | [ { start = 4; stop = 7; value = "heading1"; _ } ] -> ()
+  | [ { range = 4, 7; value = "heading1"; _ } ] -> ()
   | runs ->
       fail "the fold after a ranged block act holds [%s], wanted 4..7 \
             block=heading1"
@@ -901,15 +902,15 @@ let () =
         (show_wire_value other));
   (match document_of_blob reference with
   | { text = "abc"; runs = [ a; b ] }
-    when (a.Run.start, a.stop, a.name, a.value) = (0, 1, "bold", "true")
-         && (b.Run.start, b.stop, b.name, b.value) = (1, 3, "link", "u") ->
+    when (a.Run.range, a.name, a.value) = ((0, 1), "bold", "true")
+         && (b.Run.range, b.name, b.value) = ((1, 3), "link", "u") ->
       ()
   | doc ->
       fail "the reference list read back as %S [%s]" doc.text
         (String.concat ", "
            (List.map
               (fun (r : Run.t) ->
-                Printf.sprintf "%d..%d %s=%s" r.start r.stop r.name
+                Printf.sprintf "%d..%d %s=%s" (fst r.range) (snd r.range) r.name
                   r.value)
               doc.runs)));
 
@@ -932,7 +933,7 @@ let () =
               node := n)
             ()
         in
-        insert_record notes (str_key "a") { cn_title = "a"; cn_body = seed };
+        insert_record notes (Key.str "a") { cn_title = "a"; cn_body = seed };
         (notes, !node))
   in
   let range, inserted, runs = edit in
@@ -944,7 +945,7 @@ let () =
   absorb_edit row_app live_id range inserted runs;
   let mirrored = build row_app (fun () -> document live) in
   let rowed =
-    match List.assoc_opt (str_key "a") (build row_app (fun () -> record_items notes)) with
+    match List.assoc_opt (Key.str "a") (build row_app (fun () -> record_items notes)) with
     | Some note -> note.cn_body
     | None -> fail "the row vanished before the fold could be read back"
   in
@@ -954,5 +955,47 @@ let () =
        %S [%s] — one rule, two documents"
       rowed.text (show_runs rowed.runs) mirrored.text
       (show_runs mirrored.runs);
+
+  (* THE CORRECTION SLICE (the idiom review, 2026-09-17), the refusals
+     that answer at run time rather than at compile time. *)
+  let has s sub =
+    let n = String.length s and m = String.length sub in
+    let rec go i = i + m <= n && (String.sub s i m = sub || go (i + 1)) in
+    m = 0 || go 0
+  in
+  let refuses what f wanted =
+    match f () with
+    | exception Invalid_argument said ->
+        if not (has said wanted) then
+          fail "%s was refused, but on %S rather than %S" what said wanted
+    | _ -> fail "%s was NOT refused" what
+  in
+  refuses "a reversed span the core sent"
+    (fun () -> ignore (Run.is_flag { Run.range = For_checks.decoded_span "text_edited" 5 3;
+                                     name = "bold"; value = "true" }))
+    "5..3, a reversed span";
+  refuses "an alert choice this build does not know"
+    (fun () -> ignore (Alert_choice.of_wire 7))
+    "carries choice 7";
+  refuses "a notification outcome this build does not know"
+    (fun () -> ignore (Notification_outcome.of_wire 9))
+    "carries outcome 9";
+
+  (* X2: a flag attribute is a BOOL on both sides, the wire's own string
+     only at the boundary. *)
+  let marked =
+    Document.create "abcd"
+    |> Document.flag (0, 2) "italic" true
+    |> Document.link (2, 4) "https://kaya.dev"
+  in
+  (match marked.runs with
+  | [ a; b ] ->
+      if not (Run.is_flag a && a.value = "true") then
+        fail "a bool mark did not reach the wire as its flag string (%S)" a.value;
+      if Run.is_flag b then fail "a valued attribute read back as a flag";
+      if a.range <> (0, 2) then fail "a run does not carry its own span"
+  | other -> fail "the bool mark left %d run(s)" (List.length other));
+  if (Edit.replace (1, 3) "x").range <> (1, 3) then
+    fail "an edit does not carry its own span";
 
   print_endline "ocaml abort check: OK"

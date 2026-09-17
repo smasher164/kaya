@@ -10093,7 +10093,7 @@ fn rich_ground(
 fn rich_attrs_at(runs: &[TextRun], byte: usize) -> BTreeMap<String, String> {
     let mut out = BTreeMap::new();
     for run in runs {
-        if (run.start as usize) <= byte && byte < run.end as usize {
+        if (run.range.start as usize) <= byte && byte < run.range.end as usize {
             out.insert(run.name.clone(), run.value.clone());
         }
     }
@@ -10106,9 +10106,9 @@ fn rich_spelling(runs: &[TextRun]) -> String {
     runs.iter()
         .map(|run| {
             if run.value == "true" {
-                format!("{}:{} {}", run.start, run.end, run.name)
+                format!("{}:{} {}", run.range.start, run.range.end, run.name)
             } else {
-                format!("{}:{} {}={}", run.start, run.end, run.name, run.value)
+                format!("{}:{} {}={}", run.range.start, run.range.end, run.name, run.value)
             }
         })
         .collect::<Vec<_>>()
@@ -10125,38 +10125,38 @@ fn rich_normalize(runs: Vec<TextRun>) -> Vec<TextRun> {
     for name in names {
         let mut painted: Vec<TextRun> = Vec::new();
         for run in runs.iter().filter(|r| r.name == name) {
-            if run.start >= run.end {
+            if run.range.start >= run.range.end {
                 continue;
             }
             let mut kept: Vec<TextRun> = Vec::new();
             for old in painted.drain(..) {
-                if old.end <= run.start || old.start >= run.end {
+                if old.range.end <= run.range.start || old.range.start >= run.range.end {
                     kept.push(old);
                     continue;
                 }
-                if old.start < run.start {
-                    kept.push(TextRun { end: run.start, ..old.clone() });
+                if old.range.start < run.range.start {
+                    kept.push(TextRun { range: old.range.start..run.range.start, ..old.clone() });
                 }
-                if old.end > run.end {
-                    kept.push(TextRun { start: run.end, ..old.clone() });
+                if old.range.end > run.range.end {
+                    kept.push(TextRun { range: run.range.end..old.range.end, ..old.clone() });
                 }
             }
             kept.push(run.clone());
             painted = kept;
         }
-        painted.sort_by_key(|r| r.start);
+        painted.sort_by_key(|r| r.range.start);
         let mut merged: Vec<TextRun> = Vec::new();
         for run in painted {
             match merged.last_mut() {
-                Some(last) if last.end == run.start && last.value == run.value => {
-                    last.end = run.end;
+                Some(last) if last.range.end == run.range.start && last.value == run.value => {
+                    last.range.end = run.range.end;
                 }
                 _ => merged.push(run),
             }
         }
         out.extend(merged);
     }
-    out.sort_by(|a, b| (a.start, &a.name).cmp(&(b.start, &b.name)));
+    out.sort_by(|a, b| (a.range.start, &a.name).cmp(&(b.range.start, &b.name)));
     out
 }
 
@@ -10170,21 +10170,22 @@ fn rich_splice(
     let moved = |offset: u64| -> u64 { (offset as i64 + shift) as u64 };
     let mut next: Vec<TextRun> = Vec::with_capacity(runs.len() + inserted.len());
     for run in runs {
-        if (run.start as usize) < start {
-            next.push(TextRun { start: run.start, end: run.end.min(start as u64), ..run.clone() });
-        }
-        if (run.end as usize) > end {
+        if (run.range.start as usize) < start {
             next.push(TextRun {
-                start: moved(run.start.max(end as u64)),
-                end: moved(run.end),
+                range: run.range.start..run.range.end.min(start as u64),
+                ..run.clone()
+            });
+        }
+        if (run.range.end as usize) > end {
+            next.push(TextRun {
+                range: moved(run.range.start.max(end as u64))..moved(run.range.end),
                 ..run.clone()
             });
         }
     }
     for run in inserted {
         next.push(TextRun {
-            start: run.start + start as u64,
-            end: run.end + start as u64,
+            range: run.range.start + start as u64..run.range.end + start as u64,
             ..run.clone()
         });
     }
@@ -10200,21 +10201,20 @@ fn rich_format_runs(
     }
     let mut next: Vec<TextRun> = Vec::with_capacity(runs.len() + 2);
     for run in runs {
-        if run.name != name || (run.end as usize) <= start || run.start as usize >= end {
+        if run.name != name || (run.range.end as usize) <= start || run.range.start as usize >= end {
             next.push(run.clone());
             continue;
         }
-        if (run.start as usize) < start {
-            next.push(TextRun { end: start as u64, ..run.clone() });
+        if (run.range.start as usize) < start {
+            next.push(TextRun { range: run.range.start..start as u64, ..run.clone() });
         }
-        if (run.end as usize) > end {
-            next.push(TextRun { start: end as u64, ..run.clone() });
+        if (run.range.end as usize) > end {
+            next.push(TextRun { range: end as u64..run.range.end, ..run.clone() });
         }
     }
     if let Some(value) = value {
         next.push(TextRun {
-            start: start as u64,
-            end: end as u64,
+            range: start as u64..end as u64,
             name: name.to_owned(),
             value: value.to_owned(),
         });
@@ -10308,7 +10308,7 @@ fn rich_restyle(
     let palette = rich_palette(field);
     let mut edges: Vec<usize> = vec![from, to];
     for run in runs {
-        for edge in [run.start as usize, run.end as usize] {
+        for edge in [run.range.start as usize, run.range.end as usize] {
             if edge > from && edge < to {
                 edges.push(edge);
             }
@@ -10945,7 +10945,7 @@ fn label_block(core: &CoreState, widget: u64) -> Option<TextBlock> {
 fn rich_segments(text: &str, runs: &[TextRun]) -> Vec<(usize, usize, BTreeMap<String, String>)> {
     let mut edges: Vec<usize> = vec![0, text.len()];
     for run in runs {
-        for edge in [run.start as usize, run.end as usize] {
+        for edge in [run.range.start as usize, run.range.end as usize] {
             if edge > 0 && edge < text.len() && text.is_char_boundary(edge) {
                 edges.push(edge);
             }
@@ -11073,8 +11073,7 @@ fn rich_native_runs(text: &str, runs: &[crate::protocol::NativeRun]) -> Vec<Text
             let start = byte_offset(text, run.start as i32)?;
             let end = byte_offset(text, run.end as i32)?;
             Some(TextRun {
-                start: start as u64,
-                end: end as u64,
+                range: start as u64..end as u64,
                 name: run.name.clone(),
                 value: run.value.clone(),
             })

@@ -8,16 +8,6 @@ struct Task: KayaGen {
     var due: KayaDate
 }
 
-func day(_ d: KayaDate) -> String {
-    let (y, m, dd) = d.kayaYMD
-    return String(format: "%04d-%02d-%02d", y, m, dd)
-}
-
-func clock(_ t: KayaTime) -> String {
-    let (h, m) = t.kayaHM
-    return String(format: "%02d:%02d", h, m)
-}
-
 let app = KayaApp()
 
 app.build { tx in
@@ -36,12 +26,12 @@ app.build { tx in
             min: KayaDate(year: 2026, month: 1, day: 1),
             max: KayaDate(year: 2026, month: 12, day: 31),
             bind: dateSig,
-            onDate: { tx, picked in tx.write(dateText, .str("date: \(day(picked))")) })
+            onDate: { tx, picked in tx.write(dateText, .str("date: \(picked)")) })
         tx.setA11yId(when, "when")
         tx.setA11yLabel(when, "Due")
         let at = tx.timePicker(
             step: 15, bind: timeSig,
-            onTime: { tx, picked in tx.write(timeText, .str("time: \(clock(picked))")) })
+            onTime: { tx, picked in tx.write(timeText, .str("time: \(picked)")) })
         tx.setA11yId(at, "at")
         tx.setA11yLabel(at, "At")
         tx.button("reset") { tx in  // button#0
@@ -52,7 +42,7 @@ app.build { tx in
             row.label(row.name)
             let picker = row.datePicker(row.due) { tx, keys, picked in
                 guard case .str(let key) = keys[0] else { return }
-                tx.write(rowText, .str("row \(key): \(day(picked))"))
+                tx.write(rowText, .str("row \(key): \(picked)"))
             }
             row.t.setA11yId(picker, "due")
         }

@@ -32,26 +32,26 @@ data CheckNote = CheckNote {cnTitle :: Text, cnBody :: Document}
 failWith :: String -> IO a
 failWith msg = hPutStrLn stderr msg >> exitFailure
 
-expectKeys :: App -> Collection -> [String] -> String -> IO ()
+expectKeys :: App -> Collection -> [Text] -> String -> IO ()
 expectKeys app todos want what = do
   got <- buildTx app (map fst <$> items todos)
-  unless (got == map VStr want) $ failWith (what ++ ": " ++ show got)
+  unless (got == map textKey want) $ failWith (what ++ ": " ++ show got)
 
 main :: IO ()
 main = do
   app <- newApp
   todos <- buildTx app $ do
     c <- collection
-    insert c (VStr "a") (VStr "one")
-    insert c (VStr "b") (VStr "two")
+    insert c "a" "one"
+    insert c "b" "two"
     return c
 
   -- Abort mid-transaction after mutating: rollback, then rethrow. Rollback
   -- is by PURITY — a throwing Build trips buildTx's evaluate barrier.
   aborted <-
     try $ buildTx app $ do
-      insert todos (VStr "c") (VStr "three")
-      remove todos (VStr "a")
+      insert todos "c" "three"
+      remove todos "a"
       error "handler bug"
   case (aborted :: Either SomeException ()) of
     Right () -> failWith "buildTx swallowed the error — the tx boundary must propagate"
@@ -60,10 +60,10 @@ main = do
 
   -- A throwing handler is logged and the loop continues.
   dispatch $ buildTx app $ do
-    insert todos (VStr "d") (VStr "four")
+    insert todos "d" "four"
     error "handler bug"
   expectKeys app todos ["a", "b"] "dispatch abort leaked into the mirror"
-  buildTx app (insert todos (VStr "c") (VStr "three"))
+  buildTx app (insert todos "c" "three")
   expectKeys app todos ["a", "b", "c"] "post-abort commit broken"
 
   -- The menu surface: the constructors must reach the emitter, the ONE
@@ -108,7 +108,7 @@ main = do
       (W.editSourceNativeUndo, "native_undo"),
       (W.editSourceDrop, "drop")
     ]
-  unless (editSource (insertEdit 0 "x") == Nothing) $
+  unless ((insertEdit 0 "x").source == Nothing) $
     failWith "an app-built edit carries a source — nothing on the wire carries one downward"
   unknown <- try (evaluate (editSourceName (editSourceOfWire 99)))
   case (unknown :: Either SomeException Text) of
@@ -142,8 +142,8 @@ main = do
         check (got == want)
           (what ++ " staged (removed, ranged, start, stop) " ++ show got
              ++ ", wanted " ++ show want)
-      runsNow = docRuns <$> document app editor
-  act "formatText" (formatText editor "bold" "true") (0, 0, 0, 0)
+      runsNow = (.runs) <$> document app editor
+  act "formatText" (formatText editor "bold" (Flag True)) (0, 0, 0, 0)
   act "unformat" (unformat editor "bold") (1, 0, 0, 0)
   act "setBlock" (setBlock editor Heading1) (0, 0, 0, 0)
   runsNow >>= \runs ->
@@ -164,33 +164,33 @@ main = do
         (what ++ " staged " ++ show got ++ ", wanted " ++ show want
            ++ " — the bytes formatText " ++ show name ++ " " ++ show value
            ++ " stages"))
-    [ ("bold", bold editor, "bold", "true")
-    , ("italic", italic editor, "italic", "true")
-    , ("underline", underline editor, "underline", "true")
-    , ("strike", strike editor, "strike", "true")
-    , ("code", code editor, "code", "true")
-    , ("link", link editor "https://kaya.dev", "link", "https://kaya.dev")
+    [ ("bold", bold editor, "bold", Flag True)
+    , ("italic", italic editor, "italic", Flag True)
+    , ("underline", underline editor, "underline", Flag True)
+    , ("strike", strike editor, "strike", Flag True)
+    , ("code", code editor, "code", Flag True)
+    , ("link", link editor "https://kaya.dev", "link", Spelled "https://kaya.dev")
     ]
   runsNow >>= \runs ->
     check (null runs)
       ("a named act moved the fold (" ++ show runs
          ++ ") — a selection act is echoed back, and the fold moves when "
          ++ "it arrives")
-  act "formatTextRange" (formatTextRange app editor (4, 7) "italic" "true")
+  act "formatTextRange" (formatTextRange app editor (4, 7) "italic" (Flag True))
     (0, 1, 4, 7)
   runsNow >>= \runs ->
-    check (runs == [Run 4 7 "italic" "true"])
+    check (runs == [Run (4, 7) "italic" (Flag True)])
       ("the fold after formatTextRange holds " ++ show runs
          ++ ", wanted 4..7 italic=true")
   -- A block covers the range's whole paragraphs, snapped against the
   -- FOLD's own text: "one\ntwo\nthree" puts (5, 6) inside 4..7.
-  act "formatTextRange block" (formatTextRange app editor (5, 6) "block" "heading1")
+  act "formatTextRange block" (formatTextRange app editor (5, 6) "block" (Spelled "heading1"))
     (0, 1, 4, 7)
   runsNow >>= \runs ->
-    check (filter ((== "block") . runName) runs == [Run 4 7 "block" "heading1"])
+    check (filter ((== "block") . (.name)) runs == [Run (4, 7) "block" (Spelled "heading1")])
       ("the fold after a ranged block act holds " ++ show runs
          ++ ", wanted 4..7 block=heading1")
-  act "formatTextRange block body" (formatTextRange app editor (5, 6) "block" "body")
+  act "formatTextRange block body" (formatTextRange app editor (5, 6) "block" (Spelled "body"))
     (1, 1, 4, 7)
   act "unformatRange" (unformatRange app editor (4, 7) "italic") (1, 1, 4, 7)
   runsNow >>= \runs ->
@@ -241,27 +241,27 @@ main = do
       failWith
         ( "a Document field's model value is " ++ show other
             ++ ", wanted the blob's bytes as a binary Str" )
-  check (documentOfBlob reference == Document "abc" [Run 0 1 "bold" "true", Run 1 3 "link" "u"])
+  check (documentOfBlob reference == Document "abc" [Run (0, 1) "bold" (Flag True), Run (1, 3) "link" (Spelled "u")])
     ("the reference list read back as " ++ show (documentOfBlob reference))
 
   -- AND THE FOLD REACHES THE ROW: a stamped copy's edit folds into its
   -- row's field by the rule the LIVE mirror folds by, so the two
   -- documents are one document.
   let seed = boldRun (0, 6) (documentOf "Héllo world")
-      oneEdit = Edit 0 6 "Hey" [] Nothing
+      oneEdit = Edit (0, 6) "Hey" [] Nothing
   rowApp <- newApp
   (rowNotes, rowNode) <- buildTx rowApp $ do
     notes <- collectionOf @CheckNote
     (_, node) <- forEach (recordHandle notes) (textareaRichBound (field @"cnBody" @CheckNote))
-    insertRecord notes (VStr "a") (CheckNote "a" seed)
+    insertRecord notes (textKey "a") (CheckNote "a" seed)
     return (notes, node)
-  foldRowDocument rowApp rowNode [VStr "a"] (foldEdit oneEdit)
+  foldRowDocument rowApp rowNode [textKey "a"] (foldEdit oneEdit)
   liveEditor <- buildTx rowApp (textarea [Rich True])
   buildTx rowApp (setDocument rowApp liveEditor seed)
   absorbEdit rowApp liveEditor oneEdit
   mirrored <- document rowApp liveEditor
   items <- buildTx rowApp (recordItems rowNotes)
-  case lookup (VStr "a") items of
+  case lookup (textKey "a") items of
     Nothing -> failWith "the row vanished before the fold could be read back"
     Just note ->
       check (cnBody note == mirrored)
@@ -274,11 +274,11 @@ main = do
   -- with a 'lookup' over the same table on both a present key and an
   -- absent one — the single-row read `recordItems` \/ `lookup` forced a
   -- guest to spell out before this entry.
-  gotA <- buildTx rowApp (getRecord rowNotes (VStr "a"))
+  gotA <- buildTx rowApp (getRecord rowNotes "a")
   case gotA of
     Just note -> check (cnTitle note == "a") ("getRecord \"a\" read title " ++ show (cnTitle note) ++ ", wanted \"a\"")
     Nothing -> failWith "getRecord found no row at a present key"
-  gotMissing <- buildTx rowApp (getRecord rowNotes (VStr "no-such-key"))
+  gotMissing <- buildTx rowApp (getRecord rowNotes "no-such-key")
   case gotMissing of
     Nothing -> return ()
     Just _ -> failWith "getRecord found a row at an absent key"

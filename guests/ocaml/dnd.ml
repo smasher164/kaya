@@ -30,7 +30,7 @@ let write_dropped_file () =
 
 let read_back (f : picked_file) =
   try
-    let fd, _seekable = Kaya_runtime.open_picked f.handle file_mode_read in
+    let fd, _seekable = open_picked f File_mode.Read in
     let ic = Unix.in_channel_of_descr fd in
     let len = in_channel_length ic in
     let s = really_input_string ic len in
@@ -45,12 +45,12 @@ let () =
   build app (fun () ->
       let items = collection_of item_record in
       let items2 = collection_of item_record in
-      let drop_status = signal_str ("no drop yet") in
-      let drag_status = signal_str ("no drag yet") in
-      let source_text = signal_str ("hello") in
-      let text_target = signal_str ("text target") in
-      let note_target = signal_str ("note target") in
-      let files_target = signal_str ("files target") in
+      let drop_status = signal Scalar.Str ("no drop yet") in
+      let drag_status = signal Scalar.Str ("no drag yet") in
+      let source_text = signal Scalar.Str ("hello") in
+      let text_target = signal Scalar.Str ("text target") in
+      let note_target = signal Scalar.Str ("note target") in
+      let files_target = signal Scalar.Str ("files target") in
       let source = ref None in
       let list = ref None in
       let row_label = ref None in
@@ -87,7 +87,7 @@ let () =
 
       (* The bound payload follows the row's record (docs/dnd-plan.md §4). *)
       let on_rename () =
-        update_record items2 (str_key "y") { title = "yy" }
+        update_record items2 (Key.str "y") { title = "yy" }
       in
 
       window ~title:"dnd" ();
@@ -190,16 +190,16 @@ let () =
           set_reorderable w true;
           on_drop app w (fun (d : dropped) ->
               match (d.clip, d.anchor) with
-              | Some (Custom (_, key)), Str_key anchor :: _ ->
-                  if d.before then move_before (record_handle items) (str_key key) (str_key anchor)
-                  else move_after (record_handle items) (str_key key) (str_key anchor)
+              | Some (Custom (_, key)), Key.Str anchor :: _ ->
+                  if d.before then move_before (record_handle items) (Key.str key) (Key.str anchor)
+                  else move_after (record_handle items) (Key.str key) (Key.str anchor)
               | _ -> ()))
         !list;
-      insert_record items (str_key "a") { title = "a" };
-      insert_record items (str_key "b") { title = "b" };
-      insert_record items (str_key "c") { title = "c" };
+      insert_record items (Key.str "a") { title = "a" };
+      insert_record items (Key.str "b") { title = "b" };
+      insert_record items (Key.str "c") { title = "c" };
       List.iter
-        (fun key -> insert_record items2 (str_key key) { title = key })
+        (fun key -> insert_record items2 (Key.str key) { title = key })
         [ "x"; "y" ]);
 
   exit (run app)

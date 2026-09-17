@@ -561,7 +561,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("    /// guest-created widget (id is a widget id); otherwise id is a");
     c.line("    /// template node id and keys is the copy's key path.");
     c.line("    public static bool ParseOccurrence(");
-    c.line("        byte[] rec, out ushort kind, out ulong id, out List<object> keys, out object payload)");
+    c.line("        byte[] rec, out ushort kind, out ulong id, out List<object> keys, out object? payload)");
     c.line("    {");
     c.line("        id = 0;");
     c.line("        keys = new List<object>();");
@@ -608,10 +608,13 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("                        : Encoding.UTF8.GetString(rec, fileAt + 8, vlen);");
     c.line("                    fileAt += 8 + ((vlen + 7) & ~7);");
     c.line("                }");
+    // ABSENCE IS null, never an empty name: a local path the platform
+    // could not give is a type the compiler checks (the review's C3).
+    c.line("                string local = (string)(parts[2] ?? \"\");");
     c.line("                files.Add(new PickedFile(");
     c.line("                    (ulong)(long)(parts[0] ?? 0L),");
     c.line("                    (string)(parts[1] ?? \"\"),");
-    c.line("                    (string)(parts[2] ?? \"\")));");
+    c.line("                    local.Length == 0 ? null : local));");
     c.line("            }");
     c.line("            payload = files;");
     c.line("            return true;");

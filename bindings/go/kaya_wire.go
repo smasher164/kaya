@@ -140,20 +140,20 @@ const (
 	MpropShortcut = 7
 	MpropRole = 8
 	MpropSymbol = 9
-	SectionsPresentationAuto = 0
-	SectionsPresentationBar = 1
-	SectionsPresentationSidebar = 2
+	SectionsPresentationAuto SectionsPresentation = 0
+	SectionsPresentationBar SectionsPresentation = 1
+	SectionsPresentationSidebar SectionsPresentation = 2
 	AppearanceSystem Appearance = 0
 	AppearanceLight Appearance = 1
 	AppearanceDark Appearance = 2
-	AlertChoiceAction0 = 0
-	AlertChoiceAction1 = 1
-	AlertChoiceCancel = 4294967295
-	NotificationOutcomeActivated = 0
-	NotificationOutcomeRefused = 1
-	FileModeRead = 0
-	FileModeWrite = 1
-	FileModeReadWrite = 2
+	AlertChoiceAction0 AlertChoice = 0
+	AlertChoiceAction1 AlertChoice = 1
+	AlertChoiceCancel AlertChoice = 4294967295
+	NotificationOutcomeActivated NotificationOutcome = 0
+	NotificationOutcomeRefused NotificationOutcome = 1
+	FileModeRead FileMode = 0
+	FileModeWrite FileMode = 1
+	FileModeReadWrite FileMode = 2
 	PlatformMac = 1
 	PlatformIos = 2
 	PlatformLinux = 3
@@ -356,6 +356,18 @@ const (
 	occTextFormatted = 30
 )
 
+func (s SectionsPresentation) String() string {
+	switch s {
+	case SectionsPresentationAuto:
+		return "auto"
+	case SectionsPresentationBar:
+		return "bar"
+	case SectionsPresentationSidebar:
+		return "sidebar"
+	}
+	return "SectionsPresentation(" + strconv.FormatInt(int64(s), 10) + ")"
+}
+
 func (a Appearance) String() string {
 	switch a {
 	case AppearanceSystem:
@@ -366,6 +378,40 @@ func (a Appearance) String() string {
 		return "dark"
 	}
 	return "Appearance(" + strconv.FormatInt(int64(a), 10) + ")"
+}
+
+func (a AlertChoice) String() string {
+	switch a {
+	case AlertChoiceAction0:
+		return "action0"
+	case AlertChoiceAction1:
+		return "action1"
+	case AlertChoiceCancel:
+		return "cancel"
+	}
+	return "AlertChoice(" + strconv.FormatInt(int64(a), 10) + ")"
+}
+
+func (n NotificationOutcome) String() string {
+	switch n {
+	case NotificationOutcomeActivated:
+		return "activated"
+	case NotificationOutcomeRefused:
+		return "refused"
+	}
+	return "NotificationOutcome(" + strconv.FormatInt(int64(n), 10) + ")"
+}
+
+func (f FileMode) String() string {
+	switch f {
+	case FileModeRead:
+		return "read"
+	case FileModeWrite:
+		return "write"
+	case FileModeReadWrite:
+		return "read_write"
+	}
+	return "FileMode(" + strconv.FormatInt(int64(f), 10) + ")"
 }
 
 func (a Align) String() string {

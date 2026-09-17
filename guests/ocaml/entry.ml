@@ -8,7 +8,7 @@ let () =
 
   let status, field, add, todos =
     build app (fun () ->
-       let status = signal_str ("no todos") in
+       let status = signal Scalar.Str ("no todos") in
        let todos = collection () in
 
        let field = entry () in

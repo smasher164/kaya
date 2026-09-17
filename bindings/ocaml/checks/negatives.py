@@ -16,6 +16,12 @@ CASES = {
     "signal_type_mismatch.ml": ["has type bool", "expected of type", "string"],
     "role_bad_type.ml": ["Kaya_app.Menu_role.t"],
     "key_bad_type.ml": ["Kaya_app.key"],
+    # The correction slice (the idiom review, 2026-09-17).
+    "alert_choice_bad_type.ml": ["Alert_choice.t"],
+    "file_mode_bad_type.ml": ["File_mode.t"],
+    "derive_witness.ml": ["Scalar.t"],
+    "engine_reach.ml": ["widget_handlers"],
+    "run_span.ml": ["start"],
 }
 
 

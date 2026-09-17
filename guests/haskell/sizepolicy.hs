@@ -3,7 +3,6 @@
 -- The sizepolicy scene, Haskell port — guests/rust/sizepolicy.rs,
 -- tools/scenes/sizepolicy.steps.
 
-import Data.Text (Text)
 import KayaApp
 
 -- The declared box of the two CONSTANT-mode canvases: the one number `scale`
@@ -41,13 +40,13 @@ main = kayaMain $ \app -> do
   (live, clock) <- buildTx app $ do
     window primary [WTitle "sizepolicy", WSize 480 420]
     -- SCALE (the default)
-    fit <- canvas box (figure box) [Grow 1, A11yId ("fit" :: Text), A11yLabel ("Scaled panel" :: Text)]
+    fit <- canvas box (figure box) [Grow 1, A11yId "fit", A11yLabel "Scaled panel"]
     -- FIXED
-    mark <- canvas box (figure box) [Grow 1, A11yId ("mark" :: Text), A11yLabel ("Fixed mark" :: Text)]
+    mark <- canvas box (figure box) [Grow 1, A11yId "mark", A11yLabel "Fixed mark"]
     fixed mark
     -- REDRAW and TICK declare NO drawing here: the function is the drawing.
-    live <- canvas box [] [Grow 1, A11yId ("live" :: Text), A11yLabel ("Redrawn panel" :: Text)]
-    clock <- canvas box [] [Grow 1, A11yId ("clock" :: Text), A11yLabel ("Animated bar" :: Text)]
+    live <- canvas box [] [Grow 1, A11yId "live", A11yLabel "Redrawn panel"]
+    clock <- canvas box [] [Grow 1, A11yId "clock", A11yLabel "Animated bar"]
     root <- column [pure fit, pure mark, pure live, pure clock]
     mount root
     return (live, clock)

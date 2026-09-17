@@ -17,8 +17,8 @@ function save(): void {
   app.window({ dirty: false });
 }
 
-function answered(choice: number | null): void {
-  if (choice === null) {
+function answered(choice: kaya.AlertChoice): void {
+  if (choice === "cancel") {
     // Answering a dialog is not saving: the mark stays up.
     status.set("kept editing");
   } else {

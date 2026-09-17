@@ -9,9 +9,9 @@ let () =
   let save_enabled = ref true in
 
   build app (fun () ->
-     let status = signal_str ("ready") in
+     let status = signal Scalar.Str ("ready") in
      (* Written against the MENU ITEM: the promoted button IS that item. *)
-     let can_save = signal_bool (true) in
+     let can_save = signal Scalar.Bool (true) in
 
      (* CATALOG PREORDER DECIDES PROMOTION — menubar-append order, then
         children depth-first, so every host promotes [Save, Find]. *)

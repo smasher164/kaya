@@ -156,7 +156,7 @@ func TestHeadingAndCaptionSugarIsALabelWearingItsRole(t *testing.T) {
 	recRows := func(body func(RecordCollection[string, sugarRec], *Tpl)) func(*Tx) {
 		return func(tx *Tx) {
 			c := CollectionOf[string, sugarRec](tx)
-			for row := range tx.Rows(c.Coll).All() {
+			for row := range tx.Rows(c.Handle()).All() {
 				body(c, row.Tpl)
 			}
 		}
@@ -164,7 +164,7 @@ func TestHeadingAndCaptionSugarIsALabelWearingItsRole(t *testing.T) {
 	sumRows := func(body func(SumCase[string, sugarNote])) func(*Tx) {
 		return func(tx *Tx) {
 			c := SumOf[string, any](tx, sugarNote{}, sugarTodo{})
-			for row := range tx.Rows(c.Coll).All() {
+			for row := range tx.Rows(c.Handle()).All() {
 				c.Case[sugarNote](row.Tpl, body)
 				c.Case[sugarTodo](row.Tpl, func(SumCase[string, sugarTodo]) {})
 			}

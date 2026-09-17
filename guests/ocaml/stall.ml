@@ -15,7 +15,7 @@ let () =
 
   build app (fun () ->
       window ~title:"stall" ();
-      let status = signal_str ("ready") in
+      let status = signal Scalar.Str ("ready") in
 
       (* DELIBERATELY WRONG, and the only place in this repo that is. *)
       let block () = Thread.delay block_seconds in

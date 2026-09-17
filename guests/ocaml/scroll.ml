@@ -9,11 +9,11 @@ let () =
   let status = ref None in
   build app (fun () ->
      window ~title:"scroll" ();
-     let s = signal_str ("at top") in
+     let s = signal Scalar.Str ("at top") in
      status := Some s;
      let on_bottom () = write s ("bottom clicked") in
      let row i () =
-       let caption = signal_str ((Printf.sprintf "row %d" i)) in
+       let caption = signal Scalar.Str ((Printf.sprintf "row %d" i)) in
        label ~bind:caption ()
      in
      let root =

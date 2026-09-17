@@ -18,9 +18,9 @@ static class RichTextScene
     {
         var parts = new List<string>();
         foreach (TextRun run in runs)
-            parts.Add(run.Value == "true"
-                ? $"{run.Start}:{run.Stop} {run.Name}"
-                : $"{run.Start}:{run.Stop} {run.Name}={run.Value}");
+            parts.Add(run.IsFlag
+                ? $"{run.Range.Start}:{run.Range.Stop} {run.Name}"
+                : $"{run.Range.Start}:{run.Range.Stop} {run.Name}={run.Value}");
         return string.Join("|", parts);
     }
 
@@ -47,14 +47,14 @@ static class RichTextScene
                 {
                     string source = edit.Source is EditSource s ? s.Name() : "?";
                     t.Write(last,
-                        $"edit {edit.Start}:{edit.Stop} <{edit.Inserted}> {source} "
+                        $"edit {edit.Range.Start}:{edit.Range.Stop} <{edit.Inserted}> {source} "
                             + $"[{Spell(edit.Runs)}]");
                     t.Write(runs, Spell(app.Document(editor).Runs));
                 });
                 app.OnFormat(editor, (t, act) =>
                 {
                     t.Write(last,
-                        $"format {act.Start}:{act.Stop} {act.Name}={act.Value ?? "off"}");
+                        $"format {act.Range.Start}:{act.Range.Stop} {act.Name}={act.Value ?? "off"}");
                     t.Write(runs, Spell(app.Document(editor).Runs));
                 });
 
@@ -75,7 +75,7 @@ static class RichTextScene
                     tx.Button("insert", onClick: t => // button#1
                     {
                         var edit = Edit.Insert(TextRange.In(Doc, 5, 0), ", big")
-                            .Mark(TextRange.In(", big", 2, 3), "italic", "true");
+                            .Mark(TextRange.In(", big", 2, 3), "italic", true);
                         t.ApplyEdit(editor, edit);
                         t.Write(runs, Spell(app.Document(editor).Runs));
                     });

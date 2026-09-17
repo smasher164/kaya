@@ -17,19 +17,19 @@ spell :: [Run] -> Text
 spell = T.intercalate "|" . map one
   where
     one r
-      | runValue r == "true" = span_ r <> runName r
-      | otherwise = span_ r <> runName r <> "=" <> runValue r
-    span_ r = T.pack (show (runStart r) ++ ":" ++ show (runEnd r) ++ " ")
+      | r.value == Flag True = span_ r <> r.name
+      | otherwise = span_ r <> r.name <> "=" <> markSpelling r.value
+    span_ r = tshow (fst r.range) <> ":" <> tshow (snd r.range) <> " "
 
 main :: IO ()
 main = kayaMain $ \app -> do
   (editor, lastAct, runs) <- buildTx app $ do
     window primary [WTitle "richtext"]
-    lastAct <- signal ("" :: Text)
-    runs <- signal ("" :: Text)
+    lastAct <- signalText ""
+    runs <- signalText ""
 
     -- Realized here because the handlers below need their handles.
-    editor <- textarea [Rich True, A11yId ("doc" :: Text), A11yLabel ("Document" :: Text)]
+    editor <- textarea [Rich True, A11yId "doc", A11yLabel "Document"]
     root <-
       column
         []
@@ -47,15 +47,15 @@ main = kayaMain $ \app -> do
                         $ documentOf docSource
                 submitTx app $ do
                   setDocument app editor doc
-                  writeSignal runs (spell (docRuns doc)),
+                  writeSignal runs (spell doc.runs),
               -- button#1 — the app's own edit, italic over the inserted word
               buttonOn "insert" $ do
                 submitTx app
                   ( applyEdit app editor
-                      (markEdit (2, 5) "italic" "true" (insertEdit 6 ", big"))
+                      (markEdit (2, 5) "italic" (Flag True) (insertEdit 6 ", big"))
                   )
                 doc <- document app editor
-                submitTx app (writeSignal runs (spell (docRuns doc))),
+                submitTx app (writeSignal runs (spell doc.runs)),
               -- button#2 — select the first word, for the toolbar act
               buttonOn "select word" (submitTx app (selectRange editor (0, 6))),
               -- button#3 — the toolbar: take bold off the selection
@@ -69,7 +69,7 @@ main = kayaMain $ \app -> do
               buttonOn "prefix" $ do
                 submitTx app (applyEdit app editor (insertEdit 0 "> "))
                 doc <- document app editor
-                submitTx app (writeSignal runs (spell (docRuns doc)))
+                submitTx app (writeSignal runs (spell doc.runs))
             ]
         ]
     mount root
@@ -80,25 +80,25 @@ main = kayaMain $ \app -> do
     submitTx app $ do
       writeSignal
         lastAct
-        ( "edit " <> T.pack (show (editStart e)) <> ":" <> T.pack (show (editEnd e))
+        ( "edit " <> tshow (fst e.range) <> ":" <> tshow (snd e.range)
             <> " <"
-            <> editInserted e
+            <> e.inserted
             <> "> "
-            <> maybe "?" editSourceName (editSource e)
+            <> maybe "?" editSourceName e.source
             <> " ["
-            <> spell (editRuns e)
+            <> spell e.runs
             <> "]"
         )
-      writeSignal runs (spell (docRuns doc))
+      writeSignal runs (spell doc.runs)
   onFormat app editor $ \act -> do
     doc <- document app editor
     submitTx app $ do
       writeSignal
         lastAct
-        ( "format " <> T.pack (show (formatStart act)) <> ":" <> T.pack (show (formatEnd act))
+        ( "format " <> tshow (fst act.range) <> ":" <> tshow (snd act.range)
             <> " "
-            <> formatName act
+            <> act.name
             <> "="
-            <> maybe "off" id (formatValue act)
+            <> maybe "off" markSpelling act.value
         )
-      writeSignal runs (spell (docRuns doc))
+      writeSignal runs (spell doc.runs)

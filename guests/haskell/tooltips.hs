@@ -11,7 +11,6 @@
 import GHC.Generics (Generic)
 
 import Data.Text (Text)
-import qualified Data.Text as T
 import KayaApp
 
 data Account = Account {name :: Text, note :: Text}
@@ -22,38 +21,38 @@ data Account = Account {name :: Text, note :: Text}
 main :: IO ()
 main = kayaMain $ \app -> do
   _ <- buildTx app $ do
-    nameHelp <- signal (T.pack "Your full name as it appears on the card")
+    nameHelp <- signalText "Your full name as it appears on the card"
     accounts <- collectionOf @Account
 
     let onSave =
-          submitTx app $ writeSignal nameHelp (T.pack "Your name, as saved")
+          submitTx app $ writeSignal nameHelp "Your name, as saved"
 
     (rows, _) <- forEach (recordHandle accounts) $
       withTplAttrs
-        [ TplHelp (field @"note" @Account),
-          TplA11yId (field @"name" @Account)
+        [ TplHelpField (field @"note" @Account),
+          TplA11yIdField (field @"name" @Account)
         ]
         (label (field @"name" @Account))
 
     root <-
       column
-        [Help ("The settings for this account" :: Text), A11yId ("settings" :: Text)] -- column#0
-        [ buttonOn "Save" onSave [Help ("Saves the draft to disk" :: Text), A11yId ("save" :: Text)], -- button#0
+        [Help "The settings for this account", A11yId "settings"] -- column#0
+        [ buttonOn "Save" onSave [Help "Saves the draft to disk", A11yId "save"], -- button#0
           buttonOn -- button#1
             "Discard"
             (return ())
-            [ Help ("Throws the draft away" :: Text),
-              A11yHint ("discard every change" :: Text),
-              A11yId ("discard" :: Text)
+            [ Help "Throws the draft away",
+              A11yHint "discard every change",
+              A11yId "discard"
             ],
-          entryOn (const (return ())) [Help nameHelp, A11yId ("fullname" :: Text)], -- entry#0
+          entryOn (const (return ())) [HelpBound nameHelp, A11yId "fullname"], -- entry#0
           sliderOn 0.0 1.0 0.5 (const (return ())) -- slider#0
-            [Help ("How loud the preview plays" :: Text), A11yId ("volume" :: Text)],
+            [Help "How loud the preview plays", A11yId "volume"],
           pure rows
         ]
     mount root
 
-    insertRecord accounts (T.pack "a") (Account "a" "The first account, opened in March")
-    insertRecord accounts (T.pack "b") (Account "b" "The second account, opened in May")
+    insertRecord accounts "a" (Account "a" "The first account, opened in March")
+    insertRecord accounts "b" (Account "b" "The second account, opened in May")
     return ()
   return ()

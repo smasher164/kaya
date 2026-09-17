@@ -20,11 +20,11 @@ let () =
   let commits = ref 0 in
 
   build app (fun () ->
-      let level_text = signal_str ("value: 50") in
-      let commit_text = signal_str ("commits: 0") in
-      let volume_text = signal_str ("volume: 0.5") in
-      let row_text = signal_str ("row: none") in
-      let pos = signal_f64 (50.0) in
+      let level_text = signal Scalar.Str ("value: 50") in
+      let commit_text = signal Scalar.Str ("commits: 0") in
+      let volume_text = signal Scalar.Str ("volume: 0.5") in
+      let row_text = signal Scalar.Str ("row: none") in
+      let pos = signal Scalar.F64 (50.0) in
       let tracks = collection_of track_record in
 
       let root =
@@ -68,7 +68,7 @@ let () =
       in
       mount root;
 
-      insert_record tracks (str_key "a") { name = "a"; level = 70.0 };
-      insert_record tracks (str_key "b") { name = "b"; level = 20.0 });
+      insert_record tracks (Key.str "a") { name = "a"; level = 70.0 };
+      insert_record tracks (Key.str "b") { name = "b"; level = 20.0 });
 
   exit (run app)

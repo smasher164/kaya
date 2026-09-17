@@ -112,11 +112,11 @@ function documentBytes(doc: Document): Uint8Array {
   u32(1 + doc.runs.length * 4);
   u32(0);
   str(doc.text);
-  for (const run of doc.runs) {
-    i64(run.start);
-    i64(run.end);
-    str(run.name);
-    str(run.value);
+  for (const mark of doc.runs) {
+    i64(mark.range[0]);
+    i64(mark.range[1]);
+    str(mark.name);
+    str(mark.value);
   }
   return Uint8Array.from(out);
 }
@@ -142,7 +142,7 @@ function documentOfBytes(bytes: Uint8Array): Document {
   }
   const doc = new Document(text);
   for (let i = 1; i + 3 < values.length; i += 4) {
-    doc.runs.push({ start: values[i] as number, end: values[i + 1] as number, name: values[i + 2] as string, value: values[i + 3] as string });
+    doc.runs.push(makeRun([values[i] as number, values[i + 1] as number], values[i + 2] as string, values[i + 3] as string));
   }
   return doc;
 }
@@ -365,6 +365,18 @@ function textRange(what: string, span: unknown): [number, number] {
         `kaya: ${what}: a range's ${name} is ${offset} — offsets count from the start of the text and kaya has no end-relative spelling (indexOf answers -1 for no match; test for it)`,
       );
     }
+  }
+  if ((start as number) > (stop as number)) {
+    throw new RangeError(`kaya: ${what}: a range runs ${start}..${stop}, a reversed span`);
+  }
+  return [start as number, stop as number];
+}
+
+/** A span the CORE sent, refused by name if its ends are out of order.
+ * No scene reaches it — the core always sends ordered spans. */
+function decodedSpan(what: string, start: unknown, stop: unknown): Span {
+  if ((start as number) > (stop as number)) {
+    throw new Error(`kaya: a ${what} carries ${start}..${stop}, a reversed span`);
   }
   return [start as number, stop as number];
 }
@@ -945,8 +957,8 @@ export class Widget extends Handle {
    * (docs/rich-text-plan.md §7). */
   applyEdit(edit: Edit): this {
     this._live("applyEdit()");
-    app()._absorbEdit(this.id, edit.start, edit.end, edit.inserted, edit.runs);
-    records().push(wire.tx_apply_edit(this.id, edit.start, edit.end, edit.runs.length, flatRuns(edit.runs), edit.inserted));
+    app()._absorbEdit(this.id, edit.range, edit.inserted, edit.runs);
+    records().push(wire.tx_apply_edit(this.id, edit.range[0], edit.range[1], edit.runs.length, flatRuns(edit.runs), edit.inserted));
     return this;
   }
 
@@ -1009,27 +1021,25 @@ export class Widget extends Handle {
    * `onFormat` hears nothing, so the app's own Document takes it HERE, as
    * it is sent. A rich LABEL takes it too. A `block` act covers the range's
    * whole paragraphs, and `block` with `body` removes. */
-  formatRange(span: readonly [number, number], name: string, value: string | boolean = true): this {
+  formatRange(span: Span, name: string, value: string | boolean = true): this {
     this._live("formatRange()");
-    const raw = textRange("formatRange", span);
     const attr = String(name);
     const text = markValue("format value", value);
-    const [start, stop] = app()._rangedActBounds(this.id, raw[0], raw[1], attr);
+    const at = app()._rangedActBounds(this.id, textRange("formatRange", span), attr);
     const removed = attr === "block" && text === "body";
-    app()._absorbFormat(this.id, start, stop, attr, removed ? null : text);
-    records().push(wire.tx_format_text(this.id, removed ? 1 : 0, 1, start, stop, [attr, removed ? "" : text]));
+    app()._absorbFormat(this.id, at, attr, removed ? null : text);
+    records().push(wire.tx_format_text(this.id, removed ? 1 : 0, 1, at[0], at[1], [attr, removed ? "" : text]));
     return this;
   }
 
   /** formatRange's removal: take an attribute off a byte range, the
    * selection untouched. */
-  unformatRange(span: readonly [number, number], name: string): this {
+  unformatRange(span: Span, name: string): this {
     this._live("unformatRange()");
-    const raw = textRange("unformatRange", span);
     const attr = String(name);
-    const [start, stop] = app()._rangedActBounds(this.id, raw[0], raw[1], attr);
-    app()._absorbFormat(this.id, start, stop, attr, null);
-    records().push(wire.tx_format_text(this.id, 1, 1, start, stop, [attr, ""]));
+    const at = app()._rangedActBounds(this.id, textRange("unformatRange", span), attr);
+    app()._absorbFormat(this.id, at, attr, null);
+    records().push(wire.tx_format_text(this.id, 1, 1, at[0], at[1], [attr, ""]));
     return this;
   }
 
@@ -1927,38 +1937,55 @@ export function selectSection(sectionId: number, window = 0): void {
   records().push(wire.tx_select_section(window, sectionId));
 }
 
-export const SECTIONS_AUTO = wire.SECTIONS_PRESENTATION_AUTO;
-export const SECTIONS_BAR = wire.SECTIONS_PRESENTATION_BAR;
-export const SECTIONS_SIDEBAR = wire.SECTIONS_PRESENTATION_SIDEBAR;
+/** An alert's three outcomes: the action the user pressed, by its slot,
+ * or the cancel every native dismissal answers. */
+export type AlertChoice = "action0" | "action1" | "cancel";
 
-/** The appearance's closed set, spelled for guests
- * (docs/tasks-s2b-plan.md R1-R3). */
-export const APPEARANCE_SYSTEM = wire.APPEARANCE_SYSTEM;
-export const APPEARANCE_LIGHT = wire.APPEARANCE_LIGHT;
-export const APPEARANCE_DARK = wire.APPEARANCE_DARK;
+const ALERT_CHOICES: ReadonlyMap<number, AlertChoice> = new Map([
+  [wire.ALERT_CHOICE_ACTION0, "action0"],
+  [wire.ALERT_CHOICE_ACTION1, "action1"],
+  [wire.ALERT_CHOICE_CANCEL, "cancel"],
+] as const);
+
+function alertChoice(code: number): AlertChoice {
+  const name = ALERT_CHOICES.get(code);
+  if (name === undefined) throw new Error(`kaya: an alert result carries choice ${code}, which this build does not know`);
+  return name;
+}
 
 /** A notification's two outcomes (docs/tasks-s3-plan.md N1). Dismissal
  * is not one of them: two platforms never report it. */
-export const NOTIFICATION_ACTIVATED = wire.NOTIFICATION_OUTCOME_ACTIVATED;
-export const NOTIFICATION_REFUSED = wire.NOTIFICATION_OUTCOME_REFUSED;
+export type NotificationOutcome = "activated" | "refused";
+
+const NOTIFICATION_OUTCOMES: ReadonlyMap<number, NotificationOutcome> = new Map([
+  [wire.NOTIFICATION_OUTCOME_ACTIVATED, "activated"],
+  [wire.NOTIFICATION_OUTCOME_REFUSED, "refused"],
+] as const);
+
+function notificationOutcome(code: number): NotificationOutcome {
+  const name = NOTIFICATION_OUTCOMES.get(code);
+  if (name === undefined) throw new Error(`kaya: a notification result carries outcome ${code}, which this build does not know`);
+  return name;
+}
 
 export type AlertOptions = {
   title?: string;
   message?: string;
   actions?: readonly string[];
   cancel: string;
-  onResult?: (choice: number | null) => void;
+  onResult?: (choice: AlertChoice) => void;
   window?: number;
 };
 
 /** Request a modal alert: up to two action labels (the platform floor)
  * plus the REQUIRED cancel label. onResult(choice) fires exactly once —
- * 0 or 1 for actions, null for every native dismissal — and WITHOUT it
- * the call answers a promise of the choice instead, whose continuation
- * is its own implicit transaction. One alert may be live per process. */
-export function showAlert(opts: AlertOptions & { onResult: (choice: number | null) => void }): number;
-export function showAlert(opts: AlertOptions): Promise<number | null>;
-export function showAlert(opts: AlertOptions): number | Promise<number | null> {
+ * "action0" or "action1" for the actions, "cancel" for every native
+ * dismissal — and WITHOUT it the call answers a promise of the choice
+ * instead, whose continuation is its own implicit transaction. One alert
+ * may be live per process. */
+export function showAlert(opts: AlertOptions & { onResult: (choice: AlertChoice) => void }): number;
+export function showAlert(opts: AlertOptions): Promise<AlertChoice>;
+export function showAlert(opts: AlertOptions): number | Promise<AlertChoice> {
   const actions = [...(opts.actions ?? [])];
   if (actions.length > 2) throw new RangeError("an alert carries at most 2 actions (the platform floor)");
   if (!opts.cancel) throw new Error("the cancel slot always exists and needs a name — pass cancel:");
@@ -1974,7 +2001,7 @@ export function showAlert(opts: AlertOptions): number | Promise<number | null> {
     show();
     return alertId;
   }
-  return new Promise<number | null>((resolve) => {
+  return new Promise<AlertChoice>((resolve) => {
     a._alertHandlers.set(alertId, resolve);
     show();
   });
@@ -1989,19 +2016,19 @@ export type NotificationOptions = {
   /** A UNIX time in seconds, handed to the OS scheduler where one
    * exists. Absent (0) posts now. */
   at?: number;
-  onResult?: (outcome: number) => void;
+  onResult?: (outcome: NotificationOutcome) => void;
 };
 
 /** Post a local notification (docs/tasks-s3-plan.md N1, N2): the alert's
  * grammar without a window — the platform shows it outside the app.
- * onResult(outcome) fires exactly once, kaya.NOTIFICATION_ACTIVATED when
- * the user opened it and kaya.NOTIFICATION_REFUSED when the platform
- * would not post it, and WITHOUT it the call answers a promise of the
- * outcome instead, whose continuation is its own implicit transaction
- * (docs/js-plan.md §4, showAlert's own twin). */
-export function showNotification(opts: NotificationOptions & { onResult: (outcome: number) => void }): number;
-export function showNotification(opts: NotificationOptions): Promise<number>;
-export function showNotification(opts: NotificationOptions): number | Promise<number> {
+ * onResult(outcome) fires exactly once, "activated" when the user opened
+ * it and "refused" when the platform would not post it, and WITHOUT it
+ * the call answers a promise of the outcome instead, whose continuation
+ * is its own implicit transaction (docs/js-plan.md §4, showAlert's own
+ * twin). */
+export function showNotification(opts: NotificationOptions & { onResult: (outcome: NotificationOutcome) => void }): number;
+export function showNotification(opts: NotificationOptions): Promise<NotificationOutcome>;
+export function showNotification(opts: NotificationOptions): number | Promise<NotificationOutcome> {
   if (!opts.title) throw new Error("a notification needs a title — pass title:");
   const a = app();
   const id = opts.notification;
@@ -2013,7 +2040,7 @@ export function showNotification(opts: NotificationOptions): number | Promise<nu
     show();
     return id;
   }
-  return new Promise<number>((resolve) => {
+  return new Promise<NotificationOutcome>((resolve) => {
     a._notificationHandlers.set(id, resolve);
     show();
   });
@@ -2034,7 +2061,7 @@ export function cancelNotification(notification: number): void {
  * does not retire, so the twin would be a different semantics wearing
  * the family's spelling. It needs no transaction; call it beside the
  * scene declaration. */
-export function onNotificationActivation(f: (notification: number, outcome: number) => void): void {
+export function onNotificationActivation(f: (notification: number, outcome: NotificationOutcome) => void): void {
   app()._notificationActivation = f;
 }
 
@@ -2074,13 +2101,14 @@ export function link(pattern: string, f: (params: Record<string, string>) => voi
 export class PickedFile {
   readonly handle: number;
   readonly name: string;
-  readonly localPath: string;
+  /** A RE-OPENABLE NAME, null unless re-opening it actually works. */
+  readonly localPath: string | null;
 
   /** @internal */
   constructor(handle: number, name: string, localPath: string) {
     this.handle = handle;
     this.name = name;
-    this.localPath = localPath;
+    this.localPath = localPath === "" ? null : localPath;
   }
 
   /** The whole file's bytes, read by the addon over the platform handle —
@@ -2100,9 +2128,23 @@ export class PickedFile {
   /** The streaming route: `{fd, seekable}` — a descriptor for node:fs, and
    * whether it supports random access. Unix only (see read/write); close
    * it with fs.closeSync. BLOCKS. */
-  open(mode: number = wire.FILE_MODE_READ): { fd: number; seekable: boolean } {
-    return runtime.openPicked(this.handle, mode);
+  open(mode: FileMode = "read"): { fd: number; seekable: boolean } {
+    return runtime.openPicked(this.handle, fileMode(mode));
   }
+}
+
+/** How a picked file is re-opened (crates/kaya/src/spec.rs decides the
+ * numbers; tools/check-file-modes.py holds them together). */
+export type FileMode = "read" | "write" | "read_write";
+
+const FILE_MODES: Record<FileMode, number> = {
+  read: wire.FILE_MODE_READ,
+  write: wire.FILE_MODE_WRITE,
+  read_write: wire.FILE_MODE_READ_WRITE,
+};
+
+function fileMode(mode: unknown): number {
+  return vocab(FILE_MODES, "mode", mode, '"read"');
 }
 
 export type Filter = readonly [label: string, extensions: string | readonly string[]];
@@ -2346,39 +2388,39 @@ export type UndoDelta = {
   /** A restored blob field (a Document's bytes, an image's) arrives
    * REDEEMED: the delta names it by occurrence handle and the decoder
    * takes the bytes (crates/kaya/src/wire.rs, `undo_body`). */
-  signals: { signal: Signal<unknown>; value: wire.Decoded | Uint8Array }[];
-  texts: { widget: number; path: Key[]; text: string }[];
-  entries: { collection: Collection<unknown, unknown>; path: Key[]; key: Key; state: { variant: number; fields: (wire.Decoded | Uint8Array)[] } | null }[];
-  orders: { collection: Collection<unknown, unknown>; path: Key[]; keys: Key[] }[];
+  signals: { signal: Signal<unknown> | null; signalId: number; value: wire.Decoded | Uint8Array }[];
+  /** `widgetId` is the wire's own id, not a handle: this binding keeps no
+   * widget registry to resolve it through. */
+  texts: { widgetId: number; path: Key[]; text: string }[];
+  entries: { collection: Collection<unknown, unknown> | null; collectionId: number; path: Key[]; key: Key; state: { variant: number; fields: (wire.Decoded | Uint8Array)[] } | null }[];
+  orders: { collection: Collection<unknown, unknown> | null; collectionId: number; path: Key[]; keys: Key[] }[];
 };
 
-/** Resolve the wire's raw tuples into UndoDelta's named-field handles,
- * dropping any entry whose signal/collection id the registry does not
- * hold (the same silent skip `_absorbUndo` made positionally before). */
+/** Resolve the wire's raw tuples into UndoDelta's named-field handles.
+ * NOTHING IS DROPPED: a signal or collection id this process does not
+ * hold answers a null handle beside its own id, so the app-visible
+ * delta counts what the core sent — the count every other binding
+ * hands over. The internal fold below is the one that skips. */
 function undoDelta(app: App, payload: wire.UndoPayload): UndoDelta {
-  const signals: UndoDelta["signals"] = [];
-  for (const [id, value] of payload.signals) {
-    const signal = app._signals.get(id);
-    if (signal !== undefined) signals.push({ signal, value });
-  }
-  const texts: UndoDelta["texts"] = payload.texts.map(([widget, path, text]) => ({ widget, path: path as Key[], text }));
-  const entries: UndoDelta["entries"] = [];
-  for (const [collId, path, key, state] of payload.entries) {
-    const collection = app._collections.get(collId);
-    if (collection === undefined) continue;
-    entries.push({
-      collection,
-      path: path as Key[],
-      key: key as Key,
-      state: state === null ? null : { variant: state[0], fields: state[1] },
-    });
-  }
-  const orders: UndoDelta["orders"] = [];
-  for (const [collId, path, keys] of payload.orders) {
-    const collection = app._collections.get(collId);
-    if (collection === undefined) continue;
-    orders.push({ collection, path: path as Key[], keys: keys as Key[] });
-  }
+  const signals: UndoDelta["signals"] = payload.signals.map(([id, value]) => ({
+    signal: app._signals.get(id) ?? null,
+    signalId: id,
+    value,
+  }));
+  const texts: UndoDelta["texts"] = payload.texts.map(([widgetId, path, text]) => ({ widgetId, path: path as Key[], text }));
+  const entries: UndoDelta["entries"] = payload.entries.map(([collId, path, key, state]) => ({
+    collection: app._collections.get(collId) ?? null,
+    collectionId: collId,
+    path: path as Key[],
+    key: key as Key,
+    state: state === null ? null : { variant: state[0], fields: state[1] },
+  }));
+  const orders: UndoDelta["orders"] = payload.orders.map(([collId, path, keys]) => ({
+    collection: app._collections.get(collId) ?? null,
+    collectionId: collId,
+    path: path as Key[],
+    keys: keys as Key[],
+  }));
   return { signals, texts, entries, orders };
 }
 
@@ -2410,13 +2452,44 @@ function blockValue(kind: unknown): BlockName {
   return kind as BlockName;
 }
 
-/** One attribute over one span, in kaya's unit — UTF-8 BYTE offsets
- * (docs/ranges-units.md §7). `value` is "true" for the flags, a URL for a
- * link, a kind for a block. */
-export type Run = { start: number; end: number; name: string; value: string };
+/** A half-open span in kaya's unit — UTF-8 BYTE offsets
+ * (docs/ranges-units.md §7). The `[start, stop]` pair every write side
+ * already takes, on the read side too: JS has no range type, and a
+ * labelled readonly tuple is the pair with range semantics. */
+export type Span = readonly [start: number, stop: number];
+
+/** The wire's own spelling of a flag attribute; `markValue` coerces a
+ * boolean to it and `Run.isFlag` reads it back. */
+const FLAG = "true";
+
+/** One attribute over one span. `value` is a URL for a link and a kind
+ * for a block; a flag attribute ("bold", "italic", …) carries the wire's
+ * own string and is read back as the boolean `isFlag`. */
+export type Run = { readonly range: Span; readonly name: string; readonly value: string; readonly isFlag: boolean };
+
+/** Every Run is minted here, so `isFlag` cannot drift from `value`. */
+function makeRun(range: Span, name: string, value: string): Run {
+  return { range, name, value, isFlag: value === FLAG };
+}
+
+/** One run, for an app that builds a Document's runs itself rather than
+ * chaining `mark`: a flag attribute takes the boolean and everything else
+ * its own string. */
+export function run(range: Span, name: string, value: string | boolean): Run {
+  return makeRun(textRange("run", range), String(name), markValue("a run's value", value));
+}
+
+/** The same run over another span — what a splice does. */
+function reSpan(run: Run, range: Span): Run {
+  return { ...run, range };
+}
+
+function shifted(span: Span, by: number): Span {
+  return [span[0] + by, span[1] + by];
+}
 
 /** A toolbar act over a range; `value` null is the attribute taken off. */
-export type Format = { start: number; end: number; name: string; value: string | null };
+export type Format = { readonly range: Span; readonly name: string; readonly value: string | null; readonly isFlag: boolean };
 
 /** A `rich` textarea's text and runs, kept current by the binding from
  * the deltas it delivers (docs/rich-text-plan.md R1). The marks CHAIN:
@@ -2432,9 +2505,8 @@ export class Document {
   }
 
   /** One attribute over one range. Returns the document. */
-  mark(span: readonly [number, number], name: string, value: string | boolean): this {
-    const [start, stop] = textRange("Document.mark", span);
-    this.runs.push({ start, end: stop, name: String(name), value: markValue("a run's value", value) });
+  mark(span: Span, name: string, value: string | boolean): this {
+    this.runs.push(makeRun(textRange("Document.mark", span), String(name), markValue("a run's value", value)));
     return this;
   }
 
@@ -2471,7 +2543,7 @@ export class Document {
   /** The value `name` carries at a byte offset, or null. */
   attrAt(byte: number, name: string): string | null {
     for (const run of this.runs) {
-      if (run.name === name && run.start <= byte && byte < run.end) return run.value;
+      if (run.name === name && run.range[0] <= byte && byte < run.range[1]) return run.value;
     }
     return null;
   }
@@ -2507,38 +2579,33 @@ function editSource(source: number): EditSourceName {
  * what provoked an edit the widget delivered and undefined on one the app
  * builds; applyEdit sends nothing of it. */
 export class Edit {
-  start: number;
-  end: number;
+  range: Span;
   inserted: string;
   runs: Run[];
   source?: EditSourceName;
 
-  constructor(start: number, end: number, inserted = "", runs: readonly Run[] = []) {
-    this.start = start;
-    this.end = end;
+  constructor(range: Span, inserted = "", runs: readonly Run[] = []) {
+    this.range = range;
     this.inserted = textValue("Edit text", inserted);
     this.runs = runs.map((r) => ({ ...r }));
   }
 
   static insert(at: number, text: string): Edit {
-    return new Edit(at, at, text);
+    return new Edit([at, at], text);
   }
 
-  static delete(span: readonly [number, number]): Edit {
-    const [start, stop] = textRange("Edit.delete", span);
-    return new Edit(start, stop, "");
+  static delete(span: Span): Edit {
+    return new Edit(textRange("Edit.delete", span), "");
   }
 
-  static replace(span: readonly [number, number], text: string): Edit {
-    const [start, stop] = textRange("Edit.replace", span);
-    return new Edit(start, stop, text);
+  static replace(span: Span, text: string): Edit {
+    return new Edit(textRange("Edit.replace", span), text);
   }
 
   /** One attribute over the INSERTED text's own offsets. Returns the
    * edit. */
-  mark(span: readonly [number, number], name: string, value: string | boolean): this {
-    const [start, stop] = textRange("Edit.mark", span);
-    this.runs.push({ start, end: stop, name: String(name), value: markValue("a run's value", value) });
+  mark(span: Span, name: string, value: string | boolean): this {
+    this.runs.push(makeRun(textRange("Edit.mark", span), String(name), markValue("a run's value", value)));
     return this;
   }
 }
@@ -2550,29 +2617,30 @@ function normalizeRuns(runs: readonly Run[]): Run[] {
   for (const name of [...new Set(runs.map((r) => r.name))].sort()) {
     let painted: Run[] = [];
     for (const run of runs.filter((r) => r.name === name)) {
-      if (run.start >= run.end) continue;
+      if (run.range[0] >= run.range[1]) continue;
       const kept: Run[] = [];
       for (const old of painted) {
-        if (old.end <= run.start || old.start >= run.end) {
+        if (old.range[1] <= run.range[0] || old.range[0] >= run.range[1]) {
           kept.push(old);
           continue;
         }
-        if (old.start < run.start) kept.push({ ...old, end: run.start });
-        if (old.end > run.end) kept.push({ ...old, start: run.end });
+        if (old.range[0] < run.range[0]) kept.push(reSpan(old, [old.range[0], run.range[0]]));
+        if (old.range[1] > run.range[1]) kept.push(reSpan(old, [run.range[1], old.range[1]]));
       }
-      kept.push({ ...run });
+      kept.push(run);
       painted = kept;
     }
-    painted.sort((a, b) => a.start - b.start);
+    painted.sort((a, b) => a.range[0] - b.range[0]);
     const merged: Run[] = [];
     for (const run of painted) {
       const last = merged[merged.length - 1];
-      if (last !== undefined && last.end === run.start && last.value === run.value) last.end = run.end;
-      else merged.push({ ...run });
+      if (last !== undefined && last.range[1] === run.range[0] && last.value === run.value) {
+        merged[merged.length - 1] = reSpan(last, [last.range[0], run.range[1]]);
+      } else merged.push(run);
     }
     out.push(...merged);
   }
-  out.sort((a, b) => a.start - b.start || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  out.sort((a, b) => a.range[0] - b.range[0] || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   return out;
 }
 
@@ -2580,7 +2648,7 @@ function normalizeRuns(runs: readonly Run[]): Run[] {
 function runsFrom(flat: readonly wire.Decoded[]): Run[] {
   const runs: Run[] = [];
   for (let i = 0; i + 3 < flat.length; i += 4) {
-    runs.push({ start: flat[i] as number, end: flat[i + 1] as number, name: flat[i + 2] as string, value: flat[i + 3] as string });
+    runs.push(makeRun([flat[i] as number, flat[i + 1] as number], flat[i + 2] as string, flat[i + 3] as string));
   }
   return runs;
 }
@@ -2588,7 +2656,7 @@ function runsFrom(flat: readonly wire.Decoded[]): Run[] {
 /** `runsFrom`'s inverse: the wire's four values per run. */
 function flatRuns(runs: readonly Run[]): wire.WireValue[] {
   const flat: wire.WireValue[] = [];
-  for (const run of runs) flat.push(new I64(run.start), new I64(run.end), run.name, run.value);
+  for (const run of runs) flat.push(new I64(run.range[0]), new I64(run.range[1]), run.name, run.value);
   return flat;
 }
 
@@ -2603,7 +2671,8 @@ function onBoundary(data: Buffer, at: number): boolean {
 /** One edit folded into a document: runs before it keep, runs after it
  * shift, a run the edit falls inside is cut, and the inserted text's own
  * runs land relative to the edit (crates/kaya/src/app.rs, foldEdit). */
-function foldEdit(doc: Document, start: number, stop: number, inserted: string, runs: readonly Run[]): void {
+function foldEdit(doc: Document, range: Span, inserted: string, runs: readonly Run[]): void {
+  const [start, stop] = range;
   const data = Buffer.from(doc.text, "utf8");
   const added = Buffer.from(inserted, "utf8");
   if (stop > data.length || !onBoundary(data, start) || !onBoundary(data, stop)) {
@@ -2616,10 +2685,10 @@ function foldEdit(doc: Document, start: number, stop: number, inserted: string, 
   const shift = added.length - (stop - start);
   const next: Run[] = [];
   for (const run of doc.runs) {
-    if (run.start < start) next.push({ ...run, end: Math.min(run.end, start) });
-    if (run.end > stop) next.push({ ...run, start: Math.max(run.start, stop) + shift, end: run.end + shift });
+    if (run.range[0] < start) next.push(reSpan(run, [run.range[0], Math.min(run.range[1], start)]));
+    if (run.range[1] > stop) next.push(reSpan(run, [Math.max(run.range[0], stop) + shift, run.range[1] + shift]));
   }
-  for (const run of runs) next.push({ ...run, start: run.start + start, end: run.end + start });
+  for (const run of runs) next.push(reSpan(run, shifted(run.range, start)));
   doc.text = Buffer.concat([data.subarray(0, start), added, data.subarray(stop)]).toString("utf8");
   doc.runs = normalizeRuns(next);
 }
@@ -2627,18 +2696,19 @@ function foldEdit(doc: Document, start: number, stop: number, inserted: string, 
 /** One toolbar act folded into a document: the attribute put over the
  * range or taken off it, clipping THIS attribute's runs and no other
  * (crates/kaya/src/app.rs, foldFormat). */
-function foldFormat(doc: Document, start: number, stop: number, name: string, value: string | null): void {
+function foldFormat(doc: Document, range: Span, name: string, value: string | null): void {
+  const [start, stop] = range;
   if (start >= stop) return;
   const next: Run[] = [];
   for (const run of doc.runs) {
-    if (run.name !== name || run.end <= start || run.start >= stop) {
+    if (run.name !== name || run.range[1] <= start || run.range[0] >= stop) {
       next.push(run);
       continue;
     }
-    if (run.start < start) next.push({ ...run, end: start });
-    if (run.end > stop) next.push({ ...run, start: stop });
+    if (run.range[0] < start) next.push(reSpan(run, [run.range[0], start]));
+    if (run.range[1] > stop) next.push(reSpan(run, [stop, run.range[1]]));
   }
-  if (value !== null) next.push({ start, end: stop, name, value });
+  if (value !== null) next.push(makeRun(range, name, value));
   doc.runs = normalizeRuns(next);
 }
 
@@ -2850,12 +2920,6 @@ export const ACCEPT_FILES = "files";
 export const OP_COPY = "copy";
 export const OP_MOVE = "move";
 
-export const ROLE_SETTINGS = "settings";
-export const ROLE_CUT = "cut";
-export const ROLE_COPY = "copy";
-export const ROLE_PASTE = "paste";
-export const ROLE_UNDO = "undo";
-export const ROLE_REDO = "redo";
 
 function menuRequireCatalog(scope: MenuScope): void {
   if (!scope._shortcutOk) {
@@ -3541,30 +3605,39 @@ function symbolValue(symbol: unknown): number {
   return vocab(SYMBOL_NAMES, "symbol", symbol, "kaya.Symbol.COPY");
 }
 
-export type SectionsPresentationValue = typeof SECTIONS_AUTO | typeof SECTIONS_BAR | typeof SECTIONS_SIDEBAR;
+/** How a window presents its sections. The table is keyed BY THE UNION,
+ * so a name added to one without the other does not compile. */
 export type SectionsPresentationName = "auto" | "bar" | "sidebar";
-const SECTIONS_PRESENTATION_NAMES: Record<string, number> = { auto: SECTIONS_AUTO, bar: SECTIONS_BAR, sidebar: SECTIONS_SIDEBAR };
+const SECTIONS_PRESENTATION_NAMES: Record<SectionsPresentationName, number> = {
+  auto: wire.SECTIONS_PRESENTATION_AUTO,
+  bar: wire.SECTIONS_PRESENTATION_BAR,
+  sidebar: wire.SECTIONS_PRESENTATION_SIDEBAR,
+};
 
 function sectionsPresentationValue(value: unknown): number {
-  return vocab(SECTIONS_PRESENTATION_NAMES, "sectionsPresentation", value, "kaya.SECTIONS_SIDEBAR");
+  return vocab(SECTIONS_PRESENTATION_NAMES, "sectionsPresentation", value, '"sidebar"');
 }
 
-export type AppearanceValue = typeof APPEARANCE_SYSTEM | typeof APPEARANCE_LIGHT | typeof APPEARANCE_DARK;
+/** The app's own light/dark choice (docs/tasks-s2b-plan.md R1-R3). */
 export type AppearanceName = "system" | "light" | "dark";
-const APPEARANCE_NAMES: Record<string, number> = { system: APPEARANCE_SYSTEM, light: APPEARANCE_LIGHT, dark: APPEARANCE_DARK };
+const APPEARANCE_NAMES: Record<AppearanceName, number> = {
+  system: wire.APPEARANCE_SYSTEM,
+  light: wire.APPEARANCE_LIGHT,
+  dark: wire.APPEARANCE_DARK,
+};
 
 function appearanceValue(value: unknown): number {
-  return vocab(APPEARANCE_NAMES, "appearance", value, "kaya.APPEARANCE_SYSTEM");
+  return vocab(APPEARANCE_NAMES, "appearance", value, '"system"');
 }
 
 /** The menu item's standard-command vocabulary (crates/kaya/src/scene.rs
  * MENU_ROLES, tools/check-roles.py) — a string on the wire, with no
  * numeric encoding to pair it with. */
 export type MenuRole = "settings" | "cut" | "copy" | "paste" | "undo" | "redo";
-const MENU_ROLES: ReadonlySet<string> = new Set<MenuRole>(["settings", "cut", "copy", "paste", "undo", "redo"]);
+const MENU_ROLES: ReadonlySet<MenuRole> = new Set<MenuRole>(["settings", "cut", "copy", "paste", "undo", "redo"]);
 
 function menuRoleValue(role: unknown): string {
-  if (typeof role !== "string" || !MENU_ROLES.has(role)) {
+  if (typeof role !== "string" || !MENU_ROLES.has(role as MenuRole)) {
     throw new Error(`kaya: role must be one of ${JSON.stringify([...MENU_ROLES].sort())}, got ${JSON.stringify(role)}`);
   }
   return role;
@@ -4175,11 +4248,11 @@ export type WindowProps = {
    * unless this is false. Inert on the phones. */
   rememberFrame?: boolean;
   panes?: number;
-  sectionsPresentation?: SectionsPresentationValue | SectionsPresentationName;
+  sectionsPresentation?: SectionsPresentationName;
   /** The app's OWN light/dark choice, applied process-wide from the
    * default window (kaya.APPEARANCE_SYSTEM / _LIGHT / _DARK,
    * docs/tasks-s2b-plan.md R1-R3). */
-  appearance?: AppearanceValue | AppearanceName;
+  appearance?: AppearanceName;
   inset?: number;
 };
 
@@ -4216,6 +4289,8 @@ type ScopeKind = "window" | "build" | "push" | "section";
  * section) or without one (build). Entries and sections NEST inside an
  * open transaction; windows and builds do not. Threads the body's return
  * value back out (docs/js-plan.md §1). */
+function runScope<T>(kind: ScopeKind, body: () => T, surface: number, open: () => void): T;
+function runScope(kind: ScopeKind, body: undefined, surface: number, open: () => void): undefined;
 function runScope<T>(
   kind: ScopeKind,
   body: (() => T) | undefined,
@@ -4322,15 +4397,15 @@ export class App {
   /** @internal */ readonly _nodeHandlers = new Map<string, Handler>();
   /** @internal */ readonly _nodeOwners = new Map<number, Collection<unknown, unknown>>();
   /** @internal */ readonly _itemCatalogs = new Map<number, ContextCatalog>();
-  /** @internal */ readonly _alertHandlers = new Map<number, (choice: number | null) => void>();
+  /** @internal */ readonly _alertHandlers = new Map<number, (choice: AlertChoice) => void>();
   /** @internal One-shot, keyed by the GUEST's notification id (the
    * alert's grammar; many may be live at once). */
-  readonly _notificationHandlers = new Map<number, (outcome: number) => void>();
+  readonly _notificationHandlers = new Map<number, (outcome: NotificationOutcome) => void>();
   /** @internal NOT one-shot, and not keyed at all: the process-level
    * handler for a result whose id has none above
    * (docs/tasks-s9-plan.md R1). A relaunched process never called
    * showNotification. */
-  _notificationActivation: ((notification: number, outcome: number) => void) | undefined;
+  _notificationActivation: ((notification: number, outcome: NotificationOutcome) => void) | undefined;
   /** @internal NOT one-shot either: a route declared by link() answers
    * every URL that matches it, for the life of the process
    * (docs/app-links-plan.md §4), and the core owns the pattern table —
@@ -4437,7 +4512,7 @@ export class App {
     return runScope<T>("window", body, windowId, () => {
       records().push(wire.tx_create_window(windowId));
       windowProps(windowId, opts);
-    }) as T;
+    });
   }
 
   /** The scene scope: an ambient transaction whose single top-level
@@ -4466,13 +4541,16 @@ export class App {
       windowProps(windowId, opts);
       return undefined;
     }
-    return runScope<T>("window", body, windowId, () => windowProps(windowId, opts));
+    const open = (): void => windowProps(windowId, opts);
+    return body === undefined
+      ? runScope("window", undefined, windowId, open)
+      : runScope<T>("window", body, windowId, open);
   }
 
   /** An ambient transaction without the mount — for mutations outside
    * handlers. */
   build<T>(body: () => T): T {
-    return runScope<T>("build", body, 0, () => {}) as T;
+    return runScope<T>("build", body, 0, () => {});
   }
 
   /** A navigation entry's scene scope (DESIGN.md, Navigation): push_entry
@@ -4485,7 +4563,7 @@ export class App {
       if (opts.interceptBack !== undefined) records().push(wire.tx_set_entry_intercept_back(entryId, Boolean(opts.interceptBack)));
       if (opts.onPopped !== undefined) this._entryPopped.set(entryId, opts.onPopped);
       if (opts.onBack !== undefined) this._backRequested.set(entryId, opts.onBack);
-    }) as T;
+    });
   }
 
   /** A section's scene scope (DESIGN.md, Sections): add_section plus the
@@ -4503,7 +4581,7 @@ export class App {
         else records().push(wire.tx_set_section_badge(sectionId, opts.badge));
       }
       if (opts.onSelected !== undefined) this._sectionSelected.set(sectionId, opts.onSelected);
-    }) as T;
+    });
   }
 
   /** A top-level menu in the window's command catalog — the menubar rides
@@ -4587,8 +4665,9 @@ export class App {
    * derived write rode the same transaction as its cause and the core
    * restored it (bindings/python/kaya/__init__.py, _absorb_undo). */
   private _absorbUndo(delta: UndoDelta): void {
-    for (const { signal, value } of delta.signals) signal._mirror = value;
+    for (const { signal, value } of delta.signals) if (signal !== null) signal._mirror = value;
     for (const { collection, path, key, state } of delta.entries) {
+      if (collection === null) continue;
       const pk = pathKey(path);
       let table = collection._instances.get(pk);
       if (table === undefined) {
@@ -4604,7 +4683,7 @@ export class App {
       table.set(key, collection._decode(state.variant, state.fields, table.get(key)));
     }
     for (const { collection, path, keys } of delta.orders) {
-      const table = collection._instances.get(pathKey(path));
+      const table = collection?._instances.get(pathKey(path));
       if (table === undefined) continue;
       const named = new Set(keys);
       for (const key of [...keys, ...[...table.keys()].filter((k) => !named.has(k as Key))]) {
@@ -4634,8 +4713,8 @@ export class App {
   }
 
   /** @internal */
-  _absorbEdit(widget: number, start: number, stop: number, inserted: string, runs: readonly Run[]): void {
-    foldEdit(this._mirrorDocument(widget), start, stop, inserted, runs);
+  _absorbEdit(widget: number, range: Span, inserted: string, runs: readonly Run[]): void {
+    foldEdit(this._mirrorDocument(widget), range, inserted, runs);
   }
 
   /** @internal */
@@ -4673,18 +4752,18 @@ export class App {
   /** @internal A ranged act's range in the fold's text: a `block` covers
    * the whole paragraphs it touches, as the core snaps it
    * (docs/rich-text-plan.md §17). */
-  _rangedActBounds(widget: number, start: number, stop: number, name: string): [number, number] {
-    if (name !== "block") return [start, stop];
+  _rangedActBounds(widget: number, span: Span, name: string): Span {
+    if (name !== "block") return span;
     const data = Buffer.from(this._documents.get(widget)?.text ?? "", "utf8");
-    const from = Math.min(start, data.length);
-    const to = Math.min(stop, data.length);
+    const from = Math.min(span[0], data.length);
+    const to = Math.min(span[1], data.length);
     const at = data.subarray(to).indexOf(0x0a);
     return [data.subarray(0, from).lastIndexOf(0x0a) + 1, at < 0 ? data.length : to + at];
   }
 
   /** @internal */
-  _absorbFormat(widget: number, start: number, stop: number, name: string, value: string | null): void {
-    foldFormat(this._mirrorDocument(widget), start, stop, name, value);
+  _absorbFormat(widget: number, range: Span, name: string, value: string | null): void {
+    foldFormat(this._mirrorDocument(widget), range, name, value);
   }
 
   /** Run everything posted, each as its own transaction, in order. The
@@ -4735,7 +4814,7 @@ export class App {
     if (kind === wire.OCC_ALERT_RESULT) {
       const handler = this._alertHandlers.get(ident);
       this._alertHandlers.delete(ident);
-      const choice = payload === wire.ALERT_CHOICE_CANCEL ? null : (payload as number);
+      const choice = alertChoice(payload as number);
       if (handler !== undefined) this._dispatch(handler as Handler, choice);
       return;
     }
@@ -4771,16 +4850,16 @@ export class App {
       // drop is announced.
       const handler = this._notificationHandlers.get(ident);
       this._notificationHandlers.delete(ident);
+      const outcome = notificationOutcome(payload as number);
       if (handler !== undefined) {
-        this._dispatch(handler as Handler, payload);
+        this._dispatch(handler as Handler, outcome);
         return;
       }
       const act = this._notificationActivation;
       if (act !== undefined) {
-        this._dispatch(act as Handler, ident, payload);
+        this._dispatch(act as Handler, ident, outcome);
         return;
       }
-      const outcome = payload === wire.NOTIFICATION_OUTCOME_ACTIVATED ? "activated" : "refused";
       process.stderr.write(
         `kaya: notification ${ident} outcome ${outcome} reached no handler — none was bound at the show and no process-level handler is registered (kaya.onNotificationActivation)\n`,
       );
@@ -4824,17 +4903,18 @@ export class App {
       let arg: Edit | Format;
       if (kind === wire.OCC_TEXT_EDITED) {
         const runs = runsFrom(flat.slice(4));
-        arg = new Edit(flat[1] as number, flat[2] as number, flat[3] as string, runs);
+        arg = new Edit(decodedSpan("text_edited", flat[1], flat[2]), flat[3] as string, runs);
         arg.source = editSource(flat[0] as number);
         const edit = arg;
-        if (keys.length === 0) this._absorbEdit(ident, edit.start, edit.end, edit.inserted, runs);
-        else this._foldRowDocument(ident, keys as Key[], (doc) => foldEdit(doc, edit.start, edit.end, edit.inserted, runs));
+        if (keys.length === 0) this._absorbEdit(ident, edit.range, edit.inserted, runs);
+        else this._foldRowDocument(ident, keys as Key[], (doc) => foldEdit(doc, edit.range, edit.inserted, runs));
       } else {
         const [removed, start, stop, name, value] = flat as [number, number, number, string, string];
-        arg = { start, end: stop, name, value: removed !== 0 ? null : value };
-        const act = arg;
-        if (keys.length === 0) this._absorbFormat(ident, start, stop, name, act.value);
-        else this._foldRowDocument(ident, keys as Key[], (doc) => foldFormat(doc, start, stop, name, act.value));
+        const span = decodedSpan("text_formatted", start, stop);
+        const held = removed !== 0 ? null : value;
+        arg = { range: span, name, value: held, isFlag: held === FLAG };
+        if (keys.length === 0) this._absorbFormat(ident, span, name, held);
+        else this._foldRowDocument(ident, keys as Key[], (doc) => foldFormat(doc, span, name, held));
       }
       const handler = keys.length > 0 ? this._nodeHandlers.get(menuKey(kind, ident)) : this._widgetHandlers.get(menuKey(kind, ident));
       if (handler !== undefined) this._dispatch(handler, ...this._rowArgs(ident, keys as Key[]), arg);

@@ -29,7 +29,7 @@ const { status } = app.window({ title: "commands" }, () => {
 
   app.menu("File", () => {
     kaya.item("Reload");
-    kaya.item("Settings…", { shortcut: "primary+comma", role: kaya.ROLE_SETTINGS, onActivate: onSettings });
+    kaya.item("Settings…", { shortcut: "primary+comma", role: "settings", onActivate: onSettings });
   });
 
   // Option order IS the index vocabulary: Name = 0, Date = 1.

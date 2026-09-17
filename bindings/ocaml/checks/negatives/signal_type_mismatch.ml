@@ -4,5 +4,5 @@
 open Kaya_app
 
 let () =
-  let s = signal_str "x" in
+  let s = signal Scalar.Str "x" in
   write s true

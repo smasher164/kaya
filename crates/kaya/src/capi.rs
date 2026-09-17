@@ -4326,7 +4326,12 @@ pub unsafe extern "C" fn kaya_next_commands(batch: *mut *const u8) -> usize {
             return 0;
         };
         *rx_slot = Some(tx_rx);
-        *PRESENTATION_SCENE.lock().unwrap() = Some(presentation_scene());
+        // The slot's lock is taken BEFORE the scene is built and seeded, so a
+        // metrics report arriving meanwhile waits and applies instead of
+        // latching for a scene that already read the latch (docs/traps.md,
+        // "A metrics report between the scene's seed and its publication").
+        let mut scene_slot = PRESENTATION_SCENE.lock().unwrap();
+        *scene_slot = Some(presentation_scene());
     }
     // 0 MEANS SHUTDOWN TO EVERY PUMP, so a batch that resolved to nothing
     // must not be returned: keep waiting instead. The undo tier's wake is
@@ -4386,6 +4391,38 @@ pub unsafe extern "C" fn kaya_next_commands(batch: *mut *const u8) -> usize {
 
 #[cfg(test)]
 mod tests {
+    /// The scene slot's lock is taken before the presentation scene is
+    /// built: `*SLOT.lock() = Some(presentation_scene())` evaluates the
+    /// scene FIRST, and a metrics report in that gap was latched for a scene
+    /// that had already read the latch (iOS portfolio-python, matrix 31,
+    /// 2026-09-17). Read out of this file's own text, since the race cannot
+    /// be scheduled on purpose; the perturbation back to the one-liner is
+    /// watched failing on every run.
+    #[test]
+    fn the_scene_slot_is_locked_before_the_scene_is_seeded() {
+        let src = include_str!("capi.rs");
+        // concat! keeps each literal off one line, or the racy check below
+        // would read this test's own text as the one-liner it refuses.
+        let held = concat!("let mut scene_slot = PRESENTATION_SCENE.lock().unwrap();",
+                           "\n        *scene_slot = Some(", "presentation_scene());");
+        assert!(src.contains(held), "the creation site no longer locks the slot first");
+        let racy = |text: &str| {
+            text.lines().any(|l| {
+                !l.trim_start().starts_with("//")
+                    && l.contains(".lock()")
+                    && l.contains("Some(presentation_scene())")
+            })
+        };
+        assert!(!racy(src), "a one-line `*lock() = Some(presentation_scene())` is back");
+        let racy_line = concat!("*PRESENTATION_SCENE.lock().unwrap() = ",
+                                "Some(presentation_scene());");
+        let doctored = src.replacen(held, racy_line, 1);
+        let n = usize::from(doctored != src);
+        println!("scene-slot lock order: perturbation applied {n} time(s)");
+        assert_eq!(n, 1);
+        assert!(racy(&doctored), "the watched perturbation was not caught");
+    }
+
     use super::*;
 
     /// `blobs().out` is process-global AND the pump replaces it with

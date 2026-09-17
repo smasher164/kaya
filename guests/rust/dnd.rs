@@ -288,10 +288,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 // representation; the anchor is the row it landed on (D8).
                 let kaya::Representation::Custom { bytes, .. } = &d.clip else { return };
                 let moved = String::from_utf8_lossy(&bytes.0).to_string();
-                if d.anchor.is_empty() {
-                    return;
-                }
-                let anchor = d.anchor.key::<String>(0);
+                let Some(anchor) = d.anchor.try_key::<String>(0) else { return };
                 if d.before {
                     tx.move_before(&items, moved, anchor);
                 } else {

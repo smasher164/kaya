@@ -27,14 +27,14 @@ FileManager.default.createFile(
 
 var status: KayaSignal!
 
-// Handles, never paths — `localPath` is empty on both phones.
+// Handles, never paths — `localPath` is nil on both phones.
 var source: KayaPickedFile?
 var destination: KayaPickedFile?
 
 /// Read a handle back through kaya, with Foundation's own file API.
 func readBack(_ file: KayaPickedFile) -> String {
     do {
-        let (handle, _) = try file.open(UInt32(KAYA_FILE_MODE_READ))
+        let (handle, _) = try file.open(.read)
         let data = handle.readDataToEndOfFile()
         try? handle.close()
         return String(decoding: data, as: UTF8.self)
@@ -44,10 +44,10 @@ func readBack(_ file: KayaPickedFile) -> String {
 }
 
 /// Write `text` through a handle and report what the FILE says afterwards.
-/// `KAYA_FILE_MODE_WRITE` truncates; a destination adds create.
+/// `.write` truncates; a destination adds create.
 func writeBack(_ file: KayaPickedFile, _ text: String) -> String {
     do {
-        let (handle, _) = try file.open(UInt32(KAYA_FILE_MODE_WRITE))
+        let (handle, _) = try file.open(.write)
         handle.write(Data(text.utf8))
         // Closed before the reopen, so what comes back is the FILE's bytes.
         try? handle.close()

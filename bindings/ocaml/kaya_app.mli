@@ -73,16 +73,54 @@ type context_catalog
 
 (* A collection instance handle: the collection plus the key path
    selecting one stamped copy's table. *)
-type collection = { cid : int64; cpath : Kaya_wire.value list }
+type collection
 
 (* A collection entry's key: a string or a minted int64, the only two
    shapes [insert]/[insert_fresh] ever produce. The guest-facing type for
-   every key a guest spells or reads back — never the wire's own sum. *)
-type key = Str_key of string | Int_key of int64
+   every key a guest spells or reads back — never the wire's own sum.
+   [Key.Str "b"], [Key.Int 3L], [Key.text k]. *)
+module Key : sig
+  type t = Str of string | Int of int64
 
-val str_key : string -> key
-val int_key : int64 -> key
+  val str : string -> t
+  val int : int64 -> t
+  val text : t -> string
+end
+
+type key = Key.t
+
 val key_text : key -> string
+
+(* An alert's three outcomes: the action the user pressed, by its slot,
+   or the cancel every platform-native dismissal answers. A TYPE, not an
+   int and a sentinel. [of_wire] refuses a number this build does not
+   know, naming it. *)
+module Alert_choice : sig
+  type t = Action0 | Action1 | Cancel
+
+  val of_wire : int -> t
+end
+
+(* A notification's two outcomes (docs/tasks-s3-plan.md N1). Dismissal is
+   not one of them: two platforms never report it. *)
+module Notification_outcome : sig
+  type t = Activated | Refused
+
+  val of_wire : int -> t
+  val name : t -> string
+end
+
+(* The app's OWN light/dark choice, applied process-wide from the
+   default window (docs/tasks-s2b-plan.md R1-R3). *)
+module Appearance : sig
+  type t = System | Light | Dark
+end
+
+(* How a picked file is re-opened: read, write (truncates; a save
+   destination only adds the create) or both. *)
+module File_mode : sig
+  type t = Read | Write | Read_write
+end
 
 (* One file the picker answered with: a handle to redeem, a display
    name, and [local_path] — a RE-OPENABLE NAME, empty unless re-opening
@@ -98,6 +136,20 @@ val asset : string -> asset
 val asset_miss_sentence : string -> string
 val asset_bytes : asset -> bytes
 val asset_close : asset -> unit
+
+(* One signal an undo restored, in the BINDING's terms: the wire's own
+   value type never reaches a guest (DESIGN.md, Binding conventions), so
+   the restored value is asked for by the type it was written as and
+   answers [None] when it was written as another. *)
+module Undo_signal : sig
+  type t
+
+  val id : t -> int64
+  val as_str : t -> string option
+  val as_bool : t -> bool option
+  val as_i64 : t -> int64 option
+  val as_f64 : t -> float option
+end
 
 (* One collection entry's restored state, as the core states it —
    internal to [Undo_delta.t.entries]; a guest reads deltas through
@@ -125,7 +177,7 @@ end
    same as applying it once. *)
 module Undo_delta : sig
   type t = {
-    signals : (int64 * Kaya_wire.value) list;
+    signals : Undo_signal.t list;
     texts : Undo_text.t list;
     entries : Undo_entry.t list;
     orders : Undo_order.t list;
@@ -176,7 +228,11 @@ type block = Body | Heading1 | Heading2 | Heading3 | Quote | Code_block
 (* One attribute over one span; [value] is "true" for the flags, a URL
    for [link], a kind for [block]. *)
 module Run : sig
-  type t = { start : int; stop : int; name : string; value : string }
+  type t = { range : int * int; name : string; value : string }
+
+  (* A flag attribute, on: bold, italic, underline, strike, code. The
+     wire carries these as the string "true" and no guest compares it. *)
+  val is_flag : t -> bool
 end
 
 type run = Run.t
@@ -189,6 +245,10 @@ module Document : sig
 
   val create : string -> t
   val mark : int * int -> string -> string -> t -> t
+
+  (* A FLAG attribute, on or off — the boolean spelling, coerced to the
+     wire's own string at the boundary. *)
+  val flag : int * int -> string -> bool -> t -> t
   val bold : int * int -> t -> t
   val italic : int * int -> t -> t
   val underline : int * int -> t -> t
@@ -215,8 +275,7 @@ val edit_source_of_wire : int -> edit_source
    widget delivered and [None] on one the app builds. *)
 module Edit : sig
   type t = {
-    start : int;
-    stop : int;
+    range : int * int;
     inserted : string;
     runs : Run.t list;
     source : edit_source option;
@@ -228,108 +287,47 @@ module Edit : sig
 
   (* One attribute over the INSERTED text's own offsets. *)
   val mark : int * int -> string -> string -> t -> t
+
+  (* A flag attribute over the inserted text, on or off. *)
+  val flag : int * int -> string -> bool -> t -> t
 end
 
 type edit = Edit.t
 
 (* A toolbar act over a range; [value = None] is the attribute taken off. *)
 module Format : sig
-  type t = { start : int; stop : int; name : string; value : string option }
+  type t = { range : int * int; name : string; value : string option }
+
+  (* A flag attribute, on. *)
+  val is_flag : t -> bool
 end
 
 type format_act = Format.t
 
-(* One instance of a collection: the table inside the stamped copy
-   selected by its path. Internal to [app.model]/[app.fresh]'s
-   bookkeeping — a guest reaches a collection's rows through
-   [items]/[record_items]/[sum_items], never this type. *)
-type instance = {
-  path : Kaya_wire.value list;
-  entries : (Kaya_wire.value * (int * Kaya_wire.value list)) list;
-}
+(* THE APP AND ITS TRANSACTION, ABSTRACT. The engine — 54 handle
+   tables, the id counters, the collection model — is not a guest's to
+   reach, and it was transparent here only because the checks
+   (bindings/ocaml/checks/*.ml) read four tables to prove a registration
+   or an abort's rollback. [For_checks] is that door, and the list of
+   what a test reaches is auditable because it is written down. *)
+type app
 
-(* The app: one per process, holding every live handle table and the
-   collection model. Exposed transparently because the checks
-   (bindings/ocaml/checks/*.ml) read specific tables directly to prove a
-   registration or an abort's rollback; a guest never touches a field. *)
-type app = {
-  post_lock : Mutex.t;
-  mutable posted : (unit -> unit) list;
-  mutable c_signal : int64;
-  mutable c_widget : int64;
-  mutable c_collection : int64;
-  mutable c_menu_item : int64;
-  widget_handlers : (int64, unit -> unit) Hashtbl.t;
-  sort_handlers : (int64, int -> unit) Hashtbl.t;
-  node_sorts : (int64, Kaya_wire.value list -> int -> unit) Hashtbl.t;
-  menu_activated : (int64, unit -> unit) Hashtbl.t;
-  menu_activated_node : (int64, Kaya_wire.value list -> unit) Hashtbl.t;
-  menu_toggled : (int64, bool -> unit) Hashtbl.t;
-  menu_toggled_node : (int64, Kaya_wire.value list -> bool -> unit) Hashtbl.t;
-  menu_selected : (int64, int -> unit) Hashtbl.t;
-  menu_selected_node : (int64, Kaya_wire.value list -> int -> unit) Hashtbl.t;
-  node_handlers : (int64, Kaya_wire.value list -> unit) Hashtbl.t;
-  widget_changes : (int64, string -> unit) Hashtbl.t;
-  node_changes : (int64, Kaya_wire.value list -> string -> unit) Hashtbl.t;
-  documents : (int64, document) Hashtbl.t;
-  document_binds : (int64, int64 * int * int) Hashtbl.t;
-  widget_edits : (int64, edit -> unit) Hashtbl.t;
-  widget_formats : (int64, format_act -> unit) Hashtbl.t;
-  node_edits : (int64, Kaya_wire.value list -> edit -> unit) Hashtbl.t;
-  node_formats : (int64, Kaya_wire.value list -> format_act -> unit) Hashtbl.t;
-  widget_toggles : (int64, bool -> unit) Hashtbl.t;
-  widget_values : (int64, float -> unit) Hashtbl.t;
-  widget_dates : (int64, int64 -> unit) Hashtbl.t;
-  widget_times : (int64, int64 -> unit) Hashtbl.t;
-  node_dates : (int64, Kaya_wire.value list -> int64 -> unit) Hashtbl.t;
-  node_times : (int64, Kaya_wire.value list -> int64 -> unit) Hashtbl.t;
-  close_requested : (int64, unit -> unit) Hashtbl.t;
-  entry_popped : (int64, unit -> unit) Hashtbl.t;
-  back_requested : (int64, unit -> unit) Hashtbl.t;
-  section_selected : (int64, unit -> unit) Hashtbl.t;
-  alert_handlers : (int64, int -> unit) Hashtbl.t;
-  mutable next_alert : int64;
-  notification_handlers : (int64, int -> unit) Hashtbl.t;
-  mutable notification_activation : (int64 -> int -> unit) option;
-  link_handlers : (int64, (string * string) list -> unit) Hashtbl.t;
-  mutable next_link_route : int64;
-  mutable pending_routes : string list;
-  file_dialog_handlers : (int64, picked_file list -> unit) Hashtbl.t;
-  mutable next_file_dialog : int64;
-  clipboard_handlers : (int64, representation option -> unit) Hashtbl.t;
-  mutable next_clipboard_read : int64;
-  widget_pastes : (int64, representation -> unit) Hashtbl.t;
-  node_pastes : (int64, Kaya_wire.value list -> representation -> unit) Hashtbl.t;
-  widget_drops : (int64, dropped -> unit) Hashtbl.t;
-  node_drops : (int64, Kaya_wire.value list -> dropped -> unit) Hashtbl.t;
-  drag_ended_handlers : (int64, op option -> unit) Hashtbl.t;
-  node_drag_ended : (int64, Kaya_wire.value list -> op option -> unit) Hashtbl.t;
-  window_closed : (int64, unit -> unit) Hashtbl.t;
-  undone_handlers : (int64, string -> undo_delta -> unit) Hashtbl.t;
-  redone_handlers : (int64, string -> undo_delta -> unit) Hashtbl.t;
-  node_toggles : (int64, Kaya_wire.value list -> bool -> unit) Hashtbl.t;
-  node_values : (int64, Kaya_wire.value list -> float -> unit) Hashtbl.t;
-  widget_commits : (int64, float -> unit) Hashtbl.t;
-  node_commits : (int64, Kaya_wire.value list -> float -> unit) Hashtbl.t;
-  model : (int64, instance list) Hashtbl.t;
-  fresh : (int64, (Kaya_wire.value list * int64 ref) list) Hashtbl.t;
-  children : (int64, int64 list) Hashtbl.t;
-  mutable open_fors : int64 list;
-  mutable tpl_depth : int;
-  derived : (int64, (unit -> unit) list) Hashtbl.t;
-  canvas_viewboxes : (int64, viewbox) Hashtbl.t;
-  canvas_draws : (int64, draw -> viewbox -> float -> unit) Hashtbl.t;
-}
+type tx
 
-(* One transaction: everything queued inside build (or a handler) applies
-   atomically when it returns. *)
-and tx = {
-  app : app;
-  mutable records : string list;
-  mutable undo_group : (int64 * string) option;
-  mutable journal : (int64 * instance list) list;
-  mutable pending_derived : (int64 * (unit -> unit)) list;
-}
+(* The five engine reads bindings/ocaml/checks/*.ml makes, and nothing
+   else. A guest calls none of them. *)
+module For_checks : sig
+  val derived : app -> (int64, (unit -> unit) list) Hashtbl.t
+  val sort_handlers : app -> (int64, int -> unit) Hashtbl.t
+  val node_sorts : app -> (int64, key list -> int -> unit) Hashtbl.t
+  val pending_routes : app -> string list
+  val records : tx -> string list
+  val collection_id : collection -> int64
+
+  (* The decode-side span refusal: no scene can produce a reversed span,
+     so the check drives it here. *)
+  val decoded_span : string -> int -> int -> int * int
+end
 
 (* The transaction ambient for the extent of [build] (handler dispatch
    runs through build, so handlers get it too) — a RUNTIME error to ask
@@ -370,15 +368,24 @@ val pack_time : time -> int64
 val date_of_packed : int64 -> date
 val time_of_packed : int64 -> time
 
-(* Every signal's byte, boolean, integer, float, date or time — the
-   phantom carries the wire encoding, so a mismatched [write] is a
-   compile error. *)
-val signal_str : string -> string signal
-val signal_bool : bool -> bool signal
-val signal_i64 : int64 -> int64 signal
-val signal_f64 : float -> float signal
-val signal_date : date -> date signal
-val signal_time : time -> time signal
+(* THE TYPE WITNESS, one for the binding: a GADT, OCaml's own answer to
+   type-directed dispatch, and the thing a constructor passed as
+   ['a -> 'a signal] never was — that shape accepted any such function.
+   [signal Scalar.Str "x"], [derive Scalar.I64 todos count]. Qualified on
+   purpose: these are this binding's words, never the wire's. *)
+module Scalar : sig
+  type _ t =
+    | Str : string t
+    | Bool : bool t
+    | I64 : int64 t
+    | F64 : float t
+    | Date : date t
+    | Time : time t
+end
+
+(* A signal of the witnessed type — the phantom carries the wire
+   encoding, so a mismatched [write] is a compile error. *)
+val signal : 'a Scalar.t -> 'a -> 'a signal
 val write : 'a signal -> 'a -> unit
 
 val set_text : widget -> string -> unit
@@ -451,7 +458,7 @@ val absorb_edit : app -> int64 -> int * int -> string -> Run.t list -> unit
    the node is bound to (collection, field) by [Tpl.textarea
    ~document_field], and the occurrence's path names the row. *)
 val fold_row_document :
-  app -> int64 -> Kaya_wire.value list -> (Document.t -> Document.t) -> unit
+  app -> int64 -> key list -> (Document.t -> Document.t) -> unit
 
 (* The folded document of a [rich] textarea; empty until the first edit
    or write. Reads the ambient transaction, as [items] does. *)
@@ -467,6 +474,9 @@ val apply_edit : widget -> Edit.t -> unit
 (* Format the widget's CURRENT SELECTION through its own act. [value] is
    "true" for a flag, the URL for [link]. *)
 val format : widget -> string -> string -> unit
+
+(* A flag attribute over the selection, on or off. *)
+val format_flag : widget -> string -> bool -> unit
 
 (* The named acts: [format] with its own name over the widget's
    selection. *)
@@ -484,6 +494,9 @@ val unformat : widget -> string -> unit
    where it is. A [block] covers the range's whole paragraphs, and
    [block] with "body" takes the kind off. *)
 val format_range : widget -> int * int -> string -> string -> unit
+
+(* A flag attribute over a byte range, on or off. *)
+val format_range_flag : widget -> int * int -> string -> bool -> unit
 
 (* [format_range]'s removal. *)
 val unformat_range : widget -> int * int -> string -> unit
@@ -902,7 +915,7 @@ val record_get : 'a record_collection -> key -> 'a option
    mutation, written into the same transaction. [mk] is one of the typed
    signal constructors ([signal_str] and so on). *)
 val derive :
-  ('a -> 'a signal) -> 'b record_collection -> ((key * 'b) list -> 'a) -> 'a signal
+  'a Scalar.t -> 'b record_collection -> ((key * 'b) list -> 'a) -> 'a signal
 
 (* REQUEST this app's brand accent: one sRGB hex is the whole call and
    the core derives the rest. [~light] and [~dark] are the per-appearance
@@ -935,7 +948,7 @@ val window :
   ?remember_frame:bool ->
   ?panes:int ->
   ?sections_presentation:Sections_presentation.t ->
-  ?appearance:int64 ->
+  ?appearance:Appearance.t ->
   ?on_close_requested:(unit -> unit) ->
   ?on_closed:(unit -> unit) ->
   ?on_undone:(string -> undo_delta -> unit) ->
@@ -954,7 +967,7 @@ val create_window :
   ?remember_frame:bool ->
   ?panes:int ->
   ?sections_presentation:Sections_presentation.t ->
-  ?appearance:int64 ->
+  ?appearance:Appearance.t ->
   ?on_close_requested:(unit -> unit) ->
   ?on_closed:(unit -> unit) ->
   ?on_undone:(string -> undo_delta -> unit) ->
@@ -996,11 +1009,11 @@ val show_alert :
   ?title:string ->
   ?message:string ->
   ?actions:string list ->
-  cancel:string -> ?on_result:(int -> unit) -> unit -> int64
+  cancel:string -> ?on_result:(Alert_choice.t -> unit) -> unit -> int64
 
 val show_notification :
   ?title:string ->
-  ?body:string -> ?at:int64 -> ?on_result:(int -> unit) -> int64 -> int64
+  ?body:string -> ?at:int64 -> ?on_result:(Notification_outcome.t -> unit) -> int64 -> int64
 
 (* Withdraw a pending or delivered notification. No answer follows; an
    unknown id is ignored. *)
@@ -1008,12 +1021,13 @@ val cancel_notification : int64 -> unit
 
 (* Answer a notification occurrence: one-shot if a handler is
    registered, the process-level handler otherwise. *)
-val notification_result : app -> int64 -> int -> unit
+val notification_result : app -> int64 -> Notification_outcome.t -> unit
 
 (* NOT one-shot: the process-level handler for a result whose id has no
    one-shot handler — a relaunched process never called
    [show_notification]. *)
-val on_notification_activation : app -> f:(int64 -> int -> unit) -> unit
+val on_notification_activation :
+  app -> f:(int64 -> Notification_outcome.t -> unit) -> unit
 
 (* NOT one-shot either: a route declared here answers every URL that
    matches it, for the life of the process. *)
@@ -1064,19 +1078,17 @@ val draggable_at :
   ?files:picked_file list ->
   ?custom:(string * string) list ->
   ?operations:Op.t list ->
-  node -> keys:Kaya_wire.value list -> unit -> unit
+  node -> keys:key list -> unit -> unit
 
 val set_drop_target : widget -> Op.t list -> unit
 val set_reorderable : widget -> bool -> unit
 
-(* The alert_choice cancel sentinel, for handlers. *)
-val alert_cancel : int
 
-(* [Kaya_runtime.open_picked]'s mode: read, write (truncates; a save
-   destination only adds the create) or both. *)
-val file_mode_read : int
-val file_mode_write : int
-val file_mode_read_write : int
+(* Redeem a picked (or dropped) file's handle for a real descriptor,
+   plus whether it seeks. BLOCKS, possibly for a long time, so call it
+   from a thread you chose and post the result back (DESIGN.md, File
+   dialogs). THE DESCRIPTOR BECOMES OCAML'S. *)
+val open_picked : picked_file -> File_mode.t -> Unix.file_descr * bool
 
 (* Mount a root into the default window; mounting presents. *)
 val mount : widget -> unit
@@ -1228,7 +1240,7 @@ val sum_update_field :
 
 (* The collection-derived signal, over the sum's entries. *)
 val sum_derive :
-  ('a -> 'a signal) -> 'b sum_collection -> ((key * 'b) list -> 'a) -> 'a signal
+  'a Scalar.t -> 'b sum_collection -> ((key * 'b) list -> 'a) -> 'a signal
 
 (* The eliminator's mechanism: (variant, arm) pairs in declaration order,
    each arm a Tpl program — what the generated [<type>_each] calls. *)

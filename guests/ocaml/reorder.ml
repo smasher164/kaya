@@ -33,8 +33,8 @@ let () =
          ()
      in
      mount root;
-     insert_record items (str_key "a") { title = "a" };
-     insert_record items (str_key "b") { title = "b" };
-     insert_record items (str_key "c") { title = "c" });
+     insert_record items (Key.str "a") { title = "a" };
+     insert_record items (Key.str "b") { title = "b" };
+     insert_record items (Key.str "c") { title = "c" });
 
   exit (run app)

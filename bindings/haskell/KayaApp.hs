@@ -1,19 +1,9 @@
-{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE DerivingStrategies #-}
-{-# LANGUAGE DerivingVia #-}
-{-# LANGUAGE InstanceSigs #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE GADTs #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE DefaultSignatures #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE NoFieldSelectors #-}
+{-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE OverloadedStrings #-}
 -- KEEP THE PRAGMA BELOW: 'applyAttr' and 'applyTplAttr' must be TOTAL,
 -- and a prop added to either GADT without its arm compiles, ships and
 -- silently does nothing. -Wincomplete-patterns is not in GHC's default
@@ -77,6 +67,8 @@ module KayaApp
     window,
     SectionAttr (..),
     Symbol (..),
+    SectionsPresentation (..),
+    Appearance (..),
     popEntry,
     EntryAttr (..),
     destroyWindow,
@@ -94,7 +86,6 @@ module KayaApp
     Platform (..),
     AlertAttr (..),
     showAlert,
-    alertChoiceCancel,
     NotificationAttr (..),
     showNotification,
     cancelNotification,
@@ -174,7 +165,6 @@ module KayaApp
     bindHelp,
     bindPlaceholder,
     bindHref,
-    LiveStrSource (..),
     bindChecked,
     bindValue,
     bindSource,
@@ -207,6 +197,7 @@ module KayaApp
     scroll,
     grid,
     labeled,
+    labeledBound,
     progress,
     progressIndeterminate,
     bindTextElement,
@@ -400,6 +391,7 @@ import KayaRuntime
 import qualified KayaRuntime as R
 import System.IO (Handle)
 import qualified KayaWire as W
+import Control.Monad.State.Strict (gets, runState, state)
 import Kaya.Core
 
 -- | WHAT THIS HOST CAN DO — see crates/kaya/src/app.rs for the
@@ -436,18 +428,19 @@ capabilities = do
 -- else the process-level one, which does not; else the drop is
 -- announced.
 notificationResult :: App -> Word64 -> Word32 -> IO ()
-notificationResult app ident outcome = do
-  handlers <- readIORef (appNotificationHandlers app)
-  writeIORef (appNotificationHandlers app) (Map.delete ident handlers)
-  activation <- readIORef (appNotificationActivation app)
+notificationResult app ident wire = do
+  handlers <- readIORef (app.appNotificationHandlers)
+  writeIORef (app.appNotificationHandlers) (Map.delete ident handlers)
+  activation <- readIORef (app.appNotificationActivation)
+  -- The RING's own word here, the app's typed outcome from here on.
+  let outcome = notificationOutcomeOfWire wire
   case (Map.lookup ident handlers, activation) of
     (Just handler, _) -> dispatch (handler outcome)
     (Nothing, Just act) -> dispatch (act ident outcome)
     (Nothing, Nothing) -> do
-      let word =
-            if outcome == W.notificationOutcomeActivated
-              then "activated"
-              else "refused"
+      let word = case outcome of
+            NotificationActivated -> "activated"
+            NotificationRefused -> "refused"
       hPutStrLn
         stderr
         ( "kaya: notification "
@@ -471,7 +464,10 @@ notificationResult app ident outcome = do
 -- RAISES where the platform has handed no directory over — an error
 -- state a guest cannot plan around, so all nine bindings refuse rather
 -- than answering an absent value (ruled 2026-09-09).
-appDataDir :: IO String
+-- A 'FilePath' and not 'Text', deliberately: this is a place to build
+-- paths under, and @(\<\/\>)@, @createDirectoryIfMissing@ and @openFile@
+-- all take one.
+appDataDir :: IO FilePath
 appDataDir = do
   dir <- R.appDataDir
   if null dir
@@ -495,31 +491,36 @@ appDataDir = do
 -- divergence: this module already exports a collection `remove`, and
 -- Haskell record fields are top-level selectors.
 data Prefs = Prefs
-  { prefGetString :: String -> String -> IO String,
-    prefGetI64 :: String -> Int64 -> IO Int64,
-    prefGetF64 :: String -> Double -> IO Double,
-    prefGetBool :: String -> Bool -> IO Bool,
-    prefSetString :: String -> String -> IO (),
-    prefSetI64 :: String -> Int64 -> IO (),
-    prefSetF64 :: String -> Double -> IO (),
-    prefSetBool :: String -> Bool -> IO (),
-    prefRemove :: String -> IO ()
+  { prefGetString :: Text -> Text -> IO Text,
+    prefGetI64 :: Text -> Int64 -> IO Int64,
+    prefGetF64 :: Text -> Double -> IO Double,
+    prefGetBool :: Text -> Bool -> IO Bool,
+    prefSetString :: Text -> Text -> IO (),
+    prefSetI64 :: Text -> Int64 -> IO (),
+    prefSetF64 :: Text -> Double -> IO (),
+    prefSetBool :: Text -> Bool -> IO (),
+    prefRemove :: Text -> IO ()
   }
 
 -- A guest may READ any key and WRITE any key kaya has not reserved
 -- (docs/tasks-s4-plan.md P4: window memory lives under @kaya.@).
-prefKey :: String -> String
-prefKey "" = errorWithoutStackTrace "kaya: a preference key must not be empty"
-prefKey key = key
+prefKey :: Text -> Text
+prefKey key
+  | T.null key = errorWithoutStackTrace "kaya: a preference key must not be empty"
+  | otherwise = key
 
-prefWriteKey :: String -> String
+prefWriteKey :: Text -> Text
 prefWriteKey key
-  | null key = prefKey key
-  | take 5 key == "kaya." =
-      errorWithoutStackTrace
-        ( "kaya: preference key \"" ++ key ++ "\" is reserved "
-            ++ "(the kaya. prefix is kaya's own)"
-        )
+  -- The refusal's own sentence is byte-compared across the nine
+  -- bindings (tools/check-sugar-surface.py), so the name is spliced in
+  -- as a 'String' the way every other binding splices its own.
+  | T.null key = prefKey key
+  | T.isPrefixOf "kaya." key =
+      let name = T.unpack key
+       in errorWithoutStackTrace
+            ( "kaya: preference key \"" ++ name ++ "\" is reserved "
+                ++ "(the kaya. prefix is kaya's own)"
+            )
   | otherwise = key
 
 -- | The app's preferences store — one per process.
@@ -539,27 +540,20 @@ prefs =
 
 -- | One clip, offered in as many representations as the app fills in.
 data Clip = Clip
-  { clipText :: Maybe Text,
-    clipHtml :: Maybe Text,
-    clipImage :: Maybe BS.ByteString,
+  { text :: Maybe Text,
+    html :: Maybe Text,
+    image :: Maybe BS.ByteString,
     -- | Picked-file handles: copying a file and picking one are the
     -- same currency, so the bytes never move through kaya.
-    clipFiles :: [PickedFile],
+    files :: [PickedFile],
     -- | The one plural field with names, since several app-defined formats
     -- are legitimate.
-    clipCustom :: [(String, BS.ByteString)]
+    custom :: [(Text, BS.ByteString)]
   }
 
--- | The empty clip, to fill in: @copy emptyClip { clipText = Just "hi" }@.
+-- | The empty clip, to fill in: @copy emptyClip { text = Just "hi" }@.
 emptyClip :: Clip
-emptyClip =
-  Clip
-    { clipText = Nothing,
-      clipHtml = Nothing,
-      clipImage = Nothing,
-      clipFiles = [],
-      clipCustom = []
-    }
+emptyClip = Clip Nothing Nothing Nothing [] []
 
 -- | ONE REPRESENTATION of a TEMPLATE drag payload (docs/dnd-plan.md §4):
 -- a constant, or the ROW'S OWN FIELD, which every stamped copy resolves
@@ -570,25 +564,23 @@ data TplRep v = TplConst v | TplField (KField v)
 -- | 'Clip' one zone up: what a TEMPLATE node hands over, each
 -- representation a constant or the row's own field. A file never binds —
 -- a picked handle is not a field.
+-- THE ZONE IS IN THE FIELD NAMES, not the type's: 'Clip' carries the
+-- same five words, and GHC's DuplicateRecordFields resolves a record
+-- UPDATE across two such records by a mechanism it has announced it will
+-- drop (-Wambiguous-fields). The @tpl@ prefix is the template zone's own,
+-- as 'TplA11yId' is.
 data TplClip = TplClip
-  { tplClipText :: Maybe (TplRep Text),
-    tplClipHtml :: Maybe (TplRep Text),
-    tplClipImage :: Maybe (TplRep BS.ByteString),
-    tplClipFiles :: [PickedFile],
-    tplClipCustom :: [(String, TplRep BS.ByteString)]
+  { tplText :: Maybe (TplRep Text),
+    tplHtml :: Maybe (TplRep Text),
+    tplImage :: Maybe (TplRep BS.ByteString),
+    tplFiles :: [PickedFile],
+    tplCustom :: [(Text, TplRep BS.ByteString)]
   }
 
 -- | The empty template clip, to fill in:
--- @TplDraggable emptyTplClip { tplClipText = Just (TplField (field \@"title" \@Item)) } [OpCopy]@.
+-- @TplDraggable emptyTplClip { tplText = Just (TplField (field \@"title" \@Item)) } [OpCopy]@.
 emptyTplClip :: TplClip
-emptyTplClip =
-  TplClip
-    { tplClipText = Nothing,
-      tplClipHtml = Nothing,
-      tplClipImage = Nothing,
-      tplClipFiles = [],
-      tplClipCustom = []
-    }
+emptyTplClip = TplClip Nothing Nothing Nothing [] []
 
 -- | The mode to redeem a picked file's handle in.
 data FileMode = FileModeRead | FileModeWrite | FileModeReadWrite
@@ -603,7 +595,7 @@ fileModeWire mode = case mode of
 -- BLOCKS, possibly for a long time, so call it from a thread you chose
 -- and post the result back.
 openPicked :: PickedFile -> FileMode -> IO (Handle, Bool)
-openPicked f mode = R.openPicked (pickedHandle f) (fileModeWire mode)
+openPicked f mode = R.openPicked f.handle (fileModeWire mode)
 
 -- | AN ASSET — a file this app's own BUILD put where the running
 -- program can find it (docs\/assets-plan.md).
@@ -616,7 +608,7 @@ type Asset = R.Asset
 -- IO, AND CALLED OUTSIDE THE TRANSACTION: 'Build' is a pure state monad,
 -- so a scene opens its assets in the IO around 'buildTx'. A miss raises
 -- with the core's sentence verbatim, and EACH CALL READS — no cache.
-asset :: String -> IO Asset
+asset :: Text -> IO Asset
 asset = R.openAsset
 
 -- | Why 'asset' would raise for this name — the sentence it would carry,
@@ -624,7 +616,7 @@ asset = R.openAsset
 -- the same on every platform and is the line a scene freezes; line 2
 -- names the resolved place. Authored by @asset_why_not@ in
 -- crates\/kaya\/src\/assets.rs.
-assetMissSentence :: String -> IO String
+assetMissSentence :: Text -> IO Text
 assetMissSentence = R.assetMissSentence
 
 -- | THE BYTES REDEMPTION: this asset's bytes, copied out of core memory.
@@ -706,7 +698,7 @@ platformWire p = fromIntegral $ case p of
 data TypefaceAttr
   = -- | The family to use ON one platform, overriding the default name
     -- for that platform alone: @TFor PlatformLinux "DejaVu Serif"@.
-    TFor Platform String
+    TFor Platform Text
   | -- | A font FILE, as bytes: the backend hands them to its platform's
     -- app-font API, reads back the family that registration named, and uses
     -- it in preference to any name above.
@@ -723,11 +715,11 @@ data TypefaceAttr
 -- SET ONCE, BEFORE THE FIRST MOUNT, like 'brandAccent'. A FAMILY A
 -- PLATFORM DOES NOT HAVE LEAVES THAT PLATFORM'S OWN TYPEFACE IN PLACE,
 -- deliberately and silently.
-brandTypeface :: (TypefaceArgs r) => String -> r
+brandTypeface :: (TypefaceArgs r) => Text -> r
 brandTypeface = typefacish
 
 class TypefaceArgs r where
-  typefacish :: String -> r
+  typefacish :: Text -> r
 
 instance (a ~ ()) => TypefaceArgs (Build a) where
   typefacish family = emitTypeface family []
@@ -735,9 +727,9 @@ instance (a ~ ()) => TypefaceArgs (Build a) where
 instance (a ~ TypefaceAttr, r ~ Build ()) => TypefaceArgs ([a] -> r) where
   typefacish = emitTypeface
 
-emitTypeface :: String -> [TypefaceAttr] -> Build ()
+emitTypeface :: Text -> [TypefaceAttr] -> Build ()
 emitTypeface family attrs =
-  emitBIO (W.txSetBrandTypeface mask (W.VStr family) rows <$> slot)
+  emitBIO (W.txSetBrandTypeface mask (W.VStr (T.unpack family)) rows <$> slot)
   where
     -- THE ROWS ARE A LIST AND THE FONT IS A CELL: a repeated 'TFont' is
     -- last-wins, while the 'TFor' rows are NOT folded and NOT
@@ -745,7 +737,7 @@ emitTypeface family attrs =
     rows =
       concatMap
         ( \a -> case a of
-            TFor p f -> [W.VI64 (platformWire p), W.VStr f]
+            TFor p f -> [W.VI64 (platformWire p), W.VStr (T.unpack f)]
             TFont _ -> []
             TFontAsset _ -> []
         )
@@ -801,12 +793,12 @@ data WindowAttr
     -- (docs/multicolumn-plan.md). The live count is the platform's own
     -- judgment where it has one; the root refuses 0 and anything above 3.
     WPanes Word32
-  | WSectionsPresentation Int64
-  | -- | The app's OWN light/dark choice, applied process-wide from the
-    -- default window (docs/tasks-s2b-plan.md R1-R3):
-    -- 'W.appearanceSystem' defers to the harness knob and then the OS,
-    -- '_light' and '_dark' win over both.
-    WAppearance Int64
+  | WSectionsPresentation SectionsPresentation
+  | -- | The app's OWN light\/dark choice, applied process-wide from the
+    -- default window (docs\/tasks-s2b-plan.md R1-R3): 'AppearanceSystem'
+    -- defers to the harness knob and then the OS, the other two win over
+    -- both.
+    WAppearance Appearance
   | -- | Whether this surface holds unsaved work (docs/dirty-plan.md
     -- D1). 'WTitle' IS NEVER TOUCHED BY IT — kaya's titles are
     -- byte-compared across platforms.
@@ -852,8 +844,8 @@ window n = mapM_ apply
       emitB (W.txSetWindowHeight n h)
     apply (WVetoClose v) = emitB (W.txSetWindowVetoClose n v)
     apply (WPanes ceiling') = emitB (W.txSetWindowPanes n (fromIntegral ceiling'))
-    apply (WSectionsPresentation p) = emitB (W.txSetWindowSectionsPresentation n p)
-    apply (WAppearance a) = emitB (W.txSetWindowAppearance n a)
+    apply (WSectionsPresentation p) = emitB (W.txSetWindowSectionsPresentation n (sectionsPresentationWire p))
+    apply (WAppearance a) = emitB (W.txSetWindowAppearance n (appearanceWire a))
     apply (WDirty v) = emitB (W.txSetWindowDirty n v)
     apply (WRememberFrame v) = emitB (W.txSetWindowRememberFrame n v)
     apply (WInset units) = emitB (W.txSetWindowInset n units)
@@ -904,7 +896,7 @@ data SectionAttr
     SBadge Double
   | -- | The count from a signal, so a changing total moves the badge
     -- without a rebuild.
-    SBadgeBound Signal
+    SBadgeBound (Signal Double)
   | SOnSelected (IO ())
 
 -- | Push a navigation entry onto the primary surface's stack (entry ids
@@ -951,6 +943,28 @@ addSectionIn w n attrs = do
 -- 'SOnSelected' (the echo doctrine).
 selectSection :: Word64 -> Build ()
 selectSection n = emitB (W.txSelectSection 0 n)
+
+-- | HOW A WINDOW PRESENTS ITS SECTION SET (spec enum
+-- @sections_presentation@): the platform's own judgment, a bar, or a
+-- sidebar.
+data SectionsPresentation = SectionsAuto | SectionsBar | SectionsSidebar
+  deriving (Eq, Show)
+
+sectionsPresentationWire :: SectionsPresentation -> Int64
+sectionsPresentationWire p = fromIntegral $ case p of
+  SectionsAuto -> W.sectionsPresentationAuto
+  SectionsBar -> W.sectionsPresentationBar
+  SectionsSidebar -> W.sectionsPresentationSidebar
+
+-- | THE APP'S OWN LIGHT\/DARK CHOICE (spec enum @appearance@).
+data Appearance = AppearanceSystem | AppearanceLight | AppearanceDark
+  deriving (Eq, Show)
+
+appearanceWire :: Appearance -> Int64
+appearanceWire a = fromIntegral $ case a of
+  AppearanceSystem -> W.appearanceSystem
+  AppearanceLight -> W.appearanceLight
+  AppearanceDark -> W.appearanceDark
 
 -- | THE SEMANTIC ICON VOCABULARY (spec enum @symbol@; DESIGN.md "Icons
 -- want names, not bytes"; docs/styling-plan.md D6), shared by 'SSymbol'
@@ -1038,38 +1052,38 @@ newtype Catalog = Catalog [Word64]
 -- | A named vocabulary for the accept list's closed half. A MISTYPED
 -- BARE STRING IS SILENT: it becomes a custom format id no clipboard will
 -- ever offer, so Paste stays dead and the paste hook never fires.
-acceptText :: String
+acceptText :: Text
 acceptText = "text"
-acceptHtml :: String
+acceptHtml :: Text
 acceptHtml = "html"
-acceptImage :: String
+acceptImage :: Text
 acceptImage = "image"
-acceptFiles :: String
+acceptFiles :: Text
 acceptFiles = "files"
 
-roleSettings :: String
+roleSettings :: Text
 roleSettings = "settings"
 
 -- | The three clipboard commands. They lower to the platform's own, act
 -- on the FOCUSED widget, and work out their own enablement from what
 -- the clipboard offers and what that widget accepts.
-roleCut :: String
+roleCut :: Text
 roleCut = "cut"
 
-roleCopy :: String
+roleCopy :: Text
 roleCopy = "copy"
 
-rolePaste :: String
+rolePaste :: Text
 rolePaste = "paste"
 
 -- | The two history commands (docs/undo-plan.md D6). They ask the
 -- FOCUSED widget first — a text field with its own edit history answers
 -- before the app's ledger does — and enablement is that same question,
 -- asked live at activation.
-roleUndo :: String
+roleUndo :: Text
 roleUndo = "undo"
 
-roleRedo :: String
+roleRedo :: Text
 roleRedo = "redo"
 
 -- | Menu item construction attributes — the config-list spelling over
@@ -1080,13 +1094,13 @@ roleRedo = "redo"
 data IAttr (s :: MScope) where
   -- | Bind the label to a Str signal (constant labels are the
   -- creator's positional argument).
-  ILabel :: Signal -> IAttr s
+  ILabel :: Signal Text -> IAttr s
   IEnabled :: Bool -> IAttr s
-  IEnabledBy :: Signal -> IAttr s
+  IEnabledBy :: Signal Bool -> IAttr s
   IChecked :: Bool -> IAttr s
-  ICheckedBy :: Signal -> IAttr s
+  ICheckedBy :: Signal Bool -> IAttr s
   IValue :: Int -> IAttr s
-  IValueBy :: Signal -> IAttr s
+  IValueBy :: Signal Double -> IAttr s
   IIcon :: BS.ByteString -> IAttr s
   -- | The item's SEMANTIC ICON ('Symbol'). BESIDE 'IIcon', not instead
   -- of it: app-specific art still rides the blob. Const-only, so there
@@ -1095,16 +1109,16 @@ data IAttr (s :: MScope) where
   IPrimary :: Bool -> IAttr s
   -- | Any window-anchored LEAF command: a chord needs a window catalog
   -- as its native dispatch home, and the type carries that rule.
-  IShortcut :: String -> IAttr 'BarM
+  IShortcut :: Text -> IAttr 'BarM
   -- | Window-anchored actions only: a role names a standard command in the
   -- window catalog.
-  IRole :: String -> IAttr 'BarM
+  IRole :: Text -> IAttr 'BarM
   IOnActivate :: IO () -> IAttr s
-  IOnActivateNode :: ([W.Value] -> IO ()) -> IAttr 'CtxM
+  IOnActivateNode :: ([Key] -> IO ()) -> IAttr 'CtxM
   IOnToggle :: (Bool -> IO ()) -> IAttr s
-  IOnToggleNode :: ([W.Value] -> Bool -> IO ()) -> IAttr 'CtxM
+  IOnToggleNode :: ([Key] -> Bool -> IO ()) -> IAttr 'CtxM
   IOnSelect :: (Int -> IO ()) -> IAttr s
-  IOnSelectNode :: ([W.Value] -> Int -> IO ()) -> IAttr 'CtxM
+  IOnSelectNode :: ([Key] -> Int -> IO ()) -> IAttr 'CtxM
 
 applyIAttr :: Word64 -> IAttr s -> Build ()
 applyIAttr n attr = case attr of
@@ -1118,8 +1132,8 @@ applyIAttr n attr = case attr of
   IIcon bytes -> emitBIO (W.txSetMenuIcon n <$> registerBlob bytes)
   ISymbol s -> emitB (W.txSetMenuSymbol n (symbolWire s))
   IPrimary v -> emitB (W.txSetMenuPrimary n v)
-  IShortcut spelling -> emitB (W.txSetMenuShortcut n spelling)
-  IRole name -> emitB (W.txSetMenuRole n name)
+  IShortcut spelling -> emitB (W.txSetMenuShortcut n (T.unpack spelling))
+  IRole name -> emitB (W.txSetMenuRole n (T.unpack name))
   IOnActivate handler -> pendB (PMenuActivated n handler)
   IOnActivateNode handler -> pendB (PMenuActivatedNode n handler)
   IOnToggle handler -> pendB (PMenuToggled n handler)
@@ -1199,25 +1213,25 @@ nodeContextMenu (Node n) (Catalog roots) =
 setMenuLabel :: MItem s -> Text -> Build ()
 setMenuLabel (MItem n) label = emitB (W.txSetMenuLabel n (T.unpack label))
 
-bindMenuLabel :: MItem s -> Signal -> Build ()
+bindMenuLabel :: MItem s -> Signal Text -> Build ()
 bindMenuLabel (MItem n) (Signal s) = emitB (W.txBindMenuLabel n s)
 
 setMenuEnabled :: MItem s -> Bool -> Build ()
 setMenuEnabled (MItem n) v = emitB (W.txSetMenuEnabled n v)
 
-bindMenuEnabled :: MItem s -> Signal -> Build ()
+bindMenuEnabled :: MItem s -> Signal Bool -> Build ()
 bindMenuEnabled (MItem n) (Signal s) = emitB (W.txBindMenuEnabled n s)
 
 setMenuChecked :: MItem s -> Bool -> Build ()
 setMenuChecked (MItem n) v = emitB (W.txSetMenuChecked n v)
 
-bindMenuChecked :: MItem s -> Signal -> Build ()
+bindMenuChecked :: MItem s -> Signal Bool -> Build ()
 bindMenuChecked (MItem n) (Signal s) = emitB (W.txBindMenuChecked n s)
 
 setMenuValue :: MItem s -> Int -> Build ()
 setMenuValue (MItem n) v = emitB (W.txSetMenuValue n (fromIntegral v))
 
-bindMenuValue :: MItem s -> Signal -> Build ()
+bindMenuValue :: MItem s -> Signal Double -> Build ()
 bindMenuValue (MItem n) (Signal s) = emitB (W.txBindMenuValue n s)
 
 setMenuIcon :: MItem s -> BS.ByteString -> Build ()
@@ -1237,13 +1251,13 @@ setMenuPrimary (MItem n) v = emitB (W.txSetMenuPrimary n v)
 -- | The action's shortcut (window-anchored actions only), canonicalized
 -- by 'W.canonicalizeShortcut'. The shortcut fires the SAME
 -- menu_activated occurrence as a click.
-setMenuShortcut :: MItem s -> String -> Build ()
-setMenuShortcut (MItem n) spelling = emitB (W.txSetMenuShortcut n spelling)
+setMenuShortcut :: MItem s -> Text -> Build ()
+setMenuShortcut (MItem n) spelling = emitB (W.txSetMenuShortcut n (T.unpack spelling))
 
 -- | Declare a retained action a standard command (actions only — root-
 -- checked).
-setMenuRole :: MItem 'BarM -> String -> Build ()
-setMenuRole (MItem n) name = emitB (W.txSetMenuRole n name)
+setMenuRole :: MItem 'BarM -> Text -> Build ()
+setMenuRole (MItem n) name = emitB (W.txSetMenuRole n (T.unpack name))
 
 -- | Reopen a RETAINED grouping node and append more children — the
 -- append-at-any-time discipline.
@@ -1268,12 +1282,7 @@ data AlertAttr
 -- action index (0 or 1) or 'W.alertChoiceCancel' — and its registration
 -- retires with the result. AT MOST TWO AActions (the platform floor)
 -- and EXACTLY ONE ACancel, required.
--- | The showAlert result when the user dismissed without an action —
--- neither of the (at most two) 'AAction' indices.
-alertChoiceCancel :: Word32
-alertChoiceCancel = W.alertChoiceCancel
-
-showAlert :: [AlertAttr] -> (Word32 -> IO ()) -> Build ()
+showAlert :: [AlertAttr] -> (AlertChoice -> IO ()) -> Build ()
 showAlert attrs handler = do
   let titles = [t | ATitle t <- attrs]
       messages = [m | AMessage m <- attrs]
@@ -1286,9 +1295,9 @@ showAlert attrs handler = do
       | null cancels || any T.null cancels ->
           error "kaya: the cancel slot always exists and needs a name — add ACancel"
       | otherwise -> do
-          n <- Build $ \s ->
-            let c = bCounters s
-                next = cAlert c + 1
+          n <- state $ \s ->
+            let c = s.bCounters
+                next = c.cAlert + 1
              in (next, s {bCounters = c {cAlert = next}})
           pendB (PAlert n handler)
           emitB
@@ -1318,7 +1327,7 @@ data NotificationAttr
 -- 'W.notificationOutcomeActivated' or 'W.notificationOutcomeRefused' —
 -- and its registration retires with the result. A title is REQUIRED.
 -- Many notifications may be live at once.
-showNotification :: Word64 -> [NotificationAttr] -> (Word32 -> IO ()) -> Build ()
+showNotification :: Word64 -> [NotificationAttr] -> (NotificationOutcome -> IO ()) -> Build ()
 showNotification notification attrs handler = do
   let titles = [t | NTitle t <- attrs]
       bodies = [b | NBody b <- attrs]
@@ -1348,9 +1357,9 @@ cancelNotification notification = emitB (W.txCancelNotification notification)
 -- whole of a process the platform RELAUNCHED for a tap, since it never
 -- called it. It does not retire, and a one-shot handler for the same id
 -- still wins. An App action, not a 'Build' one: it needs no transaction.
-onNotificationActivation :: App -> (Word64 -> Word32 -> IO ()) -> IO ()
+onNotificationActivation :: App -> (Word64 -> NotificationOutcome -> IO ()) -> IO ()
 onNotificationActivation app handler =
-  writeIORef (appNotificationActivation app) (Just handler)
+  writeIORef (app.appNotificationActivation) (Just handler)
 
 -- | Declare a link ROUTE and the handler that answers it
 -- (docs/app-links-plan.md §4): @linkRoute app \"task\/{key}\" f@ matches
@@ -1371,13 +1380,13 @@ onNotificationActivation app handler =
 -- malformed one, a duplicate — and it faults at apply with the whole
 -- sentence, where every other declaration refusal in kaya lands
 -- (tools\/check-sugar-surface.py refuses a reason spelled here).
-linkRoute :: App -> String -> (Map.Map String String -> IO ()) -> IO ()
+linkRoute :: App -> Text -> (Map.Map Text Text -> IO ()) -> IO ()
 linkRoute app pattern handler = do
-  taken <- readIORef (appNextLinkRoute app)
+  taken <- readIORef (app.appNextLinkRoute)
   let route = taken + 1
-  writeIORef (appNextLinkRoute app) route
-  modifyIORef' (appLinkHandlers app) (Map.insert route handler)
-  modifyIORef' (appPendingRoutes app) (++ [W.txDeclareLinkRoute route (W.VStr pattern)])
+  writeIORef (app.appNextLinkRoute) route
+  modifyIORef' (app.appLinkHandlers) (Map.insert route handler)
+  modifyIORef' (app.appPendingRoutes) (++ [W.txDeclareLinkRoute route (W.VStr (T.unpack pattern))])
 
 -- | The link_opened decision, in a function of its own because the ring
 -- loop's branch has no seam a test can reach (the ring is C memory) —
@@ -1387,18 +1396,23 @@ linkRoute app pattern handler = do
 -- ROUTE TOOK, which the core announced naming every declared pattern, so
 -- it is silent here; a route that matched and reached no handler is this
 -- binding's to announce, naming its own registrar.
-linkOpened :: App -> Word64 -> String -> Map.Map String String -> IO ()
+linkOpened :: App -> Word64 -> Text -> Map.Map Text Text -> IO ()
 linkOpened app route url params = do
-  handlers <- readIORef (appLinkHandlers app)
+  handlers <- readIORef (app.appLinkHandlers)
   case Map.lookup route handlers of
     Just handler -> dispatch (handler params)
     Nothing
       | route == 0 -> return ()
       | otherwise ->
-          hPutStrLn
+          -- The drop's own sentence is byte-compared across the nine
+          -- bindings (tools/check-sugar-surface.py), so the URL is
+          -- spliced in as a 'String', as every other binding splices its
+          -- own.
+          let opened = T.unpack url
+           in hPutStrLn
             stderr
             ( "kaya: link "
-                ++ url
+                ++ opened
                 ++ " matched route "
                 ++ show route
                 ++ " and reached no handler — none is registered for it"
@@ -1407,9 +1421,9 @@ linkOpened app route url params = do
 
 -- | Check one accept-list entry and return it. Ids reach every
 -- platform's own registry verbatim, so they carry no spaces.
-acceptToken :: String -> String
+acceptToken :: Text -> Text
 acceptToken kind
-  | null kind || ' ' `elem` kind =
+  | T.null kind || T.any (== ' ') kind =
       error
         ( "kaya: "
             ++ show kind
@@ -1422,11 +1436,11 @@ acceptToken kind
 
 -- | Join an accept list: the closed kinds by name plus any custom ids,
 -- space separated.
-acceptList :: [String] -> String
-acceptList = unwords . map acceptToken
+acceptList :: [Text] -> Text
+acceptList = T.unwords . map acceptToken
 
 -- | Put ONE clip on the system clipboard:
--- @copy emptyClip { clipText = Just "kaya clip" }@.
+-- @copy emptyClip { text = Just "kaya clip" }@.
 copy :: Clip -> Build ()
 copy clip = emitBIO $ do
   customValues <-
@@ -1434,28 +1448,28 @@ copy clip = emitBIO $ do
       <$> mapM
         ( \(ident, bytes) -> do
             h <- registerBlob bytes
-            return [W.VStr (acceptToken ident), W.VBlob h]
+            return [W.VStr (T.unpack (acceptToken ident)), W.VBlob h]
         )
-        (clipCustom clip)
-  imageValue <- case clipImage clip of
+        (clip.custom)
+  imageValue <- case clip.image of
     Nothing -> return []
     Just bytes -> (: []) . W.VBlob <$> registerBlob bytes
   let present =
-        maybe 0 (const W.clipText) (clipText clip)
-          + maybe 0 (const W.clipHtml) (clipHtml clip)
-          + maybe 0 (const W.clipImage) (clipImage clip)
-      files = map (W.VI64 . fromIntegral . pickedHandle) (clipFiles clip)
+        maybe 0 (const W.clipText) (clip.text)
+          + maybe 0 (const W.clipHtml) (clip.html)
+          + maybe 0 (const W.clipImage) (clip.image)
+      files = map (W.VI64 . fromIntegral . (.handle)) (clip.files)
       values =
         customValues
           ++ files
           ++ imageValue
-          ++ maybe [] (\h -> [W.VStr (T.unpack h)]) (clipHtml clip)
-          ++ maybe [] (\t -> [W.VStr (T.unpack t)]) (clipText clip)
+          ++ maybe [] (\h -> [W.VStr (T.unpack h)]) (clip.html)
+          ++ maybe [] (\t -> [W.VStr (T.unpack t)]) (clip.text)
   return
     ( W.txCopy
         present
-        (fromIntegral (length (clipFiles clip)))
-        (fromIntegral (length (clipCustom clip)))
+        (fromIntegral (length (clip.files)))
+        (fromIntegral (length (clip.custom)))
         values
     )
 
@@ -1463,19 +1477,19 @@ copy clip = emitBIO $ do
 -- platforms have deliberately made it expensive (DESIGN.md, and
 -- docs/clipboard-plan.md): reach for it to detect a URL or import, never to
 -- implement Paste — that is the Paste command, and it is free.
-readClipboard :: [String] -> (Maybe Representation -> IO ()) -> Build ()
+readClipboard :: [Text] -> (Maybe Representation -> IO ()) -> Build ()
 readClipboard accepting handler = do
-  n <- Build $ \st ->
-    let c = bCounters st
-        next = cClipboardRead c + 1
+  n <- state $ \st ->
+    let c = st.bCounters
+        next = c.cClipboardRead + 1
      in (next, st {bCounters = c {cClipboardRead = next}})
   pendB (PClipboardRead n handler)
-  emitB (W.txReadClipboard n (W.VStr (acceptList accepting)))
+  emitB (W.txReadClipboard n (W.VStr (T.unpack (acceptList accepting))))
 
 -- | Declare what a widget takes from a paste — the dynamic path; the
 -- declarative spelling is the 'Accepts' attribute at construction.
-setAccepts :: Widget -> [String] -> Build ()
-setAccepts (Widget w) kinds = emitB (W.txSetAccepts w (acceptList kinds))
+setAccepts :: Widget -> [Text] -> Build ()
+setAccepts (Widget w) kinds = emitB (W.txSetAccepts w (T.unpack (acceptList kinds)))
 
 -- | The drag_op mask a guest's operations name; the empty list
 -- withdraws the declaration.
@@ -1514,13 +1528,13 @@ tplDragSourceRecord w clip ops = do
       <$> mapM
         ( \(ident, rep) -> case rep of
             TplField (KField i) ->
-              return [W.VStr (acceptToken ident), W.VI64 (fromIntegral i)]
+              return [W.VStr (T.unpack (acceptToken ident)), W.VI64 (fromIntegral i)]
             TplConst bytes -> do
               h <- registerBlob bytes
-              return [W.VStr (acceptToken ident), W.VBlob h]
+              return [W.VStr (T.unpack (acceptToken ident)), W.VBlob h]
         )
-        (tplClipCustom clip)
-  imageValue <- case tplClipImage clip of
+        (clip.tplCustom)
+  imageValue <- case clip.tplImage of
     Nothing -> return []
     Just (TplField (KField i)) -> return [W.VI64 (fromIntegral i)]
     Just (TplConst bytes) -> (: []) . W.VBlob <$> registerBlob bytes
@@ -1528,35 +1542,35 @@ tplDragSourceRecord w clip ops = do
         TplField (KField i) -> W.VI64 (fromIntegral i)
         TplConst txt -> W.VStr (T.unpack txt)
       present =
-        maybe 0 (const W.clipText) (tplClipText clip)
-          + maybe 0 (const W.clipHtml) (tplClipHtml clip)
-          + maybe 0 (const W.clipImage) (tplClipImage clip)
-      files = map (W.VI64 . fromIntegral . pickedHandle) (tplClipFiles clip)
+        maybe 0 (const W.clipText) (clip.tplText)
+          + maybe 0 (const W.clipHtml) (clip.tplHtml)
+          + maybe 0 (const W.clipImage) (clip.tplImage)
+      files = map (W.VI64 . fromIntegral . (.handle)) (clip.tplFiles)
       values =
         customValues
           ++ files
           ++ imageValue
-          ++ maybe [] ((: []) . strValue) (tplClipHtml clip)
-          ++ maybe [] ((: []) . strValue) (tplClipText clip)
+          ++ maybe [] ((: []) . strValue) (clip.tplHtml)
+          ++ maybe [] ((: []) . strValue) (clip.tplText)
       -- The bound slots BY POSITION, canonical order: a custom pair's
       -- second half, then the image, the html and the text.
-      afterCustom = 2 * length (tplClipCustom clip) + length (tplClipFiles clip)
+      afterCustom = 2 * length (clip.tplCustom) + length (clip.tplFiles)
       afterImage = afterCustom + length imageValue
-      afterHtml = afterImage + maybe 0 (const 1) (tplClipHtml clip)
+      afterHtml = afterImage + maybe 0 (const 1) (clip.tplHtml)
       slots =
-        [2 * i + 1 | (i, (_, TplField _)) <- zip [0 :: Int ..] (tplClipCustom clip)]
-          ++ [afterCustom | isTplField (tplClipImage clip)]
-          ++ [afterImage | isTplField (tplClipHtml clip)]
-          ++ [afterHtml | isTplField (tplClipText clip)]
+        [2 * i + 1 | (i, (_, TplField _)) <- zip [0 :: Int ..] (clip.tplCustom)]
+          ++ [afterCustom | isTplField (clip.tplImage)]
+          ++ [afterImage | isTplField (clip.tplHtml)]
+          ++ [afterHtml | isTplField (clip.tplText)]
       bound = sum [2 ^ s | s <- slots] :: Word32
       empty =
-        present == 0 && null (tplClipFiles clip) && null (tplClipCustom clip)
+        present == 0 && null (clip.tplFiles) && null (clip.tplCustom)
   return
     ( W.txSetDragSource
         w
         present
-        (fromIntegral (length (tplClipFiles clip)))
-        (fromIntegral (length (tplClipCustom clip)))
+        (fromIntegral (length (clip.tplFiles)))
+        (fromIntegral (length (clip.tplCustom)))
         (if empty then 0 else operationMask ops)
         0
         bound
@@ -1576,30 +1590,30 @@ dragSourceRecord w keys clip ops = do
       <$> mapM
         ( \(ident, bytes) -> do
             h <- registerBlob bytes
-            return [W.VStr (acceptToken ident), W.VBlob h]
+            return [W.VStr (T.unpack (acceptToken ident)), W.VBlob h]
         )
-        (clipCustom clip)
-  imageValue <- case clipImage clip of
+        (clip.custom)
+  imageValue <- case clip.image of
     Nothing -> return []
     Just bytes -> (: []) . W.VBlob <$> registerBlob bytes
   let present =
-        maybe 0 (const W.clipText) (clipText clip)
-          + maybe 0 (const W.clipHtml) (clipHtml clip)
-          + maybe 0 (const W.clipImage) (clipImage clip)
-      files = map (W.VI64 . fromIntegral . pickedHandle) (clipFiles clip)
+        maybe 0 (const W.clipText) (clip.text)
+          + maybe 0 (const W.clipHtml) (clip.html)
+          + maybe 0 (const W.clipImage) (clip.image)
+      files = map (W.VI64 . fromIntegral . (.handle)) (clip.files)
       values =
         customValues
           ++ files
           ++ imageValue
-          ++ maybe [] (\h -> [W.VStr (T.unpack h)]) (clipHtml clip)
-          ++ maybe [] (\t -> [W.VStr (T.unpack t)]) (clipText clip)
-      empty = present == 0 && null (clipFiles clip) && null (clipCustom clip)
+          ++ maybe [] (\h -> [W.VStr (T.unpack h)]) (clip.html)
+          ++ maybe [] (\t -> [W.VStr (T.unpack t)]) (clip.text)
+      empty = present == 0 && null (clip.files) && null (clip.custom)
   return
     ( W.txSetDragSource
         w
         present
-        (fromIntegral (length (clipFiles clip)))
-        (fromIntegral (length (clipCustom clip)))
+        (fromIntegral (length (clip.files)))
+        (fromIntegral (length (clip.custom)))
         (if empty then 0 else operationMask ops)
         (fromIntegral (length keys))
         0
@@ -1618,15 +1632,15 @@ setDropTarget (Widget w) ops =
 -- template node and the copy's keys, outermost first. The per-row
 -- payload an app declares after the row's insert; it overrides the
 -- template's own for that copy and follows it through a re-stamp.
-setDragSourceAt :: Node -> [W.Value] -> Clip -> [Op] -> Build ()
+setDragSourceAt :: Node -> [Key] -> Clip -> [Op] -> Build ()
 setDragSourceAt (Node n) keys clip ops =
-  emitBIO (dragSourceRecord n keys clip ops)
+  emitBIO (dragSourceRecord n (map keyValue keys) clip ops)
 
 -- | 'setDragSourceAt''s twin: ONE stamped copy receives drops with these
 -- operations, taking what the template's 'TplAccepts' names.
-setDropTargetAt :: Node -> [W.Value] -> [Op] -> Build ()
+setDropTargetAt :: Node -> [Key] -> [Op] -> Build ()
 setDropTargetAt (Node n) keys ops =
-  emitB (W.txSetDropTarget n (operationMask ops) (fromIntegral (length keys)) keys)
+  emitB (W.txSetDropTarget n (operationMask ops) (fromIntegral (length keys)) (map keyValue keys))
 
 -- | Rows of this live For drag within their own collection
 -- (docs\/dnd-plan.md D8): the landing arrives at 'onDrop' on the For's
@@ -1642,19 +1656,19 @@ setReorderable (Widget w) enabled =
 -- every platform. The handler fires exactly once and retires with its
 -- answer; CANCEL IS THE EMPTY LIST, and one dialog may be live per
 -- process.
-pickFiles :: [(String, String)] -> ([PickedFile] -> IO ()) -> Build ()
+pickFiles :: [(Text, Text)] -> ([PickedFile] -> IO ()) -> Build ()
 pickFiles = pick True
 
 -- | The single-file spelling. The floor always returns a LIST; this
 -- only asks the platform for one, so the handler receives zero or one.
-pickFile :: [(String, String)] -> ([PickedFile] -> IO ()) -> Build ()
+pickFile :: [(Text, Text)] -> ([PickedFile] -> IO ()) -> Build ()
 pickFile = pick False
 
-pick :: Bool -> [(String, String)] -> ([PickedFile] -> IO ()) -> Build ()
+pick :: Bool -> [(Text, Text)] -> ([PickedFile] -> IO ()) -> Build ()
 pick multiple filters handler = do
-  n <- Build $ \s ->
-    let c = bCounters s
-        next = cFileDialog c + 1
+  n <- state $ \s ->
+    let c = s.bCounters
+        next = c.cFileDialog + 1
      in (next, s {bCounters = c {cFileDialog = next}})
   pendB (PFileDialog n handler)
   emitB
@@ -1668,25 +1682,25 @@ pick multiple filters handler = do
 -- | Ask the platform WHERE TO SAVE — the picker's twin, on the same
 -- request\/result grammar and out of the same one-live-dialog slot; the
 -- handler fires exactly once and CANCEL IS 'Nothing'. Read the name you
--- GOT ('pickedName'), never the one you asked for: no platform promises
+-- GOT (the handle's own @name@), never the one you asked for: no platform promises
 -- the suggested one. WHAT YOU GET BACK OPENS EMPTY
 -- (docs\/save-plan.md D1; DESIGN.md).
-saveFile :: String -> [(String, String)] -> (Maybe PickedFile -> IO ()) -> Build ()
+saveFile :: Text -> [(Text, Text)] -> (Maybe PickedFile -> IO ()) -> Build ()
 saveFile suggested filters handler = do
   -- THE PICKER'S COUNTER AND THE PICKER'S TABLE, deliberately: the core
   -- has one dialog id space, one live slot and one retire gate, so a
   -- save minting ids of its own could collide with a pick.
-  n <- Build $ \s ->
-    let c = bCounters s
-        next = cFileDialog c + 1
+  n <- state $ \s ->
+    let c = s.bCounters
+        next = c.cFileDialog + 1
      in (next, s {bCounters = c {cFileDialog = next}})
   pendB (PFileDialog n (handler . listToMaybe))
-  emitB (W.txShowSaveDialog 0 n (W.VStr suggested) (filterValues filters))
+  emitB (W.txShowSaveDialog 0 n (W.VStr (T.unpack suggested)) (filterValues filters))
 
 -- (label, space-separated extensions) pairs, flattened the way the wire
 -- carries them.
-filterValues :: [(String, String)] -> [W.Value]
-filterValues = concatMap (\(label, exts) -> [W.VStr label, W.VStr exts])
+filterValues :: [(Text, Text)] -> [W.Value]
+filterValues = concatMap (\(label, exts) -> [W.VStr (T.unpack label), W.VStr (T.unpack exts)])
 
 -- | Mount a root into the default window; mounting presents.
 mount :: Widget -> Build ()
@@ -1783,51 +1797,49 @@ documentOf txt = Document txt []
 -- THE DOCUMENT COMES LAST, so a declaration composes:
 -- @blockRun (13, 24) Heading2 . boldRun (0, 6) $ documentOf text@.
 
-mark :: (Int, Int) -> Text -> Text -> Document -> Document
-mark (start, stop) name value doc =
-  doc {docRuns = docRuns doc ++ [Run start stop name value]}
+mark :: (Int, Int) -> Text -> MarkValue -> Document -> Document
+mark r n v doc = Document doc.text (doc.runs ++ [Run r n v])
 
 -- | A run's marks, suffixed: the plain names are the widget's own acts.
 boldRun, italicRun, underlineRun, strikeRun, codeRun ::
   (Int, Int) -> Document -> Document
-boldRun range = mark range "bold" "true"
-italicRun range = mark range "italic" "true"
-underlineRun range = mark range "underline" "true"
-strikeRun range = mark range "strike" "true"
-codeRun range = mark range "code" "true"
+boldRun r = mark r "bold" (Flag True)
+italicRun r = mark r "italic" (Flag True)
+underlineRun r = mark r "underline" (Flag True)
+strikeRun r = mark r "strike" (Flag True)
+codeRun r = mark r "code" (Flag True)
 
 -- | A run's link; 'link' itself is the widget's act.
 linkRun :: (Int, Int) -> Text -> Document -> Document
-linkRun range url = mark range "link" url
+linkRun r url = mark r "link" (Spelled url)
 
 -- | A paragraph's kind; the range covers whole paragraphs or is refused.
 blockRun :: (Int, Int) -> Block -> Document -> Document
-blockRun range kind = mark range "block" (blockName kind)
+blockRun r kind = mark r "block" (Spelled (blockName kind))
 
-attrAt :: Document -> Int -> Text -> Maybe Text
-attrAt doc byte name =
-  runValue
+attrAt :: Document -> Int -> Text -> Maybe MarkValue
+attrAt doc byte n =
+  (.value)
     <$> listToMaybe
       [ r
-        | r <- docRuns doc,
-          runName r == name,
-          runStart r <= byte,
-          byte < runEnd r
+        | r <- doc.runs,
+          r.name == n,
+          fst r.range <= byte,
+          byte < snd r.range
       ]
 
 insertEdit :: Int -> Text -> Edit
-insertEdit at txt = Edit at at txt [] Nothing
+insertEdit at txt = Edit (at, at) txt [] Nothing
 
 deleteEdit :: (Int, Int) -> Edit
-deleteEdit (start, stop) = Edit start stop "" [] Nothing
+deleteEdit r = Edit r "" [] Nothing
 
 replaceEdit :: (Int, Int) -> Text -> Edit
-replaceEdit (start, stop) txt = Edit start stop txt [] Nothing
+replaceEdit r txt = Edit r txt [] Nothing
 
 -- | One attribute over the INSERTED text's own offsets.
-markEdit :: (Int, Int) -> Text -> Text -> Edit -> Edit
-markEdit (start, stop) name value e =
-  e {editRuns = editRuns e ++ [Run start stop name value]}
+markEdit :: (Int, Int) -> Text -> MarkValue -> Edit -> Edit
+markEdit r n v e = Edit e.range e.inserted (e.runs ++ [Run r n v]) e.source
 
 -- Byte offsets are the core's (docs/ranges-units.md); the wire module
 -- decodes inbound Strs itself (docs/traps.md 2026-09-11).
@@ -1836,65 +1848,68 @@ markEdit (start, stop) name value e =
 -- @RichDoc::normalize@), so the mirror and the core's document spell one
 -- string.
 normalizeRuns :: [Run] -> [Run]
-normalizeRuns runs =
-  List.sortOn (\r -> (runStart r, runName r)) (concatMap perName names)
+normalizeRuns rs = List.sortOn (\r -> (fst r.range, r.name)) (concatMap perName names)
   where
-    names = List.sort (List.nub (map runName runs))
-    perName name =
-      merge (List.sortOn runStart (foldl paint [] (filter ((== name) . runName) runs)))
+    names = List.sort (List.nub (map (.name) rs))
+    perName n =
+      merge (List.sortOn (fst . (.range)) (foldl paint [] (filter ((== n) . (.name)) rs)))
+    paint :: [Run] -> Run -> [Run]
     paint painted run
-      | runStart run >= runEnd run = painted
+      | fst run.range >= snd run.range = painted
       | otherwise = concatMap (cut run) painted ++ [run]
+    cut :: Run -> Run -> [Run]
     cut run old
-      | runEnd old <= runStart run || runStart old >= runEnd run = [old]
+      | snd old.range <= fst run.range || fst old.range >= snd run.range = [old]
       | otherwise =
-          [old {runEnd = runStart run} | runStart old < runStart run]
-            ++ [old {runStart = runEnd run} | runEnd old > runEnd run]
+          [spanning old (fst old.range, fst run.range) | fst old.range < fst run.range]
+            ++ [spanning old (snd run.range, snd old.range) | snd old.range > snd run.range]
+    -- THE RANGE MOVES AND NOTHING ELSE: record UPDATE syntax is out,
+    -- since GHC refuses an ambiguous update on a field three records
+    -- share (Run, Edit and Format each carry a 'range').
+    spanning :: Run -> (Int, Int) -> Run
+    spanning r to = Run to r.name r.value
+    merge :: [Run] -> [Run]
     merge [] = []
     merge (r : rest) = go r rest
       where
         go acc [] = [acc]
         go acc (next : more)
-          | runEnd acc == runStart next && runValue acc == runValue next =
-              go acc {runEnd = runEnd next} more
+          | snd acc.range == fst next.range && acc.value == next.value =
+              go (spanning acc (fst acc.range, snd next.range)) more
           | otherwise = acc : go next more
 
 -- | The folded document of a @rich@ textarea; empty until the first edit
 -- or write.
 document :: App -> Widget -> IO Document
 document app (Widget n) =
-  Map.findWithDefault (documentOf "") n <$> readIORef (appDocuments app)
+  Map.findWithDefault (documentOf "") n <$> readIORef (app.appDocuments)
 
 -- | The core's own fold rule, over ANY document — a live mirror or a
 -- stamped copy's row field (crates\/kaya\/src\/app.rs, @fold_edit@;
 -- docs\/rich-text-plan.md §19).
 foldEdit :: Edit -> Document -> Document
 foldEdit e doc =
-      let bytes = utf8Bytes (docText doc)
+      let bytes = utf8Bytes doc.text
           len = length bytes
-          ins = utf8Bytes (editInserted e)
-          start = editStart e
-          stop = editEnd e
+          ins = utf8Bytes e.inserted
+          (start, stop) = e.range
           boundary at = at == len || (bytes !! at) .&. 0xc0 /= 0x80
           shift = length ins - (stop - start)
+          moved r to = Run to r.name r.value
           kept =
             concatMap
               ( \r ->
-                  [r {runEnd = min (runEnd r) start} | runStart r < start]
-                    ++ [ r
-                           { runStart = max (runStart r) stop + shift,
-                             runEnd = runEnd r + shift
-                           }
-                         | runEnd r > stop
+                  [moved r (fst r.range, min (snd r.range) start) | fst r.range < start]
+                    ++ [ moved r (max (fst r.range) stop + shift, snd r.range + shift)
+                         | snd r.range > stop
                        ]
               )
-              (docRuns doc)
-          landed =
-            map (\r -> r {runStart = runStart r + start, runEnd = runEnd r + start}) (editRuns e)
+              doc.runs
+          landed = map (\r -> moved r (fst r.range + start, snd r.range + start)) e.runs
        in if start < 0 || start > stop || stop > len || not (boundary start)
             || not (boundary stop)
             then -- A mirror out of step with the core would splice garbage.
-              Document (editInserted e) (editRuns e)
+              Document e.inserted e.runs
             else
               Document
                 (utf8Chars (take start bytes ++ ins ++ drop stop bytes))
@@ -1903,36 +1918,38 @@ foldEdit e doc =
 -- | The core's @fold_format@, over any document.
 foldFormat :: Format -> Document -> Document
 foldFormat act doc
-  | formatStart act >= formatEnd act = doc
+  | fst act.range >= snd act.range = doc
   | otherwise =
-      let (start, stop, name) = (formatStart act, formatEnd act, formatName act)
+      let (start, stop) = act.range
+          n = act.name
+          moved r to = Run to r.name r.value
           kept =
             concatMap
               ( \r ->
-                  if runName r /= name || runEnd r <= start || runStart r >= stop
+                  if r.name /= n || snd r.range <= start || fst r.range >= stop
                     then [r]
                     else
-                      [r {runEnd = start} | runStart r < start]
-                        ++ [r {runStart = stop} | runEnd r > stop]
+                      [moved r (fst r.range, start) | fst r.range < start]
+                        ++ [moved r (stop, snd r.range) | snd r.range > stop]
               )
-              (docRuns doc)
-          painted = case formatValue act of
-            Just v -> kept ++ [Run start stop name v]
+              doc.runs
+          painted = case act.value of
+            Just v -> kept ++ [Run (start, stop) n v]
             Nothing -> kept
-       in doc {docRuns = normalizeRuns painted}
+       in Document doc.text (normalizeRuns painted)
 
 -- One delivered act, into the live mirror (crates/kaya/src/app.rs,
 -- @absorb_edit@ / @absorb_format@).
 absorbEdit :: App -> Widget -> Edit -> IO ()
 absorbEdit app (Widget n) e =
   modifyIORef'
-    (appDocuments app)
+    (app.appDocuments)
     (Map.alter (Just . foldEdit e . fromMaybe (documentOf "")) n)
 
 absorbFormat :: App -> Widget -> Format -> IO ()
 absorbFormat app (Widget n) act =
   modifyIORef'
-    (appDocuments app)
+    (app.appDocuments)
     (Map.alter (Just . foldFormat act . fromMaybe (documentOf "")) n)
 
 -- A stamped copy's edit or format act reaches its ROW's Document field
@@ -1940,9 +1957,10 @@ absorbFormat app (Widget n) act =
 -- level) by 'textareaRichBound', and the occurrence's path names the
 -- row. A row that is gone has no field to fold into, and that is not a
 -- fault.
-foldRowDocument :: App -> Node -> [W.Value] -> (Document -> Document) -> IO ()
-foldRowDocument app (Node n) path f = do
-  binds <- readIORef (appDocumentBinds app)
+foldRowDocument :: App -> Node -> [Key] -> (Document -> Document) -> IO ()
+foldRowDocument app (Node n) path0 f = do
+  let path = map keyValue path0
+  binds <- readIORef (app.appDocumentBinds)
   case Map.lookup n binds of
     Nothing -> return ()
     -- [level] Fors up is [level] keys shorter: the innermost copy's own
@@ -1964,9 +1982,9 @@ foldRowDocument app (Node n) path f = do
                 | k == key = (k, (variant, slot vs))
                 | otherwise = (k, (variant, vs))
               onInstance inst
-                | iPath inst == ancestors = inst {iEntries = map onEntry (iEntries inst)}
+                | inst.iPath == ancestors = inst {iEntries = map onEntry (inst.iEntries)}
                 | otherwise = inst
-           in modifyIORef' (appModel app) $ \(model, children) ->
+           in modifyIORef' (app.appModel) $ \(model, children) ->
                 (Map.adjust (map onInstance) cid model, children)
 
 -- | This widget carries attribute runs: 'setDocument', 'applyEdit',
@@ -1988,13 +2006,13 @@ setOwnUndo (Widget n) on = emitB (W.txSetOwnUndo n on)
 -- the record's own IO, which 'buildTx' runs as it serializes the batch.
 setDocument :: App -> Widget -> Document -> Build ()
 setDocument app (Widget n) doc = emitBIO $ do
-  modifyIORef' (appDocuments app) (Map.insert n doc)
+  modifyIORef' (app.appDocuments) (Map.insert n doc)
   return
     ( W.txSetRichText
         n
-        (fromIntegral (length (docRuns doc)))
-        (runValues (docRuns doc))
-        (W.VStr (T.unpack (docText doc)))
+        (fromIntegral (length (doc.runs)))
+        (runValues (doc.runs))
+        (W.VStr (T.unpack (doc.text)))
     )
 
 -- | One edit into a @rich@ textarea: echoes nothing, never resets undo,
@@ -2007,41 +2025,44 @@ applyEdit app (Widget n) e = emitBIO $ do
   return
     ( W.txApplyEdit
         n
-        (fromIntegral (editStart e))
-        (fromIntegral (editEnd e))
-        (fromIntegral (length (editRuns e)))
-        (runValues (editRuns e))
-        (W.VStr (T.unpack (editInserted e)))
+        (fromIntegral (fst e.range))
+        (fromIntegral (snd e.range))
+        (fromIntegral (length (e.runs)))
+        (runValues (e.runs))
+        (W.VStr (T.unpack (e.inserted)))
     )
 
 -- | Format the widget's CURRENT SELECTION through its own act — what a
 -- toolbar button sends; the widget answers through 'onFormat'. Over a
 -- collapsed selection the attribute is armed for the next keystroke
 -- instead. The value is @\"true\"@ for a flag, the URL for @link@.
-formatText :: Widget -> Text -> Text -> Build ()
+formatText :: Widget -> Text -> MarkValue -> Build ()
 formatText (Widget n) name value =
-  emitB (W.txFormatText n 0 0 0 0 [W.VStr (T.unpack name), W.VStr (T.unpack value)])
+  emitB
+    ( W.txFormatText n 0 0 0 0
+        [W.VStr (T.unpack name), W.VStr (T.unpack (markSpelling value))]
+    )
 
 -- | The named acts (docs\/rich-text-plan.md §18): 'formatText' with its
 -- own name over the widget's selection. A run's mark is 'boldRun' and
 -- its siblings, the app-links route declarator 'linkRoute'.
 bold :: Widget -> Build ()
-bold w = formatText w "bold" "true"
+bold w = formatText w "bold" (Flag True)
 
 italic :: Widget -> Build ()
-italic w = formatText w "italic" "true"
+italic w = formatText w "italic" (Flag True)
 
 underline :: Widget -> Build ()
-underline w = formatText w "underline" "true"
+underline w = formatText w "underline" (Flag True)
 
 strike :: Widget -> Build ()
-strike w = formatText w "strike" "true"
+strike w = formatText w "strike" (Flag True)
 
 code :: Widget -> Build ()
-code w = formatText w "code" "true"
+code w = formatText w "code" (Flag True)
 
 link :: Widget -> Text -> Build ()
-link w url = formatText w "link" url
+link w url = formatText w "link" (Spelled url)
 
 -- | Take an attribute off the widget's current selection.
 unformat :: Widget -> Text -> Build ()
@@ -2054,8 +2075,8 @@ rangedActBounds :: App -> Word64 -> (Int, Int) -> Text -> IO (Int, Int)
 rangedActBounds app n (start, stop) name
   | name /= "block" = return (start, stop)
   | otherwise = do
-      docs <- readIORef (appDocuments app)
-      let bytes = utf8Bytes (maybe "" docText (Map.lookup n docs))
+      docs <- readIORef (app.appDocuments)
+      let bytes = utf8Bytes (maybe "" (.text) (Map.lookup n docs))
           len = length bytes
           from = min start len
           to = min stop len
@@ -2068,11 +2089,12 @@ rangedActBounds app n (start, stop) name
 -- label, and the fold moves here as 'applyEdit' moves it
 -- (docs\/rich-text-plan.md §17). A @block@ covers the range's whole
 -- paragraphs, and @block@ with @\"body\"@ takes the kind off.
-formatTextRange :: App -> Widget -> (Int, Int) -> Text -> Text -> Build ()
-formatTextRange app (Widget n) range name value = emitBIO $ do
-  (start, stop) <- rangedActBounds app n range name
-  let painted = if name == "block" && value == "body" then Nothing else Just value
-  absorbFormat app (Widget n) (Format start stop name painted)
+formatTextRange :: App -> Widget -> (Int, Int) -> Text -> MarkValue -> Build ()
+formatTextRange app (Widget n) at name value = emitBIO $ do
+  (start, stop) <- rangedActBounds app n at name
+  let painted =
+        if name == "block" && value == Spelled "body" then Nothing else Just value
+  absorbFormat app (Widget n) (Format (start, stop) name painted)
   return
     ( W.txFormatText
         n
@@ -2080,14 +2102,16 @@ formatTextRange app (Widget n) range name value = emitBIO $ do
         1
         (fromIntegral start)
         (fromIntegral stop)
-        [W.VStr (T.unpack name), W.VStr (T.unpack (fromMaybe "" painted))]
+        [ W.VStr (T.unpack name),
+          W.VStr (T.unpack (maybe "" markSpelling painted))
+        ]
     )
 
 -- | The removal 'formatTextRange' pairs with.
 unformatRange :: App -> Widget -> (Int, Int) -> Text -> Build ()
-unformatRange app (Widget n) range name = emitBIO $ do
-  (start, stop) <- rangedActBounds app n range name
-  absorbFormat app (Widget n) (Format start stop name Nothing)
+unformatRange app (Widget n) at name = emitBIO $ do
+  (start, stop) <- rangedActBounds app n at name
+  absorbFormat app (Widget n) (Format (start, stop) name Nothing)
   return
     ( W.txFormatText n 1 1 (fromIntegral start) (fromIntegral stop)
         [W.VStr (T.unpack name), W.VStr ""]
@@ -2095,7 +2119,7 @@ unformatRange app (Widget n) range name = emitBIO $ do
 
 -- | Make the selection's paragraphs @kind@; 'Body' clears.
 setBlock :: Widget -> Block -> Build ()
-setBlock w kind = formatText w "block" (blockName kind)
+setBlock w kind = formatText w "block" (Spelled (blockName kind))
 
 -- | What an 'OwnUndo' textarea's app can take back right now, and put
 -- back: the route reads these (docs\/rich-text-plan.md §14), so a write
@@ -2110,22 +2134,22 @@ canRedo (Widget n) on = emitB (W.txSetCanRedo n on)
 -- fires beside it (docs\/rich-text-plan.md R1). App-registered, the way
 -- 'onDraw' is: the handler reads the widget's own 'document'.
 onEdit :: App -> Widget -> (Edit -> IO ()) -> IO ()
-onEdit app (Widget n) f = modifyIORef' (appWidgetEdits app) (Map.insert n f)
+onEdit app (Widget n) f = modifyIORef' (app.appWidgetEdits) (Map.insert n f)
 
 -- | The user formatted a range; a format over a collapsed caret is
 -- pending state and arrives as the next edit's runs, never here.
 onFormat :: App -> Widget -> (Format -> IO ()) -> IO ()
-onFormat app (Widget n) f = modifyIORef' (appWidgetFormats app) (Map.insert n f)
+onFormat app (Widget n) f = modifyIORef' (app.appWidgetFormats) (Map.insert n f)
 
 -- | A stamped rich copy's edit, with its row's key path outermost first
 -- — 'onEdit' one zone over (docs\/rich-text-plan.md §19). The row's
 -- Document field has already taken the act when this fires, so the
 -- handler reads the ROW and never the widget.
-onEditNode :: App -> Node -> ([W.Value] -> Edit -> IO ()) -> IO ()
-onEditNode app (Node n) f = modifyIORef' (appNodeEdits app) (Map.insert n f)
+onEditNode :: App -> Node -> ([Key] -> Edit -> IO ()) -> IO ()
+onEditNode app (Node n) f = modifyIORef' (app.appNodeEdits) (Map.insert n f)
 
-onFormatNode :: App -> Node -> ([W.Value] -> Format -> IO ()) -> IO ()
-onFormatNode app (Node n) f = modifyIORef' (appNodeFormats app) (Map.insert n f)
+onFormatNode :: App -> Node -> ([Key] -> Format -> IO ()) -> IO ()
+onFormatNode app (Node n) f = modifyIORef' (app.appNodeFormats) (Map.insert n f)
 
 -- | Write a live widget's text: seed an editor's document, re-caption a
 -- label. LIVE WIDGETS ONLY — the same write on a template Node is the
@@ -2133,7 +2157,7 @@ onFormatNode app (Node n) f = modifyIORef' (appNodeFormats app) (Map.insert n f)
 setText :: Widget -> Text -> Build ()
 setText = setTextProp
 
-bindText :: Widget -> Signal -> Build ()
+bindText :: Widget -> Signal Text -> Build ()
 bindText (Widget w) (Signal s) = emitB (W.txBindText w s)
 
 -- | A container's inter-child gap (main axis, DIP; the normalized default is
@@ -2296,7 +2320,7 @@ setA11yHint :: Widget -> Text -> Build ()
 setA11yHint (Widget w) h = emitB (W.txSetA11yHint w (T.unpack h))
 
 -- | The SIGNAL-SOURCED forms of the trio, spelled as 'bindText' is.
-bindA11yId, bindA11yLabel, bindA11yHint :: Widget -> Signal -> Build ()
+bindA11yId, bindA11yLabel, bindA11yHint :: Widget -> Signal Text -> Build ()
 bindA11yId (Widget w) (Signal s) = emitB (W.txBindA11yId w s)
 bindA11yLabel (Widget w) (Signal s) = emitB (W.txBindA11yLabel w s)
 bindA11yHint (Widget w) (Signal s) = emitB (W.txBindA11yHint w s)
@@ -2309,7 +2333,7 @@ bindA11yHint (Widget w) (Signal s) = emitB (W.txBindA11yHint w s)
 setHelp :: Widget -> Text -> Build ()
 setHelp (Widget w) h = emitB (W.txSetHelp w (T.unpack h))
 
-bindHelp :: Widget -> Signal -> Build ()
+bindHelp :: Widget -> Signal Text -> Build ()
 bindHelp (Widget w) (Signal s) = emitB (W.txBindHelp w s)
 
 -- | The PROMPT a text field shows while it is empty
@@ -2319,7 +2343,7 @@ bindHelp (Widget w) (Signal s) = emitB (W.txBindHelp w s)
 setPlaceholder :: Widget -> Text -> Build ()
 setPlaceholder (Widget w) v = emitB (W.txSetPlaceholder w (T.unpack v))
 
-bindPlaceholder :: Widget -> Signal -> Build ()
+bindPlaceholder :: Widget -> Signal Text -> Build ()
 bindPlaceholder (Widget w) (Signal s) = emitB (W.txBindPlaceholder w s)
 
 -- | The DESTINATION a 'Link' label opens (docs\/tasks-s2-plan.md T3): the
@@ -2327,21 +2351,8 @@ bindPlaceholder (Widget w) (Signal s) = emitB (W.txBindPlaceholder w s)
 setHref :: Widget -> Text -> Build ()
 setHref (Widget w) v = emitB (W.txSetHref w (T.unpack v))
 
-bindHref :: Widget -> Signal -> Build ()
+bindHref :: Widget -> Signal Text -> Build ()
 bindHref (Widget w) (Signal s) = emitB (W.txBindHref w s)
-
--- | What a LIVE widget's Str a11y prop can take: a constant or a signal —
--- the attr picks the setter by the argument's type, as the template
--- zone's 'TplStrSource' does with the row field arm left out.
-class LiveStrSource s where
-  liveStr :: (Widget -> Text -> Build ()) -> (Widget -> Signal -> Build ())
-          -> Widget -> s -> Build ()
-
-instance LiveStrSource Text where
-  liveStr setter _ w v = setter w v
-
-instance LiveStrSource Signal where
-  liveStr _ binder w s = binder w s
 
 data Attr (c :: WClass) where
   -- | This widget's flex weight — any widget class.
@@ -2375,19 +2386,26 @@ data Attr (c :: WClass) where
   StackWhen :: SizeClass -> Attr 'BoxW
   -- | This widget's accessibility identifier — any widget class, like
   -- 'Grow': the two accessibility props are universal, so the index
-  -- must not narrow them.
-  A11yId :: LiveStrSource s => s -> Attr c
+  -- must not narrow them. EVERY STR PROP IS A PAIR, the constant and
+  -- the @*Bound@ twin over a signal: one class-polymorphic constructor
+  -- cannot infer a bare literal (docs/deferred.md, the Haskell
+  -- text-surface entry), which is what 'SBadge'\/'SBadgeBound' already
+  -- spelled this way.
+  A11yId :: Text -> Attr c
+  A11yIdBound :: Signal Text -> Attr c
   -- | What an assistive client speaks for this widget — any widget
-  -- class, for the same reason. A 'String' or a 'Signal'.
-  A11yLabel :: LiveStrSource s => s -> Attr c
+  -- class, for the same reason.
+  A11yLabel :: Text -> Attr c
+  A11yLabelBound :: Signal Text -> Attr c
   -- | What ACTIVATING this widget does. Leaf-class only, unlike the
   -- other two: a hint needs an activation to describe, and the root
   -- admits it on button, checkbox, select and radio alone.
-  A11yHint :: LiveStrSource s => s -> Attr 'LeafW
+  A11yHint :: Text -> Attr 'LeafW
+  A11yHintBound :: Signal Text -> Attr 'LeafW
   -- | This widget's HELP TEXT — any widget class, as the two a11y props
-  -- are: one short sentence saying what the control is or does. A
-  -- 'String' or a 'Signal'.
-  Help :: LiveStrSource s => s -> Attr c
+  -- are: one short sentence saying what the control is or does.
+  Help :: Text -> Attr c
+  HelpBound :: Signal Text -> Attr c
   -- | This widget carries attribute runs (docs\/rich-text-plan.md R1):
   -- 'setDocument', 'applyEdit', 'onEdit'. A textarea edits them; a label
   -- draws them read-only (R8, §15). The root refuses it elsewhere.
@@ -2398,11 +2416,13 @@ data Attr (c :: WClass) where
   -- | The PROMPT this field shows while its text is empty
   -- (docs\/search-plan.md S3). Entry, textarea and search only; the root
   -- refuses it elsewhere, and an empty one by name.
-  Placeholder :: LiveStrSource s => s -> Attr 'LeafW
+  Placeholder :: Text -> Attr 'LeafW
+  PlaceholderBound :: Signal Text -> Attr 'LeafW
   -- | The DESTINATION this 'Link' label opens
   -- (docs\/tasks-s2-plan.md T3): the platform's own opener takes it, and
   -- nothing is emitted.
-  Href :: LiveStrSource s => s -> Attr 'LeafW
+  Href :: Text -> Attr 'LeafW
+  HrefBound :: Signal Text -> Attr 'LeafW
   -- | A date picker's inclusive lower bound (docs/datetime-plan.md D4);
   -- a pick past it lands on the bound.
   MinDate :: Day -> Attr 'LeafW
@@ -2422,7 +2442,7 @@ data Attr (c :: WClass) where
   Role :: Role -> Attr 'LeafW
   -- | What this widget takes from a paste — the closed kinds by name
   -- ('acceptText' and friends) plus any custom format ids.
-  Accepts :: [String] -> Attr c
+  Accepts :: [Text] -> Attr c
   -- | What this widget hands over when dragged, and the operations it
   -- allows (docs\/dnd-plan.md D1). 'setDragSource' re-declares it.
   Draggable :: Clip -> [Op] -> Attr c
@@ -2439,14 +2459,20 @@ applyAttr (Spacing gap) w = setSpacing w gap
 applyAttr (Inset pad) w = setInset w pad
 applyAttr (Align a) w = setAlign w a
 applyAttr (StackWhen when) w = stackWhen w when
-applyAttr (A11yId i) w = liveStr setA11yId bindA11yId w i
-applyAttr (A11yLabel l) w = liveStr setA11yLabel bindA11yLabel w l
-applyAttr (A11yHint h) w = liveStr setA11yHint bindA11yHint w h
-applyAttr (Help h) w = liveStr setHelp bindHelp w h
+applyAttr (A11yId i) w = setA11yId w i
+applyAttr (A11yIdBound sig) w = bindA11yId w sig
+applyAttr (A11yLabel l) w = setA11yLabel w l
+applyAttr (A11yLabelBound sig) w = bindA11yLabel w sig
+applyAttr (A11yHint h) w = setA11yHint w h
+applyAttr (A11yHintBound sig) w = bindA11yHint w sig
+applyAttr (Help h) w = setHelp w h
+applyAttr (HelpBound sig) w = bindHelp w sig
 applyAttr (Rich on) w = setRich w on
 applyAttr (OwnUndo on) w = setOwnUndo w on
-applyAttr (Placeholder p) w = liveStr setPlaceholder bindPlaceholder w p
-applyAttr (Href u) w = liveStr setHref bindHref w u
+applyAttr (Placeholder p) w = setPlaceholder w p
+applyAttr (PlaceholderBound sig) w = bindPlaceholder w sig
+applyAttr (Href u) w = setHref w u
+applyAttr (HrefBound sig) w = bindHref w sig
 applyAttr (MinDate d) (Widget n) =
   let (y, m, dd) = toGregorian d
    in emitB (W.txSetMinDate n (fromIntegral y) m dd)
@@ -2527,13 +2553,15 @@ gridWith columns children = do
 -- | A LABELLED ROW (docs\/forms-plan.md): the first argument names the one
 -- control the children declare, with an optional trailing button after
 -- it. A column of nothing but these renders as the platform's form.
-labeled :: (LiveStrSource s) => s -> [Build Widget] -> Build Widget
-labeled src children = containerOf W.kindLabeled (name : children)
-  where
-    name = do
-      w <- widget W.kindLabel
-      liveStr setText bindText w src
-      return w
+labeled :: Text -> [Build Widget] -> Build Widget
+labeled name children = labeledWith (labelText name) children
+
+-- | 'labeled' with the name from a signal.
+labeledBound :: Signal Text -> [Build Widget] -> Build Widget
+labeledBound name children = labeledWith (labelBound name) children
+
+labeledWith :: Build Widget -> [Build Widget] -> Build Widget
+labeledWith name children = containerOf W.kindLabeled (name : children)
 
 -- | A spacer: PURE SUGAR for an empty grown column — it consumes the
 -- leftover main-axis space between its siblings. In EITHER zone.
@@ -2554,17 +2582,17 @@ instance (b ~ Widget) => LeafArgs (Build b) where
 instance (a ~ Attr 'LeafW, r ~ Build Widget) => LeafArgs ([a] -> r) where
   leafish act attrs = withAttrs attrs act
 
-bindChecked :: Widget -> Signal -> Build ()
+bindChecked :: Widget -> Signal Bool -> Build ()
 bindChecked (Widget w) (Signal s) = emitB (W.txBindChecked w s)
 
 -- | Bind a slider's position to a float signal — the programmatic write
 -- path (property writes never echo an occurrence, so a handler's own
 -- writes cannot loop back at it).
-bindValue :: Widget -> Signal -> Build ()
+bindValue :: Widget -> Signal Double -> Build ()
 bindValue (Widget w) (Signal s) = emitB (W.txBindValue w s)
 
 -- | Bind an image's source to a Blob signal.
-bindSource :: Widget -> Signal -> Build ()
+bindSource :: Widget -> Signal BS.ByteString -> Build ()
 bindSource (Widget w) (Signal s) = emitB (W.txBindSource w s)
 
 containerOf :: (Declare m) => Word32 -> [m (El m)] -> m (El m)
@@ -2667,7 +2695,7 @@ datePickerOn day handler = leafish $ do
 
 -- | A date picker whose VALUE follows a signal — the programmatic write
 -- path; property writes never echo.
-datePickerBoundOn :: (LeafArgs r) => Signal -> (Day -> IO ()) -> r
+datePickerBoundOn :: (LeafArgs r) => Signal Day -> (Day -> IO ()) -> r
 datePickerBoundOn (Signal s) handler = leafish $ do
   w@(Widget n) <- widget W.kindDatePicker
   emitB (W.txBindDate n s)
@@ -2684,7 +2712,7 @@ timePickerOn t handler = leafish $ do
   return w
 
 -- | A time picker whose value follows a signal.
-timePickerBoundOn :: (LeafArgs r) => Signal -> (TimeOfDay -> IO ()) -> r
+timePickerBoundOn :: (LeafArgs r) => Signal TimeOfDay -> (TimeOfDay -> IO ()) -> r
 timePickerBoundOn (Signal s) handler = leafish $ do
   w@(Widget n) <- widget W.kindTimePicker
   emitB (W.txBindTime n s)
@@ -2723,7 +2751,7 @@ sliderOn lo hi value handler = leafish $ do
 
 -- | A slider whose POSITION follows a float signal, with its change handler
 -- co-located: 'sliderOn' with the value bound instead of constant.
-sliderBoundOn :: (LeafArgs r) => Double -> Double -> Signal -> (Double -> IO ()) -> r
+sliderBoundOn :: (LeafArgs r) => Double -> Double -> Signal Double -> (Double -> IO ()) -> r
 sliderBoundOn lo hi sig handler = leafish $ do
   w@(Widget n) <- widget W.kindSlider
   emitB (W.txSetMin n lo)
@@ -2768,13 +2796,17 @@ radioOn options selected handler = leafish $ do
   pendB (PValue n (handler . round))
   return w
 
-labelText :: (LeafArgs r) => Text -> r
-labelText txt = leafish $ do
+-- | A label with a CONSTANT caption, in either zone — 'button''s shape
+-- one kind over: the argument is the same in both, so a stamped
+-- constant label needs no source and no ascription (the addressable
+-- spellings are 'labelBound' live and 'label' in a template).
+labelText :: (BothZones r) => Text -> r
+labelText txt = bothish $ do
   w <- widget W.kindLabel
-  setText w txt
+  setTextProp w txt
   return w
 
-labelBound :: (LeafArgs r) => Signal -> r
+labelBound :: (LeafArgs r) => Signal Text -> r
 labelBound sig = leafish $ do
   w <- widget W.kindLabel
   bindText w sig
@@ -2790,7 +2822,7 @@ headingText txt = leafish $ do
   return w
 
 -- | 'headingText' with the text bound, as 'labelBound' is to 'labelText'.
-headingBound :: (LeafArgs r) => Signal -> r
+headingBound :: (LeafArgs r) => Signal Text -> r
 headingBound sig = leafish $ do
   w <- labelBound sig
   setRole w Heading
@@ -2806,7 +2838,7 @@ captionText txt = leafish $ do
   return w
 
 -- | 'captionText' with the text bound.
-captionBound :: (LeafArgs r) => Signal -> r
+captionBound :: (LeafArgs r) => Signal Text -> r
 captionBound sig = leafish $ do
   w <- labelBound sig
   setRole w Caption
@@ -2831,7 +2863,7 @@ imageAsset src = leafish $ do
   return w
 
 -- | An image whose source follows a Blob signal.
-imageBound :: (LeafArgs r) => Signal -> r
+imageBound :: (LeafArgs r) => Signal BS.ByteString -> r
 imageBound sig = leafish $ do
   w <- widget W.kindImage
   bindSource w sig
@@ -2921,9 +2953,9 @@ fill paint rule =
 -- asset name; @""@ is kaya's own embedded default face, which is why a
 -- canvas can always draw text (§4.2). The size is in device-independent
 -- points.
-font :: String -> Double -> Int64 -> DrawOp
+font :: Text -> Double -> Int64 -> DrawOp
 font src size weight =
-  drawOp W.drawOpFont [W.VStr src, W.VF64 size, W.VI64 weight]
+  drawOp W.drawOpFont [W.VStr (T.unpack src), W.VF64 size, W.VI64 weight]
 
 -- | Draw ONE LINE with its anchor at (x, y). A line break in the string
 -- is refused by the core (§3.3).
@@ -2993,12 +3025,12 @@ onTick app w f = registerDraw app w W.sizePolicyTick f
 -- never asks which policy it holds.
 registerDraw :: App -> Widget -> Word32 -> (Viewbox -> Double -> [DrawOp]) -> IO ()
 registerDraw app (Widget n) policy f = do
-  modifyIORef' (appDraws app) (Map.insert n f)
+  modifyIORef' (app.appDraws) (Map.insert n f)
   submitTx app (emitB (W.txSetSizePolicy n policy))
 
 -- One Str prop's three generated emitters: const, signal, element.
 data StrProp = StrProp
-  { strConst :: Word64 -> String -> Builder, -- internal; T.unpack'd at the TplStrSource\/LiveStrSource boundary
+  { strConst :: Word64 -> String -> Builder, -- internal; the wire's own spelling, T.unpack'd at every call
     strSignal :: Word64 -> Word64 -> Builder,
     strElement :: Word64 -> Word32 -> Word32 -> Builder
   }
@@ -3015,19 +3047,27 @@ hrefProp = StrProp W.txSetHref W.txBindHref W.txBindHrefElement
 -- | What a template Str prop can bind to: a constant, a signal, or the
 -- ROW'S OWN field. Named for the prop's VALUE TYPE, the wire's
 -- @ValueType::Str@.
+--
+-- THE CONSTANT ARM IS HERE FOR THE CONSTRUCTORS ALONE — 'label',
+-- 'buttonBound' and kin, whose Rust twin takes a @&str@ the same way
+-- (@impl From<&str> for TplSource<StrKind>@). The template PROPS carry
+-- their three arms as separate 'TplAttr' constructors instead, since a
+-- class-polymorphic one cannot infer a bare literal, and a constant
+-- caption has 'labelText' and its both-zones siblings, which can
+-- (docs/deferred.md, the Haskell text-surface entry).
 class TplStrSource s where
   bindStrSource :: StrProp -> Node -> s -> Tpl ()
 
 instance TplStrSource Text where
-  bindStrSource p (Node n) txt = emitT (strConst p n (T.unpack txt))
+  bindStrSource p (Node n) txt = emitT (p.strConst n (T.unpack txt))
 
-instance TplStrSource Signal where
-  bindStrSource p (Node n) (Signal s) = emitT (strSignal p n s)
+instance TplStrSource (Signal Text) where
+  bindStrSource p (Node n) (Signal s) = emitT (p.strSignal n s)
 
 -- The LEVEL IS 0, as it is in the four bind*Field binders: reaching
 -- past the innermost For has no sugar spelling in this binding.
 instance TplStrSource (KField Text) where
-  bindStrSource p (Node n) (KField i) = emitT (strElement p n 0 i)
+  bindStrSource p (Node n) (KField i) = emitT (p.strElement n 0 i)
 
 -- | The text prop's binder, which every text-carrying constructor in
 -- this zone goes through.
@@ -3041,7 +3081,7 @@ class TplBoolSource s where
 instance TplBoolSource Bool where
   bindCheckedSource (Node n) checked = emitT (W.txSetChecked n checked)
 
-instance TplBoolSource Signal where
+instance TplBoolSource (Signal Bool) where
   bindCheckedSource (Node n) (Signal s) = emitT (W.txBindChecked n s)
 
 instance TplBoolSource (KField Bool) where
@@ -3058,7 +3098,7 @@ instance TplDateSource Day where
   bindDateSource (Node n) day =
     let (y, m, d) = toGregorian day in emitT (W.txSetDate n (fromIntegral y) m d)
 
-instance TplDateSource Signal where
+instance TplDateSource (Signal Day) where
   bindDateSource (Node n) (Signal s) = emitT (W.txBindDate n s)
 
 instance TplDateSource (KField Day) where
@@ -3071,7 +3111,7 @@ class TplTimeSource s where
 instance TplTimeSource TimeOfDay where
   bindTimeSource (Node n) t = emitT (W.txSetTime n (todHour t) (todMin t))
 
-instance TplTimeSource Signal where
+instance TplTimeSource (Signal TimeOfDay) where
   bindTimeSource (Node n) (Signal s) = emitT (W.txBindTime n s)
 
 instance TplTimeSource (KField TimeOfDay) where
@@ -3086,7 +3126,7 @@ class TplImageSource s where
 instance TplImageSource BS.ByteString where
   bindImageSource (Node n) bytes = emitTIO (W.txSetSource n <$> registerBlob bytes)
 
-instance TplImageSource Signal where
+instance TplImageSource (Signal BS.ByteString) where
   bindImageSource (Node n) (Signal s) = emitT (W.txBindSource n s)
 
 instance TplImageSource (KField BS.ByteString) where
@@ -3104,7 +3144,7 @@ class TplNumberSource s where
 instance TplNumberSource Double where
   bindValueSource (Node n) x = emitT (W.txSetValue n x)
 
-instance TplNumberSource Signal where
+instance TplNumberSource (Signal Double) where
   bindValueSource (Node n) (Signal s) = emitT (W.txBindValue n s)
 
 instance TplNumberSource (KField Double) where
@@ -3132,26 +3172,41 @@ data TplAttr where
   -- same number and the same prop.
   TplInset :: Double -> TplAttr
   -- | This stamped copy's accessibility IDENTIFIER — the authored key
-  -- automation addresses it by, never spoken.
-  TplA11yId :: TplStrSource s => s -> TplAttr
+  -- automation addresses it by, never spoken. THREE CONSTRUCTORS PER STR
+  -- PROP, the live 'Attr''s pair plus the row's own field: a
+  -- class-polymorphic one cannot infer a bare literal (docs/deferred.md,
+  -- the Haskell text-surface entry).
+  TplA11yId :: Text -> TplAttr
+  TplA11yIdBound :: Signal Text -> TplAttr
+  TplA11yIdField :: KField Text -> TplAttr
   -- | What an assistive client SPEAKS for this stamped copy. THE
-  -- ROW-FIELD CASE IS WHY THIS PROP EXISTS: @TplA11yLabel (field
+  -- ROW-FIELD CASE IS WHY THIS PROP EXISTS: @TplA11yLabelField (field
   -- \@"title" \@Task)@ makes every row announce its own name.
-  TplA11yLabel :: TplStrSource s => s -> TplAttr
+  TplA11yLabel :: Text -> TplAttr
+  TplA11yLabelBound :: Signal Text -> TplAttr
+  TplA11yLabelField :: KField Text -> TplAttr
   -- | What ACTIVATING this stamped copy does — a verb phrase.
   -- ACTIVATION KINDS ONLY (button, checkbox, select, radio); the refusal
   -- is the ROOT'S, at declare time, naming the kind it refused.
-  TplA11yHint :: TplStrSource s => s -> TplAttr
+  TplA11yHint :: Text -> TplAttr
+  TplA11yHintBound :: Signal Text -> TplAttr
+  TplA11yHintField :: KField Text -> TplAttr
   -- | This stamped copy's HELP TEXT. THE ROW-FIELD CASE IS WHY THIS PROP
-  -- REACHES THE ZONE: @TplHelp (field \@"note" \@Account)@ explains every
-  -- copy in its own words.
-  TplHelp :: TplStrSource s => s -> TplAttr
+  -- REACHES THE ZONE: @TplHelpField (field \@"note" \@Account)@ explains
+  -- every copy in its own words.
+  TplHelp :: Text -> TplAttr
+  TplHelpBound :: Signal Text -> TplAttr
+  TplHelpField :: KField Text -> TplAttr
   -- | The PROMPT this stamped field shows while its text is empty
   -- (docs\/search-plan.md S3). Entry, textarea and search only.
-  TplPlaceholder :: TplStrSource s => s -> TplAttr
+  TplPlaceholder :: Text -> TplAttr
+  TplPlaceholderBound :: Signal Text -> TplAttr
+  TplPlaceholderField :: KField Text -> TplAttr
   -- | The DESTINATION this stamped 'Link' label opens
   -- (docs\/tasks-s2-plan.md T3).
-  TplHref :: TplStrSource s => s -> TplAttr
+  TplHref :: Text -> TplAttr
+  TplHrefBound :: Signal Text -> TplAttr
+  TplHrefField :: KField Text -> TplAttr
   -- | What this stamped copy MEANS — semantic emphasis, never
   -- appearance. A CONSTANT; which role fits which kind is the ROOT'S
   -- call.
@@ -3167,7 +3222,7 @@ data TplAttr where
   -- Every backend gates the paste occurrence on the focused widget's
   -- accept list, so without this 'onPaste' at a Node could never fire
   -- (docs\/tpl-props-plan.md §1).
-  TplAccepts :: [String] -> TplAttr
+  TplAccepts :: [Text] -> TplAttr
   -- | What every stamped copy of this node hands over when dragged, and
   -- the operations it allows, carried with each copy's own identity —
   -- each representation a constant or the ROW'S OWN FIELD
@@ -3185,12 +3240,24 @@ applyTplAttr (TplFill on) n = setFill n on
 applyTplAttr (TplColumnsAuto minWidth) n = setColumnsAuto n minWidth
 applyTplAttr (TplWrap on) n = setWrap n on
 applyTplAttr (TplInset pad) n = setNodeInset n pad
-applyTplAttr (TplA11yId src) n = bindStrSource a11yIdProp n src
-applyTplAttr (TplA11yLabel src) n = bindStrSource a11yLabelProp n src
-applyTplAttr (TplA11yHint src) n = bindStrSource a11yHintProp n src
-applyTplAttr (TplHelp src) n = bindStrSource helpProp n src
-applyTplAttr (TplPlaceholder src) n = bindStrSource placeholderProp n src
-applyTplAttr (TplHref src) n = bindStrSource hrefProp n src
+applyTplAttr (TplA11yId v) n = bindStrSource a11yIdProp n v
+applyTplAttr (TplA11yIdBound src) n = bindStrSource a11yIdProp n src
+applyTplAttr (TplA11yIdField src) n = bindStrSource a11yIdProp n src
+applyTplAttr (TplA11yLabel v) n = bindStrSource a11yLabelProp n v
+applyTplAttr (TplA11yLabelBound src) n = bindStrSource a11yLabelProp n src
+applyTplAttr (TplA11yLabelField src) n = bindStrSource a11yLabelProp n src
+applyTplAttr (TplA11yHint v) n = bindStrSource a11yHintProp n v
+applyTplAttr (TplA11yHintBound src) n = bindStrSource a11yHintProp n src
+applyTplAttr (TplA11yHintField src) n = bindStrSource a11yHintProp n src
+applyTplAttr (TplHelp v) n = bindStrSource helpProp n v
+applyTplAttr (TplHelpBound src) n = bindStrSource helpProp n src
+applyTplAttr (TplHelpField src) n = bindStrSource helpProp n src
+applyTplAttr (TplPlaceholder v) n = bindStrSource placeholderProp n v
+applyTplAttr (TplPlaceholderBound src) n = bindStrSource placeholderProp n src
+applyTplAttr (TplPlaceholderField src) n = bindStrSource placeholderProp n src
+applyTplAttr (TplHref v) n = bindStrSource hrefProp n v
+applyTplAttr (TplHrefBound src) n = bindStrSource hrefProp n src
+applyTplAttr (TplHrefField src) n = bindStrSource hrefProp n src
 applyTplAttr (TplRole r) n = setNodeRole n r
 applyTplAttr (TplStep step) (Node n) = emitT (W.txSetStep n step)
 applyTplAttr (TplTickSpacing spacing) (Node n) = emitT (W.txSetTickSpacing n spacing)
@@ -3198,8 +3265,8 @@ applyTplAttr (TplAccepts kinds) n = setNodeAccepts n kinds
 applyTplAttr (TplDraggable clip ops) n = setNodeDragSource n clip ops
 applyTplAttr (TplDropTarget ops) n = setNodeDropTarget n ops
 
-setNodeAccepts :: Node -> [String] -> Tpl ()
-setNodeAccepts (Node n) kinds = emitT (W.txSetAccepts n (acceptList kinds))
+setNodeAccepts :: Node -> [Text] -> Tpl ()
+setNodeAccepts (Node n) kinds = emitT (W.txSetAccepts n (T.unpack (acceptList kinds)))
 
 -- | The dynamic path under 'TplDraggable'; a withdraw needs it.
 setNodeDragSource :: Node -> TplClip -> [Op] -> Tpl ()
@@ -3252,7 +3319,7 @@ caption src = do
   setNodeRole n Caption
   return n
 
-checkbox :: TplBoolSource s => s -> ([W.Value] -> Bool -> IO ()) -> Tpl Node
+checkbox :: TplBoolSource s => s -> ([Key] -> Bool -> IO ()) -> Tpl Node
 checkbox src handler = do
   n@(Node i) <- widget W.kindCheckbox
   bindCheckedSource n src
@@ -3263,7 +3330,7 @@ checkbox src handler = do
 -- crash, on every backend.
 -- | A stamped date picker over an addressable source, with its pick
 -- handler co-located; the handler receives the copy's keys first.
-datePicker :: TplDateSource s => s -> ([W.Value] -> Day -> IO ()) -> Tpl Node
+datePicker :: TplDateSource s => s -> ([Key] -> Day -> IO ()) -> Tpl Node
 datePicker src handler = do
   n@(Node i) <- widget W.kindDatePicker
   bindDateSource n src
@@ -3271,7 +3338,7 @@ datePicker src handler = do
   return n
 
 -- | A stamped time picker; the date picker's contract, hours and minutes.
-timePicker :: TplTimeSource s => s -> ([W.Value] -> TimeOfDay -> IO ()) -> Tpl Node
+timePicker :: TplTimeSource s => s -> ([Key] -> TimeOfDay -> IO ()) -> Tpl Node
 timePicker src handler = do
   n@(Node i) <- widget W.kindTimePicker
   bindTimeSource n src
@@ -3329,7 +3396,7 @@ textareaRichBound fd@(KField i) = do
 
 -- The For this template body is being declared inside, @level@ Fors up.
 openFor :: Word32 -> Tpl (Maybe Word64)
-openFor level = Tpl $ \s -> (listToMaybe (drop (fromIntegral level) (bOpenFors s)), s)
+openFor level = gets $ \s -> listToMaybe (drop (fromIntegral level) (s.bOpenFors))
 
 -- | A stamped search field seeded from an addressable source;
 -- 'entryBound''s contract under the platform's search chrome.
@@ -3425,20 +3492,21 @@ choiceWith kind options src = do
 -- that copy's keys, outermost first. An empty key list re-declares the
 -- drawing every copy is born with, which is what 'canvasOf' spells at
 -- declaration time (docs/canvas-plan.md §3.1).
-drawAt :: Node -> [W.Value] -> Viewbox -> [DrawOp] -> Build ()
-drawAt (Node n) keys vb ops = emitB (drawingRecord n keys vb ops)
+drawAt :: Node -> [Key] -> Viewbox -> [DrawOp] -> Build ()
+drawAt (Node n) keys vb ops = emitB (drawingRecord n (map keyValue keys) vb ops)
 
 -- | Re-declare ONE stamped copy's header bar: the table's template Node
 -- plus that copy's keys, outermost first. An empty key list re-declares
 -- the bar for every copy. The core walls the template bar being declared
 -- first.
-columnsAt :: Node -> [W.Value] -> [Text] -> Sort -> Build ()
-columnsAt (Node n) keys titles sort =
+columnsAt :: Node -> [Key] -> [Text] -> Sort -> Build ()
+columnsAt (Node n) keys0 titles sort =
+  let keys = map keyValue keys0 in
   emitB
     ( W.txSetColumnHeaders
         n
-        (sortColumn sort)
-        (sortDirection sort)
+        (sort.sortColumn)
+        (sort.sortDirection)
         (fromIntegral (length titles))
         (fromIntegral (length keys))
         -- Keys FIRST, then the titles (the record's own convention).
@@ -3522,11 +3590,11 @@ requireAppThread = do
 stageTx :: App -> Build a -> IO (a, Builder)
 stageTx app (Build f) = do
   requireAppThread
-  counters <- readIORef (appCounters app)
-  (model, children) <- readIORef (appModel app)
-  fresh <- readIORef (appFresh app)
-  derived <- readIORef (appDerived app)
-  let (a, s) = f (BuildState counters mempty model fresh children [] [] derived)
+  counters <- readIORef (app.appCounters)
+  (model, children) <- readIORef (app.appModel)
+  fresh <- readIORef (app.appFresh)
+  derived <- readIORef (app.appDerived)
+  let (a, s) = runState f (BuildState counters mempty model fresh children [] [] derived)
   -- Force the Build's final state before the first store-back: a Build
   -- that throws must throw HERE, where the boundary abandons everything
   -- — never later, from a poisoned thunk inside an IORef.
@@ -3535,15 +3603,15 @@ stageTx app (Build f) = do
   -- where image sources and Blob record fields register their bytes with the
   -- core — in record order, immediately before the submit whose handle table
   -- they fill.
-  records <- bRecords s
-  writeIORef (appCounters app) (bCounters s)
-  writeIORef (appModel app) (bModel s, bChildren s)
-  writeIORef (appFresh app) (bFresh s)
-  writeIORef (appDerived app) (bDerived s)
+  records <- s.bRecords
+  writeIORef (app.appCounters) (s.bCounters)
+  writeIORef (app.appModel) (s.bModel, s.bChildren)
+  writeIORef (app.appFresh) (s.bFresh)
+  writeIORef (app.appDerived) (s.bDerived)
   -- Handlers declared at their constructors register alongside the
   -- submit; a Build that threw never reaches here, abandoning them
   -- with its records.
-  mapM_ (register app) (reverse (bPending s))
+  mapM_ (register app) (reverse (s.bPending))
   return (a, records)
 
 -- | Run a Build to records, submit them as one transaction, and return
@@ -3557,48 +3625,48 @@ buildTx app b = do
   -- The pending link-route declarations go FIRST, in declaration order
   -- (docs/app-links-plan.md §4; Rust's PENDING_ROUTES drained head-first
   -- by Tx::commit is the shape).
-  routes <- readIORef (appPendingRoutes app)
-  writeIORef (appPendingRoutes app) []
+  routes <- readIORef (app.appPendingRoutes)
+  writeIORef (app.appPendingRoutes) []
   kayaSubmit (routes ++ [records])
   return a
 
 register :: App -> Pending -> IO ()
 register app pending = case pending of
-  PClick n handler -> modifyIORef' (appWidgetHandlers app) (Map.insert n handler)
-  PAlert n handler -> modifyIORef' (appAlertHandlers app) (Map.insert n handler)
+  PClick n handler -> modifyIORef' (app.appWidgetHandlers) (Map.insert n handler)
+  PAlert n handler -> modifyIORef' (app.appAlertHandlers) (Map.insert n handler)
   PNotification n handler ->
-    modifyIORef' (appNotificationHandlers app) (Map.insert n handler)
+    modifyIORef' (app.appNotificationHandlers) (Map.insert n handler)
   PFileDialog n handler ->
-    modifyIORef' (appFileDialogHandlers app) (Map.insert n handler)
+    modifyIORef' (app.appFileDialogHandlers) (Map.insert n handler)
   PClipboardRead n handler ->
-    modifyIORef' (appClipboardReads app) (Map.insert n handler)
-  PEntryPopped n handler -> modifyIORef' (appEntryPopped app) (Map.insert n handler)
-  PSectionSelected n handler -> modifyIORef' (appSectionSelected app) (Map.insert n handler)
-  PBackRequested n handler -> modifyIORef' (appBackRequested app) (Map.insert n handler)
-  PCloseRequested n handler -> modifyIORef' (appCloseRequested app) (Map.insert n handler)
-  PWindowClosed n handler -> modifyIORef' (appWindowClosed app) (Map.insert n handler)
+    modifyIORef' (app.appClipboardReads) (Map.insert n handler)
+  PEntryPopped n handler -> modifyIORef' (app.appEntryPopped) (Map.insert n handler)
+  PSectionSelected n handler -> modifyIORef' (app.appSectionSelected) (Map.insert n handler)
+  PBackRequested n handler -> modifyIORef' (app.appBackRequested) (Map.insert n handler)
+  PCloseRequested n handler -> modifyIORef' (app.appCloseRequested) (Map.insert n handler)
+  PWindowClosed n handler -> modifyIORef' (app.appWindowClosed) (Map.insert n handler)
   -- The undo pair keys the same per-WINDOW tables the dispatch loop
   -- reads; n is the window construct's id.
-  PUndone n handler -> modifyIORef' (appUndone app) (Map.insert n handler)
-  PRedone n handler -> modifyIORef' (appRedone app) (Map.insert n handler)
-  PChange n handler -> modifyIORef' (appWidgetChanges app) (Map.insert n handler)
-  PToggle n handler -> modifyIORef' (appWidgetToggles app) (Map.insert n handler)
-  PValue n handler -> modifyIORef' (appWidgetValues app) (Map.insert n handler)
-  PToggleNode n handler -> modifyIORef' (appNodeToggles app) (Map.insert n handler)
+  PUndone n handler -> modifyIORef' (app.appUndone) (Map.insert n handler)
+  PRedone n handler -> modifyIORef' (app.appRedone) (Map.insert n handler)
+  PChange n handler -> modifyIORef' (app.appWidgetChanges) (Map.insert n handler)
+  PToggle n handler -> modifyIORef' (app.appWidgetToggles) (Map.insert n handler)
+  PValue n handler -> modifyIORef' (app.appWidgetValues) (Map.insert n handler)
+  PToggleNode n handler -> modifyIORef' (app.appNodeToggles) (Map.insert n handler)
   PDocumentBind n cid i level ->
-    modifyIORef' (appDocumentBinds app) (Map.insert n (cid, i, level))
-  PEditNode n handler -> modifyIORef' (appNodeEdits app) (Map.insert n handler)
-  PFormatNode n handler -> modifyIORef' (appNodeFormats app) (Map.insert n handler)
-  PDate n handler -> modifyIORef' (appWidgetDates app) (Map.insert n handler)
-  PTime n handler -> modifyIORef' (appWidgetTimes app) (Map.insert n handler)
-  PDateNode n handler -> modifyIORef' (appNodeDates app) (Map.insert n handler)
-  PTimeNode n handler -> modifyIORef' (appNodeTimes app) (Map.insert n handler)
-  PMenuActivated n handler -> modifyIORef' (appMenuActivated app) (Map.insert n handler)
-  PMenuActivatedNode n handler -> modifyIORef' (appMenuActivatedNode app) (Map.insert n handler)
-  PMenuToggled n handler -> modifyIORef' (appMenuToggled app) (Map.insert n handler)
-  PMenuToggledNode n handler -> modifyIORef' (appMenuToggledNode app) (Map.insert n handler)
-  PMenuSelected n handler -> modifyIORef' (appMenuSelected app) (Map.insert n handler)
-  PMenuSelectedNode n handler -> modifyIORef' (appMenuSelectedNode app) (Map.insert n handler)
+    modifyIORef' (app.appDocumentBinds) (Map.insert n (cid, i, level))
+  PEditNode n handler -> modifyIORef' (app.appNodeEdits) (Map.insert n handler)
+  PFormatNode n handler -> modifyIORef' (app.appNodeFormats) (Map.insert n handler)
+  PDate n handler -> modifyIORef' (app.appWidgetDates) (Map.insert n handler)
+  PTime n handler -> modifyIORef' (app.appWidgetTimes) (Map.insert n handler)
+  PDateNode n handler -> modifyIORef' (app.appNodeDates) (Map.insert n handler)
+  PTimeNode n handler -> modifyIORef' (app.appNodeTimes) (Map.insert n handler)
+  PMenuActivated n handler -> modifyIORef' (app.appMenuActivated) (Map.insert n handler)
+  PMenuActivatedNode n handler -> modifyIORef' (app.appMenuActivatedNode) (Map.insert n handler)
+  PMenuToggled n handler -> modifyIORef' (app.appMenuToggled) (Map.insert n handler)
+  PMenuToggledNode n handler -> modifyIORef' (app.appMenuToggledNode) (Map.insert n handler)
+  PMenuSelected n handler -> modifyIORef' (app.appMenuSelected) (Map.insert n handler)
+  PMenuSelectedNode n handler -> modifyIORef' (app.appMenuSelectedNode) (Map.insert n handler)
 
 -- | buildTx for handlers that keep no handles.
 submitTx :: App -> Build () -> IO ()
@@ -3626,26 +3694,30 @@ undoableTxIn app windowId label body =
 -- the SAME transaction as the mutation that caused it, so the core has
 -- already restored it by the time this runs.
 absorbUndo :: App -> UndoDelta -> IO ()
-absorbUndo app delta = modifyIORef' (appModel app) fold
+absorbUndo app delta = modifyIORef' (app.appModel) fold
   where
     fold (model, children) = (foldl order (foldl entry model (undoEntries delta)) (undoOrders delta), children)
+    -- The payload is 'Key's; the model is keyed by the wire's own value.
     entry model e = case ueState e of
-      Just (variant, record) -> modelSet (ueCollection e) (uePath e) (ueKey e) variant record model
+      Just (variant, record) ->
+        modelSet (ueCollection e) (path e) (keyValue (ueKey e)) variant record model
       -- The entry is gone in the restored state. Its own instance
       -- only: the payload states what each entry IS, and an instance
       -- it never names is one this undo did not touch.
-      Nothing -> Map.adjust (map (drop1 (uePath e) (ueKey e))) (ueCollection e) model
-    drop1 path key i
-      | iPath i == path = i {iEntries = filter ((/= key) . fst) (iEntries i)}
+      Nothing -> Map.adjust (map (drop1 (path e) (keyValue (ueKey e)))) (ueCollection e) model
+    path = map keyValue . uePath
+    drop1 p key i
+      | i.iPath == p = i {iEntries = filter ((/= key) . fst) (i.iEntries)}
       | otherwise = i
     order model o = Map.adjust (map (place o)) (uoCollection o) model
     place o i
-      | iPath i == uoPath o =
+      | i.iPath == map keyValue (uoPath o) =
           -- Positioned by the payload's list, keeping anything it does
           -- not name at the end: an entry the delta never mentions is
           -- one this undo did not move.
-          let named = [(k, v) | k <- uoKeys o, Just v <- [lookup k (iEntries i)]]
-              rest = filter ((`notElem` uoKeys o) . fst) (iEntries i)
+          let wanted = map keyValue (uoKeys o)
+              named = [(k, v) | k <- wanted, Just v <- [lookup k (i.iEntries)]]
+              rest = filter ((`notElem` wanted) . fst) (i.iEntries)
            in i {iEntries = named ++ rest}
       | otherwise = i
 
@@ -3707,44 +3779,44 @@ class HandlerTarget e where
 instance HandlerTarget Widget where
   type Keyed Widget p = p
   onClick app (Widget n) handler =
-    modifyIORef' (appWidgetHandlers app) (Map.insert n handler)
+    modifyIORef' (app.appWidgetHandlers) (Map.insert n handler)
   onChange app (Widget n) handler =
-    modifyIORef' (appWidgetChanges app) (Map.insert n handler)
+    modifyIORef' (app.appWidgetChanges) (Map.insert n handler)
   onToggle app (Widget n) handler =
-    modifyIORef' (appWidgetToggles app) (Map.insert n handler)
+    modifyIORef' (app.appWidgetToggles) (Map.insert n handler)
   onValueChanged app (Widget n) handler =
-    modifyIORef' (appWidgetValues app) (Map.insert n handler)
+    modifyIORef' (app.appWidgetValues) (Map.insert n handler)
   onValueCommitted app (Widget n) handler =
-    modifyIORef' (appWidgetCommits app) (Map.insert n handler)
+    modifyIORef' (app.appWidgetCommits) (Map.insert n handler)
   onPaste app (Widget n) handler =
-    modifyIORef' (appWidgetPastes app) (Map.insert n handler)
+    modifyIORef' (app.appWidgetPastes) (Map.insert n handler)
   onSort app (Widget n) handler =
-    modifyIORef' (appSortHandlers app) (Map.insert n handler)
+    modifyIORef' (app.appSortHandlers) (Map.insert n handler)
   onDrop app (Widget n) handler =
-    modifyIORef' (appWidgetDrops app) (Map.insert n handler)
+    modifyIORef' (app.appWidgetDrops) (Map.insert n handler)
   onDragEnded app (Widget n) handler =
-    modifyIORef' (appDragEnded app) (Map.insert n handler)
+    modifyIORef' (app.appDragEnded) (Map.insert n handler)
 
 instance HandlerTarget Node where
-  type Keyed Node p = [W.Value] -> p
+  type Keyed Node p = [Key] -> p
   onClick app (Node n) handler =
-    modifyIORef' (appNodeHandlers app) (Map.insert n handler)
+    modifyIORef' (app.appNodeHandlers) (Map.insert n handler)
   onChange app (Node n) handler =
-    modifyIORef' (appNodeChanges app) (Map.insert n handler)
+    modifyIORef' (app.appNodeChanges) (Map.insert n handler)
   onToggle app (Node n) handler =
-    modifyIORef' (appNodeToggles app) (Map.insert n handler)
+    modifyIORef' (app.appNodeToggles) (Map.insert n handler)
   onValueChanged app (Node n) handler =
-    modifyIORef' (appNodeValues app) (Map.insert n handler)
+    modifyIORef' (app.appNodeValues) (Map.insert n handler)
   onValueCommitted app (Node n) handler =
-    modifyIORef' (appNodeCommits app) (Map.insert n handler)
+    modifyIORef' (app.appNodeCommits) (Map.insert n handler)
   onPaste app (Node n) handler =
-    modifyIORef' (appNodePastes app) (Map.insert n handler)
+    modifyIORef' (app.appNodePastes) (Map.insert n handler)
   onSort app (Node n) handler =
-    modifyIORef' (appNodeSorts app) (Map.insert n handler)
+    modifyIORef' (app.appNodeSorts) (Map.insert n handler)
   onDrop app (Node n) handler =
-    modifyIORef' (appNodeDrops app) (Map.insert n handler)
+    modifyIORef' (app.appNodeDrops) (Map.insert n handler)
   onDragEnded app (Node n) handler =
-    modifyIORef' (appNodeDragEnded app) (Map.insert n handler)
+    modifyIORef' (app.appNodeDragEnded) (Map.insert n handler)
 
 -- | Turn the decoder's kind-and-parts into the sum, or Nothing. EMPTY
 -- IS THE UNIVERSAL NO: Nothing covers a denied prompt, an unfocused
@@ -3765,10 +3837,10 @@ representationOf (Just cv)
     kind = W.clipKind cv
     part i = case drop i (W.clipValues cv) of p : _ -> Just p; [] -> Nothing
     str i = case part i of Just (W.CStr t) -> T.pack t; _ -> ""
-    strRaw i = case part i of Just (W.CStr t) -> t; _ -> ""
+    strRaw i = case part i of Just (W.CStr t) -> T.pack t; _ -> ""
     bytes i = case part i of Just (W.CBytes b) -> b; _ -> BS.empty
     regroup (W.CI64 h : W.CStr n : W.CStr p : rest) =
-      PickedFile (fromIntegral h) n p : regroup rest
+      PickedFile (fromIntegral h) (T.pack n) p : regroup rest
     regroup _ = []
 
 -- | A fresh app: zeroed id counters, an empty model, empty dispatch
@@ -3851,6 +3923,10 @@ kayaMain setup = do
   takeMVar done
   if code == 0 then exitSuccess else exitWith (ExitFailure (fromIntegral code))
 
+-- The ring hands a key path as wire values; a handler receives 'Key's.
+keyPath :: [W.Value] -> [Key]
+keyPath = map keyOfWire
+
 -- | One handler dispatch: an exception crosses the build boundary (the
 -- pure Build's store-back and submit never ran, so the model shows
 -- exactly what was shipped), is logged, and the loop moves on.
@@ -3865,7 +3941,7 @@ dispatch body =
 -- handler queues for after and never nests.
 post :: App -> IO () -> IO ()
 post app body = do
-  modifyMVar_ (appPosted app) (return . (++ [body]))
+  modifyMVar_ (app.appPosted) (return . (++ [body]))
   -- The app thread may be parked in C waiting on the ring. Posted work
   -- is not an occurrence and never enters that ring, so this is the
   -- only way it hears about it.
@@ -3877,7 +3953,7 @@ post app body = do
 -- across the calls would deadlock the moment one of them posted.
 drainPosted :: App -> IO ()
 drainPosted app = do
-  batch <- modifyMVar (appPosted app) (\queued -> return ([], queued))
+  batch <- modifyMVar (app.appPosted) (\queued -> return ([], queued))
   mapM_ dispatch batch
 
 dispatchLoop :: App -> IO ()
@@ -3902,7 +3978,7 @@ dispatchLoop app = do
       -- (tools/check-ambient-tx.py). The size the ask carried IS the new
       -- viewbox.
       | kind == W.occKindDrawRequested || kind == W.occKindTick -> do
-          draws <- readIORef (appDraws app)
+          draws <- readIORef (app.appDraws)
           case Map.lookup ident draws of
             Nothing -> return ()
             Just f ->
@@ -3914,11 +3990,11 @@ dispatchLoop app = do
           let column = case payload of Just (W.VI64 n) -> fromIntegral n; _ -> 0
           case keys of
             [] -> do
-              handlers <- readIORef (appSortHandlers app)
+              handlers <- readIORef (app.appSortHandlers)
               dispatch (mapM_ ($ column) (Map.lookup ident handlers))
             _ -> do
-              handlers <- readIORef (appNodeSorts app)
-              dispatch (mapM_ (\h -> h keys column) (Map.lookup ident handlers))
+              handlers <- readIORef (app.appNodeSorts)
+              dispatch (mapM_ (\h -> h (keyPath keys) column) (Map.lookup ident handlers))
           dispatchLoop app
       -- THE MIRROR IS FOLDED BEFORE THE HANDLER RUNS, so a handler
       -- reading 'document' sees the edit it was told about
@@ -3929,8 +4005,7 @@ dispatchLoop app = do
             (W.VI64 source : W.VI64 start : W.VI64 stop : W.VStr inserted : values) -> do
               let e =
                     Edit
-                      (fromIntegral start)
-                      (fromIntegral stop)
+                      (fromIntegral start, fromIntegral stop)
                       (T.pack inserted)
                       (runsOfValues values)
                       (Just (editSourceOfWire (fromIntegral source)))
@@ -3940,12 +4015,12 @@ dispatchLoop app = do
               case keys of
                 [] -> do
                   absorbEdit app (Widget ident) e
-                  handlers <- readIORef (appWidgetEdits app)
+                  handlers <- readIORef (app.appWidgetEdits)
                   dispatch (mapM_ ($ e) (Map.lookup ident handlers))
                 _ -> do
-                  foldRowDocument app (Node ident) keys (foldEdit e)
-                  handlers <- readIORef (appNodeEdits app)
-                  dispatch (mapM_ (\h -> h keys e) (Map.lookup ident handlers))
+                  foldRowDocument app (Node ident) (keyPath keys) (foldEdit e)
+                  handlers <- readIORef (app.appNodeEdits)
+                  dispatch (mapM_ (\h -> h (keyPath keys) e) (Map.lookup ident handlers))
             _ -> return ()
           dispatchLoop app
       | kind == W.occKindTextFormatted -> do
@@ -3953,118 +4028,117 @@ dispatchLoop app = do
             (W.VI64 removed : W.VI64 start : W.VI64 stop : W.VStr name : W.VStr value : _) -> do
               let act =
                     Format
-                      (fromIntegral start)
-                      (fromIntegral stop)
+                      (fromIntegral start, fromIntegral stop)
                       (T.pack name)
-                      (if removed == 0 then Just (T.pack value) else Nothing)
+                      (if removed == 0 then Just (markValueOf (T.pack value)) else Nothing)
               case keys of
                 [] -> do
                   absorbFormat app (Widget ident) act
-                  handlers <- readIORef (appWidgetFormats app)
+                  handlers <- readIORef (app.appWidgetFormats)
                   dispatch (mapM_ ($ act) (Map.lookup ident handlers))
                 _ -> do
-                  foldRowDocument app (Node ident) keys (foldFormat act)
-                  handlers <- readIORef (appNodeFormats app)
-                  dispatch (mapM_ (\h -> h keys act) (Map.lookup ident handlers))
+                  foldRowDocument app (Node ident) (keyPath keys) (foldFormat act)
+                  handlers <- readIORef (app.appNodeFormats)
+                  dispatch (mapM_ (\h -> h (keyPath keys) act) (Map.lookup ident handlers))
             _ -> return ()
           dispatchLoop app
       | kind == W.occKindTextChanged -> do
           let content = case payload of Just (W.VStr s) -> T.pack s; _ -> ""
           case keys of
             [] -> do
-              handlers <- readIORef (appWidgetChanges app)
+              handlers <- readIORef (app.appWidgetChanges)
               dispatch (mapM_ ($ content) (Map.lookup ident handlers))
             _ -> do
-              handlers <- readIORef (appNodeChanges app)
-              dispatch (mapM_ (\h -> h keys content) (Map.lookup ident handlers))
+              handlers <- readIORef (app.appNodeChanges)
+              dispatch (mapM_ (\h -> h (keyPath keys) content) (Map.lookup ident handlers))
           dispatchLoop app
       | kind == W.occKindToggled -> do
           let checked = case payload of Just (W.VBool b) -> b; _ -> False
           case keys of
             [] -> do
-              handlers <- readIORef (appWidgetToggles app)
+              handlers <- readIORef (app.appWidgetToggles)
               dispatch (mapM_ ($ checked) (Map.lookup ident handlers))
             _ -> do
-              handlers <- readIORef (appNodeToggles app)
-              dispatch (mapM_ (\h -> h keys checked) (Map.lookup ident handlers))
+              handlers <- readIORef (app.appNodeToggles)
+              dispatch (mapM_ (\h -> h (keyPath keys) checked) (Map.lookup ident handlers))
           dispatchLoop app
       | kind == W.occKindValueChanged -> do
           let v = case payload of Just (W.VF64 x) -> x; _ -> 0
           case keys of
             [] -> do
-              handlers <- readIORef (appWidgetValues app)
+              handlers <- readIORef (app.appWidgetValues)
               dispatch (mapM_ ($ v) (Map.lookup ident handlers))
             _ -> do
-              handlers <- readIORef (appNodeValues app)
-              dispatch (mapM_ (\h -> h keys v) (Map.lookup ident handlers))
+              handlers <- readIORef (app.appNodeValues)
+              dispatch (mapM_ (\h -> h (keyPath keys) v) (Map.lookup ident handlers))
           dispatchLoop app
       | kind == W.occKindValueCommitted -> do
           let v = case payload of Just (W.VF64 x) -> x; _ -> 0
           case keys of
             [] -> do
-              handlers <- readIORef (appWidgetCommits app)
+              handlers <- readIORef (app.appWidgetCommits)
               dispatch (mapM_ ($ v) (Map.lookup ident handlers))
             _ -> do
-              handlers <- readIORef (appNodeCommits app)
-              dispatch (mapM_ (\h -> h keys v) (Map.lookup ident handlers))
+              handlers <- readIORef (app.appNodeCommits)
+              dispatch (mapM_ (\h -> h (keyPath keys) v) (Map.lookup ident handlers))
           dispatchLoop app
       | kind == W.occKindDateChanged -> do
           let packed = case payload of Just (W.VI64 n) -> n; _ -> 0
           case keys of
             [] -> do
-              handlers <- readIORef (appWidgetDates app)
+              handlers <- readIORef (app.appWidgetDates)
               dispatch (mapM_ ($ dayOfPacked packed) (Map.lookup ident handlers))
             _ -> do
-              handlers <- readIORef (appNodeDates app)
-              dispatch (mapM_ (\h -> h keys (dayOfPacked packed)) (Map.lookup ident handlers))
+              handlers <- readIORef (app.appNodeDates)
+              dispatch (mapM_ (\h -> h (keyPath keys) (dayOfPacked packed)) (Map.lookup ident handlers))
           dispatchLoop app
       | kind == W.occKindTimeChanged -> do
           let packed = case payload of Just (W.VI64 n) -> n; _ -> 0
           case keys of
             [] -> do
-              handlers <- readIORef (appWidgetTimes app)
+              handlers <- readIORef (app.appWidgetTimes)
               dispatch (mapM_ ($ timeOfDayOfPacked packed) (Map.lookup ident handlers))
             _ -> do
-              handlers <- readIORef (appNodeTimes app)
-              dispatch (mapM_ (\h -> h keys (timeOfDayOfPacked packed)) (Map.lookup ident handlers))
+              handlers <- readIORef (app.appNodeTimes)
+              dispatch (mapM_ (\h -> h (keyPath keys) (timeOfDayOfPacked packed)) (Map.lookup ident handlers))
           dispatchLoop app
       | kind == W.occKindCloseRequested -> do
-          handlers <- readIORef (appCloseRequested app)
+          handlers <- readIORef (app.appCloseRequested)
           dispatch (mapM_ id (Map.lookup ident handlers))
           dispatchLoop app
       | kind == W.occKindWindowClosed -> do
           -- One-shot: the window is gone; both registrations retire
           -- with it.
-          modifyIORef' (appCloseRequested app) (Map.delete ident)
-          handlers <- readIORef (appWindowClosed app)
-          modifyIORef' (appWindowClosed app) (Map.delete ident)
+          modifyIORef' (app.appCloseRequested) (Map.delete ident)
+          handlers <- readIORef (app.appWindowClosed)
+          modifyIORef' (app.appWindowClosed) (Map.delete ident)
           dispatch (mapM_ id (Map.lookup ident handlers))
           dispatchLoop app
       | kind == W.occKindEntryPopped -> do
           -- One-shot: the entry is gone; both registrations retire
           -- with it.
-          modifyIORef' (appBackRequested app) (Map.delete ident)
-          handlers <- readIORef (appEntryPopped app)
-          modifyIORef' (appEntryPopped app) (Map.delete ident)
+          modifyIORef' (app.appBackRequested) (Map.delete ident)
+          handlers <- readIORef (app.appEntryPopped)
+          modifyIORef' (app.appEntryPopped) (Map.delete ident)
           dispatch (mapM_ id (Map.lookup ident handlers))
           dispatchLoop app
       | kind == W.occKindBackRequested -> do
-          handlers <- readIORef (appBackRequested app)
+          handlers <- readIORef (app.appBackRequested)
           dispatch (mapM_ id (Map.lookup ident handlers))
           dispatchLoop app
       | kind == W.occKindSectionSelected -> do
           -- NOT one-shot: sections never die, and the user can return any
           -- number of times (ident is the section; the window rides as the
           -- payload).
-          handlers <- readIORef (appSectionSelected app)
+          handlers <- readIORef (app.appSectionSelected)
           dispatch (mapM_ id (Map.lookup ident handlers))
           dispatchLoop app
       | kind == W.occKindClipboardResult -> do
           -- One-shot like the alert, and the request retires with it.
           -- EMPTY IS THE UNIVERSAL NO and arrives as Nothing, because no
           -- platform says which cause it was.
-          handlers <- readIORef (appClipboardReads app)
-          writeIORef (appClipboardReads app) (Map.delete ident handlers)
+          handlers <- readIORef (app.appClipboardReads)
+          writeIORef (app.appClipboardReads) (Map.delete ident handlers)
           dispatch (mapM_ ($ representationOf clip) (Map.lookup ident handlers))
           dispatchLoop app
       | kind == W.occKindPasted -> do
@@ -4073,11 +4147,11 @@ dispatchLoop app = do
           case (representationOf clip, keys) of
             (Nothing, _) -> return ()
             (Just rep, []) -> do
-              handlers <- readIORef (appWidgetPastes app)
+              handlers <- readIORef (app.appWidgetPastes)
               dispatch (mapM_ ($ rep) (Map.lookup ident handlers))
             (Just rep, ks) -> do
-              handlers <- readIORef (appNodePastes app)
-              dispatch (mapM_ (\h -> h ks rep) (Map.lookup ident handlers))
+              handlers <- readIORef (app.appNodePastes)
+              dispatch (mapM_ (\h -> h (keyPath ks) rep) (Map.lookup ident handlers))
           dispatchLoop app
       | kind == W.occKindDropped -> do
           -- A drop rides the same tag with four more words
@@ -4089,19 +4163,19 @@ dispatchLoop app = do
             Just d -> do
               let answer =
                     Dropped
-                      { droppedPoint = (W.dropX d, W.dropY d),
-                        droppedOperation = operationOf (W.dropOperation d),
-                        droppedAnchor = W.dropAnchor d,
-                        droppedBefore = W.dropBefore d,
-                        droppedClip = representationOf (Just (W.dropClip d))
+                      { point = (W.dropX d, W.dropY d),
+                        operation = operationOf (W.dropOperation d),
+                        anchor = keyPath (W.dropAnchor d),
+                        before = W.dropBefore d,
+                        clip = representationOf (Just (W.dropClip d))
                       }
               case keys of
                 [] -> do
-                  handlers <- readIORef (appWidgetDrops app)
+                  handlers <- readIORef (app.appWidgetDrops)
                   dispatch (mapM_ ($ answer) (Map.lookup ident handlers))
                 ks -> do
-                  handlers <- readIORef (appNodeDrops app)
-                  dispatch (mapM_ (\h -> h ks answer) (Map.lookup ident handlers))
+                  handlers <- readIORef (app.appNodeDrops)
+                  dispatch (mapM_ (\h -> h (keyPath ks) answer) (Map.lookup ident handlers))
           dispatchLoop app
       | kind == W.occKindDragEnded -> do
           case payload of
@@ -4109,11 +4183,11 @@ dispatchLoop app = do
               let answer = operationOf (fromIntegral mask)
               case keys of
                 [] -> do
-                  handlers <- readIORef (appDragEnded app)
+                  handlers <- readIORef (app.appDragEnded)
                   dispatch (mapM_ ($ answer) (Map.lookup ident handlers))
                 ks -> do
-                  handlers <- readIORef (appNodeDragEnded app)
-                  dispatch (mapM_ (\h -> h ks answer) (Map.lookup ident handlers))
+                  handlers <- readIORef (app.appNodeDragEnded)
+                  dispatch (mapM_ (\h -> h (keyPath ks) answer) (Map.lookup ident handlers))
             _ -> return ()
           dispatchLoop app
       | kind == W.occKindFileDialogResult -> do
@@ -4122,11 +4196,11 @@ dispatchLoop app = do
           -- (no single Value can carry a list), so they are regrouped
           -- in threes here. EMPTY IS CANCEL.
           let regroup (W.VI64 h : W.VStr n : W.VStr p : rest) =
-                PickedFile (fromIntegral h) n p : regroup rest
+                PickedFile (fromIntegral h) (T.pack n) p : regroup rest
               regroup _ = []
               files = regroup keys
-          handlers <- readIORef (appFileDialogHandlers app)
-          writeIORef (appFileDialogHandlers app) (Map.delete ident handlers)
+          handlers <- readIORef (app.appFileDialogHandlers)
+          writeIORef (app.appFileDialogHandlers) (Map.delete ident handlers)
           dispatch (mapM_ ($ files) (Map.lookup ident handlers))
           dispatchLoop app
       | kind == W.occKindAlertResult -> do
@@ -4135,9 +4209,9 @@ dispatchLoop app = do
           let choice = case payload of
                 Just (W.VI64 c) -> fromIntegral c :: Word32
                 _ -> 0
-          handlers <- readIORef (appAlertHandlers app)
-          writeIORef (appAlertHandlers app) (Map.delete ident handlers)
-          dispatch (mapM_ ($ choice) (Map.lookup ident handlers))
+          handlers <- readIORef (app.appAlertHandlers)
+          writeIORef (app.appAlertHandlers) (Map.delete ident handlers)
+          dispatch (mapM_ ($ alertChoiceOfWire choice) (Map.lookup ident handlers))
           dispatchLoop app
       | kind == W.occKindLinkOpened -> do
           -- ident is the ROUTE the core matched
@@ -4145,11 +4219,11 @@ dispatchLoop app = do
           -- flattens the URL and the captured pairs into the values
           -- slot, so they are regrouped in twos after the URL.
           let pairs (W.VStr name : W.VStr value : rest) =
-                (name, value) : pairs rest
+                (T.pack name, T.pack value) : pairs rest
               pairs _ = []
           case keys of
             (W.VStr url : rest) ->
-              linkOpened app ident url (Map.fromList (pairs rest))
+              linkOpened app ident (T.pack url) (Map.fromList (pairs rest))
             _ -> return ()
           dispatchLoop app
       | kind == W.occKindNotificationResult -> do
@@ -4169,7 +4243,7 @@ dispatchLoop app = do
           absorbUndo app delta
           handlers <-
             readIORef
-              (if kind == W.occKindUndone then appUndone app else appRedone app)
+              (if kind == W.occKindUndone then app.appUndone else app.appRedone)
           dispatch (mapM_ (\h -> h label delta) (Map.lookup ident handlers))
           dispatchLoop app
       -- Menu occurrences key the menu-item tables — their own id space.
@@ -4178,39 +4252,39 @@ dispatchLoop app = do
       | kind == W.occKindMenuActivated -> do
           case keys of
             [] -> do
-              handlers <- readIORef (appMenuActivated app)
+              handlers <- readIORef (app.appMenuActivated)
               dispatch (mapM_ id (Map.lookup ident handlers))
             _ -> do
-              handlers <- readIORef (appMenuActivatedNode app)
-              dispatch (mapM_ ($ keys) (Map.lookup ident handlers))
+              handlers <- readIORef (app.appMenuActivatedNode)
+              dispatch (mapM_ ($ keyPath keys) (Map.lookup ident handlers))
           dispatchLoop app
       | kind == W.occKindMenuToggled -> do
           let checked = case payload of Just (W.VBool b) -> b; _ -> False
           case keys of
             [] -> do
-              handlers <- readIORef (appMenuToggled app)
+              handlers <- readIORef (app.appMenuToggled)
               dispatch (mapM_ ($ checked) (Map.lookup ident handlers))
             _ -> do
-              handlers <- readIORef (appMenuToggledNode app)
-              dispatch (mapM_ (\h -> h keys checked) (Map.lookup ident handlers))
+              handlers <- readIORef (app.appMenuToggledNode)
+              dispatch (mapM_ (\h -> h (keyPath keys) checked) (Map.lookup ident handlers))
           dispatchLoop app
       | kind == W.occKindMenuValueChanged -> do
           let index = case payload of Just (W.VF64 x) -> truncate x; _ -> 0
           case keys of
             [] -> do
-              handlers <- readIORef (appMenuSelected app)
+              handlers <- readIORef (app.appMenuSelected)
               dispatch (mapM_ ($ index) (Map.lookup ident handlers))
             _ -> do
-              handlers <- readIORef (appMenuSelectedNode app)
-              dispatch (mapM_ (\h -> h keys index) (Map.lookup ident handlers))
+              handlers <- readIORef (app.appMenuSelectedNode)
+              dispatch (mapM_ (\h -> h (keyPath keys) index) (Map.lookup ident handlers))
           dispatchLoop app
     Just (_, ident, [], _, _, _, _, _) -> do
-      handlers <- readIORef (appWidgetHandlers app)
+      handlers <- readIORef (app.appWidgetHandlers)
       dispatch (mapM_ id (Map.lookup ident handlers))
       dispatchLoop app
     Just (_, ident, keys, _, _, _, _, _) -> do
-      handlers <- readIORef (appNodeHandlers app)
-      dispatch (mapM_ ($ keys) (Map.lookup ident handlers))
+      handlers <- readIORef (app.appNodeHandlers)
+      dispatch (mapM_ ($ keyPath keys) (Map.lookup ident handlers))
       dispatchLoop app
 
 -- The canvas ask's trailing values: the size the core is asking about,

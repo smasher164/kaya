@@ -5,7 +5,6 @@
 
 import Control.Concurrent (forkIO, newEmptyMVar, takeMVar, tryPutMVar)
 import Control.Exception (SomeException, try)
-import Data.Text (Text)
 import qualified Data.Text as T
 import KayaApp
 import System.Directory (createDirectoryIfMissing, getTemporaryDirectory)
@@ -28,11 +27,11 @@ main = kayaMain $ \app -> do
 
   _ <- buildTx app $ do
     window primary [WTitle "filedialog"]
-    status <- signal (T.pack "no file")
+    status <- signalText "no file"
 
     let picked files = case files of
           -- The empty list IS cancel.
-          [] -> buildTx app (writeSignal status (T.pack "cancelled"))
+          [] -> buildTx app (writeSignal status "cancelled")
           (first : _) -> do
             _ <- forkIO $ do
               -- Redeemed on the WORKER: openPicked blocks.
@@ -49,13 +48,13 @@ main = kayaMain $ \app -> do
               post app $
                 buildTx
                   app
-                  (writeSignal status (T.pack (show (length files) ++ " " ++ text)))
-            buildTx app (writeSignal status (T.pack "reading"))
+                  (writeSignal status (tshow (length files) <> " " <> T.pack text))
+            buildTx app (writeSignal status "reading")
 
     root <-
       column
         []
-        [ labelBound status [A11yId ("status" :: Text)], -- label#0
+        [ labelBound status [A11yId "status"], -- label#0
           buttonOn "open" (buildTx app (pickFiles [("Text", "txt")] picked)) [], -- button#0
           buttonOn "open one" (buildTx app (pickFile [("Text", "txt")] picked)) [], -- button#1
           -- tryPutMVar, NOT putMVar: a second release click would wedge the

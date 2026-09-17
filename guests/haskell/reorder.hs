@@ -42,4 +42,4 @@ main = kayaMain $ \app -> do
           each (recordHandle items) $ label (field @"title" @Item)
         ]
     mount root
-    mapM_ (\k -> insertRecord items k (Item k)) ["a", "b", "c"]
+    mapM_ (\k -> insertRecord items (textKey k) (Item k)) ["a", "b", "c"]

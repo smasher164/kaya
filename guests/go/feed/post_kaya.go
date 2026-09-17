@@ -25,7 +25,7 @@ func PostEachSum(
 	note func(kaya.SumCase[string, Note]),
 	todo func(kaya.SumCase[string, Todo]),
 ) kaya.Widget {
-	rows := tx.Rows(c.Coll)
+	rows := tx.Rows(c.Handle())
 	for row := range rows.All() {
 		c.Case[Note](row.Tpl, note)
 		c.Case[Todo](row.Tpl, todo)

@@ -6,8 +6,6 @@
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BC
 
-import Data.Text (Text)
-import qualified Data.Text as T
 import KayaApp
 
 {- A 2x2 RGB PNG, 75 bytes, embedded as source. -}
@@ -24,19 +22,19 @@ testPng =
 main :: IO ()
 main = kayaMain $ \app -> do
   buildTx app $ do
-    status <- signal (T.pack "urgent: false")
-    volume <- signal (T.pack "volume: 50%")
-    pos <- signal (0.5 :: Double)
+    status <- signalText "urgent: false"
+    volume <- signalText "volume: 50%"
+    pos <- signalDouble 0.5
 
     let onUrgent checked =
           submitTx app $
             writeSignal status
-              (T.pack ("urgent: " ++ if checked then "true" else "false"))
+              ("urgent: " <> if checked then "true" else "false")
         onVolume v =
           -- Integer percent, so every language's formatting agrees.
           submitTx app $
             writeSignal volume
-              (T.pack ("volume: " ++ show (round (v * 100) :: Int) ++ "%"))
+              ("volume: " <> tshow (round (v * 100) :: Int) <> "%")
         onQuarter = submitTx app $ writeSignal pos (0.25 :: Double)
 
     root <-
@@ -47,11 +45,11 @@ main = kayaMain $ \app -> do
               labelBound volume,
               buttonOn "quarter" onQuarter
             ],
-          search [Placeholder ("Search" :: Text), A11yId ("find" :: Text)],
+          search [Placeholder "Search", A11yId "find"],
           {- Deliberately invalid bytes: a decode failure reads 0x0. -}
           row [imageBytes testPng, imageBytes (BC.pack "not an image")],
           {- The labelled row: the control's accessibility name IS the
              label's text, with no A11yLabel of its own. -}
-          labeled ("Level" :: Text) [sliderOn 0 1 0.5 (const (return ())) [A11yId ("level" :: Text)]]
+          labeled "Level" [sliderOn 0 1 0.5 (const (return ())) [A11yId "level"]]
         ]
     mount root

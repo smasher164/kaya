@@ -19,8 +19,8 @@ let () =
        ~menus:[ menu ~label:"File" [ item ~label:"Save" ~symbol:Done ~primary:true ] ]
        ();
 
-     let heading = signal_str ("identity") in
-     let status = signal_str ("ready") in
+     let heading = signal Scalar.Str ("identity") in
+     let status = signal Scalar.Str ("ready") in
 
      let root =
        column
@@ -41,7 +41,7 @@ let () =
          title an app WROTE. *)
      if (capabilities ()).aux_windows then begin
        create_window ~width:360.0 ~height:240.0 1L;
-       let caption = signal_str ("no title of its own") in
+       let caption = signal Scalar.Str ("no title of its own") in
        let aux = column [ label ~bind:caption (* label#2 *) ] () in
        mount_in 1L aux
      end);

@@ -15,17 +15,17 @@ const DOC = "Héllo world\nSecond line";
  * and the core's mirror are compared as one string. */
 function spell(runs: readonly kaya.Run[]): string {
   return runs
-    .map((run) => (run.value === "true" ? `${run.start}:${run.end} ${run.name}` : `${run.start}:${run.end} ${run.name}=${run.value}`))
+    .map((run) => (run.isFlag ? `${run.range[0]}:${run.range[1]} ${run.name}` : `${run.range[0]}:${run.range[1]} ${run.name}=${run.value}`))
     .join("|");
 }
 
 function onEdit(edit: kaya.Edit): void {
-  last.set(`edit ${edit.start}:${edit.end} <${edit.inserted}> ${edit.source} [${spell(edit.runs)}]`);
+  last.set(`edit ${edit.range[0]}:${edit.range[1]} <${edit.inserted}> ${edit.source} [${spell(edit.runs)}]`);
   runs.set(spell(editor.document().runs));
 }
 
 function onFormat(act: kaya.Format): void {
-  last.set(`format ${act.start}:${act.end} ${act.name}=${act.value ?? "off"}`);
+  last.set(`format ${act.range[0]}:${act.range[1]} ${act.name}=${act.value ?? "off"}`);
   runs.set(spell(editor.document().runs));
 }
 

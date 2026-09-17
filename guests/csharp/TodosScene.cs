@@ -17,8 +17,8 @@ static class TodosScene
         {
             var edit = tx.Menu("Edit", items: new[]
             {
-                tx.Item("Undo", role: Tx.RoleUndo),
-                tx.Item("Redo", role: Tx.RoleRedo),
+                tx.Item("Undo", role: MenuRole.Undo),
+                tx.Item("Redo", role: MenuRole.Redo),
             });
             // No onUndone and no onRedone, deliberately: this scene shows core
             // state only.

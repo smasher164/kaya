@@ -17,7 +17,7 @@ app.build { tx in
                 message: "the document has unsaved changes",
                 actions: ["Discard"], cancel: "Keep Editing"
             ) { tx, choice in
-                if choice == KAYA_ALERT_CHOICE_CANCEL {
+                if choice == .cancel {
                     // Answering a dialog is not saving: the mark stays up.
                     tx.write(status, .str("kept editing"))
                 } else {

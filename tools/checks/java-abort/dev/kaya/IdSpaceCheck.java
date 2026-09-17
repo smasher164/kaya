@@ -50,7 +50,7 @@ public final class IdSpaceCheck {
             if (out.length() > 0) {
                 out.append('|');
             }
-            out.append(run.start()).append(':').append(run.stop()).append(' ')
+            out.append(run.range().start).append(':').append(run.range().stop).append(' ')
                     .append(run.name()).append('=').append(run.value());
         }
         return out.toString();
@@ -79,7 +79,8 @@ public final class IdSpaceCheck {
 
         // ONE EDIT, through the ONE fold: the live mirror's answer is
         // the row field's answer.
-        List<KayaApp.TextRun> marks = List.of(new KayaApp.TextRun(0, 1, "code", "true"));
+        List<KayaApp.TextRun> marks =
+                List.of(new KayaApp.TextRun(KayaApp.TextRange.ofBytes(0, 1), "code", "true"));
         KayaApp.Document live = new KayaApp.Document(doc.text(), doc.runs());
         KayaApp.foldEdit(live, 3, 3, "!", marks);
 

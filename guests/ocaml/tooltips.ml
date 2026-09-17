@@ -9,7 +9,7 @@ let () =
   let app = Kaya_app.create () in
 
   build app (fun () ->
-      let name_help = signal_str ("Your full name as it appears on the card") in
+      let name_help = signal Scalar.Str ("Your full name as it appears on the card") in
       let accounts = collection_of account_record in
 
       let root =
@@ -37,9 +37,9 @@ let () =
       in
       mount root;
 
-      insert_record accounts (str_key "a")
+      insert_record accounts (Key.str "a")
         { name = "a"; note = "The first account, opened in March" };
-      insert_record accounts (str_key "b")
+      insert_record accounts (Key.str "b")
         { name = "b"; note = "The second account, opened in May" });
 
   exit (run app)

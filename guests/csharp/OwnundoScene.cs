@@ -53,8 +53,8 @@ static class OwnundoScene
         {
             var edit = tx.Menu("Edit", items: new[]
             {
-                tx.Item("Undo", role: Tx.RoleUndo, onActivate: Undo),
-                tx.Item("Redo", role: Tx.RoleRedo, onActivate: Redo),
+                tx.Item("Undo", role: MenuRole.Undo, onActivate: Undo),
+                tx.Item("Redo", role: MenuRole.Redo, onActivate: Redo),
             });
             tx.Window(title: "ownundo", menus: new[] { edit });
             status = tx.Signal("undo 0 redo 0");

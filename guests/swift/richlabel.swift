@@ -13,7 +13,7 @@ let title = "Heading with italic"
 /// and the core's mirror are compared as one string.
 func spell(_ runs: [KayaRun]) -> String {
     runs.map { run in
-        run.value == "true"
+        run.isFlag
             ? "\(run.range.lowerBound):\(run.range.upperBound) \(run.name)"
             : "\(run.range.lowerBound):\(run.range.upperBound) \(run.name)=\(run.value)"
     }.joined(separator: "|")
@@ -44,21 +44,21 @@ app.build { tx in
                 let doc = KayaDocument(document)
                     .bold(0..<6)
                     .link(7..<12, "https://kaya.dev")
-                    .mark(14..<18, "code", "true")
-                let heads = KayaDocument(title).mark(13..<19, "italic", "true")
+                    .mark(14..<18, "code", true)
+                let heads = KayaDocument(title).mark(13..<19, "italic", true)
                 t.setDocument(body, doc)
                 t.setDocument(heading, heads)
                 t.write(runs, .str(spell(doc.runs)))
             }
             tx.button("insert") { t in  // button#1
-                let edit = KayaEdit.insert(at: 6, ", big").mark(2..<5, "italic", "true")
+                let edit = KayaEdit.insert(at: 6, ", big").mark(2..<5, "italic", true)
                 t.applyEdit(body, edit)
                 t.write(runs, .str(spell(app.document(body).runs)))
             }
             // THE RANGED ACT ON A LABEL (docs/rich-text-plan.md §17): the
             // label's own document written by range, no selection to move.
             tx.button("mark") { t in  // button#2
-                t.formatRange(body, 1..<4, "italic", "true")
+                t.formatRange(body, 1..<4, "italic", true)
                 t.unformatRange(body, 0..<3, "bold")  // "Hé": byte 2 is inside the é
                 t.write(runs, .str(spell(app.document(body).runs)))
             }

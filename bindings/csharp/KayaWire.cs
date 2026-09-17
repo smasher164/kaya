@@ -2423,7 +2423,7 @@ static class KayaWire
     /// guest-created widget (id is a widget id); otherwise id is a
     /// template node id and keys is the copy's key path.
     public static bool ParseOccurrence(
-        byte[] rec, out ushort kind, out ulong id, out List<object> keys, out object payload)
+        byte[] rec, out ushort kind, out ulong id, out List<object> keys, out object? payload)
     {
         id = 0;
         keys = new List<object>();
@@ -2463,10 +2463,11 @@ static class KayaWire
                         : Encoding.UTF8.GetString(rec, fileAt + 8, vlen);
                     fileAt += 8 + ((vlen + 7) & ~7);
                 }
+                string local = (string)(parts[2] ?? "");
                 files.Add(new PickedFile(
                     (ulong)(long)(parts[0] ?? 0L),
                     (string)(parts[1] ?? ""),
-                    (string)(parts[2] ?? "")));
+                    local.Length == 0 ? null : local));
             }
             payload = files;
             return true;

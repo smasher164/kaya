@@ -15,11 +15,11 @@ import (
 func spellRuns(runs []TextRun) string {
 	parts := make([]string, 0, len(runs))
 	for _, run := range runs {
-		if run.Value == "true" {
-			parts = append(parts, fmt.Sprintf("%d:%d %s", run.Start, run.End, run.Name))
+		if run.IsFlag() {
+			parts = append(parts, fmt.Sprintf("%d:%d %s", run.Range.Start, run.Range.End, run.Name))
 			continue
 		}
-		parts = append(parts, fmt.Sprintf("%d:%d %s=%s", run.Start, run.End, run.Name, run.Value))
+		parts = append(parts, fmt.Sprintf("%d:%d %s=%s", run.Range.Start, run.Range.End, run.Name, run.Value))
 	}
 	return strings.Join(parts, "|")
 }
@@ -36,25 +36,25 @@ func TestNormalizeRunsIsTheCoresNormalForm(t *testing.T) {
 		want string
 	}{
 		{"a same-valued overlap comes back as ONE run: cut, then merged",
-			[]TextRun{{0, 10, "bold", "true"}, {4, 6, "bold", "true"}},
+			[]TextRun{{TextRange{0, 10}, "bold", "true"}, {TextRange{4, 6}, "bold", "true"}},
 			"0:10 bold"},
 		{"adjacent and equal merge",
-			[]TextRun{{0, 4, "bold", "true"}, {4, 8, "bold", "true"}},
+			[]TextRun{{TextRange{0, 4}, "bold", "true"}, {TextRange{4, 8}, "bold", "true"}},
 			"0:8 bold"},
 		{"adjacent and DIFFERENT do not merge",
-			[]TextRun{{0, 4, "block", "heading1"}, {4, 8, "block", "heading2"}},
+			[]TextRun{{TextRange{0, 4}, "block", "heading1"}, {TextRange{4, 8}, "block", "heading2"}},
 			"0:4 block=heading1|4:8 block=heading2"},
 		{"a later value wins over the range it covers",
-			[]TextRun{{0, 8, "block", "heading1"}, {2, 4, "block", "quote"}},
+			[]TextRun{{TextRange{0, 8}, "block", "heading1"}, {TextRange{2, 4}, "block", "quote"}},
 			"0:2 block=heading1|2:4 block=quote|4:8 block=heading1"},
 		{"two attributes over one range are two runs, ordered by name",
-			[]TextRun{{0, 4, "link", "u"}, {0, 4, "bold", "true"}},
+			[]TextRun{{TextRange{0, 4}, "link", "u"}, {TextRange{0, 4}, "bold", "true"}},
 			"0:4 bold|0:4 link=u"},
 		{"an empty run is dropped",
-			[]TextRun{{3, 3, "bold", "true"}, {0, 2, "bold", "true"}},
+			[]TextRun{{TextRange{3, 3}, "bold", "true"}, {TextRange{0, 2}, "bold", "true"}},
 			"0:2 bold"},
 		{"ordered by start, then by name",
-			[]TextRun{{6, 8, "italic", "true"}, {0, 2, "bold", "true"}, {0, 2, "italic", "true"}},
+			[]TextRun{{TextRange{6, 8}, "italic", "true"}, {TextRange{0, 2}, "bold", "true"}, {TextRange{0, 2}, "italic", "true"}},
 			"0:2 bold|0:2 italic|6:8 italic"},
 	} {
 		if got := spellRuns(normalizeRuns(c.in)); got != c.want {
@@ -68,7 +68,7 @@ func TestAbsorbEditSplicesRunsTheCoresWay(t *testing.T) {
 	a.seedDocument(one.id, NewDocument("abcdef").Bold(0, 2).Italic(4, 6))
 	// A run the edit falls INSIDE is cut; one before it keeps; one after
 	// it shifts; the inserted runs land relative to the edit.
-	a.absorbEdit(one.id, 2, 3, "XYZ", []TextRun{{1, 2, "code", "true"}})
+	a.absorbEdit(one.id, 2, 3, "XYZ", []TextRun{{TextRange{1, 2}, "code", "true"}})
 	if got, want := a.Document(one).Text, "abXYZdef"; got != want {
 		t.Errorf("text %q, want %q", got, want)
 	}
@@ -89,7 +89,7 @@ func TestAbsorbEditSplicesRunsTheCoresWay(t *testing.T) {
 	// range.
 	c := mirror()
 	c.seedDocument(one.id, NewDocument("ab").Bold(0, 2))
-	c.absorbEdit(one.id, 40, 60, "fresh", []TextRun{{0, 5, "bold", "true"}})
+	c.absorbEdit(one.id, 40, 60, "fresh", []TextRun{{TextRange{0, 5}, "bold", "true"}})
 	if got, want := c.Document(one).Text, "fresh"; got != want {
 		t.Errorf("out-of-step mirror kept %q, want %q", got, want)
 	}
@@ -135,7 +135,7 @@ func TestMirrorAnswersTheScenesFrozenRuns(t *testing.T) {
 
 	// click button#1: the app's edit, folded as it is SENT.
 	e := Insert(6, ", big").Mark(2, 5, "italic", "true")
-	a.absorbEdit(one.id, e.Start, e.End, e.Inserted, e.Runs)
+	a.absorbEdit(one.id, e.Range.Start, e.Range.End, e.Inserted, e.Runs)
 	step("0:6 bold|8:11 italic|12:17 link=" + link + "|18:29 block=heading2")
 
 	// format 12:17 underline, then off.
@@ -154,17 +154,17 @@ func TestMirrorAnswersTheScenesFrozenRuns(t *testing.T) {
 
 	// Typing INHERITS the block, and the merge with the paragraph's own
 	// run is what keeps it ONE run.
-	a.absorbEdit(one.id, 29, 29, "x", []TextRun{{0, 1, "block", "heading2"}})
+	a.absorbEdit(one.id, 29, 29, "x", []TextRun{{TextRange{0, 1}, "block", "heading2"}})
 	step("0:17 block=heading1|8:11 italic|12:17 link=" + link +
 		"|18:30 block=heading2")
 	a.absorbEdit(one.id, 30, 30, "y",
-		[]TextRun{{0, 1, "block", "heading2"}, {0, 1, "bold", "true"}})
+		[]TextRun{{TextRange{0, 1}, "block", "heading2"}, {TextRange{0, 1}, "bold", "true"}})
 	step("0:17 block=heading1|8:11 italic|12:17 link=" + link +
 		"|18:31 block=heading2|30:31 bold")
 
 	// button#6's prefix: the app's document takes it at once.
 	p := Insert(0, "> ")
-	a.absorbEdit(one.id, p.Start, p.End, p.Inserted, p.Runs)
+	a.absorbEdit(one.id, p.Range.Start, p.Range.End, p.Inserted, p.Runs)
 	step("2:19 block=heading1|10:13 italic|14:19 link=" + link +
 		"|20:33 block=heading2|32:33 bold")
 
@@ -203,7 +203,7 @@ func TestEditOfCarriesTheSourceAndAnAppBuiltEditCarriesNone(t *testing.T) {
 	if e.Source != SourcePaste {
 		t.Errorf("a delivered edit's source is %q, want %q", e.Source, SourcePaste)
 	}
-	if got := fmt.Sprintf("edit %d:%d <%s> %s [%s]", e.Start, e.End, e.Inserted,
+	if got := fmt.Sprintf("edit %d:%d <%s> %s [%s]", e.Range.Start, e.Range.End, e.Inserted,
 		e.Source, spellRuns(e.Runs)); got != "edit 29:29 <x> paste [0:1 block=heading2]" {
 		t.Errorf("the guest's line reads %q", got)
 	}

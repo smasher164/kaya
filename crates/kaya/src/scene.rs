@@ -1179,7 +1179,7 @@ fn check_runs(
     runs.iter()
         .map(|run| {
             let named = format!("{op} run {:?}", run.name);
-            let native = check_range(text, widget, &named, TextRange::new(run.start, run.end));
+            let native = check_range(text, widget, &named, TextRange::new(run.range.start, run.range.end));
             check_attr_name(widget, op, &run.name);
             if run.name == "block" {
                 check_block_value(widget, op, &run.value);
@@ -1232,8 +1232,8 @@ fn paragraph_bounds(text: &str, range: TextRange) -> TextRange {
 /// docs/rich-text-plan.md §2: a `block` run covers whole paragraphs.
 fn check_paragraph_bounds(text: &str, widget: WidgetId, op: &str, run: &TextRun) {
     let bytes = text.as_bytes();
-    let start = run.start as usize;
-    let end = run.end as usize;
+    let start = run.range.start as usize;
+    let end = run.range.end as usize;
     let starts = start == 0 || bytes[start - 1] == b'\n';
     assert!(
         starts,
@@ -1279,9 +1279,9 @@ fn spell_runs(runs: &[TextRun]) -> String {
     runs.iter()
         .map(|run| {
             if run.value == "true" {
-                format!("{}:{} {}", run.start, run.end, run.name)
+                format!("{}:{} {}", run.range.start, run.range.end, run.name)
             } else {
-                format!("{}:{} {}={}", run.start, run.end, run.name, run.value)
+                format!("{}:{} {}={}", run.range.start, run.range.end, run.name, run.value)
             }
         })
         .collect::<Vec<_>>()
@@ -1323,7 +1323,7 @@ impl RichDoc {
     fn attrs_at(&self, byte: usize) -> BTreeMap<String, String> {
         let mut out = BTreeMap::new();
         for run in &self.runs {
-            if (run.start as usize) <= byte && byte < run.end as usize {
+            if (run.range.start as usize) <= byte && byte < run.range.end as usize {
                 out.insert(run.name.clone(), run.value.clone());
             }
         }
@@ -1336,25 +1336,22 @@ impl RichDoc {
         let moved = |offset: u64| -> u64 { (offset as i64 + shift) as u64 };
         let mut next: Vec<TextRun> = Vec::with_capacity(self.runs.len() + runs.len());
         for run in &self.runs {
-            if (run.start as usize) < start {
+            if (run.range.start as usize) < start {
                 next.push(TextRun {
-                    start: run.start,
-                    end: run.end.min(start as u64),
+                    range: run.range.start..run.range.end.min(start as u64),
                     ..run.clone()
                 });
             }
-            if (run.end as usize) > end {
+            if (run.range.end as usize) > end {
                 next.push(TextRun {
-                    start: moved(run.start.max(end as u64)),
-                    end: moved(run.end),
+                    range: moved(run.range.start.max(end as u64))..moved(run.range.end),
                     ..run.clone()
                 });
             }
         }
         for run in runs {
             next.push(TextRun {
-                start: run.start + start as u64,
-                end: run.end + start as u64,
+                range: run.range.start + start as u64..run.range.end + start as u64,
                 ..run.clone()
             });
         }
@@ -1370,21 +1367,20 @@ impl RichDoc {
         }
         let mut next: Vec<TextRun> = Vec::with_capacity(self.runs.len() + 2);
         for run in std::mem::take(&mut self.runs) {
-            if run.name != name || (run.end as usize) <= start || run.start as usize >= end {
+            if run.name != name || (run.range.end as usize) <= start || run.range.start as usize >= end {
                 next.push(run);
                 continue;
             }
-            if (run.start as usize) < start {
-                next.push(TextRun { end: start as u64, ..run.clone() });
+            if (run.range.start as usize) < start {
+                next.push(TextRun { range: run.range.start..start as u64, ..run.clone() });
             }
-            if (run.end as usize) > end {
-                next.push(TextRun { start: end as u64, ..run.clone() });
+            if (run.range.end as usize) > end {
+                next.push(TextRun { range: end as u64..run.range.end, ..run.clone() });
             }
         }
         if let Some(value) = value {
             next.push(TextRun {
-                start: start as u64,
-                end: end as u64,
+                range: start as u64..end as u64,
                 name: name.to_owned(),
                 value: value.to_owned(),
             });
@@ -1402,38 +1398,38 @@ impl RichDoc {
         for name in names {
             let mut painted: Vec<TextRun> = Vec::new();
             for run in self.runs.iter().filter(|r| r.name == name) {
-                if run.start >= run.end {
+                if run.range.start >= run.range.end {
                     continue;
                 }
                 let mut kept: Vec<TextRun> = Vec::new();
                 for old in painted.drain(..) {
-                    if old.end <= run.start || old.start >= run.end {
+                    if old.range.end <= run.range.start || old.range.start >= run.range.end {
                         kept.push(old);
                         continue;
                     }
-                    if old.start < run.start {
-                        kept.push(TextRun { end: run.start, ..old.clone() });
+                    if old.range.start < run.range.start {
+                        kept.push(TextRun { range: old.range.start..run.range.start, ..old.clone() });
                     }
-                    if old.end > run.end {
-                        kept.push(TextRun { start: run.end, ..old.clone() });
+                    if old.range.end > run.range.end {
+                        kept.push(TextRun { range: run.range.end..old.range.end, ..old.clone() });
                     }
                 }
                 kept.push(run.clone());
                 painted = kept;
             }
-            painted.sort_by_key(|r| r.start);
+            painted.sort_by_key(|r| r.range.start);
             let mut merged: Vec<TextRun> = Vec::new();
             for run in painted {
                 match merged.last_mut() {
-                    Some(last) if last.end == run.start && last.value == run.value => {
-                        last.end = run.end;
+                    Some(last) if last.range.end == run.range.start && last.value == run.value => {
+                        last.range.end = run.range.end;
                     }
                     _ => merged.push(run),
                 }
             }
             out.extend(merged);
         }
-        out.sort_by(|a, b| (a.start, &a.name).cmp(&(b.start, &b.name)));
+        out.sort_by(|a, b| (a.range.start, &a.name).cmp(&(b.range.start, &b.name)));
         self.runs = out;
     }
 }
@@ -1479,9 +1475,9 @@ impl RichDoc {
             .into_iter()
             .map(|(name, value)| {
                 let end = if name == "block" { block_end } else { inserted.len() as u64 };
-                TextRun { start: 0, end, name, value }
+                TextRun { range: 0..end, name, value }
             })
-            .filter(|run| run.end > run.start)
+            .filter(|run| run.range.end > run.range.start)
             .collect()
     }
 }
@@ -4753,7 +4749,7 @@ impl Scene {
             panic!(
                 "kaya: {op} on {widget:?}, a LABEL, carries the block run {}..{} ({}) — a \
                  label's document is inline only (docs/rich-text-plan.md R8)",
-                run.start, run.end, run.value
+                run.range.start, run.range.end, run.value
             );
         }
     }
@@ -13404,7 +13400,7 @@ mod tests {
             .rich_runs(WidgetId(1))
             .expect("the widget is rich")
             .iter()
-            .map(|r| (r.start, r.end, r.name.clone(), r.value.clone()))
+            .map(|r| (r.range.start, r.range.end, r.name.clone(), r.value.clone()))
             .collect()
     }
 

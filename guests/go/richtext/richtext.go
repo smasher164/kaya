@@ -19,11 +19,11 @@ const document = "Héllo world\nSecond line"
 func spell(runs []kaya.TextRun) string {
 	parts := make([]string, 0, len(runs))
 	for _, run := range runs {
-		if run.Value == "true" {
-			parts = append(parts, fmt.Sprintf("%d:%d %s", run.Start, run.End, run.Name))
+		if run.IsFlag() {
+			parts = append(parts, fmt.Sprintf("%d:%d %s", run.Range.Start, run.Range.End, run.Name))
 			continue
 		}
-		parts = append(parts, fmt.Sprintf("%d:%d %s=%s", run.Start, run.End, run.Name, run.Value))
+		parts = append(parts, fmt.Sprintf("%d:%d %s=%s", run.Range.Start, run.Range.End, run.Name, run.Value))
 	}
 	return strings.Join(parts, "|")
 }
@@ -43,7 +43,7 @@ func App() *kaya.App {
 			editor = tx.Textarea(nil).Rich().A11yID("doc").A11yLabel("Document")
 			app.OnEdit(editor, func(tx *kaya.Tx, edit kaya.Edit) {
 				tx.Write(last, fmt.Sprintf("edit %d:%d <%s> %s [%s]",
-					edit.Start, edit.End, edit.Inserted, edit.Source, spell(edit.Runs)))
+					edit.Range.Start, edit.Range.End, edit.Inserted, edit.Source, spell(edit.Runs)))
 				tx.Write(runs, spell(app.Document(editor).Runs))
 			})
 			app.OnFormat(editor, func(tx *kaya.Tx, act kaya.Format) {
@@ -52,7 +52,7 @@ func App() *kaya.App {
 					value = "off"
 				}
 				tx.Write(last, fmt.Sprintf("format %d:%d %s=%s",
-					act.Start, act.End, act.Name, value))
+					act.Range.Start, act.Range.End, act.Name, value))
 				tx.Write(runs, spell(app.Document(editor).Runs))
 			})
 
@@ -69,7 +69,7 @@ func App() *kaya.App {
 					tx.Write(runs, spell(doc.Runs))
 				})
 				tx.Button("insert", func(tx *kaya.Tx) { // button#1
-					tx.ApplyEdit(editor, kaya.Insert(6, ", big").Mark(2, 5, "italic", "true"))
+					tx.ApplyEdit(editor, kaya.Insert(6, ", big").Flag(2, 5, "italic", true))
 					tx.Write(runs, spell(app.Document(editor).Runs))
 				})
 				tx.Button("select word", func(tx *kaya.Tx) { // button#2

@@ -332,6 +332,81 @@ final class KayaDraw {
 /// never how it looks. Destructive and prominent are BUTTON emphasis,
 /// heading and caption are LABEL hierarchy; the root refuses the other
 /// combinations at declare time.
+/// An alert's three outcomes: the action the user pressed, by its slot,
+/// or the cancel every platform-native dismissal answers
+/// (DESIGN.md, Binding conventions — a closed vocabulary is a type).
+enum KayaAlertChoice: UInt32 {
+    case action0 = 0
+    case action1 = 1
+    case cancel = 0xFFFF_FFFF
+
+    /// The wire's number, refused naming one this build does not know.
+    static func fromWire(_ code: UInt32) -> KayaAlertChoice {
+        guard let known = KayaAlertChoice(rawValue: code) else {
+            fatalError(
+                "kaya: an alert result carries choice \(code), which this build does not know")
+        }
+        return known
+    }
+}
+
+/// A notification's two outcomes (docs/tasks-s3-plan.md N1). Dismissal
+/// is not one of them: two platforms never report it.
+enum KayaNotificationOutcome: UInt32 {
+    case activated = 0
+    case refused = 1
+
+    static func fromWire(_ code: UInt32) -> KayaNotificationOutcome {
+        guard let known = KayaNotificationOutcome(rawValue: code) else {
+            fatalError(
+                "kaya: a notification result carries outcome \(code), which this build does not know")
+        }
+        return known
+    }
+
+    /// The wire's own word for it, which the drop announcement names.
+    var name: String { self == .activated ? "activated" : "refused" }
+}
+
+/// How a picked file is re-opened (crates/kaya/src/spec.rs decides the
+/// numbers; tools/check-file-modes.py holds them together).
+enum KayaFileMode: UInt32 {
+    case read = 0
+    case write = 1
+    case readWrite = 2
+}
+
+/// How a window presents its sections.
+enum KayaSectionsPresentation: Int64 {
+    case auto = 0
+    case bar = 1
+    case sidebar = 2
+}
+
+/// The app's OWN light/dark choice, applied process-wide from the
+/// default window (docs/tasks-s2b-plan.md R1-R3).
+enum KayaAppearance: Int64 {
+    case system = 0
+    case light = 1
+    case dark = 2
+}
+
+/// THE CLOSED MENU-ROLE VOCABULARY (DESIGN.md, Menus;
+/// crates/kaya/src/scene.rs MENU_ROLES). `settings` is placed in the
+/// application menu on macOS and left where the app declared it
+/// everywhere else. Cut/copy/paste are THE GESTURE LAYER: they lower to
+/// the platform's own, act on the FOCUSED widget, and work out their own
+/// enablement. Undo/redo ask the focused widget's own history before the
+/// app's ledger (docs/undo-plan.md D6).
+enum KayaMenuRole: String {
+    case settings
+    case cut
+    case copy
+    case paste
+    case undo
+    case redo
+}
+
 enum KayaRole: Int64 {
     /// An action whose press destroys something.
     case destructive = 1
@@ -754,6 +829,17 @@ func kayaLinkParams(_ tail: [KayaValue]) -> [String: String] {
     return captured
 }
 
+/// A span the CORE sent, refused BY NAME if its ends are out of order:
+/// `Range`'s own init would otherwise trap the process with Swift's
+/// sentence and no kaya one. No scene reaches it — the core always sends
+/// ordered spans (the idiom review's S3).
+func kayaDecodedSpan(_ what: String, _ start: Int, _ stop: Int) -> Range<Int> {
+    guard start <= stop else {
+        fatalError("kaya: a \(what) carries \(start)..\(stop), a reversed span")
+    }
+    return start..<stop
+}
+
 /// A text_edited tail (KayaWire's arm): source, start, stop, the inserted
 /// text, then four values per run.
 func kayaEditFromTail(_ tail: [KayaValue]) -> KayaEdit {
@@ -770,7 +856,7 @@ func kayaEditFromTail(_ tail: [KayaValue]) -> KayaEdit {
     var start = edit.range.lowerBound, stop = edit.range.upperBound
     if case .i64(let s) = tail[1] { start = Int(s) }
     if case .i64(let e) = tail[2] { stop = Int(e) }
-    edit.range = start..<stop
+    edit.range = kayaDecodedSpan("text_edited", start, stop)
     if case .str(let inserted) = tail[3] { edit.inserted = inserted }
     edit.runs = kayaRunsFromValues(Array(tail[4...]))
     return edit
@@ -785,7 +871,7 @@ func kayaFormatFromTail(_ tail: [KayaValue]) -> KayaFormat {
     var start = act.range.lowerBound, stop = act.range.upperBound
     if case .i64(let s) = tail[1] { start = Int(s) }
     if case .i64(let e) = tail[2] { stop = Int(e) }
-    act.range = start..<stop
+    act.range = kayaDecodedSpan("text_formatted", start, stop)
     if case .str(let name) = tail[3] { act.name = name }
     if case .str(let value) = tail[4], !removed { act.value = value }
     return act
@@ -811,7 +897,8 @@ func kayaRunsFromValues(_ flat: [KayaValue]) -> [KayaRun] {
             i += 4
             continue
         }
-        runs.append(KayaRun(range: Int(start)..<Int(end), name: name, value: value))
+        runs.append(
+            KayaRun(range: kayaDecodedSpan("run", Int(start), Int(end)), name: name, value: value))
         i += 4
     }
     return runs
@@ -1473,18 +1560,27 @@ final class KayaAsset {
 struct KayaPickedFile {
     let handle: UInt64
     let name: String
-    let localPath: String
+    /// A RE-OPENABLE NAME, nil unless re-opening it actually works —
+    /// measurement puts that at the three desktops and neither phone
+    /// (DESIGN.md, File dialogs).
+    let localPath: String?
+
+    init(handle: UInt64, name: String, localPath: String) {
+        self.handle = handle
+        self.name = name
+        self.localPath = localPath.isEmpty ? nil : localPath
+    }
 
     /// Redeem the handle for a real FileHandle, plus whether it seeks.
     /// BLOCKS, possibly for a long time, so call it from a thread you
     /// chose and post the result back. THE DESCRIPTOR BECOMES SWIFT'S:
     /// `closeOnDealloc` is true, so the core keeps no claim.
-    func open(_ mode: UInt32 = UInt32(KAYA_FILE_MODE_READ))
+    func open(_ mode: KayaFileMode = .read)
         throws -> (file: FileHandle, seekable: Bool)
     {
         var raw: Int64 = 0
         var seekable: UInt32 = 0
-        let rc = kaya_open_picked(handle, mode, &raw, &seekable)
+        let rc = kaya_open_picked(handle, mode.rawValue, &raw, &seekable)
         guard rc == 0 else {
             throw NSError(
                 domain: "kaya", code: Int(rc),
@@ -1617,6 +1713,21 @@ extension Int64: KayaPrefValue {
     }
 }
 
+/// `Int` IS THE TYPE OF AN INTEGER LITERAL in Swift, so without this
+/// `prefs.get("count", default: 0)` — the most obvious call there is —
+/// does not compile (`@AppStorage`, the model the doc comment above
+/// cites, conforms Int first). It forwards to the Int64 arm; the store
+/// has one integer channel.
+extension Int: KayaPrefValue {
+    static func kayaPrefGet(_ raw: [UInt8], default def: Int) -> Int {
+        Int(Int64.kayaPrefGet(raw, default: Int64(def)))
+    }
+
+    static func kayaPrefSet(_ raw: [UInt8], _ value: Int) {
+        Int64.kayaPrefSet(raw, Int64(value))
+    }
+}
+
 extension Double: KayaPrefValue {
     static func kayaPrefGet(_ raw: [UInt8], default def: Double) -> Double {
         var out: Double = 0
@@ -1654,12 +1765,33 @@ extension Bool: KayaPrefValue {
 // (docs/ranges-units.md §7), so these take `Range<Int>` and never a
 // `String.Index`: a run's ends are the core's, not Foundation's.
 
-/// One attribute over one span; `value` is "true" for the flags, a URL
-/// for `link`, a kind for `block`.
+extension Range where Bound == Int {
+    /// The same span `d` bytes along — the splice's own arithmetic. A
+    /// Range's bounds are `let`, so without these every partial edit is a
+    /// full reconstruction and the range is a worse pair than two Ints.
+    func shifted(by d: Int) -> Range<Int> { (lowerBound + d)..<(upperBound + d) }
+
+    /// The same span with its upper bound brought down to `n`.
+    func raised(to n: Int) -> Range<Int> { lowerBound..<n }
+
+    /// The same span with its lower bound taken up to `n`.
+    func lowered(to n: Int) -> Range<Int> { n..<upperBound }
+}
+
+/// The wire's own spelling of a flag attribute; the bool overloads
+/// coerce to it and `isFlag` reads it back.
+let kayaFlagValue = "true"
+
+/// One attribute over one span; `value` is a URL for `link`, a kind for
+/// `block`, and the wire's flag string for the rest — which `isFlag`
+/// reads back as a Bool.
 struct KayaRun: Equatable {
     var range: Range<Int>
     var name: String
     var value: String
+
+    /// A flag attribute, on: bold, italic, underline, strike, code.
+    var isFlag: Bool { value == kayaFlagValue }
 }
 
 /// One paragraph kind; drawn, never stored (docs/rich-text-plan.md R3).
@@ -1704,6 +1836,12 @@ struct KayaDocument: Equatable {
 
     init(_ text: String = "") {
         self.text = text
+    }
+
+    /// A FLAG attribute, on or off — the boolean spelling, coerced to
+    /// the wire's own string here at the boundary.
+    func mark(_ range: Range<Int>, _ name: String, _ on: Bool) -> KayaDocument {
+        mark(range, name, on ? kayaFlagValue : "false")
     }
 
     func mark(_ range: Range<Int>, _ name: String, _ value: String) -> KayaDocument {
@@ -1752,6 +1890,11 @@ struct KayaEdit: Equatable {
     }
 
     /// One attribute over the INSERTED text's own offsets.
+    /// A flag attribute over the inserted text, on or off.
+    func mark(_ range: Range<Int>, _ name: String, _ on: Bool) -> KayaEdit {
+        mark(range, name, on ? kayaFlagValue : "false")
+    }
+
     func mark(_ range: Range<Int>, _ name: String, _ value: String) -> KayaEdit {
         var next = self
         next.runs.append(KayaRun(range: range, name: name, value: value))
@@ -1764,6 +1907,9 @@ struct KayaFormat: Equatable {
     var range: Range<Int>
     var name: String
     var value: String?
+
+    /// A flag attribute, on.
+    var isFlag: Bool { value == kayaFlagValue }
 }
 
 /// The core's own fold rule over ANY document — a live widget's mirror or
@@ -1787,18 +1933,18 @@ func kayaFoldEdit(
     for run in doc.runs {
         if run.range.lowerBound < start {
             var head = run
-            head.range = head.range.lowerBound..<min(run.range.upperBound, start)
+            head.range = run.range.raised(to: min(run.range.upperBound, start))
             next.append(head)
         }
         if run.range.upperBound > end {
             var tail = run
-            tail.range = (max(run.range.lowerBound, end) + shift)..<(run.range.upperBound + shift)
+            tail.range = run.range.lowered(to: max(run.range.lowerBound, end)).shifted(by: shift)
             next.append(tail)
         }
     }
     for run in runs {
         var moved = run
-        moved.range = (run.range.lowerBound + start)..<(run.range.upperBound + start)
+        moved.range = run.range.shifted(by: start)
         next.append(moved)
     }
     bytes.replaceSubrange(start..<end, with: insertedBytes)
@@ -1820,12 +1966,12 @@ func kayaFoldFormat(
         }
         if run.range.lowerBound < start {
             var head = run
-            head.range = head.range.lowerBound..<start
+            head.range = run.range.raised(to: start)
             next.append(head)
         }
         if run.range.upperBound > end {
             var tail = run
-            tail.range = end..<tail.range.upperBound
+            tail.range = run.range.lowered(to: end)
             next.append(tail)
         }
     }
@@ -1914,7 +2060,9 @@ func kayaDocumentOfBlob(_ bytes: Data) -> KayaDocument {
         guard case .i64(let start) = values[i], case .i64(let end) = values[i + 1],
               case .str(let name) = values[i + 2], case .str(let value) = values[i + 3]
         else { break }
-        doc.runs.append(KayaRun(range: Int(start)..<Int(end), name: name, value: value))
+        doc.runs.append(
+            KayaRun(range: kayaDecodedSpan("document blob run", Int(start), Int(end)),
+                    name: name, value: value))
         i += 4
     }
     return doc
@@ -1937,12 +2085,12 @@ func kayaNormalizeRuns(_ runs: [KayaRun]) -> [KayaRun] {
                 }
                 if old.range.lowerBound < run.range.lowerBound {
                     var head = old
-                    head.range = head.range.lowerBound..<run.range.lowerBound
+                    head.range = old.range.raised(to: run.range.lowerBound)
                     kept.append(head)
                 }
                 if old.range.upperBound > run.range.upperBound {
                     var tail = old
-                    tail.range = run.range.upperBound..<tail.range.upperBound
+                    tail.range = old.range.lowered(to: run.range.upperBound)
                     kept.append(tail)
                 }
             }
@@ -1954,8 +2102,7 @@ func kayaNormalizeRuns(_ runs: [KayaRun]) -> [KayaRun] {
         for run in painted {
             if let last = merged.last, last.range.upperBound == run.range.lowerBound,
                 last.value == run.value {
-                merged[merged.count - 1].range =
-                    merged[merged.count - 1].range.lowerBound..<run.range.upperBound
+                merged[merged.count - 1].range = last.range.raised(to: run.range.upperBound)
             } else {
                 merged.append(run)
             }
@@ -1977,13 +2124,13 @@ final class KayaApp {
     /// result; else the process-level one, which does not; else the drop
     /// is announced.
     func notificationResult(_ id: UInt64, _ choice: UInt32) {
+        let answer = KayaNotificationOutcome.fromWire(choice)
         if let handler = notifications.removeValue(forKey: id) {
-            dispatch { try build { tx in try handler(tx, choice) } }
+            dispatch { try build { tx in try handler(tx, answer) } }
         } else if let act = notificationActivation {
-            dispatch { try build { tx in try act(tx, id, choice) } }
+            dispatch { try build { tx in try act(tx, id, answer) } }
         } else {
-            let outcome = choice == UInt32(KAYA_NOTIFICATION_OUTCOME_ACTIVATED)
-                ? "activated" : "refused"
+            let outcome = answer.name
             FileHandle.standardError.write(Data((
                 "kaya: notification \(id) outcome \(outcome) reached no "
                 + "handler — none was bound at the show and no "
@@ -2077,14 +2224,14 @@ final class KayaApp {
     private var entryPopped: [UInt64: (KayaAppTx) throws -> Void] = [:]
     private var backRequested: [UInt64: (KayaAppTx) throws -> Void] = [:]
     private var sectionSelected: [UInt64: (KayaAppTx) throws -> Void] = [:]
-    private var alerts: [UInt64: (KayaAppTx, UInt32) throws -> Void] = [:]
+    private var alerts: [UInt64: (KayaAppTx, KayaAlertChoice) throws -> Void] = [:]
     // One-shot, keyed by the GUEST's notification id (the alert's
     // request/result grammar; many may be live at once).
-    private var notifications: [UInt64: (KayaAppTx, UInt32) throws -> Void] = [:]
+    private var notifications: [UInt64: (KayaAppTx, KayaNotificationOutcome) throws -> Void] = [:]
     // NOT one-shot, and not keyed at all: the process-level handler for
     // a result whose id has none above (docs/tasks-s9-plan.md R1). A
     // relaunched process never called showNotification.
-    private var notificationActivation: ((KayaAppTx, UInt64, UInt32) throws -> Void)?
+    private var notificationActivation: ((KayaAppTx, UInt64, KayaNotificationOutcome) throws -> Void)?
     // NOT one-shot either: a route declared by link answers every URL
     // that matches it, for the life of the process
     // (docs/app-links-plan.md §4), and the core owns the pattern table —
@@ -2714,14 +2861,15 @@ final class KayaApp {
 
     /// Bind the one-shot result handler to a request; the registration
     /// retires with the result.
-    func onAlert(_ alert: UInt64, _ handler: @escaping (KayaAppTx, UInt32) throws -> Void) {
+    func onAlert(_ alert: UInt64, _ handler: @escaping (KayaAppTx, KayaAlertChoice) throws -> Void) {
         alerts[alert] = handler
     }
 
     /// Bind a notification's one-shot result handler; the registration
     /// retires with the result.
     func onNotification(
-        _ notification: UInt64, _ handler: @escaping (KayaAppTx, UInt32) throws -> Void
+        _ notification: UInt64,
+        _ handler: @escaping (KayaAppTx, KayaNotificationOutcome) throws -> Void
     ) {
         notifications[notification] = handler
     }
@@ -2733,7 +2881,7 @@ final class KayaApp {
     /// never called showNotification. It does not retire, and a one-shot
     /// handler for the same id still wins.
     func onNotificationActivation(
-        _ handler: @escaping (KayaAppTx, UInt64, UInt32) throws -> Void
+        _ handler: @escaping (KayaAppTx, UInt64, KayaNotificationOutcome) throws -> Void
     ) {
         notificationActivation = handler
     }
@@ -3113,7 +3261,8 @@ final class KayaApp {
             case (UInt16(KAYA_OCCURRENCE_ALERT_RESULT), _):
                 // One-shot: the registration retires with the result.
                 if let handler = alerts.removeValue(forKey: id) {
-                    dispatch { try build { tx in try handler(tx, choice) } }
+                    let picked = KayaAlertChoice.fromWire(choice)
+                    dispatch { try build { tx in try handler(tx, picked) } }
                 }
             case (UInt16(KAYA_OCCURRENCE_LINK_OPENED), _):
                 // id is the ROUTE the core matched
@@ -3735,6 +3884,11 @@ final class KayaAppTx {
     /// `KayaApp.onFormat`. Over a collapsed selection the attribute is
     /// armed for the next keystroke instead. `value` is "true" for a
     /// flag, the URL for `link`.
+    /// A flag attribute over the selection, on or off.
+    func format(_ w: KayaWidget, _ name: String, _ on: Bool) {
+        format(w, name, on ? kayaFlagValue : "false")
+    }
+
     func format(_ w: KayaWidget, _ name: String, _ value: String) {
         tx.formatText(w.id, 0, 0, 0, 0, [.str(name), .str(value)])
     }
@@ -3763,6 +3917,11 @@ final class KayaAppTx {
     /// where it is: a document write, echoed by nothing, legal on a rich
     /// label (docs/rich-text-plan.md §17). A `block` name covers the
     /// range's whole paragraphs.
+    /// A flag attribute over a byte range, on or off.
+    func formatRange(_ w: KayaWidget, _ range: Range<Int>, _ name: String, _ on: Bool) {
+        formatRange(w, range, name, on ? kayaFlagValue : "false")
+    }
+
     func formatRange(_ w: KayaWidget, _ range: Range<Int>, _ name: String, _ value: String) {
         // A silent document write moves the fold, as applyEdit does
         // (docs/rich-text-plan.md §17).
@@ -4067,16 +4226,16 @@ final class KayaAppTx {
         let w = widget(UInt32(KAYA_KIND_DATE_PICKER))
         if let min {
             _ = kayaPackedDate("min_date", min)
-            tx.setMinDate(w.id, min.year!, min.month!, min.day!)
+            tx.setMinDate(w.id, min.year, min.month, min.day)
         }
         if let max {
             _ = kayaPackedDate("max_date", max)
-            tx.setMaxDate(w.id, max.year!, max.month!, max.day!)
+            tx.setMaxDate(w.id, max.year, max.month, max.day)
         }
         if let bind { tx.bindDate(w.id, bind.id) }
         if let value {
             _ = kayaPackedDate("a date picker's value", value)
-            tx.setDate(w.id, value.year!, value.month!, value.day!)
+            tx.setDate(w.id, value.year, value.month, value.day)
         }
         if let onDate { app.onDate(w, onDate) }
         if let grow { setGrow(w, grow) }
@@ -4096,7 +4255,7 @@ final class KayaAppTx {
         if let bind { tx.bindTime(w.id, bind.id) }
         if let value {
             _ = kayaPackedTime("a time picker's value", value)
-            tx.setTime(w.id, value.hour!, value.minute!)
+            tx.setTime(w.id, value.hour, value.minute)
         }
         if let onTime { app.onTime(w, onTime) }
         if let grow { setGrow(w, grow) }
@@ -4472,7 +4631,7 @@ final class KayaAppTx {
     func showAlert(
         title: String = "", message: String = "",
         actions: [String] = [], cancel: String, window: UInt64 = 0,
-        onResult: ((KayaAppTx, UInt32) throws -> Void)? = nil
+        onResult: ((KayaAppTx, KayaAlertChoice) throws -> Void)? = nil
     ) -> UInt64 {
         precondition(
             actions.count <= 2,
@@ -4501,7 +4660,7 @@ final class KayaAppTx {
     func showNotification(
         _ notification: UInt64, title: String = "", body: String = "",
         at: UInt64 = 0,
-        onResult: ((KayaAppTx, UInt32) throws -> Void)? = nil
+        onResult: ((KayaAppTx, KayaNotificationOutcome) throws -> Void)? = nil
     ) -> UInt64 {
         precondition(
             !title.isEmpty,
@@ -4764,8 +4923,8 @@ final class KayaAppTx {
         _ id: UInt64, title: String? = nil, width: Double? = nil,
         height: Double? = nil, vetoClose: Bool? = nil, dirty: Bool? = nil,
         rememberFrame: Bool? = nil,
-        panes: UInt32? = nil, sectionsPresentation: Int64? = nil,
-        appearance: Int64? = nil,
+        panes: UInt32? = nil, sectionsPresentation: KayaSectionsPresentation? = nil,
+        appearance: KayaAppearance? = nil,
         inset: Double? = nil,
         onCloseRequested: ((KayaAppTx) throws -> Void)? = nil,
         onClosed: ((KayaAppTx) throws -> Void)? = nil,
@@ -4796,8 +4955,8 @@ final class KayaAppTx {
         _ id: UInt64 = 0, title: String? = nil, width: Double? = nil,
         height: Double? = nil, vetoClose: Bool? = nil, dirty: Bool? = nil,
         rememberFrame: Bool? = nil,
-        panes: UInt32? = nil, sectionsPresentation: Int64? = nil,
-        appearance: Int64? = nil,
+        panes: UInt32? = nil, sectionsPresentation: KayaSectionsPresentation? = nil,
+        appearance: KayaAppearance? = nil,
         inset: Double? = nil,
         onCloseRequested: ((KayaAppTx) throws -> Void)? = nil,
         onClosed: ((KayaAppTx) throws -> Void)? = nil,
@@ -4815,11 +4974,11 @@ final class KayaAppTx {
         if let rememberFrame { tx.setWindowRememberFrame(id, rememberFrame) }
         if let panes { tx.setWindowPanes(id, Int64(panes)) }
         if let sectionsPresentation {
-            tx.setWindowSectionsPresentation(id, sectionsPresentation)
+            tx.setWindowSectionsPresentation(id, sectionsPresentation.rawValue)
         }
         // The app's OWN light/dark choice, applied process-wide from the
         // default window (docs/tasks-s2b-plan.md R1-R3).
-        if let appearance { tx.setWindowAppearance(id, appearance) }
+        if let appearance { tx.setWindowAppearance(id, appearance.rawValue) }
         if let inset { tx.setWindowInset(id, inset) }
         if let onCloseRequested { app.onCloseRequested(id, onCloseRequested) }
         if let onClosed { app.onWindowClosed(id, onClosed) }
@@ -4901,33 +5060,18 @@ final class KayaAppTx {
     static let acceptImage = "image"
     static let acceptFiles = "files"
 
-    static let roleSettings = "settings"
-
-    /// The three clipboard commands: they lower to the platform's own, act
-    /// on the FOCUSED widget, and work out their own enablement.
-    static let roleCut = "cut"
-    static let roleCopy = "copy"
-    static let rolePaste = "paste"
-
-    /// The two history commands (docs/undo-plan.md D6). They ask the
-    /// FOCUSED widget first — a text field whose own edit history has
-    /// something to give answers before the app's ledger does — and
-    /// enablement is that same question, computed live at activation.
-    static let roleUndo = "undo"
-    static let roleRedo = "redo"
-
     /// An action — a leaf command firing exactly one menu_activated
     /// occurrence, for a menu click and for its shortcut alike.
     func item(
         _ label: KayaMenuText, shortcut: String? = nil,
         enabled: KayaMenuBool? = nil, icon: Data? = nil,
         symbol: KayaSymbol? = nil, primary: Bool = false,
-        role: String? = nil,
+        role: KayaMenuRole? = nil,
         onActivate: ((KayaAppTx) throws -> Void)? = nil
     ) -> KayaMenuItem {
         let m = newMenuItem(KAYA_MENU_KIND_ACTION, label)
         if let shortcut { tx.setMenuShortcut(m.id, shortcut) }
-        if let role { tx.setMenuRole(m.id, role) }
+        if let role { tx.setMenuRole(m.id, role.rawValue) }
         menuTail(m, enabled, icon, symbol)
         if primary { tx.setMenuPrimary(m.id, true) }
         if let onActivate { app.menuActivated[m.id] = onActivate }
@@ -5015,7 +5159,7 @@ final class KayaAppTx {
         enabled: KayaMenuBool? = nil, checked: KayaMenuBool? = nil,
         value: KayaMenuIndex? = nil, icon: Data? = nil,
         symbol: KayaSymbol? = nil, primary: Bool? = nil,
-        shortcut: String? = nil, role: String? = nil, items: [KayaMenuItem] = []
+        shortcut: String? = nil, role: KayaMenuRole? = nil, items: [KayaMenuItem] = []
     ) {
         for child in items { tx.menuItemAppend(item.id, child.id) }
         if let label { menuLabel(item, label) }
@@ -5026,7 +5170,7 @@ final class KayaAppTx {
         if let symbol { tx.setMenuSymbol(item.id, symbol.rawValue) }
         if let primary { tx.setMenuPrimary(item.id, primary) }
         if let shortcut { tx.setMenuShortcut(item.id, shortcut) }
-        if let role { tx.setMenuRole(item.id, role) }
+        if let role { tx.setMenuRole(item.id, role.rawValue) }
     }
 
     /// A radio group — the Choice contract with the platform's checkmark
@@ -5471,7 +5615,7 @@ final class KayaTpl {
     ) -> KayaNodeHandle {
         let n = widget(UInt32(KAYA_KIND_DATE_PICKER))
         _ = kayaPackedDate("a date picker's value", value)
-        tx.tx.setDate(n.id, value.year!, value.month!, value.day!)
+        tx.tx.setDate(n.id, value.year, value.month, value.day)
         if let onDate { tx.app.onDate(n, onDate) }
         return n
     }
@@ -5505,7 +5649,7 @@ final class KayaTpl {
     ) -> KayaNodeHandle {
         let n = widget(UInt32(KAYA_KIND_TIME_PICKER))
         _ = kayaPackedTime("a time picker's value", value)
-        tx.tx.setTime(n.id, value.hour!, value.minute!)
+        tx.tx.setTime(n.id, value.hour, value.minute)
         if let onTime { tx.app.onTime(n, onTime) }
         return n
     }

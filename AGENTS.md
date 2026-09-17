@@ -453,7 +453,16 @@ in docs/deferred.md.
    by name and held to a file that still exists, a floor of forty guests
    per language. Nine watched negatives, planted 1 / blank 0, counts
    printed; the clause was red by 122 findings on the tree it was written
-   against, which is the shipped state it exists to refuse),
+   against, which is the shipped state it exists to refuse.
+   AND THE ALIAS HALF SINCE 2026-09-17, which the review of the pass found
+   the first half blind to: a wire constant RE-EXPORTED under the binding's
+   own name (`kaya.SECTIONS_BAR = wire.SECTIONS_PRESENTATION_BAR`, Go's
+   untyped constant block, OCaml's `let alert_cancel = Kaya_wire.…`) reached
+   roughly sixty guest sites while the census read zero — so the binding
+   side refuses any such re-export of a vocabulary (four planted negatives)
+   and the guest side refuses the alias names, the C header's
+   `KAYA_FILE_MODE_*` family and a magic-integer alert compare
+   (`choice == 1`), the guest plants being those real shapes now),
    `tools/check-universal-props.py` (the lowering-side sibling: every
    backend applies the universal a11y props to every kind — Compose
    per-arm, SwiftUI's one wrapper unbypassed, GTK/WinUI's apply arm

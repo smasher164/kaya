@@ -490,7 +490,7 @@ type PickedFile struct {
 // app goroutine and post the result back. THE FILE BECOMES GO'S:
 // os.NewFile takes the descriptor, or on Windows the HANDLE, over. A
 // SAVE DESTINATION OPENS EMPTY (DESIGN.md, File dialogs; save-plan D1).
-func (f PickedFile) Open(mode uint32) (file *os.File, seekable bool, err error) {
+func (f PickedFile) Open(mode FileMode) (file *os.File, seekable bool, err error) {
 	var raw C.int64_t
 	var seeks C.uint32_t
 	rc := C.kaya_open_picked(C.uint64_t(f.Handle), C.uint32_t(mode), &raw, &seeks)

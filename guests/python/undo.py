@@ -142,8 +142,8 @@ def redone(label, delta):
 
 with app.window(title="undo", on_undone=undone, on_redone=redone):
     with app.menu("Edit"):
-        kaya.item("Undo", role=kaya.ROLE_UNDO)
-        kaya.item("Redo", role=kaya.ROLE_REDO)
+        kaya.item("Undo", role=kaya.MenuRole.UNDO)
+        kaya.item("Redo", role=kaya.MenuRole.REDO)
 
     status = kaya.signal("no todos")
     history = kaya.signal("history empty")

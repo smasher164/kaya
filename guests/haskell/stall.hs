@@ -4,8 +4,6 @@
 -- tools/scenes/stall.steps.
 
 import Control.Concurrent (threadDelay)
-import Data.Text (Text)
-import qualified Data.Text as T
 import KayaApp
 
 -- Past the watchdog's one-second threshold; threadDelay counts microseconds.
@@ -20,12 +18,12 @@ main :: IO ()
 main = kayaMain $ \app -> do
   _ <- buildTx app $ do
     window primary [WTitle "stall"]
-    status <- signal (T.pack "ready")
+    status <- signalText "ready"
 
     root <-
       column
         []
-        [ labelBound status [A11yId ("status" :: Text)], -- label#0
+        [ labelBound status [A11yId "status"], -- label#0
           -- DELIBERATELY WRONG, and the only place in this repo that is.
           buttonOn
             "block" -- button#0
@@ -33,7 +31,7 @@ main = kayaMain $ \app -> do
             [],
           buttonOn
             "ping" -- button#1
-            (buildTx app (writeSignal status (T.pack "pinged")))
+            (buildTx app (writeSignal status "pinged"))
             [],
           buttonOn
             "wedge" -- button#2

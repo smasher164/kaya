@@ -54,8 +54,8 @@ let () =
         column-kind widget (the reorder scene's rule). *)
      let root = row [ w table ] () in
      mount root;
-     insert_record items (str_key "b") { name = "banana"; size = "30" };
-     insert_record items (str_key "a") { name = "apple"; size = "10" };
-     insert_record items (str_key "c") { name = "cherry"; size = "20" });
+     insert_record items (Key.str "b") { name = "banana"; size = "30" };
+     insert_record items (Key.str "a") { name = "apple"; size = "10" };
+     insert_record items (Key.str "c") { name = "cherry"; size = "20" });
 
   exit (run app)

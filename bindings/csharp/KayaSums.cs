@@ -2,6 +2,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq.Expressions;
 
 sealed class SumCollection<T>
@@ -61,9 +62,9 @@ sealed class SumCollection<T>
         return items;
     }
 
-    /// The typed model as an insertion-ordered map: O(1) keyed reads
-    /// over what Items keeps a list of
-    /// (System.Collections.Generic.OrderedDictionary, .NET 9+).
+    /// The typed model as an insertion-ordered map — a COPY, for a
+    /// caller that wants one (System.Collections.Generic.OrderedDictionary,
+    /// .NET 9+). One keyed read is TryGet, which copies nothing.
     public OrderedDictionary<object, T> Snapshot(Tx tx)
     {
         var snap = new OrderedDictionary<object, T>();
@@ -72,9 +73,18 @@ sealed class SumCollection<T>
         return snap;
     }
 
-    /// The entry at `key`, or false if it is missing.
-    public bool TryGet(Tx tx, object key, out T value) =>
-        Snapshot(tx).TryGetValue(key, out value!);
+    /// The entry at `key`, or false if it is missing: the model's own
+    /// ordered map, read in place.
+    public bool TryGet(Tx tx, object key, [MaybeNullWhen(false)] out T value)
+    {
+        if (tx.TryGetRaw(Collection, key, out var raw) && raw is T typed)
+        {
+            value = typed;
+            return true;
+        }
+        value = default;
+        return false;
+    }
 
     /// The entry's current value — the scrutinee for the pattern match
     /// that precedes a patch — or default for a missing key.

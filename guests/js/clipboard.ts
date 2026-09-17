@@ -115,9 +115,9 @@ function rowPasted(row: kaya.RowHandle<string>, clip: kaya.Clip | null): void {
 
 const { status, rowStatus, rich, plain } = app.window({ title: "clipboard" }, () => {
   app.menu("Edit", () => {
-    kaya.item("Cut", { role: kaya.ROLE_CUT });
-    kaya.item("Copy", { role: kaya.ROLE_COPY });
-    kaya.item("Paste", { role: kaya.ROLE_PASTE });
+    kaya.item("Cut", { role: "cut" });
+    kaya.item("Copy", { role: "copy" });
+    kaya.item("Paste", { role: "paste" });
   });
 
   const status = kaya.signal("ready");

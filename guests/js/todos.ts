@@ -40,8 +40,8 @@ function onToggle(todo: kaya.RowHandle<kaya.Fields<typeof Todo.schema>>, checked
 
 const { field, todos } = app.window({ title: "todos" }, () => {
   app.menu("Edit", () => {
-    kaya.item("Undo", { role: kaya.ROLE_UNDO });
-    kaya.item("Redo", { role: kaya.ROLE_REDO });
+    kaya.item("Undo", { role: "undo" });
+    kaya.item("Redo", { role: "redo" });
   });
 
   const todos = kaya.collection(Todo);

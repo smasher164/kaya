@@ -257,14 +257,14 @@ type App struct {
 	entryPopped    map[uint64]func(*Tx)
 	backRequested  map[uint64]func(*Tx)
 	sectionSelected map[uint64]func(*Tx)
-	alerts         map[uint64]func(*Tx, uint32)
+	alerts         map[uint64]func(*Tx, AlertChoice)
 	// One-shot, keyed by the GUEST's notification id (the alert's
 	// grammar; many may be live at once).
-	notifications  map[uint64]func(*Tx, uint32)
+	notifications  map[uint64]func(*Tx, NotificationOutcome)
 	// NOT one-shot, and not keyed at all: the process-level handler for
 	// a result whose id has none above (docs/tasks-s9-plan.md R1). A
 	// relaunched process never called Show.
-	notificationActivation func(*Tx, uint64, uint32)
+	notificationActivation func(*Tx, uint64, NotificationOutcome)
 	// NOT one-shot either: a route declared by Link answers every URL
 	// that matches it, for the life of the process
 	// (docs/app-links-plan.md §4), and the core owns the pattern table —
@@ -346,8 +346,8 @@ func NewApp() *App {
 		widgetHandlers: make(map[uint64]func(*Tx)),
 		sortHandlers:   make(map[uint64]func(*Tx, uint32)),
 		nodeSorts:      make(map[uint64]func(*Tx, []any, uint32)),
-		alerts:         make(map[uint64]func(*Tx, uint32)),
-		notifications:  make(map[uint64]func(*Tx, uint32)),
+		alerts:         make(map[uint64]func(*Tx, AlertChoice)),
+		notifications:  make(map[uint64]func(*Tx, NotificationOutcome)),
 		links:          make(map[uint64]func(*Tx, map[string]string)),
 		fileDialogs:    make(map[uint64]func(*Tx, []PickedFile)),
 		clipboardReads: make(map[uint64]func(*Tx, Representation)),
@@ -1304,10 +1304,18 @@ const (
 // "true" for the flags, a URL for a link, a Block's own spelling for a
 // block. NOT `Run`, which is this package's entry point.
 type TextRun struct {
-	Start, End int
-	Name       string
-	Value      string
+	Range TextRange
+	Name  string
+	Value string
 }
+
+// FlagValue is the wire's own spelling of a flag attribute; the Flag
+// writers coerce a bool to it at the boundary and IsFlag reads it back.
+const FlagValue = "true"
+
+// IsFlag is whether this run carries a flag attribute — bold, italic,
+// underline, strike, code — rather than a value of its own.
+func (r TextRun) IsFlag() bool { return r.Value == FlagValue }
 
 // Document is a rich textarea's text and runs, kept current by the
 // binding from every edit it delivers (docs/rich-text-plan.md R1). Read
@@ -1327,8 +1335,16 @@ func NewDocument(text string) Document {
 func (d Document) Mark(start, end int, name, value string) Document {
 	runs := make([]TextRun, len(d.Runs), len(d.Runs)+1)
 	copy(runs, d.Runs)
-	d.Runs = append(runs, TextRun{Start: start, End: end, Name: name, Value: value})
+	d.Runs = append(runs, TextRun{
+		Range: TextRange{Start: start, End: end}, Name: name, Value: value})
 	return d
+}
+
+// Flag paints a FLAG attribute over one byte range, on or off — the
+// boolean spelling, coerced to the wire's own string here at the
+// boundary.
+func (d Document) Flag(start, end int, name string, on bool) Document {
+	return d.Mark(start, end, name, flagWire(on))
 }
 
 func (d Document) Bold(start, end int) Document {
@@ -1365,7 +1381,7 @@ func (d Document) Block(start, end int, kind Block) Document {
 // there was one.
 func (d Document) AttrAt(at int, name string) (string, bool) {
 	for _, run := range d.Runs {
-		if run.Name == name && run.Start <= at && at < run.End {
+		if run.Name == name && run.Range.Start <= at && at < run.Range.End {
 			return run.Value, true
 		}
 	}
@@ -1391,34 +1407,36 @@ func normalizeRuns(runs []TextRun) []TextRun {
 	for _, name := range names {
 		var painted []TextRun
 		for _, run := range runs {
-			if run.Name != name || run.Start >= run.End {
+			if run.Name != name || run.Range.Start >= run.Range.End {
 				continue
 			}
 			var kept []TextRun
 			for _, old := range painted {
-				if old.End <= run.Start || old.Start >= run.End {
+				if old.Range.End <= run.Range.Start || old.Range.Start >= run.Range.End {
 					kept = append(kept, old)
 					continue
 				}
-				if old.Start < run.Start {
+				if old.Range.Start < run.Range.Start {
 					cut := old
-					cut.End = run.Start
+					cut.Range.End = run.Range.Start
 					kept = append(kept, cut)
 				}
-				if old.End > run.End {
+				if old.Range.End > run.Range.End {
 					cut := old
-					cut.Start = run.End
+					cut.Range.Start = run.Range.End
 					kept = append(kept, cut)
 				}
 			}
 			painted = append(kept, run)
 		}
-		slices.SortStableFunc(painted, func(a, b TextRun) int { return a.Start - b.Start })
+		slices.SortStableFunc(painted, func(a, b TextRun) int {
+			return a.Range.Start - b.Range.Start
+		})
 		var merged []TextRun
 		for _, run := range painted {
-			if n := len(merged); n > 0 && merged[n-1].End == run.Start &&
+			if n := len(merged); n > 0 && merged[n-1].Range.End == run.Range.Start &&
 				merged[n-1].Value == run.Value {
-				merged[n-1].End = run.End
+				merged[n-1].Range.End = run.Range.End
 				continue
 			}
 			merged = append(merged, run)
@@ -1426,8 +1444,8 @@ func normalizeRuns(runs []TextRun) []TextRun {
 		out = append(out, merged...)
 	}
 	slices.SortStableFunc(out, func(a, b TextRun) int {
-		if a.Start != b.Start {
-			return a.Start - b.Start
+		if a.Range.Start != b.Range.Start {
+			return a.Range.Start - b.Range.Start
 		}
 		return strings.Compare(a.Name, b.Name)
 	})
@@ -1473,44 +1491,54 @@ func editSourceOf(source uint32) EditSource {
 // RELATIVE to the inserted text. Source is what provoked an edit the
 // widget delivered and SourceNone on one the app builds.
 type Edit struct {
-	Start, End int
-	Inserted   string
-	Runs       []TextRun
-	Source     EditSource
+	Range    TextRange
+	Inserted string
+	Runs     []TextRun
+	Source   EditSource
 }
 
 // Insert puts text at one byte offset.
 func Insert(at int, text string) Edit {
-	return Edit{Start: at, End: at, Inserted: text}
+	return Edit{Range: TextRange{Start: at, End: at}, Inserted: text}
 }
 
 // Delete takes a byte range out.
 func Delete(start, end int) Edit {
-	return Edit{Start: start, End: end}
+	return Edit{Range: TextRange{Start: start, End: end}}
 }
 
 // Replace swaps a byte range for text.
 func Replace(start, end int, text string) Edit {
-	return Edit{Start: start, End: end, Inserted: text}
+	return Edit{Range: TextRange{Start: start, End: end}, Inserted: text}
 }
 
 // Mark paints one attribute over the INSERTED text's own offsets.
 func (e Edit) Mark(start, end int, name, value string) Edit {
 	runs := make([]TextRun, len(e.Runs), len(e.Runs)+1)
 	copy(runs, e.Runs)
-	e.Runs = append(runs, TextRun{Start: start, End: end, Name: name, Value: value})
+	e.Runs = append(runs, TextRun{
+		Range: TextRange{Start: start, End: end}, Name: name, Value: value})
 	return e
+}
+
+// Flag marks a FLAG attribute over the inserted text's own offsets, on
+// or off.
+func (e Edit) Flag(start, end int, name string, on bool) Edit {
+	return e.Mark(start, end, name, flagWire(on))
 }
 
 // Format is a toolbar act over a range; Removed is the attribute taken
 // off, and Value is empty then. Go has no option type, which is the only
 // thing that differs from the other bindings here.
 type Format struct {
-	Start, End int
-	Name       string
-	Value      string
-	Removed    bool
+	Range   TextRange
+	Name    string
+	Value   string
+	Removed bool
 }
+
+// IsFlag is whether this act put a flag attribute ON.
+func (f Format) IsFlag() bool { return !f.Removed && f.Value == FlagValue }
 
 // Rich declares this textarea attributed: Tx.SetDocument, Tx.ApplyEdit,
 // App.OnEdit, App.OnFormat (docs/rich-text-plan.md R1). A LABEL takes it
@@ -1537,8 +1565,8 @@ func (tx *Tx) SetDocument(w Widget, doc Document) {
 	tx.app.seedDocument(w.id, doc)
 	flat := make([]any, 0, 4*len(doc.Runs))
 	for _, run := range doc.Runs {
-		TextRange{Start: run.Start, End: run.End}.check("SetDocument", w)
-		flat = append(flat, int64(run.Start), int64(run.End), run.Name, run.Value)
+		run.Range.check("SetDocument", w)
+		flat = append(flat, int64(run.Range.Start), int64(run.Range.End), run.Name, run.Value)
 	}
 	tx.emit(TxSetRichText(w.id, uint32(len(doc.Runs)), flat, doc.Text))
 }
@@ -1549,13 +1577,14 @@ func (tx *Tx) SetDocument(w Widget, doc Document) {
 // while the widget and the core's mirror take it when the composition
 // ends (docs/rich-text-plan.md §7).
 func (tx *Tx) ApplyEdit(w Widget, e Edit) {
-	TextRange{Start: e.Start, End: e.End}.check("ApplyEdit", w)
-	tx.app.absorbEdit(w.id, e.Start, e.End, e.Inserted, e.Runs)
+	e.Range.check("ApplyEdit", w)
+	tx.app.absorbEdit(w.id, e.Range.Start, e.Range.End, e.Inserted, e.Runs)
 	flat := make([]any, 0, 4*len(e.Runs))
 	for _, run := range e.Runs {
-		flat = append(flat, int64(run.Start), int64(run.End), run.Name, run.Value)
+		flat = append(flat, int64(run.Range.Start), int64(run.Range.End), run.Name, run.Value)
 	}
-	tx.emit(TxApplyEdit(w.id, uint64(e.Start), uint64(e.End), uint32(len(e.Runs)), flat, e.Inserted))
+	tx.emit(TxApplyEdit(w.id, uint64(e.Range.Start), uint64(e.Range.End),
+		uint32(len(e.Runs)), flat, e.Inserted))
 }
 
 // Format formats the widget's CURRENT SELECTION through its own act —
@@ -1565,6 +1594,19 @@ func (tx *Tx) ApplyEdit(w Widget, e Edit) {
 // the URL for link.
 func (tx *Tx) Format(w Widget, name, value string) {
 	tx.emit(TxFormatText(w.id, 0, 0, 0, 0, []any{name, value}))
+}
+
+// FormatFlag is Format for a FLAG attribute, on or off.
+func (tx *Tx) FormatFlag(w Widget, name string, on bool) {
+	tx.Format(w, name, flagWire(on))
+}
+
+// flagWire is the one place a boolean flag meets the wire's own string.
+func flagWire(on bool) string {
+	if on {
+		return FlagValue
+	}
+	return "false"
 }
 
 // Unformat takes an attribute off the widget's current selection.
@@ -1618,6 +1660,11 @@ func (tx *Tx) FormatRange(w Widget, r TextRange, name, value string) {
 	}
 	tx.app.absorbFormat(w.id, r.Start, r.End, name, value, removed)
 	tx.emit(TxFormatText(w.id, word, 1, uint64(r.Start), uint64(r.End), []any{name, value}))
+}
+
+// FormatRangeFlag is FormatRange for a FLAG attribute, on or off.
+func (tx *Tx) FormatRangeFlag(w Widget, r TextRange, name string, on bool) {
+	tx.FormatRange(w, r, name, flagWire(on))
 }
 
 // UnformatRange is FormatRange's removal.
@@ -2852,7 +2899,7 @@ type AlertRef struct {
 	message  string
 	actions  []string
 	cancel   string
-	onResult func(*Tx, uint32)
+	onResult func(*Tx, AlertChoice)
 }
 
 // InWindow presents over this window instead of the primary.
@@ -2891,7 +2938,7 @@ func (r AlertRef) Cancel(label string) AlertRef {
 // is an action index (0 or 1) or AlertChoiceCancel — every
 // platform-native dismissal. The registration retires with the
 // result.
-func (r AlertRef) OnResult(fn func(*Tx, uint32)) AlertRef {
+func (r AlertRef) OnResult(fn func(*Tx, AlertChoice)) AlertRef {
 	r.onResult = fn
 	return r
 }
@@ -2942,17 +2989,17 @@ func (tx *Tx) CancelNotification(notification uint64) {
 // out of this body: the one-shot handler bound at Show first, retiring
 // with the result; else the process-level one, which does not; else the
 // drop is announced.
-func (a *App) notificationResult(id uint64, choice uint32) {
+func (a *App) notificationResult(id uint64, code uint32) {
+	// The wire's number becomes the vocabulary HERE, at the one decode
+	// point — Swift's and Java's arms take it the same way.
+	choice := NotificationOutcome(code)
 	if fn := a.notifications[id]; fn != nil {
 		delete(a.notifications, id)
 		a.dispatch(func(tx *Tx) { fn(tx, choice) })
 	} else if act := a.notificationActivation; act != nil {
 		a.dispatch(func(tx *Tx) { act(tx, id, choice) })
 	} else {
-		outcome := "refused"
-		if choice == NotificationOutcomeActivated {
-			outcome = "activated"
-		}
+		outcome := choice.String()
 		fmt.Fprintf(os.Stderr,
 			"kaya: notification %d outcome %s reached no handler — "+
 				"none was bound at the show and no process-level "+
@@ -2967,7 +3014,7 @@ func (a *App) notificationResult(id uint64, choice uint32) {
 // process the platform RELAUNCHED for a tap, since it never called
 // Show. It does not retire, and a one-shot handler for the same id
 // still wins.
-func (a *App) OnNotificationActivation(fn func(*Tx, uint64, uint32)) {
+func (a *App) OnNotificationActivation(fn func(*Tx, uint64, NotificationOutcome)) {
 	a.notificationActivation = fn
 }
 
@@ -3046,7 +3093,7 @@ type NotificationRef struct {
 	at       uint64
 	title    string
 	body     string
-	onResult func(*Tx, uint32)
+	onResult func(*Tx, NotificationOutcome)
 }
 
 func (r NotificationRef) Title(title string) NotificationRef {
@@ -3069,7 +3116,7 @@ func (r NotificationRef) At(unixSeconds uint64) NotificationRef {
 // OnResult binds the one-shot result handler to THIS request: outcome
 // is NotificationOutcomeActivated or NotificationOutcomeRefused. The
 // registration retires with the result.
-func (r NotificationRef) OnResult(fn func(*Tx, uint32)) NotificationRef {
+func (r NotificationRef) OnResult(fn func(*Tx, NotificationOutcome)) NotificationRef {
 	r.onResult = fn
 	return r
 }
@@ -3734,14 +3781,35 @@ func (w WindowRef) Size(width, height float64) WindowRef {
 // SectionsPresentation sets the window's ADVISORY sections hint
 // (SectionsPresentationAuto/Bar/Sidebar — the width/height
 // precedent; the phones ignore it by physics).
-func (w WindowRef) SectionsPresentation(hint int64) WindowRef {
-	w.tx.emit(TxSetWindowSectionsPresentation(w.id, hint))
+func (w WindowRef) SectionsPresentation(hint SectionsPresentation) WindowRef {
+	w.tx.emit(TxSetWindowSectionsPresentation(w.id, int64(hint)))
 	return w
 }
 
 // Appearance is a window's light/dark choice: AppearanceSystem,
 // AppearanceLight or AppearanceDark.
 type Appearance int64
+
+// AlertChoice is an alert's answer: the action the user pressed, by its
+// slot (AlertChoiceAction0/Action1), or AlertChoiceCancel, which is
+// every platform-native dismissal.
+type AlertChoice uint32
+
+// NotificationOutcome is a notification's answer
+// (docs/tasks-s3-plan.md N1): NotificationOutcomeActivated when the user
+// opened it, NotificationOutcomeRefused when the platform would not post
+// it. Dismissal is not one of them — two platforms never report it.
+type NotificationOutcome uint32
+
+// FileMode is how a picked file is re-opened: FileModeRead,
+// FileModeWrite (truncates; a save destination only adds the create) or
+// FileModeReadWrite. crates/kaya/src/spec.rs decides the numbers and
+// tools/check-file-modes.py holds them together.
+type FileMode uint32
+
+// SectionsPresentation is a window's ADVISORY sections hint:
+// SectionsPresentationAuto, Bar or Sidebar.
+type SectionsPresentation int64
 
 // Appearance is the app's OWN light/dark choice, applied process-wide
 // from the default window (AppearanceSystem/Light/Dark;
@@ -5477,17 +5545,21 @@ func foldEdit(doc *Document, start, end int, inserted string, runs []TextRun) {
 	shift := len(inserted) - (end - start)
 	var next []TextRun
 	for _, run := range doc.Runs {
-		if run.Start < start {
-			next = append(next, TextRun{Start: run.Start, End: min(run.End, start),
+		if run.Range.Start < start {
+			next = append(next, TextRun{
+				Range: TextRange{Start: run.Range.Start, End: min(run.Range.End, start)},
 				Name: run.Name, Value: run.Value})
 		}
-		if run.End > end {
-			next = append(next, TextRun{Start: max(run.Start, end) + shift,
-				End: run.End + shift, Name: run.Name, Value: run.Value})
+		if run.Range.End > end {
+			next = append(next, TextRun{
+				Range: TextRange{Start: max(run.Range.Start, end) + shift,
+					End: run.Range.End + shift},
+				Name: run.Name, Value: run.Value})
 		}
 	}
 	for _, run := range runs {
-		next = append(next, TextRun{Start: run.Start + start, End: run.End + start,
+		next = append(next, TextRun{
+			Range: TextRange{Start: run.Range.Start + start, End: run.Range.End + start},
 			Name: run.Name, Value: run.Value})
 	}
 	doc.Text = doc.Text[:start] + inserted + doc.Text[end:]
@@ -5533,23 +5605,24 @@ func foldFormat(doc *Document, start, end int, name, value string, removed bool)
 	}
 	var next []TextRun
 	for _, run := range doc.Runs {
-		if run.Name != name || run.End <= start || run.Start >= end {
+		if run.Name != name || run.Range.End <= start || run.Range.Start >= end {
 			next = append(next, run)
 			continue
 		}
-		if run.Start < start {
+		if run.Range.Start < start {
 			cut := run
-			cut.End = start
+			cut.Range.End = start
 			next = append(next, cut)
 		}
-		if run.End > end {
+		if run.Range.End > end {
 			cut := run
-			cut.Start = end
+			cut.Range.Start = end
 			next = append(next, cut)
 		}
 	}
 	if !removed {
-		next = append(next, TextRun{Start: start, End: end, Name: name, Value: value})
+		next = append(next, TextRun{
+			Range: TextRange{Start: start, End: end}, Name: name, Value: value})
 	}
 	doc.Runs = normalizeRuns(next)
 }
@@ -5611,8 +5684,10 @@ func editOf(tail []any) Edit {
 		panic(fmt.Sprintf("kaya: a text_edited carries %d values, want 4 plus four per run",
 			len(tail)))
 	}
-	e := Edit{Start: int(tail[1].(uint64)), End: int(tail[2].(uint64)),
-		Source: editSourceOf(tail[0].(uint32))}
+	e := Edit{
+		Range:  decodedSpan("text_edited", int(tail[1].(uint64)), int(tail[2].(uint64))),
+		Source: editSourceOf(tail[0].(uint32)),
+	}
 	e.Inserted, _ = tail[3].(string)
 	for at := 4; at < len(tail); at += 4 {
 		e.Runs = append(e.Runs, runOf(tail[at:at+4]))
@@ -5627,8 +5702,7 @@ func formatOf(tail []any) Format {
 	name, _ := tail[3].(string)
 	value, _ := tail[4].(string)
 	return Format{
-		Start:   int(tail[1].(uint64)),
-		End:     int(tail[2].(uint64)),
+		Range:   decodedSpan("text_formatted", int(tail[1].(uint64)), int(tail[2].(uint64))),
 		Name:    name,
 		Value:   value,
 		Removed: tail[0].(uint32) != 0,
@@ -5644,7 +5718,18 @@ func runOf(four []any) TextRun {
 	}
 	name, _ := four[2].(string)
 	value, _ := four[3].(string)
-	return TextRun{Start: int(start), End: int(end), Name: name, Value: value}
+	return TextRun{
+		Range: decodedSpan("run", int(start), int(end)), Name: name, Value: value}
+}
+
+// decodedSpan is a span the CORE sent, refused BY NAME if its ends are
+// out of order. No scene reaches it — the core always sends ordered
+// spans — and a reversed one means the mirror and the core disagree.
+func decodedSpan(what string, start, end int) TextRange {
+	if start > end {
+		panic(fmt.Sprintf("kaya: a %s carries %d..%d, a reversed span", what, start, end))
+	}
+	return TextRange{Start: start, End: end}
 }
 
 // OnValueChanged registers a handler for a live slider's moves, or a
@@ -5829,7 +5914,7 @@ func (a *App) Serve() {
 		// keeps its document in step (docs/rich-text-plan.md R1).
 		case kind == occTextEdited && len(keys) == 0:
 			edit := editOf(tail)
-			a.absorbEdit(id, edit.Start, edit.End, edit.Inserted, edit.Runs)
+			a.absorbEdit(id, edit.Range.Start, edit.Range.End, edit.Inserted, edit.Runs)
 			if fn := a.widgetEdits[id]; fn != nil {
 				a.dispatch(func(tx *Tx) { fn(tx, edit) })
 			}
@@ -5838,21 +5923,21 @@ func (a *App) Serve() {
 		case kind == occTextEdited:
 			edit := editOf(tail)
 			a.foldRowDocument(id, keys, func(doc *Document) {
-				foldEdit(doc, edit.Start, edit.End, edit.Inserted, edit.Runs)
+				foldEdit(doc, edit.Range.Start, edit.Range.End, edit.Inserted, edit.Runs)
 			})
 			if fn := a.nodeEdits[id]; fn != nil {
 				a.dispatch(func(tx *Tx) { fn(tx, keys, edit) })
 			}
 		case kind == occTextFormatted && len(keys) == 0:
 			act := formatOf(tail)
-			a.absorbFormat(id, act.Start, act.End, act.Name, act.Value, act.Removed)
+			a.absorbFormat(id, act.Range.Start, act.Range.End, act.Name, act.Value, act.Removed)
 			if fn := a.widgetFormats[id]; fn != nil {
 				a.dispatch(func(tx *Tx) { fn(tx, act) })
 			}
 		case kind == occTextFormatted:
 			act := formatOf(tail)
 			a.foldRowDocument(id, keys, func(doc *Document) {
-				foldFormat(doc, act.Start, act.End, act.Name, act.Value, act.Removed)
+				foldFormat(doc, act.Range.Start, act.Range.End, act.Name, act.Value, act.Removed)
 			})
 			if fn := a.nodeFormats[id]; fn != nil {
 				a.dispatch(func(tx *Tx) { fn(tx, keys, act) })
@@ -5939,7 +6024,8 @@ func (a *App) Serve() {
 			// One-shot: the registration retires with the result.
 			if fn := a.alerts[id]; fn != nil {
 				delete(a.alerts, id)
-				a.dispatch(func(tx *Tx) { fn(tx, choice) })
+				picked := AlertChoice(choice)
+				a.dispatch(func(tx *Tx) { fn(tx, picked) })
 			}
 		case kind == occLinkOpened:
 			a.linkOpened(id, linkURLOf(payload), linkParamsOf(payload))

@@ -14,9 +14,9 @@ let () =
 
   build app (fun () ->
       window ~title:"background" ();
-      let status = signal_str ("idle") in
-      let alive = signal_str ("-") in
-      let detail = signal_str ("-") in
+      let status = signal Scalar.Str ("idle") in
+      let alive = signal Scalar.Str ("-") in
+      let detail = signal Scalar.Str ("-") in
 
       let start () =
         let worker () =

@@ -18,20 +18,20 @@ def spell(runs):
     """The core's spelling of runs (`expect_runs`), so the binding's
     document and the core's mirror are compared as one string."""
     return "|".join(
-        f"{run.start}:{run.end} {run.name}" if run.value == "true"
-        else f"{run.start}:{run.end} {run.name}={run.value}"
+        f"{run.range.start}:{run.range.stop} {run.name}" if run.is_flag
+        else f"{run.range.start}:{run.range.stop} {run.name}={run.value}"
         for run in runs)
 
 
 def on_edit(edit):
-    last.set(f"edit {edit.start}:{edit.end} <{edit.inserted}> "
+    last.set(f"edit {edit.range.start}:{edit.range.stop} <{edit.inserted}> "
              f"{edit.source} [{spell(edit.runs)}]")
     runs.set(spell(editor.document().runs))
 
 
 def on_format(act):
     value = "off" if act.value is None else act.value
-    last.set(f"format {act.start}:{act.end} {act.name}={value}")
+    last.set(f"format {act.range.start}:{act.range.stop} {act.name}={value}")
     runs.set(spell(editor.document().runs))
 
 
@@ -45,7 +45,7 @@ def on_seed():
 
 
 def on_insert():
-    edit = kaya.Edit.insert(6, ", big").mark(range(2, 5), "italic", "true")
+    edit = kaya.Edit.insert(6, ", big").mark(range(2, 5), "italic", True)
     editor.apply_edit(edit)
     runs.set(spell(editor.document().runs))
 

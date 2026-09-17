@@ -22,7 +22,7 @@ data Todo = Todo {title :: Text, done :: Bool}
 
 main :: IO ()
 main = kayaMain $ \app -> do
-  draftRef <- newIORef ("" :: Text)
+  draftRef <- newIORef ""
 
   buildTx app $ do
     window
@@ -44,7 +44,7 @@ main = kayaMain $ \app -> do
     itemsLeft <-
       derive todos $ \entries ->
         let n = length (filter (not . done . snd) entries)
-         in T.pack (if n == 1 then "1 item left" else show n ++ " items left")
+         in if n == 1 then "1 item left" else tshow n <> " items left"
 
     entryField <- entryOn (writeIORef draftRef)
 

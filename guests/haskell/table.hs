@@ -14,7 +14,6 @@ import Data.Ord (comparing)
 import GHC.Generics (Generic)
 
 import Data.Text (Text)
-import qualified Data.Text as T
 import KayaApp
 
 data TableItem = TableItem {name :: Text, size :: Text}
@@ -43,8 +42,8 @@ main = kayaMain $ \app -> do
     root <- row [pure table]
     mount root
     mapM_
-      (\(k, n, s) -> insertRecord items (T.pack k) (TableItem n s))
-      [("b", "banana", "30"), ("a", "apple", "10"), ("c", "cherry", "20")]
+      (\(k, n, s) -> insertRecord items (textKey k) (TableItem n s))
+      ([("b", "banana", "30"), ("a", "apple", "10"), ("c", "cherry", "20")] :: [(Text, Text, Text)])
     return (items, table)
   onSort app table $ \column -> do
     current <- readIORef sorted

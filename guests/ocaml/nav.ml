@@ -11,13 +11,13 @@ let () =
   let status = ref None in
   build app (fun () ->
      window ~title:"nav" ();
-     let s = signal_str ("at root") in
+     let s = signal Scalar.Str ("at root") in
      status := Some s;
      let on_detail () =
        push_entry ~title:"detail"
          ~on_popped:(fun () -> write s ("popped detail"))
          detail;
-       (let caption = signal_str ("detail pane") in
+       (let caption = signal Scalar.Str ("detail pane") in
         let pane = column [ label ~bind:caption ] () in
         mount_in detail pane;
         write s ("pushed detail"))
@@ -29,7 +29,7 @@ let () =
            write s ("back requested");
            pop_entry ())
          settings;
-       (let caption = signal_str ("settings pane") in
+       (let caption = signal Scalar.Str ("settings pane") in
         let pane = column [ label ~bind:caption ] () in
         mount_in settings pane;
         write s ("pushed settings"))

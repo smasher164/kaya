@@ -643,10 +643,11 @@ if run_javac("-encoding", "UTF-8", "-cp", TMP / "classes", "-d",
 
 if run_java("-cp", f"{TMP / 'classes'}:{TMP / 'keyedclasses'}",
             "dev.kaya.guests.KeyedGetCheck") != 0:
-    fail("FAIL — Collection.get did not answer the inserted record for "
-         "its key, did not answer null for a missing one, or "
-         "updateField's missing-key refusal (which reads through get) "
-         "did not name the key.")
+    fail("FAIL — Collection.find did not answer the inserted record for "
+         "its key, did not answer empty for a missing one, get() did "
+         "not throw naming a key it did not find, or updateField's "
+         "missing-key refusal (which reads through it) did not name "
+         "the key.")
 
 # ITS WATCHED NEGATIVE: get's key comparison replaced by `true` in a
 # COPY — every key answers the FIRST entry — the substitution COUNTED,
@@ -663,8 +664,8 @@ wrong_key.write_text(
     g.doctor("keyed-get negative ignored the key",
              wrong_key.read_text(encoding="utf-8"),
              r"if \(java\.util\.Objects\.equals\(entry\.key, key\)\) \{\n"
-             r"(\s+)return \(T\) entry\.value;",
-             r"if (true) {\n\1return (T) entry.value;"),
+             r"(\s+)return java\.util\.Optional\.ofNullable\(\(T\) entry\.value\);",
+             r"if (true) {\n\1return java.util.Optional.ofNullable((T) entry.value);"),
     encoding="utf-8")
 
 if run_javac("-encoding", "UTF-8", "-d", TMP / "wrongkeyclasses",
@@ -684,7 +685,7 @@ if run_java("-cp", str(TMP / "wrongkeyclasses"),
          "green for some other reason.")
 wrongkey_log = (TMP / "wrongkey.log").read_text(encoding="utf-8",
                                                  errors="replace")
-if "did not answer null" not in wrongkey_log:
+if "did not answer empty" not in wrongkey_log:
     print("java-typecheck: FAIL — the wrong-key copy failed, but NOT by "
           "answering the first entry for a missing key, so the negative "
           "did not watch the lookup. What it printed:")

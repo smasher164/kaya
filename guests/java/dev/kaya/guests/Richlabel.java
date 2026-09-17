@@ -35,9 +35,9 @@ public final class Richlabel {
     private static String spell(List<KayaApp.TextRun> runs) {
         List<String> parts = new ArrayList<>();
         for (KayaApp.TextRun run : runs) {
-            parts.add(run.value().equals("true")
-                    ? run.start() + ":" + run.stop() + " " + run.name()
-                    : run.start() + ":" + run.stop() + " " + run.name() + "=" + run.value());
+            parts.add(run.isFlag()
+                    ? run.range().start + ":" + run.range().stop + " " + run.name()
+                    : run.range().start + ":" + run.range().stop + " " + run.name() + "=" + run.value());
         }
         return String.join("|", parts);
     }
@@ -64,10 +64,10 @@ public final class Richlabel {
                         KayaApp.Document doc = new KayaApp.Document(DOC)
                                 .bold(KayaApp.TextRange.in(DOC, 0, 5))
                                 .link(KayaApp.TextRange.in(DOC, 6, 11), URL)
-                                .mark(KayaApp.TextRange.in(DOC, 13, 17), "code", "true");
+                                .mark(KayaApp.TextRange.in(DOC, 13, 17), "code", true);
                         KayaApp.Document title = new KayaApp.Document(TITLE)
                                 .mark(KayaApp.TextRange.in(TITLE, 13, 19), "italic",
-                                        "true");
+                                        true);
                         t.setDocument(refs.body, doc);
                         t.setDocument(refs.heading, title);
                         t.write(runs, spell(doc.runs()));
@@ -76,7 +76,7 @@ public final class Richlabel {
                         KayaApp.Edit edit =
                                 KayaApp.Edit.insert(KayaApp.TextRange.in(DOC, 5, 5), ", big")
                                         .mark(KayaApp.TextRange.in(", big", 2, 5), "italic",
-                                                "true");
+                                                true);
                         t.applyEdit(refs.body, edit);
                         t.write(runs, spell(app.document(refs.body).runs()));
                     });
@@ -87,7 +87,7 @@ public final class Richlabel {
                     tx.button("mark", t -> { // button#2
                         String text = app.document(refs.body).text();
                         t.formatRange(refs.body, KayaApp.TextRange.in(text, 1, 3), "italic",
-                                "true");
+                                true);
                         t.unformatRange(refs.body, KayaApp.TextRange.in(text, 0, 2), "bold");
                         t.write(runs, spell(app.document(refs.body).runs()));
                     });

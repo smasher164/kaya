@@ -20,7 +20,7 @@ let () =
 
   build app (fun () ->
      let items = collection_of item_record in
-     let count = signal_str ((Printf.sprintf "%d items" (List.length names))) in
+     let count = signal Scalar.Str ((Printf.sprintf "%d items" (List.length names))) in
 
      let on_query text =
        let query = String.lowercase_ascii text in
@@ -30,18 +30,18 @@ let () =
        List.iter
          (fun name ->
            if not (List.mem name wanted) then
-             remove (record_handle items) (str_key name))
+             remove (record_handle items) (Key.str name))
          !visible;
        List.iter
          (fun name ->
            if not (List.mem name !visible) then
-             insert_record items (str_key name) { name })
+             insert_record items (Key.str name) { name })
          wanted;
        (* Insertion order is arrival order, so a row coming back lands
           last; walking the wanted keys to the end in order puts the list
           back in [names] order. *)
        List.iter
-         (fun name -> move_to_end (record_handle items) (str_key name))
+         (fun name -> move_to_end (record_handle items) (Key.str name))
          wanted;
        write count
          (if query = "" then Printf.sprintf "%d items" (List.length names)
@@ -70,6 +70,6 @@ let () =
          ()
      in
      mount root;
-     List.iter (fun name -> insert_record items (str_key name) { name }) names);
+     List.iter (fun name -> insert_record items (Key.str name) { name }) names);
 
   exit (run app)

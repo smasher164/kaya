@@ -29,7 +29,7 @@ let read_all ic =
 
 let read_back (file : picked_file) =
   try
-    let fd, _seekable = Kaya_runtime.open_picked file.handle file_mode_read in
+    let fd, _seekable = open_picked file File_mode.Read in
     let ic = Unix.in_channel_of_descr fd in
     let text = read_all ic in
     (* [close_in] closes the underlying descriptor; never [Unix.close] too. *)
@@ -37,9 +37,9 @@ let read_back (file : picked_file) =
     text
   with e -> "open failed: " ^ Printexc.to_string e
 
-(* [file_mode_write] truncates; a save destination only adds the create. *)
+(* [File_mode.Write] truncates; a save destination only adds the create. *)
 let write_back (file : picked_file) bytes =
-  match Kaya_runtime.open_picked file.handle file_mode_write with
+  match open_picked file File_mode.Write with
   | exception e ->
       "save failed: " ^ Printexc.to_string e
   | fd, _seekable ->
@@ -64,7 +64,7 @@ let () =
 
   build app (fun () ->
       window ~title:"save" ();
-      let status = signal_str ("no file") in
+      let status = signal Scalar.Str ("no file") in
 
       let work job =
         ignore

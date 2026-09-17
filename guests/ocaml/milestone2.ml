@@ -9,8 +9,8 @@ let () =
   let steps = ref 0 in
   let status, items, remove_button =
     build app (fun () ->
-       let status = signal_str ("step 0") in
-       let extras = signal_bool (false) in
+       let status = signal Scalar.Str ("step 0") in
+       let extras = signal Scalar.Bool (false) in
 
        let groups = collection () in
        (* Both Fors keep their results because the central registration
@@ -36,14 +36,14 @@ let () =
          let () =
            match n with
            | 1 ->
-               insert groups (str_key "g1") "Work";
-               let todos = at items (str_key "g1") in
-               insert todos (str_key "a") "send report";
-               insert todos (str_key "b") "buy milk"
+               insert groups (Key.str "g1") "Work";
+               let todos = at items (Key.str "g1") in
+               insert todos (Key.str "a") "send report";
+               insert todos (Key.str "b") "buy milk"
            | 2 ->
-               insert groups (str_key "g2") "Home";
-               insert (at items (str_key "g2")) (str_key "a") "water plants";
-               update groups (str_key "g1") "Office"
+               insert groups (Key.str "g2") "Home";
+               insert (at items (Key.str "g2")) (Key.str "a") "water plants";
+               update groups (Key.str "g1") "Office"
            | _ -> ()
          in
          write extras ((n = 1));
@@ -66,9 +66,9 @@ let () =
 
   on_click_node app remove_button (fun keys ->
       match keys with
-      | [ Str_key group; Str_key item ] ->
-          let todos = at items (str_key group) in
-          remove todos (str_key item);
+      | [ Key.Str group; Key.Str item ] ->
+          let todos = at items (Key.str group) in
+          remove todos (Key.str item);
           let left = count todos in
           write status ((Printf.sprintf "removed %s/%s, %d left" group item left))
       | _ -> ());

@@ -21,9 +21,9 @@ app.build { tx in
                 ) { tx, choice in
                     let text =
                         switch choice {
-                        case 0: "deleted"
-                        case 1: "archived"
-                        default: "kept"
+                        case .action0: "deleted"
+                        case .action1: "archived"
+                        case .cancel: "kept"
                         }
                     tx.write(status, .str(text))
                 }
@@ -35,7 +35,7 @@ app.build { tx in
                     title: "eject disk?", message: "it is still mounted",
                     actions: ["Eject"], cancel: "Hold"
                 ) { tx, choice in
-                    tx.write(status, .str(choice == 0 ? "ejected" : "held"))
+                    tx.write(status, .str(choice == .action0 ? "ejected" : "held"))
                 }
             })
     }

@@ -6,13 +6,11 @@
 import Control.Monad (when)
 import Data.IORef (newIORef, readIORef, writeIORef)
 
-import Data.Text (Text)
-import qualified Data.Text as T
 import KayaApp
 
 main :: IO ()
 main = kayaMain $ \app -> do
-  draftRef <- newIORef ("" :: Text)
+  draftRef <- newIORef ""
   caps <- capabilities
   buildTx app $ do
     -- BEFORE THE FIRST MOUNT, per the declared-once wall. NO ARGUMENTS:
@@ -28,8 +26,8 @@ main = kayaMain $ \app -> do
         WMenus [menu "File" [] [item "Save" [ISymbol SymbolDone, IPrimary True]]]
       ]
 
-    heading <- signal (T.pack "identity")
-    status <- signal (T.pack "ready")
+    heading <- signalText "identity"
+    status <- signalText "ready"
 
     root <-
       column
@@ -48,8 +46,8 @@ main = kayaMain $ \app -> do
 
     -- No title at all rather than an empty one: an empty string is a title an
     -- app WROTE.
-    when (auxWindows caps) $ do
+    when caps.auxWindows $ do
       createWindow 1 [WSize 360 240]
-      caption <- signal (T.pack "no title of its own")
+      caption <- signalText "no title of its own"
       aux <- column [] [labelBound caption] -- label#2
       mountIn 1 aux

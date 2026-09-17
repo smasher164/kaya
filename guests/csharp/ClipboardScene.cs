@@ -52,9 +52,9 @@ static class ClipboardScene
         {
             var edit = tx.Menu("Edit", items: new[]
             {
-                tx.Item("Cut", role: Tx.RoleCut),
-                tx.Item("Copy", role: Tx.RoleCopy),
-                tx.Item("Paste", role: Tx.RolePaste),
+                tx.Item("Cut", role: MenuRole.Cut),
+                tx.Item("Copy", role: MenuRole.Copy),
+                tx.Item("Paste", role: MenuRole.Paste),
             });
             tx.Window(title: "clipboard", menus: new[] { edit });
 

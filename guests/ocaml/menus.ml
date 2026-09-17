@@ -8,10 +8,10 @@ let () =
 
   let groups, items =
     build app (fun () ->
-       let status = signal_str ("ready") in
-       let can_export = signal_bool (false) in
-       let details = signal_bool (false) in
-       let sort = signal_f64 (0.0) in
+       let status = signal Scalar.Str ("ready") in
+       let can_export = signal Scalar.Bool (false) in
+       let details = signal Scalar.Bool (false) in
+       let sort = signal Scalar.F64 (0.0) in
 
        let on_share () = write status ("shared") in
 
@@ -58,8 +58,8 @@ let () =
              item ~label:"Remove" ~symbol:Delete
                ~on_activate_node:(fun keys ->
                  match keys with
-                 | [ Str_key group; Str_key item ] ->
-                     remove (at (Option.get !items_ref) (str_key group)) (str_key item);
+                 | [ Key.Str group; Key.Str item ] ->
+                     remove (at (Option.get !items_ref) (Key.str group)) (Key.str item);
                      write status
                        (Printf.sprintf "removed %s/%s" group item)
                  | _ -> ());
@@ -86,7 +86,7 @@ let () =
        in
        items_ref := Some items;
 
-       let target_text = signal_str ("rename target") in
+       let target_text = signal Scalar.Str ("rename target") in
        let root =
          column
            [
@@ -132,7 +132,7 @@ let () =
 
   (* Seeded after the mount, so the copy stamps from a closed template. *)
   build app (fun () ->
-     insert groups (str_key "g2") "Home";
-     insert (at items (str_key "g2")) (str_key "a") "water plants");
+     insert groups (Key.str "g2") "Home";
+     insert (at items (Key.str "g2")) (Key.str "a") "water plants");
 
   exit (run app)

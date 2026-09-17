@@ -303,15 +303,25 @@ public final class KayaRecords {
             tx.updateRecordRaw(handle, key, value, 0, info.wireFields(value));
         }
 
-        /** The entry's current value, or null for a missing key. */
+        /** The entry at {@code key}, or empty for a missing one.
+         * Optional as a RETURN type is the use the JDK's own guidance
+         * sanctions, and the shape the other eight bindings' keyed read
+         * translates to (Rust's Option, Go's comma-ok, C#'s TryGet). */
         @SuppressWarnings("unchecked")
-        public T get(KayaApp.Tx tx, K key) {
+        public java.util.Optional<T> find(KayaApp.Tx tx, K key) {
             for (KayaApp.Entry entry : tx.items(handle)) {
                 if (java.util.Objects.equals(entry.key, key)) {
-                    return (T) entry.value;
+                    return java.util.Optional.ofNullable((T) entry.value);
                 }
             }
-            return null;
+            return java.util.Optional.empty();
+        }
+
+        /** The entry at {@code key}; throws naming it if there is none.
+         * {@link #find} is the spelling for a key that may be absent. */
+        public T get(KayaApp.Tx tx, K key) {
+            return find(tx, key).orElseThrow(() ->
+                    new IllegalStateException("kaya: no entry at key " + key));
         }
 
         /**
@@ -325,10 +335,8 @@ public final class KayaRecords {
 
         /** updateField over a pre-resolved token. */
         public <V> void updateField(KayaApp.Tx tx, K key, Field<V> f, V value) {
-            Object current = get(tx, key);
-            if (current == null) {
-                throw new IllegalStateException("kaya: update of missing key " + key);
-            }
+            Object current = find(tx, key).orElseThrow(() ->
+                    new IllegalStateException("kaya: update of missing key " + key));
             tx.updateFieldRaw(handle, key, info.withField(current, f.index, value), 0,
                     f.index, info.encodeField(f.index, value));
         }

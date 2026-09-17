@@ -203,6 +203,12 @@ PASSTHROUGH = {
     "bindings/haskell/KayaApp.hs": "re-exports openPicked",
     "bindings/ocaml/kaya_runtime.ml": "Ctypes hands the int to C",
     "bindings/ocaml/kaya_runtime.mli": "the interface over the Ctypes pass-through",
+    "bindings/ocaml/kaya_app.ml":
+        "File_mode.wire branches through kaya_wire's NAMED constants and "
+        "open_picked hands the number to Kaya_runtime",
+    "bindings/ocaml/kaya_app.mli": "the interface over File_mode and open_picked",
+    "bindings/ocaml/checks/negatives/file_mode_bad_type.ml":
+        "a compile-fail negative: `open_picked file 0` must be refused",
     "bindings/swift/KayaApp.swift":
         "defaults to FILE_MODE_READ and passes it on",
     "bindings/python/kaya/__init__.py":

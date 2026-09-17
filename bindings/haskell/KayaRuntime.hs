@@ -30,6 +30,12 @@ module KayaRuntime
     capabilityBits,
     capAuxWindows,
     capNotifications,
+    Key (..),
+    textKey,
+    intKey,
+    keyText,
+    keyInt,
+    keyOfWire,
     UndoDelta (..),
     UndoText (..),
     UndoEntry (..),
@@ -45,18 +51,19 @@ import Data.ByteString.Builder (Builder, toLazyByteString)
 import qualified Data.ByteString.Lazy as BL
 import Data.ByteString.Unsafe (unsafeUseAsCStringLen)
 import Data.IORef (IORef, mkWeakIORef, newIORef, readIORef, writeIORef)
+import Data.String (IsString (..))
 import Data.Int (Int32, Int64)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
 import Data.Word (Word16, Word32, Word64, Word8)
 import Foreign.C.Types (CBool (..), CInt (..), CSize (..))
 import Foreign.Marshal.Alloc (alloca, allocaBytes, mallocBytes)
 import Foreign.Ptr (Ptr, castPtr, nullPtr, plusPtr)
 import Foreign.Storable (peek, peekByteOff, poke)
--- GHC.Foreign, not Foreign.C.String: the latter marshals through the LOCALE's
--- encoding, so LANG=C would round-trip differently.
-import qualified GHC.Foreign as GHCF
-import GHC.IO.Encoding (utf8)
+-- Text's own UTF-8 codec, not Foreign.C.String and not GHC.Foreign: the
+-- first marshals through the LOCALE's encoding, so LANG=C would
+-- round-trip differently, and the second needs a String to do it.
 import GHC.IO.Handle.FD (fdToHandle)
 import System.IO (Handle)
 import System.IO.Unsafe (unsafePerformIO)
@@ -236,11 +243,11 @@ data Asset = Asset {assetCell :: IORef Word64}
 -- verbatim. 'errorWithoutStackTrace' rather than 'error': 'error'
 -- appends a GHC CallStack, and the scenes compare these bytes across
 -- languages.
-openAsset :: String -> IO Asset
+openAsset :: Text -> IO Asset
 openAsset name = do
   handle <- withName name c_kaya_asset_open
   if handle == 0
-    then errorWithoutStackTrace =<< assetMissSentence name
+    then errorWithoutStackTrace . T.unpack =<< assetMissSentence name
     else do
       cell <- newIORef handle
       -- THE FINALIZER CLOSES OVER THE HANDLE NUMBER, NEVER THE CELL: a
@@ -254,27 +261,27 @@ openAsset name = do
 -- crates/kaya/src/assets.rs. SIZED, THEN READ: the C entry returns the
 -- sentence's TRUE length, so the first call measures and the second
 -- fills.
-assetMissSentence :: String -> IO String
+assetMissSentence :: Text -> IO Text
 assetMissSentence name = do
   len <- withName name $ \p n -> c_kaya_asset_why_not p n nullPtr 0
   allocaBytes (fromIntegral len) $ \out -> do
     _ <- withName name $ \p n -> c_kaya_asset_why_not p n out len
-    GHCF.peekCStringLen utf8 (castPtr out, fromIntegral len)
+    peekUtf8 out len
 
 -- | The app's own writable directory, @""@ before one exists. SIZED,
 -- THEN READ, 'assetMissSentence''s two-call shape.
-appDataDir :: IO String
+appDataDir :: IO FilePath
 appDataDir = do
   len <- c_kaya_app_data_dir nullPtr 0
   if len == 0
     then return ""
     else allocaBytes (fromIntegral len) $ \out -> do
       written <- c_kaya_app_data_dir out len
-      GHCF.peekCStringLen utf8 (castPtr out, fromIntegral (min written len))
+      T.unpack <$> peekUtf8 out (min written len)
 
 -- | The stored string, or 'Nothing' when the key is absent or holds
 -- another type.
-prefGetString :: String -> IO (Maybe String)
+prefGetString :: Text -> IO (Maybe Text)
 prefGetString key =
   withName key $ \k n -> alloca $ \lenPtr -> do
     poke lenPtr 0
@@ -284,61 +291,65 @@ prefGetString key =
       else do
         len <- peek lenPtr
         if len == 0
-          then return (Just "")
+          then return (Just T.empty)
           else allocaBytes (fromIntegral len) $ \out -> do
             ok <- c_kaya_pref_get_string k n out len lenPtr
             if ok == 0
               then return Nothing
               else do
                 got <- peek lenPtr
-                Just
-                  <$> GHCF.peekCStringLen
-                    utf8
-                    (castPtr out, fromIntegral (min got len))
+                Just <$> peekUtf8 out (min got len)
 
-prefGetI64 :: String -> IO (Maybe Int64)
+prefGetI64 :: Text -> IO (Maybe Int64)
 prefGetI64 key =
   withName key $ \k n -> alloca $ \out -> do
     poke out 0
     present <- c_kaya_pref_get_i64 k n out
     if present == 0 then return Nothing else Just <$> peek out
 
-prefGetF64 :: String -> IO (Maybe Double)
+prefGetF64 :: Text -> IO (Maybe Double)
 prefGetF64 key =
   withName key $ \k n -> alloca $ \out -> do
     poke out 0
     present <- c_kaya_pref_get_f64 k n out
     if present == 0 then return Nothing else Just <$> peek out
 
-prefGetBool :: String -> IO (Maybe Bool)
+prefGetBool :: Text -> IO (Maybe Bool)
 prefGetBool key =
   withName key $ \k n -> alloca $ \out -> do
     poke out 0
     present <- c_kaya_pref_get_bool k n out
     if present == 0 then return Nothing else Just . (/= 0) <$> peek out
 
-prefSetString :: String -> String -> IO ()
+prefSetString :: Text -> Text -> IO ()
 prefSetString key value =
   withName key $ \k n -> withName value $ \v vn -> c_kaya_pref_set_string k n v vn
 
-prefSetI64 :: String -> Int64 -> IO ()
+prefSetI64 :: Text -> Int64 -> IO ()
 prefSetI64 key value = withName key $ \k n -> c_kaya_pref_set_i64 k n value
 
-prefSetF64 :: String -> Double -> IO ()
+prefSetF64 :: Text -> Double -> IO ()
 prefSetF64 key value = withName key $ \k n -> c_kaya_pref_set_f64 k n value
 
-prefSetBool :: String -> Bool -> IO ()
+prefSetBool :: Text -> Bool -> IO ()
 prefSetBool key value =
   withName key $ \k n -> c_kaya_pref_set_bool k n (if value then 1 else 0)
 
-prefRemove :: String -> IO ()
+prefRemove :: Text -> IO ()
 prefRemove key = withName key $ \k n -> c_kaya_pref_remove k n
 
 -- The name as UTF-8 bytes plus its length. NOT NUL-terminated: the core
--- reads exactly the length handed to it.
-withName :: String -> (Ptr Word8 -> CSize -> IO a) -> IO a
+-- reads exactly the length handed to it. Text's own encoder, never the
+-- locale-sensitive GHC.Foreign pair: this boundary is UTF-8 by contract.
+withName :: Text -> (Ptr Word8 -> CSize -> IO a) -> IO a
 withName name body =
-  GHCF.withCStringLen utf8 name $ \(p, n) -> body (castPtr p) (fromIntegral n)
+  unsafeUseAsCStringLen (TE.encodeUtf8 name) $ \(p, n) ->
+    body (castPtr p) (fromIntegral n)
+
+-- The core's answer, decoded: it writes UTF-8 and nothing else.
+peekUtf8 :: Ptr Word8 -> CSize -> IO Text
+peekUtf8 out len =
+  TE.decodeUtf8 <$> BS.packCStringLen (castPtr out, fromIntegral len)
 
 -- | This asset's bytes, copied out of core memory: the pointer the core
 -- hands back borrows its buffer only until release.
@@ -421,6 +432,76 @@ waitOccurrences = do
 -- the restored state (docs/undo-plan.md D5). A STATEMENT, NOT A REPLAY —
 -- every member says what a thing now IS, so applying one twice is the
 -- same as applying it once.
+-- | A collection entry's KEY. ONE TYPE A LITERAL ALREADY IS: a string
+-- literal is a text key through 'IsString' and an integer literal is the
+-- minted I64 kind through 'Num', so @insert c "a" v@ and @remove c 3@
+-- need no ascription, and a key read back out of a handler's path is the
+-- same type going in. The guest-facing type for every key a guest spells
+-- or reads back, so no guest names the wire's own value sum (OCaml's
+-- @type key@ with @str_key@\/@int_key@\/@key_text@ is the same decision;
+-- tools\/check-sugar-surface.py's wire-tag clause is why). It lives HERE
+-- rather than in Kaya.Core because the undo payload below carries key
+-- paths and this module is under that one.
+--
+-- THE CONSTRUCTOR IS NOT EXPORTED PAST Kaya.Core: 'textKey', 'intKey' and
+-- the two literal instances are the only ways in, so 'keyText' and
+-- 'keyInt' are total by construction.
+newtype Key = Key {keyValue :: Value}
+  deriving (Eq)
+
+-- A key SHOWS as its own text, never as the wire tag that carries it: a
+-- guest's error sentence names the row it could not find.
+instance Show Key where
+  show = T.unpack . keyText
+
+instance IsString Key where
+  fromString = Key . VStr
+
+-- A KEY IS NOT A NUMBER, and 'fromInteger' is the whole reason this
+-- instance exists: an integer literal has to be the I64 key
+-- 'insertFresh' mints. Num carries five more methods with no meaning on
+-- a key and no smaller class to take 'fromInteger' from, so they refuse
+-- by name rather than inventing arithmetic.
+instance Num Key where
+  fromInteger = Key . VI64 . fromInteger
+  (+) = notArithmetic "+"
+  (-) = notArithmetic "-"
+  (*) = notArithmetic "*"
+  abs = notArithmetic "abs"
+  signum = notArithmetic "signum"
+  negate = notArithmetic "negate"
+
+notArithmetic :: String -> a
+notArithmetic op =
+  errorWithoutStackTrace
+    ( "kaya: a collection key is not a number — " ++ op ++ " has no meaning "
+        ++ "on one. Num is here so an integer literal is an I64 key." )
+
+-- | A text key from a value the guest computed; the literal form is the
+-- 'IsString' instance (OCaml's @str_key@).
+textKey :: Text -> Key
+textKey = Key . VStr . T.unpack
+
+-- | A minted-number key from a value the guest computed (OCaml's
+-- @int_key@).
+intKey :: Int64 -> Key
+intKey = Key . VI64
+
+-- | A key as text — an Int key renders as its decimal, so a label can
+-- name any row (OCaml's @key_text@).
+keyText :: Key -> Text
+keyText (Key (VStr s)) = T.pack s
+keyText (Key (VI64 n)) = T.pack (show n)
+keyText (Key other) = T.pack (show other)
+
+-- | A key's minted number, 'Nothing' for a text key.
+keyInt :: Key -> Maybe Int64
+keyInt (Key (VI64 n)) = Just n
+keyInt (Key _) = Nothing
+
+keyOfWire :: Value -> Key
+keyOfWire = Key
+
 data UndoDelta = UndoDelta
   { -- | Signal id -> its restored value.
     undoSignals :: ![(Word64, Value)],
@@ -439,7 +520,7 @@ data UndoDelta = UndoDelta
 -- §3b).
 data UndoText = UndoText
   { utId :: !Word64,
-    utPath :: ![Value],
+    utPath :: ![Key],
     utText :: !Text
   }
 
@@ -447,16 +528,16 @@ data UndoText = UndoText
 -- the restored state does not have this entry at all.
 data UndoEntry = UndoEntry
   { ueCollection :: !Word64,
-    uePath :: ![Value],
-    ueKey :: !Value,
+    uePath :: ![Key],
+    ueKey :: !Key,
     ueState :: !(Maybe (Word32, [Value]))
   }
 
 -- | One collection instance's restored key order.
 data UndoOrder = UndoOrder
   { uoCollection :: !Word64,
-    uoPath :: ![Value],
-    uoKeys :: ![Value]
+    uoPath :: ![Key],
+    uoKeys :: ![Key]
   }
 
 -- | The empty statement: an occurrence carrying nothing back.
@@ -507,7 +588,7 @@ parseUndo rec = do
             plen = fromIntegral (int pathLen)
             (path, textOnly) = splitAt plen mine
          in case textOnly of
-              [VStr s] -> (UndoText (fromIntegral (int ident)) path (T.pack s), rest')
+              [VStr s] -> (UndoText (fromIntegral (int ident)) (map keyOfWire path) (T.pack s), rest')
               _ -> error "kaya: undo text is truncated or not a string"
       text _ = error "kaya: undo text is truncated"
       entry (size : collection : present : variant : pathLen : rest) =
@@ -519,8 +600,8 @@ parseUndo rec = do
               (key : record) ->
                 ( UndoEntry
                     (fromIntegral (int collection))
-                    path
-                    key
+                    (map keyOfWire path)
+                    (keyOfWire key)
                     ( if int present /= 0
                         then Just (fromIntegral (int variant), record)
                         else Nothing
@@ -534,7 +615,7 @@ parseUndo rec = do
             (mine, rest') = splitAt body rest
             plen = fromIntegral (int pathLen)
             (path, keys) = splitAt plen mine
-         in (UndoOrder (fromIntegral (int collection)) path keys, rest')
+         in (UndoOrder (fromIntegral (int collection)) (map keyOfWire path) (map keyOfWire keys), rest')
       order _ = error "kaya: undo order is truncated"
       (signalRun, afterSignals) = takeRun signals flat [] pair
       (textRun, afterTexts) = takeRun texts afterSignals [] text

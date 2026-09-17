@@ -6,7 +6,6 @@
 
 import Data.IORef (modifyIORef', newIORef, readIORef)
 
-import qualified Data.Text as T
 import KayaApp
 
 main :: IO ()
@@ -14,14 +13,14 @@ main = kayaMain $ \app -> do
   settingsRef <- newIORef (0 :: Int)
 
   buildTx app $ do
-    status <- signal (T.pack "ready")
-    details <- signal (False)
-    sort <- signal (0.0 :: Double)
+    status <- signalText "ready"
+    details <- signalBool False
+    sort <- signalDouble 0.0
 
     let onSettings = do
           modifyIORef' settingsRef (+ 1)
           n <- readIORef settingsRef
-          submitTx app (writeSignal status (T.pack ("settings " ++ show n)))
+          submitTx app (writeSignal status ("settings " <> tshow n))
 
     window
       primary
@@ -52,7 +51,7 @@ main = kayaMain $ \app -> do
                       ( \on ->
                           submitTx app $
                             writeSignal status
-                              (T.pack (if on then "details on" else "details off"))
+                              (if on then "details on" else "details off")
                       )
                   ],
                 radioGroup
@@ -62,7 +61,7 @@ main = kayaMain $ \app -> do
                       ( \index ->
                           submitTx app $
                             writeSignal status
-                              (T.pack (if index == 1 then "sorted date" else "sorted name"))
+                              (if index == 1 then "sorted date" else "sorted name")
                       )
                   ]
                   [ option "Name" [IShortcut "primary+1"],

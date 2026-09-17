@@ -10,7 +10,7 @@ let document = "Héllo world\nSecond line"
 /// and the core's mirror are compared as one string.
 func spell(_ runs: [KayaRun]) -> String {
     runs.map { run in
-        run.value == "true"
+        run.isFlag
             ? "\(run.range.lowerBound):\(run.range.upperBound) \(run.name)"
             : "\(run.range.lowerBound):\(run.range.upperBound) \(run.name)=\(run.value)"
     }.joined(separator: "|")
@@ -60,7 +60,7 @@ app.build { tx in
                 t.write(runs, .str(spell(doc.runs)))
             }
             tx.button("insert") { t in  // button#1
-                let edit = KayaEdit.insert(at: 6, ", big").mark(2..<5, "italic", "true")
+                let edit = KayaEdit.insert(at: 6, ", big").mark(2..<5, "italic", true)
                 t.applyEdit(editor, edit)
                 t.write(runs, .str(spell(app.document(editor).runs)))
             }

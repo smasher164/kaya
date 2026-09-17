@@ -141,11 +141,27 @@ readonly struct TextRange
     internal readonly ulong Start;
     internal readonly ulong Stop;
 
-    TextRange(ulong start, ulong stop)
+    internal TextRange(ulong start, ulong stop)
     {
         Start = start;
         Stop = stop;
     }
+
+    /// Empty: a caret, or a span the fold clipped away.
+    internal bool IsEmpty => Start >= Stop;
+
+    /// Covers one UTF-8 byte offset (half-open, so Stop does not).
+    internal bool Covers(ulong at) => Start <= at && at < Stop;
+
+    /// The same span `by` bytes along; the splice's arithmetic, so the
+    /// runs move with the text rather than being rebuilt at every site.
+    internal TextRange Shifted(long by) =>
+        new TextRange((ulong)((long)Start + by), (ulong)((long)Stop + by));
+
+    /// The same span with one end moved.
+    internal TextRange WithStart(ulong start) => new TextRange(start, Stop);
+
+    internal TextRange WithStop(ulong stop) => new TextRange(Start, stop);
 
     /// The range covering `length` .NET chars from `index` — the
     /// conversion from C#'s unit into kaya's. The text is an argument
@@ -173,6 +189,9 @@ readonly struct TextRange
         if (start < 0 || stop < 0)
             throw new ArgumentOutOfRangeException(
                 nameof(start), $"kaya: a text range offset is negative ({start}..{stop})");
+        if (start > stop)
+            throw new ArgumentOutOfRangeException(
+                nameof(start), $"kaya: a text range runs {start}..{stop}, a reversed span");
         return new TextRange((ulong)start, (ulong)stop);
     }
 
@@ -202,6 +221,43 @@ readonly struct TextRange
                     + $"('{char.ConvertFromUtf32(char.ConvertToUtf32(text[at - 1], text[at]))}'), "
                     + "which is half a character");
     }
+}
+
+/// The app's OWN light/dark choice, applied process-wide from the
+/// default window (docs/tasks-s2b-plan.md R1-R3). System falls back to
+/// the platform's own setting and to KAYA_APPEARANCE.
+enum Appearance : long
+{
+    System = KayaWire.AppearanceSystem,
+    Light = KayaWire.AppearanceLight,
+    Dark = KayaWire.AppearanceDark,
+}
+
+/// THE CLOSED MENU-ROLE VOCABULARY (DESIGN.md, Menus;
+/// crates/kaya/src/scene.rs MENU_ROLES). Settings: macOS places it in the
+/// application menu and every other host leaves the item where the app
+/// declared it. Cut/Copy/Paste are THE GESTURE LAYER — they lower to the
+/// platform's own, act on the FOCUSED widget, and work out their own
+/// enablement from what the clipboard offers and what that widget
+/// accepts. Undo/Redo ask the focused widget's own stack before the
+/// core's ledger (docs/undo-plan.md D6); an app declares the two items
+/// and writes nothing else.
+enum MenuRole { Settings, Cut, Copy, Paste, Undo, Redo }
+
+static class MenuRoles
+{
+    /// The wire's own name for a role.
+    internal static string Name(this MenuRole role) => role switch
+    {
+        MenuRole.Settings => "settings",
+        MenuRole.Cut => "cut",
+        MenuRole.Copy => "copy",
+        MenuRole.Paste => "paste",
+        MenuRole.Undo => "undo",
+        MenuRole.Redo => "redo",
+        _ => throw new ArgumentOutOfRangeException(
+            nameof(role), $"kaya: {role} is no menu role"),
+    };
 }
 
 /// One paragraph kind; drawn, never stored (docs/rich-text-plan.md R3).
@@ -255,13 +311,31 @@ static class EditSources
     };
 }
 
+/// A mark or format attribute's value: the wire spells a flag attribute
+/// ("bold", "italic", ...) with the string "true", and every binding
+/// takes and answers a bool over it (DESIGN.md, Binding conventions).
+static class MarkValue
+{
+    internal const string Flag = "true";
+
+    internal static string Of(bool on) => on ? Flag : "false";
+}
+
 /// One attribute over one span, in TextRange's unit (UTF-8 bytes):
-/// Value is "true" for the flags, a URL for a link, a BlockKind's own
-/// spelling for a block.
-readonly record struct TextRun(long Start, long Stop, string Name, string Value);
+/// Value is a URL for a link, a BlockKind's own spelling for a block,
+/// and the wire's flag string for the rest — which IsFlag reads back.
+readonly record struct TextRun(TextRange Range, string Name, string Value)
+{
+    /// A flag attribute, on: bold, italic, underline, strike, code.
+    public bool IsFlag => Value == MarkValue.Flag;
+}
 
 /// A toolbar act over a range; Value null is the attribute taken off.
-readonly record struct Format(long Start, long Stop, string Name, string? Value);
+readonly record struct Format(TextRange Range, string Name, string? Value)
+{
+    /// A flag attribute, on.
+    public bool IsFlag => Value == MarkValue.Flag;
+}
 
 /// A `rich` textarea's text and runs, kept current by the binding from
 /// every edit it delivers (docs/rich-text-plan.md R1). Read the app's
@@ -286,19 +360,23 @@ sealed class Document
     /// this one with a name and a value filled in.
     public Document Mark(TextRange range, string name, string value)
     {
-        Marks.Add(new TextRun((long)range.Start, (long)range.Stop, name, value));
+        Marks.Add(new TextRun(range, name, value));
         return this;
     }
 
-    public Document Bold(TextRange range) => Mark(range, "bold", "true");
+    /// A flag attribute, on or off.
+    public Document Mark(TextRange range, string name, bool on) =>
+        Mark(range, name, MarkValue.Of(on));
 
-    public Document Italic(TextRange range) => Mark(range, "italic", "true");
+    public Document Bold(TextRange range) => Mark(range, "bold", MarkValue.Flag);
 
-    public Document Underline(TextRange range) => Mark(range, "underline", "true");
+    public Document Italic(TextRange range) => Mark(range, "italic", MarkValue.Flag);
 
-    public Document Strike(TextRange range) => Mark(range, "strike", "true");
+    public Document Underline(TextRange range) => Mark(range, "underline", MarkValue.Flag);
 
-    public Document Code(TextRange range) => Mark(range, "code", "true");
+    public Document Strike(TextRange range) => Mark(range, "strike", MarkValue.Flag);
+
+    public Document Code(TextRange range) => Mark(range, "code", MarkValue.Flag);
 
     public Document Link(TextRange range, string url) => Mark(range, "link", url);
 
@@ -311,7 +389,7 @@ sealed class Document
     public string? AttrAt(long byteOffset, string name)
     {
         foreach (TextRun run in Marks)
-            if (run.Name == name && run.Start <= byteOffset && byteOffset < run.Stop)
+            if (run.Name == name && run.Range.Covers((ulong)byteOffset))
                 return run.Value;
         return null;
     }
@@ -334,28 +412,34 @@ sealed class Document
             var painted = new List<TextRun>();
             foreach (TextRun run in runs)
             {
-                if (run.Name != name || run.Start >= run.Stop) continue;
+                if (run.Name != name || run.Range.IsEmpty) continue;
                 var kept = new List<TextRun>();
                 foreach (TextRun old in painted)
                 {
-                    if (old.Stop <= run.Start || old.Start >= run.Stop)
+                    if (old.Range.Stop <= run.Range.Start || old.Range.Start >= run.Range.Stop)
                     {
                         kept.Add(old);
                         continue;
                     }
-                    if (old.Start < run.Start) kept.Add(old with { Stop = run.Start });
-                    if (old.Stop > run.Stop) kept.Add(old with { Start = run.Stop });
+                    if (old.Range.Start < run.Range.Start)
+                        kept.Add(old with { Range = old.Range.WithStop(run.Range.Start) });
+                    if (old.Range.Stop > run.Range.Stop)
+                        kept.Add(old with { Range = old.Range.WithStart(run.Range.Stop) });
                 }
                 kept.Add(run);
                 painted = kept;
             }
-            foreach (TextRun run in Ordered(painted, (a, b) => a.Start.CompareTo(b.Start)))
+            foreach (TextRun run in Ordered(painted,
+                (a, b) => a.Range.Start.CompareTo(b.Range.Start)))
             {
                 if (one.Count > 0 && one[one.Count - 1].Name == name
-                    && one[one.Count - 1].Stop == run.Start
+                    && one[one.Count - 1].Range.Stop == run.Range.Start
                     && one[one.Count - 1].Value == run.Value)
                 {
-                    one[one.Count - 1] = one[one.Count - 1] with { Stop = run.Stop };
+                    one[one.Count - 1] = one[one.Count - 1] with
+                    {
+                        Range = one[one.Count - 1].Range.WithStop(run.Range.Stop),
+                    };
                     continue;
                 }
                 one.Add(run);
@@ -363,7 +447,7 @@ sealed class Document
         }
         return Ordered(one, (a, b) =>
         {
-            int by = a.Start.CompareTo(b.Start);
+            int by = a.Range.Start.CompareTo(b.Range.Start);
             return by != 0 ? by : string.CompareOrdinal(a.Name, b.Name);
         });
     }
@@ -385,25 +469,22 @@ sealed class Document
     }
 }
 
-/// Replace Start..Stop with Inserted, whose Runs carry offsets RELATIVE
+/// Replace Range with Inserted, whose Runs carry offsets RELATIVE
 /// to the inserted text.
 sealed class Edit
 {
     internal readonly List<TextRun> Marks = new List<TextRun>();
 
-    internal Edit(long start, long stop, string inserted, List<TextRun>? runs,
+    internal Edit(TextRange range, string inserted, List<TextRun>? runs,
         EditSource? source = null)
     {
-        Start = start;
-        Stop = stop;
+        Range = range;
         Inserted = inserted;
         Source = source;
         if (runs != null) Marks = runs;
     }
 
-    public long Start { get; }
-
-    public long Stop { get; }
+    public TextRange Range { get; }
 
     public string Inserted { get; }
 
@@ -421,21 +502,24 @@ sealed class Edit
             throw new ArgumentException(
                 $"kaya: Edit.Insert takes a caret and got {at.Start}..{at.Stop} — "
                     + "Edit.Replace swaps a range for text", nameof(at));
-        return new Edit((long)at.Start, (long)at.Stop, text, null);
+        return new Edit(at, text, null);
     }
 
-    public static Edit Delete(TextRange range) =>
-        new Edit((long)range.Start, (long)range.Stop, "", null);
+    public static Edit Delete(TextRange range) => new Edit(range, "", null);
 
     public static Edit Replace(TextRange range, string text) =>
-        new Edit((long)range.Start, (long)range.Stop, text, null);
+        new Edit(range, text, null);
 
     /// One attribute over the INSERTED text's own offsets.
     public Edit Mark(TextRange range, string name, string value)
     {
-        Marks.Add(new TextRun((long)range.Start, (long)range.Stop, name, value));
+        Marks.Add(new TextRun(range, name, value));
         return this;
     }
+
+    /// A flag attribute, on or off, over the inserted text.
+    public Edit Mark(TextRange range, string name, bool on) =>
+        Mark(range, name, MarkValue.Of(on));
 }
 
 /// A template node: a blueprint entry, stamped per collection entry.
@@ -671,15 +755,95 @@ enum Platform : long
     Android = KayaWire.PlatformAndroid,
 }
 
+/// ONE OCCURRENCE, TYPED. The ring hands over a kind, an id, a key path
+/// and an `object?` whose shape the KIND implies; KayaApp.OccurrenceOf is
+/// the ONE place that implication is cashed in, so no dispatch arm
+/// narrows a payload by hand and the switch does the narrowing the `!`
+/// used to (the idiom review's C4). A kind with no arm here decodes to
+/// null and is dropped, as an unregistered one already is.
+abstract record Occurrence(ulong Id, List<object> Keys)
+{
+    /// No key path: the occurrence is a live-zone widget's, not a
+    /// stamped copy's.
+    internal bool Live => Keys.Count == 0;
+}
+
+sealed record ButtonClicked(ulong Id, List<object> Keys) : Occurrence(Id, Keys);
+
+sealed record TextChanged(ulong Id, List<object> Keys, string Text) : Occurrence(Id, Keys);
+
+sealed record Toggled(ulong Id, List<object> Keys, bool Checked) : Occurrence(Id, Keys);
+
+sealed record ValueChanged(ulong Id, List<object> Keys, double Value) : Occurrence(Id, Keys);
+
+sealed record ValueCommitted(ulong Id, List<object> Keys, double Value) : Occurrence(Id, Keys);
+
+sealed record DateChanged(ulong Id, List<object> Keys, DateOnly Date) : Occurrence(Id, Keys);
+
+sealed record TimeChanged(ulong Id, List<object> Keys, TimeOnly Time) : Occurrence(Id, Keys);
+
+sealed record TextEdited(ulong Id, List<object> Keys, Edit Act) : Occurrence(Id, Keys);
+
+sealed record TextFormatted(ulong Id, List<object> Keys, Format Act) : Occurrence(Id, Keys);
+
+sealed record SortRequested(ulong Id, List<object> Keys, uint Column) : Occurrence(Id, Keys);
+
+sealed record DrawRequested(ulong Id, List<object> Keys, List<object> Ask) : Occurrence(Id, Keys);
+
+sealed record CloseRequested(ulong Id, List<object> Keys) : Occurrence(Id, Keys);
+
+sealed record WindowClosed(ulong Id, List<object> Keys) : Occurrence(Id, Keys);
+
+sealed record SectionSelected(ulong Id, List<object> Keys) : Occurrence(Id, Keys);
+
+sealed record EntryPopped(ulong Id, List<object> Keys) : Occurrence(Id, Keys);
+
+sealed record BackRequested(ulong Id, List<object> Keys) : Occurrence(Id, Keys);
+
+sealed record AlertAnswered(ulong Id, List<object> Keys, AlertChoice Choice) : Occurrence(Id, Keys);
+
+sealed record LinkArrived(ulong Id, List<object> Keys, string Url,
+    IReadOnlyDictionary<string, string> Params) : Occurrence(Id, Keys);
+
+sealed record NotificationAnswered(ulong Id, List<object> Keys, NotificationOutcome Outcome)
+    : Occurrence(Id, Keys);
+
+sealed record FilesPicked(ulong Id, List<object> Keys, List<PickedFile> Files)
+    : Occurrence(Id, Keys);
+
+sealed record ClipboardRead(ulong Id, List<object> Keys, Representation? Clip)
+    : Occurrence(Id, Keys);
+
+sealed record Pasted(ulong Id, List<object> Keys, Representation? Clip) : Occurrence(Id, Keys);
+
+sealed record DropLanded(ulong Id, List<object> Keys, Dropped Answer) : Occurrence(Id, Keys);
+
+sealed record DragEnded(ulong Id, List<object> Keys, Op? Operation) : Occurrence(Id, Keys);
+
+sealed record MenuActivated(ulong Id, List<object> Keys) : Occurrence(Id, Keys);
+
+sealed record MenuToggled(ulong Id, List<object> Keys, bool Checked) : Occurrence(Id, Keys);
+
+sealed record MenuValueChanged(ulong Id, List<object> Keys, int Index) : Occurrence(Id, Keys);
+
+/// An undo or a redo, as the CORE put it back; Redo tells them apart,
+/// because one ledger walk is the same fold either way.
+sealed record HistoryWalked(ulong Id, List<object> Keys, UndoStep Step, bool Redo)
+    : Occurrence(Id, Keys);
+
 sealed class KayaInstance
 {
     internal readonly List<object> Path;
-    internal List<KeyValuePair<object, object?>> Entries = new();
+
+    // Insertion-ordered AND keyed: every reader here walks it in order
+    // and every keyed read is a lookup
+    // (System.Collections.Generic.OrderedDictionary, .NET 9+).
+    internal OrderedDictionary<object, object?> Entries = new();
 
     internal KayaInstance(IEnumerable<object> path) => Path = new List<object>(path);
 
     internal KayaInstance Clone() =>
-        new(Path) { Entries = new List<KeyValuePair<object, object?>>(Entries) };
+        new(Path) { Entries = new OrderedDictionary<object, object?>(Entries) };
 }
 
 /// WHAT THIS HOST CAN DO — crates/kaya/src/app.rs carries the canonical
@@ -1264,19 +1428,18 @@ sealed class KayaApp
             var instance = InstanceOf(entry.Collection, entry.Path);
             if (instance == null)
                 instances.Add(instance = new KayaInstance(entry.Path));
-            int at = instance.Entries.FindIndex(e => Equals(e.Key, entry.Key));
+            int at = instance.Entries.IndexOf(entry.Key);
             if (entry.State is { } state)
             {
-                object? current = at >= 0 ? instance.Entries[at].Value : null;
+                object? current = at >= 0 ? instance.Entries.GetAt(at).Value : null;
                 object? value =
                     Rehydrate.TryGetValue(entry.Collection, out var rehydrate)
                         ? rehydrate(state.Variant, state.Fields, current)
                         : (state.Fields.Count > 0 ? state.Fields[0] : null);
-                var pair = new KeyValuePair<object, object?>(entry.Key, value);
                 if (at >= 0)
-                    instance.Entries[at] = pair;
+                    instance.Entries.SetAt(at, value);
                 else
-                    instance.Entries.Add(pair);
+                    instance.Entries.Add(entry.Key, value);
             }
             else if (at >= 0)
             {
@@ -1290,16 +1453,17 @@ sealed class KayaApp
                 continue;
             // Position by the payload's list, keeping anything it does
             // not name at the end.
-            var sorted = new List<KeyValuePair<object, object?>>(instance.Entries.Count);
+            var sorted = new OrderedDictionary<object, object?>(instance.Entries.Count);
             foreach (var key in order.Keys)
             {
-                int at = instance.Entries.FindIndex(e => Equals(e.Key, key));
+                int at = instance.Entries.IndexOf(key);
                 if (at < 0)
                     continue;
-                sorted.Add(instance.Entries[at]);
+                sorted.Add(key, instance.Entries.GetAt(at).Value);
                 instance.Entries.RemoveAt(at);
             }
-            sorted.AddRange(instance.Entries);
+            foreach (var rest in instance.Entries)
+                sorted.Add(rest.Key, rest.Value);
             instance.Entries = sorted;
         }
     }
@@ -1464,8 +1628,8 @@ sealed class KayaApp
         var values = new List<object> { document.Text };
         foreach (TextRun run in document.Runs)
         {
-            values.Add(run.Start);
-            values.Add(run.Stop);
+            values.Add((long)run.Range.Start);
+            values.Add((long)run.Range.Stop);
             values.Add(run.Name);
             values.Add(run.Value);
         }
@@ -1522,18 +1686,19 @@ sealed class KayaApp
                     + values.Count + " value(s)");
         var runs = new List<TextRun>();
         for (int i = 1; i + 3 < values.Count; i += 4)
-            runs.Add(new TextRun((long)values[i], (long)values[i + 1],
+            runs.Add(new TextRun(
+                TextRange.Bytes((long)values[i], (long)values[i + 1]),
                 (string)values[i + 2], (string)values[i + 3]));
         return new Document(text, runs);
     }
 
     /// One delivered edit, folded into the live widget's mirror.
-    internal void AbsorbEdit(ulong widget, long start, long stop, string inserted,
+    internal void AbsorbEdit(ulong widget, TextRange range, string inserted,
         List<TextRun> runs)
     {
         if (!documents.TryGetValue(widget, out var doc))
             documents[widget] = doc = new global::Document("");
-        FoldEdit(doc, start, stop, inserted, runs);
+        FoldEdit(doc, range, inserted, runs);
     }
 
     /// The core's own fold rule over ANY document — a live widget's
@@ -1542,12 +1707,14 @@ sealed class KayaApp
     /// UTF-8 BYTES, which a .NET string is not: the offsets are the
     /// core's (docs/ranges-units.md), so the text is cut as bytes and
     /// decoded back.
-    internal static void FoldEdit(Document doc, long start, long stop, string inserted,
+    internal static void FoldEdit(Document doc, TextRange range, string inserted,
         List<TextRun> runs)
     {
         byte[] was = System.Text.Encoding.UTF8.GetBytes(doc.Text);
         byte[] put = System.Text.Encoding.UTF8.GetBytes(inserted);
-        if (start < 0 || start > stop || stop > was.Length
+        long start = (long)range.Start;
+        long stop = (long)range.Stop;
+        if (start > stop || stop > was.Length
             || !Boundary(was, start) || !Boundary(was, stop))
         {
             // A mirror out of step with the core would splice a character
@@ -1561,17 +1728,21 @@ sealed class KayaApp
         var next = new List<TextRun>();
         foreach (TextRun run in doc.Marks)
         {
-            if (run.Start < start)
-                next.Add(run with { Stop = Math.Min(run.Stop, start) });
-            if (run.Stop > stop)
+            if ((long)run.Range.Start < start)
                 next.Add(run with
                 {
-                    Start = Math.Max(run.Start, stop) + shift,
-                    Stop = run.Stop + shift,
+                    Range = run.Range.WithStop((ulong)Math.Min((long)run.Range.Stop, start)),
+                });
+            if ((long)run.Range.Stop > stop)
+                next.Add(run with
+                {
+                    Range = run.Range
+                        .WithStart((ulong)Math.Max((long)run.Range.Start, stop))
+                        .Shifted(shift),
                 });
         }
         foreach (TextRun run in runs)
-            next.Add(run with { Start = run.Start + start, Stop = run.Stop + start });
+            next.Add(run with { Range = run.Range.Shifted(start) });
         var merged = new byte[was.Length - (stop - start) + put.Length];
         Array.Copy(was, 0, merged, 0, start);
         Array.Copy(put, 0, merged, start, put.Length);
@@ -1608,7 +1779,7 @@ sealed class KayaApp
     /// One delivered format, folded into the live widget's mirror.
     internal void AbsorbFormat(ulong widget, Format act)
     {
-        if (act.Start >= act.Stop) return;
+        if (act.Range.IsEmpty) return;
         if (!documents.TryGetValue(widget, out var doc))
             documents[widget] = doc = new global::Document("");
         FoldFormat(doc, act);
@@ -1628,16 +1799,14 @@ sealed class KayaApp
         if (instance == null)
             return;
         object key = keys[^1];
-        int at = instance.Entries.FindIndex(e => Equals(e.Key, key));
-        if (at < 0 || instance.Entries[at].Value is not { } record)
+        if (!instance.Entries.TryGetValue(key, out var held) || held is not { } record)
             return;
         var info = RecordInfo.Of(record.GetType());
-        if (info.FieldOfWire(record, bind.Field) is not Document held)
+        if (info.FieldOfWire(record, bind.Field) is not Document field)
             return;
-        var doc = new global::Document(held.Text, new List<TextRun>(held.Marks));
+        var doc = new global::Document(field.Text, new List<TextRun>(field.Marks));
         fold(doc);
-        instance.Entries[at] = new KeyValuePair<object, object?>(
-            key, info.WithField(record, bind.Field, doc));
+        instance.Entries[key] = info.WithField(record, bind.Field, doc);
     }
 
     /// FoldEdit's twin one act over: put the attribute over the range or
@@ -1645,20 +1814,23 @@ sealed class KayaApp
     /// (AppCtx::fold_format).
     internal static void FoldFormat(Document doc, Format act)
     {
-        if (act.Start >= act.Stop) return;
+        if (act.Range.IsEmpty) return;
         var next = new List<TextRun>();
         foreach (TextRun run in doc.Marks)
         {
-            if (run.Name != act.Name || run.Stop <= act.Start || run.Start >= act.Stop)
+            if (run.Name != act.Name || run.Range.Stop <= act.Range.Start
+                || run.Range.Start >= act.Range.Stop)
             {
                 next.Add(run);
                 continue;
             }
-            if (run.Start < act.Start) next.Add(run with { Stop = act.Start });
-            if (run.Stop > act.Stop) next.Add(run with { Start = act.Stop });
+            if (run.Range.Start < act.Range.Start)
+                next.Add(run with { Range = run.Range.WithStop(act.Range.Start) });
+            if (run.Range.Stop > act.Range.Stop)
+                next.Add(run with { Range = run.Range.WithStart(act.Range.Stop) });
         }
         if (act.Value != null)
-            next.Add(new TextRun(act.Start, act.Stop, act.Name, act.Value));
+            next.Add(new TextRun(act.Range, act.Name, act.Value));
         doc.Marks.Clear();
         doc.Marks.AddRange(global::Document.Normalize(next));
     }
@@ -1846,7 +2018,7 @@ sealed class KayaApp
         var runs = new List<TextRun>();
         for (int at = 4; at < tail.Count; at += 4)
             runs.Add(RunOf(tail, at));
-        return new Edit((long)(ulong)tail[1], (long)(ulong)tail[2],
+        return new Edit(SpanOf("text_edited", tail[1], tail[2]),
             tail[3] as string ?? "", runs, EditSources.FromWire((uint)tail[0]));
     }
 
@@ -1858,8 +2030,23 @@ sealed class KayaApp
                     + (tail == null ? "nothing" : tail.Count.ToString())
                     + " values, want 5");
         bool removed = tail[0] is uint r && r != 0;
-        return new Format((long)(ulong)tail[1], (long)(ulong)tail[2],
+        return new Format(SpanOf("text_formatted", tail[1], tail[2]),
             tail[3] as string ?? "", removed ? null : tail[4] as string ?? "");
+    }
+
+    /// One decoded span. A REVERSED one is refused NAMING BOTH ENDS: the
+    /// range type's own constructor would otherwise be the only thing to
+    /// notice, and it has no record to name (the C# twin of the Swift
+    /// arm's guard; no scene can produce it — the core always sends an
+    /// ordered span).
+    static TextRange SpanOf(string what, object start, object stop)
+    {
+        long from = start is ulong a ? (long)a : 0;
+        long to = stop is ulong b ? (long)b : 0;
+        if (from > to)
+            throw new InvalidOperationException(
+                $"kaya: a {what} carries {from}..{to}, a reversed span");
+        return TextRange.Bytes(from, to);
     }
 
     static TextRun RunOf(List<object> tail, int at)
@@ -1868,8 +2055,83 @@ sealed class KayaApp
             throw new InvalidOperationException(
                 $"kaya: a run's offsets are a {tail[at]?.GetType().Name ?? "null"} and a "
                     + $"{tail[at + 1]?.GetType().Name ?? "null"}, want two I64");
-        return new TextRun(start, stop, tail[at + 2] as string ?? "",
+        if (start > stop)
+            throw new InvalidOperationException(
+                $"kaya: a run carries {start}..{stop}, a reversed span");
+        return new TextRun(TextRange.Bytes(start, stop), tail[at + 2] as string ?? "",
             tail[at + 3] as string ?? "");
+    }
+
+    /// The ring's four values as the kind says they are shaped. THE ONE
+    /// NARROWING SITE (the review's C4): every `payload as`/cast in the
+    /// dispatch lives here, with the shape stated in the record's own
+    /// type rather than suppressed at a leaf.
+    static Occurrence? OccurrenceOf(ushort kind, ulong id, List<object> keys, object? payload)
+    {
+        double number = payload is double d ? d : 0.0;
+        bool flag = payload is bool b && b;
+        uint code = payload is uint u ? u : 0;
+        switch (kind)
+        {
+            case KayaWire.OccKindButtonClicked: return new ButtonClicked(id, keys);
+            case KayaWire.OccKindTextChanged:
+                return new TextChanged(id, keys, payload as string ?? "");
+            case KayaWire.OccKindToggled: return new Toggled(id, keys, flag);
+            case KayaWire.OccKindValueChanged: return new ValueChanged(id, keys, number);
+            case KayaWire.OccKindValueCommitted: return new ValueCommitted(id, keys, number);
+            case KayaWire.OccKindDateChanged:
+                return new DateChanged(id, keys, KayaRecords.DateOf(payload));
+            case KayaWire.OccKindTimeChanged:
+                return new TimeChanged(id, keys, KayaRecords.TimeOf(payload));
+            case KayaWire.OccKindTextEdited:
+                return new TextEdited(id, keys, EditOf(payload as List<object>));
+            case KayaWire.OccKindTextFormatted:
+                return new TextFormatted(id, keys, FormatOf(payload as List<object>));
+            case KayaWire.OccKindSortRequested: return new SortRequested(id, keys, code);
+            // A tick canvas is a redraw canvas too, and both asks are
+            // answered the same way (docs/canvas-plan.md §3.2.1).
+            case KayaWire.OccKindDrawRequested:
+            case KayaWire.OccKindTick:
+                return new DrawRequested(id, keys, payload as List<object> ?? new List<object>());
+            case KayaWire.OccKindCloseRequested: return new CloseRequested(id, keys);
+            case KayaWire.OccKindWindowClosed: return new WindowClosed(id, keys);
+            case KayaWire.OccKindSectionSelected: return new SectionSelected(id, keys);
+            case KayaWire.OccKindEntryPopped: return new EntryPopped(id, keys);
+            case KayaWire.OccKindBackRequested: return new BackRequested(id, keys);
+            case KayaWire.OccKindAlertResult:
+                return new AlertAnswered(id, keys, AlertChoices.FromWire(code));
+            case KayaWire.OccKindLinkOpened:
+                return new LinkArrived(id, keys, LinkUrlOf(payload), LinkParamsOf(payload));
+            case KayaWire.OccKindNotificationResult:
+                return new NotificationAnswered(id, keys, NotificationOutcomes.FromWire(code));
+            case KayaWire.OccKindFileDialogResult:
+                return new FilesPicked(id, keys,
+                    payload as List<PickedFile> ?? new List<PickedFile>());
+            case KayaWire.OccKindClipboardResult:
+                return new ClipboardRead(id, keys,
+                    Representation.From(payload as KayaWire.ClipValues));
+            case KayaWire.OccKindPasted:
+                return new Pasted(id, keys, Representation.From(payload as KayaWire.ClipValues));
+            case KayaWire.OccKindDropped:
+                return payload is KayaWire.DropValues drop
+                    ? new DropLanded(id, keys, Dropped.From(drop))
+                    : null;
+            case KayaWire.OccKindDragEnded:
+                return new DragEnded(id, keys, Dropped.Operate(code));
+            case KayaWire.OccKindMenuActivated: return new MenuActivated(id, keys);
+            case KayaWire.OccKindMenuToggled: return new MenuToggled(id, keys, flag);
+            case KayaWire.OccKindMenuValueChanged:
+                return new MenuValueChanged(id, keys, (int)number);
+            case KayaWire.OccKindUndone:
+            case KayaWire.OccKindRedone:
+                // Refused by name rather than dropped: a ledger walk the
+                // mirror never folded is a model out of step with the core.
+                return new HistoryWalked(id, keys,
+                    payload as UndoStep ?? throw new InvalidOperationException(
+                        "kaya: an undone/redone occurrence carries no step"),
+                    kind == KayaWire.OccKindRedone);
+            default: return null;
+        }
     }
 
     void DispatchLoop()
@@ -1887,324 +2149,238 @@ sealed class KayaApp
                 if (!Kaya.WaitOccurrences()) return; // shutdown
                 continue;
             }
-            string? text = payload as string;
-            bool isChecked = payload is bool b && b;
-            // THE CANVAS'S TWO ASKS ARE ANSWERED HERE AND NEVER HANDED
-            // OVER (docs/canvas-plan.md §3.2.1). No registration means
-            // DROP, like any unclaimed occurrence. AN EMPTY KEY PATH IS
-            // THE WHOLE RULE HERE: the size policy is a live-zone
-            // declaration and the core refuses one against a template node
-            // by name (docs/deferred.md, THE TEMPLATE ZONE IS REFUSED).
-            if ((kind == KayaWire.OccKindDrawRequested || kind == KayaWire.OccKindTick)
-                && keys.Count == 0)
+            switch (OccurrenceOf(kind, id, keys, payload))
             {
-                if (draws.TryGetValue(id, out var draw))
-                {
-                    var ask = payload as List<object> ?? new List<object>();
-                    Dispatch(tx => AnswerCanvasAsk(tx, id, draw, ask));
-                }
-            }
-            else if (kind == KayaWire.OccKindSortRequested && keys.Count == 0)
-            {
-                uint column = payload is uint u ? u : 0;
-                if (sortHandlers.TryGetValue(id, out var fn))
-                    Dispatch(tx => fn(tx, column));
-            }
-            else if (kind == KayaWire.OccKindSortRequested)
-            {
-                uint column = payload is uint u ? u : 0;
-                if (nodeSorts.TryGetValue(id, out var fn))
-                    Dispatch(tx => fn(tx, keys, column));
-            }
-            else if (kind == KayaWire.OccKindButtonClicked && keys.Count == 0)
-            {
-                if (widgetHandlers.TryGetValue(id, out var fn))
-                    Dispatch(fn);
-            }
-            else if (kind == KayaWire.OccKindButtonClicked)
-            {
-                if (nodeHandlers.TryGetValue(id, out var fn))
-                    Dispatch(tx => fn(tx, keys));
-            }
-            else if (kind == KayaWire.OccKindTextChanged && keys.Count == 0)
-            {
-                if (widgetChanges.TryGetValue(id, out var fn))
-                    Dispatch(tx => fn(tx, text!));
-            }
-            else if (kind == KayaWire.OccKindTextChanged)
-            {
-                if (nodeChanges.TryGetValue(id, out var fn))
-                    Dispatch(tx => fn(tx, keys, text!));
-            }
-            // THE MIRROR FOLLOWS FIRST, and unconditionally — before the
-            // handler lookup, so a rich textarea nobody registered for
-            // still keeps its document in step
-            // (docs/rich-text-plan.md R1).
-            else if (kind == KayaWire.OccKindTextEdited && keys.Count == 0)
-            {
-                Edit edit = EditOf(payload as List<object>);
-                AbsorbEdit(id, edit.Start, edit.Stop, edit.Inserted, edit.Marks);
-                if (widgetEdits.TryGetValue(id, out var fn))
-                    Dispatch(tx => fn(tx, edit));
-            }
-            // A STAMPED COPY FOLDS INTO ITS ROW, never into a mirror the
-            // app cannot address (docs/rich-text-plan.md §19).
-            else if (kind == KayaWire.OccKindTextEdited)
-            {
-                Edit edit = EditOf(payload as List<object>);
-                FoldRowDocument(id, keys,
-                    doc => FoldEdit(doc, edit.Start, edit.Stop, edit.Inserted, edit.Marks));
-                if (nodeEdits.TryGetValue(id, out var fn))
-                    Dispatch(tx => fn(tx, keys, edit));
-            }
-            else if (kind == KayaWire.OccKindTextFormatted && keys.Count == 0)
-            {
-                Format act = FormatOf(payload as List<object>);
-                AbsorbFormat(id, act);
-                if (widgetFormats.TryGetValue(id, out var fn))
-                    Dispatch(tx => fn(tx, act));
-            }
-            else if (kind == KayaWire.OccKindTextFormatted)
-            {
-                Format act = FormatOf(payload as List<object>);
-                FoldRowDocument(id, keys, doc => FoldFormat(doc, act));
-                if (nodeFormats.TryGetValue(id, out var fn))
-                    Dispatch(tx => fn(tx, keys, act));
-            }
-            else if (kind == KayaWire.OccKindToggled && keys.Count == 0)
-            {
-                if (widgetToggles.TryGetValue(id, out var fn))
-                    Dispatch(tx => fn(tx, isChecked));
-            }
-            else if (kind == KayaWire.OccKindToggled)
-            {
-                if (nodeToggles.TryGetValue(id, out var fn))
-                    Dispatch(tx => fn(tx, keys, isChecked));
-            }
-            else if (kind == KayaWire.OccKindValueChanged && keys.Count == 0)
-            {
-                if (widgetValues.TryGetValue(id, out var fn))
-                    Dispatch(tx => fn(tx, payload is double d ? d : 0.0));
-            }
-            else if (kind == KayaWire.OccKindValueChanged)
-            {
-                if (nodeValues.TryGetValue(id, out var fn))
-                    Dispatch(tx => fn(tx, keys, payload is double d ? d : 0.0));
-            }
-            else if (kind == KayaWire.OccKindValueCommitted && keys.Count == 0)
-            {
-                if (widgetCommits.TryGetValue(id, out var fn))
-                    Dispatch(tx => fn(tx, payload is double d ? d : 0.0));
-            }
-            else if (kind == KayaWire.OccKindValueCommitted)
-            {
-                if (nodeCommits.TryGetValue(id, out var fn))
-                    Dispatch(tx => fn(tx, keys, payload is double d ? d : 0.0));
-            }
-            else if (kind == KayaWire.OccKindDateChanged && keys.Count == 0)
-            {
-                if (widgetDates.TryGetValue(id, out var fn))
-                    Dispatch(tx => fn(tx, KayaRecords.DateOf(payload)));
-            }
-            else if (kind == KayaWire.OccKindDateChanged)
-            {
-                if (nodeDates.TryGetValue(id, out var fn))
-                    Dispatch(tx => fn(tx, keys, KayaRecords.DateOf(payload)));
-            }
-            else if (kind == KayaWire.OccKindTimeChanged && keys.Count == 0)
-            {
-                if (widgetTimes.TryGetValue(id, out var fn))
-                    Dispatch(tx => fn(tx, KayaRecords.TimeOf(payload)));
-            }
-            else if (kind == KayaWire.OccKindTimeChanged)
-            {
-                if (nodeTimes.TryGetValue(id, out var fn))
-                    Dispatch(tx => fn(tx, keys, KayaRecords.TimeOf(payload)));
-            }
-            else if (kind == KayaWire.OccKindCloseRequested)
-            {
-                if (closeRequested.TryGetValue(id, out var fn))
-                    Dispatch(tx => fn(tx));
-            }
-            else if (kind == KayaWire.OccKindWindowClosed)
-            {
-                // One-shot: the window is gone; both registrations
-                // retire with it.
-                closeRequested.Remove(id);
-                if (windowClosed.Remove(id, out var fn))
-                    Dispatch(tx => fn(tx));
-            }
-            else if (kind == KayaWire.OccKindSectionSelected)
-            {
+                // THE CANVAS'S TWO ASKS ARE ANSWERED HERE AND NEVER HANDED
+                // OVER (docs/canvas-plan.md §3.2.1). No registration means
+                // DROP, like any unclaimed occurrence. AN EMPTY KEY PATH IS
+                // THE WHOLE RULE HERE: the size policy is a live-zone
+                // declaration and the core refuses one against a template node
+                // by name (docs/deferred.md, THE TEMPLATE ZONE IS REFUSED).
+                case DrawRequested { Live: true } ask
+                    when draws.TryGetValue(ask.Id, out var onDraw):
+                    Dispatch(tx => AnswerCanvasAsk(tx, ask.Id, onDraw, ask.Ask));
+                    break;
+                case SortRequested { Live: true } sortLive
+                    when sortHandlers.TryGetValue(sortLive.Id, out var onSort):
+                    Dispatch(tx => onSort(tx, sortLive.Column));
+                    break;
+                case SortRequested sortRow when nodeSorts.TryGetValue(sortRow.Id, out var onSortRow):
+                    Dispatch(tx => onSortRow(tx, sortRow.Keys, sortRow.Column));
+                    break;
+                case ButtonClicked { Live: true } clickLive
+                    when widgetHandlers.TryGetValue(clickLive.Id, out var onClick):
+                    Dispatch(onClick);
+                    break;
+                case ButtonClicked clickRow
+                    when nodeHandlers.TryGetValue(clickRow.Id, out var onClickRow):
+                    Dispatch(tx => onClickRow(tx, clickRow.Keys));
+                    break;
+                case TextChanged { Live: true } textLive
+                    when widgetChanges.TryGetValue(textLive.Id, out var onText):
+                    Dispatch(tx => onText(tx, textLive.Text));
+                    break;
+                case TextChanged textRow
+                    when nodeChanges.TryGetValue(textRow.Id, out var onTextRow):
+                    Dispatch(tx => onTextRow(tx, textRow.Keys, textRow.Text));
+                    break;
+                // THE MIRROR FOLLOWS FIRST, and unconditionally — before the
+                // handler lookup, so a rich textarea nobody registered for
+                // still keeps its document in step
+                // (docs/rich-text-plan.md R1).
+                case TextEdited { Live: true } editLive:
+                    AbsorbEdit(editLive.Id, editLive.Act.Range, editLive.Act.Inserted,
+                        editLive.Act.Marks);
+                    if (widgetEdits.TryGetValue(editLive.Id, out var onEditLive))
+                        Dispatch(tx => onEditLive(tx, editLive.Act));
+                    break;
+                // A STAMPED COPY FOLDS INTO ITS ROW, never into a mirror the
+                // app cannot address (docs/rich-text-plan.md §19).
+                case TextEdited editRow:
+                    FoldRowDocument(editRow.Id, editRow.Keys,
+                        doc => FoldEdit(doc, editRow.Act.Range, editRow.Act.Inserted,
+                            editRow.Act.Marks));
+                    if (nodeEdits.TryGetValue(editRow.Id, out var onEditRow))
+                        Dispatch(tx => onEditRow(tx, editRow.Keys, editRow.Act));
+                    break;
+                case TextFormatted { Live: true } actLive:
+                    AbsorbFormat(actLive.Id, actLive.Act);
+                    if (widgetFormats.TryGetValue(actLive.Id, out var onActLive))
+                        Dispatch(tx => onActLive(tx, actLive.Act));
+                    break;
+                case TextFormatted actRow:
+                    FoldRowDocument(actRow.Id, actRow.Keys, doc => FoldFormat(doc, actRow.Act));
+                    if (nodeFormats.TryGetValue(actRow.Id, out var onActRow))
+                        Dispatch(tx => onActRow(tx, actRow.Keys, actRow.Act));
+                    break;
+                case Toggled { Live: true } toggleLive
+                    when widgetToggles.TryGetValue(toggleLive.Id, out var onToggle):
+                    Dispatch(tx => onToggle(tx, toggleLive.Checked));
+                    break;
+                case Toggled toggleRow
+                    when nodeToggles.TryGetValue(toggleRow.Id, out var onToggleRow):
+                    Dispatch(tx => onToggleRow(tx, toggleRow.Keys, toggleRow.Checked));
+                    break;
+                case ValueChanged { Live: true } valueLive
+                    when widgetValues.TryGetValue(valueLive.Id, out var onValue):
+                    Dispatch(tx => onValue(tx, valueLive.Value));
+                    break;
+                case ValueChanged valueRow
+                    when nodeValues.TryGetValue(valueRow.Id, out var onValueRow):
+                    Dispatch(tx => onValueRow(tx, valueRow.Keys, valueRow.Value));
+                    break;
+                case ValueCommitted { Live: true } commitLive
+                    when widgetCommits.TryGetValue(commitLive.Id, out var onCommit):
+                    Dispatch(tx => onCommit(tx, commitLive.Value));
+                    break;
+                case ValueCommitted commitRow
+                    when nodeCommits.TryGetValue(commitRow.Id, out var onCommitRow):
+                    Dispatch(tx => onCommitRow(tx, commitRow.Keys, commitRow.Value));
+                    break;
+                case DateChanged { Live: true } dateLive
+                    when widgetDates.TryGetValue(dateLive.Id, out var onDate):
+                    Dispatch(tx => onDate(tx, dateLive.Date));
+                    break;
+                case DateChanged dateRow when nodeDates.TryGetValue(dateRow.Id, out var onDateRow):
+                    Dispatch(tx => onDateRow(tx, dateRow.Keys, dateRow.Date));
+                    break;
+                case TimeChanged { Live: true } timeLive
+                    when widgetTimes.TryGetValue(timeLive.Id, out var onTime):
+                    Dispatch(tx => onTime(tx, timeLive.Time));
+                    break;
+                case TimeChanged timeRow when nodeTimes.TryGetValue(timeRow.Id, out var onTimeRow):
+                    Dispatch(tx => onTimeRow(tx, timeRow.Keys, timeRow.Time));
+                    break;
+                case CloseRequested close when closeRequested.TryGetValue(close.Id, out var onClose):
+                    Dispatch(tx => onClose(tx));
+                    break;
+                case WindowClosed gone:
+                    // One-shot: the window is gone; both registrations
+                    // retire with it.
+                    closeRequested.Remove(gone.Id);
+                    if (windowClosed.Remove(gone.Id, out var onGone))
+                        Dispatch(tx => onGone(tx));
+                    break;
                 // NOT one-shot: sections never die, and the user can
                 // return any number of times (id is the section; the
                 // window rides as the payload). A programmatic
                 // SelectSection never lands here (the echo doctrine).
-                if (sectionSelected.TryGetValue(id, out var fn))
-                    Dispatch(fn);
-            }
-            else if (kind == KayaWire.OccKindEntryPopped)
-            {
-                // One-shot: the entry is gone; both registrations
-                // retire with it.
-                backRequested.Remove(id);
-                if (entryPopped.Remove(id, out var fn))
-                    Dispatch(tx => fn(tx));
-            }
-            else if (kind == KayaWire.OccKindBackRequested)
-            {
-                if (backRequested.TryGetValue(id, out var fn))
-                    Dispatch(tx => fn(tx));
-            }
-            else if (kind == KayaWire.OccKindAlertResult)
-            {
-                // One-shot: the registration retires with the result;
-                // payload is the parsed u32 choice.
-                if (alerts.Remove(id, out var fn))
-                    Dispatch(tx => fn(tx, AlertChoices.FromWire(payload is uint c ? c : 0)));
-            }
-            else if (kind == KayaWire.OccKindLinkOpened)
-            {
+                case SectionSelected section
+                    when sectionSelected.TryGetValue(section.Id, out var onSection):
+                    Dispatch(onSection);
+                    break;
+                case EntryPopped popped:
+                    // One-shot: the entry is gone; both registrations
+                    // retire with it.
+                    backRequested.Remove(popped.Id);
+                    if (entryPopped.Remove(popped.Id, out var onPopped))
+                        Dispatch(tx => onPopped(tx));
+                    break;
+                case BackRequested back when backRequested.TryGetValue(back.Id, out var onBack):
+                    Dispatch(tx => onBack(tx));
+                    break;
+                // One-shot: the registration retires with the result.
+                case AlertAnswered alert when alerts.Remove(alert.Id, out var onAlert):
+                    Dispatch(tx => onAlert(tx, alert.Choice));
+                    break;
                 // id is the ROUTE the core matched
                 // (docs/app-links-plan.md §4), and NOT one-shot. TWO
                 // DROPS WITH DISJOINT CAUSES: route 0 is a URL NO ROUTE
                 // TOOK, which the core announced naming every declared
                 // pattern, so it is silent here; a route that matched
                 // and reached no handler is this binding's to announce.
-                LinkOpened(id, LinkUrlOf(payload), LinkParamsOf(payload));
-            }
-            else if (kind == KayaWire.OccKindNotificationResult)
-            {
-                NotificationResult(id, NotificationOutcomes.FromWire(payload is uint o ? o : 0));
-            }
-            else if (kind == KayaWire.OccKindFileDialogResult)
-            {
+                case LinkArrived link:
+                    LinkOpened(link.Id, link.Url, link.Params);
+                    break;
+                case NotificationAnswered notified:
+                    NotificationResult(notified.Id, notified.Outcome);
+                    break;
                 // One-shot like the alert, and the id retires with it.
                 // EMPTY IS CANCEL, for a save dialog too (it reaches the
                 // guest as null, narrowed at SaveFile).
-                if (fileDialogs.Remove(id, out var fn))
-                {
-                    var files = payload as List<PickedFile> ?? new List<PickedFile>();
-                    Dispatch(tx => fn(tx, files));
-                }
-            }
-            else if (kind == KayaWire.OccKindClipboardResult)
-            {
+                case FilesPicked picked when fileDialogs.Remove(picked.Id, out var onPicked):
+                    Dispatch(tx => onPicked(tx, picked.Files));
+                    break;
                 // One-shot like the alert, and the request retires with
                 // it. EMPTY IS THE UNIVERSAL NO and arrives as null —
                 // denied, unfocused, absent and nothing-we-accept alike,
                 // because no platform says which.
-                if (clipboardReads.Remove(id, out var fn))
-                {
-                    var clip = Representation.From(payload as KayaWire.ClipValues);
-                    Dispatch(tx => fn(tx, clip));
-                }
-            }
-            // An undo (or redo), as the CORE put it back. The id is the
-            // WINDOW: one ledger per window. THE MIRROR FOLLOWS FIRST, and
-            // unconditionally — before the handler lookup, so a window
-            // that registered no handler still keeps its mirror in step.
-            else if (kind == KayaWire.OccKindUndone || kind == KayaWire.OccKindRedone)
-            {
-                var step = (UndoStep)payload!;
-                AbsorbUndo(step.Delta);
-                var table = kind == KayaWire.OccKindUndone ? undone : redone;
-                // NOT one-shot: a history is walked as often as the user
-                // likes, so the registration outlives every step.
-                if (table.TryGetValue(id, out var fn))
-                    Dispatch(tx => fn(tx, step.Label, step.Delta));
-            }
-            // A paste rides a click tag verbatim, so it arrives on the
-            // ordinary widget/node split. Never empty: a paste that
-            // delivered nothing is not an occurrence.
-            else if (kind == KayaWire.OccKindPasted && keys.Count == 0)
-            {
-                if (widgetPastes.TryGetValue(id, out var fn)
-                    && Representation.From(payload as KayaWire.ClipValues) is { } clip)
-                    Dispatch(tx => fn(tx, clip));
-            }
-            else if (kind == KayaWire.OccKindPasted)
-            {
-                if (nodePastes.TryGetValue(id, out var fn)
-                    && Representation.From(payload as KayaWire.ClipValues) is { } clip)
-                    Dispatch(tx => fn(tx, keys, clip));
-            }
-            // A drop rides the same tag with four more words
-            // (docs/dnd-plan.md D1), so it arrives on the ordinary
-            // widget/node split — a stamped copy's landing and a
-            // reorderable row's own drag_ended carry the copy's keys (§4).
-            else if (kind == KayaWire.OccKindDropped && keys.Count == 0)
-            {
-                if (widgetDrops.TryGetValue(id, out var fn)
-                    && payload is KayaWire.DropValues drop)
-                {
-                    var answer = Dropped.From(drop);
-                    Dispatch(tx => fn(tx, answer));
-                }
-            }
-            else if (kind == KayaWire.OccKindDropped)
-            {
-                if (nodeDrops.TryGetValue(id, out var fn)
-                    && payload is KayaWire.DropValues drop)
-                {
-                    var answer = Dropped.From(drop);
-                    Dispatch(tx => fn(tx, keys, answer));
-                }
-            }
-            else if (kind == KayaWire.OccKindDragEnded && keys.Count == 0)
-            {
-                if (dragEnded.TryGetValue(id, out var fn))
-                {
-                    var answer = Dropped.Operate(payload is uint m ? m : 0);
-                    Dispatch(tx => fn(tx, answer));
-                }
-            }
-            else if (kind == KayaWire.OccKindDragEnded)
-            {
-                if (nodeDragEnded.TryGetValue(id, out var fn))
-                {
-                    var answer = Dropped.Operate(payload is uint m ? m : 0);
-                    Dispatch(tx => fn(tx, keys, answer));
-                }
-            }
-            // Menu occurrences key the menu-item tables — their own id
-            // space. Node-anchored context items carry the stamped
-            // copy's keys; toggles carry the new state, radio groups the
-            // new 0-based index.
-            else if (kind == KayaWire.OccKindMenuActivated && keys.Count == 0)
-            {
-                if (menuActivated.TryGetValue(id, out var fn))
-                    Dispatch(fn);
-            }
-            else if (kind == KayaWire.OccKindMenuActivated)
-            {
-                if (menuActivatedNode.TryGetValue(id, out var fn))
-                    Dispatch(tx => fn(tx, keys));
-            }
-            else if (kind == KayaWire.OccKindMenuToggled && keys.Count == 0)
-            {
-                if (menuToggled.TryGetValue(id, out var fn))
-                    Dispatch(tx => fn(tx, isChecked));
-            }
-            else if (kind == KayaWire.OccKindMenuToggled)
-            {
-                if (menuToggledNode.TryGetValue(id, out var fn))
-                    Dispatch(tx => fn(tx, keys, isChecked));
-            }
-            else if (kind == KayaWire.OccKindMenuValueChanged && keys.Count == 0)
-            {
-                if (menuSelected.TryGetValue(id, out var fn))
-                    Dispatch(tx => fn(tx, payload is double d ? (int)d : 0));
-            }
-            else if (kind == KayaWire.OccKindMenuValueChanged)
-            {
-                if (menuSelectedNode.TryGetValue(id, out var fn))
-                    Dispatch(tx => fn(tx, keys, payload is double d ? (int)d : 0));
+                case ClipboardRead read when clipboardReads.Remove(read.Id, out var onRead):
+                    Dispatch(tx => onRead(tx, read.Clip));
+                    break;
+                // An undo (or redo), as the CORE put it back. The id is the
+                // WINDOW: one ledger per window. THE MIRROR FOLLOWS FIRST, and
+                // unconditionally — before the handler lookup, so a window
+                // that registered no handler still keeps its mirror in step.
+                case HistoryWalked walk:
+                    AbsorbUndo(walk.Step.Delta);
+                    // NOT one-shot: a history is walked as often as the user
+                    // likes, so the registration outlives every step.
+                    var table = walk.Redo ? redone : undone;
+                    if (table.TryGetValue(walk.Id, out var onWalk))
+                        Dispatch(tx => onWalk(tx, walk.Step.Label, walk.Step.Delta));
+                    break;
+                // A paste rides a click tag verbatim, so it arrives on the
+                // ordinary widget/node split. Never empty: a paste that
+                // delivered nothing is not an occurrence.
+                case Pasted { Live: true, Clip: { } clipLive } pasteLive
+                    when widgetPastes.TryGetValue(pasteLive.Id, out var onPaste):
+                    Dispatch(tx => onPaste(tx, clipLive));
+                    break;
+                case Pasted { Clip: { } clipRow } pasteRow
+                    when nodePastes.TryGetValue(pasteRow.Id, out var onPasteRow):
+                    Dispatch(tx => onPasteRow(tx, pasteRow.Keys, clipRow));
+                    break;
+                // A drop rides the same tag with four more words
+                // (docs/dnd-plan.md D1), so it arrives on the ordinary
+                // widget/node split — a stamped copy's landing and a
+                // reorderable row's own drag_ended carry the copy's keys (§4).
+                case DropLanded { Live: true } dropLive
+                    when widgetDrops.TryGetValue(dropLive.Id, out var onDrop):
+                    Dispatch(tx => onDrop(tx, dropLive.Answer));
+                    break;
+                case DropLanded dropRow when nodeDrops.TryGetValue(dropRow.Id, out var onDropRow):
+                    Dispatch(tx => onDropRow(tx, dropRow.Keys, dropRow.Answer));
+                    break;
+                case DragEnded { Live: true } dragLive
+                    when dragEnded.TryGetValue(dragLive.Id, out var onDrag):
+                    Dispatch(tx => onDrag(tx, dragLive.Operation));
+                    break;
+                case DragEnded dragRow
+                    when nodeDragEnded.TryGetValue(dragRow.Id, out var onDragRow):
+                    Dispatch(tx => onDragRow(tx, dragRow.Keys, dragRow.Operation));
+                    break;
+                // Menu occurrences key the menu-item tables — their own id
+                // space. Node-anchored context items carry the stamped
+                // copy's keys; toggles carry the new state, radio groups the
+                // new 0-based index.
+                case MenuActivated { Live: true } menuLive
+                    when menuActivated.TryGetValue(menuLive.Id, out var onMenu):
+                    Dispatch(onMenu);
+                    break;
+                case MenuActivated menuRow
+                    when menuActivatedNode.TryGetValue(menuRow.Id, out var onMenuRow):
+                    Dispatch(tx => onMenuRow(tx, menuRow.Keys));
+                    break;
+                case MenuToggled { Live: true } menuFlagLive
+                    when menuToggled.TryGetValue(menuFlagLive.Id, out var onMenuFlag):
+                    Dispatch(tx => onMenuFlag(tx, menuFlagLive.Checked));
+                    break;
+                case MenuToggled menuFlagRow
+                    when menuToggledNode.TryGetValue(menuFlagRow.Id, out var onMenuFlagRow):
+                    Dispatch(tx => onMenuFlagRow(tx, menuFlagRow.Keys, menuFlagRow.Checked));
+                    break;
+                case MenuValueChanged { Live: true } menuPickLive
+                    when menuSelected.TryGetValue(menuPickLive.Id, out var onMenuPick):
+                    Dispatch(tx => onMenuPick(tx, menuPickLive.Index));
+                    break;
+                case MenuValueChanged menuPickRow
+                    when menuSelectedNode.TryGetValue(menuPickRow.Id, out var onMenuPickRow):
+                    Dispatch(tx => onMenuPickRow(tx, menuPickRow.Keys, menuPickRow.Index));
+                    break;
             }
         }
     }
-
-
 
     /// Enter the core on the calling thread (must be the process main
     /// thread), dispatching occurrences on the app thread; returns the
@@ -2251,8 +2427,10 @@ sealed class Tx : IDisposable
         KayaApp.RequireAppThread();
     }
 
-    /// Called by Build on the way out, on every path.
-    public void Dispose() => disposed = true;
+    /// Called by Build on the way out, on every path. EXPLICIT: `using
+    /// var tx` binds the interface, and the guest handed a live Tx has no
+    /// Dispose to call.
+    void IDisposable.Dispose() => disposed = true;
 
     // How to undo this transaction's model edits: a snapshot per
     // touched collection, taken on first touch.
@@ -2355,22 +2533,14 @@ sealed class Tx : IDisposable
                 App.Model[coll] = instances = new List<KayaInstance>();
             instances.Add(instance);
         }
-        for (int i = 0; i < instance.Entries.Count; i++)
-        {
-            if (Equals(instance.Entries[i].Key, key))
-            {
-                instance.Entries[i] = new KeyValuePair<object, object?>(key, value);
-                return;
-            }
-        }
-        instance.Entries.Add(new KeyValuePair<object, object?>(key, value));
+        instance.Entries[key] = value;
     }
 
     void ModelRemove(ulong coll, IReadOnlyList<object> path, object key)
     {
         Touch(coll);
         var instance = App.InstanceOf(coll, path);
-        instance?.Entries.RemoveAll(e => Equals(e.Key, key));
+        instance?.Entries.Remove(key);
         // The core tears down the copy, taking descendant collection
         // instances with it; the model follows.
         var prefix = new List<object>(path) { key };
@@ -2382,17 +2552,17 @@ sealed class Tx : IDisposable
         Touch(coll);
         var instance = App.InstanceOf(coll, path);
         // Both validated before anything mutates.
-        int pos = instance == null ? -1 : instance.Entries.FindIndex(e => Equals(e.Key, key));
+        int pos = instance == null ? -1 : instance.Entries.IndexOf(key);
         if (instance == null || pos < 0)
             throw new InvalidOperationException($"kaya: move of missing key {key}");
-        if (before.Length > 0 && !instance.Entries.Exists(e => Equals(e.Key, before[0])))
+        if (before.Length > 0 && !instance.Entries.ContainsKey(before[0]))
             throw new InvalidOperationException($"kaya: move before missing key {before[0]}");
-        var entry = instance.Entries[pos];
+        var entry = instance.Entries.GetAt(pos);
         instance.Entries.RemoveAt(pos);
         int at = before.Length > 0
-            ? instance.Entries.FindIndex(e => Equals(e.Key, before[0]))
+            ? instance.Entries.IndexOf(before[0])
             : instance.Entries.Count;
-        instance.Entries.Insert(at, entry);
+        instance.Entries.Insert(at, entry.Key, entry.Value);
     }
 
     List<object> KeysOf(Collection c)
@@ -2684,8 +2854,8 @@ sealed class Tx : IDisposable
         var flat = new List<object>();
         foreach (TextRun run in document.Runs)
         {
-            flat.Add(run.Start);
-            flat.Add(run.Stop);
+            flat.Add((long)run.Range.Start);
+            flat.Add((long)run.Range.Stop);
             flat.Add(run.Name);
             flat.Add(run.Value);
         }
@@ -2700,16 +2870,16 @@ sealed class Tx : IDisposable
     /// composition ends (docs/rich-text-plan.md §7).
     public void ApplyEdit(Widget w, Edit edit)
     {
-        App.AbsorbEdit(w.Id, edit.Start, edit.Stop, edit.Inserted, edit.Marks);
+        App.AbsorbEdit(w.Id, edit.Range, edit.Inserted, edit.Marks);
         var flat = new List<object>();
         foreach (TextRun run in edit.Runs)
         {
-            flat.Add(run.Start);
-            flat.Add(run.Stop);
+            flat.Add((long)run.Range.Start);
+            flat.Add((long)run.Range.Stop);
             flat.Add(run.Name);
             flat.Add(run.Value);
         }
-        Records.Add(KayaWire.TxApplyEdit(w.Id, (ulong)edit.Start, (ulong)edit.Stop,
+        Records.Add(KayaWire.TxApplyEdit(w.Id, edit.Range.Start, edit.Range.Stop,
             (uint)edit.Runs.Count, flat.ToArray(), edit.Inserted));
     }
 
@@ -2717,9 +2887,14 @@ sealed class Tx : IDisposable
     /// a toolbar button sends; the widget answers through
     /// KayaApp.OnFormat (docs/rich-text-plan.md R1). Over a collapsed
     /// selection the attribute is armed for the next keystroke instead.
-    /// `value` is "true" for a flag, the URL for link.
+    /// `value` is the URL for link, a BlockKind's spelling for block;
+    /// a flag attribute takes the bool overload.
     public void Format(Widget w, string name, string value) =>
         Records.Add(KayaWire.TxFormatText(w.Id, 0, 0, 0, 0, new object[] { name, value }));
+
+    /// A flag attribute over the selection, on or off.
+    public void Format(Widget w, string name, bool on) =>
+        Format(w, name, MarkValue.Of(on));
 
     /// The named acts (the review page's ruling 1 — docs/rich-text-plan.md
     /// §18): each is Format with its name, over the widget's own selection;
@@ -2750,17 +2925,21 @@ sealed class Tx : IDisposable
         // (docs/rich-text-plan.md §17).
         TextRange at = App.RangedActBounds(w.Id, range, name);
         string? mark = name == "block" && value == "body" ? null : value;
-        App.AbsorbFormat(w.Id, new Format((long)at.Start, (long)at.Stop, name, mark));
+        App.AbsorbFormat(w.Id, new Format(at, name, mark));
         Records.Add(KayaWire.TxFormatText(
             w.Id, mark == null ? 1u : 0u, 1, at.Start, at.Stop,
             new object[] { name, mark ?? "" }));
     }
 
+    /// A flag attribute over a byte range, on or off.
+    public void FormatRange(Widget w, TextRange range, string name, bool on) =>
+        FormatRange(w, range, name, MarkValue.Of(on));
+
     /// FormatRange's removal.
     public void UnformatRange(Widget w, TextRange range, string name)
     {
         TextRange at = App.RangedActBounds(w.Id, range, name);
-        App.AbsorbFormat(w.Id, new Format((long)at.Start, (long)at.Stop, name, null));
+        App.AbsorbFormat(w.Id, new Format(at, name, null));
         Records.Add(KayaWire.TxFormatText(
             w.Id, 1, 1, at.Start, at.Stop, new object[] { name, "" }));
     }
@@ -3493,6 +3672,21 @@ sealed class Tx : IDisposable
         return App.InstanceOf(c.Id, c.Path)?.Entries.Count ?? 0;
     }
 
+    /// One entry by key, straight out of the model's own ordered map —
+    /// no copy and no dictionary built per call. The typed doors are
+    /// RecordCollection.TryGet and SumCollection.TryGet.
+    internal bool TryGetRaw(Collection c, object key, out object? value)
+    {
+        GuardMirrorRead();
+        var instance = App.InstanceOf(c.Id, c.Path);
+        if (instance == null)
+        {
+            value = null;
+            return false;
+        }
+        return instance.Entries.TryGetValue(key, out value);
+    }
+
     /// REQUEST the app's brand accent (docs/styling-plan.md D1/D2).
     /// `seed` is one packed sRGB hex (0xRRGGBB); `light:`/`dark:` are
     /// per-appearance overrides and the seed fills whichever is left
@@ -3624,7 +3818,7 @@ sealed class Tx : IDisposable
         bool? vetoClose = null, uint? panes = null, bool? dirty = null,
         bool? rememberFrame = null,
         double? inset = null, SectionsPresentation? sectionsPresentation = null,
-        long? appearance = null,
+        Appearance? appearance = null,
         Action<Tx>? onCloseRequested = null, Action<Tx>? onClosed = null,
         Action<Tx, string, UndoDelta>? onUndone = null,
         Action<Tx, string, UndoDelta>? onRedone = null,
@@ -3646,7 +3840,7 @@ sealed class Tx : IDisposable
         // The app's OWN light/dark choice, applied process-wide from the
         // default window (docs/tasks-s2b-plan.md R1-R3).
         if (appearance is { } ap)
-            Records.Add(KayaWire.TxSetWindowAppearance(id, ap));
+            Records.Add(KayaWire.TxSetWindowAppearance(id, (long)ap));
         if (onCloseRequested is { } r) App.closeRequested[id] = r;
         if (onClosed is { } c) App.windowClosed[id] = c;
         // Each fires every time kaya routes an undo (or a redo) there,
@@ -3676,7 +3870,7 @@ sealed class Tx : IDisposable
         bool? vetoClose = null, uint? panes = null, bool? dirty = null,
         bool? rememberFrame = null,
         double? inset = null, SectionsPresentation? sectionsPresentation = null,
-        long? appearance = null,
+        Appearance? appearance = null,
         Action<Tx>? onCloseRequested = null, Action<Tx>? onClosed = null,
         Action<Tx, string, UndoDelta>? onUndone = null,
         Action<Tx, string, UndoDelta>? onRedone = null,
@@ -4061,39 +4255,17 @@ sealed class Tx : IDisposable
     public const string AcceptImage = "image";
     public const string AcceptFiles = "files";
 
-    /// The closed standard-command vocabulary (DESIGN.md, Menus): macOS
-    /// places this one in the application menu, and every other host
-    /// leaves the item where the app declared it.
-    public const string RoleSettings = "settings";
-
-    /// The three clipboard commands. They lower to the platform's own,
-    /// act on the FOCUSED widget, and work out their own enablement from
-    /// what the clipboard offers and what that widget accepts. Copy() and
-    /// ReadClipboard() are for overriding that default and for targets
-    /// with no native behaviour.
-    public const string RoleCut = "cut";
-    public const string RoleCopy = "copy";
-    public const string RolePaste = "paste";
-
-    /// Undo and Redo act on the FOCUSED widget first — a text field
-    /// whose own stack has something to give answers before the core's
-    /// ledger does — and configure their own enablement
-    /// (docs/undo-plan.md D6). An app declares the two items and writes
-    /// nothing else.
-    public const string RoleUndo = "undo";
-    public const string RoleRedo = "redo";
-
     /// An action — a leaf command firing exactly one menu_activated
     /// occurrence for a menu click OR its shortcut. The shortcut is
     /// canonicalized by the binding's one parser; the root judges its
     /// anchor (window catalogs only).
     public MenuItem Item(TextSource label, string? shortcut = null,
         BoolSource? enabled = null, byte[]? icon = null, Symbol? symbol = null,
-        bool primary = false, string? role = null, Action<Tx>? onActivate = null)
+        bool primary = false, MenuRole? role = null, Action<Tx>? onActivate = null)
     {
         var m = NewMenuItem(KayaWire.MenuKindAction, label);
         if (shortcut != null) Records.Add(KayaWire.TxSetMenuShortcut(m.Id, shortcut));
-        if (role != null) Records.Add(KayaWire.TxSetMenuRole(m.Id, role));
+        if (role is MenuRole named) Records.Add(KayaWire.TxSetMenuRole(m.Id, named.Name()));
         MenuTail(m, enabled, icon, symbol);
         if (primary) Records.Add(KayaWire.TxSetMenuPrimary(m.Id, true));
         if (onActivate != null) App.menuActivated[m.Id] = onActivate;
@@ -4177,7 +4349,7 @@ sealed class Tx : IDisposable
     public void Menu(MenuItem item, TextSource? label = null,
         BoolSource? enabled = null, BoolSource? isChecked = null,
         IndexSource? value = null, byte[]? icon = null, Symbol? symbol = null,
-        bool? primary = null, string? shortcut = null, string? role = null,
+        bool? primary = null, string? shortcut = null, MenuRole? role = null,
         MenuItem[]? items = null)
     {
         MenuAppendAll(item, items);
@@ -4189,7 +4361,7 @@ sealed class Tx : IDisposable
         if (symbol is Symbol sym) MenuSymbol(item, sym);
         if (primary is { } p) Records.Add(KayaWire.TxSetMenuPrimary(item.Id, p));
         if (shortcut != null) Records.Add(KayaWire.TxSetMenuShortcut(item.Id, shortcut));
-        if (role != null) Records.Add(KayaWire.TxSetMenuRole(item.Id, role));
+        if (role is MenuRole named) Records.Add(KayaWire.TxSetMenuRole(item.Id, named.Name()));
     }
 
     /// A radio group — the Choice contract with the platform's checkmark

@@ -8,14 +8,13 @@
    The textarea's handler is a no-op because 'textareaOn' is the only
    spelling this binding has. -}
 
-import qualified Data.Text as T
 import KayaApp
 
 main :: IO ()
 main = kayaMain $ \app -> do
   buildTx app $ do
-    probe <- signal (T.pack "grow probe")
-    one <- signal (T.pack "one")
+    probe <- signalText "grow probe"
+    one <- signalText "one"
 
     root <-
       column

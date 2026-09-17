@@ -14,8 +14,8 @@ async function askDelete(): Promise<void> {
     actions: ["Delete", "Archive"],
     cancel: "Keep",
   });
-  if (choice === null) status.set("kept");
-  else if (choice === 1) status.set("archived");
+  if (choice === "cancel") status.set("kept");
+  else if (choice === "action1") status.set("archived");
   else status.set("deleted");
 }
 
@@ -26,7 +26,7 @@ async function askEject(): Promise<void> {
     actions: ["Eject"],
     cancel: "Hold",
   });
-  status.set(choice === null ? "held" : "ejected");
+  status.set(choice === "cancel" ? "held" : "ejected");
 }
 
 const { status } = app.window({ title: "confirm" }, () => {

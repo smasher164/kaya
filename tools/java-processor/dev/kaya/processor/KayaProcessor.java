@@ -164,7 +164,7 @@ public final class KayaProcessor extends AbstractProcessor {
             w(b, "     * its witness, asserted again by the scene. */");
             w(b, "    static java.util.Optional<%sPatch> as%s(KayaApp.Tx tx,", subName, subName);
             w(b, "            KayaSums.SumCollection<%s, %s> c, %s key) {", key, sumRef, key);
-            w(b, "        return c.get(tx, key) instanceof %s", subRef);
+            w(b, "        return c.find(tx, key).orElse(null) instanceof %s", subRef);
             w(b, "                ? java.util.Optional.of(new %sPatch(tx, c, key))", subName);
             w(b, "                : java.util.Optional.empty();");
             w(b, "    }");

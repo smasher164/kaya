@@ -49,8 +49,8 @@ function onRedo(): void {
 
 const { status, native, owned } = app.window({ title: "ownundo" }, () => {
   app.menu("Edit", () => {
-    kaya.item("Undo", { role: kaya.ROLE_UNDO, onActivate: onUndo });
-    kaya.item("Redo", { role: kaya.ROLE_REDO, onActivate: onRedo });
+    kaya.item("Undo", { role: "undo", onActivate: onUndo });
+    kaya.item("Redo", { role: "redo", onActivate: onRedo });
   });
 
   const status = kaya.signal("undo 0 redo 0");

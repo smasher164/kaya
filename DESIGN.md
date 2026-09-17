@@ -393,6 +393,19 @@ compared the wire's integers by their KayaWire names.
 the C floor out of its walk by design (the floor IS the wire) and a
 check or bench that packs the wire on purpose exempt by name.
 
+**The Haskell surface is Text, keyed by a literal, with one exception
+stated** (the redo of 2026-09-17, after the idiom pass's first Haskell arm
+shipped 193 ascriptions): every attribute that takes a string has a
+monomorphic constructor and a `Bound` twin for a signal (`A11yId "x"`,
+`A11yIdBound sig`) so a literal infers under OverloadedStrings; `Signal v`
+is phantom-typed with monomorphic creators; every key slot takes `Key`, a
+type a string or integer literal already is (`IsString`, `Num`), so
+`insertRecord notes "a" note` and `remove coll 3` carry no ascription and
+the wire constructor stops inside Kaya.Core. The exception:
+`notificationResult`, the ring's own decision function, keeps the wire's
+outcome word because the checks drive it with wire constants and
+check-sugar-surface reads that exact signature; nothing a guest calls does.
+
 **One id space for widgets and template nodes.** Every binding mints
 live widget ids and template node ids from ONE monotone counter per app
 — signals, collections, alerts/dialogs and menu items keep their own —

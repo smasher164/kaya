@@ -10,13 +10,13 @@ import KayaApp
 lineTally :: Text -> Text
 lineTally text
   | T.null text = "0 lines"
-  | otherwise = T.pack (show (length (T.lines text)) ++ " lines")
+  | otherwise = tshow (length (T.lines text)) <> " lines"
 
 main :: IO ()
 main = kayaMain $ \app -> do
   (lineCount, editor, clearBtn) <- buildTx app $ do
     window primary [WTitle "textarea"]
-    lineCount <- signal (T.pack "0 lines")
+    lineCount <- signalText "0 lines"
 
     -- Realized here because the handlers below need their handles.
     editor <- textarea

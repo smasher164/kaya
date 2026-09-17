@@ -9,7 +9,7 @@ let () =
   let status = ref None in
   build app (fun () ->
      window ~title:"panels" ();
-     let s = signal_str ("two panels") in
+     let s = signal Scalar.Str ("two panels") in
      status := Some s;
 
      let root = column [ label ~bind:s (* label#0 *) ] () in
@@ -23,7 +23,7 @@ let () =
            destroy_window 1L)
          1L
      in
-     let caption = signal_str ("inspector pane") in
+     let caption = signal Scalar.Str ("inspector pane") in
      let aux = column [ label ~bind:caption (* label#1 *) ] () in
      mount_in 1L aux);
 
