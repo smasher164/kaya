@@ -35,7 +35,11 @@ dev_shell_or_die()
 #
 # Beside them the windows launcher's verb-trace path, held against the
 # name the recorder pulls: check-steps holds the launcher line alone, and
-# nothing held the two ends together.
+# nothing held the two ends together. And the toast moment's own two
+# records one door over (docs/deferred.md, the notes_rust toast entry):
+# no launcher names those — the GUEST writes them beside the verb trace —
+# so their three places are winui/mod.rs's capture, the recorder's pull
+# and deploy-win's pre-leg delete.
 
 import ast
 import re
@@ -49,6 +53,7 @@ IOS = "tools/ios/run-sim.py"
 ANDROID = "tools/android/run-emulator.py"
 WIN = "tools/deploy-win.py"
 STEPS = "tools/check-steps.py"
+WINUI = "crates/kaya/src/winui/mod.rs"
 
 # The recorder class whose body IS each python lane's collect path.
 RECORDERS = {"mac": "MacRecorder", "windows": "WinRecorder",
@@ -61,7 +66,7 @@ UNIVERSAL = ("leg-log", "verb-trace", "shot")
 def sources():
     return {rel: gate.read(rel) for rel in
             (LANE_PY, LANE_SH, LINUX, IOS, ANDROID, WIN,
-             STEPS)}
+             STEPS, WINUI)}
 
 
 def py_block(text, name):
@@ -100,6 +105,28 @@ def declared(src):
 
 # ---------------------------------------------------------------- 1 + 2
 
+def reachable_py(body, name):
+    """Whether a python recorder's collect can actually GET TO the branch
+    that names this section. `"<name>" in body` cannot see a writer
+    method nobody calls: the section is declared, the code is there, and
+    every bundle still carries finish()'s marker for it. A lane's own
+    `<lane>_leg` entry is called by the runner; anything else must be
+    called inside the class. A name spelled outside every method (a
+    class-level sentence) keeps the plain test."""
+    try:
+        tree = ast.parse(body)
+    except SyntaxError:
+        return True
+    lines = body.splitlines(keepends=True)
+    holders = [node.name for node in ast.walk(tree)
+               if isinstance(node, ast.FunctionDef)
+               and f'"{name}"' in "".join(
+                   lines[node.lineno - 1:node.end_lineno])]
+    if not holders:
+        return True
+    return any(h.endswith("_leg") or f"self.{h}(" in body for h in holders)
+
+
 def census_sections(src):
     found = []
     table = declared(src)
@@ -134,7 +161,8 @@ def census_sections(src):
             if not body:
                 found.append(f"{lane}: no {RECORDERS[lane]} in {LANE_PY}")
                 continue
-            reached = [n for n in names if f'"{n}"' in body]
+            reached = [n for n in names
+                       if f'"{n}"' in body and reachable_py(body, n)]
         for name in names:
             if name not in reached:
                 found.append(
@@ -300,6 +328,43 @@ def census_vtrace(src):
     return found
 
 
+def census_toast_files(src):
+    """THE SAME RULE ONE DOOR OVER, for the toast moment's own records.
+    No launcher names these — the GUEST writes them beside the verb trace
+    (crates/kaya/src/winui/mod.rs, `capture_toast_moment`, through
+    vtrace::sibling), so the clause above cannot reach them and the three
+    places are the guest's write, the recorder's pull, and deploy-win's
+    pre-leg delete. Either of the first two moving alone leaves
+    `toast-moment.skip` on every red windows leg, which is the sentence
+    this whole section exists to stop printing; the third missing reads a
+    capture from a PREVIOUS run of the same leg as this one's."""
+    found = []
+    pulled = sorted(set(re.findall(
+        r'C:/kaya/flightrec/\{leg\}-(toast[\w.-]*)"', src[LANE_PY])))
+    if not pulled:
+        return [f"{LANE_PY}: the windows recorder pulls no toast-moment file "
+                f"at all — the section's records are named nowhere this "
+                f"clause can read them"]
+    written = re.findall(r'sibling\("([\w.]+)"\)', src[WINUI])
+    for suffix in pulled:
+        # The WAL is derived from the database's own name, because sqlite
+        # recovers it under no other.
+        base = suffix[:-4] if suffix.endswith("-wal") else suffix
+        if base not in written:
+            found.append(
+                f"{LANE_PY} pulls C:/kaya/flightrec/<leg>-{suffix}, and "
+                f"{WINUI}'s toast capture writes no `{base}` beside the verb "
+                f"trace (vtrace::sibling) — the section would carry its skip "
+                f"on every red leg while the guest wrote a file nobody reads")
+        if f"-{suffix} " not in src[WIN].replace("\\\\", "\\"):
+            found.append(
+                f"{WIN}: does not delete C:\\kaya\\flightrec\\<leg>-{suffix} "
+                f"before the leg — a capture left by the same leg of a "
+                f"PREVIOUS lane run would be pulled and read as this leg's "
+                f"toast")
+    return found
+
+
 def census_collect_fresh(src):
     """THE OLD ANSWER GOES FIRST (docs/traps.md's run_guest_oneshot trap,
     met again by the recorder 2026-09-16): the windows collect polls for
@@ -330,6 +395,7 @@ REAL = sources()
 CENSUSES = (("sections", census_sections), ("skip writers", census_skips),
             ("finish", census_finish), ("capture point", census_when),
             ("windows verb trace", census_vtrace),
+            ("windows toast files", census_toast_files),
             ("windows collect freshness", census_collect_fresh))
 TABLE = declared(REAL)
 gate.counted("lanes declaring a bundle shape", list(TABLE), floor=5)
@@ -429,6 +495,32 @@ n10 = doctored(LANE_PY, r'        self\._ssh\(f\'cmd /c "del \{outputs\} 2>nul &
 gate.negative("N10 a windows collect that polls the last run's answer",
               lambda: census_collect_fresh(n10), want="does not delete its previous outputs")
 
-gate.negatives_ran(10)
+# N11: the toast-moment pull taken off the windows collect while the
+# section stays declared. THE CALL, not the method: five bundles named the
+# toast's class and never its sender because the record was taken at
+# collect, and a writer nobody calls leaves exactly that hole again
+# (docs/deferred.md, the notes_rust toast entry).
+n11 = doctored(LANE_PY, r'\n *self\.toast_moment\(bundle, leg, t0\)',
+               "", "N11 removed the windows toast-moment call")
+gate.negative("N11 a windows toast-moment writer nothing calls",
+              lambda: census_sections(n11), want="`toast-moment` is declared")
+
+# N12: the guest's own name for a toast record moved and the recorder's
+# pull left where it was.
+n12 = doctored(WINUI, r'crate::vtrace::sibling\("toast\.bmp"\)',
+               'crate::vtrace::sibling("toast-elsewhere.bmp")',
+               "N12 renamed the guest's toast picture")
+gate.negative("N12 a toast record the guest writes under another name",
+              lambda: census_toast_files(n12), want="toast.bmp")
+
+# N13: the pre-leg delete of a toast record dropped — the previous run's
+# capture then reads as this leg's.
+n13 = doctored(WIN,
+               r'\n *f"C:\\\\kaya\\\\flightrec\\\\\{name\}-toastwpn\.db "',
+               "", "N13 dropped the pre-leg delete of the toast database")
+gate.negative("N13 a windows leg that keeps the last run's toast capture",
+              lambda: census_toast_files(n13), want="does not delete")
+
+gate.negatives_ran(13)
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

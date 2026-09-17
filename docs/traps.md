@@ -11591,3 +11591,42 @@ the gate: PYTHONPATH pinned at the tree being read for every subprocess,
 and the completeness reader REFUSING a score whose reported
 `packageRootDirectory` is not under that tree (an unpinned run reports
 the root as "" and scores 0, which reads as red rather than as green).
+
+## The toast moment: four measured facts behind the Windows recorder's guest-side capture (2026-09-17)
+
+The `toast-moment` section (crates/kaya/src/winui/mod.rs's
+`capture_toast_moment`, tools/lib/flightrec_lane.py) leans on four things
+that were each measured on the lane's VM the day it landed:
+
+1. THE VERB-TRACE RING NEVER REACHES DISK ON A PANIC. `vtrace::dump` runs
+   from the failed-verdict path and the step watchdog; a guest that panics
+   inside a verb (the foreground dance's own assert) runs neither, which is
+   why every notes_rust bundle before this read `verb-trace.skip`. A line
+   that must survive that path is written with `vtrace::line`, which
+   appends to the trace file NOW, past the ring.
+2. THE NOTIFICATION DATABASE'S NEWEST ROWS ARE IN ITS WAL. wpndatabase.db
+   was 0.7MB beside a 2.5MB wpndatabase.db-wal; a copy of the .db alone
+   (what the collect-time `notifications` section took) cannot see the
+   banner that is up. The copy carries the WAL under sqlite's own name for
+   it (`<copy>.db-wal`), and a read-only sqlite connection to a WAL
+   database leaves `-shm`/`-wal` strays behind on close, which the reader
+   deletes.
+3. A SCREEN BitBlt NEEDS CAPTUREBLT FOR A LAYERED WINDOW, and a toast is
+   one: plain SRCCOPY copies the desktop with the banner missing, which is
+   the one thing the picture exists to show. A 32bpp BMP's fourth byte is
+   left ZERO by a screen BitBlt, and a reader that takes it as alpha shows
+   a fully transparent picture, so the writer sets it to 0xFF; rows go
+   bottom-up under a positive height because not every reader takes a
+   top-down BMP. `Win32_Graphics_Gdi` is refused by Cargo.toml's own
+   comment, so BitBlt joins the hand-written gdi32 block.
+4. A PowerShell-RAISED TOAST DOES NOT TAKE THE FOREGROUND. Under
+   reminder, incomingCall and the packaged notify identity alike, a banner
+   is drawn by explorer's `Xaml_WindowedPopupClass` PopupHost and
+   `Shell_TrayWnd` keeps the foreground throughout; only a freshly
+   RESTARTED ShellExperienceHost draws the `Windows.UI.Core.CoreWindow`
+   titled "New notification" (the five reds' window), and it holds the
+   foreground continuously only under a burst of toasts with distinct
+   tags (one tag replaces its predecessor). Forcing the red took explorer
+   restarted plus `toast-probe.cmd -Count 40`. A reminder toast survives
+   `History.Clear` and Escape; `taskkill /f /im ShellExperienceHost.exe`
+   takes it down and Windows restarts the host on demand.

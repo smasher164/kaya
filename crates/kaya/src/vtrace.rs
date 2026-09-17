@@ -133,6 +133,34 @@ fn record(verb: &'static str, attempt: u32, what: Arguments<'_>) {
     t.push(Rec { at_ms, step, verb, attempt, what: what.to_string() });
 }
 
+/// A file BESIDE the trace, for this leg: `KAYA_VERB_TRACE` names
+/// `…\<leg>-vtrace.txt`, so a capture written as `…\<leg>-<suffix>` is
+/// pulled into that leg's bundle (tools/lib/flightrec_lane.py's windows
+/// sections). None when nothing is recording — a hand-launched guest
+/// writes no captures.
+#[cfg(target_os = "windows")]
+pub(crate) fn sibling(suffix: &str) -> Option<std::path::PathBuf> {
+    let path = std::path::PathBuf::from(std::env::var_os(ENV_VAR)?);
+    let stem = path.file_name()?.to_str()?.strip_suffix("-vtrace.txt")?;
+    Some(path.with_file_name(format!("{stem}-{suffix}")))
+}
+
+/// ONE LINE, WRITTEN NOW, past the ring: the ring reaches the file only
+/// through `dump`, which a PANIC never runs — and the toast capture's own
+/// sentence is written on the path that then panics (winui/mod.rs,
+/// `capture_toast_moment`).
+#[cfg(target_os = "windows")]
+pub(crate) fn line(text: &str) {
+    let Some(path) = std::env::var_os(ENV_VAR) else {
+        return;
+    };
+    use std::io::Write;
+    let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) else {
+        return;
+    };
+    let _ = writeln!(f, "KAYA_VERB_TRACE: {text}");
+}
+
 /// One field a `key=value` reader can take, whatever the verb put in it
 /// (simdrive's `quoted`).
 fn quoted(s: &str) -> String {

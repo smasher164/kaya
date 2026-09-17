@@ -928,6 +928,7 @@ def deploy_artifacts():
                ROOT / "tools/guest/relaunch-link.ps1",
                ROOT / "tools/guest/notify-ready.ps1",
                ROOT / "tools/guest/dismiss-toasts.ps1",
+               ROOT / "tools/guest/toast-probe.ps1",
                ROOT / "tools/guest/dnd-witness.ps1"])
 
 
@@ -1900,7 +1901,10 @@ def run_one_suite(name, slot, log):
             f"C:\\kaya\\flightrec\\{name}-shot.png "
             f"C:\\kaya\\flightrec\\{name}-desktop.png "
             f"C:\\kaya\\flightrec\\{name}-shotwhy.txt "
-            f"C:\\kaya\\flightrec\\{name}-fgtext.txt 2>nul & schtasks /create /tn "
+            f"C:\\kaya\\flightrec\\{name}-fgtext.txt "
+            f"C:\\kaya\\flightrec\\{name}-toastwpn.db "
+            f"C:\\kaya\\flightrec\\{name}-toastwpn.db-wal "
+            f"C:\\kaya\\flightrec\\{name}-toast.bmp 2>nul & schtasks /create /tn "
             f'kaya_{name} /tr "wscript C:\\kaya\\run-hidden.vbs '
             f'run_{name}.cmd {slot}" /sc once /st 00:00 /it /rl highest /f '
             f">nul && schtasks /run /tn kaya_{name} >nul", log=log)

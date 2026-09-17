@@ -44,7 +44,8 @@ SECTIONS = {
     "mac": ("leg-log", "verb-trace", "shot", "desktop-shot", "windows",
             "windowserver", "sampler", "sample", "unified-log"),
     "windows": ("leg-log", "verb-trace", "shot", "desktop-shot", "desktop",
-                "foreground", "foreground-text", "desktop-live", "notifications"),
+                "foreground", "foreground-text", "desktop-live", "notifications",
+                "toast-moment"),
     "ios": ("leg-log", "verb-trace", "shot", "panic", "app-log", "devices"),
     "android": ("leg-log", "verb-trace", "shot", "logcat", "devices"),
     "linux": ("leg-log", "verb-trace", "shot", "desktop", "xvfb"),
@@ -648,6 +649,68 @@ class WinRecorder(LaneRecorder):
         (bundle / "desktop-live.when").write_text(newest[2] + "\n", encoding="utf-8")
         self.mark(bundle, "desktop-live", "ok", dest.stat().st_size)
 
+    @staticmethod
+    def _drop_db(db):
+        """The copy AND the two files sqlite makes beside it. A read-only
+        connection to a WAL database leaves `-shm` and `-wal` behind on
+        close, and a bundle carrying two binary strays is a bundle whose
+        reader wonders what they are (measured 2026-09-17)."""
+        for stray in (db, pathlib.Path(f"{db}-wal"), pathlib.Path(f"{db}-shm")):
+            if stray.is_file():
+                stray.unlink()
+
+    def render_wpn(self, db, since=None):
+        """The platform's notification database as text, newest first —
+        ONE reader for the two sections that copy that file (the collect's
+        `notifications` and the guest's own `toast-moment`), because a
+        second copy of the FILETIME arithmetic and the payload's XML would
+        drift out of step with the first.
+
+        Each row: the arrival time (UTC), the type, the sender's AUMID out
+        of NotificationHandler.PrimaryId, its display name where
+        HandlerAssets carries one (it is empty on the lane's VM, so most
+        rows have none), and the toast's own text out of its XML payload.
+        `since` is a GUEST epoch second: a row at or after it is marked as
+        having arrived inside the leg."""
+        import sqlite3
+        import datetime
+        lines = []
+        try:
+            con = sqlite3.connect(f"{pathlib.Path(db).as_uri()}?mode=ro", uri=True)
+            cur = con.cursor()
+            handlers = {r[0]: r[1] for r in
+                        cur.execute("select RecordId, PrimaryId from NotificationHandler")}
+            names = {}
+            try:
+                for hid, key, value in cur.execute(
+                        "select HandlerId, AssetKey, AssetValue from HandlerAssets"):
+                    if value and "name" in str(key).lower():
+                        names[hid] = str(value)
+            except sqlite3.Error as e:
+                lines.append(f"flightrec: no display names — HandlerAssets "
+                             f"would not be read: {e}")
+            rows = cur.execute("select HandlerId, Type, ArrivalTime, Payload from "
+                               "Notification order by ArrivalTime desc limit 40")
+            for hid, typ, at, payload in rows:
+                when = datetime.datetime(1601, 1, 1) + datetime.timedelta(microseconds=at / 10)
+                text = ""
+                if payload:
+                    s = payload.decode("utf-8", "replace") if isinstance(payload, bytes) else str(payload)
+                    text = " | ".join(re.findall(r"<text[^>]*>([^<]{1,120})</text>", s))[:240]
+                # FILETIME is 100ns ticks from 1601; the guest epoch this is
+                # compared against is seconds from 1970.
+                inside = (since is not None
+                          and at / 10_000_000 - 11644473600 >= since)
+                who = handlers.get(hid, hid)
+                if hid in names:
+                    who = f"{who} ({names[hid]})"
+                lines.append(f"{when:%Y-%m-%d %H:%M:%S}Z {typ:<6} {who} {text}"
+                             f"{'   <- ARRIVED INSIDE THIS LEG' if inside else ''}")
+            con.close()
+        except Exception as e:  # noqa: BLE001 — the section says what it could not read
+            lines.append(f"flightrec: the notification database would not render: {e}")
+        return lines
+
     def notifications(self, bundle, leg):
         db = bundle / "notifications.db"
         got = self._scp_from(f"C:/kaya/flightrec/{leg}-wpn.db", db)
@@ -659,33 +722,87 @@ class WinRecorder(LaneRecorder):
                       f"(C:\\kaya\\flightrec\\{leg}-wpn.db); its own "
                       "sentence is in desktop.txt under '== notifications =='")
             return
-        import sqlite3
-        import datetime
-        lines = []
-        try:
-            con = sqlite3.connect(str(db))
-            cur = con.cursor()
-            handlers = {r[0]: r[1] for r in
-                        cur.execute("select RecordId, PrimaryId from NotificationHandler")}
-            rows = cur.execute("select HandlerId, Type, ArrivalTime, Payload from "
-                               "Notification order by ArrivalTime desc limit 40")
-            for hid, typ, at, payload in rows:
-                when = datetime.datetime(1601, 1, 1) + datetime.timedelta(microseconds=at / 10)
-                text = ""
-                if payload:
-                    s = payload.decode("utf-8", "replace") if isinstance(payload, bytes) else str(payload)
-                    text = " | ".join(re.findall(r"<text[^>]*>([^<]{1,120})</text>", s))[:240]
-                lines.append(f"{when:%Y-%m-%d %H:%M:%S}Z {typ:<6} {handlers.get(hid, hid)} {text}")
-            con.close()
-        except Exception as e:  # noqa: BLE001 — the section says what it could not read
-            lines.append(f"flightrec: the notification database would not render: {e}")
-        db.unlink()
+        lines = self.render_wpn(db)
+        self._drop_db(db)
         head = ("flightrec: the platform's notification database at collect, newest first "
                 "(UTC) — only what is still in the Action Center; a banner that closed "
                 "and was not kept is not here, which is what desktop-live is for.\n")
         (bundle / "notifications.txt").write_text(head + "\n".join(lines) + "\n",
                                                   encoding="utf-8")
         self.mark(bundle, "notifications", "ok", (bundle / "notifications.txt").stat().st_size)
+
+    def toast_moment(self, bundle, leg, t0):
+        """THE RECORDS TAKEN WHILE THE BANNER WAS STILL UP. Five bundles
+        in three days named the toast's CLASS and never its SENDER
+        (docs/deferred.md, the notes_rust toast entry): the collect's
+        database copy is taken after the banner closed and the lane
+        sampler's sights of it fall outside the leg. The guest's own
+        foreground wait copies the database — WITH ITS WAL, where the
+        newest row lives — and grabs the screen the first moment it sees a
+        toast (crates/kaya/src/winui/mod.rs, capture_toast_moment), and
+        this renders both."""
+        if bundle is None:
+            return
+        db = bundle / "toast-moment.db"
+        bmp = bundle / "toast-moment.bmp"
+        got_db = self._scp_from(f"C:/kaya/flightrec/{leg}-toastwpn.db", db)
+        got_bmp = self._scp_from(f"C:/kaya/flightrec/{leg}-toast.bmp", bmp)
+        have_db = bool(got_db) and db.is_file() and db.stat().st_size
+        have_bmp = bool(got_bmp) and bmp.is_file() and bmp.stat().st_size
+        if not have_db and not have_bmp:
+            for stale in (db, bmp):
+                if stale.is_file():
+                    stale.unlink()
+            self.skip(bundle, "toast-moment",
+                      "flightrec: the guest's own wait saw no toast during "
+                      "this leg, so it wrote neither record "
+                      f"(C:\\kaya\\flightrec\\{leg}-toastwpn.db, "
+                      f"{leg}-toast.bmp). The foreground at failure is in "
+                      "foreground-text; a leg that never reached the type "
+                      "verb never looked")
+            return
+        head = [f"flightrec: what the GUEST saw the first moment a toast held "
+                f"the foreground during {leg}, taken by its own wait — not at "
+                f"collect, by which time the banner has closed. The leg began "
+                f"at guest epoch {t0 + self.skew}."]
+        lines = []
+        if have_db:
+            # THE WAL CARRIES THE NEWEST ROWS and the banner's row is the
+            # newest there is; sqlite recovers it only under this name.
+            self._scp_from(f"C:/kaya/flightrec/{leg}-toastwpn.db-wal",
+                           bundle / "toast-moment.db-wal")
+            lines = self.render_wpn(db, since=t0 + self.skew)
+        else:
+            head.append("flightrec: the guest wrote no database copy at that "
+                        "moment; its own sentence is in the leg log and the "
+                        "verb trace.")
+        if have_bmp:
+            png = bundle / "toast-moment.png"
+            got = subprocess.run(["sips", "-s", "format", "png", str(bmp),
+                                  "--out", str(png)],
+                                 stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL,
+                                 check=False).returncode
+            if got == 0 and png.is_file() and png.stat().st_size:
+                head.append(f"flightrec: the desktop at that moment is beside "
+                            f"this file as toast-moment.png "
+                            f"({png.stat().st_size} bytes).")
+                bmp.unlink()
+            else:
+                head.append(f"flightrec: `sips -s format png` would not "
+                            f"convert the guest's BMP (rc {got}), so the "
+                            f"picture stays beside this file as "
+                            f"toast-moment.bmp ({bmp.stat().st_size} bytes).")
+        else:
+            head.append("flightrec: the guest wrote no picture at that "
+                        "moment; its own sentence is in the leg log and the "
+                        "verb trace.")
+        self._drop_db(db)
+        (bundle / "toast-moment.txt").write_text(
+            "\n".join(head) + "\n" + "\n".join(lines) + "\n", encoding="utf-8")
+        size = sum(p.stat().st_size for p in bundle.glob("toast-moment.*")
+                   if p.is_file())
+        self.mark(bundle, "toast-moment", "ok", size)
 
     def win_leg(self, leg, verdict, secs, log, collected_already, t0,
                 out=None):
@@ -727,6 +844,10 @@ class WinRecorder(LaneRecorder):
                 # WHOSE toast, in the platform's own words: the notification
                 # database the collect copied, rendered here.
                 self.notifications(bundle, leg)
+                # AND THE SAME QUESTION ASKED WHILE THE BANNER WAS STILL UP,
+                # by the only reader standing there — the guest's own
+                # foreground wait.
+                self.toast_moment(bundle, leg, t0)
                 # The Rust verb trace (crates/kaya/src/vtrace.rs), dumped by
                 # the guest on a failed verdict to the file its launcher
                 # names (since 2026-09-07; check-steps holds the line).

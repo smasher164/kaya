@@ -583,8 +583,20 @@ in docs/deferred.md.
    photographs another leg's scene or an empty desktop and still
    produces a plausible PNG. Beside them the windows verb-trace file,
    held across the three places that name it (check-steps' launcher
-   line, the recorder's pull, deploy-win's pre-leg delete). Nine watched
-   negatives, counts printed),
+   line, the recorder's pull, deploy-win's pre-leg delete), AND THE
+   TOAST-MOMENT SECTION SINCE 2026-09-17, which exists because FIVE
+   windows bundles in three days named the toast's CLASS and never its
+   SENDER (docs/deferred.md's notes_rust toast entry): the guest's own
+   foreground wait copies the notification database — with its WAL, where
+   the newest row lives, and it is the only record that names the AUMID
+   and the toast's own text — and grabs the desktop the first moment it
+   sees a banner, and those two files ride the verb trace's rule across
+   their own three places (winui/mod.rs's capture through
+   vtrace::sibling, the recorder's pull, deploy-win's pre-leg delete).
+   A declared section's writer must also be REACHED: a method nobody
+   calls names the section in the source and still leaves every bundle
+   carrying finish()'s marker for it. Thirteen watched negatives, counts
+   printed),
    `tools/check-diagnostics.py` (a why-not may not print a sentence it
    cannot NOT print. Any function named `*WhyNot`/`*why_not`/`*Reason`
    is read as a diagnostic by that name alone; one answer, or an answer

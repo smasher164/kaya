@@ -15995,6 +15995,21 @@ unsafe extern "system" {
     /// GDI batches drawing into a DIB section; without this the bytes
     /// read back are whatever the allocation held.
     fn GdiFlush() -> i32;
+    /// The toast moment's camera (`capture_toast_moment`): `PrintWindow`
+    /// addresses ONE window and a toast belongs to another process, so
+    /// the picture that names whose banner is covering the app is a copy
+    /// of the screen itself.
+    fn BitBlt(
+        dest: isize,
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+        src: isize,
+        src_x: i32,
+        src_y: i32,
+        rop: u32,
+    ) -> i32;
 }
 
 /// Win32's ICONINFO, laid out to match winuser.h.
@@ -17241,6 +17256,106 @@ fn flush_before_hop() {
     });
 }
 
+// ---- THE TOAST MOMENT: the `toast-moment` bundle section, taken by the
+// guest's own wait (tools/lib/flightrec_lane.py; docs/traps.md, the toast
+// moment entry, holds the measured facts each helper below leans on).
+
+/// The notification database copied whole, WITH its WAL under sqlite's
+/// own name for it: the newest rows are the WAL's (docs/traps.md).
+#[cfg(feature = "harness")]
+fn copy_toast_db(dest: &std::path::Path) -> Result<u64, String> {
+    let local = std::env::var_os("LOCALAPPDATA").ok_or_else(|| {
+        "LOCALAPPDATA is unset, so the notification database's directory is unknown".to_owned()
+    })?;
+    let src = std::path::Path::new(&local).join("Microsoft\\Windows\\Notifications\\wpndatabase.db");
+    let n = std::fs::copy(&src, dest).map_err(|e| format!("{}: {e}", src.display()))?;
+    let wal = src.with_file_name("wpndatabase.db-wal");
+    if wal.is_file() {
+        let mut beside = dest.as_os_str().to_owned();
+        beside.push("-wal");
+        let _ = std::fs::copy(&wal, std::path::PathBuf::from(beside));
+    }
+    Ok(n)
+}
+
+/// The whole virtual screen as a 24-bit-opaque 32bpp BMP, by GDI.
+#[cfg(feature = "harness")]
+fn grab_desktop_bmp(dest: &std::path::Path) -> Result<u64, String> {
+    const SM_XVIRTUALSCREEN: i32 = 76;
+    const SM_YVIRTUALSCREEN: i32 = 77;
+    const SM_CXVIRTUALSCREEN: i32 = 78;
+    const SM_CYVIRTUALSCREEN: i32 = 79;
+    // CAPTUREBLT beside SRCCOPY: a toast is drawn by a LAYERED window, and
+    // a plain SRCCOPY of the screen leaves it out — the one thing this
+    // picture exists to show.
+    const SRCCOPY_CAPTUREBLT: u32 = 0x00CC_0020 | 0x4000_0000;
+    // SAFETY: four metric reads, no pointers.
+    let (x, y, w, h) = unsafe {
+        (
+            GetSystemMetrics(SM_XVIRTUALSCREEN),
+            GetSystemMetrics(SM_YVIRTUALSCREEN),
+            GetSystemMetrics(SM_CXVIRTUALSCREEN),
+            GetSystemMetrics(SM_CYVIRTUALSCREEN),
+        )
+    };
+    let grab = capture(w, h, |mem| {
+        // SAFETY: the screen's own DC, released on every path below.
+        let screen = unsafe { GetDC(0) };
+        if screen == 0 {
+            return Err("GetDC(NULL) answered 0, so there is no screen to copy from".to_owned());
+        }
+        let copied = unsafe { BitBlt(mem, 0, 0, w, h, screen, x, y, SRCCOPY_CAPTUREBLT) };
+        unsafe { ReleaseDC(0, screen) };
+        if copied == 0 {
+            return Err(format!(
+                "BitBlt of the {w}x{h} virtual screen at ({x},{y}) answered 0"
+            ));
+        }
+        Ok(())
+    })?;
+    write_bmp(dest, &grab)
+}
+
+/// A `Grab` as a BMP file, header by header: nothing this process links
+/// encodes an image, and the host converts what arrives.
+#[cfg(feature = "harness")]
+fn write_bmp(dest: &std::path::Path, grab: &Grab) -> Result<u64, String> {
+    let (w, h) = (grab.width as usize, grab.height as usize);
+    let stride = w * 4;
+    let pixels = stride * h;
+    let mut out: Vec<u8> = Vec::with_capacity(54 + pixels);
+    // BITMAPFILEHEADER: "BM", the whole file's size, two reserved words,
+    // and where the pixels start (14 + 40).
+    out.extend_from_slice(b"BM");
+    out.extend_from_slice(&((54 + pixels) as u32).to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes());
+    out.extend_from_slice(&54u32.to_le_bytes());
+    // BITMAPINFOHEADER, 32bpp BI_RGB.
+    out.extend_from_slice(&40u32.to_le_bytes());
+    out.extend_from_slice(&grab.width.to_le_bytes());
+    // POSITIVE, so the rows below go BOTTOM-UP. The grab's own DIB is
+    // top-down; a top-down BMP is legal and not every reader takes one.
+    out.extend_from_slice(&grab.height.to_le_bytes());
+    out.extend_from_slice(&1u16.to_le_bytes());
+    out.extend_from_slice(&32u16.to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes());
+    out.extend_from_slice(&(pixels as u32).to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes());
+    for row in (0..h).rev() {
+        for px in grab.pixels[row * stride..(row + 1) * stride].chunks_exact(4) {
+            // THE FOURTH BYTE IS SET, not copied: a screen BitBlt leaves it
+            // zero, and a reader that takes a 32bpp BMP's high byte as
+            // alpha then shows a fully transparent picture.
+            out.extend_from_slice(&[px[0], px[1], px[2], 0xFF]);
+        }
+    }
+    std::fs::write(dest, &out).map_err(|e| format!("{}: {e}", dest.display()))?;
+    Ok(out.len() as u64)
+}
+
 #[cfg(feature = "harness")]
 impl WinUiStage {
     /// The mutable twin of on_ui, for stage actions that reconcile
@@ -17313,6 +17428,44 @@ impl WinUiStage {
         String::from_utf16_lossy(&title[..n.max(0) as usize]) == "New notification"
     }
 
+    /// Both records of the toast, taken the FIRST moment the wait below
+    /// sees one and written beside the verb trace, where the recorder
+    /// pulls them as `toast-moment`. Never aborts the wait: a capture
+    /// that failed says so and the leg carries on.
+    fn capture_toast_moment() {
+        let (Some(db_out), Some(bmp_out)) = (
+            crate::vtrace::sibling("toastwpn.db"),
+            crate::vtrace::sibling("toast.bmp"),
+        ) else {
+            return;
+        };
+        let at_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis());
+        let db = copy_toast_db(&db_out);
+        let bmp = grab_desktop_bmp(&bmp_out);
+        let said = |r: &Result<u64, String>| match r {
+            Ok(n) => format!("{n} bytes"),
+            Err(e) => format!("NOT WRITTEN: {e}"),
+        };
+        let sentence = format!(
+            "kaya: toast seen at {at_ms}; wrote {} ({}) and {} ({})",
+            db_out.display(),
+            said(&db),
+            bmp_out.display(),
+            said(&bmp)
+        );
+        eprintln!("{sentence}");
+        crate::vtrace::line(&sentence);
+        for (what, why) in [("notification database", db), ("desktop picture", bmp)] {
+            if let Err(e) = why {
+                let failed = format!("kaya: the toast moment's {what} was not written: {e}");
+                eprintln!("{failed}");
+                crate::vtrace::line(&failed);
+            }
+        }
+    }
+
     fn foreground_guest(what: &str) {
         let hwnd = Self::on_ui(|core| {
             let native: IWindowNative = windows_core::Interface::cast(&core.window)?;
@@ -17342,10 +17495,18 @@ impl WinUiStage {
         // notification" CoreWindow in its sampler, three seconds after a
         // notify leg's toast went up (matrix 19, 2026-09-15). A toast leaves
         // on its own, so wait it out, bounded, and say so.
-        let toast_waited = (0..300)
-            .take_while(|_| Self::foreground_is_toast())
-            .inspect(|_| std::thread::sleep(std::time::Duration::from_millis(50)))
-            .count();
+        // 600 x 50ms = 30s outlasts the platform's 25s `duration="long"`.
+        let mut toast_waited = 0usize;
+        for turn in 0..600 {
+            if !Self::foreground_is_toast() {
+                break;
+            }
+            if turn == 0 {
+                Self::capture_toast_moment();
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            toast_waited += 1;
+        }
         if toast_waited > 0 {
             eprintln!(
                 "kaya: a notification toast held the foreground for {}ms before {what} injection",
