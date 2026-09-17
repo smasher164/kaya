@@ -47,9 +47,9 @@ def finish_form():
     field.focus()
 
 
-def on_toggle(key, checked):
+def on_toggle(todo, checked):
     # One field's delta: the title never travels.
-    todos.patch(key, done=checked)
+    todo.done = checked
 
 
 with app.window(title="todos"):

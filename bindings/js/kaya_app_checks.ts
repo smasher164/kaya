@@ -324,7 +324,7 @@ if (isMainThread) {
   check("a misspelled field on a row handle is refused naming the fields", throws(() => { (seen as unknown as Record<string, unknown>)["donee"] = true; }, /no field donee.*title, done/s));
   check("the row handle enumerates its fields", JSON.stringify(Object.keys(seen!)) === JSON.stringify(["title", "done"]) && "done" in seen!);
   app.build(() => todos.remove(2));
-  check("a row that left the collection reads undefined and exists false", seen!.exists === false && seen!.done === undefined);
+  check("a row that left the collection reads undefined, exists false and matches no variant", seen!.exists === false && seen!.done === undefined && !((seen as unknown) instanceof Todo));
   fire(wire.parse_occurrence(packStamped(wire.OCC_BUTTON_CLICKED, itemButton.id, ["z"], null)));
   check("a scalar row's handle carries value and key", seenItem !== undefined && seenItem.key === "z" && seenItem.value === "zed");
   shipped.length = 0;

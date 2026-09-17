@@ -46,9 +46,9 @@ def on_rename():
     status.set("renamed")
 
 
-def on_remove(group, item):
-    items.at(group).remove(item)
-    status.set(f"removed {group}/{item}")
+def on_remove(task):
+    task.remove()
+    status.set(f"removed {task.path[0]}/{task.key}")
 
 
 def on_rework():

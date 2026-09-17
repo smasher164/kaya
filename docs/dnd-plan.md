@@ -685,7 +685,9 @@ record — `tx.draggable_at(node, &keys)` / `tx.drop_target_at(node,
 follows that copy through a re-stamp, exactly as set_column_headers'
 keyed form does (crates/kaya/src/scene.rs: node_instances, the two
 override maps, the two TplOps). The landing and the drag's end reach the
-app with the copy's keys first: `on_drop_node` and `on_drag_ended_node`,
+app naming the copy — its row handle in JS and Python, its keys first in
+the other seven (DESIGN.md's Binding conventions) — through `on_drop_node`
+and `on_drag_ended_node`,
 which is also the registration a reorderable row's own drag_ended had
 lacked. The scene's column#2 is the proof: `label@item[y]` drags its
 per-copy text into the live target and reports `item y drag ended

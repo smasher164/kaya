@@ -35,8 +35,8 @@ def on_volume(value):
     volume_text.set(f"volume: {spelled(value)}")
 
 
-def on_row_level(key, value):
-    row_text.set(f"row {key}: {spelled(value)}")
+def on_row_level(track, value):
+    row_text.set(f"row {track.key}: {spelled(value)}")
 
 
 def on_reset():

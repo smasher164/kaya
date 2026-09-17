@@ -11561,3 +11561,19 @@ changed type and value without a compile error. The mac legs caught it;
 Java's compiler caught the same shape as an overload ambiguity. A binding
 that takes the Action/Func pair is swept for single-expression container
 bodies, which bind the value-answering overload by inference.
+
+## A watched negative that CRASHES the checks file is not a watched negative (2026-09-17)
+
+Three of the R2 slice's fifteen perturbations of bindings/python first
+killed `kaya_app_checks.py` outright — an `AttributeError` on a `str`
+where a `Row` was expected, an `IndexError` popping a rolled-back
+handler's empty shipped list — instead of reddening the named check. The
+run was red, so the negative looked watched, but the evidence was a
+traceback from an unrelated line and the check it was meant to exercise
+had never been reached: a later refactor could fix the crash and leave
+the guard gone with the check still "passing". A checks-file assertion
+that receives a value of the wrong shape must fail AS THAT CHECK — lead
+a row assertion with `isinstance(arg, kaya.Row)`, tolerate an empty list
+where a byte comparison pops one — and the watch script demands the
+NAMED check's FAIL line, never a non-zero exit. The same shape waits in
+every binding's checks file.

@@ -68,13 +68,13 @@ def on_change(text):
     draft = text
 
 
-def on_note(key, text):
-    """A note typed into a ROW's field: the stamped key arrives first,
-    then the text."""
+def on_note(todo, text):
+    """A note typed into a ROW's field: the row arrives first, then the
+    text."""
     if text:
-        row_notes[key] = text
+        row_notes[todo.key] = text
     else:
-        row_notes.pop(key, None)
+        row_notes.pop(todo.key, None)
     # NOT a step: the ledger banks an uncontrolled field's typing.
     notes.set(note_list())
 

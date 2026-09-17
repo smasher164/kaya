@@ -114,10 +114,12 @@ Plain JS, options objects, bodies last:
 The reference ports are guests/js/todos.ts, gallery.ts, feed.ts and
 menus.ts; every other guest under guests/js is a port of its Python
 twin, so the two directories read as the spelling table — except where
-one of the four JS-only shapes below applies, which the guest then uses
+one of the four shapes below applies, which the guest then uses
 (examples use the sugar; invariant 5).
 
-THE JS-ONLY SHAPES (ruled by the maintainer 2026-09-01, after a review
+THE FOUR SHAPES — JS-only when ruled, and rule 3, the row handle, is
+Python's too since 2026-09-17 (DESIGN.md's Binding conventions, "A stamped
+handler receives its row") — (ruled by the maintainer 2026-09-01, after a review
 of what modern JS could buy against the ported surface; the mechanism of
 each is what made it admissible, and the three rejected candidates are
 recorded beside them):

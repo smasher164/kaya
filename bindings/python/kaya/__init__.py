@@ -271,9 +271,22 @@ def _guard_tracer_escape():
     if not (_recording or _tpl_depth > 0):
         raise KayaStateError(
             "kaya: element tracers exist at record time only — a handler "
-            "receives the stamped copy's keys and reads the model "
-            "(get()/items()), never the tracer"
+            "receives the stamped copy's row and reads the model "
+            "(row.title, get()/items()), never the tracer"
         )
+
+
+def _row_owner(what):
+    """The collection a stamped registration's Row handle reads: the
+    innermost For open right now (DESIGN.md, Binding conventions)."""
+    if not _for_collections:
+        raise KayaStateError(
+            f"kaya: {what} registers inside a For — its handler receives "
+            "that For's row (`todo.done = checked`), and a template node "
+            "with no enclosing For is stamped by no collection, so no "
+            "occurrence ever reaches it"
+        )
+    return _for_collections[-1]
 
 
 def _auto_parent(child_id):
@@ -611,8 +624,8 @@ class _Handle:
         return self
 
     def on_paste(self, fn):
-        """Take pasted content here: fn(clip), or fn(*keys, clip) for a
-        stamped copy — the copy's key path first, as on_change delivers.
+        """Take pasted content here: fn(clip), or fn(row, clip) for a
+        stamped copy — the copy's `Row` first, as on_change delivers.
 
         ONLY FIRES FOR A WIDGET THAT DECLARED WHAT IT `accepts`, in both
         zones, so one that registers this and declares nothing waits
@@ -719,8 +732,8 @@ class _Handle:
 
     def on_drop(self, fn):
         """Take dropped content here: fn(dropped), with the `Dropped` of
-        docs/dnd-plan.md D1, or fn(*keys, dropped) for a stamped copy —
-        the copy's key path first, as on_paste delivers. ONLY FIRES FOR A
+        docs/dnd-plan.md D1, or fn(row, dropped) for a stamped copy —
+        the copy's `Row` first, as on_paste delivers. ONLY FIRES FOR A
         WIDGET THAT DECLARED `drop_target` over an `accepts` list, or for
         a reorderable For's container (D8). Returns the handle."""
         _app._register(self, wire.OCC_DROPPED, fn)
@@ -728,7 +741,7 @@ class _Handle:
 
     def on_drag_ended(self, fn):
         """A drag that began here has ended: fn(operation), OP_COPY,
-        OP_MOVE or None for cancelled or refused — fn(*keys, operation)
+        OP_MOVE or None for cancelled or refused — fn(row, operation)
         for a stamped copy, which is how a reorderable row's own end
         arrives. Returns the handle."""
         _app._register(self, wire.OCC_DRAG_ENDED, fn)
@@ -1006,6 +1019,9 @@ class Node(_Handle):
                 "kaya: a context catalog takes exactly one anchor"
             )
         catalog._attached = True
+        # Its items were built live; the attach is where they learn whose
+        # row their activation carries.
+        catalog._owner = _row_owner("a context catalog on a template node")
         for root in catalog._roots:
             _records().append(wire.tx_context_attach_node(self.id, root))
 
@@ -1509,8 +1525,8 @@ class Collection(_BoundCollection):
 
         The row template's body must hold a `with kaya.row():` of exactly
         one cell per column. `on_sort` takes the 0-based column index of
-        a header click, preceded by the copy keys inside a nested
-        template; re-declare with set_columns() after sorting
+        a header click, preceded by the ENCLOSING For's `Row` inside a
+        nested template; re-declare with set_columns() after sorting
         (docs/tables-plan.md)."""
         return _ColumnsTrace(self, list(titles), sort or Sort.NONE, on_sort, grow, a11y_id)
 
@@ -1552,6 +1568,147 @@ class Collection(_BoundCollection):
             del self._instances[path]
         for child in self._children:
             child._purge(prefix)
+
+
+#: The handle's own surface. A RECORD FIELD OF THE SAME NAME WINS, as
+#: JS's proxy does (docs/js-plan.md §4 rule 3).
+_ROW_VALUES = ("key", "path", "exists", "fields")
+_ROW_VERBS = ("remove", "update", "patch", "move_before", "move_after",
+              "move_to_end", "move_to_front")
+
+
+class Row:
+    """THE ROW A STAMPED HANDLER IS ABOUT (DESIGN.md, Binding
+    conventions; docs/js-plan.md §4 rule 3, the JS twin).
+
+    Fields read the model's copy and ASSIGN AS A PATCH —
+    `todo.done = checked` sends exactly what `todos.patch(key,
+    done=checked)` sends, and a scalar collection's row carries `value`,
+    whose assignment is the update. A misspelled field is refused BY NAME
+    on read and on assignment, because a plain attribute would patch
+    nothing. `isinstance(row, Todo)` narrows a sum's row; a row that has
+    left its collection reads None for every field, says `exists` False
+    and matches no variant. Beside the fields: `key`, `path` (the
+    enclosing keys, outermost first), `exists`, `fields` (the wire field
+    names in schema order), `remove()`, `update(value)`,
+    `patch(**fields)` and the four moves.
+    """
+
+    __slots__ = ("_owner", "_bound", "_key", "_path", "_spec")
+
+    def __init__(self, owner, keys):
+        bound = owner.at(*keys[:-1])
+        entry = bound._mirror().get(keys[-1])
+        if entry is None:
+            # A stale occurrence: only a one-variant collection can still
+            # say what shape the row had.
+            spec = owner._variants[0] if len(owner._variants) == 1 else None
+        else:
+            spec = owner._variant_for(entry)[1]
+        object.__setattr__(self, "_owner", owner)
+        object.__setattr__(self, "_bound", bound)
+        object.__setattr__(self, "_key", keys[-1])
+        object.__setattr__(self, "_path", tuple(keys[:-1]))
+        object.__setattr__(self, "_spec", spec)
+
+    @property
+    def __class__(self):
+        # What `isinstance` reads once `type()` has failed — the variant
+        # the entry IS, so a row that has left matches none.
+        entry = self._entry()
+        if entry is None:
+            return Row
+        spec = self._owner._variant_for(entry)[1]
+        return Row if spec.cls is None else spec.cls
+
+    def _entry(self):
+        return self._bound._mirror().get(self._key)
+
+    def _spec_now(self):
+        entry = self._entry()
+        if entry is None:
+            return self._spec
+        return self._owner._variant_for(entry)[1]
+
+    def _field_names(self):
+        spec = self._spec_now()
+        if spec is None:
+            return ()
+        return ("value",) if spec.fields is None else tuple(spec.fields)
+
+    def _named(self):
+        spec = self._spec_now()
+        if spec is None:
+            return "a row that has left its collection"
+        return "a scalar row" if spec.fields is None else spec.cls.__name__
+
+    def _no_field(self, name):
+        names = self._field_names()
+        return (
+            f"kaya: {self._named()} has no field {name!r} — the fields are "
+            f"{', '.join(names) if names else 'none'}; a row handle patches "
+            "fields and moves or removes its row, nothing else"
+        )
+
+    def _remove(self):
+        self._bound.remove(self._key)
+
+    def _update(self, value):
+        self._bound.update(self._key, value)
+
+    def _patch(self, **fields):
+        self._bound.patch(self._key, **fields)
+
+    def _move_before(self, anchor):
+        self._bound.move_before(self._key, anchor)
+
+    def _move_after(self, anchor):
+        self._bound.move_after(self._key, anchor)
+
+    def _move_to_end(self):
+        self._bound.move_to_end(self._key)
+
+    def _move_to_front(self):
+        self._bound.move_to_front(self._key)
+
+    def __getattr__(self, name):
+        if name in self._field_names():
+            entry = self._entry()
+            if entry is None:
+                return None
+            spec = self._spec_now()
+            return entry if spec.fields is None else getattr(entry, name)
+        if name in _ROW_VERBS:
+            return getattr(self, "_" + name)
+        if name == "key":
+            return self._key
+        if name == "path":
+            return self._path
+        if name == "exists":
+            return self._entry() is not None
+        if name == "fields":
+            return self._field_names()
+        if name.startswith("_"):
+            raise AttributeError(name)
+        raise KayaKeyError(self._no_field(name))
+
+    def __setattr__(self, name, value):
+        if name in self._field_names():
+            spec = self._spec_now()
+            if spec.fields is None:
+                self._bound.update(self._key, value)
+            else:
+                self._bound.patch(self._key, **{name: value})
+            return
+        raise KayaKeyError(self._no_field(name))
+
+    def __dir__(self):
+        return sorted({*self._field_names(), *_ROW_VALUES, *_ROW_VERBS})
+
+    def __repr__(self):
+        entry = self._entry()
+        return f"Row({self._key!r}) {entry!r}" if entry is not None else (
+            f"Row({self._key!r}) <gone>")
 
 
 class _Scope:
@@ -2772,7 +2929,7 @@ def read_clipboard(accepting, *, on_result=None):
 # --- Menus: the command vocabulary (DESIGN.md, Menus) --------------
 #
 # Creators declare into the open with-scope; node-anchored handlers
-# receive the stamped copy's keys FIRST.
+# receive the stamped copy's `Row` FIRST.
 
 
 class MenuItem:
@@ -2860,6 +3017,7 @@ class ContextCatalog:
     def __init__(self):
         self._roots = []
         self._attached = False
+        self._owner = None  # the For the attach found (Row's owner)
 
 
 class _MenuScope(_Scope):
@@ -2923,6 +3081,7 @@ def _menu_seat(item):
         _records().append(wire.tx_context_attach(target, item.id))
     else:  # free roots, collected for a later template-node attach
         target._roots.append(item.id)
+        _app._item_catalogs[item.id] = target
     return scope
 
 
@@ -2979,7 +3138,7 @@ def item(label, *, shortcut=None, enabled=None, icon=None, symbol=None,
          primary=None, role=None, on_activate=None):
     """An action — a leaf command firing exactly one menu_activated
     occurrence, whether from a click or its shortcut. On a template-node
-    catalog the handler receives the stamped copy's keys first."""
+    catalog the handler receives the stamped copy's `Row` first."""
     it = _menu_create(wire.MENU_KIND_ACTION, label)
     scope = _menu_seat(it)
     if shortcut is not None:
@@ -3008,7 +3167,7 @@ def item(label, *, shortcut=None, enabled=None, icon=None, symbol=None,
 def toggle(label, *, checked=None, enabled=None, icon=None, symbol=None,
            shortcut=None, on_toggle=None):
     """A toggle — a stateful leaf: user flips emit menu_toggled (the
-    handler receives the new state, template-node copies the stamped keys
+    handler receives the new state, template-node copies their `Row`
     first); programmatic checked writes are quiet."""
     it = _menu_create(wire.MENU_KIND_TOGGLE, label)
     scope = _menu_seat(it)
@@ -4022,8 +4181,9 @@ def row(*, grow=None, spacing=None, align=None, inset=None, stack_when=None):
 
 def checkbox(text=None, *, checked=None, on_toggle=None, grow=None):
     """A labeled on/off box. The box owns its checked bit: `on_toggle`
-    receives the new state (template copies get the stamped keys first)
-    and the app folds it into its own model."""
+    receives the new state (template copies get their `Row` first, and
+    `todo.done = checked` is the fold) and the app folds it into its own
+    model."""
     handle = _widget(wire.KIND_CHECKBOX)
     if text is not None:
         _records().append(wire.tx_set_text(handle.id, _text_value("checkbox text", text)))
@@ -4108,7 +4268,7 @@ def slider(value=None, *, min=None, max=None, step=None, tick_spacing=None,
            on_change=None, on_commit=None, grow=None):
     """A slider over a numeric range. UNCONTROLLED: the widget owns its
     position and reports each change to `on_change` and each settled
-    gesture to `on_commit`, template copies getting the stamped keys
+    gesture to `on_commit`, template copies getting their `Row`
     first. `min`/`max` default to 0..1. `step` is the granularity the
     thumb rests on and `tick_spacing` the distance between drawn ticks,
     in value units (docs/slider-plan.md S1, S5); each divides the range
@@ -4155,8 +4315,8 @@ def _picker_field(what, value, want):
 def date_picker(value=None, *, min=None, max=None, on_change=None, grow=None):
     """A date picker over civil dates — `datetime.date`, never an instant
     (docs/datetime-plan.md). UNCONTROLLED: the control owns its value and
-    reports each COMMITTED pick to `on_change`, template copies getting the
-    stamped keys first. `min`/`max` are the inclusive range; a pick past a
+    reports each COMMITTED pick to `on_change`, template copies getting
+    their `Row` first. `min`/`max` are the inclusive range; a pick past a
     bound lands on the bound."""
     handle = _widget(wire.KIND_DATE_PICKER)
     if min is not None:
@@ -4216,8 +4376,8 @@ def time_picker(value=None, *, step=None, on_change=None, grow=None):
 
 def entry(text=None, *, on_change=None, grow=None, placeholder=None):
     """A single-line text field. UNCONTROLLED: the widget owns its text
-    and reports each edit to `on_change`, template copies getting the
-    stamped keys first. There is no read-back."""
+    and reports each edit to `on_change`, template copies getting their
+    `Row` first. There is no read-back."""
     handle = _widget(wire.KIND_ENTRY)
     if text is not None:
         _records().append(wire.tx_set_text(handle.id, _text_value("entry text", text)))
@@ -4897,6 +5057,11 @@ class App:
         self._collections = {}
         self._signals = {}
         self._node_handlers = {}
+        # The For a stamped registration belongs to, by node id, and the
+        # catalog a free context item was built in: together they name
+        # the collection a Row handle reads and writes.
+        self._node_owners = {}
+        self._item_catalogs = {}
         # Its own table because these do not fold an occurrence into app
         # state: they answer the ask with a drawing the guest never sees
         # (docs/canvas-plan.md §3.2.1).
@@ -4920,9 +5085,24 @@ class App:
 
     def _register(self, handle, kind, fn):
         if isinstance(handle, Node):
+            # THE ROW HANDLE'S OWNER: the innermost For open at
+            # registration (docs/js-plan.md §4 rule 3).
+            self._node_owners[handle.id] = _row_owner("a stamped handler")
             self._node_handlers[(kind, handle.id)] = fn
         else:
             self._widget_handlers[(kind, handle.id)] = fn
+
+    def _row_args(self, ident, keys):
+        """The row a stamped occurrence names, as a handle."""
+        if not keys:
+            return []
+        owner = self._node_owners.get(ident)
+        if owner is None:
+            catalog = self._item_catalogs.get(ident)
+            owner = None if catalog is None else catalog._owner
+        if owner is None:
+            return list(keys)
+        return [Row(owner, keys)]
 
     def _register_draw(self, handle, policy, fn):
         """The registration half of `canvas(on_draw=)`/`(on_tick=)`.
@@ -5473,7 +5653,7 @@ class App:
                 table = self._node_handlers if keys else self._widget_handlers
                 handler = table.get((kind, ident))
                 if handler is not None:
-                    self._dispatch(handler, *keys, arg)
+                    self._dispatch(handler, *self._row_args(ident, keys), arg)
                 continue
             if kind in (wire.OCC_MENU_ACTIVATED, wire.OCC_MENU_TOGGLED,
                         wire.OCC_MENU_VALUE_CHANGED):
@@ -5484,7 +5664,7 @@ class App:
                 handler = self._menu_handlers.get((kind, ident))
                 if handler is None:
                     continue
-                args = list(keys)
+                args = self._row_args(ident, keys)
                 if kind == wire.OCC_MENU_TOGGLED:
                     args.append(payload)
                 elif kind == wire.OCC_MENU_VALUE_CHANGED:
@@ -5505,7 +5685,7 @@ class App:
                 handler = self._widget_handlers.get((kind, ident))
             if handler is None:
                 continue
-            args = list(keys)
+            args = self._row_args(ident, keys)
             if kind == wire.OCC_PASTED:
                 # A paste rides a click tag verbatim, so it arrives on
                 # the ordinary widget/node path. Never empty: a paste

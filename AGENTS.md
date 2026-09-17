@@ -469,7 +469,15 @@ in docs/deferred.md.
    body-taking constructors — JS's `column<T = void>`, Swift's `column<R>`,
    C#'s `T Column<T>`, Rust's `into_parts` on the container ref, Java's
    `Built<R>`, OCaml's `when_` answering its pair — each cut from a copy and
-   watched named, six negatives, counts printed),
+   watched named, six negatives, counts printed.
+   AND A STAMPED HANDLER RECEIVES ITS ROW SINCE 2026-09-17 (DESIGN.md's
+   Binding conventions, the R2 ruling): the row-handle clause reads JS's
+   and Python's own row-handle BLOCK — the Proxy's `set` trap and
+   `Row.__setattr__` — for the one line where a field assignment leaves
+   through the collection's own `patch`, because a handle that grew a
+   plain property instead reads back what it was given, patches nothing,
+   and no scene can tell, since none reads a row's field back after
+   writing it; the cut is watched named on every run, counts printed),
    `tools/check-universal-props.py` (the lowering-side sibling: every
    backend applies the universal a11y props to every kind — Compose
    per-arm, SwiftUI's one wrapper unbypassed, GTK/WinUI's apply arm

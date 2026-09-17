@@ -426,6 +426,31 @@ handle and discarded the body's — had six spellings of the same smuggle in
 the guests: JS `let x!: T`, Swift implicitly unwrapped optionals, Java
 holder classes, C# `notes!`, Rust `Option` plus `expect`, OCaml `ref None`.
 
+**A stamped handler receives its row** (ruled 2026-09-17). A handler
+registered on a template node is about ONE stamped copy, and in the two
+bindings whose language can INTERCEPT ASSIGNMENT — JavaScript through a
+Proxy, Python through `__setattr__` — it receives that copy as a ROW
+HANDLE rather than as the copy's keys: `todo.done = checked` IS
+`todos.patch(key, done=checked)`, byte for byte; fields read the model's
+copy rather than a snapshot; `key`, `path`, `exists`, `remove()`,
+`update()`, `patch()` and the four moves sit beside them; and a scalar
+collection's row carries `value`, whose assignment is the update. A
+MISSPELLED FIELD IS REFUSED BY NAME, with the record's own fields in the
+sentence — which is why the interception and not a per-field accessor,
+since an accessor would grow a plain attribute, patch nothing, and leave
+every scene green. The handle narrows a sum (`row instanceof Todo`,
+`isinstance(row, Todo)`), and one that has left its collection reads
+nothing, says `exists` false and matches no variant. Its owner is the
+innermost For open at the handler's REGISTRATION, or the For a context
+catalog was attached inside. THE CARVE-OUT, stated where the rule is:
+the other seven receive the copy's keys and spell the patch by name,
+because Rust, Go, C#, Java, Swift, OCaml and Haskell have no hook to
+make a field assignment travel — a handle handing out plain fields there
+would be a silent no-op, which is worse than a key.
+`tools/check-sugar-surface.py`'s row-handle clause holds the two that do,
+at the one line where the write leaves through the collection's own
+`patch`.
+
 **One id space for widgets and template nodes.** Every binding mints
 live widget ids and template node ids from ONE monotone counter per app
 — signals, collections, alerts/dialogs and menu items keep their own —
@@ -746,12 +771,12 @@ rules so far:
   transaction boundary rather than a refusal; the uniform rule it keeps
   is that every write belongs to exactly one transaction, atomic per
   handler or per continuation, and the residue (a continuation's writes
-  before a throw stand) is stated in docs/js-plan.md §4. Stamped
-  handlers receive the row as a Proxy handle whose assignment is the
-  patch, dialogs answer promises when no handler is given, and
-  kaya.fmt`...` is a derived string over any signals — spellings, not
-  semantics, each measured against what Node 24 runs with no build
-  step (decorators do not). It is a DESKTOP binding by ruling
+  before a throw stand) is stated in docs/js-plan.md §4. Dialogs answer
+  promises when no handler is given and kaya.fmt`...` is a derived
+  string over any signals — spellings, not semantics, each measured
+  against what Node 24 runs with no build step (decorators do not); the
+  row handle its stamped handlers receive is NO LONGER JS's alone, and
+  is stated above under "A stamped handler receives its row". It is a DESKTOP binding by ruling
   (2026-09-03): iOS lets no third-party app JIT JavaScript, and kaya
   carries a language to a platform only where it runs natively in a
   straightforward way — docs/js-plan.md §5 records the ruling and the

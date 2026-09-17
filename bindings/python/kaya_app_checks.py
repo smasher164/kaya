@@ -344,8 +344,11 @@ try:
 finally:
     kaya.runtime.next_occurrence = real_next_table
 check(
-    "nested on_sort passes copy keys outermost first, then the column",
-    sort_calls == [("brokerage", "taxable", 1)],
+    "nested on_sort passes the enclosing For's row, then the column",
+    len(sort_calls) == 1 and isinstance(sort_calls[0][0], kaya.Row)
+    and sort_calls[0][1] == 1
+    and sort_calls[0][0].path == ("brokerage",)
+    and sort_calls[0][0].key == "taxable",
 )
 
 with app_table.build():
@@ -2926,8 +2929,11 @@ finally:
 
 check("a value_committed occurrence reaches on_commit and NOT on_change",
       slider_commits == [35.0] and slider_moves == [40.0])
-check("a stamped value_committed passes the copy's keys first",
-      slider_row_commits == [("b", 40.0)])
+check("a stamped value_committed passes the copy's row first",
+      len(slider_row_commits) == 1
+      and isinstance(slider_row_commits[0][0], kaya.Row)
+      and slider_row_commits[0][0].key == "b"
+      and slider_row_commits[0][1] == 40.0)
 
 # --- S2: THE SWITCH ROLE, THE LINK'S href, THE SECTION BADGE ---------
 # (docs/tasks-s2-plan.md T1, T2, T3.) Three surfaces the generator hands
@@ -3723,8 +3729,9 @@ try:
 finally:
     kaya.runtime.next_occurrence = _real_next_rich
     kaya.runtime.submit = _real_ship
-rich_check("a stamped copy's edit reaches the row's handler with its key",
-           len(_row_seen) == 1 and _row_seen[0][0] == "a"
+rich_check("a stamped copy's edit reaches the row's handler as its row",
+           len(_row_seen) == 1 and isinstance(_row_seen[0][0], kaya.Row)
+           and _row_seen[0][0].key == "a"
            and _row_seen[0][1].inserted == "hi")
 rich_check("and NO document is folded for it — the live mirror is live "
            "widgets, and this copy binds no row field (§19)",
@@ -3959,9 +3966,10 @@ _deliver_rows(_packed_text_edited(
 rich_check("a stamped copy's edit folds into its ROW's field, as the live "
            "fold folds a widget's",
            _notes.get("a").body == _live_fold)
-rich_check("the handler hears the act with the row's key, the row already "
+rich_check("the handler hears the act on its row, the row already "
            "current",
-           len(_row_acts) == 1 and _row_acts[0][0] == "a")
+           len(_row_acts) == 1 and isinstance(_row_acts[0][0], kaya.Row)
+           and _row_acts[0][0].key == "a")
 
 _deliver_rows(_packed_text_formatted(_body.id, 0, 0, 3, "bold", "true",
                                      keys=("a",)))
@@ -4156,5 +4164,184 @@ try:
 except kaya.KayaValueError as e:
     check("a reversed span the core sent is refused naming the record",
           "text_edited carries 5..3, a reversed span" in str(e))
+
+# R2: ROW HANDLES (DESIGN.md's Binding conventions; docs/js-plan.md §4
+# rule 3, the JS twin these mirror one for one). A stamped handler
+# receives the ROW, its fields read the model's copy, and assigning one
+# IS the patch.
+
+
+@dataclass
+class R2Todo:
+    title: str
+    done: bool
+
+
+@dataclass
+class R2Note:
+    text: str
+
+
+_r2_shipped = []
+_r2_toggled = []
+_r2_scalar = []
+_r2_nested = []
+_r2_menu = []
+kaya.runtime.submit = lambda *recs: _r2_shipped.append(list(recs))
+
+
+def _r2_toggle(row, checked):
+    _r2_toggled.append(row)
+    row.done = checked
+
+
+_r2_app = kaya.App()
+with _r2_app.window(2700):
+    _r2_todos = kaya.collection(R2Todo | R2Note)
+    _r2_items = kaya.collection()
+    _r2_groups = kaya.collection(R2Todo)
+    with kaya.context_catalog() as _r2_catalog:
+        kaya.item("Remove", on_activate=_r2_menu.append)
+    with kaya.column():
+        with kaya.for_each(_r2_todos) as _r2_cases:
+            with _r2_cases.case(R2Todo) as _r2_todo:
+                _r2_box = kaya.checkbox(checked=_r2_todo.done,
+                                        on_toggle=_r2_toggle)
+            with _r2_cases.case(R2Note) as _r2_note:
+                kaya.label(bind=_r2_note.text)
+        for _r2_item in _r2_items:
+            _r2_scalar_button = kaya.button(bind=_r2_item,
+                                            on_click=_r2_scalar.append)
+        for _r2_group in _r2_groups:
+            with kaya.column():
+                _r2_lines = kaya.collection(R2Todo)
+                for _r2_line in _r2_lines:
+                    kaya.label(bind=_r2_line.title).context_menu(_r2_catalog)
+                    _r2_line_button = kaya.button(bind=_r2_line.title,
+                                                  on_click=_r2_nested.append)
+    _r2_todos.insert("t1", R2Todo(title="write it", done=True))
+    _r2_todos.insert("n1", R2Note(text="jot"))
+    _r2_items.insert("s1", "one")
+    _r2_groups.insert("g1", R2Todo(title="group", done=False))
+    _r2_groups.insert("g2", R2Todo(title="other", done=False))
+    _r2_lines.at("g1").insert("l1", R2Todo(title="line", done=False))
+    _r2_lines.at("g2").insert("l1", R2Todo(title="twin", done=False))
+
+
+def _r2_deliver(*occurrences):
+    queue = list(occurrences)
+    real = kaya.runtime.next_occurrence
+    kaya.runtime.next_occurrence = lambda: queue.pop(0) if queue else None
+    try:
+        _r2_app._dispatch_loop()
+    finally:
+        kaya.runtime.next_occurrence = real
+
+
+def _r2_refused(fn):
+    """The refusal's sentence, or "" when nothing was refused."""
+    try:
+        fn()
+    except kaya.KayaError as e:
+        return str(e)
+    return ""
+
+
+_r2_shipped.clear()
+_r2_deliver((kaya.wire.OCC_TOGGLED, _r2_box.id, ["t1"], False))
+_r2_via_row = _r2_shipped.pop() if _r2_shipped else []
+with _r2_app.build():
+    _r2_todos.patch("t1", done=False)
+_r2_via_patch = _r2_shipped.pop() if _r2_shipped else []
+check("a stamped handler receives the row, and assigning a field IS the patch",
+      len(_r2_toggled) == 1 and isinstance(_r2_toggled[0], kaya.Row)
+      and _r2_toggled[0].key == "t1"
+      and _r2_via_row == _r2_via_patch and len(_r2_via_row) == 1)
+check("the row handle reads the model's copy",
+      _r2_toggled[0].title == _r2_todos.get("t1").title
+      and _r2_toggled[0].done is False
+      and _r2_toggled[0].exists is True and _r2_toggled[0].path == ())
+check("the row handle is an instance of its variant, and of no other",
+      isinstance(_r2_toggled[0], R2Todo)
+      and not isinstance(_r2_toggled[0], R2Note))
+check("a misspelled field ASSIGNED on a row handle is refused naming the "
+      "fields",
+      "has no field 'donee'" in _r2_refused(
+          lambda: setattr(_r2_toggled[0], "donee", True))
+      and "the fields are title, done" in _r2_refused(
+          lambda: setattr(_r2_toggled[0], "donee", True)))
+check("a misspelled field READ on a row handle is refused naming the fields",
+      "R2Todo has no field 'donee' — the fields are title, done"
+      in _r2_refused(lambda: _r2_toggled[0].donee))
+check("the row handle enumerates its fields in schema order",
+      _r2_toggled[0].fields == ("title", "done"))
+check("a row handle's assignment outside a transaction is refused with the "
+      "collection's own ambient sentence",
+      "no ambient transaction" in _r2_refused(
+          lambda: setattr(_r2_toggled[0], "done", True)))
+
+with _r2_app.build():
+    _r2_todos.remove("t1")
+check("a row that left the collection reads None, exists False, and matches "
+      "no variant",
+      _r2_toggled[0].exists is False and _r2_toggled[0].done is None
+      and not isinstance(_r2_toggled[0], R2Todo)
+      and not isinstance(_r2_toggled[0], R2Note))
+
+_r2_deliver((kaya.wire.OCC_BUTTON_CLICKED, _r2_scalar_button.id, ["s1"], None))
+check("a scalar row's handle carries key and value",
+      len(_r2_scalar) == 1 and isinstance(_r2_scalar[0], kaya.Row)
+      and _r2_scalar[0].key == "s1"
+      and _r2_scalar[0].value == "one"
+      and _r2_scalar[0].fields == ("value",))
+_r2_shipped.clear()
+with _r2_app.build():
+    _r2_scalar[0].value = "two"
+_r2_scalar_via_row = _r2_shipped.pop() if _r2_shipped else []
+with _r2_app.build():
+    _r2_items.update("s1", "two")
+_r2_scalar_via_update = _r2_shipped.pop() if _r2_shipped else []
+check("assigning a scalar row's value IS the update",
+      _r2_items.get("s1") == "two"
+      and _r2_scalar_via_row == _r2_scalar_via_update
+      and len(_r2_scalar_via_row) == 1)
+
+_r2_deliver((kaya.wire.OCC_BUTTON_CLICKED, _r2_line_button.id,
+             ["g1", "l1"], None))
+check("a nested row's path is the enclosing keys, outermost first",
+      len(_r2_nested) == 1 and isinstance(_r2_nested[0], kaya.Row)
+      and _r2_nested[0].path == ("g1",)
+      and _r2_nested[0].key == "l1"
+      and _r2_nested[0].title == "line")
+with _r2_app.build():
+    _r2_nested[0].remove()
+check("a nested row's remove() reaches its own instance and no other",
+      _r2_lines.at("g1").get("l1") is None
+      and _r2_lines.at("g2").get("l1").title == "twin")
+
+_r2_deliver((kaya.wire.OCC_MENU_ACTIVATED, _r2_catalog._roots[0],
+             ["g2", "l1"], None))
+check("a context catalog's item on a template node receives the row",
+      len(_r2_menu) == 1 and isinstance(_r2_menu[0], kaya.Row)
+      and _r2_menu[0].path == ("g2",)
+      and _r2_menu[0].key == "l1" and _r2_menu[0].title == "twin")
+
+# THE OWNER IS THE INNERMOST FOR OPEN AT REGISTRATION, and a template
+# node with none is stamped by no collection, so no occurrence can ever
+# reach its handler: the registration is refused rather than left dead.
+_r2_owner_app = kaya.App()
+_r2_owner_said = ""
+try:
+    with _r2_owner_app.window(2701):
+        _r2_flag = kaya.signal(True)
+        with kaya.column():
+            with kaya.when(_r2_flag):
+                kaya.button("x", on_click=lambda *a: None)
+except kaya.KayaStateError as e:
+    _r2_owner_said = str(e)
+check("a stamped registration with no enclosing For is refused naming the "
+      "rule",
+      "registers inside a For" in _r2_owner_said)
+kaya.runtime.submit = _real_ship
 
 sys.exit(1 if failures else 0)

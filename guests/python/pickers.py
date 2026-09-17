@@ -28,8 +28,8 @@ def on_time(picked):
     time_text.set(f"time: {clock(picked)}")
 
 
-def on_row_date(key, picked):
-    row_text.set(f"row {key}: {picked}")
+def on_row_date(task, picked):
+    row_text.set(f"row {task.key}: {picked}")
 
 
 def on_reset():

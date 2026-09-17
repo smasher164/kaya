@@ -30,10 +30,10 @@ def on_step():
     status.set(f"step {n}")
 
 
-def on_remove(group, item_key):
-    todos = items.at(group)
-    todos.remove(item_key)
-    status.set(f"removed {group}/{item_key}, {len(todos)} left")
+def on_remove(item):
+    group = item.path[0]
+    item.remove()
+    status.set(f"removed {group}/{item.key}, {len(items.at(group))} left")
 
 
 with app.window():

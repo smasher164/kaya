@@ -28,11 +28,10 @@ def spell(runs):
         for run in runs)
 
 
-def on_acted(key, _act):
+def on_acted(note, _act):
     # The row's field already carries the copy's act when this fires: the
     # app reads the row, never the widget.
-    note = notes.get(key)
-    last.set(f"{key}: {spell(note.body.runs)}")
+    last.set(f"{note.key}: {spell(note.body.runs)}")
 
 
 def on_patch():

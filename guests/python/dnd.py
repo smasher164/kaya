@@ -59,18 +59,18 @@ def on_drag_ended(operation):
     drag_status.set(f"drag ended {operation or 'none'}")
 
 
-def on_item_dropped(key, dropped):
+def on_item_dropped(item, dropped):
     op = dropped.operation or "none"
     match dropped.clip:
         case kaya.Representation.Text(text):
-            drop_status.set(f"item {key} got text {text} ({op})")
+            drop_status.set(f"item {item.key} got text {text} ({op})")
         case other:
-            drop_status.set(f"item {key} got {other!r} ({op})")
+            drop_status.set(f"item {item.key} got {other!r} ({op})")
 
 
 def node_drag_ended(what):
-    def ended(key, operation):
-        drag_status.set(f"{what} {key} drag ended {operation or 'none'}")
+    def ended(row, operation):
+        drag_status.set(f"{what} {row.key} drag ended {operation or 'none'}")
     return ended
 
 

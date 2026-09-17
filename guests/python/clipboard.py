@@ -106,13 +106,13 @@ def pasted(clip):
             status.set(f"pasted {other!r}")
 
 
-def row_pasted(key, clip):
+def row_pasted(row, clip):
     # Printing the key proves this dispatched as an INSTANCE occurrence.
     match clip:
         case kaya.Representation.Text(text):
-            row_status.set(f"row {key} pasted {text}")
+            row_status.set(f"row {row.key} pasted {text}")
         case other:
-            row_status.set(f"row {key} pasted {other!r}")
+            row_status.set(f"row {row.key} pasted {other!r}")
 
 
 with app.window(title="clipboard"):

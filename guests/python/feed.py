@@ -36,10 +36,10 @@ def on_promote():
             break
 
 
-def on_toggle(key, checked):
-    # A stale occurrence lands in the else and folds into nothing.
-    if isinstance(feed.get(key), Todo):
-        feed.patch(key, done=checked)
+def on_toggle(post, checked):
+    # A stale occurrence matches no variant and folds into nothing.
+    if isinstance(post, Todo):
+        post.done = checked
 
 
 with app.window():

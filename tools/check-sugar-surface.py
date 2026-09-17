@@ -7845,6 +7845,72 @@ for _lang, (_rel, _pattern, _cut, _repl) in BODY_VALUE_ROWS.items():
 print("check-sugar-surface: body-value rows watched (cut): " + " ".join(_body_watched),
       file=sys.stderr)
 
+# --- A stamped handler receives its row (DESIGN.md's Binding conventions;
+# docs/js-plan.md §4 rule 3): the one line where a field assignment leaves
+# through the collection's own patch, read out of each row handle's block.
+ROW_HANDLE_ROWS = {
+    "js": ("bindings/js/kaya/index.ts",
+           r"^function rowHandle\(", r"^\}$",
+           r"else bound\.patch\(key, \{ \[prop\]: v \}\);",
+           "else bound.patch(key, {});"),
+    "python": ("bindings/python/kaya/__init__.py",
+               r"^class Row:", r"^class _Scope:",
+               r"self\._bound\.patch\(self\._key, \*\*\{name: value\}\)",
+               "object.__setattr__(self, name, value)"),
+}
+
+
+def row_handle_block(rel, start, end, text_for):
+    """The row handle's own block: its opening line to the line that
+    closes it. A block that cannot be found is a finding, never a skip."""
+    lines = text_for(rel).splitlines()
+    at = next((i for i, ln in enumerate(lines) if re.match(start, ln)), None)
+    if at is None:
+        return None
+    stop = next((i for i in range(at + 1, len(lines))
+                 if re.match(end, lines[i])), len(lines))
+    return "\n".join(lines[at:stop])
+
+
+def row_handle_findings(text_for=read_rel):
+    out = []
+    for lang, (rel, start, end, patch, _repl) in ROW_HANDLE_ROWS.items():
+        block = row_handle_block(rel, start, end, text_for)
+        if block is None:
+            out.append(f"check-sugar-surface: {lang}'s row handle is gone from "
+                       f"{rel} (wanted a block opening /{start}/) — a stamped "
+                       f"handler receives its row in JS and Python "
+                       f"(DESIGN.md's Binding conventions)")
+            continue
+        if not re.search(patch, block):
+            out.append(f"check-sugar-surface: {lang}'s row handle no longer "
+                       f"assigns THROUGH the collection's patch (wanted "
+                       f"/{patch}/ in {rel}'s row-handle block) — a field that "
+                       f"assigns anywhere else patches nothing and no scene "
+                       f"can see it (docs/js-plan.md §4 rule 3)")
+    return out
+
+
+for msg in row_handle_findings():
+    print(msg, file=sys.stderr)
+    status = 1
+_row_watched = []
+for _lang, (_rel, _start, _end, _patch, _repl) in ROW_HANDLE_ROWS.items():
+    _doctored, _n = sub_count(_patch, _repl, read_rel(_rel), re.M)
+    if _n < 1:
+        selftest_exit(f"check-sugar-surface: self-test failed — the {_lang} "
+                      f"row-handle negative changed nothing in {_rel}")
+    _fired = [m for m in row_handle_findings(
+        lambda rel, _r=_rel, _d=_doctored: _d if rel == _r else read_rel(rel))
+        if m.startswith(f"check-sugar-surface: {_lang}'s row handle")]
+    _row_watched.append(f"{_lang}={_n}/{len(_fired)}")
+    if len(_fired) != 1:
+        selftest_exit(f"check-sugar-surface: self-test failed — cutting "
+                      f"{_lang}'s row-handle patch produced {len(_fired)} "
+                      f"finding(s), not 1")
+print("check-sugar-surface: row-handle rows watched (applied/named): "
+      + " ".join(_row_watched), file=sys.stderr)
+
 check_scene_sugar()
 
 if status != 0:

@@ -3506,6 +3506,10 @@ function rowHandle(owner: Collection<unknown, unknown>, keys: readonly Key[]): u
     has(receiver, prop) {
       return (typeof prop === "string" && (fields.has(prop) || prop in methods)) || Reflect.has(receiver, prop);
     },
+    getPrototypeOf() {
+      const now = current();
+      return now === undefined ? Object.prototype : (owner._variantFor(now)[1].ctor?.prototype ?? Object.prototype);
+    },
     ownKeys() {
       return [...fields];
     },

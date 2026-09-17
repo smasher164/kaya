@@ -154,7 +154,8 @@ def apply_order(account, column, descending):
     table.set_columns("Ticker", "Qty", "Price", "Value", sort=indicator)
 
 
-def on_positions_sort(account, column):
+def on_positions_sort(row, column):
+    account = row.key
     current = sorted_accounts.get(account)
     descending = current is not None and current[0] == column and not current[1]
     sorted_accounts[account] = (column, descending)
@@ -399,13 +400,13 @@ def closed_transactions():
     screen.clear()
 
 
-def open_account_transactions(account):
+def open_account_transactions(row):
     """The stamped affordance: each account card's own Transactions
-    button, whose click arrives with the card's key (the account), opens
-    the view filtered to it — the natural affordance docs/portfolio-plan.md
-    §5 recorded as unreachable while `kind@id[key]` answered for columns
+    button, whose click arrives as the card's row, opens the view filtered
+    to that account — the natural affordance docs/portfolio-plan.md §5
+    recorded as unreachable while `kind@id[key]` answered for columns
     alone (2026-09-01)."""
-    open_transactions(account=account)
+    open_transactions(account=row.key)
 
 
 def open_transactions(account=None):

@@ -2220,10 +2220,44 @@ unpicked.
     thread), the way docs/js-plan.md §4 names the languages that cannot
     spell the implicit transaction. Python's `await` form is the survey's
     one SEMANTICS finding and is not taken.
-  - R2 ROW HANDLES IN PYTHON, the twin of JS's rule 3: `todo.done =
+  - ~~R2 ROW HANDLES IN PYTHON, the twin of JS's rule 3: `todo.done =
     checked` is the patch through `__setattr__`, refused by name on a
     typo; the other seven keep `patch`, stated as the carve-out where
-    the language cannot intercept assignment.
+    the language cannot intercept assignment.~~ LANDED 2026-09-17 (one
+    Opus agent; the job's tmp/idiom/notes-r2.md): `kaya.Row` after
+    `Collection` — fields read the model's copy, `__setattr__` is the
+    collection's own `patch` (a scalar row's `value` its `update`),
+    `__class__` answers the variant the entry IS so `isinstance` narrows
+    and a row that left matches none, a misspelled field refused by name
+    on read and assignment with the fields in the sentence, `key`,
+    `path`, `exists`, `fields`, the verbs and four moves beside them;
+    the owner is captured at `_register` and at `Node.context_menu`
+    (`_row_owner`), and `_row_args` builds the handle at all three
+    dispatch sites. Eleven guests re-spelled, fourteen handlers, no
+    `.steps` touched, no handler takes a bare key any more; 14 new
+    negatives plus 4 re-spelled, all fifteen perturbations watched red;
+    check-sugar-surface's row-handle clause holds JS's `set` trap and
+    Python's `__setattr__` to the collection's `patch`, watched cut;
+    DESIGN.md's paragraph states the seven-binding carve-out. JS's proxy
+    gained a `getPrototypeOf` trap the same day so a row removed AFTER
+    the handler received it matches no variant there either (Python's
+    `__class__` is read per access; JS's target prototype was fixed at
+    construction — the one order the two disagreed in).
+    TWO GAPS THE SLICE FOUND, open: (a) a LIVE-TOP `kaya.when` body's
+    widgets are template Nodes in Python, the core stamps that copy with
+    an EMPTY key path, and a keyless occurrence is routed to the widget
+    table — so a handler registered inside such a body could never fire,
+    silently, on every python lane; `_row_owner` refuses the registration
+    now (no guest writes one; milestone2's when body is a label). Whether
+    the core should route it, and whether the other eight bindings share
+    the dead path, is unprobed. KEY: live-top when, _row_owner, empty key
+    path, when body handler. (b) a `kaya.menu(...)` NESTED inside a
+    context catalog's body seats its items on the parent ITEM, so JS's
+    `_itemCatalogs` and Python's `_item_catalogs` record no owner for
+    them and their activation arrives as bare keys — the same in both by
+    choice (invariant 1), a two-line fix in each when taken together; no
+    guest hits it (menus.py's catalog is flat). KEY: nested catalog
+    submenu, _itemCatalogs, _item_catalogs, bare keys.
   - R3 THE TOOLCHAIN: JDK 21 (pattern switch over the sealed sums,
     virtual threads; touches nine gradle modules), Swift 6 language mode
     with strict concurrency (the binding becomes a package target),
@@ -10986,8 +11020,9 @@ the For's body gives every stamped copy a CONSTANT payload and the
 template's operations with its own identity, a KEYED record after the
 row's insert — `draggable_at` / `drop_target_at` and their eight
 spellings — overrides it for one copy, and `on_drop_node` /
-`on_drag_ended_node` deliver a copy's landing and its drag's end with the
-copy's keys first, which is the registration a reorderable row's own
+`on_drag_ended_node` deliver a copy's landing and its drag's end naming the
+copy first (its keys; its row handle in JS and Python since 2026-09-17),
+which is the registration a reorderable row's own
 drag_ended had lacked. The two ambient bindings' one handle serves both
 zones, so what refuses there is a KEYED declaration on a LIVE widget, in
 one byte-frozen sentence. THE ELEMENT-BOUND PAYLOAD IS IN ALL NINE
