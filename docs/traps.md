@@ -11683,3 +11683,33 @@ sum with five variants and three outcomes needs five labels with two
 never-read bindings, which is why Dnd's dropped() kept its chain under
 the "a guest only gets shorter or clearer" rule. Weigh it whenever "make
 it an exhaustive switch" is proposed; it goes away on the next JDK bump.
+
+## `Get-Date -UFormat %s` on Windows PowerShell 5.1 answers LOCAL time as UTC (2026-09-18)
+
+Measured on the lane's VM (PowerShell 5.1.26100, Pacific): the host's
+`date -u` and the guest's `[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()`
+agree to the second, while `[int64](Get-Date -UFormat %s)` is 25200s
+behind — the local wall clock read as if it were UTC. Three recorder
+sites stamped the guest epoch with it and agreed with each other, so
+nothing looked wrong until that clock met a platform timestamp: the
+toast-moment marker compared the leg's start against the notification
+database's FILETIMEs and read every row of the last seven hours as
+"inside the leg". Anything that stamps an epoch on the guest uses
+`[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()`; tools/check-flightrec.py's
+guest-clock clause refuses the other spelling at both ends.
+
+## A Windows registry value can be refused BY NAME while the same key takes any other name (2026-09-18)
+
+From an ssh session that reads elevated and holds FullControl on the key,
+`reg add HKCU\...\Explorer\Advanced /v kayaprobe` succeeds and
+`/v TaskbarDa` answers "Access is denied"; the same for
+HKLM\SOFTWARE\Policies\Microsoft\Dsh's `AllowNewsAndInterests` beside a
+nonsense name. So "Access is denied" from an admin session is not always
+the ACL or the elevation, and the ACL says nothing is wrong; the test that
+tells the two apart is a write of a NONSENSE value name into the same
+key. The Widgets feature is reachable through the MDM policy store the
+feature actually reads
+(`HKLM\SOFTWARE\Microsoft\PolicyManager\default\NewsAndInterests\AllowNewsAndInterests`),
+which deploy-win writes and reads
+back. A per-app notification setting (`Enabled 0`, `ShowBanner 0`)
+governs presentation, not delivery: the row still lands in the database.

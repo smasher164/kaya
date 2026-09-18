@@ -595,8 +595,16 @@ in docs/deferred.md.
    vtrace::sibling, the recorder's pull, deploy-win's pre-leg delete).
    A declared section's writer must also be REACHED: a method nobody
    calls names the section in the source and still leaves every bundle
-   carrying finish()'s marker for it. Thirteen watched negatives, counts
-   printed),
+   carrying finish()'s marker for it. AND ONE CLOCK UNDER THAT MARKER
+   SINCE 2026-09-17: neither the guest sampler's ring stamp nor the
+   host's read of it may use `Get-Date -UFormat %s`, which on Windows
+   PowerShell 5.1 answers LOCAL time as though it were UTC — the two
+   ends agreed with each other, so nothing looked wrong until that clock
+   met the notification database's own FILETIMEs and every row of the
+   last seven hours read `ARRIVED INSIDE THIS LEG` (docs/traps.md,
+   docs/deferred.md's notes_rust toast entry). No lane can fail it,
+   because a marker that is too wide marks MORE rows and never fewer.
+   Fifteen watched negatives, counts printed),
    `tools/check-diagnostics.py` (a why-not may not print a sentence it
    cannot NOT print. Any function named `*WhyNot`/`*why_not`/`*Reason`
    is read as a diagnostic by that name alone; one answer, or an answer

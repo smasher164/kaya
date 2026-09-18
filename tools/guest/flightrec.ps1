@@ -233,7 +233,7 @@ if ($Mode -eq 'sample') {
             # file on its line; the host pulls the newest inside the leg.
             if ($line -like "*title='New notification'*" -and -not $grabbed.Contains([int64]$h)) {
                 [void]$grabbed.Add([int64]$h)
-                $stamp = [int64](Get-Date -UFormat %s)
+                $stamp = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
                 $tpath = Join-Path $dir "lane-toast-$stamp.png"
                 try {
                     $size = DesktopGrab $tpath
@@ -250,8 +250,10 @@ if ($Mode -eq 'sample') {
                 # GUEST EPOCH SECONDS, not milliseconds-since-start: one
                 # sampler serves the whole lane, so a reader must be able to
                 # place a line against a leg that started whenever
-                # (flightrec_win_clock_sync reads the offset once).
-                $at = [int64](Get-Date -UFormat %s)
+                # (flightrec_win_clock_sync reads the offset once). NOT
+                # `Get-Date -UFormat %s`, which answers LOCAL time as though
+                # it were UTC on PowerShell 5.1 (docs/traps.md).
+                $at = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
                 Emit $out "at=$at $line"
                 $last = $line
                 $lines++

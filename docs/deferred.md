@@ -11903,6 +11903,63 @@ seconds with a one-second floor, the miss sentence byte-identical to the
 other two harnesses, and `KAYA_HARNESS: scene ready after <n>ms` on the way
 through. tools/check-harness-ceiling.py holds all three. The android python suite standalone the same day: varied-python 3s, green.
 
+## GAP — a mac input-driving leg run while a human holds the host's foreground is a swallowed-press red (first recorded 2026-09-18; the bundle names the frontmost app)
+KEY: presses were swallowed, AX reported success for every press, panel is still up after, HIDIdleTime, frontmost app, human on the host, exclusive funnel idle wait
+
+Matrix #38, 2026-09-18 02:15Z: `save-java-swiftui` red at `file_choose`
+with the harness's own sentence — `the panel is still up after 3 presses
+(listing ["decoy", "draft"]) — every press was swallowed, which the panel
+cannot tell you; AX reported success for every press` — then every step
+after it; the same leg green in matrix #37 an hour earlier on the same
+tree. THE BUNDLE NAMES THE CAUSE: its window census (`windows.txt`) has
+Firefox frontmost at layer 0 with a Hacker News page, and the launch
+line's top consumers were plugin-container, WindowServer, the Firefox GPU
+helper and Finder — the maintainer was reading on the host while the
+exclusive funnel admitted a leg that drives NSOpenPanel through AX, and
+the panel's key events went to the frontmost application. Not a code
+defect and not a class the lanes can fix alone (memory:
+never-drive-the-host-ui-while-akhil-is-active), but the funnel can
+REFUSE TO GUESS: the mac exclusive block should read HIDIdleTime before
+admitting an input-driving leg and WAIT, bounded and printing, for the
+host to have been idle N seconds, and every mac red should print the
+frontmost app beside its verdict so the read is one line. Until then, a
+matrix launched while the host is in use wants `--no-exclusive`, and a
+red of this shape is re-run alone once the host is idle (this one was
+re-run by hand the moment the maintainer said the host was free: green).
+
+## GAP — a wayland clipboard seed expires when the guest window is not active: the compositor never tells an unfocused client the selection moved (first instrumented sighting 2026-09-18)
+KEY: seed files EXPIRED, gtk_window_active=false, changed count, wayland focus, clipboard_seed, data_offer, sway focus ring, present before seeding
+
+Matrix #38 (the Widgets/clock tree, 2026-09-18 02:15Z; host load 3.5 at
+launch, the maintainer's browser frontmost on the mac): `clipboard-ocaml-
+wayland` red at its `files` seed and green alone three minutes later (3s).
+THE INSTRUMENT THE CLOSED ENTRY BELOW ASKED FOR FIRED, and it names the
+premise: the verb trace reads `seed files EXPIRED ms=5047 rounds=235
+expected=text/uri-list foreign_listed=true` — the foreign writer's targets
+were listed by another reader the whole time — while the guest's own
+GdkClipboard was never told the selection moved (`gdk's changed count is
+still 6`, its formats still the image seed's), and the reads before it
+carry `gtk_window_active=false` on three of four requests, `true` on the
+one that answered. On wayland a client receives a data_offer only while
+it holds keyboard focus; the 2026-09-06 fix made the seed wait for THIS
+process's own offer, which is right, and an inactive window waits for an
+offer that cannot come. What took focus inside the container is not in
+the bundle: the linux recorder's `desktop` section is the sway tree at
+COLLECT (the guest gone, the workspace focused), and it has no focus ring
+during the leg, which is the section this sighting needed (the 2026-09-16
+ruling: the recorder grows it, no watch). REMEDY, one slice: (1) the seed
+ACTIVATES the window before spawning the foreign writer — `present()` and
+a bounded wait for `gtk_window_active`, with its own sentence when the
+compositor refuses — since a seed against an inactive window is a wait
+for nothing; (2) tools/lib/flightrec.sh's linux collect gains a focus
+ring (`swaymsg -t get_tree` focused node, app_id and pid, once a second
+through the leg, the Windows foreground ring's shape), held by
+check-flightrec; (3) the seed's own `gtk_window_active` at spawn time is
+printed beside the expiry sentence. Proof: force it by taking focus in the
+container (a `swaymsg focus` on another surface, or a second client) with
+the seed pending, read the ring naming the thief, and see the activation
+win. The x11 twin never showed it and is out of the rule.
+
 ## ~~WATCH — `clipboard-python-wayland` under a contended matrix: every paste read "empty"~~ CLOSED 2026-09-15: a real race read and fixed 2026-09-06 (clipboard_seed waits for this process's own offer, not only the foreign targets list; two perturbed census entries in check-gtk.py hold it; the `gtk_window_is_active` false premise is in docs/traps.md); not re-sighted in any matrix since, seventeen of them on 2026-09-14/15 alone
 EXCLUSIVE SINCE 2026-09-06: the three wayland clipboard legs run holding the
 matrix-wide quiet token (tools/linux/run-suites.sh KAYA_EXCLUSIVE_LEGS); the
@@ -13119,6 +13176,45 @@ sits 25199s behind the database's FILETIME clock (foreground.txt prints
 the offset), so the marker is seven hours wide; the same slice converts
 the leg's start onto the database's clock and proves the marker on the
 forced red again.
+
+SEVENTH SIGHTING, 2026-09-18 01:19Z, ON THE FIXED CLOCK, AND THE SIXTH RE-READ
+(the Widgets slice; the job's tmp/idiom/notes-widgets.md). THE CLOCK: the VM's
+clock was right all along — Windows PowerShell 5.1's `Get-Date -UFormat %s`
+answers LOCAL time as though it were UTC (25200s out, docs/traps.md), and all
+three guest stamps used it, so the recorder's guest epoch sat one timezone
+behind the database's FILETIMEs; all three sites read
+`[DateTimeOffset]::UtcNow` now, the lane prints `guest clock 0s off`, and
+check-flightrec's guest-clock clause holds both ends (15 watched negatives).
+Re-read on the true clock, the sixth sighting's Widgets tile arrived 106s
+BEFORE the leg: the sender was named on a wrong premise. THE WIDGETS BOARD IS
+OFF ANYWAY in deploy-win's provisioning (the MDM policy store's
+AllowNewsAndInterests, read back, the board's processes stopped and counted;
+the two documented switches are refused by value name on this build,
+docs/traps.md; a per-app notification setting governs presentation, not
+delivery — its tiles were the only rows on the machine and would fill any
+marker), proven by five explorer restarts and three lane runs posting nothing.
+AND THE CAUSE, NAMED FOR THE FIRST TIME: the seventh red's bundle carries NO
+row inside the leg, a BARE desktop in toast-moment.png (no banner, no guest
+window), and foreground-text's ShellExperienceHost `Windows.UI.Core.CoreWindow`
+titled "New notification" with one element walked and none named — a PHANTOM
+notification host window holding the foreground with nothing in it, refusing
+SetForegroundWindow for 30s+. The ring shows where it comes from: the pool's
+last leg before the exclusive funnel was `notify`, which posts real toasts;
+`ShowBanner 0` keeps the banner off the screen but not the host window from
+coming up, `dismiss_toasts()` finds the histories already empty (the scene
+clears its own) and a Clear on an empty history takes nothing down (measured,
+foreground unchanged over 10s), and the window appears ~2s AFTER the funnel
+(an EnumWindows census over 216 windows at funnel time found no
+ShellExperienceHost window at all, so a kill there would kill a process the
+pending notification then restarts). THAT is why the class is intermittent: it
+fires when a notification leg is the last pooled leg before the exclusive
+block, and notes_rust types at +45ms. THE REMEDY TO CHARGE: the guest's wait
+can now tell a phantom from a banner — a "New notification" window with no
+database row newer than the leg's start is nothing to wait out, and the wait
+should say so and take the foreground by the AttachThreadInput route the
+dance lacks, instead of spending 30s; beside it the lane keeps notification
+legs off the end of the pool. KEY: phantom notification window, New
+notification empty, notify last pooled leg, AttachThreadInput.
 ## WATCH — the iOS dark canvas leg read LIGHT pixels under a matrix, once (first sighting 2026-09-14)
 KEY: canvasdark-swift, expect_ink dark, KAYA_APPEARANCE, kayaCanvasAppearance, traitCollection, appearance flake
 

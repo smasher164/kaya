@@ -54,6 +54,7 @@ ANDROID = "tools/android/run-emulator.py"
 WIN = "tools/deploy-win.py"
 STEPS = "tools/check-steps.py"
 WINUI = "crates/kaya/src/winui/mod.rs"
+GUEST_PS1 = "tools/guest/flightrec.ps1"
 
 # The recorder class whose body IS each python lane's collect path.
 RECORDERS = {"mac": "MacRecorder", "windows": "WinRecorder",
@@ -66,7 +67,7 @@ UNIVERSAL = ("leg-log", "verb-trace", "shot")
 def sources():
     return {rel: gate.read(rel) for rel in
             (LANE_PY, LANE_SH, LINUX, IOS, ANDROID, WIN,
-             STEPS, WINUI)}
+             STEPS, WINUI, GUEST_PS1)}
 
 
 def py_block(text, name):
@@ -365,6 +366,50 @@ def census_toast_files(src):
     return found
 
 
+def census_guest_clock(src):
+    """ONE CLOCK, AND IT IS THE PLATFORM'S. The windows sampler stamps
+    every ring line with an epoch second and the host reads the guest's
+    own epoch once a lane, and both used `Get-Date -UFormat %s`, which on
+    Windows PowerShell 5.1 answers LOCAL time as though it were UTC
+    (docs/traps.md, measured 25200s out on the lane's VM). The two agreed
+    with each other, so nothing looked wrong until that clock met a
+    PLATFORM timestamp: `render_wpn(db, since=…)` compares the leg's start
+    against the notification database's FILETIMEs, and every row of the
+    last seven hours read `ARRIVED INSIDE THIS LEG` (docs/deferred.md, the
+    PopupHost WATCH's sixth sighting). No lane can fail this — a marker
+    that is too wide marks MORE rows, never fewer."""
+    found = []
+    for rel in (GUEST_PS1, LANE_PY):
+        # COMMENT-STRIPPED, because both files now NAME the broken call in
+        # the prose that says not to use it.
+        code = re.sub(r'"""[\s\S]*?"""', "", src[rel])
+        code = "\n".join(ln for ln in code.splitlines()
+                         if not ln.strip().startswith("#"))
+        if "-UFormat %s" in code:
+            found.append(
+                f"{rel}: stamps an epoch with `Get-Date -UFormat %s`, which "
+                f"answers LOCAL time as though it were UTC on Windows "
+                f"PowerShell 5.1 — the guest's clock then sits one UTC offset "
+                f"behind the notification database's own, and the toast "
+                f"moment's `ARRIVED INSIDE THIS LEG` marker reads hours wide. "
+                f"`[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()` is the call")
+    if not re.search(r'\$at = \[DateTimeOffset\]::UtcNow\.ToUnixTimeSeconds\(\)',
+                     src[GUEST_PS1]):
+        found.append(
+            f"{GUEST_PS1}: the ring's `at=` stamp is not "
+            f"[DateTimeOffset]::UtcNow.ToUnixTimeSeconds() — every section "
+            f"that places a leg against that ring (the foreground head line, "
+            f"desktop-live's window, the toast moment's marker) is read "
+            f"against it")
+    if "ToUnixTimeSeconds" not in py_block(src[LANE_PY], "clock_sync"):
+        found.append(
+            f"{LANE_PY}: clock_sync reads the guest's epoch some other way "
+            f"than [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() — it must "
+            f"read the clock the sampler stamps, or the offset it measures "
+            f"is a timezone rather than a drift")
+    return found
+
+
 def census_collect_fresh(src):
     """THE OLD ANSWER GOES FIRST (docs/traps.md's run_guest_oneshot trap,
     met again by the recorder 2026-09-16): the windows collect polls for
@@ -396,7 +441,8 @@ CENSUSES = (("sections", census_sections), ("skip writers", census_skips),
             ("finish", census_finish), ("capture point", census_when),
             ("windows verb trace", census_vtrace),
             ("windows toast files", census_toast_files),
-            ("windows collect freshness", census_collect_fresh))
+            ("windows collect freshness", census_collect_fresh),
+            ("guest clock", census_guest_clock))
 TABLE = declared(REAL)
 gate.counted("lanes declaring a bundle shape", list(TABLE), floor=5)
 gate.counted("sections declared across the five lanes",
@@ -521,6 +567,24 @@ n13 = doctored(WIN,
 gate.negative("N13 a windows leg that keeps the last run's toast capture",
               lambda: census_toast_files(n13), want="does not delete")
 
-gate.negatives_ran(13)
+# N14: the guest's epoch stamp back on PowerShell 5.1's local-time-as-UTC
+# call — the shape every windows bundle carried until 2026-09-17.
+n14 = doctored(GUEST_PS1,
+               r'\$at = \[DateTimeOffset\]::UtcNow\.ToUnixTimeSeconds\(\)',
+               "$at = [int64](Get-Date -UFormat %s)",
+               "N14 put the sampler's stamp back on -UFormat %s")
+gate.negative("N14 a guest epoch stamped in local time",
+              lambda: census_guest_clock(n14), want="LOCAL time")
+
+# N15: the host's end of the same clock, alone — the two must move
+# together, and either one left behind measures a timezone.
+n15 = doctored(LANE_PY,
+               r'"\[DateTimeOffset\]::UtcNow\.ToUnixTimeSeconds\(\)"',
+               '"[int64](Get-Date -UFormat %s)"',
+               "N15 put clock_sync's read back on -UFormat %s")
+gate.negative("N15 a host reading the guest's clock in local time",
+              lambda: census_guest_clock(n15), want="LOCAL time")
+
+gate.negatives_ran(15)
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

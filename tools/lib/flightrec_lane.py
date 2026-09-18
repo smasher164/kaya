@@ -402,11 +402,17 @@ class WinRecorder(LaneRecorder):
     def clock_sync(self):
         """The host-to-guest clock offset, read ONCE per lane. Without
         it the ring is a wall of guest timestamps no leg can be
-        attributed to."""
+        attributed to.
+
+        READ THE SAME WAY THE SAMPLER STAMPS (tools/guest/flightrec.ps1):
+        `Get-Date -UFormat %s` on Windows PowerShell 5.1 answers LOCAL
+        time as though it were UTC (docs/traps.md), so both ends were
+        25199s behind the platform's own clock and the toast moment's
+        `ARRIVED INSIDE THIS LEG` marker read seven hours wide."""
         if not self._ready():
             return
         got = self._ssh_out('powershell -NoProfile -Command '
-                            '"[int64](Get-Date -UFormat %s)"') or ""
+                            '"[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()"') or ""
         got = got.replace("\r", "").replace("\n", "").strip()
         self.skew = int(got) - int(time.time()) if got.isdigit() else 0
         print(f"flightrec: the guest's clock is {self.skew}s from this host's")

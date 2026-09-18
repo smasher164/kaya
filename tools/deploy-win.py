@@ -635,6 +635,8 @@ def notify_banner_off(aumid):
 
 for _aumid in NOTIFY_AUMIDS:
     notify_banner_off(_aumid)
+# The spelling the guest's own database carries, not a guess.
+WIDGETS_AUMID = "MicrosoftWindows.Client.WebExperience_cw5n1h2txyewy!Widgets"
 # EVERY OTHER IDENTITY THAT HAS EVER POSTED ON THIS GUEST, read out of its
 # own notification settings and database on 2026-09-16 (docs/deferred.md,
 # the PopupHost WATCH's eighth red): OneDrive's sign-in nag (the toast
@@ -649,11 +651,56 @@ FOREIGN_TOAST_AUMIDS = [
     "Windows.SystemToast.Suggested",
     "Windows.ActionCenter.SmartOptOut",
     "Windows.SystemToast.LowDisk",
-    # The spelling the guest's own database carries, not a guess.
-    "MicrosoftWindows.Client.WebExperience_cw5n1h2txyewy!Widgets",
+    WIDGETS_AUMID,
 ]
 for _aumid in FOREIGN_TOAST_AUMIDS:
     notify_banner_off(_aumid)
+
+
+# The Widgets board is off: its lock-screen tiles were the only rows on
+# the VM and filled the toast-moment marker's window (docs/deferred.md,
+# the PopupHost WATCH's sixth sighting) — the toast class's own cause is
+# the phantom "New notification" window, recorded there. A per-app
+# notification setting governs presentation, not delivery (measured), and
+# the two documented switches are refused by value name on this build
+# (docs/traps.md); the MDM policy store the feature reads takes the value.
+WIDGETS_POLICY = ("HKLM\\SOFTWARE\\Microsoft\\PolicyManager\\default\\"
+                  "NewsAndInterests\\AllowNewsAndInterests")
+
+
+def widgets_board_off():
+    """The board may not run, READ BACK and then STOPPED: a write that did
+    not take looks exactly like one that did, and a board already running
+    when the value lands keeps posting until the shell restarts."""
+    must_ssh(f'reg add "{WIDGETS_POLICY}" /v value /t REG_DWORD /d 0 /f >nul')
+    said = (run_ssh_out(f'reg query "{WIDGETS_POLICY}" /v value') or "").strip()
+    if "0x0" not in said:
+        print("deploy-win: the Widgets board is still allowed to run —",
+              file=sys.stderr)
+        print(f"  `reg query {WIDGETS_POLICY} /v value` read {said!r} after "
+              f"the write.", file=sys.stderr)
+        print("  The board posts a lock-screen tile whenever it starts, and "
+              "one arriving", file=sys.stderr)
+        print("  while the pool empties holds the foreground through the "
+              "exclusive notes", file=sys.stderr)
+        print("  leg's type verb (docs/deferred.md, the PopupHost WATCH).",
+              file=sys.stderr)
+        sys.exit(1)
+    must_ssh('cmd /c "taskkill /f /im Widgets.exe >nul 2>nul '
+             '& taskkill /f /im WidgetService.exe >nul 2>nul & exit /b 0"')
+    left = (run_ssh_out('powershell -NoProfile -Command "@(Get-Process -Name '
+                        'Widgets,WidgetService -ErrorAction SilentlyContinue)'
+                        '.Count"') or "").strip()
+    if left != "0":
+        print(f"deploy-win: {left!r} Widgets process(es) survived the stop — "
+              f"the board", file=sys.stderr)
+        print("  goes on posting until the shell restarts, whatever the "
+              "policy says.", file=sys.stderr)
+        sys.exit(1)
+    print("widgets: the board is off (policy 0x0, no Widgets process left)")
+
+
+widgets_board_off()
 must_ssh('reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\'
          'ContentDeliveryManager" /v SubscribedContent-338389Enabled '
          '/t REG_DWORD /d 0 /f >nul')
