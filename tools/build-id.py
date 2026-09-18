@@ -113,7 +113,13 @@ GATES = {
     "check-compose": ["android", "bindings/java"],
     "check-detekt": ["android"],
     "check-compose-state": ["android", "docs"],
-    "check-pins": ["android"],
+    # `tools` is not padding: this gate reads the Dockerfile, deploy-win,
+    # fetch-winappsdk and the fetch-zip script, and SINCE 2026-09-17 the
+    # java language-level clause reads six javac sites plus a census of
+    # every tools/**/*.{py,sh}. Declared `["android"]` alone it went
+    # stale under KAYA_FAST on exactly the edits it exists to catch.
+    # `guests` and `docs` carry the .csproj files its NuGet clause reads.
+    "check-pins": ["android", "tools", "guests/csharp", "docs"],
     # The INTERFACE, not the implementation: kaya.h's own freshness is
     # gated by gen-header, which is keyed on all of crates/.
     "swift-typecheck": ["crates/kaya/include", "bindings/swift",

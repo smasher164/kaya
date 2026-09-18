@@ -2281,8 +2281,33 @@ unpicked.
     half-speaks (`__len__`, `__contains__`, `keys`, `items`); (b) a sum
     collection's element is typed `Any`, and a distinct runtime class for
     sum collections would let `cases.case(Note)` narrow; (c) a live
-    `bind="x"` literal type-checks and raises. JDK 21 and Swift 6 mode
-    remain.
+    `bind="x"` literal type-checks and raises. THE JAVA THIRD LANDED 2026-09-17
+    (one Opus agent; the job's tmp/idiom/notes-jdk21.md), after the
+    maintainer asked for Android's feasibility before the work and ruled
+    on the measurement: JDK 21 on all four Java lanes — the flake's zulu
+    21, the linux image's Temurin 21 by version and sha256 (trixie's
+    default-jdk happened to be 21, which is the Go pin's fiction one
+    lane over), the VM's Microsoft.OpenJDK.21 arm64 version-keyed with
+    17 uninstalled and both java and javac read back, and the ten
+    gradle modules at VERSION_21 / jvmTarget 21 with the five android/
+    modules at compileSdk 36, because pattern matching for switch lowers
+    to java.lang.runtime.SwitchBootstraps and android-35's jar has none
+    while D8 desugars it for the API-35 image the lane boots. Every javac
+    states `--release 21` and check-pins' java clause refuses one that
+    does not (fifteen watched negatives). Sums are eliminated by
+    exhaustive switch where a guest reads shorter or clearer: Feed's
+    derive and promote, Clipboard's five-arm chain that had NO FINAL
+    ELSE (a sixth representation would have fallen through silently) and
+    is exhaustive now with `case null` for the empty clipboard; guests
+    18 -> 11 `instanceof`, +7 lines over three files. VIRTUAL THREADS
+    DROPPED FROM THE RULING, measured: ART has no Thread.ofVirtual at any
+    compileSdk and the guests are one source for four lanes. Two
+    measured limits stand in the guests and docs/traps.md: an ENUM
+    switch with `case null` throws on ART while a TYPE switch with one is
+    fine (Dnd's `word()` keeps its chain; the android lane's dnd leg is
+    the only wall), and Java 21 has no unnamed pattern, so a five-variant
+    sum with three outcomes costs five arms (Dnd's chain kept). Swift 6
+    mode remains.
   - R4 NOT TAKEN: a Roslyn source generator for C# and an attached macro
     for Swift (the checked-in generated files are held by gen-guests
     --check); Go's must-use diagnostic through runtime.AddCleanup (a
@@ -12953,7 +12978,7 @@ are struck (docs/rich-text-plan.md §16 keeps the two measured facts).
 KEY: notes demo, automerge, format_range, remote mark, peer fork.
 
 ## WATCH — an explorer PopupHost held the VM's foreground and the `type` verb could not take it, once (first sighting 2026-09-15)
-KEY: PopupHost, Xaml_WindowedPopupClass, SetForegroundWindow, type injection, windows foreground, notes_rust, toast-moment, toastwpn, CAPTUREBLT, ShellExperienceHost, New notification
+KEY: PopupHost, Xaml_WindowedPopupClass, SetForegroundWindow, type injection, windows foreground, notes_rust, toast-moment, toastwpn, CAPTUREBLT, ShellExperienceHost, New notification, Widgets, WebExperience, guest epoch
 
 Matrix 15 on 5531fe55: the Windows `notes_rust` leg died at its first
 `type` with the arm's own sentence (`could not foreground the guest window
@@ -13075,6 +13100,25 @@ closed; and provisioning turns the banner off for every non-kaya identity
 that has posted (FOREIGN_TOAST_AUMIDS, the toast trap's remedy generalized),
 the platform re-read after. The next red names its toast in two sections.
 
+
+SIXTH SIGHTING, 2026-09-17 23:57Z (the JDK 21 slice's windows lane run,
+89da76e8's recorder in place), AND THE SENDER IS NAMED: toast-moment.txt's
+row inside the leg is a TILE from
+MicrosoftWindows.Client.WebExperience_cw5n1h2txyewy!Widgets — the Widgets
+board — and toast-moment.png shows its weather surface on the taskbar
+with the guest window behind it; the board posts one such row near every
+lane start (20:49, 21:25, 21:40, 22:21, 23:58Z that day, one per deploy),
+which is the burst-after-a-shell-restart shape the forced proof needed.
+Two things follow. THE REMEDY IS PROVISIONING: deploy-win turns the
+Widgets board's notifications off on the VM (or the board itself, the
+taskbar's Widgets toggle) the way it already sets the notify identity's
+ShowBanner, proven by the lane, next slice. AND A DEFECT IN THE SECTION'S
+MARKER: all five rows over three hours read `ARRIVED INSIDE THIS LEG`,
+because the leg's start is stamped in the recorder's GUEST epoch, which
+sits 25199s behind the database's FILETIME clock (foreground.txt prints
+the offset), so the marker is seven hours wide; the same slice converts
+the leg's start onto the database's clock and proves the marker on the
+forced red again.
 ## WATCH — the iOS dark canvas leg read LIGHT pixels under a matrix, once (first sighting 2026-09-14)
 KEY: canvasdark-swift, expect_ink dark, KAYA_APPEARANCE, kayaCanvasAppearance, traitCollection, appearance flake
 

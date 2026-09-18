@@ -64,9 +64,12 @@ def run_javac(*args):
                             check=False).returncode == 0
     except FileNotFoundError:
         ok = False
-    cmd = ["javac"] if ok else ["nix", "shell", "nixpkgs#jdk17", "-c",
+    cmd = ["javac"] if ok else ["nix", "shell", "nixpkgs#jdk21", "-c",
                                 "javac"]
-    return subprocess.run([*cmd, *[str(a) for a in args]],
+    # The language level is stated here so the processor parses the same
+    # Java the lanes compile (tools/check-pins.py's java clause).
+    return subprocess.run([*cmd, "--release", "21",
+                           *[str(a) for a in args]],
                           check=False).returncode
 
 

@@ -83,7 +83,7 @@ drain_builds() {
 build_csharp() { dotnet build --nologo -v q /tmp/cs/kaya-guests.csproj >/dev/null; }
 build_java() {
     mkdir -p /tmp/java-guests
-    javac -encoding UTF-8 -d /tmp/java-guests \
+    javac --release 21 -encoding UTF-8 -d /tmp/java-guests \
         bindings/java-desktop/dev/kaya/KayaRing.java \
         bindings/java/dev/kaya/*.java \
         guests/java/dev/kaya/guests/*.java

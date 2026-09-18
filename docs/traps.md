@@ -11630,3 +11630,56 @@ that were each measured on the lane's VM the day it landed:
    restarted plus `toast-probe.cmd -Count 40`. A reminder toast survives
    `History.Clear` and Escape; `taskkill /f /im ShellExperienceHost.exe`
    takes it down and Windows restarts the host on demand.
+
+## A multiplexed ssh session keeps the PATH it was opened with, and winget says "already installed" with a failing exit code (2026-09-17)
+
+tools/deploy-win.py runs every remote command over one ControlMaster
+connection with ControlPersist=120. A `winget install --scope machine`
+writes the MACHINE PATH and a `winget uninstall` of the old JDK deletes
+the directory the live session's PATH still names, so the very next
+`java -version` over that connection ran nothing and the post-install
+verify read an empty string one line after "Successfully installed". And
+the mux OUTLIVES the run: the next deploy's first probe reused the master
+the previous run left alive and reported the JDK absent on a guest that
+had it. The rule: drop the mux (`ssh -O exit`) before the first toolchain
+probe and again after any install that changes PATH; a verify over the
+connection that did the install is verifying the old environment, and it
+looks exactly like a failed install. Beside it: `winget install` exits
+non-zero for "Found an existing package already installed … No available
+upgrade found", which is a guest that has what was asked for — the verify
+AFTER the fetch is the judge, never the installer's exit code.
+
+## javac 21.0.11 crashes on a record pattern inside a conditional expression inside a lambda (2026-09-17)
+
+`(r) -> write("pasted " + (r instanceof T(String value) ? value : r))`
+dies with an AssertionError in code generation (Code.addLocalVar via
+Gen.visitLetExpr), not a diagnostic, and names no source line. All three
+ingredients are needed — the same pattern in a ternary with no lambda,
+a lambda with a plain type pattern in a ternary, and a lambda with the
+record pattern in an `if` statement all compile. The `if` statement is
+the workaround. javac leaves a `javac.<stamp>.args` file in the working
+tree on the way out, which tools/java-typecheck.py sweeps.
+
+## An ENUM switch with `case null` throws on ART, where a TYPE switch with `case null` is fine (2026-09-17)
+
+`switch (op) { case COPY -> …; case MOVE -> …; case null -> "none"; }`
+over a nullable enum compiles at `--release 21`, dexes, installs, and
+passes on the mac and Windows lanes — and on Android every handler that
+calls it throws `java.lang.RuntimeException`, which kaya catches and rolls
+back, so the app does not even crash: the scene goes silent. Bisected on
+the android jvm suite in three runs (the if-chain passes, the enum switch
+alone fails, record patterns alone pass). D8 desugars
+`SwitchBootstraps.typeSwitch` into `$$ExternalSyntheticTypeSwitch`
+synthetics (read out of the APK's dex) and does not do the same for the
+enum form. The rule for any Java a guest shares with Android: `case null`
+in a TYPE switch over a sealed hierarchy, never in a switch over an enum;
+a nullable enum keeps its if-chain. Nothing short of the android lane
+catches it — not javac against android.jar, not the dex step.
+
+## Java 21 has no unnamed pattern, so an exhaustive switch costs one named arm per variant (2026-09-17)
+
+`case Foo _ ->` (JEP 456) is preview in 21 and standard in 22. A sealed
+sum with five variants and three outcomes needs five labels with two
+never-read bindings, which is why Dnd's dropped() kept its chain under
+the "a guest only gets shorter or clearer" rule. Weigh it whenever "make
+it an exhaustive switch" is proposed; it goes away on the next JDK bump.

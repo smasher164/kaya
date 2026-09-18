@@ -106,13 +106,29 @@ ENV PATH=/root/.cargo/bin:/usr/local/dotnet:$PATH
 ENV CC=clang
 ENV DOTNET_CLI_TELEMETRY_OPTOUT=1
 
-# The desktop JVM tier: headless is enough — the JVM speaks only the
-# ring (no AWT; presentation is the native GTK backend in-process).
-# A trailing layer deliberately: appending rebuilds in seconds where
-# touching the first apt list rebuilds the toolchain world.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    default-jdk-headless \
-    && rm -rf /var/lib/apt/lists/*
+# The desktop JVM tier, BY VERSION AND BY BYTES (tools/check-pins.py's
+# java clause holds the version, the hash and the read-back; docs/traps.md's
+# Go-pin entry is why): `default-jdk-headless` follows the base image's
+# default-java, so a base bump would move the LANGUAGE LEVEL with nothing
+# red. The whole JDK because Adoptium ships one tarball; the JVM still
+# speaks only the ring, and nothing here opens an AWT window.
+RUN set -eu; arch="$(dpkg --print-architecture)"; \
+    case "$arch" in \
+      arm64) tarball=OpenJDK21U-jdk_aarch64_linux_hotspot_21.0.12.1_1.tar.gz; \
+             sum=23e37e026f12f3e706f18938ff611db3032d075b09d0879a25d06718c773e223 ;; \
+      amd64) tarball=OpenJDK21U-jdk_x64_linux_hotspot_21.0.12.1_1.tar.gz; \
+             sum=ce79869e1307ed8ee1e2baa86a412b1eb5b75d10a01006d788a6f968bcfaee94 ;; \
+      *) echo "no jdk tarball pinned for $arch" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL -o "/tmp/$tarball" \
+        "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.12.1%2B1/$tarball"; \
+    echo "$sum  /tmp/$tarball" | sha256sum -c -; \
+    mkdir -p /usr/local/jdk21; \
+    tar -xzf "/tmp/$tarball" -C /usr/local/jdk21 --strip-components=1; \
+    rm "/tmp/$tarball"; \
+    /usr/local/jdk21/bin/javac -version; /usr/local/jdk21/bin/java -version
+ENV JAVA_HOME=/usr/local/jdk21
+ENV PATH=/usr/local/jdk21/bin:$PATH
 
 # Accessibility: the AT-SPI bus and registry. GTK deliberately exposes
 # no getter for accessible properties — the accessible surface IS

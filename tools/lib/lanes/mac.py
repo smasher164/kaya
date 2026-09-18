@@ -808,7 +808,7 @@ def build_java(root, log=None):
             *sorted(str(p.relative_to(root))
                     for p in (root / "guests/java/dev/kaya/guests"
                               ).glob("*.java"))]
-    return _run(["javac", "-encoding", "UTF-8", "-d",
+    return _run(["javac", "--release", "21", "-encoding", "UTF-8", "-d",
                  "target/java-guests", *srcs], log, cwd=root)
 
 

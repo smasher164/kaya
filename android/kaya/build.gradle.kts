@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "dev.kaya"
-    compileSdk = 35
+    compileSdk = 36
     // Pinned to the version the nix SDK provides; AGP cannot download
     // into the read-only store path.
     buildToolsVersion = "37.0.0"
@@ -31,12 +31,12 @@ android {
     }
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
     }
 
     kotlinOptions {
-        jvmTarget = "17"
+        jvmTarget = "21"
     }
 }
 

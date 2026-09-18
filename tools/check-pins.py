@@ -484,6 +484,376 @@ else:
     out.append(f"{DEPLOY_WIN} or {FETCH_ZIP}: gone — the zip clause reads "
                "them by name")
 
+# --- The Java language level: ONE number across four lanes -------------
+# The Go pin's fiction was one lane quietly on another toolchain
+# (docs/traps.md, 2026-09-01). A javac with no `--release` is the same
+# defect with no version to read: it compiles at whatever level the javac
+# on PATH defaults to, so a lane whose JDK moves changes language silently
+# and every other gate stays green. HERE and not in check-gates.py because
+# this gate already reads all four files involved — android/**/*.gradle.kts,
+# tools/linux/Dockerfile, tools/deploy-win.py and tools/**/*.sh — and its
+# subject IS a toolchain version that no lockfile pins; check-gates' subject
+# is the gate roster and the lane launch topology, and it reads no javac
+# line at all.
+JAVA_RELEASE = "21"
+ANDROID_COMPILE_SDK = "36"
+# Every file in this repo that compiles Java, and how it spells the flag.
+# A javac found anywhere else is a finding naming the site (the census
+# below), never a skip.
+JAVAC_SITES = {
+    "tools/java-typecheck.py": "the fast gate over the binding and every guest",
+    "tools/gen-guests.py": "the annotation processor that writes *Kaya.java",
+    "tools/check-abort.py": "the abort exerciser",
+    "tools/lib/lanes/mac.py": "the mac lane's guest build",
+    "tools/linux/run-suites.sh": "the linux container's guest build",
+    "tools/deploy-win.py": "the javac that runs ON the Windows guest",
+}
+# compileSdk 36 is not a nicety on these five: pattern matching for switch
+# needs java.lang.runtime.SwitchBootstraps on the compile classpath and
+# android-35's android.jar has none (measured 2026-09-17; D8 desugars the
+# typeSwitch for minSdk 26, so the APKs still run on the API-35 image).
+# Dropping one back to 35 fails the javahost compile — but only on the
+# android lane, a whole matrix away, which is why it is held here.
+ANDROID_SDK36_MODULES = ("android/kaya/build.gradle.kts",
+                         "android/javahost/build.gradle.kts",
+                         "android/gohost/build.gradle.kts",
+                         "android/pyhost/build.gradle.kts",
+                         "android/rusthost/build.gradle.kts")
+
+JAVAC_CALL = re.compile(r"\bjavac\b")
+
+
+def scan_java_level(texts, gradle_texts):
+    """Findings for the java language level. A function so the watched
+    negatives below can run it against doctored copies."""
+    bad, read = [], 0
+    for rel, what in sorted(JAVAC_SITES.items()):
+        text = texts.get(rel)
+        if text is None:
+            bad.append(f"{rel}: gone — the java language-level clause reads "
+                       f"it by name as {what}; if Java is compiled some "
+                       f"other way now, that way needs this clause")
+            continue
+        code = code_only(text)
+        if not JAVAC_CALL.search(code):
+            bad.append(f"{rel}: names no javac, but this clause lists it as "
+                       f"{what} — the census is reading the wrong file")
+            continue
+        read += 1
+        # Both spellings: an argv list ("--release", "21") and embedded
+        # shell (`javac --release 21 …`). Adjacency is what makes it a
+        # flag rather than two unrelated tokens.
+        argv = f'"--release", "{JAVA_RELEASE}"'
+        shell = f"--release {JAVA_RELEASE}"
+        if argv not in code and shell not in code:
+            bad.append(f"{rel}: compiles Java without `--release "
+                       f"{JAVA_RELEASE}` — {what}. The level would be "
+                       f"whatever the javac on PATH defaults to, so this "
+                       f"lane can compile a different language from the "
+                       f"other three with nothing red (CLAUDE.md "
+                       f"invariant 3; the Go pin's fiction, docs/traps.md)")
+    if read < len(JAVAC_SITES):
+        bad.append(f"check-pins: read {read} of {len(JAVAC_SITES)} javac "
+                   f"sites — a census that reads almost nothing agrees "
+                   f"with almost anything")
+    for rel, text in sorted(gradle_texts.items()):
+        code = code_only(text)
+        # EVERY occurrence, not "at least one right one": a module with
+        # sourceCompatibility 17 beside targetCompatibility 21 satisfies a
+        # membership test and compiles at 17 (watched negative below).
+        for spelled in set(re.findall(r"JavaVersion\.VERSION_(\w+)", code)):
+            if spelled != JAVA_RELEASE:
+                bad.append(f"{rel}: JavaVersion.VERSION_{spelled} — every "
+                           f"javac site in this repo states `--release "
+                           f"{JAVA_RELEASE}`, so this module compiles the "
+                           f"guests at a level the other lanes do not")
+        for spelled in set(re.findall(r'jvmTarget\s*=\s*"([^"]+)"', code)):
+            if spelled != JAVA_RELEASE:
+                bad.append(f"{rel}: jvmTarget = \"{spelled}\" — the Kotlin "
+                           f"half of this module targets a bytecode level "
+                           f"the Java half does not")
+        if rel in ANDROID_SDK36_MODULES:
+            if f"compileSdk = {ANDROID_COMPILE_SDK}" not in code:
+                bad.append(f"{rel}: not at `compileSdk = "
+                           f"{ANDROID_COMPILE_SDK}` — pattern matching for "
+                           f"switch needs java.lang.runtime.SwitchBootstraps "
+                           f"on the compile classpath and android-35's "
+                           f"android.jar has none (measured 2026-09-17). "
+                           f"Below 36 the javahost compile dies with "
+                           f"`class file for java.lang.runtime."
+                           f"SwitchBootstraps not found`, on the android "
+                           f"lane and nowhere else")
+    # THE NEW DOOR: this clause reads its files BY NAME, so a javac that
+    # appears anywhere else in tools/ is invisible to it.
+    return bad, read
+
+
+# Files that NAME javac without compiling: the two command-hygiene gates
+# that read other files' javac lines, the gradle wrapper's prose, and the
+# prelude's docstring. Each must still name javac, or the exemption is
+# stale and says so.
+JAVAC_EXEMPT = {
+    "tools/check-python.py": "rule 11 reads OTHER files' javac argv lists",
+    "tools/check-shell.py": "the same rule, shell side",
+    "tools/check-compose.py": "names gradle's compileDebugJavaWithJavac task",
+    "tools/lib/kaya_gate.py": "the -encoding trap, in a docstring",
+}
+# An INVOCATION, not the word: `javac` as an argv element, or at the head
+# of a shell command. The bare word also appears in prose and in the two
+# gates that police other files' javac lines (JAVAC_EXEMPT).
+JAVAC_INVOCATION = re.compile(
+    r"""["']javac["']|(?:^|[;&|(]|\bthen\b|\bdo\b)\s*javac\s""", re.M)
+
+
+def java_level_census(bodies):
+    """Every tools/ file that INVOKES javac, so a NEW compile site is a
+    finding rather than a silence. Takes the bodies rather than reading
+    them, so the watched negative below can inject one."""
+    found = [rel for rel, body in sorted(bodies.items())
+             if JAVAC_INVOCATION.search(code_only(body))]
+    stale = [rel for rel in sorted(JAVAC_EXEMPT)
+             if rel not in bodies
+             or not JAVAC_CALL.search(code_only(bodies[rel]))]
+    return found, stale
+
+
+def tools_bodies(root_dir):
+    out_ = {}
+    for pattern in ("tools/**/*.py", "tools/**/*.sh"):
+        for f in sorted(root_dir.glob(pattern)):
+            rel = f.relative_to(root_dir).as_posix()
+            if rel == "tools/check-pins.py":
+                continue
+            out_[rel] = f.read_text(encoding="utf-8")
+    return out_
+
+
+def census_findings(found, stale):
+    bad = []
+    for rel in found:
+        if rel not in JAVAC_SITES and rel not in JAVAC_EXEMPT:
+            bad.append(f"{rel}: invokes javac and is not in check-pins' "
+                       f"JAVAC_SITES, so nothing holds its `--release "
+                       f"{JAVA_RELEASE}` — add it there with what it is "
+                       f"for")
+    for rel in stale:
+        bad.append(f"{rel}: is in check-pins' JAVAC_EXEMPT ("
+                   f"{JAVAC_EXEMPT[rel]}) but no longer names javac — a "
+                   f"stale exemption is the next stale audit")
+    return bad
+
+
+java_texts = {}
+for rel in JAVAC_SITES:
+    f = root / rel
+    if f.is_file():
+        java_texts[rel] = f.read_text(encoding="utf-8")
+gradle_texts = {
+    f.relative_to(root).as_posix(): f.read_text(encoding="utf-8")
+    for f in sorted(list(root.glob("android/**/*.gradle.kts"))
+                    + list(root.glob("tools/android/**/*.gradle.kts")))}
+_java_out, _java_read = scan_java_level(java_texts, gradle_texts)
+out += _java_out
+_tools_bodies = tools_bodies(root)
+out += census_findings(*java_level_census(_tools_bodies))
+# TWO WATCHED NEGATIVES ON THE CENSUS ITSELF, because a census nobody has
+# seen fire is a guess: a NEW javac site that nothing holds, and an
+# exemption that stopped naming javac.
+_planted = dict(_tools_bodies)
+_planted["tools/a-new-lane.py"] = (
+    'subprocess.run(["javac", "-encoding", "UTF-8", "-d", out, src])\n')
+_blanked = dict(_tools_bodies)
+_blanked["tools/check-shell.py"] = "# nothing here compiles anything\n"
+_census_negatives = [
+    ("a new javac site", _planted, "a-new-lane.py", "JAVAC_SITES"),
+    ("a stale javac exemption", _blanked, "check-shell.py",
+     "stale exemption"),
+]
+_crefused = 0
+for _label, _bodies, _who, _what in _census_negatives:
+    _got = census_findings(*java_level_census(_bodies))
+    if any(_who in f and _what in f for f in _got):
+        _crefused += 1
+    else:
+        out.append(f"check-pins: watched negative {_label!r} was NOT "
+                   f"refused naming {_what!r} (findings: {_got})")
+print(f"check-pins: javac census: {len(_tools_bodies)} tools file(s) read, "
+      f"{_crefused}/{len(_census_negatives)} watched negatives refused",
+      file=sys.stderr)
+
+# WATCHED NEGATIVES on doctored copies of the real files.
+JAVA_NEGATIVES = [
+    ("the mac lane's release flag dropped", "tools/lib/lanes/mac.py",
+     '"javac", "--release", "21",', '"javac",',
+     "without `--release 21`"),
+    ("the linux container's release flag dropped",
+     "tools/linux/run-suites.sh",
+     "javac --release 21 -encoding UTF-8", "javac -encoding UTF-8",
+     "without `--release 21`"),
+    ("the windows guest's release flag dropped", "tools/deploy-win.py",
+     "javac --release 21 -encoding UTF-8", "javac -encoding UTF-8",
+     "without `--release 21`"),
+    ("the gate's own release flag dropped", "tools/java-typecheck.py",
+     'RELEASE = ["--release", "21"]', 'RELEASE = []',
+     "without `--release 21`"),
+    ("a gradle module left at 17", "android/javahost/build.gradle.kts",
+     "sourceCompatibility = JavaVersion.VERSION_21",
+     "sourceCompatibility = JavaVersion.VERSION_17",
+     "JavaVersion.VERSION_17"),
+    ("a gradle module's kotlin target left at 17",
+     "android/kaya/build.gradle.kts",
+     'jvmTarget = "21"', 'jvmTarget = "17"', 'jvmTarget = "17"'),
+    ("compileSdk dropped back to 35", "android/javahost/build.gradle.kts",
+     "compileSdk = 36", "compileSdk = 35", "SwitchBootstraps not found"),
+    ("a probe app's kotlin target left at 17",
+     "tools/android/clipprobe/app/build.gradle.kts",
+     'jvmTarget = "21"', 'jvmTarget = "17"', 'jvmTarget = "17"'),
+]
+jcounts, jrefused = [], 0
+for label, rel, old, new, expect in JAVA_NEGATIVES:
+    src = java_texts.get(rel) or gradle_texts.get(rel)
+    if src is None:
+        out.append(f"check-pins: watched negative '{label}' names {rel}, "
+                   f"which this clause never read")
+        jcounts.append("0")
+        continue
+    sites = src.count(old)
+    jcounts.append(f"{min(sites, 1)}")
+    if sites != 1:
+        out.append(f"check-pins: watched negative '{label}' matches "
+                   f"{sites} sites in {rel} — an unchanged file is a "
+                   f"failed test, and an ambiguous one doctors somewhere "
+                   f"nobody meant")
+        continue
+    doctored = src.replace(old, new, 1)
+    jt = dict(java_texts)
+    gt = dict(gradle_texts)
+    if rel in jt:
+        jt[rel] = doctored
+    else:
+        gt[rel] = doctored
+    got, _ = scan_java_level(jt, gt)
+    if any(expect in g for g in got):
+        jrefused += 1
+    else:
+        out.append(f"check-pins: watched negative '{label}' was NOT "
+                   f"refused naming {expect!r} (findings: {got})")
+print(f"check-pins: java language level: {_java_read} javac site(s) and "
+      f"{len(gradle_texts)} gradle module(s) read, {jrefused}/"
+      f"{len(JAVA_NEGATIVES)} watched negatives refused (substitutions "
+      f"{'/'.join(jcounts)})", file=sys.stderr)
+
+# --- The linux image's JDK: by version AND by bytes --------------------
+# The Dockerfile's own apt policy leaves package versions to trixie on
+# purpose, and exempts nothing that decides a LANGUAGE LEVEL: this is the
+# node/Go/winappsdk rule one toolchain over.
+JDK_FETCH = re.compile(
+    r"OpenJDK(\d+)U-jdk_(?:aarch64|x64)_linux_hotspot_"
+    r"(\d+(?:\.\d+)+)_(\d+)\.tar\.gz")
+
+
+def scan_jdk_pin(text):
+    bad = []
+    body = code_only(text)
+    names = JDK_FETCH.findall(body)
+    if len(names) < 2:
+        bad.append(f"{dockerfile}: read {len(names)} pinned JDK tarball "
+                   f"name(s) — the image fetches one per container arch, "
+                   f"and a census that reads almost nothing agrees with "
+                   f"almost anything")
+    for major, version, _build in names:
+        if major != JAVA_RELEASE:
+            bad.append(f"{dockerfile}: a JDK tarball for major {major}, "
+                       f"but every javac in this repo states `--release "
+                       f"{JAVA_RELEASE}` — the container would compile at "
+                       f"21 and RUN on {major}")
+        if not re.match(r"^\d+(\.\d+)+$", version):
+            bad.append(f"{dockerfile}: JDK version {version!r} is not a "
+                       f"fixed version")
+    joined = body.replace("\\\n", " ")
+    hashes = re.findall(r"sum=([0-9a-fA-F]+)", joined)
+    jdk_hashes = [h for h in hashes if SHA256.match(h)]
+    if len(jdk_hashes) < 4:
+        # node's two plus the JDK's two: a bare count is enough to catch a
+        # hash dropped or shortened, and the shape check below says which.
+        bad.append(f"{dockerfile}: {len(jdk_hashes)} 64-hex sha256(s) "
+                   f"beside the tarball fetches — a version names a "
+                   f"release, not the bytes that arrive")
+    for stanza in re.findall(r"tarball=(OpenJDK\S+)", joined):
+        idx = joined.index(stanza)
+        window = joined[idx:idx + 400]
+        if not re.search(r"sum=[0-9a-f]{64}", window):
+            bad.append(f"{dockerfile}: the JDK tarball {stanza} records no "
+                       f"sha256 beside it")
+    if "OpenJDK" in body:
+        # The verification must be unreachable-around: the compare comes
+        # before the unpack, and the unpacked compiler is read back.
+        order = [body.find("sha256sum -c -", body.find("OpenJDK21U")),
+                 body.find("tar -xzf \"/tmp/$tarball\" -C /usr/local/jdk21")]
+        if min(order) < 0:
+            bad.append(f"{dockerfile}: the JDK fetch lacks the sha256 "
+                       f"compare or the unpack")
+        elif order[0] > order[1]:
+            bad.append(f"{dockerfile}: the JDK unpacks before it verifies "
+                       f"— the order is compare, then unpack")
+        if "/usr/local/jdk21/bin/javac -version" not in body:
+            bad.append(f"{dockerfile}: the JDK is never read back after "
+                       f"the unpack — a provisioning step that 'succeeded' "
+                       f"without producing the toolchain is how the Go pin "
+                       f"went uninstalled for weeks (docs/traps.md)")
+    if "default-jdk" in body:
+        bad.append(f"{dockerfile}: installs `default-jdk`, whose major "
+                   f"follows the base image's default-java — the language "
+                   f"level would move with a base bump and nothing here "
+                   f"would be red")
+    return bad
+
+
+out += scan_jdk_pin(text)
+
+JDK_NEGATIVES = [
+    ("the jdk hash shortened",
+     "sum=23e37e026f12f3e706f18938ff611db3032d075b09d0879a25d06718c773e223",
+     "sum=23e37e026f12f3e706f18938ff611db3032d075b09d0879a25d06718c773e2",
+     "sha256"),
+    ("the jdk unpacked before it verifies",
+     '    echo "$sum  /tmp/$tarball" | sha256sum -c -; \\\n'
+     "    mkdir -p /usr/local/jdk21; \\\n",
+     "    mkdir -p /usr/local/jdk21; \\\n",
+     "unpacks before it verifies"),
+    ("the read-back removed",
+     "    /usr/local/jdk21/bin/javac -version; "
+     "/usr/local/jdk21/bin/java -version\n",
+     "\n",
+     "never read back"),
+    ("default-jdk back in the apt list",
+     "    grim \\\n",
+     "    grim default-jdk-headless \\\n",
+     "default-jdk"),
+    ("the jdk major moved without the javac sites",
+     "OpenJDK21U-jdk_aarch64_linux_hotspot_21.0.12.1_1.tar.gz",
+     "OpenJDK25U-jdk_aarch64_linux_hotspot_25.0.1.1_1.tar.gz",
+     "RUN on 25"),
+]
+dcounts, drefused = [], 0
+for label, old, new, expect in JDK_NEGATIVES:
+    sites = text.count(old)
+    dcounts.append(f"{min(sites, 1)}")
+    if sites != 1:
+        out.append(f"check-pins: watched negative '{label}' matches "
+                   f"{sites} sites in the Dockerfile — an unchanged file "
+                   f"is a failed test")
+        continue
+    got = scan_jdk_pin(text.replace(old, new, 1))
+    if any(expect in g for g in got):
+        drefused += 1
+    else:
+        out.append(f"check-pins: watched negative '{label}' was NOT "
+                   f"refused naming {expect!r} (findings: {got})")
+print(f"check-pins: linux jdk: {drefused}/{len(JDK_NEGATIVES)} watched "
+      f"negatives refused (substitutions {'/'.join(dcounts)})",
+      file=sys.stderr)
+
 status = 0
 if out:
     print("check-pins: dependencies that a server, not this repo, would "

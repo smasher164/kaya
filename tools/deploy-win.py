@@ -346,6 +346,10 @@ NODE_DIR = f"C:\\kaya\\node24\\node-v{NODE_VERSION}-win-arm64"
 # before expansion.
 GO_VERSION = "1.27.0"
 GO_WIN_ARM64_SHA256 = "6e0156b9788209931dd340fadc04171ce15063c17b51c92e7b86b51109626e90"
+# The JDK: winget's own id carries the major, and the guest's javac is
+# held to it after the install (the `java -version` string's first field).
+JDK_MAJOR = "21"
+JDK_WINGET_ID = f"Microsoft.OpenJDK.{JDK_MAJOR}"
 BUILD_EXAMPLES = []
 for _s in SCENES + DEPTH_SCENES:
     BUILD_EXAMPLES += ["--example", _s]
@@ -749,10 +753,95 @@ if PROVISION:
 # --architecture arm64 MUST STAY: winget under the emulated x64 shell
 # defaults to the x64 build, whose JVM cannot load the aarch64 kaya.dll.
 # zulu ships no arm64 winget package; Microsoft's OpenJDK does.
-must_ssh("cmd /c java -version >nul 2>&1 && echo jdk present || winget "
-         "install --id Microsoft.OpenJDK.17 --architecture arm64 --silent "
-         "--accept-package-agreements --accept-source-agreements "
-         "--scope machine")
+#
+# VERSION-KEYED, NOT EXISTS-KEYED, for the Go pin's own reason
+# (docs/traps.md, 2026-09-01): `java -version >nul && echo jdk present` is
+# satisfied by ANY JDK, so a VM already carrying 17 would never be moved
+# to 21 and this lane would compile one language level below the other
+# three with nothing red. The version is read HERE rather than by a
+# `findstr` inside a `cmd /c "…"` because that pattern needs its own
+# double quotes and interior quotes re-pair across the line sshd wraps
+# (docs/traps.md).
+
+
+def drop_ssh_mux():
+    """Close the multiplexed master so the next command opens a session
+    that reads the CURRENT machine PATH. Anything that installs a
+    toolchain and then verifies it over the same connection verifies the
+    OLD environment (docs/traps.md, measured 2026-09-17: the verify read
+    an empty string one line after `Successfully installed`), and
+    ControlPersist keeps that session alive across RUNS, so a probe at
+    the top of the next deploy inherits it too."""
+    subprocess.run(["ssh", "-O", "exit", "-o",
+                    f"ControlPath={CONTROL_PATH}", HOST],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                   check=False)
+
+
+def jdk_major(tool):
+    """The major of the `java`/`javac` the launchers resolve, with the
+    line it was read from. Both write their version to stderr, so the
+    guest folds it into stdout."""
+    said = (run_ssh_out(f"cmd /c {tool} -version 2>&1") or "").strip()
+    m = re.search(r'(?:version\s+"|javac\s+)(\d+)[.\s]', said)
+    return (m.group(1) if m else None), said
+
+
+# BEFORE the first read, not only after the install: a PREVIOUS deploy's
+# master can still be alive here carrying the PATH from before its own
+# install, and this probe would then report the JDK absent on a guest that
+# has it.
+drop_ssh_mux()
+_have, _said = jdk_major("java")
+if _have == JDK_MAJOR:
+    print(f"jdk: {JDK_MAJOR} present ({_said.splitlines()[0]})")
+else:
+    print(f"== provisioning {JDK_WINGET_ID} (guest java is "
+          f"{_have or 'absent'}) ==")
+    # run_ssh, NOT must_ssh: winget exits non-zero for "Found an existing
+    # package already installed … No available upgrade found", which is a
+    # guest that already has what we asked for. The verify below is the
+    # judge — that is the whole point of verifying AFTER the fetch.
+    run_ssh(f"cmd /c winget install --id {JDK_WINGET_ID} "
+            "--architecture arm64 --silent --accept-package-agreements "
+            "--accept-source-agreements --scope machine")
+    # TWO JDKs ON ONE PATH IS THE TRAP, so the older ones are REMOVED
+    # rather than ordered around: winget appends the new JDK's bin to the
+    # machine PATH and `where java` answers with whatever sits first,
+    # which after an upgrade in place is still the old one. Uninstalling
+    # leaves exactly one java and one javac for the launchers to find,
+    # and the census below proves it.
+    for _old in ("11", "16", "17", "25"):
+        if _old != JDK_MAJOR:
+            run_ssh(f"cmd /c winget uninstall --id Microsoft.OpenJDK."
+                    f"{_old} --silent >nul 2>&1")
+    drop_ssh_mux()
+
+# VERIFIED AFTER THE FETCH, not only before it (the Go pin's lesson), and
+# BOTH halves: `javac` builds the guests and `java` runs them, they are
+# separate executables on PATH, and an uninstall that left one behind
+# would compile at one level and run at another.
+for _tool in ("java", "javac"):
+    _got, _line = jdk_major(_tool)
+    if _got != JDK_MAJOR:
+        print(f"deploy-win: the {_tool} on the guest's PATH is "
+              f"{_got or 'unreadable'} after provisioning, not "
+              f"{JDK_MAJOR} — the java legs would compile or run at the "
+              f"wrong language level. It said: {_line[:200]!r}",
+              file=sys.stderr)
+        sys.exit(1)
+    _where = [ln.strip() for ln
+              in (run_ssh_out(f"cmd /c where {_tool}") or ""
+                  ).replace("\r", "").splitlines() if ln.strip()]
+    if len(_where) != 1:
+        print(f"deploy-win: {len(_where)} {_tool}(s) on the guest's PATH "
+              f"({', '.join(_where) or 'none'}) — with two JDKs installed "
+              f"the one that wins is a PATH accident, and the version "
+              f"read above is only the winner's. Uninstall the others: "
+              f"`winget uninstall --id Microsoft.OpenJDK.<major>`.",
+              file=sys.stderr)
+        sys.exit(1)
+    print(f"jdk: {_tool} {JDK_MAJOR} at {_where[0]}")
 
 # GO AND NODE, BY VERSION AND BY BYTES, THROUGH A SHIPPED SCRIPT: an
 # inline `powershell -Command \"...\"` through ssh and cmd arrives as one
@@ -1109,7 +1198,8 @@ else:
                        .glob("*.java")),
               "C:/kaya/java/src/") != 0:
         die("deploy-win: could not ship the java sources")
-    if run_ssh("cmd /c javac -encoding UTF-8 -d C:\\kaya\\java\\classes "
+    if run_ssh("cmd /c javac --release 21 -encoding UTF-8 "
+               "-d C:\\kaya\\java\\classes "
                "C:\\kaya\\java\\src\\*.java") != 0:
         die("javac failed on the VM")
     # The manifest lands WITH the stamp, after everything above held: a

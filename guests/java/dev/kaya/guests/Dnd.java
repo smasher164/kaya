@@ -35,6 +35,9 @@ public final class Dnd {
 
     private static final String NOTE_ID = "dev.kaya/note";
 
+    // NOT a switch: `op` is null for a cancelled drag, and an ENUM switch
+    // with `case null` throws on ART (docs/traps.md; a TYPE switch with
+    // `case null` is fine, which is why Clipboard's is one).
     private static String word(KayaApp.Op op) {
         if (op == KayaApp.Op.COPY) {
             return "copy";
@@ -182,9 +185,9 @@ public final class Dnd {
                     t.write(dragStatus, "drag ended " + word(op)));
             app.onDrop(refs.itemNode, (t, keys, d) -> {
                 String op = word(d.operation());
-                if (d.clip() instanceof KayaApp.Representation.Text text) {
+                if (d.clip() instanceof KayaApp.Representation.Text(String value)) {
                     t.write(dropStatus, "item " + keyWord(keys) + " got text "
-                            + text.value() + " (" + op + ")");
+                            + value + " (" + op + ")");
                 } else {
                     t.write(dropStatus, "item " + keyWord(keys) + " got other ("
                             + op + ")");
@@ -232,17 +235,19 @@ public final class Dnd {
             KayaApp.Widget source) {
         return (t, d) -> {
             String op = word(d.operation());
-            if (d.clip() instanceof KayaApp.Representation.Text text) {
-                t.write(dropStatus, name + " got text " + text.value() + " (" + op + ")");
-                t.write(target, text.value());
-            } else if (d.clip() instanceof KayaApp.Representation.Custom custom) {
-                t.write(dropStatus, name + " got " + custom.id() + " "
-                        + custom.bytes().length + " bytes (" + op + ")");
-            } else if (d.clip() instanceof KayaApp.Representation.Files files) {
+            if (d.clip() instanceof KayaApp.Representation.Text(String value)) {
+                t.write(dropStatus, name + " got text " + value + " (" + op + ")");
+                t.write(target, value);
+            } else if (d.clip() instanceof KayaApp.Representation.Custom(
+                    String id, byte[] bytes)) {
+                t.write(dropStatus, name + " got " + id + " "
+                        + bytes.length + " bytes (" + op + ")");
+            } else if (d.clip() instanceof KayaApp.Representation.Files(
+                    List<KayaApp.PickedFile> value)) {
                 // A dropped file IS a picked file (D6): read it back
                 // through the same table the picker fills.
                 List<String> said = new ArrayList<>();
-                for (KayaApp.PickedFile f : files.value()) {
+                for (KayaApp.PickedFile f : value) {
                     said.add(f.name() + " " + readBack(f));
                 }
                 t.write(dropStatus, name + " got " + String.join(", ", said)

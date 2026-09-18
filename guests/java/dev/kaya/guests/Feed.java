@@ -24,9 +24,10 @@ public final class Feed {
             KayaApp.Signal<String> doneCount = feed.derive(tx, items -> {
                 int n = 0;
                 for (KayaRecords.Entry<String, Post> entry : items) {
-                    if (entry.value instanceof Todo todo && todo.done()) {
-                        n++;
-                    }
+                    n += switch (entry.value) {
+                        case Todo todo -> todo.done() ? 1 : 0;
+                        case Note note -> 0;
+                    };
                 }
                 return n + " done";
             });
@@ -34,8 +35,8 @@ public final class Feed {
             tx.mount(tx.row(row -> {
                 tx.button("promote", t -> {
                     for (KayaRecords.Entry<String, Post> entry : feed.items(t)) {
-                        if (entry.value instanceof Note note) {
-                            feed.update(t, entry.key, new Todo(note.text(), true));
+                        if (entry.value instanceof Note(String text)) {
+                            feed.update(t, entry.key, new Todo(text, true));
                             break;
                         }
                     }

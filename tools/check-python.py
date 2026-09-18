@@ -155,6 +155,8 @@ SCRIPT_EXEMPT = {
         "check-doc-refs' brace-group negative: the second missing member",
     "tools/check-third-deleted.sh":
         "check-doc-refs' brace-group negative: the third missing member",
+    "tools/a-new-lane.py":
+        "check-pins' javac census negative: a NEW javac site nothing holds",
 }
 SCRIPT_REF = re.compile(r"tools/[A-Za-z0-9_./-]*[A-Za-z0-9_-]\.(?:py|sh)\b")
 COMPOSED_SH = re.compile(r"\{[^{}]*\}\.sh\b")
@@ -519,8 +521,14 @@ else:
 mac_body = gate.doctor(
     "N20 rule 11 — a javac with no -encoding in an unconverted module",
     gate.read("tools/lib/lanes/mac.py"),
-    r'^    return _run\(\["javac", "-encoding", "UTF-8", "-d",$',
-    '    return _run(["javac", "-d",', want=1, flags=re.M)
+    # LOOSENED TO THE SHAPE, not weakened: the flags between `javac` and
+    # `-encoding` moved when the language level was stated
+    # (`--release 21`, tools/check-pins.py's java clause), and an anchor
+    # that named them would go vacuous on the next such move. Still
+    # exactly one site, and the perturbation still removes -encoding.
+    r'^    return _run\(\["javac", ((?:"[^"]*", )*?)"-encoding", "UTF-8", '
+    r'"-d",$',
+    r'    return _run(["javac", \1"-d",', want=1, flags=re.M)
 gate.negative("N20 rule 11 — a javac with no -encoding in an unconverted "
               "module",
               lambda b=mac_body: command_census({"tools/lib/lanes/mac.py": b}),

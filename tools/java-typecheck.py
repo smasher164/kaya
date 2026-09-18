@@ -37,16 +37,23 @@ def _tool(name):
                            stderr=subprocess.DEVNULL, check=False)
     if probe.returncode == 0:
         return [name]
-    return ["nix", "shell", "nixpkgs#jdk17", "-c", name]
+    return ["nix", "shell", "nixpkgs#jdk21", "-c", name]
 
 
 JAVAC = _tool("javac")
 JAVA = _tool("java")
 
+# THE LANGUAGE LEVEL IS STATED, NEVER INHERITED, and stated HERE so no
+# call site can forget it: `--release 21` is what makes pattern matching
+# for switch and virtual threads legal, and what keeps this gate
+# compiling the same language the four lanes compile
+# (tools/check-pins.py's java language-level clause).
+RELEASE = ["--release", "21"]
+
 
 def run_javac(*args, log=None):
     out = subprocess.PIPE if log is not None else None
-    r = subprocess.run([*JAVAC, *[str(a) for a in args]], cwd=ROOT,
+    r = subprocess.run([*JAVAC, *RELEASE, *[str(a) for a in args]], cwd=ROOT,
                        stdout=out, stderr=subprocess.STDOUT if log
                        is not None else None, check=False)
     if log is not None:

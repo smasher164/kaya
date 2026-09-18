@@ -27,7 +27,9 @@
     {
       devShells = forAllSystems (pkgs:
         let
-          # SDK + emulator + NDK for the Android leg.
+          # SDK + emulator + NDK for the Android leg. The system image
+          # the lane boots is API 35 (tools/android/run-emulator.py's
+          # IMAGE) and stays here.
           androidSdk = (pkgs.androidenv.composeAndroidPackages {
             platformVersions = [ "35" ];
             includeEmulator = true;
@@ -36,6 +38,28 @@
             abiVersions = [ "arm64-v8a" ];
             includeNDK = true;
           }).androidsdk;
+          # THE API-36 PLATFORM JAR, AND NOTHING ELSE OF 36. `compileSdk
+          # = 36` is what puts java.lang.runtime.SwitchBootstraps on the
+          # compile classpath, and nothing below it can: pattern matching
+          # for switch is a LIBRARY-dependent language feature on Android
+          # and android-35's android.jar has ObjectMethods (records) but
+          # no SwitchBootstraps (measured 2026-09-17). D8 desugars the
+          # typeSwitch into $$ExternalSyntheticTypeSwitch for minSdk 26,
+          # so the APKs still run on the API-35 image the lane boots.
+          # Composed SEPARATELY and joined rather than added to
+          # platformVersions above, because androidenv composes a system
+          # image per platform version and the 36 image would be ~2GB the
+          # lane never boots.
+          androidPlatform36 = (pkgs.androidenv.composeAndroidPackages {
+            platformVersions = [ "36" ];
+          }).androidsdk;
+          androidHome = pkgs.symlinkJoin {
+            name = "kaya-android-sdk";
+            paths = [
+              "${androidSdk}/libexec/android-sdk"
+              "${androidPlatform36}/libexec/android-sdk"
+            ];
+          };
           # THE SANITIZER COMPILER, under a name of its own so `clang`
           # keeps meaning this shell's 21.1.8 and tools/check-c-bounds.py
           # can ask for this one by name. Every nixpkgs llvm below 22 has
@@ -194,7 +218,12 @@
             detekt
             # Gradle fetches AGP/Compose from Google Maven at build time.
             androidSdk
-            jdk17
+            # JDK 21 (LTS): pattern matching for switch and virtual
+            # threads are standard from 21, and every javac in this
+            # repo states `--release 21` rather than inherit a level
+            # (tools/check-pins.py's java language-level clause).
+            # gradle takes its daemon JVM from this one.
+            jdk21
             gradle
           ];
           shellHook = ''
@@ -206,7 +235,7 @@
             # Ad-hoc `python3` resolves the kaya package the way the
             # suites do; the runners export their own copy of this.
             export PYTHONPATH="$(git rev-parse --show-toplevel 2>/dev/null || pwd)/bindings/python"
-            export ANDROID_HOME="${androidSdk}/libexec/android-sdk"
+            export ANDROID_HOME="${androidHome}"
             export ANDROID_SDK_ROOT="$ANDROID_HOME"
             export ANDROID_NDK_ROOT="$ANDROID_HOME/ndk-bundle"
             # The Android lane's embedded CPython, both ABIs (see

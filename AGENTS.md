@@ -1174,7 +1174,30 @@ in docs/deferred.md.
    own first draft doctoring the dev-shell fingerprint instead of the
    verifier, so an ambiguous pattern is a failed test too. A second
    tools/ script curling the same flat container is refused BY NAME,
-   because reading one file by name is how this hole existed),
+   because reading one file by name is how this hole existed.
+   AND THE JAVA LANGUAGE LEVEL SINCE 2026-09-17, which is a version pin
+   with no version written anywhere: a `javac` with no `--release`
+   compiles at whatever the javac on PATH defaults to, so the day a lane's
+   JDK moves that lane changes LANGUAGE in silence and every other gate
+   stays green — the Go pin's fiction with nothing to read back
+   (docs/traps.md). Six javac sites state `--release 21` (the fast gate,
+   the annotation processor, the abort exerciser, and the mac, linux and
+   Windows-guest builds), twenty-two gradle modules state it again as
+   `JavaVersion.VERSION_21` and `jvmTarget = "21"` — read out of EVERY
+   occurrence, because a module with sourceCompatibility 17 beside
+   targetCompatibility 21 satisfies a membership test and compiles at 17 —
+   and the five android/ modules are held at `compileSdk = 36`, since
+   pattern matching for switch needs java.lang.runtime.SwitchBootstraps on
+   the compile classpath and android-35's android.jar has none (measured;
+   D8 desugars the typeSwitch for minSdk 26, so the APKs still run on the
+   API-35 image the lane boots). A javac invoked anywhere else in tools/
+   is a finding naming the site, with the four files that merely NAME
+   javac exempt by name and held to still naming it. The linux image's own
+   JDK rides the same clause: Temurin 21 BY VERSION AND BY BYTES, the
+   sha256 compared before the unpack and `javac -version` read back after
+   it, because `default-jdk-headless` — what that layer used to install —
+   follows the base image's default-java and would move the level on a
+   base bump with nothing red. Fifteen watched negatives, counts printed),
    `tools/check-design-generation.py` (BOTH macOS design generations stay
    on the mac lane: SwiftUI reads the MAIN EXECUTABLE's sdk stamp, so
    flake.nix's apple-sdk_26 keeps the kaya-linked legs modern while the

@@ -216,7 +216,8 @@ with scratch_dir("check-abort-") as tmp:
     # transactions always abort (AbortCheck.java's header has the shape).
     shutil.rmtree(tmp / "java", ignore_errors=True)
     step("java-build",
-         ["javac", "-encoding", "UTF-8", "-d", str(tmp / "java"),
+         ["javac", "--release", "21", "-encoding", "UTF-8",
+          "-d", str(tmp / "java"),
           "bindings/java-desktop/dev/kaya/KayaRing.java",
           *sorted(glob.glob(str(ROOT / "bindings/java/dev/kaya/*.java"))),
           "tools/checks/java-abort/dev/kaya/IdSpaceCheck.java",

@@ -474,6 +474,27 @@ for `Any` on the very parameters its isinstance walls exist to refuse.
 What the checker cannot see is exempted by file, rule and COUNT in the
 gate, never by a rule turned off.
 
+**The Java tier compiles at level 21** (2026-09-17, the R3 ruling's Java
+third, after the maintainer asked for Android's feasibility first). Every
+javac in the repo states `--release 21` and tools/check-pins.py refuses
+one that does not, since a bare javac compiles at whatever the JDK on
+PATH defaults to — the Go pin's fiction with nothing to read back. The
+four lanes that run Java each pin their JDK by version (the flake, a
+Temurin tarball by sha256 in the linux image, a version-keyed install on
+the Windows VM, the ten gradle modules), and the five android/ modules
+compile against API 36 because pattern matching for switch needs
+`java.lang.runtime.SwitchBootstraps` on the compile classpath, which
+android-35's jar lacks; D8 desugars the switch, so the APKs still run on
+the API-35 image. What the level buys is the compiler doing the
+language's own checking: a sum's variants are a sealed hierarchy
+eliminated by an exhaustive `switch` with record patterns, so a variant
+added and not handled fails at the elimination site, and the chain that
+had no final else is gone. Two measured limits: an ENUM switch with
+`case null` throws on ART where a TYPE switch with one is fine, so a
+nullable enum keeps its if-chain (docs/traps.md); and virtual threads
+are not taken — ART has none at any compileSdk, and a guest is one source
+for four lanes.
+
 **One id space for widgets and template nodes.** Every binding mints
 live widget ids and template node ids from ONE monotone counter per app
 — signals, collections, alerts/dialogs and menu items keep their own —

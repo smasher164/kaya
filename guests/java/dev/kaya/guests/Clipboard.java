@@ -120,8 +120,8 @@ public final class Clipboard {
 
                 fields.rich = tx.entry().accepts(KayaApp.ACCEPT_TEXT).a11yId("rich"); // entry#0
                 app.onPaste(fields.rich, (t, clip) -> {
-                    if (clip instanceof KayaApp.Representation.Text text) {
-                        t.write(status, "pasted " + text.value());
+                    if (clip instanceof KayaApp.Representation.Text(String value)) {
+                        t.write(status, "pasted " + value);
                         return;
                     }
                     t.write(status, "pasted " + clip);
@@ -136,9 +136,9 @@ public final class Clipboard {
                     KayaApp.Node note = row.entry(); // entry#2, one stamped copy
                     row.setAccepts(note, KayaApp.ACCEPT_TEXT);
                     app.onPaste(note, (t, keys, clip) -> {
-                        if (clip instanceof KayaApp.Representation.Text text) {
+                        if (clip instanceof KayaApp.Representation.Text(String value)) {
                             t.write(rowStatus,
-                                    "row " + keys.get(0) + " pasted " + text.value());
+                                    "row " + keys.get(0) + " pasted " + value);
                             return;
                         }
                         t.write(rowStatus, "row " + keys.get(0) + " pasted " + clip);
@@ -157,48 +157,49 @@ public final class Clipboard {
             KayaApp.Signal<String> status,
             KayaApp.Tx tx,
             KayaApp.Representation clip) {
-        if (clip == null) {
-            tx.write(status, "empty");
-            return;
-        }
-        // instanceof, not a pattern switch: switching over a sealed interface
-        // is preview until JDK 21 and this compiles at 17.
-        if (clip instanceof KayaApp.Representation.Text text) {
-            tx.write(status, "text " + text.value());
-        } else if (clip instanceof KayaApp.Representation.Html html) {
-            tx.write(status, "html " + html.value());
-        } else if (clip instanceof KayaApp.Representation.Custom custom) {
-            tx.write(status, "custom " + custom.id() + " "
-                    + new String(custom.bytes(), StandardCharsets.UTF_8));
-        } else if (clip instanceof KayaApp.Representation.Image image) {
-            // Straight back out, so a foreign DECODER makes the assertion.
-            tx.copy().image(image.bytes()).send();
-            tx.write(status, "image");
-        } else if (clip instanceof KayaApp.Representation.Files files) {
-            if (files.value().isEmpty()) {
-                tx.write(status, "files none");
-                return;
+        // EXHAUSTIVE over the sealed sum, so a sixth representation fails
+        // to compile here; `case null` is the empty clipboard, which a
+        // switch would otherwise throw on.
+        switch (clip) {
+            case null -> tx.write(status, "empty");
+            case KayaApp.Representation.Text(String value) ->
+                    tx.write(status, "text " + value);
+            case KayaApp.Representation.Html(String value) ->
+                    tx.write(status, "html " + value);
+            case KayaApp.Representation.Custom(String id, byte[] bytes) ->
+                    tx.write(status, "custom " + id + " "
+                            + new String(bytes, StandardCharsets.UTF_8));
+            case KayaApp.Representation.Image(byte[] bytes) -> {
+                // Straight back out, so a foreign DECODER makes the assertion.
+                tx.copy().image(bytes).send();
+                tx.write(status, "image");
             }
-            KayaApp.PickedFile file = files.value().get(0);
-            Thread worker = new Thread(() -> {
-                // OFF THE APP THREAD: open blocks.
-                String text;
-                try {
-                    KayaApp.Opened opened = file.open(KayaApp.FileMode.READ);
-                    try (InputStream in = opened.stream()) {
-                        text = new String(in.readAllBytes(), StandardCharsets.UTF_8);
-                    }
-                } catch (IOException e) {
-                    text = "open failed: " + e.getMessage();
+            case KayaApp.Representation.Files(java.util.List<KayaApp.PickedFile> value) -> {
+                if (value.isEmpty()) {
+                    tx.write(status, "files none");
+                    return;
                 }
-                String read = text;
-                app.post(t -> t.write(status, "files " + file.name() + " " + read));
-            }, "clipboard-reader");
-            // The worker MUST be a daemon: a parked non-daemon thread keeps the
-            // JVM alive and turns a FAILING run into a timeout.
-            worker.setDaemon(true);
-            worker.start();
-            tx.write(status, "reading");
+                KayaApp.PickedFile file = value.get(0);
+                Thread worker = new Thread(() -> {
+                    // OFF THE APP THREAD: open blocks.
+                    String text;
+                    try {
+                        KayaApp.Opened opened = file.open(KayaApp.FileMode.READ);
+                        try (InputStream in = opened.stream()) {
+                            text = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+                        }
+                    } catch (IOException e) {
+                        text = "open failed: " + e.getMessage();
+                    }
+                    String read = text;
+                    app.post(t -> t.write(status, "files " + file.name() + " " + read));
+                }, "clipboard-reader");
+                // The worker MUST be a daemon: a parked non-daemon thread keeps
+                // the JVM alive and turns a FAILING run into a timeout.
+                worker.setDaemon(true);
+                worker.start();
+                tx.write(status, "reading");
+            }
         }
     }
 
