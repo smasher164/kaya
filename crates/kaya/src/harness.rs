@@ -2908,7 +2908,16 @@ fn write_act_two_verdict(verdict: &str) {
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    if let Err(e) = std::fs::write(&path, format!("{verdict}\n")) {
+    // PUBLISHED BY RENAME: the runner polls this path every 100ms, and a
+    // create-then-write let it read the file EMPTY in the instant between
+    // the two and kill the act as a failed answer (docs/traps.md, the
+    // act-two verdict race).
+    let mut staged = path.clone().into_os_string();
+    staged.push(".tmp");
+    let staged = std::path::PathBuf::from(staged);
+    let published = std::fs::write(&staged, format!("{verdict}\n"))
+        .and_then(|()| std::fs::rename(&staged, &path));
+    if let Err(e) = published {
         // NOT SILENT: the runner is waiting on this file and would
         // otherwise report a timeout with no cause at all.
         use std::io::Write as _;
@@ -5355,6 +5364,24 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
     use std::sync::mpsc::Sender;
+
+    /// THE VERDICT FILE IS NEVER SEEN EMPTY (docs/traps.md, the act-two
+    /// verdict race): the runner polls it every 100ms, so it is written
+    /// under another name and renamed into place. Read out of this file's
+    /// own text, since the race is a shape and not a value.
+    #[test]
+    fn the_act_two_verdict_is_published_by_rename() {
+        let src = include_str!("harness.rs");
+        let body = src
+            .split("fn write_act_two_verdict(")
+            .nth(1)
+            .expect("write_act_two_verdict is still here");
+        let body = &body[..body.find("\n}\n").expect("the function closes")];
+        assert!(body.contains("fs::rename("), "the verdict is no longer renamed into place");
+        // concat! keeps the refused spelling off one line of this test.
+        let straight = concat!("fs::write(&", "path,");
+        assert!(!body.contains(straight), "the verdict is written straight to the polled path again");
+    }
 
     /// THE SPLIT THE WHOLE SECOND ACT RESTS ON (docs/tasks-s9-plan.md
     /// R6a): line-oriented, so the three harnesses agree; anything after

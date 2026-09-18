@@ -11783,3 +11783,22 @@ selection needs an input serial, and wtype's F24 tap goes to whoever
 holds the focus), every expect_clipboard reads "" for 15s, gdk goes on
 believing it owns the board, and a later seed expires even with the focus
 granted; a red with green seeds and failed copies is that shape (ledger).
+
+## The act-two verdict race: a file the runner polls every 100ms must never exist empty (2026-09-18)
+
+Matrix #40's `links-rust-x11` red: act two had finished its three
+statements and was writing its verdict, the harness wrote the file with
+`std::fs::write` (create, then write), and tools/linux/link-leg.py's
+poll read it in the instant between the two — an empty line, which the
+runner took as a failed answer ("act two answered after 2.2s: ") and
+killed the act; the leg log then ended at the act's last step with no
+verdict, no panic and no ring dump, which looked like a silent death.
+Green alone in 6s, red only under the loaded host. The writer publishes
+by RENAME now (`<path>.tmp` written, then renamed into place — atomic on
+all three desktops), held by harness::tests'
+the_act_two_verdict_is_published_by_rename, and the three linux pollers
+treat a file without its final newline as not yet answered. Every other
+poller of act2.verdict (the mac lane, iOS, android, the three Windows
+relaunch scripts) is covered by the writer's rename alone. Any file one
+process polls while another writes it has this shape: publish by rename,
+never by create-then-write.

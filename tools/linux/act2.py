@@ -96,7 +96,13 @@ def main(argv):
 
     while time.monotonic() - started < ceiling:
         if verdict.is_file():
-            line = verdict.read_text(encoding="utf-8").strip()
+            text = verdict.read_text(encoding="utf-8")
+            if not text.endswith("\n"):
+                # Still being written: not an answer yet (docs/traps.md, the
+                # act-two verdict race).
+                time.sleep(0.1)
+                continue
+            line = text.strip()
             say(f"act two answered after "
                 f"{time.monotonic() - started:.1f}s: {line}")
             if line.startswith("KAYA_SELFTEST: OK"):
