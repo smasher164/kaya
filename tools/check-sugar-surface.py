@@ -82,13 +82,57 @@ if not kinds:
                   "generated wire file")
 
 
-def check(lang, rel, kind, pattern, findings=None):
+def top_level_block(rel, header):
+    """The text of the top-level declaration `header` opens, its closing
+    bare `}` included. `None` when the header is not there — a reader
+    that cannot LOCATE its block has not measured an empty one."""
+    lines = read_rel(rel).split("\n")
+    for i, line in enumerate(lines):
+        if line.startswith(header):
+            for j in range(i + 1, len(lines)):
+                if lines[j] == "}":
+                    return "\n".join(lines[i:j + 1])
+            return None
+    return None
+
+
+# SWIFT'S TWO ZONES ARE ONE FILE AND ONE SPELLING, so the kind row below
+# reads the LIVE class's own block: `func column(` stands in `KayaTpl`
+# too, and the unscoped pattern passed on the TEMPLATE copy with the live
+# constructor gone (docs/deferred.md, the idiom entry). The other eight
+# rows are unscoped on purpose — their live and template zones are
+# separate files, separate receivers, or separate namespaces.
+SWIFT_LIVE_ZONE = "final class KayaAppTx {"
+SWIFT_TPL_ZONE = "final class KayaTpl {"
+
+
+def check(lang, rel, kind, pattern, findings=None, zone=None):
     """One live-zone constructor pattern; `findings` collects instead
-    of printing when a self-test drives it."""
+    of printing when a self-test drives it. `zone` names the top-level
+    declaration the pattern must match INSIDE."""
     global status
-    if not grep_file(pattern, rel):
+    if zone is None:
+        found = grep_file(pattern, rel)
+        where = rel
+    else:
+        block = top_level_block(rel, zone)
+        if block is None:
+            msg = (f"check-sugar-surface: cannot find `{zone}` in {rel} to "
+                   f"read {lang}'s live zone for '{kind}' — a reader that "
+                   f"cannot locate its zone has not measured a binding "
+                   f"missing a constructor, it has stopped reading. Fix the "
+                   f"anchor here rather than widening it back to the file.")
+            if findings is None:
+                print(msg)
+                status = 1
+            else:
+                findings.append(msg)
+            return
+        found = grep_e(pattern, block)
+        where = f"`{zone}` in {rel}"
+    if not found:
         msg = (f"check-sugar-surface: {lang} has no live-zone "
-               f"constructor for '{kind}' (wanted /{pattern}/ in {rel})")
+               f"constructor for '{kind}' (wanted /{pattern}/ in {where})")
         if findings is None:
             print(msg)
             status = 1
@@ -119,8 +163,11 @@ def check_kind(kind, findings=None):
           f"public (Widget|void|T) {pascal}[A-Za-z]*(<[^>]*>)?\\(", findings)
     check("java", "bindings/java/dev/kaya/KayaApp.java", kind,
           f"public Widget {camel}[A-Za-z]*\\(", findings)
+    # The generic arm is the container spelling since X3 (`func row<R>(`),
+    # and the zone is KayaAppTx's block — see SWIFT_LIVE_ZONE above.
     check("swift", "bindings/swift/KayaApp.swift", kind,
-          f"func {camel}[A-Za-z]*\\(", findings)
+          f"func {camel}[A-Za-z]*(<[^>]*>)?\\(", findings,
+          zone=SWIFT_LIVE_ZONE)
     # Leading whitespace allowed: row/column are Declare-class methods.
     check("haskell", "bindings/haskell/KayaApp.hs", kind,
           f"^[[:space:]]*{camel}[A-Za-z]* ::", findings)
@@ -3477,6 +3524,80 @@ print("check-sugar-surface: kind-name derivation watched: "
                        "java/swift/haskell/js"),
                       kind_case("date_picker"))))
 
+# AND THE SWIFT ROW READS ONE ZONE, watched. Swift spells both zones in
+# ONE FILE with ONE name, so the file-wide pattern this row replaces was
+# satisfied by `KayaTpl`'s copy: `row`, `scroll`, `grid` and `labeled`
+# had NO live match at all under it (the live containers took a generic
+# parameter at X3, `func row<R>(`) and passed entirely on the template
+# zone. Each cut renames every live-zone match of the row's own
+# prefix-loose pattern and leaves KayaTpl alone; the doctored copy is
+# read BY BOTH readers, because a negative the old reader also catches
+# says nothing about the zone.
+SWIFT_ZONE_REL = "bindings/swift/KayaApp.swift"
+
+
+def swift_zone_probe():
+    real = read_rel(SWIFT_ZONE_REL)
+    out = []
+    try:
+        for kind in ("column", "row", "scroll", "grid", "labeled", "entry",
+                     "checkbox", "canvas"):
+            _snake, _pascal, camel = kind_case(kind)
+            _TEXT_CACHE[SWIFT_ZONE_REL] = real
+            block = top_level_block(SWIFT_ZONE_REL, SWIFT_LIVE_ZONE)
+            cut, applied = sub_count(rf"func {camel}([A-Za-z]*)",
+                                     r"func kayaGone\1", block)
+            if applied < 1 or real.count(block) != 1:
+                out.append(f"{kind}=SELFTEST-BROKEN(applied {applied}, "
+                           f"block matched {real.count(block)})")
+                continue
+            doctored = real.replace(block, cut)
+            _TEXT_CACHE[SWIFT_ZONE_REL] = doctored
+            findings = []
+            check_kind(kind, findings=findings)
+            named = sum(1 for m in findings
+                        if "swift has no live-zone constructor" in m
+                        and f"'{kind}'" in m)
+            # The reader this row replaces, on the same copy.
+            was_green = grep_e(rf"func {camel}[A-Za-z]*\(", doctored)
+            _TEXT_CACHE[SWIFT_ZONE_REL] = real
+            kept = grep_e(rf"func {camel}[A-Za-z]*\(",
+                          top_level_block(SWIFT_ZONE_REL, SWIFT_TPL_ZONE))
+            out.append(f"{kind}=applied:{applied} named:{named} "
+                       f"file-wide-still-green:{was_green} tpl-kept:{kept}")
+        # AND THE ANCHOR: a reader that cannot find its zone says so
+        # rather than reporting a binding with no constructors.
+        _TEXT_CACHE[SWIFT_ZONE_REL] = real
+        gone, applied = sub_count(re.escape(SWIFT_LIVE_ZONE),
+                                  "final class KayaAppTxRenamed {", real)
+        _TEXT_CACHE[SWIFT_ZONE_REL] = gone
+        findings = []
+        check_kind("row", findings=findings)
+        out.append(f"anchor=applied:{applied} named:"
+                   f"{sum(1 for m in findings if 'cannot find' in m and SWIFT_LIVE_ZONE in m)}")
+    finally:
+        _TEXT_CACHE[SWIFT_ZONE_REL] = real
+    return "\n".join(out)
+
+
+swift_zone = swift_zone_probe()
+WANT_SWIFT_ZONE = """column=applied:3 named:1 file-wide-still-green:True tpl-kept:True
+row=applied:1 named:1 file-wide-still-green:True tpl-kept:True
+scroll=applied:1 named:1 file-wide-still-green:True tpl-kept:True
+grid=applied:1 named:1 file-wide-still-green:True tpl-kept:True
+labeled=applied:3 named:1 file-wide-still-green:True tpl-kept:True
+entry=applied:1 named:1 file-wide-still-green:True tpl-kept:True
+checkbox=applied:1 named:1 file-wide-still-green:True tpl-kept:True
+canvas=applied:1 named:1 file-wide-still-green:True tpl-kept:True
+anchor=applied:1 named:1"""
+if swift_zone != WANT_SWIFT_ZONE:
+    selftest_exit("check-sugar-surface: SELF-TEST FAIL (the swift kind row "
+                  "is not reading the live zone alone). Wanted:\n"
+                  + WANT_SWIFT_ZONE + "\nGot:\n" + swift_zone)
+print("check-sugar-surface: swift live-zone kind row watched "
+      "(cut/named/file-wide-green/template-kept):")
+print(swift_zone)
+
 for kind in kinds:
     check_kind(kind)
 
@@ -3611,6 +3732,20 @@ def stage_binding(app_text, chain, leaf_text):
     parent, leaf = chain[-1]
     link_children(parent, f"{root}/{parent}", leaf)
     shadow_write(root, f"{parent}/{leaf}", leaf_text)
+    return root
+
+
+def stage_guest(app_text, rel, leaf_text):
+    """stage_app plus ONE file under guests/ swapped. `guests` is a whole
+    symlink there, so every hop down to the leaf is re-staged as a real
+    directory first — shadow_write refuses the write otherwise."""
+    root = stage_app(app_text)
+    os.unlink(f"{root}/guests")
+    parts = rel.split("/")
+    for depth in range(1, len(parts)):
+        hop = "/".join(parts[:depth])
+        link_children(hop, f"{root}/{hop}", parts[depth])
+    shadow_write(root, rel, leaf_text)
     return root
 
 
@@ -4346,6 +4481,98 @@ if tpl_table != WANT_TABLE_PROBE:
     raise SystemExit(1)
 print("check-sugar-surface: dynamic-table perturbations applied:")
 print(tpl_table)
+
+
+# (c2a) SWIFT'S GENERATED SURFACE IS WATCHED FOR THE DISCARD ATTRIBUTE.
+#       `@discardableResult` cannot be missed by a compiler — an unused
+#       result is a WARNING and the guest passes carry no
+#       -warnings-as-errors — so the only wall is the census, and a
+#       census nobody has seen fail is a census that stops you looking.
+#       Each cut is scoped to the declaration it names; the same
+#       attribute elsewhere in the file stays.
+def tpl_discardable_probe():
+    lines = []
+    app = read_rel("crates/kaya/src/app.rs")
+
+    def run_root(name, root, want, applied):
+        r = subprocess.run(
+            [sys.executable, str(ROOT / "tools" / "tpl-surfaces.py"), root],
+            cwd=ROOT, capture_output=True, text=True, check=False)
+        shutil.rmtree(root)
+        lines.append(f"{name}=applied:{applied} rc:{r.returncode} "
+                     f"named:{want in r.stdout}")
+
+    def cut(name, rel, member, returns, head, block=None):
+        """The attribute line above ONE declaration, cut from a copy.
+
+        `head` is that declaration's first line, so the perturbation is
+        the two-line pair and nothing else in the file matches it;
+        `block` scopes the cut where the file spells the same
+        declaration twice (a sum's two arms)."""
+        text = read_rel(rel)
+        indent = head[:len(head) - len(head.lstrip())]
+        pair = f"{indent}@discardableResult\n{head}\n"
+        if block is None:
+            n = text.count(pair)
+            doctored = text.replace(pair, f"{head}\n") if n == 1 else None
+        else:
+            doctored, n = scoped(text, block[0], block[1], pair, f"{head}\n")
+        if n != 1 or doctored is None:
+            lines.append(f"{name}=SELFTEST-BROKEN(matched {n}, expected 1)")
+            return
+        want = (f"Swift's generated `{member}` returns {returns} with no "
+                f"@discardableResult — in {rel}")
+        run_root(name, stage_guest(app, rel, doctored), want, 1)
+
+    cut("swift-row-member", "guests/swift/todos+Kaya.swift", "row",
+        "KayaNodeHandle",
+        "    func row(@KayaNodeChildren _ children: () -> Void) -> KayaNodeHandle {")
+    # Both of Post's arms spell `checkbox`, so this cut is scoped to the
+    # one it names.
+    cut("swift-arm-member", "guests/swift/feed+Kaya.swift", "checkbox",
+        "KayaNodeHandle", "    func checkbox(",
+        ("struct PostTodoArm {", "/// The collection factory"))
+    # The eliminator returns the For rather than a node, and is held
+    # because `KayaAppTx.each` is @discardableResult and the generated
+    # twin must be too.
+    cut("swift-eliminator", "guests/swift/table+Kaya.swift", "tableItemEach",
+        "KayaWidget", "func tableItemEach(")
+
+    # AND THE FLOOR: a reader that finds no generated surface at all must
+    # refuse a verdict rather than agree with everything.
+    root = stage_app(app)
+    os.unlink(f"{root}/guests")
+    link_children("guests", f"{root}/guests", "swift")
+    os.makedirs(f"{root}/guests/swift")
+    hidden = 0
+    for entry in sorted(os.listdir("guests/swift")):
+        if entry.endswith("+Kaya.swift"):
+            hidden += 1
+            continue
+        os.symlink(os.path.abspath(f"guests/swift/{entry}"),
+                   f"{root}/guests/swift/{entry}")
+    run_root("swift-census-floor", root,
+             "the Swift generated-surface reader found 0 handle-returning "
+             "declarations in 0 files", hidden)
+    return "\n".join(lines)
+
+
+discardable = tpl_discardable_probe()
+WANT_DISCARDABLE = """swift-row-member=applied:1 rc:1 named:True
+swift-arm-member=applied:1 rc:1 named:True
+swift-eliminator=applied:1 rc:1 named:True
+swift-census-floor=applied:11 rc:1 named:True"""
+if discardable != WANT_DISCARDABLE:
+    print("check-sugar-surface: SELF-TEST FAIL (the Swift generated-surface "
+          "discard census did not catch its watched cuts). Wanted:",
+          file=sys.stderr)
+    print(WANT_DISCARDABLE, file=sys.stderr)
+    print("Got:", file=sys.stderr)
+    print(discardable, file=sys.stderr)
+    raise SystemExit(1)
+print("check-sugar-surface: Swift generated-surface discard perturbations "
+      "applied:")
+print(discardable)
 
 
 # (c2b) AND THE HASKELL SPELLING IS COMPILED. The census above reads
@@ -7912,6 +8139,88 @@ for _lang, (_rel, _start, _end, _patch, _repl) in ROW_HANDLE_ROWS.items():
                       f"finding(s), not 1")
 print("check-sugar-surface: row-handle rows watched (applied/named): "
       + " ".join(_row_watched), file=sys.stderr)
+
+# --- A CONTEXT CATALOG'S ITEMS RECEIVE THE ROW, however deep the menu
+# nests (docs/deferred.md, R2 gap (b); invariant 1 — JS and Python spell
+# one semantics). Two points per binding, and NO SCENE CAN SEE EITHER:
+# no guest declares a submenu inside a catalog, and a handler that took
+# bare keys where it should have taken a row still runs.
+#   1. THE SEAT CHAIN CARRIES THE CATALOG. `kaya.menu(...)` inside a
+#      catalog body seats its items on the PARENT ITEM, so an item two
+#      levels down belongs to no catalog unless the parent's entry is
+#      inherited at seat time.
+#   2. THE ROW LOOKUP IS TOLD ITS ID SPACE. Menu items are counted apart
+#      from widgets and nodes, so a bare id is ambiguous: looked up in
+#      the node table first, a menu item whose number equals a stamped
+#      node's answers with THAT node's collection — measured on this
+#      tree, where the python check read a row that had left.
+CATALOG_SEAT_ROWS = {
+    "js": ("bindings/js/kaya/index.ts",
+           r"^function menuSeat\(", r"^\}$",
+           "if (inherited !== undefined) app()._itemCatalogs.set(item.id, inherited);",
+           "void inherited;",
+           "this._rowArgs(ident, keys as Key[], true)",
+           "this._rowArgs(ident, keys as Key[])"),
+    "python": ("bindings/python/kaya/__init__.py",
+               r"^def _menu_seat\(", r"^\S",
+               "            _app._item_catalogs[item.id] = inherited",
+               "            _ = inherited",
+               "args = self._row_args(ident, keys, menu=True)",
+               "args = self._row_args(ident, keys)"),
+}
+
+
+def catalog_seat_findings(text_for=read_rel):
+    out = []
+    for lang, (rel, start, end, inherit, _c1, idspace, _c2) in \
+            CATALOG_SEAT_ROWS.items():
+        block = row_handle_block(rel, start, end, text_for)
+        if block is None:
+            out.append(f"check-sugar-surface: {lang}'s menu-seat function is "
+                       f"gone from {rel} (wanted a block opening /{start}/) — "
+                       f"a context catalog's items are seated there, and a "
+                       f"reader that cannot find it cannot fail")
+        elif inherit not in block:
+            out.append(f"check-sugar-surface: {lang}'s menu seat no longer "
+                       f"carries the context catalog down the seat chain "
+                       f"(wanted `{inherit}` in {rel}'s menu-seat block) — a "
+                       f"`menu(...)` NESTED in a catalog seats its items on "
+                       f"the parent ITEM, so their activation arrives as bare "
+                       f"keys instead of the row (docs/deferred.md, R2)")
+        if idspace not in text_for(rel):
+            out.append(f"check-sugar-surface: {lang}'s menu dispatch no longer "
+                       f"tells the row lookup which id space the occurrence's "
+                       f"id lives in (wanted `{idspace}` in {rel}) — menu "
+                       f"items are counted apart from widgets and nodes, so a "
+                       f"menu item whose number equals a stamped node's would "
+                       f"answer with that node's collection")
+    return out
+
+
+for msg in catalog_seat_findings():
+    print(msg, file=sys.stderr)
+    status = 1
+_catalog_watched = []
+for _lang, (_rel, _s, _e, _inherit, _cut1, _idspace, _cut2) in \
+        CATALOG_SEAT_ROWS.items():
+    for _half, _old, _new in (("seat", _inherit, _cut1),
+                              ("id-space", _idspace, _cut2)):
+        _doctored, _n = sub_count(re.escape(_old), _new.replace("\\", "\\\\"),
+                                  read_rel(_rel))
+        if _n != 1:
+            selftest_exit(f"check-sugar-surface: self-test failed — the "
+                          f"{_lang} catalog {_half} negative applied {_n} "
+                          f"times in {_rel}, expected 1")
+        _fired = catalog_seat_findings(
+            lambda rel, _r=_rel, _d=_doctored: _d if rel == _r else read_rel(rel))
+        _mine = [m for m in _fired if f" {_lang}'s menu " in m]
+        _catalog_watched.append(f"{_lang}-{_half}={_n}/{len(_mine)}")
+        if len(_mine) != 1:
+            selftest_exit(f"check-sugar-surface: self-test failed — cutting "
+                          f"{_lang}'s catalog {_half} produced {len(_mine)} "
+                          f"finding(s), not 1")
+print("check-sugar-surface: catalog-seat rows watched (applied/named): "
+      + " ".join(_catalog_watched), file=sys.stderr)
 
 check_scene_sugar()
 

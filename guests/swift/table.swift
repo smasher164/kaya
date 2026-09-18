@@ -20,7 +20,7 @@ app.build { tx in
     // column-kind widget (the reorder scene's rule).
     let root = tx.row { root in
         let table = tableItemEach(tx, items) { row in
-            _ = row.row {
+            row.row {
                 row.label(row.name)
                 row.label(row.size)
             }

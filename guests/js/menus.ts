@@ -38,9 +38,9 @@ function onRename(): void {
   status.set("renamed");
 }
 
-function onRemove(group: kaya.Key, item: kaya.Key): void {
-  items.at(group).remove(item);
-  status.set(`removed ${group}/${item}`);
+function onRemove(task: kaya.RowHandle<kaya.Fields<typeof Task.schema>>): void {
+  task.remove();
+  status.set(`removed ${task.path[0]}/${task.key}`);
 }
 
 function onRework(): void {

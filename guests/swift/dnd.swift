@@ -85,8 +85,8 @@ app.build { tx in
             let filesWidget = tx.label(bind: filesTarget)  // label#3
             tx.setAccepts(filesWidget, [KayaAppTx.acceptFiles])
             tx.setDropTarget(filesWidget, [.copy])
-            _ = tx.label(bind: dropStatus)  // label#4
-            _ = tx.label(bind: dragStatus)  // label#5
+            tx.label(bind: dropStatus)  // label#4
+            tx.label(bind: dragStatus)  // label#5
             return (source, textID, noteWidget, filesWidget)
         }
         // THE TEMPLATE ZONE (docs/dnd-plan.md §4): every stamped item is a

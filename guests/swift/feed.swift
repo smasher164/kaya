@@ -31,13 +31,13 @@ app.build { tx in
         }
     }
     tx.label(bind: doneCount)
-    _ = postEachSum(
+    postEachSum(
         tx, feed,
         note: { note in
-            _ = note.label(note.text)
+            note.label(note.text)
         },
         todo: { todo in
-            _ = todo.row {
+            todo.row {
                 todo.checkbox(todo.done) { tx, keys, checked in
                     // Optional chaining re-eliminates at write time: a stale
                     // occurrence folds into nil.

@@ -149,7 +149,7 @@ let todos: KayaRecordCollection<Todo> = app.build { tx in
             tx.write(keys, .str(keyList(tx)))
         }
         for row in todos.rows {
-            _ = row.row {
+            row.row {
                 row.label(row.title)
                 // UNBOUND on purpose: the copy owns its text and the app folds it.
                 row.t.entry { tx, path, text in

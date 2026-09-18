@@ -3295,6 +3295,12 @@ def _menu_seat(item: MenuItem) -> _MenuScope[Any]:
     kind, target = scope._seat
     if kind == "item":
         _records().append(wire.tx_menu_item_append(target, item.id))
+        # A NESTED submenu seats its items on the PARENT ITEM, so the
+        # catalog rides the chain: the parent's entry is already the
+        # resolved one (docs/deferred.md, R2 gap (b)).
+        inherited = _app._item_catalogs.get(target)
+        if inherited is not None:
+            _app._item_catalogs[item.id] = inherited
     elif kind == "widget":
         _records().append(wire.tx_context_attach(target, item.id))
     else:  # free roots, collected for a later template-node attach
@@ -5432,14 +5438,21 @@ class App:
         else:
             self._widget_handlers[(kind, handle.id)] = fn
 
-    def _row_args(self, ident: int, keys: Sequence[Key]) -> list[Any]:
-        """The row a stamped occurrence names, as a handle."""
+    def _row_args(self, ident: int, keys: Sequence[Key],
+                  menu: bool = False) -> list[Any]:
+        """The row a stamped occurrence names, as a handle.
+
+        THE ID SPACE IS A PARAMETER: menu items are counted apart from
+        widgets and nodes, so a bare id is ambiguous and a menu item
+        whose number equals a stamped node's would answer with THAT
+        node's collection."""
         if not keys:
             return []
-        owner = self._node_owners.get(ident)
-        if owner is None:
+        if menu:
             catalog = self._item_catalogs.get(ident)
             owner = None if catalog is None else catalog._owner
+        else:
+            owner = self._node_owners.get(ident)
         if owner is None:
             return list(keys)
         return [Row(owner, keys)]
@@ -6039,7 +6052,7 @@ class App:
                 handler = self._menu_handlers.get((kind, ident))
                 if handler is None:
                     continue
-                args = self._row_args(ident, keys)
+                args = self._row_args(ident, keys, menu=True)
                 if kind == wire.OCC_MENU_TOGGLED:
                     args.append(payload)
                 elif kind == wire.OCC_MENU_VALUE_CHANGED:

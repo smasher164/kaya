@@ -331,6 +331,42 @@ if (isMainThread) {
   app.build(() => { seenItem!.value = "zee"; });
   check("assigning a scalar row's value is the update", items.get("z") === "zee" && shipped.length === 1);
 
+  // A CONTEXT CATALOG'S ITEMS RECEIVE THE ROW, the flat ones and the ones
+  // a NESTED kaya.menu declares alike: a submenu seats its items on the
+  // PARENT ITEM, so without the catalog riding the seat chain their
+  // activation arrives as bare keys (docs/deferred.md, R2 gap (b);
+  // bindings/python/kaya_app_checks.py's twin).
+  const catalogFlat: unknown[] = [];
+  const catalogNested: unknown[] = [];
+  let catalogRow!: K.ContextCatalog;
+  let notes!: K.Collection<TodoFields, K.Row<typeof Todo.schema>>;
+  let flatItemId = 0;
+  let nestedItemId = 0;
+  app.window(() => {
+    notes = kaya.collection(Todo);
+    catalogRow = kaya.contextCatalog((c) => {
+      flatItemId = kaya.item("Remove", { onActivate: (row: unknown) => catalogFlat.push(row) }).id;
+      kaya.menu("More", () => {
+        nestedItemId = kaya.item("Archive", { onActivate: (row: unknown) => catalogNested.push(row) }).id;
+      });
+      return c;
+    });
+    kaya.column(() => {
+      for (const note of notes) {
+        kaya.label({ bind: note.title }).contextMenu(catalogRow);
+      }
+    });
+    notes.insert("n1", { title: "keep", done: false });
+  });
+  fire(wire.parse_occurrence(packStamped(wire.OCC_MENU_ACTIVATED, flatItemId, ["n1"], null)));
+  fire(wire.parse_occurrence(packStamped(wire.OCC_MENU_ACTIVATED, nestedItemId, ["n1"], null)));
+  const flatRow = catalogFlat[0] as K.RowHandle<TodoFields> | undefined;
+  const nestedRow = catalogNested[0] as K.RowHandle<TodoFields> | undefined;
+  check("a context catalog's item on a template node receives the row",
+    catalogFlat.length === 1 && (flatRow as unknown) instanceof Todo && flatRow!.key === "n1" && flatRow!.exists && flatRow!.title === "keep");
+  check("a nested menu's item inside a context catalog receives the row too",
+    catalogNested.length === 1 && (nestedRow as unknown) instanceof Todo && nestedRow!.key === "n1" && nestedRow!.exists && nestedRow!.title === "keep");
+
   // ------------------------------------------------------------ the tag
   let formatted!: K.Signal<string>;
   shipped.length = 0;

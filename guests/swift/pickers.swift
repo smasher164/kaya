@@ -39,7 +39,7 @@ app.build { tx in
             tx.write(timeSig, .time(KayaTime(hour: 9, minute: 0)))
         }
         for row in tasks.rows {
-            _ = row.label(row.name)
+            row.label(row.name)
             let picker = row.datePicker(row.due) { tx, keys, picked in
                 guard case .str(let key) = keys[0] else { return }
                 tx.write(rowText, .str("row \(key): \(picked)"))

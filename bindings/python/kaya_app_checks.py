@@ -4201,6 +4201,7 @@ _r2_toggled = []
 _r2_scalar = []
 _r2_nested = []
 _r2_menu = []
+_r2_submenu = []
 kaya.runtime.submit = lambda *recs: _r2_shipped.append(list(recs))
 
 
@@ -4216,6 +4217,12 @@ with _r2_app.window(2700):
     _r2_groups = kaya.collection(R2Todo)
     with kaya.context_catalog() as _r2_catalog:
         kaya.item("Remove", on_activate=_r2_menu.append)
+        # A NESTED submenu seats its items on the PARENT ITEM, so without
+        # the catalog riding the seat chain this one's activation arrives
+        # as bare keys (docs/deferred.md, R2 gap (b)).
+        with kaya.menu("More"):
+            _r2_submenu_item = kaya.item("Archive",
+                                         on_activate=_r2_submenu.append)
     with kaya.column():
         with kaya.for_each(_r2_todos) as _r2_cases:
             with _r2_cases.case(R2Todo) as _r2_todo:
@@ -4338,7 +4345,16 @@ _r2_deliver((kaya.wire.OCC_MENU_ACTIVATED, _r2_catalog._roots[0],
 check("a context catalog's item on a template node receives the row",
       len(_r2_menu) == 1 and isinstance(_r2_menu[0], kaya.Row)
       and _r2_menu[0].path == ("g2",)
-      and _r2_menu[0].key == "l1" and _r2_menu[0].title == "twin")
+      and _r2_menu[0].key == "l1" and _r2_menu[0].exists
+      and _r2_menu[0].title == "twin")
+
+_r2_deliver((kaya.wire.OCC_MENU_ACTIVATED, _r2_submenu_item.id,
+             ["g2", "l1"], None))
+check("a nested menu's item inside a context catalog receives the row too",
+      len(_r2_submenu) == 1 and isinstance(_r2_submenu[0], kaya.Row)
+      and _r2_submenu[0].path == ("g2",)
+      and _r2_submenu[0].key == "l1" and _r2_submenu[0].exists
+      and _r2_submenu[0].title == "twin")
 
 # THE OWNER IS THE INNERMOST FOR OPEN AT REGISTRATION, and a template
 # node with none is stamped by no collection, so no occurrence can ever

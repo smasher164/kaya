@@ -47,7 +47,7 @@ app.build { tx in
         }
         tx.label(bind: itemsLeft)
         for row in todos.rows {
-            _ = row.row {
+            row.row {
                 row.checkbox(row.done) { tx, keys, checked in
                     todos.patch(tx, keys[0]).set(\.done, checked)
                 }

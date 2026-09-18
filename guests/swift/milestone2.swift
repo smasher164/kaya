@@ -39,12 +39,12 @@ let (status, items, removeButton) = app.build {
         tx.label(bind: status)
         _ = tx.when(stepCount == 1) { t in t.label("extras on") }
         tx.each(groups) { g in
-            _ = g.column {
+            g.column {
                 g.label(KayaField<String>(index: 0))
                 let todos = g.collection()
                 items = todos
                 g.each(todos) { item in
-                    _ = item.column {
+                    item.column {
                         item.label(KayaField<String>(index: 0))
                         removeButton = item.button("remove")
                     }

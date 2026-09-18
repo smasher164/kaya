@@ -48,10 +48,12 @@ struct PostNoteArm {
     let t: KayaTpl
     let text = PostNoteFields.text
 
+    @discardableResult
     func label(_ f: KayaField<String>) -> KayaNodeHandle {
         t.label(f)
     }
 
+    @discardableResult
     func checkbox(
         _ f: KayaField<Bool>,
         onToggle: ((KayaAppTx, [KayaValue], Bool) -> Void)? = nil
@@ -59,10 +61,12 @@ struct PostNoteArm {
         t.checkbox(f, onToggle: onToggle)
     }
 
+    @discardableResult
     func row(@KayaNodeChildren _ children: () -> Void) -> KayaNodeHandle {
         t.row(children)
     }
 
+    @discardableResult
     func column(@KayaNodeChildren _ children: () -> Void) -> KayaNodeHandle {
         t.column(children)
     }
@@ -75,10 +79,12 @@ struct PostTodoArm {
     let title = PostTodoFields.title
     let done = PostTodoFields.done
 
+    @discardableResult
     func label(_ f: KayaField<String>) -> KayaNodeHandle {
         t.label(f)
     }
 
+    @discardableResult
     func checkbox(
         _ f: KayaField<Bool>,
         onToggle: ((KayaAppTx, [KayaValue], Bool) -> Void)? = nil
@@ -86,10 +92,12 @@ struct PostTodoArm {
         t.checkbox(f, onToggle: onToggle)
     }
 
+    @discardableResult
     func row(@KayaNodeChildren _ children: () -> Void) -> KayaNodeHandle {
         t.row(children)
     }
 
+    @discardableResult
     func column(@KayaNodeChildren _ children: () -> Void) -> KayaNodeHandle {
         t.column(children)
     }
@@ -103,6 +111,7 @@ func postCollection(_ tx: KayaAppTx) -> KayaSumCollection<Post> {
 
 /// The compile-total eliminator: one required labeled parameter
 /// per constructor, with the scene checking totality again.
+@discardableResult
 func postEachSum(
     _ tx: KayaAppTx, _ c: KayaSumCollection<Post>,
     note: @escaping (PostNoteArm) -> Void,

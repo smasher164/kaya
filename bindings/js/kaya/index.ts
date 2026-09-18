@@ -2907,9 +2907,19 @@ function menuSeat(item: MenuItem): MenuScope {
     );
   }
   const [kind, target] = scope._seat;
-  if (kind === "item") records().push(wire.tx_menu_item_append(target, item.id));
-  else if (kind === "widget") records().push(wire.tx_context_attach(target, item.id));
-  else target._roots.push(item.id);
+  if (kind === "item") {
+    records().push(wire.tx_menu_item_append(target, item.id));
+    // A NESTED submenu seats its items on the PARENT ITEM, so the
+    // catalog rides the chain: the parent's entry is already resolved
+    // (docs/deferred.md, R2 gap (b)).
+    const inherited = app()._itemCatalogs.get(target);
+    if (inherited !== undefined) app()._itemCatalogs.set(item.id, inherited);
+  } else if (kind === "widget") {
+    records().push(wire.tx_context_attach(target, item.id));
+  } else {
+    target._roots.push(item.id);
+    app()._itemCatalogs.set(item.id, target);
+  }
   return scope;
 }
 
@@ -4464,17 +4474,16 @@ export class App {
     // (contextMenu).
     const owner = _forCollections[_forCollections.length - 1];
     if (owner !== undefined) this._nodeOwners.set(handle.id, owner);
-    else if (handle instanceof MenuItem) {
-      const scope = _menuScopes[_menuScopes.length - 1];
-      if (scope !== undefined && scope._seat[0] === "free") this._itemCatalogs.set(handle.id, scope._seat[1]);
-    }
     (handle instanceof Widget && handle.isNode ? this._nodeHandlers : this._widgetHandlers).set(menuKey(kind, handle.id), fn);
   }
 
   /** @internal The row a stamped occurrence names, as a handle — or the
-   * bare keys when no collection owns the registration. */
-  _rowArgs(ident: number, keys: readonly Key[]): unknown[] {
-    const owner = this._nodeOwners.get(ident) ?? this._itemCatalogs.get(ident)?._owner ?? null;
+   * bare keys when no collection owns the registration. THE ID SPACE IS
+   * A PARAMETER: menu items are counted apart from widgets and nodes, so
+   * a bare id is ambiguous and a menu item whose number equals a stamped
+   * node's would answer with THAT node's collection. */
+  _rowArgs(ident: number, keys: readonly Key[], menu = false): unknown[] {
+    const owner = (menu ? this._itemCatalogs.get(ident)?._owner : this._nodeOwners.get(ident)) ?? null;
     if (owner === null || keys.length === 0) return [...keys];
     return [rowHandle(owner, keys)];
   }
@@ -4926,7 +4935,7 @@ export class App {
     if (kind === wire.OCC_MENU_ACTIVATED || kind === wire.OCC_MENU_TOGGLED || kind === wire.OCC_MENU_VALUE_CHANGED) {
       const handler = this._menuHandlers.get(menuKey(kind, ident));
       if (handler === undefined) return;
-      const args: unknown[] = this._rowArgs(ident, keys as Key[]);
+      const args: unknown[] = this._rowArgs(ident, keys as Key[], true);
       if (kind === wire.OCC_MENU_TOGGLED) args.push(payload);
       else if (kind === wire.OCC_MENU_VALUE_CHANGED) args.push(Math.trunc(payload as number));
       this._dispatch(handler, ...args);

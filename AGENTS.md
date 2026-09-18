@@ -362,6 +362,21 @@ in docs/deferred.md.
    it, and Swift's, which forwards no prop setter at all and is a slice
    of its own) are named in the file's exemption list, on the record
    rather than merely absent.
+   AND IT READS SWIFT'S GENERATED SURFACE FOR ONE THING SINCE 2026-09-18,
+   the DISCARD ATTRIBUTE (docs/deferred.md, the idiom entry): `KayaTpl`
+   marks every widget-handle constructor `@discardableResult` and
+   `KayaAppTx.each` marks the For, so a generated `<Rec>Row` /
+   `<Sum><Case>Arm` forward that drops it is spelled `_ =` at every guest
+   site keeping no handle — 18 such sites before it — and NO COMPILER PASS
+   CAN SAY SO, since an unused result is a warning and the guest passes
+   carry no -warnings-as-errors. Every declaration returning
+   `KayaNodeHandle` or `KayaWidget` in `guests/swift/*+Kaya.swift` must
+   carry it, read as SIGNATURES rather than lines (the emitter spells a
+   constructor on one line or across five), with the count printed and a
+   verdict refused below the floor; tools/kaya-swift-gen is what gets
+   fixed when it fires. Four cuts watched in check-sugar-surface — a row
+   member, a sum arm's, the eliminator's, and the whole generated set
+   hidden so the reader must refuse — counts printed.
    AND THE CAPABILITY SURFACE SINCE 2026-08-19, in three clauses: the
    `capabilities` QUERY in all nine, one NAMED BOOLEAN per bit
    (`aux_windows` and its casings) in all nine, and the bit NUMBER
@@ -477,7 +492,32 @@ in docs/deferred.md.
    through the collection's own `patch`, because a handle that grew a
    plain property instead reads back what it was given, patches nothing,
    and no scene can tell, since none reads a row's field back after
-   writing it; the cut is watched named on every run, counts printed),
+   writing it; the cut is watched named on every run, counts printed.
+   AND A CONTEXT CATALOG'S ITEMS RECEIVE THAT ROW HOWEVER DEEP THE MENU
+   NESTS, SINCE 2026-09-18 (docs/deferred.md, R2 gap (b)): two clauses per
+   binding, since neither point is visible to any scene — no guest declares
+   a `menu(...)` inside a catalog, and a handler handed BARE KEYS where it
+   should have had a row still runs. The seat chain carries the catalog
+   (a nested menu seats its items on the parent ITEM, so the parent's own
+   entry is inherited at seat time), and the row lookup is told WHICH ID
+   SPACE the occurrence's id lives in — menu items are counted apart from
+   widgets and nodes, so a bare id looked up in the node table first
+   answers a menu item with a stamped node's collection, measured raising
+   out of the python checks file. JS was the shipped half of that: its one
+   writer sat in a `_register` branch `MenuItem` can never reach, so every
+   catalog item there took bare keys while Python's took the row. Four cuts
+   watched named, counts printed.
+   AND THE SWIFT KIND ROW READS ONE ZONE SINCE 2026-09-18: Swift spells its
+   live and template zones in ONE FILE with ONE name, so the file-wide
+   pattern was satisfied by `KayaTpl`'s copy — `row`, `scroll`, `grid` and
+   `labeled` had NO live match at all under it, since X3 gave the live
+   containers a generic parameter, and passed entirely on the template
+   zone. The row reads `final class KayaAppTx`'s own block and admits the
+   generic arm; a zone it cannot LOCATE is a finding naming the anchor. The
+   other eight rows stay file-wide on purpose — their two zones are
+   separate files, receivers or namespaces, which is why tpl-surfaces
+   exists. Nine cuts watched, each showing the reader it replaces still
+   green on the same copy),
    `tools/check-universal-props.py` (the lowering-side sibling: every
    backend applies the universal a11y props to every kind — Compose
    per-arm, SwiftUI's one wrapper unbypassed, GTK/WinUI's apply arm

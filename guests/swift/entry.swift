@@ -15,7 +15,7 @@ let (status, field, add, todos) = app.build {
         let add = tx.button("add")  // button#0
         tx.label(bind: status)  // label#0
         tx.each(todos) { t in
-            _ = t.label(KayaField<String>(index: 0))
+            t.label(KayaField<String>(index: 0))
         }
         return (root, field, add)
     }

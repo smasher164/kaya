@@ -34,18 +34,22 @@ struct TrackRow {
     let name = TrackFields.name
     let level = TrackFields.level
 
+    @discardableResult
     func label(_ f: KayaField<String>) -> KayaNodeHandle {
         t.label(f)
     }
 
+    @discardableResult
     func image(_ f: KayaField<Data>) -> KayaNodeHandle {
         t.image(f)
     }
 
+    @discardableResult
     func textarea(document f: KayaField<KayaDocument>) -> KayaNodeHandle {
         t.textarea(document: f)
     }
 
+    @discardableResult
     func checkbox(
         _ f: KayaField<Bool>,
         onToggle: ((KayaAppTx, [KayaValue], Bool) -> Void)? = nil
@@ -53,6 +57,7 @@ struct TrackRow {
         t.checkbox(f, onToggle: onToggle)
     }
 
+    @discardableResult
     func datePicker(
         _ f: KayaField<KayaDate>,
         onDate: ((KayaAppTx, [KayaValue], KayaDate) -> Void)? = nil
@@ -60,6 +65,7 @@ struct TrackRow {
         t.datePicker(f, onDate: onDate)
     }
 
+    @discardableResult
     func timePicker(
         _ f: KayaField<KayaTime>,
         onTime: ((KayaAppTx, [KayaValue], KayaTime) -> Void)? = nil
@@ -67,6 +73,7 @@ struct TrackRow {
         t.timePicker(f, onTime: onTime)
     }
 
+    @discardableResult
     func slider(
         min: Double = 0.0, max: Double = 1.0, value f: KayaField<Double>,
         step: Double? = nil, tickSpacing: Double? = nil,
@@ -78,10 +85,12 @@ struct TrackRow {
             onChange: onChange, onCommit: onCommit)
     }
 
+    @discardableResult
     func row(@KayaNodeChildren _ children: () -> Void) -> KayaNodeHandle {
         t.row(children)
     }
 
+    @discardableResult
     func column(@KayaNodeChildren _ children: () -> Void) -> KayaNodeHandle {
         t.column(children)
     }
@@ -99,6 +108,7 @@ extension KayaRecordCollection where T == Track {
 /// The record template, expression form: the body runs once,
 /// authoring the blueprint with the typed row surface; stamping is
 /// the core's replay.
+@discardableResult
 func trackEach(
     _ tx: KayaAppTx, _ c: KayaRecordCollection<Track>,
     _ body: @escaping (TrackRow) -> Void

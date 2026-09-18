@@ -50,7 +50,7 @@ app.build { tx in
         tx.setA11yId(tx.label(bind: count), "count")
         // The For IS the list: expect_order reads its label children.
         let list = searchItemEach(tx, items) { row in
-            _ = row.label(row.name)
+            row.label(row.name)
         }
         tx.setA11yId(list, "list")
         return root

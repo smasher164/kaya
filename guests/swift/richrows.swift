@@ -71,7 +71,7 @@ app.build { tx in
             }
         }
         for r in notes.rows {
-            _ = r.column {
+            r.column {
                 r.label(r.title)
                 let body = r.textarea(document: r.body)
                 r.t.setA11yId(body, "body")

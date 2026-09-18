@@ -11829,3 +11829,15 @@ before it completes. (3) A KAYA WINDOW MAPPED AS AN ADVERSARY TAKES THE
 SEAT TWICE — sway focuses it on map and the app's own startup re-takes
 the seat over the next second, so a steal timed at zero lands in the
 middle of that; give the thief its settle before the verb under test.
+
+## An edit to anything the gate sweep reads, made while a matrix runs, costs the mac lane a whole sweep (2026-09-18)
+
+The mac lane skips its own gate sweep inside a matrix only while the
+tree's gate fingerprint still matches the token validate-all's sweep will
+stamp; a docs/deferred.md edit made ten minutes into matrix #43 moved
+that fingerprint, and the mac lane ran the full 60-gate sweep itself —
+`core-build+gates 505s` against 35s the run before — landing at 1076s net
+against its 1100s ceiling with every leg green. The rule already says not
+to edit the tree while a matrix runs; the reason it bites even for a docs
+edit is that check-doc-refs and check-ledger are gates, and their inputs
+are in the fingerprint.

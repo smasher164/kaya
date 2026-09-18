@@ -2181,12 +2181,30 @@ unpicked.
   gone); OCaml's containers take a child list and needed nothing but the
   live `when_`, which answers its pair; Python, Go and Haskell re-read and
   unchanged for the reasons DESIGN.md states. 314 legs green, 16 watched
-  negatives. Left open, small: the generated Swift `<Rec>Row` surface
-  should mark its `-> KayaNodeHandle` members `@discardableResult` (the 7
-  `_ =` the guests carry); check-sugar-surface's Swift kind row passes on
-  the template `func column(` and wants a zone-aware reader; `draw`,
-  `draw_at` and `breakpoint_when` bodies record ops and setters and answer
-  nothing, stated rather than changed.
+  negatives. Left open, small — and TWO OF THREE CLOSED 2026-09-18 (one Opus
+    agent; the job's tmp/idiom/notes-tiny.md): ~~the generated Swift
+    `<Rec>Row` surface should mark its `-> KayaNodeHandle` members
+    `@discardableResult`~~ — the Swift emitter (tools/kaya-swift-gen)
+    marks every handle-returning member now, eighteen `_ =` (not seven)
+    across the guests became one, and tpl-surfaces' `discardable_swift`
+    reads every generated file as SIGNATURES (a line pattern saw 5 of 9
+    members) with a floor of 90 declarations in 9 files, four watched
+    negatives through check-sugar-surface; the one `_ =` left is
+    milestone2's, because `when<R>` answers a tuple that the census
+    deliberately does not reach, and `KayaTpl.labeled`'s String and
+    KayaSignal overloads are unmarked with no guest calling them bare —
+    both stated. ~~check-sugar-surface's Swift kind row passes on the
+    template `func column(` and wants a zone-aware reader~~ — and worse
+    than recorded: `row`, `scroll`, `grid` and `labeled` had NO live-zone
+    match at all, passing on the template alone, because X3's generic
+    parameter (`func row<R>(`) fell outside the old pattern; the row reads
+    the live class's own block now and admits the generic, one watched
+    negative cutting the live constructor with the template one kept;
+    `column` stays prefix-loose (satisfied by `func columns(`, the table
+    bar) because all nine rows share that looseness for `entryBound`'s
+    sake — recorded, not narrowed. `draw`, `draw_at` and `breakpoint_when`
+    bodies record ops and setters and answer nothing, stated rather than
+    changed.
   THE HASKELL REDO (2026-09-17, Opus, two rounds): guest ascriptions
   193 -> 0 and pack/unpack 214 -> 9 (String-by-nature boundaries), the
   surface on Text end to end, Text/Bound constructor pairs in place of the
@@ -2256,8 +2274,24 @@ unpicked.
     `_itemCatalogs` and Python's `_item_catalogs` record no owner for
     them and their activation arrives as bare keys — the same in both by
     choice (invariant 1), a two-line fix in each when taken together; no
-    guest hits it (menus.py's catalog is flat). KEY: nested catalog
-    submenu, _itemCatalogs, _item_catalogs, bare keys.
+    guest hits it (menus.py's catalog is flat). CLOSED 2026-09-18 (the same
+    agent): an item seated on a parent item inherits the parent's catalog
+    in both bindings, one check in each checks file activating a nested
+    item on a stamped row and receiving the ROW, each watched failing on a
+    copy with the fix removed, and check-sugar-surface's CATALOG_SEAT_ROWS
+    holds both spellings with four watched cuts. AND A DIVERGENCE THAT HAD
+    SHIPPED, found because the check was written before the fix: JS's
+    `_itemCatalogs` had ONE writer and it sat in an unreachable `_register`
+    branch, so EVERY JS context-catalog item took bare keys while Python's
+    took the row (invariant 1); guests/js/menus.ts's onRemove takes the row
+    now, Python's own spelling, the scene's bytes unmoved. Beside it an
+    id-space collision in `_row_args`/`_rowArgs` — menu items are counted
+    apart from widgets and nodes, so a menu item whose number equalled a
+    stamped node's answered with THAT node's collection (the Python check
+    RAISED rather than failed) — fixed in both with the id space passed as
+    a parameter; the other seven bindings hand a catalog item bare keys by
+    design and have nothing to mis-key. KEY: nested catalog submenu,
+    _itemCatalogs, _item_catalogs, bare keys, CATALOG_SEAT_ROWS.
   - R3 THE TOOLCHAIN: JDK 21 (pattern switch over the sealed sums,
     virtual threads; touches nine gradle modules), Swift 6 language mode
     with strict concurrency (the binding becomes a package target),

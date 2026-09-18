@@ -22,7 +22,7 @@ app.build { tx in
             items.moveToFront(tx, entries[entries.count - 1].key)
         }
         for row in items.rows {
-            _ = row.label(row.title)
+            row.label(row.title)
         }
         return root
     }

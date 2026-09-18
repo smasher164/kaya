@@ -50,7 +50,7 @@ app.build { tx in
             tx.write(pos, .f64(25.0))
         }
         for row in tracks.rows {
-            _ = row.label(row.name)
+            row.label(row.name)
             let level = row.slider(
                 min: 0.0, max: 100.0, value: row.level, step: 10.0,
                 onCommit: { tx, keys, v in

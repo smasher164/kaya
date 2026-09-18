@@ -89,7 +89,7 @@ let (groups, items) = app.build { tx -> (KayaCollection, KayaCollection) in
             itemsOut = items
             // A bare mention in the builder is DISCARDED, so the For is
             // declared INSIDE the column (docs/traps.md, result builders).
-            _ = g.column {
+            g.column {
                 g.each(items) { r in
                     // label#2 once g2/a stamps.
                     let row = r.label(KayaField<String>.element)

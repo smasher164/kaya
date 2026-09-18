@@ -1989,6 +1989,51 @@ def twins_csharp():
     return out
 
 
+# --- SWIFT'S GENERATED SURFACE DISCARDS LIKE THE ZONE IT FORWARDS TO ----
+# `KayaTpl` marks every widget-handle constructor `@discardableResult`, and
+# `KayaAppTx.each` marks the For; a generated forward that drops the
+# attribute is invisible to every compiler pass (an unused result is a
+# WARNING, and the guest passes carry no -warnings-as-errors) and shows up
+# only as `_ =` spelled through the guests — 18 sites before this clause
+# (docs/deferred.md, the idiom entry). tools/kaya-swift-gen/Sources/main.swift
+# is what gets fixed when it fires.
+SWIFT_GENERATED_FLOOR = 9
+SWIFT_HANDLE_FLOOR = 90
+
+
+def discardable_swift():
+    """`(file, declaration, return type, marked?)` per handle-returning
+    declaration in every generated Swift surface.
+
+    Read as SIGNATURES, not lines: the emitter spells a constructor on one
+    line or across five, so a line pattern would see five of the nine row
+    members and call the rest absent."""
+    out = []
+    for path in sorted(glob.glob(f"{ROOT}/guests/swift/*+Kaya.swift")):
+        src = open(path, encoding="utf-8").read()
+        rel = path[len(ROOT) + 1:] if path.startswith(ROOT + "/") else path
+        lines = src.split("\n")
+        for i, line in enumerate(lines):
+            m = re.match(r"\s*func (\w+)\(", line)
+            if not m:
+                continue
+            signature = []
+            for j in range(i, len(lines)):
+                signature.append(lines[j].strip())
+                if lines[j].rstrip().endswith("{"):
+                    break
+            returns = re.search(r"->\s*(KayaNodeHandle|KayaWidget)\s*\{$",
+                                " ".join(signature))
+            if not returns:
+                continue
+            above = i - 1
+            while above >= 0 and lines[above].strip().startswith("///"):
+                above -= 1
+            marked = above >= 0 and lines[above].strip() == "@discardableResult"
+            out.append((rel, m.group(1), returns.group(1), marked))
+    return out
+
+
 # THE FAÇADES THAT ARE NOT HERE, on the record rather than merely absent:
 #   go — `type Row struct{ *Tpl }` EMBEDS the zone, so the pair cannot
 #     drift (bindings/go/tplzone_test.go checks its two sealed surfaces).
@@ -2310,6 +2355,47 @@ def main():
                 "RowSurface overload a table inside a row template cannot be "
                 "spelled with the typed row at all; without the Tx one a "
                 "top-level one cannot. Emit it in tools/java-processor."
+            )
+            status = 1
+
+    # AND SWIFT'S GENERATED SURFACE, read for the DISCARD ATTRIBUTE rather
+    # than for what it can build: the zone it forwards to marks every
+    # widget-handle constructor, and a forward that does not is spelled
+    # `_ =` at every guest site that keeps no handle.
+    try:
+        swift_decls = discardable_swift()
+    except OSError as e:
+        print(f"tpl-surfaces: cannot read Swift's generated row surfaces ({e})")
+        return 1
+    swift_files = {rel for rel, _, _, _ in swift_decls}
+    if len(swift_files) < SWIFT_GENERATED_FLOOR or len(swift_decls) < SWIFT_HANDLE_FLOOR:
+        print(
+            f"tpl-surfaces: the Swift generated-surface reader found "
+            f"{len(swift_decls)} handle-returning declarations in "
+            f"{len(swift_files)} files under guests/swift, fewer than the "
+            f"{SWIFT_HANDLE_FLOOR} in {SWIFT_GENERATED_FLOOR} the tree is known "
+            "to carry — the reader has stopped seeing the surface it exists to "
+            "census and can no longer fail. Fix the reader here rather than "
+            "lowering the floor."
+        )
+        status = 1
+    else:
+        print(f"tpl-surfaces: Swift's generated surfaces carry "
+              f"{len(swift_decls)} handle-returning declarations in "
+              f"{len(swift_files)} files, "
+              f"{sum(1 for d in swift_decls if d[3])} of them @discardableResult")
+    for rel, name, returns, marked in swift_decls:
+        if not marked:
+            print(
+                f"check-sugar-surface: Swift's generated `{name}` returns "
+                f"{returns} with no @discardableResult — in {rel}. The zone it "
+                "forwards to marks every widget-handle constructor "
+                "(`final class KayaTpl` and `KayaAppTx.each`, "
+                "bindings/swift/KayaApp.swift), so without the attribute every "
+                "guest site that keeps no handle spells `_ =` and no compiler "
+                "pass can say so (an unused result is a warning, and the guest "
+                "passes carry no -warnings-as-errors). Emit it in "
+                "tools/kaya-swift-gen/Sources/main.swift."
             )
             status = 1
 
