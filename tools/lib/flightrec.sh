@@ -101,7 +101,7 @@ flightrec_mark() { # <bundle> <name> <state> <bytes>
 # holds the two spellings to ONE list and reads this lane's collect for
 # each name.
 # shellcheck disable=SC2034
-FLIGHTREC_SECTIONS_LINUX="leg-log verb-trace shot desktop xvfb"
+FLIGHTREC_SECTIONS_LINUX="leg-log verb-trace shot desktop focus xvfb"
 
 # flightrec_skip <bundle> <name> <sentence...>
 #

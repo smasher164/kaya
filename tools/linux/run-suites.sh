@@ -312,7 +312,39 @@ gtk_layout_clean_selftest
 KAYA_EXCLUSIVE_LEGS=" dndwitness-in-x11 dndwitness-out-x11 dndwitness-in-wayland dndwitness-out-wayland clipboard-python-wayland clipboard-js-wayland clipboard-rust-wayland "
 # A lane that dies mid-run is exactly when the journal matters, and this
 # runner has no other EXIT trap to share.
-trap 'flightrec_flush; rm -rf "$FLIGHTREC_SCRATCH"' EXIT
+trap 'flightrec_flush; focus_ring_stop; rm -rf "$FLIGHTREC_SCRATCH"' EXIT
+
+# THE FOCUS RING (tools/linux/focus-ring.py; docs/deferred.md's wayland
+# clipboard seed entry). One sampler for the lane, writing ONE ring per
+# session, because a red leg's `desktop` section is the tree at COLLECT
+# with the guest already gone. Started once the session pools are up
+# (below), stopped by the trap above, and its absence printed.
+FOCUS_RING_PID=""
+focus_ring_start() {
+    python3 /work/tools/linux/focus-ring.py --self-test || exit 1
+    python3 /work/tools/linux/focus-ring.py sample "$FLIGHTREC_SCRATCH" \
+        --seconds 7200 >"$FLIGHTREC_SCRATCH/focus-sampler.log" 2>&1 &
+    FOCUS_RING_PID=$!
+    disown
+}
+focus_ring_stop() {
+    [ -n "$FOCUS_RING_PID" ] || return 0
+    : >"$FLIGHTREC_SCRATCH/focus.stop" 2>/dev/null || true
+    local kaya_waited=0
+    while kill -0 "$FOCUS_RING_PID" 2>/dev/null && [ "$kaya_waited" -lt 60 ]; do
+        kaya_waited=$((kaya_waited + 1))
+        sleep 0.1
+    done
+    kill "$FOCUS_RING_PID" 2>/dev/null
+    sleep 0.2
+    if kill -0 "$FOCUS_RING_PID" 2>/dev/null; then
+        kill -9 "$FOCUS_RING_PID" 2>/dev/null
+        echo "focus-ring: the sampler (pid $FOCUS_RING_PID) had to be killed" >&2
+    else
+        echo "focus-ring: the sampler (pid $FOCUS_RING_PID) is stopped"
+    fi
+    FOCUS_RING_PID=""
+}
 
 # THE X11 DISPLAY POOL, one Xvfb per pool slot, booted once (2026-08-20:
 # xvfb-run per leg re-paid ~half a second of server boot on every one of
@@ -347,6 +379,7 @@ if [ -z "${KAYA_RECORD:-}" ]; then
         X11_POOL+=("$kaya_d")
     done
 fi
+focus_ring_start
 
 # KAYA_ONLY is a prefix, so `KAYA_ONLY=menus-java` takes both protocols
 # and `KAYA_ONLY=menus-java-wayland` takes one. Empty means every leg.
@@ -430,16 +463,29 @@ run() {
 # the display is rebooted, and the .when sentence says exactly that,
 # because a photograph nobody can date answers a question it was never
 # asked. Written into the recorder's scratch; drain() adopts them.
-flightrec_shot_x11() { # <leg> <display-number>
+# WHO HELD THE FOCUS WHILE THE LEG RAN, cut out of this session's ring
+# (tools/linux/focus-ring.py; docs/deferred.md's wayland clipboard seed
+# entry). The two sections above are readings taken AFTER the guest has
+# gone; this one is the only part of the bundle that covers the leg.
+flightrec_focus_cut() { # <leg> <ring-file> <leg-start-epoch> <session>
+    python3 /work/tools/linux/focus-ring.py cut "$2" \
+        "$FLIGHTREC_SCRATCH/$1.focus.txt" --leg "$1" --since "$3" \
+        --until "${EPOCHSECONDS:-0}" --session "$4" >/dev/null 2>&1 || true
+    return 0
+}
+
+flightrec_shot_x11() { # <leg> <display-number> <leg-start-epoch>
     local dpy="$2" out="$FLIGHTREC_SCRATCH/$1"
     DISPLAY=":$dpy" import -window root "$out.shot.png" 2>/dev/null || true
     DISPLAY=":$dpy" xwininfo -root -tree >"$out.desktop.txt" 2>&1 || true
     printf 'the x11 root window of display :%s, grabbed by `import` the moment the leg exited and before this display was rebooted; the guest process is already gone, so an app window here is one that outlived it\n' \
         "$dpy" >"$out.shotwhen"
+    flightrec_focus_cut "$1" "$FLIGHTREC_SCRATCH/focus-x11-$dpy.txt" \
+        "${3:-0}" "x11 display :$dpy"
     return 0
 }
 
-flightrec_shot_wayland() { # <leg> <xdg-runtime-dir>
+flightrec_shot_wayland() { # <leg> <xdg-runtime-dir> <leg-start-epoch>
     local dir="$2" out="$FLIGHTREC_SCRATCH/$1"
     XDG_RUNTIME_DIR="$dir" WAYLAND_DISPLAY="$(cat "$dir/socket" 2>/dev/null)" \
         grim "$out.shot.png" 2>/dev/null || true
@@ -447,6 +493,8 @@ flightrec_shot_wayland() { # <leg> <xdg-runtime-dir>
         swaymsg -t get_tree >"$out.desktop.txt" 2>&1 || true
     printf 'the headless sway output of %s, grabbed by `grim` the moment the leg exited and before this session was rebooted; the guest process is already gone, so a surface here is one that outlived it\n' \
         "$dir" >"$out.shotwhen"
+    flightrec_focus_cut "$1" "$FLIGHTREC_SCRATCH/focus-wl-${dir##*-}.txt" \
+        "${3:-0}" "wayland slot ${dir##*-} ($dir)"
     return 0
 }
 
@@ -484,6 +532,7 @@ run_one() {
                 done
                 sleep 0.05
             done
+            local kaya_t0="${EPOCHSECONDS:-0}"
             DISPLAY=":$kaya_display" KAYA_SELFTEST=1 GDK_BACKEND=x11 \
                 KAYA_VERB_TRACE="$LEGS_DIR/$name-$proto.vtrace" timeout 180 "$@"
             local kaya_rc=$?
@@ -492,7 +541,7 @@ run_one() {
                 # two lines down replaces this display with an empty one,
                 # so a shot at bundle time photographs a fresh desktop
                 # and says nothing about the leg.
-                flightrec_shot_x11 "$name-$proto" "$kaya_display"
+                flightrec_shot_x11 "$name-$proto" "$kaya_display" "$kaya_t0"
                 # A failed leg may leave windows behind; the next leg on
                 # this display must not meet them. Reboot it, still under
                 # the claim.
@@ -514,13 +563,14 @@ run_one() {
                 sleep 0.05
             done
             local kaya_wl="/tmp/xdg-wl-$kaya_slot"
+            local kaya_t0="${EPOCHSECONDS:-0}"
             XDG_RUNTIME_DIR="$kaya_wl" WAYLAND_DISPLAY="$(cat "$kaya_wl/socket")" \
                 SWAYSOCK="$(cat "$kaya_wl/ipc")" KAYA_SELFTEST=1 GDK_BACKEND=wayland \
                 KAYA_VERB_TRACE="$LEGS_DIR/$name-$proto.vtrace" timeout 180 "$@"
             local kaya_rc=$?
             if [ "$kaya_rc" -ne 0 ]; then
                 # Before the reboot, for the x11 arm's reason above.
-                flightrec_shot_wayland "$name-$proto" "$kaya_wl"
+                flightrec_shot_wayland "$name-$proto" "$kaya_wl" "$kaya_t0"
                 wayland_session_boot "$kaya_slot"
             fi
             rmdir "$LEGS_DIR/.wl-$kaya_slot" 2>/dev/null
@@ -593,6 +643,11 @@ drain() {
                 flightrec_adopt "$bundle" desktop \
                     "$FLIGHTREC_SCRATCH/$name.desktop.txt" \
                     "flightrec: no window tree was read for this leg's session (xwininfo on x11, swaymsg -t get_tree on wayland) — the leg ran in serial mode, or the session was already gone"
+                # WHO HELD FOCUS DURING THE LEG, which neither section
+                # above can say (both are read once the guest is gone).
+                flightrec_adopt "$bundle" focus \
+                    "$FLIGHTREC_SCRATCH/$name.focus.txt" \
+                    "flightrec: no focus ring was cut for this leg — the lane's sampler (tools/linux/focus-ring.py) wrote no ring for this leg's session, or the leg ran in serial mode (which keeps no per-leg state)"
                 # shellcheck disable=SC2086
                 flightrec_finish "$bundle" $FLIGHTREC_SECTIONS_LINUX
             fi

@@ -2406,13 +2406,145 @@ for label, kwargs, finding in (
                             + label_no_quote_clauses(kwargs.get("kotlin_src")),
                             polish_out, finding), label)
 
+# THE SEED TAKES THE SEAT'S FOCUS BEFORE IT SPAWNS THE WRITER (GTK;
+# docs/deferred.md's wayland clipboard seed entry). On wayland a client is
+# handed a data offer only while its surface holds the seat's keyboard
+# focus, so a seed against a window that lost it waits five seconds for an
+# offer that cannot come — measured 2026-09-18 with a second client on the
+# leg's own session: 0/5 legs before, 5/5 after. NO LANE CAN SEE THE RULE
+# GO: every wayland session this lane boots holds exactly one window, so
+# the focus is the guest's anyway and a seed with the request deleted is
+# green on every leg of every matrix; the class shows only when something
+# takes the seat. AND THE READING MAY NOT COME FROM INSIDE THE PROCESS:
+# `gtk_window_is_active` is false for every step of a GREEN wayland leg
+# (gtk.rs, ClipView::active) and `present()` was measured losing — sway
+# denies the self-activation token — so the compositor is asked and its own
+# answer is what the sentence carries (invariant 3).
+SEED_FOCUS = [
+    ("the request stands before the writer is spawned", "clipboard_seed",
+     r"let focus = clipboard_seed_focus\(\);[\s\S]*?"
+     r"foreign_clip_write\(mime, bytes\);",
+     "a seed that asks for the focus AFTER the writer has set the "
+     "selection has already missed the offer"),
+    ("the compositor is asked, by this process's own pid",
+     "clipboard_seed_focus",
+     r'Command::new\("swaymsg"\)\s*\.arg\(format!\("\[pid=\{pid\}\] focus"\)\)',
+     "the seat's focus is the compositor's to give, and no reading inside "
+     "this process can even see it"),
+    ("only a wayland session pays for it", "clipboard_seed_focus",
+     r"if !linux_wayland_session\(\) \{\s*return String::new\(\);",
+     "x11 serves its selection to any client that asks, so the request "
+     "would be one spawn per seed for nothing"),
+    ("the grant is read out of the compositor's own answer",
+     "clipboard_seed_focus",
+     r'said\.status\.success\(\)\s*&&\s*answer\.replace\([^)]*\)\s*'
+     r'\.contains\(',
+     'sway answers `success: false, error: "No matching node."` when the '
+     "criteria match nothing (measured), so a request that read only the "
+     "exit status would report a grant that never happened"),
+    ("the expiry says what the focus request answered", "clipboard_seed",
+     r'"seed \{kind\}\{focus\} EXPIRED',
+     "the sentence a reader chases must name the channel's own state"),
+    ("the expiry carries BOTH readings of gtk_window_active",
+     "clipboard_seed", r"gtk_window_active=\{\}->\{\}",
+     "one reading cannot say whether the window's own state moved during "
+     "the five seconds"),
+]
+
+
+def rust_fn_body(gtk_src, name):
+    """One `fn <name>(`'s body, braces balanced, or None."""
+    at = gtk_src.find(f"fn {name}(")
+    if at < 0:
+        return None
+    return balanced(gtk_src, gtk_src.index("{", gtk_src.index(")", at)))
+
+
+def seed_focus_clauses(gtk_src=None):
+    bad = []
+    text = gtk_src if gtk_src is not None else real(GTK)
+    bodies = {}
+    for name in ("clipboard_seed", "clipboard_seed_focus"):
+        body = rust_fn_body(text, name)
+        if body is None or len(body) < 200:
+            bad.append(f"gtk.rs has no `fn {name}` body this clause can read "
+                       f"— the wayland seed's focus rule is held by nothing")
+        bodies[name] = body or ""
+    for label, fn, pattern, why in SEED_FOCUS:
+        if not re.search(pattern, bodies.get(fn, "")):
+            bad.append(f"the wayland clipboard seed: {label} — `fn {fn}` in "
+                       f"gtk.rs no longer matches /{pattern}/. {why}")
+    # AND NEITHER REFUSAL MAY BE A SENTENCE THAT INTERPOLATES NOTHING: a
+    # focus request that failed prints what the compositor said, or it is a
+    # diagnostic that cannot discriminate. tools/check-diagnostics.py reads
+    # `*WhyNot` names only, so it cannot reach this one.
+    said = re.findall(r"eprintln!\(\s*\"([\s\S]*?)\"\s*\);",
+                      bodies.get("clipboard_seed_focus", ""))
+    if len(said) != 2:
+        bad.append(f"the wayland clipboard seed: `fn clipboard_seed_focus` "
+                   f"prints {len(said)} sentence(s) on its failure paths, "
+                   f"wanted 2 — one for a compositor that refused and one for "
+                   f"a host with no swaymsg, since a single sentence for both "
+                   f"cannot say which happened")
+    for one in said:
+        if "{" not in one:
+            bad.append(f"the wayland clipboard seed: a refusal sentence "
+                       f"interpolates nothing ({one[:60]!r}) — it would be "
+                       f"printed for every cause it does not name")
+    return bad
+
+
+seed_focus_out = seed_focus_clauses()
+seed_focus_status = 0
+for line in seed_focus_out:
+    print(f"check-verbs: {line}", file=sys.stderr)
+    seed_focus_status = 1
+for label, kwargs, finding in (
+    ("the focus request moved after the writer",
+     dict(gtk_src=perturb(
+         "seed focus (asked after the writer)", GTK,
+         r"(        )let focus = clipboard_seed_focus\(\);\n",
+         "")),
+     r"the request stands before the writer is spawned"),
+    ("the compositor asked about somebody else's window",
+     dict(gtk_src=perturb("seed focus (pid dropped from the criteria)", GTK,
+                          r'(\.arg\(format!\(")\[pid=\{pid\}\] focus',
+                          "[app_id=kaya] focus")),
+     r"the compositor is asked, by this process's own pid"),
+    ("the grant read off the exit status alone",
+     dict(gtk_src=perturb("seed focus (the answer no longer read)", GTK,
+                          r"(if said\.status\.success\(\))\s*&&\s*"
+                          r"answer\.replace\([^)]*\)\s*\.contains\([^)]*\)",
+                          "")),
+     r"the grant is read out of the compositor's own answer"),
+    ("a refusal sentence that names nothing it measured",
+     dict(gtk_src=perturb("seed focus (a refusal blanked)", GTK,
+                          r"(focus: swaymsg )\{e\}",
+                          "somehow")),
+     r"a refusal sentence interpolates nothing"),
+    ("the expiry that stopped naming the focus request",
+     dict(gtk_src=perturb("seed focus (the expiry sentence stripped)", GTK,
+                          r'("seed \{kind\})\{focus\}( EXPIRED)',
+                          " EXPIRED")),
+     r"the expiry says what the focus request answered"),
+    ("the expiry back to one reading of gtk_window_active",
+     dict(gtk_src=perturb("seed focus (one active reading)", GTK,
+                          r"(gtk_window_active=\{\})->\{\}", "")),
+     r"the expiry carries BOTH readings"),
+):
+    score_or_die(introduced(seed_focus_clauses(**kwargs), seed_focus_out,
+                            finding), label)
+print(f"check-verbs: the wayland clipboard seed takes the seat's focus "
+      f"before it spawns the writer: {len(SEED_FOCUS)} links + 2 refusal "
+      f"sentences, 6 watched negatives refused", file=sys.stderr)
+
 # clip_mirrors() ran first and printed its own findings; its verdict
 # is read here so there is exactly ONE verdict line.
 if (clip_status or window_status or ink_status or ax_status
         or words_status or label_status or polish_status
         or metrics_status or keyed_status or drop_line_status
         or vtrace_status or norm_status or ind_status
-        or answer_status):
+        or answer_status or seed_focus_status):
     raise SystemExit(1)
 g.verdict(f"{len(verbs)} verbs, {len(rows)} constants "
           f"({len(canvas_rows)} of them the canvas vocabularies) + "
@@ -2427,4 +2559,5 @@ g.verdict(f"{len(verbs)} verbs, {len(rows)} constants "
           f"+ an action returns once the app has answered it in 3 "
           f"runners + the rich label's refusal sentence and draw on 4 arms "
           f"+ the polish pass's ground and rule per arm "
+          f"+ the wayland clipboard seed's focus request "
           f"+ spec hash against 2 interpreters")

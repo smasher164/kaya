@@ -55,6 +55,7 @@ WIN = "tools/deploy-win.py"
 STEPS = "tools/check-steps.py"
 WINUI = "crates/kaya/src/winui/mod.rs"
 GUEST_PS1 = "tools/guest/flightrec.ps1"
+FOCUS_RING = "tools/linux/focus-ring.py"
 
 # The recorder class whose body IS each python lane's collect path.
 RECORDERS = {"mac": "MacRecorder", "windows": "WinRecorder",
@@ -67,7 +68,7 @@ UNIVERSAL = ("leg-log", "verb-trace", "shot")
 def sources():
     return {rel: gate.read(rel) for rel in
             (LANE_PY, LANE_SH, LINUX, IOS, ANDROID, WIN,
-             STEPS, WINUI, GUEST_PS1)}
+             STEPS, WINUI, GUEST_PS1, FOCUS_RING)}
 
 
 def py_block(text, name):
@@ -434,6 +435,68 @@ def census_collect_fresh(src):
     return found
 
 
+def census_focus_ring(src):
+    """THE LINUX FOCUS RING'S TWO ENDS, AND ITS LIFE (docs/deferred.md, the
+    wayland clipboard seed entry). The `desktop` section is the sway tree at
+    COLLECT, with the guest already gone, so the one question a wayland
+    clipboard red asks — who held the seat while the leg ran — had no
+    section at all. The ring answers it, and three things no lane can fail
+    hold it up: the sampler's own file names against the names the collect
+    cuts (census_vtrace's rule one lane over: either end moving alone leaves
+    `focus.skip` on every red leg while a sampler writes a file nobody
+    reads), the sampler being STARTED by the runner, and its being STOPPED
+    by the EXIT trap — a ring nobody starts is a section that always skips,
+    and a sampler nobody stops is a process left polling in a container that
+    outlived its lane (docs/deferred.md's windows LEAK entry, one lane
+    over)."""
+    found = []
+    ring = src[FOCUS_RING]
+    runner = src[LINUX]
+    names = sorted(set(re.findall(r'f"(focus-[\w-]+?-)\{number\}\.txt"',
+                                  ring)))
+    if len(names) != 2:
+        found.append(
+            f"{FOCUS_RING}: this clause reads the sampler's own ring file "
+            f"names out of its emit calls and found {len(names)} — the two "
+            f"halves (a wayland slot's and an x11 display's) are what the "
+            f"collect cuts by name")
+    for prefix in names:
+        if f'"$FLIGHTREC_SCRATCH/{prefix}' not in runner:
+            found.append(
+                f"{LINUX}: the collect cuts no {prefix}… ring, but "
+                f"{FOCUS_RING} writes one — a renamed end leaves focus.skip "
+                f"on every red leg of that protocol while the sampler goes "
+                f"on writing a file nobody reads")
+    stop = re.search(r'stop = ring / "([^"]+)"', ring)
+    if not stop:
+        found.append(f"{FOCUS_RING}: names no stop file, so the runner's "
+                     f"EXIT trap has no channel to end the sampler with")
+    elif stop.group(1) not in runner:
+        found.append(
+            f"{LINUX}: never writes {FOCUS_RING}'s stop file "
+            f"({stop.group(1)}) — the sampler would poll until its own "
+            f"deadline, inside a container the lane has finished with")
+    for call, why in (
+            ("focus_ring_start",
+             "the ring is never sampled, so every red leg's focus section "
+             "is a skip"),
+            ("focus_ring_stop",
+             "the sampler outlives the lane")):
+        if len(re.findall(rf"\b{call}\b", runner)) < 2:
+            found.append(
+                f"{LINUX}: `{call}` is declared and not called (or called "
+                f"and not declared) — {why}")
+    if "focus_ring_stop" not in sh_block(runner, "trap '", "' EXIT"):
+        found.append(
+            f"{LINUX}: the EXIT trap does not stop the focus sampler — a "
+            f"lane that dies mid-run is exactly when it is left behind")
+    if "--self-test" not in sh_block(runner, "focus_ring_start() {", "\n}\n"):
+        found.append(
+            f"{LINUX}: the lane does not run {FOCUS_RING}'s own self-test "
+            f"before it samples — the cut's range is what tells this leg's "
+            f"lines from the previous leg's, and nothing else watches it")
+    return found
+
 # ---------------------------------------------------------------- run it
 
 REAL = sources()
@@ -442,7 +505,8 @@ CENSUSES = (("sections", census_sections), ("skip writers", census_skips),
             ("windows verb trace", census_vtrace),
             ("windows toast files", census_toast_files),
             ("windows collect freshness", census_collect_fresh),
-            ("guest clock", census_guest_clock))
+            ("guest clock", census_guest_clock),
+            ("linux focus ring", census_focus_ring))
 TABLE = declared(REAL)
 gate.counted("lanes declaring a bundle shape", list(TABLE), floor=5)
 gate.counted("sections declared across the five lanes",
@@ -519,7 +583,7 @@ gate.negative("N7 a lane that never marks its unreached sections",
 # N8: the picture moved to after the display reboot — a PNG of a fresh
 # empty session, which passes every "is it a plausible image" test.
 n8 = doctored(LINUX, r'                flightrec_shot_x11 "\$name-\$proto" '
-                     r'"\$kaya_display"\n',
+                     r'"\$kaya_display" "\$kaya_t0"\n',
               "", "N8 moved the x11 shot off the failure path")
 gate.negative("N8 a linux picture taken after the reboot",
               lambda: census_when(n8), want="takes no picture")
@@ -585,6 +649,29 @@ n15 = doctored(LANE_PY,
 gate.negative("N15 a host reading the guest's clock in local time",
               lambda: census_guest_clock(n15), want="LOCAL time")
 
-gate.negatives_ran(15)
+# N16: the linux focus section's collect renamed away — the shell lane's
+# N2 one section over, on the section a wayland clipboard red needs.
+n16 = doctored(LINUX, r'flightrec_adopt "\$bundle" focus(?= )',
+               'flightrec_adopt "$bundle" focusnope',
+               "N16 renamed the linux focus section away")
+gate.negative("N16 the linux focus section the collect stopped writing",
+              lambda: census_sections(n16), want="`focus` is declared")
+
+# N17: the sampler writes one name and the collect cuts another — the
+# windows verb-trace drift (N9) one lane over.
+n17 = doctored(FOCUS_RING, r'f"focus-wl-\{number\}\.txt"',
+               'f"focus-wayland-{number}.txt"',
+               "N17 renamed the sampler's wayland ring file")
+gate.negative("N17 a focus ring written under a name the collect never cuts",
+              lambda: census_focus_ring(n17), want="the collect cuts no")
+
+# N18: the sampler started and never stopped.
+n18 = doctored(LINUX, r"trap 'flightrec_flush; focus_ring_stop; ",
+               "trap 'flightrec_flush; ",
+               "N18 took the focus sampler out of the EXIT trap")
+gate.negative("N18 a focus sampler the lane never stops",
+              lambda: census_focus_ring(n18), want="does not stop the focus sampler")
+
+gate.negatives_ran(18)
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

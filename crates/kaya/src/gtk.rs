@@ -14911,6 +14911,50 @@ struct ClipView {
     local: bool,
 }
 
+/// The seed needs the seat's keyboard focus before the writer runs: a
+/// wayland client is handed a data offer only while its surface holds it,
+/// and neither reading inside this process can decide it (docs/traps.md,
+/// the wayland seat entry: `gtk_window_is_active` is false on every step
+/// of a green leg, and `present()` loses on sway), so the compositor is
+/// asked and its own answer is the measurement. x11 is out of the rule.
+#[cfg(feature = "harness")]
+fn clipboard_seed_focus() -> String {
+    if !linux_wayland_session() {
+        return String::new();
+    }
+    let pid = std::process::id();
+    let out = std::process::Command::new("swaymsg")
+        .arg(format!("[pid={pid}] focus"))
+        .output();
+    let said = match out {
+        Err(e) => {
+            eprintln!(
+                "kaya: clipboard_seed could not ask the compositor for this \
+                 window's focus: swaymsg {e} — on wayland a client is handed \
+                 the selection only while it holds the seat's focus, so the \
+                 seed below may wait for an offer that cannot come"
+            );
+            return format!(" focus=unasked({e})");
+        }
+        Ok(out) => out,
+    };
+    let answer = clip_one_line(&format!(
+        "{}{}",
+        String::from_utf8_lossy(&said.stdout),
+        String::from_utf8_lossy(&said.stderr)
+    ));
+    if said.status.success() && answer.replace(' ', "").contains("\"success\":true") {
+        return " focus=granted".to_owned();
+    }
+    eprintln!(
+        "kaya: clipboard_seed asked the compositor to focus this window \
+         ([pid={pid}] focus) and it answered {answer:?} — on wayland a client \
+         is handed the selection only while it holds the seat's focus; \
+         seeding anyway"
+    );
+    format!(" focus=refused({answer})")
+}
+
 /// `materialize`'s own test, one seeded kind at a time.
 #[cfg(feature = "harness")]
 fn clip_kind_offered(kind: &str, formats: &gdk::ContentFormats) -> bool {
@@ -18382,6 +18426,7 @@ impl crate::harness::Stage for GtkStage {
                  would be foreign in name only"
             ),
         };
+        let focus = clipboard_seed_focus();
         let before = clip_app_view(kind);
         foreign_clip_write(mime, bytes);
         let started = std::time::Instant::now();
@@ -18403,7 +18448,7 @@ impl crate::harness::Stage for GtkStage {
                 // `sees` alone is satisfied before the selection has moved.
                 if view.generation != before.generation && view.sees {
                     clip_note(format_args!(
-                        "seed {kind} settled ms={} rounds={rounds} expected={expected} \
+                        "seed {kind}{focus} settled ms={} rounds={rounds} expected={expected} \
                          foreign_targets={:?} app_formats={:?} app_generation={}->{} \
                          gtk_window_active={} app_is_own_writer={}",
                         started.elapsed().as_millis(),
@@ -18433,8 +18478,13 @@ impl crate::harness::Stage for GtkStage {
                     format!(
                         "another process reads {seen:?} on this clipboard, but THIS one \
                          was never told the selection moved (gdk's changed count is still \
-                         {}); the formats it still holds are {:?}",
-                        before.generation, view.formats
+                         {}); the formats it still holds are {:?}. On wayland that is the \
+                         seat's focus channel — a client is handed a data offer only while \
+                         its surface holds the seat's keyboard focus — and the seed asked \
+                         for it before the writer ran:{}",
+                        before.generation,
+                        view.formats,
+                        if focus.is_empty() { " it did not, this is an x11 session" } else { &focus }
                     )
                 } else {
                     format!(
@@ -18446,13 +18496,14 @@ impl crate::harness::Stage for GtkStage {
                     )
                 };
                 clip_note(format_args!(
-                    "seed {kind} EXPIRED ms={ms} rounds={rounds} expected={expected} \
+                    "seed {kind}{focus} EXPIRED ms={ms} rounds={rounds} expected={expected} \
                      foreign_listed={foreign_listed} foreign_targets={seen:?} \
-                     app_formats={:?} app_generation={}->{} gtk_window_active={} \
+                     app_formats={:?} app_generation={}->{} gtk_window_active={}->{} \
                      app_is_own_writer={}",
                     view.formats,
                     before.generation,
                     view.generation,
+                    before.active,
                     view.active,
                     view.local,
                 ));

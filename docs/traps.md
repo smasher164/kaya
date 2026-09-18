@@ -11755,3 +11755,31 @@ banner path on this VM is explorer's `Xaml_WindowedPopupClass` PopupHost,
 which takes nothing; the CoreWindow is the exceptional drawer.
 tools/guest/phantom-probe.ps1 (+ .cmd) is the probe that watched it, and
 the job's tmp/idiom/phantom holds the spinner generator and the runner.
+
+## A wayland client is handed the selection through the seat's keyboard focus, and neither `gtk_window_is_active` nor `present()` can decide or take it (2026-09-18)
+
+On the linux lane's headless sway, `gtk_window_is_active` is false for
+every step of a GREEN wayland leg — the seat advertises no keyboard, so
+gdk is never sent `wl_keyboard.enter` — while sway has the guest's window
+focused and hands it every data offer. The two readings are independent:
+the compositor's focus decides whether a seed arrives, and gdk's active
+flag says nothing about it. `present()` does not take the seat back
+either: a self-activation needs an xdg-activation token with a valid seat
+and serial, which a headless seat earns only for the moment of wtype's
+tap, and sway denies the rest (watched losing: the thief kept the focus
+for the whole 5s and the seed died with presented=true). The route that
+works is the compositor's own command, `swaymsg '[pid=…] focus'` — and
+its exit status is not the answer: `[pid=<live>] focus` prints
+`[{"success": true}]`, `[pid=999999] focus` prints `success: false, "No
+matching node."` with rc=2, and a bad SWAYSOCK exits 1; read the JSON.
+Beside it: a chained `xdotool getwindowfocus getwindowname getwindowpid`
+prints no window id (getwindowfocus prints its id only when it is the
+LAST command), and a window with no _NET_WM_PID — every window under a
+bare Xvfb with no window manager — fails the pid lookup, so one sentence
+built from the chain read `focus=none` for a focus it had; each field is
+asked separately. AND THE COPY VERB HAS THE SAME DEPENDENCY: under a thief
+holding the seat, the guest's own set_selection is dropped (taking the
+selection needs an input serial, and wtype's F24 tap goes to whoever
+holds the focus), every expect_clipboard reads "" for 15s, gdk goes on
+believing it owns the board, and a later seed expires even with the focus
+granted; a red with green seeds and failed copies is that shape (ledger).

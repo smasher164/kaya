@@ -614,7 +614,20 @@ in docs/deferred.md.
    last seven hours read `ARRIVED INSIDE THIS LEG` (docs/traps.md,
    docs/deferred.md's notes_rust toast entry). No lane can fail it,
    because a marker that is too wide marks MORE rows and never fewer.
-   Fifteen watched negatives, counts printed),
+   AND THE LINUX FOCUS RING SINCE 2026-09-18, the section a wayland
+   clipboard red needs and no bundle had: the `desktop` section is the
+   sway tree at COLLECT, with the guest already gone, so who held the
+   SEAT while the leg ran — the channel a wayland client is handed a data
+   offer through — was unrecorded, and matrix #38's expiry could not be
+   attributed (docs/deferred.md's wayland clipboard seed entry).
+   tools/linux/focus-ring.py samples ONE RING PER SESSION (a headless
+   sway per wayland slot, an Xvfb per x11 display, since every leg claims
+   a session of its own), writing a line only when its reading moves; the
+   gate holds the sampler's own file names against the names the collect
+   cuts — the windows verb-trace rule one lane over — plus the sampler
+   being STARTED by the runner, STOPPED by its EXIT trap, and its own
+   self-test run before the first leg. Eighteen watched negatives, counts
+   printed),
    `tools/check-diagnostics.py` (a why-not may not print a sentence it
    cannot NOT print. Any function named `*WhyNot`/`*why_not`/`*Reason`
    is read as a diagnostic by that name alone; one answer, or an answer
@@ -984,6 +997,24 @@ in docs/deferred.md.
    no gate reading either copy — the sweep had been holding six
    families and the two that change with a ruling were not among
    them.
+   AND THE WAYLAND CLIPBOARD SEED TAKES THE SEAT'S FOCUS BEFORE IT
+   SPAWNS THE WRITER since 2026-09-18 (docs/deferred.md's wayland
+   clipboard seed entry): on wayland a client is handed a data offer only
+   while its surface holds the seat's keyboard focus, so a seed against a
+   window that lost it waits five seconds for an offer that cannot come —
+   0/5 legs before and 5/5 after, measured with a second client on the
+   leg's own session. NO LANE CAN SEE THE RULE GO, because every wayland
+   session this lane boots holds exactly one window and the focus is the
+   guest's anyway; the class shows only when something takes the seat.
+   AND THE READING MAY NOT COME FROM INSIDE THE PROCESS:
+   `gtk_window_is_active` is false for every step of a GREEN wayland leg
+   and `present()` was measured losing (sway denies the self-activation
+   token), so the
+   compositor is asked — `swaymsg '[pid=…] focus'` — and ITS OWN ANSWER is
+   what the seed's sentence carries, since `[pid=<nothing>] focus` answers
+   `success: false` while the exit status alone would report a grant that
+   never happened. Six links, two refusal sentences each interpolating
+   what it measured, six watched negatives.
    AND THE AX WORD SET IS CLOSED since 2026-09-07: harness.rs's ROLES is
    the vocabulary a shared scene may assert, and the two interpreters
    mint their words from their own platform readers, so a word one
