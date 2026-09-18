@@ -2,6 +2,7 @@
 // tools/scenes/pickers.steps, docs/datetime-plan.md.
 
 import Foundation
+import Kaya
 
 struct Task: KayaGen {
     var name: String

@@ -2,6 +2,7 @@
 // tools/scenes/commands.steps.
 
 import Foundation
+import Kaya
 
 let app = KayaApp()
 var settingsCount = 0

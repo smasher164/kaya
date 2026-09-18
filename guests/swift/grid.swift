@@ -1,6 +1,7 @@
 // The grid scene, Swift port — guests/rust/grid.rs, tools/scenes/grid.steps.
 
 import Foundation
+import Kaya
 
 let app = KayaApp()
 

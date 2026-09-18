@@ -36,6 +36,18 @@ refuse() {
     exit 1
 }
 
+# THE BINDING IS A MODULE (Package.swift): build it once, then every
+# guest compiles against the built module. The Swift 6 language mode is
+# declared in the manifest and nowhere else; the guests ask for it on
+# their own command line, and tools/check-pins.py holds both.
+KAYA_MODULES="target/swiftpm/debug/Modules"
+if ! kaya_swift build --disable-automatic-resolution \
+    --scratch-path target/swiftpm; then
+    echo "swift-typecheck: FAIL (the Kaya package target, macOS)"
+    exit 1
+fi
+PASSES+=("bindings/swift as the Kaya package target: macOS SDK, .swiftLanguageMode(.v6)")
+
 # Globbed, not listed: a hand-maintained list here once skipped a guest
 # silently.
 GUESTS=()
@@ -58,8 +70,8 @@ for example in "${GUESTS[@]}"; do
     companions=$(ls "${example%.swift}"+*.swift 2>/dev/null || true)
     # shellcheck disable=SC2086
     if ! kaya_swiftc -typecheck \
-        -import-objc-header crates/kaya/include/kaya.h \
-        bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift bindings/swift/KayaRecords.swift bindings/swift/KayaSums.swift $companions "$TMP/main.swift"; then
+        -I "$KAYA_MODULES" -I bindings/swift/CKaya \
+        $companions "$TMP/main.swift"; then
         echo "swift-typecheck: FAIL ($example, the macOS guest pass)"
         exit 1
     fi
@@ -77,9 +89,7 @@ NESTED_TABLE=tools/checks/swift-nested-table.swift
 [ -f "$NESTED_TABLE" ] ||
     refuse "$NESTED_TABLE is missing — the nested-table spelling would then be compiled by nothing"
 if ! kaya_swiftc -typecheck \
-    -import-objc-header crates/kaya/include/kaya.h \
-    bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift \
-    bindings/swift/KayaRecords.swift bindings/swift/KayaSums.swift "$NESTED_TABLE"; then
+    -I "$KAYA_MODULES" -I bindings/swift/CKaya "$NESTED_TABLE"; then
     echo "swift-typecheck: FAIL ($NESTED_TABLE, the dynamic-table surface)"
     exit 1
 fi
@@ -174,6 +184,26 @@ PY
     fi
     { read -r ios_min; read -r ios_scene_sources; } <<<"$ios_lane_spec"
     read -r -a ios_names <<<"$ios_scene_sources"
+    # THE PACKAGE FOR THE SIMULATOR: `swift build --triple` alone picks
+    # the macOS sysroot and cannot load the standard library, so the SDK
+    # goes in by hand on both sides (measured; the iOS lane's guest build
+    # passes the same pair).
+    ios_sdk="$(ios_xcrun -sdk iphonesimulator --show-sdk-path)"
+    if ! kaya_swift build --disable-automatic-resolution \
+        --scratch-path target/swiftpm-ios \
+        --triple "arm64-apple-ios$ios_min-simulator" \
+        -Xswiftc -sdk -Xswiftc "$ios_sdk" \
+        -Xcc -isysroot -Xcc "$ios_sdk"; then
+        echo "swift-typecheck: FAIL (the Kaya package target, iphonesimulator)"
+        exit 1
+    fi
+    # SwiftPM drops the OS version from the triple's directory name, so
+    # the path is read from its own `debug` symlink rather than composed
+    # from $ios_min.
+    ios_modules="target/swiftpm-ios/debug/Modules"
+    [ -d "$ios_modules" ] ||
+        refuse "the iOS package build left no modules at $ios_modules"
+    PASSES+=("bindings/swift as the Kaya package target: iphonesimulator SDK, arm64-apple-ios$ios_min-simulator")
     ios_srcs=()
     for name in "${ios_names[@]}"; do
         [ -f "guests/swift/$name.swift" ] ||
@@ -195,9 +225,7 @@ PY
             # shellcheck disable=SC2086
             ios_xcrun -sdk iphonesimulator swiftc -typecheck \
                 -target "arm64-apple-ios$ios_min-simulator" \
-                -import-objc-header crates/kaya/include/kaya.h \
-                bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift \
-                bindings/swift/KayaRecords.swift bindings/swift/KayaSums.swift \
+                -I "$ios_modules" -I bindings/swift/CKaya \
                 $companions "$stage/main.swift" >"$stage/log" 2>&1
         ) &
         ios_pids+=($!)

@@ -2,6 +2,7 @@
 // tools/scenes/confirm.steps.
 
 import Foundation
+import Kaya
 
 let app = KayaApp()
 

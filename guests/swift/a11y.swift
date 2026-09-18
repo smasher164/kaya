@@ -1,6 +1,7 @@
 // The a11y scene, Swift port — guests/rust/a11y.rs, tools/scenes/a11y.steps.
 
 import Foundation
+import Kaya
 
 let app = KayaApp()
 

@@ -2,6 +2,7 @@
 // tools/scenes/sliders.steps, docs/slider-plan.md.
 
 import Foundation
+import Kaya
 
 struct Track: KayaGen {
     var name: String

@@ -1,6 +1,7 @@
 // The undo scene, Swift port — guests/rust/undo.rs, tools/scenes/undo.steps.
 
 import Foundation
+import Kaya
 
 struct Todo: KayaGen {
     var title: String

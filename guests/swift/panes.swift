@@ -2,6 +2,7 @@
 // tools/scenes/panes.steps.
 
 import Foundation
+import Kaya
 
 let CONTENT: UInt64 = 7
 let DETAIL: UInt64 = 8

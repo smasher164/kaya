@@ -2,6 +2,7 @@
 // tools/scenes/ownundo.steps (docs/rich-text-plan.md R6, §14).
 
 import Foundation
+import Kaya
 
 let app = KayaApp()
 

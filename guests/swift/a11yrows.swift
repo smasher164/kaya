@@ -2,6 +2,7 @@
 // tools/scenes/a11yrows.steps.
 
 import Foundation
+import Kaya
 
 let app = KayaApp()
 

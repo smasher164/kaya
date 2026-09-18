@@ -2,6 +2,7 @@
 // Regenerate with tools/gen-guests.py (which also checks freshness).
 
 import Foundation
+import Kaya
 
 extension Post: KayaSumElement {
     /// One prototype per constructor, in declaration order — the

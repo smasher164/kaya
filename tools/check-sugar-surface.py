@@ -88,7 +88,12 @@ def top_level_block(rel, header):
     that cannot LOCATE its block has not measured an empty one."""
     lines = read_rel(rel).split("\n")
     for i, line in enumerate(lines):
-        if line.startswith(header):
+        # An access modifier is part of the zone's SPELLING, not of its
+        # LOCATION: Swift's two zones are `public final class …` since
+        # the package target landed, and `public` is required on the
+        # MEMBER patterns below, where the rule belongs. A locator that
+        # cannot find its block has measured nothing.
+        if line.startswith(header) or line.startswith("public " + header):
             for j in range(i + 1, len(lines)):
                 if lines[j] == "}":
                     return "\n".join(lines[i:j + 1])
@@ -768,7 +773,7 @@ LINK_REGISTRAR = [
     ("go", "bindings/go/app.go", r"^func \(a \*App\) Link\("),
     ("csharp", "bindings/csharp/KayaApp.cs", r"public void Link\("),
     ("java", "bindings/java/dev/kaya/KayaApp.java", r"public void link\("),
-    ("swift", "bindings/swift/KayaApp.swift", r"^    func link\("),
+    ("swift", "bindings/swift/KayaApp.swift", r"^    public func link\("),
     ("haskell", "bindings/haskell/KayaApp.hs", r"^linkRoute ::"),
     ("ocaml", "bindings/ocaml/kaya_app.ml", r"^let link_route app "),
     ("js", "bindings/js/kaya/index.ts", r"^export function link\("),
@@ -4160,7 +4165,7 @@ def tpl_table_probe():
     # each perturbation leaves the live spelling untouched: a clause
     # that came back green would be reading the wrong one.
     sw = read_rel("bindings/swift/KayaApp.swift")
-    tpl_bar = ("    func columns(_ n: KayaNodeHandle, _ titles: "
+    tpl_bar = ("    public func columns(_ n: KayaNodeHandle, _ titles: "
                "[String], _ sort: KayaSort) {")
     n = sw.count(tpl_bar)
     run_leaf("swift-columns", src, SW_CHAIN,
@@ -4196,7 +4201,7 @@ def tpl_table_probe():
              if n == 1 else sw, n,
              "swift's TEMPLATE-zone table cannot spell on_sort")
 
-    keyed = "    func columns(\n        _ n: KayaNodeHandle, at path:"
+    keyed = "    public func columns(\n        _ n: KayaNodeHandle, at path:"
     n = sw.count(keyed)
     run_leaf("swift-keyed", src, SW_CHAIN,
              sw.replace(keyed,
@@ -4966,7 +4971,7 @@ def record_probe():
            "java", "record instance addressing")
 
     census("swift-record-zone", SWIFT_APP,
-           "    func collection<T: KayaRecord>(of type: T.Type) -> "
+           "    public func collection<T: KayaRecord>(of type: T.Type) -> "
            "KayaRecordCollection<T> {\n"
            "        tx.collection(of: type)\n    }",
            "",
@@ -7010,9 +7015,9 @@ for name, (fn, rel, anchor) in {
                       r"^    public void Window\("),
     "csharp-create-window": (paren_region, WH_CS,
                              r"^    public void CreateWindow\("),
-    "swift-window": (paren_region, WH_SW, r"^    func window\("),
+    "swift-window": (paren_region, WH_SW, r"^    public func window\("),
     "swift-create-window": (paren_region, WH_SW,
-                            r"^    func createWindow\("),
+                            r"^    public func createWindow\("),
     "ocaml-window": (let_region, WH_ML, r"^let window"),
     "ocaml-create-window": (let_region, WH_ML,
                             r"^let create_window"),
@@ -8029,7 +8034,8 @@ BODY_VALUE_ROWS = {
     "js": ("bindings/js/kaya/index.ts",
            r"^export function column<T = void>\(", r"column<T = void>\(", "column("),
     "swift": ("bindings/swift/KayaApp.swift",
-              r"^\s+func column<R>\(", r"func column<R>\(", "func column("),
+              r"^\s+public func column<R>\(", r"public func column<R>\(",
+              "public func column("),
     "csharp": ("bindings/csharp/KayaApp.cs",
                r"^\s+public T Column<T>\(", r"public T Column<T>\(", "public Widget Column("),
     "rust": ("crates/kaya/src/app.rs",

@@ -2,6 +2,7 @@
 // tools/scenes/align.steps.
 
 import Foundation
+import Kaya
 
 // A 100x20 PNG: exact pixel widths, so row@wrapped breaks onto two lines
 // in every lane's window (docs/layout-knobs-plan.md §2).

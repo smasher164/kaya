@@ -1,6 +1,7 @@
 // The save scene, Swift port — guests/rust/save.rs, tools/scenes/save.steps.
 
 import Foundation
+import Kaya
 
 let app = KayaApp()
 

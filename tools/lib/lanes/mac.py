@@ -882,13 +882,21 @@ def build_go(root, log=None):
 
 
 def build_swift(root, log=None):
-    """The same bindings the iOS bundles compile, linked against
-    libkaya.dylib. swiftc allows top-level code only in a file named
-    main.swift, so each scene gets its own staging dir and the
-    compiles pool. DEPTH_SCENES too: a depth slice's guests arrive one
-    language at a time, and the file test decides — a scene whose
-    Swift guest has not landed is skipped, not a build failure."""
+    """The same bindings the iOS bundles compile — the Kaya package
+    target (Package.swift, Swift 6 language mode), built once and linked
+    into every guest beside libkaya.dylib. swiftc allows top-level code
+    only in a file named main.swift, so each scene gets its own staging
+    dir and the compiles pool. DEPTH_SCENES too: a depth slice's guests
+    arrive one language at a time, and the file test decides — a scene
+    whose Swift guest has not landed is skipped, not a build failure."""
     (root / "target/swift-guests").mkdir(parents=True, exist_ok=True)
+    rc = _run(["bash", "-c",
+               'source "$1/tools/lib/swift-toolchain.sh" && shift && '
+               'kaya_swift "$@"', "_", str(root), "build",
+               "--disable-automatic-resolution",
+               "--scratch-path", "target/swiftpm"], log, cwd=root)
+    if rc.returncode != 0:
+        return rc
     procs = []
     for guest in [*SCENES, *DEPTH_SCENES]:
         src = root / f"guests/swift/{guest}.swift"
@@ -906,12 +914,10 @@ def build_swift(root, log=None):
             ["bash", "-c",
              'source "$1/tools/lib/swift-toolchain.sh" && shift && '
              'kaya_swiftc "$@"', "_", str(root),
-             "-import-objc-header", "crates/kaya/include/kaya.h",
-             "bindings/swift/KayaWire.swift",
-             "bindings/swift/KayaApp.swift",
-             "bindings/swift/KayaRecords.swift",
-             "bindings/swift/KayaSums.swift",
+             "-I", "target/swiftpm/debug/Modules",
+             "-I", "bindings/swift/CKaya",
              *companions, str(stage / "main.swift"),
+             "target/swiftpm/debug/libKaya.a",
              "-L", "target/debug", "-lkaya",
              "-Xlinker", "-rpath", "-Xlinker",
              f"{root}/target/debug",

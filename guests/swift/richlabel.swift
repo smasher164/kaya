@@ -5,6 +5,7 @@
 // (docs/ranges-units.md).
 
 import Foundation
+import Kaya
 
 let document = "Héllo world, code"
 let title = "Heading with italic"

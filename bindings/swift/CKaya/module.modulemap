@@ -1,0 +1,6 @@
+// The C API as a module: SwiftPM has no -import-objc-header, which is
+// how the four binding files reached kaya.h before they became a target.
+module CKaya {
+    header "shim.h"
+    export *
+}

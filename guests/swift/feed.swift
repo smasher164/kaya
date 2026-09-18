@@ -1,6 +1,7 @@
 // The feed scene, Swift port — guests/rust/feed.rs, tools/scenes/feed.steps.
 
 import Foundation
+import Kaya
 
 enum Post: KayaGen {
     case note(text: String)

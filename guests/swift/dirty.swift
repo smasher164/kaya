@@ -2,6 +2,7 @@
 // tools/scenes/dirty.steps.
 
 import Foundation
+import Kaya
 
 let app = KayaApp()
 

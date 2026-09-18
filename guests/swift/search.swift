@@ -4,6 +4,7 @@
 // inserts by key.
 
 import Foundation
+import Kaya
 
 struct SearchItem: KayaGen {
     var name: String

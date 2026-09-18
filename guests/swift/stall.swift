@@ -2,6 +2,7 @@
 // tools/scenes/stall.steps.
 
 import Foundation
+import Kaya
 
 // Past the watchdog's one-second threshold.
 let blockSeconds = 2.5

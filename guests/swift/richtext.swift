@@ -3,6 +3,7 @@
 // first word is what makes a UTF-16 reader fail (docs/ranges-units.md).
 
 import Foundation
+import Kaya
 
 let document = "Héllo world\nSecond line"
 

@@ -2,6 +2,7 @@
 // Regenerate with tools/gen-guests.py (which also checks freshness).
 
 import Foundation
+import Kaya
 
 extension SearchItem: KayaRecord {
     /// The prototype Mirror walks for the schema; every field at

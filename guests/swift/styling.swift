@@ -2,6 +2,7 @@
 // tools/scenes/styling.steps.
 
 import Foundation
+import Kaya
 
 let app = KayaApp()
 

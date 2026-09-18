@@ -72,6 +72,10 @@ with scratch_dir("check-abort-") as tmp:
           str(ROOT / "tools/checks/swift-abort/main.swift"),
           "-import-objc-header", "crates/kaya/include/kaya.h",
           "-I", "crates/kaya/include",
+          # The binding is a package target and names the C API as a
+          # MODULE (Package.swift); this arm compiles the same files as
+          # one module with its probe, so it needs the modulemap's dir.
+          "-I", "bindings/swift/CKaya",
           "-L", "target/debug", "-lkaya",
           "-Xlinker", "-rpath", "-Xlinker", str(ROOT / "target/debug")],
          tmp / "swift.log", env=NO_XCODE)
@@ -92,6 +96,10 @@ with scratch_dir("check-abort-") as tmp:
           str(ROOT / "tools/checks/swift-notify/main.swift"),
           "-import-objc-header", "crates/kaya/include/kaya.h",
           "-I", "crates/kaya/include",
+          # The binding is a package target and names the C API as a
+          # MODULE (Package.swift); this arm compiles the same files as
+          # one module with its probe, so it needs the modulemap's dir.
+          "-I", "bindings/swift/CKaya",
           "-L", "target/debug", "-lkaya",
           "-Xlinker", "-rpath", "-Xlinker", str(ROOT / "target/debug")],
          tmp / "swift-notify.log", env=NO_XCODE)
@@ -126,6 +134,10 @@ with scratch_dir("check-abort-") as tmp:
           str(ROOT / "tools/checks/swift-notify/main.swift"),
           "-import-objc-header", "crates/kaya/include/kaya.h",
           "-I", "crates/kaya/include",
+          # The binding is a package target and names the C API as a
+          # MODULE (Package.swift); this arm compiles the same files as
+          # one module with its probe, so it needs the modulemap's dir.
+          "-I", "bindings/swift/CKaya",
           "-L", "target/debug", "-lkaya",
           "-Xlinker", "-rpath", "-Xlinker", str(ROOT / "target/debug")],
          tmp / "swift-swapped.log", env=NO_XCODE)
@@ -174,6 +186,10 @@ with scratch_dir("check-abort-") as tmp:
           str(ROOT / "tools/checks/swift-notify/main.swift"),
           "-import-objc-header", "crates/kaya/include/kaya.h",
           "-I", "crates/kaya/include",
+          # The binding is a package target and names the C API as a
+          # MODULE (Package.swift); this arm compiles the same files as
+          # one module with its probe, so it needs the modulemap's dir.
+          "-I", "bindings/swift/CKaya",
           "-L", "target/debug", "-lkaya",
           "-Xlinker", "-rpath", "-Xlinker", str(ROOT / "target/debug")],
          tmp / "swift-route-zero.log", env=NO_XCODE)

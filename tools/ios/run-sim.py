@@ -2737,6 +2737,33 @@ def build_swiftui_dylib():
         sys.exit(1)
 
 
+PKG_SCRATCH = ROOT / "target/swiftpm-ios"
+PKG_TRIPLE = f"arm64-apple-ios{IOS_MIN}-simulator"
+# SwiftPM drops the OS version from the triple's directory name, so the
+# build's own `debug` symlink names the output rather than the triple.
+PKG_MODULES = PKG_SCRATCH / "debug/Modules"
+PKG_LIB = PKG_SCRATCH / "debug/libKaya.a"
+
+
+def build_kaya_package():
+    """bindings/swift as the Kaya package target, for the simulator.
+    `swift build --triple` alone picks the macOS sysroot and cannot load
+    the standard library, so the SDK goes in by hand on both sides
+    (docs/HACKING.md's Hand tools row)."""
+    if run(["bash", "-c",
+            'source "$1/tools/lib/swift-toolchain.sh" && shift && '
+            'kaya_swift "$@"', "_", str(ROOT), "build",
+            "--disable-automatic-resolution",
+            "--scratch-path", str(PKG_SCRATCH), "--triple", PKG_TRIPLE,
+            "-Xswiftc", "-sdk", "-Xswiftc", SDKROOT_SIM,
+            "-Xcc", "-isysroot", "-Xcc", SDKROOT_SIM],
+           cwd=ROOT).returncode != 0:
+        sys.exit(1)
+    if not PKG_LIB.is_file():
+        print(f"the Kaya package build left no {PKG_LIB}", file=sys.stderr)
+        sys.exit(1)
+
+
 def with_dylib(app):
     shutil.copy2(BUNDLES / "libkaya_swiftui_ios.dylib",
                  app / "libkaya_swiftui.dylib")
@@ -2779,6 +2806,7 @@ if SUITE in ("swift", "all"):
     # Every app bundle below links this archive; verify it once, here.
     verify_built(TARGET_DIR / "libkaya.a")
     build_swiftui_dylib()
+    build_kaya_package()
     # With more than one input file, swiftc only allows top-level code
     # in a file named main.swift — each scene stages its own.
     builds = []
@@ -2795,14 +2823,9 @@ if SUITE in ("swift", "all"):
         p = subprocess.Popen(
             ["xcrun", "-sdk", "iphonesimulator", "swiftc", "-target",
              f"arm64-apple-ios{IOS_MIN}-simulator",
-             "-import-objc-header", "crates/kaya/include/kaya.h",
-             "-pch-output-dir", str(BUNDLES / ".pch"),
-             "bindings/swift/KayaWire.swift",
-             "bindings/swift/KayaApp.swift",
-             "bindings/swift/KayaRecords.swift",
-             "bindings/swift/KayaSums.swift",
+             "-I", str(PKG_MODULES), "-I", "bindings/swift/CKaya",
              *companions, str(stage / "main.swift"),
-             str(TARGET_DIR / "libkaya.a"),
+             str(PKG_LIB), str(TARGET_DIR / "libkaya.a"),
              "-framework", "UIKit", "-framework", "Foundation",
              "-framework", "CoreFoundation", "-framework",
              "CoreGraphics", "-framework", "QuartzCore",

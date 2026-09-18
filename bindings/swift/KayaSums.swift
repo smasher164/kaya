@@ -2,12 +2,13 @@
 // sum, its cases the constructors. Mirror walks one prototype per case,
 // and init(variant:values:) is the one hand-written member.
 
+internal import CKaya
 import Foundation
 
 /// A sum element type. Conform with one prototype per constructor (in
 /// declaration order) and init(variant:values:); everything else
 /// derives.
-protocol KayaSumElement {
+public protocol KayaSumElement {
     static var prototypes: [Self] { get }
     init(variant: UInt32, values: [KayaValue])
 }
@@ -32,7 +33,7 @@ extension KayaSumElement {
     }
 
     /// The discriminant this value holds.
-    var kayaVariant: UInt32 {
+    public var kayaVariant: UInt32 {
         let name = kayaCaseName
         for (i, prototype) in Self.prototypes.enumerated()
         where prototype.kayaCaseName == name {
@@ -77,11 +78,11 @@ extension KayaSumElement {
 
 /// A collection whose entries are one of T's constructors, keyed as
 /// usual; the plain handle rides along for the template surface.
-struct KayaSumCollection<T: KayaSumElement> {
+public struct KayaSumCollection<T: KayaSumElement> {
     let collection: KayaCollection
 
     /// Insert witnesses the value's own constructor onto the wire.
-    func insert(_ tx: KayaAppTx, _ key: KayaValue, _ value: T) {
+    public func insert(_ tx: KayaAppTx, _ key: KayaValue, _ value: T) {
         tx.insertRecordRaw(collection, key, value, value.kayaVariant, value.kayaSumValues)
     }
 
@@ -93,7 +94,7 @@ struct KayaSumCollection<T: KayaSumElement> {
 
     /// Update replaces a record wholesale; a different constructor
     /// than the entry's current one restamps its copy in place.
-    func update(_ tx: KayaAppTx, _ key: KayaValue, _ value: T) {
+    public func update(_ tx: KayaAppTx, _ key: KayaValue, _ value: T) {
         tx.updateRecordRaw(collection, key, value, value.kayaVariant, value.kayaSumValues)
     }
 
@@ -105,13 +106,13 @@ struct KayaSumCollection<T: KayaSumElement> {
 
     /// The typed model, in insertion order; `if case` / `switch`
     /// eliminates the values.
-    func items(_ tx: KayaAppTx) -> [(key: KayaValue, value: T)] {
+    public func items(_ tx: KayaAppTx) -> [(key: KayaValue, value: T)] {
         tx.recordEntries(collection).map { (key: $0.key, value: $0.value as! T) }
     }
 
     /// The entry's current value — the scrutinee for the `if case`
     /// that precedes a patch — or nil for a missing key.
-    func get(_ tx: KayaAppTx, _ key: KayaValue) -> T? {
+    public func get(_ tx: KayaAppTx, _ key: KayaValue) -> T? {
         tx.recordEntries(collection).first(where: { $0.key == key })?.value as? T
     }
 
@@ -143,7 +144,7 @@ struct KayaSumCollection<T: KayaSumElement> {
     /// The witnessed field write, token form: the generated field
     /// tokens (kaya-swift-gen) carry the index and the wire type, so
     /// nothing resolves by label at run time.
-    func updateField<F>(
+    public func updateField<F>(
         _ tx: KayaAppTx, _ key: KayaValue, of prototype: T, _ field: KayaField<F>,
         _ value: KayaValue
     ) {
@@ -162,7 +163,7 @@ struct KayaSumCollection<T: KayaSumElement> {
     }
 
     /// The collection-derived signal, over the sum's entries.
-    func derive(
+    public func derive(
         _ tx: KayaAppTx, _ compute: @escaping ([(key: KayaValue, value: T)]) -> KayaValue
     ) -> KayaSignal {
         let s = tx.signal(compute(items(tx)))
@@ -174,14 +175,14 @@ struct KayaSumCollection<T: KayaSumElement> {
 
     /// One arm of the template eliminator: `of` is the constructor's
     /// prototype, the body its blueprint author.
-    func arm(_ prototype: T, _ body: @escaping (KayaTpl) -> Void) -> KayaSumArm<T> {
+    public func arm(_ prototype: T, _ body: @escaping (KayaTpl) -> Void) -> KayaSumArm<T> {
         KayaSumArm(variant: prototype.kayaVariant, body: body)
     }
 }
 
 /// One declared arm: the constructor's discriminant plus its blueprint
 /// author.
-struct KayaSumArm<T: KayaSumElement> {
+public struct KayaSumArm<T: KayaSumElement> {
     let variant: UInt32
     let body: (KayaTpl) -> Void
 }
@@ -189,7 +190,7 @@ struct KayaSumArm<T: KayaSumElement> {
 extension KayaAppTx {
     /// Declare a sum collection: T's prototypes are its constructors, in
     /// order.
-    func sumCollection<T: KayaSumElement>(of type: T.Type) -> KayaSumCollection<T> {
+    public func sumCollection<T: KayaSumElement>(of type: T.Type) -> KayaSumCollection<T> {
         let schemas = T.kayaVariantSchemas
         precondition(
             schemas.count >= 2,
@@ -203,7 +204,7 @@ extension KayaAppTx {
 
     /// The template eliminator: a product of arms, one per constructor,
     /// handed over whole.
-    func eachSum<T: KayaSumElement>(
+    public func eachSum<T: KayaSumElement>(
         _ c: KayaSumCollection<T>, arms: [KayaSumArm<T>]
     ) -> KayaWidget {
         let count = T.prototypes.count

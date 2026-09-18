@@ -212,11 +212,13 @@ def zone_java(_):
     return {m.lower() for m in re.findall(r"public Node ([a-z][A-Za-z]*)\(", body)}
 
 
-def zone_swift(_):
-    body = brace_block(read("bindings/swift/KayaApp.swift"), r"^final class KayaTpl\b")
+def zone_swift(src=None):
+    body = brace_block(
+        read("bindings/swift/KayaApp.swift") if src is None else src,
+        r"^(?:public )?final class KayaTpl\b")
     if body is None:
         return None
-    return {m.lower() for m in re.findall(r"func ([a-z][A-Za-z]*)\([^)]*\)[^{]*-> KayaNodeHandle", body)}
+    return {m.lower() for m in re.findall(r"public func ([a-z][A-Za-z]*)\([^)]*\)[^{]*-> KayaNodeHandle", body)}
 
 
 def zone_ocaml(_):
@@ -369,12 +371,14 @@ def members_java(_):
         re.findall(r"^\s*public\s+(?:void|Node)\s+([a-zA-Z][A-Za-z0-9]*)\s*\(", body, re.M))
 
 
-def members_swift(_):
-    body = brace_block(read("bindings/swift/KayaApp.swift"), r"^final class KayaTpl\b")
+def members_swift(src=None):
+    body = brace_block(
+        read("bindings/swift/KayaApp.swift") if src is None else src,
+        r"^(?:public )?final class KayaTpl\b")
     return None if body is None else set(
-        re.findall(r"^\s*func ([a-zA-Z][A-Za-z0-9]*)\s*\(", body, re.M)
+        re.findall(r"^\s*public func ([a-zA-Z][A-Za-z0-9]*)\s*\(", body, re.M)
         + [f"{name}({label}:" for name, label in re.findall(
-            r"^\s*func ([a-zA-Z][A-Za-z0-9]*)\s*\(\s*([a-zA-Z][A-Za-z0-9]*)\s*[a-zA-Z0-9]*\s*:",
+            r"^\s*public func ([a-zA-Z][A-Za-z0-9]*)\s*\(\s*([a-zA-Z][A-Za-z0-9]*)\s*[a-zA-Z0-9]*\s*:",
             body, re.M)])
 
 
@@ -704,22 +708,22 @@ def table_swift(_):
     # block that owns it and read for the handle it takes AND the record
     # it emits.
     src = read("bindings/swift/KayaApp.swift")
-    tpl = brace_block(src, r"^final class KayaTpl\b")
-    live = brace_block(src, r"^final class KayaAppTx\b")
-    app = brace_block(src, r"^final class KayaApp\b")
+    tpl = brace_block(src, r"^(?:public )?final class KayaTpl\b")
+    live = brace_block(src, r"^(?:public )?final class KayaAppTx\b")
+    app = brace_block(src, r"^(?:public )?final class KayaApp\b")
     if None in (tpl, live, app):
         return None
 
     got = set()
     _, template_bar = swift_member(
-        tpl, r"^\s{4}func columns\(\s*_ n: KayaNodeHandle,\s*_ titles:")
+        tpl, r"^\s{4}public func columns\(\s*_ n: KayaNodeHandle,\s*_ titles:")
     if template_bar and re.search(
         r"setColumnHeaders\(\s*n\.id,.*?,\s*0,\s*titles\.map", template_bar, re.S
     ):
         got.add("columns")
 
     signature, registration = swift_member(
-        app, r"^\s{4}func onSort\(\s*_ n: KayaNodeHandle,")
+        app, r"^\s{4}public func onSort\(\s*_ n: KayaNodeHandle,")
     registered = (
         signature
         and "[KayaValue]" in signature
@@ -739,7 +743,7 @@ def table_swift(_):
         got.add("on_sort")
 
     _, keyed = swift_member(
-        live, r"^\s{4}func columns\(\s*_ n: KayaNodeHandle,\s*at path:")
+        live, r"^\s{4}public func columns\(\s*_ n: KayaNodeHandle,\s*at path:")
     # count, THEN path_len, THEN keys-before-titles. Both counts are
     # UInt32, so nothing but this reads a swap; the values order is the
     # half Python's census watches one binding over.
@@ -1318,10 +1322,10 @@ def record_java(_):
 
 
 def record_swift(_):
-    tpl = brace_block(read("bindings/swift/KayaApp.swift"), r"^final class KayaTpl\b")
+    tpl = brace_block(read("bindings/swift/KayaApp.swift"), r"^(?:public )?final class KayaTpl\b")
     rc = brace_block(
         read("bindings/swift/KayaRecords.swift"),
-        r"^struct KayaRecordCollection<T: KayaRecord>",
+        r"^(?:public )?struct KayaRecordCollection<T: KayaRecord>",
     )
     if None in (tpl, rc):
         return None
@@ -1332,14 +1336,14 @@ def record_swift(_):
     # both spelled with the same word.
     _, ctor = swift_member(
         tpl,
-        r"^\s{4}func collection<T: KayaRecord>\(of type: T\.Type\)"
+        r"^\s{4}public func collection<T: KayaRecord>\(of type: T\.Type\)"
         r" -> KayaRecordCollection<T>",
     )
     if ctor and "tx.collection(of: type)" in ctor:
         got.add("nested record collection")
 
     _, at = swift_member(
-        rc, r"^\s{4}func at\(_ key: KayaValue\) -> KayaRecordCollection<T>")
+        rc, r"^\s{4}public func at\(_ key: KayaValue\) -> KayaRecordCollection<T>")
     if at and "KayaRecordCollection(collection: collection.at(key))" in at:
         got.add("record instance addressing")
     return got
@@ -1648,15 +1652,24 @@ def sources_java(_):
     return got
 
 
-def sources_swift(_):
-    body = brace_block(read("bindings/swift/KayaApp.swift"), r"^final class KayaTpl\b")
+def sources_swift(src=None):
+    body = brace_block(
+        read("bindings/swift/KayaApp.swift") if src is None else src,
+        r"^(?:public )?final class KayaTpl\b")
     if body is None:
         return None
-    pars = _overload_params(body, r"^\s*func button\(([^)]*)\)\s*->\s*KayaNodeHandle")
+    # LOCATED with the modifier optional and READ only when it is
+    # there: bindings/swift is a module, so a `button` overload that is
+    # not `public` is not the API's — and a reader that could not locate
+    # it at all would report an unread surface instead of a missing one.
+    pars = _overload_params(
+        body, r"^\s*(public )?func button\(([^)]*)\)\s*->\s*KayaNodeHandle")
     if not pars:
         return None
     got = set()
-    for p in pars:
+    for access, p in pars:
+        if not access:
+            continue
         if re.search(r"\bKayaSignal\b", p):
             got.add("signal")
         if re.search(r"\bKayaField<String>", p):
@@ -2062,6 +2075,27 @@ def offers(names, kind, spelling):
     return any(n == want or n.startswith(want) for n in names)
 
 
+# The three Swift rows, one censused member each: a constructor, a prop
+# setter and a caption source. The reader is handed the TEXT so the
+# negative never writes to the tree (docs/traps.md, perturb-restore).
+SWIFT_PUBLIC_NEGATIVES = [
+    ("KayaTpl's `grid` constructor",
+     "    public func grid(columns: Int, @KayaNodeChildren "
+     "_ children: () -> Void) -> KayaNodeHandle {",
+     "    func grid(columns: Int, @KayaNodeChildren "
+     "_ children: () -> Void) -> KayaNodeHandle {",
+     zone_swift, "grid"),
+    ("KayaTpl's `setGrow` prop setter",
+     "    public func setGrow(_ n: KayaNodeHandle, _ weight: Double) {",
+     "    func setGrow(_ n: KayaNodeHandle, _ weight: Double) {",
+     members_swift, "setGrow"),
+    ("KayaTpl's signal-taking `button`",
+     "    public func button(_ s: KayaSignal) -> KayaNodeHandle {",
+     "    func button(_ s: KayaSignal) -> KayaNodeHandle {",
+     sources_swift, "signal"),
+]
+
+
 def main():
     global ROOT
     kinds = DEFAULT_KINDS
@@ -2398,6 +2432,39 @@ def main():
                 "tools/kaya-swift-gen/Sources/main.swift."
             )
             status = 1
+
+    # EVERY CENSUSED SWIFT MEMBER IS `public`, WATCHED. bindings/swift is
+    # a MODULE since 2026-09-18 (Package.swift), so a member that falls
+    # out of the API is not a compile error here — it is a compile error
+    # in a GUEST, on a lane, hours later. Every Swift row above therefore
+    # reads `public func …`; this drops the modifier from one censused
+    # member of each kind in a copy and demands the row notice, because a
+    # rule nobody has seen fire is a guess about a state nobody reached.
+    swift_src = read("bindings/swift/KayaApp.swift")
+    refused, counts = 0, []
+    for label, old_line, new_line, reader, gone in SWIFT_PUBLIC_NEGATIVES:
+        n = swift_src.count(old_line)
+        counts.append(str(n))
+        if n != 1:
+            print(f"tpl-surfaces: SELF-TEST BROKEN — the Swift public "
+                  f"negative {label!r} matched {n} line(s), wanted 1. An "
+                  f"unperturbed copy proves nothing.")
+            status = 1
+            continue
+        before = reader(swift_src)
+        after = reader(swift_src.replace(old_line, new_line, 1))
+        if before is not None and gone in before and (
+                after is None or gone not in after):
+            refused += 1
+        else:
+            print(f"tpl-surfaces: SELF-TEST FAILED — dropping `public` from "
+                  f"{label} left the census still reporting {gone!r} "
+                  f"(before={before is not None and gone in before}, "
+                  f"after={after is not None and gone in after})")
+            status = 1
+    print(f"tpl-surfaces: swift public surface: "
+          f"{refused}/{len(SWIFT_PUBLIC_NEGATIVES)} watched negatives "
+          f"refused (substitutions {'/'.join(counts)})")
 
     return status
 

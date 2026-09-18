@@ -2,6 +2,7 @@
 // tools/scenes/ranges.steps.
 
 import Foundation
+import Kaya
 
 /// Frozen: the same bytes as every other language's guest. The CJK word in
 /// line 00 is what makes bytes and UTF-16 disagree (813 vs 807).

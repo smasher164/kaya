@@ -2,6 +2,7 @@
 // tools/scenes/table.steps.
 
 import Foundation
+import Kaya
 
 struct TableItem: KayaGen {
     var name: String

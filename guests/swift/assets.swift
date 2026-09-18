@@ -2,6 +2,7 @@
 // tools/scenes/assets.steps.
 
 import Foundation
+import Kaya
 
 /// Deliberately absent, and a LEGAL name: the answer is the census sentence.
 let missingName = "icons/nope.png"

@@ -2,6 +2,7 @@
 // tools/scenes/sizepolicy.steps.
 
 import Foundation
+import Kaya
 
 let app = KayaApp()
 

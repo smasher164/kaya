@@ -495,6 +495,27 @@ nullable enum keeps its if-chain (docs/traps.md); and virtual threads
 are not taken — ART has none at any compileSdk, and a guest is one source
 for four lanes.
 
+**The Swift binding is a package target in Swift 6 language mode**
+(2026-09-18, the R3 ruling's Swift third, taken after the mode was
+measured first). `Package.swift` at the root builds bindings/swift as the
+`Kaya` module with the C API behind a system-library target (`internal
+import CKaya`), so a `public` signature that names a C type is refused by
+the compiler and the wire boundary stops being a convention; 371 of the
+binding's 1,998 declarations are public, each because a guest calls it or
+the sugar census names it as surface, and the one public wire name is
+`KayaValue`. Strict concurrency is TRUE there with four `nonisolated(unsafe)`
+waivers, each in the ledger tools/check-pins.py holds. THE GUESTS AND THE
+INTERPRETER STAY IN SWIFT 5 MODE, ON THE RECORD, for one measured reason:
+a guest is top-level code, top-level code is main-actor isolated (SE-0343),
+Swift 6 mode checks that isolation at run time, and kaya calls a guest's
+closures on its app thread, which is not the process main thread — so a
+guest built in Swift 6 mode traps at its first handler with nothing on
+stderr (docs/traps.md), and the interpreter is 418 diagnostics behind the
+same wall. Both lift together when the app thread has its own
+`SerialExecutor` (docs/async-dialogs-plan.md §2.1), which makes the
+isolation true rather than waived; the alternative for the guests, every
+one re-spelled as a `@main` type, is a design ruling and is not taken.
+
 **One id space for widgets and template nodes.** Every binding mints
 live widget ids and template node ids from ONE monotone counter per app
 — signals, collections, alerts/dialogs and menu items keep their own —

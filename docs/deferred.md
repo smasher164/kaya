@@ -2293,8 +2293,9 @@ unpicked.
     design and have nothing to mis-key. KEY: nested catalog submenu,
     _itemCatalogs, _item_catalogs, bare keys, CATALOG_SEAT_ROWS.
   - R3 THE TOOLCHAIN: JDK 21 (pattern switch over the sealed sums,
-    virtual threads; touches nine gradle modules), Swift 6 language mode
-    with strict concurrency (the binding becomes a package target),
+    virtual threads; touches nine gradle modules), ~~Swift 6 language mode
+    with strict concurrency (the binding becomes a package target)~~ —
+    THE BINDING LANDED 2026-09-18, the guests refused by measurement (below),
     ~~Python type hints with a shipped py.typed and a pyright gate~~ —
     THE PYTHON THIRD LANDED 2026-09-17 (one Opus agent; the job's
     tmp/idiom/notes-r3py.md): ~330 signatures over the public surface,
@@ -2353,7 +2354,35 @@ unpicked.
     one is a custom `SerialExecutor` — the object docs/async-dialogs-plan.md's
     Swift arm needs anyway. RECOMMENDED: the binding as a package target and the
     guests now, one slice; the interpreter last or excluded, its own measurement
-    if taken. AWAITING THE MAINTAINER'S RULING.
+    if taken. RULED THE SAME DAY (the maintainer, after the mode was explained as
+    a checking mode and not a platform): the binding as a package target and the
+    guests now, the interpreter later. BUILT (one Opus agent; the job's
+    tmp/idiom/notes-swift6.md): Package.swift at the root, `path:
+    "bindings/swift"` so no gate's path moved, the C API behind a CKaya
+    system-library target under `internal import`, four `nonisolated(unsafe)`
+    waivers, 371 of 1,998 declarations public by a compiler-driven sweep (34 of
+    them by the sugar census alone — KayaTpl's constructors and setters no guest
+    calls today), `KayaValue` the one public wire name and `KayaTx` internal; the
+    four build invocations on the package with `--disable-automatic-resolution`
+    and the iOS SDK pair; check-pins reads python bodies for SwiftPM now and
+    holds the language mode in the manifest ALONE with the waiver ledger (eleven
+    watched negatives), tpl-surfaces' Swift rows carry `public`; the mac lane
+    ALL PASS 61/61 and 477 legs, the iOS lane ALL PASS 139 legs. AND THE GUESTS'
+    HALF IS REFUSED BY A MEASUREMENT THE RULING DID NOT HAVE: a guest built in
+    Swift 6 mode SIGTRAPs at its first handler with nothing on stderr — top-level
+    code is main-actor isolated (SE-0343), Swift 6 checks that at run time, and
+    kaya calls the closure on the app thread; `-default-isolation nonisolated`
+    does not lift it, and the same guest in Swift 5 mode against the Swift 6
+    module prints OK — so the guests take `import Kaya` and nothing else, and the
+    guests and the interpreter now wait on the SAME app-thread SerialExecutor
+    (docs/async-dialogs-plan.md §2.1). A RULING OWED: the alternative is every one
+    of the 52 guests re-spelled `-parse-as-library` with a `@main` type, which
+    removes the top-level-code rule at the cost of every guest's shape; named,
+    not taken. Small opens: 29 pre-existing warnings across the guest compiles
+    (no -warnings-as-errors there, as before); the package build is at zero
+    warnings with no `.treatAllWarnings(as: .error)`, which needs
+    swift-tools-version 6.2. KEY: Package.swift, CKaya, nonisolated(unsafe),
+    SE-0343, top-level code, parse-as-library, SerialExecutor, swift language mode
   - R4 NOT TAKEN: a Roslyn source generator for C# and an attached macro
     for Swift (the checked-in generated files are held by gen-guests
     --check); Go's must-use diagnostic through runtime.AddCleanup (a

@@ -485,7 +485,9 @@ for path in arguments {
     out += "// Regenerate with tools/gen-guests.py (which also checks freshness).\n\n"
     // Foundation: Data is the blob channel, and the record row
     // surface's image constructor names it (imports are per-file).
-    out += "import Foundation\n\n"
+    // Kaya: the binding is a package target, so every guest file that
+    // names KayaTpl, KayaField or KayaRecord imports it.
+    out += "import Foundation\nimport Kaya\n\n"
     out += collector.decls.map(generate).joined(separator: "\n")
     let outPath = String(path.dropLast(".swift".count)) + "+Kaya.swift"
     // Write only on change: regeneration is idempotent AND

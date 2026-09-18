@@ -5,6 +5,7 @@
 // text, not types.
 
 import Foundation
+import Kaya
 
 private let kayaPositionTitles = ["Symbol", "Shares"]
 

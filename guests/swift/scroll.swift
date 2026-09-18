@@ -2,6 +2,7 @@
 // tools/scenes/scroll.steps.
 
 import Foundation
+import Kaya
 
 let app = KayaApp()
 

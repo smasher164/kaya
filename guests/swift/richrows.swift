@@ -5,6 +5,7 @@
 // folds into the row the app reads back.
 
 import Foundation
+import Kaya
 
 struct Note: KayaGen {
     var title: String

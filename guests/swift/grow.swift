@@ -1,6 +1,7 @@
 // The grow scene, Swift port — guests/rust/grow.rs, tools/scenes/grow.steps.
 
 import Foundation
+import Kaya
 
 let app = KayaApp()
 

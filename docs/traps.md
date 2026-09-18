@@ -11841,3 +11841,47 @@ against its 1100s ceiling with every leg green. The rule already says not
 to edit the tree while a matrix runs; the reason it bites even for a docs
 edit is that check-doc-refs and check-ledger are gates, and their inputs
 are in the fingerprint.
+
+## A kaya guest built in Swift 6 language mode traps at its first handler, silently (2026-09-18)
+
+swiftc allows top-level code only in main.swift, so every guest IS
+top-level code; SE-0343 makes top-level code main-actor isolated,
+including every closure formed in it; Swift 6 mode emits a DYNAMIC
+isolation check at such a closure's entry; kaya calls guest closures on
+the app thread, which is not the process main thread — so
+`dispatch_assert_queue` fails: EXC_BREAKPOINT, exit -5, nothing on stdout
+or stderr, and the compile was clean (warnings only), so no typecheck can
+see it. `-default-isolation nonisolated` (SE-0466) does not lift it: the
+module default and the top-level-code rule are separate, measured at
+compile time and at run time. The same guest in Swift 5 mode against the
+same Swift 6 module prints its verdict. When a Swift process traps with
+no message, the crash report is the only reader:
+`SWIFT_BACKTRACE=enable=yes` answers "not supported for privileged
+executables" on a guest, and ~/Library/Logs/DiagnosticReports/<exe>-*.ips
+is JSON after its first line, the triggered thread's frames naming
+`_swift_task_checkIsolatedSwift` → `dispatch_assert_queue` in one read.
+tools/check-pins.py's language-mode clause refuses any `-swift-version`
+in tools/ by name, with this sentence.
+
+## Four smaller facts from the Swift package slice (2026-09-18)
+
+(1) A `public` struct loses the implicit `Sendable` an internal one had,
+so publishing a binding type can turn a GUEST's `static let` into an
+error it never had (`TodoFields.title`, a record holding a
+`KayaDocument`); the fix is an explicit conformance on the types that
+really are values, and never on a handle, which is app-thread-only.
+(2) An unqualified `'x' is inaccessible due to 'internal' protection
+level` cannot identify the declaration — matching the name against any
+type with a member of that name published KayaTx's 29 wire packers,
+since KayaAppTx and KayaTx spell the same verbs; the compiler's
+`note: 'x' declared here` with file and line is the only exact answer.
+(3) `swift build --triple arm64-apple-ios…-simulator` picks the macOS
+sysroot and dies with "unable to load standard library"; it needs
+`-Xswiftc -sdk <SDK> -Xcc -isysroot <SDK>`, and SwiftPM drops the OS
+version from the triple's output directory (`arm64-apple-ios-simulator`),
+so read the build through its own `debug` symlink rather than composing
+the path. (4) `internal import CKaya` does not free the client of the
+search path — the built module still records CKaya as a dependency, so
+every guest compile carries `-I bindings/swift/CKaya`; what the internal
+import buys is a compile-time rule: a `public` signature naming a C type
+is refused by name.

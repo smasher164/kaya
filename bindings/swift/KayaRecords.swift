@@ -2,11 +2,12 @@
 // declaration — stored properties of wire types in declaration order —
 // and cannot CONSTRUCT, so init(values:) is the one hand-written member.
 
+internal import CKaya
 import Foundation
 
 /// The generator's marker: kaya-swift-gen reads the declaration — the
 /// shape decides record or sum — and emits the runtime conformance.
-protocol KayaGen {}
+public protocol KayaGen {}
 
 /// A collection element type. Conform with a prototype (any instance — Mirror
 /// needs one to walk) and init(values:); everything else derives.
@@ -17,7 +18,7 @@ protocol KayaGen {}
 /// declares a `KayaDocument` field. A record that declares none has no
 /// `KayaField<KayaDocument>` token to bind with, so the defaults below are
 /// the answer for exactly that case.
-protocol KayaRecord {
+public protocol KayaRecord {
     static var prototype: Self { get }
     init(values: [KayaValue])
     static func kayaDocument(_ record: Self, _ index: UInt32) -> KayaDocument?
@@ -26,9 +27,9 @@ protocol KayaRecord {
 }
 
 extension KayaRecord {
-    static func kayaDocument(_ record: Self, _ index: UInt32) -> KayaDocument? { nil }
+    public static func kayaDocument(_ record: Self, _ index: UInt32) -> KayaDocument? { nil }
 
-    static func kayaWithDocument(
+    public static func kayaWithDocument(
         _ record: Self, _ index: UInt32, _ document: KayaDocument
     ) -> Self {
         record
@@ -40,31 +41,31 @@ extension KayaRecord {
 /// alias: every component of one is optional, so a date with no day was
 /// representable and a KayaTime passed where a KayaDate was wanted and
 /// failed at run time. kaya-swift-gen reads the declared spelling.
-struct KayaDate: Hashable, Sendable, CustomStringConvertible {
+public struct KayaDate: Hashable, Sendable, CustomStringConvertible {
     var year: Int
     var month: Int
     var day: Int
 
-    init(year: Int, month: Int, day: Int) {
+    public init(year: Int, month: Int, day: Int) {
         self.year = year
         self.month = month
         self.day = day
     }
 
-    var description: String { String(format: "%04d-%02d-%02d", year, month, day) }
+    public var description: String { String(format: "%04d-%02d-%02d", year, month, day) }
 }
 
 /// A civil time: hour and minute, no seconds (D3).
-struct KayaTime: Hashable, Sendable, CustomStringConvertible {
+public struct KayaTime: Hashable, Sendable, CustomStringConvertible {
     var hour: Int
     var minute: Int
 
-    init(hour: Int, minute: Int) {
+    public init(hour: Int, minute: Int) {
         self.hour = hour
         self.minute = minute
     }
 
-    var description: String { String(format: "%02d:%02d", hour, minute) }
+    public var description: String { String(format: "%02d:%02d", hour, minute) }
 }
 
 /// A date's packed wire value. The components are non-optional by
@@ -95,7 +96,7 @@ func kayaDaysInMonth(_ year: Int, _ month: Int) -> Int {
     return [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1]
 }
 
-func kayaDate(packed: Int64) -> KayaDate {
+public func kayaDate(packed: Int64) -> KayaDate {
     let parts = kayaUnpackDate(packed)
     return KayaDate(year: parts.year, month: parts.month, day: parts.day)
 }
@@ -107,21 +108,25 @@ func kayaTime(packed: Int64) -> KayaTime {
 
 extension KayaValue {
     /// A civil date on the wire — what a date signal carries.
-    static func date(_ d: KayaDate) -> KayaValue { .i64(kayaPackedDate("a date", d)) }
+    public static func date(_ d: KayaDate) -> KayaValue { .i64(kayaPackedDate("a date", d)) }
 
     /// A civil time on the wire.
-    static func time(_ t: KayaTime) -> KayaValue { .i64(kayaPackedTime("a time", t)) }
+    public static func time(_ t: KayaTime) -> KayaValue { .i64(kayaPackedTime("a time", t)) }
 }
 
 /// A typed projection: one field of a record type, by wire position.
-struct KayaField<V> {
+public struct KayaField<V>: Sendable {
     let index: UInt32
+
+    public init(index: UInt32) {
+        self.index = index
+    }
 }
 
 extension KayaField where V == String {
     /// THE WHOLE ELEMENT OF A SCALAR COLLECTION, as a field token: a scalar
     /// collection has no record, so its element IS the value.
-    static var element: KayaField<String> { KayaField<String>(index: 0) }
+    public static var element: KayaField<String> { KayaField<String>(index: 0) }
 }
 
 func wireValue(_ any: Any) -> KayaValue? {
@@ -218,38 +223,38 @@ extension KayaRecord {
 
 /// Key path -> wire index, all record types together. APP-THREAD ONLY,
 /// like every guest-side structure.
-private var kayaFieldIndexes: [AnyKeyPath: UInt32] = [:]
+nonisolated(unsafe) private var kayaFieldIndexes: [AnyKeyPath: UInt32] = [:]
 
 /// A collection whose entries are T records; the plain handle rides
 /// along for forEach and at.
-struct KayaRecordCollection<T: KayaRecord> {
-    let collection: KayaCollection
+public struct KayaRecordCollection<T: KayaRecord> {
+    public let collection: KayaCollection
 
     /// The instance of this collection inside the copy keyed by `key` of
     /// the next enclosing For; chain for deeper nesting. TYPED: the
     /// plain handle's `at` hands back a bare KayaCollection, and every
     /// record mutation below takes this one.
-    func at(_ key: KayaValue) -> KayaRecordCollection<T> {
+    public func at(_ key: KayaValue) -> KayaRecordCollection<T> {
         KayaRecordCollection(collection: collection.at(key))
     }
 
-    func insert(_ tx: KayaAppTx, _ key: KayaValue, _ value: T) {
+    public func insert(_ tx: KayaAppTx, _ key: KayaValue, _ value: T) {
         tx.insertRecordRaw(collection, key, value, 0, value.kayaValues)
     }
 
     /// Insert under a key the binding authors, and hand the key back.
     @discardableResult
-    func insertFresh(_ tx: KayaAppTx, _ value: T) -> Int64 {
+    public func insertFresh(_ tx: KayaAppTx, _ value: T) -> Int64 {
         tx.insertRecordFresh(collection, value, 0, value.kayaValues)
     }
 
-    func update(_ tx: KayaAppTx, _ key: KayaValue, _ value: T) {
+    public func update(_ tx: KayaAppTx, _ key: KayaValue, _ value: T) {
         tx.updateRecordRaw(collection, key, value, 0, value.kayaValues)
     }
 
     /// Drop an entry, taking its stamped copy and every collection
     /// instance inside it with it.
-    func remove(_ tx: KayaAppTx, _ key: KayaValue) {
+    public func remove(_ tx: KayaAppTx, _ key: KayaValue) {
         tx.remove(collection, key)
     }
 
@@ -292,30 +297,30 @@ struct KayaRecordCollection<T: KayaRecord> {
 
     /// Repositions an entry before another's; the wire carries a keys-only
     /// delta. KEYS, NEVER INDICES.
-    func moveBefore(_ tx: KayaAppTx, _ key: KayaValue, _ anchor: KayaValue) {
+    public func moveBefore(_ tx: KayaAppTx, _ key: KayaValue, _ anchor: KayaValue) {
         tx.moveBefore(collection, key, anchor)
     }
 
     /// Repositions an entry at the end of its collection.
-    func moveToEnd(_ tx: KayaAppTx, _ key: KayaValue) {
+    public func moveToEnd(_ tx: KayaAppTx, _ key: KayaValue) {
         tx.moveToEnd(collection, key)
     }
 
     /// Repositions an entry at the front: sugar for moveBefore the
     /// current first key, lowering to the same wire op.
-    func moveToFront(_ tx: KayaAppTx, _ key: KayaValue) {
+    public func moveToFront(_ tx: KayaAppTx, _ key: KayaValue) {
         tx.moveToFront(collection, key)
     }
 
     /// Repositions an entry directly after another's: sugar for
     /// moveBefore the anchor's successor (moveToEnd when the anchor is
     /// last), lowering to the same wire op.
-    func moveAfter(_ tx: KayaAppTx, _ key: KayaValue, _ anchor: KayaValue) {
+    public func moveAfter(_ tx: KayaAppTx, _ key: KayaValue, _ anchor: KayaValue) {
         tx.moveAfter(collection, key, anchor)
     }
 
     /// A label bound to the field the key path selects.
-    func label(_ t: KayaTpl, _ keyPath: WritableKeyPath<T, String>) -> KayaNodeHandle {
+    public func label(_ t: KayaTpl, _ keyPath: WritableKeyPath<T, String>) -> KayaNodeHandle {
         t.label(T.field(keyPath))
     }
 
@@ -329,13 +334,13 @@ struct KayaRecordCollection<T: KayaRecord> {
     }
 
     /// The typed model: what this guest wrote, in insertion order.
-    func items(_ tx: KayaAppTx) -> [(key: KayaValue, value: T)] {
+    public func items(_ tx: KayaAppTx) -> [(key: KayaValue, value: T)] {
         tx.recordEntries(collection).map { (key: $0.key, value: $0.value as! T) }
     }
 
     /// A signal the binding recomputes from this collection's entries after
     /// every mutation, written into the same transaction.
-    func derive(
+    public func derive(
         _ tx: KayaAppTx, _ compute: @escaping ([(key: KayaValue, value: T)]) -> KayaValue
     ) -> KayaSignal {
         let s = tx.signal(compute(items(tx)))
@@ -347,20 +352,20 @@ struct KayaRecordCollection<T: KayaRecord> {
 
     /// Typed field writes with the key spelled once: todos.patch(tx,
     /// key).set(\.done, true).
-    func patch(_ tx: KayaAppTx, _ key: KayaValue) -> KayaRecordPatch<T> {
+    public func patch(_ tx: KayaAppTx, _ key: KayaValue) -> KayaRecordPatch<T> {
         KayaRecordPatch(c: self, tx: tx, key: key)
     }
 }
 
 /// An open patch on one entry; set chains.
-struct KayaRecordPatch<T: KayaRecord> {
+public struct KayaRecordPatch<T: KayaRecord> {
     let c: KayaRecordCollection<T>
     let tx: KayaAppTx
     let key: KayaValue
 
     /// Writes the field the key path selects; chainable.
     @discardableResult
-    func set<V>(_ keyPath: WritableKeyPath<T, V>, _ value: V) -> KayaRecordPatch<T> {
+    public func set<V>(_ keyPath: WritableKeyPath<T, V>, _ value: V) -> KayaRecordPatch<T> {
         c.updateField(tx, key, keyPath, value)
         return self
     }
@@ -368,7 +373,7 @@ struct KayaRecordPatch<T: KayaRecord> {
 
 extension KayaAppTx {
     /// Declare a collection of T records; the struct is the schema.
-    func collection<T: KayaRecord>(of _: T.Type) -> KayaRecordCollection<T> {
+    public func collection<T: KayaRecord>(of _: T.Type) -> KayaRecordCollection<T> {
         let c = collectionWithSchema(T.kayaSchema)
         // How an undo rebuilds this collection's model entries: its
         // payload carries wire fields, and this declaration is the ONLY

@@ -2,6 +2,7 @@
 // tools/scenes/gallery.steps.
 
 import Foundation
+import Kaya
 
 /// A 2x2 RGB PNG, 75 bytes, embedded as source.
 let testPNG = Data([

@@ -119,11 +119,14 @@ GATES = {
     # every tools/**/*.{py,sh}. Declared `["android"]` alone it went
     # stale under KAYA_FAST on exactly the edits it exists to catch.
     # `guests` and `docs` carry the .csproj files its NuGet clause reads.
-    "check-pins": ["android", "tools", "guests/csharp", "docs"],
+    # Package.swift and bindings/swift: the swift language-mode clause
+    # reads the manifest and every nonisolated(unsafe) waiver.
+    "check-pins": ["android", "tools", "guests/csharp", "docs",
+                   "Package.swift", "bindings/swift", "guests/swift"],
     # The INTERFACE, not the implementation: kaya.h's own freshness is
     # gated by gen-header, which is keyed on all of crates/.
     "swift-typecheck": ["crates/kaya/include", "bindings/swift",
-                        "guests/swift", "swift"],
+                        "guests/swift", "swift", "Package.swift"],
     "java-typecheck": ["bindings/java", "bindings/java-desktop", "guests/java"],
     "js-typecheck": ["bindings/js", "guests/js"],
     "py-typecheck": ["bindings/python", "guests/python"],

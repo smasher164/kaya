@@ -2,6 +2,7 @@
 // tools/scenes/reorder.steps.
 
 import Foundation
+import Kaya
 
 struct Item: KayaGen {
     var title: String

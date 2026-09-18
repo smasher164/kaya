@@ -2,6 +2,7 @@
 // tools/scenes/textarea.steps.
 
 import Foundation
+import Kaya
 
 func count(_ text: String) -> String {
     text.isEmpty ? "0 lines" : "\(text.split(separator: "\n", omittingEmptySubsequences: false).filter { !($0.isEmpty && text.hasSuffix("\n")) }.count) lines"

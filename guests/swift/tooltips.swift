@@ -2,6 +2,7 @@
 // tools/scenes/tooltips.steps, docs/tooltip-plan.md.
 
 import Foundation
+import Kaya
 
 struct Account: KayaGen {
     var name: String

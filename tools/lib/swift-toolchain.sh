@@ -40,6 +40,19 @@ kaya_resolve_swiftc() {
     SWIFT_SDK_ARGS=(-sdk "$sdk")
 }
 
+# SwiftPM through the same toolchain: bindings/swift is a package target
+# (Package.swift, Swift 6 language mode), and `swift build` takes no -sdk
+# of its own — the iOS pass hands it one with -Xswiftc/-Xcc.
+kaya_swift() {
+    kaya_resolve_swiftc || return 1
+    local swift="${SWIFTC%/swiftc}/swift"
+    if [ -n "${SWIFT_DEVELOPER_DIR:-}" ]; then
+        env -u SDKROOT DEVELOPER_DIR="$SWIFT_DEVELOPER_DIR" "$swift" "$@"
+    else
+        env -u DEVELOPER_DIR -u SDKROOT "$swift" "$@"
+    fi
+}
+
 # DEVELOPER_DIR is set for a full Xcode and unset otherwise, so the nix
 # apple-sdk cannot shadow it; SDKROOT is always cleared so -sdk wins.
 kaya_swiftc() {

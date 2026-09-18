@@ -1352,7 +1352,37 @@ in docs/deferred.md.
    sha256 compared before the unpack and `javac -version` read back after
    it, because `default-jdk-headless` — what that layer used to install —
    follows the base image's default-java and would move the level on a
-   base bump with nothing red. Fifteen watched negatives, counts printed),
+   base bump with nothing red. Fifteen watched negatives, counts printed.
+   AND THE SWIFT PACKAGE SINCE 2026-09-18, in two clauses. THE FIRST IS
+   THE POPULATION: bindings/swift is a package target now (Package.swift,
+   `.swiftLanguageMode(.v6)`), and of the three builds that compile it two
+   are PYTHON (tools/lib/lanes/mac.py, tools/ios/run-sim.py) while the
+   `--disable-automatic-resolution` clause read `tools/**/*.sh` alone — so
+   every new invocation was policed by nothing. It reads both languages
+   now, a python argv list and embedded shell alike, with a docstring
+   saying what `swift build` does excluded by name because prose is not a
+   command. THE SECOND IS THE LANGUAGE MODE, the java clause's shape one
+   language over: `.swiftLanguageMode(.v6)` in the manifest is the ONLY
+   place a Swift language mode is declared, and NO tools/ compile may pass
+   `-swift-version` — the refusal says why, because both layers outside
+   the package trap on kaya's app thread under Swift 6 (measured
+   2026-09-18). The GUESTS: swiftc allows top-level code only in
+   main.swift and SE-0343 makes top-level code `@MainActor`, so every
+   closure a guest hands the binding is main-actor-isolated; Swift 6 emits
+   a dynamic isolation check at such a closure's entry, kaya calls it on
+   the app thread, and `dispatch_assert_queue` fails — SIGTRAP with
+   nothing on stderr, at the first handler of the first scene, and
+   `-default-isolation nonisolated` does not lift it. THE INTERPRETER:
+   the same thread, one door over — `MainActor.assumeIsolated` SIGTRAPs
+   there too, so `@MainActor` is an armed promise and not a cheap answer,
+   and swift/KayaSwiftUI.swift waits for a custom SerialExecutor bound to
+   the app thread (docs/async-dialogs-plan.md §2.1). Both halves lift
+   together, with that executor. And the WAIVER LEDGER: every
+   `nonisolated(unsafe)` in bindings/swift and guests/swift is named with
+   the external synchronisation that makes the claim true — four, all in
+   the binding — so a fifth is a finding and a named one that vanished is
+   a stale audit. Eleven watched negatives over the two clauses, counts
+   printed),
    `tools/check-design-generation.py` (BOTH macOS design generations stay
    on the mac lane: SwiftUI reads the MAIN EXECUTABLE's sdk stamp, so
    flake.nix's apple-sdk_26 keeps the kaya-linked legs modern while the

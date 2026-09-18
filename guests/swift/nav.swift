@@ -1,6 +1,7 @@
 // The nav scene, Swift port — guests/rust/nav.rs, tools/scenes/nav.steps.
 
 import Foundation
+import Kaya
 
 let DETAIL: UInt64 = 7
 let SETTINGS: UInt64 = 8

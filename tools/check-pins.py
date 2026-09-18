@@ -14,6 +14,7 @@ dev_shell_or_die()
 # The curl clauses hold BYTES as well as a version, and cut the verifier
 # out of its script to run it against wrong bytes on every sweep.
 
+import ast
 import hashlib
 import re
 import subprocess
@@ -120,14 +121,8 @@ for f in sorted(root.rglob("Package.swift")):
         out.append(f"{f}: remote dependencies with no checked-in "
                    f"Package.resolved")
 
-SWIFTPM = re.compile(r"swift\s+(?:run|build|test)\b")
-for f in sorted(root.glob("tools/**/*.sh")):
-    for n, line in logical_lines(f.read_text(encoding="utf-8")):
-        if line.lstrip().startswith("#") or not SWIFTPM.search(line):
-            continue
-        if "--disable-automatic-resolution" not in line:
-            out.append(f"{f}:{n}: swiftpm invocation may re-resolve "
-                       "(want --disable-automatic-resolution)")
+# The `swift build` half of this clause runs at the END of this file,
+# where the tools/ bodies the java census reads are already in hand.
 
 # --- NuGet flat container: the Windows App SDK arrives by curl --------
 # The PackageReference clause above cannot see it: the .csproj files in
@@ -852,6 +847,295 @@ for label, old, new, expect in JDK_NEGATIVES:
                    f"refused naming {expect!r} (findings: {got})")
 print(f"check-pins: linux jdk: {drefused}/{len(JDK_NEGATIVES)} watched "
       f"negatives refused (substitutions {'/'.join(dcounts)})",
+      file=sys.stderr)
+
+SWIFTPM = re.compile(r"swift\s+(?:run|build|test)\b")
+SWIFTPM_VERBS = {"run", "build", "test"}
+# THE POPULATION IS BOTH LANGUAGES since 2026-09-18: bindings/swift is a
+# package target (Package.swift) and the three builds that compile it are
+# tools/swift-typecheck.sh (shell) plus tools/lib/lanes/mac.py and
+# tools/ios/run-sim.py (PYTHON, where the command is an argv list and the
+# shell rule was policed by nothing).
+
+
+def docstrings(tree):
+    """The Constant nodes that are documentation, not commands — a
+    docstring saying what `swift build --triple` does is prose."""
+    out_ = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef,
+                             ast.ClassDef)) and node.body:
+            first = node.body[0]
+            if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant) \
+                    and isinstance(first.value.value, str):
+                out_.add(id(first.value))
+    return out_
+
+
+def swiftpm_findings(rel, text):
+    """Every `swift build|run|test` in one tools/ body, in either
+    spelling. A function so the watched negatives below can run it
+    against doctored copies."""
+    bad = []
+    if not rel.endswith(".py"):
+        for n, line in logical_lines(text):
+            if line.lstrip().startswith("#") or not SWIFTPM.search(line):
+                continue
+            if "--disable-automatic-resolution" not in line:
+                bad.append(f"{rel}:{n}: swiftpm invocation may re-resolve "
+                           "(want --disable-automatic-resolution)")
+        return bad
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return bad
+    docs = docstrings(tree)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str) \
+                and id(node) not in docs:
+            for n, line in logical_lines(node.value):
+                if line.lstrip().startswith("#") or not SWIFTPM.search(line):
+                    continue
+                if "--disable-automatic-resolution" not in line:
+                    bad.append(f"{rel}:{node.lineno}: line {n} of a string "
+                               f"holds a swiftpm invocation that may "
+                               f"re-resolve (want "
+                               f"--disable-automatic-resolution) — embedded "
+                               f"shell is still shell.")
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.List, ast.Tuple)):
+            continue
+        elems = [e.value for e in node.elts
+                 if isinstance(e, ast.Constant) and isinstance(e.value, str)]
+        if not any(e == "swift" or e.endswith("/swift") or "kaya_swift" in e
+                   for e in elems):
+            continue
+        if not (SWIFTPM_VERBS & set(elems)):
+            continue
+        if "--disable-automatic-resolution" not in elems:
+            bad.append(f"{rel}:{node.lineno}: a swiftpm argv without "
+                       f"--disable-automatic-resolution — the shell rule "
+                       f"follows the command into python.")
+    return bad
+
+
+_swiftpm_bodies = _tools_bodies
+_swiftpm_read = 0
+for _rel, _text in sorted(_swiftpm_bodies.items()):
+    out += swiftpm_findings(_rel, _text)
+    _swiftpm_read += 1
+# WATCHED NEGATIVES, one per spelling, plus the over-eagerness check.
+SWIFTPM_NEGATIVES = [
+    ("the shell package build without the flag", "tools/swift-typecheck.sh",
+     "kaya_swift build --disable-automatic-resolution \\\n"
+     "    --scratch-path target/swiftpm;",
+     "kaya_swift build \\\n    --scratch-path target/swiftpm;",
+     "may re-resolve"),
+    ("the mac lane's argv without the flag", "tools/lib/lanes/mac.py",
+     '"--disable-automatic-resolution",\n               "--scratch-path", "target/swiftpm"',
+     '"--scratch-path", "target/swiftpm"',
+     "a swiftpm argv without"),
+    ("the iOS lane's argv without the flag", "tools/ios/run-sim.py",
+     '"--disable-automatic-resolution",\n            "--scratch-path", str(PKG_SCRATCH)',
+     '"--scratch-path", str(PKG_SCRATCH)',
+     "a swiftpm argv without"),
+]
+_srefused, _scounts = 0, []
+for _label, _rel, _old, _new, _expect in SWIFTPM_NEGATIVES:
+    _text = _swiftpm_bodies.get(_rel, "")
+    _n = _text.count(_old)
+    _scounts.append(str(_n))
+    if _n != 1:
+        out.append(f"check-pins: watched negative {_label!r} applied {_n} "
+                   f"substitution(s) to {_rel}; an unperturbed copy is a "
+                   f"failed test")
+        continue
+    _got = swiftpm_findings(_rel, _text.replace(_old, _new, 1))
+    if any(_expect in g for g in _got):
+        _srefused += 1
+    else:
+        out.append(f"check-pins: watched negative {_label!r} was NOT "
+                   f"refused naming {_expect!r} (findings: {_got})")
+# The compliant spellings, unperturbed, must be QUIET — a clause that
+# fires on everything says nothing.
+_quiet = [g for _rel, _text in sorted(_swiftpm_bodies.items())
+          for g in swiftpm_findings(_rel, _text)]
+print(f"check-pins: swiftpm: {_swiftpm_read} tools file(s) read, "
+      f"{_srefused}/{len(SWIFTPM_NEGATIVES)} watched negatives refused "
+      f"(substitutions {'/'.join(_scounts)}), {len(_quiet)} finding(s) on "
+      f"the real tree", file=sys.stderr)
+
+# --- Swift's LANGUAGE MODE: the package is v6, NOTHING ELSE IS --------
+# `.swiftLanguageMode(.v6)` in Package.swift is the ONLY place a Swift
+# language mode is declared, and no tools/ compile may pass
+# `-swift-version`. Both layers outside the package trap on kaya's app
+# thread under Swift 6, measured on 2026-09-18:
+#   - the GUESTS, because swiftc allows top-level code only in main.swift
+#     and SE-0343 makes top-level code @MainActor, so every closure a
+#     guest hands the binding is main-actor-isolated; Swift 6 emits a
+#     dynamic isolation check at such a closure's entry, kaya calls it on
+#     the app thread, and `dispatch_assert_queue` fails — SIGTRAP with
+#     nothing on stderr, at the first handler of the first scene.
+#     `-default-isolation nonisolated` does not lift it (measured).
+#   - the INTERPRETER, which waits for the same custom SerialExecutor
+#     (docs/async-dialogs-plan.md §2.1): `MainActor.assumeIsolated`
+#     SIGTRAPs on that thread too.
+# A waiver is a debt, and NONISOLATED_SITES is its ledger: every
+# `nonisolated(unsafe)` in the Swift tier is named here, so a new one is a
+# finding rather than a silence.
+MANIFEST = "Package.swift"
+SWIFT_VERSION = re.compile(r"-swift-version")
+NONISOLATED = re.compile(r"nonisolated\(unsafe\)\s+"
+                         r"(?:public\s+|private\s+|internal\s+)?"
+                         r"(?:static\s+)?(?:var|let)\s+([A-Za-z_][A-Za-z0-9_]*)")
+NONISOLATED_SITES = {
+    ("bindings/swift/KayaApp.swift", "ambient"):
+        "the process's one app object, written once and read on the app thread",
+    ("bindings/swift/KayaApp.swift", "appThread"):
+        "claimed by dispatchLoop, read at every transaction gate",
+    ("bindings/swift/KayaApp.swift", "app"):
+        "run() hands the app object to the app thread and the calling "
+        "thread then enters kaya_run and never returns",
+    ("bindings/swift/KayaRecords.swift", "kayaFieldIndexes"):
+        "key path -> wire index, app-thread only",
+}
+
+
+def swift_mode_findings(bodies, manifest):
+    """Findings for the Swift language mode. Takes the texts so the
+    watched negatives below can hand it doctored ones."""
+    bad = []
+    if ".swiftLanguageMode(.v6)" not in manifest:
+        bad.append(f"{MANIFEST}: the Kaya target does not declare "
+                   f".swiftLanguageMode(.v6) — the binding's language "
+                   f"mode is declared in the manifest and nowhere else")
+    if "swift-tools-version: 6" not in manifest:
+        bad.append(f"{MANIFEST}: swift-tools-version is not 6.x, so "
+                   f".swiftLanguageMode is not even spellable")
+    for rel, text in sorted(bodies.items()):
+        for n, line in logical_lines(text):
+            if line.lstrip().startswith("#") or not SWIFT_VERSION.search(line):
+                continue
+            bad.append(
+                f"{rel}:{n}: passes -swift-version. The Swift 6 language "
+                f"mode is Package.swift's `.swiftLanguageMode(.v6)` and "
+                f"nothing else: a guest compiled in Swift 6 SIGTRAPs at "
+                f"its first handler (top-level code is @MainActor by "
+                f"SE-0343, and Swift 6's dynamic isolation check fires "
+                f"when kaya calls that closure on the app thread), and "
+                f"the SwiftUI interpreter waits for the app-thread "
+                f"SerialExecutor (docs/async-dialogs-plan.md §2.1). Both "
+                f"measured 2026-09-18.")
+    return bad
+
+
+def waiver_findings(sources):
+    """Every nonisolated(unsafe) in the Swift tier is in the ledger."""
+    bad, seen = [], set()
+    for rel, text in sorted(sources.items()):
+        for name in NONISOLATED.findall(text):
+            seen.add((rel, name))
+            if (rel, name) not in NONISOLATED_SITES:
+                bad.append(f"{rel}: `{name}` is nonisolated(unsafe) and is "
+                           f"not in check-pins' NONISOLATED_SITES. A waiver "
+                           f"is a debt and this table is its ledger: add it "
+                           f"with the external synchronisation that makes "
+                           f"the claim true, or make the claim unnecessary")
+    for rel, name in sorted(NONISOLATED_SITES):
+        if (rel, name) not in seen:
+            bad.append(f"{rel}: check-pins' NONISOLATED_SITES names `{name}` "
+                       f"({NONISOLATED_SITES[(rel, name)]}) and the file no "
+                       f"longer carries it — a stale waiver is the next "
+                       f"stale audit")
+    return bad
+
+
+_manifest = (root / MANIFEST).read_text(encoding="utf-8")
+_swift_sources = {
+    f.relative_to(root).as_posix(): f.read_text(encoding="utf-8")
+    for f in sorted(list((root / "bindings/swift").glob("*.swift"))
+                    + list((root / "guests/swift").glob("*.swift")))}
+out += swift_mode_findings(_swiftpm_bodies, _manifest)
+out += waiver_findings(_swift_sources)
+
+SWIFT_MODE_NEGATIVES = [
+    ("the manifest's language mode dropped", "manifest",
+     ".swiftLanguageMode(.v6)", ".swiftLanguageMode(.v5)",
+     "does not declare .swiftLanguageMode"),
+    ("the tools version dropped", "manifest",
+     "swift-tools-version: 6.0", "swift-tools-version: 5.10",
+     "swift-tools-version is not 6.x"),
+    ("a guest compile asking for Swift 6", "tools/swift-typecheck.sh",
+     "    if ! kaya_swiftc -typecheck \\\n",
+     "    if ! kaya_swiftc -typecheck -swift-version 6 \\\n",
+     "passes -swift-version"),
+    ("the interpreter compiled in Swift 6", "tools/swiftui/build-dylib.sh",
+     "\n    -warnings-as-errors \\\n",
+     "\n    -warnings-as-errors -swift-version 6 \\\n",
+     "passes -swift-version"),
+    ("a fourth compile site", "tools/a-new-lane.py",
+     None, 'PAYLOAD = """\nswiftc -swift-version 6 x.swift\n"""\n',
+     "passes -swift-version"),
+]
+_mrefused, _mcounts = 0, []
+for _label, _who, _old, _new, _expect in SWIFT_MODE_NEGATIVES:
+    _bodies = dict(_swiftpm_bodies)
+    _man = _manifest
+    if _who == "manifest":
+        _n = _man.count(_old)
+        _man = _man.replace(_old, _new, 1)
+    elif _old is None:
+        _n = 1
+        _bodies[_who] = _new
+    else:
+        _n = _bodies.get(_who, "").count(_old)
+        _bodies[_who] = _bodies.get(_who, "").replace(_old, _new, 1)
+    _mcounts.append(str(_n))
+    if _n != 1:
+        out.append(f"check-pins: watched negative {_label!r} applied {_n} "
+                   f"substitution(s); an unperturbed copy is a failed test")
+        continue
+    _got = swift_mode_findings(_bodies, _man)
+    if any(_expect in g for g in _got):
+        _mrefused += 1
+    else:
+        out.append(f"check-pins: watched negative {_label!r} was NOT "
+                   f"refused naming {_expect!r} (findings: {_got})")
+WAIVER_NEGATIVES = [
+    ("a fifth waiver in the binding", "bindings/swift/KayaSums.swift",
+     "import Foundation",
+     "import Foundation\n\nnonisolated(unsafe) var kayaSneak = 0",
+     "not in check-pins' NONISOLATED_SITES"),
+    ("a waiver in a guest", "guests/swift/todos.swift",
+     "import Foundation",
+     "import Foundation\n\nnonisolated(unsafe) var kayaSneak = 0",
+     "not in check-pins' NONISOLATED_SITES"),
+    ("a declared waiver removed", "bindings/swift/KayaRecords.swift",
+     "nonisolated(unsafe) private var kayaFieldIndexes",
+     "private var kayaFieldIndexes",
+     "no longer carries it"),
+]
+for _label, _who, _old, _new, _expect in WAIVER_NEGATIVES:
+    _srcs = dict(_swift_sources)
+    _n = _srcs.get(_who, "").count(_old)
+    _mcounts.append(str(_n))
+    if _n != 1:
+        out.append(f"check-pins: watched negative {_label!r} applied {_n} "
+                   f"substitution(s); an unperturbed copy is a failed test")
+        continue
+    _srcs[_who] = _srcs[_who].replace(_old, _new, 1)
+    _got = waiver_findings(_srcs)
+    if any(_expect in g for g in _got):
+        _mrefused += 1
+    else:
+        out.append(f"check-pins: watched negative {_label!r} was NOT "
+                   f"refused naming {_expect!r} (findings: {_got})")
+print(f"check-pins: swift language mode: the manifest alone, "
+      f"{len(_swiftpm_bodies)} tools file(s) read for -swift-version, "
+      f"{len(NONISOLATED_SITES)} waiver(s) in the ledger over "
+      f"{len(_swift_sources)} Swift file(s), "
+      f"{_mrefused}/{len(SWIFT_MODE_NEGATIVES) + len(WAIVER_NEGATIVES)} "
+      f"watched negatives refused (substitutions {'/'.join(_mcounts)})",
       file=sys.stderr)
 
 status = 0

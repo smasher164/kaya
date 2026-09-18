@@ -2,6 +2,7 @@
 // tools/scenes/panels.steps.
 
 import Foundation
+import Kaya
 
 let app = KayaApp()
 
