@@ -28,6 +28,7 @@ import pathlib
 import re
 import shutil
 import subprocess
+import sys
 import threading
 import time
 
@@ -73,10 +74,8 @@ GUEST_STEM = {"listdetail": "split", "taskspersist": "tasks",
 # script and binary under KAYA_APPEARANCE=dark.
 DARK_LEG = ("canvasdark-rust-swiftui", "canvas", "rust")
 
-# Nothing on this lane is in the quiet class (tools/lib/exclusive.py): its
-# input-driving legs are already alone between drains and its drags cost
-# 1-3s. The set grows on a sighting, with its reason.
-EXCLUSIVE = set()
+# EXCLUSIVE and the idle wait are below, after legs() — the set is derived
+# from the queue rather than spelled.
 
 # The apps and depth scenes hand-queued OUTSIDE SCENES/DEPTH_SCENES
 # (each would otherwise derive a cargo --example that does not exist):
@@ -338,6 +337,157 @@ def blocks():
 def wired_scenes():
     """The scenes some leg runs — the gates' census surface."""
     return {scene for _name, scene, _lang in legs()}
+
+
+# The legs that run as the only input-driving leg on the host (tools/lib/
+# exclusive.py), derived from the queue: the three scenes that press the
+# file panel's own buttons through the accessibility client, since a press
+# posted while a human holds the foreground is swallowed and AX still
+# reports success (docs/deferred.md, the swallowed-press entry).
+PANEL_SCENES = ("filedialog", "save", "editor")
+EXCLUSIVE = {name for name, scene, _lang in legs() if scene in PANEL_SCENES}
+
+# The host's own idle clock (HIDIdleTime, nanoseconds since the last key or
+# pointer event), read before such a leg is admitted; the wait never
+# reddens a lane (docs/deferred.md, the swallowed-press entry). IDLE_S: a
+# reader's pauses are seconds, so 20s idle means the host is not in use;
+# IDLE_BOUND_S: what one leg waits before running anyway and saying so;
+# IDLE_BUDGET_S: what the whole lane spends, sized against validate-all's
+# mac ceiling (net band 550-673s + 240 fits 1100 with room) rather than
+# bound x set, which stops fitting the day a leg joins the set.
+IDLE_S = 20.0
+IDLE_BOUND_S = 60.0
+IDLE_BUDGET_S = 240.0
+IDLE_TELL_S = 30.0
+IDLE_POLL_S = 1.0
+# A SELF-TEST DOOR, and _hid_idle_ns() below is its ONLY reader
+# (tools/check-exclusive.py refuses any other): nanosecond values, comma
+# separated, answered one per poll with the last repeating, instead of
+# asking ioreg. Every sentence the wait then prints carries `(doctored)`,
+# so a doctored run can never read as a real one.
+IDLE_DOOR = "KAYA_HID_IDLE_NS_OVERRIDE"
+
+IDLE_SENTENCES = {
+    "waiting": "mac: {leg} waits for an idle host — HIDIdleTime {idle}s, "
+               "wants {want}s (waited {waited}s of {bound}s){door}",
+    "cleared": "mac: {leg} waited {waited}s for an idle host — HIDIdleTime "
+               "{idle}s{door}",
+    "expired": "mac: {leg} waited {bound}s and the host is still in use "
+               "(HIDIdleTime {idle}s, wants {want}s) — running it anyway, so "
+               "a red here is the host's{door}",
+    "spent": "mac: {leg} does not wait — this lane has spent its {budget}s "
+             "idle-wait budget (HIDIdleTime {idle}s){door}",
+    "unreadable": "mac: {leg} cannot read HIDIdleTime ({why}) — running "
+                  "without the idle wait",
+    "summary": "mac: idle waits — {legs} leg(s) waited {secs}s of the "
+               "{budget}s budget for an idle host",
+}
+
+_idle = {"spent": 0.0, "legs": 0, "door": []}
+
+
+def _hid_idle_ns():
+    """(nanoseconds, None), or (None, why) — never an invented number."""
+    raw = os.environ.get(IDLE_DOOR, "")
+    if raw:
+        if not _idle["door"]:
+            try:
+                _idle["door"] = [int(v) for v in raw.split(",") if v.strip()]
+            except ValueError:
+                return None, f"{IDLE_DOOR}={raw!r} is not a list of integers"
+        if not _idle["door"]:
+            return None, f"{IDLE_DOOR} is set and names no value"
+        rest = _idle["door"]
+        return (rest.pop(0) if len(rest) > 1 else rest[0]), None
+    try:
+        got = subprocess.run(["ioreg", "-c", "IOHIDSystem", "-r", "-d", "1"],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             text=True, encoding="utf-8", errors="replace",
+                             check=False)
+    except OSError as e:
+        return None, f"ioreg would not run: {e.strerror or e}"
+    if got.returncode != 0:
+        first = (got.stderr or "").strip().splitlines()
+        return None, (f"ioreg exited {got.returncode}"
+                      + (f": {first[0]}" if first else ""))
+    m = re.search(r'"HIDIdleTime"\s*=\s*(\d+)', got.stdout)
+    if not m:
+        return None, ("ioreg's IOHIDSystem entry carries no HIDIdleTime "
+                      f"({len(got.stdout.splitlines())} line(s) read)")
+    return int(m.group(1)), None
+
+
+def _idle_say(text):
+    print(text, file=sys.stderr, flush=True)
+
+
+def idle_wait(leg, say=None):
+    """Hold an input-driving leg until the host has been idle IDLE_S seconds.
+
+    Called INSIDE the exclusive hold (tools/validate-mac.py's queue_leg), so
+    no other lane can admit its own input-driving leg into the same busy host
+    while this one waits. It NEVER reddens a lane: an unreadable clock, an
+    expired bound and a spent budget each print one sentence and the leg runs
+    (tools/lib/exclusive.py's rule, one file over). Returns seconds waited.
+    """
+    say = say or _idle_say
+    door = " (doctored)" if os.environ.get(IDLE_DOOR, "") else ""
+    ns, why = _hid_idle_ns()
+    if ns is None:
+        say(IDLE_SENTENCES["unreadable"].format(leg=leg, why=why))
+        return 0.0
+    if ns / 1e9 >= IDLE_S:
+        return 0.0
+    if _idle["spent"] >= IDLE_BUDGET_S:
+        say(IDLE_SENTENCES["spent"].format(
+            leg=leg, budget=int(IDLE_BUDGET_S), idle=int(ns / 1e9), door=door))
+        return 0.0
+    bound = min(IDLE_BOUND_S, IDLE_BUDGET_S - _idle["spent"])
+    started = time.monotonic()
+    told = 0
+
+    def done(waited):
+        _idle["spent"] += waited
+        _idle["legs"] += 1
+        return waited
+
+    while True:
+        time.sleep(IDLE_POLL_S)
+        waited = time.monotonic() - started
+        ns, why = _hid_idle_ns()
+        if ns is None:
+            say(IDLE_SENTENCES["unreadable"].format(leg=leg, why=why))
+            return done(waited)
+        idle = int(ns / 1e9)
+        if ns / 1e9 >= IDLE_S:
+            say(IDLE_SENTENCES["cleared"].format(
+                leg=leg, waited=int(waited), idle=idle, door=door))
+            return done(waited)
+        if waited >= bound:
+            say(IDLE_SENTENCES["expired"].format(
+                leg=leg, bound=int(bound), idle=idle, want=int(IDLE_S),
+                door=door))
+            return done(waited)
+        if waited >= (told + 1) * IDLE_TELL_S:
+            told += 1
+            say(IDLE_SENTENCES["waiting"].format(
+                leg=leg, idle=idle, want=int(IDLE_S), waited=int(waited),
+                bound=int(bound), door=door))
+
+
+def idle_summary(say=None):
+    """What waiting for a quiet host cost this lane, printed on EVERY run —
+    zero on a quiet host, which is the number the everyday matrix pays."""
+    (say or _idle_say)(IDLE_SENTENCES["summary"].format(
+        legs=_idle["legs"], secs=int(_idle["spent"]),
+        budget=int(IDLE_BUDGET_S)))
+
+
+def hid_idle_seconds():
+    """The host's idle seconds as (secs, None) or (None, why) — the launch
+    line's reading (tools/validate-all.py), one reader with the wait's."""
+    ns, why = _hid_idle_ns()
+    return (None, why) if ns is None else (int(ns / 1e9), None)
 
 
 # THE LEG'S COMMAND AND SCRIPT, one copy: validate-mac.py runs the roster

@@ -572,7 +572,30 @@ in docs/deferred.md.
    SCRIPTS (tools/lib/lanes/win.py's `notification_legs`, pointer_scenes'
    own reason), never a hand list, and the clause refuses one before an
    exclusive leg in its own block or anywhere in the block that one opens.
-   Nine watched negatives, counts printed),
+   AND THE MAC FUNNEL WAITS FOR AN IDLE HOST, since 2026-09-18: the token
+   holds the other four lanes off an input-driving leg and nothing held
+   off the HUMAN at the keyboard — matrix #38's `save-java-swiftui` died
+   at `file_choose` with every press swallowed while the maintainer's
+   browser was frontmost, and AX reported success for all three
+   (docs/deferred.md, the swallowed-press entry). The mac lane's
+   `EXCLUSIVE` is the three scenes whose steps press the file panel's own
+   buttons through the accessibility client — DERIVED from the queue, and
+   the whole class, since the interpreter's only three
+   `AXUIElementPerformAction` sites are those drives while `type` is
+   in-process `NSApp.sendEvent` and a drag is a private pasteboard — and
+   the funnel reads HIDIdleTime INSIDE the hold, before the leg, waiting
+   bounded for twenty seconds of neither key nor pointer. A wait that
+   expires RUNS THE LEG ANYWAY and says so, so a red then reads as the
+   host's; on a quiet host the wait is skipped and the everyday matrix
+   pays nothing. The gate holds the call between the hold and the leg,
+   the three numbers as literals that fit the mac ceiling (a threshold
+   under the bound, a bound under the budget, a budget under half the
+   ceiling), each sentence still saying what it measured, the self-test
+   door `KAYA_HID_IDLE_NS_OVERRIDE` to its ONE reader across every
+   tools/ script, and a red mac leg's verdict line naming the frontmost
+   application AT THE MOMENT OF THE RED (one reader with the bundle's
+   window census, tools/lib/flightrec_lane.py's `mac_frontmost`).
+   Fifteen watched negatives, counts printed),
    `tools/check-flightrec.py` (A RED LEG'S BUNDLE NAMES ITS CAUSE ON
    EVERY LANE, or says what it measured instead (the maintainer's
    2026-09-16 ruling): the bundle shape is ONE declaration —
@@ -1013,8 +1036,24 @@ in docs/deferred.md.
    compositor is asked — `swaymsg '[pid=…] focus'` — and ITS OWN ANSWER is
    what the seed's sentence carries, since `[pid=<nothing>] focus` answers
    `success: false` while the exit status alone would report a grant that
-   never happened. Six links, two refusal sentences each interpolating
-   what it measured, six watched negatives.
+   never happened. AND THE COPY VERB ASKS TOO, since 2026-09-18 (that
+   entry's STILL OPEN half): TAKING the selection needs an input serial,
+   and the harness earns one with a wtype F24 tap the compositor delivers
+   TO WHOEVER HOLDS THE FOCUS — so a copy made while another surface holds
+   the seat is dropped SILENTLY, gdk goes on believing this process owns
+   the board, every `expect_clipboard` then reads "" for fifteen seconds,
+   and a later seed expires EVEN WITH ITS OWN GRANT because the process it
+   seeds never made its copy. ONE request and ONE parse serve both sides
+   (`clipboard_focus(what)`, the only body in gtk.rs that may name the
+   compositor's command) and the copy's answer rides the COPY's own
+   verb-trace record, so a red with green seeds and failed copies names
+   the seat instead of pointing at the seed. ONCE PER COPY, not once per
+   scene: the request sits at `prime_if_clipboard_scene`, the per-action
+   funnel click, shortcut and menu_activate all pass, because the seat can
+   be taken between two copies of one leg. Eight links, one spelling of
+   the request, three copying verbs held to the funnel, two refusal
+   sentences each interpolating something it MEASURED (the caller's own
+   name does not count), eleven watched negatives.
    AND THE AX WORD SET IS CLOSED since 2026-09-07: harness.rs's ROLES is
    the vocabulary a shared scene may assert, and the two interpreters
    mint their words from their own platform readers, so a word one

@@ -11802,3 +11802,30 @@ poller of act2.verdict (the mac lane, iOS, android, the three Windows
 relaunch scripts) is covered by the writer's rename alone. Any file one
 process polls while another writes it has this shape: publish by rename,
 never by create-then-write.
+
+## sway's `success: true` is about the command, not the seat; and the seat is not the whole copy (2026-09-18)
+
+Measured on the linux lane while a second client's window was still
+coming up: `swaymsg '[pid=<ours>] focus'` answered `[{"success": true}]`
+and a 20Hz sampler showed the focus had gone to the other window at
++596ms and never returned, while the copy verb printed `focus=granted`.
+The read-back is sway's own criterion for the container that holds the
+seat — `swaymsg '[pid=N con_id=__focused__] nop'` answers `success: true`
+iff the focused container is that pid's and `"No matching node."`
+otherwise (both watched) — and crates/kaya/src/gtk.rs's `clipboard_focus`
+reads it after every grant. Three more facts from the same session:
+(1) THE SEAT IS NOT THE WHOLE COPY — a wayland copy needs an input SERIAL
+too, which on the headless lane comes from wtype's F24 tap and reaches a
+client only through a `wl_keyboard.enter`; a window refocused
+milliseconds ago has not been sent one, so a copy taken straight after a
+grant is still dropped silently (gdk reports `local=true` and its own
+formats): the same copy under the same thief is 0/5 ~10ms after the grant
+and 5/5 with four seconds of settle, and nothing inside the process reads
+the enter (`gtk_window_is_active` is false all leg). (2) THE PLATFORM'S
+OWN PASTE IS A THIRD SURFACE — under a thief taking the seat four times a
+second every copy landed and the leg died at `menu_activate "Edit>Paste"`,
+GTK's own `clipboard.paste` action whose asynchronous read loses the seat
+before it completes. (3) A KAYA WINDOW MAPPED AS AN ADVERSARY TAKES THE
+SEAT TWICE — sway focuses it on map and the app's own startup re-takes
+the seat over the next second, so a steal timed at zero lands in the
+middle of that; give the thief its settle before the verb under test.

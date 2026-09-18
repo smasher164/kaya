@@ -650,6 +650,12 @@ def _leg_worker(name, argv, env, scene=None):
                                               encoding="utf-8")
     (LEGS_DIR / f"{name}.secs").write_text(f"{secs}\n",
                                            encoding="utf-8")
+    if verdict != "PASS":
+        # AT THE MOMENT OF THE RED, never at drain time: the pool finishes
+        # minutes later and the foreground has moved on by then
+        # (docs/deferred.md, the swallowed-press entry).
+        (LEGS_DIR / f"{name}.front").write_text(
+            flightrec_lane.mac_frontmost(ROOT) + "\n", encoding="utf-8")
     FR.mac_leg(name, verdict, secs, log, scratch)
 
 
@@ -666,6 +672,10 @@ def queue_leg(name, argv, env, scene=None):
             t.join()
         _leg_names.append(name)
         with exclusive.hold("mac", name):
+            # AND THE HOST'S OWN IDLE CLOCK, inside the hold so no other
+            # lane admits an input-driving leg into the same busy host while
+            # this one waits (docs/deferred.md, the swallowed-press entry).
+            lane.idle_wait(name)
             _leg_worker(name, argv, env, scene)
         return
     if JOBS == 1 and not os.environ.get("KAYA_RECORD"):
@@ -692,7 +702,9 @@ def queue_leg(name, argv, env, scene=None):
             FR.sampler_stop(sampler)
         secs = int(time.monotonic() - t0)
         verdict = "PASS" if rc == 0 else "FAIL"
-        print(f"{name}: {verdict} ({secs}s)")
+        front = ("" if rc == 0
+                 else " — " + flightrec_lane.mac_frontmost(ROOT))
+        print(f"{name}: {verdict} ({secs}s){front}")
         if rc != 0:
             status = 1
         FR.mac_leg(name, verdict, secs, log, scratch)
@@ -766,7 +778,10 @@ def drain():
                           f"display, or a blocking connect at startup. "
                           f"Look before the scene, not inside it.")
             status = 1
-        print(f"{name}: {verdict} ({secs}s)", flush=True)
+        ffile = LEGS_DIR / f"{name}.front"
+        front = (" — " + ffile.read_text(encoding="utf-8").strip()
+                 if ffile.is_file() else "")
+        print(f"{name}: {verdict} ({secs}s){front}", flush=True)
     _leg_names.clear()
 
 
@@ -880,6 +895,7 @@ if os.environ.get("KAYA_RECORD"):
 # The one-line verdict: suites accumulate failures rather than abort,
 # so a truncated log must still end with the answer.
 exclusive.summary("mac")
+lane.idle_summary()
 if status == 0:
     print("validate-mac: ALL PASS")
 else:

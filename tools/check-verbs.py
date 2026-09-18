@@ -2420,24 +2420,49 @@ for label, kwargs, finding in (
 # (gtk.rs, ClipView::active) and `present()` was measured losing — sway
 # denies the self-activation token — so the compositor is asked and its own
 # answer is what the sentence carries (invariant 3).
+#
+# AND THE COPY VERB ASKS TOO, since 2026-09-18 (that entry's STILL OPEN half,
+# docs/traps.md's wayland seat entry, trap 5): TAKING the selection needs an
+# input serial, and the harness earns one with a wtype F24 tap the compositor
+# delivers TO WHOEVER HOLDS THE FOCUS — so a copy made while another surface
+# holds the seat is dropped SILENTLY, gdk goes on believing this process owns
+# the board (`app_is_own_writer=true`, its own formats still listed), every
+# `expect_clipboard` then reads "" for fifteen seconds, and a later seed
+# expires EVEN WITH ITS OWN GRANT because the process it seeds never made its
+# copy — measured twice in five runs of the whole scene under the thief. ONE
+# request and ONE parse serve both sides (`clipboard_focus(what)`) and the
+# copy's answer rides the copy's OWN verb-trace record, so a red with green
+# seeds and failed copies names the seat instead of pointing at the seed.
+# ONCE PER COPY, not once per scene: the seat can be taken between two copies
+# of one leg, and under the thief it was.
 SEED_FOCUS = [
     ("the request stands before the writer is spawned", "clipboard_seed",
-     r"let focus = clipboard_seed_focus\(\);[\s\S]*?"
+     r"let focus = clipboard_focus\(\"clipboard_seed\"\);[\s\S]*?"
      r"foreign_clip_write\(mime, bytes\);",
      "a seed that asks for the focus AFTER the writer has set the "
      "selection has already missed the offer"),
     ("the compositor is asked, by this process's own pid",
-     "clipboard_seed_focus",
-     r'Command::new\("swaymsg"\)\s*\.arg\(format!\("\[pid=\{pid\}\] focus"\)\)',
+     "clipboard_focus", r'say\(format!\("\[pid=\{pid\}\] focus"\)\)',
      "the seat's focus is the compositor's to give, and no reading inside "
      "this process can even see it"),
-    ("only a wayland session pays for it", "clipboard_seed_focus",
+    ("the grant is READ BACK out of the compositor's own tree",
+     "clipboard_focus",
+     r'format!\("\[pid=\{pid\} con_id=__focused__\] nop',
+     "sway's `success: true` is about the COMMAND, not about the seat a "
+     "moment later — measured 2026-09-18, it answered success for a focus "
+     "that never moved and the copy reported a grant it did not have"),
+    ("a grant that did not take is its own answer", "clipboard_focus",
+     r'focus=granted-not-held\(\{seen\}\)',
+     "folded into `granted` it is the false green this read-back exists to "
+     "end; folded into `refused` it would blame the compositor for a "
+     "request it honoured"),
+    ("only a wayland session pays for it", "clipboard_focus",
      r"if !linux_wayland_session\(\) \{\s*return String::new\(\);",
      "x11 serves its selection to any client that asks, so the request "
      "would be one spawn per seed for nothing"),
     ("the grant is read out of the compositor's own answer",
-     "clipboard_seed_focus",
-     r'said\.status\.success\(\)\s*&&\s*answer\.replace\([^)]*\)\s*'
+     "clipboard_focus",
+     r'out\.status\.success\(\)\s*&&\s*answer\.replace\([^)]*\)\s*'
      r'\.contains\(',
      'sway answers `success: false, error: "No matching node."` when the '
      "criteria match nothing (measured), so a request that read only the "
@@ -2449,7 +2474,27 @@ SEED_FOCUS = [
      "clipboard_seed", r"gtk_window_active=\{\}->\{\}",
      "one reading cannot say whether the window's own state moved during "
      "the five seconds"),
+    # THE COPY'S OWN THREE.
+    ("the copy asks for the seat before the serial tap",
+     "prime_if_clipboard_scene",
+     r'clipboard_focus\("the copy verb"\);[\s\S]*?freshen_wayland_serial\(\);',
+     "wtype's tap is delivered to whoever holds the focus, so a tap taken "
+     "first spends the serial on somebody else's surface and the copy that "
+     "follows is dropped with no error anywhere"),
+    ("the copy's answer rides the copy's own record",
+     "prime_if_clipboard_scene", r'"copy\{focus\}',
+     "a red with green seeds and failed copies would point at the seed, "
+     "which is the one thing that did ask"),
 ]
+# ONCE PER COPY, NOT ONCE PER SCENE: the seat can be taken between two
+# copies of one leg (measured under the thief), so the request lives at the
+# per-action funnel EVERY verb that can reach a copy already passes.
+COPY_VERBS = ("click", "shortcut", "menu_activate")
+
+# ONE SPELLING OF THE REQUEST: `clipboard_focus` is the only body in gtk.rs
+# that may name the compositor's focus command. A second copy would drift
+# from this one's parse — which is the half that decides a grant. That both
+# sides CALL it is already demanded by their two ordering links above.
 
 
 def rust_fn_body(gtk_src, name):
@@ -2464,7 +2509,8 @@ def seed_focus_clauses(gtk_src=None):
     bad = []
     text = gtk_src if gtk_src is not None else real(GTK)
     bodies = {}
-    for name in ("clipboard_seed", "clipboard_seed_focus"):
+    for name in ("clipboard_seed", "clipboard_focus",
+                 "prime_if_clipboard_scene"):
         body = rust_fn_body(text, name)
         if body is None or len(body) < 200:
             bad.append(f"gtk.rs has no `fn {name}` body this clause can read "
@@ -2474,23 +2520,40 @@ def seed_focus_clauses(gtk_src=None):
         if not re.search(pattern, bodies.get(fn, "")):
             bad.append(f"the wayland clipboard seed: {label} — `fn {fn}` in "
                        f"gtk.rs no longer matches /{pattern}/. {why}")
+    # ONE SPELLING OF THE REQUEST, for the seed and the copy alike.
+    asks = len(re.findall(r'Command::new\("swaymsg"\)', text))
+    if asks != 1:
+        bad.append(f"the wayland clipboard seat: gtk.rs spells the "
+                   f"compositor's focus command {asks} time(s), wanted 1 — "
+                   f"the seed and the copy share one request and one parse "
+                   f"of sway's answer, and a second copy drifts from this "
+                   f"one on the half that decides a grant")
+    for verb in COPY_VERBS:
+        if "Self::prime_if_clipboard_scene();" not in (rust_fn_body(text, verb) or ""):
+            bad.append(f"the wayland clipboard seat: `fn {verb}` in gtk.rs no "
+                       f"longer passes prime_if_clipboard_scene — the seat is "
+                       f"asked for ONCE PER COPY and a verb that skips the "
+                       f"funnel copies with whatever focus it happens to find")
     # AND NEITHER REFUSAL MAY BE A SENTENCE THAT INTERPOLATES NOTHING: a
     # focus request that failed prints what the compositor said, or it is a
     # diagnostic that cannot discriminate. tools/check-diagnostics.py reads
     # `*WhyNot` names only, so it cannot reach this one.
     said = re.findall(r"eprintln!\(\s*\"([\s\S]*?)\"\s*\);",
-                      bodies.get("clipboard_seed_focus", ""))
-    if len(said) != 2:
-        bad.append(f"the wayland clipboard seed: `fn clipboard_seed_focus` "
+                      bodies.get("clipboard_focus", ""))
+    if len(said) != 3:
+        bad.append(f"the wayland clipboard seat: `fn clipboard_focus` "
                    f"prints {len(said)} sentence(s) on its failure paths, "
-                   f"wanted 2 — one for a compositor that refused and one for "
-                   f"a host with no swaymsg, since a single sentence for both "
-                   f"cannot say which happened")
+                   f"wanted 3 — a host with no swaymsg, a compositor that "
+                   f"refused, and a grant that was answered and did not take "
+                   f"— since one sentence for any two cannot say which "
+                   f"happened")
     for one in said:
-        if "{" not in one:
+        # `{what}` is the CALLER's name, not a measurement: a sentence
+        # carrying only that is still one sentence for every cause.
+        if "{" not in one.replace("{what}", ""):
             bad.append(f"the wayland clipboard seed: a refusal sentence "
-                       f"interpolates nothing ({one[:60]!r}) — it would be "
-                       f"printed for every cause it does not name")
+                       f"interpolates nothing it measured ({one[:60]!r}) — it "
+                       f"would be printed for every cause it does not name")
     return bad
 
 
@@ -2499,22 +2562,22 @@ seed_focus_status = 0
 for line in seed_focus_out:
     print(f"check-verbs: {line}", file=sys.stderr)
     seed_focus_status = 1
-for label, kwargs, finding in (
+SEAT_NEGATIVES = (
     ("the focus request moved after the writer",
      dict(gtk_src=perturb(
          "seed focus (asked after the writer)", GTK,
-         r"(        )let focus = clipboard_seed_focus\(\);\n",
+         r"(        )let focus = clipboard_focus\(\"clipboard_seed\"\);\n",
          "")),
      r"the request stands before the writer is spawned"),
     ("the compositor asked about somebody else's window",
      dict(gtk_src=perturb("seed focus (pid dropped from the criteria)", GTK,
-                          r'(\.arg\(format!\(")\[pid=\{pid\}\] focus',
+                          r'(say\(format!\(")\[pid=\{pid\}\] focus',
                           "[app_id=kaya] focus")),
      r"the compositor is asked, by this process's own pid"),
     ("the grant read off the exit status alone",
      dict(gtk_src=perturb("seed focus (the answer no longer read)", GTK,
-                          r"(if said\.status\.success\(\))\s*&&\s*"
-                          r"answer\.replace\([^)]*\)\s*\.contains\([^)]*\)",
+                          r"(out\.status\.success\(\))\s*&&\s*"
+                          r"answer\.replace\([^)]*\)\.contains\([^)]*\)",
                           "")),
      r"the grant is read out of the compositor's own answer"),
     ("a refusal sentence that names nothing it measured",
@@ -2531,12 +2594,59 @@ for label, kwargs, finding in (
      dict(gtk_src=perturb("seed focus (one active reading)", GTK,
                           r"(gtk_window_active=\{\})->\{\}", "")),
      r"the expiry carries BOTH readings"),
-):
+    # THE COPY'S OWN FOUR — the state the tree was in until 2026-09-18,
+    # when the seed asked and the copy did not.
+    ("the copy that stopped asking for the seat",
+     dict(gtk_src=perturb("copy focus (the request cut out)", GTK,
+                          r'(            )let focus = clipboard_focus\("the copy '
+                          r'verb"\);\n',
+                          '\\1let focus = String::new();\n')),
+     r"the copy asks for the seat before the serial tap"),
+    ("the copy asking AFTER the tap has spent the serial",
+     dict(gtk_src=perturb("copy focus (asked after the tap)", GTK,
+                          r'(            )let focus = clipboard_focus\("the copy '
+                          r'verb"\);\n(            )freshen_wayland_serial\(\);\n',
+                          '\\2freshen_wayland_serial();\n'
+                          '\\1let focus = clipboard_focus("the copy verb");\n')),
+     r"the copy asks for the seat before the serial tap"),
+    ("the copy's record that stopped carrying the answer",
+     dict(gtk_src=perturb("copy focus (the record blanked)", GTK,
+                          r'("copy)\{focus\}', "")),
+     r"the copy's answer rides the copy's own record"),
+    ("a copying verb that stopped passing the funnel",
+     dict(gtk_src=perturb("copy focus (click leaves the funnel)", GTK,
+                          r"(fn click\(&self, t: crate::harness::Target\) \{)"
+                          r"[\s\S]*?Self::prime_if_clipboard_scene\(\);",
+                          "")),
+     r"`fn click` in gtk.rs no longer passes prime_if_clipboard_scene"),
+    ("the grant taken on the command's word alone",
+     dict(gtk_src=perturb("seat focus (the read-back cut out)", GTK,
+                          r'(    match )say\(format!\("\[pid=\{pid\} '
+                          r'con_id=__focused__\] nop kaya seat read-back"\)\)',
+                          'say(format!("[pid={pid}] focus"))')),
+     r"the grant is READ BACK out of the compositor's own tree"),
+    ("a grant that did not take folded back into `granted`",
+     dict(gtk_src=perturb("seat focus (not-held folded into granted)", GTK,
+                          r'(            )format!\(" focus=granted-not-held'
+                          r'\(\{seen\}\)"\)',
+                          '" focus=granted".to_owned()')),
+     r"a grant that did not take is its own answer"),
+    ("a second spelling of the compositor's focus command",
+     dict(gtk_src=perturb("copy focus (a second swaymsg)", GTK,
+                          r'(        let focus = clipboard_focus'
+                          r'\("clipboard_seed"\);\n)',
+                          '        let _second = '
+                          'std::process::Command::new("swaymsg");\n')),
+     r"spells the compositor's focus command 2 time"),
+)
+for label, kwargs, finding in SEAT_NEGATIVES:
     score_or_die(introduced(seed_focus_clauses(**kwargs), seed_focus_out,
                             finding), label)
-print(f"check-verbs: the wayland clipboard seed takes the seat's focus "
-      f"before it spawns the writer: {len(SEED_FOCUS)} links + 2 refusal "
-      f"sentences, 6 watched negatives refused", file=sys.stderr)
+print(f"check-verbs: the wayland clipboard seat is asked for by the seed AND "
+      f"by the copy: {len(SEED_FOCUS)} links + one spelling of the request + "
+      f"{len(COPY_VERBS)} copying verbs through the funnel + 3 refusal "
+      f"sentences, {len(SEAT_NEGATIVES)} watched negatives refused",
+      file=sys.stderr)
 
 # clip_mirrors() ran first and printed its own findings; its verdict
 # is read here so there is exactly ONE verdict line.

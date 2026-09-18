@@ -84,6 +84,58 @@ def winlist_bin(root):
     return str(binp) if got.returncode == 0 and binp.is_file() else None
 
 
+def frontmost_from_listing(out, rc, err):
+    """Who held the foreground, out of flightrec-winlist's own lines.
+
+    THE FIRST LAYER-0 LINE: CGWindowListCopyWindowInfo answers the on-screen
+    list front to back, and layer 0 is where ordinary application windows
+    live. One reader, so the bundle's `windows` section and a red leg's
+    verdict line cannot disagree about who was in front.
+    """
+    if rc != 0:
+        first = (err or "").strip().splitlines()
+        return ("unknown: flightrec-winlist exited "
+                f"{rc}{': ' + first[0] if first else ''}")
+    seen = 0
+    for line in (out or "").splitlines():
+        # Greedy up to the LAST ` title=`, and the title to end of line: both
+        # fields are Swift debugDescription literals and may hold anything.
+        m = re.match(r"win=\d+ pid=(\d+) layer=(-?\d+) bounds=\S+ "
+                     r"app=\"(.*)\" title=(.*)$", line)
+        if not m:
+            continue
+        seen += 1
+        if m.group(2) != "0":
+            continue
+        return f"{m.group(3)} {m.group(4)} (pid {m.group(1)})"
+    return (f"unknown: flightrec-winlist listed {seen} window(s), none of "
+            f"them at layer 0")
+
+
+def mac_frontmost(root):
+    """`frontmost <app> "<title>" (pid N)` right now, or why it cannot be told.
+
+    Module-level beside winlist_bin() and for its reason: a caller may want
+    the reading WITHOUT a recorder. tools/validate-mac.py prints it on a red
+    leg's verdict line AT THE MOMENT OF THE RED — a matrix leg that drives
+    the platform's own input dies with every press swallowed when a human
+    holds the foreground, and the bundle's window census was the only place
+    that said so (docs/deferred.md, the swallowed-press entry).
+    """
+    binp = winlist_bin(root)
+    if not binp:
+        return ("frontmost unknown: no swiftc, or "
+                "tools/mac/flightrec-winlist.swift would not build")
+    try:
+        got = subprocess.run([binp], stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE, text=True,
+                             encoding="utf-8", errors="replace", check=False)
+    except OSError as e:
+        return f"frontmost unknown: {binp} would not run ({e.strerror or e})"
+    return "frontmost " + frontmost_from_listing(got.stdout, got.returncode,
+                                                 got.stderr)
+
+
 class LaneRecorder:
     """One lane run's recorder. Generic half here; windows half below."""
 

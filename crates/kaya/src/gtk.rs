@@ -14911,48 +14911,76 @@ struct ClipView {
     local: bool,
 }
 
-/// The seed needs the seat's keyboard focus before the writer runs: a
-/// wayland client is handed a data offer only while its surface holds it,
-/// and neither reading inside this process can decide it (docs/traps.md,
-/// the wayland seat entry: `gtk_window_is_active` is false on every step
-/// of a green leg, and `present()` loses on sway), so the compositor is
-/// asked and its own answer is the measurement. x11 is out of the rule.
+/// THE SEAT, FOR BOTH SIDES OF THE CLIPBOARD (docs/traps.md, the wayland
+/// seat entry). A wayland client is handed a data offer only while its
+/// surface holds the seat's keyboard focus, AND taking the selection needs
+/// an input serial that wtype's tap delivers to whoever holds that focus —
+/// so the SEED and the COPY have one dependency and one request between
+/// them, named by its caller. Neither reading inside this process can
+/// decide it (`gtk_window_is_active` is false on every step of a green
+/// leg, and `present()` loses on sway), so the compositor is asked and its
+/// own answer is the measurement. x11 is out of the rule.
 #[cfg(feature = "harness")]
-fn clipboard_seed_focus() -> String {
+fn clipboard_focus(what: &str) -> String {
     if !linux_wayland_session() {
         return String::new();
     }
     let pid = std::process::id();
-    let out = std::process::Command::new("swaymsg")
-        .arg(format!("[pid={pid}] focus"))
-        .output();
-    let said = match out {
+    // ONE SPELLING OF THE REQUEST AND OF ITS PARSE, for the seed and the
+    // copy alike: sway answers `success: false, "No matching node."` when
+    // the criteria match nothing, so the exit status alone would report a
+    // grant that never happened (docs/traps.md, the wayland seat entry).
+    let say = |cmd: String| -> std::io::Result<(bool, String)> {
+        let out = std::process::Command::new("swaymsg").arg(cmd).output()?;
+        let answer = clip_one_line(&format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        ));
+        let said_yes =
+            out.status.success() && answer.replace(' ', "").contains("\"success\":true");
+        Ok((said_yes, answer))
+    };
+    let (moved, answer) = match say(format!("[pid={pid}] focus")) {
         Err(e) => {
             eprintln!(
-                "kaya: clipboard_seed could not ask the compositor for this \
-                 window's focus: swaymsg {e} — on wayland a client is handed \
-                 the selection only while it holds the seat's focus, so the \
-                 seed below may wait for an offer that cannot come"
+                "kaya: {what} could not ask the compositor for this \
+                 window's focus: swaymsg {e} — on wayland the selection moves \
+                 only through the seat this window does not hold, so what \
+                 follows may wait for an offer that cannot come"
             );
             return format!(" focus=unasked({e})");
         }
-        Ok(out) => out,
+        Ok(got) => got,
     };
-    let answer = clip_one_line(&format!(
-        "{}{}",
-        String::from_utf8_lossy(&said.stdout),
-        String::from_utf8_lossy(&said.stderr)
-    ));
-    if said.status.success() && answer.replace(' ', "").contains("\"success\":true") {
-        return " focus=granted".to_owned();
+    if !moved {
+        eprintln!(
+            "kaya: {what} asked the compositor to focus this window \
+             ([pid={pid}] focus) and it answered {answer:?} — on wayland the \
+             selection moves only through the seat this window does not hold; \
+             going on anyway"
+        );
+        return format!(" focus=refused({answer})");
     }
-    eprintln!(
-        "kaya: clipboard_seed asked the compositor to focus this window \
-         ([pid={pid}] focus) and it answered {answer:?} — on wayland a client \
-         is handed the selection only while it holds the seat's focus; \
-         seeding anyway"
-    );
-    format!(" focus=refused({answer})")
+    // The grant is READ BACK out of the compositor's own tree: `success:
+    // true` is about the command, not the seat a moment later (docs/
+    // traps.md, the wayland seat entry), and `con_id=__focused__` is sway's
+    // own criterion for the container that holds it.
+    match say(format!("[pid={pid} con_id=__focused__] nop kaya seat read-back")) {
+        Err(e) => format!(" focus=granted-unread({e})"),
+        Ok((true, _)) => " focus=granted".to_owned(),
+        Ok((false, seen)) => {
+            eprintln!(
+                "kaya: {what} asked the compositor to focus this window \
+                 ([pid={pid}] focus), it answered success, and the seat is \
+                 still somebody else's — the read-back \
+                 ([pid={pid} con_id=__focused__] nop) says {seen:?}. What \
+                 follows runs without the seat: a copy's serial goes to the \
+                 window that has it and a seed is never handed the offer"
+            );
+            format!(" focus=granted-not-held({seen})")
+        }
+    }
 }
 
 /// `materialize`'s own test, one seeded kind at a time.
@@ -15037,9 +15065,23 @@ impl GtkStage {
     /// copy — but only in scenes that will SPEND one (the hub arms
     /// when a clipboard surface appears), so the other two hundred
     /// legs pay nothing.
+    ///
+    /// AND TAKE THE SEAT FIRST (docs/deferred.md, the wayland clipboard
+    /// seed entry's copy half): wtype's tap is delivered to whoever holds
+    /// the focus, so a copy made while another surface has it is dropped
+    /// SILENTLY and gdk goes on believing this process owns the board.
+    /// ONCE PER COPY, not once per scene — the seat can be taken between
+    /// two copies of the same leg, and it was, measured under the thief.
     fn prime_if_clipboard_scene() {
         if Self::on_main(|core| core.clipboard.armed.get()) {
+            let wayland = linux_wayland_session();
+            let focus = clipboard_focus("the copy verb");
             freshen_wayland_serial();
+            clip_note(format_args!(
+                "copy{focus} session={} serial={}",
+                if wayland { "wayland" } else { "x11" },
+                if wayland { "tapped" } else { "not needed" }
+            ));
         }
     }
 
@@ -18426,7 +18468,7 @@ impl crate::harness::Stage for GtkStage {
                  would be foreign in name only"
             ),
         };
-        let focus = clipboard_seed_focus();
+        let focus = clipboard_focus("clipboard_seed");
         let before = clip_app_view(kind);
         foreign_clip_write(mime, bytes);
         let started = std::time::Instant::now();

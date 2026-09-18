@@ -177,9 +177,16 @@ def top_consumers(n=4):
     return ", ".join(f"{name} {cpu:.0f}%" for cpu, name in rows[:n])
 
 
+# AND THE HOST'S IDLE CLOCK BESIDE THEM (docs/deferred.md, the
+# swallowed-press entry): load says how busy the machine is, never whether
+# a HUMAN is at it, and an input-driving leg admitted under a human's
+# foreground dies with every press swallowed. One reader with the mac
+# funnel's wait (tools/lib/lanes/mac.py).
+_idle_s, _idle_why = _mac.hid_idle_seconds()
 print(f"host load at launch: {LOAD_AT_LAUNCH[0]:.1f} {LOAD_AT_LAUNCH[1]:.1f} "
-      f"{LOAD_AT_LAUNCH[2]:.1f} (1, 5, 15 min); top consumers: "
-      f"{top_consumers()}", flush=True)
+      f"{LOAD_AT_LAUNCH[2]:.1f} (1, 5, 15 min); HIDIdleTime "
+      + (f"{_idle_s}s" if _idle_s is not None else f"unreadable ({_idle_why})")
+      + f"; top consumers: {top_consumers()}", flush=True)
 # THE MATRIX-WIDE EXCLUSIVE TOKEN (tools/lib/exclusive.py): one directory every
 # lane reaches, the container through its flight-recorder mount.
 EXCLUSIVE_DIR = pathlib.Path(
