@@ -596,22 +596,13 @@ def _leg_worker(name, argv, env, scene=None):
     leg_env = dict(os.environ, **env)
     leg_env.setdefault("KAYA_SELFTEST", "1")
     scratch = FLIGHTREC_SCRATCH / name
-    # THE VERB TRACE (crates/kaya/src/vtrace.rs and its two interpreter
-    # copies): written by the guest on a failure alone, adopted into the
-    # bundle by mac_leg, gone with the scratch either way.
-    scratch.mkdir(parents=True, exist_ok=True)
-    leg_env["KAYA_VERB_TRACE"] = str(scratch / "verb-trace.txt")
+
     def attempt(mode):
+        # THE ONE WIRING (tools/lib/flightrec_lane.py's watched_leg): the
+        # scratch, the verb trace, the `timeout 120` the sampler anchors
+        # on, and the sampler — the same call tools/run-leg.py makes.
         with open(log, mode, encoding="utf-8", errors="replace") as lf:
-            # The guest runs under `timeout`, which is both the 120s bound
-            # and the sampler's anchor (the guest is timeout's descendant
-            # and nothing else is).
-            proc = subprocess.Popen(["timeout", "120", *argv], env=leg_env,
-                                    stdout=lf, stderr=lf)
-            sampler = FR.sampler_start(scratch, proc)
-            rc = proc.wait()
-            FR.sampler_stop(sampler)
-        return rc
+            return FR.watched_leg(scratch, argv, leg_env, lf)
 
     # THE SECOND ACT (docs/tasks-s9-plan.md R6a): a scene with a
     # `relaunch` ends act one at it, and this lane's door is the
@@ -690,16 +681,7 @@ def queue_leg(name, argv, env, scene=None):
         scratch = FLIGHTREC_SCRATCH / name
         log = LEGS_DIR / f"{name}.log"
         with open(log, "w", encoding="utf-8", errors="replace") as lf:
-            proc = subprocess.Popen(["timeout", "120", *argv],
-                                    env=leg_env,
-                                    stdout=subprocess.PIPE,
-                                    stderr=subprocess.STDOUT, **TEXT)
-            sampler = FR.sampler_start(scratch, proc)
-            for line in proc.stdout:
-                print(line, end="")
-                lf.write(line)
-            rc = proc.wait()
-            FR.sampler_stop(sampler)
+            rc = FR.watched_leg(scratch, argv, leg_env, lf, echo=sys.stdout)
         secs = int(time.monotonic() - t0)
         verdict = "PASS" if rc == 0 else "FAIL"
         front = ("" if rc == 0

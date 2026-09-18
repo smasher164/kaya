@@ -2101,11 +2101,31 @@ unpicked.
   constructor or constant in any hand-written guest, nine watched
   negatives (planted 1 / blank 0), and was red on the pre-pass tree by
   122 findings — the shipped state.
-  FOUND EN ROUTE, open: a red leg from a hand `tools/run-leg.py` run has
+  ~~FOUND EN ROUTE, open: a red leg from a hand `tools/run-leg.py` run has
   no flight-recorder bundle (neither run-leg.py nor tools/lib/lanes/mac.py
   names the recorder), so the "read the bundle first" rule has nothing to
   read on the inner loop and a hand-run red can only be re-run; the mac
-  lane's own collect should wrap the hand run too (S) — and the same
+  lane's own collect should wrap the hand run too (S)~~ CLOSED 2026-09-18 (one Opus agent; the job's tmp/idiom/notes-handrun.md):
+ONE wiring, `MacRecorder.watched_leg` in tools/lib/flightrec_lane.py (the
+scratch, the verb-trace env, the `timeout 120` wrapper, the sampler around
+the process), called by tools/run-leg.py and by both of validate-mac.py's
+leg paths, so neither spells the wrapper; the hand run collects through
+`mac_leg`, flushes its journal, prints the frontmost app on a red and
+`flightrec: bundle <path>` as the lane does, and keeps an inherited
+KAYA_SELFTEST_SCRIPT for a scratch scene (the forced-red route, documented
+in docs/HACKING.md); check-gates' hand-run clause reads the wiring's name
+out of the recorder and demands it in both runners (six watched
+negatives), check-flightrec's `census_hand_run` derives the scratch-fed
+sections (two more, 20 in all). Proven on a forced red through a scratch
+copy of milestone2: nine of nine mac sections ok or honestly skipped, the
+leg log carrying the step-failed line, the window census naming the
+frontmost app, both pictures viewed; a green hand run leaves one journal
+record and no bundle; validate-mac ALL PASS twice. Small opens: a hand run
+consumes one of the journal's newest-20 run slots (KAYA_FLIGHTREC_KEEP,
+machine-wide), so twenty hand runs age out a lane run's bundles — raise the
+cap or keep hand runs under their own retention, a ruling; and on a
+relaunch scene the lane refuses act two unless act one published `ACT 1
+OK` while run-leg checks the exit code alone, one line if wanted. — and the same
   runner launched the guest bare where the pool wraps it in `timeout 120`,
   under which an undeclared window opens at another size: align-python
   read as a pre-existing red by three agents (fixed 2026-09-16, check-gates

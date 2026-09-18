@@ -58,10 +58,25 @@ against into target/guest-specs/<lang>.spec, and a run whose staged guest
 carries another spec is refused by name — both hashes, and the panic the
 leg would otherwise die of — rather than started.
 
-A hand run that fails can keep its verb trace: `KAYA_VERB_TRACE=<file>
-tools/run-leg.py <scene> <lang>` appends the harness's attempt-by-attempt
-record to that file on a failure alone (crates/kaya/src/vtrace.rs; the
-lanes collect it into the flight-recorder bundle themselves).
+A HAND RUN THAT GOES RED LEAVES THE LANE'S OWN BUNDLE. run-leg opens a
+flight-recorder run of its own (one run, one leg) and wires the leg
+through the same `MacRecorder.watched_leg` and `mac_leg` the pool calls,
+so a red prints `flightrec: bundle <path>` with every mac section — the
+leg's log, the verb trace, the guest's own window or the desktop, the
+window census, the sampler, the sample, WindowServer's load, the bounded
+unified log — present or carrying a sentence saying what was measured
+instead. Read that first (CLAUDE.md's rule); the leg is also teed to
+`target/run-leg-<scene>-<lang>.log`, which is the bundle's `leg-log`. A
+green run builds no bundle and writes one journal record. The journal
+keeps the newest 20 runs, hand runs included, so a loop of them ages out
+older lane runs.
+
+STEPS OTHER THAN THE SCENE'S: `KAYA_SELFTEST_SCRIPT` in the environment
+is kept over the ones lane.leg_env reads from tools/scenes (the capture
+route, below — a `settle` where the photograph goes, or one expectation
+changed to watch a red), and the run prints that it took them, since a
+leg naming one scene and running another's steps is the trap that env
+per leg exists for.
 
 ## Hand tools — how the lanes reach each toolchain, so a hand run does too
 
@@ -105,7 +120,7 @@ afternoon twice, 2026-09-07). The routes:
 | probe GTK without a lane | `docker run --rm -i -v "$PWD":/work kaya-linux:latest bash -c 'xvfb-run -a …'` — python3-gi, Xvfb, weston and ImageMagick are in the image; `convert -trim` cuts a root-window grab to the window |
 | run one Rust guest on a warm emulator | `adb -s emulator-5554 shell am start -W -n dev.kaya.rusthost/.MainActivity --es KAYA_SELFTEST <scene> --es KAYA_SELFTEST_SCRIPT '<steps folded with ;>'`; the pool stays booted between runs THE SINGLE QUOTES AROUND THE FOLDED SCRIPT ARE LOAD-BEARING: the device shell reads each `;` as a command separator without them (`shlex.quote` the script). |
 | run one leg on the VM | `tools/deploy-win.py akhil@192.168.64.2 <leg>` (per-leg names are the grammar; `python` is the milestone2 python leg, not the python suite) |
-| hold a scene still for a capture | give the guest its own steps through `KAYA_SELFTEST_SCRIPT` (the mac lane sets it from tools/scenes in `lanes.mac.leg_env`, so build that env and replace the one key) with `settle 9000` where the photograph goes; the tree stays untouched |
+| hold a scene still for a capture | give the guest its own steps through `KAYA_SELFTEST_SCRIPT` (the mac lane sets it from tools/scenes in `lanes.mac.leg_env`, so build that env and replace the one key) with `settle 9000` where the photograph goes; the tree stays untouched. On the mac, `KAYA_SELFTEST_SCRIPT="$(cat <yours>)" tools/run-leg.py <scene> <lang>` keeps yours over the scene's and prints that it did |
 | read a failed leg | the flight recorder's bundle first: `~/.local/state/kaya/flightrec/runs/<run>/bundles/<lane>-<leg>/` — the leg log, the verb trace, a PICTURE of what the user would have seen, and each lane's own sections, every one present or carrying a sentence saying what was measured instead; the leg's log prints them all with their sizes. The table is in "The flight recorder's bundle, lane by lane" below |
 
 ## The regeneration workflow (any spec.rs change)

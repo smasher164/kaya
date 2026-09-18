@@ -292,7 +292,15 @@ in docs/deferred.md.
    (docs/measurements/gate-sweep-2026-09-07.md). It holds the runner and environment probe to the
    same four-phone pool; its self-tests watch lane count, pool width,
    concurrent platform launch, pid provenance, single-sweep shape and
-   niceness red),
+   niceness red. AND THE HAND RUN AND THE LANE LAUNCH A LEG THROUGH ONE
+   WIRING since 2026-09-18: tools/run-leg.py and validate-mac's pool both
+   run their leg through the MacRecorder method that wraps it in the
+   pool's `timeout 120` (also the sampler's pid anchor) and samples it,
+   the method found BY ITS BODY so a rename moves both callers, neither
+   runner spelling its own launch; and the hand run opens a recorder,
+   collects through mac_leg and flushes, because a red found by hand had
+   no bundle to read at all — the rung-4 rule with nothing behind it on
+   the inner loop. Four more watched negatives, counts printed),
    `tools/check-ledger.py` (docs/deferred.md may not disagree with
    itself: an UNSTRUCK headline over an entry that records a terminal
    resolution, or a STRUCK one with no resolution note. Two entries
@@ -689,7 +697,13 @@ in docs/deferred.md.
    gate holds the sampler's own file names against the names the collect
    cuts — the windows verb-trace rule one lane over — plus the sampler
    being STARTED by the runner, STOPPED by its EXIT trap, and its own
-   self-test run before the first leg. Eighteen watched negatives, counts
+   self-test run before the first leg. AND THE HAND RUN'S OWN BUNDLE SINCE
+   2026-09-18: tools/run-leg.py collects through the SAME MacRecorder the
+   lane does, so the mac row's sections are a hand red's sections too —
+   and the sections adopted out of the leg's SCRATCH (the sampler's
+   lines, its `sample`, the verb trace) are held to the launch wiring
+   that fills it, since a hand run launching its own guest keeps the
+   bundle and loses exactly those. Twenty watched negatives, counts
    printed),
    `tools/check-diagnostics.py` (a why-not may not print a sentence it
    cannot NOT print. Any function named `*WhyNot`/`*why_not`/`*Reason`

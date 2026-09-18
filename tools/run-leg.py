@@ -23,9 +23,15 @@ dev_shell_or_die()
 #
 #   tools/run-leg.py <scene> <lang> [--build] [--appearance dark]
 
+import atexit
 import os
+import shutil
+import signal
 import subprocess
+import tempfile
+import time
 
+import flightrec_lane
 from lanes import mac as lane
 
 args = [a for a in sys.argv[1:] if not a.startswith("--")]
@@ -106,6 +112,17 @@ if lang == "rust":
 argv = lane.leg_argv(scene, lang, lambda name: lane.hs_bin(ROOT, name))
 env = dict(os.environ)
 env.update(lane.leg_env(ROOT, scene, lang, appearance))
+# THE SCENE OVERRIDE (docs/HACKING.md, "hold a scene still for a
+# capture"): steps handed in through the environment are KEPT over the
+# ones lane.leg_env read from tools/scenes, and the run says which it
+# ran — a persisting export otherwise runs another scene's steps in
+# silence, which is the trap leg_env exists for.
+_override = os.environ.get("KAYA_SELFTEST_SCRIPT", "")
+if _override and _override != env["KAYA_SELFTEST_SCRIPT"]:
+    env["KAYA_SELFTEST_SCRIPT"] = _override
+    print(f"run-leg: the steps come from KAYA_SELFTEST_SCRIPT in this "
+          f"environment ({len(_override.splitlines())} lines), NOT from "
+          f"tools/scenes/{scene}.steps", flush=True)
 # THE SECOND ACT, the lane's way (docs/tasks-s9-plan.md R6a): a scene with
 # a `relaunch` ends act one at it, and the lane's door is the carve-out.
 # tools/lib/lanes/mac.py's own functions, so a hand run and the lane push
@@ -113,29 +130,38 @@ env.update(lane.leg_env(ROOT, scene, lang, appearance))
 second = scene in lane.RELAUNCH_DOOR
 if second:
     lane.clear_act2(ROOT, env)
-# THE POOL'S OWN LAUNCH: validate-mac runs every leg under `timeout 120`, and
-# a guest launched bare opens its undeclared window at another size
-# (docs/traps.md, "A guest launched without the pool's timeout wrapper").
-argv = ["timeout", "120", *argv]
-print(f"run-leg: {scene}-{lang}: {' '.join(argv)}", flush=True)
+
+# THE FLIGHT RECORDER, THE LANE'S OWN (CLAUDE.md: a red leg is read from
+# the recorder first): one run, one leg, through the same
+# MacRecorder.watched_leg and mac_leg tools/validate-mac.py's pool calls,
+# so a red found by hand leaves the bundle a red under the lane leaves
+# (docs/deferred.md's hand-run entry; tools/check-gates.py's hand-run
+# clause and tools/check-flightrec.py's hand-run census hold the two
+# together).
+FR = flightrec_lane.MacRecorder(ROOT)
+SCRATCH = pathlib.Path(tempfile.mkdtemp())
+name = lane.leg_name(scene, lang) + ("-" + appearance if appearance else "")
+
+
+def kaya_teardown():
+    FR.flush()
+    shutil.rmtree(SCRATCH, ignore_errors=True)
+
+
+atexit.register(kaya_teardown)
+signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
+signal.signal(signal.SIGINT, lambda *_: sys.exit(130))
+
+print(f"run-leg: {scene}-{lang}: timeout 120 {' '.join(argv)}", flush=True)
+# TEED, ALWAYS: the terminal watches it live and the bundle's `leg-log`
+# section is the file — and the link door reads act one's own
+# `KAYA_RELAUNCH:` line back out of it, as the lane does.
 log = ROOT / f"target/run-leg-{scene}-{lang}.log"
-if second:
-    # ACT ONE'S OUTPUT ON DISK AS WELL AS ON SCREEN: the link door reads
-    # the URL off act one's own `KAYA_RELAUNCH:` line (the lane does the
-    # same), and a hand run must push the door the lane pushes.
-    log.parent.mkdir(parents=True, exist_ok=True)
-    with open(log, "w", encoding="utf-8", errors="replace") as lf:
-        proc = subprocess.Popen(argv, cwd=ROOT, env=env,
-                                stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT, text=True,
-                                encoding="utf-8", errors="replace")
-        for line in proc.stdout:
-            sys.stdout.write(line)
-            sys.stdout.flush()
-            lf.write(line)
-        rc = proc.wait()
-else:
-    rc = subprocess.run(argv, cwd=ROOT, env=env).returncode
+log.parent.mkdir(parents=True, exist_ok=True)
+t0 = time.monotonic()
+with open(log, "w", encoding="utf-8", errors="replace") as lf:
+    rc = FR.watched_leg(SCRATCH / name, argv, env, lf, cwd=ROOT,
+                        echo=sys.stdout)
 if second:
     if rc != 0:
         print(f"run-leg: act one exited {rc}; the door was not pushed",
@@ -147,5 +173,13 @@ if second:
         rc = lane.second_act(ROOT, scene, argv, env, log)
         sys.stdout.write(
             log.read_text(encoding="utf-8", errors="replace")[before:])
+if rc != 0:
+    # AT THE MOMENT OF THE RED, as the lane prints it: a leg driving the
+    # platform's own input dies with every press swallowed when something
+    # else holds the foreground (docs/deferred.md, the swallowed-press
+    # entry).
+    print(f"run-leg: {flightrec_lane.mac_frontmost(ROOT)}", flush=True)
+FR.mac_leg(name, "PASS" if rc == 0 else "FAIL",
+           int(time.monotonic() - t0), log, SCRATCH / name)
 print(f"run-leg: exit {rc}")
 sys.exit(rc)

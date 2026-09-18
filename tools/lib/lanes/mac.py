@@ -745,6 +745,11 @@ def second_act(root, scene, argv, env, log, launch=None):
             notification = RELAUNCH_NOTIFICATION[scene]
             lf.write(f"== act two: {door} notification {notification} ==\n")
             act2_env["KAYA_LAUNCH_NOTIFICATION"] = str(notification)
+        # FLUSHED BEFORE THE CHILD WRITES THROUGH THE SAME fd, as the link
+        # door above flushes: unflushed, this marker lands AFTER act two's
+        # own output and the log reads as though act two began at its own
+        # verdict (measured in a hand run's log, 2026-09-18).
+        lf.flush()
         # RECORDING MODE GIVES THE SECOND PROCESS ITS OWN TILE (P6): the
         # runner hands a launcher that registers the relaunched pid with
         # the suite recorder before it waits, so the film covers act one,

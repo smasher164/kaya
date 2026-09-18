@@ -18,6 +18,7 @@ dev_shell_or_die()
 # runner and probe agreeing on the four-phone pool). CLAUDE.md alone,
 # not AGENTS.md: check-mirror.py holds those two level.
 
+import ast
 import json
 import re
 import subprocess
@@ -323,15 +324,118 @@ flightrec_lib_text = (root / "tools" / "lib" / "flightrec.sh").read_text(
     encoding="utf-8")
 flightrec_pylib_text = (root / "tools" / "lib" / "flightrec_lane.py"
                         ).read_text(encoding="utf-8")
-def hand_run_problem(text):
-    """tools/run-leg.py launches a leg the way validate-mac's pool does,
-    under `timeout 120`: a guest launched bare opens its undeclared window
-    at another size and a width premise fails by hand alone (docs/traps.md,
-    "A guest launched without the pool's timeout wrapper")."""
-    if 'argv = ["timeout", "120", *argv]' not in text:
-        return ("tools/run-leg.py must launch the leg under the pool's own "
-                "`timeout 120` wrapper")
+def wiring_method(pylib):
+    """The MacRecorder method that launches a leg the way the recorder can
+    read it: the one whose body holds BOTH the pool's `timeout 120`
+    wrapper and the per-leg sampler. Read by name out of the library, so a
+    rename moves both runners with it instead of going quiet."""
+    lines = pylib.splitlines(keepends=True)
+    for node in ast.walk(ast.parse(pylib)):
+        if not isinstance(node, ast.ClassDef) or node.name != "MacRecorder":
+            continue
+        for fn in node.body:
+            if not isinstance(fn, ast.FunctionDef):
+                continue
+            body = "".join(lines[fn.lineno - 1:fn.end_lineno])
+            if '"timeout", "120"' in body and "sampler_start(" in body:
+                return fn.name
     return None
+
+
+def recorder_calls(text):
+    """Every method called ON THE RECORDER a runner opened, or None when
+    it opens none. Read off the variable a `MacRecorder(...)` was
+    assigned to: a bare `.flush(` on any object would otherwise satisfy
+    the clause while the journal never got the record."""
+    tree = ast.parse(text)
+    held = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign) \
+                or not isinstance(node.value, ast.Call):
+            continue
+        func = node.value.func
+        if getattr(func, "attr", "") == "MacRecorder" \
+                or getattr(func, "id", "") == "MacRecorder":
+            held.update(t.id for t in node.targets
+                        if isinstance(t, ast.Name))
+    if not held:
+        return None
+    return {node.func.attr for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id in held}
+
+
+def override_says_so(hand):
+    """A hand run that takes its steps from KAYA_SELFTEST_SCRIPT must say
+    it did: it would otherwise name a scene it never ran, which is the
+    trap lanes.mac.leg_env's per-leg env exists for."""
+    lines = hand.splitlines(keepends=True)
+    for node in ast.walk(ast.parse(hand)):
+        if not isinstance(node, ast.If):
+            continue
+        block = "".join(lines[node.lineno - 1:node.end_lineno])
+        if 'env["KAYA_SELFTEST_SCRIPT"] =' in block and "print(" in block:
+            return True
+    return False
+
+
+def hand_run_problems(hand, mac, pylib):
+    """ONE WIRING FOR THE HAND RUN AND THE LANE. tools/run-leg.py runs one
+    mac leg the way tools/validate-mac.py's pool runs it — under
+    `timeout 120`, because a guest launched bare opens its undeclared
+    window at another size (docs/traps.md, "A guest launched without the
+    pool's timeout wrapper") — and through the same flight recorder,
+    because a red is read from its bundle first (CLAUDE.md) and a hand red
+    left nothing to read until 2026-09-18 (docs/deferred.md's hand-run
+    entry). Both are one call now: tools/lib/flightrec_lane.py's
+    MacRecorder wiring, which neither runner may spell for itself."""
+    problems = []
+    wiring = wiring_method(pylib)
+    if wiring is None:
+        return ["tools/lib/flightrec_lane.py: MacRecorder has no method "
+                "that launches a leg under `timeout 120` with its own "
+                "sampler running — that one wiring is what the lane's pool "
+                "and the hand run share, and without it each spells its "
+                "own launch again"]
+    for rel, text in (("tools/run-leg.py", hand),
+                      ("tools/validate-mac.py", mac)):
+        calls = recorder_calls(text)
+        if calls is None:
+            problems.append(
+                f"{rel} constructs no flightrec_lane.MacRecorder — it opens "
+                f"no flight-recorder run at all, so its legs are journaled "
+                f"nowhere and a red keeps nothing")
+            continue
+        if wiring not in calls:
+            problems.append(
+                f"{rel} does not run its leg through "
+                f"MacRecorder.{wiring} — the leg then launches bare (an "
+                f"undeclared window at another size) or with no sampler, "
+                f"verb trace or bundle behind it")
+        if '"timeout", "120"' in text:
+            problems.append(
+                f"{rel} spells its own `timeout 120` leg launch — the "
+                f"wrapper is MacRecorder.{wiring}'s, because it is also "
+                f"the sampler's pid anchor, and a second copy is how the "
+                f"two paths drift")
+        for method, why in (
+                ("mac_leg", "journals no leg and collects no bundle — that "
+                            "is the one collect entry every mac leg path "
+                            "calls"),
+                ("flush", "never writes its spooled records to the "
+                          "journal")):
+            if method not in calls:
+                problems.append(f"{rel} {why} (no .{method}() on the "
+                                f"recorder it opened)")
+    if not override_says_so(hand):
+        problems.append(
+            "tools/run-leg.py takes steps from KAYA_SELFTEST_SCRIPT "
+            "without printing that it did — a hand run that names one "
+            "scene and runs another's steps is a diagnostic that cannot "
+            "discriminate (invariant 3)")
+    return problems
 
 
 matrix_text = (root / "tools" / "validate-all.py").read_text(encoding="utf-8")
@@ -651,8 +755,7 @@ if problem is not None:
 problem = ios_pool_problem(ios_text, probe_text)
 if problem is not None:
     fail(problem)
-problem = hand_run_problem(run_leg_text)
-if problem is not None:
+for problem in hand_run_problems(run_leg_text, mac_text, flightrec_pylib_text):
     fail(problem)
 for problem in lane_contract_problems(lane_texts, flightrec_lib_text,
                                       flightrec_pylib_text):
@@ -723,16 +826,106 @@ else:
                  for x in problems):
         fail("self-test N17 failed for another reason: " + "; ".join(problems))
 
-# N18 — the hand runner launching bare must be named.
-doctored, n = re.subn(r'(?m)^argv = \["timeout", "120", \*argv\]\n', "",
-                      run_leg_text, count=1)
-print(f"check-gates: self-test N18 removed the hand runner's timeout wrapper, "
+# N18 — the hand runner launching itself must be named: bare (an
+# undeclared window at another size) AND with no recorder behind it,
+# which is the state a hand red was in until 2026-09-18.
+doctored, n = re.subn(
+    r"rc = FR\.watched_leg\(SCRATCH / name, argv, env, lf, cwd=ROOT,\n"
+    r"\s+echo=sys\.stdout\)",
+    "rc = subprocess.run(argv, cwd=ROOT, env=env).returncode",
+    run_leg_text, count=1)
+print(f"check-gates: self-test N18 unwired the hand run's recorder, "
       f"{n} substitution(s)")
 if n != 1:
-    fail("self-test N18 did not remove exactly one wrapper line — the "
+    fail("self-test N18 did not replace exactly one launch — the hand-run "
+         "clause is not reading tools/run-leg.py")
+else:
+    problems = hand_run_problems(doctored, mac_text, flightrec_pylib_text)
+    if not problems:
+        fail("self-test N18: a hand runner launching its own leg passed")
+    elif not any("run-leg" in x and "watched_leg" in x for x in problems):
+        fail("self-test N18 failed for another reason: " + "; ".join(problems))
+
+# N19 — the lane's pool spelling the launch for itself again, beside the
+# wiring: two copies of one shape is how the hand run drifted off it.
+doctored, n = re.subn(
+    r"return FR\.watched_leg\(scratch, argv, leg_env, lf\)",
+    'proc = subprocess.Popen(["timeout", "120", *argv], env=leg_env,\n'
+    "                                    stdout=lf, stderr=lf)\n"
+    "            return proc.wait()",
+    mac_text, count=1)
+print(f"check-gates: self-test N19 re-inlined the pool's own leg launch, "
+      f"{n} substitution(s)")
+if n != 1:
+    fail("self-test N19 did not replace exactly one pooled launch — the "
+         "hand-run clause is not reading tools/validate-mac.py")
+else:
+    problems = hand_run_problems(run_leg_text, doctored, flightrec_pylib_text)
+    if not any("validate-mac" in x and "timeout 120" in x for x in problems):
+        fail("self-test N19: a runner spelling its own `timeout 120` leg "
+             "launch passed: " + ("; ".join(problems) or "no finding"))
+
+# N20 — the hand run taking its steps from the environment in silence.
+doctored, n = re.subn(
+    r'    print\(f"run-leg: the steps come from KAYA_SELFTEST_SCRIPT in this "\n'
+    r'[^\n]*\n[^\n]*\n',
+    "", run_leg_text, count=1)
+print(f"check-gates: self-test N20 silenced the hand run's scene override, "
+      f"{n} substitution(s)")
+if n != 1:
+    fail("self-test N20 did not remove exactly one override sentence — the "
          "hand-run clause is not reading tools/run-leg.py")
-elif hand_run_problem(doctored) is None:
-    fail("self-test N18: a hand runner launching bare passed")
+else:
+    problems = hand_run_problems(doctored, mac_text, flightrec_pylib_text)
+    if not any("KAYA_SELFTEST_SCRIPT" in x for x in problems):
+        fail("self-test N20: a hand run that swaps the scene's steps in "
+             "silence passed: " + ("; ".join(problems) or "no finding"))
+
+# N21 — the wrapper gone from the one wiring, which is where the
+# bare-launch trap now lives for both runners (docs/traps.md).
+doctored, n = re.subn(r'\["timeout", "120", \*argv\], cwd=cwd, env=env,',
+                      "argv, cwd=cwd, env=env,", flightrec_pylib_text,
+                      count=1)
+print(f"check-gates: self-test N21 removed the wiring's timeout wrapper, "
+      f"{n} substitution(s)")
+if n != 1:
+    fail("self-test N21 did not remove exactly one wrapper — the hand-run "
+         "clause is not reading tools/lib/flightrec_lane.py")
+else:
+    problems = hand_run_problems(run_leg_text, mac_text, doctored)
+    if not any("under `timeout 120`" in x for x in problems):
+        fail("self-test N21: a wiring that launches the guest bare passed: "
+             + ("; ".join(problems) or "no finding"))
+
+# N22 — the hand run opening no recorder at all, which is the state a
+# hand red was in before this: every other clause reads the recorder it
+# opened, so this branch is the one that must still speak.
+doctored, n = re.subn(r"FR = flightrec_lane\.MacRecorder\(ROOT\)",
+                      "FR = None", run_leg_text, count=1)
+print(f"check-gates: self-test N22 took the recorder out of the hand run, "
+      f"{n} substitution(s)")
+if n != 1:
+    fail("self-test N22 did not remove exactly one recorder — the hand-run "
+         "clause is not reading tools/run-leg.py")
+else:
+    problems = hand_run_problems(doctored, mac_text, flightrec_pylib_text)
+    if not any("constructs no" in x for x in problems):
+        fail("self-test N22: a hand run with no flight-recorder run passed: "
+             + ("; ".join(problems) or "no finding"))
+
+# N23 — the records spooled and never flushed: the bundle is on disk and
+# the journal never learns the leg ran.
+doctored, n = re.subn(r"    FR\.flush\(\)\n", "", run_leg_text, count=1)
+print(f"check-gates: self-test N23 dropped the hand run's journal flush, "
+      f"{n} substitution(s)")
+if n != 1:
+    fail("self-test N23 did not remove exactly one flush — the hand-run "
+         "clause is not reading tools/run-leg.py")
+else:
+    problems = hand_run_problems(doctored, mac_text, flightrec_pylib_text)
+    if not any("spooled records" in x for x in problems):
+        fail("self-test N23: a hand run that journals nothing passed: "
+             + ("; ".join(problems) or "no finding"))
 
 # The driver's own arithmetic: an under-run, a failing gate and a
 # missing script must each come back red, watched on every run.

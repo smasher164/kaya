@@ -56,6 +56,7 @@ STEPS = "tools/check-steps.py"
 WINUI = "crates/kaya/src/winui/mod.rs"
 GUEST_PS1 = "tools/guest/flightrec.ps1"
 FOCUS_RING = "tools/linux/focus-ring.py"
+HAND = "tools/run-leg.py"
 
 # The recorder class whose body IS each python lane's collect path.
 RECORDERS = {"mac": "MacRecorder", "windows": "WinRecorder",
@@ -68,7 +69,7 @@ UNIVERSAL = ("leg-log", "verb-trace", "shot")
 def sources():
     return {rel: gate.read(rel) for rel in
             (LANE_PY, LANE_SH, LINUX, IOS, ANDROID, WIN,
-             STEPS, WINUI, GUEST_PS1, FOCUS_RING)}
+             STEPS, WINUI, GUEST_PS1, FOCUS_RING, HAND)}
 
 
 def py_block(text, name):
@@ -497,6 +498,57 @@ def census_focus_ring(src):
             f"lines from the previous leg's, and nothing else watches it")
     return found
 
+# -------------------------------------------------------------------- 10
+
+def census_hand_run(src):
+    """A RED FOUND BY HAND LEAVES THE LANE'S OWN BUNDLE (CLAUDE.md's
+    flight-recorder rule; docs/deferred.md's hand-run entry, where a hand
+    red could only be re-run). tools/run-leg.py runs ONE mac leg and
+    reaches the recorder through MacRecorder's own entry points — never a
+    second collect of its own — so the mac row's sections ARE the hand
+    run's sections and clause 2 above answers for both. The half that
+    reading the recorder alone cannot see: the sections adopted out of the
+    leg's SCRATCH are filled by the launch wiring, so a hand run that
+    launches its own guest keeps a bundle and loses exactly those."""
+    found = []
+    text = src[HAND]
+    cls = RECORDERS["mac"]
+    if f"{cls}(" not in text or ".mac_leg(" not in text:
+        return [f"{HAND} does not collect through {cls}.mac_leg — a leg "
+                f"that fails by hand then leaves no bundle at all, which "
+                f"is the state docs/deferred.md's hand-run entry recorded"]
+    fed = sorted(set(re.findall(r'self\.adopt\(bundle, "([\w-]+)", scratch',
+                                py_block(src[LANE_PY], "_capture"))))
+    if not fed:
+        return [f"{LANE_PY}: MacRecorder._capture adopts no section out of "
+                f"the leg's scratch — this clause reads that list to know "
+                f"which sections the launch wiring answers for"]
+    wiring = ""
+    lines = src[LANE_PY].splitlines(keepends=True)
+    for node in ast.walk(ast.parse(src[LANE_PY])):
+        if not isinstance(node, ast.ClassDef) or node.name != cls:
+            continue
+        for fn in node.body:
+            if not isinstance(fn, ast.FunctionDef):
+                continue
+            body = "".join(lines[fn.lineno - 1:fn.end_lineno])
+            if "KAYA_VERB_TRACE" in body and "sampler_start(" in body:
+                wiring = fn.name
+    if not wiring:
+        found.append(
+            f"{LANE_PY}: no {cls} method fills a leg's scratch (the verb "
+            f"trace's path in the leg's environment, the sampler over its "
+            f"process), so sections {', '.join(fed)} have no one wiring "
+            f"the hand run and the lane can share")
+    elif f".{wiring}(" not in text:
+        found.append(
+            f"{HAND} does not launch its leg through {cls}.{wiring}, so "
+            f"nothing fills the scratch: sections {', '.join(fed)} carry "
+            f"finish()'s marker on every hand red while the lane's bundle "
+            f"for the same leg carries them")
+    return found
+
+
 # ---------------------------------------------------------------- run it
 
 REAL = sources()
@@ -506,7 +558,8 @@ CENSUSES = (("sections", census_sections), ("skip writers", census_skips),
             ("windows toast files", census_toast_files),
             ("windows collect freshness", census_collect_fresh),
             ("guest clock", census_guest_clock),
-            ("linux focus ring", census_focus_ring))
+            ("linux focus ring", census_focus_ring),
+            ("hand run", census_hand_run))
 TABLE = declared(REAL)
 gate.counted("lanes declaring a bundle shape", list(TABLE), floor=5)
 gate.counted("sections declared across the five lanes",
@@ -672,6 +725,22 @@ n18 = doctored(LINUX, r"trap 'flightrec_flush; focus_ring_stop; ",
 gate.negative("N18 a focus sampler the lane never stops",
               lambda: census_focus_ring(n18), want="does not stop the focus sampler")
 
-gate.negatives_ran(18)
+# N19: the hand run launching its own guest — the bundle is still built
+# and the three sections the scratch feeds are silently skips.
+n19 = doctored(HAND, r"rc = FR\.watched_leg\(SCRATCH / name, argv, env, lf, "
+                     r"cwd=ROOT,\n\s+echo=sys\.stdout\)",
+               "rc = subprocess.run(argv, cwd=ROOT, env=env).returncode",
+               "N19 unwired the hand run's launch")
+gate.negative("N19 a hand run whose bundle loses every sampled section",
+              lambda: census_hand_run(n19), want="nothing fills the scratch")
+
+# N20: the hand run keeping no bundle at all — the state a hand red was
+# in until 2026-09-18.
+n20 = doctored(HAND, r"FR\.mac_leg\(name, ", "FR.leg(name, ",
+               "N20 took the hand run's collect off mac_leg")
+gate.negative("N20 a hand red that leaves no bundle",
+              lambda: census_hand_run(n20), want="leaves no bundle at all")
+
+gate.negatives_ran(20)
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

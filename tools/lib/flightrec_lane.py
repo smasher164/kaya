@@ -1208,6 +1208,49 @@ class MacRecorder(LaneRecorder):
         stop.set()
         t.join(timeout=10)
 
+    # ---- the one per-leg wiring: the pool's launch AND the hand run's ----
+    def watched_leg(self, scratch, argv, env, log_file, cwd=None, echo=None):
+        """Run one mac leg under this recorder and answer its exit code.
+
+        THE ONE WIRING, called by tools/validate-mac.py's pool and by
+        tools/run-leg.py's hand run, so a red found by hand leaves the
+        same bundle a red under the lane leaves (docs/deferred.md's
+        hand-run entry; tools/check-gates.py's hand-run clause reads this
+        method's name out of this file and demands it in both).
+
+        `timeout 120` is the 120s bound AND the sampler's own pid anchor
+        (the guest is timeout's descendant and nothing else is), so the
+        wrapper is not the caller's to spell — and a guest launched bare
+        opens its undeclared window at another size (docs/traps.md).
+
+        THE VERB TRACE (crates/kaya/src/vtrace.rs and its two interpreter
+        copies): written by the guest on a failure alone, adopted into
+        the bundle by mac_leg, gone with the scratch either way.
+
+        `echo` is a stream the leg's output is teed to line by line — the
+        serial path and the hand run watch it live — and `log_file` keeps
+        it either way, because the bundle's `leg-log` section is that
+        file.
+        """
+        scratch = pathlib.Path(scratch)
+        scratch.mkdir(parents=True, exist_ok=True)
+        env["KAYA_VERB_TRACE"] = str(scratch / "verb-trace.txt")
+        text = ({"text": True, "encoding": "utf-8", "errors": "replace"}
+                if echo else {})
+        proc = subprocess.Popen(
+            ["timeout", "120", *argv], cwd=cwd, env=env,
+            stdout=subprocess.PIPE if echo else log_file,
+            stderr=subprocess.STDOUT if echo else log_file, **text)
+        sampler = self.sampler_start(scratch, proc)
+        if echo:
+            for line in proc.stdout:
+                echo.write(line)
+                echo.flush()
+                log_file.write(line)
+        rc = proc.wait()
+        self.sampler_stop(sampler)
+        return rc
+
     def _text_section(self, bundle, name, text):
         dest = bundle / f"{name}.txt"
         dest.write_text(text, encoding="utf-8")
