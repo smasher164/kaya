@@ -11713,3 +11713,45 @@ feature actually reads
 which deploy-win writes and reads
 back. A per-app notification setting (`Enabled 0`, `ShowBanner 0`)
 governs presentation, not delivery: the row still lands in the database.
+
+## Nothing outside the process takes the foreground from the shell's notification host window, and a cleared notification is still in the database's bytes (2026-09-18)
+
+Measured on the lane's VM while ShellExperienceHost's `Windows.UI.Core.
+CoreWindow` titled "New notification" held the foreground: eleven routes,
+each at 0, 100, 1000 and 3000ms — SetForegroundWindow, AttachThreadInput
+(REFUSED outright, the call answers 0), SwitchToThisWindow, ShowWindow's
+minimize and hide, WM_CLOSE, HWND_BOTTOM, LockSetForegroundWindow,
+AllowSetForegroundWindow, SPI_SETFOREGROUNDLOCKTIMEOUT — and the
+foreground did not move for any of them. Ending the process that owns the
+window hands it over at once, and Windows restarts the host on demand;
+crates/kaya/src/winui/mod.rs's `take_down_notification_host` is that
+route, harness-only and guarded to the window's class AND title. Three
+more facts from the same session: (1) a "is a notification up?" test
+built on wpndatabase.db's bytes cannot work — a row the platform has
+DELETED is still in the file, so three toasts posted and cleared straight
+after read 45s later as a notification 45s old, and the lane's notify
+scene clears its own toast two seconds before notes_rust types; reading
+LIVE rows alone is no better, since the Action Center legitimately holds
+other apps' rows and the banner on screen in the one reproduction was 7.7
+minutes old. (2) A killed ShellExperienceHost leaves its DESTROYED hwnd as
+GetForegroundWindow's answer for minutes (`pid=0 class='' title=''`); a
+foreground read that does not check the window is alive names a window
+that no longer exists. (3) A real banner's host window reads `visible=1
+iconic=0 rect=884,214 396x538 cloaked=0 layered=no style=0x94000000
+exstyle=0x200008` and its UIA walk names the toast's text; the EMPTY one
+walks one element and names none, and its Win32 readings have never been
+taken — the wait prints them now for the next sighting.
+
+## The "New notification" host window comes up only under CPU starvation beside a stack of banners; a quiet VM never shows it (2026-09-18)
+
+Six single-lever recipes on a quiet VM, 25-30s each, never brought the
+window up: killing ShellExperienceHost, restarting explorer, forty
+`reminder` toasts with distinct tags, a toast under a `ShowBanner 0`
+identity, a foreground app window of the probe's own, a toast cleared
+straight after. It came up only with eight CPU spinners running on the
+guest beside a stack of reminder banners — CPU starvation is the
+ingredient every one of the eight matrix reds had and no probe had. The
+banner path on this VM is explorer's `Xaml_WindowedPopupClass` PopupHost,
+which takes nothing; the CoreWindow is the exceptional drawer.
+tools/guest/phantom-probe.ps1 (+ .cmd) is the probe that watched it, and
+the job's tmp/idiom/phantom holds the spinner generator and the runner.

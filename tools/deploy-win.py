@@ -115,6 +115,11 @@ if len(sys.argv) < 2:
 HOST = sys.argv[1]
 PROVISION = False
 SUITE = "all"
+# SEVERAL LEGS, IN THE ORDER GIVEN, through the funnel the lane uses: a
+# class that only fires when one leg follows another cannot be reproduced
+# one deploy at a time (docs/deferred.md, the phantom notification window —
+# the recipe is a notification leg and then notes_rust).
+LEGS = []
 PHASES = ("caption-centre", "enable-dumps", "crash-report", "analyze-dump")
 for arg in sys.argv[2:]:
     if arg == "--provision":
@@ -124,6 +129,7 @@ for arg in sys.argv[2:]:
     elif arg in lane.legs():
         # EVERY LEG CAN BE RUN ON ITS OWN: the roster is the argument
         # grammar.
+        LEGS.append(arg)
         SUITE = arg
     else:
         print(f"unknown argument: {arg}", file=sys.stderr)
@@ -1065,6 +1071,7 @@ def deploy_artifacts():
                ROOT / "tools/guest/notify-ready.ps1",
                ROOT / "tools/guest/dismiss-toasts.ps1",
                ROOT / "tools/guest/toast-probe.ps1",
+               ROOT / "tools/guest/phantom-probe.ps1",
                ROOT / "tools/guest/dnd-witness.ps1"])
 
 
@@ -1450,7 +1457,7 @@ def go_warm():
     print("== go warm (dev.kaya/guests/go/cmd built once, alone) ==")
 
 
-if SUITE == "all" or SUITE.endswith("_go") or SUITE == "go":
+if SUITE == "all" or any(leg.endswith("_go") or leg == "go" for leg in LEGS):
     go_warm()
 timing("go-warm")
 
@@ -1827,7 +1834,7 @@ def package_rust_guests():
         sys.exit(1)
 
 
-if SUITE == "all" or SUITE in lane.PACKAGED_LEGS:
+if SUITE == "all" or any(leg in lane.PACKAGED_LEGS for leg in LEGS):
     package_rust_guests()
 timing("package")
 
@@ -2425,7 +2432,8 @@ elif SUITE == "analyze-dump":
                              "ANALYZEDONE"):
         status = 1
 else:
-    run_suite(SUITE)
+    for leg in LEGS:
+        run_suite(leg)
 drain_suites()
 timing("suites")
 if not rec_suite_stop():

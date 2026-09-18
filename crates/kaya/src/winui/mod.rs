@@ -15642,6 +15642,34 @@ unsafe extern "system" {
     /// This module's own base, for the sampler window's class.
     #[cfg(feature = "harness")]
     fn GetModuleHandleW(name: *const u16) -> isize;
+    /// NOW, on the notification database's own clock: `ArrivalTime` is a
+    /// FILETIME, so the phantom's reading compares like with like and
+    /// converts nothing (docs/deferred.md, the phantom notification window).
+    /// `*mut u64` rather than a FILETIME pair — the callee writes 8 bytes
+    /// and a u64 is more aligned than the struct, never less.
+    #[cfg(feature = "harness")]
+    fn GetSystemTimeAsFileTime(out: *mut u64);
+    /// THE LAST RESORT AGAINST THE NOTIFICATION HOST WINDOW, and the only
+    /// route measured taking the foreground from it (docs/deferred.md, the
+    /// phantom notification window).
+    #[cfg(feature = "harness")]
+    fn OpenProcess(access: u32, inherit: i32, pid: u32) -> *mut c_void;
+    /// `*mut c_void`, because crates/kaya/src/lib.rs's exit_hard declares
+    /// this one too and two extern declarations of one symbol must agree.
+    #[cfg(feature = "harness")]
+    fn TerminateProcess(process: *mut c_void, code: u32) -> i32;
+    #[cfg(feature = "harness")]
+    fn CloseHandle(handle: *mut c_void) -> i32;
+}
+
+// DWM's own answer to "is this window drawn at all?". The shell's empty
+// notification host window and a real banner present the same class and
+// title, so the wait reads everything it can (docs/deferred.md, the phantom
+// notification window).
+#[cfg(feature = "harness")]
+#[link(name = "dwmapi")]
+unsafe extern "system" {
+    fn DwmGetWindowAttribute(hwnd: isize, attr: u32, value: *mut c_void, size: u32) -> i32;
 }
 
 #[link(name = "ole32")]
@@ -16558,6 +16586,29 @@ unsafe extern "system" {
     // so menu legs run serially).
     fn SetForegroundWindow(hwnd: isize) -> i32;
     fn GetForegroundWindow() -> isize;
+    /// THE PHANTOM'S READING AND THE DANCE'S ATTACH ROUTE (docs/deferred.md,
+    /// the phantom notification window): what the foreground holder IS, and
+    /// the foreground-lock bypass that wins against it. Declared one by one
+    /// here for the reason the gone-check's three are.
+    #[cfg(feature = "harness")]
+    fn IsIconic(hwnd: isize) -> i32;
+    #[cfg(feature = "harness")]
+    fn GetLayeredWindowAttributes(
+        hwnd: isize,
+        key: *mut u32,
+        alpha: *mut u8,
+        flags: *mut u32,
+    ) -> i32;
+    #[cfg(feature = "harness")]
+    fn GetWindowLongPtrW(hwnd: isize, index: i32) -> isize;
+    #[cfg(feature = "harness")]
+    fn GetWindowThreadProcessId(hwnd: isize, pid: *mut u32) -> u32;
+    #[cfg(feature = "harness")]
+    fn AttachThreadInput(attach: u32, attach_to: u32, join: i32) -> i32;
+    #[cfg(feature = "harness")]
+    fn BringWindowToTop(hwnd: isize) -> i32;
+    #[cfg(feature = "harness")]
+    fn SetFocus(hwnd: isize) -> isize;
     /// The clipboard-change signal Paste's enablement follows
     /// (WM_CLIPBOARDUPDATE to every registered listener).
     fn AddClipboardFormatListener(hwnd: isize) -> i32;
@@ -17260,6 +17311,13 @@ fn flush_before_hop() {
 // guest's own wait (tools/lib/flightrec_lane.py; docs/traps.md, the toast
 // moment entry, holds the measured facts each helper below leans on).
 
+/// How far back the phantom's database reading looks. Wide enough to carry
+/// a banner the platform has kept up (25s is `duration="long"`) and the
+/// minutes a stalled lane can put between a notification leg and the typing
+/// one; narrow enough that a chance 8-byte match is negligible.
+#[cfg(feature = "harness")]
+const PHANTOM_HORIZON_MS: u64 = 3_600_000;
+
 /// The notification database copied whole, WITH its WAL under sqlite's
 /// own name for it: the newest rows are the WAL's (docs/traps.md).
 #[cfg(feature = "harness")]
@@ -17412,20 +17470,139 @@ impl WinUiStage {
     /// class+title pair the sampler read (foreground.txt in the leg's
     /// bundle): ShellExperienceHost's `Windows.UI.Core.CoreWindow` titled
     /// "New notification".
-    fn foreground_is_toast() -> bool {
+    fn foreground_toast() -> Option<isize> {
         let fg = unsafe { GetForegroundWindow() };
         if fg == 0 {
-            return false;
+            return None;
         }
         let mut class = [0u16; 128];
         let n = unsafe { GetClassNameW(fg, class.as_mut_ptr(), class.len() as i32) };
         let class = String::from_utf16_lossy(&class[..n.max(0) as usize]);
         if class != "Windows.UI.Core.CoreWindow" {
-            return false;
+            return None;
         }
         let mut title = [0u16; 128];
         let n = unsafe { GetWindowTextW(fg, title.as_mut_ptr(), title.len() as i32) };
-        String::from_utf16_lossy(&title[..n.max(0) as usize]) == "New notification"
+        (String::from_utf16_lossy(&title[..n.max(0) as usize]) == "New notification").then_some(fg)
+    }
+
+    /// WHAT THE FOREGROUND HOLDER IS, measured rather than named: the
+    /// empty host window this wait meets in a notification leg's wake and
+    /// a real banner present the SAME class and title, so every candidate
+    /// reading is taken and printed (docs/deferred.md, the phantom entry).
+    fn toast_window_reading(fg: isize) -> String {
+        const GWL_STYLE: i32 = -16;
+        const GWL_EXSTYLE: i32 = -20;
+        const DWMWA_CLOAKED: u32 = 14;
+        let mut rect = Rect::default();
+        let mut cloaked = 0u32;
+        let (mut key, mut alpha, mut flags) = (0u32, 0u8, 0u32);
+        // SAFETY: six reads of one window handle, each into a local.
+        let (visible, iconic, got_rect, cloak_hr, layered, style, exstyle) = unsafe {
+            (
+                IsWindowVisible(fg),
+                IsIconic(fg),
+                GetWindowRect(fg, &mut rect),
+                DwmGetWindowAttribute(
+                    fg,
+                    DWMWA_CLOAKED,
+                    std::ptr::from_mut(&mut cloaked).cast(),
+                    4,
+                ),
+                GetLayeredWindowAttributes(fg, &mut key, &mut alpha, &mut flags),
+                GetWindowLongPtrW(fg, GWL_STYLE),
+                GetWindowLongPtrW(fg, GWL_EXSTYLE),
+            )
+        };
+        let rect = if got_rect == 0 {
+            "unreadable".to_owned()
+        } else {
+            format!(
+                "{},{} {}x{}",
+                rect.left,
+                rect.top,
+                rect.right - rect.left,
+                rect.bottom - rect.top
+            )
+        };
+        let cloaked = if cloak_hr == 0 {
+            format!("{cloaked}")
+        } else {
+            format!("unreadable(0x{cloak_hr:08x})")
+        };
+        let layered = if layered == 0 {
+            "no".to_owned()
+        } else {
+            format!("alpha={alpha} flags=0x{flags:x}")
+        };
+        format!(
+            "visible={visible} iconic={iconic} rect={rect} cloaked={cloaked} \
+             layered={layered} style=0x{style:x} exstyle=0x{exstyle:x}"
+        )
+    }
+
+    /// THE AGE OF THE NEWEST NOTIFICATION, read out of the platform's own
+    /// database BY BYTES: rusqlite is the EXAMPLES' dependency and libkaya
+    /// links no sqlite (crates/kaya/Cargo.toml). `Notification.ArrivalTime`
+    /// is a FILETIME, which sqlite stores as an 8-byte BIG-ENDIAN integer
+    /// (serial type 6), so a row inside the horizon is an 8-byte big-endian
+    /// value inside it; the horizon is narrow enough that a chance match in
+    /// the ~3MB the database and its WAL hold is ~1 in 150 (3610s of ticks
+    /// against 2^64). THE WAL CARRIES THE NEWEST ROWS (docs/traps.md, the
+    /// toast moment).
+    fn newest_notification_age_ms(horizon_ms: u64) -> Result<Option<u64>, String> {
+        const TICKS_PER_MS: u64 = 10_000;
+        let local = std::env::var_os("LOCALAPPDATA").ok_or_else(|| {
+            "LOCALAPPDATA is unset, so the notification database's directory is unknown".to_owned()
+        })?;
+        let dir = std::path::Path::new(&local).join("Microsoft\\Windows\\Notifications");
+        let mut now = 0u64;
+        // SAFETY: one write of 8 bytes into an aligned local.
+        unsafe { GetSystemTimeAsFileTime(&mut now) };
+        // A row written between this read and the scan is legitimately AHEAD
+        // of `now`, so the window opens a little into the future.
+        let hi = now + 10_000 * TICKS_PER_MS;
+        let lo = now.saturating_sub(horizon_ms * TICKS_PER_MS);
+        let mut newest: Option<u64> = None;
+        let mut read = 0usize;
+        let mut why = Vec::new();
+        for name in ["wpndatabase.db", "wpndatabase.db-wal"] {
+            let path = dir.join(name);
+            match std::fs::read(&path) {
+                Ok(bytes) => {
+                    read += 1;
+                    for window in bytes.windows(8) {
+                        let v = u64::from_be_bytes(window.try_into().unwrap_or([0; 8]));
+                        if v >= lo && v <= hi && newest.is_none_or(|n| v > n) {
+                            newest = Some(v);
+                        }
+                    }
+                }
+                Err(e) => why.push(format!("{name}: {e}")),
+            }
+        }
+        if read == 0 {
+            return Err(why.join("; "));
+        }
+        Ok(newest.map(|v| now.saturating_sub(v) / TICKS_PER_MS))
+    }
+
+    /// BOTH READINGS, for the one sentence the next reader gets. Neither
+    /// decides anything (docs/deferred.md, the phantom notification window:
+    /// the database reading was MEASURED seeing a CLEARED row as fresh, and
+    /// no phantom has yet been caught with the window's own readings beside
+    /// it) — they are here so the next sighting's bundle carries the numbers
+    /// a structural discriminator would need.
+    fn toast_evidence(fg: isize) -> String {
+        let said = match Self::newest_notification_age_ms(PHANTOM_HORIZON_MS) {
+            Ok(Some(ms)) => format!("newest notification row, cleared ones included, {ms}ms ago"),
+            Ok(None) => format!(
+                "no notification row in the last {}s",
+                PHANTOM_HORIZON_MS / 1000
+            ),
+            Err(e) => format!("the notification database would not be read: {e}"),
+        };
+        format!("{said}; {}", Self::toast_window_reading(fg))
     }
 
     /// Both records of the toast, taken the FIRST moment the wait below
@@ -17489,37 +17666,82 @@ impl WinUiStage {
             "kaya: the guest window was not visible 20s after {what} injection \
              was asked for — the scene typed before the window came up"
         );
-        // A NOTIFICATION TOAST HOLDS THE FOREGROUND for its whole display
-        // and blocks SetForegroundWindow the way a menu does: the notes leg
-        // read `foreground=none` and then ShellExperienceHost's "New
-        // notification" CoreWindow in its sampler, three seconds after a
-        // notify leg's toast went up (matrix 19, 2026-09-15). A toast leaves
-        // on its own, so wait it out, bounded, and say so.
-        // 600 x 50ms = 30s outlasts the platform's 25s `duration="long"`.
+        // A NOTIFICATION HOST WINDOW HOLDS THE FOREGROUND and blocks
+        // SetForegroundWindow the way a menu does: ShellExperienceHost's
+        // "New notification" CoreWindow, three seconds after a notify leg's
+        // toast went up (matrix 19, 2026-09-15). It comes up over a BANNER
+        // and it comes up EMPTY, in a notification leg's wake, and the empty
+        // one does not leave — eight reds, the last of them 30s of waiting
+        // against nothing (docs/deferred.md, the phantom notification
+        // window). NOTHING THE GUEST CAN READ TELLS THE TWO APART: the
+        // reading below is taken and printed, and the WINDOW'S OWN BEHAVIOUR
+        // decides — the dance runs from the first turn, and the wait goes on
+        // only while the window keeps the foreground back. 600 x 50ms = 30s
+        // outlasts the platform's 25s `duration="long"`.
         let mut toast_waited = 0usize;
+        let mut rounds = 0usize;
+        let mut took = None;
         for turn in 0..600 {
-            if !Self::foreground_is_toast() {
+            let Some(fg) = Self::foreground_toast() else {
                 break;
-            }
+            };
             if turn == 0 {
                 Self::capture_toast_moment();
+                let sentence = format!(
+                    "kaya: the foreground is a notification host window ({}) — taking it",
+                    Self::toast_evidence(fg)
+                );
+                eprintln!("{sentence}");
+                crate::vtrace::line(&sentence);
+            }
+            rounds += 1;
+            took = Self::take_foreground(hwnd);
+            if took.is_some() {
+                break;
             }
             std::thread::sleep(std::time::Duration::from_millis(50));
             toast_waited += 1;
         }
-        if toast_waited > 0 {
-            eprintln!(
-                "kaya: a notification toast held the foreground for {}ms before {what} injection",
+        if let Some(route) = took {
+            let sentence = format!(
+                "kaya: the guest took the foreground from the notification host window \
+                 on round {rounds} of the wait ({}ms in), by {route}",
                 toast_waited * 50
             );
+            eprintln!("{sentence}");
+            crate::vtrace::line(&sentence);
+        } else if toast_waited > 0 {
+            let sentence = format!(
+                "kaya: a notification host window held the foreground for {}ms against \
+                 {rounds} rounds of SetForegroundWindow and AttachThreadInput, \
+                 before {what} injection — {}",
+                toast_waited * 50,
+                Self::take_down_notification_host()
+            );
+            eprintln!("{sentence}");
+            crate::vtrace::line(&sentence);
         }
         let mut confirmed = false;
+        let mut route = "";
         for attempt in 0..150 {
             if unsafe { GetForegroundWindow() } == hwnd {
                 confirmed = true;
                 break;
             }
-            unsafe { SetForegroundWindow(hwnd) };
+            if let Some(won) = Self::take_foreground(hwnd) {
+                confirmed = true;
+                route = won;
+                break;
+            }
+            if attempt == 100 && Self::foreground_toast().is_some() {
+                // The window came up DURING the dance rather than before it.
+                let sentence = format!(
+                    "kaya: a notification host window took the foreground mid-dance — {}",
+                    Self::take_down_notification_host()
+                );
+                eprintln!("{sentence}");
+                crate::vtrace::line(&sentence);
+            }
             if attempt == 10 {
                 // An ACTIVE MENU categorically blocks SetForegroundWindow —
                 // "no menus are active" is one of the documented
@@ -17542,15 +17764,112 @@ impl WinUiStage {
             }
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
+        if confirmed && !route.is_empty() {
+            let sentence = format!("kaya: the guest window took the foreground by {route}");
+            eprintln!("{sentence}");
+            crate::vtrace::line(&sentence);
+        }
         assert!(
             confirmed,
             "kaya: could not foreground the guest window for {what} \
              injection after 3s (an ACTIVE MENU blocks SetForegroundWindow \
              outright — a Start menu or popup left open on the VM is the \
-             usual cause; ESC and the ALT foreground-lock release were \
-             both tried; a notification toast was waited out for {}ms first)",
+             usual cause; ESC, the ALT foreground-lock release, the \
+             AttachThreadInput bypass and ending the notification host were \
+             all tried; a notification host window held it for {}ms first)",
             toast_waited * 50
         );
+    }
+
+    /// ONE ROUND OF THE DANCE, and the route that won it. Plain
+    /// SetForegroundWindow first, then THE CLASSIC FOREGROUND-LOCK BYPASS the
+    /// dance lacked: a thread ATTACHED to the holder's input queue is allowed
+    /// to set the foreground. Attached and DETACHED around the three calls — a
+    /// thread left attached shares the holder's keyboard state for the life of
+    /// the process. THE SETTLE IS A GUARD, NOT A MEASUREMENT: a win is only a
+    /// win once it is still held 100ms later, since the next thing this verb
+    /// does is put real keystrokes on the system input queue. No holder has
+    /// yet been watched yielding and taking it back (docs/deferred.md, the
+    /// phantom notification window).
+    fn take_foreground(hwnd: isize) -> Option<&'static str> {
+        let settled = |route| {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            (unsafe { GetForegroundWindow() } == hwnd).then_some(route)
+        };
+        unsafe { SetForegroundWindow(hwnd) };
+        if unsafe { GetForegroundWindow() } == hwnd {
+            return settled("SetForegroundWindow");
+        }
+        let fg = unsafe { GetForegroundWindow() };
+        if fg == 0 {
+            return None;
+        }
+        let mut pid = 0u32;
+        let holder = unsafe { GetWindowThreadProcessId(fg, &mut pid) };
+        let mine = unsafe { GetCurrentThreadId() };
+        if holder == 0 || holder == mine {
+            return None;
+        }
+        // SAFETY: attach, three window calls, detach — on this thread, and
+        // the detach runs on every path out of the block.
+        unsafe {
+            if AttachThreadInput(mine, holder, 1) == 0 {
+                return None;
+            }
+            SetForegroundWindow(hwnd);
+            BringWindowToTop(hwnd);
+            SetFocus(hwnd);
+            AttachThreadInput(mine, holder, 0);
+        }
+        if unsafe { GetForegroundWindow() } == hwnd {
+            return settled("AttachThreadInput");
+        }
+        None
+    }
+
+    /// THE ONE ROUTE MEASURED TAKING THE FOREGROUND FROM THE SHELL'S
+    /// NOTIFICATION HOST WINDOW, and the last one tried (docs/deferred.md,
+    /// the phantom notification window; docs/traps.md's toast moment has
+    /// said so since 2026-09-17). Eleven routes were driven against that
+    /// window on the lane's VM while it held the foreground —
+    /// SetForegroundWindow, AttachThreadInput (REFUSED outright: it answers
+    /// 0), SwitchToThisWindow, ShowWindow's minimize and hide, WM_CLOSE,
+    /// HWND_BOTTOM, LockSetForegroundWindow, AllowSetForegroundWindow,
+    /// SPI_SETFOREGROUNDLOCKTIMEOUT — and the foreground did not move for any
+    /// of them, at 0, 100, 1000 and 3000ms. Ending the process that owns the
+    /// window hands it over at once, and Windows restarts the host on demand.
+    /// ONLY against a window whose class AND title are the host's, so the one
+    /// thing this can end is the shell's notification host.
+    fn take_down_notification_host() -> String {
+        const PROCESS_TERMINATE: u32 = 0x0001;
+        let Some(fg) = Self::foreground_toast() else {
+            return "the foreground was no longer a notification host window, so \
+                    nothing was taken down"
+                .to_owned();
+        };
+        let mut pid = 0u32;
+        // SAFETY: one window read into a local.
+        unsafe { GetWindowThreadProcessId(fg, &mut pid) };
+        if pid == 0 {
+            return "the notification host window named no process, so nothing was \
+                    taken down"
+                .to_owned();
+        }
+        // SAFETY: open, terminate, close — the handle is closed on every path.
+        let process = unsafe { OpenProcess(PROCESS_TERMINATE, 0, pid) };
+        if process.is_null() {
+            return format!("the notification host (pid {pid}) would not open for \
+                            termination, so nothing was taken down");
+        }
+        let ended = unsafe { TerminateProcess(process, 1) };
+        unsafe { CloseHandle(process) };
+        if ended == 0 {
+            return format!("the notification host (pid {pid}) refused termination");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        format!("the notification host (pid {pid}) was ended, which is the only \
+                 route measured taking the foreground back from it; Windows \
+                 restarts it on demand")
     }
 
     /// THE UI THREAD WITHOUT THE CORE — for a call that must not be running

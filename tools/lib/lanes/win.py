@@ -160,6 +160,37 @@ def pointer_scenes(scenes_dir):
     return found
 
 
+# THE VERBS THAT MEAN A REAL TOAST WENT UP, and the ONE ordering rule they
+# force: A NOTIFICATION LEG NEVER RUNS IN THE POOL AN EXCLUSIVE LEG'S FUNNEL
+# DRAINS. The shell's notification host window comes up ~2s AFTER a
+# notification is delivered, holds the foreground with nothing in it and
+# refuses SetForegroundWindow for 30s and more (docs/deferred.md, the phantom
+# notification window), and the funnel joins every leg started before it in
+# its block — so a notification raised there is in flight exactly when the
+# typing leg foregrounds. tools/check-exclusive.py holds it.
+NOTIFICATION_VERBS = ("expect_notification", "notification_activate")
+
+
+def notification_scenes(scenes_dir):
+    """Every scene whose script asserts a DELIVERED notification, READ OUT
+    OF THE SCENE SCRIPTS — pointer_scenes' own reason: a hand list is what
+    goes stale the day a scene grows a toast."""
+    found = set()
+    for path in sorted(pathlib.Path(scenes_dir).glob("*.steps")):
+        for line in path.read_text(encoding="utf-8").splitlines():
+            head = line.strip().split(" ")[0] if line.strip() else ""
+            if head in NOTIFICATION_VERBS:
+                found.add(path.stem)
+                break
+    return found
+
+
+def notification_legs(scenes_dir):
+    """Every leg of this lane whose scene posts a notification."""
+    scenes = notification_scenes(scenes_dir)
+    return {leg for leg in legs() if scene_lang(leg)[0] in scenes}
+
+
 def pooled_pointer_legs(scenes_dir):
     """{leg: verb} for every leg that drives the real pointer and is NOT
     alone in its block — the pool may place any of them on a tile that
@@ -230,11 +261,6 @@ ORDER = [
     # canvas.exe under KAYA_APPEARANCE=dark.
     [
      "windowed_rust",
-     # The notification conformance scene (docs/tasks-s3-plan.md N5). POOLED:
-     # the platform keys a notification by the AUMID `Register()` derives from
-     # the EXE, so this leg's history is its own, and a toast banner neither
-     # takes the foreground nor lands where a pooled window is tiled.
-     "notify_rust",
      "canvas_rust",
      "canvasdark_rust",
      "sizepolicy_rust",
@@ -246,6 +272,12 @@ ORDER = [
      "richlabel_rust",
      "richrows_rust",
      "notes_rust",
+     # The notification conformance scene (docs/tasks-s3-plan.md N5). POOLED:
+     # the platform keys a notification by the AUMID `Register()` derives from
+     # the EXE, so this leg's history is its own, and a toast banner neither
+     # takes the foreground nor lands where a pooled window is tiled. AFTER
+     # notes_rust, never before it, by the NOTIFICATION_VERBS rule above.
+     "notify_rust",
      "portfolio_python",
      "varied_python",
      "a11yrows_rust", "a11yrows_python", "a11yrows_js", "a11yrows_go", "a11yrows_csharp", "a11yrows_java",

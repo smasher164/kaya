@@ -3,7 +3,7 @@ import pathlib
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
-from kaya_gate import Gate, dev_shell_or_die
+from kaya_gate import ROOT, Gate, dev_shell_or_die
 
 dev_shell_or_die()
 
@@ -196,7 +196,39 @@ def census(texts, lanes=None):
         if flat not in sh_sentences:
             out.append(f"{EXCLUSIVE_SH}: does not say the python module's {key!r} sentence "
                        f"({flat!r}) — two spellings of one protocol")
-    # 5. THE COORDINATOR HANDS THE DIRECTORY; THE SWEEP YIELDS.
+    # 5. A NOTIFICATION LEG NEVER RUNS IN THE POOL AN EXCLUSIVE FUNNEL
+    # DRAINS. The windows funnel JOINS every leg started before the
+    # exclusive one in its block, and the block before it has just drained
+    # — so a notification delivered there is in flight exactly when the
+    # typing leg foregrounds, and the shell's notification host window
+    # comes up ~2s later holding the foreground with nothing in it
+    # (docs/deferred.md, the phantom notification window).
+    win = lanes.get("windows")
+    if win is not None:
+        notify_legs = win.notification_legs(str(ROOT / "tools/scenes"))
+        if not notify_legs:
+            out.append("tools/lib/lanes/win.py: notification_legs read no leg at all — a census "
+                       "that finds none agrees with every order")
+        blame = ("the exclusive funnel joins it, so its toast is in flight when {leg} "
+                 "foregrounds to type, and the shell's notification host window comes up ~2s "
+                 "later holding the foreground with nothing in it for 30s "
+                 "(docs/deferred.md, the phantom notification window). Move the notification "
+                 "leg after the exclusive one")
+        for at, block in enumerate(win.ORDER):
+            for i, leg in enumerate(block):
+                if leg not in win.EXCLUSIVE:
+                    continue
+                for name in [n for n in block[:i] if n in notify_legs]:
+                    out.append(f"tools/lib/lanes/win.py: {name!r} is pooled before the exclusive "
+                               f"leg {leg!r} in the same block — "
+                               + blame.format(leg=leg))
+                if i:
+                    continue
+                for name in [n for n in win.ORDER[at - 1] if n in notify_legs] if at else []:
+                    out.append(f"tools/lib/lanes/win.py: {name!r} ends the block before the one "
+                               f"{leg!r} opens — the drain between blocks joins it and "
+                               + blame.format(leg=leg))
+    # 6. THE COORDINATOR HANDS THE DIRECTORY; THE SWEEP YIELDS.
     if 'os.environ["KAYA_EXCLUSIVE_DIR"] = ' not in texts["tools/validate-all.py"]:
         out.append("tools/validate-all.py: never sets KAYA_EXCLUSIVE_DIR — the lanes cannot share "
                    "a token")
@@ -271,7 +303,27 @@ no_mode = gate.doctor("the windows mode read cut out", REAL["tools/deploy-win.py
 watched("a windows funnel that ignores --exclusive", {**REAL, "tools/deploy-win.py": no_mode},
         "does not read KAYA_EXCLUSIVE")
 
-gate.negatives_ran(8)
+# 9. A NOTIFICATION LEG BACK IN THE POOL THE EXCLUSIVE FUNNEL DRAINS —
+# the roster as it stood before the phantom slice, one leg moved. A DATA
+# perturbation, so the copy is a doctored win.py loaded as a module.
+WIN_LANE = "tools/lib/lanes/win.py"
+_moved = gate.doctor("the windows notify leg lifted out from after notes_rust",
+                     gate.read(WIN_LANE),
+                     r'\n     # The notification conformance scene[\s\S]*?\n     "notify_rust",\n',
+                     "\n")
+_moved = gate.doctor("the windows notify leg put back before notes_rust", _moved,
+                     r'\n     "richrows_rust",\n',
+                     '\n     "richrows_rust",\n     "notify_rust",\n')
+_ghost_win = gate.scratch() / "win-notify-before-notes.py"
+_ghost_win.write_text(_moved, encoding="utf-8")
+watched("a windows pool whose notification leg the exclusive funnel drains", REAL,
+        "is pooled before the exclusive leg 'notes_rust'",
+        lanes={**MODS, "windows": load_lane(_ghost_win)})
+
+gate.negatives_ran(9)
+
+gate.counted("windows legs whose scene posts a notification",
+             sorted(MODS["windows"].notification_legs(str(ROOT / "tools/scenes"))), floor=2)
 
 for line in census(REAL):
     gate.finding(line)

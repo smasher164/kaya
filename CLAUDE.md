@@ -561,8 +561,18 @@ in docs/deferred.md.
    for the wait and the hold, holds every EXCLUSIVE name to a leg its lane
    runs, holds the python and shell spellings to ONE set of sentences,
    and holds validate-all to handing the directory, the container launch
-   to naming its path, and the sweep to yielding. Six watched negatives,
-   counts printed),
+   to naming its path, and the sweep to yielding.
+   AND A NOTIFICATION LEG NEVER RUNS IN THE POOL THE FUNNEL DRAINS, since
+   2026-09-18: the funnel JOINS every leg started before the exclusive one
+   in its block, so a notification delivered there is in flight exactly
+   when the typing leg foregrounds — and the shell's notification host
+   window comes up ~2s later and holds the foreground for 30s and more
+   (docs/deferred.md, the phantom notification window; eight reds on
+   `notes_rust`). The notification scenes are read OUT OF THE SCENE
+   SCRIPTS (tools/lib/lanes/win.py's `notification_legs`, pointer_scenes'
+   own reason), never a hand list, and the clause refuses one before an
+   exclusive leg in its own block or anywhere in the block that one opens.
+   Nine watched negatives, counts printed),
    `tools/check-flightrec.py` (A RED LEG'S BUNDLE NAMES ITS CAUSE ON
    EVERY LANE, or says what it measured instead (the maintainer's
    2026-09-16 ruling): the bundle shape is ONE declaration —
@@ -647,7 +657,34 @@ in docs/deferred.md.
    cut out of KayaSwiftUI.swift by the gate and compiled with
    tools/checks/swiftui-wedge.swift, run against a REAL wedged main
    thread — with a ceiling that can never expire watched reporting the
-   silence. The Rust half's runtime proof is in the unit suite instead,
+   silence.
+   AND THE WINDOWS FOREGROUND DANCE SINCE 2026-09-18, the same rule one
+   platform over on the one wait no scene can reach: the shell's
+   notification host window holds the foreground against
+   SetForegroundWindow, ESC and the ALT release alike, and the wait used
+   to sleep its whole 30s before it even danced (docs/deferred.md, the
+   phantom notification window). The clause holds the dance INSIDE the
+   wait, both loops bounded by a literal, the reading taken and written
+   with `vtrace::line` (the ring never reaches disk on the panic this path
+   ends in), and `take_foreground`'s own route — AttachThreadInput
+   ATTACHED AND DETACHED around SetForegroundWindow/BringWindowToTop/
+   SetFocus, since a thread left attached shares the holder's keyboard
+   state for the life of the process — with the 100ms settle that tells a
+   window which yields from one that takes the foreground straight back.
+   AND THE LAST RESORT, which is the ONLY route measured taking the
+   foreground back from that window: eleven were driven against it on the
+   lane's VM while it held the foreground — SetForegroundWindow,
+   AttachThreadInput (REFUSED outright, answering 0), SwitchToThisWindow,
+   ShowWindow's minimize and hide, WM_CLOSE, HWND_BOTTOM,
+   LockSetForegroundWindow, AllowSetForegroundWindow and
+   SPI_SETFOREGROUNDLOCKTIMEOUT — and the foreground did not move for any of
+   them, so the wait's expiry ENDS THE NOTIFICATION HOST'S PROCESS, which
+   hands it over at once and which Windows restarts on demand
+   (docs/traps.md's toast moment has named that route since 2026-09-17). The
+   class-and-title guard is half that rule and the gate reads it: without
+   `foreground_toast()` in front of the OpenProcess this ends whatever
+   happens to hold the foreground. Eight more watched negatives, eighteen
+   clauses counted. The Rust half's runtime proof is in the unit suite instead,
    where a wedged MockStage read leaves a child process under its own
    verdict),
    `tools/check-empty-child.py` (ONE NODE IS ONE WIDGET, even when its

@@ -611,13 +611,283 @@ g.negative("an Android dialog left live by the activity that finished "
            want="no longer answers a live dialog when its activity "
                 "FINISHES")
 
+# --- Clause C: THE WINDOWS FOREGROUND DANCE. The same rule one platform
+# --- over — a bounded wait that loses legibly — on the one wait no scene
+# --- can reach.
+WINUI = "crates/kaya/src/winui/mod.rs"
+
+
+def rust_body(text, header):
+    """One `fn`'s body: from its opening brace to the brace that closes
+    it, counted. The rules below are about which calls sit INSIDE which
+    loop, which no line pattern over a 23,000-line file can answer."""
+    at = text.find(header)
+    if at < 0:
+        return None
+    start = text.find("{", at)
+    if start < 0:
+        return None
+    depth = 0
+    for i in range(start, len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start:i + 1]
+    return None
+
+
+def foreground_dance(path):
+    """THE WAIT THAT MEETS THE SHELL'S NOTIFICATION HOST WINDOW
+    (docs/deferred.md, the phantom notification window). NO SCENE CAN FAIL
+    THIS: the window comes up in a notification leg's wake, on the guest,
+    once in three lane runs — eight reds in three days and never on demand
+    — so the leg that meets it is the only witness there is and every leg
+    that does not is silent. Four things have to hold, and each of them
+    was a red:
+
+      * THE DANCE RUNS INSIDE THE WAIT. The wait used to sleep its whole
+        30s and dance afterwards, which is 30s spent against a window that
+        was never going to leave.
+      * THE ATTACH ROUTE IS THERE, AND DETACHES. SetForegroundWindow, ESC
+        and the ALT release all lost to that window for 3s; the classic
+        foreground-lock bypass is the route the dance lacked. A thread
+        left attached to another process's input queue shares its keyboard
+        state for the life of the process, so the detach is half the rule.
+      * THE READING IS TAKEN AND SURVIVES THE PANIC. The sentence goes to
+        stderr AND to `vtrace::line`, because the ring never reaches disk
+        on the path this used to end in (docs/traps.md, the toast moment).
+      * BOTH LOOPS KEEP A LITERAL BOUND, which is this gate's own subject.
+    """
+    bad = []
+    p = pathlib.Path(path)
+    if not p.is_absolute():
+        p = ROOT / p
+    try:
+        text = p.read_text(encoding="utf-8")
+    except OSError as exc:
+        return [f"cannot read {path} for the windows foreground dance "
+                f"({exc.strerror})"]
+    guest = rust_body(text, "fn foreground_guest(what: &str)")
+    take = rust_body(text, "fn take_foreground(hwnd: isize)")
+    if guest is None or take is None:
+        return [f"{path}: "
+                + (" and ".join(n for n, b in
+                                (("foreground_guest", guest),
+                                 ("take_foreground", take)) if b is None))
+                + " is gone — re-point this clause at whatever replaced the "
+                  "windows foreground dance"]
+    # The wait is the loop that calls foreground_toast; the confirm loop is
+    # the one after it. Both must dance and both must be bounded.
+    wait = rust_body(guest, "for turn in 0..600")
+    confirm = rust_body(guest, "for attempt in 0..150")
+    for name, body, why in (
+        ("the toast wait (`for turn in 0..600`)", wait,
+         "30s of 50ms turns, which outlasts the platform's 25s "
+         "`duration=\"long\"`"),
+        ("the confirmation dance (`for attempt in 0..150`)", confirm,
+         "3s of 20ms attempts"),
+    ):
+        if body is None:
+            bad.append(
+                f"{path}: foreground_guest no longer bounds {name} by a "
+                f"literal — {why}. A wait with no ceiling is the silence "
+                f"this gate exists to refuse")
+        elif "Self::take_foreground(hwnd)" not in body:
+            bad.append(
+                f"{path}: {name} does not call Self::take_foreground(hwnd) "
+                f"— the dance has to run INSIDE the wait, or a notification "
+                f"host window that would yield at once costs the leg the "
+                f"whole 30s (docs/deferred.md, the phantom notification "
+                f"window)")
+    if "Self::toast_evidence(fg)" not in (wait or ""):
+        bad.append(
+            f"{path}: the toast wait takes no reading of the window it met "
+            f"(Self::toast_evidence) — the next sighting's bundle is the "
+            f"only place the phantom's own numbers can come from")
+    if (wait or "").count("crate::vtrace::line(") < 1:
+        bad.append(
+            f"{path}: the toast wait's sentence never reaches "
+            f"crate::vtrace::line — the ring reaches the file only through "
+            f"`dump`, which the panic this path ends in never runs "
+            f"(docs/traps.md, the toast moment)")
+    for call, why in (
+        ("AttachThreadInput(mine, holder, 1)",
+         "the foreground-lock bypass is the route SetForegroundWindow, ESC "
+         "and the ALT release all lost without"),
+        ("AttachThreadInput(mine, holder, 0)",
+         "a thread left attached to another process's input queue shares "
+         "its keyboard state for the life of the process"),
+        ("BringWindowToTop(hwnd)", "the attached route raises as well as "
+                                   "activates"),
+        ("SetFocus(hwnd)", "the attached route gives the window the "
+                           "keyboard focus the type verb needs"),
+        ('settled("SetForegroundWindow")', "every route answers through the "
+                                           "settle"),
+        ('settled("AttachThreadInput")', "every route answers through the "
+                                         "settle"),
+    ):
+        if call not in take:
+            bad.append(
+                f"{path}: take_foreground does not call `{call}` — {why}")
+    # THE SETTLE IS THE DISCRIMINATOR: a win is only a win once it is still
+    # held, which is what tells a window that yields from one that takes the
+    # foreground straight back. Read out of the closure's OWN body — the
+    # same comparison is spelled twice more in the routes above it.
+    settle = rust_body(take, "let settled = |route|")
+    if settle is None:
+        bad.append(
+            f"{path}: take_foreground has no `settled` closure — a route "
+            f"that answers on one GetForegroundWindow read calls a window "
+            f"beaten that took the foreground straight back")
+    else:
+        for call, why in (
+            ("std::thread::sleep", "the settle has to let the holder take "
+                                   "it back before it believes the win"),
+            ("GetForegroundWindow() } == hwnd", "the settle has to RE-READ "
+                                                "the foreground"),
+        ):
+            if call not in settle:
+                bad.append(
+                    f"{path}: take_foreground's settle does not call "
+                    f"`{call}` — {why}")
+    # THE LAST RESORT, and the ONLY route measured taking the foreground back
+    # from that window: ending the process that owns it. It may reach exactly
+    # one window, so the class-and-title guard is half the rule.
+    end = rust_body(text, "fn take_down_notification_host()")
+    if end is None:
+        bad.append(
+            f"{path}: take_down_notification_host is gone — eleven routes "
+            f"were driven against the notification host window while it held "
+            f"the foreground and only ending its process moved it "
+            f"(docs/deferred.md, the phantom notification window)")
+    else:
+        for call, why in (
+            ("Self::foreground_toast()",
+             "it may reach exactly one window — without the class-and-title "
+             "guard this ends whatever happens to hold the foreground"),
+            ("OpenProcess(PROCESS_TERMINATE", "the handle it terminates with"),
+            ("TerminateProcess(process, 1)", "the termination itself"),
+            ("CloseHandle(process)", "the handle is closed on every path"),
+        ):
+            if call not in end:
+                bad.append(
+                    f"{path}: take_down_notification_host does not call "
+                    f"`{call}` — {why}")
+    if "Self::take_down_notification_host()" not in (guest or ""):
+        bad.append(
+            f"{path}: foreground_guest never reaches "
+            f"take_down_notification_host — the wait then expires against a "
+            f"window no other route has ever moved, and the leg panics")
+    if "could not foreground the guest window" in text:
+        refusal = text[text.index("could not foreground the guest window"):]
+        refusal = flat(refusal[:refusal.index('"')])
+        for word in ("ESC", "ALT", "AttachThreadInput",
+                     "ending the notification host"):
+            if word not in refusal:
+                bad.append(
+                    f"{path}: the foreground refusal does not name {word} "
+                    f"among what it tried — a diagnostic may only print "
+                    f"what it measured, and the reader chases the sentence")
+    else:
+        bad.append(f"{path}: the foreground refusal is gone — the sentence "
+                   f"every red typing leg is read from")
+    return bad
+
+
+for line in foreground_dance(WINUI):
+    g.finding(line)
+
+winui_nowait = g.perturb(
+    "the winui in-wait dance perturbation", WINUI,
+    r"            rounds \+= 1;\n            took = Self::take_foreground\(hwnd\);\n"
+    r"            if took\.is_some\(\) \{\n                break;\n            \}\n", "")
+g.negative("a windows wait that sleeps its whole 30s before it dances",
+           lambda: foreground_dance(str(winui_nowait)),
+           want="the toast wait (`for turn in 0..600`) does not call "
+                "Self::take_foreground(hwnd)")
+
+winui_noattach = g.perturb(
+    "the winui attach-route perturbation", WINUI,
+    r"            if AttachThreadInput\(mine, holder, 1\) == 0 \{\n"
+    r"                return None;\n            \}\n", "")
+g.negative("a windows dance with no foreground-lock bypass",
+           lambda: foreground_dance(str(winui_noattach)),
+           want="does not call `AttachThreadInput(mine, holder, 1)`")
+
+winui_nodetach = g.perturb(
+    "the winui detach perturbation", WINUI,
+    r"            AttachThreadInput\(mine, holder, 0\);\n", "")
+g.negative("a windows dance that stays attached to the holder's input "
+           "queue",
+           lambda: foreground_dance(str(winui_nodetach)),
+           want="does not call `AttachThreadInput(mine, holder, 0)`")
+
+winui_nosettle = g.perturb(
+    "the winui settle perturbation", WINUI,
+    r"            \(unsafe \{ GetForegroundWindow\(\) \} == hwnd\)\.then_some\(route\)",
+    "            Some(route)")
+g.negative("a windows dance that calls a win it never re-read",
+           lambda: foreground_dance(str(winui_nosettle)),
+           want="settle does not call `GetForegroundWindow() } == hwnd`")
+
+winui_notrace = g.perturb(
+    "the winui wait-sentence trace perturbation", WINUI,
+    r"                    Self::toast_evidence\(fg\)\n                \);\n"
+    r'                eprintln!\("\{sentence\}"\);\n'
+    r"                crate::vtrace::line\(&sentence\);\n",
+    "                    Self::toast_evidence(fg)\n                );\n"
+    '                eprintln!("{sentence}");\n')
+g.negative("a windows wait whose sentence dies with the panic",
+           lambda: foreground_dance(str(winui_notrace)),
+           want="never reaches crate::vtrace::line")
+
+winui_mute = g.perturb(
+    "the winui refusal perturbation", WINUI,
+    r"the \\\n             AttachThreadInput bypass and ending the "
+    r"notification host were \\\n             all tried",
+    "other routes were all tried")
+g.negative("a windows refusal that does not name the routes it tried",
+           lambda: foreground_dance(str(winui_mute)),
+           want="does not name AttachThreadInput among what it tried")
+
+winui_anywindow = g.perturb(
+    "the winui take-down guard perturbation", WINUI,
+    r"        let Some\(fg\) = Self::foreground_toast\(\) else \{\n"
+    r"            return \"the foreground was no longer a notification host window, so \\\n"
+    r"                    nothing was taken down\"\n                \.to_owned\(\);\n        \};\n",
+    "        let fg = unsafe { GetForegroundWindow() };\n")
+g.negative("a windows last resort that would end whatever holds the "
+           "foreground",
+           lambda: foreground_dance(str(winui_anywindow)),
+           want="take_down_notification_host does not call "
+                "`Self::foreground_toast()`")
+
+winui_nolastresort = g.perturb(
+    "the winui last-resort call perturbation", WINUI,
+    r"                Self::take_down_notification_host\(\)\n", "                \"\"\n",
+    want=2)
+g.negative("a windows wait that expires against a window nothing has ever "
+           "moved",
+           lambda: foreground_dance(str(winui_nolastresort)),
+           want="never reaches take_down_notification_host")
+
+g.counted("windows foreground-dance clauses read",
+          ["in-wait dance", "wait bound", "confirm bound", "reading",
+           "vtrace line", "attach", "detach", "raise", "focus",
+           "settle on both routes", "settle sleeps", "settle re-reads",
+           "last resort's guard", "last resort's open", "last resort's "
+           "terminate", "last resort's close", "last resort reached",
+           "refusal"], floor=18)
+
 # An ABSENT harness is a failure that NAMES IT, never a skip.
 absent = g.scratch() / "no-such-harness.kt"
 g.negative("an absent harness",
            lambda: check(HARNESS, SWIFTUI, str(absent)),
            want=f"cannot read {absent}")
 
-g.negatives_ran(21)
+g.negatives_ran(29)
 
 # --- Clause B: the runtime negative, where the toolchain exists. ------
 if platform.system() == "Darwin":
