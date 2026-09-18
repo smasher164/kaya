@@ -2340,8 +2340,20 @@ unpicked.
     switch with `case null` throws on ART while a TYPE switch with one is
     fine (Dnd's `word()` keeps its chain; the android lane's dnd leg is
     the only wall), and Java 21 has no unnamed pattern, so a five-variant
-    sum with three outcomes costs five arms (Dnd's chain kept). Swift 6
-    mode remains.
+    sum with three outcomes costs five arms (Dnd's chain kept). Swift 6 mode remains — MEASURED 2026-09-18 before any work (the maintainer's
+    rule from JDK 21; the job's tmp/idiom/notes-swift6-r1.md): the binding is
+    THREE `nonisolated(unsafe)` annotations from a green Swift 6 build, measured
+    as a real `.v6` SwiftPM package target (`Build complete!`), the guests eight
+    more in three of fifty-two files, and the SwiftUI interpreter 418
+    build-breaking diagnostics behind the same flag because `-warnings-as-errors`
+    is on that compile in both tools/swift-typecheck.sh and
+    tools/swiftui/build-dylib.sh, so it has no warnings-only preview to sit in;
+    `MainActor.assumeIsolated` SIGTRAPs on kaya's app thread (measured), so the
+    cheap `@MainActor` answer for the interpreter is an armed lie and the honest
+    one is a custom `SerialExecutor` — the object docs/async-dialogs-plan.md's
+    Swift arm needs anyway. RECOMMENDED: the binding as a package target and the
+    guests now, one slice; the interpreter last or excluded, its own measurement
+    if taken. AWAITING THE MAINTAINER'S RULING.
   - R4 NOT TAKEN: a Roslyn source generator for C# and an attached macro
     for Swift (the checked-in generated files are held by gen-guests
     --check); Go's must-use diagnostic through runtime.AddCleanup (a
