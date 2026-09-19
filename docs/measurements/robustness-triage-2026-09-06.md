@@ -207,7 +207,7 @@ Classification key:
 - line 9611 `HOLD — the mirrored adaptive sugar awaits demand`; 9712 `HOLD — the windows guest-side command scripts convert to python`; 9732 `HOLD — keyed when/otherwise arms await a use-case`.
 - line 9990 `DESIGN — THE LINUX OUT-OF-BOX LOOK`.
 - line 10539 `CHORE — SYNTHESIZING A PAN INTO THE iOS SIMULATOR` (built, opt-in, waiting on the subsumption slice).
-- line 10616 `PERF — THE JS WIRE ENCODER ALLOCATES TWICE PER SCALAR` — 15.6x on the table, desktop-only, an unclaimed speedup.
+- line 10616 `PERF — THE JS WIRE ENCODER ALLOCATES TWICE PER SCALAR` — 15.6x in the historical probe; closed 2026-09-18 after five lanes and 61 gates passed, actual-module measurements in docs/measurements/js-encoder-2026-09-18.md.
 - line 10634 `DRAG AND DROP — LANDED …` — the headline is unstruck only because the mac cross-app witness is owed; the `dndwitness-in-x11` WATCH lives in its body (entry 3).
 - line 11829 `GAP — kaya has no filtered view over a collection`.
 - line 11852 `DEFERRED — a `submitted` occurrence for text fields`.

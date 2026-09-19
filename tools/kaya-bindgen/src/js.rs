@@ -11,7 +11,7 @@ use crate::{Ctx, PropKind, is_padding, prop_variants, record_params, tx_fields, 
 /// Names spec identifiers must avoid: this emitter's helpers, plus the
 /// JavaScript reserved words a parameter would collide with.
 pub const RESERVED: &[&str] = &[
-    "enc", "record", "pad", "cat", "u32", "u64", "i64", "f64", "parse_value", "parse_clip", "parse_representation",
+    "enc", "record", "Encoder", "parse_value", "parse_clip", "parse_representation",
     "parse_occurrence", "BlobHandle", "I64", "canonicalize_shortcut", "occurrence_blob",
     "install_occurrence_blob", "redeem_occurrence_blob", "text_encoder", "text_decoder",
     "pack_date", "unpack_date", "pack_time", "unpack_time",
@@ -83,56 +83,6 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("const text_encoder = new TextEncoder();");
     c.line("const text_decoder = new TextDecoder(\"utf-8\", { fatal: true });");
     c.line("");
-    c.line("function pad(b: Uint8Array): Uint8Array {");
-    c.line("  const rest = (8 - (b.length % 8)) % 8;");
-    c.line("  if (rest === 0) return b;");
-    c.line("  const out = new Uint8Array(b.length + rest);");
-    c.line("  out.set(b);");
-    c.line("  return out;");
-    c.line("}");
-    c.line("");
-    c.line("function cat(...parts: Uint8Array[]): Uint8Array {");
-    c.line("  let n = 0;");
-    c.line("  for (const p of parts) n += p.length;");
-    c.line("  const out = new Uint8Array(n);");
-    c.line("  let at = 0;");
-    c.line("  for (const p of parts) {");
-    c.line("    out.set(p, at);");
-    c.line("    at += p.length;");
-    c.line("  }");
-    c.line("  return out;");
-    c.line("}");
-    c.line("");
-    c.line("function u32(v: number): Uint8Array {");
-    c.line("  const b = new Uint8Array(4);");
-    c.line("  new DataView(b.buffer).setUint32(0, v, true);");
-    c.line("  return b;");
-    c.line("}");
-    c.line("");
-    c.line("// Ids and handles are counters below 2^53 (crates/kaya/src/spec.rs,");
-    c.line("// MAX_SAFE_INTEGER), so a u64 is two u32 halves and no BigInt.");
-    c.line("function u64(v: number): Uint8Array {");
-    c.line("  if (!Number.isSafeInteger(v) || v < 0) throw new RangeError(`kaya: ${v} is not a u64 the wire carries`);");
-    c.line("  const b = new Uint8Array(8);");
-    c.line("  const view = new DataView(b.buffer);");
-    c.line("  view.setUint32(0, v % 4294967296, true);");
-    c.line("  view.setUint32(4, Math.floor(v / 4294967296), true);");
-    c.line("  return b;");
-    c.line("}");
-    c.line("");
-    c.line("function i64(v: number): Uint8Array {");
-    c.line("  if (!Number.isSafeInteger(v)) throw new RangeError(`kaya: ${v} is not a safe integer — a kaya integer is a count or a quantity, exact to ±(2^53 − 1); identity rides as strings or opaque tags`);");
-    c.line("  const b = new Uint8Array(8);");
-    c.line("  new DataView(b.buffer).setBigInt64(0, BigInt(v), true);");
-    c.line("  return b;");
-    c.line("}");
-    c.line("");
-    c.line("function f64(v: number): Uint8Array {");
-    c.line("  const b = new Uint8Array(8);");
-    c.line("  new DataView(b.buffer).setFloat64(0, v, true);");
-    c.line("  return b;");
-    c.line("}");
-    c.line("");
     c.line("/** A blob value at the wire tier: the u64 handle from kaya_blob_register,");
     c.line(" * consumed by the next submit. The bytes never ride the record stream. */");
     c.line("export class BlobHandle {");
@@ -154,45 +104,117 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("");
     c.line("export type WireValue = boolean | number | string | BlobHandle | I64;");
     c.line("");
-    c.line("/** Encoders, namespaced so no generated parameter can shadow them. */");
-    c.line("const enc = {");
-    c.line("  /** Encode one scalar as a kaya value. */");
-    c.line("  value(v: WireValue): Uint8Array {");
-    c.line("    if (typeof v === \"boolean\") return pad(cat(u32(VALUE_BOOL), u32(1), new Uint8Array([v ? 1 : 0])));");
-    c.line("    if (v instanceof I64) return cat(u32(VALUE_I64), u32(8), i64(v.value));");
-    c.line("    if (typeof v === \"number\") return cat(u32(VALUE_F64), u32(8), f64(v));");
-    c.line("    if (v instanceof BlobHandle) return cat(u32(VALUE_BLOB), u32(8), u64(v.handle));");
-    c.line("    if (typeof v === \"string\") {");
-    c.line("      const utf8 = text_encoder.encode(v);");
-    c.line("      return pad(cat(u32(VALUE_STR), u32(utf8.length), utf8));");
-    c.line("    }");
-    c.line("    throw new TypeError(`kaya: ${typeof v} is not a wire value (boolean, number, I64, string, BlobHandle)`);");
-    c.line("  },");
-    c.line("  /** Encode a counted value sequence: a key path or a record. */");
-    c.line("  values(vals: readonly WireValue[]): Uint8Array {");
-    c.line("    return cat(u32(vals.length), u32(0), ...vals.map((v) => enc.value(v)));");
-    c.line("  },");
-    c.line("  /** Encode a collection's element sum: per variant, a counted list of VALUE_* tags. A record collection is the one-variant case. */");
-    c.line("  variant_schemas(variants: readonly (readonly number[])[]): Uint8Array {");
-    c.line("    const parts = [u32(variants.length), u32(0)];");
-    c.line("    for (const schema of variants) {");
-    c.line("      parts.push(u32(schema.length));");
-    c.line("      for (const t of schema) parts.push(u32(t));");
-    c.line("    }");
-    c.line("    return pad(cat(...parts));");
-    c.line("  },");
-    c.line("};");
-    c.line("");
-    c.line("/** Frame one record. */");
-    c.line("export function record(kind: number, body: Uint8Array): Uint8Array {");
-    c.line("  body = pad(body);");
-    c.line("  const head = new Uint8Array(8);");
-    c.line("  const view = new DataView(head.buffer);");
-    c.line("  view.setUint32(0, 8 + body.length, true);");
-    c.line("  view.setUint16(4, kind, true);");
-    c.line("  view.setUint16(6, 0, true);");
-    c.line("  return cat(head, body);");
-    c.line("}");
+    c.line(r#"class Encoder {
+  private buf = new Uint8Array(4096);
+  private view = new DataView(this.buf.buffer);
+  private at = 8;
+
+  begin(): void { this.at = 8; }
+
+  private ensure(n: number): void {
+    if (this.at + n <= this.buf.length) return;
+    let cap = this.buf.length;
+    while (cap < this.at + n) cap *= 2;
+    const grown = new Uint8Array(cap);
+    grown.set(this.buf.subarray(0, this.at));
+    this.buf = grown;
+    this.view = new DataView(grown.buffer);
+  }
+
+  private pad(length: number): void {
+    const rest = (8 - length % 8) % 8;
+    this.ensure(rest);
+    this.buf.fill(0, this.at, this.at + rest);
+    this.at += rest;
+  }
+
+  u32(v: number): void {
+    this.ensure(4);
+    this.view.setUint32(this.at, v, true);
+    this.at += 4;
+  }
+
+  u64(v: number): void {
+    if (!Number.isSafeInteger(v) || v < 0) throw new RangeError(`kaya: ${v} is not a u64 the wire carries`);
+    this.ensure(8);
+    this.view.setUint32(this.at, v % 4294967296, true);
+    this.view.setUint32(this.at + 4, Math.floor(v / 4294967296), true);
+    this.at += 8;
+  }
+
+  i64(v: number): void {
+    if (!Number.isSafeInteger(v)) throw new RangeError(`kaya: ${v} is not a safe integer — a kaya integer is a count or a quantity, exact to ±(2^53 − 1); identity rides as strings or opaque tags`);
+    this.ensure(8);
+    this.view.setBigInt64(this.at, BigInt(v), true);
+    this.at += 8;
+  }
+
+  f64(v: number): void {
+    this.ensure(8);
+    this.view.setFloat64(this.at, v, true);
+    this.at += 8;
+  }
+
+  bytes(v: Uint8Array): void {
+    this.ensure(v.length);
+    this.buf.set(v, this.at);
+    this.at += v.length;
+  }
+
+  value(v: WireValue): void {
+    if (typeof v === "boolean") {
+      this.u32(VALUE_BOOL); this.u32(1); this.u32(v ? 1 : 0); this.u32(0);
+    } else if (v instanceof I64) {
+      this.u32(VALUE_I64); this.u32(8); this.i64(v.value);
+    } else if (typeof v === "number") {
+      this.u32(VALUE_F64); this.u32(8); this.f64(v);
+    } else if (v instanceof BlobHandle) {
+      this.u32(VALUE_BLOB); this.u32(8); this.u64(v.handle);
+    } else if (typeof v === "string") {
+      this.u32(VALUE_STR);
+      const lengthAt = this.at;
+      this.u32(0);
+      this.ensure(v.length * 3);
+      const { written } = text_encoder.encodeInto(v, this.buf.subarray(this.at));
+      this.view.setUint32(lengthAt, written, true);
+      this.at += written;
+      this.pad(written);
+    } else {
+      throw new TypeError(`kaya: ${typeof v} is not a wire value (boolean, number, I64, string, BlobHandle)`);
+    }
+  }
+
+  values(vals: readonly WireValue[]): void {
+    this.u32(vals.length); this.u32(0);
+    for (const v of vals) this.value(v);
+  }
+
+  variant_schemas(variants: readonly (readonly number[])[]): void {
+    const start = this.at;
+    this.u32(variants.length); this.u32(0);
+    for (const schema of variants) {
+      this.u32(schema.length);
+      for (const t of schema) this.u32(t);
+    }
+    this.pad(this.at - start);
+  }
+
+  end(kind: number): Uint8Array {
+    this.pad(this.at);
+    this.view.setUint32(0, this.at, true);
+    this.view.setUint16(4, kind, true);
+    this.view.setUint16(6, 0, true);
+    return this.buf.slice(0, this.at);
+  }
+}
+
+const enc = new Encoder();
+
+export function record(kind: number, body: Uint8Array): Uint8Array {
+  enc.begin();
+  enc.bytes(body);
+  return enc.end(kind);
+}"#);
 
     for r in spec.tx {
         if r.name == "set_property" || r.name == "set_window_prop" {
@@ -217,20 +239,19 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         let mut parts: Vec<String> = Vec::new();
         for f in tx_fields(r) {
             parts.push(match f.ty {
-                FieldTy::U32 if is_padding(f) => "u32(0)".into(),
-                FieldTy::U32 => format!("u32({})", f.name),
-                FieldTy::U64 => format!("u64({})", f.name),
+                FieldTy::U32 if is_padding(f) => "enc.u32(0)".into(),
+                FieldTy::U32 => format!("enc.u32({})", f.name),
+                FieldTy::U64 => format!("enc.u64({})", f.name),
                 FieldTy::Value => format!("enc.value({})", f.name),
                 FieldTy::Values => format!("enc.values({})", f.name),
                 FieldTy::VariantSchemas => format!("enc.variant_schemas({})", f.name),
             });
         }
-        let body = if parts.is_empty() {
-            "new Uint8Array(0)".to_string()
-        } else {
-            format!("cat({})", parts.join(", "))
-        };
-        c.line(&format!("  return record(TX_{}, {body});", r.name.to_uppercase()));
+        c.line("  enc.begin();");
+        for part in parts {
+            c.line(&format!("  {part};"));
+        }
+        c.line(&format!("  return enc.end(TX_{});", r.name.to_uppercase()));
         c.line("}");
     }
 
@@ -263,17 +284,20 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("");
         c.line(&format!("/** set_property with a constant {prop} value.{} */", crate::date_note(kind)));
         c.line(&format!("export function tx_set_{prop}(widget_id: number, {param}): Uint8Array {{"));
-        c.line(&format!("  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_{up}), u32(SOURCE_CONST), {expr}));"));
+        c.line(&format!("  enc.begin(); enc.u64(widget_id); enc.u32(PROP_{up}); enc.u32(SOURCE_CONST); {expr};"));
+        c.line("  return enc.end(TX_SET_PROPERTY);");
         c.line("}");
         c.line("");
         c.line(&format!("/** set_property with a signal-bound {prop} value. */"));
         c.line(&format!("export function tx_bind_{prop}(widget_id: number, signal_id: number): Uint8Array {{"));
-        c.line(&format!("  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_{up}), u32(SOURCE_SIGNAL), u64(signal_id)));"));
+        c.line(&format!("  enc.begin(); enc.u64(widget_id); enc.u32(PROP_{up}); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);"));
+        c.line("  return enc.end(TX_SET_PROPERTY);");
         c.line("}");
         c.line("");
         c.line(&format!("/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */"));
         c.line(&format!("export function tx_bind_{prop}_element(widget_id: number, level = 0, field = 0): Uint8Array {{"));
-        c.line(&format!("  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_{up}), u32(SOURCE_ELEMENT), u32(level), u32(field)));"));
+        c.line(&format!("  enc.begin(); enc.u64(widget_id); enc.u32(PROP_{up}); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);"));
+        c.line("  return enc.end(TX_SET_PROPERTY);");
         c.line("}");
     }
 
@@ -288,12 +312,14 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("");
         c.line(&format!("/** set_window_prop with a constant {prop} value; window 0, the primary surface. */"));
         c.line(&format!("export function tx_set_window_{prop}(window: number, {param}): Uint8Array {{"));
-        c.line(&format!("  return record(TX_SET_WINDOW_PROP, cat(u64(window), u32(WPROP_{up}), u32(SOURCE_CONST), {expr}));"));
+        c.line(&format!("  enc.begin(); enc.u64(window); enc.u32(WPROP_{up}); enc.u32(SOURCE_CONST); {expr};"));
+        c.line("  return enc.end(TX_SET_WINDOW_PROP);");
         c.line("}");
         c.line("");
         c.line(&format!("/** set_window_prop with a signal-bound {prop} value; window 0, the primary surface. */"));
         c.line(&format!("export function tx_bind_window_{prop}(window: number, signal_id: number): Uint8Array {{"));
-        c.line(&format!("  return record(TX_SET_WINDOW_PROP, cat(u64(window), u32(WPROP_{up}), u32(SOURCE_SIGNAL), u64(signal_id)));"));
+        c.line(&format!("  enc.begin(); enc.u64(window); enc.u32(WPROP_{up}); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);"));
+        c.line("  return enc.end(TX_SET_WINDOW_PROP);");
         c.line("}");
     }
 
@@ -306,12 +332,14 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("");
         c.line(&format!("/** set_entry_prop with a constant {prop} value. */"));
         c.line(&format!("export function tx_set_entry_{prop}(entry: number, {param}): Uint8Array {{"));
-        c.line(&format!("  return record(TX_SET_ENTRY_PROP, cat(u64(entry), u32(EPROP_{up}), u32(SOURCE_CONST), {expr}));"));
+        c.line(&format!("  enc.begin(); enc.u64(entry); enc.u32(EPROP_{up}); enc.u32(SOURCE_CONST); {expr};"));
+        c.line("  return enc.end(TX_SET_ENTRY_PROP);");
         c.line("}");
         c.line("");
         c.line(&format!("/** set_entry_prop with a signal-bound {prop} value. */"));
         c.line(&format!("export function tx_bind_entry_{prop}(entry: number, signal_id: number): Uint8Array {{"));
-        c.line(&format!("  return record(TX_SET_ENTRY_PROP, cat(u64(entry), u32(EPROP_{up}), u32(SOURCE_SIGNAL), u64(signal_id)));"));
+        c.line(&format!("  enc.begin(); enc.u64(entry); enc.u32(EPROP_{up}); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);"));
+        c.line("  return enc.end(TX_SET_ENTRY_PROP);");
         c.line("}");
     }
 
@@ -327,12 +355,14 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("");
         c.line(&format!("/** set_section_prop with a constant {prop} value. */"));
         c.line(&format!("export function tx_set_section_{prop}(section: number, {param}): Uint8Array {{"));
-        c.line(&format!("  return record(TX_SET_SECTION_PROP, cat(u64(section), u32(SPROP_{up}), u32(SOURCE_CONST), {expr}));"));
+        c.line(&format!("  enc.begin(); enc.u64(section); enc.u32(SPROP_{up}); enc.u32(SOURCE_CONST); {expr};"));
+        c.line("  return enc.end(TX_SET_SECTION_PROP);");
         c.line("}");
         c.line("");
         c.line(&format!("/** set_section_prop with a signal-bound {prop} value. */"));
         c.line(&format!("export function tx_bind_section_{prop}(section: number, signal_id: number): Uint8Array {{"));
-        c.line(&format!("  return record(TX_SET_SECTION_PROP, cat(u64(section), u32(SPROP_{up}), u32(SOURCE_SIGNAL), u64(signal_id)));"));
+        c.line(&format!("  enc.begin(); enc.u64(section); enc.u32(SPROP_{up}); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);"));
+        c.line("  return enc.end(TX_SET_SECTION_PROP);");
         c.line("}");
     }
 
@@ -389,13 +419,15 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("");
         c.line(&format!("/** set_menu_prop with a constant {prop} value. */"));
         c.line(&format!("export function tx_set_menu_{prop}(item: number, {param}): Uint8Array {{"));
-        c.line(&format!("  return record(TX_SET_MENU_PROP, cat(u64(item), u32(MPROP_{up}), u32(SOURCE_CONST), {expr}));"));
+        c.line(&format!("  enc.begin(); enc.u64(item); enc.u32(MPROP_{up}); enc.u32(SOURCE_CONST); {expr};"));
+        c.line("  return enc.end(TX_SET_MENU_PROP);");
         c.line("}");
         if crate::menu_prop_bindable(prop) {
             c.line("");
             c.line(&format!("/** set_menu_prop with a signal-bound {prop} value. */"));
             c.line(&format!("export function tx_bind_menu_{prop}(item: number, signal_id: number): Uint8Array {{"));
-            c.line(&format!("  return record(TX_SET_MENU_PROP, cat(u64(item), u32(MPROP_{up}), u32(SOURCE_SIGNAL), u64(signal_id)));"));
+            c.line(&format!("  enc.begin(); enc.u64(item); enc.u32(MPROP_{up}); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);"));
+            c.line("  return enc.end(TX_SET_MENU_PROP);");
             c.line("}");
         }
     }

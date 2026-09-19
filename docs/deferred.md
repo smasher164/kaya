@@ -11111,8 +11111,31 @@ it for every leg through SIMCTL_CHILD_, and a failed leg's
 back). The WATCH stays for the sighting itself: the next occurrence
 arrives with its sentence, and that is what closes it.
 
-## PERF — THE JS WIRE ENCODER ALLOCATES TWICE PER SCALAR, and that is 15.6x on the table (measured 2026-09-02)
+## ~~PERF — THE JS WIRE ENCODER ALLOCATES TWICE PER SCALAR, and that is 15.6x on the table (measured 2026-09-02)~~ COMPLETE 2026-09-18: the generated cursor encoder is byte-identical, 10.92x faster on the measured collection batch, and all five lanes plus 61 gates passed.
 KEY: wire.ts encoder, cursor buffer, two allocations per scalar, portfolio batch 11.30 ms, 15.6x
+
+RESOLUTION 2026-09-18: tools/kaya-bindgen/src/js.rs
+writes through one growable cursor and returns one owned slice per record.
+The actual generated module packs 15,003 collection inserts in 5.7671 ms
+against 62.9666 ms before (10.92x), and a 20-record handler in 7.5885 µs
+against 87.7921 µs (11.57x). This is a larger record shape than the old
+probe below. All 208 tx exports, 3,744 corpus records, are byte-identical;
+eight hand-derived golden records in bindings/js/kaya_app_checks.ts were
+each watched failing with one substitution in a copy, and removing string
+padding changed 162 corpus records. The existing js-app-checks gate holds
+the goldens, growth, padding reuse, byte ownership and reset after refusal;
+the core decoder is the wall every desktop JS leg reaches. Measurement
+and scope: docs/measurements/js-encoder-2026-09-18.md. Four more one-cut
+negatives proved growth, reused padding, record ownership and reset after
+refusal, for thirteen watched perturbations in total. Validation passed:
+628 Rust unit tests, 18 doc tests, four generator tests, strict TypeScript
+over three binding sources and 51 guests, 262 JS checks, six hand JS legs,
+the standalone 61/61 gate sweep, and the complete mac lane (477 legs and
+61/61 gates). The five-lane matrix passed 1,821 legs: mac 477, linux 775,
+windows 282, iOS 139, Android 148, plus 61/61 gates, in 1,497 seconds.
+Every duration budget passed. No surface change or semantic carve-out was
+needed in any of the nine bindings. The KEY sweep updated the original
+probe and the robustness triage; their old timings remain historical.
 
 Found by the JIT/AOT research (docs/probes/js-jit-aot-2026-09-02.md §0,
 the wire-packing benchmark under docs/probes/js-jit-probes/), while
@@ -11124,10 +11147,10 @@ growable cursor buffer with byte-identical output (600,128 bytes, the
 probe's `cursorbench.js`) is 15.6x faster; holding the encoder fixed, a
 JIT is worth 4.6x. The phones are out by ruling (docs/js-plan.md §5), so
 this is desktop work: the three lanes that ship the JS legs today gain the
-whole factor, every guest's handler gets cheaper, and nothing about the
-binding's surface moves. Close it by rewriting the encoder against the
-probe's output bytes as the oracle, with bindings/js/kaya_app_checks.ts's
-byte-equality negatives held, and record the new batch time here.
+encoder improvement, every guest's handler gets cheaper, and nothing about
+the binding's surface moves. The resolution above measures the actual
+generated module against its saved predecessor; the probe's smaller record
+mix and its timing are historical.
 
 ## ~~DRAG AND DROP~~ COMPLETE — LANDED on every lane in every language 2026-09-03 (spec, core, five backend arms, the `drag` verb per lane, nine bindings, the dnd scene), and its ledger CLOSED the same day: the TEMPLATE ZONE in three shapes (a declaration in the row's body, a keyed per-copy override, and the ELEMENT-BOUND payload, ruled 2026-09-03) in all nine bindings, a row's own `drag_ended`, the files drop on every lane that has a foreign source (a phone cuts it, D9), the reorder's insertion indicator on GTK and WinUI, and the cross-app witnesses as lane legs on linux (both pools, both directions) and windows (a stock OLE reader and EXPLORER ITSELF, the OLE route's first real drops); the one thing owed is the mac witness, measured undrivable without a human (docs/probes/dnd-witness-mac-2026-09-03.md) and payable by a hand run or a check-pane-ladder-shaped gate
 KEY: set_drag_source, set_drop_target, set_reorderable, dropped, drag_ended, drag_op, kaya_drag_verdict, dnd scene, docs/dnd-plan.md, KayaDragDropView, kayaDriveDrag, identityTag, kaya_blob_count, KayaPhoneDragDropSurface, KayaDropSessionDouble, kayaReadDropValue, DndHub, dragdrive.py, KAYA_DRAG_DRIVER, await_frames, targets_mut, drag_file, kayaProviderIsFile, kayaDriveFileDrop, dragwitness, dragWriter, draggable_at, drop_target_at, on_drop_node, on_drag_ended_node, TplDraggable, setDragSourceAt, deliver_drop, ClipOffer::Foreign, kaya-drop-before, show_insertion, dragwitness.py, dragwitness-leg.py, dndwitness-out, dndwitness-in, TplDragRef, KayaTplDragRef, TplClip, TplRep, tplClipText, text_field, _drag_slot, dragSlot, bound

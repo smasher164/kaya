@@ -11,6 +11,31 @@ import { Worker, isMainThread } from "node:worker_threads";
 import type * as K from "./kaya/index.ts";
 import type * as W from "./kaya/wire.ts";
 
+// docs/measurements/js-encoder-2026-09-18.md: hand-derived wire grammar.
+function wireGoldens(w: typeof W): [string, Uint8Array, string][] {
+  return [
+    ["bool", w.tx_create_signal(1, true),
+      "20000000 0100 0000 0100000000000000 01000000 01000000 0100000000000000"],
+    ["f64", w.tx_create_signal(1, -1.5),
+      "20000000 0100 0000 0100000000000000 03000000 08000000 000000000000f8bf"],
+    ["i64", w.tx_create_signal(4294967297, new w.I64(-2)),
+      "20000000 0100 0000 0100000001000000 02000000 08000000 feffffffffffffff"],
+    ["string", w.tx_create_signal(1, "a😀"),
+      "20000000 0100 0000 0100000000000000 04000000 05000000 61f09f9880000000"],
+    ["empty", w.tx_template_end(), "08000000 0d00 0000"],
+    ["values", w.tx_collection_insert(1, [], new w.I64(2), 0, [true, "x", -1.5]),
+      "68000000 0800 0000 0100000000000000 0000000000000000"
+      + " 02000000 08000000 0200000000000000 0000000000000000 0300000000000000"
+      + " 01000000 01000000 0100000000000000 04000000 01000000 7800000000000000"
+      + " 03000000 08000000 000000000000f8bf"],
+    ["variants", w.tx_create_collection(1, [[1, 2], [3]]),
+      "30000000 0700 0000 0100000000000000 0200000000000000"
+      + " 02000000 01000000 02000000 01000000 03000000 00000000"],
+    ["blob", w.tx_create_signal(1, new w.BlobHandle(4294967297)),
+      "20000000 0100 0000 0100000000000000 05000000 08000000 0100000001000000"],
+  ];
+}
+
 if (isMainThread) {
   // SCRATCH BEFORE THE WORKER EXISTS. The prefs block below writes into
   // the platform's own store, so `KAYA_SELFTEST` must move the domain to
@@ -45,6 +70,24 @@ if (isMainThread) {
       return pattern.test(e instanceof Error ? e.message : String(e));
     }
   }
+
+  for (const [name, bytes, hex] of wireGoldens(wire)) {
+    check(`wire golden ${name}`, Buffer.from(bytes).toString("hex") === hex.replaceAll(" ", ""));
+  }
+  const retained = wire.tx_create_signal(1, "keep");
+  const retainedHex = Buffer.from(retained).toString("hex");
+  const longText = "é😀\ud800".repeat(4096);
+  const grown = wire.tx_create_signal(1, longText);
+  const utf8 = new TextEncoder().encode(longText);
+  check("wire grows past its initial buffer with TextEncoder bytes",
+    new DataView(grown.buffer, grown.byteOffset).getUint32(20, true) === utf8.length
+    && utf8.every((v, i) => grown[24 + i] === v));
+  wire.tx_create_signal(1, "xxxxxxxx");
+  const padded = wire.tx_create_signal(1, "x");
+  check("wire clears reused padding", padded.subarray(25).every(v => v === 0));
+  check("wire records own their bytes across growth and reuse", Buffer.from(retained).toString("hex") === retainedHex);
+  check("wire rejects a bad value after a partial write", throws(() => wire.tx_create_signal(1, null as never), /not a wire value/));
+  check("wire resets after a refused record", Buffer.from(wire.tx_template_end()).toString("hex") === "080000000d000000");
 
   const shipped: Uint8Array[][] = [];
   runtime.hooks.submit = (records) => shipped.push([...records]);

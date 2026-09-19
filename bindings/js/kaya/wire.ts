@@ -352,56 +352,6 @@ export const OCC_TEXT_FORMATTED = 30;
 const text_encoder = new TextEncoder();
 const text_decoder = new TextDecoder("utf-8", { fatal: true });
 
-function pad(b: Uint8Array): Uint8Array {
-  const rest = (8 - (b.length % 8)) % 8;
-  if (rest === 0) return b;
-  const out = new Uint8Array(b.length + rest);
-  out.set(b);
-  return out;
-}
-
-function cat(...parts: Uint8Array[]): Uint8Array {
-  let n = 0;
-  for (const p of parts) n += p.length;
-  const out = new Uint8Array(n);
-  let at = 0;
-  for (const p of parts) {
-    out.set(p, at);
-    at += p.length;
-  }
-  return out;
-}
-
-function u32(v: number): Uint8Array {
-  const b = new Uint8Array(4);
-  new DataView(b.buffer).setUint32(0, v, true);
-  return b;
-}
-
-// Ids and handles are counters below 2^53 (crates/kaya/src/spec.rs,
-// MAX_SAFE_INTEGER), so a u64 is two u32 halves and no BigInt.
-function u64(v: number): Uint8Array {
-  if (!Number.isSafeInteger(v) || v < 0) throw new RangeError(`kaya: ${v} is not a u64 the wire carries`);
-  const b = new Uint8Array(8);
-  const view = new DataView(b.buffer);
-  view.setUint32(0, v % 4294967296, true);
-  view.setUint32(4, Math.floor(v / 4294967296), true);
-  return b;
-}
-
-function i64(v: number): Uint8Array {
-  if (!Number.isSafeInteger(v)) throw new RangeError(`kaya: ${v} is not a safe integer — a kaya integer is a count or a quantity, exact to ±(2^53 − 1); identity rides as strings or opaque tags`);
-  const b = new Uint8Array(8);
-  new DataView(b.buffer).setBigInt64(0, BigInt(v), true);
-  return b;
-}
-
-function f64(v: number): Uint8Array {
-  const b = new Uint8Array(8);
-  new DataView(b.buffer).setFloat64(0, v, true);
-  return b;
-}
-
 /** A blob value at the wire tier: the u64 handle from kaya_blob_register,
  * consumed by the next submit. The bytes never ride the record stream. */
 export class BlobHandle {
@@ -423,319 +373,632 @@ export class I64 {
 
 export type WireValue = boolean | number | string | BlobHandle | I64;
 
-/** Encoders, namespaced so no generated parameter can shadow them. */
-const enc = {
-  /** Encode one scalar as a kaya value. */
-  value(v: WireValue): Uint8Array {
-    if (typeof v === "boolean") return pad(cat(u32(VALUE_BOOL), u32(1), new Uint8Array([v ? 1 : 0])));
-    if (v instanceof I64) return cat(u32(VALUE_I64), u32(8), i64(v.value));
-    if (typeof v === "number") return cat(u32(VALUE_F64), u32(8), f64(v));
-    if (v instanceof BlobHandle) return cat(u32(VALUE_BLOB), u32(8), u64(v.handle));
-    if (typeof v === "string") {
-      const utf8 = text_encoder.encode(v);
-      return pad(cat(u32(VALUE_STR), u32(utf8.length), utf8));
-    }
-    throw new TypeError(`kaya: ${typeof v} is not a wire value (boolean, number, I64, string, BlobHandle)`);
-  },
-  /** Encode a counted value sequence: a key path or a record. */
-  values(vals: readonly WireValue[]): Uint8Array {
-    return cat(u32(vals.length), u32(0), ...vals.map((v) => enc.value(v)));
-  },
-  /** Encode a collection's element sum: per variant, a counted list of VALUE_* tags. A record collection is the one-variant case. */
-  variant_schemas(variants: readonly (readonly number[])[]): Uint8Array {
-    const parts = [u32(variants.length), u32(0)];
-    for (const schema of variants) {
-      parts.push(u32(schema.length));
-      for (const t of schema) parts.push(u32(t));
-    }
-    return pad(cat(...parts));
-  },
-};
+class Encoder {
+  private buf = new Uint8Array(4096);
+  private view = new DataView(this.buf.buffer);
+  private at = 8;
 
-/** Frame one record. */
+  begin(): void { this.at = 8; }
+
+  private ensure(n: number): void {
+    if (this.at + n <= this.buf.length) return;
+    let cap = this.buf.length;
+    while (cap < this.at + n) cap *= 2;
+    const grown = new Uint8Array(cap);
+    grown.set(this.buf.subarray(0, this.at));
+    this.buf = grown;
+    this.view = new DataView(grown.buffer);
+  }
+
+  private pad(length: number): void {
+    const rest = (8 - length % 8) % 8;
+    this.ensure(rest);
+    this.buf.fill(0, this.at, this.at + rest);
+    this.at += rest;
+  }
+
+  u32(v: number): void {
+    this.ensure(4);
+    this.view.setUint32(this.at, v, true);
+    this.at += 4;
+  }
+
+  u64(v: number): void {
+    if (!Number.isSafeInteger(v) || v < 0) throw new RangeError(`kaya: ${v} is not a u64 the wire carries`);
+    this.ensure(8);
+    this.view.setUint32(this.at, v % 4294967296, true);
+    this.view.setUint32(this.at + 4, Math.floor(v / 4294967296), true);
+    this.at += 8;
+  }
+
+  i64(v: number): void {
+    if (!Number.isSafeInteger(v)) throw new RangeError(`kaya: ${v} is not a safe integer — a kaya integer is a count or a quantity, exact to ±(2^53 − 1); identity rides as strings or opaque tags`);
+    this.ensure(8);
+    this.view.setBigInt64(this.at, BigInt(v), true);
+    this.at += 8;
+  }
+
+  f64(v: number): void {
+    this.ensure(8);
+    this.view.setFloat64(this.at, v, true);
+    this.at += 8;
+  }
+
+  bytes(v: Uint8Array): void {
+    this.ensure(v.length);
+    this.buf.set(v, this.at);
+    this.at += v.length;
+  }
+
+  value(v: WireValue): void {
+    if (typeof v === "boolean") {
+      this.u32(VALUE_BOOL); this.u32(1); this.u32(v ? 1 : 0); this.u32(0);
+    } else if (v instanceof I64) {
+      this.u32(VALUE_I64); this.u32(8); this.i64(v.value);
+    } else if (typeof v === "number") {
+      this.u32(VALUE_F64); this.u32(8); this.f64(v);
+    } else if (v instanceof BlobHandle) {
+      this.u32(VALUE_BLOB); this.u32(8); this.u64(v.handle);
+    } else if (typeof v === "string") {
+      this.u32(VALUE_STR);
+      const lengthAt = this.at;
+      this.u32(0);
+      this.ensure(v.length * 3);
+      const { written } = text_encoder.encodeInto(v, this.buf.subarray(this.at));
+      this.view.setUint32(lengthAt, written, true);
+      this.at += written;
+      this.pad(written);
+    } else {
+      throw new TypeError(`kaya: ${typeof v} is not a wire value (boolean, number, I64, string, BlobHandle)`);
+    }
+  }
+
+  values(vals: readonly WireValue[]): void {
+    this.u32(vals.length); this.u32(0);
+    for (const v of vals) this.value(v);
+  }
+
+  variant_schemas(variants: readonly (readonly number[])[]): void {
+    const start = this.at;
+    this.u32(variants.length); this.u32(0);
+    for (const schema of variants) {
+      this.u32(schema.length);
+      for (const t of schema) this.u32(t);
+    }
+    this.pad(this.at - start);
+  }
+
+  end(kind: number): Uint8Array {
+    this.pad(this.at);
+    this.view.setUint32(0, this.at, true);
+    this.view.setUint16(4, kind, true);
+    this.view.setUint16(6, 0, true);
+    return this.buf.slice(0, this.at);
+  }
+}
+
+const enc = new Encoder();
+
 export function record(kind: number, body: Uint8Array): Uint8Array {
-  body = pad(body);
-  const head = new Uint8Array(8);
-  const view = new DataView(head.buffer);
-  view.setUint32(0, 8 + body.length, true);
-  view.setUint16(4, kind, true);
-  view.setUint16(6, 0, true);
-  return cat(head, body);
+  enc.begin();
+  enc.bytes(body);
+  return enc.end(kind);
 }
 
 /** Create a signal holding `initial`. */
 export function tx_create_signal(signal_id: number, initial: WireValue): Uint8Array {
-  return record(TX_CREATE_SIGNAL, cat(u64(signal_id), enc.value(initial)));
+  enc.begin();
+  enc.u64(signal_id);
+  enc.value(initial);
+  return enc.end(TX_CREATE_SIGNAL);
 }
 
 /** Replace a signal's value; keep-latest per batch. */
 export function tx_write_signal(signal_id: number, value: WireValue): Uint8Array {
-  return record(TX_WRITE_SIGNAL, cat(u64(signal_id), enc.value(value)));
+  enc.begin();
+  enc.u64(signal_id);
+  enc.value(value);
+  return enc.end(TX_WRITE_SIGNAL);
 }
 
 /** Create a live widget, or declare a template node inside a scope. */
 export function tx_create_widget(widget_id: number, kind: number): Uint8Array {
-  return record(TX_CREATE_WIDGET, cat(u64(widget_id), u32(kind), u32(0)));
+  enc.begin();
+  enc.u64(widget_id);
+  enc.u32(kind);
+  enc.u32(0);
+  return enc.end(TX_CREATE_WIDGET);
 }
 
 /** Append `child` to `parent` (same zone only). */
 export function tx_add_child(parent: number, child: number): Uint8Array {
-  return record(TX_ADD_CHILD, cat(u64(parent), u64(child)));
+  enc.begin();
+  enc.u64(parent);
+  enc.u64(child);
+  return enc.end(TX_ADD_CHILD);
 }
 
 /** Mount a root into a window (0 = the default window). */
 export function tx_mount(window: number, root: number): Uint8Array {
-  return record(TX_MOUNT, cat(u64(window), u64(root)));
+  enc.begin();
+  enc.u64(window);
+  enc.u64(root);
+  return enc.end(TX_MOUNT);
 }
 
 /** Declare a collection and its schema: one ordered field-type list per variant of the element sum. A record collection is the one-variant case and a scalar collection the one-variant one-field case. Variants are indices; names never travel. A blueprint when inside a template. */
 export function tx_create_collection(collection_id: number, variants: readonly (readonly number[])[]): Uint8Array {
-  return record(TX_CREATE_COLLECTION, cat(u64(collection_id), enc.variant_schemas(variants)));
+  enc.begin();
+  enc.u64(collection_id);
+  enc.variant_schemas(variants);
+  return enc.end(TX_CREATE_COLLECTION);
 }
 
 /** Insert an entry into the instance at `path`; the fields match `variant`'s schema positionally. Stamps a copy from that variant's case. */
 export function tx_collection_insert(collection_id: number, path: readonly WireValue[], key: WireValue, variant: number, fields: readonly WireValue[]): Uint8Array {
-  return record(TX_COLLECTION_INSERT, cat(u64(collection_id), enc.values(path), enc.value(key), u32(variant), u32(0), enc.values(fields)));
+  enc.begin();
+  enc.u64(collection_id);
+  enc.values(path);
+  enc.value(key);
+  enc.u32(variant);
+  enc.u32(0);
+  enc.values(fields);
+  return enc.end(TX_COLLECTION_INSERT);
 }
 
 /** Replace an entry's record; every element binding follows. A different `variant` than the entry's current one tears down its stamped copy and restamps from the new variant's case, in place. */
 export function tx_collection_update(collection_id: number, path: readonly WireValue[], key: WireValue, variant: number, fields: readonly WireValue[]): Uint8Array {
-  return record(TX_COLLECTION_UPDATE, cat(u64(collection_id), enc.values(path), enc.value(key), u32(variant), u32(0), enc.values(fields)));
+  enc.begin();
+  enc.u64(collection_id);
+  enc.values(path);
+  enc.value(key);
+  enc.u32(variant);
+  enc.u32(0);
+  enc.values(fields);
+  return enc.end(TX_COLLECTION_UPDATE);
 }
 
 /** Remove an entry; its stamped copy tears down. */
 export function tx_collection_remove(collection_id: number, path: readonly WireValue[], key: WireValue): Uint8Array {
-  return record(TX_COLLECTION_REMOVE, cat(u64(collection_id), enc.values(path), enc.value(key)));
+  enc.begin();
+  enc.u64(collection_id);
+  enc.values(path);
+  enc.value(key);
+  return enc.end(TX_COLLECTION_REMOVE);
 }
 
 /** A For over a collection; opens a template scope until template_end. */
 export function tx_create_for(id: number, collection_id: number): Uint8Array {
-  return record(TX_CREATE_FOR, cat(u64(id), u64(collection_id)));
+  enc.begin();
+  enc.u64(id);
+  enc.u64(collection_id);
+  return enc.end(TX_CREATE_FOR);
 }
 
 /** A When over a Bool signal; opens a template scope until template_end. */
 export function tx_create_when(id: number, signal_id: number): Uint8Array {
-  return record(TX_CREATE_WHEN, cat(u64(id), u64(signal_id)));
+  enc.begin();
+  enc.u64(id);
+  enc.u64(signal_id);
+  return enc.end(TX_CREATE_WHEN);
 }
 
 /** Close the innermost template scope. */
 export function tx_template_end(): Uint8Array {
-  return record(TX_TEMPLATE_END, new Uint8Array(0));
+  enc.begin();
+  return enc.end(TX_TEMPLATE_END);
 }
 
 /** Move an entry so it sits before the entry whose key is the one value in `before`, or to the end when `before` is empty. Keys, never indices: order is data, and indices would race the very deltas that change them. */
 export function tx_collection_move(collection_id: number, path: readonly WireValue[], key: WireValue, before: readonly WireValue[]): Uint8Array {
-  return record(TX_COLLECTION_MOVE, cat(u64(collection_id), enc.values(path), enc.value(key), enc.values(before)));
+  enc.begin();
+  enc.u64(collection_id);
+  enc.values(path);
+  enc.value(key);
+  enc.values(before);
+  return enc.end(TX_COLLECTION_MOVE);
 }
 
 /** Set one field of an entry's record; only bindings on that field re-resolve. `variant` is the discriminant the guest witnessed in the match that produced this write — the scene asserts it against the entry's stored variant, so a drifted model fails loudly; it never changes a constructor (update does). */
 export function tx_collection_update_field(collection_id: number, path: readonly WireValue[], key: WireValue, field: number, variant: number, value: WireValue): Uint8Array {
-  return record(TX_COLLECTION_UPDATE_FIELD, cat(u64(collection_id), enc.values(path), enc.value(key), u32(field), u32(variant), enc.value(value)));
+  enc.begin();
+  enc.u64(collection_id);
+  enc.values(path);
+  enc.value(key);
+  enc.u32(field);
+  enc.u32(variant);
+  enc.value(value);
+  return enc.end(TX_COLLECTION_UPDATE_FIELD);
 }
 
 /** Inside a For over a sum: the records that follow (until the next variant_case or template_end) are the blueprint for this variant. Cases must be total at template_end; an empty case renders a constructor as nothing, explicitly. */
 export function tx_variant_case(variant: number): Uint8Array {
-  return record(TX_VARIANT_CASE, cat(u32(variant), u32(0)));
+  enc.begin();
+  enc.u32(variant);
+  enc.u32(0);
+  return enc.end(TX_VARIANT_CASE);
 }
 
 /** A one-shot command aimed at a live widget: momentary, fire-and-forget, never state at rest — the app's sanctioned crossing into widget-owned state (clear, focus). The widget answers through its normal occurrence path; nothing is recorded and nothing replays on rebuild. The command enum is the closed vocabulary; each verb is admitted by a real artifact, per the escalation policy. */
 export function tx_widget_command(widget_id: number, command: number): Uint8Array {
-  return record(TX_WIDGET_COMMAND, cat(u64(widget_id), u32(command), u32(0)));
+  enc.begin();
+  enc.u64(widget_id);
+  enc.u32(command);
+  enc.u32(0);
+  return enc.end(TX_WIDGET_COMMAND);
 }
 
 /** Create an auxiliary window (capability-gated: a host without KAYA_CAP_AUX_WINDOWS rejects it at the root). Materializes hidden; mounting a root presents it. Ids are guest-allocated, below the internal bit; 0 is the primary and always exists. */
 export function tx_create_window(window_id: number): Uint8Array {
-  return record(TX_CREATE_WINDOW, cat(u64(window_id)));
+  enc.begin();
+  enc.u64(window_id);
+  return enc.end(TX_CREATE_WINDOW);
 }
 
 /** Close and forget an auxiliary window: the native window and its views are released wholesale, and the scene forgets the mounted tree (widget ids are never reused, so stale entries are inert). The primary is not destroyable: the process owns it. */
 export function tx_destroy_window(window_id: number): Uint8Array {
-  return record(TX_DESTROY_WINDOW, cat(u64(window_id)));
+  enc.begin();
+  enc.u64(window_id);
+  return enc.end(TX_DESTROY_WINDOW);
 }
 
 /** Request a modal alert over a live window (0 = primary): the request/result grammar's first client (DESIGN.md, Presentation contexts). One atomic record: title, message, `actions` action labels (0..=2 — the platform floor; ContentDialog's three slots are two actions plus close), and the always-present cancel slot, which is what EVERY platform-native dismissal (Esc, back, outside tap) resolves to. All five Values are Str; action slots beyond `actions` ride empty and are ignored. Alert ids are guest-chosen; one alert may be live per process, and the id retires when its result fires. */
 export function tx_show_alert(window: number, alert: number, actions: number, title: WireValue, message: WireValue, action0: WireValue, action1: WireValue, cancel: WireValue): Uint8Array {
-  return record(TX_SHOW_ALERT, cat(u64(window), u64(alert), u32(actions), u32(0), enc.value(title), enc.value(message), enc.value(action0), enc.value(action1), enc.value(cancel)));
+  enc.begin();
+  enc.u64(window);
+  enc.u64(alert);
+  enc.u32(actions);
+  enc.u32(0);
+  enc.value(title);
+  enc.value(message);
+  enc.value(action0);
+  enc.value(action1);
+  enc.value(cancel);
+  return enc.end(TX_SHOW_ALERT);
 }
 
 /** Push a navigation entry onto `window`'s stack (0 = the primary surface; no capability gate — every host materializes a serial stack natively). Entry ids share the surface namespace with windows: one guest-side allocator, and mount's target field addresses either. Materializes covered/incoming; mounting a root into it presents it. The covered root below stays alive — retained until popped (DESIGN.md, Navigation). */
 export function tx_push_entry(window: number, entry: number): Uint8Array {
-  return record(TX_PUSH_ENTRY, cat(u64(window), u64(entry)));
+  enc.begin();
+  enc.u64(window);
+  enc.u64(entry);
+  return enc.end(TX_PUSH_ENTRY);
 }
 
 /** Pop the top navigation entry from `window`'s stack and forget its mounted tree, exactly as destroy_window does (ids are never reused, so stale targets fail loudly). Popping an empty stack is a scene error. Multi-pop is binding sugar: N of these in one transaction, animated by backends as the NET stack change per batch. */
 export function tx_pop_entry(window: number): Uint8Array {
-  return record(TX_POP_ENTRY, cat(u64(window)));
+  enc.begin();
+  enc.u64(window);
+  return enc.end(TX_POP_ENTRY);
 }
 
 /** Bind a navigation-entry property (ENTRY_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — entries are not collection elements. */
 export function tx_set_entry_prop(entry: number, prop: number, source: number): Uint8Array {
-  return record(TX_SET_ENTRY_PROP, cat(u64(entry), u32(prop), u32(source)));
+  enc.begin();
+  enc.u64(entry);
+  enc.u32(prop);
+  enc.u32(source);
+  return enc.end(TX_SET_ENTRY_PROP);
 }
 
 /** Append a section to `window`'s section set (0 = the primary surface; no capability gate — every platform has a sections idiom). Section ids share the surface namespace with windows and entries: one guest-side allocator, and mount's target field addresses any of them. The first section added becomes the selected one; the set is APPEND-ONLY — this grammar has no destruction verbs by design, and every section's root is retained while covered (DESIGN.md, Sections). */
 export function tx_add_section(window: number, section: number): Uint8Array {
-  return record(TX_ADD_SECTION, cat(u64(window), u64(section)));
+  enc.begin();
+  enc.u64(window);
+  enc.u64(section);
+  return enc.end(TX_ADD_SECTION);
 }
 
 /** Select a section programmatically: configuration, not a user act — it never echoes section_selected (the echo doctrine). The section must already be added to `window`; switching is SELECTION, not lifecycle — the covered root stays alive. */
 export function tx_select_section(window: number, section: number): Uint8Array {
-  return record(TX_SELECT_SECTION, cat(u64(window), u64(section)));
+  enc.begin();
+  enc.u64(window);
+  enc.u64(section);
+  return enc.end(TX_SELECT_SECTION);
 }
 
 /** Bind a section property (SECTION_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — sections are not collection elements. */
 export function tx_set_section_prop(section: number, prop: number, source: number): Uint8Array {
-  return record(TX_SET_SECTION_PROP, cat(u64(section), u32(prop), u32(source)));
+  enc.begin();
+  enc.u64(section);
+  enc.u32(prop);
+  enc.u32(source);
+  return enc.end(TX_SET_SECTION_PROP);
 }
 
 /** Create a menu item of `kind` (menu_kind) in the menu-item id space — its own guest allocator (c_menu_item), distinct from every widget, node, and surface space. Items are live, append-only, and never removed in v1 (DESIGN.md, Menus). */
 export function tx_menu_item_create(item: number, kind: number): Uint8Array {
-  return record(TX_MENU_ITEM_CREATE, cat(u64(item), u32(kind), u32(0)));
+  enc.begin();
+  enc.u64(item);
+  enc.u32(kind);
+  enc.u32(0);
+  return enc.end(TX_MENU_ITEM_CREATE);
 }
 
 /** Append `child` under grouping node `parent`. Single-parent: an item acquires exactly one parent or anchor and ids are never reused. The closed parent/child grammar (menu accepts menu/radio_group/action/toggle/separator; radio_group accepts only radio_option; leaves accept nothing) and the depth cap are validated at the root. */
 export function tx_menu_item_append(parent: number, child: number): Uint8Array {
-  return record(TX_MENU_ITEM_APPEND, cat(u64(parent), u64(child)));
+  enc.begin();
+  enc.u64(parent);
+  enc.u64(child);
+  return enc.end(TX_MENU_ITEM_APPEND);
 }
 
 /** Append a top-level grouping node (menu or radio_group) to `window`'s command catalog — the window anchor, riding the window construct under the window-attribute unification rule (0 = the primary surface). The bar accepts only grouping nodes; duplicate shortcuts within the window's catalog are a root error. */
 export function tx_menubar_append(window: number, item: number): Uint8Array {
-  return record(TX_MENUBAR_APPEND, cat(u64(window), u64(item)));
+  enc.begin();
+  enc.u64(window);
+  enc.u64(item);
+  return enc.end(TX_MENUBAR_APPEND);
 }
 
 /** Attach a context catalog rooted at `item` to a live widget — the same command vocabulary scoped to a noun. The editable text controls (entry, textarea) reject attachment (their native edit menus are dress), a context root cannot be a radio_option, and a shortcut anywhere in the subtree is a root error (shortcuts need a window catalog home). */
 export function tx_context_attach(widget: number, item: number): Uint8Array {
-  return record(TX_CONTEXT_ATTACH, cat(u64(widget), u64(item)));
+  enc.begin();
+  enc.u64(widget);
+  enc.u64(item);
+  return enc.end(TX_CONTEXT_ATTACH);
 }
 
 /** Attach a context catalog to a template node (the Tpl zone): every stamped copy shows the same catalog, and an activation carries that copy's key path — the keys ARE the noun (the on_click_node encoding). Same rejections as context_attach. */
 export function tx_context_attach_node(node: number, item: number): Uint8Array {
-  return record(TX_CONTEXT_ATTACH_NODE, cat(u64(node), u64(item)));
+  enc.begin();
+  enc.u64(node);
+  enc.u64(item);
+  return enc.end(TX_CONTEXT_ATTACH_NODE);
 }
 
 /** Bind a menu property (MENU_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — menu items are not collection elements — and icon/primary/ shortcut reject SOURCE_SIGNAL (const-only). label and enabled fan out through the signal-write path; the domain of a signal-bound value is validated on the COMPLETE coalesced value at the transaction barrier. */
 export function tx_set_menu_prop(item: number, prop: number, source: number): Uint8Array {
-  return record(TX_SET_MENU_PROP, cat(u64(item), u32(prop), u32(source)));
+  enc.begin();
+  enc.u64(item);
+  enc.u32(prop);
+  enc.u32(source);
+  return enc.end(TX_SET_MENU_PROP);
 }
 
 /** Request the platform's file picker over a live window (0 = primary), on the alert's request/result grammar (DESIGN.md, File dialogs). Dialog ids are guest-chosen; one dialog may be live per process, and the id retires when its result fires. `multiple` is 0 or 1 — every backend supports both, spelled four ways (a flag on SwiftUI and AppKit, a different METHOD on GTK and WinUI, a different CONTRACT on Android). `filters` is advisory and rides as alternating Str values, a label then its space-separated extensions: every platform treats them as a default view rather than a guarantee, so the guest still validates what it got. */
 export function tx_show_file_dialog(window: number, dialog: number, multiple: number, filters: readonly WireValue[]): Uint8Array {
-  return record(TX_SHOW_FILE_DIALOG, cat(u64(window), u64(dialog), u32(multiple), u32(0), enc.values(filters)));
+  enc.begin();
+  enc.u64(window);
+  enc.u64(dialog);
+  enc.u32(multiple);
+  enc.u32(0);
+  enc.values(filters);
+  return enc.end(TX_SHOW_FILE_DIALOG);
 }
 
 /** Put one clip on the system clipboard, offered in several REPRESENTATIONS at once (DESIGN.md, Clipboard; docs/clipboard-plan.md). A clip is not a string: every platform models it as one item available in several types, and the consumer takes the richest it understands — so an app offers html AND text, and pasting into Pages keeps the formatting while a plain field still works. A RECORD RATHER THAN A LIST, which is what makes at-most-one-per-kind structural instead of a runtime duplicate check. `present` is a mask over the `clip` enum for the single-valued kinds; the two plural ones carry counts. `reps` holds the populated ones in the CANONICAL ORDER, which kaya fixes once because richness is a property of the kind rather than of the app's intent, and the wire's preference order (macOS type order, X11 TARGETS) has to be right whoever wrote the guest. THE ORDER IS DESCENDING CLIP VALUE, which is descending richness, so a backend writes what it is handed in the order it is handed: `custom_count` pairs of Str id and I64 blob, `file_count` I64 handles, I64 image blob, Str html, Str text. Files are the SAME CAPABILITY the picker returns — a handle redeemed with kaya_open_picked — so copying a file and picking one are one currency and the bytes never move through kaya. */
 export function tx_copy(present: number, file_count: number, custom_count: number, reps: readonly WireValue[]): Uint8Array {
-  return record(TX_COPY, cat(u32(present), u32(file_count), u32(custom_count), u32(0), enc.values(reps)));
+  enc.begin();
+  enc.u32(present);
+  enc.u32(file_count);
+  enc.u32(custom_count);
+  enc.u32(0);
+  enc.values(reps);
+  return enc.end(TX_COPY);
 }
 
 /** Read the clipboard OUTSIDE any paste gesture, on the alert's request/result grammar. `accepting` is an ACCEPT LIST, the same space-separated Str the widget prop carries: the closed kinds by name plus any custom ids, which are open and so could never be a mask. The answer carries the first match by canonical richness, so exactly one representation is ever materialised. THIS IS THE PRIVILEGED ONE, and it is named for what it is rather than for pasting. A user's paste arrives at the widget's hook and costs nothing; this asks without a gesture, which the platforms have deliberately made expensive — iOS 16 PROMPTS when the content came from another app, and the read blocks until the user answers (measured); Android returns nothing unless the app has focus; Wayland delivers no offer to an unfocused client. Reaching for a thing called paste in an editor would have cost a permission prompt for content the hook delivers free, which is why this name is not that one. An empty answer covers denied, absent, and nothing-we-accept alike. */
 export function tx_read_clipboard(request: number, accepting: WireValue): Uint8Array {
-  return record(TX_READ_CLIPBOARD, cat(u64(request), enc.value(accepting)));
+  enc.begin();
+  enc.u64(request);
+  enc.value(accepting);
+  return enc.end(TX_READ_CLIPBOARD);
 }
 
 /** Mark this transaction as ONE undoable step in `window`'s ledger, under `label` (a non-empty Str, validated at the root like every other authored grammar). MUST BE THE FIRST RECORD OF THE BATCH and may appear once: a transaction is a bare list with no header, so per-transaction metadata has nowhere else to live, and head-of-batch is the one position that cannot be ambiguous (docs/undo-plan.md D2). A WIRE FACT AND NOT A BINDING CONVENTION, so both interpreters and check-verbs see it and a binding that forgets to emit it fails a byte-compared scene instead of grouping wrong in silence.  THE UNDOABLE SET IS THE REACTIVE HALF (D4): a marked batch may hold signal writes and the five collection deltas, whose inverse the core derives from state it already keeps. PURE EFFECTS — focus today, scroll when it lands — are permitted and simply not restored (A2): undo restores state, not where you were looking. Anything else (const prop sets, create/destroy/mount, window/nav/section/menu structure, clear, commands, dialog and clipboard requests) is REFUSED at apply, loudly, naming the op — an app that wants a widget property undoable binds it to a signal, which is the reactive doctrine saying what it already said. A refused group leaves the scene exactly as it was.  The window is explicit because the core cannot derive it: a signal write names no surface, and the scene keeps no widget-to-window map. 0 is the primary. */
 export function tx_undo_group(window: number, label: WireValue): Uint8Array {
-  return record(TX_UNDO_GROUP, cat(u64(window), enc.value(label)));
+  enc.begin();
+  enc.u64(window);
+  enc.value(label);
+  return enc.end(TX_UNDO_GROUP);
 }
 
 /** DECLARE the set of decorated ranges on a textarea, replacing whatever was declared before (docs/ranges-plan.md D1/D2). `ranges` holds 2*`count` I64 values — start then end, in UTF-8 BYTE offsets into the widget's current guest-visible text; an empty set is the clear.  THE OFFSET UNIT AND ITS THREE RULES, once, here, because four of the five platforms answer a malformed offset differently and one of them ABORTS THE PROCESS (docs/ranges-units.md §3: an out-of-range NSTextStorage attribute is an NSRangeException, exit 134). The core refuses before lowering: `start <= end`, `end <= text.len()`, and both endpoints on a CODE-POINT boundary. A GRAPHEME split is deliberately NOT refused and is the stated carve-out — the platforms disagree about what a grapheme is (java.text.BreakIterator counts the ZWJ family as 11 clusters where .NET and Swift count 5, measured), so a core that refused by its own table would refuse ranges three platforms honor. The range covers exactly the code points it names; a platform may widen what it PAINTS to the whole cluster.  APP-OWNED AND NEVER TRACKED. kaya adjusts nothing across edits: a declared set is bound to the text it was declared against, and a backend paints it only while the widget still holds that text — the first keystroke, programmatic write or native undo drops the set with nothing said. The app re-declares from the fold `text_changed` already drives, which is the same uncontrolled contract the text itself has. Range tracking is editor-component work and lives in the app.  TEXTAREA ONLY this milestone. The entry is deferred with measured per-platform reasons (docs/deferred.md): GTK's entry highlight rides absolute byte offsets that do not follow edits and is not readable over AT-SPI, macOS destroys an entry's highlight the moment it loses focus (the field editor is the window's, not the field's), and no consumer wants it — an editor's find bar decorates a document. */
 export function tx_highlight_ranges(widget_id: number, count: number, ranges: readonly WireValue[]): Uint8Array {
-  return record(TX_HIGHLIGHT_RANGES, cat(u64(widget_id), u32(count), u32(0), enc.values(ranges)));
+  enc.begin();
+  enc.u64(widget_id);
+  enc.u32(count);
+  enc.u32(0);
+  enc.values(ranges);
+  return enc.end(TX_HIGHLIGHT_RANGES);
 }
 
 /** Put the textarea's SELECTION at one range (UTF-8 byte offsets, validated exactly as highlight_ranges is). `start == end` is a caret and is legal — every platform's text object models a degenerate range.  ITS OWN RECORD RATHER THAN A `widget_command`, which it otherwise is exactly (momentary, fire-and-forget, the app's sanctioned crossing into widget-owned state): that record's layout has nowhere to put offsets, and growing it two U64s would hang two dead fields on `clear` and `focus` and make `focus(w, 0, 0)` representable.  REFUSED DURING AN INPUT-METHOD COMPOSITION, in every backend, under the reason `ime_composition` (docs/ranges-plan.md D4). Measured on macOS: honoring it COMMITS the marked text into the document and into the app's model mid-word, which is data loss shaped like a feature, and it shifts every later offset by the committed length. A refusal here is a NO-OP AND NOT A PANIC — unlike undo's D4, which refuses an app-programming error the app can fix. Composition state is on no kaya channel and never will be (there are no widget mirror reads), so the same app code is correct one millisecond and refused the next; the app that wants the selection waits for the composition to end, which `text_changed` announces anyway. HIGHLIGHT and REVEAL do not disturb a composition and are not refused (measured, same probe). */
 export function tx_select_range(widget_id: number, start: number, stop: number): Uint8Array {
-  return record(TX_SELECT_RANGE, cat(u64(widget_id), u64(start), u64(stop)));
+  enc.begin();
+  enc.u64(widget_id);
+  enc.u64(start);
+  enc.u64(stop);
+  return enc.end(TX_SELECT_RANGE);
 }
 
 /** Scroll the textarea so a range is inside the viewport (UTF-8 byte offsets, validated exactly as highlight_ranges is). A PURE EFFECT: it moves no state, the selection is untouched, and per docs/undo-plan.md A2 undo does not restore it — undo restores state, not where you were looking, which is why it is permitted inside an undo group and simply not inverted.  WHAT `inside the viewport` MEANS IS THE PLATFORM'S, not kaya's: each backend calls its own scroll-to-range (scrollRangeToVisible, ScrollIntoView, gtk_text_view_scroll_to_iter, bringIntoView), so how much context lands around the range is native behaviour. The observable kaya fixes is containment, which is the only thing every platform agrees on. */
 export function tx_reveal_range(widget_id: number, start: number, stop: number): Uint8Array {
-  return record(TX_REVEAL_RANGE, cat(u64(widget_id), u64(start), u64(stop)));
+  enc.begin();
+  enc.u64(widget_id);
+  enc.u64(start);
+  enc.u64(stop);
+  return enc.end(TX_REVEAL_RANGE);
 }
 
 /** Request the platform's save dialog over a live window (0 = primary), on the SAME request/result grammar as the open picker (docs/save-plan.md D2): guest-chosen dialog ids out of the one id space, one dialog live per process whichever kind it is, and the answer arriving as a file_dialog_result whose id retires there. `filters` is the picker's advisory encoding unchanged — alternating Str values, a label then its space-separated extensions. `suggested_name` is the name the dialog opens with, which every platform takes (nameFieldStringValue, GtkFileDialog's initial name, IFileSaveDialog's SetFileName, EXTRA_TITLE, the export controller's filename) and none guarantees: the user renames it, and Android may append an extension matching the mime type, so a guest reads the name it GOT rather than the name it asked for.  THE ANSWER IS EXACTLY ONE LOCATOR OR NONE, and there is no `multiple` twin of the picker's flag: no platform's save dialog names two destinations. Cancel is the empty answer, the picker's rule verbatim.  WHAT THE DESTINATION IS FOR is the decision with the semantics in it (docs/save-plan.md D1): the result's handle opens with CREATE, so opening a name the dialog invented succeeds and yields an EMPTY file on every platform. Android and iOS hand back a document that already exists; macOS, GTK and Windows hand back a name for a file nobody has made (measured: macOS does not even truncate on Replace). The core absorbs that, not the guest, and NOT a fourth file mode — creation is a property of the destination the dialog promised, never of the caller's intent, and a mode would let a guest ask for it on a file it merely opened. */
 export function tx_show_save_dialog(window: number, dialog: number, suggested_name: WireValue, filters: readonly WireValue[]): Uint8Array {
-  return record(TX_SHOW_SAVE_DIALOG, cat(u64(window), u64(dialog), enc.value(suggested_name), enc.values(filters)));
+  enc.begin();
+  enc.u64(window);
+  enc.u64(dialog);
+  enc.value(suggested_name);
+  enc.values(filters);
+  return enc.end(TX_SHOW_SAVE_DIALOG);
 }
 
 /** REQUEST the app's brand accent (docs/styling-plan.md D1/D2). `seed` is one packed sRGB (0xRRGGBB) — the only value most apps write; `mask` says which per-appearance overrides are present (bit 0 = light, bit 1 = dark) and `light`/`dark` carry them when set, 0 otherwise. Per-PLATFORM values never ride the wire: the binding resolves its platform at runtime and sends one resolved trio (values may vary per platform; code and wire shape never do).  A REQUEST, uniformly: a platform may let its user override the app's accent — macOS does today (an app accent applies only while the system accent is multicolor), and the semantics does not change if another platform grows the preference. The app states a brand; the platform stays the judge of its chrome.  SET ONCE, before the first mount: the root refuses a second write and a late one — brand is identity, not state, and a slot that could flip at runtime would promise a theme- switching surface the vocabulary deliberately does not have.  The app NEVER writes a foreground and NEVER writes contrast variants; the core derives fill/on-fill/standalone and a hover/pressed ramp per appearance (the danger-band clamp, docs/styling-plan.md D1) and hands every backend VALUES. Backends do not re-derive — except Compose, which receives the SEED as well because Material 3's own documented flow derives a full role scheme from it, and kaya defers to the platform's derivation where one exists. */
 export function tx_set_brand_accent(seed: number, mask: number, light: number, dark: number): Uint8Array {
-  return record(TX_SET_BRAND_ACCENT, cat(u32(seed), u32(mask), u32(light), u32(dark)));
+  enc.begin();
+  enc.u32(seed);
+  enc.u32(mask);
+  enc.u32(light);
+  enc.u32(dark);
+  return enc.end(TX_SET_BRAND_ACCENT);
 }
 
 /** REQUEST the app's brand typeface (docs/styling-plan.md D6, Slice 2b). `family` is the default family name every platform falls back to; `platforms` carries the optional per-platform overrides as PAIRS — an I64 platform tag from the `platform` enum, then that platform's family as a Str — and `mask` bit 0 says a `font` BLOB is present (an empty Str rides in its slot when it is not).  THE FAMILY, NEVER THE SCALE (ratified DESIGN.md): sizes, weights, metrics and the whole type ramp stay the platform's. Substituting a family into the platform's own ramp is what makes the swap safe, and it is the role tier — not a font size — that carries emphasis.  PER-PLATFORM VALUES RIDE THE WIRE, unlike the accent's, and the asymmetry is the design (Slice 2b): a BINDING cannot know its platform — the JVM says "Linux" on Android — but a LOWERING is its platform, so each backend picks its own row out of `platforms` and no platform id is ever needed on the guest side. A colour resolves to one number a binding can compute anywhere; a family name has to survive to the backend that will look it up.  FONT BYTES RIDE THE BLOB CHANNEL, register-then-resolve: when `font` carries bytes the backend hands them to its platform's app-font API (CTFontManager, fontconfig, the Compose/DWrite routes), reads back the family name the registration produced, and the NAME machinery takes over unchanged — one resolution, one observation, one fallback for both forms. A registered blob's own family wins over `family` on the backend that registered it.  SET ONCE, before the first mount — the accent's wall verbatim, and for its reason: a typeface that could flip at runtime would promise the theme-switching surface the vocabulary deliberately does not have.  THE RISK IS THE SILENT FALLBACK. Every platform's font API renders SOMETHING for a family it does not have, so a typo is invisible to every other observation: each backend gates on the family being PRESENT and otherwise leaves the platform default in place, and `expect_typeface` reads the RESOLVED family off the real views rather than echoing the request. */
 export function tx_set_brand_typeface(mask: number, family: WireValue, platforms: readonly WireValue[], font: WireValue): Uint8Array {
-  return record(TX_SET_BRAND_TYPEFACE, cat(u32(mask), u32(0), enc.value(family), enc.values(platforms), enc.value(font)));
+  enc.begin();
+  enc.u32(mask);
+  enc.u32(0);
+  enc.value(family);
+  enc.values(platforms);
+  enc.value(font);
+  return enc.end(TX_SET_BRAND_TYPEFACE);
 }
 
 /** DECLARE the app's identity — the name it goes by and the picture that stands for it (docs/app-identity-plan.md, ratified 2026-08-18). `name` is a Str; `mask` bit 0 says an `icon` BLOB is present, and an empty Str rides its slot when it is not — the typeface's mask-plus-always-written-slot convention, copied rather than reinvented, so the two records decode the same way and one mask/slot disagreement test covers the shape.  A TRANSACTION VERB AND NOT A WINDOW PROP, because identity is per-APP where WINDOW_PROPS is per-window. `title` already lives there and is the WINDOW's title; the identity name is a different thing and the vocabulary must not conflate them (on Windows the two meet in one string, and it is the backend's single caption writer that composes them, never two authors).  ONE PICTURE, FIVE ROUTES. The same PNG reaches the macOS Dock, the Windows taskbar/alt-tab and caption, an X11 window's _NET_WM_ICON, the Android launcher and the iOS Home Screen — each by its platform's own route, some at runtime off these bytes and some at build time off the same file in the tree. One PNG goes in and each lowering converts (NSImage(data:), BitmapImage.SetSource, an HICON, a GdkTexture); no .ico, no .icns, no per-platform artwork on the wire.  THE FOUR WALLS ARE THE BRAND'S, VERBATIM, and for the brand's reasons. SET ONCE: a second write dies in the root, in every language at once. BEFORE THE FIRST MOUNT: so no backend shows an unidentified frame it must repaint. EMPTY IS REFUSED: an app that wants the platform's own identity declares none at all, and an empty string would sail through five lowerings indistinguishable from a default. NOT UNDOABLE: identity is not state.  THE BYTES ARE NOT INSPECTED IN THE CORE — the typeface's rule transfers exactly. Whether a blob is an image is a question only the platform's own decoder can answer, and a guess that disagreed with the decoder would be worse than no answer. Each backend decodes, and the observation reports what the DECODER produced (a size, sampled pixels) rather than echoing the request, so bytes that are not an image fail exactly like an icon that never applied. */
 export function tx_set_app_identity(mask: number, name: WireValue, icon: WireValue): Uint8Array {
-  return record(TX_SET_APP_IDENTITY, cat(u32(mask), u32(0), enc.value(name), enc.value(icon)));
+  enc.begin();
+  enc.u32(mask);
+  enc.u32(0);
+  enc.value(name);
+  enc.value(icon);
+  return enc.end(TX_SET_APP_IDENTITY);
 }
 
 /** DECLARE the column header bar on a For's container, replacing whatever was declared before (docs/tables-plan.md). `titles` holds `count` Str values, one per column in visual order; `sorted` is the 0-based index of the column showing the sort indicator, or u32::MAX for none (alert_choice's cancel-sentinel precedent); `direction` is 0 ascending, 1 descending, read only when `sorted` names a column.  ONE RECORD FOR THE WHOLE BAR, titles and indicator together, because the header's state is one declaration: a sort flip re-sends a handful of short strings and buys atomicity — no window where new titles show a stale indicator. A dedicated record and not a prop because a prop carries ONE Value and titles are many, with spaces (`accepts`' space-separated trick is out); the carrier is highlight_ranges' count-plus-Values shape.  THE TARGET IS THE FOR'S CONTAINER — there is no List widget; a For materializes as a Column and this record is what turns that container into a table where the size class and the platform have the idiom (DESIGN.md's column-props ruling). The root refuses a target that is not a For container, a `count` of 0, an empty title, a `sorted` outside 0..count that is not the sentinel, and a `direction` past 1.  PATH ADDRESSING (dynamic tables, docs/tables-plan.md): the Values carry `path_len` KEY values FIRST, then the `count` titles — sort_requested's identity convention pointed the other way. path_len 0 with a live For's container id is the flat case above; path_len 0 with a nested For's TEMPLATE NODE id declares the bar for EVERY copy (stored on the site, applied at each stamp); path_len > 0 with the template node id and keys outermost-first re-declares ONE stamped copy's bar — the per-copy sort indicator. A keyed target that names no stamped copy is refused loudly.  ROWS MUST FIT THE COLUMNS: with N columns declared, every stamped row's template root must be a Row with exactly N children, checked at stamp time in the core so every backend inherits the wall — a mismatched template dies naming the row and both counts instead of rendering N-1 cells under N headers on some platforms and not others.  THE INDICATOR IS THE GUEST'S: a header click emits sort_requested and changes nothing; the guest reorders its collection by key and re-declares this record with the new indicator. Configuration, not an occurrence source — the echo doctrine. Not undoable: the header bar is not state, and the order underneath it already rides collection_move's undo run. */
 export function tx_set_column_headers(widget_id: number, sorted: number, direction: number, count: number, path_len: number, titles: readonly WireValue[]): Uint8Array {
-  return record(TX_SET_COLUMN_HEADERS, cat(u64(widget_id), u32(sorted), u32(direction), u32(count), u32(path_len), enc.values(titles)));
+  enc.begin();
+  enc.u64(widget_id);
+  enc.u32(sorted);
+  enc.u32(direction);
+  enc.u32(count);
+  enc.u32(path_len);
+  enc.values(titles);
+  return enc.end(TX_SET_COLUMN_HEADERS);
 }
 
 /** DECLARE the whole drawing on a canvas widget, replacing whatever was declared before (docs/canvas-plan.md §3.1). `ops` holds `path_len` KEY values FIRST, then `count` op values — set_column_headers' convention verbatim, and what lets a canvas live inside a For row template: path_len 0 with a live widget id is the flat case, path_len 0 with a template node id declares the drawing for every stamped copy, path_len > 0 re-declares one copy's.  THE OP STREAM IS A FLAT RUN OF TAGGED VALUES: an i64 `draw_op` opcode followed by its operands (§3.3). `vb_w`/`vb_h` are the VIEWBOX — the coordinate system the guest draws in AND the canvas's natural size in device-independent points — which is what keeps one op stream identical on five platforms (§3.2, invariant 6).  ONE RECORD FOR THE WHOLE DRAWING, never a patch, on set_column_headers' reasoning: a half-updated chart is the same defect as new titles under a stale indicator. NOT UNDOABLE: a drawing renders app state, it is not state.  THE CORE RASTERIZES AND THE BACKEND BLITS (ruling 1). No backend interprets an op, so every refusal in §3.5 happens in the only place that draws. */
 export function tx_set_drawing(widget_id: number, vb_w: WireValue, vb_h: WireValue, count: number, path_len: number, ops: readonly WireValue[]): Uint8Array {
-  return record(TX_SET_DRAWING, cat(u64(widget_id), enc.value(vb_w), enc.value(vb_h), u32(count), u32(path_len), enc.values(ops)));
+  enc.begin();
+  enc.u64(widget_id);
+  enc.value(vb_w);
+  enc.value(vb_h);
+  enc.u32(count);
+  enc.u32(path_len);
+  enc.values(ops);
+  return enc.end(TX_SET_DRAWING);
 }
 
 /** WHAT THIS CANVAS DOES WITH A TRACK THAT IS NOT ITS VIEWBOX (`size_policy`; docs/canvas-plan.md §3.2.1). A drawing is a FUNCTION OF SIZE and `redraw`/`tick` say so: the core hands the canvas the size it was assigned, through draw_requested/tick, and rasterizes what comes back at that size. `scale` and `fixed` DECLARE THE FUNCTION CONSTANT, which is what lets the core answer a size change by itself — `scale` re-rasterizes the held display list under a UNIFORM FIT with a letterbox, `fixed` never adapts at all.  NOT SENT FOR `scale`: it is the default a guest that declares nothing gets. THE GUEST NEVER SPELLS THIS NUMBER — the binding lowers `fixed` (the one true property) and the presence of an on_draw/on_tick handler; a canvas with no policy record is `scale`.  LIVE CANVASES ONLY in this slice: a template node is refused by name (docs/deferred.md's template-zone size policy entry). */
 export function tx_set_size_policy(widget_id: number, policy: number): Uint8Array {
-  return record(TX_SET_SIZE_POLICY, cat(u64(widget_id), u32(policy), u32(0)));
+  enc.begin();
+  enc.u64(widget_id);
+  enc.u32(policy);
+  enc.u32(0);
+  return enc.end(TX_SET_SIZE_POLICY);
 }
 
 /** A size-class breakpoint on a window: while the window's size class equals `size_class` (i64; SIZE_CLASS_COMPACT is the only class a guest may name today), the core applies the setter list; leaving the class it restores the guest-authored value, or the widget's own default where the guest never wrote one — the adaptation is a DIFF against the base declaration (docs/adaptive-layout-plan.md D3, size classes ruled 2026-08-31). The guest NEVER writes a width: iOS answers with the platform's own size class, and every other platform derives it from the latched width at the kaya-owned SIZE_CLASS_COMPACT_BELOW boundary.  THE CORE EVALUATES THE CONDITION, never the platform's breakpoint machinery and never a guest round trip: width and platform class are LATCHED from the backend's metrics reports, a breakpoint declared before any report applies at the first — the phone that never resizes — and a same-metrics report moves nothing.  `setters` is count triples flat: widgets (i64), then props (i64), then values, thirds by position. Setters may name `axis` only until the settable-prop ruling widens the list; anything else fails the batch by name. */
 export function tx_create_breakpoint(window: number, size_class: WireValue, count: number, setters: readonly WireValue[]): Uint8Array {
-  return record(TX_CREATE_BREAKPOINT, cat(u64(window), enc.value(size_class), u32(count), u32(0), enc.values(setters)));
+  enc.begin();
+  enc.u64(window);
+  enc.value(size_class);
+  enc.u32(count);
+  enc.u32(0);
+  enc.values(setters);
+  return enc.end(TX_CREATE_BREAKPOINT);
 }
 
 /** DECLARE that `widget` can be dragged, and what it hands over (docs/dnd-plan.md D1): the copy record's body — a clip in several representations, descending clip value, `present` a mask over the single-valued kinds and the two plural ones counted — plus `operations`, a mask over the drag_op enum naming what the source allows (copy 1, move 2). App-updated state: a widget whose payload changes re-declares, and a `present` of zero with no files and no custom ids withdraws the declaration. The core answers every hover from this and the destination's own declaration with no app round trip (D2). `path_len` keys after the header address ONE stamped copy the way set_column_headers' do. INSIDE A FOR'S BODY the widget is a template node and `bound` is a mask over the reps' slot indices (canonical order: custom id and bytes per pair, then files, image, html, text): a bound slot carries an i64 `level << 32 | field` — set_property's element source — and every stamped copy resolves it from its own row, re-declaring when that field changes (docs/dnd-plan.md §4). A live widget refuses a bound slot by name; a file slot never binds. */
 export function tx_set_drag_source(widget: number, present: number, file_count: number, custom_count: number, operations: number, path_len: number, bound: number, reps: readonly WireValue[]): Uint8Array {
-  return record(TX_SET_DRAG_SOURCE, cat(u64(widget), u32(present), u32(file_count), u32(custom_count), u32(operations), u32(path_len), u32(bound), enc.values(reps)));
+  enc.begin();
+  enc.u64(widget);
+  enc.u32(present);
+  enc.u32(file_count);
+  enc.u32(custom_count);
+  enc.u32(operations);
+  enc.u32(path_len);
+  enc.u32(bound);
+  enc.values(reps);
+  return enc.end(TX_SET_DRAG_SOURCE);
 }
 
 /** DECLARE that `widget` receives drops, with `operations` a mask over the drag_op enum naming what it will perform (copy 1, move 2; copy alone by default). WHAT it accepts is the existing `accepts` prop — the same list a paste consults, so a widget declares its vocabulary once. The hover verdict is the intersection of the source's operations with these, over a type the accept list names; a foreign source into kaya is always answered copy (D2). A zero mask withdraws the declaration. Keys as in set_drag_source. */
 export function tx_set_drop_target(widget: number, operations: number, path_len: number, keys: readonly WireValue[]): Uint8Array {
-  return record(TX_SET_DROP_TARGET, cat(u64(widget), u32(operations), u32(path_len), enc.values(keys)));
+  enc.begin();
+  enc.u64(widget);
+  enc.u32(operations);
+  enc.u32(path_len);
+  enc.values(keys);
+  return enc.end(TX_SET_DROP_TARGET);
 }
 
 /** Make every stamped row of a live For draggable within its own collection (docs/dnd-plan.md D8): each row is a source whose payload is its key, and a destination that accepts only its own collection's rows. The drop arrives as `dropped` with the ANCHOR — the key of the row it landed on and a before/onto bit — and the app confirms with the collection_move it already has; the core reorders nothing on its own. `enabled` 0 withdraws it. */
 export function tx_set_reorderable(container: number, enabled: number): Uint8Array {
-  return record(TX_SET_REORDERABLE, cat(u64(container), u32(enabled), u32(0)));
+  enc.begin();
+  enc.u64(container);
+  enc.u32(enabled);
+  enc.u32(0);
+  return enc.end(TX_SET_REORDERABLE);
 }
 
 /** Post a local notification (docs/tasks-s3-plan.md N1, N2): the alert grammar without a window — the platform shows it outside the app, and the one answer is notification_result when the user activates it or the platform refuses to post. `at` is a UNIX time in seconds handed to the OS scheduler where one exists (0 = now); title and body are Str values. Ids are guest-chosen; many may be live, and an id retires on its result or its cancel. */
 export function tx_show_notification(notification: number, at: number, title: WireValue, body: WireValue): Uint8Array {
-  return record(TX_SHOW_NOTIFICATION, cat(u64(notification), u64(at), enc.value(title), enc.value(body)));
+  enc.begin();
+  enc.u64(notification);
+  enc.u64(at);
+  enc.value(title);
+  enc.value(body);
+  return enc.end(TX_SHOW_NOTIFICATION);
 }
 
 /** Withdraw a pending or delivered notification by id (a reminder that was cleared). No answer follows; an unknown id is ignored. */
 export function tx_cancel_notification(notification: number): Uint8Array {
-  return record(TX_CANCEL_NOTIFICATION, cat(u64(notification)));
+  enc.begin();
+  enc.u64(notification);
+  return enc.end(TX_CANCEL_NOTIFICATION);
 }
 
 /** Declare one app-link route (docs/app-links-plan.md §4): `route` is the app's own id for it, `pattern` a Str. The MATCH HAPPENS ONCE, IN THE CORE — the patterns come here so a URL the platform hands over is turned into a route and its captures by one matcher rather than by nine. The grammar: segments split on `/`, a literal segment matches itself, `{name}` captures one segment. REFUSED AT THE DECLARATION, a fault like every other declaration refusal: an empty pattern, an empty segment, a brace a segment never closes, and a pattern already declared. Routes are declared at startup, before or inside the app's first transaction: the core matches a link that STARTED the process once that transaction lands. */
 export function tx_declare_link_route(route: number, pattern: WireValue): Uint8Array {
-  return record(TX_DECLARE_LINK_ROUTE, cat(u64(route), enc.value(pattern)));
+  enc.begin();
+  enc.u64(route);
+  enc.value(pattern);
+  return enc.end(TX_DECLARE_LINK_ROUTE);
 }
 
 /** The WHOLE attributed document of a `rich` textarea (docs/rich-text-plan.md R1): the text as the payload, and `runs` holding 4*`count` values read in FOURS — I64 start, I64 end, Str name, Str value — each run one attribute over one range in UTF-8 BYTE offsets into that text, validated at the ranges' chokepoint (docs/ranges-units.md §7) and allowed to overlap (bold and italic over one range are two runs). A CONFIGURATION WRITE: it echoes nothing, and it resets the widget's native undo history where that tier is on (docs/undo-plan.md D7). The vocabulary is wire::RICH_ATTRS; a `block` run must start and end on paragraph boundaries. Refused on a textarea that is not `rich`. */
 export function tx_set_rich_text(widget_id: number, count: number, runs: readonly WireValue[], text: WireValue): Uint8Array {
-  return record(TX_SET_RICH_TEXT, cat(u64(widget_id), u32(count), u32(0), enc.values(runs), enc.value(text)));
+  enc.begin();
+  enc.u64(widget_id);
+  enc.u32(count);
+  enc.u32(0);
+  enc.values(runs);
+  enc.value(text);
+  return enc.end(TX_SET_RICH_TEXT);
 }
 
 /** ONE edit into a `rich` textarea, the app's own or a collaborator's (docs/rich-text-plan.md R1, R5): replace `start..end` (UTF-8 byte offsets into the widget's current text, validated as a range is) with the payload text, whose attribute runs are `runs` in fours as set_rich_text's, with offsets RELATIVE to the inserted text. Keeps the selection: unchanged before the edit, shifted after it, a caret at `start` ending AFTER the insertion. Echoes nothing and never resets undo. QUEUED while an input-method composition is live and applied when it ends, since a refusal would drop a collaborator's edit. */
 export function tx_apply_edit(widget_id: number, start: number, stop: number, count: number, runs: readonly WireValue[], text: WireValue): Uint8Array {
-  return record(TX_APPLY_EDIT, cat(u64(widget_id), u64(start), u64(stop), u32(count), u32(0), enc.values(runs), enc.value(text)));
+  enc.begin();
+  enc.u64(widget_id);
+  enc.u64(start);
+  enc.u64(stop);
+  enc.u32(count);
+  enc.u32(0);
+  enc.values(runs);
+  enc.value(text);
+  return enc.end(TX_APPLY_EDIT);
 }
 
 /** Format a `rich` textarea's CURRENT SELECTION through the widget's own act — what an app's toolbar button sends (docs/rich-text-plan.md R1): `attr` is two Str values, name then value; `removed` 1 takes the attribute off. `ranged` 1 formats `start..stop` (UTF-8 bytes) INSTEAD of the selection, which stays where it is: a document write, echoed by nothing, legal on a rich label too (docs/rich-text-plan.md §17, the notes demo's remote mark). The widget answers with text_formatted over the range it formatted, which is how the mirror moves; a collapsed selection arms the typing attribute and answers nothing until the next edit. A `block` act covers the selection's whole paragraphs, and `block` with value `body` removes. Refused on a textarea that is not `rich` and for a name outside wire::RICH_ATTRS. */
 export function tx_format_text(widget_id: number, removed: number, ranged: number, start: number, stop: number, attr: readonly WireValue[]): Uint8Array {
-  return record(TX_FORMAT_TEXT, cat(u64(widget_id), u32(removed), u32(ranged), u64(start), u64(stop), enc.values(attr)));
+  enc.begin();
+  enc.u64(widget_id);
+  enc.u32(removed);
+  enc.u32(ranged);
+  enc.u64(start);
+  enc.u64(stop);
+  enc.values(attr);
+  return enc.end(TX_FORMAT_TEXT);
 }
 
 /** A civil date as the wire's I64: year * 10000 + month * 100 + day. */
@@ -760,702 +1023,842 @@ export function unpack_time(packed: number): [hour: number, minute: number] {
 
 /** set_property with a constant text value. */
 export function tx_set_text(widget_id: number, text: string): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_TEXT), u32(SOURCE_CONST), enc.value(text)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_TEXT); enc.u32(SOURCE_CONST); enc.value(text);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a signal-bound text value. */
 export function tx_bind_text(widget_id: number, signal_id: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_TEXT), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_TEXT); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_text_element(widget_id: number, level = 0, field = 0): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_TEXT), u32(SOURCE_ELEMENT), u32(level), u32(field)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_TEXT); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a constant checked value. */
 export function tx_set_checked(widget_id: number, checked: boolean): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_CHECKED), u32(SOURCE_CONST), enc.value(checked)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_CHECKED); enc.u32(SOURCE_CONST); enc.value(checked);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a signal-bound checked value. */
 export function tx_bind_checked(widget_id: number, signal_id: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_CHECKED), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_CHECKED); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_checked_element(widget_id: number, level = 0, field = 0): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_CHECKED), u32(SOURCE_ELEMENT), u32(level), u32(field)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_CHECKED); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a constant value value. */
 export function tx_set_value(widget_id: number, value: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_VALUE), u32(SOURCE_CONST), enc.value(value)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_VALUE); enc.u32(SOURCE_CONST); enc.value(value);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a signal-bound value value. */
 export function tx_bind_value(widget_id: number, signal_id: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_VALUE), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_VALUE); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_value_element(widget_id: number, level = 0, field = 0): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_VALUE), u32(SOURCE_ELEMENT), u32(level), u32(field)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_VALUE); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a constant min value. */
 export function tx_set_min(widget_id: number, min: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_MIN), u32(SOURCE_CONST), enc.value(min)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_MIN); enc.u32(SOURCE_CONST); enc.value(min);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a signal-bound min value. */
 export function tx_bind_min(widget_id: number, signal_id: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_MIN), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_MIN); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_min_element(widget_id: number, level = 0, field = 0): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_MIN), u32(SOURCE_ELEMENT), u32(level), u32(field)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_MIN); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a constant max value. */
 export function tx_set_max(widget_id: number, max: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_MAX), u32(SOURCE_CONST), enc.value(max)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_MAX); enc.u32(SOURCE_CONST); enc.value(max);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a signal-bound max value. */
 export function tx_bind_max(widget_id: number, signal_id: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_MAX), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_MAX); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_max_element(widget_id: number, level = 0, field = 0): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_MAX), u32(SOURCE_ELEMENT), u32(level), u32(field)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_MAX); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a constant source value. */
 export function tx_set_source(widget_id: number, handle: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_SOURCE), u32(SOURCE_CONST), enc.value(new BlobHandle(handle))));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_SOURCE); enc.u32(SOURCE_CONST); enc.value(new BlobHandle(handle));
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a signal-bound source value. */
 export function tx_bind_source(widget_id: number, signal_id: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_SOURCE), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_SOURCE); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_source_element(widget_id: number, level = 0, field = 0): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_SOURCE), u32(SOURCE_ELEMENT), u32(level), u32(field)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_SOURCE); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a constant grow value. */
 export function tx_set_grow(widget_id: number, grow: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_GROW), u32(SOURCE_CONST), enc.value(grow)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_GROW); enc.u32(SOURCE_CONST); enc.value(grow);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a signal-bound grow value. */
 export function tx_bind_grow(widget_id: number, signal_id: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_GROW), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_GROW); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_grow_element(widget_id: number, level = 0, field = 0): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_GROW), u32(SOURCE_ELEMENT), u32(level), u32(field)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_GROW); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a constant spacing value. */
 export function tx_set_spacing(widget_id: number, spacing: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_SPACING), u32(SOURCE_CONST), enc.value(spacing)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_SPACING); enc.u32(SOURCE_CONST); enc.value(spacing);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a signal-bound spacing value. */
 export function tx_bind_spacing(widget_id: number, signal_id: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_SPACING), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_SPACING); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_spacing_element(widget_id: number, level = 0, field = 0): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_SPACING), u32(SOURCE_ELEMENT), u32(level), u32(field)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_SPACING); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a constant align value. */
 export function tx_set_align(widget_id: number, align: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_ALIGN), u32(SOURCE_CONST), enc.value(new I64(align))));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_ALIGN); enc.u32(SOURCE_CONST); enc.value(new I64(align));
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a signal-bound align value. */
 export function tx_bind_align(widget_id: number, signal_id: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_ALIGN), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_ALIGN); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_align_element(widget_id: number, level = 0, field = 0): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_ALIGN), u32(SOURCE_ELEMENT), u32(level), u32(field)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_ALIGN); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a constant indeterminate value. */
 export function tx_set_indeterminate(widget_id: number, indeterminate: boolean): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_INDETERMINATE), u32(SOURCE_CONST), enc.value(indeterminate)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_INDETERMINATE); enc.u32(SOURCE_CONST); enc.value(indeterminate);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a signal-bound indeterminate value. */
 export function tx_bind_indeterminate(widget_id: number, signal_id: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_INDETERMINATE), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_INDETERMINATE); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_indeterminate_element(widget_id: number, level = 0, field = 0): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_INDETERMINATE), u32(SOURCE_ELEMENT), u32(level), u32(field)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_INDETERMINATE); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a constant columns value. */
 export function tx_set_columns(widget_id: number, columns: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_COLUMNS), u32(SOURCE_CONST), enc.value(columns)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_COLUMNS); enc.u32(SOURCE_CONST); enc.value(columns);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a signal-bound columns value. */
 export function tx_bind_columns(widget_id: number, signal_id: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_COLUMNS), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_COLUMNS); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_columns_element(widget_id: number, level = 0, field = 0): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_COLUMNS), u32(SOURCE_ELEMENT), u32(level), u32(field)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_COLUMNS); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a constant a11y_id value. */
 export function tx_set_a11y_id(widget_id: number, a11y_id: string): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_A11Y_ID), u32(SOURCE_CONST), enc.value(a11y_id)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_A11Y_ID); enc.u32(SOURCE_CONST); enc.value(a11y_id);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a signal-bound a11y_id value. */
 export function tx_bind_a11y_id(widget_id: number, signal_id: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_A11Y_ID), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_A11Y_ID); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_a11y_id_element(widget_id: number, level = 0, field = 0): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_A11Y_ID), u32(SOURCE_ELEMENT), u32(level), u32(field)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_A11Y_ID); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a constant a11y_label value. */
 export function tx_set_a11y_label(widget_id: number, a11y_label: string): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_A11Y_LABEL), u32(SOURCE_CONST), enc.value(a11y_label)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_A11Y_LABEL); enc.u32(SOURCE_CONST); enc.value(a11y_label);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a signal-bound a11y_label value. */
 export function tx_bind_a11y_label(widget_id: number, signal_id: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_A11Y_LABEL), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_A11Y_LABEL); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_a11y_label_element(widget_id: number, level = 0, field = 0): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_A11Y_LABEL), u32(SOURCE_ELEMENT), u32(level), u32(field)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_A11Y_LABEL); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a constant a11y_hint value. */
 export function tx_set_a11y_hint(widget_id: number, a11y_hint: string): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_A11Y_HINT), u32(SOURCE_CONST), enc.value(a11y_hint)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_A11Y_HINT); enc.u32(SOURCE_CONST); enc.value(a11y_hint);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a signal-bound a11y_hint value. */
 export function tx_bind_a11y_hint(widget_id: number, signal_id: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_A11Y_HINT), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_A11Y_HINT); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_a11y_hint_element(widget_id: number, level = 0, field = 0): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_A11Y_HINT), u32(SOURCE_ELEMENT), u32(level), u32(field)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_A11Y_HINT); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a constant accepts value. */
 export function tx_set_accepts(widget_id: number, accepts: string): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_ACCEPTS), u32(SOURCE_CONST), enc.value(accepts)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_ACCEPTS); enc.u32(SOURCE_CONST); enc.value(accepts);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a signal-bound accepts value. */
 export function tx_bind_accepts(widget_id: number, signal_id: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_ACCEPTS), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_ACCEPTS); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_accepts_element(widget_id: number, level = 0, field = 0): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_ACCEPTS), u32(SOURCE_ELEMENT), u32(level), u32(field)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_ACCEPTS); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a constant role value. */
 export function tx_set_role(widget_id: number, role: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_ROLE), u32(SOURCE_CONST), enc.value(new I64(role))));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_ROLE); enc.u32(SOURCE_CONST); enc.value(new I64(role));
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a signal-bound role value. */
 export function tx_bind_role(widget_id: number, signal_id: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_ROLE), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_ROLE); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_role_element(widget_id: number, level = 0, field = 0): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_ROLE), u32(SOURCE_ELEMENT), u32(level), u32(field)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_ROLE); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a constant inset value. */
 export function tx_set_inset(widget_id: number, inset: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_INSET), u32(SOURCE_CONST), enc.value(inset)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_INSET); enc.u32(SOURCE_CONST); enc.value(inset);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a signal-bound inset value. */
 export function tx_bind_inset(widget_id: number, signal_id: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_INSET), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_INSET); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_inset_element(widget_id: number, level = 0, field = 0): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_INSET), u32(SOURCE_ELEMENT), u32(level), u32(field)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_INSET); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a constant axis value. */
 export function tx_set_axis(widget_id: number, axis: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_AXIS), u32(SOURCE_CONST), enc.value(new I64(axis))));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_AXIS); enc.u32(SOURCE_CONST); enc.value(new I64(axis));
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a signal-bound axis value. */
 export function tx_bind_axis(widget_id: number, signal_id: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_AXIS), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_AXIS); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_axis_element(widget_id: number, level = 0, field = 0): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_AXIS), u32(SOURCE_ELEMENT), u32(level), u32(field)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_AXIS); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a constant date value. A civil date, packed YYYYMMDD on the wire. */
 export function tx_set_date(widget_id: number, year: number, month: number, day: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_DATE), u32(SOURCE_CONST), enc.value(new I64(pack_date(year, month, day)))));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_DATE); enc.u32(SOURCE_CONST); enc.value(new I64(pack_date(year, month, day)));
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a signal-bound date value. */
 export function tx_bind_date(widget_id: number, signal_id: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_DATE), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_DATE); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_date_element(widget_id: number, level = 0, field = 0): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_DATE), u32(SOURCE_ELEMENT), u32(level), u32(field)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_DATE); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a constant time value. A civil time, packed HHMM on the wire. */
 export function tx_set_time(widget_id: number, hour: number, minute: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_TIME), u32(SOURCE_CONST), enc.value(new I64(pack_time(hour, minute)))));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_TIME); enc.u32(SOURCE_CONST); enc.value(new I64(pack_time(hour, minute)));
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a signal-bound time value. */
 export function tx_bind_time(widget_id: number, signal_id: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_TIME), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_TIME); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_time_element(widget_id: number, level = 0, field = 0): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_TIME), u32(SOURCE_ELEMENT), u32(level), u32(field)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_TIME); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a constant min_date value. A civil date, packed YYYYMMDD on the wire. */
 export function tx_set_min_date(widget_id: number, year: number, month: number, day: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_MIN_DATE), u32(SOURCE_CONST), enc.value(new I64(pack_date(year, month, day)))));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_MIN_DATE); enc.u32(SOURCE_CONST); enc.value(new I64(pack_date(year, month, day)));
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a signal-bound min_date value. */
 export function tx_bind_min_date(widget_id: number, signal_id: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_MIN_DATE), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_MIN_DATE); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_min_date_element(widget_id: number, level = 0, field = 0): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_MIN_DATE), u32(SOURCE_ELEMENT), u32(level), u32(field)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_MIN_DATE); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a constant max_date value. A civil date, packed YYYYMMDD on the wire. */
 export function tx_set_max_date(widget_id: number, year: number, month: number, day: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_MAX_DATE), u32(SOURCE_CONST), enc.value(new I64(pack_date(year, month, day)))));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_MAX_DATE); enc.u32(SOURCE_CONST); enc.value(new I64(pack_date(year, month, day)));
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a signal-bound max_date value. */
 export function tx_bind_max_date(widget_id: number, signal_id: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_MAX_DATE), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_MAX_DATE); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_max_date_element(widget_id: number, level = 0, field = 0): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_MAX_DATE), u32(SOURCE_ELEMENT), u32(level), u32(field)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_MAX_DATE); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a constant minute_step value. */
 export function tx_set_minute_step(widget_id: number, minute_step: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_MINUTE_STEP), u32(SOURCE_CONST), enc.value(minute_step)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_MINUTE_STEP); enc.u32(SOURCE_CONST); enc.value(minute_step);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a signal-bound minute_step value. */
 export function tx_bind_minute_step(widget_id: number, signal_id: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_MINUTE_STEP), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_MINUTE_STEP); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_minute_step_element(widget_id: number, level = 0, field = 0): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_MINUTE_STEP), u32(SOURCE_ELEMENT), u32(level), u32(field)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_MINUTE_STEP); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a constant step value. */
 export function tx_set_step(widget_id: number, step: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_STEP), u32(SOURCE_CONST), enc.value(step)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_STEP); enc.u32(SOURCE_CONST); enc.value(step);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a signal-bound step value. */
 export function tx_bind_step(widget_id: number, signal_id: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_STEP), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_STEP); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_step_element(widget_id: number, level = 0, field = 0): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_STEP), u32(SOURCE_ELEMENT), u32(level), u32(field)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_STEP); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a constant tick_spacing value. */
 export function tx_set_tick_spacing(widget_id: number, tick_spacing: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_TICK_SPACING), u32(SOURCE_CONST), enc.value(tick_spacing)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_TICK_SPACING); enc.u32(SOURCE_CONST); enc.value(tick_spacing);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a signal-bound tick_spacing value. */
 export function tx_bind_tick_spacing(widget_id: number, signal_id: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_TICK_SPACING), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_TICK_SPACING); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_tick_spacing_element(widget_id: number, level = 0, field = 0): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_TICK_SPACING), u32(SOURCE_ELEMENT), u32(level), u32(field)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_TICK_SPACING); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a constant help value. */
 export function tx_set_help(widget_id: number, help: string): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_HELP), u32(SOURCE_CONST), enc.value(help)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_HELP); enc.u32(SOURCE_CONST); enc.value(help);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a signal-bound help value. */
 export function tx_bind_help(widget_id: number, signal_id: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_HELP), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_HELP); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_help_element(widget_id: number, level = 0, field = 0): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_HELP), u32(SOURCE_ELEMENT), u32(level), u32(field)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_HELP); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a constant fill value. */
 export function tx_set_fill(widget_id: number, fill: boolean): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_FILL), u32(SOURCE_CONST), enc.value(fill)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_FILL); enc.u32(SOURCE_CONST); enc.value(fill);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a signal-bound fill value. */
 export function tx_bind_fill(widget_id: number, signal_id: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_FILL), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_FILL); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_fill_element(widget_id: number, level = 0, field = 0): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_FILL), u32(SOURCE_ELEMENT), u32(level), u32(field)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_FILL); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a constant min_column_width value. */
 export function tx_set_min_column_width(widget_id: number, min_column_width: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_MIN_COLUMN_WIDTH), u32(SOURCE_CONST), enc.value(min_column_width)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_MIN_COLUMN_WIDTH); enc.u32(SOURCE_CONST); enc.value(min_column_width);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a signal-bound min_column_width value. */
 export function tx_bind_min_column_width(widget_id: number, signal_id: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_MIN_COLUMN_WIDTH), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_MIN_COLUMN_WIDTH); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_min_column_width_element(widget_id: number, level = 0, field = 0): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_MIN_COLUMN_WIDTH), u32(SOURCE_ELEMENT), u32(level), u32(field)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_MIN_COLUMN_WIDTH); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a constant wrap value. */
 export function tx_set_wrap(widget_id: number, wrap: boolean): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_WRAP), u32(SOURCE_CONST), enc.value(wrap)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_WRAP); enc.u32(SOURCE_CONST); enc.value(wrap);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a signal-bound wrap value. */
 export function tx_bind_wrap(widget_id: number, signal_id: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_WRAP), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_WRAP); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_wrap_element(widget_id: number, level = 0, field = 0): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_WRAP), u32(SOURCE_ELEMENT), u32(level), u32(field)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_WRAP); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a constant placeholder value. */
 export function tx_set_placeholder(widget_id: number, placeholder: string): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_PLACEHOLDER), u32(SOURCE_CONST), enc.value(placeholder)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_PLACEHOLDER); enc.u32(SOURCE_CONST); enc.value(placeholder);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a signal-bound placeholder value. */
 export function tx_bind_placeholder(widget_id: number, signal_id: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_PLACEHOLDER), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_PLACEHOLDER); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_placeholder_element(widget_id: number, level = 0, field = 0): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_PLACEHOLDER), u32(SOURCE_ELEMENT), u32(level), u32(field)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_PLACEHOLDER); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a constant href value. */
 export function tx_set_href(widget_id: number, href: string): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_HREF), u32(SOURCE_CONST), enc.value(href)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_HREF); enc.u32(SOURCE_CONST); enc.value(href);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a signal-bound href value. */
 export function tx_bind_href(widget_id: number, signal_id: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_HREF), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_HREF); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_href_element(widget_id: number, level = 0, field = 0): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_HREF), u32(SOURCE_ELEMENT), u32(level), u32(field)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_HREF); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a constant rich value. */
 export function tx_set_rich(widget_id: number, rich: boolean): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_RICH), u32(SOURCE_CONST), enc.value(rich)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_RICH); enc.u32(SOURCE_CONST); enc.value(rich);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a signal-bound rich value. */
 export function tx_bind_rich(widget_id: number, signal_id: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_RICH), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_RICH); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_rich_element(widget_id: number, level = 0, field = 0): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_RICH), u32(SOURCE_ELEMENT), u32(level), u32(field)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_RICH); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a constant own_undo value. */
 export function tx_set_own_undo(widget_id: number, own_undo: boolean): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_OWN_UNDO), u32(SOURCE_CONST), enc.value(own_undo)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_OWN_UNDO); enc.u32(SOURCE_CONST); enc.value(own_undo);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a signal-bound own_undo value. */
 export function tx_bind_own_undo(widget_id: number, signal_id: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_OWN_UNDO), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_OWN_UNDO); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_own_undo_element(widget_id: number, level = 0, field = 0): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_OWN_UNDO), u32(SOURCE_ELEMENT), u32(level), u32(field)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_OWN_UNDO); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a constant can_undo value. */
 export function tx_set_can_undo(widget_id: number, can_undo: boolean): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_CAN_UNDO), u32(SOURCE_CONST), enc.value(can_undo)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_CAN_UNDO); enc.u32(SOURCE_CONST); enc.value(can_undo);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a signal-bound can_undo value. */
 export function tx_bind_can_undo(widget_id: number, signal_id: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_CAN_UNDO), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_CAN_UNDO); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_can_undo_element(widget_id: number, level = 0, field = 0): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_CAN_UNDO), u32(SOURCE_ELEMENT), u32(level), u32(field)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_CAN_UNDO); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a constant can_redo value. */
 export function tx_set_can_redo(widget_id: number, can_redo: boolean): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_CAN_REDO), u32(SOURCE_CONST), enc.value(can_redo)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_CAN_REDO); enc.u32(SOURCE_CONST); enc.value(can_redo);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a signal-bound can_redo value. */
 export function tx_bind_can_redo(widget_id: number, signal_id: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_CAN_REDO), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_CAN_REDO); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_can_redo_element(widget_id: number, level = 0, field = 0): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_CAN_REDO), u32(SOURCE_ELEMENT), u32(level), u32(field)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_CAN_REDO); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a constant document value. */
 export function tx_set_document(widget_id: number, handle: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_DOCUMENT), u32(SOURCE_CONST), enc.value(new BlobHandle(handle))));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_DOCUMENT); enc.u32(SOURCE_CONST); enc.value(new BlobHandle(handle));
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property with a signal-bound document value. */
 export function tx_bind_document(widget_id: number, signal_id: number): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_DOCUMENT), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_DOCUMENT); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_document_element(widget_id: number, level = 0, field = 0): Uint8Array {
-  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_DOCUMENT), u32(SOURCE_ELEMENT), u32(level), u32(field)));
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_DOCUMENT); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
 }
 
 /** set_window_prop with a constant title value; window 0, the primary surface. */
 export function tx_set_window_title(window: number, title: string): Uint8Array {
-  return record(TX_SET_WINDOW_PROP, cat(u64(window), u32(WPROP_TITLE), u32(SOURCE_CONST), enc.value(title)));
+  enc.begin(); enc.u64(window); enc.u32(WPROP_TITLE); enc.u32(SOURCE_CONST); enc.value(title);
+  return enc.end(TX_SET_WINDOW_PROP);
 }
 
 /** set_window_prop with a signal-bound title value; window 0, the primary surface. */
 export function tx_bind_window_title(window: number, signal_id: number): Uint8Array {
-  return record(TX_SET_WINDOW_PROP, cat(u64(window), u32(WPROP_TITLE), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(window); enc.u32(WPROP_TITLE); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_WINDOW_PROP);
 }
 
 /** set_window_prop with a constant width value; window 0, the primary surface. */
 export function tx_set_window_width(window: number, width: number): Uint8Array {
-  return record(TX_SET_WINDOW_PROP, cat(u64(window), u32(WPROP_WIDTH), u32(SOURCE_CONST), enc.value(width)));
+  enc.begin(); enc.u64(window); enc.u32(WPROP_WIDTH); enc.u32(SOURCE_CONST); enc.value(width);
+  return enc.end(TX_SET_WINDOW_PROP);
 }
 
 /** set_window_prop with a signal-bound width value; window 0, the primary surface. */
 export function tx_bind_window_width(window: number, signal_id: number): Uint8Array {
-  return record(TX_SET_WINDOW_PROP, cat(u64(window), u32(WPROP_WIDTH), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(window); enc.u32(WPROP_WIDTH); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_WINDOW_PROP);
 }
 
 /** set_window_prop with a constant height value; window 0, the primary surface. */
 export function tx_set_window_height(window: number, height: number): Uint8Array {
-  return record(TX_SET_WINDOW_PROP, cat(u64(window), u32(WPROP_HEIGHT), u32(SOURCE_CONST), enc.value(height)));
+  enc.begin(); enc.u64(window); enc.u32(WPROP_HEIGHT); enc.u32(SOURCE_CONST); enc.value(height);
+  return enc.end(TX_SET_WINDOW_PROP);
 }
 
 /** set_window_prop with a signal-bound height value; window 0, the primary surface. */
 export function tx_bind_window_height(window: number, signal_id: number): Uint8Array {
-  return record(TX_SET_WINDOW_PROP, cat(u64(window), u32(WPROP_HEIGHT), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(window); enc.u32(WPROP_HEIGHT); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_WINDOW_PROP);
 }
 
 /** set_window_prop with a constant veto_close value; window 0, the primary surface. */
 export function tx_set_window_veto_close(window: number, veto_close: boolean): Uint8Array {
-  return record(TX_SET_WINDOW_PROP, cat(u64(window), u32(WPROP_VETO_CLOSE), u32(SOURCE_CONST), enc.value(veto_close)));
+  enc.begin(); enc.u64(window); enc.u32(WPROP_VETO_CLOSE); enc.u32(SOURCE_CONST); enc.value(veto_close);
+  return enc.end(TX_SET_WINDOW_PROP);
 }
 
 /** set_window_prop with a signal-bound veto_close value; window 0, the primary surface. */
 export function tx_bind_window_veto_close(window: number, signal_id: number): Uint8Array {
-  return record(TX_SET_WINDOW_PROP, cat(u64(window), u32(WPROP_VETO_CLOSE), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(window); enc.u32(WPROP_VETO_CLOSE); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_WINDOW_PROP);
 }
 
 /** set_window_prop with a constant sections_presentation value; window 0, the primary surface. */
 export function tx_set_window_sections_presentation(window: number, sections_presentation: number): Uint8Array {
-  return record(TX_SET_WINDOW_PROP, cat(u64(window), u32(WPROP_SECTIONS_PRESENTATION), u32(SOURCE_CONST), enc.value(new I64(sections_presentation))));
+  enc.begin(); enc.u64(window); enc.u32(WPROP_SECTIONS_PRESENTATION); enc.u32(SOURCE_CONST); enc.value(new I64(sections_presentation));
+  return enc.end(TX_SET_WINDOW_PROP);
 }
 
 /** set_window_prop with a signal-bound sections_presentation value; window 0, the primary surface. */
 export function tx_bind_window_sections_presentation(window: number, signal_id: number): Uint8Array {
-  return record(TX_SET_WINDOW_PROP, cat(u64(window), u32(WPROP_SECTIONS_PRESENTATION), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(window); enc.u32(WPROP_SECTIONS_PRESENTATION); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_WINDOW_PROP);
 }
 
 /** set_window_prop with a constant panes value; window 0, the primary surface. */
 export function tx_set_window_panes(window: number, panes: number): Uint8Array {
-  return record(TX_SET_WINDOW_PROP, cat(u64(window), u32(WPROP_PANES), u32(SOURCE_CONST), enc.value(new I64(panes))));
+  enc.begin(); enc.u64(window); enc.u32(WPROP_PANES); enc.u32(SOURCE_CONST); enc.value(new I64(panes));
+  return enc.end(TX_SET_WINDOW_PROP);
 }
 
 /** set_window_prop with a signal-bound panes value; window 0, the primary surface. */
 export function tx_bind_window_panes(window: number, signal_id: number): Uint8Array {
-  return record(TX_SET_WINDOW_PROP, cat(u64(window), u32(WPROP_PANES), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(window); enc.u32(WPROP_PANES); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_WINDOW_PROP);
 }
 
 /** set_window_prop with a constant dirty value; window 0, the primary surface. */
 export function tx_set_window_dirty(window: number, dirty: boolean): Uint8Array {
-  return record(TX_SET_WINDOW_PROP, cat(u64(window), u32(WPROP_DIRTY), u32(SOURCE_CONST), enc.value(dirty)));
+  enc.begin(); enc.u64(window); enc.u32(WPROP_DIRTY); enc.u32(SOURCE_CONST); enc.value(dirty);
+  return enc.end(TX_SET_WINDOW_PROP);
 }
 
 /** set_window_prop with a signal-bound dirty value; window 0, the primary surface. */
 export function tx_bind_window_dirty(window: number, signal_id: number): Uint8Array {
-  return record(TX_SET_WINDOW_PROP, cat(u64(window), u32(WPROP_DIRTY), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(window); enc.u32(WPROP_DIRTY); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_WINDOW_PROP);
 }
 
 /** set_window_prop with a constant inset value; window 0, the primary surface. */
 export function tx_set_window_inset(window: number, inset: number): Uint8Array {
-  return record(TX_SET_WINDOW_PROP, cat(u64(window), u32(WPROP_INSET), u32(SOURCE_CONST), enc.value(inset)));
+  enc.begin(); enc.u64(window); enc.u32(WPROP_INSET); enc.u32(SOURCE_CONST); enc.value(inset);
+  return enc.end(TX_SET_WINDOW_PROP);
 }
 
 /** set_window_prop with a signal-bound inset value; window 0, the primary surface. */
 export function tx_bind_window_inset(window: number, signal_id: number): Uint8Array {
-  return record(TX_SET_WINDOW_PROP, cat(u64(window), u32(WPROP_INSET), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(window); enc.u32(WPROP_INSET); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_WINDOW_PROP);
 }
 
 /** set_window_prop with a constant appearance value; window 0, the primary surface. */
 export function tx_set_window_appearance(window: number, appearance: number): Uint8Array {
-  return record(TX_SET_WINDOW_PROP, cat(u64(window), u32(WPROP_APPEARANCE), u32(SOURCE_CONST), enc.value(new I64(appearance))));
+  enc.begin(); enc.u64(window); enc.u32(WPROP_APPEARANCE); enc.u32(SOURCE_CONST); enc.value(new I64(appearance));
+  return enc.end(TX_SET_WINDOW_PROP);
 }
 
 /** set_window_prop with a signal-bound appearance value; window 0, the primary surface. */
 export function tx_bind_window_appearance(window: number, signal_id: number): Uint8Array {
-  return record(TX_SET_WINDOW_PROP, cat(u64(window), u32(WPROP_APPEARANCE), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(window); enc.u32(WPROP_APPEARANCE); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_WINDOW_PROP);
 }
 
 /** set_window_prop with a constant remember_frame value; window 0, the primary surface. */
 export function tx_set_window_remember_frame(window: number, remember_frame: boolean): Uint8Array {
-  return record(TX_SET_WINDOW_PROP, cat(u64(window), u32(WPROP_REMEMBER_FRAME), u32(SOURCE_CONST), enc.value(remember_frame)));
+  enc.begin(); enc.u64(window); enc.u32(WPROP_REMEMBER_FRAME); enc.u32(SOURCE_CONST); enc.value(remember_frame);
+  return enc.end(TX_SET_WINDOW_PROP);
 }
 
 /** set_window_prop with a signal-bound remember_frame value; window 0, the primary surface. */
 export function tx_bind_window_remember_frame(window: number, signal_id: number): Uint8Array {
-  return record(TX_SET_WINDOW_PROP, cat(u64(window), u32(WPROP_REMEMBER_FRAME), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(window); enc.u32(WPROP_REMEMBER_FRAME); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_WINDOW_PROP);
 }
 
 /** set_entry_prop with a constant title value. */
 export function tx_set_entry_title(entry: number, title: string): Uint8Array {
-  return record(TX_SET_ENTRY_PROP, cat(u64(entry), u32(EPROP_TITLE), u32(SOURCE_CONST), enc.value(title)));
+  enc.begin(); enc.u64(entry); enc.u32(EPROP_TITLE); enc.u32(SOURCE_CONST); enc.value(title);
+  return enc.end(TX_SET_ENTRY_PROP);
 }
 
 /** set_entry_prop with a signal-bound title value. */
 export function tx_bind_entry_title(entry: number, signal_id: number): Uint8Array {
-  return record(TX_SET_ENTRY_PROP, cat(u64(entry), u32(EPROP_TITLE), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(entry); enc.u32(EPROP_TITLE); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_ENTRY_PROP);
 }
 
 /** set_entry_prop with a constant intercept_back value. */
 export function tx_set_entry_intercept_back(entry: number, intercept_back: boolean): Uint8Array {
-  return record(TX_SET_ENTRY_PROP, cat(u64(entry), u32(EPROP_INTERCEPT_BACK), u32(SOURCE_CONST), enc.value(intercept_back)));
+  enc.begin(); enc.u64(entry); enc.u32(EPROP_INTERCEPT_BACK); enc.u32(SOURCE_CONST); enc.value(intercept_back);
+  return enc.end(TX_SET_ENTRY_PROP);
 }
 
 /** set_entry_prop with a signal-bound intercept_back value. */
 export function tx_bind_entry_intercept_back(entry: number, signal_id: number): Uint8Array {
-  return record(TX_SET_ENTRY_PROP, cat(u64(entry), u32(EPROP_INTERCEPT_BACK), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(entry); enc.u32(EPROP_INTERCEPT_BACK); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_ENTRY_PROP);
 }
 
 /** set_section_prop with a constant title value. */
 export function tx_set_section_title(section: number, title: string): Uint8Array {
-  return record(TX_SET_SECTION_PROP, cat(u64(section), u32(SPROP_TITLE), u32(SOURCE_CONST), enc.value(title)));
+  enc.begin(); enc.u64(section); enc.u32(SPROP_TITLE); enc.u32(SOURCE_CONST); enc.value(title);
+  return enc.end(TX_SET_SECTION_PROP);
 }
 
 /** set_section_prop with a signal-bound title value. */
 export function tx_bind_section_title(section: number, signal_id: number): Uint8Array {
-  return record(TX_SET_SECTION_PROP, cat(u64(section), u32(SPROP_TITLE), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(section); enc.u32(SPROP_TITLE); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_SECTION_PROP);
 }
 
 /** set_section_prop with a constant icon value. */
 export function tx_set_section_icon(section: number, handle: number): Uint8Array {
-  return record(TX_SET_SECTION_PROP, cat(u64(section), u32(SPROP_ICON), u32(SOURCE_CONST), enc.value(new BlobHandle(handle))));
+  enc.begin(); enc.u64(section); enc.u32(SPROP_ICON); enc.u32(SOURCE_CONST); enc.value(new BlobHandle(handle));
+  return enc.end(TX_SET_SECTION_PROP);
 }
 
 /** set_section_prop with a signal-bound icon value. */
 export function tx_bind_section_icon(section: number, signal_id: number): Uint8Array {
-  return record(TX_SET_SECTION_PROP, cat(u64(section), u32(SPROP_ICON), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(section); enc.u32(SPROP_ICON); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_SECTION_PROP);
 }
 
 /** set_section_prop with a constant symbol value. */
 export function tx_set_section_symbol(section: number, symbol: number): Uint8Array {
-  return record(TX_SET_SECTION_PROP, cat(u64(section), u32(SPROP_SYMBOL), u32(SOURCE_CONST), enc.value(new I64(symbol))));
+  enc.begin(); enc.u64(section); enc.u32(SPROP_SYMBOL); enc.u32(SOURCE_CONST); enc.value(new I64(symbol));
+  return enc.end(TX_SET_SECTION_PROP);
 }
 
 /** set_section_prop with a signal-bound symbol value. */
 export function tx_bind_section_symbol(section: number, signal_id: number): Uint8Array {
-  return record(TX_SET_SECTION_PROP, cat(u64(section), u32(SPROP_SYMBOL), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(section); enc.u32(SPROP_SYMBOL); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_SECTION_PROP);
 }
 
 /** set_section_prop with a constant badge value. */
 export function tx_set_section_badge(section: number, badge: number): Uint8Array {
-  return record(TX_SET_SECTION_PROP, cat(u64(section), u32(SPROP_BADGE), u32(SOURCE_CONST), enc.value(badge)));
+  enc.begin(); enc.u64(section); enc.u32(SPROP_BADGE); enc.u32(SOURCE_CONST); enc.value(badge);
+  return enc.end(TX_SET_SECTION_PROP);
 }
 
 /** set_section_prop with a signal-bound badge value. */
 export function tx_bind_section_badge(section: number, signal_id: number): Uint8Array {
-  return record(TX_SET_SECTION_PROP, cat(u64(section), u32(SPROP_BADGE), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(section); enc.u32(SPROP_BADGE); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_SECTION_PROP);
 }
 
 const SHORTCUT_NAMED_KEYS = new Set(["enter", "escape", "delete", "left", "right", "up", "down", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "comma", "period", "slash", "backslash", "minus", "equal", "leftbracket", "rightbracket"]);
@@ -1489,67 +1892,80 @@ export function canonicalize_shortcut(spelling: string): string {
 
 /** set_menu_prop with a constant label value. */
 export function tx_set_menu_label(item: number, label: string): Uint8Array {
-  return record(TX_SET_MENU_PROP, cat(u64(item), u32(MPROP_LABEL), u32(SOURCE_CONST), enc.value(label)));
+  enc.begin(); enc.u64(item); enc.u32(MPROP_LABEL); enc.u32(SOURCE_CONST); enc.value(label);
+  return enc.end(TX_SET_MENU_PROP);
 }
 
 /** set_menu_prop with a signal-bound label value. */
 export function tx_bind_menu_label(item: number, signal_id: number): Uint8Array {
-  return record(TX_SET_MENU_PROP, cat(u64(item), u32(MPROP_LABEL), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(item); enc.u32(MPROP_LABEL); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_MENU_PROP);
 }
 
 /** set_menu_prop with a constant enabled value. */
 export function tx_set_menu_enabled(item: number, enabled: boolean): Uint8Array {
-  return record(TX_SET_MENU_PROP, cat(u64(item), u32(MPROP_ENABLED), u32(SOURCE_CONST), enc.value(enabled)));
+  enc.begin(); enc.u64(item); enc.u32(MPROP_ENABLED); enc.u32(SOURCE_CONST); enc.value(enabled);
+  return enc.end(TX_SET_MENU_PROP);
 }
 
 /** set_menu_prop with a signal-bound enabled value. */
 export function tx_bind_menu_enabled(item: number, signal_id: number): Uint8Array {
-  return record(TX_SET_MENU_PROP, cat(u64(item), u32(MPROP_ENABLED), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(item); enc.u32(MPROP_ENABLED); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_MENU_PROP);
 }
 
 /** set_menu_prop with a constant checked value. */
 export function tx_set_menu_checked(item: number, checked: boolean): Uint8Array {
-  return record(TX_SET_MENU_PROP, cat(u64(item), u32(MPROP_CHECKED), u32(SOURCE_CONST), enc.value(checked)));
+  enc.begin(); enc.u64(item); enc.u32(MPROP_CHECKED); enc.u32(SOURCE_CONST); enc.value(checked);
+  return enc.end(TX_SET_MENU_PROP);
 }
 
 /** set_menu_prop with a signal-bound checked value. */
 export function tx_bind_menu_checked(item: number, signal_id: number): Uint8Array {
-  return record(TX_SET_MENU_PROP, cat(u64(item), u32(MPROP_CHECKED), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(item); enc.u32(MPROP_CHECKED); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_MENU_PROP);
 }
 
 /** set_menu_prop with a constant value value. */
 export function tx_set_menu_value(item: number, value: number): Uint8Array {
-  return record(TX_SET_MENU_PROP, cat(u64(item), u32(MPROP_VALUE), u32(SOURCE_CONST), enc.value(value)));
+  enc.begin(); enc.u64(item); enc.u32(MPROP_VALUE); enc.u32(SOURCE_CONST); enc.value(value);
+  return enc.end(TX_SET_MENU_PROP);
 }
 
 /** set_menu_prop with a signal-bound value value. */
 export function tx_bind_menu_value(item: number, signal_id: number): Uint8Array {
-  return record(TX_SET_MENU_PROP, cat(u64(item), u32(MPROP_VALUE), u32(SOURCE_SIGNAL), u64(signal_id)));
+  enc.begin(); enc.u64(item); enc.u32(MPROP_VALUE); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_MENU_PROP);
 }
 
 /** set_menu_prop with a constant icon value. */
 export function tx_set_menu_icon(item: number, handle: number): Uint8Array {
-  return record(TX_SET_MENU_PROP, cat(u64(item), u32(MPROP_ICON), u32(SOURCE_CONST), enc.value(new BlobHandle(handle))));
+  enc.begin(); enc.u64(item); enc.u32(MPROP_ICON); enc.u32(SOURCE_CONST); enc.value(new BlobHandle(handle));
+  return enc.end(TX_SET_MENU_PROP);
 }
 
 /** set_menu_prop with a constant primary value. */
 export function tx_set_menu_primary(item: number, primary: boolean): Uint8Array {
-  return record(TX_SET_MENU_PROP, cat(u64(item), u32(MPROP_PRIMARY), u32(SOURCE_CONST), enc.value(primary)));
+  enc.begin(); enc.u64(item); enc.u32(MPROP_PRIMARY); enc.u32(SOURCE_CONST); enc.value(primary);
+  return enc.end(TX_SET_MENU_PROP);
 }
 
 /** set_menu_prop with a constant shortcut value. */
 export function tx_set_menu_shortcut(item: number, shortcut: string): Uint8Array {
-  return record(TX_SET_MENU_PROP, cat(u64(item), u32(MPROP_SHORTCUT), u32(SOURCE_CONST), enc.value(canonicalize_shortcut(shortcut))));
+  enc.begin(); enc.u64(item); enc.u32(MPROP_SHORTCUT); enc.u32(SOURCE_CONST); enc.value(canonicalize_shortcut(shortcut));
+  return enc.end(TX_SET_MENU_PROP);
 }
 
 /** set_menu_prop with a constant role value. */
 export function tx_set_menu_role(item: number, role: string): Uint8Array {
-  return record(TX_SET_MENU_PROP, cat(u64(item), u32(MPROP_ROLE), u32(SOURCE_CONST), enc.value(role)));
+  enc.begin(); enc.u64(item); enc.u32(MPROP_ROLE); enc.u32(SOURCE_CONST); enc.value(role);
+  return enc.end(TX_SET_MENU_PROP);
 }
 
 /** set_menu_prop with a constant symbol value. */
 export function tx_set_menu_symbol(item: number, symbol: number): Uint8Array {
-  return record(TX_SET_MENU_PROP, cat(u64(item), u32(MPROP_SYMBOL), u32(SOURCE_CONST), enc.value(new I64(symbol))));
+  enc.begin(); enc.u64(item); enc.u32(MPROP_SYMBOL); enc.u32(SOURCE_CONST); enc.value(new I64(symbol));
+  return enc.end(TX_SET_MENU_PROP);
 }
 
 /** A decoded value: an I64 arrives as a plain number, the root having
