@@ -19821,10 +19821,8 @@ impl crate::harness::Stage for WinUiStage {
     /// LAYOUT (VkKeyScanW), plus Return as its own virtual key.
     fn type_text(&self, text: &str) {
         let text = text.to_owned();
-        // The caret first, and the field's text before the run — both read
-        // from the FOCUSED editable, the platform's answer to "who receives
-        // this", not kaya's.
-        let before = Self::on_ui(|core| {
+        // docs/traps.md: A Windows type can replace the selection it moved away from.
+        let before = Self::on_ui_mut(|core| {
             let Some(id) = focused_editable_id(core) else {
                 return Ok(None);
             };
@@ -19832,8 +19830,38 @@ impl crate::harness::Stage for WinUiStage {
                 return Ok(None);
             };
             let now = lf(field.text()?);
-            let n = now.chars().count() as i32;
+            let n = now.encode_utf16().count() as i32;
             field.set_caret(n)?;
+            let end = now.len() as u64;
+            core.scene.set_text_selection(WidgetId(id), end, end);
+            if let Editable::Textarea(field) = &field {
+                let selection = field.TextDocument()?.Selection()?;
+                let native = (selection.StartPosition()?, selection.EndPosition()?);
+                let reported = core.scene.rich_selection(WidgetId(id));
+                crate::vtrace::note("type.caret", format_args!(
+                    "widget={id} native_utf16={}:{} core_utf8={:?} text_bytes={}",
+                    native.0, native.1, reported, now.len(),
+                ));
+                let native_bytes = (byte_offset(&now, native.0), byte_offset(&now, native.1));
+                if native_bytes != (Some(now.len()), Some(now.len()))
+                    || reported.is_some_and(|range| (range.start, range.stop) != (end, end))
+                {
+                    crate::vtrace::dump("type caret mismatch before key injection");
+                }
+                assert_eq!(
+                    native_bytes,
+                    (Some(now.len()), Some(now.len())),
+                    "kaya: type widget={id}: native caret is not at the UTF-8 text end; \
+                     check UTF-16 caret positioning before injecting keys",
+                );
+                if let Some(reported) = reported {
+                    assert_eq!(
+                        (reported.start, reported.stop), (end, end),
+                        "kaya: type widget={id}: core selection is not at the text end; \
+                         report the caret synchronously before injecting keys",
+                    );
+                }
+            }
             Ok(Some((id, now)))
         });
         Self::foreground_guest("type");

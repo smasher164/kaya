@@ -95,9 +95,9 @@ in docs/deferred.md.
   every lane, each one viewed before it is published, on an artifact the
   maintainer reviews (the search field's page is the shape). A feature
   the maintainer has not seen is not delivered.
-- The maintainer granted standing approval for commits on 2026-09-18.
-  Commit validated slices without asking for each message. Unresolved design
-  rulings still require his decision; pushing still requires his approval.
+- The maintainer granted standing approval for commits on 2026-09-18 and
+  pushes on 2026-09-19. Commit and push validated slices without asking for
+  each message. Unresolved design rulings still require his decision.
 
 ## The invariants (violating these is never a style choice)
 
@@ -304,7 +304,11 @@ in docs/deferred.md.
    the inner loop. Four more watched negatives, counts printed. The hand
    runner's relaunch branch is executed against six exit/marker cases;
    four counted cuts refuse a missing marker check, missing exit check,
-   false-green verdict and refusal absent from the recorder's leg log),
+   false-green verdict and refusal absent from the recorder's leg log.
+   The matrix's log-retention helper runs against eight filesystem cases:
+   default and explicit destinations, directory failures at both copies,
+   and missing source logs. Four counted negatives hold both printed paths,
+   the OS error and the archived bytes),
    `tools/check-ledger.py` (docs/deferred.md may not disagree with
    itself: an UNSTRUCK headline over an entry that records a terminal
    resolution, or a STRUCK one with no resolution note. Two entries

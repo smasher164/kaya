@@ -13393,6 +13393,44 @@ window's `traitCollection.userInterfaceStyle` and the value of
 KAYA_APPEARANCE at the presentation report and at the ink read, so the
 record says which of the two it was.
 
+## ~~DEFECT — the matrix prints a stale log destination~~ COMPLETE 2026-09-19: print the actual destination and preserve the OS error.
+KEY: keep_lane_log, printed log destination, validate-failures, validate-lanes
+
+The WinUI table matrix retained the right logs but printed the failure-log
+folder for passing lanes. Following it read an older 60/61 sweep and 33
+Windows tests instead of the current 61/61 and 36. tools/validate-all.py now
+prints the actual latest-copy destination; failures name that destination,
+the per-run archive and the OS error without claiming which copy succeeded.
+No archive or newest-20 retention policy changed.
+
+Guard: tools/check-gates.py executes the real helper in eight filesystem
+cases, checking both saved files and every diagnostic branch. The original
+helper was watched red. Four one-substitution negatives catch a hard-coded
+success path, hard-coded failure path, absent OS error and omitted archive
+copy. The closing KEY sweep found no other description of this defect;
+existing references to the two real folders still describe valid locations.
+See docs/traps.md, "A matrix's printed log path can point at an older run".
+
+## ~~DEFECT: Windows typing can retain the old core selection~~ COMPLETE 2026-09-19: report the caret synchronously, count UTF-16, and guard both readings before keys.
+KEY: Windows type caret, stale core selection, type.caret, rich.edit, emoji append
+
+The notes_rust matrix failure lost bold and reordered a peer insertion.
+The original bundle lacked selection/edit readings; the new recorder
+records exposed native caret `3:3` versus core selection `0:3`, producing
+a whole-text replacement with no runs when one asynchronous callback was
+suppressed. The fix passed with that callback still suppressed. Removing
+the synchronous update then failed the new guard before injection.
+
+The same call counted scalars for a UTF-16 caret. Its negative required
+`👋a`, not a lone emoji that WinUI corrected: the wrong count read byte 4
+against end 5. Both guards were watched failing with one counted mutation
+each. The recorder flush before the panic was read back from a forced-red
+bundle. Shared notes assertions hold the exact bold edit and Unicode
+append. No public binding surface changed; the toast watch stays armed.
+See docs/measurements/winui-typing-2026-09-19.md and the trap "A Windows
+type can replace the selection it moved away from". The KEY sweep names
+these new records only; the older notes toast findings remain distinct.
+
 ## RULING WANTED — a lost dialog answers the app as a cancel; should the app be able to tell the two apart? (recorded 2026-09-06)
 KEY: lost dialog, KAYA_DIALOG_LOST, file_dialog_result reason, cancelled versus lost, DIALOG_RESULT_BUDGET_MS, dialog occurrence
 

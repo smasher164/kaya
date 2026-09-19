@@ -23,6 +23,7 @@ import contextlib
 import io
 import json
 import re
+import shutil
 import subprocess
 import tempfile
 import types
@@ -385,6 +386,65 @@ def override_says_so(hand):
         if 'env["KAYA_SELFTEST_SCRIPT"] =' in block and "print(" in block:
             return True
     return False
+
+
+def lane_log_problems(text, report=False):
+    functions = [node for node in ast.parse(text).body
+                 if isinstance(node, ast.FunctionDef) and node.name == "keep_lane_log"]
+    if len(functions) != 1:
+        return [f"matrix: expected one keep_lane_log, read {len(functions)}"]
+    code = compile(ast.Module(body=functions, type_ignores=[]),
+                   "tools/validate-all.py keep_lane_log", "exec")
+    problems = []
+    for explicit in (False, True):
+        for blocked in (None, "destination", "archive", "source"):
+            with tempfile.TemporaryDirectory(prefix="kaya log check ") as scratch:
+                base = pathlib.Path(scratch)
+                source_dir = base / "scratch"
+                source_dir.mkdir()
+                payload = "current lane evidence\n"
+                if blocked != "source":
+                    (source_dir / "mac.log").write_text(payload, encoding="utf-8")
+                default = base / "target/validate-failures"
+                destination = base / "target/validate-lanes" if explicit else default
+                archive = base / "target/validate-lanes/runs/test-run"
+                if blocked in ("destination", "archive"):
+                    obstacle = destination if blocked == "destination" else archive
+                    obstacle.parent.mkdir(parents=True, exist_ok=True)
+                    obstacle.write_text("not a directory", encoding="utf-8")
+                scope = dict(ROOT=base, KEEP_DIR=default, LANES_DIR=source_dir,
+                             RUN_STAMP="test-run", shutil=shutil, sys=sys)
+                exec(code, scope)
+                output, errors = io.StringIO(), io.StringIO()
+                with contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
+                    result = scope["keep_lane_log"]("mac", destination if explicit else None)
+                case = f"explicit={explicit}, blocked={blocked}"
+                if result is not (blocked is None):
+                    problems.append(f"matrix log {case}: wrong retention verdict {result}")
+                if blocked is None:
+                    expected = f"== mac log kept at {destination / 'mac.log'} ==\n"
+                    if output.getvalue() != expected or errors.getvalue():
+                        problems.append(f"matrix log {case}: wrong success destination")
+                    for parent in (destination, archive):
+                        saved = parent / "mac.log"
+                        if not saved.is_file() or saved.read_text(encoding="utf-8") != payload:
+                            problems.append(f"matrix log {case}: current bytes missing at {saved}")
+                else:
+                    expected = {"destination": destination, "archive": archive,
+                                "source": source_dir / "mac.log"}[blocked]
+                    reason = "No such file or directory" if blocked == "source" else "File exists"
+                    if (not errors.getvalue().startswith(
+                            f"== mac log retention failed for {destination / 'mac.log'} ")
+                            or str(expected) not in errors.getvalue()
+                            or reason not in errors.getvalue()
+                            or output.getvalue()):
+                        problems.append(f"matrix log {case}: refusal lacks actual path "
+                                        "and OS error")
+                if report:
+                    message = output.getvalue() or errors.getvalue()
+                    print(f"check-gates: matrix log {case}: {message}",
+                          end="")
+    return problems
 
 
 def hand_relaunch_problems(hand):
@@ -806,6 +866,8 @@ if not re.search(r'ROOT / "tools/gates\.py"', mac_text):
 problem = matrix_parallel_problem(matrix_text)
 if problem is not None:
     fail(problem)
+for problem in lane_log_problems(matrix_text, report=True):
+    fail(problem)
 problem = android_pool_problem(android_text, probe_text)
 if problem is not None:
     fail(problem)
@@ -998,6 +1060,24 @@ for label, old, new in (
         print(f"check-gates: hand relaunch {label}: {len(problems)} refusal(s)")
         if not problems:
             fail(f"hand relaunch {label} negative passed")
+
+for label, old, new in (
+        ("success path", 'log kept at {destination}',
+         'log kept at target/validate-failures/{name}.log'),
+        ("failure path", 'log retention failed for {destination}',
+         'log retention failed for target/validate-failures/{name}.log'),
+        ("OS error", '): {error} ==', '): copy failed =='),
+        ("archive copy", 'shutil.copy2(LANES_DIR / f"{name}.log", run_dir / f"{name}.log")',
+         'pass')):
+    n = matrix_text.count(old)
+    print(f"check-gates: matrix log cut {label}, {n} substitution(s)")
+    if n != 1:
+        fail(f"matrix log {label} negative changed {n} sites, expected one")
+    else:
+        problems = lane_log_problems(matrix_text.replace(old, new))
+        print(f"check-gates: matrix log {label}: {len(problems)} refusal(s)")
+        if not problems:
+            fail(f"matrix log {label} negative passed")
 
 # The driver's own arithmetic: an under-run, a failing gate and a
 # missing script must each come back red, watched on every run.

@@ -4795,8 +4795,7 @@ impl Scene {
         self.rich.get(&widget).map(|doc| doc.last_edit.clone().unwrap_or_default())
     }
 
-    /// The selection the core last heard of, for the tests that drive R5.
-    #[cfg(test)]
+    #[cfg(any(test, all(feature = "harness", target_os = "windows")))]
     pub(crate) fn rich_selection(&self, widget: WidgetId) -> Option<TextRange> {
         self.rich.get(&widget).map(|doc| doc.selection)
     }
@@ -4818,6 +4817,12 @@ impl Scene {
             _ => (start, end, inserted),
         };
         let runs = doc.typed_runs(start, &inserted);
+        #[cfg(all(feature = "harness", any(target_os = "windows", target_os = "linux", test)))]
+        crate::vtrace::note("rich.edit", format_args!(
+            "widget={} before_bytes={} after_bytes={} selection={}:{} edit={}:{} inserted={:?} runs={:?}",
+            widget.0, doc.text.len(), text.len(), doc.selection.start, doc.selection.stop,
+            start, end, inserted, runs,
+        ));
         let disagreement = self.check_reported_edit(widget, start, end, inserted.len());
         if let Some(sentence) = disagreement {
             eprintln!("{sentence}");

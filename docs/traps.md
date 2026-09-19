@@ -4,6 +4,36 @@ Each of these cost a debugging session (or would have). Most now have a
 structural guard; the guard is named where it exists. Do not re-derive
 these the hard way.
 
+## A Windows type can replace the selection it moved away from (measured 2026-09-19)
+
+The matrix's notes_rust leg lost bold after appending `d` to `abc`, then
+merged the peer's `Z` as `abcdZ` instead of `abcZd`. The recorder ruled out
+the armed toast-focus watch but lacked the selection and derived edit.
+The new `type.caret` and `rich.edit` trace records supplied those readings
+in a controlled reproduction: suppressing one SelectionChanged callback
+left native UTF-16 selection `3:3` beside core UTF-8 selection `0:3`.
+Seven milliseconds later the core derived replacement `0:3` with `abcd`
+and no runs. R10 deliberately prefers a selection that explains an edit;
+the driver had moved only the native caret, relying on an asynchronous
+event for the core. Replacing the original characters also replaced the
+identities the CRDT uses to order concurrent inserts.
+
+`WinUiStage::type_text` now reports the end selection in the same mutable
+UI hop as the native caret move, before key injection. The notes leg
+passed with the asynchronous report still suppressed. Removing the new
+synchronous report tripped its runtime guard at `0:3` versus `3:3`.
+The guard flushes the recorder before panicking: the first negative showed
+that a UI callback abort did not otherwise dump the ring.
+
+The native caret counts UTF-16 units, not Rust chars. A lone emoji is a
+weak negative: WinUI snapped the interior-surrogate position to the end
+and the wrong implementation passed. `👋a` is the durable witness: two
+scalars put the caret between the emoji and `a`, byte 4 instead of end 5.
+That one-site negative tripped the native-position guard and left all 25
+trace records in the bundle. The shared notes script checks both the
+single-character bold edit and the emoji-plus-ASCII append. Measurements
+and run identifiers: docs/measurements/winui-typing-2026-09-19.md.
+
 
 
 
@@ -11944,6 +11974,23 @@ search path — the built module still records CKaya as a dependency, so
 every guest compile carries `-I bindings/swift/CKaya`; what the internal
 import buys is a compile-time rule: a `public` signature naming a C type
 is refused by name.
+
+## A matrix's printed log path can point at an older run (measured 2026-09-19)
+
+`keep_lane_log` in tools/validate-all.py copied successful lanes into
+`target/validate-lanes` but printed `target/validate-failures` in both its
+success and error messages. Following that sentence after the WinUI table
+matrix read an old 60/61 gate log and 33 Windows tests; the actual per-run
+archive held 61/61 gates and 36 Windows tests, matching the matrix verdict.
+The evidence was retained correctly; the pointer was wrong.
+
+Messages now name the actual destination. A failure names both retention
+destinations and the OS error, since the latest copy can succeed before the
+archive fails. tools/check-gates.py executes the real helper against eight
+filesystem cases, including paths with spaces, and reads both saved copies.
+The original helper failed the new check. Four one-substitution negatives
+restore each hard-coded message, remove the OS error, or drop the archive
+copy; each was watched failing. Retention remains newest 20 runs.
 
 ## WinUI's independently rounded table columns add two pixels and feed a resize ramp (measured 2026-09-18)
 

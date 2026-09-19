@@ -36,6 +36,7 @@ expect_selection textarea#0 "0:3=abc"
 # actor sorts first).
 type "d"
 expect textarea#0 "abcd"
+expect_edit textarea#0 "3:3 <d> user [0:1 bold]"
 expect_runs textarea#0 "0:4 bold"
 click button#0
 expect textarea#0 "abcZd"
@@ -77,3 +78,8 @@ expect label#1 "1:4 italic|2:4 bold"
 expect label#2 "1:4 italic|2:4 bold"
 expect textarea#0 "abcd"
 expect label#0 "peer 5 undo 7 redo 0"
+set_text textarea#0 "👋a"
+click textarea#0
+type "x"
+expect textarea#0 "👋ax"
+expect_edit textarea#0 "5:5 <x> user []"

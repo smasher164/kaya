@@ -62,30 +62,27 @@ status = 0
 
 
 def keep_lane_log(name, where=None):
-    """A failing lane's log goes to target/validate-failures; EVERY lane's
-    goes to target/validate-lanes as well (2026-09-07), since the matrix
-    deletes its scratch at exit and the phase timings inside are the only
-    profile a run leaves behind."""
+    # docs/traps.md: A matrix's printed log path can point at an older run.
     where = where or KEEP_DIR
+    destination = where / f"{name}.log"
+    run_dir = ROOT / "target/validate-lanes/runs" / RUN_STAMP
     try:
         where.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(LANES_DIR / f"{name}.log", where / f"{name}.log")
+        shutil.copy2(LANES_DIR / f"{name}.log", destination)
         # AND ONE COPY PER RUN (2026-09-09): the per-run copy above is
         # overwritten by the next matrix, so a duration anomaly could not be
         # read per leg against the matrix before it (the S4 windows reading
         # had no baseline). Newest 20 runs kept.
-        run_dir = ROOT / "target/validate-lanes/runs" / RUN_STAMP
         run_dir.mkdir(parents=True, exist_ok=True)
         shutil.copy2(LANES_DIR / f"{name}.log", run_dir / f"{name}.log")
         runs = sorted((ROOT / "target/validate-lanes/runs").iterdir())
         for stale in runs[:-20]:
             shutil.rmtree(stale, ignore_errors=True)
-    except OSError:
-        print(f"== {name} log could not be kept at "
-              f"target/validate-failures/{name}.log ==", file=sys.stderr)
+    except OSError as error:
+        print(f"== {name} log retention failed for {destination} "
+              f"(archive {run_dir / f'{name}.log'}): {error} ==", file=sys.stderr)
         return False
-    print(f"== {name} log kept at target/validate-failures/{name}.log "
-          f"==")
+    print(f"== {name} log kept at {destination} ==")
     return True
 
 
