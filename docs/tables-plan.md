@@ -107,6 +107,9 @@ is a separate admission if a real app ever needs one).
      tracks declaratively, and star-with-MinWidth resolves to equal
      columns clamped up at content rather than to this decision's
      floor-plus-distribute.
+     Spare width is distributed in whole physical pixels before writing
+     the tracks, so independent native rounding cannot grow their total
+     (docs/measurements/winui-table-pixels-2026-09-18.md).
    - Compose: synthesized header over FLOORED-AND-DISTRIBUTED columns
      — DESIGN.md already files this as lowering tier 3 (Material
      dropped the component). Landed 2026-08-21 as one custom Layout: a

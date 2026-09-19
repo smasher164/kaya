@@ -12219,7 +12219,7 @@ caught it) and the failing step's own `offers=`/`answered` pair — a full
 `offers` with `answered nothing` is a transfer failure, an empty or stale
 `offers` is the selection not having reached this client.
 
-## ~~WATCH — windows `portfolio_python` under a matrix: six `reporting a row window failed: 0x88000FA8` faults after the scene's last step (first sighting 2026-09-07)~~ CLOSED 2026-09-16 AT THE CAUSE, READ UNDER LOAD: 5 faults in 50 hand runs on the VM under the mac and linux lanes looping, the band in the tree by every read the platform offers (`band loaded true parent yes xamlroot true`) and no cycle line — neither earlier cause — and every fault inside a ~50-pass RAMP where the table's own container grid gains 2.0 dip per layout pass (faulting runs stamp 157-177 columns, settled ones 55-67; every ancestor and the XamlRoot pinned at 900 the whole way). 0x88000FA8 there is what the platform says: the layout under `band.UpdateLayout()` did not complete that turn, and the band's next LayoutUpdated reports. A report round failing with that code is ABANDONED, said out loud with the measured state, for at most 8 consecutive rounds per table; a success clears the count, the 9th and every other HRESULT still fault (the bound is load-bearing: kaya's UnhandledException handler prints XAML's cycle sentence and SetHandled(true), so an unbounded skip would green a never-completing layout). GUARD on the path the lane cannot avoid: winui::tests' `an_incomplete_layout_is_skipped_until_the_bound_and_nothing_else_is`, run on the guest by deploy-win's unit phase (33/33), three watched negatives. 50 runs under the same load: 50 PASS, 3 ramping, 2 printing the abandoned line. The ramp itself is the next entry. (Was: REOPENED 2026-09-15 on the guarded build; before that CLOSED 2026-09-07: reproduced on the VM under load with the call named (`band.UpdateLayout`), the mechanism read and fixed — a popped screen's tables stay registered until the app's destroy lands and the resize's LayoutUpdated scheduled reports for their detached bands; a report skips a band outside the tree now (docs/traps.md).)
+## ~~WATCH — windows `portfolio_python` under a matrix: six `reporting a row window failed: 0x88000FA8` faults after the scene's last step (first sighting 2026-09-07)~~ CLOSED 2026-09-16 AT THE CAUSE, READ UNDER LOAD: 5 faults in 50 hand runs on the VM under the mac and linux lanes looping, the band in the tree by every read the platform offers (`band loaded true parent yes xamlroot true`) and no cycle line — neither earlier cause — and every fault inside a ~50-pass RAMP where the table's own container grid gains 2.0 dip per layout pass (faulting runs stamp 157-177 columns, settled ones 55-67; every ancestor and the XamlRoot pinned at 900 the whole way). 0x88000FA8 there is what the platform says: the layout under `band.UpdateLayout()` did not complete that turn, and the band's next LayoutUpdated reports. A report round failing with that code is ABANDONED, said out loud with the measured state, for at most 8 consecutive rounds per table; a success clears the count, the 9th and every other HRESULT still fault (the bound is load-bearing: kaya's UnhandledException handler prints XAML's cycle sentence and SetHandled(true), so an unbounded skip would green a never-completing layout). GUARD on the path the lane cannot avoid: winui::tests' `an_incomplete_layout_is_skipped_until_the_bound_and_nothing_else_is`, run on the guest by deploy-win's unit phase (33/33), three watched negatives. 50 runs under the same load: 50 PASS, 3 ramping, 2 printing the abandoned line. The ramp's separate column-rounding cause was fixed on 2026-09-18; see docs/measurements/winui-table-pixels-2026-09-18.md. (Was: REOPENED 2026-09-15 on the guarded build; before that CLOSED 2026-09-07: reproduced on the VM under load with the call named (`band.UpdateLayout`), the mechanism read and fixed — a popped screen's tables stay registered until the app's destroy lands and the resize's LayoutUpdated scheduled reports for their detached bands; a report skips a band outside the tree now (docs/traps.md).)
 KEY: portfolio_python, 0x88000FA8, reporting a row window failed, row window report, table_report_once, windows fold
 
 Matrix #25: the windows lane's `portfolio_python` leg passed every step
@@ -12272,12 +12272,11 @@ before naming the cause; there were none). The windows lane ran 1134s
 against its 600 ceiling on that matrix, the slowest windows lane on the
 record, with every other windows leg but the notes toast green. Bundle:
 ~/.local/state/kaya/flightrec/runs/20260916T051839Z-009718/bundles/windows-portfolio_python.
-So the gate closed the detached-band cause and a second cause remains
-that only a starved host reaches; the next step is the loop the first
-closing used (the leg on the VM under the mac and linux lanes' load,
-`KAYA_WINUI_STAMP_TRACE=1`), reading which band faulted and whether it
-was loaded. Not reproduced alone: the windows lane re-run standalone
-after the matrix is this entry's next line.
+That sighting prompted the loaded loop recorded in the resolution above,
+reading the band's loaded state beside `KAYA_WINUI_STAMP_TRACE=1`. The
+bounded fallback landed on 2026-09-16. The remaining two-pixel ramp was
+closed on 2026-09-18 at the column-rounding cause; the measurement is in
+docs/measurements/winui-table-pixels-2026-09-18.md.
 
 ## ~~BUG — GTK: twenty `Gtk-WARNING … natural size must be >= min size` lines on the tasks scene, from kaya's own FlexLayout::measure (found 2026-09-07)~~ FIXED 2026-09-11 AT THE CAUSE, WHICH WAS NOT THE ONE NAMED: a trace inside kaya's flex measure never fired and the backtrace at the first warning under G_DEBUG=fatal-warnings had no kaya frame — the reporters were libadwaita's own GtkBoxLayout boxes asked for width-for-height at a height below their natural, by kaya's flex allocate measuring a row's children at the allocated height. The flex layout declares height-for-width and asks widths at -1 now (crates/kaya/src/gtk.rs), zero warnings on the tasks, layout, grow, grid and sizepolicy scenes, and tools/linux/run-suites.sh fails any leg whose log carries the line, with a planted-line self-test at lane start (docs/traps.md)
 KEY: natural size must be >= min size, Gtk-WARNING, FlexLayout::measure, gtk flex measure, tasks scene gtk warnings
@@ -13076,7 +13075,7 @@ the race; the matrix is the proof, and the diag line is the instrument that
 says how far behind Compose was when it does.
 Bundle: ~/.local/state/kaya/flightrec/runs/20260916T085035Z-097444/bundles/android-ownundo-compose.
 
-## The WinUI table's container grid gains 2.0 dip per layout pass for ~50 passes after a resize — a layout storm, and what made the row-window fault reachable (found 2026-09-16 under the layout-fault loop)
+## ~~The WinUI table's container grid gains 2.0 dip per layout pass for ~50 passes after a resize — a layout storm, and what made the row-window fault reachable (found 2026-09-16 under the layout-fault loop)~~ FIXED 2026-09-18: distribute spare physical pixels before writing the native tracks; WinUI had rounded four half-pixel columns upward independently, adding two pixels to the next measure. The captured run had 177 stamps and 51 consecutive increases; 50 post-fix runs passed with no ramp or abandoned report, and all 10,668 nonzero requested/resolved column readings matched. Three new WinUI tests run in the deployment's mandatory unit census (36/36); four one-substitution mutants were watched failing. Measurement and load qualification: docs/measurements/winui-table-pixels-2026-09-18.md.
 KEY: 2px ramp, layout storm, container grid ramp, 157 columns stamped, KAYA_WINUI_STAMP_TRACE, portfolio_python resize, table chrome width
 
 Measured while closing the entry above: on `portfolio_python`'s last
@@ -13084,15 +13083,18 @@ resize the table's OWN container grid grows by exactly 2.0 dip on each of
 ~50 consecutive layout passes before it settles — a ~2.5x layout storm on
 one resize (faulting runs stamped 157-177 columns against 55-67 settled),
 with every ancestor and the XamlRoot pinned at 900.0 the whole way, so the
-ramp is inside the table's chrome, not above it. It is the only state in
-which `band.UpdateLayout` ever answered 0x88000FA8, and the bounded skip
-above lives with it rather than removing it. The next instrument goes
-inside the table's chrome (which element asks for two more pixels each
-pass — a border, a padding, a scrollbar reservation — read from
-`KAYA_WINUI_STAMP_TRACE=1`'s stamps with the chrome's own widths beside
-them), the agent's notes §6 carry the evidence
-(tmp/openlist/notes-layout.md in the 2026-09-16 job), and the fix is
-whatever makes the grid's first post-resize measure its last.
+ramp was inside the table's chrome, not above it. The new chrome-width
+instrument ruled out the decorative border, padding and scroll reservation:
+the native definitions themselves changed four half-pixel requests to four
+integer widths, gaining two pixels. The header and folded wrapper then fed
+those desired widths back into the allocation. `table_widths` now preserves
+one physical-pixel budget, protects the measured floors and shares the
+remainder one pixel at a time. Its rounded total padding and spacing avoid
+turning the growth loop into a shrink loop at fractional display scales.
+The temporary probe's readings are preserved in the measurement and
+docs/traps.md; `KAYA_WINUI_STAMP_TRACE=1` and the bounded incomplete-layout
+fallback remain. The latter still refuses an unrelated HRESULT or a ninth
+consecutive incomplete report.
 
 ## ~~WATCH — the iOS `portfolio-python` leg laid its tables out UNFOLDED beside the summary on a phone: the metrics report latched with no scene and the breakpoint then found no metrics (first sighting 2026-09-16, matrix 23)~~ CLOSED 2026-09-17 (matrix 31, the second sighting, read from its bundle with the seed instrument): the report crossed the FFI in the gap between `presentation_scene()` reading the latch and the scene reaching `PRESENTATION_SCENE` — `*SLOT.lock() = Some(presentation_scene())` builds the scene BEFORE taking the lock — so `with_window_scene` saw no scene, latched the report for a scene that had already been seeded from an empty latch, and the breakpoint found nothing. The slot's lock is taken before the scene is built now (crates/kaya/src/capi.rs, `kaya_next_commands`), held by `capi::tests::the_scene_slot_is_locked_before_the_scene_is_seeded` with its perturbation watched; docs/traps.md carries the interleaving
 KEY: portfolio-python ios unfolded, no metrics latched, presentation_scene seed, METRICS_REPORTED, breakpoint window=0 when=1, viewport 320...343pt, adaptive fold ios

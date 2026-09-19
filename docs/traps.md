@@ -8090,6 +8090,10 @@ converge as the band grows (1, 2, 4, 8, 16, 32 rows) and as the wrap
 re-breaks the track (613 -> 427), 58 stamps over eleven tables; an
 oscillation would show as alternating widths on consecutive passes.
 
+The later two-pixel growth ramp was fixed at its independent column-rounding
+cause on 2026-09-18. See docs/measurements/winui-table-pixels-2026-09-18.md;
+the detached-band guard and bounded incomplete-report fallback still apply.
+
 ## An iOS launch colour that names nothing shows WHITE, silently; an XML comment may not hold `--` (measured 2026-09-07)
 
 Building the launch slot (docs/tasks-s2-plan.md T4): `UILaunchScreen`'s
@@ -11940,3 +11944,30 @@ search path — the built module still records CKaya as a dependency, so
 every guest compile carries `-I bindings/swift/CKaya`; what the internal
 import buys is a compile-time rule: a `public` signature naming a C type
 is refused by name.
+
+## WinUI's independently rounded table columns add two pixels and feed a resize ramp (measured 2026-09-18)
+
+Four requested tracks of 120.5, 105.5, 121.5 and 136.5 DIP resolved to
+121, 106, 122 and 137 at scale 1. Both scroll extents were 558 against a
+556-DIP viewport. WinUI rounds each fixed-width definition independently;
+equal fractional spare widths do not conserve the table's width. Nested
+tables can feed the rounded desired size back into each other's next
+allocation: the eighth portfolio run under Mac/Linux load stamped 177
+times, with 51 consecutive two-DIP increases and two bounded layout-report
+abandons. Borders, padding and scroll reservations were read, not guessed:
+only the decorative card had a border, and its desired width was zero.
+
+Distribute spare physical pixels by quotient and remainder, after recovering
+the measured floors' integer pixels from their f32 storage. Subtract rounded
+total padding and total spacing separately from the rounded outer width.
+Ceiling padding can instead shrink a hugging container by one pixel per
+pass. Compare the quantized tracks exactly: a half-DIP cache tolerance can
+hide a whole physical pixel at high density.
+
+Three WinUI tests run on every Windows deployment. Four one-substitution
+mutants were watched failing. Fifty post-fix portfolio runs had no ramp or
+abandoned report; all 10,668 nonzero resolved column readings equalled their
+requests. The load qualification, raw readings and test scope are in
+docs/measurements/winui-table-pixels-2026-09-18.md. The temporary chrome probe
+was removed after recording this evidence; the stamp trace and bounded
+layout-report fallback remain.

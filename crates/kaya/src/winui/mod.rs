@@ -3844,23 +3844,22 @@ fn table_measure(table: &WinTable) -> windows_core::Result<Vec<f64>> {
     Ok(floors)
 }
 
-/// THE GEOMETRY RULE, this backend's spelling: content is each column's
-/// FLOOR, the leftover track width divides equally, and header and rows
-/// take the same explicit tracks, so the cells share leading edges by
-/// construction (docs/tables-plan.md decision 6).
-fn table_widths(table: &WinTable, track: f64) -> Vec<f64> {
-    let cols = table.floors.len();
-    let mut widths = table.floors.clone();
+// docs/traps.md: WinUI's independently rounded table columns.
+fn table_widths(floors: &[f64], outer: f64, pad: f64, scale: f64) -> Vec<f64> {
+    let cols = floors.len();
+    let mut widths: Vec<_> = floors.iter().map(|width| (width * scale).round()).collect();
     if cols == 0 {
         return widths;
     }
     let content: f64 = widths.iter().sum();
-    let leftover = track - content - TABLE_COL_GAP * (cols as f64 - 1.0);
-    if leftover > 0.0 {
-        let per = leftover / cols as f64;
-        for w in &mut widths {
-            *w += per;
-        }
+    let budget = (outer * scale).round()
+        - (2.0 * pad * scale).round()
+        - (TABLE_COL_GAP * (cols as f64 - 1.0) * scale).round();
+    let leftover = (budget - content).max(0.0);
+    let per = (leftover / cols as f64).floor();
+    let remainder = leftover % cols as f64;
+    for (at, width) in widths.iter_mut().enumerate() {
+        *width = (*width + per + if (at as f64) < remainder { 1.0 } else { 0.0 }) / scale;
     }
     widths
 }
@@ -4042,20 +4041,16 @@ fn stamp_trace_enabled() -> bool {
 }
 
 fn table_stamp(id: u64, table: &mut WinTable) -> windows_core::Result<()> {
-    let inner = table.grid.ActualWidth()? - 2.0 * table.pad;
+    let outer = table.grid.ActualWidth()?;
+    let inner = outer - 2.0 * table.pad;
     if inner <= 0.0 {
         // No track to divide — before the first layout, and again while
         // the window is closing. Neither is a table to size.
         return Ok(());
     }
-    let widths = table_widths(table, inner);
-    if table.stamped == table.rows
-        && widths.len() == table.applied.len()
-        && widths
-            .iter()
-            .zip(&table.applied)
-            .all(|(a, b)| (a - b).abs() < 0.5)
-    {
+    let scale = table.grid.XamlRoot()?.RasterizationScale()?;
+    let widths = table_widths(&table.floors, outer, table.pad, scale);
+    if table.stamped == table.rows && widths == table.applied {
         return Ok(());
     }
     if stamp_trace_enabled() {
@@ -24375,6 +24370,63 @@ fn shell_open(url: &str) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn table_tracks_do_not_repeat_the_four_half_pixel_roundups() {
+        let widths = table_widths(&[38.0, 23.0, 39.0, 54.0], 580.0, 12.0, 1.0);
+        assert_eq!(widths, [121.0, 106.0, 121.0, 136.0]);
+        assert_eq!(widths.iter().sum::<f64>() + 3.0 * TABLE_COL_GAP, 556.0);
+    }
+
+    #[test]
+    fn table_tracks_keep_native_floors_when_content_overflows() {
+        assert!(table_widths(&[], 100.0, 12.0, 1.25).is_empty());
+        for scale in [1.0, 1.25, 1.5, 1.75, 2.0, 3.0] {
+            let floors: Vec<_> = [101.0, 73.0, 31.0]
+                .iter()
+                .map(|pixels| (pixels / scale) as f32 as f64)
+                .collect();
+            let widths = table_widths(&floors, 40.0, 12.0, scale);
+            for (width, pixels) in widths.iter().zip([101.0, 73.0, 31.0]) {
+                assert!((width * scale - pixels).abs() < 1e-9);
+            }
+        }
+    }
+
+    #[test]
+    fn table_tracks_share_physical_pixels_without_a_layout_feedback_loop() {
+        for dpi in 96..=288 {
+            let scale = (dpi as f32 / 96.0) as f64;
+            for cols in 1..=8 {
+                let floors: Vec<_> = (0..cols)
+                    .map(|at| ((31.0 + at as f64) / scale) as f32 as f64)
+                    .collect();
+                for pixels in 1000..=1012 {
+                    let outer = f64::from(pixels) / scale;
+                    let widths = table_widths(&floors, outer, 12.0, scale);
+                    let mut extras = Vec::new();
+                    for (at, width) in widths.iter().enumerate() {
+                        let physical = width * scale;
+                        assert!((physical - physical.round()).abs() < 1e-9);
+                        let extra = physical.round() - (31.0 + at as f64);
+                        assert!(extra >= 0.0);
+                        extras.push(extra as i64);
+                    }
+                    assert!(extras.iter().max().unwrap() - extras.iter().min().unwrap() <= 1);
+                    let header = (widths.iter().map(|w| (w * scale).round()).sum::<f64>()
+                        + TABLE_COL_GAP * (cols as f64 - 1.0) * scale)
+                        .round();
+                    let measured = (header + 24.0 * scale).round();
+                    assert_eq!(measured, f64::from(pixels), "dpi={dpi}, cols={cols}");
+                    assert_eq!(table_widths(&floors, measured / scale, 12.0, scale), widths);
+                    assert_eq!(
+                        table_widths(&floors, outer + 0.01 / scale, 12.0, scale),
+                        widths
+                    );
+                }
+            }
+        }
+    }
+
     /// THE ROW WINDOW'S TWO FAILURES ARE NOT ONE (docs/deferred.md, the
     /// row-window WATCH; docs/traps.md, 0x88000FA8). NO LANE CAN SEE THIS: the
     /// transient arm fires on a starved host inside a resize ramp — five
@@ -26004,4 +26056,3 @@ mod tests {
         }
     }
 }
-

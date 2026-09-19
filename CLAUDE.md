@@ -95,8 +95,9 @@ in docs/deferred.md.
   every lane, each one viewed before it is published, on an artifact the
   maintainer reviews (the search field's page is the shape). A feature
   the maintainer has not seen is not delivered.
-- The maintainer approves every commit and its exact message. Do not
-  commit or push on your own initiative.
+- The maintainer granted standing approval for commits on 2026-09-18.
+  Commit validated slices without asking for each message. Unresolved design
+  rulings still require his decision; pushing still requires his approval.
 
 ## The invariants (violating these is never a style choice)
 
