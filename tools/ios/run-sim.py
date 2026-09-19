@@ -45,6 +45,7 @@ from lanes import ios as lane
 import exclusive
 import scene_cut
 import flightrec_lane
+from swift_sdk import require_ios_sdk
 
 SELF = pathlib.Path(__file__).resolve()
 
@@ -2401,7 +2402,17 @@ def xcuidrive_revive(udid, log):
               file=sys.stderr, flush=True)
 
 
+def keep_binary_stamp(name, app):
+    info = plistlib.loads((app / "Info.plist").read_bytes())
+    with open(LEGS_DIR / f"{name}.sdk", "w", encoding="utf-8") as log:
+        for binary in (app / info["CFBundleExecutable"], app / "libkaya_swiftui.dylib"):
+            print(f"binary: {binary}", file=log, flush=True)
+            got = run(["xcrun", "vtool", "-show-build", str(binary)], stdout=log, stderr=log)
+            print(f"vtool exit: {got.returncode}", file=log)
+
+
 def _leg_worker(name, args, kwargs, pad):
+    keep_binary_stamp(name, args[0])
     with open(LEGS_DIR / f"{name}.log", "w", encoding="utf-8",
               errors="replace", buffering=1) as log:
         if pad:
@@ -2441,6 +2452,7 @@ def _leg_worker(name, args, kwargs, pad):
 
 
 def _proof_worker(name, app, bundle_id):
+    keep_binary_stamp(name, app)
     with open(LEGS_DIR / f"{name}.log", "w", encoding="utf-8",
               errors="replace", buffering=1) as log:
         slot = _claim_device()
@@ -2520,6 +2532,7 @@ def xcuidrive_pan_witness(udid, log, app, bundle_id):
 
 
 def _witness_worker(name, fn, app, bundle_id):
+    keep_binary_stamp(name, app)
     with open(LEGS_DIR / f"{name}.log", "w", encoding="utf-8",
               errors="replace", buffering=1) as log:
         slot = _claim_device()
@@ -2821,7 +2834,10 @@ if SUITE in ("swift", "all"):
             companions = [f"guests/swift/{src}+Kaya.swift"]
         blog = open(stage / "build.log", "w", encoding="utf-8")
         p = subprocess.Popen(
-            ["xcrun", "-sdk", "iphonesimulator", "swiftc", "-target",
+            ["bash", "-c",
+             'source "$1/tools/lib/swift-toolchain.sh" && shift && '
+             'kaya_swift_guestc "$@"', "_", str(ROOT),
+             "-sdk", SDKROOT_SIM, "-target",
              f"arm64-apple-ios{IOS_MIN}-simulator",
              "-I", str(PKG_MODULES), "-I", "bindings/swift/CKaya",
              *companions, str(stage / "main.swift"),
@@ -2851,6 +2867,7 @@ if SUITE in ("swift", "all"):
     for entry in lane.SWIFT_ENTRIES:
         guest, _src = lane.swift_scene(entry)
         verify_built(BUNDLES / f"{guest}swift-bin")
+        require_ios_sdk(BUNDLES / f"{guest}swift-bin", pathlib.Path(SDKROOT_SIM))
     for entry in lane.SWIFT_ENTRIES:
         guest, _src = lane.swift_scene(entry)
         # THE DECLARED IDENTITY GOES INTO ONE BUNDLE, the one whose

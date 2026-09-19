@@ -1556,7 +1556,7 @@ public final class KayaAsset {
     }
 }
 
-public struct KayaPickedFile {
+public struct KayaPickedFile: Sendable {
     let handle: UInt64
     public let name: String
     /// A RE-OPENABLE NAME, nil unless re-opening it actually works —
@@ -2178,11 +2178,7 @@ public final class KayaApp {
             notifications: bits & UInt64(KAYA_CAP_NOTIFICATIONS) != 0)
     }
 
-    // Work handed over by other threads, waiting to run as transactions
-    // on the app thread. THE ONLY STATE HERE TOUCHED FROM ANOTHER THREAD;
-    // everything below is app-thread-only by construction.
-    private let postLock = NSLock()
-    private var posted: [(KayaAppTx) throws -> Void] = []
+    private let posted = KayaAppQueue<@KayaAppActor @Sendable (KayaAppTx) throws -> Void>()
     private var signals: UInt64 = 0
     private var widgets: UInt64 = 0
     private var collections: UInt64 = 0
@@ -2822,25 +2818,14 @@ public final class KayaApp {
         nodeTimes[n.id] = handler
     }
 
-    /// Run `body` as a transaction on the app thread, soon. THE ONE
-    /// method safe to call from another thread.
-    public func post(_ body: @escaping (KayaAppTx) throws -> Void) {
-        postLock.lock()
-        posted.append(body)
-        postLock.unlock()
-        // The app thread may be parked in C waiting on the ring, and
-        // posted work never enters that ring.
-        kaya_wake()
+    public var post: @Sendable (@escaping @KayaAppActor @Sendable (KayaAppTx) throws -> Void) -> Void {
+        posted.append
     }
 
     /// Run everything posted, each as its own transaction, in order.
-    private func drainPosted() {
-        postLock.lock()
-        let batch = posted
-        posted = []
-        postLock.unlock()
-        for body in batch {
-            dispatch { try build(body) }
+    @KayaAppActor private func drainPosted() {
+        for body in posted.takeAll() {
+            dispatch { try build { tx in try body(tx) } }
         }
     }
 
@@ -3053,10 +3038,11 @@ public final class KayaApp {
         redone[window] = handler
     }
 
-    private func dispatchLoop() {
+    @KayaAppActor private func dispatchLoop() {
         KayaApp.claimAppThread()
         var record: UnsafePointer<UInt8>?
         while true {
+            KayaAppExecutor.shared.drain()
             // Posted work first, then the ring: draining at the TOP is
             // what makes a wake sufficient.
             drainPosted()
@@ -3352,9 +3338,30 @@ public final class KayaApp {
         }
     }
 
-    /// Enter the core on the calling thread (must be the process main
-    /// thread), dispatching occurrences on the app thread.
-    public func run() -> Never {
+    public static func run(
+        _ setup: @escaping @KayaAppActor @Sendable (KayaApp) throws -> Void
+    ) -> Never {
+        verifySpec()
+        start(setup)
+        exit(kaya_run())
+    }
+
+    static func start(_ setup: @escaping @KayaAppActor @Sendable (KayaApp) throws -> Void) {
+        Task { @KayaAppActor in
+            let app = KayaApp()
+            KayaApp.claimAppThread()
+            do {
+                try setup(app)
+            } catch {
+                FileHandle.standardError.write(Data("kaya: app setup threw: \(error)\n".utf8))
+                exit(1)
+            }
+            app.dispatchLoop()
+        }
+        Thread { KayaAppExecutor.shared.serve() }.start()
+    }
+
+    private static func verifySpec() {
         // The stale-artifact guard: the loaded library must speak the
         // spec revision this binding was generated from.
         precondition(
@@ -3362,11 +3369,17 @@ public final class KayaApp {
             "kaya: library speaks spec \(String(kaya_spec_hash(), radix: 16)), this binding "
                 + "was generated from \(String(kayaSpecHash, radix: 16)) — rebuild the "
                 + "library or regenerate bindings")
+    }
+
+    @available(swift, obsoleted: 6, message: "Use KayaApp.run { app in ... } so construction and handlers belong to KayaAppActor.")
+    public func run() -> Never {
+        Self.verifySpec()
         // The app object crosses to the app thread here and the
         // calling thread never touches it again; tools/check-pins.py
         // names every nonisolated(unsafe) site.
         nonisolated(unsafe) let app = self
-        let thread = Thread { app.dispatchLoop() }
+        Task { @KayaAppActor in app.dispatchLoop() }
+        let thread = Thread { KayaAppExecutor.shared.serve() }
         thread.start()
         exit(kaya_run())
     }

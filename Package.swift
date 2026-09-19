@@ -1,9 +1,5 @@
 // swift-tools-version: 6.0
-// The Swift binding as a module, in Swift 6 language mode. The SwiftUI
-// interpreter is NOT in this package: it stays on the bridging header
-// in Swift 5 mode until the app-thread executor exists
-// (docs/async-dialogs-plan.md §2.1); tools/check-pins.py holds both
-// halves.
+// tools/check-pins.py; docs/measurements/swift-executor-2026-09-18.md
 import PackageDescription
 
 let package = Package(

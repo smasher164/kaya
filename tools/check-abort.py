@@ -15,6 +15,7 @@ dev_shell_or_die()
 
 import glob
 import os
+import re
 import shutil
 import subprocess
 
@@ -80,6 +81,79 @@ with scratch_dir("check-abort-") as tmp:
           "-Xlinker", "-rpath", "-Xlinker", str(ROOT / "target/debug")],
          tmp / "swift.log", env=NO_XCODE)
     step("swift", [str(tmp / "swift-abort")], tmp / "swift.log")
+
+    executor_compile = [
+        "bash", "-c",
+        'source "$1/tools/lib/swift-toolchain.sh" && shift && kaya_swift_guestc "$@"',
+        "_", str(ROOT), "-I", "bindings/swift/CKaya",
+        "-L", "target/debug", "-lkaya", "-Xlinker", "-rpath", "-Xlinker",
+        str(ROOT / "target/debug"),
+    ]
+    executor_sources = sorted(glob.glob(str(ROOT / "bindings/swift/*.swift")))
+    executor_probe = str(ROOT / "tools/checks/swift-executor/main.swift")
+    step("swift-executor-build", executor_compile + executor_sources + [
+        executor_probe, "-o", str(tmp / "swift-executor")], tmp / "executor-build.log")
+    step("swift-executor", [str(tmp / "swift-executor")], tmp / "executor.log",
+         echo=("swift-executor:", "kaya: handler threw"))
+    for mode, expected in (("closed", "transaction is over"),
+                           ("double-start", "the Swift app executor may only start once"),
+                           ("setup-throw", "kaya: app setup threw: setup")):
+        got = subprocess.run([str(tmp / "swift-executor"), mode], cwd=ROOT,
+                             capture_output=True, text=True, encoding="utf-8", timeout=10)
+        said = got.stdout + got.stderr
+        if got.returncode == 0 or expected not in said:
+            g.refuse(f"swift-executor {mode}: rc={got.returncode}: {said}")
+        print(f"check-abort: swift-executor {mode} refused by name: {expected}")
+
+    legacy = tmp / "legacy.swift"
+    legacy.write_text(g.doctor("Swift legacy entry", "import Kaya\nKayaApp.run { _ in }\n",
+                              re.escape("KayaApp.run { _ in }"),
+                              "let app = KayaApp()\napp.run()"), encoding="utf-8")
+    got = subprocess.run(executor_compile + ["-typecheck", "-I", "target/swiftpm/debug/Modules",
+                         str(legacy)], cwd=ROOT, capture_output=True, text=True, encoding="utf-8")
+    if got.returncode == 0 or "Use KayaApp.run { app in ... }" not in got.stderr:
+        g.refuse(f"swift-executor legacy entry was not refused: {got.stderr}")
+    print("check-abort: swift-executor legacy entry refused at compile time")
+
+    actor_state = tmp / "actor-state.swift"
+    actor_state.write_text(g.doctor("Swift main-thread state",
+                                   "import Kaya\nKayaApp.run { _ in }\n",
+                                   re.escape("KayaApp.run { _ in }"),
+                                   "var count = 0\nKayaApp.run { _ in count += 1 }"),
+                           encoding="utf-8")
+    got = subprocess.run(executor_compile + ["-typecheck", "-I", "target/swiftpm/debug/Modules",
+                         str(actor_state)], cwd=ROOT, capture_output=True,
+                         text=True, encoding="utf-8")
+    if got.returncode == 0 or "main actor-isolated var 'count'" not in got.stderr:
+        g.refuse(f"swift-executor main-thread state was not refused: {got.stderr}")
+    print("check-abort: swift-executor main-thread state refused at compile time")
+
+    stalled = "executor: timed out waiting for the app loop"
+    for name, file, before, after, expected in (
+        ("drain", "KayaApp.swift", "            KayaAppExecutor.shared.drain()", "", stalled),
+        ("wake", "KayaExecutor.swift", "        kaya_wake()", "", stalled),
+        ("owner", "KayaExecutor.swift", "KayaAppExecutor.shared.asUnownedSerialExecutor()",
+         "MainActor.shared.unownedExecutor", stalled),
+        ("rollback", "KayaApp.swift", "app.signalMirrors[id] = old",
+         "app.signalMirrors[id] = old == .i64(0) ? .i64(99) : old",
+         "executor: thrown post was not rolled back"),
+    ):
+        shadow = tmp / f"executor-{name}"
+        shutil.copytree(ROOT / "bindings/swift", shadow)
+        target = shadow / file
+        target.write_text(g.doctor(f"Swift executor {name}", target.read_text(encoding="utf-8"),
+                                  re.escape(before), after), encoding="utf-8")
+        binary = tmp / f"executor-{name}-bin"
+        step(f"swift-executor-{name}-build", executor_compile +
+             sorted(map(str, shadow.glob("*.swift"))) + [executor_probe, "-o", str(binary)],
+             tmp / f"executor-{name}-build.log")
+        got = subprocess.run([str(binary)], cwd=ROOT, capture_output=True,
+                             text=True, encoding="utf-8", timeout=10)
+        refused = expected in got.stderr
+        if got.returncode == 0 or not refused:
+            g.refuse(f"Swift executor {name} negative: rc={got.returncode}: "
+                     f"{got.stdout}{got.stderr}")
+        print(f"check-abort: Swift executor {name} negative refused by the runtime probe")
 
     # THE PROCESS-LEVEL NOTIFICATION HANDLER'S DISPATCH ORDER
     # (docs/tasks-s9-plan.md R1, docs/deferred.md's S9 entry): the

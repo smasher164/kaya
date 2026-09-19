@@ -4,16 +4,14 @@
 import Foundation
 import Kaya
 
-let app = KayaApp()
-
-app.build { tx in
-    tx.window(title: "window probe", width: 640.0, height: 400.0)
-    let probe = tx.signal(.str("window probe"))
-    let root = tx.column { root in
-        tx.label(bind: probe)  // label#0
-        return root
+KayaApp.run { app in
+    app.build { tx in
+        tx.window(title: "window probe", width: 640.0, height: 400.0)
+        let probe = tx.signal(.str("window probe"))
+        let root = tx.column { root in
+            tx.label(bind: probe)  // label#0
+            return root
+        }
+        tx.mount(root)
     }
-    tx.mount(root)
 }
-
-app.run()

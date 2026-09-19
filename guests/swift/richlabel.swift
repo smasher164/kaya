@@ -20,48 +20,46 @@ func spell(_ runs: [KayaRun]) -> String {
     }.joined(separator: "|")
 }
 
-let app = KayaApp()
+KayaApp.run { app in
+    app.build { tx in
+        tx.window(title: "richlabel")
+        let runs = tx.signal(.str(""))
 
-app.build { tx in
-    tx.window(title: "richlabel")
-    let runs = tx.signal(.str(""))
-
-    let (root, body, heading) = tx.column { root -> (KayaWidget, KayaWidget, KayaWidget) in
-        let bodyText = tx.signal(.str(""))
-        let headingText = tx.signal(.str(title))
-        let body = tx.label(bind: bodyText, rich: true)  // label#0
-        tx.setA11yId(body, "body")
-        let heading = tx.label(bind: headingText, role: .heading, rich: true)  // label#1
-        tx.setA11yId(heading, "heading")
-        let mirror = tx.label(bind: runs)  // label#2
-        tx.setA11yId(mirror, "runs")
-        tx.row { _ in
-            tx.button("seed") { t in  // button#0
-                let doc = KayaDocument(document)
-                    .bold(0..<6)
-                    .link(7..<12, "https://kaya.dev")
-                    .mark(14..<18, "code", true)
-                let heads = KayaDocument(title).mark(13..<19, "italic", true)
-                t.setDocument(body, doc)
-                t.setDocument(heading, heads)
-                t.write(runs, .str(spell(doc.runs)))
+        let (root, _, _) = tx.column { root -> (KayaWidget, KayaWidget, KayaWidget) in
+            let bodyText = tx.signal(.str(""))
+            let headingText = tx.signal(.str(title))
+            let body = tx.label(bind: bodyText, rich: true)  // label#0
+            tx.setA11yId(body, "body")
+            let heading = tx.label(bind: headingText, role: .heading, rich: true)  // label#1
+            tx.setA11yId(heading, "heading")
+            let mirror = tx.label(bind: runs)  // label#2
+            tx.setA11yId(mirror, "runs")
+            tx.row { _ in
+                tx.button("seed") { t in  // button#0
+                    let doc = KayaDocument(document)
+                        .bold(0..<6)
+                        .link(7..<12, "https://kaya.dev")
+                        .mark(14..<18, "code", true)
+                    let heads = KayaDocument(title).mark(13..<19, "italic", true)
+                    t.setDocument(body, doc)
+                    t.setDocument(heading, heads)
+                    t.write(runs, .str(spell(doc.runs)))
+                }
+                tx.button("insert") { t in  // button#1
+                    let edit = KayaEdit.insert(at: 6, ", big").mark(2..<5, "italic", true)
+                    t.applyEdit(body, edit)
+                    t.write(runs, .str(spell(app.document(body).runs)))
+                }
+                // THE RANGED ACT ON A LABEL (docs/rich-text-plan.md §17): the
+                // label's own document written by range, no selection to move.
+                tx.button("mark") { t in  // button#2
+                    t.formatRange(body, 1..<4, "italic", true)
+                    t.unformatRange(body, 0..<3, "bold")  // "Hé": byte 2 is inside the é
+                    t.write(runs, .str(spell(app.document(body).runs)))
+                }
             }
-            tx.button("insert") { t in  // button#1
-                let edit = KayaEdit.insert(at: 6, ", big").mark(2..<5, "italic", true)
-                t.applyEdit(body, edit)
-                t.write(runs, .str(spell(app.document(body).runs)))
-            }
-            // THE RANGED ACT ON A LABEL (docs/rich-text-plan.md §17): the
-            // label's own document written by range, no selection to move.
-            tx.button("mark") { t in  // button#2
-                t.formatRange(body, 1..<4, "italic", true)
-                t.unformatRange(body, 0..<3, "bold")  // "Hé": byte 2 is inside the é
-                t.write(runs, .str(spell(app.document(body).runs)))
-            }
+            return (root, body, heading)
         }
-        return (root, body, heading)
+        tx.mount(root)
     }
-    tx.mount(root)
 }
-
-app.run()

@@ -149,6 +149,12 @@ So `@MainActor` on kaya's Swift tier is not a white lie; it is an armed one.
 **The mechanism.** A global actor whose executor enqueues onto the app loop's own
 queue. Measured working, in Swift 6 language mode, with no warnings:
 
+Follow-up, 2026-09-18: the guest executor slice is recorded in
+docs/measurements/swift-executor-2026-09-18.md. The sample below was the
+original isolated probe, not the production implementation. The deployment
+floors require the older UnownedJob enqueue spelling, and Swift jobs must
+enter the loop without an implicit transaction around the job.
+
 ```swift
 final class KayaAppExecutor: SerialExecutor {
     func enqueue(_ job: consuming ExecutorJob) {
@@ -224,14 +230,13 @@ once and synchronously, and a suspension inside it would leave a half-authored
 blueprint, which the core already refuses by name.
 
 **How Swift 6 strict concurrency constrains it (Part 1's measurement).** The
-binding is three `nonisolated(unsafe)` annotations from compiling clean in Swift 6
-language mode, and the SwiftUI interpreter is 418 build-breaking diagnostics away
-from it. The relevance to R1 is the other direction: **the custom executor makes
-the isolation TRUE rather than waived.** If the Swift tier takes `@KayaAppActor`,
-every top-level guest `var` can be isolated to it instead of carrying
-`nonisolated(unsafe)`, and the compiler then checks what kaya's comments currently
-only assert. That is an argument for ruling R1 and the Swift 6 slice together, and
-against doing the Swift 6 slice with `@MainActor`.
+binding package already compiles in Swift 6 with four audited
+`nonisolated(unsafe)` sites; the SwiftUI interpreter remains 418 measured
+build-breaking diagnostics away. The guest follow-up corrected the original
+proposal: Swift rejects a custom global actor on a top-level-code variable.
+State belongs inside the `KayaApp.run { app in ... }` actor-isolated entry,
+whose construction and handlers run on the executor's app thread. R1 can reuse
+that executor; it does not need to migrate the interpreter with the guests.
 
 **The guard.** The rule "the continuation runs on the app thread" is exactly
 `check-tx-liveness`'s existing rule, one suspension later: Swift's `Tx` refuses a

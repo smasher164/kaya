@@ -703,8 +703,11 @@ in docs/deferred.md.
    and the sections adopted out of the leg's SCRATCH (the sampler's
    lines, its `sample`, the verb trace) are held to the launch wiring
    that fills it, since a hand run launching its own guest keeps the
-   bundle and loses exactly those. Twenty watched negatives, counts
-   printed),
+   bundle and loses exactly those. The iOS binary-stamp section reads the
+   main executable and interpreter before launch: the Swift executor slice's
+   SDKROOT regression stamped SDK 16.0 despite an explicit 26.5 SDK, and the
+   original bundle carried no stamp. All three worker paths and adoption
+   are held by four cuts. Twenty-four watched negatives, counts printed),
    `tools/check-diagnostics.py` (a why-not may not print a sentence it
    cannot NOT print. Any function named `*WhyNot`/`*why_not`/`*Reason`
    is read as a diagnostic by that name alone; one answer, or an answer
@@ -1375,28 +1378,26 @@ in docs/deferred.md.
    every new invocation was policed by nothing. It reads both languages
    now, a python argv list and embedded shell alike, with a docstring
    saying what `swift build` does excluded by name because prose is not a
-   command. THE SECOND IS THE LANGUAGE MODE, the java clause's shape one
-   language over: `.swiftLanguageMode(.v6)` in the manifest is the ONLY
-   place a Swift language mode is declared, and NO tools/ compile may pass
-   `-swift-version` — the refusal says why, because both layers outside
-   the package trap on kaya's app thread under Swift 6 (measured
-   2026-09-18). The GUESTS: swiftc allows top-level code only in
-   main.swift and SE-0343 makes top-level code `@MainActor`, so every
-   closure a guest hands the binding is main-actor-isolated; Swift 6 emits
-   a dynamic isolation check at such a closure's entry, kaya calls it on
-   the app thread, and `dispatch_assert_queue` fails — SIGTRAP with
-   nothing on stderr, at the first handler of the first scene, and
-   `-default-isolation nonisolated` does not lift it. THE INTERPRETER:
-   the same thread, one door over — `MainActor.assumeIsolated` SIGTRAPs
-   there too, so `@MainActor` is an armed promise and not a cheap answer,
-   and swift/KayaSwiftUI.swift waits for a custom SerialExecutor bound to
-   the app thread (docs/async-dialogs-plan.md §2.1). Both halves lift
-   together, with that executor. And the WAIVER LEDGER: every
-   `nonisolated(unsafe)` in bindings/swift and guests/swift is named with
-   the external synchronisation that makes the claim true — four, all in
-   the binding — so a fifth is a finding and a named one that vanished is
-   a stale audit. Eleven watched negatives over the two clauses, counts
-   printed),
+   command. THE SECOND IS THE LANGUAGE MODE: the package declares Swift 6
+   in its manifest and every guest compile goes through kaya_swift_guestc,
+   the only tools/ body that may pass -swift-version. Both guest check
+   passes compile through SIL, not merely -typecheck: the latter missed
+   three data-race refusals and two compiler crashes in the executor slice.
+   The interpreter remains in Swift 5. check-pins holds all compiler routes
+   and watches a missing wrapper, a check stopping before SIL, and an
+   interpreter switched to Swift 6 fail. The Swift 6 guest entry is
+   KayaApp.run { app in ... }, whose body and state belong to KayaAppActor;
+   the old instance run is refused by the compiler. check-abort exercises
+   the real executor and occurrence loop headlessly, including suspension,
+   wake, thread identity, post rollback and the retained-transaction refusal,
+   with counted cuts of the drain, wake and executor identity watched red.
+   The iOS staging path also refuses an executable whose SDK stamp disagrees
+   with the selected SDK's SDKSettings.json; a real compile and a counted
+   SDKROOT cut prove that refusal in check-pins.
+   See docs/measurements/swift-executor-2026-09-18.md. The WAIVER LEDGER
+   still names all four nonisolated(unsafe) sites and permits unchecked
+   Sendable only on the locked executor queue. New and stale waivers are
+   findings, with watched negatives and substitution counts),
    `tools/check-design-generation.py` (BOTH macOS design generations stay
    on the mac lane: SwiftUI reads the MAIN EXECUTABLE's sdk stamp, so
    flake.nix's apple-sdk_26 keeps the kaya-linked legs modern while the

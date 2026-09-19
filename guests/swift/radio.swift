@@ -6,20 +6,18 @@ import Kaya
 
 let options = ["Small", "Medium", "Large"]
 
-let app = KayaApp()
+KayaApp.run { app in
+    app.build { tx in
+        tx.window(title: "radio")
+        let size = tx.signal(.str("size: Small"))
 
-app.build { tx in
-    tx.window(title: "radio")
-    let size = tx.signal(.str("size: Small"))
-
-    let root = tx.column { root in
-        tx.radio(options, selected: 0) { t, index in
-            t.write(size, .str("size: \(options[index])"))
+        let root = tx.column { root in
+            tx.radio(options, selected: 0) { t, index in
+                t.write(size, .str("size: \(options[index])"))
+            }
+            tx.label(bind: size)  // label#0
+            return root
         }
-        tx.label(bind: size)  // label#0
-        return root
+        tx.mount(root)
     }
-    tx.mount(root)
 }
-
-app.run()

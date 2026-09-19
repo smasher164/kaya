@@ -16,9 +16,11 @@ dev_shell_or_die()
 
 import ast
 import hashlib
+import os
 import re
 import subprocess
 import tempfile
+from swift_sdk import require_ios_sdk
 
 root = ROOT
 out = []
@@ -966,25 +968,19 @@ print(f"check-pins: swiftpm: {_swiftpm_read} tools file(s) read, "
       f"the real tree", file=sys.stderr)
 
 # --- Swift's LANGUAGE MODE: the package is v6, NOTHING ELSE IS --------
-# `.swiftLanguageMode(.v6)` in Package.swift is the ONLY place a Swift
-# language mode is declared, and no tools/ compile may pass
-# `-swift-version`. Both layers outside the package trap on kaya's app
-# thread under Swift 6, measured on 2026-09-18:
-#   - the GUESTS, because swiftc allows top-level code only in main.swift
-#     and SE-0343 makes top-level code @MainActor, so every closure a
-#     guest hands the binding is main-actor-isolated; Swift 6 emits a
-#     dynamic isolation check at such a closure's entry, kaya calls it on
-#     the app thread, and `dispatch_assert_queue` fails — SIGTRAP with
-#     nothing on stderr, at the first handler of the first scene.
-#     `-default-isolation nonisolated` does not lift it (measured).
-#   - the INTERPRETER, which waits for the same custom SerialExecutor
-#     (docs/async-dialogs-plan.md §2.1): `MainActor.assumeIsolated`
-#     SIGTRAPs on that thread too.
-# A waiver is a debt, and NONISOLATED_SITES is its ledger: every
-# `nonisolated(unsafe)` in the Swift tier is named here, so a new one is a
-# finding rather than a silence.
+# docs/measurements/swift-executor-2026-09-18.md
 MANIFEST = "Package.swift"
 SWIFT_VERSION = re.compile(r"-swift-version")
+SWIFT_GUEST_SITES = {
+    "tools/lib/swift-toolchain.sh": [
+        'kaya_swift_guestc() {\n    kaya_swiftc -swift-version 6 -warnings-as-errors "$@"'],
+    "tools/swift-typecheck.sh": [
+        'kaya_swift_guestc -c -whole-module-optimization -o "$TMP/guest.o"',
+        'kaya_swift_guestc -sdk "$ios_sdk" -c -whole-module-optimization -o "$stage/guest.o"'],
+    "tools/lib/lanes/mac.py": ['kaya_swift_guestc "$@"'],
+    "tools/ios/run-sim.py": ['kaya_swift_guestc "$@"'],
+    "tools/check-abort.py": ['kaya_swift_guestc "$@"'],
+}
 NONISOLATED = re.compile(r"nonisolated\(unsafe\)\s+"
                          r"(?:public\s+|private\s+|internal\s+)?"
                          r"(?:static\s+)?(?:var|let)\s+([A-Za-z_][A-Za-z0-9_]*)")
@@ -1016,16 +1012,23 @@ def swift_mode_findings(bodies, manifest):
         for n, line in logical_lines(text):
             if line.lstrip().startswith("#") or not SWIFT_VERSION.search(line):
                 continue
+            if (rel == "tools/lib/swift-toolchain.sh"
+                    and line.strip() == 'kaya_swiftc -swift-version 6 -warnings-as-errors "$@"'):
+                continue
             bad.append(
-                f"{rel}:{n}: passes -swift-version. The Swift 6 language "
-                f"mode is Package.swift's `.swiftLanguageMode(.v6)` and "
-                f"nothing else: a guest compiled in Swift 6 SIGTRAPs at "
-                f"its first handler (top-level code is @MainActor by "
-                f"SE-0343, and Swift 6's dynamic isolation check fires "
-                f"when kaya calls that closure on the app thread), and "
-                f"the SwiftUI interpreter waits for the app-thread "
-                f"SerialExecutor (docs/async-dialogs-plan.md §2.1). Both "
-                f"measured 2026-09-18.")
+                f"{rel}:{n}: passes -swift-version outside kaya_swift_guestc. "
+                f"Guests use that Swift 6 wrapper and KayaApp.run {{ app in ... }}; "
+                "the interpreter remains in Swift 5 "
+                "(docs/measurements/swift-executor-2026-09-18.md).")
+        calls = code_only(text).count("kaya_swift_guestc")
+        wanted = len(SWIFT_GUEST_SITES.get(rel, []))
+        if calls != wanted:
+            bad.append(f"{rel}: Swift guest wrapper census is {calls}, expected {wanted}; "
+                       "every guest compile uses kaya_swift_guestc and no interpreter does")
+    for rel, sites in SWIFT_GUEST_SITES.items():
+        for site in sites:
+            if bodies.get(rel, "").count(site) != 1:
+                bad.append(f"{rel}: missing unique Swift 6 guest compile route: {site}")
     return bad
 
 
@@ -1033,6 +1036,11 @@ def waiver_findings(sources):
     """Every nonisolated(unsafe) in the Swift tier is in the ledger."""
     bad, seen = [], set()
     for rel, text in sorted(sources.items()):
+        unchecked = text.count("@unchecked Sendable")
+        expected = int(rel == "bindings/swift/KayaExecutor.swift")
+        if unchecked != expected:
+            bad.append(f"{rel}: @unchecked Sendable count {unchecked}, expected {expected}; "
+                       "only the locked Swift executor queue is audited")
         for name in NONISOLATED.findall(text):
             seen.add((rel, name))
             if (rel, name) not in NONISOLATED_SITES:
@@ -1050,6 +1058,40 @@ def waiver_findings(sources):
     return bad
 
 
+QUEUE_METHODS = {
+    "append(_ item: Item)": ["ready.lock()", "items.append(item)",
+                           "ready.signal()", "ready.unlock()", "kaya_wake()"],
+    "claim()": ["ready.lock()", "precondition(!started", "started = true", "ready.unlock()"],
+    "wait() -> Item": ["ready.lock()", "while items.isEmpty { ready.wait() }",
+                      "let item = items.removeFirst()", "ready.unlock()", "return item"],
+    "takeAll() -> [Item]": ["ready.lock()", "let batch = items", "items = []",
+                           "ready.unlock()", "return batch"],
+}
+
+
+def queue_findings(source):
+    bad = []
+    for signature, steps in QUEUE_METHODS.items():
+        anchor = "func " + signature + " {"
+        if source.count(anchor) != 1:
+            bad.append(f"Swift executor queue missing unique {signature}")
+            continue
+        start = source.index(anchor) + len(anchor)
+        depth, end = 1, start
+        while end < len(source) and depth:
+            depth += (source[end] == "{") - (source[end] == "}")
+            end += 1
+        body = source[start:end - 1]
+        at = 0
+        for step_ in steps:
+            found = body.find(step_, at)
+            if found < 0:
+                bad.append(f"Swift executor queue {signature} lacks ordered {step_}")
+                break
+            at = found + len(step_)
+    return bad
+
+
 _manifest = (root / MANIFEST).read_text(encoding="utf-8")
 _swift_sources = {
     f.relative_to(root).as_posix(): f.read_text(encoding="utf-8")
@@ -1057,6 +1099,14 @@ _swift_sources = {
                     + list((root / "guests/swift").glob("*.swift")))}
 out += swift_mode_findings(_swiftpm_bodies, _manifest)
 out += waiver_findings(_swift_sources)
+_queue = _swift_sources["bindings/swift/KayaExecutor.swift"]
+out += queue_findings(_queue)
+for _signature in QUEUE_METHODS:
+    _old = "func " + _signature + " {\n        ready.lock()"
+    _count = _queue.count(_old)
+    print(f"check-pins: Swift queue {_signature}: {_count} substitution(s)", file=sys.stderr)
+    if _count != 1 or not queue_findings(_queue.replace(_old, "func " + _signature + " {", 1)):
+        out.append(f"Swift queue {_signature}: lock-cut negative did not refuse")
 
 SWIFT_MODE_NEGATIVES = [
     ("the manifest's language mode dropped", "manifest",
@@ -1065,10 +1115,10 @@ SWIFT_MODE_NEGATIVES = [
     ("the tools version dropped", "manifest",
      "swift-tools-version: 6.0", "swift-tools-version: 5.10",
      "swift-tools-version is not 6.x"),
-    ("a guest compile asking for Swift 6", "tools/swift-typecheck.sh",
-     "    if ! kaya_swiftc -typecheck \\\n",
-     "    if ! kaya_swiftc -typecheck -swift-version 6 \\\n",
-     "passes -swift-version"),
+    ("a guest compile dropping Swift 6", "tools/swift-typecheck.sh",
+     '    if ! kaya_swift_guestc -c -whole-module-optimization -o "$TMP/guest.o" \\\n',
+     '    if ! kaya_swiftc -c -whole-module-optimization -o "$TMP/guest.o" \\\n',
+     "missing unique Swift 6 guest compile route"),
     ("the interpreter compiled in Swift 6", "tools/swiftui/build-dylib.sh",
      "\n    -warnings-as-errors \\\n",
      "\n    -warnings-as-errors -swift-version 6 \\\n",
@@ -1076,6 +1126,26 @@ SWIFT_MODE_NEGATIVES = [
     ("a fourth compile site", "tools/a-new-lane.py",
      None, 'PAYLOAD = """\nswiftc -swift-version 6 x.swift\n"""\n',
      "passes -swift-version"),
+]
+SWIFT_MODE_NEGATIVES += [
+    (f"{rel} guest route dropped", rel, site, site.replace("kaya_swift_guestc", "kaya_swiftc"),
+     "missing unique Swift 6 guest compile route")
+    for rel, sites in SWIFT_GUEST_SITES.items() for site in sites
+]
+SWIFT_MODE_NEGATIVES += [
+    ("guest check stops before SIL", "tools/swift-typecheck.sh", site,
+     site.replace("-c -whole-module-optimization", "-typecheck"),
+     "missing unique Swift 6 guest compile route")
+    for site in SWIFT_GUEST_SITES["tools/swift-typecheck.sh"]
+]
+SWIFT_MODE_NEGATIVES += [
+    ("guest language mode regressed", "tools/lib/swift-toolchain.sh",
+     "kaya_swiftc -swift-version 6 -warnings-as-errors",
+     "kaya_swiftc -swift-version 5 -warnings-as-errors",
+     "missing unique Swift 6 guest compile route"),
+    ("guest warnings no longer refuse", "tools/lib/swift-toolchain.sh",
+     "kaya_swiftc -swift-version 6 -warnings-as-errors",
+     "kaya_swiftc -swift-version 6", "missing unique Swift 6 guest compile route"),
 ]
 _mrefused, _mcounts = 0, []
 for _label, _who, _old, _new, _expect in SWIFT_MODE_NEGATIVES:
@@ -1102,6 +1172,11 @@ for _label, _who, _old, _new, _expect in SWIFT_MODE_NEGATIVES:
         out.append(f"check-pins: watched negative {_label!r} was NOT "
                    f"refused naming {_expect!r} (findings: {_got})")
 WAIVER_NEGATIVES = [
+    ("an unchecked app handle", "bindings/swift/KayaApp.swift",
+     "public final class KayaApp {", "public final class KayaApp: @unchecked Sendable {",
+     "@unchecked Sendable count"),
+    ("the executor audit removed", "bindings/swift/KayaExecutor.swift",
+     "@unchecked Sendable", "Sendable", "@unchecked Sendable count"),
     ("a fifth waiver in the binding", "bindings/swift/KayaSums.swift",
      "import Foundation",
      "import Foundation\n\nnonisolated(unsafe) var kayaSneak = 0",
@@ -1130,13 +1205,63 @@ for _label, _who, _old, _new, _expect in WAIVER_NEGATIVES:
     else:
         out.append(f"check-pins: watched negative {_label!r} was NOT "
                    f"refused naming {_expect!r} (findings: {_got})")
-print(f"check-pins: swift language mode: the manifest alone, "
+print(f"check-pins: swift language mode: package plus guest wrapper, "
       f"{len(_swiftpm_bodies)} tools file(s) read for -swift-version, "
       f"{len(NONISOLATED_SITES)} waiver(s) in the ledger over "
       f"{len(_swift_sources)} Swift file(s), "
       f"{_mrefused}/{len(SWIFT_MODE_NEGATIVES) + len(WAIVER_NEGATIVES)} "
       f"watched negatives refused (substitutions {'/'.join(_mcounts)})",
       file=sys.stderr)
+
+with tempfile.TemporaryDirectory(prefix="kaya-swift-sdk-") as sdk_tmp:
+    sdk_tmp = pathlib.Path(sdk_tmp)
+    toolchain = root / "tools/lib/swift-toolchain.sh"
+    resolved = subprocess.run([
+        "bash", "-c", 'source "$1" && kaya_resolve_swiftc && '
+        'printf "%s\\n" "$SWIFT_DEVELOPER_DIR" && '
+        'env DEVELOPER_DIR="$SWIFT_DEVELOPER_DIR" /usr/bin/xcrun '
+        '--sdk iphonesimulator --show-sdk-path', "_", str(toolchain)],
+        capture_output=True, text=True, encoding="utf-8", check=True)
+    developer, sdk_path = resolved.stdout.strip().splitlines()
+    sdk_env = dict(os.environ, DEVELOPER_DIR=developer)
+    sdk_env.pop("SDKROOT", None)
+    sdk_root = pathlib.Path(sdk_path)
+    source = sdk_tmp / "main.swift"
+    source.write_text('print("SDK stamp probe")\n', encoding="utf-8")
+    wrapper = toolchain.read_text(encoding="utf-8")
+    cut = 'SDKROOT="$sdk_root"'
+    count = wrapper.count(cut)
+    print(f"check-pins: Swift SDKROOT cut: {count} substitution(s)")
+    if count != 2:
+        out.append("Swift SDKROOT negative did not identify both compiler launch arms")
+    else:
+        broken = sdk_tmp / "toolchain.sh"
+        broken.write_text(wrapper.replace(cut, "-u SDKROOT"), encoding="utf-8")
+        for label, script in (("real", toolchain), ("without SDKROOT", broken)):
+            binary = sdk_tmp / label.replace(" ", "-")
+            subprocess.run([
+                "bash", "-c", 'source "$1" && shift && kaya_swift_guestc "$@"',
+                "_", str(script), "-sdk", sdk_path, "-target",
+                "arm64-apple-ios16.0-simulator", str(source), "-o", str(binary)],
+                env=sdk_env, check=True)
+            try:
+                stamp = require_ios_sdk(binary, sdk_root, env=sdk_env)
+            except ValueError as exc:
+                if label == "real":
+                    out.append(str(exc))
+                else:
+                    print(f"check-pins: Swift SDK negative refused: {exc}")
+            else:
+                if label != "real":
+                    out.append("Swift SDK negative passed with SDKROOT removed")
+                print(f"check-pins: Swift SDK {label}: platform/minos/sdk {stamp}")
+
+sdk_route = 'require_ios_sdk(BUNDLES / f"{guest}swift-bin", pathlib.Path(SDKROOT_SIM))'
+ios_source = (root / "tools/ios/run-sim.py").read_text(encoding="utf-8")
+sdk_count = code_only(ios_source).count(sdk_route)
+print(f"check-pins: iOS SDK staging wall cut: {sdk_count} substitution(s)")
+if sdk_count != 1 or code_only(ios_source.replace(sdk_route, "pass", 1)).count(sdk_route) != 0:
+    out.append("iOS SDK staging wall must run once in the Swift executable verification loop")
 
 status = 0
 if out:

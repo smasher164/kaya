@@ -27,75 +27,73 @@ func keyText(_ key: KayaValue) -> String {
     return "\(key)"
 }
 
-let app = KayaApp()
+KayaApp.run { app in
+    app.build { tx in
+        let notes = noteCollection(tx)
+        let last = tx.signal(.str(""))
+        let view = tx.signal(.str(""))
 
-app.build { tx in
-    let notes = noteCollection(tx)
-    let last = tx.signal(.str(""))
-    let view = tx.signal(.str(""))
-
-    func row(_ t: KayaAppTx, _ key: KayaValue) -> Note {
-        guard let note = notes.items(t).first(where: { $0.key == key })?.value else {
-            preconditionFailure("richrows: no row \(key)")
-        }
-        return note
-    }
-
-    // An undo or redo moved the row back: the app reads ITS OWN mirror of
-    // row b, which is the fold a restored Blob field lands in.
-    func restored(_ t: KayaAppTx, _ label: String, _ delta: KayaUndoDelta) {
-        let note = row(t, .str("b"))
-        t.write(view, .str("\(note.body.text) | \(spell(note.body.runs))"))
-    }
-
-    let edit = tx.menu(
-        "Edit",
-        items: [
-            tx.item("Undo", role: .undo),
-            tx.item("Redo", role: .redo),
-        ])
-    tx.window(
-        title: "richrows", onUndone: restored, onRedone: restored, menus: [edit])
-
-    let root = tx.column { root in
-        tx.label(bind: last)  // label#0
-        tx.label(bind: view)  // label#1
-        tx.row { _ in
-            tx.button("patch b") { t in  // button#0
-                t.undoable("patch b")
-                notes.patch(t, .str("b")).set(
-                    \.body, KayaDocument("Patched").italic(0..<7))
+        func row(_ t: KayaAppTx, _ key: KayaValue) -> Note {
+            guard let note = notes.items(t).first(where: { $0.key == key })?.value else {
+                preconditionFailure("richrows: no row \(key)")
             }
-            tx.button("read a") { t in  // button#1
-                let note = row(t, .str("a"))
-                t.write(view, .str("\(note.body.text) | \(spell(note.body.runs))"))
-            }
+            return note
         }
-        for r in notes.rows {
-            r.column {
-                r.label(r.title)
-                let body = r.textarea(document: r.body)
-                r.t.setA11yId(body, "body")
-                // The row's field already carries the copy's act when
-                // these fire: the app reads the row, never the widget.
-                app.onEdit(body) { t, keys, _ in
-                    let note = row(t, keys[0])
-                    t.write(last, .str("\(keyText(keys[0])): \(spell(note.body.runs))"))
+
+        // An undo or redo moved the row back: the app reads ITS OWN mirror of
+        // row b, which is the fold a restored Blob field lands in.
+        func restored(_ t: KayaAppTx, _ label: String, _ delta: KayaUndoDelta) {
+            let note = row(t, .str("b"))
+            t.write(view, .str("\(note.body.text) | \(spell(note.body.runs))"))
+        }
+
+        let edit = tx.menu(
+            "Edit",
+            items: [
+                tx.item("Undo", role: .undo),
+                tx.item("Redo", role: .redo),
+            ])
+        tx.window(
+            title: "richrows", onUndone: restored, onRedone: restored, menus: [edit])
+
+        let root = tx.column { root in
+            tx.label(bind: last)  // label#0
+            tx.label(bind: view)  // label#1
+            tx.row { _ in
+                tx.button("patch b") { t in  // button#0
+                    t.undoable("patch b")
+                    notes.patch(t, .str("b")).set(
+                        \.body, KayaDocument("Patched").italic(0..<7))
                 }
-                app.onFormat(body) { t, keys, _ in
-                    let note = row(t, keys[0])
-                    t.write(last, .str("\(keyText(keys[0])): \(spell(note.body.runs))"))
+                tx.button("read a") { t in  // button#1
+                    let note = row(t, .str("a"))
+                    t.write(view, .str("\(note.body.text) | \(spell(note.body.runs))"))
                 }
             }
+            for r in notes.rows {
+                r.column {
+                    r.label(r.title)
+                    let body = r.textarea(document: r.body)
+                    r.t.setA11yId(body, "body")
+                    // The row's field already carries the copy's act when
+                    // these fire: the app reads the row, never the widget.
+                    app.onEdit(body) { t, keys, _ in
+                        let note = row(t, keys[0])
+                        t.write(last, .str("\(keyText(keys[0])): \(spell(note.body.runs))"))
+                    }
+                    app.onFormat(body) { t, keys, _ in
+                        let note = row(t, keys[0])
+                        t.write(last, .str("\(keyText(keys[0])): \(spell(note.body.runs))"))
+                    }
+                }
+            }
+            return root
         }
-        return root
-    }
-    tx.mount(root)
+        tx.mount(root)
 
-    notes.insert(tx, .str("a"), Note(
-        title: "a", body: KayaDocument("Héllo world").bold(0..<6)))
-    notes.insert(tx, .str("b"), Note(
-        title: "b", body: KayaDocument("Second note").link(7..<11, "https://kaya.dev")))
+        notes.insert(tx, .str("a"), Note(
+            title: "a", body: KayaDocument("Héllo world").bold(0..<6)))
+        notes.insert(tx, .str("b"), Note(
+            title: "b", body: KayaDocument("Second note").link(7..<11, "https://kaya.dev")))
+    }
 }
-
-app.run()

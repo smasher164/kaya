@@ -4,180 +4,182 @@
 import Foundation
 import Kaya
 
-let app = KayaApp()
+KayaApp.run { app in
+    let post = app.post
+    // NOT THE TEMP DIRECTORY ON iOS: $TMP there is the app's own Documents
+    // (kayaTempDir in swift/KayaSwiftUI.swift) — the outside reader cannot see
+    // private storage. TMPDIR elsewhere; NSTemporaryDirectory() ignores it
+    // (docs/traps.md).
+    #if os(iOS)
+        let kayaTmp = (NSHomeDirectory() as NSString).appendingPathComponent("Documents")
+    #else
+        let kayaTmp = ProcessInfo.processInfo.environment["TMPDIR"] ?? NSTemporaryDirectory()
+    #endif
+    let sceneDir = (kayaTmp as NSString)
+        .appendingPathComponent("kaya-clip-\(ProcessInfo.processInfo.processIdentifier)")
+    try? FileManager.default.createDirectory(
+        atPath: sceneDir, withIntermediateDirectories: true)
 
-// NOT THE TEMP DIRECTORY ON iOS: $TMP there is the app's own Documents
-// (kayaTempDir in swift/KayaSwiftUI.swift) — the outside reader cannot see
-// private storage. TMPDIR elsewhere; NSTemporaryDirectory() ignores it
-// (docs/traps.md).
-#if os(iOS)
-    let kayaTmp = (NSHomeDirectory() as NSString).appendingPathComponent("Documents")
-#else
-    let kayaTmp = ProcessInfo.processInfo.environment["TMPDIR"] ?? NSTemporaryDirectory()
-#endif
-let sceneDir = (kayaTmp as NSString)
-    .appendingPathComponent("kaya-clip-\(ProcessInfo.processInfo.processIdentifier)")
-try? FileManager.default.createDirectory(
-    atPath: sceneDir, withIntermediateDirectories: true)
+    // A real 4x4 PNG: a foreign decoder asserts its size.
+    let pixelPNG: [UInt8] = [
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,  // signature
+        0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,  // IHDR length + type
+        0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x04,  // 4 x 4
+        0x08, 0x02, 0x00, 0x00, 0x00, 0x26, 0x93, 0x09,  // 8-bit rgb + crc
+        0x29, 0x00, 0x00, 0x00, 0x14, 0x49, 0x44, 0x41,  // IDAT length + type
+        0x54, 0x78, 0xDA, 0x63, 0xF8, 0xCF, 0xC0, 0x00,
+        0x47, 0x48, 0x4C, 0x74, 0xDE, 0x7F, 0x24, 0x00,
+        0x00, 0xD2, 0x6F, 0x17, 0xE9, 0x51, 0xBB, 0x23,
+        0x2D, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E,
+        0x44, 0xAE, 0x42, 0x60, 0x82,  // IEND + crc
+    ]
 
-// A real 4x4 PNG: a foreign decoder asserts its size.
-let pixelPNG: [UInt8] = [
-    0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,  // signature
-    0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,  // IHDR length + type
-    0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x04,  // 4 x 4
-    0x08, 0x02, 0x00, 0x00, 0x00, 0x26, 0x93, 0x09,  // 8-bit rgb + crc
-    0x29, 0x00, 0x00, 0x00, 0x14, 0x49, 0x44, 0x41,  // IDAT length + type
-    0x54, 0x78, 0xDA, 0x63, 0xF8, 0xCF, 0xC0, 0x00,
-    0x47, 0x48, 0x4C, 0x74, 0xDE, 0x7F, 0x24, 0x00,
-    0x00, 0xD2, 0x6F, 0x17, 0xE9, 0x51, 0xBB, 0x23,
-    0x2D, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E,
-    0x44, 0xAE, 0x42, 0x60, 0x82,  // IEND + crc
-]
+    // Reverse-DNS and space-free: reaches every registry VERBATIM.
+    let noteID = "dev.kaya/note"
+    // NO QUOTES: the step grammar escapes \n, \r and \\ only.
+    let noteBytes: [UInt8] = Array("note=1".utf8)
 
-// Reverse-DNS and space-free: reaches every registry VERBATIM.
-let noteID = "dev.kaya/note"
-// NO QUOTES: the step grammar escapes \n, \r and \\ only.
-let noteBytes: [UInt8] = Array("note=1".utf8)
+    FileManager.default.createFile(
+        atPath: (sceneDir as NSString).appendingPathComponent("pixel.png"),
+        contents: Data(pixelPNG))
+    FileManager.default.createFile(
+        atPath: (sceneDir as NSString).appendingPathComponent("pasted.txt"),
+        contents: Data("pasted bytes".utf8))
 
-FileManager.default.createFile(
-    atPath: (sceneDir as NSString).appendingPathComponent("pixel.png"),
-    contents: Data(pixelPNG))
-FileManager.default.createFile(
-    atPath: (sceneDir as NSString).appendingPathComponent("pasted.txt"),
-    contents: Data("pasted bytes".utf8))
+    app.build { tx in
+        let edit = tx.menu(
+            "Edit",
+            items: [
+                tx.item("Cut", role: .cut),
+                tx.item("Copy", role: .copy),
+                tx.item("Paste", role: .paste),
+            ])
+        tx.window(title: "clipboard", menus: [edit])
 
-app.build { tx in
-    let edit = tx.menu(
-        "Edit",
-        items: [
-            tx.item("Cut", role: .cut),
-            tx.item("Copy", role: .copy),
-            tx.item("Paste", role: .paste),
-        ])
-    tx.window(title: "clipboard", menus: [edit])
-
-    let status = tx.signal(.str("ready"))
-    let rowStatus = tx.signal(.str(""))
-
-    func answered(_ tx: KayaAppTx, _ clip: KayaRepresentation?) throws {
-        switch clip {
-        case nil:
-            tx.write(status, .str("empty"))
-        case .text(let text):
-            tx.write(status, .str("text \(text)"))
-        case .html(let html):
-            tx.write(status, .str("html \(html)"))
-        case .custom(let id, let bytes):
-            tx.write(
-                status, .str("custom \(id) \(String(decoding: bytes, as: UTF8.self))"))
-        case .image(let bytes):
-            // Straight back out — a foreign DECODER makes the assertion.
-            tx.copy().image(bytes).send()
-            tx.write(status, .str("image"))
-        case .files(let files):
-            guard let file = files.first else {
-                tx.write(status, .str("files none"))
-                return
-            }
-            Thread.detachNewThread {
-                // OFF THE APP THREAD: open blocks.
-                var text = ""
-                do {
-                    let (handle, _) = try file.open()
-                    text = String(decoding: handle.readDataToEndOfFile(), as: UTF8.self)
-                    try? handle.close()
-                } catch {
-                    text = "open failed: \(error)"
-                }
-                let name = file.name
-                let read = text
-                app.post { tx in
-                    tx.write(status, .str("files \(name) \(read)"))
-                }
-            }
-            tx.write(status, .str("reading"))
-        }
-    }
-
-    // Forward declarations, not a smuggle: the focus buttons are
-    // declared before the entries they act on, and Swift has no zero
-    // value for a handle (guests/go/clipboard uses var + zero value).
-    var rich: KayaWidget!
-    var plain: KayaWidget!
-    let root = tx.column { root in
-        tx.setA11yId(tx.label(bind: status), "status")  // label#0
-        tx.button(
-            "copy",
-            onClick: { inner in  // button#0
-                inner.copy()
-                    .text("kaya clip")
-                    .html("<b>kaya</b> clip")
-                    .image(pixelPNG)
-                    .custom(noteID, noteBytes)
-                    .send()
-                inner.write(status, .str("copied"))
-            })
-        tx.button(
-            "read custom",
-            onClick: { inner in  // button#1
-                inner.readClipboard().custom(noteID).onResult(answered).send()
-            })
-        tx.button(
-            "read text",
-            onClick: { inner in  // button#2
-                inner.readClipboard().text().onResult(answered).send()
-            })
-        tx.button(
-            "read image",
-            onClick: { inner in  // button#3
-                inner.readClipboard().image().onResult(answered).send()
-            })
-        tx.button(
-            "read files",
-            onClick: { inner in  // button#4
-                inner.readClipboard().files().onResult(answered).send()
-            })
-        tx.button(
-            "focus rich",
-            onClick: { inner in inner.focus(rich) })  // button#5
-        tx.button(
-            "focus plain",
-            onClick: { inner in inner.focus(plain) })  // button#6
-
-        rich = tx.entry()  // entry#0
-        tx.setAccepts(rich, [KayaAppTx.acceptText])
-        tx.setA11yId(rich, "rich")
-        tx.onPaste(rich) { inner, clip in
-            if case .text(let text) = clip {
-                inner.write(status, .str("pasted \(text)"))
-                return
-            }
-            inner.write(status, .str("pasted \(clip)"))
+        let status = tx.signal(.str("ready"))
+        let rowStatus = tx.signal(.str(""))
+        let receive: @KayaAppActor @Sendable (KayaAppTx, String) -> Void = { tx, text in
+            tx.write(status, .str(text))
         }
 
-        plain = tx.entry()  // entry#1
-        tx.setA11yId(plain, "plain")
-
-        // The accept list is declared on the TEMPLATE, which is what turns the
-        // node hook on at all (docs/tpl-props-plan.md §1).
-        tx.setA11yId(tx.label(bind: rowStatus), "row-status")  // label#1
-        let notes = tx.collection()
-        tx.each(notes) { t in
-            let note = t.entry()  // entry#2, one stamped copy
-            t.setAccepts(note, [KayaAppTx.acceptText])
-            tx.onPaste(note) { inner, keys, clip in
-                // Dispatch routes only a NON-EMPTY path to a node handler.
-                if case .text(let text) = clip, case .str(let key) = keys[0] {
-                    inner.write(rowStatus, .str("row \(key) pasted \(text)"))
+        func answered(_ tx: KayaAppTx, _ clip: KayaRepresentation?) throws {
+            switch clip {
+            case nil:
+                tx.write(status, .str("empty"))
+            case .text(let text):
+                tx.write(status, .str("text \(text)"))
+            case .html(let html):
+                tx.write(status, .str("html \(html)"))
+            case .custom(let id, let bytes):
+                tx.write(
+                    status, .str("custom \(id) \(String(decoding: bytes, as: UTF8.self))"))
+            case .image(let bytes):
+                // Straight back out — a foreign DECODER makes the assertion.
+                tx.copy().image(bytes).send()
+                tx.write(status, .str("image"))
+            case .files(let files):
+                guard let file = files.first else {
+                    tx.write(status, .str("files none"))
                     return
                 }
-                inner.write(rowStatus, .str("row \(keys[0]) pasted \(clip)"))
+                Thread.detachNewThread {
+                    // OFF THE APP THREAD: open blocks.
+                    var text = ""
+                    do {
+                        let (handle, _) = try file.open()
+                        text = String(decoding: handle.readDataToEndOfFile(), as: UTF8.self)
+                        try? handle.close()
+                    } catch {
+                        text = "open failed: \(error)"
+                    }
+                    let name = file.name
+                    let read = text
+                    post { tx in
+                        receive(tx, "files \(name) \(read)")
+                    }
+                }
+                tx.write(status, .str("reading"))
             }
         }
-        tx.insert(notes, .str("r1"), .str(""))
-        return root
-    }
-    tx.mount(root)
-}
 
-app.run()
+        // Forward declarations, not a smuggle: the focus buttons are
+        // declared before the entries they act on, and Swift has no zero
+        // value for a handle (guests/go/clipboard uses var + zero value).
+        var rich: KayaWidget!
+        var plain: KayaWidget!
+        let root = tx.column { root in
+            tx.setA11yId(tx.label(bind: status), "status")  // label#0
+            tx.button(
+                "copy",
+                onClick: { inner in  // button#0
+                    inner.copy()
+                        .text("kaya clip")
+                        .html("<b>kaya</b> clip")
+                        .image(pixelPNG)
+                        .custom(noteID, noteBytes)
+                        .send()
+                    inner.write(status, .str("copied"))
+                })
+            tx.button(
+                "read custom",
+                onClick: { inner in  // button#1
+                    inner.readClipboard().custom(noteID).onResult(answered).send()
+                })
+            tx.button(
+                "read text",
+                onClick: { inner in  // button#2
+                    inner.readClipboard().text().onResult(answered).send()
+                })
+            tx.button(
+                "read image",
+                onClick: { inner in  // button#3
+                    inner.readClipboard().image().onResult(answered).send()
+                })
+            tx.button(
+                "read files",
+                onClick: { inner in  // button#4
+                    inner.readClipboard().files().onResult(answered).send()
+                })
+            tx.button(
+                "focus rich",
+                onClick: { inner in inner.focus(rich) })  // button#5
+            tx.button(
+                "focus plain",
+                onClick: { inner in inner.focus(plain) })  // button#6
+
+            rich = tx.entry()  // entry#0
+            tx.setAccepts(rich, [KayaAppTx.acceptText])
+            tx.setA11yId(rich, "rich")
+            tx.onPaste(rich) { inner, clip in
+                if case .text(let text) = clip {
+                    inner.write(status, .str("pasted \(text)"))
+                    return
+                }
+                inner.write(status, .str("pasted \(clip)"))
+            }
+
+            plain = tx.entry()  // entry#1
+            tx.setA11yId(plain, "plain")
+
+            // The accept list is declared on the TEMPLATE, which is what turns the
+            // node hook on at all (docs/tpl-props-plan.md §1).
+            tx.setA11yId(tx.label(bind: rowStatus), "row-status")  // label#1
+            let notes = tx.collection()
+            tx.each(notes) { t in
+                let note = t.entry()  // entry#2, one stamped copy
+                t.setAccepts(note, [KayaAppTx.acceptText])
+                tx.onPaste(note) { inner, keys, clip in
+                    // Dispatch routes only a NON-EMPTY path to a node handler.
+                    if case .text(let text) = clip, case .str(let key) = keys[0] {
+                        inner.write(rowStatus, .str("row \(key) pasted \(text)"))
+                        return
+                    }
+                    inner.write(rowStatus, .str("row \(keys[0]) pasted \(clip)"))
+                }
+            }
+            tx.insert(notes, .str("r1"), .str(""))
+            return root
+        }
+        tx.mount(root)
+    }
+}

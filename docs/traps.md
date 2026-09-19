@@ -973,7 +973,7 @@ the same patterns return through interpreter drop-downs
   *-apple-ios*`, fails with "framework not found" (UIKit, etc.). Guard:
   `tools/lib/swift-toolchain.sh` — source it and invoke `kaya_swiftc`
   (it resolves a real Apple toolchain + macOS SDK, preferring a full
-  Xcode.app, and handles the `DEVELOPER_DIR`/`SDKROOT` unsetting). All
+  Xcode.app, and selects DEVELOPER_DIR plus a matching SDKROOT). All
   three former copies (validate-mac, swift-typecheck, build-dylib) now
   route through it; any new Swift build should too, instead of
   re-deriving the dance. For an iOS `cargo build` (not a direct swiftc),
@@ -991,6 +991,26 @@ the same patterns return through interpreter drop-downs
   finally step. Do NOT tear down the simulator/emulator device pools —
   the runners deliberately keep them warm across runs (re-boot is slow);
   only the app process/window is the leak, not the device.
+- **Swift's explicit iOS SDK does not set the linker's SDK stamp**
+  (measured 2026-09-18, Swift 6.3.3 / Xcode 26.6). A direct swiftc
+  invocation with `-sdk iPhoneSimulator26.5.sdk`, target iOS 16, and
+  SDKROOT unset compiles successfully but stamps LC_BUILD_VERSION with
+  sdk 16.0, not 26.5. The same command with SDKROOT set to that iOS SDK
+  stamps sdk 26.5 and minos 16.0. Removing a duplicate macOS -sdk argument
+  alone does not fix it. The first Swift-executor matrix exposed this in
+  menus, toolbar and identity: the rendered toolbar read found no symbol
+  image while button handlers still ran. The old xcrun route supplied
+  SDKROOT; the new direct-wrapper route initially cleared it.
+  Guard: tools/lib/swift-toolchain.sh selects one SDK and passes it as
+  both -sdk and SDKROOT. tools/ios/run-sim.py reads every Swift executable's
+  actual stamp through tools/lib/swift_sdk.py before staging, compared to
+  the selected SDK's SDKSettings.json. Check-pins compiles the real wrapper
+  and a doctored copy that clears SDKROOT (two substitutions), and watched
+  the latter refused with actual 16.0 versus expected 26.5.
+  The iOS recorder now keeps the main executable and interpreter's build
+  stamps before launch as binary-stamp; the original bundles lacked the
+  SDK evidence this diagnosis needed. Four capture/adoption cuts are
+  watched by check-flightrec; a forced-red bundle is the runtime proof.
 - **SwiftUI resolves its design generation from the MAIN EXECUTABLE's
   SDK stamp (the sdk field, NOT minos — verified: minos 14 + sdk 26.5
   takes the modern path), and the compat path mis-measures Button.** `otool -l
@@ -11860,10 +11880,30 @@ no message, the crash report is the only reader:
 executables" on a guest, and ~/Library/Logs/DiagnosticReports/<exe>-*.ips
 is JSON after its first line, the triggered thread's frames naming
 `_swift_task_checkIsolatedSwift` → `dispatch_assert_queue` in one read.
-tools/check-pins.py's language-mode clause refuses any `-swift-version`
-in tools/ by name, with this sentence.
+The follow-up executor slice makes the old instance run unavailable to
+Swift 6 callers, naming KayaApp.run's actor-isolated entry instead.
+tools/check-pins.py holds the guest compiler wrapper separately from the
+interpreter (docs/measurements/swift-executor-2026-09-18.md).
 
 ## Four smaller facts from the Swift package slice (2026-09-18)
+
+The executor follow-up measured two more constraints:
+`@KayaAppActor var x` is rejected on a top-level-code variable, so an executor
+alone does not migrate a guest's state. An actor-isolated entry body does.
+And the consuming ExecutorJob API requires macOS 14 / iOS 17; the explicit
+UnownedJob enqueue and executor-reference implementation compile at macOS 13 /
+iOS 16 without warnings. See docs/measurements/swift-executor-2026-09-18.md.
+
+The same follow-up found that `-typecheck` does not run Swift's SIL
+SendNonSendable pass. All 52 guests passed it, then the real build refused
+background, filedialog and clipboard for captures handed through a foreign
+thread before returning to the actor. Creating the actor-isolated receive
+closure before that handoff preserves its ownership. The compiler also
+aborted in the SIL pass on undo and save, where local helpers captured a
+value returned by the build that registered those helpers. Passing the
+collection explicitly (undo) or defining the work helper inside the build
+beside its signal (save) removed that cycle. Both guest gate passes now
+compile object files through SIL, so these later diagnostics cannot be skipped.
 
 (1) A `public` struct loses the implicit `Sendable` an internal one had,
 so publishing a binding type can turn a GUEST's `static let` into an

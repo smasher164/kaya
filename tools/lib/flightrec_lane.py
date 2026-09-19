@@ -46,7 +46,7 @@ SECTIONS = {
     "windows": ("leg-log", "verb-trace", "shot", "desktop-shot", "desktop",
                 "foreground", "foreground-text", "desktop-live", "notifications",
                 "toast-moment"),
-    "ios": ("leg-log", "verb-trace", "shot", "panic", "app-log", "devices"),
+    "ios": ("leg-log", "verb-trace", "shot", "panic", "app-log", "devices", "binary-stamp"),
     "android": ("leg-log", "verb-trace", "shot", "logcat", "devices"),
     "linux": ("leg-log", "verb-trace", "shot", "desktop", "xvfb"),
 }
@@ -967,6 +967,8 @@ class IosRecorder(LaneRecorder):
                 self.adopt(bundle, "app-log", log.with_suffix(".applog"),
                            why_absent="flightrec: no `simctl spawn … log "
                                       "show` slice was kept for this leg")
+                self.adopt(bundle, "binary-stamp", log.with_suffix(".sdk"),
+                           why_absent="flightrec: no binary stamp was kept before this leg")
                 self.adopt_shot(bundle, "shot", log.with_suffix(".shot.png"),
                                 why_absent=self.SHOT_ABSENT,
                                 note_src=log.with_suffix(".shotwhen"))

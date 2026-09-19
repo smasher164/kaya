@@ -918,7 +918,7 @@ def build_swift(root, log=None):
         p = subprocess.Popen(
             ["bash", "-c",
              'source "$1/tools/lib/swift-toolchain.sh" && shift && '
-             'kaya_swiftc "$@"', "_", str(root),
+             'kaya_swift_guestc "$@"', "_", str(root),
              "-I", "target/swiftpm/debug/Modules",
              "-I", "bindings/swift/CKaya",
              *companions, str(stage / "main.swift"),
@@ -1094,4 +1094,3 @@ def hs_bin(root, name):
                              text=True, encoding="utf-8", errors="replace")
         _HS_BINS[key] = got.stdout.strip()
     return _HS_BINS[key]
-

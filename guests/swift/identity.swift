@@ -4,44 +4,42 @@
 import Foundation
 import Kaya
 
-let app = KayaApp()
+KayaApp.run { app in
+    var draft = ""
 
-var draft = ""
+    app.build { tx in
+        // BEFORE THE FIRST MOUNT, per the declared-once wall. NO ARGUMENTS: the
+        // name, the mark and the id are the manifest's (docs/tasks-s3-plan.md N4).
+        tx.appIdentity()
 
-try app.build { tx in
-    // BEFORE THE FIRST MOUNT, per the declared-once wall. NO ARGUMENTS: the
-    // name, the mark and the id are the manifest's (docs/tasks-s3-plan.md N4).
-    tx.appIdentity()
+        // ONE PROMOTED COMMAND, and not about commands: Windows mints its custom
+        // caption from the first promotion, taking the system icon with it.
+        let file = tx.menu("File", items: [tx.item("Save", symbol: .done, primary: true)])
+        tx.window(title: "identity", width: 480, height: 360, menus: [file])
 
-    // ONE PROMOTED COMMAND, and not about commands: Windows mints its custom
-    // caption from the first promotion, taking the system icon with it.
-    let file = tx.menu("File", items: [tx.item("Save", symbol: .done, primary: true)])
-    tx.window(title: "identity", width: 480, height: 360, menus: [file])
-
-    let heading = tx.signal(.str("identity"))
-    let status = tx.signal(.str("ready"))
-    let root = tx.column { root in
-        tx.label(bind: heading)  // label#0
-        tx.label(bind: status)  // label#1
-        tx.entry { _, text in draft = text }  // entry#0
-        tx.button("Go") { t in  // button#0
-            t.write(status, .str("clicked \(draft)"))
+        let heading = tx.signal(.str("identity"))
+        let status = tx.signal(.str("ready"))
+        let root = tx.column { root in
+            tx.label(bind: heading)  // label#0
+            tx.label(bind: status)  // label#1
+            tx.entry { _, text in draft = text }  // entry#0
+            tx.button("Go") { t in  // button#0
+                t.write(status, .str("clicked \(draft)"))
+            }
+            return root
         }
-        return root
-    }
-    tx.mount(root)
+        tx.mount(root)
 
-    // DESKTOP-ONLY: KAYA_CAP_AUX_WINDOWS is unset on iOS, whose leg drops the
-    // step that reads it (docs/app-identity-plan.md ruling 3). A runtime `if`.
-    if KayaApp.capabilities().auxWindows {
-        tx.createWindow(1, width: 360.0, height: 240.0)
-        let auxRoot = tx.column { auxRoot in
-            let caption = tx.signal(.str("no title of its own"))
-            tx.label(bind: caption)  // label#2
-            return auxRoot
+        // DESKTOP-ONLY: KAYA_CAP_AUX_WINDOWS is unset on iOS, whose leg drops the
+        // step that reads it (docs/app-identity-plan.md ruling 3). A runtime `if`.
+        if KayaApp.capabilities().auxWindows {
+            tx.createWindow(1, width: 360.0, height: 240.0)
+            let auxRoot = tx.column { auxRoot in
+                let caption = tx.signal(.str("no title of its own"))
+                tx.label(bind: caption)  // label#2
+                return auxRoot
+            }
+            tx.mountIn(1, auxRoot)
         }
-        tx.mountIn(1, auxRoot)
     }
 }
-
-app.run()

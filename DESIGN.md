@@ -504,17 +504,19 @@ the compiler and the wire boundary stops being a convention; 371 of the
 binding's 1,998 declarations are public, each because a guest calls it or
 the sugar census names it as surface, and the one public wire name is
 `KayaValue`. Strict concurrency is TRUE there with four `nonisolated(unsafe)`
-waivers, each in the ledger tools/check-pins.py holds. THE GUESTS AND THE
-INTERPRETER STAY IN SWIFT 5 MODE, ON THE RECORD, for one measured reason:
-a guest is top-level code, top-level code is main-actor isolated (SE-0343),
-Swift 6 mode checks that isolation at run time, and kaya calls a guest's
-closures on its app thread, which is not the process main thread — so a
-guest built in Swift 6 mode traps at its first handler with nothing on
-stderr (docs/traps.md), and the interpreter is 418 diagnostics behind the
-same wall. Both lift together when the app thread has its own
-`SerialExecutor` (docs/async-dialogs-plan.md §2.1), which makes the
-isolation true rather than waived; the alternative for the guests, every
-one re-spelled as a `@main` type, is a design ruling and is not taken.
+waivers, each in the ledger tools/check-pins.py holds. THE SWIFT 6 GUEST
+ENTRY IS `KayaApp.run { app in ... }`: construction, guest state and handlers
+belong to KayaAppActor on the app thread. Its SerialExecutor queues Swift
+jobs and wakes the same blocking occurrence loop that drains posted work.
+The old instance `app.run()` is unavailable in Swift 6 and names this entry
+in its diagnostic; it remains for Swift 5 clients. A top-level-code variable
+cannot be assigned a custom global actor, so keeping those variables outside
+the entry is not a migration (docs/traps.md). The queue owner alone has an
+audited `@unchecked Sendable` conformance, with all queue state under its lock.
+The interpreter remains in Swift 5, its migration separate; an executor in
+the guest module does not resolve its 418 measured diagnostics. Async-dialog
+APIs also remain a separate ruling. See
+docs/measurements/swift-executor-2026-09-18.md for proof and validation status.
 
 **One id space for widgets and template nodes.** Every binding mints
 live widget ids and template node ids from ONE monotone counter per app

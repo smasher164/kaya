@@ -12,48 +12,46 @@ let testPNG = Data([
     5, 251, 11, 217, 104, 139, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
 ])
 
-let app = KayaApp()
+KayaApp.run { app in
+    app.build { tx in
+        let status = tx.signal(.str("urgent: false"))
+        let volume = tx.signal(.str("volume: 50%"))
+        let pos = tx.signal(.f64(0.5))
 
-app.build { tx in
-    let status = tx.signal(.str("urgent: false"))
-    let volume = tx.signal(.str("volume: 50%"))
-    let pos = tx.signal(.f64(0.5))
-
-    let root = tx.column { root in
-        tx.row { _ in
-            tx.checkbox("urgent") { t, checked in
-                t.write(status, .str("urgent: \(checked)"))
+        let root = tx.column { root in
+            tx.row { _ in
+                tx.checkbox("urgent") { t, checked in
+                    t.write(status, .str("urgent: \(checked)"))
+                }
+                tx.label(bind: status)
             }
-            tx.label(bind: status)
-        }
-        tx.row { _ in
-            // Integer percent, so every language's formatting agrees.
-            tx.slider(min: 0.0, max: 1.0, bind: pos) { t, value in
-                t.write(volume, .str("volume: \(Int((value * 100).rounded()))%"))
+            tx.row { _ in
+                // Integer percent, so every language's formatting agrees.
+                tx.slider(min: 0.0, max: 1.0, bind: pos) { t, value in
+                    t.write(volume, .str("volume: \(Int((value * 100).rounded()))%"))
+                }
+                tx.label(bind: volume)
+                // A programmatic write must NOT come back as an occurrence.
+                tx.button("quarter") { t in
+                    t.write(pos, .f64(0.25))
+                }
             }
-            tx.label(bind: volume)
-            // A programmatic write must NOT come back as an occurrence.
-            tx.button("quarter") { t in
-                t.write(pos, .f64(0.25))
+            let find = tx.search()
+            tx.setPlaceholder(find, "Search")
+            tx.setA11yId(find, "find")
+            tx.row { _ in
+                // Invalid bytes read 0x0: decode failure is the placeholder
+                // class, never a crash, on every backend.
+                tx.image(testPNG)
+                tx.image(Data("not an image".utf8))
             }
+            // The labelled row: the control's accessibility name IS the
+            // label's text, with no a11yLabel of its own.
+            tx.labeled("Level") { _ in
+                tx.setA11yId(tx.slider(min: 0.0, max: 1.0, value: 0.5), "level")
+            }
+            return root
         }
-        let find = tx.search()
-        tx.setPlaceholder(find, "Search")
-        tx.setA11yId(find, "find")
-        tx.row { _ in
-            // Invalid bytes read 0x0: decode failure is the placeholder
-            // class, never a crash, on every backend.
-            tx.image(testPNG)
-            tx.image(Data("not an image".utf8))
-        }
-        // The labelled row: the control's accessibility name IS the
-        // label's text, with no a11yLabel of its own.
-        tx.labeled("Level") { _ in
-            tx.setA11yId(tx.slider(min: 0.0, max: 1.0, value: 0.5), "level")
-        }
-        return root
+        tx.mount(root)
     }
-    tx.mount(root)
 }
-
-app.run()

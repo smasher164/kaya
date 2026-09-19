@@ -3,22 +3,20 @@
 import Foundation
 import Kaya
 
-let app = KayaApp()
+KayaApp.run { app in
+    app.build { tx in
+        let probe = tx.signal(.str("grow probe"))
+        let one = tx.signal(.str("one"))
 
-app.build { tx in
-    let probe = tx.signal(.str("grow probe"))
-    let one = tx.signal(.str("one"))
-
-    let root = tx.column { root in
-        tx.label(bind: probe, grow: 1)  // label#0
-        tx.textarea(grow: 2)  // textarea#0
-        tx.row(grow: 1, spacing: 12) { _ in
-            tx.label(bind: one, grow: 1)  // label#1
-            tx.button("three", grow: 3)
+        let root = tx.column { root in
+            tx.label(bind: probe, grow: 1)  // label#0
+            tx.textarea(grow: 2)  // textarea#0
+            tx.row(grow: 1, spacing: 12) { _ in
+                tx.label(bind: one, grow: 1)  // label#1
+                tx.button("three", grow: 3)
+            }
+            return root
         }
-        return root
+        tx.mount(root)
     }
-    tx.mount(root)
 }
-
-app.run()

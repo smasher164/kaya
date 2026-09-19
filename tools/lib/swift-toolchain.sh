@@ -53,14 +53,31 @@ kaya_swift() {
     fi
 }
 
-# DEVELOPER_DIR is set for a full Xcode and unset otherwise, so the nix
-# apple-sdk cannot shadow it; SDKROOT is always cleared so -sdk wins.
+# docs/traps.md: Swift's explicit iOS SDK does not set the linker's SDK stamp.
 kaya_swiftc() {
     kaya_resolve_swiftc || return 1
+    local arg sdk_root="${SWIFT_SDK_ARGS[1]}" read_sdk=0
+    local sdk_args=("${SWIFT_SDK_ARGS[@]}")
+    for arg in "$@"; do
+        if [ "$read_sdk" = 1 ]; then
+            sdk_root="$arg"
+            read_sdk=0
+        else
+            case "$arg" in
+                -sdk) sdk_args=(); read_sdk=1 ;;
+                -sdk=*) sdk_args=(); sdk_root="${arg#-sdk=}" ;;
+            esac
+        fi
+    done
     if [ -n "${SWIFT_DEVELOPER_DIR:-}" ]; then
-        env -u SDKROOT DEVELOPER_DIR="$SWIFT_DEVELOPER_DIR" \
-            "$SWIFTC" "${SWIFT_SDK_ARGS[@]}" "$@"
+        env SDKROOT="$sdk_root" DEVELOPER_DIR="$SWIFT_DEVELOPER_DIR" \
+            "$SWIFTC" "${sdk_args[@]}" "$@"
     else
-        env -u DEVELOPER_DIR -u SDKROOT "$SWIFTC" "${SWIFT_SDK_ARGS[@]}" "$@"
+        env -u DEVELOPER_DIR SDKROOT="$sdk_root" "$SWIFTC" "${sdk_args[@]}" "$@"
     fi
+}
+
+# docs/measurements/swift-executor-2026-09-18.md; tools/check-pins.py
+kaya_swift_guestc() {
+    kaya_swiftc -swift-version 6 -warnings-as-errors "$@"
 }

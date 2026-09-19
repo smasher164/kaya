@@ -63,52 +63,50 @@ func findAll(_ text: String, _ needle: String) -> [Range<String.Index>] {
     return hits
 }
 
-let app = KayaApp()
+KayaApp.run { app in
+    // A `String.Index` is meaningful only against the string it came from.
+    var doc = doc0
 
-// A `String.Index` is meaningful only against the string it came from.
-var doc = doc0
+    app.build { tx in
+        tx.window(title: "ranges")
+        let status = tx.signal(.str("0 matches"))
 
-app.build { tx in
-    tx.window(title: "ranges")
-    let status = tx.signal(.str("0 matches"))
-
-    let (root, editor) = tx.column { root -> (KayaWidget, KayaWidget) in
-        let editor = tx.textarea { t, text in
-            doc = text
-            // A declared set is bound to the text it was declared against (D2).
-            t.write(status, .str("0 matches"))
+        let (root, _) = tx.column { root -> (KayaWidget, KayaWidget) in
+            let editor = tx.textarea { t, text in
+                doc = text
+                // A declared set is bound to the text it was declared against (D2).
+                t.write(status, .str("0 matches"))
+            }
+            // Every range assertion finds this control by its authored id.
+            tx.setText(editor, doc0)
+            tx.setA11yId(editor, "doc")
+            tx.setA11yLabel(editor, "Document")
+            tx.label(bind: status)  // label#0
+            tx.row { _ in
+                tx.button("find") { t in  // button#0
+                    let hits = findAll(doc, needle)
+                    t.highlightRanges(editor, hits, in: doc)
+                    if hits.count > 1 {
+                        t.selectRange(editor, hits[1], in: doc)
+                    }
+                    t.write(status, .str("\(hits.count) matches"))
+                }
+                tx.button("reveal last") { t in  // button#1
+                    if let last = findAll(doc, needle).last {
+                        t.revealRange(editor, last, in: doc)
+                    }
+                }
+                tx.button("focus editor") { t in  // button#2
+                    t.focus(editor)
+                }
+                tx.button("select first") { t in  // button#3
+                    if let first = findAll(doc, needle).first {
+                        t.selectRange(editor, first, in: doc)
+                    }
+                }
+            }
+            return (root, editor)
         }
-        // Every range assertion finds this control by its authored id.
-        tx.setText(editor, doc0)
-        tx.setA11yId(editor, "doc")
-        tx.setA11yLabel(editor, "Document")
-        tx.label(bind: status)  // label#0
-        tx.row { _ in
-            tx.button("find") { t in  // button#0
-                let hits = findAll(doc, needle)
-                t.highlightRanges(editor, hits, in: doc)
-                if hits.count > 1 {
-                    t.selectRange(editor, hits[1], in: doc)
-                }
-                t.write(status, .str("\(hits.count) matches"))
-            }
-            tx.button("reveal last") { t in  // button#1
-                if let last = findAll(doc, needle).last {
-                    t.revealRange(editor, last, in: doc)
-                }
-            }
-            tx.button("focus editor") { t in  // button#2
-                t.focus(editor)
-            }
-            tx.button("select first") { t in  // button#3
-                if let first = findAll(doc, needle).first {
-                    t.selectRange(editor, first, in: doc)
-                }
-            }
-        }
-        return (root, editor)
+        tx.mount(root)
     }
-    tx.mount(root)
 }
-
-app.run()

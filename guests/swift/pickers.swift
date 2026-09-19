@@ -9,50 +9,48 @@ struct Task: KayaGen {
     var due: KayaDate
 }
 
-let app = KayaApp()
+KayaApp.run { app in
+    app.build { tx in
+        let dateText = tx.signal(.str("date: none"))
+        let timeText = tx.signal(.str("time: none"))
+        let rowText = tx.signal(.str("row: none"))
+        let dateSig = tx.signal(.date(KayaDate(year: 2026, month: 9, day: 4)))
+        let timeSig = tx.signal(.time(KayaTime(hour: 14, minute: 30)))
+        let tasks = taskCollection(tx)
 
-app.build { tx in
-    let dateText = tx.signal(.str("date: none"))
-    let timeText = tx.signal(.str("time: none"))
-    let rowText = tx.signal(.str("row: none"))
-    let dateSig = tx.signal(.date(KayaDate(year: 2026, month: 9, day: 4)))
-    let timeSig = tx.signal(.time(KayaTime(hour: 14, minute: 30)))
-    let tasks = taskCollection(tx)
-
-    let root = tx.column { root in
-        tx.label(bind: dateText)  // label#0
-        tx.label(bind: timeText)  // label#1
-        tx.label(bind: rowText)  // label#2
-        let when = tx.datePicker(
-            min: KayaDate(year: 2026, month: 1, day: 1),
-            max: KayaDate(year: 2026, month: 12, day: 31),
-            bind: dateSig,
-            onDate: { tx, picked in tx.write(dateText, .str("date: \(picked)")) })
-        tx.setA11yId(when, "when")
-        tx.setA11yLabel(when, "Due")
-        let at = tx.timePicker(
-            step: 15, bind: timeSig,
-            onTime: { tx, picked in tx.write(timeText, .str("time: \(picked)")) })
-        tx.setA11yId(at, "at")
-        tx.setA11yLabel(at, "At")
-        tx.button("reset") { tx in  // button#0
-            tx.write(dateSig, .date(KayaDate(year: 2026, month: 3, day: 1)))
-            tx.write(timeSig, .time(KayaTime(hour: 9, minute: 0)))
-        }
-        for row in tasks.rows {
-            row.label(row.name)
-            let picker = row.datePicker(row.due) { tx, keys, picked in
-                guard case .str(let key) = keys[0] else { return }
-                tx.write(rowText, .str("row \(key): \(picked)"))
+        let root = tx.column { root in
+            tx.label(bind: dateText)  // label#0
+            tx.label(bind: timeText)  // label#1
+            tx.label(bind: rowText)  // label#2
+            let when = tx.datePicker(
+                min: KayaDate(year: 2026, month: 1, day: 1),
+                max: KayaDate(year: 2026, month: 12, day: 31),
+                bind: dateSig,
+                onDate: { tx, picked in tx.write(dateText, .str("date: \(picked)")) })
+            tx.setA11yId(when, "when")
+            tx.setA11yLabel(when, "Due")
+            let at = tx.timePicker(
+                step: 15, bind: timeSig,
+                onTime: { tx, picked in tx.write(timeText, .str("time: \(picked)")) })
+            tx.setA11yId(at, "at")
+            tx.setA11yLabel(at, "At")
+            tx.button("reset") { tx in  // button#0
+                tx.write(dateSig, .date(KayaDate(year: 2026, month: 3, day: 1)))
+                tx.write(timeSig, .time(KayaTime(hour: 9, minute: 0)))
             }
-            row.t.setA11yId(picker, "due")
+            for row in tasks.rows {
+                row.label(row.name)
+                let picker = row.datePicker(row.due) { tx, keys, picked in
+                    guard case .str(let key) = keys[0] else { return }
+                    tx.write(rowText, .str("row \(key): \(picked)"))
+                }
+                row.t.setA11yId(picker, "due")
+            }
+            return root
         }
-        return root
+        tx.mount(root)
+
+        tasks.insert(tx, .str("a"), Task(name: "a", due: KayaDate(year: 2026, month: 10, day: 1)))
+        tasks.insert(tx, .str("b"), Task(name: "b", due: KayaDate(year: 2026, month: 11, day: 20)))
     }
-    tx.mount(root)
-
-    tasks.insert(tx, .str("a"), Task(name: "a", due: KayaDate(year: 2026, month: 10, day: 1)))
-    tasks.insert(tx, .str("b"), Task(name: "b", due: KayaDate(year: 2026, month: 11, day: 20)))
 }
-
-app.run()

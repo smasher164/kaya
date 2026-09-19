@@ -2361,7 +2361,7 @@ OK` while run-leg checks the exit code alone, one line if wanted. — and the sa
     switch with `case null` throws on ART while a TYPE switch with one is
     fine (Dnd's `word()` keeps its chain; the android lane's dnd leg is
     the only wall), and Java 21 has no unnamed pattern, so a five-variant
-    sum with three outcomes costs five arms (Dnd's chain kept). Swift 6 mode remains — MEASURED 2026-09-18 before any work (the maintainer's
+    sum with three outcomes costs five arms (Dnd's chain kept). Swift 6 mode was measured 2026-09-18 before any work (the maintainer's
     rule from JDK 21; the job's tmp/idiom/notes-swift6-r1.md): the binding is
     THREE `nonisolated(unsafe)` annotations from a green Swift 6 build, measured
     as a real `.v6` SwiftPM package target (`Build complete!`), the guests eight
@@ -2387,19 +2387,41 @@ OK` while run-leg checks the exit code alone, one line if wanted. — and the sa
     and the iOS SDK pair; check-pins reads python bodies for SwiftPM now and
     holds the language mode in the manifest ALONE with the waiver ledger (eleven
     watched negatives), tpl-surfaces' Swift rows carry `public`; the mac lane
-    ALL PASS 61/61 and 477 legs, the iOS lane ALL PASS 139 legs. AND THE GUESTS'
-    HALF IS REFUSED BY A MEASUREMENT THE RULING DID NOT HAVE: a guest built in
+    ALL PASS 61/61 and 477 legs, the iOS lane ALL PASS 139 legs. THE GUESTS'
+    HALF WAS REFUSED BY A MEASUREMENT THE RULING DID NOT HAVE: a guest built in
     Swift 6 mode SIGTRAPs at its first handler with nothing on stderr — top-level
     code is main-actor isolated (SE-0343), Swift 6 checks that at run time, and
     kaya calls the closure on the app thread; `-default-isolation nonisolated`
     does not lift it, and the same guest in Swift 5 mode against the Swift 6
-    module prints OK — so the guests take `import Kaya` and nothing else, and the
-    guests and the interpreter now wait on the SAME app-thread SerialExecutor
-    (docs/async-dialogs-plan.md §2.1). A RULING OWED: the alternative is every one
+    module prints OK — so that slice gave the guests `import Kaya` only, and the
+    guests and the interpreter were left waiting on an app-thread SerialExecutor
+    (docs/async-dialogs-plan.md §2.1). The alternative was every one
     of the 52 guests re-spelled `-parse-as-library` with a `@main` type, which
     removes the top-level-code rule at the cost of every guest's shape; named,
-    not taken. Small opens: 29 pre-existing warnings across the guest compiles
-    (no -warnings-as-errors there, as before); the package build is at zero
+    not taken. FOLLOW-UP RULED 2026-09-18: take the executor route for the
+    guests, leaving async-dialog APIs and the interpreter migration separate.
+    RESOLVED: KayaApp.run's actor-isolated entry, the app-thread queue and
+    Swift 6 guest compiler routes passed the full validation ladder. The
+    top-level-variable annotation proposed in the plan is not legal Swift;
+    guest state instead lives inside that entry body. The real milestone2
+    and background legs pass, including suspended work resuming on the same
+    thread. The compiler's later SIL pass found three handoff refusals and
+    two crashes that -typecheck missed; those guest shapes were repaired and
+    both guest gate passes now compile through SIL. The first matrix exposed
+    an iOS SDK stamp regression; matching SDKROOT to the selected SDK repaired
+    it, every Swift iOS binary is checked before staging, and recorder bundles
+    now carry both executable and interpreter build stamps. The corrected
+    matrix passed Mac 477, Linux 775, Windows 282, iOS 139, Android 148 and
+    61/61 gates in 22m41s. The interpreter remains Swift 5; async-dialog APIs
+    await their separate rulings. Record and watched-negative guard details:
+    docs/measurements/swift-executor-2026-09-18.md.
+    ~~Small open: 29 pre-existing warnings across the guest compiles.~~
+    RESOLVED in the executor slice's strict compile: all 52 macOS and all 43
+    iOS guests compile through SIL with warnings as errors. Unused bindings
+    and redundant tries are gone; background workers take the Sendable posting
+    function instead of the app object, and immutable picked-file capabilities
+    have a checked Sendable conformance. The complete runtime matrix passed
+    with the guest migration above. The package build is at zero
     warnings with no `.treatAllWarnings(as: .error)`, which needs
     swift-tools-version 6.2. KEY: Package.swift, CKaya, nonisolated(unsafe),
     SE-0343, top-level code, parse-as-library, SerialExecutor, swift language mode

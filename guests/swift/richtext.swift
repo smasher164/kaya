@@ -17,74 +17,72 @@ func spell(_ runs: [KayaRun]) -> String {
     }.joined(separator: "|")
 }
 
-let app = KayaApp()
+KayaApp.run { app in
+    app.build { tx in
+        tx.window(title: "richtext")
+        let last = tx.signal(.str(""))
+        let runs = tx.signal(.str(""))
 
-app.build { tx in
-    tx.window(title: "richtext")
-    let last = tx.signal(.str(""))
-    let runs = tx.signal(.str(""))
+        // A SELF-REFERENCE, not a smuggle: the textarea's own onEdit reads
+        // the document of the widget being declared.
+        var editor: KayaWidget! = nil
 
-    // A SELF-REFERENCE, not a smuggle: the textarea's own onEdit reads
-    // the document of the widget being declared.
-    var editor: KayaWidget! = nil
-
-    let root = tx.column { root in
-        editor = tx.textarea(
-            rich: true,
-            onEdit: { t, edit in
-                let mirror = spell(app.document(editor).runs)
-                t.write(
-                    last,
-                    .str("edit \(edit.range.lowerBound):\(edit.range.upperBound) <\(edit.inserted)> "
-                        + "\(edit.source?.name ?? "?") [\(spell(edit.runs))]"))
-                t.write(runs, .str(mirror))
-            },
-            onFormat: { t, act in
-                let mirror = spell(app.document(editor).runs)
-                t.write(
-                    last,
-                    .str("format \(act.range.lowerBound):\(act.range.upperBound) \(act.name)="
-                        + "\(act.value ?? "off")"))
-                t.write(runs, .str(mirror))
-            })
-        tx.setA11yId(editor, "doc")
-        tx.setA11yLabel(editor, "Document")
-        tx.label(bind: last)  // label#0
-        tx.label(bind: runs)  // label#1
-        tx.row { _ in
-            tx.button("seed") { t in  // button#0
-                let doc = KayaDocument(document)
-                    .bold(0..<6)
-                    .link(7..<12, "https://kaya.dev")
-                    .block(13..<24, .heading2)
-                t.setDocument(editor, doc)
-                t.write(runs, .str(spell(doc.runs)))
+        let root = tx.column { root in
+            editor = tx.textarea(
+                rich: true,
+                onEdit: { t, edit in
+                    let mirror = spell(app.document(editor).runs)
+                    t.write(
+                        last,
+                        .str("edit \(edit.range.lowerBound):\(edit.range.upperBound) <\(edit.inserted)> "
+                            + "\(edit.source?.name ?? "?") [\(spell(edit.runs))]"))
+                    t.write(runs, .str(mirror))
+                },
+                onFormat: { t, act in
+                    let mirror = spell(app.document(editor).runs)
+                    t.write(
+                        last,
+                        .str("format \(act.range.lowerBound):\(act.range.upperBound) \(act.name)="
+                            + "\(act.value ?? "off")"))
+                    t.write(runs, .str(mirror))
+                })
+            tx.setA11yId(editor, "doc")
+            tx.setA11yLabel(editor, "Document")
+            tx.label(bind: last)  // label#0
+            tx.label(bind: runs)  // label#1
+            tx.row { _ in
+                tx.button("seed") { t in  // button#0
+                    let doc = KayaDocument(document)
+                        .bold(0..<6)
+                        .link(7..<12, "https://kaya.dev")
+                        .block(13..<24, .heading2)
+                    t.setDocument(editor, doc)
+                    t.write(runs, .str(spell(doc.runs)))
+                }
+                tx.button("insert") { t in  // button#1
+                    let edit = KayaEdit.insert(at: 6, ", big").mark(2..<5, "italic", true)
+                    t.applyEdit(editor, edit)
+                    t.write(runs, .str(spell(app.document(editor).runs)))
+                }
+                tx.button("select word") { t in  // button#2
+                    t.selectRange(editor, 0..<6)
+                }
+                tx.button("unbold") { t in  // button#3
+                    t.unformat(editor, "bold")
+                }
+                tx.button("heading") { t in  // button#4
+                    t.setBlock(editor, .heading1)
+                }
+                tx.button("focus") { t in  // button#5
+                    t.focus(editor)
+                }
+                tx.button("prefix") { t in  // button#6
+                    t.applyEdit(editor, KayaEdit.insert(at: 0, "> "))
+                    t.write(runs, .str(spell(app.document(editor).runs)))
+                }
             }
-            tx.button("insert") { t in  // button#1
-                let edit = KayaEdit.insert(at: 6, ", big").mark(2..<5, "italic", true)
-                t.applyEdit(editor, edit)
-                t.write(runs, .str(spell(app.document(editor).runs)))
-            }
-            tx.button("select word") { t in  // button#2
-                t.selectRange(editor, 0..<6)
-            }
-            tx.button("unbold") { t in  // button#3
-                t.unformat(editor, "bold")
-            }
-            tx.button("heading") { t in  // button#4
-                t.setBlock(editor, .heading1)
-            }
-            tx.button("focus") { t in  // button#5
-                t.focus(editor)
-            }
-            tx.button("prefix") { t in  // button#6
-                t.applyEdit(editor, KayaEdit.insert(at: 0, "> "))
-                t.write(runs, .str(spell(app.document(editor).runs)))
-            }
+            return root
         }
-        return root
+        tx.mount(root)
     }
-    tx.mount(root)
 }
-
-app.run()

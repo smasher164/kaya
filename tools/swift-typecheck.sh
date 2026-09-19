@@ -36,10 +36,7 @@ refuse() {
     exit 1
 }
 
-# THE BINDING IS A MODULE (Package.swift): build it once, then every
-# guest compiles against the built module. The Swift 6 language mode is
-# declared in the manifest and nowhere else; the guests ask for it on
-# their own command line, and tools/check-pins.py holds both.
+# Package.swift; tools/check-pins.py holds kaya_swift_guestc's Swift 6 mode.
 KAYA_MODULES="target/swiftpm/debug/Modules"
 if ! kaya_swift build --disable-automatic-resolution \
     --scratch-path target/swiftpm; then
@@ -69,7 +66,7 @@ for example in "${GUESTS[@]}"; do
     # <name>+Kaya.swift companion; compile it alongside.
     companions=$(ls "${example%.swift}"+*.swift 2>/dev/null || true)
     # shellcheck disable=SC2086
-    if ! kaya_swiftc -typecheck \
+    if ! kaya_swift_guestc -c -whole-module-optimization -o "$TMP/guest.o" \
         -I "$KAYA_MODULES" -I bindings/swift/CKaya \
         $companions "$TMP/main.swift"; then
         echo "swift-typecheck: FAIL ($example, the macOS guest pass)"
@@ -79,7 +76,7 @@ for example in "${GUESTS[@]}"; do
 done
 [ "$mac_guests" = "${#GUESTS[@]}" ] ||
     refuse "the macOS guest pass compiled $mac_guests of ${#GUESTS[@]} guests"
-PASSES+=("guests/swift: $mac_guests files, macOS SDK")
+PASSES+=("guests/swift: $mac_guests files, macOS SDK, Swift 6")
 
 # THE DYNAMIC-TABLE SURFACE, which no guest spells: a table per stamped
 # row (KayaTpl.columns, the node-flavoured KayaApp.onSort, and
@@ -152,8 +149,8 @@ if ios_xcrun -sdk iphonesimulator --show-sdk-path >/dev/null 2>&1; then
     # ARE THE LANE'S, never restated here — the roster is the lane
     # module's SWIFT_ENTRIES, and IOS_MIN (16.0) is the runner's, NOT the
     # 17.0 the interpreter passes use, since the older target is STRICTER
-    # for availability diagnostics. No -warnings-as-errors: a gate
-    # stricter than the lane fails builds that would have shipped.
+    # for availability diagnostics. kaya_swift_guestc holds the same
+    # Swift 6 and warnings-as-errors flags here and in both lanes.
     if ! ios_lane_spec="$(python3 - tools/ios/run-sim.py <<'PY'
 import pathlib
 import re
@@ -223,7 +220,7 @@ PY
             cp "$src" "$stage/main.swift"
             companions=$(ls "${src%.swift}"+*.swift 2>/dev/null || true)
             # shellcheck disable=SC2086
-            ios_xcrun -sdk iphonesimulator swiftc -typecheck \
+            kaya_swift_guestc -sdk "$ios_sdk" -c -whole-module-optimization -o "$stage/guest.o" \
                 -target "arm64-apple-ios$ios_min-simulator" \
                 -I "$ios_modules" -I bindings/swift/CKaya \
                 $companions "$stage/main.swift" >"$stage/log" 2>&1
@@ -247,7 +244,7 @@ PY
     [ "$ios_status" = 0 ] || exit 1
     [ "$ios_guests" = "${#ios_srcs[@]}" ] ||
         refuse "the iOS guest pass compiled $ios_guests of ${#ios_srcs[@]} guests"
-    PASSES+=("guests/swift: $ios_guests of ${#GUESTS[@]} files (the ios lane module's SWIFT_ENTRIES; the rest are desktop-only), iphonesimulator SDK, arm64-apple-ios$ios_min-simulator")
+    PASSES+=("guests/swift: $ios_guests of ${#GUESTS[@]} files (the ios lane module's SWIFT_ENTRIES; the rest are desktop-only), iphonesimulator SDK, arm64-apple-ios$ios_min-simulator, Swift 6")
 else
     echo "swift-typecheck: note — no iphonesimulator SDK; the iOS half went unchecked" >&2
     PASSES+=("SKIPPED: everything iOS — the interpreter, tools/ios/xcuidrive and the lane's guests (no iphonesimulator SDK)")

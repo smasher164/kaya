@@ -6,20 +6,18 @@ import Kaya
 
 let options = ["Red", "Green", "Blue"]
 
-let app = KayaApp()
+KayaApp.run { app in
+    app.build { tx in
+        tx.window(title: "select")
+        let picked = tx.signal(.str("picked: Red"))
 
-app.build { tx in
-    tx.window(title: "select")
-    let picked = tx.signal(.str("picked: Red"))
-
-    let root = tx.column { root in
-        tx.select(options, selected: 0) { t, index in
-            t.write(picked, .str("picked: \(options[index])"))
+        let root = tx.column { root in
+            tx.select(options, selected: 0) { t, index in
+                t.write(picked, .str("picked: \(options[index])"))
+            }
+            tx.label(bind: picked)  // label#0
+            return root
         }
-        tx.label(bind: picked)  // label#0
-        return root
+        tx.mount(root)
     }
-    tx.mount(root)
 }
-
-app.run()

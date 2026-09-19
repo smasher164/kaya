@@ -8,24 +8,22 @@ func count(_ text: String) -> String {
     text.isEmpty ? "0 lines" : "\(text.split(separator: "\n", omittingEmptySubsequences: false).filter { !($0.isEmpty && text.hasSuffix("\n")) }.count) lines"
 }
 
-let app = KayaApp()
+KayaApp.run { app in
+    app.build { tx in
+        tx.window(title: "textarea")
+        let lines = tx.signal(.str("0 lines"))
 
-app.build { tx in
-    tx.window(title: "textarea")
-    let lines = tx.signal(.str("0 lines"))
-
-    let root = tx.column { root in
-        let editor = tx.textarea { t, text in
-            t.write(lines, .str(count(text)))
+        let root = tx.column { root in
+            let editor = tx.textarea { t, text in
+                t.write(lines, .str(count(text)))
+            }
+            tx.label(bind: lines)  // label#0
+            tx.button("clear") { t in
+                t.clear(editor)
+                t.focus(editor)
+            }
+            return root
         }
-        tx.label(bind: lines)  // label#0
-        tx.button("clear") { t in
-            t.clear(editor)
-            t.focus(editor)
-        }
-        return root
+        tx.mount(root)
     }
-    tx.mount(root)
 }
-
-app.run()

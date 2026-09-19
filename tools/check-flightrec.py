@@ -549,6 +549,21 @@ def census_hand_run(src):
     return found
 
 
+def census_ios_stamp(src):
+    found = []
+    if "binary-stamp" not in declared(src).get("ios", ()):
+        found.append("ios: declares no binary-stamp section")
+    for worker in ("_leg_worker", "_proof_worker", "_witness_worker"):
+        if "keep_binary_stamp(" not in py_block(src[IOS], worker):
+            found.append(f"ios: {worker} does not keep the executable SDK stamp")
+    capture = py_block(src[IOS], "keep_binary_stamp")
+    if not all(s in capture for s in ('"vtool", "-show-build"', 'CFBundleExecutable', '.sdk')):
+        found.append("ios: binary-stamp does not read the bundle executable through vtool")
+    if 'log.with_suffix(".sdk")' not in py_block(src[LANE_PY], "IosRecorder"):
+        found.append("ios: binary-stamp does not adopt the SDK sidecar")
+    return found
+
+
 # ---------------------------------------------------------------- run it
 
 REAL = sources()
@@ -559,7 +574,7 @@ CENSUSES = (("sections", census_sections), ("skip writers", census_skips),
             ("windows collect freshness", census_collect_fresh),
             ("guest clock", census_guest_clock),
             ("linux focus ring", census_focus_ring),
-            ("hand run", census_hand_run))
+            ("hand run", census_hand_run), ("iOS SDK stamp", census_ios_stamp))
 TABLE = declared(REAL)
 gate.counted("lanes declaring a bundle shape", list(TABLE), floor=5)
 gate.counted("sections declared across the five lanes",
@@ -741,6 +756,20 @@ n20 = doctored(HAND, r"FR\.mac_leg\(name, ", "FR.leg(name, ",
 gate.negative("N20 a hand red that leaves no bundle",
               lambda: census_hand_run(n20), want="leaves no bundle at all")
 
-gate.negatives_ran(20)
+for worker, call in (("_leg_worker", "keep_binary_stamp(name, args[0])"),
+                     ("_proof_worker", "keep_binary_stamp(name, app)"),
+                     ("_witness_worker", "keep_binary_stamp(name, app)")):
+    changed = dict(REAL)
+    body = py_block(REAL[IOS], worker)
+    patched = gate.doctor(f"iOS {worker} SDK capture cut", body, re.escape(call), "pass", want=1)
+    changed[IOS] = REAL[IOS].replace(body, patched, 1)
+    gate.negative(f"iOS {worker} without SDK evidence",
+                  lambda: census_ios_stamp(changed), want="does not keep")
+stamp_cut = doctored(LANE_PY, r'self\.adopt\(bundle, "binary-stamp",',
+                     'self.adopt(bundle, "wrong-stamp",', "iOS SDK section adopt cut")
+gate.negative("iOS SDK section unwritten", lambda: census_sections(stamp_cut),
+              want="`binary-stamp` is declared")
+
+gate.negatives_ran(24)
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")
