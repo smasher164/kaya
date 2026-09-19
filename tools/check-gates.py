@@ -19,9 +19,15 @@ dev_shell_or_die()
 # not AGENTS.md: check-mirror.py holds those two level.
 
 import ast
+import contextlib
+import io
 import json
 import re
 import subprocess
+import tempfile
+import types
+
+from lanes import mac as mac_lane
 
 root = ROOT
 
@@ -381,6 +387,56 @@ def override_says_so(hand):
     return False
 
 
+def hand_relaunch_problems(hand):
+    branches = [node for node in ast.parse(hand).body
+                if isinstance(node, ast.If)
+                and isinstance(node.test, ast.Name) and node.test.id == "second"
+                and any(isinstance(call, ast.Call)
+                        and isinstance(call.func, ast.Attribute)
+                        and call.func.attr == "second_act"
+                        for call in ast.walk(node))]
+    if len(branches) != 1:
+        return [f"run-leg: expected one relaunch branch, read {len(branches)}"]
+    code = compile(ast.Module(body=branches, type_ignores=[]),
+                   "tools/run-leg.py relaunch branch", "exec")
+    problems = []
+    with tempfile.TemporaryDirectory() as scratch:
+        log = pathlib.Path(scratch) / "leg.log"
+        for second, rc, text, pushes in (
+                (True, 0, "", 0),
+                (True, 0, "KAYA_SELFTEST: OK\n", 0),
+                (True, 3, "", 0),
+                (True, 3, "KAYA_SELFTEST: ACT 1 OK\n", 0),
+                (True, 0, "KAYA_SELFTEST: ACT 1 OK\n", 1),
+                (False, 0, "KAYA_SELFTEST: OK\n", 0)):
+            log.write_text(text, encoding="utf-8")
+            calls = []
+            def door(*args):
+                calls.append(args)
+                return 0
+            scope = dict(second=second, rc=rc, log=log, ROOT=root,
+                         scene="tasks", argv=[], env={}, sys=sys,
+                         lane=types.SimpleNamespace(
+                             act_one_ok=mac_lane.act_one_ok,
+                             second_act=door, RELAUNCH_DOOR={"tasks": "test"}))
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+                exec(code, scope)
+            expected_rc = (rc or 1) if second and not pushes else rc
+            case = f"second={second}, exit={rc}, marker={mac_lane.act_one_ok(text)}"
+            if len(calls) != pushes or scope["rc"] != expected_rc:
+                problems.append(f"run-leg relaunch {case}: door calls {len(calls)} "
+                                f"and exit {scope['rc']}, expected {pushes} and {expected_rc}")
+            if second and not pushes:
+                measured = (f"act one exited {rc}; ACT 1 OK present: "
+                            f"{mac_lane.act_one_ok(text)}; the door was not pushed")
+                recorded = log.read_text(encoding="utf-8")
+                if measured not in output.getvalue() or measured not in recorded:
+                    problems.append(f"run-leg relaunch {case}: missing measured refusal "
+                                    "in terminal or leg log")
+    return problems
+
+
 def hand_run_problems(hand, mac, pylib):
     """ONE WIRING FOR THE HAND RUN AND THE LANE. tools/run-leg.py runs one
     mac leg the way tools/validate-mac.py's pool runs it — under
@@ -435,6 +491,7 @@ def hand_run_problems(hand, mac, pylib):
             "without printing that it did — a hand run that names one "
             "scene and runs another's steps is a diagnostic that cannot "
             "discriminate (invariant 3)")
+    problems.extend(hand_relaunch_problems(hand))
     return problems
 
 
@@ -926,6 +983,21 @@ else:
     if not any("spooled records" in x for x in problems):
         fail("self-test N23: a hand run that journals nothing passed: "
              + ("; ".join(problems) or "no finding"))
+
+for label, old, new in (
+        ("marker", "if rc != 0 or not act_one:", "if rc != 0:"),
+        ("exit", "if rc != 0 or not act_one:", "if not act_one:"),
+        ("verdict", "rc = rc or 1", "rc = 0"),
+        ("recorded refusal", 'lf.write(refusal + "\\n")', "pass")):
+    doctored, n = re.subn(re.escape(old), lambda _: new, run_leg_text, count=1)
+    print(f"check-gates: hand relaunch cut {label}, {n} substitution(s)")
+    if n != 1:
+        fail(f"hand relaunch {label} negative changed {n} sites, expected one")
+    else:
+        problems = hand_relaunch_problems(doctored)
+        print(f"check-gates: hand relaunch {label}: {len(problems)} refusal(s)")
+        if not problems:
+            fail(f"hand relaunch {label} negative passed")
 
 # The driver's own arithmetic: an under-run, a failing gate and a
 # missing script must each come back red, watched on every run.

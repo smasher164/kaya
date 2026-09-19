@@ -163,9 +163,14 @@ with open(log, "w", encoding="utf-8", errors="replace") as lf:
     rc = FR.watched_leg(SCRATCH / name, argv, env, lf, cwd=ROOT,
                         echo=sys.stdout)
 if second:
-    if rc != 0:
-        print(f"run-leg: act one exited {rc}; the door was not pushed",
-              file=sys.stderr)
+    act_one = lane.act_one_ok(log.read_text(encoding="utf-8", errors="replace"))
+    if rc != 0 or not act_one:
+        refusal = (f"run-leg: act one exited {rc}; ACT 1 OK present: "
+                   f"{act_one}; the door was not pushed")
+        print(refusal, file=sys.stderr)
+        with open(log, "a", encoding="utf-8") as lf:
+            lf.write(refusal + "\n")
+        rc = rc or 1
     else:
         print(f"run-leg: act two through the "
               f"{lane.RELAUNCH_DOOR[scene]} door", flush=True)

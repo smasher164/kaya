@@ -2123,9 +2123,22 @@ frontmost app, both pictures viewed; a green hand run leaves one journal
 record and no bundle; validate-mac ALL PASS twice. Small opens: a hand run
 consumes one of the journal's newest-20 run slots (KAYA_FLIGHTREC_KEEP,
 machine-wide), so twenty hand runs age out a lane run's bundles — raise the
-cap or keep hand runs under their own retention, a ruling; and on a
-relaunch scene the lane refuses act two unless act one published `ACT 1
-OK` while run-leg checks the exit code alone, one line if wanted. — and the same
+cap or keep hand runs under their own retention, a ruling.
+~~On a relaunch scene the lane refuses act two unless act one published
+`ACT 1 OK` while run-leg checks the exit code alone.~~ RESOLVED 2026-09-18:
+the hand runner now requires both a zero exit and the lane's act_one_ok
+reader before opening act two. Its refusal records the exit and marker's
+presence in both the terminal and the bundled leg log. check-gates executes
+the real branch against six cases and watches four counted cuts fail.
+A real taskspersist run with the relaunch boundary removed (one cut) exited
+zero with an ordinary OK; the runner refused it, kept a nine-section bundle,
+and never pushed the door. The unchanged two-act scene passed afterwards.
+Validation: 628 unit tests and 18 doc tests passed; the standalone gate sweep
+passed 61/61 and the Mac lane 477/477. The full matrix passed Mac 477, Linux
+775, Windows 282, iOS 139, Android 148 and 61/61 gates in 23m01s, every
+existing net-time ceiling held. KEY: hand-run relaunch, act_one_ok, ACT 1 OK,
+exit code alone, KAYA_FLIGHTREC_KEEP.
+The same
   runner launched the guest bare where the pool wraps it in `timeout 120`,
   under which an undeclared window opens at another size: align-python
   read as a pre-existing red by three agents (fixed 2026-09-16, check-gates

@@ -11885,6 +11885,21 @@ Swift 6 callers, naming KayaApp.run's actor-isolated entry instead.
 tools/check-pins.py holds the guest compiler wrapper separately from the
 interpreter (docs/measurements/swift-executor-2026-09-18.md).
 
+## A successful process exit does not prove a relaunch scene reached its boundary (2026-09-18)
+
+Removing the relaunch boundary and following steps from taskspersist's script
+left a successful first process, exit zero and `KAYA_SELFTEST: OK`, but no
+`KAYA_SELFTEST: ACT 1 OK`. The full Mac lane already required the latter;
+tools/run-leg.py only checked the exit. It now uses the same act_one_ok reader
+and requires both. Its refusal prints the measured exit and marker presence
+in the terminal and recorder's leg log, without claiming a missing marker
+when the marker exists but the exit is nonzero. check-gates executes the real
+branch across six cases and watches four counted regressions fail. The real
+negative's bundle is mac-taskspersist-rust-swiftui in flightrec run
+20260919T045704Z-047081; its step clock ends after the resize at +1226ms,
+followed by ordinary OK and the runner's refusal. The unchanged scene then
+passed both acts. No scene file was edited for the negative.
+
 ## Four smaller facts from the Swift package slice (2026-09-18)
 
 The executor follow-up measured two more constraints:

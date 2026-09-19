@@ -300,7 +300,10 @@ in docs/deferred.md.
    runner spelling its own launch; and the hand run opens a recorder,
    collects through mac_leg and flushes, because a red found by hand had
    no bundle to read at all — the rung-4 rule with nothing behind it on
-   the inner loop. Four more watched negatives, counts printed),
+   the inner loop. Four more watched negatives, counts printed. The hand
+   runner's relaunch branch is executed against six exit/marker cases;
+   four counted cuts refuse a missing marker check, missing exit check,
+   false-green verdict and refusal absent from the recorder's leg log),
    `tools/check-ledger.py` (docs/deferred.md may not disagree with
    itself: an UNSTRUCK headline over an entry that records a terminal
    resolution, or a STRUCK one with no resolution note. Two entries
