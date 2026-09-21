@@ -521,6 +521,18 @@ def boot_pool():
 # (docs/traps.md's recording-mode entry carries the YAVG numbers).
 REC_ROOT = ROOT / "target/recordings/ios"
 REC_RUN = ""
+# The film's pixels lag the harness transcript by 266-280 ms, measured over
+# five alert transitions of one leg with no drift across the film, and a
+# dismissed alert is on film for only ~90 ms before the next one, so the
+# bias sits just past the measured spread; every step's still is sampled
+# this late (docs/measurements/ios-recording-alignment-2026-09-21.md).
+REC_LAG_MS = 300
+# The two fiducials must agree: the anchor is taken from the dark edge, and
+# the light edge predicted from it must land within this of the film's own.
+# Measured 53, 129 and 82 ms on three films (the marks are stamped by a
+# 200 ms screenshot poll); a wider disagreement means the anchor is wrong
+# and every still would be a lie.
+REC_FIDUCIAL_TOL_MS = 400
 REC_PIDS = []
 T_MARKS = {}
 L_MARKS = {}
@@ -574,6 +586,15 @@ def rec_suite_start(retry=False):
     if run([str(ROOT / "tools/harness-extract.sh"),
             "--selftest"]).returncode != 0:
         sys.exit(1)
+    # The fiducial agreement check, watched refusing before a film exists.
+    over = fiducial_disagreement(8220, 8220 + REC_FIDUCIAL_TOL_MS + 1)
+    within = fiducial_disagreement(8220, 8167)
+    if not (over > REC_FIDUCIAL_TOL_MS and within <= REC_FIDUCIAL_TOL_MS
+            and fiducial_disagreement(8220, None) is None):
+        die("recording: the fiducial agreement check did not refuse a "
+            f"disagreement over {REC_FIDUCIAL_TOL_MS}ms")
+    print(f"recording: fiducial agreement check watched refusing {over}ms "
+          f"and admitting {within}ms")
     REC_ROOT.mkdir(parents=True, exist_ok=True)
     # A STAMP rather than a wipe: `run-sim.py swift` must not delete
     # the rust-swiftui suite's films.
@@ -687,6 +708,14 @@ def _film_edge_ms(movie, down):
     return None
 
 
+def fiducial_disagreement(predicted_ms, film_ms):
+    """How far the second fiducial's film edge sits from where the anchor
+    put it; None when the film has no such edge to compare."""
+    if film_ms is None:
+        return None
+    return abs(predicted_ms - film_ms)
+
+
 def rec_suite_stop():
     if not os.environ.get("KAYA_RECORD"):
         return True
@@ -718,6 +747,23 @@ def rec_suite_stop():
             anchors[i] = L_MARKS[i] - t_flip
         (REC_ROOT / f"anchor-{i}").write_text(f"{anchors[i]}\n",
                                               encoding="utf-8")
+        # The anchor is checked against the OTHER edge before any still
+        # is cut from it: the light mark predicts a film time, the film
+        # has its own, and they must agree.
+        light_film = _film_edge_ms(movie, down=False)
+        gap = fiducial_disagreement(L_MARKS[i] - anchors[i], light_film)
+        if gap is None:
+            print(f"recording: suite-{i}.mov has no light edge to check the "
+                  f"anchor against (dark edge at {t_flip}ms)")
+        else:
+            print(f"recording: suite-{i}.mov fiducials {gap}ms apart "
+                  f"(light edge predicted {L_MARKS[i] - anchors[i]}ms, "
+                  f"filmed {light_film}ms; tolerance {REC_FIDUCIAL_TOL_MS})")
+            if gap > REC_FIDUCIAL_TOL_MS:
+                print(f"recording: suite-{i}.mov's anchor disagrees with its "
+                      f"second fiducial by {gap}ms — no still is cut from an "
+                      f"anchor the film contradicts", file=sys.stderr)
+                return False
     failed = False
     threads = []
     results = {}
@@ -729,6 +775,7 @@ def rec_suite_stop():
                       str(REC_ROOT / f"suite-{slot}.mov"),
                       str(dirp / "leg.log"), str(anchors[slot]),
                       str(dirp / "steps")],
+                     env=dict(os.environ, KAYA_EXTRACT_LAG_MS=str(REC_LAG_MS)),
                      stdout=lf, stderr=subprocess.STDOUT).returncode
         results[dirp] = rc == 0
 

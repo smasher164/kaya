@@ -17,10 +17,15 @@ fi
 #
 # anchor_ms is the epoch ms of the video's t=0; the transcript's
 # "KAYA_HARNESS: epoch <ms>" line supplies the harness's start, so the
-# lead is computed rather than guessed from launch times. Action steps
-# are sampled 300ms late and EXPECT steps take no bias; a step resolves
+# lead is computed rather than guessed from launch times. A step resolves
 # to its COVERING frame, since these films are sparse VFR (docs/traps.md,
-# recording mode). Exit is nonzero when anything silently degrades.
+# recording mode). The bias: with KAYA_EXTRACT_LAG_MS set, EVERY step is
+# sampled that many ms late — the lane's measured lag between its
+# transcript and its film's pixels (iOS: 300, docs/measurements/
+# ios-recording-alignment-2026-09-21.md); without it, action steps are
+# sampled 300ms late and EXPECT steps take no bias, the split the mac and
+# windows lanes still run unmeasured. Exit is nonzero when anything
+# silently degrades.
 set -uo pipefail
 
 # --selftest: a synthesized three-color sparse video whose steps must
@@ -50,6 +55,13 @@ print("r" if r >= g and r >= b else "g" if g >= b else "b")'
     }
     got="$(dominant "$T/steps/step-01-a.png")$(dominant "$T/steps/step-02-expect_q.png")$(dominant "$T/steps/step-03-b.png")$(dominant "$T/steps/step-04-c.png")"
     [ "$got" = rrgb ] || { echo "harness-extract selftest: covering frames wrong (got $got, want rrgb)"; exit 1; }
+    # A lane-measured lag moves EVERY step, expects included: the same
+    # expect at +1800ms crosses into green under a 300ms lag, and the
+    # answer differs from the split's, so an ignored lag is a red here.
+    KAYA_EXTRACT_LAG_MS=300 "$0" "$T/v.mp4" "$T/leg.log" 1000 "$T/steps-lag" >/dev/null \
+        || { echo "harness-extract selftest: lagged extraction failed"; exit 1; }
+    got="$(dominant "$T/steps-lag/step-01-a.png")$(dominant "$T/steps-lag/step-02-expect_q.png")$(dominant "$T/steps-lag/step-03-b.png")$(dominant "$T/steps-lag/step-04-c.png")"
+    [ "$got" = rggb ] || { echo "harness-extract selftest: lagged covering frames wrong (got $got, want rggb)"; exit 1; }
     # A transcript with steps but a video with no frames must fail.
     : >"$T/empty.mp4"
     if "$0" "$T/empty.mp4" "$T/leg.log" 1000 "$T/steps2" >/dev/null 2>&1; then
@@ -135,10 +147,14 @@ line = os.environ["KAYA_LINE"]
 m = re.search(r"KAYA_HARNESS: \+([0-9]+)ms ?(.*)", line)
 off, rest = (m.group(1), m.group(2)) if m else ("0", "")
 print(off, re.sub(r"[^A-Za-z0-9._#-]", "_", rest)[:48])')"
-    case "$step" in
-        [Ee]xpect*) bias=0 ;;
-        *) bias=300 ;;
-    esac
+    if [ -n "${KAYA_EXTRACT_LAG_MS:-}" ]; then
+        bias="$KAYA_EXTRACT_LAG_MS"
+    else
+        case "$step" in
+            [Ee]xpect*) bias=0 ;;
+            *) bias=300 ;;
+        esac
+    fi
     at_ms=$((LEAD_MS + offset + bias))
     if [ "$at_ms" -gt "$END_MS" ]; then at_ms=$END_MS; fi
     if [ "$at_ms" -lt 0 ]; then at_ms=0; fi

@@ -192,8 +192,8 @@ validation passed: 644 core tests, 25 doctests (one ignored), all 61 gates,
 Android 148 in the 1104-second matrix. Every unchanged timing ceiling held.
 Measurement: docs/measurements/gtk-capture-2026-09-21.md.
 
-## INVESTIGATE — iOS recording's step-named frames lead their stated scene state (2026-09-20)
-KEY: iOS recording, fiducial timestamp, step-named frames, confirm-swift, anchor-2
+## ~~INVESTIGATE — iOS recording's step-named frames lead their stated scene state (2026-09-20)~~ COMPLETE 2026-09-21: the film's pixels lag the transcript by a constant 266-280 ms (no drift), measured over five transitions of an archived leg; every iOS still is now sampled 300 ms late through KAYA_EXTRACT_LAG_MS, both reported stills reproduce and then land on their named state, and the second fiducial checks every anchor before a still is cut (docs/measurements/ios-recording-alignment-2026-09-21.md)
+KEY: iOS recording, fiducial timestamp, step-named frames, confirm-swift, anchor-2, KAYA_EXTRACT_LAG_MS, REC_LAG_MS, REC_FIDUCIAL_TOL_MS
 
 The Swift review run's confirm frame named for the first delete alert showed
 the launch screen; its frame named for the final eject alert showed the third
@@ -208,8 +208,12 @@ recording run 96498-1789957517; the reviewed frame is retained on the Swift
 review page, but suite films and marks are overwritten by the next recorded
 run. Archive them before the next calibration experiment. The extraction
 records the film, marks and transcript needed for that measurement; do not
-publish step-named stills without viewing them. A timing correction and its
-independent alignment guard remain open.
+publish step-named stills without viewing them. Run 96498's films were
+overwritten before they could be measured; the 06:25Z run that replaced them
+was archived and measured instead, and reproduced both observations. Still
+open, on purpose: the mac and windows extractions keep the old 300/0 split
+because their lags are unmeasured, and no guard measures the iOS lag per run
+(the measurement names the launch-edge probe that would).
 
 ## ~~BUG — Swift save's missing-handle branches retain the construction transaction (2026-09-20)~~ COMPLETE 2026-09-21: Swift's handlers use the handler transaction, the C floor refuses a missing handle with the same sentences, and the shared save scene visits all three missing-handle cases on every lane, held by three counted check-steps cuts; validation passed 644 core tests, 25 doctests (one ignored), 61 gates, 477 standalone Mac legs and all five matrix lanes: Mac 477, Linux 777, Windows 283, iOS 139, Android 148 in 1047 seconds, every timing ceiling held
 KEY: save.swift, nothing open to save, nothing to reopen, construction transaction

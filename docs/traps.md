@@ -4,6 +4,20 @@ Each of these cost a debugging session (or would have). Most now have a
 structural guard; the guard is named where it exists. Do not re-derive
 these the hard way.
 
+## An iOS recording's pixels lag its transcript by a constant 275 ms (2026-09-21)
+
+A step-named still is the film's covering frame at the transcript's time, and
+on the iOS simulator the pixels of every state change arrive 266-280 ms after
+the harness logged it, with no drift across a 200 s film. Sampled unbiased, an
+expect's still is the frame BEFORE its state: the first alert's still was the
+launch screen and the eject alert's still was the previous alert. Every step is
+now sampled 300 ms late (`REC_LAG_MS` in tools/ios/run-sim.py, through the
+extractor's `KAYA_EXTRACT_LAG_MS`), and a film's anchor must agree with its
+second fiducial before any still is cut. A dismissed alert is on film for only
+~90 ms, so a bias inside the measured spread still misses. The mac and windows
+lanes are unmeasured and keep the old split. Numbers, frames and the viewed
+stills: docs/measurements/ios-recording-alignment-2026-09-21.md.
+
 ## The gate sweep relinked libkaya under the mac lane's guests (2026-09-21)
 
 The matrix on the save slice lost seven mac legs (dirty and ranges, the Go,
