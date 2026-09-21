@@ -727,7 +727,7 @@ static inline void kaya_tx_format_text(KayaTx *tx, uint64_t widget_id, uint32_t 
     kaya_wire_end(tx, kaya_at);
 }
 
-/* Request a sheet over `parent` — a window (0 = the primary) or a live sheet, so modal-over-modal is a chain (docs/sheet-plan.md §1). `sheet` is a guest-allocated surface id in the one namespace windows and entries share. Materializes hidden; mounting a root into it presents it. A second live sheet over the same parent is refused at the root, as a second alert is; no capability gate, every host has one. */
+/* Request a sheet over `parent` — any live surface: a window (0 = the primary), a pushed entry, a section, or a live sheet, so modal-over-modal is a chain (docs/sheet-plan.md §1). `sheet` is a guest-allocated surface id in the one namespace windows and entries share. Materializes hidden; mounting a root into it presents it. A second live sheet over the same parent is refused at the root, as a second alert is; no capability gate, every host has one. */
 static inline void kaya_tx_present_sheet(KayaTx *tx, uint64_t parent, uint64_t sheet) {
     size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_PRESENT_SHEET);
     kaya_wire_u64(tx, parent);

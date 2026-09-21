@@ -3296,14 +3296,18 @@ impl Scene {
                     out.push(ApplyOp::PopEntry { window });
                 }
                 TxOp::PresentSheet { parent, sheet } => {
-                    // A window or a LIVE SHEET: modal-over-modal is a
-                    // chain, one child per parent (docs/sheet-plan.md §1).
+                    // ANY LIVE SURFACE: a window, a pushed entry, a section
+                    // or a LIVE SHEET — modal-over-modal is a chain, one
+                    // child per parent (docs/sheet-plan.md §1). The task
+                    // manager presents over its project screen, an entry.
                     assert!(
                         parent == crate::protocol::DEFAULT_WINDOW
                             || self.windows.contains(&parent)
+                            || self.nav_entries.contains_key(&parent)
+                            || self.section_of.contains_key(&parent)
                             || self.sheets.contains_key(&parent),
                         "kaya: present_sheet over unknown surface {parent:?} — a live \
-                         window or a live sheet (0 is the primary)"
+                         window, entry, section or sheet (0 is the primary)"
                     );
                     assert!(
                         sheet.0 != 0,
@@ -11662,6 +11666,23 @@ mod tests {
     fn a_sheet_over_an_unknown_surface_is_refused() {
         let mut scene = Scene::new();
         scene.apply(vec![TxOp::PresentSheet { parent: WindowId(9), sheet: WindowId(11) }]);
+    }
+
+    #[test]
+    fn a_sheet_presents_over_a_pushed_entry_and_a_section() {
+        // The task manager's project screen is an entry (docs/tasks-plan.md S6).
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::PushEntry { window: DEFAULT_WINDOW, entry: WindowId(21) },
+            TxOp::PresentSheet { parent: WindowId(21), sheet: WindowId(31) },
+        ]);
+        assert_eq!(scene.sheets.get(&WindowId(31)), Some(&WindowId(21)));
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::AddSection { window: DEFAULT_WINDOW, section: WindowId(10) },
+            TxOp::PresentSheet { parent: WindowId(10), sheet: WindowId(30) },
+        ]);
+        assert_eq!(scene.sheets.get(&WindowId(30)), Some(&WindowId(10)));
     }
 
     #[test]

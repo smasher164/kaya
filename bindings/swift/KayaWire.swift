@@ -648,7 +648,7 @@ struct KayaTx {
         self.end(kayaAt)
     }
 
-    /// Request a sheet over `parent` — a window (0 = the primary) or a live sheet, so modal-over-modal is a chain (docs/sheet-plan.md §1). `sheet` is a guest-allocated surface id in the one namespace windows and entries share. Materializes hidden; mounting a root into it presents it. A second live sheet over the same parent is refused at the root, as a second alert is; no capability gate, every host has one.
+    /// Request a sheet over `parent` — any live surface: a window (0 = the primary), a pushed entry, a section, or a live sheet, so modal-over-modal is a chain (docs/sheet-plan.md §1). `sheet` is a guest-allocated surface id in the one namespace windows and entries share. Materializes hidden; mounting a root into it presents it. A second live sheet over the same parent is refused at the root, as a second alert is; no capability gate, every host has one.
     mutating func presentSheet(_ parent: UInt64, _ sheet: UInt64) {
         let kayaAt = self.begin(UInt16(KAYA_TX_PRESENT_SHEET))
         self.u64(parent)

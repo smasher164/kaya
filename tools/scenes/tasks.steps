@@ -22,13 +22,17 @@ expect_fills row@task[t1]
 expect label@title[t2] "Call the plumber"
 expect label@caption[t2] ""
 
-# Quick-add lands in Inbox; the field clears and keeps focus (todos.steps).
+# Quick-add is a sheet (docs/tasks-plan.md S6): the button presents it,
+# Add lands the task in Inbox and dismisses it.
+expect_sheets 0
+click button@new
+expect_sheets 1
+expect_sheet "New task"
 set_text entry@quick "Buy oat milk"
 click button@add
+expect_sheets 0
 expect label@inbox_count "3 in inbox"
 expect label@title[t10] "Buy oat milk"
-expect entry@quick ""
-expect_focused entry@quick
 
 # S1 (docs/search-plan.md S10): each list's search field filters that list
 # alone by title and notes, and the count caption says how many match; the
@@ -142,8 +146,12 @@ expect_entries 1
 expect_order column@rows "Book the flights|Renew passport"
 drag label@ptitle[t6] to label@ptitle[t5] before
 expect_order column@rows "Renew passport|Book the flights"
+click button@pnew
+expect_sheets 1
+expect_sheet "New task"
 set_text entry@pquick "Pack chargers"
 click button@padd
+expect_sheets 0
 expect_order column@rows "Renew passport|Book the flights|Pack chargers"
 back
 expect_entries 0

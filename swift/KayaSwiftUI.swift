@@ -6929,6 +6929,10 @@ private func kayaLiveIds() -> Set<UInt64> {
     for window in kayaScene.windows.values { if let root = window.root { stack.append(root) } }
     for section in kayaScene.sectionsById.values { if let root = section.root { stack.append(root) } }
     for entry in kayaScene.navEntries.values { if let root = entry.root { stack.append(root) } }
+    // A SHEET IS A SURFACE TOO: its root's widgets answer keyed targets
+    // (the task manager's quick-add read `no such target entry@quick`
+    // with the sheet up, 2026-09-21; tools/check-verbs.py holds the walk).
+    for sheet in kayaScene.sheets.values { if let root = sheet.root { stack.append(root) } }
     while let node = stack.popLast() {
         if !ids.insert(node.id).inserted { continue }
         stack.append(contentsOf: node.children)

@@ -255,6 +255,8 @@ enum List {
 
 #[derive(Clone)]
 enum Msg {
+    QuickAdd,
+    QuickDismissed,
     Draft(String),
     Add,
     Search(List, String),
@@ -281,6 +283,8 @@ enum Msg {
     Delete,
     DetailPopped,
     OpenProject(kaya::Path),
+    ProjectQuickAdd,
+    ProjectQuickDismissed,
     ProjectDraft(String),
     ProjectAdd,
     Reorder(kaya::Dropped),
@@ -306,6 +310,10 @@ const DETAIL: WindowId = WindowId(20);
 const PROJECT: WindowId = WindowId(21);
 const LOGBOOK_SCREEN: WindowId = WindowId(22);
 const SETTINGS_SCREEN: WindowId = WindowId(23);
+/// The quick-add sheets (docs/tasks-plan.md S6; docs/sheet-plan.md §6):
+/// one over the Inbox, one over the open project screen.
+const QUICK_SHEET: WindowId = WindowId(30);
+const PROJECT_QUICK_SHEET: WindowId = WindowId(31);
 
 fn date(year: i32, month: u8, day: u8) -> kaya::Date {
     kaya::Date::new(year, month, day).unwrap()
@@ -711,7 +719,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     let loaded = store.as_ref().map(|s| s.load()).unwrap_or_default();
     let seed_wanted = store.as_ref().is_none_or(|s| s.fresh);
 
-    let (lists, projects_coll, quick, counts, today_badge, link_note) = ctx.apply(|tx| {
+    let (lists, projects_coll, counts, today_badge, link_note) = ctx.apply(|tx| {
         tx.window(kaya::DEFAULT_WINDOW)
             .title("tasks")
             // A desktop default that fits the details screen (GTK's own
@@ -746,10 +754,6 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         ];
         let mut lists = Vec::new();
         let mut counts = BTreeMap::new();
-        // The section LOOP's fold, not a body's slot: only the Inbox
-        // section declares a quick-add field, and each column body hands
-        // its own answer back.
-        let mut quick: Option<kaya::WidgetId> = None;
         let today_badge = tx.signal(0.0);
         let link_note = tx.signal("");
         for (list, window, name, symbol) in sections {
@@ -777,7 +781,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 List::Anytime => "anytime_count",
                 List::Logbook => unreachable!("the logbook has no section"),
             };
-            let (root, quick_here) = tx
+            let root = tx
                 .column(|tx| {
                     // The list's search field, first, filtering this list
                     // alone (docs/search-plan.md S10).
@@ -793,20 +797,12 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                         // (docs/app-links-plan.md L4): empty otherwise.
                         tx.caption(link_note).a11y_id("link_note").id();
                     }
-                    let quick_here = if list == List::Inbox {
-                        Some(
-                            tx.row(|tx| {
-                                let id = tx.entry().a11y_id("quick").grow(1.0).id();
-                                msgs.on_change(id, Msg::Draft);
-                                let add = tx.button("Add").a11y_id("add").id();
-                                msgs.on_click(add, Msg::Add);
-                                id
-                            })
-                            .value(),
-                        )
-                    } else {
-                        None
-                    };
+                    // QUICK-ADD IS A SHEET (S6): the button presents it, and
+                    // the field and the Add button live inside it.
+                    if list == List::Inbox {
+                        let new = tx.button("New task").a11y_id("new").id();
+                        msgs.on_click(new, Msg::QuickAdd);
+                    }
                     let rows = coll.rows(tx);
                     let list_column = rows.id();
                     for mut row in rows {
@@ -832,10 +828,8 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     // the section's width (R7): a hugging list hides behind
                     // rows that fill it.
                     tx.a11y_id(list_column, format!("{}_list", count_id.trim_end_matches("_count")));
-                    quick_here
                 })
-                .into_parts();
-            quick = quick.or(quick_here);
+                .id();
             tx.mount_in(section, root);
             lists.push((list, coll));
         }
@@ -864,8 +858,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             })
             .id();
         tx.mount_in(projects_section, projects_root);
-        let quick = quick.expect("the Inbox section declared the quick-add field");
-        (lists, projects_coll, quick, counts, today_badge, link_note)
+        (lists, projects_coll, counts, today_badge, link_note)
     });
     msgs.on_undone(kaya::DEFAULT_WINDOW, |_, _| Msg::Resync);
     msgs.on_redone(kaya::DEFAULT_WINDOW, |_, _| Msg::Resync);
@@ -993,6 +986,30 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
 
     while let Some(msg) = msgs.next(&ctx) {
         match msg {
+            Msg::QuickAdd => {
+                // The sheet hosts the field and the Add button; Add inserts
+                // and dismisses it, the cancel path leaves the draft behind.
+                let sheet = ctx.apply(|tx| {
+                    let sheet = tx
+                        .present_sheet(QUICK_SHEET)
+                        .title("New task")
+                        .detent(kaya::Detent::Medium)
+                        .id();
+                    let body = tx
+                        .column(|tx| {
+                            let field = tx.entry().a11y_id("quick").id();
+                            msgs.on_change(field, Msg::Draft);
+                            let add = tx.button("Add").a11y_id("add").id();
+                            msgs.on_click(add, Msg::Add);
+                        })
+                        .id();
+                    tx.mount_in(sheet, body);
+                    sheet
+                });
+                msgs.on_sheet_dismissed(sheet, Msg::QuickDismissed);
+                app.draft.clear();
+            }
+            Msg::QuickDismissed => app.draft.clear(),
             Msg::Draft(text) => app.draft = text,
             Msg::Search(list, query) => {
                 // Never undoable: a search must not un-type under Undo.
@@ -1020,8 +1037,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     app.place(tx, &key, row);
                 });
                 ctx.apply(|tx| {
-                    tx.clear(quick);
-                    tx.focus(quick);
+                    tx.dismiss_sheet(QUICK_SHEET);
                 });
                 app.draft.clear();
             }
@@ -1198,13 +1214,8 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     let lines = tx.collection::<Line>();
                     let root = tx
                         .column(|tx| {
-                            tx.row(|tx| {
-                                let pquick = tx.entry().a11y_id("pquick").grow(1.0).id();
-                                msgs.on_change(pquick, Msg::ProjectDraft);
-                                let padd = tx.button("Add").a11y_id("padd").id();
-                                msgs.on_click(padd, Msg::ProjectAdd);
-                            })
-                            .id();
+                            let pnew = tx.button("New task").a11y_id("pnew").id();
+                            msgs.on_click(pnew, Msg::ProjectQuickAdd);
                             let rows = lines.rows(tx);
                             let list = rows.id();
                             for mut row in rows {
@@ -1226,6 +1237,29 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 app.open_project = Some((project, lines));
                 app.pdraft.clear();
             }
+            Msg::ProjectQuickAdd => {
+                // Over the project's own screen, the entry surface.
+                let sheet = ctx.apply(|tx| {
+                    let sheet = tx
+                        .present_sheet_over(PROJECT, PROJECT_QUICK_SHEET)
+                        .title("New task")
+                        .detent(kaya::Detent::Medium)
+                        .id();
+                    let body = tx
+                        .column(|tx| {
+                            let pquick = tx.entry().a11y_id("pquick").id();
+                            msgs.on_change(pquick, Msg::ProjectDraft);
+                            let padd = tx.button("Add").a11y_id("padd").id();
+                            msgs.on_click(padd, Msg::ProjectAdd);
+                        })
+                        .id();
+                    tx.mount_in(sheet, body);
+                    sheet
+                });
+                msgs.on_sheet_dismissed(sheet, Msg::ProjectQuickDismissed);
+                app.pdraft.clear();
+            }
+            Msg::ProjectQuickDismissed => app.pdraft.clear(),
             Msg::ProjectDraft(text) => app.pdraft = text,
             Msg::ProjectAdd => {
                 let Some((project, lines)) = app.open_project.clone() else { continue };
@@ -1250,6 +1284,10 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     tx.insert(&lines, key.clone(), Line { title: row.title.clone() });
                     app.place(tx, &key, row);
                     app.project_count(tx, &project);
+                });
+                // Programmatic: no sheet_dismissed follows.
+                ctx.apply(|tx| {
+                    tx.dismiss_sheet(PROJECT_QUICK_SHEET);
                 });
                 app.pdraft.clear();
             }

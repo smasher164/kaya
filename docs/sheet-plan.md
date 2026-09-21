@@ -153,11 +153,13 @@ Unknowns, each measured before an arm depends on it:
 Three tx records and two occurrences, the navigation grammar's shape one
 context over. Numbers are assigned at depth; the spec hash moves once.
 
-- `present_sheet {parent, sheet}`: request a sheet over `parent`, a
-  window (0 = the primary) or a live sheet; `sheet` is a guest-allocated
-  surface id. Materializes hidden; mounting a root into it presents it. A
-  second live sheet over the same parent is refused at the root, and so is
-  a parent that is neither a live window nor a live sheet.
+- `present_sheet {parent, sheet}`: request a sheet over `parent`, any
+  live surface — a window (0 = the primary), a pushed entry, a section or
+  a live sheet; `sheet` is a guest-allocated surface id. Materializes
+  hidden; mounting a root into it presents it. A second live sheet over
+  the same parent is refused at the root, and so is a parent that is not
+  a live surface (the task manager presents over its project screen, an
+  entry, which the first draft of this check refused).
 - `dismiss_sheet {sheet}`: dismiss and forget the sheet's tree, as
   `pop_entry` does; also the veto grammar's confirmation. Dismissing an
   unknown or already-gone sheet is a scene error.
@@ -236,8 +238,10 @@ phones, and a second present over a live parent refused (the scene's
 loud-error shape, the alert scene's precedent). The task manager's S6 (docs/tasks-plan.md) then moves quick-add
 into a sheet: on the phones a bottom sheet with the entry rising over the
 keyboard (U4), on the desktops the window sheet or dialog. The tasks scene
-does not change; the quick-add row's steps address the same widget ids
-inside the sheet.
+gains the click that presents it (`button@new`, `button@pnew` on the
+project screen) and reads the sheet up and gone around the same
+`entry@quick` / `button@add` steps; Add inserts and dismisses. BUILT
+2026-09-21.
 
 ## §7 RULINGS
 
@@ -290,5 +294,11 @@ phone-only feature with a desktop carve-out. The app writes one thing.
    2026-09-21 (the sheet scene green in nine languages on the mac, sixteen
    linux legs, six windows legs, three android legs and the iOS leg), then
    S6 in the task manager on all five lanes.
-4. The matrix, then a review page with the sheet on every lane, each
-   capture viewed before it is published.
+4. ~~The matrix, then a review page with the sheet on every lane, each
+   capture viewed before it is published.~~ DONE 2026-09-21: the breadth
+   matrix in ab31ec09, S6's with its own commit, and the review page at
+   https://claude.ai/artifact/549v7HfaFeTJv4rVuLt8RF (the shared scene and the
+   quick-add on all five lanes, each capture viewed first). The linux
+   captures show the AdwDialog beside the parent, since over a plain
+   GtkWindow it is a toplevel of its own; adopting AdwWindow so the dialog
+   draws inside the parent is a possible follow-up.

@@ -9,7 +9,7 @@ Landed history lives in git; this file only carries what is still open.
 scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
-## BUILD — sheets: the root-hosting modal (design pass approved 2026-09-21)
+## ~~BUILD — sheets: the root-hosting modal (design pass approved 2026-09-21)~~ COMPLETE 2026-09-21: depth on the mac, breadth on all five lanes in nine languages, the task manager's quick-add sheet (S6) and the review page (https://claude.ai/artifact/549v7HfaFeTJv4rVuLt8RF) with the shared scene and the quick-add captured on every lane, each viewed before publication; the depth and breadth matrices ran ALL PASS and S6's ran with its closing commit
 KEY: sheet, present_sheet, dismiss_sheet, sheet_dismissed, dismiss_requested, intercept_dismiss, detent, SHEET_PROPS, expect_sheets, expect_sheet, expect_sheet_detent, AdwDialog, ModalBottomSheet, presentationDetents, Popup, sheetprobe, quick-add sheet
 
 The maintainer picked sheets from the roadmap (2026-09-21, "sheets is a good
@@ -63,8 +63,14 @@ roster, and check-verbs' rows. What breadth still owes, held open here:
   BREADTH LANDED 2026-09-21: the eight bindings' sugar and guests, the
   generators' sheet-prop duos, check-sugar-surface's eleven-part census
   with its 99 fake-stem negatives, and the four backend arms above, each
-  green by hand on its own lane. What remains of the slice is the task
-  manager's quick-add sheet (S6) and the review page.
+  green by hand on its own lane. S6 BUILT the same evening: the task
+  manager's quick-add is a sheet in Inbox and on the project screen, the
+  tasks and taskspersist scenes reading it up and gone. THE REVIEW PAGE
+  CLOSED IT the same evening: https://claude.ai/artifact/549v7HfaFeTJv4rVuLt8RF, the shared
+  scene and the quick-add on each of the five lanes, every capture viewed
+  before it was published; the windows sheet capture is a held run
+  photographed through the lane's window shot, since the recorder's
+  stills for the one-second sheet leg were one frame.
 
 ## ~~BUILD — R1 async dialogs: explicit-transaction amendment approved (2026-09-19)~~ COMPLETE 2026-09-21: C#, Swift, Java and Rust awaitable tiers, explicit transaction scopes and honest task-error ownership are implemented; JS overlap and cleanup guards agree. Final Rust slice passed 644 core tests, 25 doctests (one ignored), 61 gates and all five matrix lanes: Mac 477, Linux 777, Windows 283, iOS 139, Android 148 in 1072 seconds, every timing ceiling held
 KEY: async dialogs, R1.4, R1.5, async void, SynchronizationContext, continuation rollback, explicit Build, Swift Task, app.task, task error ownership, Java CompletionStage, app.observe, Rust local future, Tx across await, poll boundary, scope-only, private begin, Go carve-out

@@ -1458,8 +1458,29 @@ COLUMN_ONLY = [
 ]
 
 
+# A SHEET IS A SURFACE THE LIVE CENSUS WALKS (docs/sheet-plan.md): the two
+# interpreters answer a keyed target only from a presented root's subtree,
+# and a walk that stops at windows, sections and entries reads a sheet's
+# `entry@quick` as `no such target` with the sheet up (the task manager's
+# quick-add, 2026-09-21). The sheet scene addresses by ordinal and cannot
+# see it. Byte-frozen, cut and watched like the arms above.
+LIVE_ROOTS = [
+    ("swift/KayaSwiftUI.swift",
+     "for sheet in kayaScene.sheets.values { if let root = sheet.root { stack.append(root) } }",
+     "// sheets skipped"),
+    ("android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt",
+     "for (sheet in KayaSceneModel.sheets) sheet.root?.let { stack.addLast(it) }",
+     "// sheets skipped"),
+]
+
+
 def keyed_problems(texts):
     bad = []
+    for rel, marker, _ in LIVE_ROOTS:
+        if texts[rel].count(marker) != 1:
+            bad.append(f"{rel}: the live census no longer walks sheet roots "
+                       f"(`{marker}` once) — a keyed target inside a sheet "
+                       f"answers `no such target` with the sheet up")
     for rel, marker, _ in KEYED_ARMS:
         if texts[rel].count(marker) != 1:
             bad.append(f"{rel}: the keyed target arm no longer spells "
@@ -1480,7 +1501,7 @@ def keyed_problems(texts):
 keyed_texts = {rel: (ROOT / rel).read_text(encoding="utf-8")
                for rel, _, _ in KEYED_ARMS}
 keyed_out = keyed_problems(keyed_texts)
-for rel, marker, broken in KEYED_ARMS:
+for rel, marker, broken in KEYED_ARMS + LIVE_ROOTS:
     doctored = dict(keyed_texts)
     doctored[rel] = g.doctor(f"keyed arm marker cut from {rel}",
                              keyed_texts[rel], re.escape(marker), broken)
@@ -1498,8 +1519,10 @@ if keyed_out:
           "tagged kind on every backend:", file=sys.stderr)
     print("\n".join(keyed_out), file=sys.stderr)
 keyed_status = 1 if keyed_out else 0
-print(f"check-verbs: keyed target arms: {len(KEYED_ARMS)} markers pinned, "
-      f"{len(KEYED_ARMS) + len(COLUMN_ONLY) + len(FIRST_COPY)} watched negatives refused",
+print(f"check-verbs: keyed target arms: {len(KEYED_ARMS)} markers + "
+      f"{len(LIVE_ROOTS)} live-root walks pinned, "
+      f"{len(KEYED_ARMS) + len(LIVE_ROOTS) + len(COLUMN_ONLY) + len(FIRST_COPY)} "
+      f"watched negatives refused",
       file=sys.stderr)
 
 # --- THE REORDER'S INSERTION INDICATOR, ON THE ONE BACKEND THAT DRAWS

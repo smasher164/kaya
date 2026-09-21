@@ -988,7 +988,7 @@ txApplyEdit widgetId start stop count runs text = wireRecord txKindApplyEdit (wo
 txFormatText :: Word64 -> Word32 -> Word32 -> Word64 -> Word64 -> [Value] -> Builder
 txFormatText widgetId removed ranged start stop attr = wireRecord txKindFormatText (word64LE widgetId <> word32LE removed <> word32LE ranged <> word64LE start <> word64LE stop <> encodeValues attr)
 
--- Request a sheet over `parent` — a window (0 = the primary) or a live sheet, so modal-over-modal is a chain (docs/sheet-plan.md §1). `sheet` is a guest-allocated surface id in the one namespace windows and entries share. Materializes hidden; mounting a root into it presents it. A second live sheet over the same parent is refused at the root, as a second alert is; no capability gate, every host has one.
+-- Request a sheet over `parent` — any live surface: a window (0 = the primary), a pushed entry, a section, or a live sheet, so modal-over-modal is a chain (docs/sheet-plan.md §1). `sheet` is a guest-allocated surface id in the one namespace windows and entries share. Materializes hidden; mounting a root into it presents it. A second live sheet over the same parent is refused at the root, as a second alert is; no capability gate, every host has one.
 txPresentSheet :: Word64 -> Word64 -> Builder
 txPresentSheet parent sheet = wireRecord txKindPresentSheet (word64LE parent <> word64LE sheet)
 

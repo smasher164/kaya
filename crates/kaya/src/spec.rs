@@ -1596,9 +1596,9 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             name: "present_sheet",
             fields: &[f("parent", FieldTy::U64), f("sheet", FieldTy::U64)],
             payload: None,
-            doc: "Request a sheet over `parent` — a window (0 = the primary) or \
-                  a live sheet, so modal-over-modal is a chain (docs/sheet-plan.md \
-                  §1). `sheet` is a guest-allocated surface id in the one \
+            doc: "Request a sheet over `parent` — any live surface: a window (0 = \
+                  the primary), a pushed entry, a section, or a live sheet, so \
+                  modal-over-modal is a chain (docs/sheet-plan.md §1). `sheet` is a guest-allocated surface id in the one \
                   namespace windows and entries share. Materializes hidden; \
                   mounting a root into it presents it. A second live sheet over \
                   the same parent is refused at the root, as a second alert is; \

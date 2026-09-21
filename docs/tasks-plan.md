@@ -99,7 +99,8 @@ Deliberate v0 stops, each a recorded stop short of a forced feature:
   Nothing persists (S4).
 - **Reminders are stored, not fired.** The time picker writes the
   field; S3 turns a reminder into a notification.
-- **Quick-add is inline.** S6 moves it into a sheet on the phones.
+- **Quick-add is inline.** S6 moves it into a sheet on the phones
+  (BUILT 2026-09-21 on every lane, docs/sheet-plan.md §6).
 - **Notes are plain text.** S7 renders links and emphasis.
 - **Projects are flat.** No areas, no headings; S8 brings the tree.
 - **Nothing survives a relaunch.** S4.
@@ -471,7 +472,7 @@ the gate or trap it became.
 | S3 | a reminder fires as a notification; activating it opens the task | local notifications | 3 |
 | S4 | tasks survive a relaunch; settings persist | app data directory, the preferences store, window memory | 4 |
 | S5 | the app under the largest text size, an RTL locale, a non-US locale, on every lane | the compliance pass | 5 |
-| S6 | quick-add as a sheet on the phones | the modal sheet | 6 |
+| S6 | quick-add as a sheet on the phones (BUILT 2026-09-21: a New task button presents a medium sheet with the field and Add on every lane, in Inbox and on the project screen; docs/sheet-plan.md §6) | the modal sheet | 6 |
 | S7 | notes with links and emphasis; two-line row captions | rich text, text layout props | 7 |
 | S8 | areas, projects and headings in one sidebar | the tree view | 8 |
 | S9 | reminders fire with the app closed | OS-scheduled background work | 9 |

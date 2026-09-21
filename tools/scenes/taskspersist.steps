@@ -19,11 +19,13 @@ expect label@inbox_count "2 in inbox"
 
 # THE DATA. A quick-added task is the app's own document's to keep: it
 # lands in Inbox as t10, the first key past the nine the seed minted.
+click button@new
+expect_sheets 1
 set_text entry@quick "Water the plants"
 click button@add
+expect_sheets 0
 expect label@inbox_count "3 in inbox"
 expect label@title[t10] "Water the plants"
-expect entry@quick ""
 
 # THE SETTINGS, through the Settings screen the View menu pushes. Week
 # starts Sunday is `week_start` = 1 in the preferences store; the

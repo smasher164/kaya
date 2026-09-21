@@ -670,7 +670,7 @@ def tx_format_text(widget_id: int, removed: int, ranged: int, start: int, stop: 
     return record(TX_FORMAT_TEXT, struct.pack("<Q", widget_id) + struct.pack("<I", removed) + struct.pack("<I", ranged) + struct.pack("<Q", start) + struct.pack("<Q", stop) + _enc.values(attr))
 
 def tx_present_sheet(parent: int, sheet: int) -> bytes:
-    """Request a sheet over `parent` — a window (0 = the primary) or a live sheet, so modal-over-modal is a chain (docs/sheet-plan.md §1). `sheet` is a guest-allocated surface id in the one namespace windows and entries share. Materializes hidden; mounting a root into it presents it. A second live sheet over the same parent is refused at the root, as a second alert is; no capability gate, every host has one."""
+    """Request a sheet over `parent` — any live surface: a window (0 = the primary), a pushed entry, a section, or a live sheet, so modal-over-modal is a chain (docs/sheet-plan.md §1). `sheet` is a guest-allocated surface id in the one namespace windows and entries share. Materializes hidden; mounting a root into it presents it. A second live sheet over the same parent is refused at the root, as a second alert is; no capability gate, every host has one."""
     return record(TX_PRESENT_SHEET, struct.pack("<Q", parent) + struct.pack("<Q", sheet))
 
 def tx_dismiss_sheet(sheet: int) -> bytes:

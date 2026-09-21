@@ -2439,8 +2439,16 @@ elif SUITE == "analyze-dump":
                              "ANALYZEDONE"):
         status = 1
 else:
+    # A LEG THE LANE RUNS ALONE RUNS ALONE BY HAND TOO: four task-manager
+    # legs given in one list pooled, three tasks.exe processes shared the
+    # link scheme, the OLE drop targets and the state home, and all four went
+    # red in ways the lane cannot produce (2026-09-21).
     for leg in LEGS:
+        if lane.alone(leg):
+            drain_suites()
         run_suite(leg)
+        if lane.alone(leg):
+            drain_suites()
 drain_suites()
 timing("suites")
 if not rec_suite_stop():
