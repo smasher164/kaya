@@ -721,7 +721,15 @@ in docs/deferred.md.
    captures run on the failure path before the device returns to the pool.
    ANR history is package-filtered and explicitly historical, never a claim
    that an old report belongs to this leg. Eight capture, adoption and
-   renderer mutations hold it. Thirty-two watched negatives, counts printed),
+   renderer mutations hold it. Mac's power-history adds six counted negatives
+   for collection, rendering, sleep/wake selection, newest retention, read
+   status and historical attribution. A forced red retained the sleep that
+   outlasted the sampler's two-second counter. iOS recording's actual image
+   and film probes run over synthetic media: four more mutations refuse an
+   invalid ffprobe log level, hidden command failure, guessed brightness and
+   a discarded first frame. Recording recovery stops drivers before its service
+   reset, then launches and joins the whole pool; three executed branch cuts
+   hold that lifecycle. Forty-five watched negatives, counts printed),
    `tools/check-diagnostics.py` (a why-not may not print a sentence it
    cannot NOT print. Any function named `*WhyNot`/`*why_not`/`*Reason`
    is read as a diagnostic by that name alone; one answer, or an answer
@@ -1013,7 +1021,13 @@ in docs/deferred.md.
    slots, invalid-request cleanup and synchronous Build refusal. check-sugar-surface holds the
    five signatures and context/install/drain/wake wiring with nine counted
    cuts and an empty-reader refusal. docs/async-dialogs-plan.md is the
-   approved explicit-transaction contract),
+   approved explicit-transaction contract. SWIFT ASYNC DIALOGS use the existing
+   actor executor: fifteen headless cases cover results, cancellation, scoped
+   rollback, callback cleanup, concurrent overlap and transaction boundaries.
+   Ten counted runtime mutations and three compile negatives hold the task
+   observer, live slots, retirement, cleanup, rollback and actor/scope walls;
+   check-sugar-surface holds twelve API and occurrence-wiring clauses, each cut
+   and watched red, plus an empty-reader refusal),
    `tools/check-tx-liveness.py` (a transaction is usable only inside
    the build or handler that made it, on the app thread — the HANDLE
    bindings refuse a closed one at a single write chokepoint, the

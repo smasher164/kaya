@@ -69,14 +69,19 @@ KayaApp.run { app in
             tx.setA11yId(tx.label(bind: status), "status")  // label#0
             tx.button(
                 "open",
-                onClick: { inner in  // button#0
-                    // Filters are ADVISORY: a default view, never a guarantee.
-                    inner.pickFiles(filters: [("Text", "txt")], onResult: picked)
+                onClick: { _ in
+                    app.task {
+                        let files = await app.pickFiles(filters: [("Text", "txt")])
+                        try app.build { tx in try picked(tx, files) }
+                    }
                 })
             tx.button(
                 "open one",
-                onClick: { inner in  // button#1
-                    inner.pickFile(filters: [("Text", "txt")], onResult: picked)
+                onClick: { _ in
+                    app.task {
+                        let files = await app.pickFile(filters: [("Text", "txt")])
+                        try app.build { tx in try picked(tx, files) }
+                    }
                 })
             tx.button(
                 "release",

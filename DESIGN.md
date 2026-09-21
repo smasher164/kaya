@@ -532,6 +532,11 @@ semantics remain unchanged in all nine. Python, Haskell and OCaml retain the
 approved callback-only runtime carve-out; a new Go concurrency surface is
 deferred, not part of the four additions. All nine verdicts and the shared
 failure sentence live in the plan and its C# feasibility measurement.
+The ownership rule was clarified 2026-09-20: Kaya reports errors escaping async
+work handed to it, not arbitrary tasks or future chains created by the guest.
+Swift's app.task owns that async throwing body on KayaAppActor, with no ambient
+transaction. A raw Swift Task stores its error for its caller to observe;
+the serial executor's thread affinity does not make it an error reporter.
 
 **One id space for widgets and template nodes.** Every binding mints
 live widget ids and template node ids from ONE monotone counter per app

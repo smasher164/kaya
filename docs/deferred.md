@@ -10,7 +10,7 @@ scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
 ## BUILD — R1 async dialogs: explicit-transaction amendment approved (2026-09-19)
-KEY: async dialogs, R1.4, R1.5, async void, SynchronizationContext, continuation rollback, explicit Build
+KEY: async dialogs, R1.4, R1.5, async void, SynchronizationContext, continuation rollback, explicit Build, Swift Task, app.task, task error ownership
 
 Akhil approved the seven recommendations in docs/async-dialogs-plan.md §5.
 C# feasibility against the real binding found that its proposed context
@@ -72,6 +72,73 @@ The measurement includes all nine binding verdicts; Go's existing callbacks
 remain, its new concurrency surface deferred rather than silently omitted.
 Remaining work: Swift on its shipped executor,
 Java, Rust; guards and review page per the plan, then the full ladder.
+
+SWIFT MEASUREMENT 2026-09-20, TASK OWNERSHIP APPROVED: the real executor and alert
+occurrence path resume on the app thread with no transaction open, and explicit
+build scopes have the approved commit/rollback behavior. But the plan's plain
+Swift Task stores a thrown error in its result and produces no failure report.
+Reading that result or catching inside a task wrapper reports it once. Approved
+app.task owns the async body and reporter, retaining the synchronous handler
+surface; raw Tasks remain guest-owned. This is an error-observation boundary,
+not an error store or a requirement for awaiting dialogs. The five async forms and
+app.task compile on macOS and iOS with no new unsafe waivers. The four dialog
+guests use the new forms. check-abort passed ten counted runtime mutations
+and three compile negatives; check-sugar-surface passed twelve counted cuts
+and an empty-reader refusal. Core validation passed 628 tests and 18 doctests
+(one ignored). All 61 gates and the four native Mac dialog scenes passed.
+The first picker leg ran across a 123-second host sleep and timed out; its
+recorder held loginwindow and the step clock but lacked the power history.
+Mac bundles now include power-history, held by six counted negatives and a
+forced-red readback of the original sleep/wake timestamps (docs/traps.md).
+The same picker source passed on the unlocked host. The iOS review recording exposed an older quiet-to-exclusive
+rename in two ffprobe log-level arguments. The reader now surfaces command
+failures instead of guessing brightness, and retains frame zero for its first
+transition. Four executable media-probe negatives hold those corrections
+(docs/traps.md). Full Mac then passed 477 legs. The recorded iOS suite passed
+all scenes but failed its driver proof and final driver census after recording
+recovery reset CoreSimulatorService without restarting the drivers. Recovery
+now stops, launches and joins the whole driver pool around the reset, held by
+three executed branch cuts. The recorded suite retry passed 46 legs with all
+four drivers alive and no between-leg restart; that run did not need the stale
+recording recovery branch. The final matrix passed Mac 477, Linux 775,
+Windows 282, iOS 139 and Android 148 legs, plus all 61 gates, in 1084 seconds
+with every net-time ceiling held. Mac and iOS captures have been viewed for
+docs/reviews/async-dialogs-swift-2026-09-20/README.md. The Swift tier is landed;
+Java and Rust remain.
+Four feasibility observations and three one-substitution negatives are recorded
+in docs/measurements/async-dialogs-swift-2026-09-20.md. The ownership rule is
+shared: Kaya reports errors escaping work handed to Kaya; independently created
+tasks and future chains remain their creator's responsibility.
+
+## INVESTIGATE — iOS recording's step-named frames lead their stated scene state (2026-09-20)
+KEY: iOS recording, fiducial timestamp, step-named frames, confirm-swift, anchor-2
+
+The Swift review run's confirm frame named for the first delete alert showed
+the launch screen; its frame named for the final eject alert showed the third
+delete alert instead. The latter was visually inspected and used with its
+actual content, not the filename's claim. The confirm script passed. This is
+not proof of a scene mismatch: the film contains the right guest and sequence.
+Slot 2's anchor was 1789957520126, dark mark 1789957535756, light mark
+1789957537920; confirm's epoch was 1789957587608. The film's dark/light edges
+were at 15.630/18.180 seconds. The first requested alert frame was at about
+67.67 seconds; the film's alert appearance was later. These readings came from
+recording run 96498-1789957517; the reviewed frame is retained on the Swift
+review page, but suite films and marks are overwritten by the next recorded
+run. Archive them before the next calibration experiment. The extraction
+records the film, marks and transcript needed for that measurement; do not
+publish step-named stills without viewing them. A timing correction and its
+independent alignment guard remain open.
+
+## BUG — Swift save's missing-handle branches retain the construction transaction (2026-09-20)
+KEY: save.swift, nothing open to save, nothing to reopen, construction transaction
+
+Code review during the async-dialog slice found that save.swift's synchronous
+save and reopen handlers ignore their current transaction argument and use the
+outer construction tx in the missing-handle branches. The existing transaction
+liveness wall should refuse those writes; this is not yet a measured runtime
+finding. The shared save scene opens both handles before exercising the buttons,
+so it does not reach either branch. Follow up with a counted old/new negative,
+the current handler transaction, and an all-binding missing-handle audit.
 
 ## INVESTIGATE — full-matrix host contention and Android startup ANR (2026-09-20)
 KEY: matrix host contention, Windows net ceiling, clipboard-jvm, startup FocusEvent, ANR history, system-events
@@ -2366,7 +2433,8 @@ The same
     spell the implicit transaction. Python's `await` form is the survey's
     one SEMANTICS finding and is not taken. APPROVED 2026-09-19: all seven
     recommendations in docs/async-dialogs-plan.md §5. C# depth passed the full
-    five-lane matrix on 2026-09-20; Swift, Java and Rust remain (§6).
+    five-lane matrix on 2026-09-20, followed by Swift the same day; Java and
+    Rust remain (§6).
   - ~~R2 ROW HANDLES IN PYTHON, the twin of JS's rule 3: `todo.done =
     checked` is the patch through `__setattr__`, refused by name on a
     typo; the other seven keep `patch`, stated as the carve-out where

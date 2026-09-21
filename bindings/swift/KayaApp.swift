@@ -335,7 +335,7 @@ public final class KayaDraw {
 /// An alert's three outcomes: the action the user pressed, by its slot,
 /// or the cancel every platform-native dismissal answers
 /// (DESIGN.md, Binding conventions — a closed vocabulary is a type).
-public enum KayaAlertChoice: UInt32 {
+public enum KayaAlertChoice: UInt32, Sendable {
     case action0 = 0
     case action1 = 1
     case cancel = 0xFFFF_FFFF
@@ -745,7 +745,7 @@ extension Double: KayaMenuIndex {}
 extension KayaSignal: KayaMenuIndex {}
 
 /// One representation of a clip (DESIGN.md, Clipboard).
-public enum KayaRepresentation {
+public enum KayaRepresentation: Sendable {
     case text(String)
     case html(String)
     /// Encoded image bytes. WHAT COMES BACK MAY BE A RE-ENCODE — the
@@ -1449,8 +1449,8 @@ public struct KayaClipReadRef {
     /// Send the request, returning its id.
     @discardableResult
     public func send() -> UInt64 {
-        if let onResult { tx.app.onClipboard(id, onResult) }
         tx.tx.readClipboard(id, .str(kayaAcceptList(accepting)))
+        tx.app.onClipboard(id, onResult)
         return id
     }
 }
@@ -2219,7 +2219,9 @@ public final class KayaApp {
     private var entryPopped: [UInt64: (KayaAppTx) throws -> Void] = [:]
     private var backRequested: [UInt64: (KayaAppTx) throws -> Void] = [:]
     private var sectionSelected: [UInt64: (KayaAppTx) throws -> Void] = [:]
-    private var alerts: [UInt64: (KayaAppTx, KayaAlertChoice) throws -> Void] = [:]
+    var alerts: [UInt64: (KayaAppTx, KayaAlertChoice) throws -> Void] = [:]
+    var liveAlert: UInt64 = 0
+    var liveFileDialog: UInt64 = 0
     // One-shot, keyed by the GUEST's notification id (the alert's
     // request/result grammar; many may be live at once).
     private var notifications: [UInt64: (KayaAppTx, KayaNotificationOutcome) throws -> Void] = [:]
@@ -2237,10 +2239,10 @@ public final class KayaApp {
     // waits here for one (submitIfAny drains it head-first). Module
     // scope, not private: tools/checks/swift-notify reads the bytes back.
     var pendingRoutes = KayaTx()
-    private var fileDialogs: [UInt64: (KayaAppTx, [KayaPickedFile]) throws -> Void] = [:]
+    var fileDialogs: [UInt64: (KayaAppTx, [KayaPickedFile]) throws -> Void] = [:]
     // Clipboard reads: one-shot, keyed by request id, on the alert's
     // request/result grammar.
-    private var clipboardReads: [UInt64: (KayaAppTx, KayaRepresentation?) throws -> Void] = [:]
+    var clipboardReads: [UInt64: (KayaAppTx, KayaRepresentation?) throws -> Void] = [:]
     // The rich mirror, one Document per `rich` textarea
     // (docs/rich-text-plan.md R1): folded from the two occurrences here
     // and from the app's own set_document/apply_edit as they are SENT.
@@ -2822,6 +2824,87 @@ public final class KayaApp {
         posted.append
     }
 
+    // docs/async-dialogs-plan.md section 2.1; tools/check-abort.py
+    @KayaAppActor public func task(
+        _ body: @escaping @KayaAppActor @Sendable () async throws -> Void
+    ) {
+        KayaApp.requireAppThread()
+        precondition(tplDepth == 0, "kaya: async work cannot be started inside a template body")
+        Task { @KayaAppActor in
+            requireAsyncBoundary()
+            do {
+                try await body()
+            } catch {
+                requireAsyncBoundary()
+                FileHandle.standardError.write(Data("\(error)\n".utf8))
+                FileHandle.standardError.write(Data((
+                    "kaya: async handler failed; no transaction was rolled back by this reporter; "
+                        + "completed transactions remain committed\n").utf8))
+            }
+        }
+    }
+
+    @KayaAppActor func requireAsyncBoundary() {
+        KayaApp.requireAppThread()
+        precondition(currentTx == nil, "kaya: async work cannot run inside a transaction")
+        precondition(tplDepth == 0, "kaya: async dialogs cannot be requested inside a template body")
+    }
+
+    @KayaAppActor private func requestAsync<T: Sendable>(
+        _ send: (KayaAppTx, @escaping (T) -> Void) -> Void
+    ) async -> T {
+        requireAsyncBoundary()
+        let answer: T = await withCheckedContinuation { continuation in
+            build { tx in send(tx, { continuation.resume(returning: $0) }) }
+        }
+        requireAsyncBoundary()
+        return answer
+    }
+
+    @KayaAppActor public func showAlert(
+        title: String = "", message: String = "",
+        actions: [String] = [], cancel: String, window: UInt64 = 0
+    ) async -> KayaAlertChoice {
+        await requestAsync { tx, resolve in
+            tx.showAlert(title: title, message: message, actions: actions,
+                         cancel: cancel, window: window) { _, choice in resolve(choice) }
+        }
+    }
+
+    @KayaAppActor public func pickFile(
+        filters: [(String, String)] = [], window: UInt64 = 0
+    ) async -> [KayaPickedFile] {
+        await requestAsync { tx, resolve in
+            tx.pickFile(filters: filters, window: window) { _, files in resolve(files) }
+        }
+    }
+
+    @KayaAppActor public func pickFiles(
+        filters: [(String, String)] = [], window: UInt64 = 0
+    ) async -> [KayaPickedFile] {
+        await requestAsync { tx, resolve in
+            tx.pickFiles(filters: filters, window: window) { _, files in resolve(files) }
+        }
+    }
+
+    @KayaAppActor public func saveFile(
+        suggestedName: String, filters: [(String, String)] = [], window: UInt64 = 0
+    ) async -> KayaPickedFile? {
+        await requestAsync { tx, resolve in
+            tx.saveFile(suggestedName: suggestedName, filters: filters, window: window) {
+                _, file in resolve(file)
+            }
+        }
+    }
+
+    @KayaAppActor public func readClipboard(accepting: [String] = []) async -> KayaRepresentation? {
+        await requestAsync { tx, resolve in
+            var request = tx.readClipboard()
+            for kind in accepting { request = request.custom(kind) }
+            request.onResult { _, clip in resolve(clip) }.send()
+        }
+    }
+
     /// Run everything posted, each as its own transaction, in order.
     @KayaAppActor private func drainPosted() {
         for body in posted.takeAll() {
@@ -2847,8 +2930,20 @@ public final class KayaApp {
 
     /// Bind the one-shot result handler to a request; the registration
     /// retires with the result.
-    func onAlert(_ alert: UInt64, _ handler: @escaping (KayaAppTx, KayaAlertChoice) throws -> Void) {
-        alerts[alert] = handler
+    func onAlert(_ alert: UInt64, _ handler: ((KayaAppTx, KayaAlertChoice) throws -> Void)?) {
+        liveAlert = alert
+        if let handler { alerts[alert] = handler }
+        currentTx!.rollbackActions.append { [self] in
+            alerts.removeValue(forKey: alert)
+            if liveAlert == alert { liveAlert = 0 }
+        }
+    }
+
+    func alertResult(_ id: UInt64, _ choice: KayaAlertChoice) {
+        if liveAlert == id { liveAlert = 0 }
+        if let handler = alerts.removeValue(forKey: id) {
+            dispatch { try build { tx in try handler(tx, choice) } }
+        }
     }
 
     /// Bind a notification's one-shot result handler; the registration
@@ -2929,15 +3024,23 @@ public final class KayaApp {
     }
 
     func allocAlert() -> UInt64 {
+        precondition(liveAlert == 0, "kaya: another alert is already live; wait for its result before showing the next")
         nextAlert += 1
         return nextAlert
     }
 
     /// Bind a clipboard read's one-shot result handler.
     func onClipboard(
-        _ request: UInt64, _ handler: @escaping (KayaAppTx, KayaRepresentation?) throws -> Void
+        _ request: UInt64, _ handler: ((KayaAppTx, KayaRepresentation?) throws -> Void)?
     ) {
-        clipboardReads[request] = handler
+        if let handler { clipboardReads[request] = handler }
+        currentTx!.rollbackActions.append { [self] in clipboardReads.removeValue(forKey: request) }
+    }
+
+    func clipboardResult(_ id: UInt64, _ answer: KayaRepresentation?) {
+        if let handler = clipboardReads.removeValue(forKey: id) {
+            dispatch { try build { tx in try handler(tx, answer) } }
+        }
     }
 
     func allocClipboardRead() -> UInt64 {
@@ -2990,12 +3093,25 @@ public final class KayaApp {
     /// Bind the picker's one-shot result handler; it retires with the
     /// result.
     func onFileDialog(
-        _ dialog: UInt64, _ handler: @escaping (KayaAppTx, [KayaPickedFile]) throws -> Void
+        _ dialog: UInt64, _ handler: ((KayaAppTx, [KayaPickedFile]) throws -> Void)?
     ) {
-        fileDialogs[dialog] = handler
+        liveFileDialog = dialog
+        if let handler { fileDialogs[dialog] = handler }
+        currentTx!.rollbackActions.append { [self] in
+            fileDialogs.removeValue(forKey: dialog)
+            if liveFileDialog == dialog { liveFileDialog = 0 }
+        }
+    }
+
+    func fileDialogResult(_ id: UInt64, _ files: [KayaPickedFile]) {
+        if liveFileDialog == id { liveFileDialog = 0 }
+        if let handler = fileDialogs.removeValue(forKey: id) {
+            dispatch { try build { tx in try handler(tx, files) } }
+        }
     }
 
     func allocFileDialog() -> UInt64 {
+        precondition(liveFileDialog == 0, "kaya: another file dialog is already live; wait for its result before showing the next")
         nextFileDialog += 1
         return nextFileDialog
     }
@@ -3246,11 +3362,7 @@ public final class KayaApp {
                     dispatch { try build(handler) }
                 }
             case (UInt16(KAYA_OCCURRENCE_ALERT_RESULT), _):
-                // One-shot: the registration retires with the result.
-                if let handler = alerts.removeValue(forKey: id) {
-                    let picked = KayaAlertChoice.fromWire(choice)
-                    dispatch { try build { tx in try handler(tx, picked) } }
-                }
+                alertResult(id, KayaAlertChoice.fromWire(choice))
             case (UInt16(KAYA_OCCURRENCE_LINK_OPENED), _):
                 // id is the ROUTE the core matched
                 // (docs/app-links-plan.md §4), and NOT one-shot.
@@ -3258,13 +3370,7 @@ public final class KayaApp {
             case (UInt16(KAYA_OCCURRENCE_NOTIFICATION_RESULT), _):
                 notificationResult(id, choice)
             case (UInt16(KAYA_OCCURRENCE_CLIPBOARD_RESULT), _):
-                // One-shot. EMPTY IS THE UNIVERSAL NO and arrives as
-                // nil — denied, unfocused, absent and nothing-we-accept
-                // alike, because no platform says which.
-                if let handler = clipboardReads.removeValue(forKey: id) {
-                    let answer = kayaRepresentation(clip)
-                    dispatch { try build { tx in try handler(tx, answer) } }
-                }
+                clipboardResult(id, kayaRepresentation(clip))
             // A paste rides a click tag verbatim: one record kind, the
             // key path deciding.
             case (UInt16(KAYA_OCCURRENCE_PASTED), true):
@@ -3300,11 +3406,7 @@ public final class KayaApp {
                     dispatch { try build { tx in try handler(tx, keys, answer) } }
                 }
             case (UInt16(KAYA_OCCURRENCE_FILE_DIALOG_RESULT), _):
-                // One-shot. EMPTY IS CANCEL — no platform can confirm an
-                // empty selection, so there is no sentinel to invent.
-                if let handler = fileDialogs.removeValue(forKey: id) {
-                    dispatch { try build { tx in try handler(tx, files) } }
-                }
+                fileDialogResult(id, files)
             // Menu occurrences key the menu-item tables — their own id
             // space, so neither widget nor node ids can collide with
             // them.
@@ -3500,6 +3602,7 @@ public final class KayaAppTx {
     var signalJournal: [UInt64: KayaValue?] = [:]
     var pendingSignalDeps: [(UInt64, (KayaAppTx) -> Void)] = []
     var pendingDerived: [(UInt64, (KayaAppTx) -> Void)] = []
+    var rollbackActions: [() -> Void] = []
 
     init(app: KayaApp) {
         self.app = app
@@ -3535,6 +3638,7 @@ public final class KayaAppTx {
     /// drop the records with the pending registrations.
     func rollback() {
         app.currentTx = nil
+        for action in rollbackActions.reversed() { action() }
         app.restoreModel(journal)
         for (id, old) in signalJournal {
             if let old {
@@ -4658,6 +4762,7 @@ public final class KayaAppTx {
         actions: [String] = [], cancel: String, window: UInt64 = 0,
         onResult: ((KayaAppTx, KayaAlertChoice) throws -> Void)? = nil
     ) -> UInt64 {
+        alive()
         precondition(
             actions.count <= 2,
             "kaya: an alert carries at most 2 actions (the platform floor)")
@@ -4665,11 +4770,11 @@ public final class KayaAppTx {
             !cancel.isEmpty,
             "kaya: the cancel slot always exists and needs a name")
         let id = app.allocAlert()
-        if let onResult { app.onAlert(id, onResult) }
         tx.showAlert(
             window, id, UInt32(actions.count), .str(title), .str(message),
             .str(actions.count >= 1 ? actions[0] : ""),
             .str(actions.count == 2 ? actions[1] : ""), .str(cancel))
+        app.onAlert(id, onResult)
         return id
     }
 
@@ -4727,9 +4832,10 @@ public final class KayaAppTx {
         multiple: Bool, filters: [(String, String)], window: UInt64,
         onResult: ((KayaAppTx, [KayaPickedFile]) throws -> Void)?
     ) -> UInt64 {
+        alive()
         let id = app.allocFileDialog()
-        if let onResult { app.onFileDialog(id, onResult) }
         tx.showFileDialog(window, id, multiple ? 1 : 0, kayaFilterValues(filters))
+        app.onFileDialog(id, onResult)
         return id
     }
 
@@ -4743,13 +4849,16 @@ public final class KayaAppTx {
         suggestedName: String, filters: [(String, String)] = [], window: UInt64 = 0,
         onResult: ((KayaAppTx, KayaPickedFile?) throws -> Void)? = nil
     ) -> UInt64 {
+        alive()
         let id = app.allocFileDialog()
+        tx.showSaveDialog(window, id, .str(suggestedName), kayaFilterValues(filters))
         if let onResult {
             // The save answer rides the picker's own result occurrence:
             // one id space, one live slot, one retire gate.
             app.onFileDialog(id) { tx, files in try onResult(tx, files.first) }
+        } else {
+            app.onFileDialog(id, nil)
         }
-        tx.showSaveDialog(window, id, .str(suggestedName), kayaFilterValues(filters))
         return id
     }
 

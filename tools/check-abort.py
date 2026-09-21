@@ -56,10 +56,10 @@ def step(name, argv, log, *, env=ENV, cwd=ROOT, echo=None):
                 print(f"check-abort: {name}: {line}")
 
 
-def probe_run(argv, timeout=10):
+def probe_run(argv, timeout=10, env=None):
     try:
         return subprocess.run(argv, cwd=ROOT, capture_output=True,
-                              text=True, encoding="utf-8", timeout=timeout, check=False)
+                              text=True, encoding="utf-8", timeout=timeout, env=env, check=False)
     except subprocess.TimeoutExpired as error:
         stdout = (error.stdout or b"").decode("utf-8", errors="replace")
         stderr = (error.stderr or b"").decode("utf-8", errors="replace")
@@ -186,6 +186,132 @@ with scratch_dir("check-abort-") as tmp:
             g.refuse(f"Swift executor {name} negative: rc={got.returncode}: "
                      f"{got.stdout}{got.stderr}")
         print(f"check-abort: Swift executor {name} negative refused by the runtime probe")
+
+    # docs/async-dialogs-plan.md section 2.1
+    async_probe = str(ROOT / "tools/checks/swift-async/main.swift")
+    async_sentence = (
+        "kaya: async handler failed; no transaction was rolled back by this reporter; "
+        "completed transactions remain committed")
+    async_refusals = {
+        "closed": "transaction is over",
+        "overlap-alert": "another alert is already live",
+        "overlap-file": "another file dialog is already live",
+        "overlap-save": "another file dialog is already live",
+        "async-overlap-alert": "another alert is already live",
+        "async-overlap-file": "another file dialog is already live",
+        "async-overlap-save": "another file dialog is already live",
+        "template": "async work cannot be started inside a template body",
+        "boundary": "async work cannot run inside a transaction",
+    }
+
+    def async_findings(got, mode):
+        if mode in async_refusals:
+            if got.returncode == 0 or async_refusals[mode] not in got.stderr:
+                return f"{mode}: missing named refusal {async_refusals[mode]}"
+        else:
+            if got.returncode != 0 or "swift-async: OK " not in got.stdout:
+                return f"{mode}: runtime probe failed or did not finish"
+            reports = 1 if mode in ("before", "outside", "inside") else 0
+            if got.stderr.count(async_sentence) != reports:
+                return f"{mode}: async reporter count mismatch"
+            if "transaction rolled back" in got.stderr:
+                return f"{mode}: async error reached the synchronous reporter"
+        return ""
+
+    async_binary = tmp / "swift-async"
+    step("swift-async-build", executor_compile + executor_sources + [
+        async_probe, "-o", str(async_binary)], tmp / "async-build.log")
+    for mode in ("requests", "rollback", "before", "outside", "inside", "caught", *async_refusals):
+        got = probe_run([str(async_binary), mode])
+        finding = async_findings(got, mode)
+        if finding:
+            g.refuse(f"Swift async {finding}: {got.stdout}{got.stderr}")
+        print(f"check-abort: Swift async {mode} passed")
+
+    async_shadow = tmp / "async-shadow"
+    shutil.copytree(ROOT / "bindings/swift", async_shadow)
+    async_source = async_shadow / "KayaApp.swift"
+    async_text = async_source.read_text(encoding="utf-8")
+    mutant = 'ProcessInfo.processInfo.environment["KAYA_SWIFT_ASYNC_MUTANT"]'
+    async_cuts = (
+        ("observer", "try await body()",
+         f'if {mutant} == "observer" {{ Task {{ try await body() }}; return }}\n'
+         '                try await body()', "outside", "async reporter count mismatch"),
+        ("boundary", 'precondition(currentTx == nil, '
+         '"kaya: async work cannot run inside a transaction")',
+         f'precondition({mutant} == "boundary" || currentTx == nil, '
+         '"kaya: async work cannot run inside a transaction")',
+         "boundary", "async: open transaction was accepted"),
+        ("alert", 'precondition(liveAlert == 0, "kaya: another alert is already live; '
+         'wait for its result before showing the next")',
+         f'precondition({mutant} == "alert" || liveAlert == 0, '
+         '"kaya: another alert is already live; wait for its result before showing the next")',
+         "overlap-alert", "async: overlapping alert was accepted"),
+        ("file", 'precondition(liveFileDialog == 0, "kaya: another file dialog is already live; '
+         'wait for its result before showing the next")',
+         f'precondition({mutant} == "file" || liveFileDialog == 0, '
+         '"kaya: another file dialog is already live; '
+         'wait for its result before showing the next")',
+         "overlap-file", "async: overlapping file dialog was accepted"),
+        ("retire-alert", 'if liveAlert == id { liveAlert = 0 }',
+         f'if liveAlert == id && {mutant} != "retire-alert" {{ liveAlert = 0 }}',
+         "requests", "async: alert did not retire"),
+        ("retire-file", 'if liveFileDialog == id { liveFileDialog = 0 }',
+         f'if liveFileDialog == id && {mutant} != "retire-file" {{ liveFileDialog = 0 }}',
+         "requests", "async: file dialog did not retire"),
+        ("retire-clipboard", 'if let handler = clipboardReads.removeValue(forKey: id) {',
+         f'if let handler = ({mutant} == "retire-clipboard" ? clipboardReads[id] : '
+         'clipboardReads.removeValue(forKey: id)) {',
+         "requests", "async: clipboard did not retire"),
+        ("rollback", 'for action in rollbackActions.reversed() { action() }',
+         f'if {mutant} != "rollback" {{ for action in rollbackActions.reversed() {{ action() }} }}',
+         "rollback", "async: rollback leaked alert"),
+        ("scope", 'app.signalMirrors[id] = old',
+         f'if {mutant} != "scope" {{ app.signalMirrors[id] = old }}',
+         "inside", "async: scope atomicity changed"),
+        ("template", 'precondition(tplDepth == 0, '
+         '"kaya: async work cannot be started inside a template body")',
+         f'precondition({mutant} == "template" || tplDepth == 0, '
+         '"kaya: async work cannot be started inside a template body")',
+         "template", "async: task in template was accepted"),
+    )
+    for name, before, after, _, _ in async_cuts:
+        if async_text.count(before) != 1:
+            g.refuse(f"Swift async {name} mutation is not unique")
+        async_text = g.doctor(f"Swift async {name}", async_text, re.escape(before), after)
+    async_source.write_text(async_text, encoding="utf-8")
+    mutant_binary = tmp / "swift-async-mutant"
+    step("swift-async-mutant-build", executor_compile +
+         sorted(map(str, async_shadow.glob("*.swift"))) + [async_probe, "-o", str(mutant_binary)],
+         tmp / "async-mutant-build.log")
+    for name, _, _, mode, expected in async_cuts:
+        got = probe_run([str(mutant_binary), mode], env=dict(ENV, KAYA_SWIFT_ASYNC_MUTANT=name))
+        finding = async_findings(got, mode)
+        if not finding or expected not in finding + got.stdout + got.stderr:
+            g.refuse(f"Swift async {name} mutation did not fail by {expected}: "
+                     f"{finding}\n{got.stdout}{got.stderr}")
+        print(f"check-abort: Swift async {name} mutation refused: {expected}")
+
+    async_compile_source = (
+        'KayaApp.run { app in app.task { _ = await app.showAlert(cancel: "keep") } }\n')
+    for name, before, after, expected in (
+        ("build-await", 'app.task { _ = await app.showAlert(cancel: "keep") }',
+         'app.build { _ in _ = await app.showAlert(cancel: "keep") }', "synchronous"),
+        ("handler-and-await", 'app.showAlert(cancel: "keep")',
+         'app.showAlert(cancel: "keep", onResult: { _, _ in })', "extra argument 'onResult'"),
+        ("actor", async_compile_source,
+         'func wrong(_ app: KayaApp) { app.task {} }\n', "global actor 'KayaAppActor'-isolated"),
+    ):
+        negative_dir = tmp / f"async-compile-{name}"
+        negative_dir.mkdir()
+        negative_main = negative_dir / "main.swift"
+        negative_main.write_text(g.doctor(f"Swift async compile {name}", async_compile_source,
+                                         re.escape(before), after), encoding="utf-8")
+        got = probe_run(executor_compile + executor_sources + [
+            str(negative_main), "-o", str(negative_dir / "probe")], timeout=60)
+        if got.returncode == 0 or expected not in got.stderr:
+            g.refuse(f"Swift async compile {name} was not refused by {expected}: {got.stderr}")
+        print(f"check-abort: Swift async compile {name} refused by {expected}")
 
     # THE PROCESS-LEVEL NOTIFICATION HANDLER'S DISPATCH ORDER
     # (docs/tasks-s9-plan.md R1, docs/deferred.md's S9 entry): the

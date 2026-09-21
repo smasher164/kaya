@@ -14,7 +14,8 @@ JS has the feature already (docs/js-plan.md §4, rule 2). This document says wha
 the same rule means in the other four, states each mechanism from zero before it
 uses it, and ends with the rulings and the order of work. Akhil approved all seven
 recommendations in §5 on 2026-09-19 ("go ahead"). The C# dialog APIs passed the
-full five-lane matrix on 2026-09-20; Swift, Java and Rust remain. The Swift executor prerequisite
+full five-lane matrix on 2026-09-20, followed by Swift the same day. Java and Rust
+remain. The Swift executor prerequisite
 has shipped (§2.1). Implementation follows §6.
 
 Every claim about a platform below was MEASURED with a small probe, not recalled;
@@ -114,6 +115,12 @@ kaya: async handler failed; no transaction was rolled back by this reporter; com
 It does not assert that suspension occurred or that a scope rolled back. A scope
 that threw already performed its own rollback before the reporter saw the error.
 Synchronous callbacks keep their existing rollback sentence.
+
+Task ownership clarified and approved 2026-09-20: Kaya reports errors escaping
+async work handed to Kaya. Independently created tasks and future chains remain
+their creator's responsibility. Swift's entry is app.task; a plain or nested raw
+Swift Task must have its error handled by the guest. The launcher does not open
+a transaction or acquire SwiftUI's view-lifetime cancellation semantics.
 
 JS keeps its ruled implicit continuation transaction and its existing failure
 sentence. Its language limit is stated in docs/js-plan.md §4: "nothing sees a
@@ -242,7 +249,7 @@ func askDelete() async {
     app.build { tx in tx.write(status, choice == .cancel ? "kept" : "deleted") }
 }
 …
-tx.button("delete", onClick: { _ in Task { await askDelete() } })
+tx.button("delete", onClick: { _ in app.task { await askDelete() } })
 ```
 
 `app.showAlert(…) async` opens its own transaction to send the request, suspends,
@@ -268,6 +275,19 @@ that executor; it does not need to migrate the interpreter with the guests.
 write through a closed transaction at its single chokepoint (the `tx` property), so
 a guest that keeps its `tx` across the await and writes through it is refused by
 the guard that already exists. §6 says what must be ADDED.
+
+**Task ownership approved 2026-09-20.** A plain Swift Task does not fulfill
+§1.4's failure-reporting promise when its
+body throws. Swift retains the error in the Task's result rather than throwing
+it from the executor's runSynchronously. A real-binding probe delivered an alert
+through the core, resumed on the right thread with no transaction, committed
+one explicit scope and threw: zero failure reports. Reading the task result or
+catching inside a task wrapper reported it once. Akhil approved app.task
+with an actor-isolated async throwing body, owned by the binding for reporting;
+raw Swift Tasks remain the guest's responsibility. This is an error-observation
+boundary, not an error store or a requirement for awaiting a dialog. Four
+observations and three counted negatives:
+docs/measurements/async-dialogs-swift-2026-09-20.md.
 
 ### 2.2 C# — a SynchronizationContext for the app thread
 
@@ -674,7 +694,7 @@ count printed — CLAUDE.md invariant 3):
 |---|---|---|
 | C# | guests/csharp/AbortCheck.cs | a write through a `Tx` captured across the await is refused; a second dialog while one is live throws at the show; a throw after the await rolls back only the scope it threw inside, scopes that returned stand; the four feasibility cases enter check-abort with watched mutations |
 | Java | tools/checks/java-abort/AbortCheck.java | the same scope and lifetime cases, plus a foreign-executor write refused by the thread check and completion inside an open transaction refused by the raw-job boundary |
-| Swift | tools/checks/swift-abort/main.swift | the same three, plus the continuation's thread id equalling the app thread's |
+| Swift | tools/checks/swift-async/main.swift | the same scope and lifetime cases, continuation thread identity, app.task's observer, callback rollback cleanup, result retirement, and compile refusals for async build bodies and off-actor entry |
 | Rust | crates/kaya/src/app.rs `compile_fail` doctests + unit tests | a `Tx` held across `.await` fails to COMPILE; an `.await` inside `apply` fails to compile; the loop resolves a future and runs its continuation on the app thread |
 | JS | bindings/js/kaya_app_checks.ts | already has the promise-resolution negative; add the second-dialog refusal so all five say one thing |
 

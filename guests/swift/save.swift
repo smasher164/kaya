@@ -92,8 +92,11 @@ KayaApp.run { app in
 
         let root = tx.column { root in
             tx.setA11yId(tx.label(bind: status), "status")  // label#0
-            tx.button("open") { inner in  // button#0
-                inner.pickFile(onResult: picked)
+            tx.button("open") { _ in
+                app.task {
+                    let files = await app.pickFile()
+                    app.build { tx in picked(tx, files) }
+                }
             }
             tx.button("save") { _ in  // button#1
                 // A missing handle gets its OWN sentence, never a crash: a crashed
@@ -104,9 +107,11 @@ KayaApp.run { app in
                 }
                 work { "saved \(writeBack(file, "second draft"))" }
             }
-            tx.button("save as") { inner in  // button#2
-                // The name the dialog OPENS with; the harness types over it.
-                inner.saveFile(suggestedName: "copy", onResult: saved)
+            tx.button("save as") { _ in
+                app.task {
+                    let file = await app.saveFile(suggestedName: "copy")
+                    app.build { tx in saved(tx, file) }
+                }
             }
             tx.button("reopen") { _ in  // button#3
                 // BOTH, in order: a save-as that wrote to the wrong handle passes

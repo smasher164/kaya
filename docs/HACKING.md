@@ -375,11 +375,15 @@ section to a branch of its lane's own collect.
 
 | lane | sections |
 |------|----------|
-| mac | leg-log, verb-trace, shot, desktop-shot, windows, windowserver, sampler, sample, unified-log |
+| mac | leg-log, verb-trace, shot, desktop-shot, windows, windowserver, sampler, sample, unified-log, power-history |
 | windows | leg-log, verb-trace, shot, desktop-shot, desktop, foreground, foreground-text |
 | ios | leg-log, verb-trace, shot, panic, app-log, devices |
 | android | leg-log, verb-trace, shot, logcat, devices, system-events, anr-history |
 | linux | leg-log, verb-trace, shot, desktop, xvfb |
+
+Mac's `power-history` keeps the newest 200 sleep, wake and display events from
+pmset, with their original timestamps. It is host history, not attribution to
+this leg. Compare it with the step clock when the sampler and watchdog disagree.
 
 Android's `system-events` keeps focus transfers, ANR notices and clipboard
 denials from the full saved logcat, not just its final 400 lines. `anr-history`

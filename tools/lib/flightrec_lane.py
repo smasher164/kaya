@@ -42,7 +42,7 @@ BUNDLE_CAP = int(os.environ.get("KAYA_FLIGHTREC_BUNDLE_CAP", "33554432"))
 # bundle that could not name the cause is the defect to fix).
 SECTIONS = {
     "mac": ("leg-log", "verb-trace", "shot", "desktop-shot", "windows",
-            "windowserver", "sampler", "sample", "unified-log"),
+            "windowserver", "sampler", "sample", "unified-log", "power-history"),
     "windows": ("leg-log", "verb-trace", "shot", "desktop-shot", "desktop",
                 "foreground", "foreground-text", "desktop-live", "notifications",
                 "toast-moment"),
@@ -51,6 +51,19 @@ SECTIONS = {
                 "system-events", "anr-history"),
     "linux": ("leg-log", "verb-trace", "shot", "desktop", "xvfb"),
 }
+
+
+def mac_power_history(text, code):
+    # docs/traps.md: a sleeping Mac's step clock outruns the recorder sampler.
+    heading = ("macOS power history, not current-leg attribution; compare timestamps "
+               "with leg-log.txt.\n")
+    if code:
+        return heading + f"power-history capture status {code}; no sleep verdict.\n{text}\n"
+    pattern = (r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} [+-]\d{4}\s+"
+               r"(?:Sleep|Wake|DarkWake)\s|Display is turned")
+    lines = [line for line in text.splitlines() if re.search(pattern, line)]
+    return (heading + f"Selected {len(lines)} event(s); newest 200 retained.\n"
+            + "\n".join(lines[-200:]) + "\n")
 
 
 def android_system_events(text):
@@ -1351,8 +1364,8 @@ class MacRecorder(LaneRecorder):
             self.skip(bundle, "shot",
                       f"flightrec: guest pid {pid} owned no on-screen "
                       f"window at failure and the sampler took none while "
-                      f"it lived — the leg failed faster than the "
-                      f"sampler's first shot. The window list beside this "
+                      f"it lived. This does not establish how long the "
+                      f"host was awake. The window list beside this "
                       f"file is what was there, and the desktop-shot "
                       f"section is its picture.")
         # THE DESKTOP IS THE ANSWER TO "THEN WHAT WAS ON SCREEN?" — the
@@ -1376,10 +1389,11 @@ class MacRecorder(LaneRecorder):
                               "no line at all — it never started, or the "
                               "leg was over before its first 2s turn")
         self.adopt(bundle, "sample", scratch / "sample.txt",
-                   why_absent="flightrec: no `sample` was taken — the leg "
-                              "ended before KAYA_FLIGHTREC_SAMPLE_AT "
-                              "(default 100s), which is the only moment the "
-                              "guest is both alive and worth a stack")
+                   why_absent="flightrec: no stack sample was recorded. "
+                              "The sampler log gives its observed turns; "
+                              "power-history records sleep/wake events. "
+                              "A missing sample does not establish the "
+                              "leg's elapsed duration.")
         self.adopt(bundle, "verb-trace", scratch / "verb-trace.txt",
                    why_absent="flightrec: the guest wrote no verb trace. "
                               "The ring is dumped by the harness on a FAILED "
@@ -1428,6 +1442,16 @@ class MacRecorder(LaneRecorder):
             "--predicate",
             'process CONTAINS "kaya" OR senderImagePath CONTAINS '
             '"kaya" OR eventMessage CONTAINS "kaya"'])
+        try:
+            power = subprocess.run(["pmset", "-g", "log"], stdout=subprocess.PIPE,
+                                   stderr=subprocess.STDOUT, text=True, encoding="utf-8",
+                                   errors="replace", timeout=10, check=False)
+            power_text, power_code = power.stdout, power.returncode
+        except subprocess.TimeoutExpired:
+            power_text, power_code = "pmset exceeded its 10-second deadline", 124
+        except OSError as error:
+            power_text, power_code = str(error), 1
+        self._text_section(bundle, "power-history", mac_power_history(power_text, power_code))
         self.finish(bundle, out=out)
 
     def mac_leg(self, leg, verdict, secs, log, scratch, out=None):

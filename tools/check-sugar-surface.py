@@ -8228,7 +8228,7 @@ for _lang, (_rel, _s, _e, _inherit, _cut1, _idspace, _cut2) in \
 print("check-sugar-surface: catalog-seat rows watched (applied/named): "
       + " ".join(_catalog_watched), file=sys.stderr)
 
-# docs/async-dialogs-plan.md section 6: C# depth; Swift, Java and Rust follow.
+# docs/async-dialogs-plan.md section 6
 ASYNC_CS_PARTS = {
     "alert": r"public Task<AlertChoice> ShowAlertAsync\(",
     "pick": r"public Task<List<PickedFile>> PickFileAsync\(",
@@ -8267,6 +8267,46 @@ for _name, _pattern in ASYNC_CS_PARTS.items():
           file=sys.stderr)
 if "awaitable census below five" not in async_cs_findings(""):
     selftest_exit("check-sugar-surface: C# async empty reader did not refuse")
+
+ASYNC_SWIFT_PARTS = {
+    "alert": r"@KayaAppActor public func showAlert\([^{}]*\) async -> KayaAlertChoice",
+    "pick": r"@KayaAppActor public func pickFile\([^{}]*\) async -> \[KayaPickedFile\]",
+    "picks": r"@KayaAppActor public func pickFiles\([^{}]*\) async -> \[KayaPickedFile\]",
+    "save": r"@KayaAppActor public func saveFile\([^{}]*\) async -> KayaPickedFile\?",
+    "clipboard": r"@KayaAppActor public func readClipboard\([^{}]*\) async -> KayaRepresentation\?",
+    "task": (r"@KayaAppActor public func task\(\s*_ body: @escaping @KayaAppActor "
+             r"@Sendable \(\) async throws -> Void"),
+    "observer": r"Task \{ @KayaAppActor in\s*requireAsyncBoundary\(\)\s*do \{\s*try await body\(\)",
+    "request": r"@KayaAppActor private func requestAsync<T: Sendable>\(",
+    "result-boundary": r"requireAsyncBoundary\(\)\s*return answer",
+    "alert-result": r"alertResult\(id, KayaAlertChoice.fromWire\(choice\)\)",
+    "file-result": r"fileDialogResult\(id, files\)",
+    "clipboard-result": r"clipboardResult\(id, kayaRepresentation\(clip\)\)",
+}
+
+
+def async_swift_findings(text):
+    code = _c_like(text)
+    missing = [name for name, pattern in ASYNC_SWIFT_PARTS.items()
+               if re.search(pattern, code) is None]
+    if len(re.findall(r"@KayaAppActor public func \w+\([^{}]*\) async ->", code)) < 5:
+        missing.append("awaitable census below five")
+    return missing
+
+
+_async_swift = read_rel("bindings/swift/KayaApp.swift")
+for _missing in async_swift_findings(_async_swift):
+    print(f"check-sugar-surface: Swift async dialogs missing {_missing}", file=sys.stderr)
+    status = 1
+for _name, _pattern in ASYNC_SWIFT_PARTS.items():
+    _doctored, _n = sub_count(_pattern, "", _async_swift)
+    if _n != 1 or _name not in async_swift_findings(_doctored):
+        selftest_exit(f"check-sugar-surface: Swift async {_name} negative failed: "
+                      f"{_n} substitution(s)")
+    print(f"check-sugar-surface: Swift async {_name}: {_n} substitution(s), named refusal",
+          file=sys.stderr)
+if "awaitable census below five" not in async_swift_findings(""):
+    selftest_exit("check-sugar-surface: Swift async empty reader did not refuse")
 
 check_scene_sugar()
 

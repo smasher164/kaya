@@ -4,6 +4,67 @@ Each of these cost a debugging session (or would have). Most now have a
 structural guard; the guard is named where it exists. Do not re-derive
 these the hard way.
 
+## An exclusive-leg rename changed ffprobe's log level (2026-09-20)
+
+The iOS review recording stopped before any guest with "dark fiducial never
+rendered", base 175. Both recording probes passed ffprobe -v exclusive, left
+by commit 39877ccf's quiet-to-exclusive rename. ffprobe exited 1 naming the
+invalid log level, but out_of discarded stderr and the caller invented the
+175 baseline. The screen-transition diagnosis was about a measurement that
+never happened.
+
+The probes use error level and refuse a failed command or nonnumeric luma,
+including the measured command/error output. No guessed baseline remains.
+A real white PNG and white-to-black movie now exercise both production readers
+in check-flightrec. This also exposed the movie selector dropping frame zero,
+so its first selected transition had no prior frame to compare. The selector
+now retains frame zero. Four watched mutations restore the invalid log level
+(two substitutions), swallow command status, invent luma, or drop frame zero
+(one each). No simulator is required for this guard.
+
+The first complete recording after the probe fix reset stale simulator
+recording sessions. That also killed all four resident XCTest drivers. Ordinary
+legs revived their own driver, but the proof ran first without one and the idle
+iPad's dead driver reddened the final census. Recovery now stops drivers before
+resetting CoreSimulatorService, then launches and joins the whole pool before
+retrying recording. Three counted cuts run that real branch with stubbed
+platform calls and refuse missing stop, launch or join. The proof's bundle and
+saved xcodebuild log identified the interrupted connection and exit 65.
+
+## A sleeping Mac's step clock outruns the recorder sampler (2026-09-20)
+
+The Swift filedialog hand leg entered expect_file_dialog at +706ms and its
+watchdog fired 121.7 seconds later. Its sampler recorded only t=0 and stopped
+at t=2, because that counter counts completed two-second waits, not wall time.
+The trace saw a visible panel with loginwindow foreground; the failure window
+list carried Display 1 Shield and the desktop capture was black. pmset recorded
+sleep at 18:52:44 and dark wake at 18:54:47, a 123-second sleep across the leg.
+The same source passed the picker scene in two seconds on the unlocked Mac.
+
+Do not infer a fast exit from a missing sampler stack or shot. Those skip
+sentences now state only what was recorded. Failed Mac bundles carry the newest
+200 sleep/wake/display events as power-history, through a ten-second bounded
+pmset read; compare timestamps, not an assumed current-leg attribution.
+check-flightrec holds its wiring, event selection, newest retention, status and
+attribution with six counted negatives. GUI runs need an unlocked session and
+open lid; a scoped caffeinate -di prevents idle sleep, not lid-close sleep.
+
+## A Swift Task's throw does not escape its executor job (measured 2026-09-20)
+
+The async-dialog plan showed a plain Task launched from a click handler and
+promised Kaya's shared async-failure report. The real binding probe resumed
+an alert continuation on the correct app thread, committed an explicit build,
+then threw. The task unwound, but no failure report appeared. A second task
+awaiting its result received the error; a task wrapper catching its body
+reported it once. runSynchronously on UnownedJob has no throwing result for
+the serial executor to catch. It schedules the work, not its error policy.
+
+Do not claim an executor guarantees async failure reporting. The task owner
+must catch or observe the error. Four observations and three counted negatives
+are in docs/measurements/async-dialogs-swift-2026-09-20.md. Akhil approved the
+app.task entry in docs/async-dialogs-plan.md §2.1 on 2026-09-20; it passed the
+full five-lane matrix that day. Raw tasks remain guest-owned.
+
 ## Android's ANR dialog took the clipboard leg's focus
 
 Measured 2026-09-20: clipboard-jvm's first paste succeeded, then its second

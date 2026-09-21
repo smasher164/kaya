@@ -43,6 +43,9 @@ dev_shell_or_die()
 
 import ast
 import re
+import subprocess
+import tempfile
+import types
 
 gate = Gate("check-flightrec")
 
@@ -587,6 +590,94 @@ def census_android_history(src):
     return found
 
 
+def ios_recording_recovery(src):
+    tree = ast.parse(py_block(src[IOS], "rec_suite_start"))
+    branches = [node for node in ast.walk(tree) if isinstance(node, ast.If)
+                and ast.unparse(node.test) == "wedged and (not retry)"]
+    if len(branches) != 1:
+        return ["ios: cannot locate one recording recovery branch"]
+    branch = branches[0]
+    if not isinstance(branch.body[-1], ast.Return):
+        return ["ios: recording recovery no longer returns after retry"]
+    calls = []
+    scope = {"REC_PIDS": [], "UDIDS": ["phone"], "subprocess": subprocess,
+             "time": types.SimpleNamespace(sleep=lambda _: None),
+             "xcuidrive_stop_all": lambda: calls.append("stop drivers"),
+             "run": lambda *a, **kw: calls.append("reset service"),
+             "boot_pool": lambda: calls.append("boot pool"),
+             "xcuidrive_launch_all": lambda: calls.append("launch drivers"),
+             "xcuidrive_join": lambda: calls.append("join drivers"),
+             "rec_suite_start": lambda **kw: calls.append("retry recording")}
+    exec(compile(ast.Module(body=branch.body[:-1], type_ignores=[]), IOS, "exec"), scope)
+    expected = ["stop drivers", "reset service", "boot pool", "launch drivers",
+                "join drivers", "retry recording"]
+    return [] if calls == expected else [f"ios: recording recovery driver lifecycle {calls}"]
+
+
+def ios_recording_checks(src, png, film):
+    def refuse(message):
+        raise RuntimeError(message)
+    scope = {"subprocess": subprocess, "die": refuse,
+             "TEXT": {"text": True, "encoding": "utf-8", "errors": "replace"}}
+    for name in ("_recording_probe", "_luma_of", "_film_edge_ms"):
+        exec(compile(py_block(src[IOS], name), IOS, "exec"), scope)
+    found = []
+    for name, args, expected in (("_luma_of", (png,), 255),
+                                 ("_film_edge_ms", (film, True), 1000)):
+        try:
+            answer = scope[name](*args)
+            if answer != expected:
+                found.append(f"ios: recording {name} read {answer}, wanted {expected}")
+        except RuntimeError as error:
+            found.append(f"ios: recording {name} failed: {error}")
+    try:
+        scope["_luma_of"](png.parent / "missing.png")
+        found.append("ios: recording probe accepted a missing image")
+    except RuntimeError as error:
+        if "exited" not in str(error) or "missing.png" not in str(error):
+            found.append("ios: recording probe hid the command failure")
+    scope["_recording_probe"] = lambda _: "not a number"
+    try:
+        scope["_luma_of"](png)
+        found.append("ios: recording probe invented a luma")
+    except RuntimeError as error:
+        if "no numeric luma" not in str(error):
+            found.append("ios: recording probe lost the malformed output")
+    return found
+
+
+def mac_power_checks(src, echo=False):
+    scope = {"re": re}
+    exec(compile(py_block(src[LANE_PY], "mac_power_history"), LANE_PY, "exec"), scope)
+    render = scope["mac_power_history"]
+    found = []
+    capture = py_block(src[LANE_PY], "MacRecorder")
+    if ('["pmset", "-g", "log"]' not in capture
+            or 'mac_power_history(power_text, power_code)' not in capture
+            or "power-history" not in declared(src).get("mac", ())):
+        found.append("mac: power capture no longer reads and renders pmset history")
+    events = [f"2026-09-20 18:52:44 -0700 Sleep event-{n:03d}" for n in range(201)]
+    events += ["2026-09-20 18:54:47 -0700 DarkWake event-newest",
+               "2026-09-20 18:54:48 -0700 Wake event-awake",
+               "2026-09-20 18:54:49 -0700 Notification Display is turned on"]
+    noise = "2026-09-20 18:54:47 -0700 Kernel Client Acks: Sleep unrelated noise"
+    said = render("\n".join([*events, noise]), 0)
+    if (any(line not in said for line in events[-200:]) or "event-000" in said
+            or "unrelated noise" in said or "Selected 204 event(s)" not in said):
+        found.append("mac: power history lost newest events or retained unrelated noise")
+    if "not current-leg attribution" not in said:
+        found.append("mac: power history claimed current-leg attribution")
+    for code, text, expected in ((0, "noise", "Selected 0 event(s)"),
+                                 (1, "permission denied", "power-history capture status 1"),
+                                 (124, "deadline", "power-history capture status 124")):
+        answer = render(text, code)
+        if expected not in answer or (code and text not in answer):
+            found.append("mac: power diagnostic lost its measured result")
+        if echo:
+            print(f"check-flightrec: Mac power: {answer.strip()}")
+    return found
+
+
 def android_report_checks(src, echo=False):
     scope = {"re": re}
     for name in ("android_system_events", "android_anr_history"):
@@ -658,6 +749,10 @@ for label, fn in CENSUSES:
         gate.finding(line, at=label)
 for line in android_report_checks(REAL, echo=True):
     gate.finding(line, at="Android report renderers")
+for line in mac_power_checks(REAL, echo=True):
+    gate.finding(line, at="Mac power history")
+for line in ios_recording_recovery(REAL):
+    gate.finding(line, at="iOS recording recovery")
 
 
 def doctored(rel, pattern, repl, label, *, flags=re.M, want=1):
@@ -868,6 +963,55 @@ for label, before, after, want in (
     gate.negative(f"Android {label} report corrupted",
                   lambda: android_report_checks(changed), want=want)
 
-gate.negatives_ran(32)
+power_cut = doctored(LANE_PY, r'self\._text_section\(bundle, "power-history",',
+                     'self._text_section(bundle, "lost-history",', "Mac power section cut")
+gate.negative("Mac power section unwritten", lambda: census_sections(power_cut),
+              want="`power-history` is declared")
+for label, before, after, want in (
+        ("capture", "mac_power_history(power_text, power_code)", "power_text",
+         "no longer reads and renders"),
+        ("newest", "lines[-200:]", "lines[:200]", "lost newest events"),
+        ("filter", "(?:Sleep|Wake|DarkWake)", "(?:Gone|Wake|DarkWake)", "lost newest events"),
+        ("status", "if code:", "if False:", "diagnostic lost its measured result"),
+        ("attribution", "not current-leg attribution", "current-leg attribution",
+         "claimed current-leg attribution")):
+    changed = doctored(LANE_PY, re.escape(before), after, f"Mac power {label} mutation")
+    gate.negative(f"Mac power {label} corrupted", lambda: mac_power_checks(changed), want=want)
+
+with tempfile.TemporaryDirectory(prefix="kaya-record-probe-") as directory:
+    record_dir = pathlib.Path(directory)
+    film = record_dir / "edge.mp4"
+    png = record_dir / "white.png"
+    subprocess.run([
+        "ffmpeg", "-nostdin", "-v", "error", "-f", "lavfi", "-i",
+        "color=white:s=16x16:r=10:d=1", "-f", "lavfi", "-i",
+        "color=black:s=16x16:r=10:d=1", "-filter_complex",
+        "[0:v][1:v]concat=n=2:v=1:a=0", "-c:v", "libx264", str(film)], check=True)
+    subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-i", str(film),
+                    "-frames:v", "1", str(png)], check=True)
+    for finding in ios_recording_checks(REAL, png, film):
+        gate.finding(finding, at="iOS recording")
+    for label, before, after, count, want in (
+            ("log level", '"ffprobe", "-v", "error"',
+             '"ffprobe", "-v", "exclusive"', 2, "Invalid loglevel"),
+            ("exit status", "if got.returncode:\n", "if False:\n", 1,
+             "hid the command failure"),
+            ("guessed luma", 'die(f"recording: ffprobe returned no numeric luma '
+             'for {png}: {got!r}")', "return 175", 1, "invented a luma"),
+            ("first frame", "eq(n\\\\,0)+", "", 1, "read None")):
+        changed = doctored(IOS, re.escape(before), after,
+                           f"iOS recording {label}", want=count)
+        gate.negative(f"iOS recording {label} corrupted",
+                      lambda: ios_recording_checks(changed, png, film), want=want)
+
+for call in ("xcuidrive_stop_all()", "xcuidrive_launch_all()", "xcuidrive_join()"):
+    changed = dict(REAL)
+    body = py_block(REAL[IOS], "rec_suite_start")
+    cut = gate.doctor(f"iOS recording recovery {call}", body, re.escape(call), "pass", want=1)
+    changed[IOS] = REAL[IOS].replace(body, cut, 1)
+    gate.negative(f"iOS recording recovery without {call}",
+                  lambda: ios_recording_recovery(changed), want="driver lifecycle")
+
+gate.negatives_ran(45)
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

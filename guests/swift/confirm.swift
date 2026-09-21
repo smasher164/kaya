@@ -12,28 +12,30 @@ KayaApp.run { app in
             tx.label(bind: status)  // label#0
             tx.button(
                 "delete",
-                onClick: { inner in
-                    inner.showAlert(
-                        title: "delete item?", message: "this cannot be undone",
-                        actions: ["Delete", "Archive"], cancel: "Keep"
-                    ) { tx, choice in
+                onClick: { _ in
+                    app.task {
+                        let choice = await app.showAlert(
+                            title: "delete item?", message: "this cannot be undone",
+                            actions: ["Delete", "Archive"], cancel: "Keep")
                         let text =
                             switch choice {
                             case .action0: "deleted"
                             case .action1: "archived"
                             case .cancel: "kept"
                             }
-                        tx.write(status, .str(text))
+                        app.build { tx in tx.write(status, .str(text)) }
                     }
                 })
             tx.button(
                 "eject",
-                onClick: { inner in
-                    inner.showAlert(
-                        title: "eject disk?", message: "it is still mounted",
-                        actions: ["Eject"], cancel: "Hold"
-                    ) { tx, choice in
-                        tx.write(status, .str(choice == .action0 ? "ejected" : "held"))
+                onClick: { _ in
+                    app.task {
+                        let choice = await app.showAlert(
+                            title: "eject disk?", message: "it is still mounted",
+                            actions: ["Eject"], cancel: "Hold")
+                        app.build { tx in
+                            tx.write(status, .str(choice == .action0 ? "ejected" : "held"))
+                        }
                     }
                 })
             return root

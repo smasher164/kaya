@@ -122,23 +122,35 @@ KayaApp.run { app in
                 })
             tx.button(
                 "read custom",
-                onClick: { inner in  // button#1
-                    inner.readClipboard().custom(noteID).onResult(answered).send()
+                onClick: { _ in
+                    app.task {
+                        let clip = await app.readClipboard(accepting: [noteID])
+                        try app.build { tx in try answered(tx, clip) }
+                    }
                 })
             tx.button(
                 "read text",
-                onClick: { inner in  // button#2
-                    inner.readClipboard().text().onResult(answered).send()
+                onClick: { _ in
+                    app.task {
+                        let clip = await app.readClipboard(accepting: ["text"])
+                        try app.build { tx in try answered(tx, clip) }
+                    }
                 })
             tx.button(
                 "read image",
-                onClick: { inner in  // button#3
-                    inner.readClipboard().image().onResult(answered).send()
+                onClick: { _ in
+                    app.task {
+                        let clip = await app.readClipboard(accepting: ["image"])
+                        try app.build { tx in try answered(tx, clip) }
+                    }
                 })
             tx.button(
                 "read files",
-                onClick: { inner in  // button#4
-                    inner.readClipboard().files().onResult(answered).send()
+                onClick: { _ in
+                    app.task {
+                        let clip = await app.readClipboard(accepting: ["files"])
+                        try app.build { tx in try answered(tx, clip) }
+                    }
                 })
             tx.button(
                 "focus rich",

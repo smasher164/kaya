@@ -527,12 +527,26 @@ L_MARKS = {}
 REC_DIRS = {}
 
 
+def _recording_probe(argv):
+    # docs/traps.md: an exclusive-leg rename changed ffprobe's log level.
+    try:
+        got = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             timeout=15, check=False, **TEXT)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        die(f"recording: {argv!r} could not finish: {error}")
+    if got.returncode:
+        die(f"recording: {argv!r} exited {got.returncode}: {got.stderr.strip()}")
+    return got.stdout
+
+
 def _luma_of(png):
-    got = out_of(["ffprobe", "-v", "exclusive", "-f", "lavfi",
+    got = _recording_probe(["ffprobe", "-v", "error", "-f", "lavfi",
                   f"movie={png},signalstats", "-show_entries",
                   "frame_tags=lavfi.signalstats.YAVG", "-of", "csv=p=0"])
     first = got.splitlines()[0] if got.splitlines() else ""
-    return int(first.split(".")[0]) if first.split(".")[0].isdigit() else None
+    if not first.split(".")[0].isdigit():
+        die(f"recording: ffprobe returned no numeric luma for {png}: {got!r}")
+    return int(first.split(".")[0])
 
 
 def _await_flip(udid, base, down, rec_i):
@@ -585,6 +599,7 @@ def rec_suite_start(retry=False):
         # A killed prior run orphans host-side recording sessions.
         print("recording: stale simctl sessions; resetting "
               "CoreSimulatorService and retrying")
+        xcuidrive_stop_all()
         for p in REC_PIDS:
             p.kill()
         run(["killall", "-9",
@@ -593,6 +608,8 @@ def rec_suite_start(retry=False):
         time.sleep(3)
         UDIDS.clear()
         boot_pool()
+        xcuidrive_launch_all()
+        xcuidrive_join()
         rec_suite_start(retry=True)
         return
     if wedged:
@@ -621,7 +638,7 @@ def rec_suite_start(retry=False):
     for i, udid in enumerate(UDIDS):
         run(["xcrun", "simctl", "io", udid, "screenshot", str(probe)],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        base = _luma_of(probe) or 175
+        base = _luma_of(probe)
         run(["xcrun", "simctl", "ui", udid, "appearance", "dark"])
         if not _await_flip(udid, base, down=True, rec_i=i):
             sys.exit(1)
@@ -635,7 +652,7 @@ def rec_suite_start(retry=False):
     for i, udid in enumerate(UDIDS):
         run(["xcrun", "simctl", "io", udid, "screenshot", str(probe)],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        base = _luma_of(probe) or 107
+        base = _luma_of(probe)
         run(["xcrun", "simctl", "ui", udid, "appearance", "light"])
         if not _await_flip(udid, base, down=False, rec_i=i):
             sys.exit(1)
@@ -649,8 +666,8 @@ def rec_suite_start(retry=False):
 def _film_edge_ms(movie, down):
     """The first frame whose average luma steps by 25 in the wanted
     direction; its presentation time in ms is the fiducial edge."""
-    got = out_of(["ffprobe", "-v", "exclusive", "-f", "lavfi",
-                  f"movie={movie},select=gt(scene\\,0.3),signalstats",
+    got = _recording_probe(["ffprobe", "-v", "error", "-f", "lavfi",
+                  f"movie={movie},select=eq(n\\,0)+gt(scene\\,0.3),signalstats",
                   "-show_entries",
                   "frame=pts_time:frame_tags=lavfi.signalstats.YAVG",
                   "-of", "csv=p=0"])
