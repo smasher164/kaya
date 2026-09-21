@@ -9,6 +9,28 @@ Landed history lives in git; this file only carries what is still open.
 scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
+## BUILD — sheets: the root-hosting modal (design pass approved 2026-09-21)
+KEY: sheet, present_sheet, dismiss_sheet, sheet_dismissed, dismiss_requested, intercept_dismiss, detent, SHEET_PROPS, expect_sheets, expect_sheet, expect_sheet_detent, AdwDialog, ModalBottomSheet, presentationDetents, Popup, sheetprobe, quick-add sheet
+
+The maintainer picked sheets from the roadmap (2026-09-21, "sheets is a good
+next step") and approved docs/sheet-plan.md whole after asking for the
+complete surface rather than a staged one ("there are no users for kaya, so
+we can get the whole thing working"): a sheet is a third surface kind in the
+id space windows and entries share, presented by mounting a root into it,
+dismissed through the one cancel slot with the back-veto class transplanted
+(`intercept_dismiss`, `dismiss_requested`), chained (a sheet's parent is any
+surface, one child per parent), with `detent` honored by the phones and
+stating nothing on the desktops, `title` as the accessible name, and no
+result value. The three unknowns were measured before any arm
+(docs/measurements/sheet-probes-2026-09-21.md): GNOME's AdwDialog chains and
+Esc reaches the topmost, `can-close` is the veto; SwiftUI's macOS sheet
+dismisses on Esc by itself, chains topmost-first, and
+`interactiveDismissDisabled` makes Esc inert; WinUI refuses a second
+ContentDialog (`0x80000019`) while a Popup takes both an alert and a child
+sheet, so the Windows sheet is a modal Popup. Depth on the mac next (spec,
+core, SwiftUI, Rust, `sheet.steps`, gates), then breadth and the task
+manager's quick-add sheet (S6) on all five lanes.
+
 ## ~~BUILD — R1 async dialogs: explicit-transaction amendment approved (2026-09-19)~~ COMPLETE 2026-09-21: C#, Swift, Java and Rust awaitable tiers, explicit transaction scopes and honest task-error ownership are implemented; JS overlap and cleanup guards agree. Final Rust slice passed 644 core tests, 25 doctests (one ignored), 61 gates and all five matrix lanes: Mac 477, Linux 777, Windows 283, iOS 139, Android 148 in 1072 seconds, every timing ceiling held
 KEY: async dialogs, R1.4, R1.5, async void, SynchronizationContext, continuation rollback, explicit Build, Swift Task, app.task, task error ownership, Java CompletionStage, app.observe, Rust local future, Tx across await, poll boundary, scope-only, private begin, Go carve-out
 

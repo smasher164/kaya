@@ -1,0 +1,39 @@
+diff --git a/crates/kaya/Cargo.toml b/crates/kaya/Cargo.toml
+index fffdef0d..57107a83 100644
+--- a/crates/kaya/Cargo.toml
++++ b/crates/kaya/Cargo.toml
+@@ -373,6 +373,11 @@ path = "../../guests/rust/commands.rs"
+ name = "a11y"
+ path = "../../guests/rust/a11y.rs"
+ 
++# TEMPORARY: the throwaway sheet-probe guest (docs/sheet-plan.md U1) — revert.
++[[example]]
++name = "sheetprobe"
++path = "../../tools/win/sheetprobe/guest.rs"
++
+ [[example]]
+ name = "a11yrows"
+ path = "../../guests/rust/a11yrows.rs"
+diff --git a/crates/kaya/src/winui/mod.rs b/crates/kaya/src/winui/mod.rs
+index 55e5f27f..3f53f389 100644
+--- a/crates/kaya/src/winui/mod.rs
++++ b/crates/kaya/src/winui/mod.rs
+@@ -8,6 +8,9 @@
+     clippy::all
+ )]
+ mod bindings;
++// TEMPORARY probe hook (docs/sheet-plan.md U1) — revert.
++#[path = "../../../../tools/win/sheetprobe/probe.rs"]
++mod sheetprobe;
+ mod order;
+ 
+ use order::{track_of, ChildOrder};
+@@ -17246,6 +17249,8 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
+ 
+     // The first transaction may already be queued; drain now.
+     drain_transactions();
++    // TEMPORARY probe hook (docs/sheet-plan.md U1) — revert.
++    sheetprobe::maybe_spawn();
+     Ok(())
+ }
+ 
