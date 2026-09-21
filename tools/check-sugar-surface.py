@@ -8420,6 +8420,17 @@ ASYNC_CARVEOUTS = {
                 ["showAlert", "pickFile", "pickFiles", "saveFile", "readClipboard"],
                 r"(?m)^{name} :: [^\n]*", "-> IO ()) -> Build ()",
                 r"(?m)^{name}(?:Async|Future)\s*::", "{name}Future :: Future ()\n"),
+    # Go's callback sits on the ref its show constructor returns, so the
+    # signature spans from the constructor to that ref's OnResult (ruled a
+    # carve-out 2026-09-21, docs/async-dialogs-plan.md §3).
+    "Go": ("bindings/go/app.go",
+           ["ShowAlert", "PickFile", "PickFiles", "SaveFile", "ReadClipboard"],
+           r"(?ms)^func \(tx \*Tx\) {name}\([^)]*\) (\w+Ref) \{{.*?^func \(r \1\) OnResult\(",
+           "OnResult(",
+           r"(?m)^func \(tx \*Tx\) {name}(?:Async|Chan|Await|Future)\b"
+           r"|^func \(r \w+Ref\) (?:Wait|Await|Chan|Future)\(",
+           # app.go ends without a newline, so the plant opens its own line.
+           "\nfunc (tx *Tx) {name}Chan() {{}}\n"),
 }
 
 

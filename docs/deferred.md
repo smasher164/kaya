@@ -10,7 +10,12 @@ scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
 ## ~~BUILD — R1 async dialogs: explicit-transaction amendment approved (2026-09-19)~~ COMPLETE 2026-09-21: C#, Swift, Java and Rust awaitable tiers, explicit transaction scopes and honest task-error ownership are implemented; JS overlap and cleanup guards agree. Final Rust slice passed 644 core tests, 25 doctests (one ignored), 61 gates and all five matrix lanes: Mac 477, Linux 777, Windows 283, iOS 139, Android 148 in 1072 seconds, every timing ceiling held
-KEY: async dialogs, R1.4, R1.5, async void, SynchronizationContext, continuation rollback, explicit Build, Swift Task, app.task, task error ownership, Java CompletionStage, app.observe, Rust local future, Tx across await, poll boundary, scope-only, private begin
+KEY: async dialogs, R1.4, R1.5, async void, SynchronizationContext, continuation rollback, explicit Build, Swift Task, app.task, task error ownership, Java CompletionStage, app.observe, Rust local future, Tx across await, poll boundary, scope-only, private begin, Go carve-out
+
+GO RULED 2026-09-21 (the maintainer, "option a is the move"): Go joins Python,
+Haskell and OCaml in the callback-only carve-out rather than gaining a channel
+tier; the plan's §3 carries the reasons and check-sugar-surface reads Go's five
+dialogs by name, cut and planted like the other three.
 
 Akhil approved the seven recommendations in docs/async-dialogs-plan.md §5.
 C# feasibility against the real binding found that its proposed context

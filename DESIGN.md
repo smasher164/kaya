@@ -528,9 +528,10 @@ transaction. Java completes futures in raw app-thread jobs outside result
 dispatch, since completing inside a transaction runs thenAccept inside it too.
 JS retains its ruled implicit continuation transaction and its documented
 limit: writes before a continuation throws stand. Synchronous callback abort
-semantics remain unchanged in all nine. Python, Haskell and OCaml retain the
-approved callback-only runtime carve-out; a new Go concurrency surface is
-deferred, not part of the four additions. All nine verdicts and the shared
+semantics remain unchanged in all nine. Python, Haskell, OCaml and Go retain the
+approved callback-only runtime carve-out (Go ruled 2026-09-21: no `await`, and a
+channel form would resume off the app thread and come back through Post, the
+callback in disguise; docs/async-dialogs-plan.md §3). All nine verdicts and the shared
 failure sentence live in the plan and its C# feasibility measurement.
 The ownership rule was clarified 2026-09-20: Kaya reports errors escaping async
 work handed to it, not arbitrary tasks or future chains created by the guest.

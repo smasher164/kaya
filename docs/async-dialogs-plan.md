@@ -560,7 +560,7 @@ Mac 477, Linux 777, Windows 283, iOS 139 and Android 148 legs, plus 61 gates,
 in 1072 seconds with every timing ceiling held. Runtime behavior is exercised,
 not inferred from the original compiler measurement.
 
-## §3 THE CARVE-OUT: Python, Haskell and OCaml keep the callback
+## §3 THE CARVE-OUT: Python, Haskell, OCaml and Go keep the callback
 
 Stated in the shape DESIGN.md uses for JS's implicit transaction, and for the same
 reason the row-handle rule states its own carve-out:
@@ -587,7 +587,18 @@ loop kaya does not own, which is a different observable semantics, not a differe
 spelling. Invariant 1 forbids that. Recorded in docs/deferred.md's idiom entry as
 "not taken".
 
-The three carve-out bindings must be held to NOT growing an async form later by
+**Go joined the carve-out by ruling on 2026-09-21** (the maintainer, "option a is
+the move", after DESIGN.md had carried it as deferred). Go has no `await`; its
+own idiom for waiting on a result is a goroutine reading a channel, and a
+goroutine cannot be resumed on a particular thread, so any channel form would
+hand its continuation back through `app.Post` — the callback in disguise, with a
+goroutine per question. The one shape where a channel reads better, a chain of
+dialogs, has no consumer in the tree; if one arrives, the channel-plus-Post tier
+is the measured slice to take, since Post already gives it the route back. Until
+then `ShowAlert().OnResult(func(*Tx, AlertChoice))` and its four siblings are the
+form, and the gate reads Go's five by name like the other three.
+
+The four carve-out bindings must be held to NOT growing an async form later by
 accident — see §6's gate clause, which reads them by name.
 
 ## §4 THE SCENES: the future form changes none of them
