@@ -10,7 +10,7 @@ scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
 ## BUILD — R1 async dialogs: explicit-transaction amendment approved (2026-09-19)
-KEY: async dialogs, R1.4, R1.5, async void, SynchronizationContext, continuation rollback, explicit Build, Swift Task, app.task, task error ownership, Java CompletionStage, app.observe
+KEY: async dialogs, R1.4, R1.5, async void, SynchronizationContext, continuation rollback, explicit Build, Swift Task, app.task, task error ownership, Java CompletionStage, app.observe, Rust local future, Tx across await, poll boundary
 
 Akhil approved the seven recommendations in docs/async-dialogs-plan.md §5.
 C# feasibility against the real binding found that its proposed context
@@ -130,6 +130,17 @@ docs/reviews/async-dialogs-java-2026-09-20/README.md. Recording review also fixe
 Android's invalid ffprobe option and missing recording-failure evidence, and
 Windows' lost recording tile identity; nine counted negatives and a native
 forced-red readback hold the recorder changes (docs/traps.md). Rust remains.
+
+RUST GUARD MEASUREMENT 2026-09-20, AWAITING A RULING: a local future holds the
+real Tx across an await and compiles. Requiring Send refuses both that case
+and the valid explicit-scope control because AppCtx is not Sync. Await inside
+apply is independently refused with E0728. Five compiler cases and four counted
+mutations: docs/measurements/async-dialogs-rust-2026-09-20.md. Recommended:
+replace the plan's retained-Tx compiler refusal with a runtime poll-boundary
+refusal, discard the offending task before any other work, and verify its
+transaction cleanup; completed scopes still stand. That guard is not approved,
+implemented or runtime-tested. Rust future ownership and dialog resolution
+remain to be measured after this decision. Java is already committed and pushed.
 
 ## INVESTIGATE — iOS recording's step-named frames lead their stated scene state (2026-09-20)
 KEY: iOS recording, fiducial timestamp, step-named frames, confirm-swift, anchor-2

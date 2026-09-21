@@ -4,6 +4,18 @@ Each of these cost a debugging session (or would have). Most now have a
 structural guard; the guard is named where it exists. Do not re-derive
 these the hard way.
 
+## A non-Send Rust transaction can cross an await in a local future (2026-09-20)
+
+The real kaya Tx compiled across pending().await and was committed afterwards
+inside a future accepted without Send. Adding Send rejected both that future
+and the valid explicit-apply-scope control, because &AppCtx is not Send when
+AppCtx is not Sync. Await inside apply's synchronous closure was independently
+refused with E0728. Five compiler cases and four counted mutations are in
+docs/measurements/async-dialogs-rust-2026-09-20.md. This disproves the async
+plan's retained-Tx compiler-guard assumption, not its explicit-scope semantics.
+A runtime poll-boundary guard is proposed and awaits a ruling; no executor or
+rollback behavior was exercised by this compile-only measurement.
+
 ## A Java dialog future does not observe a later stage's error (2026-09-20)
 
 The real Java binding's result dispatch completed a probe future successfully;

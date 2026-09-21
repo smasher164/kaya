@@ -445,6 +445,13 @@ loop is what makes "one handler, one batch" true.
 
 ### 2.4 Rust — the app loop IS the executor, with no runtime
 
+**Guard correction awaiting a ruling, 2026-09-20.** The real binding permits
+a local future to hold Tx across an await. Requiring Send also rejects the
+valid explicit-scope future's access to AppCtx. Five compiler cases and four
+counted mutations are in docs/measurements/async-dialogs-rust-2026-09-20.md.
+The recommendation is an executor poll-boundary refusal for an open transaction;
+await inside apply remains a compiler error. No Rust implementation has started.
+
 **From zero.** Rust's `async` has no runtime in the standard library. An `async
 fn` compiles to a value implementing `Future`, which does nothing until something
 POLLS it. Polling hands the future a `Waker`; if the future is not ready it stores
@@ -522,10 +529,11 @@ transaction and registers the binding's internal one-shot handler as the resolve
   `async` functions and blocks"), so the boundary is a type, not a convention;
 - NEVER around `msgs.next(&ctx)`, which is the loop itself.
 
-**The guard.** Rust's is the only tier where the wrong spelling is a COMPILE error
-rather than a runtime refusal, and the binding should keep it that way: the
-`compile_fail` doctests in crates/kaya/src/app.rs are the home for "a `Tx` held
-across an `.await`" and "an `.await` inside `apply`".
+**The guard.** Await inside apply is a compiler error and belongs in a
+compile_fail doctest. Retaining a Tx across an await in a local future is NOT
+a compiler error on today's binding. The proposed executor runtime refusal
+above replaces that mistaken claim only if approved, with rollback and cleanup
+proved on the real polling path before it is trusted.
 
 ## §3 THE CARVE-OUT: Python, Haskell and OCaml keep the callback
 
@@ -707,7 +715,7 @@ count printed — CLAUDE.md invariant 3):
 | C# | guests/csharp/AbortCheck.cs | a write through a `Tx` captured across the await is refused; a second dialog while one is live throws at the show; a throw after the await rolls back only the scope it threw inside, scopes that returned stand; the four feasibility cases enter check-abort with watched mutations |
 | Java | tools/checks/java-async/dev/kaya/AsyncCheck.java | the same scope and lifetime cases, final-stage observation, foreign-thread writes refused, completion inside an open transaction refused, raw-loop wake, callback cleanup and callback/future compile refusals |
 | Swift | tools/checks/swift-async/main.swift | the same scope and lifetime cases, continuation thread identity, app.task's observer, callback rollback cleanup, result retirement, and compile refusals for async build bodies and off-actor entry |
-| Rust | crates/kaya/src/app.rs `compile_fail` doctests + unit tests | a `Tx` held across `.await` fails to COMPILE; an `.await` inside `apply` fails to compile; the loop resolves a future and runs its continuation on the app thread |
+| Rust | crates/kaya/src/app.rs `compile_fail` doctests + unit tests | await inside apply fails to compile; the loop resolves a future on the app thread; a retained Tx currently compiles, with a runtime poll-boundary refusal and cleanup proof proposed in §2.4 and awaiting approval |
 | JS | bindings/js/kaya_app_checks.ts | already has the promise-resolution negative; add the second-dialog refusal so all five say one thing |
 
 And the four scenes (§4) re-run unchanged on every lane, which is the whole point:
