@@ -54,15 +54,17 @@ public final class FileDialog {
             tx.mount(tx.column(col -> {
                 tx.label(status).a11yId("status"); // label#0
                 tx.button("open", inner -> // button#0
-                        inner.pickFiles()
+                        app.observe(inner.pickFiles()
                                 .filter("Text", "txt")
-                                .onResult((t, files) -> picked(app, status, release, t, files))
-                                .show());
+                                .showFuture().thenAccept(files -> app.build(t -> {
+                                    picked(app, status, release, t, files);
+                                }))));
                 tx.button("open one", inner -> // button#1
-                        inner.pickFile()
+                        app.observe(inner.pickFile()
                                 .filter("Text", "txt")
-                                .onResult((t, files) -> picked(app, status, release, t, files))
-                                .show());
+                                .showFuture().thenAccept(files -> app.build(t -> {
+                                    picked(app, status, release, t, files);
+                                }))));
                 tx.button("release", inner -> release.countDown()); // button#2
             }));
         });

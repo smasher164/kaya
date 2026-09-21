@@ -9,6 +9,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
@@ -24,6 +26,9 @@ public final class KayaApp {
     // is app-thread-only by construction.
     private final Object postLock = new Object();
     private List<Consumer<Tx>> posted = new ArrayList<>();
+    private List<Runnable> asyncJobs = new ArrayList<>();
+    int transactionDepth;
+    long liveAlert, liveFileDialog;
 
     /** One App per process; see the constructor. */
     private static final java.util.concurrent.atomic.AtomicBoolean BUILT =
@@ -728,7 +733,7 @@ public final class KayaApp {
     /** The alert chain: accumulates the one atomic SHOW_ALERT record and
      * sends it at show(). A chain that never calls show() sends
      * nothing. */
-    public static final class AlertRef {
+    public static class AlertRef {
         private final Tx tx;
         private final KayaApp app;
         private final long id;
@@ -738,6 +743,7 @@ public final class KayaApp {
         private final java.util.ArrayList<String> actions = new java.util.ArrayList<>();
         private String cancel = "";
         private BiConsumer<Tx, AlertChoice> onResult;
+        private boolean sent;
 
         AlertRef(Tx tx, KayaApp app, long id) {
             this.tx = tx;
@@ -784,6 +790,15 @@ public final class KayaApp {
         }
 
         public long show() {
+            return send(onResult);
+        }
+
+        private long send(BiConsumer<Tx, AlertChoice> handler) {
+            tx.alive();
+            if (sent) throw new IllegalStateException("kaya: this alert request was already sent");
+            if (app.liveAlert != 0) {
+                throw new IllegalStateException("kaya: another alert is already live; wait for its result before showing the next");
+            }
             if (cancel.isEmpty()) {
                 throw new IllegalStateException(
                         "kaya: the cancel slot always exists and needs a name — "
@@ -791,14 +806,33 @@ public final class KayaApp {
             }
             String action0 = actions.size() >= 1 ? actions.get(0) : "";
             String action1 = actions.size() == 2 ? actions.get(1) : "";
-            if (onResult != null) {
-                app.alerts.put(id, onResult);
-            }
             tx.emit(KayaWire.txShowAlert(
                     window, id, actions.size(), title, message,
                     action0, action1, cancel));
+            sent = true;
+            app.liveAlert = id;
+            if (handler != null) app.alerts.put(id, handler);
+            tx.rollbackActions.add(() -> {
+                app.alerts.remove(id);
+                if (app.liveAlert == id) app.liveAlert = 0;
+            });
             return id;
         }
+
+        private CompletableFuture<AlertChoice> future() {
+            if (onResult != null) throw new IllegalStateException("kaya: choose a callback or a future, not both");
+            return app.requestFuture(tx, resolve -> send((t, answer) -> resolve.accept(answer)));
+        }
+    }
+
+    public static final class FutureAlertRef extends AlertRef {
+        FutureAlertRef(Tx tx, KayaApp app, long id) { super(tx, app, id); }
+        @Override public FutureAlertRef inWindow(long window) { super.inWindow(window); return this; }
+        @Override public FutureAlertRef title(String title) { super.title(title); return this; }
+        @Override public FutureAlertRef message(String message) { super.message(message); return this; }
+        @Override public FutureAlertRef action(String action) { super.action(action); return this; }
+        @Override public FutureAlertRef cancel(String cancel) { super.cancel(cancel); return this; }
+        public CompletableFuture<AlertChoice> showFuture() { return super.future(); }
     }
 
     /** The notification chain (docs/tasks-s3-plan.md N1, N2): the
@@ -1408,7 +1442,7 @@ public final class KayaApp {
 
     /** Accumulates the one atomic SHOW_FILE_DIALOG record; nothing is
      * sent until show (a request has a send moment). */
-    public static final class FileDialogRef {
+    public static class FileDialogRef {
         private final Tx tx;
         private final KayaApp app;
         private final long id;
@@ -1416,6 +1450,7 @@ public final class KayaApp {
         private long window;
         private final java.util.List<Object> filters = new java.util.ArrayList<>();
         private BiConsumer<Tx, java.util.List<PickedFile>> onResult;
+        private boolean sent;
 
         FileDialogRef(Tx tx, KayaApp app, long id, boolean multiple) {
             this.tx = tx;
@@ -1446,13 +1481,33 @@ public final class KayaApp {
         }
 
         public long show() {
-            if (onResult != null) {
-                app.fileDialogs.put(id, onResult);
-            }
+            return send(onResult);
+        }
+
+        private long send(BiConsumer<Tx, java.util.List<PickedFile>> handler) {
+            tx.alive();
+            if (sent) throw new IllegalStateException("kaya: this file request was already sent");
+            app.requireFileSlot();
             tx.emit(KayaWire.txShowFileDialog(
                     window, id, multiple ? 1 : 0, filters.toArray()));
+            sent = true;
+            app.registerFileDialog(tx, id, handler);
             return id;
         }
+
+        private CompletableFuture<java.util.List<PickedFile>> future() {
+            if (onResult != null) throw new IllegalStateException("kaya: choose a callback or a future, not both");
+            return app.requestFuture(tx, resolve -> send((t, answer) -> resolve.accept(answer)));
+        }
+    }
+
+    public static final class FutureFileDialogRef extends FileDialogRef {
+        FutureFileDialogRef(Tx tx, KayaApp app, long id, boolean multiple) { super(tx, app, id, multiple); }
+        @Override public FutureFileDialogRef in(long window) { super.in(window); return this; }
+        @Override public FutureFileDialogRef filter(String label, String extensions) {
+            super.filter(label, extensions); return this;
+        }
+        public CompletableFuture<java.util.List<PickedFile>> showFuture() { return super.future(); }
     }
 
     /** Accumulates the one atomic SHOW_SAVE_DIALOG record; nothing is
@@ -1462,7 +1517,7 @@ public final class KayaApp {
      * back as a file_dialog_result and one dialog of either kind is live
      * per process. The narrowing to at-most-one file happens HERE rather
      * than in every app. */
-    public static final class SaveDialogRef {
+    public static class SaveDialogRef {
         private final Tx tx;
         private final KayaApp app;
         private final long id;
@@ -1470,6 +1525,7 @@ public final class KayaApp {
         private long window;
         private final java.util.List<Object> filters = new java.util.ArrayList<>();
         private BiConsumer<Tx, PickedFile> onResult;
+        private boolean sent;
 
         SaveDialogRef(Tx tx, KayaApp app, long id, String suggestedName) {
             this.tx = tx;
@@ -1501,15 +1557,34 @@ public final class KayaApp {
         }
 
         public long show() {
-            if (onResult != null) {
-                BiConsumer<Tx, PickedFile> handler = onResult;
-                app.fileDialogs.put(id, (t, files) ->
-                        handler.accept(t, files.isEmpty() ? null : files.get(0)));
-            }
+            return send(onResult);
+        }
+
+        private long send(BiConsumer<Tx, PickedFile> handler) {
+            tx.alive();
+            if (sent) throw new IllegalStateException("kaya: this save request was already sent");
+            app.requireFileSlot();
             tx.emit(KayaWire.txShowSaveDialog(
                     window, id, suggestedName, filters.toArray()));
+            sent = true;
+            app.registerFileDialog(tx, id, handler == null ? null : (t, files) ->
+                    handler.accept(t, files.isEmpty() ? null : files.get(0)));
             return id;
         }
+
+        private CompletableFuture<PickedFile> future() {
+            if (onResult != null) throw new IllegalStateException("kaya: choose a callback or a future, not both");
+            return app.requestFuture(tx, resolve -> send((t, answer) -> resolve.accept(answer)));
+        }
+    }
+
+    public static final class FutureSaveDialogRef extends SaveDialogRef {
+        FutureSaveDialogRef(Tx tx, KayaApp app, long id, String name) { super(tx, app, id, name); }
+        @Override public FutureSaveDialogRef in(long window) { super.in(window); return this; }
+        @Override public FutureSaveDialogRef filter(String label, String extensions) {
+            super.filter(label, extensions); return this;
+        }
+        public CompletableFuture<PickedFile> showFuture() { return super.future(); }
     }
 
     /** The copy chain: a clip record under construction. Each method
@@ -1806,12 +1881,13 @@ public final class KayaApp {
 
     /** The read chain: which representations this read can use, and the
      * request id its one answer arrives under. */
-    public static final class ClipReadRef {
+    public static class ClipReadRef {
         private final Tx tx;
         private final KayaApp app;
         private final long id;
         private final java.util.List<String> accepting = new java.util.ArrayList<>();
         private BiConsumer<Tx, Representation> onResult;
+        private boolean sent;
 
         ClipReadRef(Tx tx, KayaApp app, long id) {
             this.tx = tx;
@@ -1856,13 +1932,34 @@ public final class KayaApp {
         }
 
         public long send() {
-            if (onResult != null) {
-                app.clipboardReads.put(id, onResult);
-            }
+            return send(onResult);
+        }
+
+        private long send(BiConsumer<Tx, Representation> handler) {
+            tx.alive();
+            if (sent) throw new IllegalStateException("kaya: this clipboard request was already sent");
             tx.emit(KayaWire.txReadClipboard(
                     id, acceptList(accepting.toArray(new String[0]))));
+            sent = true;
+            if (handler != null) app.clipboardReads.put(id, handler);
+            tx.rollbackActions.add(() -> app.clipboardReads.remove(id));
             return id;
         }
+
+        private CompletableFuture<Representation> future() {
+            if (onResult != null) throw new IllegalStateException("kaya: choose a callback or a future, not both");
+            return app.requestFuture(tx, resolve -> send((t, answer) -> resolve.accept(answer)));
+        }
+    }
+
+    public static final class FutureClipReadRef extends ClipReadRef {
+        FutureClipReadRef(Tx tx, KayaApp app, long id) { super(tx, app, id); }
+        @Override public FutureClipReadRef text() { super.text(); return this; }
+        @Override public FutureClipReadRef html() { super.html(); return this; }
+        @Override public FutureClipReadRef image() { super.image(); return this; }
+        @Override public FutureClipReadRef files() { super.files(); return this; }
+        @Override public FutureClipReadRef custom(String kind) { super.custom(kind); return this; }
+        public CompletableFuture<Representation> sendFuture() { return super.future(); }
     }
 
     /** A window's advisory sections presentation — guest-chosen, never
@@ -4274,6 +4371,7 @@ public final class KayaApp {
          * loudly, not append into an orphaned record list.
          */
         boolean closed;
+        final List<Runnable> rollbackActions = new ArrayList<>();
 
         private final List<byte[]> records = new ArrayList<>();
 
@@ -4423,6 +4521,7 @@ public final class KayaApp {
         }
 
         void rollback() {
+            for (int i = rollbackActions.size() - 1; i >= 0; i--) rollbackActions.get(i).run();
             openTraces = 0;
             // App state, not tx state: an aborted build is abandoned
             // but the app continues, and a stuck counter would poison
@@ -5812,8 +5911,8 @@ public final class KayaApp {
          * Up to two actions (the platform floor); the cancel label is
          * required. One alert may be live per process.
          */
-        public AlertRef showAlert() {
-            return new AlertRef(this, KayaApp.this, ++nextAlert);
+        public FutureAlertRef showAlert() {
+            return new FutureAlertRef(this, KayaApp.this, ++nextAlert);
         }
 
         /**
@@ -5843,14 +5942,14 @@ public final class KayaApp {
          * THE EMPTY LIST. One dialog may be live per process; show the
          * next from the handler.
          */
-        public FileDialogRef pickFiles() {
-            return new FileDialogRef(this, KayaApp.this, ++nextFileDialog, true);
+        public FutureFileDialogRef pickFiles() {
+            return new FutureFileDialogRef(this, KayaApp.this, ++nextFileDialog, true);
         }
 
         /** The single-file spelling: the floor always returns a LIST,
          * this only asks the platform for one. */
-        public FileDialogRef pickFile() {
-            return new FileDialogRef(this, KayaApp.this, ++nextFileDialog, false);
+        public FutureFileDialogRef pickFile() {
+            return new FutureFileDialogRef(this, KayaApp.this, ++nextFileDialog, false);
         }
 
         /**
@@ -5860,8 +5959,8 @@ public final class KayaApp {
          * GOT, and on the phones read the file through the handle. WHAT
          * YOU GET BACK OPENS EMPTY — the handle's open CREATES (D1).
          */
-        public SaveDialogRef saveFile(String suggestedName) {
-            return new SaveDialogRef(
+        public FutureSaveDialogRef saveFile(String suggestedName) {
+            return new FutureSaveDialogRef(
                     this, KayaApp.this, ++nextFileDialog, suggestedName);
         }
 
@@ -5879,8 +5978,8 @@ public final class KayaApp {
          * delivers no offer to an unfocused client. NEVER IMPLEMENT
          * PASTE WITH THIS — that is the Paste command, and it is
          * free. */
-        public ClipReadRef readClipboard() {
-            return new ClipReadRef(this, KayaApp.this, ++nextClipboardRead);
+        public FutureClipReadRef readClipboard() {
+            return new FutureClipReadRef(this, KayaApp.this, ++nextClipboardRead);
         }
 
         /** Declare what a widget takes from a paste. */
@@ -7153,6 +7252,7 @@ public final class KayaApp {
     public <R> R build(java.util.function.Function<Tx, R> build) {
         requireAppThread();
         Tx tx = new Tx();
+        transactionDepth++;
         R out;
         try {
             out = build.apply(tx);
@@ -7163,6 +7263,7 @@ public final class KayaApp {
             // Marks the transaction over on either exit path, so late
             // construction chains (Widget.grow) die loudly.
             tx.closed = true;
+            transactionDepth--;
         }
         tx.submitIfAny();
         return out;
@@ -8010,6 +8111,101 @@ public final class KayaApp {
         }
     }
 
+    // docs/async-dialogs-plan.md section 2.3; tools/check-abort.py
+    public void observe(CompletionStage<?> finalStage) {
+        requireAppThread();
+        if (tplDepth != 0) throw new IllegalStateException("kaya: async work cannot be observed inside a template body");
+        java.util.Objects.requireNonNull(finalStage, "kaya: observe needs a final stage");
+        finalStage.whenComplete((value, error) -> {
+            if (error != null) queueAsync(() -> reportAsync(error));
+        });
+    }
+
+    void requireAsyncBoundary() {
+        requireAppThread();
+        if (transactionDepth != 0 || tplDepth != 0) {
+            throw new IllegalStateException("kaya: async work cannot run inside a transaction or template body");
+        }
+    }
+
+    private static void reportAsync(Throwable failure) {
+        while (failure instanceof java.util.concurrent.CompletionException && failure.getCause() != null) {
+            failure = failure.getCause();
+        }
+        if (failure instanceof Error fatal) throw fatal;
+        failure.printStackTrace(System.err);
+        System.err.println("kaya: async handler failed; no transaction was rolled back by this reporter; completed transactions remain committed");
+    }
+
+    private void queueAsync(Runnable job) {
+        synchronized (postLock) {
+            asyncJobs.add(job);
+        }
+        KayaRing.wake();
+    }
+
+    void drainAsync() {
+        requireAsyncBoundary();
+        List<Runnable> batch;
+        synchronized (postLock) {
+            batch = asyncJobs;
+            asyncJobs = new ArrayList<>();
+        }
+        for (Runnable job : batch) {
+            requireAsyncBoundary();
+            try {
+                job.run();
+            } catch (RuntimeException failure) {
+                reportAsync(failure);
+            }
+        }
+    }
+
+    private <T> CompletableFuture<T> requestFuture(Tx tx, Consumer<Consumer<T>> send) {
+        tx.alive();
+        if (tplDepth != 0) throw new IllegalStateException("kaya: async dialogs cannot be requested inside a template body");
+        CompletableFuture<T> answer = new CompletableFuture<>();
+        send.accept(value -> queueAsync(() -> {
+            requireAsyncBoundary();
+            answer.complete(value);
+        }));
+        tx.rollbackActions.add(() -> queueAsync(() -> answer.completeExceptionally(
+                new IllegalStateException("kaya: dialog request transaction aborted"))));
+        return answer;
+    }
+
+    private void requireFileSlot() {
+        if (liveFileDialog != 0) {
+            throw new IllegalStateException("kaya: another file dialog is already live; wait for its result before showing the next");
+        }
+    }
+
+    private void registerFileDialog(Tx tx, long id, BiConsumer<Tx, List<PickedFile>> handler) {
+        liveFileDialog = id;
+        if (handler != null) fileDialogs.put(id, handler);
+        tx.rollbackActions.add(() -> {
+            fileDialogs.remove(id);
+            if (liveFileDialog == id) liveFileDialog = 0;
+        });
+    }
+
+    void alertResult(long id, AlertChoice choice) {
+        if (liveAlert == id) liveAlert = 0;
+        BiConsumer<Tx, AlertChoice> handler = alerts.remove(id);
+        if (handler != null) dispatch(tx -> handler.accept(tx, choice));
+    }
+
+    void fileDialogResult(long id, List<PickedFile> files) {
+        if (liveFileDialog == id) liveFileDialog = 0;
+        BiConsumer<Tx, List<PickedFile>> handler = fileDialogs.remove(id);
+        if (handler != null) dispatch(tx -> handler.accept(tx, files));
+    }
+
+    void clipboardResult(long id, Representation clip) {
+        BiConsumer<Tx, Representation> handler = clipboardReads.remove(id);
+        if (handler != null) dispatch(tx -> handler.accept(tx, clip));
+    }
+
     /**
      * One handler dispatch: an exception crosses the build boundary
      * (which rolled the model back and dropped the records), is logged,
@@ -8036,6 +8232,7 @@ public final class KayaApp {
             // the TOP is what makes a wake sufficient: whatever brought
             // this thread back, it looks here before anywhere else.
             drainPosted();
+            drainAsync();
             int t = (int) GET_INT.invokeExact(tailAddr);
             LOAD_FENCE.invokeExact(); // acquire: record reads stay below the tail load
             if (h == t) {
@@ -8249,12 +8446,7 @@ public final class KayaApp {
                     dispatch(handler);
                 }
             } else if (occ.kind == KayaWire.OCC_KIND_ALERT_RESULT) {
-                // One-shot: the registration retires with the result.
-                BiConsumer<Tx, AlertChoice> handler = alerts.remove(occ.id);
-                if (handler != null) {
-                    AlertChoice choice = AlertChoice.fromWire((Integer) occ.payload);
-                    dispatch(tx -> handler.accept(tx, choice));
-                }
+                alertResult(occ.id, AlertChoice.fromWire((Integer) occ.payload));
             } else if (occ.kind == KayaWire.OCC_KIND_LINK_OPENED) {
                 // occ.id is the ROUTE the core matched
                 // (docs/app-links-plan.md §4), and NOT one-shot.
@@ -8262,29 +8454,11 @@ public final class KayaApp {
             } else if (occ.kind == KayaWire.OCC_KIND_NOTIFICATION_RESULT) {
                 notificationResult(occ.id, (Integer) occ.payload);
             } else if (occ.kind == KayaWire.OCC_KIND_FILE_DIALOG_RESULT) {
-                // One-shot like the alert, and the id retires with it.
-                // EMPTY IS CANCEL. A SAVE DIALOG ANSWERS HERE TOO,
-                // through the same table and id space (docs/save-plan.md
-                // D2): its handler was wrapped at show() to take the one
-                // destination out of the list.
-                BiConsumer<Tx, java.util.List<PickedFile>> handler =
-                        fileDialogs.remove(occ.id);
-                if (handler != null) {
-                    @SuppressWarnings("unchecked")
-                    java.util.List<PickedFile> files =
-                            (java.util.List<PickedFile>) occ.payload;
-                    dispatch(tx -> handler.accept(tx, files));
-                }
+                @SuppressWarnings("unchecked")
+                List<PickedFile> files = (List<PickedFile>) occ.payload;
+                fileDialogResult(occ.id, files);
             } else if (occ.kind == KayaWire.OCC_KIND_CLIPBOARD_RESULT) {
-                // One-shot like the alert, and the request retires with
-                // it. EMPTY IS THE UNIVERSAL NO and arrives as null —
-                // denied, unfocused, absent and nothing-we-accept
-                // alike, because no platform says which.
-                BiConsumer<Tx, Representation> handler = clipboardReads.remove(occ.id);
-                if (handler != null) {
-                    Representation clip = representation(occ.payload);
-                    dispatch(tx -> handler.accept(tx, clip));
-                }
+                clipboardResult(occ.id, representation(occ.payload));
             } else if (occ.kind == KayaWire.OCC_KIND_PASTED && occ.keys.isEmpty()) {
                 // A paste rides a click tag verbatim, so it arrives on
                 // the ordinary widget/node split. Never empty: a paste

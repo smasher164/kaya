@@ -4,7 +4,52 @@ Each of these cost a debugging session (or would have). Most now have a
 structural guard; the guard is named where it exists. Do not re-derive
 these the hard way.
 
+## A Java dialog future does not observe a later stage's error (2026-09-20)
+
+The real Java binding's result dispatch completed a probe future successfully;
+thenAccept committed a build and threw. The original future still succeeded,
+the new stage failed, and neither dispatch nor an observer on the original
+future reported that failure. Observing the final stage reported it once.
+Completing inside dispatch also ran the continuation inside its result Tx;
+queuing completion until after dispatch closed it. A late foreign-thread
+attachment ran on that foreign thread and stored the thread refusal in its
+own stage. Eight cases and six counted negatives are reproduced in
+docs/measurements/async-dialogs-java-2026-09-20.md. The app.observe
+ownership spelling was approved 2026-09-20; implementation validation is separate
+from this feasibility measurement.
+
+## Windows recording loses tile identity when a guest sets its title (2026-09-20)
+
+A pooled Java confirm/filedialog/clipboard review passed all three scenes but
+recorded all windows under slot 0. The launcher's files assigned slots 2, 0 and
+1 respectively; record-win's own CAPTURING lines showed the three bare titles
+"confirm", "filedialog" and "clipboard", each slot=0. Its WindowSlot reads a
+bracketed suffix from the title, which those guests replace. The resulting 29
+frames belonged to three windows under one slot; extraction reported no frames
+for slots 1 and 2 and could mislabel a slot-0 frame. A successful extraction is
+not evidence of window identity when the capturer has already lost it.
+
+Recording mode now forces one Windows leg at a time, always slot 0. Ordinary
+validation retains its existing pool width. The capturer's transcript is kept
+in recorder.log beside the extracted films; an empty selection names its slot,
+time range and total frame count. check-flightrec executes the width selection
+and missing-frame diagnostic, with three counted mutations holding the serial
+selection, slot identity in the diagnostic and transcript retention.
+
 ## An exclusive-leg rename changed ffprobe's log level (2026-09-20)
+
+The same missed caller remained in Android's recording duration probe. During
+Java review the confirm scene passed, while recording said only "no readable
+video". The kept film was valid: ffprobe -v error read 2.261778 seconds, while
+-v exclusive exited 1 naming its invalid log level. A recording-only failure
+also skipped device_capture and all the history sections because that branch
+looked only at the scene verdict. The corrected probe preserves exit status,
+stderr and invalid numeric output, refuses a failed pull before probing an old
+film, and the failure capture tests both verdict and runner failures.
+check-flightrec has six counted negatives. A one-substitution forced red kept
+all seven Android sections, including the exact invalid-loglevel error and
+every confirm step clock. The screenshot was viewed and correctly labeled as
+taken after the app had left, not as the failed dialog.
 
 The iOS review recording stopped before any guest with "dark fiducial never
 rendered", base 175. Both recording probes passed ffprobe -v exclusive, left

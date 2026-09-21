@@ -1647,7 +1647,10 @@ def _extract_leg_recording(name, recdir):
             "\n".join(str(t) for t in stamps) + ("\n" if stamps else ""),
             encoding="utf-8")
         if not stamps:
-            lf.write(f"{name}: no frames overlap the leg's transcript\n")
+            count = len(list((recdir / "frames").glob("*.png")))
+            lf.write(f"{name}: no frames overlap the leg's transcript: slot={slot}, "
+                     f"range={lo}..{hi}, total frames={count}; "
+                     f"recorder log: {recdir / 'recorder.log'}\n")
             return False
         anchor = stamps[0]
         # ffconcat: each frame held until the next one is due, the last
@@ -1688,6 +1691,8 @@ def rec_suite_stop():
     recdir = ROOT / "target/recordings/windows"
     shutil.rmtree(recdir, ignore_errors=True)
     recdir.mkdir(parents=True)
+    recorder_log = run_ssh_out("type C:\\kaya\\out_record.txt") or ""
+    (recdir / "recorder.log").write_text(recorder_log, encoding="utf-8")
     # Plain tar: the VM's bsdtar would write real zip for a .zip name
     # (-a), which the host's GNU tar refuses to read.
     if run_ssh('cmd /c "cd /d C:\\kaya && tar -c -f frames.tar frames"') != 0:
@@ -1726,6 +1731,7 @@ def rec_suite_stop():
             failed = True
     if failed:
         print("recording: extraction failures above")
+        print(f"recording: capturer transcript at {recdir / 'recorder.log'}\n{recorder_log}")
         return False
     return True
 
@@ -1845,7 +1851,8 @@ timing("package")
 # task through the hidden-window shim with the slot argument, and blocks
 # on the waiter for its output file. A timed-out leg's kill_guests sweep
 # is VM-WIDE and takes concurrent legs with it.
-WIDTH = int(os.environ.get("KAYA_WIN_JOBS", "6"))
+# docs/traps.md: Windows recording loses tile identity when a guest sets its title.
+WIDTH = 1 if os.environ.get("KAYA_RECORD") else int(os.environ.get("KAYA_WIN_JOBS", "6"))
 _slots = list(range(WIDTH))
 _slots_lock = threading.Condition()
 _leg_names = []

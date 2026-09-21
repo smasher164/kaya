@@ -6315,7 +6315,7 @@ check("go", "bindings/go/app.go", "read_clipboard",
 check("csharp", "bindings/csharp/KayaApp.cs", "read_clipboard",
       r"public ClipReadRef ReadClipboard\(")
 check("java", "bindings/java/dev/kaya/KayaApp.java", "read_clipboard",
-      r"public ClipReadRef readClipboard\(")
+      r"public FutureClipReadRef readClipboard\(")
 check("swift", "bindings/swift/KayaApp.swift", "read_clipboard",
       r"func readClipboard\(")
 check("haskell", "bindings/haskell/KayaApp.hs", "read_clipboard",
@@ -8307,6 +8307,48 @@ for _name, _pattern in ASYNC_SWIFT_PARTS.items():
           file=sys.stderr)
 if "awaitable census below five" not in async_swift_findings(""):
     selftest_exit("check-sugar-surface: Swift async empty reader did not refuse")
+
+ASYNC_JAVA_PARTS = {
+    "alert": r"public FutureAlertRef showAlert\(\)",
+    "pick": r"public FutureFileDialogRef pickFile\(\)",
+    "picks": r"public FutureFileDialogRef pickFiles\(\)",
+    "save": r"public FutureSaveDialogRef saveFile\(String suggestedName\)",
+    "clipboard": r"public FutureClipReadRef readClipboard\(\)",
+    "alert-future": r"public CompletableFuture<AlertChoice> showFuture\(\)",
+    "file-future": r"public CompletableFuture<java.util.List<PickedFile>> showFuture\(\)",
+    "save-future": r"public CompletableFuture<PickedFile> showFuture\(\)",
+    "clipboard-future": r"public CompletableFuture<Representation> sendFuture\(\)",
+    "observe": r"public void observe\(CompletionStage<\?> finalStage\)",
+    "drain": r"drainPosted\(\);\s*drainAsync\(\);",
+    "wake": r"asyncJobs.add\(job\);\s*\}\s*KayaRing.wake\(\);",
+    "alert-result": r"alertResult\(occ.id, AlertChoice.fromWire\(\(Integer\) occ.payload\)\)",
+    "file-result": r"fileDialogResult\(occ.id, files\)",
+    "clipboard-result": r"clipboardResult\(occ.id, representation\(occ.payload\)\)",
+}
+
+
+def async_java_findings(text):
+    code = _c_like(text)
+    missing = [name for name, pattern in ASYNC_JAVA_PARTS.items()
+               if re.search(pattern, code) is None]
+    if len(re.findall(r"public Future\w+Ref \w+\(", code)) < 5:
+        missing.append("awaitable census below five")
+    return missing
+
+
+_async_java = read_rel("bindings/java/dev/kaya/KayaApp.java")
+for _missing in async_java_findings(_async_java):
+    print(f"check-sugar-surface: Java async dialogs missing {_missing}", file=sys.stderr)
+    status = 1
+for _name, _pattern in ASYNC_JAVA_PARTS.items():
+    _doctored, _n = sub_count(_pattern, "", _async_java)
+    if _n != 1 or _name not in async_java_findings(_doctored):
+        selftest_exit(f"check-sugar-surface: Java async {_name} negative failed: "
+                      f"{_n} substitution(s)")
+    print(f"check-sugar-surface: Java async {_name}: {_n} substitution(s), named refusal",
+          file=sys.stderr)
+if "awaitable census below five" not in async_java_findings(""):
+    selftest_exit("check-sugar-surface: Java async empty reader did not refuse")
 
 check_scene_sugar()
 

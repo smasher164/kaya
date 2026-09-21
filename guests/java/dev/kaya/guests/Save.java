@@ -48,8 +48,8 @@ public final class Save {
             tx.mount(tx.column(col -> {
                 tx.label(status).a11yId("status"); // label#0
                 tx.button("open", inner -> // button#0
-                        inner.pickFile()
-                                .onResult((t, files) -> {
+                        app.observe(inner.pickFile().showFuture()
+                                .thenAccept(files -> app.build(t -> {
                                     if (files.isEmpty()) {
                                         // The empty list IS cancel.
                                         t.write(status, "open cancelled");
@@ -59,8 +59,7 @@ public final class Save {
                                     held.source = file;
                                     work(app, status,
                                             () -> "opened " + readBack(file));
-                                })
-                                .show());
+                                }))));
                 tx.button("save", inner -> { // button#1
                     // A missing handle gets its OWN sentence, never an NPE: the
                     // crash masks the real failure (docs/deferred.md, save-jvm WATCH).
@@ -74,8 +73,8 @@ public final class Save {
                 });
                 tx.button("save as", inner -> // button#2
                         // The name the dialog OPENS with; the scene types over it.
-                        inner.saveFile("copy")
-                                .onResult((t, file) -> {
+                        app.observe(inner.saveFile("copy").showFuture()
+                                .thenAccept(file -> app.build(t -> {
                                     if (file == null) {
                                         // null IS cancel.
                                         t.write(status, "save cancelled");
@@ -84,8 +83,7 @@ public final class Save {
                                     held.destination = file;
                                     work(app, status,
                                             () -> "saved " + writeBack(file, "third draft"));
-                                })
-                                .show());
+                                }))));
                 tx.button("reopen", inner -> { // button#3
                     // BOTH, in order: a save-as that wrote to the wrong handle
                     // passes every earlier step and fails here.

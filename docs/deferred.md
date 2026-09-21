@@ -10,7 +10,7 @@ scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
 ## BUILD — R1 async dialogs: explicit-transaction amendment approved (2026-09-19)
-KEY: async dialogs, R1.4, R1.5, async void, SynchronizationContext, continuation rollback, explicit Build, Swift Task, app.task, task error ownership
+KEY: async dialogs, R1.4, R1.5, async void, SynchronizationContext, continuation rollback, explicit Build, Swift Task, app.task, task error ownership, Java CompletionStage, app.observe
 
 Akhil approved the seven recommendations in docs/async-dialogs-plan.md §5.
 C# feasibility against the real binding found that its proposed context
@@ -70,8 +70,8 @@ lane's 477 legs in 387 seconds. The final five-lane matrix was ALL PASS in
 docs/reviews/async-dialogs-csharp-2026-09-20/README.md.
 The measurement includes all nine binding verdicts; Go's existing callbacks
 remain, its new concurrency surface deferred rather than silently omitted.
-Remaining work: Swift on its shipped executor,
-Java, Rust; guards and review page per the plan, then the full ladder.
+Swift and Java followed below. Remaining work: Rust; guards and review page
+per the plan, then the full ladder.
 
 SWIFT MEASUREMENT 2026-09-20, TASK OWNERSHIP APPROVED: the real executor and alert
 occurrence path resume on the app thread with no transaction open, and explicit
@@ -104,11 +104,32 @@ recording recovery branch. The final matrix passed Mac 477, Linux 775,
 Windows 282, iOS 139 and Android 148 legs, plus all 61 gates, in 1084 seconds
 with every net-time ceiling held. Mac and iOS captures have been viewed for
 docs/reviews/async-dialogs-swift-2026-09-20/README.md. The Swift tier is landed;
-Java and Rust remain.
+Java followed below; Rust remains.
 Four feasibility observations and three one-substitution negatives are recorded
 in docs/measurements/async-dialogs-swift-2026-09-20.md. The ownership rule is
 shared: Kaya reports errors escaping work handed to Kaya; independently created
 tasks and future chains remain their creator's responsibility.
+
+JAVA MEASUREMENT AND OWNERSHIP APPROVAL 2026-09-20: the real
+binding's callback dispatch and explicit builds confirm queued completion
+outside the result transaction, scope rollback and foreign-thread refusal.
+The original dialog future succeeds even when thenAccept throws; observing
+that parent reports nothing, while observing the final stage reports once.
+Eight observations and six one-substitution negatives passed. Akhil approved
+app.observe(finalStage), reporting its remaining failure on the raw app-thread
+queue without opening a transaction or rescheduling guest work. Implementation
+is built; see docs/measurements/async-dialogs-java-2026-09-20.md. Headless runtime
+and compiler negatives, native dialog checks and captures on all four Java lanes
+pass. Linux and Windows now include the Java save scene; sixteen counted roster
+cuts in check-steps hold four dialog scenes on every Java lane. LANDED 2026-09-20:
+628 core tests, 18 doctests (one ignored), all 61 gates and the standalone Mac
+lane's 477 legs passed. The final matrix passed in 1105 seconds: Mac 477,
+Linux 777, Windows 283, iOS 139 and Android 148 legs, plus all 61 gates, with
+every net-time ceiling held. The review is
+docs/reviews/async-dialogs-java-2026-09-20/README.md. Recording review also fixed
+Android's invalid ffprobe option and missing recording-failure evidence, and
+Windows' lost recording tile identity; nine counted negatives and a native
+forced-red readback hold the recorder changes (docs/traps.md). Rust remains.
 
 ## INVESTIGATE — iOS recording's step-named frames lead their stated scene state (2026-09-20)
 KEY: iOS recording, fiducial timestamp, step-named frames, confirm-swift, anchor-2
@@ -2433,8 +2454,8 @@ The same
     spell the implicit transaction. Python's `await` form is the survey's
     one SEMANTICS finding and is not taken. APPROVED 2026-09-19: all seven
     recommendations in docs/async-dialogs-plan.md §5. C# depth passed the full
-    five-lane matrix on 2026-09-20, followed by Swift the same day; Java and
-    Rust remain (§6).
+    five-lane matrix on 2026-09-20, followed by Swift and Java the same day;
+    Rust remains (§6).
   - ~~R2 ROW HANDLES IN PYTHON, the twin of JS's rule 3: `todo.done =
     checked` is the patch through `__setattr__`, refused by name on a
     typo; the other seven keep `patch`, stated as the carve-out where

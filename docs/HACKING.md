@@ -123,6 +123,11 @@ afternoon twice, 2026-09-07). The routes:
 | hold a scene still for a capture | give the guest its own steps through `KAYA_SELFTEST_SCRIPT` (the mac lane sets it from tools/scenes in `lanes.mac.leg_env`, so build that env and replace the one key) with `settle 9000` where the photograph goes; the tree stays untouched. On the mac, `KAYA_SELFTEST_SCRIPT="$(cat <yours>)" tools/run-leg.py <scene> <lang>` keeps yours over the scene's and prints that it did |
 | read a failed leg | the flight recorder's bundle first: `~/.local/state/kaya/flightrec/runs/<run>/bundles/<lane>-<leg>/` — the leg log, the verb trace, a PICTURE of what the user would have seen, and each lane's own sections, every one present or carrying a sentence saying what was measured instead; the leg's log prints them all with their sizes. The table is in "The flight recorder's bundle, lane by lane" below |
 
+Windows `KAYA_RECORD=1` runs legs serially, regardless of KAYA_WIN_JOBS. A
+guest's title replaces the tile suffix record-win uses as identity, so pooled
+recording mixes windows into slot 0 (docs/traps.md). The recorder transcript is
+retained beside the films; empty frame selections print their slot and time range.
+
 ## The regeneration workflow (any spec.rs change)
 
 1. Edit `crates/kaya/src/spec.rs` (records, enums, PROPS). The spec

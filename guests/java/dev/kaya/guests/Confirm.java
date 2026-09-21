@@ -16,13 +16,13 @@ public final class Confirm {
             tx.mount(tx.column(col -> {
                 tx.label(status); // label#0
                 tx.button("delete", inner -> {
-                    inner.showAlert()
+                    app.observe(inner.showAlert()
                             .title("delete item?")
                             .message("this cannot be undone")
                             .action("Delete")
                             .action("Archive")
                             .cancel("Keep")
-                            .onResult((tx2, choice) -> {
+                            .showFuture().thenAccept(choice -> app.build(tx2 -> {
                                 if (choice == KayaApp.AlertChoice.CANCEL) {
                                     tx2.write(status, "kept");
                                 } else if (choice == KayaApp.AlertChoice.ACTION1) {
@@ -30,21 +30,19 @@ public final class Confirm {
                                 } else {
                                     tx2.write(status, "deleted");
                                 }
-                            })
-                            .show();
+                            })));
                 });
                 tx.button("eject", inner -> {
-                    inner.showAlert()
+                    app.observe(inner.showAlert()
                             .title("eject disk?")
                             .message("it is still mounted")
                             .action("Eject")
                             .cancel("Hold")
-                            .onResult((tx2, choice) -> {
+                            .showFuture().thenAccept(choice -> app.build(tx2 -> {
                                 tx2.write(status,
                                         choice == KayaApp.AlertChoice.CANCEL
                                                 ? "held" : "ejected");
-                            })
-                            .show();
+                            })));
                 });
             }));
             return null;

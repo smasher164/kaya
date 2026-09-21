@@ -1153,6 +1153,8 @@ for proto in x11 wayland; do
     # Through a11y-leg.sh like every other leg in this block.
     run "$proto" save-c env KAYA_SELFTEST=save \
         tools/linux/a11y-leg.sh /tmp/c-guests/save
+    run "$proto" save-java env KAYA_SELFTEST=save KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
     run "$proto" background-python env KAYA_SELFTEST=background KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh python3 guests/python/background.py
     run "$proto" background-js env KAYA_SELFTEST=background KAYA_LIB="$LIB" \

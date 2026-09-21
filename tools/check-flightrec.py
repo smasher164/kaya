@@ -42,6 +42,7 @@ dev_shell_or_die()
 # and deploy-win's pre-leg delete.
 
 import ast
+import io
 import re
 import subprocess
 import tempfile
@@ -576,11 +577,12 @@ def census_android_history(src):
     body = py_block(src[ANDROID], "run_apk_on")
     failures = []
     for node in ast.walk(ast.parse(body)):
-        if isinstance(node, ast.If) and isinstance(node.test, ast.Compare):
-            test = node.test
-            if (isinstance(test.left, ast.Constant)
+        if isinstance(node, ast.If):
+            tests = node.test.values if isinstance(node.test, ast.BoolOp) else [node.test]
+            if any(isinstance(test, ast.Compare) and isinstance(test.left, ast.Constant)
                     and test.left.value == "KAYA_SELFTEST: OK"
-                    and len(test.ops) == 1 and isinstance(test.ops[0], ast.NotIn)):
+                    and len(test.ops) == 1 and isinstance(test.ops[0], ast.NotIn)
+                    for test in tests):
                 failures.append(ast.get_source_segment(body, node))
     for call, suffix in (("android_system_events", ".system-events"),
                          ("android_anr_history", ".anr-history")):
@@ -643,6 +645,86 @@ def ios_recording_checks(src, png, film):
     except RuntimeError as error:
         if "no numeric luma" not in str(error):
             found.append("ios: recording probe lost the malformed output")
+    return found
+
+
+def android_recording_checks(src, film):
+    scope = {"subprocess": subprocess,
+             "TEXT": {"text": True, "encoding": "utf-8", "errors": "replace"}}
+    exec(compile(py_block(src[ANDROID], "recording_duration_ms"), ANDROID, "exec"), scope)
+    read = scope["recording_duration_ms"]
+    found = []
+    log = io.StringIO()
+    if read(film, log) != 2000:
+        found.append(f"android: recording duration changed: {log.getvalue()}")
+    log = io.StringIO()
+    if read(film.parent / "missing.mp4", log) != 0 or "exited" not in log.getvalue():
+        found.append("android: recording probe hid command failure")
+    for output in ("broken", "nan", "inf", "0", "-1"):
+        scope["subprocess"] = types.SimpleNamespace(run=lambda *a, output=output, **kw:
+            types.SimpleNamespace(returncode=0, stdout=output, stderr="probe detail"))
+        log = io.StringIO()
+        if (read(film, log) != 0 or "no positive duration" not in log.getvalue()
+                or output not in log.getvalue() or "probe detail" not in log.getvalue()):
+            found.append("android: recording probe guessed duration or hid malformed output")
+    tree = ast.parse(py_block(src[ANDROID], "run_apk_on"))
+    branches = [node for node in ast.walk(tree) if isinstance(node, ast.If)
+                and any(isinstance(child, ast.Expr) and isinstance(child.value, ast.Call)
+                        and isinstance(child.value.func, ast.Name)
+                        and child.value.func.id == "device_capture" for child in node.body)]
+    if len(branches) != 1:
+        found.append("android: recording cannot locate failure capture")
+    else:
+        condition = compile(ast.Expression(branches[0].test), ANDROID, "eval")
+        if not eval(condition, {"failed": True, "out": "KAYA_SELFTEST: OK"}):
+            found.append("android: recording failure skipped recorder sections")
+    if 'dur_ms = recording_duration_ms(rec_dir / "video.mp4", log)' not in src[ANDROID]:
+        found.append("android: recording duration reader is not reached")
+    pulls = [node for node in ast.walk(tree) if isinstance(node, ast.If)
+             and ast.unparse(node.test) == "pulled"]
+    if len(pulls) != 1 or 'dur_ms = 0' not in ast.unparse(pulls[0]):
+        found.append("android: recording failed pull can reuse stale video")
+    return found
+
+
+def windows_recording_width(src):
+    tree = ast.parse(src[WIN])
+    assignments = [node for node in tree.body if isinstance(node, ast.Assign)
+                   and any(isinstance(target, ast.Name) and target.id == "WIDTH"
+                           for target in node.targets)]
+    if len(assignments) != 1:
+        return ["windows: cannot locate recording pool width"]
+    found = []
+    for environ, expected in (({}, 6), ({"KAYA_WIN_JOBS": "3"}, 3),
+                              ({"KAYA_RECORD": "1"}, 1),
+                              ({"KAYA_RECORD": "1", "KAYA_WIN_JOBS": "3"}, 1)):
+        scope = {"os": types.SimpleNamespace(environ=environ)}
+        exec(compile(ast.Module(body=assignments, type_ignores=[]), WIN, "exec"), scope)
+        if scope["WIDTH"] != expected:
+            found.append(f"windows: recording pool width {scope['WIDTH']} for {environ}, "
+                         f"wanted {expected}")
+    return found
+
+
+def windows_recording_diagnostic(src, directory):
+    capture = directory / "windows"
+    capture.mkdir(exist_ok=True)
+    (capture / "frames").mkdir(exist_ok=True)
+    (capture / "frames/0-1234.png").write_bytes(b"test")
+    (capture / "check.slot").write_text("2", encoding="utf-8")
+    scope = {"re": re, "LEGS_DIR": capture,
+             "run_ssh_out": lambda _: "KAYA_HARNESS: epoch 1000\nKAYA_HARNESS: +50ms end"}
+    exec(compile(py_block(src[WIN], "_extract_leg_recording"), WIN, "exec"), scope)
+    found = []
+    if scope["_extract_leg_recording"]("check", capture):
+        found.append("windows: recording accepted no matching frames")
+    said = (capture / "check/extract.log").read_text(encoding="utf-8")
+    for part in ("slot=2", "range=-500..3050", "total frames=1", "recorder.log"):
+        if part not in said:
+            found.append(f"windows: recording diagnostic lost {part}")
+    body = py_block(src[WIN], "rec_suite_stop")
+    if '(recdir / "recorder.log").write_text(recorder_log, encoding="utf-8")' not in body:
+        found.append("windows: recording did not retain capturer transcript")
     return found
 
 
@@ -991,6 +1073,31 @@ with tempfile.TemporaryDirectory(prefix="kaya-record-probe-") as directory:
                     "-frames:v", "1", str(png)], check=True)
     for finding in ios_recording_checks(REAL, png, film):
         gate.finding(finding, at="iOS recording")
+    for finding in android_recording_checks(REAL, film):
+        gate.finding(finding, at="Android recording")
+    for finding in windows_recording_diagnostic(REAL, record_dir):
+        gate.finding(finding, at="Windows recording")
+    for label, before, after, want in (
+            ("frame identity", 'f"{name}: no frames overlap the leg\'s transcript: slot={slot}, "',
+             'f"{name}: no frames overlap the leg\'s transcript: slot=unknown, "', "lost slot=2"),
+            ("capturer log", '(recdir / "recorder.log").write_text(recorder_log, encoding="utf-8")',
+             'pass', "did not retain capturer transcript")):
+        changed = doctored(WIN, re.escape(before), after, f"Windows recording {label}")
+        gate.negative(f"Windows recording {label} corrupted",
+                      lambda: windows_recording_diagnostic(changed, record_dir), want=want)
+    for label, before, after, want in (
+            ("log level", '"ffprobe", "-v", "error"',
+             '"ffprobe", "-v", "exclusive"', "Invalid loglevel"),
+            ("exit status", 'if got.returncode:\n', 'if False:\n', "hid command failure"),
+            ("guessed duration", 'duration = 0', 'duration = 2000', "guessed duration"),
+            ("reader call", 'dur_ms = recording_duration_ms(rec_dir / "video.mp4", log)',
+             'dur_ms = 2000', "reader is not reached"),
+            ("capture", 'if failed or "KAYA_SELFTEST: OK" not in out:',
+             'if "KAYA_SELFTEST: OK" not in out:', "skipped recorder sections"),
+            ("pull status", 'if pulled:', 'if False:', "reuse stale video")):
+        changed = doctored(ANDROID, re.escape(before), after, f"Android recording {label}")
+        gate.negative(f"Android recording {label} corrupted",
+                      lambda: android_recording_checks(changed, film), want=want)
     for label, before, after, count, want in (
             ("log level", '"ffprobe", "-v", "error"',
              '"ffprobe", "-v", "exclusive"', 2, "Invalid loglevel"),
@@ -1004,6 +1111,13 @@ with tempfile.TemporaryDirectory(prefix="kaya-record-probe-") as directory:
         gate.negative(f"iOS recording {label} corrupted",
                       lambda: ios_recording_checks(changed, png, film), want=want)
 
+for finding in windows_recording_width(REAL):
+    gate.finding(finding, at="Windows recording")
+changed = doctored(WIN, re.escape('1 if os.environ.get("KAYA_RECORD") else '), "",
+                   "Windows recording serialization")
+gate.negative("Windows recording pool loses window identity",
+              lambda: windows_recording_width(changed), want="recording pool width")
+
 for call in ("xcuidrive_stop_all()", "xcuidrive_launch_all()", "xcuidrive_join()"):
     changed = dict(REAL)
     body = py_block(REAL[IOS], "rec_suite_start")
@@ -1012,6 +1126,6 @@ for call in ("xcuidrive_stop_all()", "xcuidrive_launch_all()", "xcuidrive_join()
     gate.negative(f"iOS recording recovery without {call}",
                   lambda: ios_recording_recovery(changed), want="driver lifecycle")
 
-gate.negatives_ran(45)
+gate.negatives_ran(54)
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

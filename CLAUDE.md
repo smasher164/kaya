@@ -729,7 +729,14 @@ in docs/deferred.md.
    invalid ffprobe log level, hidden command failure, guessed brightness and
    a discarded first frame. Recording recovery stops drivers before its service
    reset, then launches and joins the whole pool; three executed branch cuts
-   hold that lifecycle. Forty-five watched negatives, counts printed),
+   hold that lifecycle. Android's recording duration probe checks ffprobe's exit
+   and numeric output, preserves its diagnostic and refuses a failed pull before
+   reading any old film; recording-only failures collect the same recorder sections
+   as scene failures. Six counted cuts hold those paths, with a forced-red bundle
+   read back. Windows recording is serial because guest title changes discard the
+   tile suffix its capturer reads; its own transcript is retained beside extraction
+   diagnostics naming the requested slot and frame range. Three more cuts hold
+   serialization and diagnostic retention. Fifty-four watched negatives, counts printed),
    `tools/check-diagnostics.py` (a why-not may not print a sentence it
    cannot NOT print. Any function named `*WhyNot`/`*why_not`/`*Reason`
    is read as a diagnostic by that name alone; one answer, or an answer
@@ -1027,6 +1034,12 @@ in docs/deferred.md.
    Ten counted runtime mutations and three compile negatives hold the task
    observer, live slots, retirement, cleanup, rollback and actor/scope walls;
    check-sugar-surface holds twelve API and occurrence-wiring clauses, each cut
+   and watched red, plus an empty-reader refusal. JAVA ASYNC DIALOGS run through
+   the real binding and JNI transport: five future and callback forms, scope
+   rollback, final-stage observation, cleanup and thread boundaries, plus a
+   parked occurrence loop awakened by a foreign-thread failure. Fourteen counted
+   runtime mutations and four callback/future compile refusals hold those paths;
+   check-sugar-surface holds fifteen API and occurrence-wiring clauses, each cut
    and watched red, plus an empty-reader refusal),
    `tools/check-tx-liveness.py` (a transaction is usable only inside
    the build or handler that made it, on the app thread — the HANDLE

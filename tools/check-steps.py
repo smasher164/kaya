@@ -2727,6 +2727,37 @@ if sweep_c_floor():
     status = 1
 
 
+def java_dialog_coverage(rosters):
+    return [f"{lane}: missing Java {scene} dialog leg"
+            for lane, scenes in rosters.items()
+            for scene in ("confirm", "filedialog", "save", "clipboard")
+            if scene not in scenes]
+
+
+java_dialog_rosters = {
+    "mac": [scene for _, scene, lang in mac_lane.legs() if lang == "java"],
+    "linux": re.findall(r'^\s*run "\$proto" ([\w]+)-java\s',
+                        read_rel("tools/linux/run-suites.sh"), re.M),
+    "windows": [name.removesuffix("_java") for name in win_lane.legs()
+                if name.endswith("_java")],
+    "android": [name.removesuffix("-jvm") for name in android_lane.legs()
+                if name.endswith("-jvm")],
+}
+for finding in java_dialog_coverage(java_dialog_rosters):
+    print(f"check-steps: {finding}", file=sys.stderr)
+    status = 1
+for lane, scenes in java_dialog_rosters.items():
+    for scene in ("confirm", "filedialog", "save", "clipboard"):
+        changed = dict(java_dialog_rosters)
+        changed[lane] = [value for value in scenes if value != scene]
+        count = len(scenes) - len(changed[lane])
+        findings = java_dialog_coverage(changed)
+        print(f"check-steps: Java dialog {lane}/{scene}: {count} deletion(s), "
+              f"{len(findings)} finding(s)")
+        if count != 1 or findings != [f"{lane}: missing Java {scene} dialog leg"]:
+            selftest_fail(f"Java dialog coverage {lane}/{scene} did not refuse its cut")
+
+
 # EVERY WINDOWS LEG NEEDS ITS LAUNCHER: the .cmd files deploy-win
 # schedules are CHECKED IN under tools/guest, and a leg whose launcher is
 # missing does not fail — schtasks starts nothing and the runner waits out

@@ -14,8 +14,8 @@ JS has the feature already (docs/js-plan.md §4, rule 2). This document says wha
 the same rule means in the other four, states each mechanism from zero before it
 uses it, and ends with the rulings and the order of work. Akhil approved all seven
 recommendations in §5 on 2026-09-19 ("go ahead"). The C# dialog APIs passed the
-full five-lane matrix on 2026-09-20, followed by Swift the same day. Java and Rust
-remain. The Swift executor prerequisite
+full five-lane matrix on 2026-09-20, followed by Swift and Java the same day. Rust
+remains. The Swift executor prerequisite
 has shipped (§2.1). Implementation follows §6.
 
 Every claim about a platform below was MEASURED with a small probe, not recalled;
@@ -359,6 +359,17 @@ through a `Tx` captured across the await is refused there.
 
 ### 2.3 Java — the future's own chain, because there is no `await`
 
+**Landed 2026-09-20 after the full five-lane matrix.** Completing a
+dialog's future does not expose an exception thrown by thenAccept: the final
+stage stores it, while the original dialog future succeeds. Observing only the
+original future misses it. Eight cases and six counted negatives against the
+real binding are in docs/measurements/async-dialogs-java-2026-09-20.md. The
+approved spelling is app.observe(finalStage), which hands Kaya that stage for
+error reporting without changing its scheduling or transaction boundaries.
+It observes only the handed stage, not branches appended afterwards. Guest
+recovery belongs before observe. Fatal Errors remain fatal. Unlike app.post,
+observe neither schedules guest work nor supplies a transaction.
+
 **From zero.** Java has no `await`. Its standard future type is
 `CompletableFuture<T>`: a value that is completed later, with a chain of
 continuations attached to it — `thenAccept(fn)` runs `fn` with the result,
@@ -392,19 +403,20 @@ thenAccept immediately inside the result handler's transaction. The completion
 job must instead run with no transaction open, with a runtime refusal and a watched
 negative if that boundary is lost.
 
-**The spelling** (guests/java/dev/kaya/guests/Confirm.java today chains
-`.onResult(…)` before `.show()`):
+**The spelling** (the callback chain remains available):
 
 ```java
-tx.button("delete", inner -> inner.showAlert()
+tx.button("delete", inner -> app.observe(inner.showAlert()
         .title("delete item?")
         .message("this cannot be undone")
         .action("Delete").action("Archive").cancel("Keep")
         .showFuture()                       // no .onResult: answers a future
-        .thenAccept(choice -> app.build(tx -> tx.write(status, switch (choice) {
-            case ACTION0 -> "deleted";
-            case ACTION1 -> "archived";
-            case CANCEL  -> "kept";
+        .thenAccept(choice -> app.build(t -> {
+            t.write(status, switch (choice) {
+                case ACTION0 -> "deleted";
+                case ACTION1 -> "archived";
+                case CANCEL  -> "kept";
+            });
         }))));
 ```
 
@@ -678,7 +690,7 @@ a new clause reading, per binding, out of that binding's own file:
   five languages spell an awaitable five ways;
 - the app-thread executor/context/actor by name in each of the four: the
   `SerialExecutor` conformance, the `SynchronizationContext` subclass, the
-  `Executor` the binding completes on, the `Wake` impl — a census over the
+  raw app-thread queue Java completes on, the `Wake` impl — a census over the
   binding's own body, not a grep for the name, since the name appears in the prose
   beside the call (the trap check-appearance was bitten by twice);
 - **the carve-out refused BY NAME**: Python, Haskell and OCaml must have NO
@@ -693,7 +705,7 @@ count printed — CLAUDE.md invariant 3):
 | tier | file | the negatives |
 |---|---|---|
 | C# | guests/csharp/AbortCheck.cs | a write through a `Tx` captured across the await is refused; a second dialog while one is live throws at the show; a throw after the await rolls back only the scope it threw inside, scopes that returned stand; the four feasibility cases enter check-abort with watched mutations |
-| Java | tools/checks/java-abort/AbortCheck.java | the same scope and lifetime cases, plus a foreign-executor write refused by the thread check and completion inside an open transaction refused by the raw-job boundary |
+| Java | tools/checks/java-async/dev/kaya/AsyncCheck.java | the same scope and lifetime cases, final-stage observation, foreign-thread writes refused, completion inside an open transaction refused, raw-loop wake, callback cleanup and callback/future compile refusals |
 | Swift | tools/checks/swift-async/main.swift | the same scope and lifetime cases, continuation thread identity, app.task's observer, callback rollback cleanup, result retirement, and compile refusals for async build bodies and off-actor entry |
 | Rust | crates/kaya/src/app.rs `compile_fail` doctests + unit tests | a `Tx` held across `.await` fails to COMPILE; an `.await` inside `apply` fails to compile; the loop resolves a future and runs its continuation on the app thread |
 | JS | bindings/js/kaya_app_checks.ts | already has the promise-resolution negative; add the second-dialog refusal so all five say one thing |

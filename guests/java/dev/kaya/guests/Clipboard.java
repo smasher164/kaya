@@ -98,21 +98,17 @@ public final class Clipboard {
                     inner.write(status, "copied");
                 });
                 tx.button("read custom", inner -> // button#1
-                        inner.readClipboard().custom(NOTE_ID)
-                                .onResult((t, clip) -> answered(app, status, t, clip))
-                                .send());
+                        app.observe(inner.readClipboard().custom(NOTE_ID).sendFuture()
+                                .thenAccept(clip -> app.build(t -> { answered(app, status, t, clip); }))));
                 tx.button("read text", inner -> // button#2
-                        inner.readClipboard().text()
-                                .onResult((t, clip) -> answered(app, status, t, clip))
-                                .send());
+                        app.observe(inner.readClipboard().text().sendFuture()
+                                .thenAccept(clip -> app.build(t -> { answered(app, status, t, clip); }))));
                 tx.button("read image", inner -> // button#3
-                        inner.readClipboard().image()
-                                .onResult((t, clip) -> answered(app, status, t, clip))
-                                .send());
+                        app.observe(inner.readClipboard().image().sendFuture()
+                                .thenAccept(clip -> app.build(t -> { answered(app, status, t, clip); }))));
                 tx.button("read files", inner -> // button#4
-                        inner.readClipboard().files()
-                                .onResult((t, clip) -> answered(app, status, t, clip))
-                                .send());
+                        app.observe(inner.readClipboard().files().sendFuture()
+                                .thenAccept(clip -> app.build(t -> { answered(app, status, t, clip); }))));
 
                 Refs fields = new Refs();
                 tx.button("focus rich", inner -> inner.focus(fields.rich)); // button#5

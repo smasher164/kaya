@@ -537,6 +537,10 @@ work handed to it, not arbitrary tasks or future chains created by the guest.
 Swift's app.task owns that async throwing body on KayaAppActor, with no ambient
 transaction. A raw Swift Task stores its error for its caller to observe;
 the serial executor's thread affinity does not make it an error reporter.
+Java's app.observe(finalStage) owns reporting for the stage handed to it, not
+the dialog future's later branches. It queues a remaining failure onto the app
+thread without a transaction; guest recovery belongs before observe. Unlike
+app.post, it neither schedules guest work nor supplies a transaction.
 
 **One id space for widgets and template nodes.** Every binding mints
 live widget ids and template node ids from ONE monotone counter per app

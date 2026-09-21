@@ -437,6 +437,9 @@ ORDER = [
     [
      "save_rust",
     ],
+    [
+     "save_java",
+    ],
     # editor_go, for BOTH serial reasons: open/save dialogs plus
     # OS-global `type` keystrokes (docs/editor-plan.md; Go alone by
     # design — an editor in Rust would be kaya testing itself).
@@ -568,4 +571,3 @@ def alone(leg):
 def wired_scenes():
     """The scenes some leg runs — the gates' census surface."""
     return {scene_lang(leg)[0] for leg in legs()}
-

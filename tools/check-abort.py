@@ -533,6 +533,103 @@ with scratch_dir("check-abort-") as tmp:
     step("java", ["java", "-cp", str(tmp / "java"), "AbortCheck"],
          tmp / "java.log")
 
+    java_async = ROOT / "tools/checks/java-async/dev/kaya/AsyncCheck.java"
+    java_binding = ROOT / "bindings/java/dev/kaya/KayaApp.java"
+    java_compile = ["javac", "--release", "21", "-encoding", "UTF-8", "-proc:none"]
+    java_sources = ["bindings/java-desktop/dev/kaya/KayaRing.java",
+                    *sorted(glob.glob(str(ROOT / "bindings/java/dev/kaya/*.java")))]
+    step("java-async-build", [*java_compile, "-d", str(tmp / "java"),
+                              *java_sources, str(java_async)], tmp / "java-async-build.log")
+    for mode in ("all", "loop"):
+        step(f"java-async-{mode}", ["java", "-cp", str(tmp / "java"),
+                                   "dev.kaya.AsyncCheck", mode],
+             tmp / f"java-async-{mode}.log", echo="java-async:")
+
+    java_original = java_binding.read_text(encoding="utf-8")
+    java_probe = java_async.read_text(encoding="utf-8")
+    java_mutations = [
+        ("parent-observer", "probe", r'app.observe\(terminal\);',
+         'app.observe(request.answer());', "all", "report count mismatch"),
+        ("inline-completion", "binding",
+         r'send.accept\(value -> queueAsync\(\(\) -> \{\s*requireAsyncBoundary\(\);'
+         r'\s*answer.complete\(value\);\s*\}\)\);',
+         'send.accept(value -> { requireAsyncBoundary(); answer.complete(value); });',
+         "all", "completion did not resolve"),
+        ("raw-boundary", "binding", r'if \(transactionDepth != 0 \|\| tplDepth != 0\)',
+         'if (false)', "all", "missing refusal: inside a transaction"),
+        ("scope-rollback", "binding", r'tx.rollback\(\);', '', "all", "throwing scope committed"),
+        ("reporter", "binding", re.escape('System.err.println("kaya: async handler failed; '
+         'no transaction was rolled back by this reporter; '
+         'completed transactions remain committed");'),
+         'System.err.println("kaya: transaction rolled back");', "all", "report count mismatch"),
+        ("alert-overlap", "binding", r'if \(app.liveAlert != 0\)',
+         'if (false)', "all", "missing refusal: another alert"),
+        ("file-overlap", "binding", r'if \(liveFileDialog != 0\)',
+         'if (false)', "all", "missing refusal: another file dialog"),
+        ("retirement", "binding", r'alerts.remove\(id\);\n        if \(handler != null\)',
+         'alerts.get(id);\n        if (handler != null)',
+         "all", "result registration did not retire"),
+        ("rollback-cleanup", "binding",
+         r'for \(int i = rollbackActions.size\(\) - 1; i >= 0; i--\) '
+         r'rollbackActions.get\(i\).run\(\);',
+         '', "all", "aborted request kept registration"),
+        ("abort-completion", "binding",
+         r'tx.rollbackActions.add\(\(\) -> queueAsync\(\(\) -> answer.completeExceptionally\('
+         r'\s*new IllegalStateException\("kaya: dialog request transaction aborted"\)\)\)\);',
+         '', "all", "aborted request left future pending"),
+        ("mixed-owner", "binding", r'if \(onResult != null\) throw new IllegalStateException\('
+         r'"kaya: choose a callback or a future, not both"\);',
+         '', "all", "missing refusal: callback or a future"),
+        ("fatal-error", "binding", r'if \(failure instanceof Error fatal\) throw fatal;',
+         '', "all", "fatal error was swallowed"),
+        ("queue-drain", "binding", r'drainPosted\(\);\s*drainAsync\(\);',
+         'drainPosted();', "loop", "async queue did not wake and drain"),
+        ("queue-wake", "binding", r'asyncJobs.add\(job\);\s*\}\s*KayaRing.wake\(\);',
+         'asyncJobs.add(job);\n        }', "loop", "async queue did not wake and drain"),
+    ]
+    for name, target, pattern, replacement, mode, expected in java_mutations:
+        shadow = tmp / f"java-async-{name}"
+        shadow.mkdir()
+        source = java_probe if target == "probe" else java_original
+        changed = g.doctor(f"Java async {name}", source, pattern, replacement,
+                           want=4 if name == "mixed-owner" else 1)
+        binding_copy = shadow / "KayaApp.java"
+        probe_copy = shadow / "AsyncCheck.java"
+        binding_copy.write_text(changed if target == "binding" else java_original, encoding="utf-8")
+        probe_copy.write_text(changed if target == "probe" else java_probe, encoding="utf-8")
+        step(f"java-async-{name}-build",
+             [*java_compile, "-d", str(shadow), "-cp", str(tmp / "java"),
+              str(binding_copy), str(probe_copy)], tmp / f"java-{name}-build.log")
+        got = probe_run(["java", "-cp", os.pathsep.join((str(shadow), str(tmp / "java"))),
+                         "dev.kaya.AsyncCheck", mode], timeout=15, env=ENV)
+        said = got.stdout + got.stderr
+        if got.returncode != 1 or expected not in said:
+            g.refuse(f"Java async {name}: expected exit 1 naming {expected}: {said}")
+        print(f"check-abort: Java async {name} refused: {expected}")
+
+    for name, chain, method in (
+        ("alert", 'tx.showAlert().cancel("no")', "showFuture"),
+        ("pick", 'tx.pickFile().filter("Text", "txt")', "showFuture"),
+        ("save", 'tx.saveFile("copy")', "showFuture"),
+        ("clipboard", 'tx.readClipboard().text()', "sendFuture"),
+    ):
+        fixture = tmp / "MixedAsync.java"
+        control = (
+            'import dev.kaya.KayaApp; class MixedAsync { void check(KayaApp.Tx tx) { '
+            + chain + '.' + method + '(); } }')
+        fixture.write_text(control, encoding="utf-8")
+        step(f"java-async-{name}-control", [*java_compile, "-cp", str(tmp / "java"),
+                                           str(fixture)], tmp / f"java-{name}-control.log")
+        fixture.write_text(g.doctor(
+            f"Java callback/future {name}", control, re.escape('.' + method + '();'),
+            '.onResult((t, value) -> {}).'+ method + '();'), encoding="utf-8")
+        got = probe_run([*java_compile, "-cp", str(tmp / "java"), str(fixture)], env=ENV)
+        if (got.returncode == 0 or "cannot find symbol" not in got.stderr
+                or method not in got.stderr):
+            g.refuse(f"Java callback/future {name} did not refuse {method}: "
+                     f"{got.stdout}{got.stderr}")
+        print(f"check-abort: Java callback/future {name}: compiler refused {method}")
+
     step("ocaml-build",
          ["dune", "build", "--root", ".",
           "./bindings/ocaml/checks/abort_check.exe"], tmp / "ml.log")

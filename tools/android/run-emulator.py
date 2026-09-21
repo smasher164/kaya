@@ -1198,6 +1198,25 @@ def device_capture(serial, package, name, log):
               f"{serial}", file=log)
 
 
+def recording_duration_ms(video, log):
+    # docs/traps.md: an exclusive-leg rename changed ffprobe's log level.
+    argv = ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+            "-of", "csv=p=0", str(video)]
+    got = subprocess.run(argv, capture_output=True, check=False, **TEXT)
+    if got.returncode:
+        print(f"recording: {argv!r} exited {got.returncode}: {got.stderr.strip()}", file=log)
+        return 0
+    try:
+        duration = int(float(got.stdout.strip()) * 1000)
+    except (ValueError, OverflowError):
+        duration = 0
+    if duration <= 0:
+        print(f"recording: ffprobe returned no positive duration for {video}: "
+              f"{got.stdout!r}; stderr={got.stderr!r}", file=log)
+        return 0
+    return duration
+
+
 def run_apk_on(serial, name, apk, component, script, extras,
                remount_expect, two_act, log, rebooted=False):
     """One leg on one device, everything it prints going to its own
@@ -1469,20 +1488,17 @@ def run_apk_on(serial, name, apk, component, script, extras,
         if rec_proc is not None:
             rec_proc.wait()
         time.sleep(1)
-        adb(serial, "pull", "/data/local/tmp/kaya-rec.mp4",
-            str(rec_dir / "video.mp4"), stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL)
+        pulled = adb(serial, "pull", "/data/local/tmp/kaya-rec.mp4",
+                     str(rec_dir / "video.mp4"), stdout=log, stderr=log).returncode
         with open(rec_dir / "leg.log", "w", encoding="utf-8",
                   errors="replace") as lf:
             run(["adb", "-s", serial, "logcat", "-d", "-s", "kaya:*"],
                 stdout=lf, stderr=subprocess.DEVNULL, **TEXT)
-        dur = out_of(["ffprobe", "-v", "exclusive", "-show_entries",
-                      "format=duration", "-of", "csv=p=0",
-                      str(rec_dir / "video.mp4")]).strip()
-        try:
-            dur_ms = int(float(dur or "0") * 1000)
-        except ValueError:
+        if pulled:
+            print(f"{name}: adb pull of the recording exited {pulled}", file=log)
             dur_ms = 0
+        else:
+            dur_ms = recording_duration_ms(rec_dir / "video.mp4", log)
         if not dur_ms:
             print(f"{name}: recording produced no readable video",
                   file=log)
@@ -1492,7 +1508,7 @@ def run_apk_on(serial, name, apk, component, script, extras,
                   str(t_kill - dur_ms), str(rec_dir / "steps")],
                  stdout=log, stderr=log).returncode != 0:
             failed = True
-    if "KAYA_SELFTEST: OK" not in out:
+    if failed or "KAYA_SELFTEST: OK" not in out:
         # THE PICTURE FIRST, because it is the only evidence with a
         # CLOCK on it: the scene exits about 300ms after its verdict and
         # every adb round trip below spends some of that (the verb
