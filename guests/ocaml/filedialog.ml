@@ -67,10 +67,10 @@ let () =
 
       let ask () =
         (* Filters are ADVISORY: a guest still validates what it got. *)
-        ignore (pick_files ~filters:[ ("Text", "txt") ] ~on_result:picked ())
+        pick_files ~filters:[ ("Text", "txt") ] () picked
       in
       let ask_one () =
-        ignore (pick_file ~filters:[ ("Text", "txt") ] ~on_result:picked ())
+        pick_file ~filters:[ ("Text", "txt") ] () picked
       in
       let do_release () =
         Mutex.lock release_lock;

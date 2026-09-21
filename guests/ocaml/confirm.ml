@@ -21,16 +21,18 @@ let () =
        write s ((if choice = Alert_choice.Cancel then "held" else "ejected"))
      in
      let on_delete () =
-       ignore
-         (show_alert ~title:"delete item?"
-            ~message:"this cannot be undone"
-            ~actions:[ "Delete"; "Archive" ] ~cancel:"Keep"
-            ~on_result:delete_answered ())
+       let* choice =
+         show_alert ~title:"delete item?" ~message:"this cannot be undone"
+           ~actions:[ "Delete"; "Archive" ] ~cancel:"Keep" ()
+       in
+       delete_answered choice
      in
      let on_eject () =
-       ignore
-         (show_alert ~title:"eject disk?" ~message:"it is still mounted"
-            ~actions:[ "Eject" ] ~cancel:"Hold" ~on_result:eject_answered ())
+       let* choice =
+         show_alert ~title:"eject disk?" ~message:"it is still mounted"
+           ~actions:[ "Eject" ] ~cancel:"Hold" ()
+       in
+       eject_answered choice
      in
      let root =
        column

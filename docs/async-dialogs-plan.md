@@ -598,6 +598,23 @@ is the measured slice to take, since Post already gives it the route back. Until
 then `ShowAlert().OnResult(func(*Tx, AlertChoice))` and its four siblings are the
 form, and the gate reads Go's five by name like the other three.
 
+**OCaml and Haskell layer the continuation monad over the callback** (ruled
+2026-09-21, "sounds good, go for it"). Spelling only: the continuation IS the
+callback the binding registers, run on the app thread as its own transaction,
+so nothing suspends and the carve-out's meaning is untouched. OCaml: the five
+dialogs are questions, `show_alert ~title ~cancel () : Alert_choice.t ask` with
+`'a ask = ('a -> unit) -> unit` transparent and `( let* )` plain application —
+the callback moved AFTER the positional terminator because OCaml erases
+unfilled optional labels only at a positional argument, so `?on_result` before
+the unit could never be bound by `let*`, and the returned id went because all
+eleven call sites ignored it and nothing takes one. Haskell's five keep their
+callback-last shape; `Ask = ReaderT App (ContT () IO)` carries the app,
+`askAlert` and its four siblings answer in it, `build` opens the explicit scope
+after an answer (the four async tiers' rule), `runAsk app` runs a chain. No
+`and*` or parallel form in either: one dialog is live at a time (§5 R1.2).
+tools/check-sugar-surface.py holds both shapes and refuses any Lwt, Eio,
+effect handler, forkIO or MVar under them, five watched cuts.
+
 The four carve-out bindings must be held to NOT growing an async form later by
 accident — see §6's gate clause, which reads them by name.
 

@@ -17,6 +17,12 @@ Haskell and OCaml in the callback-only carve-out rather than gaining a channel
 tier; the plan's §3 carries the reasons and check-sugar-surface reads Go's five
 dialogs by name, cut and planted like the other three.
 
+AND THE CARVE-OUT'S SUGAR 2026-09-21 ("sounds good, go for it"): OCaml's five
+dialogs answer an `ask` (callback after the terminator, the unused id gone,
+`let*` plain application) and Haskell gains `Ask`/`askAlert`.../`build`/`runAsk`;
+both are the continuation monad over the callback, held runtime-free by
+check-sugar-surface with five watched cuts. Plan §3 has the reasons.
+
 Akhil approved the seven recommendations in docs/async-dialogs-plan.md §5.
 C# feasibility against the real binding found that its proposed context
 wrapper commits a continuation's writes before receiving the async-void

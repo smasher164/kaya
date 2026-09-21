@@ -1058,7 +1058,12 @@ in docs/deferred.md.
    and six accepted controls. Thirteen task tests run through check-abort with
    a census and four measured reports: initial panic, resumed panic inside and
    outside a scope, and a returned error. The surface gate holds all five
-   async tiers and the three callback-only carve-outs with counted cuts.
+   async tiers and the four callback-only carve-outs with counted cuts,
+   AND THE CARVE-OUT'S SUGAR SINCE 2026-09-21: OCaml's five dialogs answer
+   a transparent `'a ask` bound by `let*`, Haskell's five `ask*` live in
+   `Ask = ReaderT App (ContT () IO)` with `build` and `runAsk`, and neither
+   may name Lwt, Eio, an effect handler, forkIO or an MVar, since a runtime
+   under the sugar's name is what the carve-out forbids; five watched cuts.
    app.rs unit tests hold occurrence-loop reentry before posts or events,
    including a manually polled nested future, and depth cleanup on every exit),
    `tools/check-tx-liveness.py` (a transaction is usable only inside

@@ -8414,7 +8414,7 @@ ASYNC_CARVEOUTS = {
                "async def {name}_async(): pass\n"),
     "OCaml": ("bindings/ocaml/kaya_app.ml",
               ["show_alert", "pick_file", "pick_files", "save_file", "read_clipboard"],
-              r"(?m)^let {name}\b[^\n]*(?:\n    [^\n]*)?", "?on_result",
+              r"(?m)^let {name}\b[^\n]*(?:\n    [^\n]*)?", " k =",
               r"(?m)^let {name}_(?:async|future)\b", "let {name}_future () = failwith \"probe\"\n"),
     "Haskell": ("bindings/haskell/KayaApp.hs",
                 ["showAlert", "pickFile", "pickFiles", "saveFile", "readClipboard"],
@@ -8471,6 +8471,77 @@ for _lang, (_rel, _names, _signature, _callback, _forbidden, _plant) in ASYNC_CA
     if len(async_carveout_findings("", _names, _signature, _callback, _forbidden)) != 5:
         selftest_exit(f"check-sugar-surface: {_lang} empty carve-out reader "
                       "did not refuse five callbacks")
+
+# THE CARVE-OUT'S OWN SUGAR (ruled 2026-09-21, docs/async-dialogs-plan.md §3):
+# OCaml's five dialogs are questions, `... -> unit -> <answer> ask` with the
+# callback as the continuation, and Haskell's five ask* live in an Ask monad
+# over ContT; both are the continuation monad over the callback the binding
+# already registers, so neither may carry a runtime. Held here because a
+# runtime smuggled in under the sugar's name is what the carve-out forbids.
+OCAML_ASK = ["show_alert", "pick_files", "pick_file", "save_file", "read_clipboard"]
+HASKELL_ASK = {"askAlert": "Ask AlertChoice", "askPickFiles": "Ask [PickedFile]",
+               "askPickFile": "Ask [PickedFile]", "askSaveFile": "Ask (Maybe PickedFile)",
+               "askReadClipboard": "Ask (Maybe Representation)"}
+HASKELL_ASK_SCOPE = (r"(?m)^build :: Build a -> Ask a\s*$",
+                     r"(?m)^runAsk :: App -> Ask \(\) -> IO \(\)\s*$")
+
+
+def carveout_sugar_findings(mli, ml, hs):
+    out = []
+    if "type 'a ask = ('a -> unit) -> unit" not in mli:
+        out.append("ocaml: 'a ask is not the transparent continuation type")
+    if not re.search(r"(?m)^val \( let\* \) : 'a ask -> \('a -> unit\) -> unit", mli):
+        out.append("ocaml: no let* over ask")
+    for name in OCAML_ASK:
+        sig = re.search(rf"(?m)^val {name} :[^\n]*(?:\n  [^\n]*)*", mli)
+        if sig is None or not sig.group().rstrip().endswith(" ask"):
+            out.append(f"ocaml: {name} does not answer an ask")
+    if re.search(r"\b(?:Lwt|Eio|Effect)\.", ml):
+        out.append("ocaml: a concurrency runtime is named in kaya_app.ml")
+    if "type Ask = ReaderT App (ContT () IO)" not in hs:
+        out.append("haskell: Ask is not ReaderT App (ContT () IO)")
+    for name, answer in HASKELL_ASK.items():
+        if not re.search(rf"(?m)^{name} :: .*-> {re.escape(answer)}\s*$", hs):
+            out.append(f"haskell: {name} :: ... -> {answer} is missing")
+    for sig in HASKELL_ASK_SCOPE:
+        if not re.search(sig, hs):
+            out.append(f"haskell: {sig} is missing")
+    block = re.search(r"(?ms)^type Ask = .*?^runAsk app m = [^\n]*\n", hs)
+    if block is None:
+        out.append("haskell: the Ask block could not be located")
+    elif re.search(r"\b(?:forkIO|MVar|threadDelay|unsafePerformIO)\b", block.group()):
+        out.append("haskell: the Ask block reaches a thread or an MVar")
+    return out
+
+
+_mli = read_rel("bindings/ocaml/kaya_app.mli")
+_ml = read_rel("bindings/ocaml/kaya_app.ml")
+_hs = read_rel("bindings/haskell/KayaApp.hs")
+for _finding in carveout_sugar_findings(_mli, _ml, _hs):
+    print(f"check-sugar-surface: carve-out sugar: {_finding}", file=sys.stderr)
+    status = 1
+for _label, _which, _pattern, _repl, _want in [
+    ("ask made abstract", "mli", r"type 'a ask = \('a -> unit\) -> unit", "type 'a ask",
+     "transparent continuation type"),
+    ("show_alert answering an id", "mli", r"-> Alert_choice\.t ask", "-> int64",
+     "show_alert does not answer an ask"),
+    ("Lwt planted in the binding", "ml", r"\Z", "\nlet _ = Lwt.bind\n",
+     "concurrency runtime"),
+    ("askAlert cut", "hs", r"(?m)^askAlert :: \[AlertAttr\] -> Ask AlertChoice\n", "",
+     "askAlert :: ... -> Ask AlertChoice is missing"),
+    ("a thread under runAsk", "hs", r"(?m)^runAsk app m = evalContT \(runReaderT m app\)\n",
+     "runAsk app m = forkIO (evalContT (runReaderT m app)) >> pure ()\n",
+     "reaches a thread"),
+]:
+    _texts = {"mli": _mli, "ml": _ml, "hs": _hs}
+    _texts[_which], _n = sub_count(_pattern, _repl, _texts[_which])
+    _found = carveout_sugar_findings(_texts["mli"], _texts["ml"], _texts["hs"])
+    print(f"check-sugar-surface: carve-out sugar {_label}: {_n} substitution(s), "
+          f"{len(_found)} finding(s)", file=sys.stderr)
+    if _n != 1 or not any(_want in f for f in _found):
+        selftest_exit(f"check-sugar-surface: carve-out sugar negative {_label!r} did not refuse")
+if len(carveout_sugar_findings("", "", "")) < 13:
+    selftest_exit("check-sugar-surface: the carve-out sugar reader read nothing and agreed")
 
 check_scene_sugar()
 

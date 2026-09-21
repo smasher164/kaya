@@ -1004,12 +1004,21 @@ val select_section : ?window:int64 -> int64 -> unit
 (* Pop the primary surface's top entry. *)
 val pop_entry : ?window:int64 -> unit -> unit
 
+(* A dialog is a QUESTION: [show_alert ~title ~cancel ()] shows the alert
+   when handed its continuation, the callback the binding runs on the app
+   thread in its own transaction, so [let*] chains questions with no
+   runtime behind it (docs/async-dialogs-plan.md §3). Transparent on
+   purpose: any callback-shaped operation of yours chains the same way.
+   There is no [and*]: one dialog is live at a time. *)
+type 'a ask = ('a -> unit) -> unit
+
+val ( let* ) : 'a ask -> ('a -> unit) -> unit
+
 val show_alert :
   ?window:int64 ->
   ?title:string ->
   ?message:string ->
-  ?actions:string list ->
-  cancel:string -> ?on_result:(Alert_choice.t -> unit) -> unit -> int64
+  ?actions:string list -> cancel:string -> unit -> Alert_choice.t ask
 
 val show_notification :
   ?title:string ->
@@ -1036,19 +1045,13 @@ val link_route : app -> pattern:string -> f:((string * string) list -> unit) -> 
 val link_opened : app -> int64 -> string -> (string * string) list -> unit
 
 val pick_files :
-  ?window:int64 ->
-  ?filters:(string * string) list ->
-  ?on_result:(picked_file list -> unit) -> unit -> int64
+  ?window:int64 -> ?filters:(string * string) list -> unit -> picked_file list ask
 
 val pick_file :
-  ?window:int64 ->
-  ?filters:(string * string) list ->
-  ?on_result:(picked_file list -> unit) -> unit -> int64
+  ?window:int64 -> ?filters:(string * string) list -> unit -> picked_file list ask
 
 val save_file :
-  ?window:int64 ->
-  ?filters:(string * string) list ->
-  ?on_result:(picked_file option -> unit) -> string -> int64
+  ?window:int64 -> ?filters:(string * string) list -> string -> picked_file option ask
 
 val copy :
   ?text:string ->
@@ -1056,8 +1059,7 @@ val copy :
   ?image:string ->
   ?files:picked_file list -> ?custom:(string * string) list -> unit -> unit
 
-val read_clipboard :
-  ?on_result:(representation option -> unit) -> string list -> int64
+val read_clipboard : string list -> representation option ask
 
 val set_accepts : widget -> string list -> unit
 

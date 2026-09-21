@@ -95,7 +95,7 @@ let () =
       in
 
       let ask_open () =
-        ignore (pick_file ~on_result:opened ())
+        pick_file () opened
       in
       let save_back () =
         (* A missing handle gets its OWN sentence, never an exception: a
@@ -107,7 +107,7 @@ let () =
             work (fun () -> "saved " ^ write_back file "second draft")
       in
       let save_as () =
-        ignore (save_file ~on_result:saved "copy")
+        save_file "copy" saved
       in
       let reopen () =
         match (!source, !destination) with

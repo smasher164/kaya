@@ -34,6 +34,14 @@ module KayaApp
     newApp,
     post,
     buildTx,
+    Ask,
+    askAlert,
+    askPickFiles,
+    askPickFile,
+    askSaveFile,
+    askReadClipboard,
+    build,
+    runAsk,
     -- Exported for guests/haskell's AbortCheck, which reads a ranged
     -- format act's record back before it is submitted.
     stageTx,
@@ -392,6 +400,10 @@ import qualified KayaRuntime as R
 import System.IO (Handle)
 import qualified KayaWire as W
 import Control.Monad.State.Strict (gets, runState, state)
+import Control.Monad.Trans.Class (lift)
+import Control.Monad.Trans.Cont (ContT (..), evalContT)
+import Control.Monad.Trans.Reader (ReaderT (..))
+import qualified Control.Monad.Trans.Reader as Reader
 import Kaya.Core
 
 -- | WHAT THIS HOST CAN DO — see crates/kaya/src/app.rs for the
@@ -4300,3 +4312,38 @@ askSize other =
         ++ show other
         ++ ", wanted the assigned width and height as f64"
     )
+
+-- A dialog is a question: the continuation monad over the callbacks the
+-- binding already registers, with the App carried, so a chain reads top to
+-- bottom while every step still runs as that callback on the app thread.
+-- `build` is the explicit scope after an answer (docs/async-dialogs-plan.md
+-- §3). No parallel form: one dialog is live at a time.
+type Ask = ReaderT App (ContT () IO)
+
+askWith :: ((a -> IO ()) -> Build ()) -> Ask a
+askWith show = do
+  app <- Reader.ask
+  lift (ContT (\k -> buildTx app (show k)))
+
+askAlert :: [AlertAttr] -> Ask AlertChoice
+askAlert attrs = askWith (showAlert attrs)
+
+askPickFiles :: [(Text, Text)] -> Ask [PickedFile]
+askPickFiles filters = askWith (pickFiles filters)
+
+askPickFile :: [(Text, Text)] -> Ask [PickedFile]
+askPickFile filters = askWith (pickFile filters)
+
+askSaveFile :: Text -> [(Text, Text)] -> Ask (Maybe PickedFile)
+askSaveFile name filters = askWith (saveFile name filters)
+
+askReadClipboard :: [Text] -> Ask (Maybe Representation)
+askReadClipboard kinds = askWith (readClipboard kinds)
+
+build :: Build a -> Ask a
+build b = do
+  app <- Reader.ask
+  lift (ContT (\k -> buildTx app b >>= k))
+
+runAsk :: App -> Ask () -> IO ()
+runAsk app m = evalContT (runReaderT m app)

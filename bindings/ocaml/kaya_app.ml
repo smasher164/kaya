@@ -2728,8 +2728,16 @@ let pop_entry ?(window = 0L) () = emit (the_tx ()) (Kaya_wire.tx_pop_entry windo
    rides the REQUEST and retires with its one answer — choice is an
    action index (0 or 1) or [alert_cancel], every platform-native
    dismissal. *)
+(* A dialog is a QUESTION: [show_alert ~title ~cancel ()] shows the alert
+   when handed its continuation, the callback the binding runs on the app
+   thread in its own transaction, so [let*] chains questions with no
+   runtime behind it (docs/async-dialogs-plan.md §3). *)
+type 'a ask = ('a -> unit) -> unit
+
+let ( let* ) (ask : 'a ask) k = ask k
+
 let show_alert ?(window = 0L) ?(title = "") ?(message = "")
-    ?(actions = []) ~cancel ?on_result () =
+    ?(actions = []) ~cancel () k =
   let tx = the_tx () in
   if List.length actions > 2 then
     invalid_arg "kaya: an alert carries at most 2 actions (the platform floor)";
@@ -2738,14 +2746,13 @@ let show_alert ?(window = 0L) ?(title = "") ?(message = "")
   let app = tx.app in
   app.next_alert <- Int64.add app.next_alert 1L;
   let id = app.next_alert in
-  Option.iter (fun f -> Hashtbl.replace app.alert_handlers id f) on_result;
+  Hashtbl.replace app.alert_handlers id k;
   let nth i = match List.nth_opt actions i with Some a -> a | None -> "" in
   emit tx
     (Kaya_wire.tx_show_alert window id (List.length actions)
        (Kaya_wire.Str title) (Kaya_wire.Str message)
        (Kaya_wire.Str (nth 0)) (Kaya_wire.Str (nth 1))
-       (Kaya_wire.Str cancel));
-  id
+       (Kaya_wire.Str cancel))
 
 
 (* Post a local notification with a GUEST-CHOSEN id
@@ -2871,28 +2878,27 @@ let next_dialog app =
   app.next_file_dialog <- Int64.add app.next_file_dialog 1L;
   app.next_file_dialog
 
-let pick ?(window = 0L) ?(filters = []) ~multiple ?on_result () =
+let pick ?(window = 0L) ?(filters = []) ~multiple () k =
   let tx = the_tx () in
   let app = tx.app in
   let id = next_dialog app in
-  Option.iter (fun f -> Hashtbl.replace app.file_dialog_handlers id f) on_result;
+  Hashtbl.replace app.file_dialog_handlers id k;
   emit tx
     (Kaya_wire.tx_show_file_dialog window id
        (if multiple then 1 else 0)
-       (filter_values filters));
-  id
+       (filter_values filters))
 
 (* Ask the platform for files. THE PICK, NOT THE OPEN — the result
    carries handles you redeem later (DESIGN.md, File dialogs). [filters]
    is (label, space-separated extensions), ADVISORY everywhere.
-   [on_result] fires exactly once; CANCEL IS THE EMPTY LIST. *)
-let pick_files ?(window = 0L) ?(filters = []) ?on_result () =
-  pick ~window ~filters ~multiple:true ?on_result ()
+   The continuation fires exactly once; CANCEL IS THE EMPTY LIST. *)
+let pick_files ?(window = 0L) ?(filters = []) () k =
+  pick ~window ~filters ~multiple:true () k
 
 (* The single-file spelling. The floor always returns a LIST; this only
    asks the platform for one, so the handler receives zero or one. *)
-let pick_file ?(window = 0L) ?(filters = []) ?on_result () =
-  pick ~window ~filters ~multiple:false ?on_result ()
+let pick_file ?(window = 0L) ?(filters = []) () k =
+  pick ~window ~filters ~multiple:false () k
 
 (* Ask the platform WHERE TO SAVE — the picker's twin on the same grammar
    and out of the same one-live-dialog slot (docs/save-plan.md D2).
@@ -2900,20 +2906,16 @@ let pick_file ?(window = 0L) ?(filters = []) ?on_result () =
    TAKES it and none guarantees it, so read the name you GOT (on macOS
    NSSavePanel appends the first allowed extension — docs/deferred.md).
    CANCEL IS [None], and WHAT YOU GET BACK OPENS EMPTY (D1). *)
-let save_file ?(window = 0L) ?(filters = []) ?on_result suggested_name =
+let save_file ?(window = 0L) ?(filters = []) suggested_name k =
   let tx = the_tx () in
   let app = tx.app in
   let id = next_dialog app in
-  Option.iter
-    (fun f ->
-      Hashtbl.replace app.file_dialog_handlers id (fun files ->
-          f (match files with [] -> None | destination :: _ -> Some destination)))
-    on_result;
+  Hashtbl.replace app.file_dialog_handlers id (fun files ->
+      k (match files with [] -> None | destination :: _ -> Some destination));
   emit tx
     (Kaya_wire.tx_show_save_dialog window id
        (Kaya_wire.Str suggested_name)
-       (filter_values filters));
-  id
+       (filter_values filters))
 
 (* --- The clipboard (DESIGN.md, Clipboard) --------------------------- *)
 
@@ -2972,14 +2974,13 @@ let copy ?text ?html ?image ?(files = []) ?(custom = []) () =
    platforms have deliberately made it expensive (DESIGN.md, and
    docs/clipboard-plan.md): reach for it to detect a URL or import, never to
    implement Paste — that is the Paste command, and it is free. *)
-let read_clipboard ?on_result accepting =
+let read_clipboard accepting k =
   let tx = the_tx () in
   let app = tx.app in
   app.next_clipboard_read <- Int64.add app.next_clipboard_read 1L;
   let id = app.next_clipboard_read in
-  Option.iter (fun f -> Hashtbl.replace app.clipboard_handlers id f) on_result;
-  emit tx (Kaya_wire.tx_read_clipboard id (Kaya_wire.Str (accept_list accepting)));
-  id
+  Hashtbl.replace app.clipboard_handlers id k;
+  emit tx (Kaya_wire.tx_read_clipboard id (Kaya_wire.Str (accept_list accepting)))
 
 (* Declare what a widget takes from a paste — the closed kinds by name
    plus any custom format ids. It drives whether Paste is live while this

@@ -28,11 +28,12 @@ let () =
      in
      (* Nothing has closed yet: the veto class says so. *)
      let on_close_requested () =
-       ignore
-         (show_alert ~title:"unsaved changes"
-            ~message:"the document has unsaved changes"
-            ~actions:[ "Discard" ] ~cancel:"Keep Editing"
-            ~on_result:close_answered ())
+       let* choice =
+         show_alert ~title:"unsaved changes"
+           ~message:"the document has unsaved changes"
+           ~actions:[ "Discard" ] ~cancel:"Keep Editing" ()
+       in
+       close_answered choice
      in
 
      (* No [~dirty] here: the default false is the first assertion. *)

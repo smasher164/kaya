@@ -110,14 +110,14 @@ let () =
         write status ("copied")
       in
       let read_custom () =
-        ignore (read_clipboard ~on_result:answered [ note_id ])
+        read_clipboard [ note_id ] answered
       in
-      let read_text () = ignore (read_clipboard ~on_result:answered [ accept_text ]) in
+      let read_text () = read_clipboard [ accept_text ] answered in
       let read_image () =
-        ignore (read_clipboard ~on_result:answered [ accept_image ])
+        read_clipboard [ accept_image ] answered
       in
       let read_files () =
-        ignore (read_clipboard ~on_result:answered [ accept_files ])
+        read_clipboard [ accept_files ] answered
       in
 
       let root =

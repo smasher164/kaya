@@ -531,7 +531,9 @@ limit: writes before a continuation throws stand. Synchronous callback abort
 semantics remain unchanged in all nine. Python, Haskell, OCaml and Go retain the
 approved callback-only runtime carve-out (Go ruled 2026-09-21: no `await`, and a
 channel form would resume off the app thread and come back through Post, the
-callback in disguise; docs/async-dialogs-plan.md §3). All nine verdicts and the shared
+callback in disguise; docs/async-dialogs-plan.md §3). OCaml and Haskell layer the
+continuation monad over that callback as spelling (`'a ask` with `let*`, and `Ask`
+with `runAsk`/`build`; ruled 2026-09-21, same section). All nine verdicts and the shared
 failure sentence live in the plan and its C# feasibility measurement.
 The ownership rule was clarified 2026-09-20: Kaya reports errors escaping async
 work handed to it, not arbitrary tasks or future chains created by the guest.
