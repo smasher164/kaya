@@ -537,7 +537,9 @@ in docs/deferred.md.
    `tools/check-universal-props.py` (the lowering-side sibling: every
    backend applies the universal a11y props to every kind — Compose
    per-arm, SwiftUI's one wrapper unbypassed, GTK/WinUI's apply arm
-   still keyed on the prop alone),
+   still keyed on the prop alone. Android drag completion belongs to the stable
+   scene root, with captured source identity and native-event session identity;
+   eight counted cuts hold that ownership through source removal and row restamps),
    `tools/check-roles.py` (the role vocabulary reaches every backend:
    `MENU_ROLES` is one line, it is not in the spec hash, and adding an
    entry regenerates nothing — so before this gate a role could ship with
@@ -736,7 +738,10 @@ in docs/deferred.md.
    read back. Windows recording is serial because guest title changes discard the
    tile suffix its capturer reads; its own transcript is retained beside extraction
    diagnostics naming the requested slot and frame range. Three more cuts hold
-   serialization and diagnostic retention. Fifty-four watched negatives, counts printed),
+   serialization and diagnostic retention. Android's system timeline also retains
+   native drag/drop and Kaya's matching events: three renderer cuts hold that
+   history, because a missing Kaya callback does not prove Android sent no end.
+   Fifty-seven watched negatives, counts printed),
    `tools/check-diagnostics.py` (a why-not may not print a sentence it
    cannot NOT print. Any function named `*WhyNot`/`*why_not`/`*Reason`
    is read as a diagnostic by that name alone; one answer, or an answer
@@ -1041,8 +1046,12 @@ in docs/deferred.md.
    runtime mutations and four callback/future compile refusals hold those paths;
    check-sugar-surface holds fifteen API and occurrence-wiring clauses, each cut
    and watched red, plus an empty-reader refusal. RUST SCOPED TRANSACTIONS
-   add eleven compiler cases through tools/checks/rust-scoped.py: private begin,
-   seven borrowed-scope refusals and three accepted local-future controls.
+   add twenty compiler cases through tools/checks/rust-scoped.py: private begin,
+   scoped borrows, task ownership and callback/future types, fourteen refusals
+   and six accepted controls. Thirteen task tests run through check-abort with
+   a census and four measured reports: initial panic, resumed panic inside and
+   outside a scope, and a returned error. The surface gate holds all five
+   async tiers and the three callback-only carve-outs with counted cuts.
    app.rs unit tests hold occurrence-loop reentry before posts or events,
    including a manually polled nested future, and depth cleanup on every exit),
    `tools/check-tx-liveness.py` (a transaction is usable only inside

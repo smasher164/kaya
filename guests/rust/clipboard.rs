@@ -35,10 +35,8 @@ const PIXEL_PNG: &[u8] = &[
     0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x04, // 4 x 4
     0x08, 0x02, 0x00, 0x00, 0x00, 0x26, 0x93, 0x09, // 8-bit rgb + crc
     0x29, 0x00, 0x00, 0x00, 0x14, 0x49, 0x44, 0x41, // IDAT length + type
-    0x54, 0x78, 0xDA, 0x63, 0xF8, 0xCF, 0xC0, 0x00,
-    0x47, 0x48, 0x4C, 0x74, 0xDE, 0x7F, 0x24, 0x00,
-    0x00, 0xD2, 0x6F, 0x17, 0xE9, 0x51, 0xBB, 0x23,
-    0x2D, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E,
+    0x54, 0x78, 0xDA, 0x63, 0xF8, 0xCF, 0xC0, 0x00, 0x47, 0x48, 0x4C, 0x74, 0xDE, 0x7F, 0x24, 0x00,
+    0x00, 0xD2, 0x6F, 0x17, 0xE9, 0x51, 0xBB, 0x23, 0x2D, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E,
     0x44, 0xAE, 0x42, 0x60, 0x82, // IEND + crc
 ];
 
@@ -55,7 +53,6 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         ReadText,
         ReadImage,
         ReadFiles,
-        Answer(Option<kaya::Representation>),
         FocusRich,
         FocusPlain,
         Pasted(kaya::Representation),
@@ -69,12 +66,14 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
 
     let msgs = kaya::Messages::<Msg>::new();
     let (status, row_status, rich_field, plain_field) = ctx.apply(|tx| {
-        tx.window(kaya::DEFAULT_WINDOW).title("clipboard").menu("Edit", |m| {
-            m.item("Cut").role(kaya::MenuRole::Cut).id();
-            m.item("Copy").role(kaya::MenuRole::Copy).id();
-            m.item("Paste").role(kaya::MenuRole::Paste).id();
-        })
-        .id();
+        tx.window(kaya::DEFAULT_WINDOW)
+            .title("clipboard")
+            .menu("Edit", |m| {
+                m.item("Cut").role(kaya::MenuRole::Cut).id();
+                m.item("Copy").role(kaya::MenuRole::Copy).id();
+                m.item("Paste").role(kaya::MenuRole::Paste).id();
+            })
+            .id();
         let status = tx.signal("ready");
         let row_status = tx.signal("");
         let mut rich_field = None;
@@ -120,10 +119,16 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             })
             .id();
         tx.mount(root);
-        (status, row_status, rich_field.unwrap(), plain_field.unwrap())
+        (
+            status,
+            row_status,
+            rich_field.unwrap(),
+            plain_field.unwrap(),
+        )
     });
 
-    while let Some(msg) = msgs.next(&ctx) {
+    let tasks = ctx.tasks();
+    while let Some(msg) = tasks.next(&msgs) {
         match msg {
             Msg::CopyRich => {
                 // One clip, four representations; kaya derives none of them.
@@ -137,21 +142,18 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     tx.write(status, "copied");
                 });
             }
-            Msg::ReadCustom => {
-                let request = ctx.apply(|tx| tx.read_clipboard().custom(NOTE_ID).send());
-                msgs.on_clipboard(request, Msg::Answer);
-            }
-            Msg::ReadText => {
-                let request = ctx.apply(|tx| tx.read_clipboard().text().send());
-                msgs.on_clipboard(request, Msg::Answer);
-            }
-            Msg::ReadImage => {
-                let request = ctx.apply(|tx| tx.read_clipboard().image().send());
-                msgs.on_clipboard(request, Msg::Answer);
-            }
-            Msg::ReadFiles => {
-                let request = ctx.apply(|tx| tx.read_clipboard().files().send());
-                msgs.on_clipboard(request, Msg::Answer);
+            Msg::ReadCustom | Msg::ReadText | Msg::ReadImage | Msg::ReadFiles => {
+                tasks.spawn(async move |app| {
+                    let request = app.read_clipboard();
+                    let request = match msg {
+                        Msg::ReadCustom => request.custom(NOTE_ID),
+                        Msg::ReadText => request.text(),
+                        Msg::ReadImage => request.image(),
+                        Msg::ReadFiles => request.files(),
+                        _ => unreachable!(),
+                    };
+                    answer(app, status, request.await);
+                });
             }
             Msg::FocusRich => ctx.apply(|tx| tx.focus(rich_field)),
             Msg::FocusPlain => ctx.apply(|tx| tx.focus(plain_field)),
@@ -168,55 +170,58 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             Msg::RowPasted(path, other) => {
                 ctx.apply(|tx| tx.write(row_status, format!("row {path:?} pasted {other:?}")));
             }
-            Msg::Answer(clip) => match clip {
-                // EMPTY IS THE UNIVERSAL NO; no platform says which cause.
-                None => ctx.apply(|tx| tx.write(status, "empty")),
-                Some(kaya::Representation::Text(text)) => {
-                    ctx.apply(|tx| tx.write(status, format!("text {text}")));
-                }
-                Some(kaya::Representation::Html(html)) => {
-                    ctx.apply(|tx| tx.write(status, format!("html {html}")));
-                }
-                Some(kaya::Representation::Custom { id, bytes }) => {
-                    let body = String::from_utf8_lossy(&bytes.0).into_owned();
-                    ctx.apply(|tx| tx.write(status, format!("custom {id} {body}")));
-                }
-                Some(kaya::Representation::Image(bytes)) => {
-                    // A foreign DECODER's size: byte counts differ per host.
-                    let bytes = bytes.0.to_vec();
-                    ctx.apply(|tx| {
-                        tx.copy().image(bytes).send();
-                        tx.write(status, "image");
-                    });
-                }
-                Some(kaya::Representation::Files(files)) => {
-                    let Some(file) = files.into_iter().next() else {
-                        ctx.apply(|tx| tx.write(status, "files none"));
-                        continue;
-                    };
-                    // Off the app thread: `open` blocks.
-                    let poster = ctx.poster();
-                    std::thread::Builder::new()
-                        .name("clipboard-reader".into())
-                        .spawn(move || {
-                            let name = file.name.clone();
-                            let mut text = String::new();
-                            match file.open(kaya::FileMode::Read) {
-                                Ok(mut opened) => {
-                                    if let Err(e) = opened.file.read_to_string(&mut text) {
-                                        text = format!("read failed: {e}");
-                                    }
-                                }
-                                Err(e) => text = format!("open failed: {e}"),
+        }
+    }
+}
+
+fn answer(ctx: &kaya::AppCtx, status: kaya::SignalId, clip: Option<kaya::Representation>) {
+    match clip {
+        // EMPTY IS THE UNIVERSAL NO; no platform says which cause.
+        None => ctx.apply(|tx| tx.write(status, "empty")),
+        Some(kaya::Representation::Text(text)) => {
+            ctx.apply(|tx| tx.write(status, format!("text {text}")));
+        }
+        Some(kaya::Representation::Html(html)) => {
+            ctx.apply(|tx| tx.write(status, format!("html {html}")));
+        }
+        Some(kaya::Representation::Custom { id, bytes }) => {
+            let body = String::from_utf8_lossy(&bytes.0).into_owned();
+            ctx.apply(|tx| tx.write(status, format!("custom {id} {body}")));
+        }
+        Some(kaya::Representation::Image(bytes)) => {
+            // A foreign DECODER's size: byte counts differ per host.
+            let bytes = bytes.0.to_vec();
+            ctx.apply(|tx| {
+                tx.copy().image(bytes).send();
+                tx.write(status, "image");
+            });
+        }
+        Some(kaya::Representation::Files(files)) => {
+            let Some(file) = files.into_iter().next() else {
+                ctx.apply(|tx| tx.write(status, "files none"));
+                return;
+            };
+            // Off the app thread: `open` blocks.
+            let poster = ctx.poster();
+            std::thread::Builder::new()
+                .name("clipboard-reader".into())
+                .spawn(move || {
+                    let name = file.name.clone();
+                    let mut text = String::new();
+                    match file.open(kaya::FileMode::Read) {
+                        Ok(mut opened) => {
+                            if let Err(e) = opened.file.read_to_string(&mut text) {
+                                text = format!("read failed: {e}");
                             }
-                            poster.post(move |tx| {
-                                tx.write(status, format!("files {name} {text}"));
-                            });
-                        })
-                        .expect("failed to spawn the reader");
-                    ctx.apply(|tx| tx.write(status, "reading"));
-                }
-            },
+                        }
+                        Err(e) => text = format!("open failed: {e}"),
+                    }
+                    poster.post(move |tx| {
+                        tx.write(status, format!("files {name} {text}"));
+                    });
+                })
+                .expect("failed to spawn the reader");
+            ctx.apply(|tx| tx.write(status, "reading"));
         }
     }
 }

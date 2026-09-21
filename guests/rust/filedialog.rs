@@ -34,7 +34,6 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     enum Msg {
         Ask,
         AskOne,
-        Picked(Vec<kaya::PickedFile>),
         Release,
     }
 
@@ -67,50 +66,51 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     // The send must NOT wait for the receiver — mpsc's does not.
     let (release_tx, release_rx) = mpsc::channel::<()>();
     let mut release_tx = Some(release_tx);
-    let mut release_rx = Some(release_rx);
+    let release_rx = std::rc::Rc::new(std::cell::RefCell::new(Some(release_rx)));
 
-    while let Some(msg) = msgs.next(&ctx) {
+    let tasks = ctx.tasks();
+    while let Some(msg) = tasks.next(&msgs) {
         match msg {
             Msg::Ask | Msg::AskOne => {
                 let one = matches!(msg, Msg::AskOne);
-                let dialog = ctx.apply(|tx| {
-                    let r = if one { tx.pick_file() } else { tx.pick_files() };
-                    // Advisory on every platform, never a guarantee.
-                    r.filter("Text", "txt").show()
-                });
-                msgs.on_files(dialog, Msg::Picked);
-            }
-            Msg::Picked(files) => {
-                if files.is_empty() {
-                    // The empty list IS cancel.
-                    ctx.apply(|tx| tx.write(status, "cancelled"));
-                    continue;
-                }
-                let poster = ctx.poster();
-                let rx = release_rx
-                    .take()
-                    .expect("the scene picks a file exactly once");
-                std::thread::Builder::new()
-                    .name("filedialog-reader".into())
-                    .spawn(move || {
-                        let count = files.len();
-                        let mut text = String::new();
-                        match files[0].open(kaya::FileMode::Read) {
-                            Ok(mut opened) => {
-                                if let Err(e) = opened.file.read_to_string(&mut text) {
-                                    text = format!("read failed: {e}");
+                let release_rx = release_rx.clone();
+                tasks.spawn(async move |app| {
+                    let request = if one {
+                        app.pick_file()
+                    } else {
+                        app.pick_files()
+                    };
+                    let files = request.filter("Text", "txt").await;
+                    if files.is_empty() {
+                        app.apply(|tx| tx.write(status, "cancelled"));
+                        return;
+                    }
+                    let poster = app.poster();
+                    let rx = release_rx
+                        .borrow_mut()
+                        .take()
+                        .expect("the scene picks a file exactly once");
+                    std::thread::Builder::new()
+                        .name("filedialog-reader".into())
+                        .spawn(move || {
+                            let count = files.len();
+                            let mut text = String::new();
+                            match files[0].open(kaya::FileMode::Read) {
+                                Ok(mut opened) => {
+                                    if let Err(e) = opened.file.read_to_string(&mut text) {
+                                        text = format!("read failed: {e}");
+                                    }
                                 }
+                                Err(e) => text = format!("open failed: {e}"),
                             }
-                            Err(e) => text = format!("open failed: {e}"),
-                        }
-                        // Parks: on the app thread the release click could
-                        // never be processed.
-                        let _ = rx.recv();
-                        poster.post(move |tx| tx.write(status, format!("{count} {text}")));
-                    })
-                    .expect("failed to spawn the reader");
-                // The handler RETURNED without reading; the scene reads this.
-                ctx.apply(|tx| tx.write(status, "reading"));
+                            // Parks: on the app thread the release click could
+                            // never be processed.
+                            let _ = rx.recv();
+                            poster.post(move |tx| tx.write(status, format!("{count} {text}")));
+                        })
+                        .expect("failed to spawn the reader");
+                    app.apply(|tx| tx.write(status, "reading"));
+                });
             }
             Msg::Release => {
                 if let Some(tx) = release_tx.take() {

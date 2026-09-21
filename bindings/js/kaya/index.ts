@@ -1992,19 +1992,19 @@ export function showAlert(opts: AlertOptions): number | Promise<AlertChoice> {
   if (actions.length > 2) throw new RangeError("an alert carries at most 2 actions (the platform floor)");
   if (!opts.cancel) throw new Error("the cancel slot always exists and needs a name — pass cancel:");
   const a = app();
+  if (a._alertHandlers.size !== 0) throw new Error("kaya: an alert is already live");
   const alertId = a._next("alert");
+  const record = wire.tx_show_alert(opts.window ?? 0, alertId, actions.length, opts.title ?? "", opts.message ?? "", actions[0] ?? "", actions[1] ?? "", opts.cancel);
   const show = (): void => {
-    records().push(
-      wire.tx_show_alert(opts.window ?? 0, alertId, actions.length, opts.title ?? "", opts.message ?? "", actions[0] ?? "", actions[1] ?? "", opts.cancel),
-    );
+    records().push(record);
   };
   if (opts.onResult !== undefined) {
-    a._alertHandlers.set(alertId, opts.onResult);
+    registerDialog(a._alertHandlers, alertId, opts.onResult);
     show();
     return alertId;
   }
   return new Promise<AlertChoice>((resolve) => {
-    a._alertHandlers.set(alertId, resolve);
+    registerDialog(a._alertHandlers, alertId, resolve);
     show();
   });
 }
@@ -2183,18 +2183,20 @@ export function saveFile(suggestedName: string, opts: SaveOptions & { onResult: 
 export function saveFile(suggestedName: string, opts?: SaveOptions): Promise<PickedFile | null>;
 export function saveFile(suggestedName: string, opts: SaveOptions = {}): number | Promise<PickedFile | null> {
   const a = app();
+  if (a._fileDialogHandlers.size !== 0) throw new Error("kaya: a file dialog is already live");
   const dialogId = a._next("file_dialog");
   const onResult = opts.onResult;
+  const record = wire.tx_show_save_dialog(opts.window ?? 0, dialogId, String(suggestedName), filters(opts.filters ?? []));
   const show = (): void => {
-    records().push(wire.tx_show_save_dialog(opts.window ?? 0, dialogId, String(suggestedName), filters(opts.filters ?? [])));
+    records().push(record);
   };
   if (onResult === undefined) {
     return new Promise<PickedFile | null>((resolve) => {
-      a._fileDialogHandlers.set(dialogId, (files) => resolve(files[0] ?? null));
+      registerDialog(a._fileDialogHandlers, dialogId, (files) => resolve(files[0] ?? null));
       show();
     });
   }
-  a._fileDialogHandlers.set(dialogId, (files) => onResult(files[0] ?? null));
+  registerDialog(a._fileDialogHandlers, dialogId, (files) => onResult(files[0] ?? null));
   show();
   return dialogId;
 }
@@ -2210,19 +2212,27 @@ function filters(list: readonly Filter[]): string[] {
   return flat;
 }
 
+function registerDialog<T>(handlers: Map<number, T>, id: number, handler: T): void {
+  records();
+  journalOnce({}, () => { handlers.delete(id); });
+  handlers.set(id, handler);
+}
+
 function pick(multiple: boolean, opts: PickOptions): number | Promise<PickedFile[]> {
   const a = app();
+  if (a._fileDialogHandlers.size !== 0) throw new Error("kaya: a file dialog is already live");
   const dialogId = a._next("file_dialog");
+  const record = wire.tx_show_file_dialog(opts.window ?? 0, dialogId, multiple ? 1 : 0, filters(opts.filters ?? []));
   const show = (): void => {
-    records().push(wire.tx_show_file_dialog(opts.window ?? 0, dialogId, multiple ? 1 : 0, filters(opts.filters ?? [])));
+    records().push(record);
   };
   if (opts.onResult !== undefined) {
-    a._fileDialogHandlers.set(dialogId, opts.onResult);
+    registerDialog(a._fileDialogHandlers, dialogId, opts.onResult);
     show();
     return dialogId;
   }
   return new Promise<PickedFile[]>((resolve) => {
-    a._fileDialogHandlers.set(dialogId, resolve);
+    registerDialog(a._fileDialogHandlers, dialogId, resolve);
     show();
   });
 }

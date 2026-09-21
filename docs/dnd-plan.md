@@ -853,6 +853,11 @@ the wayland clipboard legs; then iOS.
    Three natives on `KayaPresent` (emitDropped, emitDragEnded,
    dragVerdict) and the `drag` verb as a RUNNER CHANNEL (D10's Android
    bullet). tools/scenes/dnd.steps green as the lane's `dnd-compose` leg.
+   End ownership moved to KayaRoot on 2026-09-21: a move or reorder can remove
+   the source modifier before native END arrives. The root accepts local
+   sessions, uses the source identity captured at start, and emits once from
+   native onEnded. The held-END red/green probe and recorder readback are in
+   docs/measurements/android-drag-end-2026-09-21.md.
    FOUR FINDINGS ON THE WAY, all in docs/traps.md: the compose BOM does
    not decide the compose version here (adaptive 1.2.0 pulls 1.9.0, so the
    1.7 API spelling does not compile); `input draganddrop` holds no long

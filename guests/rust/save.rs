@@ -61,10 +61,8 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     #[derive(Clone)]
     enum Msg {
         Open,
-        Picked(Vec<kaya::PickedFile>),
         SaveBack,
         SaveAs,
-        Saved(Option<kaya::PickedFile>),
         Reopen,
     }
 
@@ -96,8 +94,8 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     });
 
     // Handles and never paths: the phones have no re-openable path.
-    let mut source: Option<kaya::PickedFile> = None;
-    let mut destination: Option<kaya::PickedFile> = None;
+    let source = std::rc::Rc::new(std::cell::RefCell::new(None::<kaya::PickedFile>));
+    let destination = std::rc::Rc::new(std::cell::RefCell::new(None::<kaya::PickedFile>));
 
     // Off the app thread, because `open` blocks.
     let work = |job: Box<dyn FnOnce() -> String + Send>| {
@@ -111,46 +109,51 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             .expect("failed to spawn the worker");
     };
 
-    while let Some(msg) = msgs.next(&ctx) {
+    let work = &work;
+    let tasks = ctx.tasks();
+    while let Some(msg) = tasks.next(&msgs) {
         match msg {
             Msg::Open => {
-                let dialog = ctx.apply(|tx| tx.pick_file().show());
-                msgs.on_files(dialog, Msg::Picked);
-            }
-            Msg::Picked(files) => {
-                let Some(file) = files.into_iter().next() else {
-                    ctx.apply(|tx| tx.write(status, "open cancelled"));
-                    continue;
-                };
-                source = Some(file.clone());
-                work(Box::new(move || format!("opened {}", read_back(&file))));
+                let source = source.clone();
+                tasks.spawn(async move |app| {
+                    let files = app.pick_file().await;
+                    let Some(file) = files.into_iter().next() else {
+                        app.apply(|tx| tx.write(status, "open cancelled"));
+                        return;
+                    };
+                    *source.borrow_mut() = Some(file.clone());
+                    work(Box::new(move || format!("opened {}", read_back(&file))));
+                });
             }
             Msg::SaveBack => {
                 // No dialog: the chosen handle is writable. A missing one
                 // gets its OWN sentence, never a panic (save-jvm WATCH).
-                let Some(file) = source.clone() else {
+                let Some(file) = source.borrow().clone() else {
                     ctx.apply(|tx| tx.write(status, "nothing open to save"));
                     continue;
                 };
-                work(Box::new(move || format!("saved {}", write_back(&file, "second draft"))));
+                work(Box::new(move || {
+                    format!("saved {}", write_back(&file, "second draft"))
+                }));
             }
             Msg::SaveAs => {
-                // The name the dialog OPENS with; the scene types over it.
-                let dialog = ctx.apply(|tx| tx.save_file("copy").show());
-                msgs.on_saved(dialog, Msg::Saved);
-            }
-            Msg::Saved(file) => {
-                let Some(file) = file else {
-                    // Cancel is None: nothing named, nothing written.
-                    ctx.apply(|tx| tx.write(status, "save cancelled"));
-                    continue;
-                };
-                destination = Some(file.clone());
-                work(Box::new(move || format!("saved {}", write_back(&file, "third draft"))));
+                let destination = destination.clone();
+                tasks.spawn(async move |app| {
+                    let file = app.save_file("copy").await;
+                    let Some(file) = file else {
+                        app.apply(|tx| tx.write(status, "save cancelled"));
+                        return;
+                    };
+                    *destination.borrow_mut() = Some(file.clone());
+                    work(Box::new(move || {
+                        format!("saved {}", write_back(&file, "third draft"))
+                    }));
+                });
             }
             Msg::Reopen => {
                 // A save-as through the ORIGINAL handle fails only here.
-                let (Some(first), Some(second)) = (source.clone(), destination.clone())
+                let (Some(first), Some(second)) =
+                    (source.borrow().clone(), destination.borrow().clone())
                 else {
                     ctx.apply(|tx| tx.write(status, "nothing to reopen"));
                     continue;

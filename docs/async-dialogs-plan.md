@@ -14,9 +14,9 @@ JS has the feature already (docs/js-plan.md §4, rule 2). This document says wha
 the same rule means in the other four, states each mechanism from zero before it
 uses it, and ends with the rulings and the order of work. Akhil approved all seven
 recommendations in §5 on 2026-09-19 ("go ahead"). The C# dialog APIs passed the
-full five-lane matrix on 2026-09-20, followed by Swift and Java the same day. Rust
-remains. The Swift executor prerequisite
-has shipped (§2.1). Implementation follows §6.
+full five-lane matrix on 2026-09-20, followed by Swift and Java the same day.
+Rust completed the four-tier implementation on 2026-09-21. The Swift executor
+prerequisite has shipped (§2.1). The implementation order is recorded in §6.
 
 Every claim about a platform below was MEASURED with a small probe, not recalled;
 the probes are reproduced in §2 so a later session can re-run them.
@@ -455,14 +455,23 @@ Owned results and non-Send local state remain usable across awaits. Akhil approv
 this design with a runtime reentry check as backup. The measurements and the
 precise limit are in docs/measurements/async-dialogs-rust-2026-09-20.md.
 
+**Scoped task owner approved 2026-09-20.** `let tasks = ctx.tasks()` borrows the
+existing context; `tasks.spawn(async |app| { ... })` owns local async work, and
+`tasks.next(&msgs)` drives it beside occurrences. Dropping the owner drops its
+suspended futures before the borrowed context may move. AppCtx retains its
+existing Send behavior; the task scope is local. Raw async loops use
+tasks.next_occurrence. A live owner refuses the old ctx.next entry rather than
+leaving tasks unpolled. Existing synchronous guests keep their current loop.
+
 **From zero.** Rust's `async` has no runtime in the standard library. An `async
 fn` compiles to a value implementing `Future`, which does nothing until something
 POLLS it. Polling hands the future a `Waker`; if the future is not ready it stores
 the waker and returns `Poll::Pending`, and whoever completes the work later calls
 `waker.wake()` to say "poll me again". An executor is just a loop that polls futures
 and parks between wakes. Tokio and async-std are large executors; kaya needs a
-five-line one, because **kaya's app loop is already that loop**: it polls the
-occurrence ring and parks on `kaya_wake()`.
+small local executor, because **kaya's app loop already waits on the channel
+used for occurrences and posted-work wakes**. Scheduling still needs explicit
+ownership, wake deduplication, reentry guards and shutdown cleanup.
 
 **Rust's guest shape is different from the other three**, and this is the reason it
 is last in §6. Rust guests do not register callbacks; they run a message loop:
@@ -511,18 +520,22 @@ anyway. The shape that fits the message loop is a spawned task whose executor is
 the loop:
 
 ```rust
-Msg::AskDelete => ctx.spawn(async move {
-    let choice = ctx.show_alert()
+Msg::AskDelete => tasks.spawn(async move |app| {
+    let choice = app.show_alert()
         .title("delete item?").message("this cannot be undone")
         .action("Delete").action("Archive").cancel("Keep")
         .await;                                   // suspends; the loop turns
-    ctx.apply(|tx| tx.write(status, match choice { … }));
+    app.apply(|tx| tx.write(status, match choice { … }));
 }),
 ```
 
-`AppCtx::spawn` boxes the future and puts it in a task list the occurrence loop
-polls between occurrences; the alert ref's `IntoFuture` sends the request in its own
-transaction and registers the binding's internal one-shot handler as the resolver.
+`TaskScope::spawn` boxes the future in the external owner. Its occurrence entry
+polls ready tasks between occurrences; the alert builder's `IntoFuture` sends
+the request in its own transaction and registers the one-shot resolver. Spawn
+accepts unit-returning bodies and `Result<(), E>` bodies whose error implements
+Display; returned errors and escaping panics reach the shared async reporter.
+Guest recovery inside the body remains guest-owned. No join handle or foreign
+executor is introduced.
 
 **Where `.await` may appear:** Kaya drives futures handed to its task launcher;
 other executors remain guest-owned. An await directly in apply's synchronous
@@ -536,9 +549,16 @@ inside a synchronous callback: that shape compiles. Entering Kaya's occurrence
 loop while any transaction is open must refuse before posted work or occurrences
 run, including through Messages::next. Transaction-depth tracking survives both
 commit and unwinding; the unit tests exercise the nested manual-poll route too.
-The async scheduler must also refuse reentry while polling a task and clean up
-stored futures at shutdown. Its ownership and dialog resolver remain a separate
-implementation step, not established by the compiler measurement.
+The scheduler also refuses loop reentry while polling a task and drops stored
+futures at shutdown. Thirteen real-binding headless tests exercise wakeups,
+reply delivery, explicit-scope rollback, task error reporting and cleanup.
+The four Mac dialog guests and the 49-leg recorded iOS Rust suite passed, as
+did native alert recordings on Linux X11/Wayland, Windows and Android. The full
+Mac lane passed 477 legs and all 61 gates passed. After correcting an Android
+drag-source lifetime bug found by the first matrix, the final matrix passed
+Mac 477, Linux 777, Windows 283, iOS 139 and Android 148 legs, plus 61 gates,
+in 1072 seconds with every timing ceiling held. Runtime behavior is exercised,
+not inferred from the original compiler measurement.
 
 ## §3 THE CARVE-OUT: Python, Haskell and OCaml keep the callback
 
@@ -720,8 +740,8 @@ count printed — CLAUDE.md invariant 3):
 | C# | guests/csharp/AbortCheck.cs | a write through a `Tx` captured across the await is refused; a second dialog while one is live throws at the show; a throw after the await rolls back only the scope it threw inside, scopes that returned stand; the four feasibility cases enter check-abort with watched mutations |
 | Java | tools/checks/java-async/dev/kaya/AsyncCheck.java | the same scope and lifetime cases, final-stage observation, foreign-thread writes refused, completion inside an open transaction refused, raw-loop wake, callback cleanup and callback/future compile refusals |
 | Swift | tools/checks/swift-async/main.swift | the same scope and lifetime cases, continuation thread identity, app.task's observer, callback rollback cleanup, result retirement, and compile refusals for async build bodies and off-actor entry |
-| Rust | crates/kaya/src/app.rs `compile_fail` doctests + unit tests; tools/checks/rust-scoped.py through check-abort | private begin and scoped borrows reject retained Tx; occurrence-loop reentry refuses before posts or events; task ownership, shutdown cleanup and dialog completion must be proved on the scheduler path |
-| JS | bindings/js/kaya_app_checks.ts | already has the promise-resolution negative; add the second-dialog refusal so all five say one thing |
+| Rust | crates/kaya/src/app.rs `compile_fail` doctests + unit tests; crates/kaya/src/app/tasks.rs; tools/checks/rust-scoped.py through check-abort | private begin and scoped borrows reject retained Tx; occurrence-loop reentry refuses before posts or events; thirteen scheduler-path tests, fourteen watched production cuts and twenty compiler cases hold task ownership, shutdown cleanup, dialog completion and explicit-scope atomicity |
+| JS | bindings/js/kaya_app_checks.ts | promise resolution, second-dialog refusal, callback/promise overlap, abort cleanup and invalid-input registration ordering; three production cuts watched failing |
 
 And the four scenes (§4) re-run unchanged on every lane, which is the whole point:
 if any of them needs a byte changed, the design is wrong rather than the scene.

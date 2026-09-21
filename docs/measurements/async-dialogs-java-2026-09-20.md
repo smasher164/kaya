@@ -177,7 +177,7 @@ recorded in docs/traps.md and the review page.
 | Java | Do, shipped: five future forms, raw completion queue and final-stage observer. |
 | Swift | Do, shipped: app.task owns its body; raw Tasks remain guest-owned. |
 | C# | Do, shipped: captured context reports async-void failures; ordinary Tasks remain caller-owned. |
-| Rust | Do later: planned spawn owns its future; polling and failure reporting need measurement. |
+| Rust | Do: subsequently measured and validated with scoped task ownership in docs/measurements/async-dialogs-rust-2026-09-20.md. |
 | JS | Do, preserve: existing promise reporting and continuation-write residue. |
 | Python | Can't under the approved runtime constraint; callbacks remain. |
 | Haskell | Can't under the approved runtime constraint; callbacks remain. |

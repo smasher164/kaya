@@ -798,10 +798,18 @@ def android_report_checks(src, echo=False):
               "am_anr  : waited for FocusEvent", "ANR in dev.kaya.javahost",
               "Input dispatching timed out", "Denying clipboard access",
               "ClipboardOverlay", "wm_pause_activity:", "wm_resume_activity:",
-              "wm_set_resumed_activity:"]
+              "wm_set_resumed_activity:",
+              "WindowManager: Drop result=true reported by token",
+              "WindowManager: Sending DRAG_ENDED to Window{kaya}",
+              "VRI[MainActivity]: Reporting drop result: true",
+              "KAYA_DRAG_EVENT: source detached ended=false",
+              "KAYA_DRAG_STARTED: draganddrop",
+              "KAYA_REQUEST: draganddrop 6 96 64 106 128 1500",
+              "KAYA_ACK: draganddrop 6"]
     timeline = scope["android_system_events"]("\n".join([*events, "unrelated noise"]))
     if any(event not in timeline for event in events) or "unrelated noise" in timeline:
-        found.append("android: system timeline dropped a focus/ANR event or kept unrelated noise")
+        found.append("android: system timeline dropped a focus/ANR event or drag event, "
+                     "or kept unrelated noise")
     if "Selected 0 line(s)" not in scope["android_system_events"]("unrelated noise"):
         found.append("android: empty system timeline did not report its zero count")
     if echo:
@@ -1040,7 +1048,10 @@ for label, before, after, want in (
          "current-leg attribution"),
         ("read status", "if returncode != 0:", "if False:",
          "diagnostic lost its measured result"),
-        ("focus", "input_focus:", "lost_focus:", "dropped a focus/ANR event")):
+        ("focus", "input_focus:", "lost_focus:", "dropped a focus/ANR event"),
+        ("native drag", "WindowManager:", "LostWindowManager:", "drag event"),
+        ("view drop", "VRI", "LostView", "drag event"),
+        ("Kaya drag", "KAYA_DRAG_", "LOST_DRAG_", "drag event")):
     changed = doctored(LANE_PY, re.escape(before), after, f"Android {label} report mutation")
     gate.negative(f"Android {label} report corrupted",
                   lambda: android_report_checks(changed), want=want)
@@ -1126,6 +1137,6 @@ for call in ("xcuidrive_stop_all()", "xcuidrive_launch_all()", "xcuidrive_join()
     gate.negative(f"iOS recording recovery without {call}",
                   lambda: ios_recording_recovery(changed), want="driver lifecycle")
 
-gate.negatives_ran(54)
+gate.negatives_ran(57)
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

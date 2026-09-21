@@ -79,7 +79,7 @@ commits, and cannot be obtained by the proposed context wrapper alone.
 | C# | Do: Task forms and app-thread context under the approved explicit-scope amendment. |
 | Swift | Do: async forms on the shipped KayaAppActor executor; explicit build scopes. |
 | Java | Do: future forms; explicit build scopes and existing foreign-thread refusal. |
-| Rust | Do: app-loop future polling; explicit apply scopes, feasibility still to measure. |
+| Rust | Do: scoped app-loop polling and explicit apply; subsequently measured and validated in docs/measurements/async-dialogs-rust-2026-09-20.md. |
 | JS | Do: preserve existing promises and documented continuation residue; add overlap coverage. |
 | Python | Can't under the approved runtime constraint: callbacks remain, no asyncio integration. |
 | Haskell | Can't under the approved runtime constraint: callbacks remain, no new async runtime. |

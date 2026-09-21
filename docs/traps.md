@@ -4,6 +4,43 @@ Each of these cost a debugging session (or would have). Most now have a
 structural guard; the guard is named where it exists. Do not re-derive
 these the hard way.
 
+## Android sent a drag end that Kaya did not record (2026-09-21)
+
+The Rust async-dialog matrix's sixth dnd-compose drag accepted the custom move
+at 23:38:38.831 PDT, changed the source to "moved out", then timed out with
+started=1 entered=2 dropped=1 ended=false. The next two row drags worked. The
+bundle's logcat tail started after the relevant event, and system-events did
+not select drag messages. The full device history did: WindowManager received
+the successful drop result and sent DRAG_ENDED to Kaya's window at the same
+timestamp. Missing Kaya onEnded is not evidence that Android never sent END.
+The older android drag ledger's no-system-end inference was too strong.
+
+The recorder now retains WindowManager drag/drop, ViewRoot drop results and
+Kaya drag/request/ack events in system-events. check-flightrec exercises the
+real renderer and three counted mutations that remove those event families.
+The Compose source surface is removed when a move's drop transaction clears
+its draggable declaration. Its onEnded was the only callback allowed to emit
+drag_ended. A temporary native-listener probe held each actual END for 500ms
+before forwarding it to Compose. Five drags passed, then the move removed its
+source 20ms after the held END arrived. Delivery after 507ms found no source
+listener. The move and both reorders timed out with ended=false. The new bundle
+contains the entire native/send/dispose/deliver history; its step clock records
+the first drag timeout at 38107ms and the stale label at 53124ms.
+
+The probe copies DragEvent through Parcel, which omits localState, so the
+probe-only onEnded resolves the already-existing session from kayaDragSession.
+All other events use their unchanged local state. It forwards through Compose's
+installed AndroidDragAndDropManager, not View.onDragEvent. A hidden obtain
+method was refused, and replacing the listener without forwarding lost START;
+neither failed probe is evidence for the lifetime bug.
+
+End ownership now belongs to the stable KayaRoot target. The session captures
+its source identity before the drop can remove or restamp a row, and the root
+reports only the actual native END, once. Node disposal is logged with the
+measured session counters. check-universal-props holds the root attachment,
+local admission, native callback, deduplication, captured identity and sole
+reporter. The existing shared dnd scene exercises source-clear and reorder.
+
 ## A non-Send Rust transaction can cross an await in a local future (2026-09-20)
 
 The real kaya Tx compiled across pending().await and was committed afterwards
@@ -21,6 +58,28 @@ apply still compiles, so the guarantee must not be stated as a universal ban on
 await syntax while any Tx exists. tools/checks/rust-scoped.py holds eight
 compiler refusals and three accepted controls through check-abort; app.rs's
 scoped_tx tests hold the occurrence-loop check before posts or events run.
+
+## A Promise executor can hide a malformed request after reserving a dialog (2026-09-20)
+
+JS's dialog helpers registered their resolver before encoding inside the Promise
+executor. Passing a malformed filter rejected that promise instead of throwing
+through the explicit build, leaving a handler for a request never sent. The
+new live-dialog guard then blocked every later request. The real binding check
+observed both missing synchronous refusal and the retained registration, plus
+ten downstream cleanup failures. Encode before registering or constructing the
+Promise. bindings/js/kaya_app_checks.ts holds malformed-filter refusal, empty
+registration state and the subsequent request/rollback controls. Synchronous
+abort also needs to remove newly installed handlers through the journal; a
+promise does not perform that cleanup itself.
+
+## A diverging Rust async closure may need its unit return written (2026-09-20)
+
+With rustc 1.97.0 and TaskScope::spawn's unit-or-Result output bound, a closure
+whose body ends in panic inferred the never type and failed E0277 because that
+type does not implement TaskOutcome. Spelling `async |app| -> () { ... }` keeps
+the intentional panic probe a runtime test. The real runtime checks use that
+annotation for the two wholly diverging task bodies; ordinary bodies and
+Result<(), E> closures infer their output normally.
 
 ## A Java dialog future does not observe a later stage's error (2026-09-20)
 
@@ -8750,6 +8809,11 @@ the source still reads `none` — so a missing ack means no gesture
 reached the app at all, and a re-injection cannot apply one twice.
 
 ## A Compose drag source must be a drop target of its own drag, or a refused drag tells it nothing (measured 2026-09-03)
+
+Superseded end ownership on 2026-09-21: KayaRoot now accepts every local session
+and receives its END even if the source disappears. The source acceptance below
+remains for its started/entered instrumentation, not for end delivery. See
+"Android sent a drag end that Kaya did not record" above.
 
 Android delivers ACTION_DRAG_STARTED to a window's drag listener and
 sends nothing more — no location, no drop, and NO ACTION_DRAG_ENDED —

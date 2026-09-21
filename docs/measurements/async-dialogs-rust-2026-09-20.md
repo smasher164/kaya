@@ -107,3 +107,110 @@ feature review will accompany its future-form guests, not this guard-only change
 No dialog future or task launcher is claimed yet. Ownership of
 stored futures, scheduler reentry and shutdown cleanup must be measured on the
 real executor before adding the dialog resolver and migrating guests.
+
+## Scoped task owner and dialog implementation, 2026-09-20
+
+The guard-only slice above shipped as 7f30e41e. Akhil then approved an external
+TaskScope borrowing AppCtx rather than a cloneable context that becomes !Send.
+The implementation lives in crates/kaya/src/app/tasks.rs. Twenty compiler
+cases now run through tools/checks/rust-scoped.py: fourteen refusals and six
+accepted controls. New cases prove that the context cannot escape the task
+owner, the owner cannot cross threads, the context can move after its owner
+drops, local Rc captures work, Result bodies work, callback and future methods
+cannot be mixed, and a task still cannot retain the borrowed Tx.
+
+The real AppCtx occurrence channel drives an Arc-backed ready queue. Wakers
+carry only queue identity and the inbox sender, not application state. Each
+turn polls a snapshot without holding queue or task-table borrows; repeated
+wakes of the same task coalesce. A foreign-thread wake reaches both raw and
+typed loops. AppCtx's loop entry guard refuses recursive entry before posted
+work or occurrences run. Calling the old loop with an active task owner is
+refused by name, rather than silently leaving futures unpolled.
+
+Thirteen headless runtime tests use the actual binding, channels, request
+records and resolver. They cover all five request forms, cancellation and
+nonempty payloads, one-shot retirement, same-thread resumption with no ambient
+transaction, completed scopes surviving a later panic, rollback only in a
+throwing scope, Result error reporting, sibling tasks surviving failures,
+scope drop and shutdown releasing suspended Rc captures, stale wakes, retained
+external futures after scope close, overlap between callback and future forms,
+callback abort cleanup, and a closed transport refusing before a future could
+wait forever. check-abort demands the source's test census and exactly four
+reporter sentences from initial panic, two resumed panics and returned error.
+
+Fourteen Rust production cuts were applied individually and watched red: lost
+pending task, leaked task at close, missing alert/file claims, missing abort
+cleanup, missing loop-entry guard, missing wake deduplication, missing reply
+closure, ambient request allowed, missing file-slot retirement, wrong clipboard
+payload, ignored send failure, altered reporter sentence, and missing inbox wake.
+Every cut printed one substitution and was
+restored. The wake-dedup test initially held a mutex guard inside its assertion;
+its deliberate failure poisoned the queue and caused a second panic during
+cleanup. The test now reads the count before asserting so the negative names
+the failed assertion without poisoning the production queue. The repeated cut
+failed with queue length 100 versus 1, then one poll versus two, without aborting.
+
+The R1 JS negative exposed a missing binding-side overlap check. Alert, picker
+and save calls now refuse synchronously before constructing a promise, with
+callbacks and promises sharing the handler-table slot. Aborted explicit scopes
+remove their registrations through the existing journal. Three cuts were
+watched red: alert guard (one substitution, four failing checks), both file
+guards (two substitutions, ten failing checks), and registration rollback
+(one substitution, twelve failing checks). Existing promise results, including
+JS pickFile's already-ruled single-result null, are unchanged.
+An invalid-filter probe then found another registration leak: encoding inside
+the Promise executor rejected the promise after installing a handler for a
+request never sent. Both direct assertions and ten later cleanup checks failed.
+All three request encodings now precede registration and Promise construction;
+the invalid-filter guard passes with synchronous refusal and no live slot.
+
+The surface gate now reads Rust's five constructors, four IntoFuture impls,
+task ownership and occurrence wiring, plus JS's five promise signatures. Its
+21 new surface cuts and two empty-reader controls fail by name. Python, OCaml
+and Haskell retain five callback signatures each; fifteen callback cuts and
+fifteen planted awaitable names refuse, with an empty-reader check per language.
+This gate checks the named API contract, not arbitrary user-defined runtimes.
+
+| Binding | Verdict for this async surface |
+|---|---|
+| Rust | Do: scoped local task owner, five awaitables, explicit apply, task error ownership |
+| Swift | Do: retain shipped actor, awaitables and app.task; explicit build |
+| C# | Do: retain shipped context, awaitables and async-void reporting; explicit Build |
+| Java | Do: retain shipped futures, outside-transaction completion and app.observe; explicit build |
+| JS | Do: retain promise/implicit-continuation ruling; add early overlap and abort cleanup guards |
+| Python | Can't add native await without owning its runtime; callback-only contract guarded |
+| OCaml | Can't choose a guest effect runtime for it; callback-only contract guarded |
+| Haskell | Can't supply the ruled native future spelling in its IO tier; callback-only contract guarded |
+| Go | Defer a new concurrency surface, as ruled; callbacks unchanged |
+
+Four Rust guests now use tasks.spawn and tasks.next: confirm, filedialog, save
+and clipboard. Their shared scene scripts are unchanged. File IO stays on
+worker threads, returning synchronous writes through Poster, not through the
+task launcher. Rust compiled all examples; the full core passed 644 unit tests
+and 25 doctests with one existing ignored. JS strict type checks and binding
+checks passed. All 61 gates passed. Seven Mac hand legs passed: Rust confirm,
+filedialog, save and clipboard, and JS confirm, filedialog and save. The full
+Mac lane passed 477 legs. Recorded Rust confirm passed on Linux X11 and Wayland,
+Windows and Android; the recorded iOS Rust suite passed all 49 legs, with four
+healthy drivers at the verdict. Each of the five platform captures was viewed
+before inclusion in docs/reviews/async-dialogs-rust-2026-09-20/README.md.
+The first five-lane matrix finished in 1088 seconds: Mac 477, Linux 777,
+Windows 283 and iOS 139 passed; Android passed 147 of 148. All 61 gates passed
+and every timing ceiling held. The only red was dnd-compose, whose accepted
+move never produced Kaya's drag-end callback. All async-dialog legs passed.
+The recorder-first investigation is recorded in docs/traps.md under
+"Android sent a drag end that Kaya did not record". This slice is not yet
+validated by that run. The Android source-removal race was then reproduced with
+a held native END, fixed by stable-root ownership and guarded by eight counted
+cuts. Three recorder cuts hold the expanded native drag timeline, read back in
+the forced-red bundle. The exact comparison is in
+docs/measurements/android-drag-end-2026-09-21.md.
+
+After removing the temporary probe, the production drag leg passed. The core
+rerun passed 644 tests and 25 doctests with one existing ignored. The first
+gate sweep caught a diagnostic substring mismatch introduced while wrapping
+a long line in the recorder's self-test; restoring its expected word fixed it.
+The repeated complete sweep passed 61/61, and the full Mac lane passed 477 legs.
+The final matrix on 2026-09-21 passed in 1072 seconds: Mac 477/556s,
+Linux 777/995s, Windows 283/1063s, iOS 139/1032s, Android 148/698s and all
+61 gates/334s. Every unchanged net-time ceiling held. R1 is complete.

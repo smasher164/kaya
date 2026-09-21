@@ -548,8 +548,16 @@ escape into the suspended outer task, while owned results can. This does not
 ban manually polling a nested future inside that callback. The occurrence loop
 refuses entry while a transaction is open, before running posted work or reading
 an occurrence. The compiler probes and reentry tests are recorded in
-docs/measurements/async-dialogs-rust-2026-09-20.md; the async scheduler remains
-separate work.
+docs/measurements/async-dialogs-rust-2026-09-20.md. Its scoped task owner borrows
+AppCtx and drives local futures through tasks.next or tasks.next_occurrence.
+The compiler prevents that owner from outliving or moving the borrowed context;
+AppCtx remains Send outside the scope. Tasks resume without a transaction, on
+the thread driving the scope. A task returning Result<(), E> reports its error,
+and an escaping panic is caught per task; sibling tasks survive. Shutdown drops
+suspended tasks and their reply registrations. Dropping a future does not cancel
+the native dialog or release its live slot before the result. Callback requests
+and future requests share those slots. JS checks overlap before constructing a
+promise and journals its dialog registrations alongside synchronous rollback.
 
 **One id space for widgets and template nodes.** Every binding mints
 live widget ids and template node ids from ONE monotone counter per app

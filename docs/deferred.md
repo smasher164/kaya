@@ -9,7 +9,7 @@ Landed history lives in git; this file only carries what is still open.
 scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
-## BUILD — R1 async dialogs: explicit-transaction amendment approved (2026-09-19)
+## ~~BUILD — R1 async dialogs: explicit-transaction amendment approved (2026-09-19)~~ COMPLETE 2026-09-21: C#, Swift, Java and Rust awaitable tiers, explicit transaction scopes and honest task-error ownership are implemented; JS overlap and cleanup guards agree. Final Rust slice passed 644 core tests, 25 doctests (one ignored), 61 gates and all five matrix lanes: Mac 477, Linux 777, Windows 283, iOS 139, Android 148 in 1072 seconds, every timing ceiling held
 KEY: async dialogs, R1.4, R1.5, async void, SynchronizationContext, continuation rollback, explicit Build, Swift Task, app.task, task error ownership, Java CompletionStage, app.observe, Rust local future, Tx across await, poll boundary, scope-only, private begin
 
 Akhil approved the seven recommendations in docs/async-dialogs-plan.md §5.
@@ -70,8 +70,8 @@ lane's 477 legs in 387 seconds. The final five-lane matrix was ALL PASS in
 docs/reviews/async-dialogs-csharp-2026-09-20/README.md.
 The measurement includes all nine binding verdicts; Go's existing callbacks
 remain, its new concurrency surface deferred rather than silently omitted.
-Swift and Java followed below. Remaining work: Rust; guards and review page
-per the plan, then the full ladder.
+Swift, Java and Rust followed below, each with guards, a review page and the
+full validation ladder.
 
 SWIFT MEASUREMENT 2026-09-20, TASK OWNERSHIP APPROVED: the real executor and alert
 occurrence path resume on the app thread with no transaction open, and explicit
@@ -104,7 +104,7 @@ recording recovery branch. The final matrix passed Mac 477, Linux 775,
 Windows 282, iOS 139 and Android 148 legs, plus all 61 gates, in 1084 seconds
 with every net-time ceiling held. Mac and iOS captures have been viewed for
 docs/reviews/async-dialogs-swift-2026-09-20/README.md. The Swift tier is landed;
-Java followed below; Rust remains.
+Java and Rust followed below.
 Four feasibility observations and three one-substitution negatives are recorded
 in docs/measurements/async-dialogs-swift-2026-09-20.md. The ownership rule is
 shared: Kaya reports errors escaping work handed to Kaya; independently created
@@ -129,7 +129,7 @@ every net-time ceiling held. The review is
 docs/reviews/async-dialogs-java-2026-09-20/README.md. Recording review also fixed
 Android's invalid ffprobe option and missing recording-failure evidence, and
 Windows' lost recording tile identity; nine counted negatives and a native
-forced-red readback hold the recorder changes (docs/traps.md). Rust remains.
+forced-red readback hold the recorder changes (docs/traps.md). Rust followed below.
 
 RUST SCOPE-ONLY API APPROVED 2026-09-20: the initial five compiler cases found
 that a public begin permits owned Tx across await and that Send also rejects
@@ -147,13 +147,44 @@ private begin. Each was restored. Core validation passed 631 unit tests and
 passed all 477 legs. The full matrix passed: mac 477, linux 777, windows 283,
 iOS 139, android 148; 61/61 gates, 1112 seconds wall, every timing ceiling met.
 Rust stored-future ownership, scheduler reentry, shutdown cleanup and dialog
-resolution remain to be implemented. The record is
+resolution remained at that boundary and followed in the task-owner slice below. The record is
 docs/measurements/async-dialogs-rust-2026-09-20.md.
-The next API choice is awaiting Akhil: a separate task owner borrowing AppCtx,
-with tasks.spawn and tasks.next, versus a cloneable app-thread-only context
-keeping the current message-loop spelling. The recommendation is the scoped
-owner, preserving AppCtx's current ownership and Send behavior outside that
-scope. This is not yet a scheduler implementation or a native runtime proof.
+SCOPED TASK OWNER APPROVED 2026-09-20: Akhil chose a separate task owner borrowing
+AppCtx, with tasks.spawn and tasks.next, preserving AppCtx's current ownership
+and Send behavior outside that scope. The Rust implementation, native
+validation and feature captures are complete.
+The implementation now has five IntoFuture request builders, thirteen headless
+tests and twenty compiler cases (fourteen refusals, six accepted controls).
+Four Rust guests use the scoped owner and explicit apply without scene edits.
+The JS R1 negative found missing early overlap and abort cleanup guards; those
+now share the existing registration tables and journal, with three watched
+cuts. All five async tiers and the three callback-only carve-outs join the
+surface census. Core passed 644 unit tests and 25 doctests (one ignored);
+all 61 gates and all 477 standalone Mac legs passed. Seven Mac hand legs and
+the 49-leg recorded iOS Rust suite passed, alongside recorded alert runs on
+Linux X11/Wayland, Windows and Android. Five viewed captures are in
+docs/reviews/async-dialogs-rust-2026-09-20/README.md. The first matrix exposed an
+Android source-removal race in drag completion, not an async-dialog failure.
+The stable scene root now owns native END; a held-END probe failed with the old
+owner and passed with the root, and the recorder retains the missing timeline.
+Eight ownership cuts and three recorder cuts were watched failing. See
+docs/measurements/android-drag-end-2026-09-21.md. After removing the probe,
+the production drag leg passed, then 644 core tests, 25 doctests (one ignored),
+61 gates and 477 standalone Mac legs passed. The final matrix was ALL PASS in
+1072 seconds: Mac 477, Linux 777, Windows 283, iOS 139, Android 148 and all
+61 gates, every unchanged timing ceiling held. The R1 KEY sweep updated the
+plan, earlier tier measurements and the idiom entry below.
+
+## BUG — GTK hand capture can hide a failed build (2026-09-20)
+KEY: shot-gtk build pipeline, stale screenshot, shot-gtk.py, tail -1
+
+Code review found tools/linux/shot-gtk.py piping cargo through tail without
+pipefail, then running conversion after a semicolon with fixed output paths.
+A failed build can therefore lead to a stale executable or screenshot being
+reported as a fresh capture. This is a source finding, not a reproduced runtime
+failure. The Rust async review used the checked Linux lane instead. Next slice:
+measure a deliberately failed build, separate build and capture with checked
+exits, use per-run outputs, and put the negative on the normal gate path.
 
 ## INVESTIGATE — iOS recording's step-named frames lead their stated scene state (2026-09-20)
 KEY: iOS recording, fiducial timestamp, step-named frames, confirm-swift, anchor-2
@@ -2470,16 +2501,18 @@ The same
   with no UndoStep was a hard cast and is a named refusal — both
   unreachable while the core sends what it says.
   RULED FOR LATER SLICES, each its own entry when it starts:
-  - R1 ASYNC DIALOGS beyond JS for Swift, C#, Java and Rust under one
+  - ~~R1 ASYNC DIALOGS beyond JS for Swift, C#, Java and Rust under one
     rule — no handler given, a dialog answers a future; the continuation
     runs on the app thread with explicit transaction scopes after suspension — with Python, Haskell
     and OCaml stated as the carve-out (no native async runtime on the app
     thread), the way docs/js-plan.md §4 names the languages that cannot
-    spell the implicit transaction. Python's `await` form is the survey's
+    spell the implicit transaction.~~ COMPLETE 2026-09-21: all four tiers and
+    the JS overlap/cleanup guards passed the full matrix recorded above.
+    Python's `await` form is the survey's
     one SEMANTICS finding and is not taken. APPROVED 2026-09-19: all seven
     recommendations in docs/async-dialogs-plan.md §5. C# depth passed the full
     five-lane matrix on 2026-09-20, followed by Swift and Java the same day;
-    Rust remains (§6).
+    Rust followed on 2026-09-21 (§6).
   - ~~R2 ROW HANDLES IN PYTHON, the twin of JS's rule 3: `todo.done =
     checked` is the patch through `__setattr__`, refused by name on a
     typo; the other seven keep `patch`, stated as the carve-out where
@@ -11742,6 +11775,15 @@ lanes running, so the token narrows this class rather than closing it: a
 sighting under the token is a different premise and is read as such.
 KEY: dnd-compose, drag ended none, KAYA_DRAG_STARTED, KAYA_ACK, matrix contention, android drag
 
+FOLLOW-UP 2026-09-21: a new dropped=1 ended=false sighting under the exclusive
+token disproves the earlier inference that Android necessarily sent no END.
+WindowManager sent it; source-clear removed the only Kaya callback. Holding
+native END for 500ms reproduced the loss on the move and both reorders. The
+stable root now owns end delivery using captured source identity, and the
+recorder retains system and Kaya drag history. See docs/traps.md, "Android sent
+a drag end that Kaya did not record". This does not retroactively establish the
+cause of every old sighting, nor close the separate missing-start/no-enter cases.
+
 On the first matrix of the pickers breadth tree (five lanes, host load 4.7
 at launch) the android compose suite's dnd leg failed its first in-process
 drag: `drag label#0 to label#1` ran the runner channel cleanly —
@@ -11785,9 +11827,11 @@ shapes the instrument now separates: (a) `drag label#0 to label@item[x]`
 with a settled 7-px-wide box (`[32, 64, 7, 16]`) ended `op=0 entered=0` —
 the injected gesture entered NO target at all; and (b) a drag whose drop
 was TAKEN (`drop node=7 … taken=true`) ended with `dropped=1 ended=false`
-after 20s — the system's ACTION_DRAG_ENDED never reached the app. Neither
-is a box the verb aimed wrong; both are the emulator's drag session under
-host contention (five lanes, the android lane's own pool of four). Green
+after 20s. The original interpretation was that ACTION_DRAG_ENDED never reached
+the app; the 2026-09-21 finding above shows the counters cannot establish that.
+Neither is a box the verb aimed wrong. They occurred under host contention
+(five lanes, the android lane's own pool of four), which alone does not prove
+their cause. Green
 alone the same hour (ALL PASS 135). Left open: on the next sighting,
 compare the injected endpoint against the settled box in the same log
 line (the runner prints the injection beside these already) and consider a

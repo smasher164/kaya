@@ -8350,6 +8350,117 @@ for _name, _pattern in ASYNC_JAVA_PARTS.items():
 if "awaitable census below five" not in async_java_findings(""):
     selftest_exit("check-sugar-surface: Java async empty reader did not refuse")
 
+ASYNC_RUST_PARTS = {
+    "alert": r"pub fn show_alert\(&self\) -> AlertFutureRef<'_>",
+    "pick": r"pub fn pick_file\(&self\) -> FileFutureRef<'_>",
+    "picks": r"pub fn pick_files\(&self\) -> FileFutureRef<'_>",
+    "save": r"pub fn save_file\(&self, name: impl Into<String>\) -> SaveFutureRef<'_>",
+    "clipboard": r"pub fn read_clipboard\(&self\) -> ClipboardFutureRef<'_>",
+    "alert-future": r"IntoFuture for AlertFutureRef<'a>",
+    "file-future": r"IntoFuture for FileFutureRef<'a>",
+    "save-future": r"IntoFuture for SaveFutureRef<'a>",
+    "clipboard-future": r"IntoFuture for ClipboardFutureRef<'a>",
+    "scope": r"pub fn tasks\(&self\) -> TaskScope<'_>",
+    "spawn": r"pub fn spawn<F, R>\(&self, body: F\)",
+    "wake": r"self\.ready\.wake\.send\(Inbox::Woken\)",
+    "pump": r"self\.ctx\.next_with\(\|\| self\.poll_ready\(\)\)",
+    "typed-loop": r"messages\.next_from\(self\.ctx, \|\| self\.next_occurrence\(\)\)",
+    "drain": r"self\.drain_posted\(\);\s*pump\(\);",
+    "reply": r"if self\.resolve_reply\(&occ\) \{\s*continue;",
+}
+ASYNC_JS_PARTS = {
+    "alert": r"export function showAlert\(opts: AlertOptions\): Promise<AlertChoice>;",
+    "pick": r"export function pickFile\(opts\?: PickOneOptions\): Promise<PickedFile \| null>;",
+    "picks": r"export function pickFiles\(opts\?: PickOptions\): Promise<PickedFile\[\]>;",
+    "save": (r"export function saveFile\(suggestedName: string, opts\?: SaveOptions\): "
+             r"Promise<PickedFile \| null>;"),
+    "clipboard": (r"export function readClipboard\(accepting: readonly string\[\]\): "
+                  r"Promise<Clip \| null>;"),
+}
+
+
+def async_final_findings(text, parts, census):
+    code = _c_like(text)
+    missing = [name for name, pattern in parts.items() if re.search(pattern, code) is None]
+    if len(re.findall(census, code)) < 5:
+        missing.append("awaitable census below five")
+    return missing
+
+
+for _language, _text, _parts, _census in [
+    ("Rust", read_rel("crates/kaya/src/app/tasks.rs") + read_rel("crates/kaya/src/app.rs"),
+     ASYNC_RUST_PARTS, r"pub fn \w+\([^{}]*\) -> \w+FutureRef<'_>"),
+    ("JS", read_rel("bindings/js/kaya/index.ts"), ASYNC_JS_PARTS,
+     r"export function \w+\([^{}]*\): Promise<[^;]+>;"),
+]:
+    for _missing in async_final_findings(_text, _parts, _census):
+        print(f"check-sugar-surface: {_language} async dialogs missing {_missing}", file=sys.stderr)
+        status = 1
+    for _name, _pattern in _parts.items():
+        _doctored, _n = sub_count(_pattern, "", _text)
+        if _n != 1 or _name not in async_final_findings(_doctored, _parts, _census):
+            selftest_exit(f"check-sugar-surface: {_language} async {_name} negative failed: "
+                          f"{_n} substitution(s)")
+        print(f"check-sugar-surface: {_language} async {_name}: {_n} substitution(s), "
+              "named refusal", file=sys.stderr)
+    if "awaitable census below five" not in async_final_findings("", _parts, _census):
+        selftest_exit(f"check-sugar-surface: {_language} async empty reader did not refuse")
+
+ASYNC_CARVEOUTS = {
+    "Python": ("bindings/python/kaya/__init__.py",
+               ["show_alert", "pick_file", "pick_files", "save_file", "read_clipboard"],
+               r"(?m)^def {name}\([\s\S]*?\) -> int:", "on_result:",
+               r"(?m)^(?:async def {name}\b|(?:async )?def {name}_(?:async|future)\b)",
+               "async def {name}_async(): pass\n"),
+    "OCaml": ("bindings/ocaml/kaya_app.ml",
+              ["show_alert", "pick_file", "pick_files", "save_file", "read_clipboard"],
+              r"(?m)^let {name}\b[^\n]*(?:\n    [^\n]*)?", "?on_result",
+              r"(?m)^let {name}_(?:async|future)\b", "let {name}_future () = failwith \"probe\"\n"),
+    "Haskell": ("bindings/haskell/KayaApp.hs",
+                ["showAlert", "pickFile", "pickFiles", "saveFile", "readClipboard"],
+                r"(?m)^{name} :: [^\n]*", "-> IO ()) -> Build ()",
+                r"(?m)^{name}(?:Async|Future)\s*::", "{name}Future :: Future ()\n"),
+}
+
+
+def async_carveout_findings(text, names, signature, callback, forbidden):
+    missing = []
+    for name in names:
+        match = re.search(signature.format(name=name), text)
+        if match is None or callback not in match.group():
+            missing.append(name + " callback")
+        if re.search(forbidden.format(name=name), text):
+            missing.append(name + " awaitable")
+    return missing
+
+
+for _lang, (_rel, _names, _signature, _callback, _forbidden, _plant) in ASYNC_CARVEOUTS.items():
+    _text = read_rel(_rel)
+    for _finding in async_carveout_findings(_text, _names, _signature, _callback, _forbidden):
+        print(f"check-sugar-surface: {_lang} async carve-out: {_finding}", file=sys.stderr)
+        status = 1
+    for _name in _names:
+        _pattern = _signature.format(name=_name)
+        _match = re.search(_pattern, _text)
+        if _match is None:
+            selftest_exit(f"check-sugar-surface: {_lang} {_name} callback reader found nothing")
+        _replacement = _match.group().replace(_callback, "removed_callback")
+        _cut, _n = sub_count(_pattern, _replacement.replace("\\", "\\\\"), _text)
+        if _n != 1 or _name + " callback" not in async_carveout_findings(
+                _cut, _names, _signature, _callback, _forbidden):
+            selftest_exit(f"check-sugar-surface: {_lang} {_name} callback negative failed: "
+                          f"{_n} substitution(s)")
+        _cut, _n = sub_count(r"\Z", _plant.format(name=_name), _text)
+        if _n != 1 or _name + " awaitable" not in async_carveout_findings(
+                _cut, _names, _signature, _callback, _forbidden):
+            selftest_exit(f"check-sugar-surface: {_lang} {_name} awaitable negative failed: "
+                          f"{_n} substitution(s)")
+        print(f"check-sugar-surface: {_lang} {_name}: callback cut 1, "
+              f"awaitable planted {_n}, both refused", file=sys.stderr)
+    if len(async_carveout_findings("", _names, _signature, _callback, _forbidden)) != 5:
+        selftest_exit(f"check-sugar-surface: {_lang} empty carve-out reader "
+                      "did not refuse five callbacks")
+
 check_scene_sugar()
 
 if status != 0:

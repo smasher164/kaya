@@ -90,6 +90,21 @@ print("check-abort: timeout diagnostic retained both child streams")
 with scratch_dir("check-abort-") as tmp:
     step("rust-scoped", [sys.executable, "tools/checks/rust-scoped.py"],
          tmp / "rust-scoped.log", echo="rust-scoped:")
+    step("rust-async", ["timeout", "60", "cargo", "test", "-p", "kaya",
+                        "--features", "harness", "--locked",
+                        "app::tasks::tests", "--", "--nocapture", "--test-threads=1"],
+         tmp / "rust-async.log", echo=("test result:", "kaya: async handler failed;"))
+    rust_async_log = (tmp / "rust-async.log").read_text(encoding="utf-8")
+    rust_async_source = (ROOT / "crates/kaya/src/app/tasks.rs").read_text(encoding="utf-8")
+    rust_async_count = rust_async_source.count("#[test]")
+    rust_async_verdict = f"test result: ok. {rust_async_count} passed; 0 failed"
+    if rust_async_count < 13 or rust_async_verdict not in rust_async_log:
+        g.refuse("Rust async tests did not run their declared census")
+    if rust_async_log.count("kaya: async handler failed; "
+                            "no transaction was rolled back by this reporter; "
+                            "completed transactions remain committed") != 4:
+        g.refuse("Rust async reporter did not answer the initial panic, "
+                 "two resumed panics and returned error")
     step("go", ["go", "test", "dev.kaya/bindings/go"], tmp / "go.log")
 
     # Built as ONE module with the bindings: the internal mirrors are

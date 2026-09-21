@@ -108,6 +108,7 @@ pub use app::{
     CatalogHome, MenuRole, Platform, Role, SizeClass, Sort, Symbol, ToggleRef, Tpl, TplSource, Tx,
     ValueKind,
     props, Dropped, Op, Block, Document, Edit, EditSource, Format, Run,
+    AlertFutureRef, ClipboardFutureRef, DialogFuture, FileFutureRef, SaveFutureRef, TaskOutcome, TaskScope,
 };
 
 /// The canvas surface (docs/canvas-plan.md §2.2).

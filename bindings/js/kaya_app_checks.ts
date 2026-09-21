@@ -426,6 +426,12 @@ if (isMainThread) {
   let promised: Promise<K.AlertChoice> | null = null;
   app.build(() => { promised = kaya.showAlert({ title: "t", message: "m", actions: ["A"], cancel: "C" }); });
   const alertId = (app as unknown as { _counters: { alert: number } })._counters.alert;
+  check("second promise alert refuses synchronously before suspension", throws(() => {
+    app.build(() => { kaya.showAlert({ cancel: "Keep" }); });
+  }, /an alert is already live/));
+  check("callback alert cannot bypass a live promise alert", throws(() => {
+    app.build(() => { kaya.showAlert({ cancel: "Keep", onResult: () => {} }); });
+  }, /an alert is already live/));
   const alertBytes = new Uint8Array(24);
   const av = new DataView(alertBytes.buffer);
   av.setUint32(0, 24, true);
@@ -455,6 +461,15 @@ if (isMainThread) {
   fire(wire.parse_occurrence(cancelBytes));
   const cancelChoice = await cancelPromised!;
   check("a native alert dismissal answers \"cancel\", not the wire sentinel", cancelChoice === "cancel");
+  for (const promise of [false, true]) {
+    check("aborted alert scope propagates", throws(() => app.build(() => {
+      if (promise) kaya.showAlert({ cancel: "Keep" });
+      else kaya.showAlert({ cancel: "Keep", onResult: () => {} });
+      throw new Error("abort dialog");
+    }), /abort dialog/));
+    check("aborted alert registration releases the live slot",
+      (app as unknown as { _alertHandlers: Map<number, unknown> })._alertHandlers.size === 0);
+  }
 
   // THE CORRECTION SLICE (the idiom review, 2026-09-17). Every closed
   // vocabulary a guest passes is a string-literal union of this binding,
@@ -512,6 +527,12 @@ if (isMainThread) {
   let filePromised: Promise<K.PickedFile | null> | null = null;
   app.build(() => { filePromised = kaya.pickFile(); });
   const fileDialogId = (app as unknown as { _counters: { file_dialog: number } })._counters.file_dialog;
+  for (const show of [() => kaya.pickFile(), () => kaya.pickFiles(), () => kaya.saveFile("copy"),
+    () => kaya.pickFile({ onResult: () => {} }), () => kaya.saveFile("copy", { onResult: () => {} })]) {
+    check("picker and save callback/future forms share one live slot", throws(() => {
+      app.build(() => { show(); });
+    }, /a file dialog is already live/));
+  }
   const fdBytes = new Uint8Array(24);
   const fv = new DataView(fdBytes.buffer);
   fv.setUint32(0, 24, true);
@@ -521,6 +542,23 @@ if (isMainThread) {
   fire(wire.parse_occurrence(fdBytes));
   const pickedFile = await filePromised!;
   check("pickFile() resolves to null on cancel (the empty file list), not []", pickedFile === null);
+  let invalidRequest: Promise<K.PickedFile[]> | null = null;
+  const invalidThrew = throws(() => {
+    app.build(() => { invalidRequest = kaya.pickFiles({ filters: [null] as never }); });
+  }, /iterable/);
+  if (invalidRequest !== null) await (invalidRequest as Promise<K.PickedFile[]>).catch(() => {});
+  check("invalid picker parameters refuse synchronously before claiming a slot", invalidThrew);
+  check("invalid picker parameters leave no live registration",
+    (app as unknown as { _fileDialogHandlers: Map<number, unknown> })._fileDialogHandlers.size === 0);
+  for (const show of [() => kaya.pickFile(), () => kaya.pickFiles(), () => kaya.saveFile("copy"),
+    () => kaya.pickFiles({ onResult: () => {} }), () => kaya.saveFile("copy", { onResult: () => {} })]) {
+    check("aborted file request scope propagates", throws(() => app.build(() => {
+      show();
+      throw new Error("abort file dialog");
+    }), /abort file dialog/));
+    check("aborted picker/save registration releases the live slot",
+      (app as unknown as { _fileDialogHandlers: Map<number, unknown> })._fileDialogHandlers.size === 0);
+  }
 
   // ------------------------------------------------------------ the sum
   app.build(() => {

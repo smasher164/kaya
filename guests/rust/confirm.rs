@@ -1,6 +1,3 @@
-//! The confirm conformance scene (tools/scenes/confirm.steps): each dialog
-//! binds to its own handler AT SHOW TIME, and Cancel is every dismissal.
-
 pub(crate) fn app(ctx: kaya::AppCtx) {
     use kaya::AlertChoice;
 
@@ -8,8 +5,6 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     enum Msg {
         AskDelete,
         AskEject,
-        Deleted(AlertChoice),
-        Ejected(AlertChoice),
     }
 
     let msgs = kaya::Messages::<Msg>::new();
@@ -29,50 +24,47 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         status
     });
 
-    while let Some(msg) = msgs.next(&ctx) {
+    let tasks = ctx.tasks();
+    while let Some(msg) = tasks.next(&msgs) {
         match msg {
-            Msg::AskDelete => {
-                let alert = ctx.apply(|tx| {
-                    tx.show_alert()
-                        .title("delete item?")
-                        .message("this cannot be undone")
-                        .action("Delete")
-                        .action("Archive")
-                        .cancel("Keep")
-                        .show()
+            Msg::AskDelete => tasks.spawn(async move |app| {
+                let choice = app
+                    .show_alert()
+                    .title("delete item?")
+                    .message("this cannot be undone")
+                    .action("Delete")
+                    .action("Archive")
+                    .cancel("Keep")
+                    .await;
+                app.apply(|tx| {
+                    tx.write(
+                        status,
+                        match choice {
+                            AlertChoice::Action(0) => "deleted",
+                            AlertChoice::Action(1) => "archived",
+                            AlertChoice::Action(_) => unreachable!("the cap is 2"),
+                            AlertChoice::Cancel => "kept",
+                        },
+                    );
                 });
-                msgs.on_alert(alert, Msg::Deleted);
-            }
-            Msg::AskEject => {
-                let alert = ctx.apply(|tx| {
-                    tx.show_alert()
-                        .title("eject disk?")
-                        .message("it is still mounted")
-                        .action("Eject")
-                        .cancel("Hold")
-                        .show()
-                });
-                msgs.on_alert(alert, Msg::Ejected);
-            }
-            Msg::Deleted(choice) => ctx.apply(|tx| {
-                tx.write(
-                    status,
-                    match choice {
-                        AlertChoice::Action(0) => "deleted",
-                        AlertChoice::Action(1) => "archived",
-                        AlertChoice::Action(_) => unreachable!("the cap is 2"),
-                        AlertChoice::Cancel => "kept",
-                    },
-                );
             }),
-            Msg::Ejected(choice) => ctx.apply(|tx| {
-                tx.write(
-                    status,
-                    match choice {
-                        AlertChoice::Action(_) => "ejected",
-                        AlertChoice::Cancel => "held",
-                    },
-                );
+            Msg::AskEject => tasks.spawn(async move |app| {
+                let choice = app
+                    .show_alert()
+                    .title("eject disk?")
+                    .message("it is still mounted")
+                    .action("Eject")
+                    .cancel("Hold")
+                    .await;
+                app.apply(|tx| {
+                    tx.write(
+                        status,
+                        match choice {
+                            AlertChoice::Action(_) => "ejected",
+                            AlertChoice::Cancel => "held",
+                        },
+                    );
+                });
             }),
         }
     }

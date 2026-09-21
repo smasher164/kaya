@@ -135,8 +135,8 @@ Sources: [SwiftUI](https://developer.apple.com/documentation/swiftui/view/task(n
 |---|---|
 | Swift | Do: five async forms and approved app.task error-reporting boundary. |
 | C# | Do, shipped: its context receives async-void exceptions; no change from this finding. |
-| Java | Do later: raw completion outside transactions remains approved; measure future-chain error ownership first. |
-| Rust | Do later: the planned spawn entry owns the future; measure polling and failure reporting first. |
+| Java | Do: subsequently measured and validated with app.observe in docs/measurements/async-dialogs-java-2026-09-20.md. |
+| Rust | Do: subsequently measured and validated with a scoped task owner in docs/measurements/async-dialogs-rust-2026-09-20.md. |
 | JS | Do: preserve its promises, reporter and stated continuation-write residue. |
 | Python | Can't within the approved runtime constraint; keep callbacks. |
 | Haskell | Can't within the approved runtime constraint; keep callbacks. |

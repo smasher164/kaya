@@ -13,6 +13,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
+mod tasks;
+pub use tasks::{AlertFutureRef, ClipboardFutureRef, DialogFuture, FileFutureRef, SaveFutureRef, TaskOutcome, TaskScope};
+
 use crate::protocol::{
     Inbox,
     AlertChoice, AlertId, AlertSpec,
@@ -1013,6 +1016,10 @@ pub struct Format {
 
 pub struct AppCtx {
     open_transactions: Cell<usize>,
+    loop_active: Cell<bool>,
+    tasks_active: Cell<bool>,
+    shutdown: Cell<bool>,
+    replies: RefCell<tasks::Replies>,
     pub(crate) occurrences: Receiver<Inbox>,
     pub(crate) transactions: Sender<Transaction>,
     // Shared with every Poster, so a real lock — unlike every other field,
@@ -1063,6 +1070,10 @@ impl AppCtx {
             posted: Arc::new(Mutex::new(Vec::new())),
             wake,
             open_transactions: Cell::new(0),
+            loop_active: Cell::new(false),
+            tasks_active: Cell::new(false),
+            shutdown: Cell::new(false),
+            replies: RefCell::new(tasks::Replies::default()),
             next_signal: Cell::new(1),
             next_widget: Cell::new(1),
             next_alert: Cell::new(1),
@@ -1083,14 +1094,28 @@ impl AppCtx {
     /// means the core is shutting down, which is an occurrence, not an
     /// error.
     pub fn next(&self) -> Occurrence {
+        assert!(!self.tasks_active.get(), "kaya: a task scope is active; use tasks.next or tasks.next_occurrence");
+        self.next_with(|| {})
+    }
+
+    fn next_with(&self, mut pump: impl FnMut()) -> Occurrence {
         assert_eq!(
             self.open_transactions.get(), 0,
             "kaya: cannot enter the occurrence loop with an open transaction; return from apply first"
         );
+        assert!(!self.loop_active.replace(true), "kaya: cannot reenter the occurrence loop while it is running");
+        let _entry = tasks::Reset(&self.loop_active);
         loop {
+            if self.shutdown.get() {
+                return Occurrence::Shutdown;
+            }
             // Draining at the TOP is what makes the wake sufficient:
             // whatever brought this thread back looks here first.
             self.drain_posted();
+            pump();
+            if self.shutdown.get() {
+                return Occurrence::Shutdown;
+            }
             match self.occurrences.recv() {
                 // The drain above already ran whatever the wake was about.
                 Ok(Inbox::Woken) => continue,
@@ -1100,6 +1125,9 @@ impl AppCtx {
                     // that never returns shows up as the NEXT occurrence
                     // going unclaimed.
                     crate::stall::taken();
+                    if self.resolve_reply(&occ) {
+                        continue;
+                    }
                     // An undo moved core state with no transaction, so the
                     // mirror follows HERE — the ONE place both the raw loop
                     // and Messages::next take occurrences from.
@@ -1128,7 +1156,10 @@ impl AppCtx {
                     }
                     return occ;
                 }
-                Err(_) => return Occurrence::Shutdown,
+                Err(_) => {
+                    self.shutdown.set(true);
+                    return Occurrence::Shutdown;
+                }
             }
         }
     }
@@ -1970,6 +2001,9 @@ impl Drop for Tx<'_> {
     fn drop(&mut self) {
         self.ctx.open_transactions.set(self.ctx.open_transactions.get() - 1);
         if !self.committed {
+            for op in &self.ops {
+                self.ctx.replies.borrow_mut().abandon(op);
+            }
             let mut model = self.ctx.model.borrow_mut();
             for (id, snapshot) in self.journal.drain(..).rev() {
                 model.insert(id, snapshot);
@@ -3731,7 +3765,11 @@ impl<'a> Tx<'a> {
 
     /// Send the batch and wake the main loop to apply it. The model
     /// edits stand: they are exactly what was sent.
-    pub fn commit(mut self) {
+    pub fn commit(self) {
+        self.commit_inner();
+    }
+
+    fn commit_inner(mut self) -> bool {
         for (collection, derived) in self.pending_derived.drain(..) {
             self.ctx.derived.borrow_mut().entry(collection).or_default().push(derived);
         }
@@ -3751,6 +3789,9 @@ impl<'a> Tx<'a> {
                 target_os = "android"
             ))]
             crate::backend::ring_doorbell();
+            true
+        } else {
+            false
         }
     }
 }
@@ -5194,8 +5235,12 @@ impl<M> Messages<M> {
     /// with a registered meaning. Unmapped occurrences fold into
     /// nothing; None is Shutdown — `while let Some(msg) = msgs.next(&ctx)`.
     pub fn next(&self, ctx: &AppCtx) -> Option<M> {
+        self.next_from(ctx, || ctx.next())
+    }
+
+    fn next_from(&self, ctx: &AppCtx, mut next: impl FnMut() -> Occurrence) -> Option<M> {
         loop {
-            let occ = ctx.next();
+            let occ = next();
             let mapped = match &occ {
                 Occurrence::Shutdown => return None,
                 // THE CANVAS'S TWO ASKS ARE ANSWERED HERE AND NEVER
@@ -5413,6 +5458,7 @@ impl FileDialogRef<'_, '_> {
     /// [`Messages::on_files`] binds the one-shot result handler to.
     pub fn show(self) -> crate::protocol::FileDialogId {
         let id = self.spec.dialog;
+        self.tx.ctx.replies.borrow_mut().claim_file(id.0);
         self.tx.ops.push(TxOp::ShowFileDialog(self.spec));
         id
     }
@@ -5446,6 +5492,7 @@ impl SaveDialogRef<'_, '_> {
     /// [`Messages::on_saved`] binds the one-shot result handler to.
     pub fn show(self) -> crate::protocol::FileDialogId {
         let id = self.spec.dialog;
+        self.tx.ctx.replies.borrow_mut().claim_file(id.0);
         self.tx.ops.push(TxOp::ShowSaveDialog(self.spec));
         id
     }
@@ -5811,6 +5858,7 @@ impl AlertRef<'_, '_> {
              call .cancel(label) before .show()"
         );
         let id = self.spec.alert;
+        self.tx.ctx.replies.borrow_mut().claim_alert(id.0);
         self.tx.ops.push(TxOp::ShowAlert(self.spec));
         id
     }

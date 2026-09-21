@@ -1106,6 +1106,7 @@ internal class KayaDragPayload(
  */
 internal class KayaDragSession(
     val sourceId: Long,
+    val sourceTag: ByteArray,
     val payload: KayaDragPayload,
     val ops: Int,
     /** The reorderable For this source is a row of, 0 for a data drag. */
@@ -11802,23 +11803,21 @@ private fun kayaPerformDrop(
 private fun kayaIsDragSource(node: KayaNode): Boolean =
     node.dragPayload != null || node.reorderIn != null
 
-/**
- * THE DRAG-AND-DROP SURFACE behind a node that declares a payload, an
- * operation mask, or is a row of a reorderable For — null for every
- * other node, so a scene that declares nothing composes exactly as it
- * did. The mac arm's KayaMacDragDropSurface, in Compose's own two
- * modifiers (docs/dnd-plan.md D1, D8).
- *
- * A SOURCE IS ALSO A TARGET, deliberately: `onEnded` reaches only the
- * nodes whose `shouldStartDragAndDrop` accepted the transfer, and the
- * source is where `drag_ended` has to be emitted from.
- */
+// docs/dnd-plan.md D1, D8; docs/traps.md: Android sent a drag end that Kaya did not record.
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun kayaDragAndDropSurface(node: KayaNode): Modifier? {
     val reorderIn = node.reorderIn
     val payload = node.dragPayload
     if (payload == null && node.dropOps == 0 && reorderIn == null) return null
+    DisposableEffect(node) {
+        onDispose {
+            val session = kayaDragSession
+            if (session?.sourceId == node.id) {
+                Log.i("kaya", "KAYA_DRAG_EVENT: source surface disposed node=${node.id} dropped=${session.dropped} ended=${session.ended} payload=${node.dragPayload != null}")
+            }
+        }
+    }
     val isSource = kayaIsDragSource(node)
     val target = remember(node, reorderIn) {
         object : DragAndDropTarget {
@@ -11844,15 +11843,6 @@ private fun kayaDragAndDropSurface(node: KayaNode): Modifier? {
                 return taken
             }
 
-            override fun onEnded(event: DragAndDropEvent) {
-                val session = event.toAndroidDragEvent().localState as? KayaDragSession
-                    ?: return
-                if (session.sourceId != node.id || session.ended) return
-                session.ended = true
-                Log.i("kaya", "KAYA_DRAG_EVENT: ended node=${node.id} op=${session.operation} entered=${session.entered}")
-                KayaPresent.emitDragEnded(node.identityTag, session.operation)
-                kayaDragEndings += 1
-            }
         }
     }
     var modifier: Modifier = Modifier.onGloballyPositioned {
@@ -11874,7 +11864,7 @@ private fun kayaDragAndDropSurface(node: KayaNode): Modifier? {
                         (KayaCompose.tableStamp(node.tag)?.keys ?: emptyList())
                             .joinToString(".").toByteArray(Charsets.UTF_8))))
             val ops = if (payload != null) node.dragOps else KayaCompose.DRAG_OP_MOVE
-            val session = KayaDragSession(node.id, declared, ops, reorderIn?.id ?: 0L)
+            val session = KayaDragSession(node.id, node.identityTag.copyOf(), declared, ops, reorderIn?.id ?: 0L)
             kayaDragSession = session
             // The gesture took: the runner stops re-injecting on this, so a
             // slow-ending drag under load is not clobbered by a fresh one
@@ -11889,10 +11879,7 @@ private fun kayaDragAndDropSurface(node: KayaNode): Modifier? {
     // measured (docs/dnd-plan.md D12).
     return modifier.dragAndDropTarget(
         shouldStartDragAndDrop = { event ->
-            // A SOURCE ACCEPTS ITS OWN DRAG (docs/traps.md: A Compose drag
-            // source must be a drop target of its own drag): a transfer
-            // nobody accepts gets no ACTION_DRAG_ENDED at all, and the
-            // source would never learn the answer was `none`.
+            // docs/traps.md: A Compose drag source must be a drop target of its own drag.
             val session = event.toAndroidDragEvent().localState as? KayaDragSession
             (session != null && session.sourceId == node.id) ||
                 kayaDropVerdict(node, reorderIn, event) != KayaCompose.DRAG_OP_NONE
@@ -14251,6 +14238,22 @@ private fun kayaSystemContrast(): Float {
 
 @Composable
 fun KayaRoot() {
+    // docs/traps.md: Android sent a drag end that Kaya did not record.
+    val dragEndTarget = remember {
+        object : DragAndDropTarget {
+            override fun onDrop(event: DragAndDropEvent) = false
+
+            override fun onEnded(event: DragAndDropEvent) {
+                val session = event.toAndroidDragEvent().localState as? KayaDragSession
+                    ?: return
+                if (session.ended) return
+                session.ended = true
+                Log.i("kaya", "KAYA_DRAG_EVENT: ended node=${session.sourceId} op=${session.operation} entered=${session.entered}")
+                KayaPresent.emitDragEnded(session.sourceTag, session.operation)
+                kayaDragEndings += 1
+            }
+        }
+    }
     // The runner thread has no density; convert the 8-dp gap here,
     // where composition provides one (expect_fills sums it between
     // tracks).
@@ -14305,7 +14308,10 @@ fun KayaRoot() {
     // could reach it either. No lane could see it: every `click` is
     // programmatic, and the dnd lane's real injected pointer is the
     // first injected touch this backend ever had.
-    Box(modifier = Modifier.fillMaxSize().safeDrawingPadding()) {
+    Box(modifier = Modifier.fillMaxSize().safeDrawingPadding().dragAndDropTarget(
+        shouldStartDragAndDrop = { it.toAndroidDragEvent().localState is KayaDragSession },
+        target = dragEndTarget,
+    )) {
         if (KayaSceneModel.menubar.isEmpty()) {
             // No catalog: the surface keeps its exact pre-menus shape (no
             // phantom bar over scenes that declared no commands).

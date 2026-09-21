@@ -234,6 +234,25 @@ def census(files):
                 "by the source test — a drop target is no drag source and "
                 "takes nothing from D12")
 
+    # docs/traps.md: Android sent a drag end that Kaya did not record.
+    root = block(compose_code, "fun KayaRoot()") or ""
+    for required in (
+        "target = dragEndTarget",
+        "shouldStartDragAndDrop = { it.toAndroidDragEvent().localState is KayaDragSession }",
+        "override fun onEnded(event: DragAndDropEvent)",
+        "val session = event.toAndroidDragEvent().localState as? KayaDragSession",
+        "if (session.ended) return",
+        "KayaPresent.emitDragEnded(session.sourceTag, session.operation)",
+    ):
+        if required not in root:
+            bad.append(f"{compose}: stable root drag-end owner lacks {required!r}; "
+                       "a removed source must still receive its native end")
+    if "KayaDragSession(node.id, node.identityTag.copyOf()," not in (surface or ""):
+        bad.append(f"{compose}: the drag session must capture its source identity "
+                   "before a drop can remove or restamp that source")
+    if compose_code.count("KayaPresent.emitDragEnded(") != 1:
+        bad.append(f"{compose}: the stable root must be the only drag-end reporter")
+
     swift_code = code_only(read(swiftui))
     at = swift_code.find("private func kayaPhoneDragDrop(")
     if at < 0:
@@ -290,7 +309,7 @@ def census(files):
 real = load()
 g = Gate("check-universal-props")
 RAN = 0
-DECLARED = 15
+DECLARED = 23
 for path, pattern, repl in (
     (COMPOSE, r"\ba11y\b", "kayaUnappliedProps"),
     (SWIFTUI, r"\bkayaA11y\b", "kayaUnappliedProps"),
@@ -360,6 +379,30 @@ if not census(load({COMPOSE: moved})):
           "outside the drag surface's box still passed")
     raise SystemExit(1)
 RAN += 1
+
+for label, pattern, repl in (
+    ("root drag owner disconnected", r"target = dragEndTarget", "target = lostTarget"),
+    ("root no longer accepts local drags", r"localState is KayaDragSession", "localState == null"),
+    ("root native end callback removed", r"override fun onEnded\(event: DragAndDropEvent\)",
+     "fun lostEnd(event: DragAndDropEvent)"),
+    ("end session guessed instead of read from native event",
+     r"(override fun onEnded\(event: DragAndDropEvent\) \{\n *)"
+     r"val session = event.toAndroidDragEvent\(\).localState as\? KayaDragSession",
+     r"\1val session = kayaDragSession"),
+    ("root end deduplication removed", r"if \(session\.ended\) return", ""),
+    ("end routed through a current node instead of captured identity",
+     r"emitDragEnded\(session\.sourceTag,", "emitDragEnded(node.identityTag,"),
+    ("source identity no longer captured", r"node\.identityTag\.copyOf\(\)", "ByteArray(0)"),
+    ("second drag-end reporter planted", r"private fun kayaIsDragSource\(node: KayaNode\)",
+     "private fun staleEnd() { KayaPresent.emitDragEnded(ByteArray(0), 0) }\n"
+     "private fun kayaIsDragSource(node: KayaNode)"),
+):
+    doctored = g.doctor(label, real[COMPOSE], pattern, repl, want=1)
+    findings = census(load({COMPOSE: doctored}))
+    if not findings:
+        raise SystemExit(f"check-universal-props: self-test failed: {label} still passed")
+    print(f"check-universal-props: {label}: {findings[0]}")
+    RAN += 1
 
 print(f"check-universal-props: {RAN} watched negative(s) ran")
 if RAN != DECLARED:
