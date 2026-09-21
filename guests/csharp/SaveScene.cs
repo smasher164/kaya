@@ -130,8 +130,11 @@ static class SaveScene
                 var label = tx.Label(bind: status); // label#0
                 tx.SetA11yId(label, "status");
 
-                tx.Button("open", onClick: inner =>       // button#0
-                    inner.PickFile(onResult: Picked));
+                tx.Button("open", onClick: async _ =>
+                {
+                    var files = await app.PickFileAsync();
+                    app.Build(tx => Picked(tx, files));
+                });
 
                 tx.Button("save", onClick: inner =>       // button#1
                 {
@@ -147,8 +150,11 @@ static class SaveScene
                 });
 
                 // "copy" is the name the dialog OPENS with; the harness types over it.
-                tx.Button("save as", onClick: inner =>    // button#2
-                    inner.SaveFile("copy", onResult: Saved));
+                tx.Button("save as", onClick: async _ =>
+                {
+                    var file = await app.SaveFileAsync("copy");
+                    app.Build(tx => Saved(tx, file));
+                });
 
                 tx.Button("reopen", onClick: inner =>     // button#3
                 {

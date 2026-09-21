@@ -1556,6 +1556,19 @@ def run_apk_on(serial, name, apk, component, script, extras,
                 **TEXT)
         print(f"full buffers kept at target/validate-failures/"
               f"android-{name}-buffers.log", file=log)
+        full_buffers = (keep / f"android-{name}-buffers.log").read_text(
+            encoding="utf-8", errors="replace")
+        sidecar = LEGS_DIR / f"{name}.log"
+        sidecar.with_suffix(".system-events").write_text(
+            flightrec_lane.android_system_events(full_buffers), encoding="utf-8")
+        anrs = subprocess.run(
+            ["timeout", "20", "adb", "-s", serial, "shell", "dumpsys",
+             "dropbox", "--print", "data_app_anr"],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, encoding="utf-8", errors="replace", check=False)
+        sidecar.with_suffix(".anr-history").write_text(
+            flightrec_lane.android_anr_history(package, anrs.stdout, anrs.returncode),
+            encoding="utf-8")
         # THE VERB TRACE, out of the app's private files dir through
         # run-as (the debug APKs are debuggable).
         pulled = subprocess.run(

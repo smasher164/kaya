@@ -715,7 +715,13 @@ in docs/deferred.md.
    main executable and interpreter before launch: the Swift executor slice's
    SDKROOT regression stamped SDK 16.0 despite an explicit 26.5 SDK, and the
    original bundle carried no stamp. All three worker paths and adoption
-   are held by four cuts. Twenty-four watched negatives, counts printed),
+   are held by four cuts. Android's system-events and anr-history sections
+   joined on 2026-09-20: the 400-line tail missed an ANR dialog taking
+   clipboard focus, and its stack lived only in Android's DropBox. Both
+   captures run on the failure path before the device returns to the pool.
+   ANR history is package-filtered and explicitly historical, never a claim
+   that an old report belongs to this leg. Eight capture, adoption and
+   renderer mutations hold it. Thirty-two watched negatives, counts printed),
    `tools/check-diagnostics.py` (a why-not may not print a sentence it
    cannot NOT print. Any function named `*WhyNot`/`*why_not`/`*Reason`
    is read as a diagnostic by that name alone; one answer, or an answer
@@ -999,7 +1005,15 @@ in docs/deferred.md.
    bare value where a key is) must each fail to compile on the one line
    their finding names, and the Haskell KayaValue probe's four cases must
    each be refused by the class itself, never by a syntax error — both
-   run here because a negative nobody runs is a guard nobody walks into),
+   run here because a negative nobody runs is a guard nobody walks into.
+   C# ASYNC DIALOGS SINCE 2026-09-20: the four scope cases, all five
+   result forms, request rollback, callbacks and thread boundaries run
+   through AbortCheck; eleven counted mutations hold the raw continuation
+   boundary, scope rollback, honest reporter, deferred completion, live
+   slots, invalid-request cleanup and synchronous Build refusal. check-sugar-surface holds the
+   five signatures and context/install/drain/wake wiring with nine counted
+   cuts and an empty-reader refusal. docs/async-dialogs-plan.md is the
+   approved explicit-transaction contract),
    `tools/check-tx-liveness.py` (a transaction is usable only inside
    the build or handler that made it, on the app thread — the HANDLE
    bindings refuse a closed one at a single write chokepoint, the

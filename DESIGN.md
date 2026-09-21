@@ -515,8 +515,23 @@ the entry is not a migration (docs/traps.md). The queue owner alone has an
 audited `@unchecked Sendable` conformance, with all queue state under its lock.
 The interpreter remains in Swift 5, its migration separate; an executor in
 the guest module does not resolve its 418 measured diagnostics. Async-dialog
-APIs also remain a separate ruling. See
+APIs follow the separately approved explicit-transaction ruling below. See
 docs/measurements/swift-executor-2026-09-18.md for proof and validation status.
+
+**Async dialogs use explicit transaction scopes** (ruled 2026-09-19,
+docs/async-dialogs-plan.md R1, implementation in progress). Swift, C#, Java
+and Rust continuations resume on the app thread with no transaction open.
+Build/build/apply is the atomic scope: return commits, a throw through its
+synchronous body rolls back, and a later failure cannot undo a completed scope.
+The async reporter reports the failure without claiming it rolled back a
+transaction. Java completes futures in raw app-thread jobs outside result
+dispatch, since completing inside a transaction runs thenAccept inside it too.
+JS retains its ruled implicit continuation transaction and its documented
+limit: writes before a continuation throws stand. Synchronous callback abort
+semantics remain unchanged in all nine. Python, Haskell and OCaml retain the
+approved callback-only runtime carve-out; a new Go concurrency surface is
+deferred, not part of the four additions. All nine verdicts and the shared
+failure sentence live in the plan and its C# feasibility measurement.
 
 **One id space for widgets and template nodes.** Every binding mints
 live widget ids and template node ids from ONE monotone counter per app

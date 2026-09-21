@@ -802,6 +802,8 @@ static class AbortCheck
 
         WireGuards(app);
 
+        AsyncDialogCheck.Run(app);
+
         Console.WriteLine("csharp abort check: OK");
     }
 }

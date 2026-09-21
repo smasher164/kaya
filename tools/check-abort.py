@@ -14,6 +14,8 @@ dev_shell_or_die()
 # no mirror to roll back.
 
 import glob
+import contextlib
+import io
 import os
 import re
 import shutil
@@ -52,6 +54,37 @@ def step(name, argv, log, *, env=ENV, cwd=ROOT, echo=None):
                                   errors="replace").splitlines():
             if line.startswith(echo):
                 print(f"check-abort: {name}: {line}")
+
+
+def probe_run(argv, timeout=10):
+    try:
+        return subprocess.run(argv, cwd=ROOT, capture_output=True,
+                              text=True, encoding="utf-8", timeout=timeout, check=False)
+    except subprocess.TimeoutExpired as error:
+        stdout = (error.stdout or b"").decode("utf-8", errors="replace")
+        stderr = (error.stderr or b"").decode("utf-8", errors="replace")
+        print(f"check-abort: probe timed out after {error.timeout}s: {argv!r}\n"
+              f"captured stdout ({len(stdout)} characters):\n{stdout}\n"
+              f"captured stderr ({len(stderr)} characters):\n{stderr}", flush=True)
+        raise
+
+
+timeout_child = g.doctor(
+    "timeout diagnostic", "pass", r"^pass$",
+    "import sys, threading; print('timeout-out', flush=True); "
+    "print('timeout-err', file=sys.stderr, flush=True); threading.Event().wait(60)")
+timeout_report = io.StringIO()
+try:
+    with contextlib.redirect_stdout(timeout_report):
+        probe_run([sys.executable, "-c", timeout_child], timeout=1)
+except subprocess.TimeoutExpired:
+    report = timeout_report.getvalue()
+    if ("captured stdout (12 characters):\ntimeout-out\n" not in report
+            or "captured stderr (12 characters):\ntimeout-err\n" not in report):
+        g.refuse(f"timeout diagnostic lost the child's output: {report}")
+else:
+    g.refuse("timeout diagnostic did not exercise the timeout branch")
+print("check-abort: timeout diagnostic retained both child streams")
 
 
 with scratch_dir("check-abort-") as tmp:
@@ -147,8 +180,7 @@ with scratch_dir("check-abort-") as tmp:
         step(f"swift-executor-{name}-build", executor_compile +
              sorted(map(str, shadow.glob("*.swift"))) + [executor_probe, "-o", str(binary)],
              tmp / f"executor-{name}-build.log")
-        got = subprocess.run([str(binary)], cwd=ROOT, capture_output=True,
-                             text=True, encoding="utf-8", timeout=10)
+        got = probe_run([str(binary)])
         refused = expected in got.stderr
         if got.returncode == 0 or not refused:
             g.refuse(f"Swift executor {name} negative: rc={got.returncode}: "
@@ -295,12 +327,72 @@ with scratch_dir("check-abort-") as tmp:
           "guests/csharp/kaya-guests.csproj"], tmp / "cs.log")
     step("csharp",
          ["dotnet", "exec", "guests/csharp/bin/Debug/net10.0/kaya-guests.dll"],
-         tmp / "cs.log", env=dict(ENV, KAYA_CHECK="abort"))
+         tmp / "cs.log", env=dict(ENV, KAYA_CHECK="abort"), echo="async-dialog:")
     # The notification dispatch order, same binary, its own KAYA_CHECK.
     step("csharp-notify",
          ["dotnet", "exec", "guests/csharp/bin/Debug/net10.0/kaya-guests.dll"],
          tmp / "cs-notify.log", env=dict(ENV, KAYA_CHECK="notify"),
          echo=("notify-order:", "link-route:"))
+
+    for name, before, after, expected in (
+        ("ambient", "try { job(); }", "try { Build(_ => job()); }",
+         "continuation had an ambient transaction"),
+        ("rollback", "App.SignalMirrors[id] = old!;",
+         'App.SignalMirrors[id] = "broken rollback";', "explicit scope rollback/commit mismatch"),
+        ("reporter", "kaya: async handler failed; no transaction was rolled back by this reporter; "
+         "completed transactions remain committed",
+         "kaya: handler threw (transaction rolled back)", "async reporter claimed rollback"),
+        ("completion", "send(tx, value => QueueAsync(() => answer.SetResult(value)));",
+         "send(tx, value => answer.SetResult(value));", "future completed inside result dispatch"),
+        ("retire", "if (liveAlert == id) liveAlert = 0;", "",
+         "alert id did not retire"),
+        ("overlap", "if (App.liveAlert != 0)", "if (App.liveAlert == ulong.MaxValue)",
+         "missing refusal: another alert"),
+        ("abandon", "foreach (var action in RollbackActions) action();", "",
+         "abandoned request leaked a registration"),
+        ("encode", "ulong id = ++App.nextAlert;",
+         "ulong id = ++App.nextAlert; if (onResult != null) App.alerts[id] = onResult;",
+         "invalid request leaked a registration"),
+        ("sync-build-void", "public void Build(Action<Tx> build)\n    {\n"
+         "        RequireSynchronousBuild(build);",
+         "public void Build(Action<Tx> build)\n    {",
+         "missing refusal: Build requires a synchronous body"),
+        ("sync-build-task", "RequireAppThread();\n        RequireSynchronousBuild(build);",
+         "RequireAppThread();",
+         "missing refusal: Build requires a synchronous body"),
+        ("raw-boundary", "if (CurrentTx != null)",
+         "if (CurrentTx != null && liveAlert == ulong.MaxValue)",
+         "missing refusal: async work cannot run inside a transaction"),
+    ):
+        shadow = tmp / f"cs-async-{name}"
+        shadow.mkdir()
+        for src in sorted((ROOT / "bindings/csharp").glob("*.cs")):
+            text = src.read_text(encoding="utf-8")
+            if src.name == "KayaApp.cs":
+                text = g.doctor(f"C# async {name}", text, re.escape(before), after)
+            (shadow / src.name).write_text(text, encoding="utf-8")
+        shutil.copyfile(ROOT / "guests/csharp/AsyncDialogCheck.cs", shadow / "AsyncDialogCheck.cs")
+        (shadow / "Main.cs").write_text(
+            'static class MainCheck { static int Main() { try { '
+            'AsyncDialogCheck.Run(new KayaApp()); return 0; } '
+            'catch (System.Exception e) { System.Console.Error.WriteLine(e); return 1; } } }',
+            encoding="utf-8")
+        (shadow / "async.csproj").write_text(
+            '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup>'
+            '<OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework>'
+            '<AllowUnsafeBlocks>true</AllowUnsafeBlocks><Nullable>enable</Nullable>'
+            '<ImplicitUsings>enable</ImplicitUsings></PropertyGroup></Project>',
+            encoding="utf-8")
+        step(f"csharp-async-{name}-build", ["dotnet", "build", "--nologo", "-v", "q",
+                                           str(shadow / "async.csproj")],
+             tmp / f"cs-{name}-build.log")
+        got = subprocess.run(["dotnet", "exec", str(shadow / "bin/Debug/net10.0/async.dll")],
+                             env=ENV, capture_output=True, text=True, encoding="utf-8",
+                             timeout=20, check=False)
+        said = got.stdout + got.stderr
+        if got.returncode != 1 or expected not in said:
+            g.refuse(f"C# async {name}: expected exit 1 naming {expected}: {said}")
+        print(f"check-abort: C# async {name} refused: {expected}")
 
     # Pure JVM against the ring stub — no natives, so mutating
     # transactions always abort (AbortCheck.java's header has the shape).

@@ -8228,6 +8228,46 @@ for _lang, (_rel, _s, _e, _inherit, _cut1, _idspace, _cut2) in \
 print("check-sugar-surface: catalog-seat rows watched (applied/named): "
       + " ".join(_catalog_watched), file=sys.stderr)
 
+# docs/async-dialogs-plan.md section 6: C# depth; Swift, Java and Rust follow.
+ASYNC_CS_PARTS = {
+    "alert": r"public Task<AlertChoice> ShowAlertAsync\(",
+    "pick": r"public Task<List<PickedFile>> PickFileAsync\(",
+    "picks": r"public Task<List<PickedFile>> PickFilesAsync\(",
+    "save": r"public Task<PickedFile\?> SaveFileAsync\(",
+    "clipboard": r"public Task<Representation\?> ReadClipboardAsync\(",
+    "context": (r"sealed class AppThreadContext\(KayaApp app\) : SynchronizationContext\s*\{\s*"
+                r"public override void Post\(SendOrPostCallback callback, object\? state\) =>\s*"
+                r"app.QueueAsync\(\(\) => callback\(state\)\);"),
+    "install": r"void DispatchLoop\(\)\s*\{\s*ClaimAppThread\(\);\s*InstallAsyncContext\(\);",
+    "drain": r"DrainPosted\(\);\s*DrainAsync\(\);",
+    "wake": (r"internal void QueueAsync\(Action job\)\s*\{\s*"
+             r"lock \(postLock\) asyncJobs.Add\(job\);\s*Kaya.Wake\(\);"),
+}
+
+
+def async_cs_findings(text):
+    code = _c_like(text)
+    missing = [name for name, pattern in ASYNC_CS_PARTS.items()
+               if re.search(pattern, code) is None]
+    if len(re.findall(r"public Task<", code)) < 5:
+        missing.append("awaitable census below five")
+    return missing
+
+
+_async_cs = read_rel("bindings/csharp/KayaApp.cs")
+for _missing in async_cs_findings(_async_cs):
+    print(f"check-sugar-surface: C# async dialogs missing {_missing}", file=sys.stderr)
+    status = 1
+for _name, _pattern in ASYNC_CS_PARTS.items():
+    _doctored, _n = sub_count(_pattern, "", _async_cs)
+    if _n != 1 or _name not in async_cs_findings(_doctored):
+        selftest_exit(f"check-sugar-surface: C# async {_name} negative failed: "
+                      f"{_n} substitution(s)")
+    print(f"check-sugar-surface: C# async {_name}: {_n} substitution(s), named refusal",
+          file=sys.stderr)
+if "awaitable census below five" not in async_cs_findings(""):
+    selftest_exit("check-sugar-surface: C# async empty reader did not refuse")
+
 check_scene_sugar()
 
 if status != 0:

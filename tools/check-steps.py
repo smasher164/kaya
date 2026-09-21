@@ -13,12 +13,17 @@ dev_shell_or_die()
 # trees are children-first — docs/traps.md's children-first family), so a
 # container is targetable only through a key or the blessed unique #0.
 
+import ast
+import contextlib
 import hashlib
+import io
 import platform
 import re
 import shutil
 import subprocess
 import tempfile
+import time
+import types
 
 # Every lane's roster, order and drain structure is DATA
 # (docs/runner-conversion-plan.md §2): the clauses below import what the
@@ -4329,8 +4334,8 @@ picker_selftest(doc, "exactly two warmed export attempts",
 # And once: a third probe of the same warmed device is the open-ended
 # retry the rule refuses.
 doc, hits = sub_count(
-    r"(?m)^(    if rc == 76:\n        # Once more.*\n(?:        #.*\n)*"
-    r"        print\(f\"run-sim: re-probing \{udid\} after a slow export flow\",\n"
+    r"(?m)^(    if rc == 76:\n(?:        #.*\n)*"
+    r"        print\(f\"run-sim: re-probing \{udid\} after an incomplete export flow\",\n"
     r"              file=sys\.stderr\)\n        rc = picker_export_probe\(udid\)\n)",
     r"\1        if rc == 76:\n            rc = picker_export_probe(udid)\n",
     RUN_SIM)
@@ -4466,6 +4471,41 @@ if out:
           file=sys.stderr)
     print("\n".join(out), file=sys.stderr)
     status = 1
+
+probe_nodes = [node for node in ast.parse(RUN_SIM).body
+               if (isinstance(node, ast.FunctionDef) and node.name == "picker_export_probe")
+               or (isinstance(node, ast.Assign)
+                   and any(isinstance(target, ast.Name) and target.id == "PROBE_CODES"
+                           for target in node.targets))]
+if len(probe_nodes) != 2:
+    selftest_fail("the admission diagnostic probe did not find its function and code table")
+probe_code = compile(ast.Module(body=probe_nodes, type_ignores=[]), "run-sim-admission", "exec")
+probe_scope = {"os": types.SimpleNamespace(environ={"KAYA_IOS_SLOW_PROBE_TEST": "test-device"}),
+               "time": time, "sys": sys, "_probe_attempts": {}}
+exec(probe_code, probe_scope)
+
+
+def admission_diagnostic():
+    report = io.StringIO()
+    with contextlib.redirect_stderr(report):
+        rc = probe_scope["picker_export_probe"]("test-device")
+    return rc == 76 and "no export-health verdict" in report.getvalue(), report.getvalue()
+
+
+good, report = admission_diagnostic()
+print(report, end="")
+if not good:
+    selftest_fail("the incomplete admission diagnostic lost its measured meaning")
+old_codes = probe_scope["PROBE_CODES"]
+wrong, hits = sub_count("no export-health verdict", "a slow host", old_codes[76])
+print(f"check-steps: incomplete admission diagnostic mutation: {hits} substitution(s)")
+if hits != 1:
+    selftest_fail("the incomplete admission diagnostic mutation did not apply once")
+old_codes[76] = wrong
+good, report = admission_diagnostic()
+if good:
+    selftest_fail("the incomplete admission diagnostic accepted an unsupported cause")
+print("check-steps: incomplete admission diagnostic watched failing")
 
 # The android clipboard clause's negatives, same discipline. A
 # clipboard leg moved onto the lockless tablet must fail...
@@ -4738,6 +4778,11 @@ if out:
 # tools/check-file-modes.py, which reads the numbers out of spec.rs.)
 def ios_picker(driver):
     bad = []
+    naming = re.search(r'case "savename":(.*?)case "savepress":', driver, re.S)
+    if not naming or not re.search(
+            r'if let why = typingRefusal\(.*?return \(false, why\)', naming.group(1), re.S):
+        bad.append("tools/ios/xcuidrive/KayaDrive.swift: savename does not refuse "
+                   "typing when typingRefusal reports lost readiness")
     # 1. THE DRIVER NAMES THE PICKER BY THE TWO IDENTIFIERS ITS CONTRACT
     #    RESTS ON: the picker's navigation bar and the save sheet's
     #    filename field, both measured on iOS 26.5
@@ -4804,6 +4849,49 @@ if hits != 1:
 if not any("savePressWindow" in b for b in ios_picker(doc)):
     selftest_fail("a savepress that spends its whole budget on one press "
                   "passed")
+
+doc, hits = sub_count(r'if let why = typingRefusal\(a, "the save sheet\x27s name field",',
+                      'if let why = missingTypingRefusal(a, "the save sheet\x27s name field",',
+                      DRIVER_SRC)
+print(f"check-steps: savename readiness call cut: {hits} substitution(s)")
+if hits != 1 or not any("typingRefusal" in b for b in ios_picker(doc)):
+    selftest_fail("the savename typing guard cut did not fire")
+
+if platform.system() == "Darwin":
+    start = DRIVER_SRC.index("    func typingRefusal(")
+    end = DRIVER_SRC.index("    func cancelSheet(", start)
+    typing_body = DRIVER_SRC[start:end]
+    with tempfile.TemporaryDirectory() as typing_t:
+        typing_dir = pathlib.Path(typing_t)
+        for name, before, after in (
+            ("current", "", ""),
+            ("stale", "waited && (focusedNow == true || keyboardsNow > 0)", "waited"),
+            ("deadline", "waited && (focusedNow == true || keyboardsNow > 0)",
+             "(focusedNow == true || keyboardsNow > 0)"),
+            ("remote", "focusedNow == true || keyboardsNow > 0", "focusedNow == true"),
+        ):
+            body = typing_body
+            if before:
+                body, hits = sub_count(re.escape(before), after, body)
+                print(f"check-steps: typing readiness {name}: {hits} substitution(s)")
+                if hits != 1:
+                    selftest_fail(f"typing readiness {name} mutation missed its body")
+            source = typing_dir / f"{name}.swift"
+            source.write_text("import Foundation\nextension TypingProbe {\n" + body + "}\n",
+                              encoding="utf-8")
+            binary = typing_dir / name
+            if swiftc(source, "tools/checks/ios-typing-readiness.swift", "-o", binary) != 0:
+                selftest_fail(f"typing readiness {name} did not compile")
+            result = subprocess.run([str(binary)], capture_output=True, text=True,
+                                    encoding="utf-8", check=False)
+            if name == "current":
+                print(result.stdout, end="")
+                if result.returncode != 0 or "20 cases passed" not in result.stdout:
+                    selftest_fail("typing readiness truth table failed: " + result.stderr)
+            elif result.returncode != 1 or "FAIL typing case" not in result.stdout:
+                selftest_fail(f"typing readiness {name} did not fail by its assertion")
+            else:
+                print(f"check-steps: typing readiness {name} watched failing, exit 1")
 
 
 # THE GENERATOR MUST NOT OUTRUN WHAT IT GENERATED (docs/traps.md: "A

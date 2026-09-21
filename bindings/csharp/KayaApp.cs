@@ -6,7 +6,9 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Runtime.CompilerServices;
 using System.Threading;
+using System.Threading.Tasks;
 
 readonly struct Signal
 {
@@ -1178,6 +1180,45 @@ sealed class KayaApp
     // and the only reason this class carries a lock at all.
     readonly object postLock = new object();
     List<Action<Tx>> posted = new List<Action<Tx>>();
+    List<Action> asyncJobs = new();
+
+    sealed class AppThreadContext(KayaApp app) : SynchronizationContext
+    {
+        public override void Post(SendOrPostCallback callback, object? state) =>
+            app.QueueAsync(() => callback(state));
+    }
+
+    internal void InstallAsyncContext() =>
+        SynchronizationContext.SetSynchronizationContext(new AppThreadContext(this));
+
+    internal void QueueAsync(Action job)
+    {
+        lock (postLock) asyncJobs.Add(job);
+        Kaya.Wake();
+    }
+
+    internal void DrainAsync()
+    {
+        RequireAppThread();
+        if (CurrentTx != null)
+            throw new InvalidOperationException("kaya: async work cannot run inside a transaction");
+        List<Action> batch;
+        lock (postLock)
+        {
+            batch = asyncJobs;
+            asyncJobs = new();
+        }
+        foreach (var job in batch)
+        {
+            try { job(); }
+            catch (Exception e)
+            {
+                Console.Error.WriteLine(e);
+                Console.Error.WriteLine(
+                    "kaya: async handler failed; no transaction was rolled back by this reporter; completed transactions remain committed");
+            }
+        }
+    }
 
     // Signals recomputed from a collection after each of its
     // mutations, written into the same transaction.
@@ -1283,6 +1324,7 @@ sealed class KayaApp
     internal ulong nextAlert;
     internal ulong nextFileDialog;
     internal ulong nextClipboardRead;
+    internal ulong liveAlert, liveFileDialog;
 
     // The collection is the model — the only copy: every mutation op
     // edits it and queues the wire delta in the same call. Children
@@ -1471,13 +1513,25 @@ sealed class KayaApp
     /// Run `build` with a fresh transaction and submit it atomically. A
     /// handler that throws abandons its records, and the model abandons
     /// the same writes before the exception continues.
-    public void Build(Action<Tx> build) => Build<object?>(tx => { build(tx); return null; });
+    public void Build(Action<Tx> build)
+    {
+        RequireSynchronousBuild(build);
+        Build<object?>(tx => { build(tx); return null; });
+    }
+
+    static void RequireSynchronousBuild(Delegate build)
+    {
+        if (build.Method.IsDefined(typeof(AsyncStateMachineAttribute), false)
+            || typeof(Task).IsAssignableFrom(build.Method.ReturnType))
+            throw new ArgumentException("kaya: Build requires a synchronous body; await outside it and open a new Build for writes");
+    }
 
     /// The same, answering what the body answered — how a handle made
     /// inside the scope reaches the code outside it.
     public T Build<T>(Func<Tx, T> build)
     {
         RequireAppThread();
+        RequireSynchronousBuild(build);
         using var tx = new Tx(this);
         CurrentTx = tx;
         T out_;
@@ -1499,6 +1553,69 @@ sealed class KayaApp
     }
 
     public void OnClick(Widget w, Action<Tx> handler) => widgetHandlers[w.Id] = handler;
+
+    Task<T> RequestAsync<T>(Action<Tx, Action<T>> send)
+    {
+        RequireAppThread();
+        if (TplDepth != 0)
+            throw new InvalidOperationException("kaya: async dialogs cannot be requested inside a template body");
+        var answer = new TaskCompletionSource<T>();
+        void Request(Tx tx)
+        {
+            send(tx, value => QueueAsync(() => answer.SetResult(value)));
+            tx.RollbackActions.Add(() => QueueAsync(() => answer.SetException(
+                new InvalidOperationException("kaya: the dialog request transaction was rolled back"))));
+        }
+        if (CurrentTx is { } current) Request(current);
+        else Build(Request);
+        return answer.Task;
+    }
+
+    public Task<AlertChoice> ShowAlertAsync(
+        string title = "", string message = "", string? action0 = null,
+        string? action1 = null, string? cancel = null, ulong window = 0) =>
+        RequestAsync<AlertChoice>((tx, resolve) => tx.ShowAlert(
+            title, message, action0, action1, cancel, (_, choice) => resolve(choice), window));
+
+    public Task<List<PickedFile>> PickFileAsync(
+        (string Label, string Extensions)[]? filters = null, ulong window = 0) =>
+        RequestAsync<List<PickedFile>>((tx, resolve) => tx.PickFile(
+            filters, (_, files) => resolve(files), window));
+
+    public Task<List<PickedFile>> PickFilesAsync(
+        (string Label, string Extensions)[]? filters = null, ulong window = 0) =>
+        RequestAsync<List<PickedFile>>((tx, resolve) => tx.PickFiles(
+            filters, (_, files) => resolve(files), window));
+
+    public Task<PickedFile?> SaveFileAsync(string suggestedName,
+        (string Label, string Extensions)[]? filters = null, ulong window = 0) =>
+        RequestAsync<PickedFile?>((tx, resolve) => tx.SaveFile(
+            suggestedName, filters, (_, file) => resolve(file), window));
+
+    public Task<Representation?> ReadClipboardAsync(params string[] accepting) =>
+        RequestAsync<Representation?>((tx, resolve) =>
+        {
+            var request = tx.ReadClipboard();
+            foreach (string kind in accepting) request.Accept(kind);
+            request.OnResult((_, clip) => resolve(clip)).Send();
+        });
+
+    internal void AlertResult(ulong id, AlertChoice choice)
+    {
+        if (liveAlert == id) liveAlert = 0;
+        if (alerts.Remove(id, out var handler)) Dispatch(tx => handler(tx, choice));
+    }
+
+    internal void FileDialogResult(ulong id, List<PickedFile> files)
+    {
+        if (liveFileDialog == id) liveFileDialog = 0;
+        if (fileDialogs.Remove(id, out var handler)) Dispatch(tx => handler(tx, files));
+    }
+
+    internal void ClipboardResult(ulong id, Representation? clip)
+    {
+        if (clipboardReads.Remove(id, out var handler)) Dispatch(tx => handler(tx, clip));
+    }
 
     /// <summary>Register the PROCESS-LEVEL notification handler
     /// (docs/tasks-s9-plan.md R1): it receives every result whose id has
@@ -1913,7 +2030,7 @@ sealed class KayaApp
     {
         try
         {
-            Build(fn);
+            Build<object?>(tx => { fn(tx); return null; });
         }
         catch (Exception e)
         {
@@ -2143,12 +2260,14 @@ sealed class KayaApp
     void DispatchLoop()
     {
         ClaimAppThread();
+        InstallAsyncContext();
         while (true)
         {
             // Posted work first, then the ring, then park. Draining at
             // the TOP is what makes a wake sufficient: whatever brought
             // this thread back, it looks here before anywhere else.
             DrainPosted();
+            DrainAsync();
             if (!Kaya.PollOccurrence(
                 out ushort kind, out ulong id, out List<object> keys, out object? payload))
             {
@@ -2286,8 +2405,8 @@ sealed class KayaApp
                     Dispatch(tx => onBack(tx));
                     break;
                 // One-shot: the registration retires with the result.
-                case AlertAnswered alert when alerts.Remove(alert.Id, out var onAlert):
-                    Dispatch(tx => onAlert(tx, alert.Choice));
+                case AlertAnswered alert:
+                    AlertResult(alert.Id, alert.Choice);
                     break;
                 // id is the ROUTE the core matched
                 // (docs/app-links-plan.md §4), and NOT one-shot. TWO
@@ -2304,15 +2423,15 @@ sealed class KayaApp
                 // One-shot like the alert, and the id retires with it.
                 // EMPTY IS CANCEL, for a save dialog too (it reaches the
                 // guest as null, narrowed at SaveFile).
-                case FilesPicked picked when fileDialogs.Remove(picked.Id, out var onPicked):
-                    Dispatch(tx => onPicked(tx, picked.Files));
+                case FilesPicked picked:
+                    FileDialogResult(picked.Id, picked.Files);
                     break;
                 // One-shot like the alert, and the request retires with
                 // it. EMPTY IS THE UNIVERSAL NO and arrives as null —
                 // denied, unfocused, absent and nothing-we-accept alike,
                 // because no platform says which.
-                case ClipboardRead read when clipboardReads.Remove(read.Id, out var onRead):
-                    Dispatch(tx => onRead(tx, read.Clip));
+                case ClipboardRead read:
+                    ClipboardResult(read.Id, read.Clip);
                     break;
                 // An undo (or redo), as the CORE put it back. The id is the
                 // WINDOW: one ledger per window. THE MIRROR FOLLOWS FIRST, and
@@ -2454,6 +2573,7 @@ sealed class Tx : IDisposable
     readonly Dictionary<ulong, (bool Existed, object? Old)> signalJournal = new();
 
     internal Tx(KayaApp app) => App = app;
+    internal readonly List<Action> RollbackActions = new();
 
     internal void SubmitIfAny()
     {
@@ -2491,6 +2611,7 @@ sealed class Tx : IDisposable
 
     internal void Rollback()
     {
+        foreach (var action in RollbackActions) action();
         // The template-scope counter is app state, not tx state: an
         // aborted build is abandoned but the app continues, and a
         // stuck counter would poison every later mirror read.
@@ -3929,6 +4050,9 @@ sealed class Tx : IDisposable
         string? cancel = null, Action<Tx, AlertChoice>? onResult = null,
         ulong window = 0)
     {
+        Alive();
+        if (App.liveAlert != 0)
+            throw new InvalidOperationException($"kaya: cannot show another alert while alert {App.liveAlert} is live");
         if (action1 != null && action0 == null)
             throw new ArgumentException(
                 "kaya: action1 without action0 — actions fill in order");
@@ -3937,11 +4061,17 @@ sealed class Tx : IDisposable
                 "kaya: the cancel slot always exists and needs a name — pass cancel:");
         uint actions = action0 == null ? 0u : (action1 == null ? 1u : 2u);
         ulong id = ++App.nextAlert;
-        if (onResult != null)
-            App.alerts[id] = onResult;
         Records.Add(KayaWire.TxShowAlert(
             window, id, actions, title, message,
             action0 ?? "", action1 ?? "", cancel));
+        if (onResult != null)
+            App.alerts[id] = onResult;
+        App.liveAlert = id;
+        RollbackActions.Add(() =>
+        {
+            App.alerts.Remove(id);
+            if (App.liveAlert == id) App.liveAlert = 0;
+        });
         return id;
     }
 
@@ -3996,11 +4126,15 @@ sealed class Tx : IDisposable
         Action<Tx, List<PickedFile>>? onResult,
         ulong window)
     {
+        Alive();
+        if (App.liveFileDialog != 0)
+            throw new InvalidOperationException($"kaya: cannot show another file dialog while dialog {App.liveFileDialog} is live");
         ulong id = ++App.nextFileDialog;
-        if (onResult != null)
-            App.fileDialogs[id] = onResult;
         Records.Add(KayaWire.TxShowFileDialog(
             window, id, multiple ? 1u : 0u, FilterValues(filters)));
+        if (onResult != null)
+            App.fileDialogs[id] = onResult;
+        TrackFileDialog(id);
         return id;
     }
 
@@ -4016,17 +4150,31 @@ sealed class Tx : IDisposable
         Action<Tx, PickedFile?>? onResult = null,
         ulong window = 0)
     {
+        Alive();
+        if (App.liveFileDialog != 0)
+            throw new InvalidOperationException($"kaya: cannot show another file dialog while dialog {App.liveFileDialog} is live");
         // ONE ID SPACE AND ONE TABLE, shared with the picker: a second
         // counter would mint an id the picker had already used.
         ulong id = ++App.nextFileDialog;
+        Records.Add(KayaWire.TxShowSaveDialog(
+            window, id, suggestedName, FilterValues(filters)));
         if (onResult != null)
             // The narrowing lives at the REGISTRATION, so the dispatch
             // loop's one-shot removal serves both kinds unchanged.
             App.fileDialogs[id] = (tx, files) =>
                 onResult(tx, files.Count == 0 ? (PickedFile?)null : files[0]);
-        Records.Add(KayaWire.TxShowSaveDialog(
-            window, id, suggestedName, FilterValues(filters)));
+        TrackFileDialog(id);
         return id;
+    }
+
+    void TrackFileDialog(ulong id)
+    {
+        App.liveFileDialog = id;
+        RollbackActions.Add(() =>
+        {
+            App.fileDialogs.Remove(id);
+            if (App.liveFileDialog == id) App.liveFileDialog = 0;
+        });
     }
 
     /// The advisory filters' wire shape, shared by both dialog kinds:
@@ -5583,7 +5731,7 @@ sealed class ClipReadRef
     /// FIRST, in the order named.
     public ClipReadRef Custom(string formatId) => Accept(formatId);
 
-    ClipReadRef Accept(string kind)
+    internal ClipReadRef Accept(string kind)
     {
         accepting.Add(kind);
         return this;
@@ -5601,9 +5749,12 @@ sealed class ClipReadRef
 
     public ulong Send()
     {
+        tx.Alive();
+        byte[] record = KayaWire.TxReadClipboard(id, Tx.AcceptList(accepting));
         if (onResult != null)
             tx.App.clipboardReads[id] = onResult;
-        tx.Records.Add(KayaWire.TxReadClipboard(id, Tx.AcceptList(accepting)));
+        tx.Records.Add(record);
+        tx.RollbackActions.Add(() => tx.App.clipboardReads.Remove(id));
         return id;
     }
 }

@@ -129,14 +129,26 @@ static class ClipboardScene
                         .Send();
                     inner.Write(status, "copied");
                 }); // button#0
-                tx.Button("read custom", onClick: inner =>
-                    inner.ReadClipboard().Custom(NoteId).OnResult(Answered).Send());
-                tx.Button("read text", onClick: inner =>
-                    inner.ReadClipboard().Text().OnResult(Answered).Send());
-                tx.Button("read image", onClick: inner =>
-                    inner.ReadClipboard().Image().OnResult(Answered).Send());
-                tx.Button("read files", onClick: inner =>
-                    inner.ReadClipboard().Files().OnResult(Answered).Send());
+                tx.Button("read custom", onClick: async _ =>
+                {
+                    var clip = await app.ReadClipboardAsync(NoteId);
+                    app.Build(tx => Answered(tx, clip));
+                });
+                tx.Button("read text", onClick: async _ =>
+                {
+                    var clip = await app.ReadClipboardAsync(Tx.AcceptText);
+                    app.Build(tx => Answered(tx, clip));
+                });
+                tx.Button("read image", onClick: async _ =>
+                {
+                    var clip = await app.ReadClipboardAsync(Tx.AcceptImage);
+                    app.Build(tx => Answered(tx, clip));
+                });
+                tx.Button("read files", onClick: async _ =>
+                {
+                    var clip = await app.ReadClipboardAsync(Tx.AcceptFiles);
+                    app.Build(tx => Answered(tx, clip));
+                });
                 tx.Button("focus rich", onClick: inner => inner.Focus(rich));
                 tx.Button("focus plain", onClick: inner => inner.Focus(plain));
 

@@ -9,6 +9,100 @@ Landed history lives in git; this file only carries what is still open.
 scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
+## BUILD — R1 async dialogs: explicit-transaction amendment approved (2026-09-19)
+KEY: async dialogs, R1.4, R1.5, async void, SynchronizationContext, continuation rollback, explicit Build
+
+Akhil approved the seven recommendations in docs/async-dialogs-plan.md §5.
+C# feasibility against the real binding found that its proposed context
+wrapper commits a continuation's writes before receiving the async-void
+exception, then incorrectly reports rollback. Four measured cases and one
+counted negative: docs/measurements/async-dialogs-csharp-2026-09-19.md.
+
+RULED 2026-09-19, implementation resumed 2026-09-20: resume without an implicit transaction;
+explicit Build/build/apply is the atomic scope. A throw inside it rolls it back;
+a throw after it returned does not undo committed writes. Async reporting must
+not claim rollback it did not observe. Synchronous callback behavior stays as
+it is. JS already documents continuation writes standing on rejection. Akhil
+also adopted Java completion outside transactions with a watched negative,
+rewriting the conflicting plan sections, and one honest async-failure sentence
+for the four new tiers. The reporter does not assert suspension it did not observe.
+
+C# DEPTH VALIDATED 2026-09-20: the five Task forms, raw context queue, request
+rollback cleanup and explicit-scope guards passed the full ladder.
+The four dialog guests use await with explicit Build. Headless validation:
+628 core tests and 18 doctests passed (one ignored); check-abort passed with
+eleven counted C# runtime mutations; check-sugar-surface passed with nine counted
+C# surface/wiring cuts and an empty-reader refusal; check-tx-liveness and
+check-python passed. The four C# Mac dialog legs passed with shared scripts
+unchanged. An invalid-input probe then found callbacks registered before an
+encoding failure; registration now follows encoding, and its counted
+check-abort mutation was watched failing. The final validation below includes it.
+One intermediate check-abort run timed out in the existing Swift executor's
+deliberately broken wake probe (10-second subprocess deadline); the next whole
+run passed. Its cause is not established and the timeout lost captured output.
+check-abort now retains both captured streams on that timeout path; a forced
+timeout verifies both payloads, not merely the command text. The diagnostic
+negative and all 61 gates passed before the invalid-input follow-up above.
+No Swift executor implementation changed.
+The first full matrix passed Mac 477, Linux 775, Windows 282, Android 148 and
+61 gates, but iOS admission failed before any leg. Its saved driver trace
+identified a stale typing-readiness verdict; correction and regression guards
+passed the final matrix below, recorded in docs/measurements/ios-typing-readiness-2026-09-20.md.
+The corrected tree then passed every leg and all 61 gates, but Windows missed
+its net-time ceiling by three seconds. A third matrix passed Mac 477, Linux
+775, Windows 282, iOS 139 and 61 gates; Android passed 147 of 148. An Android
+startup ANR dialog took focus before clipboard-jvm's second paste. The full
+system log and Android DropBox report identify that sequence, but were not
+in its original bundle. Failure-only system-events and anr-history sections
+are implemented with eight watched mutations. A one-substitution forced red
+produced all seven sections, read back with the original ANR stack and focus
+history; the shared script was then restored byte-for-byte. See
+docs/measurements/android-anr-2026-09-20.md. Windows also missed
+its net-time ceiling by 217 seconds on that run. No ceiling was raised and
+no ALL PASS verdict or commit is claimed for these two matrices.
+After the recorder change, the core again passed 628 unit tests and 18
+doctests (one ignored), and the full 61-gate sweep passed in 173 seconds.
+After the maintainer rebooted the Mac, the same source passed 628 unit tests
+and 18 doctests (one ignored), all 61 gates in 159 seconds, and the full Mac
+lane's 477 legs in 387 seconds. The final five-lane matrix was ALL PASS in
+1258 seconds: Mac 477, Linux 775, Windows 282, iOS 139, Android 148 and all
+61 gates, every unchanged runtime ceiling held. The review is
+docs/reviews/async-dialogs-csharp-2026-09-20/README.md.
+The measurement includes all nine binding verdicts; Go's existing callbacks
+remain, its new concurrency surface deferred rather than silently omitted.
+Remaining work: Swift on its shipped executor,
+Java, Rust; guards and review page per the plan, then the full ladder.
+
+## INVESTIGATE — full-matrix host contention and Android startup ANR (2026-09-20)
+KEY: matrix host contention, Windows net ceiling, clipboard-jvm, startup FocusEvent, ANR history, system-events
+
+Two successive unchanged-source matrices exceeded the Windows net ceiling:
+1353s and 1567s against 1350s. The latter also had clipboard-jvm lose focus to
+Android's startup ANR dialog; 147 of 148 Android legs passed. All other legs
+and all 61 gates passed in both runs. Host samples reached load 518.87 and
+389 runnable processes; measured Windows slowdown covered all six languages,
+while its build and deploy phases had been faster on the second run.
+No Windows backend or runner code changed. This is not proof of a sole cause.
+
+The original Android bundle lacked the earlier focus history and ANR stack.
+Those sections are now captured automatically on failure, held by eight
+watched mutations and a forced-red bundle readback. The restored clipboard
+leg passed alone in two seconds, which does not fix the matrix condition.
+See docs/measurements/android-anr-2026-09-20.md for the clocks and stack.
+Do not raise the ceilings or call a passing rerun a diagnosis. The maintainer
+rebooted the Mac on 2026-09-20. After restoring Accessibility and capture
+permissions, the core, all 61 gates and Mac 477 passed. The controlled
+post-reboot matrix then passed every leg and gate in 1258 seconds, with all
+ceilings held. Windows' suites fell to 645 seconds from 1258 before reboot,
+but startup still reached load 647 and a process census found 514 runnable
+processes, mostly simulator services. The Windows VM-ready phase took 342
+seconds; a live sample caught utmctl status waiting for a ScriptingBridge
+reply. It later proceeded without a runner change. Neither sample establishes
+the sole cause. Keep this investigation open; the next recurrence should be
+compared against these saved process samples and the recorder's new sections.
+The C# slice's validation is no longer blocked. Full readings are in
+docs/measurements/android-anr-2026-09-20.md.
+
 ## ~~BUILD — the flight recorder: one failure is enough evidence (Akhil, 2026-08-27)~~ COMPLETE 2026-09-02: both interpreter harnesses carry the verb-trace ring, held level with the Rust one by check-verbs, and four lanes collect it into the bundle
 KEY: flightrec, flight recorder, capture bundle, journal jsonl, XDG_STATE_HOME, KAYA_FLIGHTREC_DIR, KAYA_VERB_TRACE, vtrace, verb trace, foreground sampler, PrintWindow shot, flightrec-selftest, bundle sections, SECTIONS, FLIGHTREC_SECTIONS_LINUX, desktop-shot, foreground-text, app-log, shot.when, skip sentence, check-flightrec, flightrec_skip, flightrec_finish, device_capture, screencap, simctl io screenshot, grim
 
@@ -2266,11 +2360,13 @@ The same
   RULED FOR LATER SLICES, each its own entry when it starts:
   - R1 ASYNC DIALOGS beyond JS for Swift, C#, Java and Rust under one
     rule — no handler given, a dialog answers a future; the continuation
-    runs on the app thread as its own transaction — with Python, Haskell
+    runs on the app thread with explicit transaction scopes after suspension — with Python, Haskell
     and OCaml stated as the carve-out (no native async runtime on the app
     thread), the way docs/js-plan.md §4 names the languages that cannot
     spell the implicit transaction. Python's `await` form is the survey's
-    one SEMANTICS finding and is not taken.
+    one SEMANTICS finding and is not taken. APPROVED 2026-09-19: all seven
+    recommendations in docs/async-dialogs-plan.md §5. C# depth passed the full
+    five-lane matrix on 2026-09-20; Swift, Java and Rust remain (§6).
   - ~~R2 ROW HANDLES IN PYTHON, the twin of JS's rule 3: `todo.done =
     checked` is the patch through `__setattr__`, refused by name on a
     typo; the other seven keep `patch`, stated as the carve-out where
@@ -11863,8 +11959,8 @@ queued batch (the Swift binding's shape), and the instrument itself
 half-dead. No lane time is added: one run of 32,000 replaces two of
 2,000 + 32,000.
 
-## ~~WATCH — the iOS lane under a matrix: one simulator's LocalStorage admission probe hit its slow flow and the lane ran no leg (first sighting 2026-09-06)~~
-KEY: LocalStorage admission, rc=76, device preparation failed, picker probe, slow flow, ios lane, matrix contention
+## ~~FIX — iOS export admission can type after readiness disappears (re-sighted 2026-09-20)~~ COMPLETE 2026-09-20: current focus/keyboard readings gate typing, held by 20 cases and five counted mutations; all 139 iOS legs and the full five-lane matrix passed
+KEY: LocalStorage admission, rc=76, device preparation failed, picker probe, slow flow, ios lane, matrix contention, typingRefusal, focused=false keyboards=0
 
 Matrix #15 (the robustness day; five lanes): `run-sim: LocalStorage
 admission on 8F0680C5-… took 77s (rc=76)` beside 56s and 102s on the other
@@ -11891,7 +11987,22 @@ admission line says how many attempts, and the refusal names both.
 `KAYA_IOS_SLOW_PROBE_TEST=<udid>` is the hand-only injection, watched on
 the real pool.
 
-RE-SIGHTED 2026-09-09 00:26 (the S9 plain matrix, five lanes, the tree frozen): on kaya-sim-1 both admission attempts read rc=76 and `ios: FAIL (182s, 0 legs)`, and the driver's own log shows the 09-06 fix did NOT hold there — XCTest retried `Type 'kaya-export-prefli…'` to attempt #3 and then raised `Failed to synthesize event: Neither element nor any descendant has keyboard focus` on the export probe, so the driver TYPED after its deadline-based wait rather than refusing in a sentence (the keyboard signal it waits for was answered while the field had no focus). The simulator sat at a plain home screen afterwards, nothing in the way. Matrix #2 on the same tree, twenty minutes later: iOS ALL PASS, 132 legs, every admission settled — load alone, so the entry stays struck; a third sighting makes the driver's savename wait take the FIELD's focus as its signal, not the keyboard's presence.
+RE-SIGHTED 2026-09-09 00:26 (the S9 plain matrix, five lanes, the tree frozen):
+on kaya-sim-1 both admission attempts read rc=76 and iOS failed with zero legs.
+XCTest's third typing attempt reported no keyboard focus. A second matrix on
+the same tree passed 132 iOS legs; that did not establish a cause. The proposed
+focus-only wait conflicted with the measured remote-field state in docs/traps.md.
+
+REOPENED 2026-09-20: the async-dialog matrix supplied the missing distinction.
+The driver printed `safe, focused=false keyboards=0`: its wait had succeeded,
+but its final readings no longer admitted typing. A compiled probe reproduced
+the stale verdict. The final readings now gate typing; keyboard-only readiness
+remains legal. Twenty cases, three decision mutations, one caller cut and the
+incomplete-flow diagnostic's mutation enter check-steps. Final validation passed
+628 core tests, 18 doctests, all 61 gates, Mac 477 and the five-lane matrix:
+Mac 477, Linux 775, Windows 282, iOS 139 and Android 148, in 1258 seconds.
+Evidence: docs/measurements/ios-typing-readiness-2026-09-20.md.
+
 ## ~~GAP — of the Compose action verbs only `click` waits for the app's answer; `choose`, `header_click`, `toggle` and `set_value` return the moment they emit (2026-09-06)~~
 KEY: kayaAwaitQuiet, kayaAwaitAnswer, action returns once the app has answered, choose, header_click, toggle, set_value, Compose runner
 

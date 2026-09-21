@@ -564,6 +564,79 @@ def census_ios_stamp(src):
     return found
 
 
+def census_android_history(src):
+    found = []
+    sections = declared(src).get("android", ())
+    for name in ("system-events", "anr-history"):
+        if name not in sections:
+            found.append(f"android: declares no {name} section")
+    body = py_block(src[ANDROID], "run_apk_on")
+    failures = []
+    for node in ast.walk(ast.parse(body)):
+        if isinstance(node, ast.If) and isinstance(node.test, ast.Compare):
+            test = node.test
+            if (isinstance(test.left, ast.Constant)
+                    and test.left.value == "KAYA_SELFTEST: OK"
+                    and len(test.ops) == 1 and isinstance(test.ops[0], ast.NotIn)):
+                failures.append(ast.get_source_segment(body, node))
+    for call, suffix in (("android_system_events", ".system-events"),
+                         ("android_anr_history", ".anr-history")):
+        if not any(f"flightrec_lane.{call}(" in branch and f'"{suffix}"' in branch
+                   for branch in failures):
+            found.append(f"android: failure path does not write {suffix} through {call}")
+    return found
+
+
+def android_report_checks(src, echo=False):
+    scope = {"re": re}
+    for name in ("android_system_events", "android_anr_history"):
+        body = py_block(src[LANE_PY], name)
+        if not body:
+            return [f"android: missing report renderer {name}"]
+        exec(compile(body, LANE_PY, "exec"), scope)
+    render = scope["android_anr_history"]
+    package = "dev.kaya.javahost"
+    def entry(stamp, owner):
+        return ("========================================\n"
+                f"{stamp} data_app_anr\nProcess: {owner}\nPID: 18476\n"
+                f"Timestamp: {stamp}\nmain stack\n")
+    text = ("Drop box contents: 3 entries\n" + entry("2026-09-19 12:00:00", package)
+            + entry("2026-09-20 15:28:00", package)
+            + entry("2026-09-20 15:29:00", "dev.kaya.other"))
+    answer = render(package, text, 0)
+    found = []
+    if "Matched 2 of 3" not in answer or "Process: dev.kaya.other" in answer:
+        found.append("android: ANR history did not filter by exact package")
+    if "Reports can predate this leg" not in answer:
+        found.append("android: ANR history claimed current-leg attribution")
+    if answer.find("2026-09-20 15:28:00") > answer.find("2026-09-19 12:00:00"):
+        found.append("android: newest ANR did not precede the old report")
+    cases = (("empty", "(No entries found.)", 0, "Matched 0 of 0"),
+             ("read failure", "permission denied", 1, "DropBox read exited 1; no ANR verdict"),
+             ("timeout", "partial output", 124, "DropBox read exited 124; no ANR verdict"),
+             ("format", "unknown format", 0, "Unrecognized DropBox output; no ANR verdict"))
+    for label, output, code, expected in cases:
+        said = render(package, output, code)
+        if expected not in said or (code and output not in said):
+            found.append(f"android: ANR {label} diagnostic lost its measured result")
+        if echo:
+            print(f"check-flightrec: Android {label}: {said.strip()}")
+    events = ["input_focus: Focus entering Application Not Responding",
+              "am_anr  : waited for FocusEvent", "ANR in dev.kaya.javahost",
+              "Input dispatching timed out", "Denying clipboard access",
+              "ClipboardOverlay", "wm_pause_activity:", "wm_resume_activity:",
+              "wm_set_resumed_activity:"]
+    timeline = scope["android_system_events"]("\n".join([*events, "unrelated noise"]))
+    if any(event not in timeline for event in events) or "unrelated noise" in timeline:
+        found.append("android: system timeline dropped a focus/ANR event or kept unrelated noise")
+    if "Selected 0 line(s)" not in scope["android_system_events"]("unrelated noise"):
+        found.append("android: empty system timeline did not report its zero count")
+    if echo:
+        print(f"check-flightrec: Android timeline: {timeline.strip()}")
+        print(f"check-flightrec: Android history: {answer.strip()}")
+    return found
+
+
 # ---------------------------------------------------------------- run it
 
 REAL = sources()
@@ -574,7 +647,8 @@ CENSUSES = (("sections", census_sections), ("skip writers", census_skips),
             ("windows collect freshness", census_collect_fresh),
             ("guest clock", census_guest_clock),
             ("linux focus ring", census_focus_ring),
-            ("hand run", census_hand_run), ("iOS SDK stamp", census_ios_stamp))
+            ("hand run", census_hand_run), ("iOS SDK stamp", census_ios_stamp),
+            ("Android history", census_android_history))
 TABLE = declared(REAL)
 gate.counted("lanes declaring a bundle shape", list(TABLE), floor=5)
 gate.counted("sections declared across the five lanes",
@@ -582,6 +656,8 @@ gate.counted("sections declared across the five lanes",
 for label, fn in CENSUSES:
     for line in fn(REAL):
         gate.finding(line, at=label)
+for line in android_report_checks(REAL, echo=True):
+    gate.finding(line, at="Android report renderers")
 
 
 def doctored(rel, pattern, repl, label, *, flags=re.M, want=1):
@@ -770,6 +846,28 @@ stamp_cut = doctored(LANE_PY, r'self\.adopt\(bundle, "binary-stamp",',
 gate.negative("iOS SDK section unwritten", lambda: census_sections(stamp_cut),
               want="`binary-stamp` is declared")
 
-gate.negatives_ran(24)
+for call in ("android_system_events", "android_anr_history"):
+    changed = doctored(ANDROID, re.escape(f"flightrec_lane.{call}("),
+                       f"flightrec_lane.unwired_{call}(", f"Android {call} capture cut")
+    gate.negative(f"Android {call} capture unwritten",
+                  lambda: census_android_history(changed), want="failure path does not write")
+for name in ("system-events", "anr-history"):
+    changed = doctored(LANE_PY, re.escape(f'self.adopt(bundle, "{name}",'),
+                       f'self.adopt(bundle, "wrong-{name}",', f"Android {name} adoption cut")
+    gate.negative(f"Android {name} section unwritten",
+                  lambda: census_sections(changed), want=f"`{name}` is declared")
+for label, before, after, want in (
+        ("package", 'if f"Process: {package}" in entry.splitlines()', "if True",
+         "filter by exact package"),
+        ("attribution", "Reports can predate this leg", "Reports belong to this leg",
+         "current-leg attribution"),
+        ("read status", "if returncode != 0:", "if False:",
+         "diagnostic lost its measured result"),
+        ("focus", "input_focus:", "lost_focus:", "dropped a focus/ANR event")):
+    changed = doctored(LANE_PY, re.escape(before), after, f"Android {label} report mutation")
+    gate.negative(f"Android {label} report corrupted",
+                  lambda: android_report_checks(changed), want=want)
+
+gate.negatives_ran(32)
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

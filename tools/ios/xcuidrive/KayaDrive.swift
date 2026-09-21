@@ -263,34 +263,21 @@ final class KayaDrive: XCTestCase {
     /// the loop to it).
     let savePressWindow: TimeInterval = 6
 
-    /// TYPING IS THE ONE VERB THAT CAN KILL THIS DRIVER: `typeText` raises
-    /// "Neither element nor any descendant has keyboard focus" when the tap
-    /// that should have focused the field has not landed yet, the raise ends
-    /// the resident test, and xcodebuild answers 65 for the whole lane. So
-    /// the keyboard is WAITED FOR — the app's own signal that a keystroke
-    /// has somewhere to go — and a refusal is a sentence naming both
-    /// readings rather than a dead driver. Nil means go ahead.
-    /// THE KEYBOARD IS THE HALF THAT ANSWERS for the save sheet: measured
-    /// 2026-09-06 on iOS 26.5, the picker's own field reads
-    /// `hasFocus=false keyboards=1` while typing into it works, since
-    /// DOCPicker is a remote view controller. Both are read, either
-    /// admits, and the sentence prints the pair so a future reading that
-    /// changes is visible rather than assumed.
+    // docs/traps.md: An iOS typing wait can succeed before its readiness disappears.
     func typingRefusal(_ a: XCUIApplication, _ what: String, _ seconds: TimeInterval? = nil,
                        focused: (() -> Bool)? = nil) -> String? {
-        let ready = waitFor("a keyboard for \(what)", seconds, {
+        let waited = waitFor("a keyboard for \(what)", seconds, {
             (focused?() ?? false) || a.keyboards.count > 0
         })
-        // WHICH OF THE TWO SIGNALS ARRIVED, always: the wait is satisfied by
-        // either, and a line that cannot tell them apart is a line the next
-        // reader will believe for the wrong one (CLAUDE.md invariant 3).
-        let reading = "focused=" + (focused == nil ? "<not asked>" : "\(focused!())")
-            + " keyboards=\(a.keyboards.count)"
-        note("typing into \(what): \(ready ? "safe" : "REFUSED"), \(reading)")
+        let focusedNow = focused?()
+        let keyboardsNow = a.keyboards.count
+        let ready = waited && (focusedNow == true || keyboardsNow > 0)
+        let reading = "waited=\(waited) focused=" + (focusedNow.map { "\($0)" } ?? "<not asked>")
+            + " keyboards=\(keyboardsNow)"
+        note("typing into \(what): \(ready ? "ready" : "REFUSED"), \(reading)")
         if ready { return nil }
-        return "nothing in \(what) can take a keystroke (\(reading)), so nothing "
-            + "was typed — typing here would end this driver and the lane "
-            + "would lose its hands"
+        let reason = waited ? "readiness disappeared after waiting" : "the readiness wait expired"
+        return "typing refused for \(what): \(reason) (\(reading)); nothing was typed"
     }
     func cancelSheet(_ a: XCUIApplication, _ what: String) -> (Bool, String) {
         // A hittable Cancel BUTTON when the picker offers one; otherwise

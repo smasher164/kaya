@@ -275,7 +275,8 @@ def selftest(label, site, pattern, repl, expect):
 selftest("N1", GO, r"\n\trequireAppThread\(\)\n\}", "\n}",
          "the write chokepoint does not call")
 # N2: the call gone from a build entry — the background-Build hole.
-selftest("N2", CS, r"\{\n        RequireAppThread\(\);\n", "{\n",
+selftest("N2", CS, r"(public T Build<T>\(Func<Tx, T> build\)\n    \{\n)"
+         r"        RequireAppThread\(\);\n", r"\1",
          "the build entry does not call")
 # N3: the dispatch loop stops claiming — every check above goes inert.
 selftest("N3", JAVA, r"\n        claimAppThread\(\);", "",

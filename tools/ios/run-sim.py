@@ -1030,7 +1030,7 @@ def picker_cleanup(udid):
 PROBE_CODES = {
     0: "admitted",
     75: "a measured stale LocalStorage export",
-    76: "the flow did not finish, a slow host and not a verdict",
+    76: "the export flow did not finish; no export-health verdict",
     1: "the probe itself could not run",
 }
 _probe_attempts = {}
@@ -1038,7 +1038,7 @@ _probe_attempts = {}
 
 def picker_export_probe(udid):
     """0 healthy, 75 the measured LocalStorage failure, 76 the flow that
-    did not finish in time (a slow host, not a stale export — the two
+    did not finish (not evidence of a stale export — the two
     read alike under matrix load, and the second erased a healthy
     device twice, 2026-09-01), 1 otherwise.
 
@@ -1144,12 +1144,9 @@ def picker_export_probe(udid):
             print(f"run-sim: the drive's last words on {udid}: "
                   + " | ".join(drive_out.strip().splitlines()[-3:]),
                   file=sys.stderr)
-            # The flow never finished: nothing here says the export is
-            # STALE, only that the host was slow. The log below may carry an
-            # FP -1005 from the Files app's own warm-up, which is what made
-            # this read as 75 and erase a healthy device.
+            # docs/traps.md: An iOS typing wait can succeed before its readiness disappears.
             print(f"run-sim: the LocalStorage export probe did not finish on "
-                  f"{udid} (drive rc={drive_rc}); a slow host, not a verdict",
+                  f"{udid} (drive rc={drive_rc}); {PROBE_CODES[76]}",
                   file=sys.stderr)
             return 76
         logq = subprocess.run(
@@ -1213,9 +1210,8 @@ def picker_prepare(udid):
         return 1
     rc = picker_export_probe(udid)
     if rc == 76:
-        # Once more before any verdict: the first attempt's slowness is
-        # the host's (check-steps holds this to ONE re-run on that code).
-        print(f"run-sim: re-probing {udid} after a slow export flow",
+        # tools/check-steps.py holds this to one re-run on code 76.
+        print(f"run-sim: re-probing {udid} after an incomplete export flow",
               file=sys.stderr)
         rc = picker_export_probe(udid)
     if rc == 0 and os.environ.get("KAYA_IOS_RESEED_TEST") == udid:
@@ -1235,7 +1231,7 @@ def picker_prepare(udid):
         return 1
     rc = picker_export_probe(udid)
     if rc == 76:
-        print(f"run-sim: re-probing {udid} after a slow export flow on "
+        print(f"run-sim: re-probing {udid} after an incomplete export flow on "
               f"the reseeded device", file=sys.stderr)
         rc = picker_export_probe(udid)
     if rc == 0:

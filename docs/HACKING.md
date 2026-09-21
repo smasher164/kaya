@@ -243,9 +243,9 @@ collection keys. See DESIGN.md's transport section for the doctrine.
   a real tap on kaya's `step` button (the `xcuidrive-proof` leg) proves
   the app-widget route. By hand: `KAYA_DRIVE_DIR` names a directory,
   write `<verb>` to `request` (part-then-rename), read `response`.
-  iOS admission is load-sensitive: a busy host fails the LocalStorage
-  probe with "no size" — a slow host, not a verdict; never erase the
-  pool to chase it. To EXERCISE the recovery path on purpose,
+  An incomplete LocalStorage export flow (code 76) establishes neither
+  a slow host nor an unhealthy provider. Read the driver's saved logs;
+  never erase the pool to chase that code. To EXERCISE the recovery path on purpose,
   `KAYA_IOS_RESEED_TEST=<udid>` puts that healthy phone through erase,
   boot, driver restart, warm and probe once (fault injection, by hand).
   The `type` verb's keys on this lane are the driver's too.
@@ -378,8 +378,15 @@ section to a branch of its lane's own collect.
 | mac | leg-log, verb-trace, shot, desktop-shot, windows, windowserver, sampler, sample, unified-log |
 | windows | leg-log, verb-trace, shot, desktop-shot, desktop, foreground, foreground-text |
 | ios | leg-log, verb-trace, shot, panic, app-log, devices |
-| android | leg-log, verb-trace, shot, logcat, devices |
+| android | leg-log, verb-trace, shot, logcat, devices, system-events, anr-history |
 | linux | leg-log, verb-trace, shot, desktop, xvfb |
+
+Android's `system-events` keeps focus transfers, ANR notices and clipboard
+denials from the full saved logcat, not just its final 400 lines. `anr-history`
+reads Android's DropBox on the failure path and keeps this package's reports.
+It is history, not current-leg attribution: match each report's PID and
+Timestamp against the step clock and system events. Empty history, failed
+reads and an unrecognized output format have different measured sentences.
 
 - `shot` is the GUEST'S OWN window where a platform can address one (the
   mac by window id, windows by PrintWindow on the WinUI class) and the

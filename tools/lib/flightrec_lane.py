@@ -47,9 +47,36 @@ SECTIONS = {
                 "foreground", "foreground-text", "desktop-live", "notifications",
                 "toast-moment"),
     "ios": ("leg-log", "verb-trace", "shot", "panic", "app-log", "devices", "binary-stamp"),
-    "android": ("leg-log", "verb-trace", "shot", "logcat", "devices"),
+    "android": ("leg-log", "verb-trace", "shot", "logcat", "devices",
+                "system-events", "anr-history"),
     "linux": ("leg-log", "verb-trace", "shot", "desktop", "xvfb"),
 }
+
+
+def android_system_events(text):
+    # docs/traps.md: Android's ANR dialog took the clipboard leg's focus.
+    pattern = (r"input_focus:|am_anr\s*:|ANR in|Input dispatching timed out|"
+               r"Denying clipboard access|ClipboardOverlay|"
+               r"wm_(?:pause|resume|set_resumed)_activity:")
+    lines = [line for line in text.splitlines() if re.search(pattern, line)]
+    return ("Selected focus, ANR and clipboard events from this device's logcat.\n"
+            "History can predate this leg; match timestamps against leg-log.txt.\n"
+            f"Selected {len(lines)} line(s).\n" + "\n".join(lines) + "\n")
+
+
+def android_anr_history(package, text, returncode):
+    heading = (f"Android ANR history for {package}.\n"
+               "Reports can predate this leg; match PID and Timestamp against "
+               "system-events.txt and leg-log.txt. Newest published entries first.\n")
+    if returncode != 0:
+        return heading + f"DropBox read exited {returncode}; no ANR verdict.\n{text}\n"
+    entries = re.split(r"(?m)^={10,}\r?\n", text)[1:]
+    if not entries and "(No entries found.)" not in text:
+        return heading + "Unrecognized DropBox output; no ANR verdict.\n" + text + "\n"
+    matched = [entry for entry in entries
+               if f"Process: {package}" in entry.splitlines()]
+    return (heading + f"Matched {len(matched)} of {len(entries)} report(s).\n"
+            + "\n".join(reversed(matched)))
 
 
 def _flightrec(root):
@@ -1020,6 +1047,10 @@ class AndroidRecorder(LaneRecorder):
                 self.adopt(bundle, "logcat", log.with_suffix(".logcat"),
                            why_absent="flightrec: no logcat tail was kept "
                                       "for this leg")
+                self.adopt(bundle, "system-events", log.with_suffix(".system-events"),
+                           why_absent="flightrec: no system-event timeline was kept for this leg")
+                self.adopt(bundle, "anr-history", log.with_suffix(".anr-history"),
+                           why_absent="flightrec: no ANR history was kept for this leg")
                 self.adopt_shot(bundle, "shot", log.with_suffix(".shot.png"),
                                 why_absent=self.SHOT_ABSENT,
                                 note_src=log.with_suffix(".shotwhen"))

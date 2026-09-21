@@ -4,6 +4,80 @@ Each of these cost a debugging session (or would have). Most now have a
 structural guard; the guard is named where it exists. Do not re-derive
 these the hard way.
 
+## Android's ANR dialog took the clipboard leg's focus
+
+Measured 2026-09-20: clipboard-jvm's first paste succeeded, then its second
+paste and row paste read nothing. The recorder's 400-line logcat tail showed
+clipboard denials and its screenshot, taken after exit, showed the launcher.
+The full buffer outside the bundle named the intervening window: Android's
+Application Not Responding dialog. A delayed startup FocusEvent had timed out
+after 5013ms, before the first paste; the dialog took focus later, immediately
+before the second paste. See docs/measurements/android-anr-2026-09-20.md.
+
+The ANR stack is not in that logcat tail. `/data/anr` is system-owned; do not
+restart adb as root during a lane. `adb shell dumpsys dropbox --print
+data_app_anr` exposes the report without changing device state. Its publication
+minute was 15:28 while the event timestamp was 15:27, so filtering on the
+event's minute returned no report. The stack sampled Compose text layout;
+heavy CPU pressure was measured, but one stack does not prove the sole cause.
+
+The recorder now keeps a system-event timeline and package-filtered ANR
+history. Match PID and timestamps; old reports are not evidence about the
+current leg. check-flightrec holds the failure-path captures, adoption and
+renderers with eight counted mutations, and exercises every report diagnostic.
+
+## An iOS typing wait can succeed before its readiness disappears (measured 2026-09-20)
+
+The async-dialog matrix's iOS admission driver printed `safe, focused=false
+keyboards=0`, then XCTest retried typing three times and ended the driver with
+exit 65. The saved driver log carried the cause: typingRefusal returned the
+earlier wait's Boolean while its newer focus and keyboard readings were used
+only in the diagnostic. A compiled probe of that exact function reproduced
+the contradiction with keyboard readings 1 then 0.
+
+The final readings now participate in the decision and in its diagnostic.
+The remote save field still may report no focus while a keyboard is present,
+so requiring hasFocus alone would reject a measured working state. This guards
+the observed stale verdict; it does not promise focus cannot change after the
+last read. check-steps compiles the real function against 20 changing-state
+cases and watches three one-site decision mutations fail, plus a cut of the
+savename caller's refusal. The trace remains available for any later race.
+
+Admission code 76 establishes an incomplete export flow, not a slow host or a
+stale provider. Its shared diagnostic now says it has no export-health verdict;
+check-steps forces that branch and rejects a doctored causal claim. The failure
+and initial matrix result are recorded in
+docs/measurements/ios-typing-readiness-2026-09-20.md.
+
+## Register a dialog result only after its request encodes (measured 2026-09-20)
+
+The C# alert and picker registered their result callbacks before encoding the
+wire record. An invalid null title or filter extension threw during encoding,
+leaving one callback in each map although no request was submitted. Registering
+after encoding leaves both maps empty. Rollback cleanup handles the separate
+case of a valid request whose enclosing transaction later aborts.
+The five invalid-input cases in guests/csharp/AsyncDialogCheck.cs cover the
+new Task forms. check-abort moves alert registration back before encoding in
+a scratch copy and demands the leaked-registration failure.
+
+## A C# async-void exception reaches the context after its write committed (measured 2026-09-19)
+
+The proposed async-dialog context posted continuations through KayaApp.Post,
+which opens a transaction and runs Dispatch's rollback reporter. The real
+binding probe wrote a signal after suspension and threw. The first queue
+drain committed the value; the second delivered the exception and printed
+"transaction rolled back" over an empty transaction. The signal still held
+the new value. A throw inside an explicit Build did roll that Build back.
+The four cases and one counted false-expectation negative are reproducible
+in docs/measurements/async-dialogs-csharp-2026-09-19.md.
+
+Do not use App.Post as proof of async continuation rollback. The approved
+R1.4/R1.5 amendment uses explicit transaction scopes and makes no rollback claim
+for an exception delivered outside one. Implementation follows the rewritten
+docs/async-dialogs-plan.md. JS already documents that continuation writes before a throw
+stand; the async-dialog plan's claim that its rollback rule matches JS was
+incorrect.
+
 ## A Windows type can replace the selection it moved away from (measured 2026-09-19)
 
 The matrix's notes_rust leg lost bold after appending `d` to `abc`, then

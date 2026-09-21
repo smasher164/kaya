@@ -63,15 +63,16 @@ static class FileDialogScene
             {
                 var label = tx.Label(bind: status); // label#0
                 tx.SetA11yId(label, "status");
-                tx.Button("open", onClick: inner =>
-                    // Filters are ADVISORY: a guest still validates what it got.
-                    inner.PickFiles(
-                        filters: new[] { ("Text", "txt") },
-                        onResult: Picked));
-                tx.Button("open one", onClick: inner =>
-                    inner.PickFile(
-                        filters: new[] { ("Text", "txt") },
-                        onResult: Picked));
+                tx.Button("open", onClick: async _ =>
+                {
+                    var files = await app.PickFilesAsync(filters: new[] { ("Text", "txt") });
+                    app.Build(tx => Picked(tx, files));
+                });
+                tx.Button("open one", onClick: async _ =>
+                {
+                    var files = await app.PickFileAsync(filters: new[] { ("Text", "txt") });
+                    app.Build(tx => Picked(tx, files));
+                });
                 tx.Button("release", onClick: _ => released.Set());
                 return root;
             }));

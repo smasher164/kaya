@@ -15,29 +15,28 @@ static class ConfirmScene
             tx.Mount(tx.Column(root =>
             {
                 tx.Label(bind: status); // label#0
-                tx.Button("delete", onClick: inner =>
+                tx.Button("delete", onClick: async _ =>
                 {
-                    inner.ShowAlert(
+                    var choice = await app.ShowAlertAsync(
                         title: "delete item?",
                         message: "this cannot be undone",
                         action0: "Delete", action1: "Archive",
-                        cancel: "Keep",
-                        onResult: (tx, choice) => tx.Write(status, choice switch
+                        cancel: "Keep");
+                    app.Build(tx => tx.Write(status, choice switch
                         {
                             AlertChoice.Action0 => "deleted",
                             AlertChoice.Action1 => "archived",
                             _ => "kept",
                         }));
                 });
-                tx.Button("eject", onClick: inner =>
+                tx.Button("eject", onClick: async _ =>
                 {
-                    inner.ShowAlert(
+                    var choice = await app.ShowAlertAsync(
                         title: "eject disk?",
                         message: "it is still mounted",
-                        action0: "Eject", cancel: "Hold",
-                        onResult: (tx, choice) => tx.Write(
-                            status,
-                            choice == AlertChoice.Cancel ? "held" : "ejected"));
+                        action0: "Eject", cancel: "Hold");
+                    app.Build(tx => tx.Write(status,
+                        choice == AlertChoice.Cancel ? "held" : "ejected"));
                 });
                 return root;
             }));

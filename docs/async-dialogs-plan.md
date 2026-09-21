@@ -1,10 +1,10 @@
-# Async dialogs beyond JS — the design, for ruling
+# Async dialogs beyond JS — approved design and implementation record
 
 The ruling this document serves is R1 in docs/deferred.md's idiom entry:
 
 > ASYNC DIALOGS beyond JS for Swift, C#, Java and Rust under one rule — no
 > handler given, a dialog answers a future; the continuation runs on the app
-> thread as its own transaction — with Python, Haskell and OCaml stated as the
+> thread, with explicit transactions after suspension — with Python, Haskell and OCaml stated as the
 > carve-out (no native async runtime on the app thread), the way
 > docs/js-plan.md §4 names the languages that cannot spell the implicit
 > transaction. Python's `await` form is the survey's one SEMANTICS finding and
@@ -12,11 +12,21 @@ The ruling this document serves is R1 in docs/deferred.md's idiom entry:
 
 JS has the feature already (docs/js-plan.md §4, rule 2). This document says what
 the same rule means in the other four, states each mechanism from zero before it
-uses it, and ends with the rulings owed and the order of work. Nothing here is
-built; §5 is the list of questions for the maintainer.
+uses it, and ends with the rulings and the order of work. Akhil approved all seven
+recommendations in §5 on 2026-09-19 ("go ahead"). The C# dialog APIs passed the
+full five-lane matrix on 2026-09-20; Swift, Java and Rust remain. The Swift executor prerequisite
+has shipped (§2.1). Implementation follows §6.
 
 Every claim about a platform below was MEASURED with a small probe, not recalled;
 the probes are reproduced in §2 so a later session can re-run them.
+
+**Amendment approved 2026-09-19; work resumed 2026-09-20:** the transaction is
+the unit of atomicity, not the whole continuation. Akhil adopted the amendment
+with three additions: Java completes futures outside transactions; this plan is
+rewritten rather than annotated; all four new tiers share the honest failure
+sentence in §1.4. The original probes measured scheduling, not rollback; the
+real-binding evidence and nine-language assessment are in
+docs/measurements/async-dialogs-csharp-2026-09-19.md. The other six approvals stand.
 
 ## §1 THE ONE RULE
 
@@ -56,18 +66,19 @@ transaction boundary.** Precisely, and identically in Swift, C#, Java and Rust:
    app-thread work queue for exactly this — `post(body)` appends under a lock and
    rings `kaya_wake()`, and the loop drains it at the top of every turn — so the
    suspension machinery is routed into that queue and nothing new is invented.
-3. **The continuation is its own transaction, atomic.** Also already true of the
-   post queue: "Run everything posted, each as its own transaction, in order"
-   (bindings/swift/KayaApp.swift, `drainPosted`). Writes after the await land in
-   one batch, the way writes inside a handler do.
+3. **The transaction is atomic; the continuation is not a transaction.** Async
+   jobs resume with no transaction open. Writes use explicit Build/build/apply
+   scopes: each commits on return or rolls back if its synchronous body throws.
+   The raw job queue must not route through the transactional public post API.
 4. **THE AWAIT IS A TRANSACTION BOUNDARY.** The handler's transaction commits at
    the suspension point. It has to: the dialog's answer arrives through the app
    loop, so the loop must be free to turn, and a transaction that stayed open
    across the suspension would hold the batch for however long the user stares at
    the dialog. This is the same sentence docs/js-plan.md §4 rule 1 states for JS,
    arrived at from the other direction.
-5. **A handler's transaction semantics do not change.** A handler that throws
-   still rolls its transaction back. Only the boundary moved.
+5. **Synchronous callback semantics do not change.** A throw crossing its
+   transaction boundary rolls that transaction back. An async failure reaches
+   the async reporter, which cannot undo a transaction that already returned.
 
 ### 1.3 What is spelling, per language
 
@@ -88,12 +99,27 @@ dialog answers (§5 R1.3), whether a second dialog while one is live is refused
 
 ### 1.4 The residue, stated
 
-docs/js-plan.md §4 rule 1 states JS's residue and this is its twin: **writes
-committed before the suspension stand.** The handler's transaction committed at
-the await; nothing can take it back. If the continuation throws, the
-continuation's OWN transaction rolls back and the binding prints the same
-"handler threw (transaction rolled back)" sentence it prints today, and the dialog's
-id is already retired either way.
+**The transaction is the unit of atomicity in all nine bindings.** Writes
+committed before suspension stand. In Swift, C#, Java and Rust, a continuation
+resumes with no transaction open. A throw inside explicit Build/build/apply
+rolls back that scope; scopes that returned remain committed. A throw outside
+a scope rolls back nothing. The dialog id retires independently of the outcome.
+
+The four new tiers report the exception separately, followed by this one sentence:
+
+```text
+kaya: async handler failed; no transaction was rolled back by this reporter; completed transactions remain committed
+```
+
+It does not assert that suspension occurred or that a scope rolled back. A scope
+that threw already performed its own rollback before the reporter saw the error.
+Synchronous callbacks keep their existing rollback sentence.
+
+JS keeps its ruled implicit continuation transaction and its existing failure
+sentence. Its language limit is stated in docs/js-plan.md §4: "nothing sees a
+continuation throw, so the writes before the throw stand". An explicit JS build
+or post still provides rollback for its synchronous body. The earlier version
+of this plan incorrectly described JS as rolling back a failed continuation.
 
 If the guest never awaits the future — drops it, or returns without resuming — the
 result still arrives, the internal handler still resolves the future, the id still
@@ -213,16 +239,15 @@ func askDelete() async {
     let choice = await app.showAlert(
         title: "delete item?", message: "this cannot be undone",
         actions: ["Delete", "Archive"], cancel: "Keep")
-    app.write(status, .str(choice == .cancel ? "kept" : "deleted"))
+    app.build { tx in tx.write(status, choice == .cancel ? "kept" : "deleted") }
 }
 …
 tx.button("delete", onClick: { _ in Task { await askDelete() } })
 ```
 
 `app.showAlert(…) async` opens its own transaction to send the request, suspends,
-and resolves with the choice. The write after the await is its own transaction by
-rule 3. (Whether the writes after the await are spelled `app.write` or through an
-explicit `app.build { tx in … }` is §5 R1.5.)
+and resolves with the choice. The existing executor runs the resumed job without
+an ambient transaction; the explicit build above is the write's atomic scope.
 
 **Where `.await` may appear:** inside a function isolated to `@KayaAppActor`, and
 nowhere inside a `build` closure or a For template body — a declaration trace runs
@@ -278,9 +303,11 @@ installed once, on the app thread, at the top of `DispatchLoop` (which already c
   [handler] resumed on the app thread? True
 ```
 
-In the shipped binding the queue IS the existing posted-work queue: `Post` becomes
-`App.Post(tx => …)`, so the continuation arrives as its own transaction for free —
-the ambient transaction rule 3 asks for is the post queue's own behaviour.
+The context queues raw jobs beside the existing transactional posted-work queue
+and wakes the same app loop. It never implements Post through App.Post: the
+real-binding probe measured that wrapper committing before the async-void
+exception arrived. The drain refuses an open transaction and reports failures
+with §1.4's sentence. It runs outside Build and Dispatch.
 
 **The spelling** (guests/csharp/ConfirmScene.cs today passes `onResult:`):
 
@@ -290,11 +317,11 @@ tx.Button("delete", onClick: async _ =>
     var choice = await app.ShowAlertAsync(
         title: "delete item?", message: "this cannot be undone",
         action0: "Delete", action1: "Archive", cancel: "Keep");
-    app.Write(status, choice switch {
+    app.Build(tx => tx.Write(status, choice switch {
         AlertChoice.Action0 => "deleted",
         AlertChoice.Action1 => "archived",
         _ => "kept",
-    });
+    }));
 });
 ```
 
@@ -302,8 +329,9 @@ tx.Button("delete", onClick: async _ =>
 NOT inside a `Build` body. C# has one sharp edge worth naming at ruling time: an
 `async void` lambda (which is what `onClick: async _ => …` is) swallows its
 exception into the captured context rather than to the caller. The binding's own
-`Dispatch` already catches and prints; the context's `Post` must do the same, so
-a throw after the await is reported with the same sentence and not lost.
+`Dispatch` catches synchronous callback failures. The raw context drain catches
+the separately posted async-void exception and uses §1.4's async sentence, without
+opening a transaction merely to report it.
 
 **The guard.** `check-tx-liveness` again — the C# chokepoint is the `Records`
 property, and the gate already pins the raw field to exactly two uses. A write
@@ -338,8 +366,11 @@ showAlert().thenAcceptAsync(choice -> { … }, appThreadExecutor);
   [handler] ran on the app thread? true
 ```
 
-In the shipped binding the executor is `app::post`-shaped, so again the continuation
-arrives as its own transaction.
+The production completion is queued as a raw app-thread job, not through the
+transactional app.post. Completing a CompletableFuture inside Dispatch can run
+thenAccept immediately inside the result handler's transaction. The completion
+job must instead run with no transaction open, with a runtime refusal and a watched
+negative if that boundary is lost.
 
 **The spelling** (guests/java/dev/kaya/guests/Confirm.java today chains
 `.onResult(…)` before `.show()`):
@@ -350,18 +381,19 @@ tx.button("delete", inner -> inner.showAlert()
         .message("this cannot be undone")
         .action("Delete").action("Archive").cancel("Keep")
         .showFuture()                       // no .onResult: answers a future
-        .thenAccept(choice -> app.write(status, switch (choice) {
+        .thenAccept(choice -> app.build(tx -> tx.write(status, switch (choice) {
             case ACTION0 -> "deleted";
             case ACTION1 -> "archived";
             case CANCEL  -> "kept";
-        })));
+        }))));
 ```
 
 Note `thenAccept`, not `thenAcceptAsync(…, executor)`: the binding completes the
-future ON the app thread (the answer occurrence is dispatched there), so the plain
-chain already runs there, and the guest never names an executor. That is the
-idiomatic reading and it keeps the guest free of kaya's threading. Whether the
-binding should ALSO expose the executor is §5 R1.6.
+future ON the app thread, in a raw job after the answer occurrence's dispatch,
+so a chain attached before completion runs there without an ambient transaction.
+No executor is exposed (R1.6). A chain attached from another thread after completion
+can run on that attaching thread; its writes are refused by the existing thread
+check, just as a continuation using a foreign executor is.
 
 **Where the continuation may appear:** anywhere — Java's future chain has no
 syntactic scope. What must be refused is the same thing as everywhere else: a
@@ -471,7 +503,7 @@ reason the row-handle rule states its own carve-out:
 > **Python, Haskell and OCaml keep the callback form.** A dialog in those three is
 > answered by the handler that rode the request, exactly as it is today, and no
 > awaitable spelling is added. The reason is not taste: the rule requires the
-> continuation to run ON KAYA'S APP THREAD as its own transaction, and none of the
+> continuation to run ON KAYA'S APP THREAD, and none of the
 > three has a native way to resume a suspended computation there. Python's
 > `await` resumes on whatever event loop is running the coroutine, and kaya's app
 > thread runs no event loop — it runs the occurrence loop; making one run both
@@ -522,9 +554,10 @@ Two consequences worth stating before the work starts:
   already covers the legal case and a negative in each checks file covers the
   illegal one.
 
-## §5 RULINGS OWED
+## §5 RULINGS APPROVED 2026-09-19
 
-Each is a plain question with a recommended answer and the reason.
+Each recommendation below was approved. Measured implementation conflicts must
+be brought back for a ruling, not silently resolved by changing the contract.
 
 **R1.1 — Is one name enough, or does the async form get its own?**
 JS uses one name: `showAlert` answers a promise when no `onResult` is given. Swift
@@ -562,12 +595,15 @@ these, and turning it into a thrown `TaskCanceledException` in C# alone would be
 invariant-1 divergence.
 
 **R1.4 — What does a throw between the show and the continuation do?**
-RECOMMENDED: **the JS residue, uniformly** (§1.4): writes committed before the
-suspension stand; a throw in the continuation rolls back the continuation's own
-transaction and is printed with the binding's existing "handler threw (transaction
-rolled back)" sentence. The one thing to add is that C#'s `async void` path must
-route its exception through the same reporter, because .NET's default is to raise
-it on the captured context where it can be lost.
+RULED, amended 2026-09-19: **explicit transaction scopes are the atomic boundary**
+(§1.4). A throw inside a scope rolls that scope back; scopes that returned stand.
+Async jobs in the four new tiers run with no transaction open. An exception outside
+a scope rolls back nothing and reaches the shared async reporter, including C#'s
+separately posted async-void exceptions. JS keeps its existing implicit transaction
+and documented residue, not the rollback promise this plan originally attributed
+to it. Java completes its future outside Dispatch's transaction, held by a watched
+negative. The four new reporters use §1.4's one sentence, without inferring whether
+the handler suspended or which scope rolled itself back.
 
 **R1.5 — After the await, how does the guest write?**
 Today every write needs a `Tx`, handed to a handler. After the await there is no
@@ -596,7 +632,7 @@ RECOMMENDED: **no — dialogs only, this slice**, with the reason on the record:
 future cannot span a process restart, and half a surface that sometimes can and
 sometimes cannot answer is worse than a uniform callback.
 
-## §6 THE ORDER OF WORK, IF RULED
+## §6 THE ORDER OF WORK
 
 **Depth on C# first.** Its mechanism is the smallest of the four and needs no new
 type: `SynchronizationContext` and `Task<T>` are standard library, `await` is the
@@ -636,8 +672,8 @@ count printed — CLAUDE.md invariant 3):
 
 | tier | file | the negatives |
 |---|---|---|
-| C# | guests/csharp/AbortCheck.cs | a write through a `Tx` captured across the await is refused; a second dialog while one is live throws at the show; a throw after the await is printed and rolls back only the continuation |
-| Java | tools/checks/java-abort/AbortCheck.java | the same three, plus a continuation chained with a foreign executor being refused by the thread check |
+| C# | guests/csharp/AbortCheck.cs | a write through a `Tx` captured across the await is refused; a second dialog while one is live throws at the show; a throw after the await rolls back only the scope it threw inside, scopes that returned stand; the four feasibility cases enter check-abort with watched mutations |
+| Java | tools/checks/java-abort/AbortCheck.java | the same scope and lifetime cases, plus a foreign-executor write refused by the thread check and completion inside an open transaction refused by the raw-job boundary |
 | Swift | tools/checks/swift-abort/main.swift | the same three, plus the continuation's thread id equalling the app thread's |
 | Rust | crates/kaya/src/app.rs `compile_fail` doctests + unit tests | a `Tx` held across `.await` fails to COMPILE; an `.await` inside `apply` fails to compile; the loop resolves a future and runs its continuation on the app thread |
 | JS | bindings/js/kaya_app_checks.ts | already has the promise-resolution negative; add the second-dialog refusal so all five say one thing |
