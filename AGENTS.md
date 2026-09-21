@@ -1385,7 +1385,10 @@ in docs/deferred.md.
    the three compiled artifacts — libkaya, the SwiftUI interpreter, the
    Compose interpreter — carries the id of the sources it came from,
    the verifier rejects one carrying any other, and every lane verifies
-   what it runs or ships before it runs or ships it),
+   what it runs or ships before it runs or ships it. The GTK hand capture
+   also executes 16 controlled failure/success cases and 10 counted
+   mutations: checked stages, fresh output, no publication on failure,
+   and guest cleanup),
    `tools/check-pins.py` (every dependency resolved over the network
    names an exact version — gradle, nuget, SwiftPM, and the container's
    opam index, none of which has a lockfile the way cargo and nix do;

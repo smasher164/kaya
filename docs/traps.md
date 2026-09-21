@@ -4,6 +4,34 @@ Each of these cost a debugging session (or would have). Most now have a
 structural guard; the guard is named where it exists. Do not re-derive
 these the hard way.
 
+## GTK hand capture hid a failed build and reused an old image (2026-09-21)
+
+The old tools/linux/shot-gtk.py payload piped cargo into tail, then placed
+conversion after a semicolon. Extracting that exact payload and running it
+with controlled commands showed both a build returning 42 and a capture
+returning 43 ending at status zero and copying a planted previous image.
+Seven scratch-path substitutions were counted. These are executed shell
+failure cases, not failures of native cargo or Xvfb.
+
+The helper now checks build, core verification, screenshot and crop separately
+in Python, captures into a fresh directory mounted into the container, and
+publishes only after a successful container exit and PNG check. It reaps its
+guest and retains build, capture and guest output beside the requested image
+as `<output>.log`. A failed build or capture does not publish over the previous
+requested image; that old image is not a successful result. Publication is not
+atomic if the output-disk write itself fails. The real confirm capture was viewed.
+
+The Linux Rust example does not contain a build-id marker: verifying confirm
+itself refused with NO build id. Like the Linux lane, this tool builds the
+example and libkaya together and verifies libkaya.so before running the example.
+The checked cargo exit covers the example build; the library marker covers
+the core sources. Do not claim the verifier read a marker from the executable.
+
+Guard: tools/check-build-id.py executes tools/checks/gtk-capture.py on the normal
+61-gate path: 16 execution cases and 10 counted mutations, including commands
+returning failure, absent/bad PNGs, guest exit before/during capture, termination
+and kill, and host refusal before publication.
+
 ## Android sent a drag end that Kaya did not record (2026-09-21)
 
 The Rust async-dialog matrix's sixth dnd-compose drag accepted the custom move

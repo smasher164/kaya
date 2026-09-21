@@ -175,16 +175,22 @@ the production drag leg passed, then 644 core tests, 25 doctests (one ignored),
 61 gates, every unchanged timing ceiling held. The R1 KEY sweep updated the
 plan, earlier tier measurements and the idiom entry below.
 
-## BUG — GTK hand capture can hide a failed build (2026-09-20)
+## ~~BUG — GTK hand capture can hide a failed build (2026-09-20)~~ COMPLETE 2026-09-21: checked stages, per-run images and retained diagnostics refuse stale publication; 16 execution cases and 10 counted mutations, 644 core tests, 25 doctests (one ignored), 61 gates, 477 standalone Mac legs and the five-lane matrix passed in 1104 seconds
 KEY: shot-gtk build pipeline, stale screenshot, shot-gtk.py, tail -1
 
-Code review found tools/linux/shot-gtk.py piping cargo through tail without
-pipefail, then running conversion after a semicolon with fixed output paths.
-A failed build can therefore lead to a stale executable or screenshot being
-reported as a fresh capture. This is a source finding, not a reproduced runtime
-failure. The Rust async review used the checked Linux lane instead. Next slice:
-measure a deliberately failed build, separate build and capture with checked
-exits, use per-run outputs, and put the negative on the normal gate path.
+The extracted shell payload reproduced both false-success paths with controlled
+commands: failed build (42) and failed capture (43) each returned zero and copied
+a planted previous image. Seven scratch-path substitutions were counted.
+The helper now uses checked Python subprocess stages, verifies the core built
+beside the example, captures into a per-run directory, retains an output-side
+transcript and refuses publication on failure. A real confirm PNG was viewed.
+tools/check-build-id.py now executes 16 cases and 10 counted mutations through
+tools/checks/gtk-capture.py. Real cargo also refused an absent example with exit
+101 before launching a guest, leaving the planted output unchanged. Full
+validation passed: 644 core tests, 25 doctests (one ignored), all 61 gates,
+477 standalone Mac legs, then Mac 477, Linux 777, Windows 283, iOS 139 and
+Android 148 in the 1104-second matrix. Every unchanged timing ceiling held.
+Measurement: docs/measurements/gtk-capture-2026-09-21.md.
 
 ## INVESTIGATE — iOS recording's step-named frames lead their stated scene state (2026-09-20)
 KEY: iOS recording, fiducial timestamp, step-named frames, confirm-swift, anchor-2

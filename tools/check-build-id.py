@@ -89,7 +89,8 @@ with scratch_dir("check-build-id-") as tmp:
 
     for lane_rel in ["tools/validate-mac.py", "tools/linux/run-suites.sh",
                      "tools/ios/run-sim.py", "tools/android/run-emulator.py",
-                     "tools/deploy-win.py", "tools/swiftui/build-dylib.sh"]:
+                     "tools/deploy-win.py", "tools/swiftui/build-dylib.sh",
+                     "tools/linux/shot-gtk.py"]:
         if not lane_verifies((ROOT / lane_rel).read_text(encoding="utf-8")):
             fail(f"{lane_rel} builds the core but never verifies what it "
                  f"runs (build-id.py --verify)")
@@ -195,6 +196,9 @@ with scratch_dir("check-build-id-") as tmp:
         elif verify("--component", "swiftui", str(stale))[0] == 0:
             fail("self-test failed: an interpreter carrying a DIFFERENT id "
                  "verified clean")
+
+if subprocess.run(["python3", "tools/checks/gtk-capture.py"], cwd=ROOT, check=False).returncode:
+    fail("GTK capture execution checks failed")
 
 if status == 0:
     print("check-build-id: OK")

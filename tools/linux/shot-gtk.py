@@ -7,89 +7,142 @@ from kaya_gate import ROOT, dev_shell_or_die
 
 dev_shell_or_die()
 
-# PHOTOGRAPH ONE SCENE'S WINDOW ON GTK, the lane's own way (docs/gtk-chrome.md,
-# docs/HACKING.md's Hand tools table): the scene's rust example runs in the
-# lane's container under Xvfb with its steps held by a settle, an optional
-# GTK settings file is injected through XDG_CONFIG_HOME (`--layout` names a
-# gtk-decoration-layout, e.g. appmenu:close for GNOME's look), the root
-# window is shot and the kaya window cropped out. Without --layout the
-# capture shows kaya's own fallback for a session with no settings.
-#
-#   tools/linux/shot-gtk.py <scene> <out.png> [--layout L] [--hold-after N]
-#                           [--crop WxH] [--settle-seconds S]
+# docs/traps.md: GTK hand capture hid a failed build and reused an old image.
 
 import argparse
+import math
+import os
+import re
+import shlex
 import subprocess
 import tempfile
+import time
 
-ap = argparse.ArgumentParser()
-ap.add_argument("scene")
-ap.add_argument("out")
-ap.add_argument("--layout", default=None)
-ap.add_argument("--hold-after", type=int, default=0,
-                help="the step line after which the scene is held (0: at the start)")
-ap.add_argument("--crop", default=None,
-                help="WxH from the top-left; default trims the root window to the kaya window")
-ap.add_argument("--settle-seconds", type=float, default=6.0)
-args = ap.parse_args()
 
-steps_path = ROOT / "tools/scenes" / f"{args.scene}.steps"
-if not steps_path.exists():
-    print(f"shot-gtk: no such scene {steps_path}", file=sys.stderr)
-    sys.exit(2)
-lines = [line for line in steps_path.read_text(encoding="utf-8").splitlines()
-         if line.strip() and not line.startswith("#")]
-if args.hold_after < 0 or args.hold_after > len(lines):
-    print(f"shot-gtk: --hold-after {args.hold_after} is past the scene's "
-          f"{len(lines)} steps", file=sys.stderr)
-    sys.exit(2)
-held = lines[:args.hold_after] + ["settle 20000"]
-if args.hold_after == 0 and not any(line.startswith("expect") for line in held):
-    # The harness refuses a script with no expects; the first expect of
-    # the scene is enough to hold it at its start.
-    first = next((line for line in lines if line.startswith("expect")), None)
-    if first:
-        held = [first, "settle 20000"]
-script = "\n".join(held) + "\n"
+def checked(stage, command, **kwargs):
+    print(f"shot-gtk: {stage}: {shlex.join(command)}", flush=True)
+    result = subprocess.run(command, cwd=ROOT, check=False, **kwargs)
+    if result.returncode != 0:
+        raise RuntimeError(f"{stage} exited {result.returncode}: {shlex.join(command)}")
 
-example = f"/work/target-linux/debug/examples/{args.scene}"
-out = pathlib.Path(args.out).resolve()
-out.parent.mkdir(parents=True, exist_ok=True)
-with tempfile.TemporaryDirectory(prefix="kaya-shot-gtk-") as scratch:
-    scratch = pathlib.Path(scratch)
-    mounts = ["-v", f"{ROOT}:/work"]
-    env = ["-e", f"KAYA_SELFTEST_SCRIPT={script}"]
-    if args.layout:
-        cfg = scratch / "config/gtk-4.0"
-        cfg.mkdir(parents=True)
-        (cfg / "settings.ini").write_text(
-            f"[Settings]\ngtk-decoration-layout={args.layout}\n", encoding="utf-8")
-        mounts += ["-v", f"{scratch / 'config'}:/kaya-config"]
-        env += ["-e", "XDG_CONFIG_HOME=/kaya-config"]
-    # THE EXAMPLE IS BUILT FIRST, on the lane's own target dir: a hand tool
-    # runs what it built, never last lane's binary (docs/traps.md
-    # 2026-09-14, the go leg that ran last build's label).
-    cut = (f"-crop {args.crop}+0+0 +repage" if args.crop else "-trim +repage")
-    inner = (
-        f"cd /work && export CARGO_TARGET_DIR=/work/target-linux && "
-        f"cargo build -p kaya --features harness --locked --example {args.scene} "
-        f"2>&1 | tail -1 && "
-        f"xvfb-run -a bash -c \"KAYA_SELFTEST={args.scene} {example} "
-        f"> /work/target-linux/shot-gtk.log 2>&1 & sleep {args.settle_seconds}; "
-        f"import -window root /work/target-linux/shot-gtk.png; kill %1\" 2>/dev/null; "
-        f"convert /work/target-linux/shot-gtk.png {cut} /work/target-linux/shot-gtk-crop.png"
-    )
-    rc = subprocess.run(
-        ["timeout", "300", "docker", "run", "--rm", *mounts, *env, "kaya-linux",
-         "bash", "-c", inner], cwd=ROOT, check=False).returncode
-    if rc != 0:
-        print(f"shot-gtk: the container run failed (rc {rc})", file=sys.stderr)
-        sys.exit(1)
-crop = ROOT / "target-linux/shot-gtk-crop.png"
-if not crop.exists() or crop.stat().st_size < 1000:
-    print("shot-gtk: no photograph came back — read target-linux/shot-gtk.log",
-          file=sys.stderr)
-    sys.exit(1)
-out.write_bytes(crop.read_bytes())
-print(f"shot-gtk: {args.scene} -> {out} ({out.stat().st_size} bytes; "
-      f"layout {args.layout or 'the fallback'}); VIEW IT before it is published")
+
+def image_bytes(path):
+    blob = path.read_bytes()
+    if len(blob) < 1000 or not blob.startswith(b"\x89PNG\r\n\x1a\n"):
+        raise RuntimeError(f"{path}: expected a PNG of at least 1000 bytes; got {len(blob)} bytes")
+    return blob
+
+
+def capture(scene, out, crop, settle):
+    target = ROOT / "target-linux"
+    checked("build", ["cargo", "build", "-p", "kaya", "--features", "harness",
+                      "--locked", "--lib", "--example", scene],
+            env=dict(os.environ, CARGO_TARGET_DIR=str(target)))
+    checked("build verification", ["python3", "tools/build-id.py", "--verify",
+                                   str(target / "debug/libkaya.so")])
+    raw = out.with_name("root.png")
+    with open(out.with_name("guest.log"), "wb") as log:
+        guest = subprocess.Popen([str(target / "debug/examples" / scene)], cwd=ROOT,
+                                 env=dict(os.environ, KAYA_SELFTEST=scene),
+                                 stdout=log, stderr=subprocess.STDOUT)
+        try:
+            time.sleep(settle)
+            rc = guest.poll()
+            if rc is not None:
+                raise RuntimeError(f"{scene} exited {rc} before the screenshot")
+            checked("screenshot", ["import", "-window", "root", str(raw)])
+            rc = guest.poll()
+            if rc is not None:
+                raise RuntimeError(f"{scene} exited {rc} during the screenshot")
+            image_bytes(raw)
+            cut = ["-crop", f"{crop}+0+0"] if crop else ["-trim"]
+            checked("crop", ["convert", str(raw), *cut, "+repage", str(out)])
+            image_bytes(out)
+        finally:
+            if guest.poll() is None:
+                guest.terminate()
+                try:
+                    guest.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    guest.kill()
+                    guest.wait(timeout=5)
+            else:
+                guest.wait()
+
+
+def photograph(args, out, script):
+    transcript = out.with_name(out.name + ".log")
+    print(f"shot-gtk: transcript {transcript}", flush=True)
+    with tempfile.TemporaryDirectory(prefix="kaya-shot-gtk-") as directory:
+        scratch = pathlib.Path(directory)
+        env = ["-e", "KAYA_DEV_SHELL", "-e", f"KAYA_SELFTEST_SCRIPT={script}"]
+        if args.layout:
+            cfg = scratch / "config/gtk-4.0"
+            cfg.mkdir(parents=True)
+            (cfg / "settings.ini").write_text(
+                f"[Settings]\ngtk-decoration-layout={args.layout}\n", encoding="utf-8")
+            env += ["-e", "XDG_CONFIG_HOME=/capture/config"]
+        options = ["--crop", args.crop] if args.crop else []
+        with open(transcript, "wb") as log:
+            try:
+                result = subprocess.run(
+                    ["timeout", "300", "docker", "run", "--rm", "--init",
+                     "-v", f"{ROOT}:/work", "-v", f"{scratch}:/capture", *env,
+                     "-w", "/work", "kaya-linux", "xvfb-run", "-a", "python3",
+                     "/work/tools/linux/shot-gtk.py", args.scene, "/capture/crop.png",
+                     "--in-container", "--settle-seconds", str(args.settle_seconds),
+                     *options], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, check=False)
+            finally:
+                guest_log = scratch / "guest.log"
+                if guest_log.exists():
+                    log.write(b"\nshot-gtk: guest output follows\n")
+                    log.write(guest_log.read_bytes())
+        if result.returncode != 0:
+            raise RuntimeError(f"container exited {result.returncode}; read {transcript}")
+        out.write_bytes(image_bytes(scratch / "crop.png"))
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser()
+    ap.add_argument("scene")
+    ap.add_argument("out")
+    ap.add_argument("--layout")
+    ap.add_argument("--hold-after", type=int, default=0,
+                    help="the step line after which the scene is held (0: at the start)")
+    ap.add_argument("--crop", help="WxH from the top-left; default trims to the kaya window")
+    ap.add_argument("--settle-seconds", type=float, default=6.0)
+    ap.add_argument("--in-container", action="store_true", help=argparse.SUPPRESS)
+    args = ap.parse_args(argv)
+    if args.crop and not re.fullmatch(r"[1-9][0-9]*x[1-9][0-9]*", args.crop):
+        ap.error("--crop must be positive WxH")
+    if not math.isfinite(args.settle_seconds) or args.settle_seconds < 0:
+        ap.error("--settle-seconds must be finite and nonnegative")
+    steps_path = ROOT / "tools/scenes" / f"{args.scene}.steps"
+    if not steps_path.is_file():
+        ap.error(f"no such scene {steps_path}")
+    lines = [line for line in steps_path.read_text(encoding="utf-8").splitlines()
+             if line.strip() and not line.startswith("#")]
+    if args.hold_after < 0 or args.hold_after > len(lines):
+        ap.error(f"--hold-after {args.hold_after} is past the scene's {len(lines)} steps")
+    held = lines[:args.hold_after] + ["settle 20000"]
+    if args.hold_after == 0:
+        first = next((line for line in lines if line.startswith("expect")), None)
+        if first:
+            held = [first, "settle 20000"]
+    out = pathlib.Path(args.out).resolve()
+    try:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        if args.in_container:
+            capture(args.scene, out, args.crop, args.settle_seconds)
+        else:
+            photograph(args, out, "\n".join(held) + "\n")
+    except (OSError, RuntimeError) as error:
+        print(f"shot-gtk: {error}", file=sys.stderr)
+        return 1
+    print(f"shot-gtk: {args.scene} -> {out} ({out.stat().st_size} bytes; "
+          f"layout {args.layout or 'the fallback'}); VIEW IT before it is published")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
