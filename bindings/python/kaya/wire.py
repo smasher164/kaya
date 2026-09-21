@@ -14,7 +14,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, cast
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x3854759c1c5d028c
+SPEC_HASH = 0xde79316215dcaa9e
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -121,6 +121,11 @@ WPROP_APPEARANCE = 9
 WPROP_REMEMBER_FRAME = 10
 EPROP_TITLE = 1
 EPROP_INTERCEPT_BACK = 2
+SHPROP_TITLE = 1
+SHPROP_INTERCEPT_DISMISS = 2
+SHPROP_DETENT = 3
+DETENT_MEDIUM = 1
+DETENT_LARGE = 2
 SPROP_TITLE = 1
 SPROP_ICON = 2
 SPROP_SYMBOL = 3
@@ -282,6 +287,9 @@ TX_DECLARE_LINK_ROUTE = 54
 TX_SET_RICH_TEXT = 55
 TX_APPLY_EDIT = 56
 TX_FORMAT_TEXT = 57
+TX_PRESENT_SHEET = 58
+TX_DISMISS_SHEET = 59
+TX_SET_SHEET_PROP = 60
 APPLY_CREATE = 1
 APPLY_SET_PROP = 2
 APPLY_ADD_CHILD = 3
@@ -325,6 +333,9 @@ APPLY_SET_REORDERABLE = 40
 APPLY_SET_RICH_TEXT = 43
 APPLY_APPLY_EDIT = 44
 APPLY_FORMAT_TEXT = 45
+APPLY_PRESENT_SHEET = 46
+APPLY_DISMISS_SHEET = 47
+APPLY_SET_SHEET_PROP = 48
 OCC_BUTTON_CLICKED = 1
 OCC_TEXT_CHANGED = 2
 OCC_TOGGLED = 3
@@ -355,6 +366,8 @@ OCC_NOTIFICATION_RESULT = 27
 OCC_LINK_OPENED = 28
 OCC_TEXT_EDITED = 29
 OCC_TEXT_FORMATTED = 30
+OCC_SHEET_DISMISSED = 31
+OCC_DISMISS_REQUESTED = 32
 
 
 def _pad(b: bytes) -> bytes:
@@ -655,6 +668,18 @@ def tx_apply_edit(widget_id: int, start: int, stop: int, count: int, runs: Seque
 def tx_format_text(widget_id: int, removed: int, ranged: int, start: int, stop: int, attr: Sequence[Value]) -> bytes:
     """Format a `rich` textarea's CURRENT SELECTION through the widget's own act — what an app's toolbar button sends (docs/rich-text-plan.md R1): `attr` is two Str values, name then value; `removed` 1 takes the attribute off. `ranged` 1 formats `start..stop` (UTF-8 bytes) INSTEAD of the selection, which stays where it is: a document write, echoed by nothing, legal on a rich label too (docs/rich-text-plan.md §17, the notes demo's remote mark). The widget answers with text_formatted over the range it formatted, which is how the mirror moves; a collapsed selection arms the typing attribute and answers nothing until the next edit. A `block` act covers the selection's whole paragraphs, and `block` with value `body` removes. Refused on a textarea that is not `rich` and for a name outside wire::RICH_ATTRS."""
     return record(TX_FORMAT_TEXT, struct.pack("<Q", widget_id) + struct.pack("<I", removed) + struct.pack("<I", ranged) + struct.pack("<Q", start) + struct.pack("<Q", stop) + _enc.values(attr))
+
+def tx_present_sheet(parent: int, sheet: int) -> bytes:
+    """Request a sheet over `parent` — a window (0 = the primary) or a live sheet, so modal-over-modal is a chain (docs/sheet-plan.md §1). `sheet` is a guest-allocated surface id in the one namespace windows and entries share. Materializes hidden; mounting a root into it presents it. A second live sheet over the same parent is refused at the root, as a second alert is; no capability gate, every host has one."""
+    return record(TX_PRESENT_SHEET, struct.pack("<Q", parent) + struct.pack("<Q", sheet))
+
+def tx_dismiss_sheet(sheet: int) -> bytes:
+    """Dismiss a live sheet and forget its tree, exactly as pop_entry does, its child sheets with it; also the dismiss-veto grammar's confirmation. An unknown or already-gone sheet is a scene error."""
+    return record(TX_DISMISS_SHEET, struct.pack("<Q", sheet))
+
+def tx_set_sheet_prop(sheet: int, prop: int, source: int) -> bytes:
+    """Bind a sheet property (SHEET_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — sheets are not collection elements."""
+    return record(TX_SET_SHEET_PROP, struct.pack("<Q", sheet) + struct.pack("<I", prop) + struct.pack("<I", source))
 
 
 def tx_set_text(widget_id: int, text: str) -> bytes:
@@ -1522,7 +1547,7 @@ def parse_occurrence(buf: bytes | bytearray) -> tuple[int, Any, list[Any], Any]:
     value for OCC_VALUE_CHANGED, None otherwise.
     """
     _size, kind, _flags = struct.unpack_from("<IHH", buf, 0)
-    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED):
+    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED):
         return kind, None, [], None
     if kind == OCC_ALERT_RESULT:
         # A request's one answer: id + the u32 code.
@@ -1556,7 +1581,7 @@ def parse_occurrence(buf: bytes | bytearray) -> tuple[int, Any, list[Any], Any]:
         (request,) = struct.unpack_from("<Q", buf, 8)
         clip, values, _at = parse_clip(buf, 16)
         return kind, request, [], (clip, values)
-    if kind in (OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED):
+    if kind in (OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED):
         # Surface lifecycle records carry the surface id alone —
         # no key path, no payload (derived from the record shapes).
         (surface_id,) = struct.unpack_from("<Q", buf, 8)

@@ -9,7 +9,7 @@ import UserNotifications
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0x3854759c1c5d028c
+let kayaSpecHash: UInt64 = 0xde79316215dcaa9e
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -57,6 +57,10 @@ private let applySetReorderable: UInt16 = 40
 private let applySetRichText: UInt16 = 43
 private let applyApplyEdit: UInt16 = 44
 private let applyFormatText: UInt16 = 45
+/// Sheets (docs/sheet-plan.md §3).
+private let applyPresentSheet: UInt16 = 46
+private let applyDismissSheet: UInt16 = 47
+private let applySetSheetProp: UInt16 = 48
 /// What a drop settles on (the wire's drag_op).
 let kayaDragOpNone: UInt32 = 0
 let kayaDragOpCopy: UInt32 = 1
@@ -99,6 +103,13 @@ private let sectionsPresentationSidebar: Int64 = 2
 /// Navigation-entry properties — their own typed table.
 private let epropTitle: UInt32 = 1
 private let epropInterceptBack: UInt32 = 2
+/// Sheet properties — their own typed table (spec::SHEET_PROPS); the
+/// detent values are the wire's `detent` enum.
+private let shpropTitle: UInt32 = 1
+private let shpropInterceptDismiss: UInt32 = 2
+private let shpropDetent: UInt32 = 3
+private let detentMedium: Int64 = 1
+private let detentLarge: Int64 = 2
 /// The menu item vocabulary (spec enum "menu_kind").
 private let menuKindMenu: UInt32 = 1
 private let menuKindAction: UInt32 = 2
@@ -906,6 +917,31 @@ final class KayaEntryModel: Identifiable {
     }
 }
 
+/// One sheet: a root-hosting modal over a surface (docs/sheet-plan.md
+/// §1), presented while its root is mounted, one child per parent.
+@Observable
+final class KayaSheetModel: Identifiable {
+    let id: UInt64
+    let parent: UInt64
+    /// One per present: a re-presented id is a NEW presentation to the
+    /// host below, never the old one's content re-shown (docs/traps.md,
+    /// the sheet re-presented into its own teardown).
+    let token: UInt64
+    var root: KayaNode?
+    var title = ""
+    /// The dismiss-veto class (back's transplanted): armed, the cancel
+    /// path emits dismiss_requested and nothing goes until the app answers.
+    var interceptDismiss = false
+    /// The wire's detent, 0 = the platform's default height.
+    var detent: Int64 = 0
+
+    init(id: UInt64, parent: UInt64, token: UInt64) {
+        self.id = id
+        self.parent = parent
+        self.token = token
+    }
+}
+
 @Observable
 final class KayaSceneModel {
     /// Live surfaces by id; the primary starts with the process name as its
@@ -919,6 +955,9 @@ final class KayaSceneModel {
     /// Live navigation entries by surface id. `navEntries`, not `entries` —
     /// that name is the ENTRY-widget registry below.
     var navEntries: [UInt64: KayaEntryModel] = [:]
+    /// Live sheets by surface id, and each parent surface's one child.
+    var sheets: [UInt64: KayaSheetModel] = [:]
+    var childSheet: [UInt64: UInt64] = [:]
     /// GROUPED SCREENS (docs/adaptive-layout-plan.md D7.5): the sets the
     /// surface roots consult; `groupedFlows` names each grouped screen's
     /// PRIMARY FLOW, whose children become the section stream. Rewritten
@@ -4361,6 +4400,18 @@ enum KayaHost {
         api.emit_back_requested(entry)
     }
 
+    /// The user's cancel path closed a sheet natively (post-fact; the
+    /// core forgets the chain inside this call).
+    static func emitSheetDismissed(_ sheet: UInt64) {
+        api.emit_sheet_dismissed(sheet)
+    }
+
+    /// The user drove cancel on an intercept_dismiss-armed sheet: nothing
+    /// went; the app answers with dismiss_sheet if it agrees.
+    static func emitDismissRequested(_ sheet: UInt64) {
+        api.emit_dismiss_requested(sheet)
+    }
+
     /// The user switched sections through the platform switcher — post-fact.
     /// Programmatic selection never comes here (echo doctrine).
     static func emitSectionSelected(_ window: UInt64, _ section: UInt64) {
@@ -4946,6 +4997,8 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     kayaWindowDelegates.removeValue(forKey: wid)
                 #endif
                 kayaScene.windows.removeValue(forKey: wid)
+                // The core takes the window's sheet chain with it.
+                if let child = kayaScene.childSheet[wid] { kayaForgetSheet(child) }
             case applyCopy:
                 // { u32 present; u32 file_count; u32 custom_count; u32
                 // reserved } then a Values block in the canonical order:
@@ -5622,6 +5675,12 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 // window, or a pushed navigation entry.
                 let wid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
                 let root = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self)
+                if let sheet = kayaScene.sheets[wid] {
+                    // Mounting presents: the parent's KayaSheetHost reads
+                    // the root and raises the sheet.
+                    sheet.root = kayaScene.nodes[root]
+                    break
+                }
                 if let entry = kayaScene.navEntries[wid] {
                     // An entry presents in-window: the push already put it on
                     // the stack; the mount fills it. Nothing new materializes.
@@ -5898,6 +5957,37 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     fatalError("kaya: bad menu prop \(prop) value type \(mvType)")
                 }
                 menusTouched = true
+            case applyPresentSheet:
+                let parent = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                let sid = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self)
+                kayaSheetTokens &+= 1
+                kayaScene.sheets[sid] = KayaSheetModel(id: sid, parent: parent, token: kayaSheetTokens)
+                kayaScene.childSheet[parent] = sid
+                #if os(macOS)
+                    kayaInstallSheetKeyMonitor()
+                #endif
+            case applyDismissSheet:
+                // Programmatic: the core already forgot the chain; the
+                // model drop ends the presentation, no emit (echo doctrine).
+                let sid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                kayaForgetSheet(sid)
+            case applySetSheetProp:
+                let sid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                let prop = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt32.self)
+                let svType = raw.loadUnaligned(fromByteOffset: body + 16, as: UInt32.self)
+                let sheet = kayaScene.sheets[sid]!
+                switch (prop, svType) {
+                case (shpropTitle, valueStr):
+                    let len = Int(raw.loadUnaligned(fromByteOffset: body + 20, as: UInt32.self))
+                    let bytes = raw[(body + 24)..<(body + 24 + len)]
+                    sheet.title = String(decoding: bytes, as: UTF8.self)
+                case (shpropInterceptDismiss, valueBool):
+                    sheet.interceptDismiss = raw[body + 24] != 0
+                case (shpropDetent, valueI64):
+                    sheet.detent = raw.loadUnaligned(fromByteOffset: body + 24, as: Int64.self)
+                default:
+                    fatalError("kaya: bad sheet prop \(prop) value type \(svType)")
+                }
             default:
                 fatalError("kaya: unknown apply record kind \(kind)")
             }
@@ -9127,13 +9217,102 @@ private func kayaRunScript(_ script: String) {
                     #endif
                 }
                 kayaAwaitAnswer(answered)
-            case "expect_alerts":
-                // The REAL screen truth on macOS: an attached sheet
-                // counts even if bookkeeping already cleared.
+            case "expect_sheets":
+                // The chain's depth off the PLATFORM: sheet windows still
+                // attached to a parent on macOS, presented controllers on
+                // iOS — never the model.
                 let want = Int(parts[1]) ?? -1
                 let got = DispatchQueue.main.sync { () -> Int in
                     #if os(macOS)
-                        let sheets = kayaNSWindows.values.filter { $0.attachedSheet != nil }
+                        return kayaLiveSheetWindows().count
+                    #else
+                        return kayaPresentedSheetControllers().count
+                    #endif
+                }
+                if got == want {
+                    observed.append("sheets \(want)")
+                } else {
+                    failures.append("sheets \(got), wanted \(want)")
+                }
+            case "expect_sheet":
+                // The topmost sheet's title as the platform holds it: the
+                // sheet NSWindow's title (its accessibility name) on macOS.
+                let want = kayaQuoted(Array(parts[1...]))
+                let got = DispatchQueue.main.sync { () -> String? in
+                    #if os(macOS)
+                        return kayaTopmostSheetWindow()?.1.title
+                    #else
+                        guard let top = kayaPresentedSheetControllers().last else { return nil }
+                        return top.title ?? kayaScene.sheets.values
+                            .first { kayaScene.childSheet[$0.id] == nil }?.title ?? ""
+                    #endif
+                }
+                if let got, kayaBytesEqual(got, want) {
+                    observed.append("sheet \"\(want)\"")
+                } else if let got {
+                    failures.append("sheet \"\(got)\", wanted \"\(want)\"")
+                } else {
+                    failures.append("no sheet live, wanted \"\(want)\"")
+                }
+            case "expect_sheet_detent":
+                // The height the platform reports: a desktop sheet has no
+                // detent and answers none; iOS reads the presentation
+                // controller's selected detent.
+                let want = parts.count > 1 ? String(parts[1]) : ""
+                let got = DispatchQueue.main.sync { () -> String in
+                    #if os(macOS)
+                        return "none"
+                    #else
+                        guard let top = kayaPresentedSheetControllers().last,
+                            let spc = top.sheetPresentationController
+                        else { return "none" }
+                        let id = spc.selectedDetentIdentifier ?? spc.detents.first?.identifier
+                        if id == .medium { return "medium" }
+                        if id == .large { return "large" }
+                        return "none"
+                    #endif
+                }
+                if got == want {
+                    observed.append("sheet detent \(want)")
+                } else {
+                    failures.append("sheet detent \(got), wanted \(want)")
+                }
+            case "dismiss_sheet":
+                // The platform's own cancel path on the topmost sheet: Esc
+                // as an NSEvent through NSApp.sendEvent (the type verb's
+                // route; U2 measured it reaching the topmost of a chain).
+                kayaAwaitQuiet()
+                let answered = kayaAnswers()
+                DispatchQueue.main.sync {
+                    #if os(macOS)
+                        guard let (_, window) = kayaTopmostSheetWindow() else { return }
+                        for kind in [NSEvent.EventType.keyDown, .keyUp] {
+                            guard
+                                let event = NSEvent.keyEvent(
+                                    with: kind, location: .zero, modifierFlags: [],
+                                    timestamp: ProcessInfo.processInfo.systemUptime,
+                                    windowNumber: window.windowNumber, context: nil,
+                                    characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}",
+                                    isARepeat: false, keyCode: 53)
+                            else { return }
+                            NSApp.sendEvent(event)
+                        }
+                    #else
+                        kayaDepthStub("sheet", on: "ios")
+                    #endif
+                }
+                kayaAwaitAnswer(answered)
+            case "expect_alerts":
+                // The REAL screen truth on macOS: an attached sheet
+                // counts even if bookkeeping already cleared — kaya's own
+                // sheets (KayaSheetAccessor's registry) are not alerts.
+                let want = Int(parts[1]) ?? -1
+                let got = DispatchQueue.main.sync { () -> Int in
+                    #if os(macOS)
+                        let kayaSheets = Set(kayaSheetWindows.values.map(\.windowNumber))
+                        let sheets = kayaNSWindows.values.filter {
+                            $0.attachedSheet.map { !kayaSheets.contains($0.windowNumber) } ?? false
+                        }
                         return max(kayaLiveAlert == nil ? 0 : 1, sheets.count)
                     #else
                         return kayaLiveAlert == nil ? 0 : 1
@@ -18942,6 +19121,272 @@ let kayaToolbarSymbolIdent = "kaya-toolbar-symbol:"
     }
 #endif
 
+// --- Sheets (docs/sheet-plan.md) --------------------------------------
+
+/// One presentation: the sheet id under its present's token, so the same
+/// id presented again is a different item.
+struct KayaSheetItem: Identifiable, Equatable {
+    let token: UInt64
+    let sheet: UInt64
+    var id: UInt64 { token }
+}
+
+private var kayaSheetTokens: UInt64 = 0
+
+/// The sheet a surface presents: one child per surface, raised while its
+/// root is mounted; the chain nests because the sheet's own content wears
+/// this modifier too, so a child presents over its parent sheet (U2).
+/// ONE PRESENTATION AT A TIME PER HOST: the next item waits for the last
+/// one's onDismiss, because a present issued into a dismissal still
+/// running left the old content alive for a minute, re-registering its
+/// dead window and presenting the chain's child twice (measured on the
+/// lane 2026-09-21, docs/traps.md).
+struct KayaSheetHost: ViewModifier {
+    let surface: UInt64
+    @State private var scene = kayaScene
+    @State private var shown: KayaSheetItem?
+    @State private var pending: KayaSheetItem?
+
+    private var wanted: KayaSheetItem? {
+        guard let sid = kayaPresentedSheet(surface), let sheet = scene.sheets[sid]
+        else { return nil }
+        return KayaSheetItem(token: sheet.token, sheet: sid)
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .sheet(
+                item: Binding(
+                    get: { shown },
+                    set: { item in
+                        // SwiftUI's own cancel path (Esc, the swipe) landed:
+                        // post-fact, the model follows and the app hears it.
+                        if item == nil, let was = shown,
+                            kayaScene.sheets[was.sheet]?.token == was.token
+                        {
+                            kayaSheetUserDismissed(was.sheet)
+                        }
+                        shown = item
+                    }),
+                onDismiss: {
+                    shown = nil
+                    if let next = pending {
+                        pending = nil
+                        shown = next
+                    }
+                }
+            ) { item in
+                KayaSheetRoot(sheetId: item.sheet)
+            }
+            .onChange(of: wanted, initial: true) { _, want in
+                if want == shown {
+                    pending = nil
+                } else if shown == nil {
+                    shown = want
+                } else {
+                    // A live presentation ends first; onDismiss raises the next.
+                    pending = want
+                    shown = nil
+                }
+            }
+    }
+}
+
+/// The surface's sheet once it has a root; nil while hidden or absent.
+func kayaPresentedSheet(_ surface: UInt64) -> UInt64? {
+    guard let sid = kayaScene.childSheet[surface], kayaScene.sheets[sid]?.root != nil
+    else { return nil }
+    return sid
+}
+
+/// Drop a sheet's model and its children's — the core's forget_sheet mirrored.
+func kayaForgetSheet(_ sid: UInt64) {
+    guard let sheet = kayaScene.sheets.removeValue(forKey: sid) else { return }
+    if kayaScene.childSheet[sheet.parent] == sid {
+        kayaScene.childSheet.removeValue(forKey: sheet.parent)
+    }
+    if let child = kayaScene.childSheet[sid] { kayaForgetSheet(child) }
+}
+
+/// The user's cancel path ended a sheet: forget it here and tell the core,
+/// which forgets the chain inside the emit. Idempotent, because the platform's
+/// dismissal and kaya's own cancel arm can both report one Esc.
+func kayaSheetUserDismissed(_ sid: UInt64) {
+    guard kayaScene.sheets[sid] != nil else { return }
+    kayaForgetSheet(sid)
+    kayaApplyGeneration &+= 1
+    KayaHost.emitSheetDismissed(sid)
+}
+
+/// The cancel path on an ARMED sheet: SwiftUI's own dismissal is off
+/// (interactiveDismissDisabled), so the key reaches this arm and the app
+/// is asked; nothing goes until it answers with dismiss_sheet.
+func kayaSheetCancelRequested(_ sid: UInt64) {
+    guard kayaScene.sheets[sid] != nil else { return }
+    KayaHost.emitDismissRequested(sid)
+}
+
+#if os(macOS)
+    /// The sheet NSWindows by surface id, registered by KayaSheetAccessor;
+    /// the harness reads the platform's truth off them (sheetParent), so a
+    /// window whose sheet ended stays listed and stops counting by itself.
+    var kayaSheetWindows: [UInt64: NSWindow] = [:]
+
+    /// The live sheet windows, parent-first: the one with no attached
+    /// sheet of its own is the topmost, where Esc lands (U2).
+    func kayaLiveSheetWindows() -> [(UInt64, NSWindow)] {
+        kayaSheetWindows.filter { $0.value.sheetParent != nil }
+            .sorted { $0.key < $1.key }
+            .map { ($0.key, $0.value) }
+    }
+
+    func kayaTopmostSheetWindow() -> (UInt64, NSWindow)? {
+        kayaLiveSheetWindows().first { $0.1.attachedSheet == nil }
+    }
+
+    /// The armed sheet's cancel path. `interactiveDismissDisabled` makes Esc
+    /// inert (U2) and `onExitCommand` reaches the content only while a
+    /// responder inside it has focus (measured, docs/traps.md), so the key
+    /// is read where every key passes: a local monitor, which sees the
+    /// harness's NSApp.sendEvent and the user's press alike. An unarmed
+    /// sheet's Esc passes through to the platform's own dismissal.
+    var kayaSheetKeyMonitor: Any?
+
+    func kayaInstallSheetKeyMonitor() {
+        guard kayaSheetKeyMonitor == nil else { return }
+        kayaSheetKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            guard event.keyCode == 53,
+                event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty,
+                let (sid, top) = kayaTopmostSheetWindow(),
+                kayaScene.sheets[sid]?.interceptDismiss == true,
+                let target = event.window
+            else { return event }
+            // The key lands on the topmost sheet or on a window under it in
+            // the chain (AppKit hands a parent's keys to its sheet).
+            var chain: NSWindow? = top
+            var onChain = false
+            while let window = chain, !onChain {
+                onChain = window === target
+                chain = window.sheetParent
+            }
+            guard onChain else { return event }
+            kayaSheetCancelRequested(sid)
+            return nil
+        }
+    }
+
+    /// Materializes the sheet's title onto its NSWindow — a sheet draws no
+    /// title bar, but the window's title IS its accessibility name and the
+    /// harness's `expect_sheet` reads it back from there, never the model.
+    private struct KayaSheetAccessor: NSViewRepresentable {
+        let sheetId: UInt64
+        let title: String
+
+        final class AttachView: NSView {
+            var onAttach: () -> Void = {}
+            override func viewDidMoveToWindow() {
+                super.viewDidMoveToWindow()
+                if window != nil { onAttach() }
+            }
+        }
+
+        func makeNSView(context: Context) -> AttachView {
+            let view = AttachView()
+            view.onAttach = { [weak view] in
+                if let view { register(view) }
+            }
+            return view
+        }
+
+        func updateNSView(_ view: AttachView, context: Context) {
+            register(view)
+        }
+
+        private func register(_ view: NSView) {
+            guard let window = view.window else { return }
+            if let live = kayaSheetWindows[sheetId], live !== window,
+                live.sheetParent != nil, window.sheetParent == nil
+            {
+                // A window still tearing down must not shadow the live one.
+                return
+            }
+            if kayaSheetWindows[sheetId] !== window {
+                kayaDiag("register sheet=\(sheetId) num=\(window.windowNumber)")
+                kayaSheetWindows[sheetId] = window
+            }
+            if window.title != title { window.title = title }
+        }
+    }
+#endif
+
+/// A sheet's content: the mounted root in the normalized frame, its own
+/// KayaSheetHost for the chain, the veto switch, and on the phones the
+/// detent and a titled bar.
+struct KayaSheetRoot: View {
+    let sheetId: UInt64
+    @State private var scene = kayaScene
+
+    private var sheet: KayaSheetModel? { scene.sheets[sheetId] }
+
+    var body: some View {
+        let content = Group {
+            if let sheet, let root = sheet.root {
+                KayaRender(node: root, isRoot: true)
+            }
+        }
+        .padding(scene.windows[0]?.inset ?? 16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .modifier(KayaSheetHost(surface: sheetId))
+        .tint(kayaBrandTint())
+        .font(kayaBrandFont())
+        #if os(macOS)
+            content
+                .frame(minWidth: 400, minHeight: 300)
+                // Armed: SwiftUI's own Esc is off and the key monitor below
+                // asks the app; unarmed: the platform's own path dismisses
+                // and the KayaSheetHost binding reports it. No onExitCommand
+                // here — measured swallowing Esc beside a field, and never
+                // firing without one (docs/traps.md, the sheet's Esc).
+                .interactiveDismissDisabled(sheet?.interceptDismiss ?? false)
+                .background(KayaSheetAccessor(sheetId: sheetId, title: sheet?.title ?? ""))
+        #else
+            NavigationStack {
+                content
+                    .navigationTitle(sheet?.title ?? "")
+                    .navigationBarTitleDisplayMode(.inline)
+            }
+            .interactiveDismissDisabled(sheet?.interceptDismiss ?? false)
+            .presentationDetents(kayaSheetDetents(sheet?.detent ?? 0))
+        #endif
+    }
+}
+
+#if !os(macOS)
+    /// The wire's detent as the platform's: unset is the platform's own
+    /// default (large), so the set is the one the sheet may rest at.
+    func kayaSheetDetents(_ detent: Int64) -> Set<PresentationDetent> {
+        switch detent {
+        case detentMedium: return [.medium]
+        default: return [.large]
+        }
+    }
+
+    /// The presented sheet controllers, parent-first, off the key window's
+    /// root: the platform's truth for expect_sheets, the alert excluded.
+    func kayaPresentedSheetControllers() -> [UIViewController] {
+        var out: [UIViewController] = []
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        guard let root = scenes.flatMap(\.windows).first(where: \.isKeyWindow)?.rootViewController
+        else { return out }
+        var next = root.presentedViewController
+        while let vc = next {
+            if !(vc is UIAlertController) { out.append(vc) }
+            next = vc.presentedViewController
+        }
+        return out
+    }
+#endif
+
 /// A navigation entry's content: the mounted root in the normalized frame,
 /// titled from its model — navigationTitle inside a NavigationStack destination
 /// titles the bar (and the window, on macOS): the real title path the harness
@@ -18964,6 +19409,7 @@ struct KayaEntryRoot: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .modifier(KayaGroupedScreenGround(on: scene.groupedEntries.contains(entryId)))
         .navigationTitle(scene.navEntries[entryId]?.title ?? "")
+        .modifier(KayaSheetHost(surface: entryId))
     }
 }
 
@@ -18998,6 +19444,7 @@ struct KayaAuxRoot: View {
         }
         }
         }
+        .modifier(KayaSheetHost(surface: windowId))
         .onAppear { kayaDiag("auxRoot appear wid=\(windowId)") }
         // The brand rides every scene root, not window 0's alone (the
         // Phase A finding — see KayaRoot's tint note).
@@ -21225,6 +21672,7 @@ struct KayaSectionPane: View {
             // hid because the process name equals the scene's title
             // (docs/traps.md, "A sectioned window's title was the process name").
             .modifier(KayaMacWindowCaption(windowId: scene.sectionWindow[sectionId] ?? 0))
+            .modifier(KayaSheetHost(surface: sectionId))
             .navigationDestination(for: UInt64.self) { eid in
                 KayaEntryRoot(entryId: eid)
             }
@@ -21377,6 +21825,7 @@ struct KayaRoot: View {
         // The form factor is measured on the WHOLE window, outside the arm chain,
         // so the reading does not depend on which arm rendered — the arm depends
         // on the reading, never the reverse.
+        .modifier(KayaSheetHost(surface: 0))
         .modifier(KayaFormFactorRecorder(windowId: 0))
         // The breakpoint channel (docs/adaptive-layout-plan.md D3), the
         // form factor's sibling for the same whole-window reason.

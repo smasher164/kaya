@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0x3854759c1c5d028c;
+    public const ulong SpecHash = 0xde79316215dcaa9e;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -119,6 +119,11 @@ static class KayaWire
     public const uint WpropRememberFrame = 10;
     public const uint EpropTitle = 1;
     public const uint EpropInterceptBack = 2;
+    public const uint ShpropTitle = 1;
+    public const uint ShpropInterceptDismiss = 2;
+    public const uint ShpropDetent = 3;
+    public const uint DetentMedium = 1;
+    public const uint DetentLarge = 2;
     public const uint SpropTitle = 1;
     public const uint SpropIcon = 2;
     public const uint SpropSymbol = 3;
@@ -279,6 +284,9 @@ static class KayaWire
     public const ushort TxKindSetRichText = 55;
     public const ushort TxKindApplyEdit = 56;
     public const ushort TxKindFormatText = 57;
+    public const ushort TxKindPresentSheet = 58;
+    public const ushort TxKindDismissSheet = 59;
+    public const ushort TxKindSetSheetProp = 60;
     public const ushort ApplyKindCreate = 1;
     public const ushort ApplyKindSetProp = 2;
     public const ushort ApplyKindAddChild = 3;
@@ -322,6 +330,9 @@ static class KayaWire
     public const ushort ApplyKindSetRichText = 43;
     public const ushort ApplyKindApplyEdit = 44;
     public const ushort ApplyKindFormatText = 45;
+    public const ushort ApplyKindPresentSheet = 46;
+    public const ushort ApplyKindDismissSheet = 47;
+    public const ushort ApplyKindSetSheetProp = 48;
     public const ushort OccKindButtonClicked = 1;
     public const ushort OccKindTextChanged = 2;
     public const ushort OccKindToggled = 3;
@@ -352,6 +363,8 @@ static class KayaWire
     public const ushort OccKindLinkOpened = 28;
     public const ushort OccKindTextEdited = 29;
     public const ushort OccKindTextFormatted = 30;
+    public const ushort OccKindSheetDismissed = 31;
+    public const ushort OccKindDismissRequested = 32;
 
     /// A blob value: the u64 handle from kaya_blob_register, consumed
     /// by the next submit; the bytes never ride the record stream.
@@ -1008,6 +1021,33 @@ static class KayaWire
         w.Write(stop);
         EncodeValues(w, attr);
         return Finish(stream, w, TxKindFormatText);
+    }
+
+    /// Request a sheet over `parent` — a window (0 = the primary) or a live sheet, so modal-over-modal is a chain (docs/sheet-plan.md §1). `sheet` is a guest-allocated surface id in the one namespace windows and entries share. Materializes hidden; mounting a root into it presents it. A second live sheet over the same parent is refused at the root, as a second alert is; no capability gate, every host has one.
+    public static byte[] TxPresentSheet(ulong parent, ulong sheet)
+    {
+        var w = Begin(out var stream);
+        w.Write(parent);
+        w.Write(sheet);
+        return Finish(stream, w, TxKindPresentSheet);
+    }
+
+    /// Dismiss a live sheet and forget its tree, exactly as pop_entry does, its child sheets with it; also the dismiss-veto grammar's confirmation. An unknown or already-gone sheet is a scene error.
+    public static byte[] TxDismissSheet(ulong sheet)
+    {
+        var w = Begin(out var stream);
+        w.Write(sheet);
+        return Finish(stream, w, TxKindDismissSheet);
+    }
+
+    /// Bind a sheet property (SHEET_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — sheets are not collection elements.
+    public static byte[] TxSetSheetProp(ulong sheet, uint prop, uint source)
+    {
+        var w = Begin(out var stream);
+        w.Write(sheet);
+        w.Write(prop);
+        w.Write(source);
+        return Finish(stream, w, TxKindSetSheetProp);
     }
 
     /// A civil date as the wire's I64: year * 10000 + month * 100 + day.
@@ -2429,7 +2469,7 @@ static class KayaWire
         keys = new List<object>();
         payload = null;
         kind = BitConverter.ToUInt16(rec, 4);
-        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged && kind != OccKindFileDialogResult && kind != OccKindClipboardResult && kind != OccKindPasted && kind != OccKindUndone && kind != OccKindRedone && kind != OccKindSortRequested && kind != OccKindDrawRequested && kind != OccKindTick && kind != OccKindDropped && kind != OccKindDragEnded && kind != OccKindDateChanged && kind != OccKindTimeChanged && kind != OccKindValueCommitted && kind != OccKindNotificationResult && kind != OccKindLinkOpened && kind != OccKindTextEdited && kind != OccKindTextFormatted)
+        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged && kind != OccKindFileDialogResult && kind != OccKindClipboardResult && kind != OccKindPasted && kind != OccKindUndone && kind != OccKindRedone && kind != OccKindSortRequested && kind != OccKindDrawRequested && kind != OccKindTick && kind != OccKindDropped && kind != OccKindDragEnded && kind != OccKindDateChanged && kind != OccKindTimeChanged && kind != OccKindValueCommitted && kind != OccKindNotificationResult && kind != OccKindLinkOpened && kind != OccKindTextEdited && kind != OccKindTextFormatted && kind != OccKindSheetDismissed && kind != OccKindDismissRequested)
             return false;
         id = BitConverter.ToUInt64(rec, 8);
         if (kind == OccKindAlertResult)
@@ -2489,7 +2529,7 @@ static class KayaWire
         }
         // Surface lifecycle records carry the surface id alone
         // (derived from the record shapes).
-        if (kind == OccKindCloseRequested || kind == OccKindWindowClosed || kind == OccKindEntryPopped || kind == OccKindBackRequested)
+        if (kind == OccKindCloseRequested || kind == OccKindWindowClosed || kind == OccKindEntryPopped || kind == OccKindBackRequested || kind == OccKindSheetDismissed || kind == OccKindDismissRequested)
             return true;
         // Surface-pair records (window, section): the SECOND id
         // keys the handler; the first rides as the payload.

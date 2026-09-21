@@ -48,6 +48,37 @@ The plan's first draft said SwiftUI does not wire Esc on macOS; it does.
 Nothing to add for the cancel path; `interactiveDismissDisabled` is the
 veto's switch and a programmatic dismiss still lands under it.
 
+### U2b, macOS: the arm's first red, and where the armed sheet reads Esc
+
+The depth slice's first leg failed at its first `dismiss_sheet`: the sheet
+stayed up (the bundle's verb trace, `sheets 1, wanted 0` for fifteen
+seconds). The arm differed from the probe above in two ways, so two more
+probes (`esc_probe.swift`, `esc_probe2.swift`, the same shape and route)
+measured each alone and together:
+
+| Sheet content | Esc | Reading |
+| --- | --- | --- |
+| a label, `.onExitCommand(perform: nil)` | to the key window | dismissed in 2 ms |
+| a label and a `TextField` | to the key window | dismissed in 3 ms |
+| a label, a `TextField`, `.onExitCommand(perform: nil)` | to the key window | still up 1 s later; a programmatic dismiss lands |
+| armed (`interactiveDismissDisabled`), a label, `.onExitCommand { … }` | to the sheet window | the handler never fires; first responder is the sheet window itself |
+| armed, a label, a `TextField`, `.onExitCommand { … }` | to the sheet window | the handler fires in 2 ms; first responder is the field editor |
+
+So `onExitCommand` reaches the content only while a responder INSIDE it
+has focus, and a nil handler beside a field consumes the key with nothing
+done. The arm carries no `onExitCommand`: an unarmed sheet's Esc goes to
+the platform's own dismissal and the `.sheet` binding's setter reports it,
+and an armed sheet's Esc is read by a local `NSEvent` monitor keyed on the
+topmost sheet window (or its parent chain), which sees the harness's
+`NSApp.sendEvent` and a person's press alike. The sheet scene's second run
+was green on every step (docs/traps.md, the sheet's Esc).
+
+The whole mac lane then found the second red the hand run could not: a
+present of the same surface id issued into the previous sheet's dismissal
+left both contents alive (docs/traps.md, the sheet presented into its own
+dismissal); the host presents one item per host now, the next raised from
+the last one's `onDismiss`.
+
 ## U1, WinUI: a modal over a modal
 
 `tools/win/sheetprobe/` (the undo probe's route: a module of the backend

@@ -275,6 +275,16 @@ pub const ENTRY_PROPS: &[(&'static str, u32, PropKind)] = &[
     ("intercept_back", 2, PropKind::Bool),
 ];
 
+/// Sheet properties (docs/sheet-plan.md §3): the ENTRY_PROPS stance one
+/// context over. `intercept_dismiss` is the dismiss-veto class;
+/// `detent` is the height the phones honor and the desktops state
+/// nothing about.
+pub const SHEET_PROPS: &[(&'static str, u32, PropKind)] = &[
+    ("title", 1, PropKind::Str),
+    ("intercept_dismiss", 2, PropKind::Bool),
+    ("detent", 3, PropKind::Enum("detent")),
+];
+
 /// Section properties: the third typed surface table (the ENTRY_PROPS
 /// stance — spec facts with typed setters, never applicability checks).
 pub const SECTION_PROPS: &[(&'static str, u32, PropKind)] = &[
@@ -368,6 +378,12 @@ pub fn hash() -> u64 {
     }
     eat(b"window_props");
     for (name, id, kind) in WINDOW_PROPS {
+        eat(name.as_bytes());
+        eat(&id.to_le_bytes());
+        eat(format!("{kind:?}").as_bytes());
+    }
+    eat(b"sheet_props");
+    for (name, id, kind) in SHEET_PROPS {
         eat(name.as_bytes());
         eat(&id.to_le_bytes());
         eat(format!("{kind:?}").as_bytes());
@@ -1575,6 +1591,41 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   and `block` with value `body` removes. Refused on a textarea \
                   that is not `rich` and for a name outside wire::RICH_ATTRS.",
         },
+        Record {
+            kind: 58,
+            name: "present_sheet",
+            fields: &[f("parent", FieldTy::U64), f("sheet", FieldTy::U64)],
+            payload: None,
+            doc: "Request a sheet over `parent` — a window (0 = the primary) or \
+                  a live sheet, so modal-over-modal is a chain (docs/sheet-plan.md \
+                  §1). `sheet` is a guest-allocated surface id in the one \
+                  namespace windows and entries share. Materializes hidden; \
+                  mounting a root into it presents it. A second live sheet over \
+                  the same parent is refused at the root, as a second alert is; \
+                  no capability gate, every host has one.",
+        },
+        Record {
+            kind: 59,
+            name: "dismiss_sheet",
+            fields: &[f("sheet", FieldTy::U64)],
+            payload: None,
+            doc: "Dismiss a live sheet and forget its tree, exactly as pop_entry \
+                  does, its child sheets with it; also the dismiss-veto grammar's \
+                  confirmation. An unknown or already-gone sheet is a scene error.",
+        },
+        Record {
+            kind: 60,
+            name: "set_sheet_prop",
+            fields: &[
+                f("sheet", FieldTy::U64),
+                f("prop", FieldTy::U32),
+                f("source", FieldTy::U32),
+            ],
+            payload: None,
+            doc: "Bind a sheet property (SHEET_PROPS). Same tail convention as \
+                  SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — sheets \
+                  are not collection elements.",
+        },
     ],
     apply: &[
         Record {
@@ -2300,6 +2351,34 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   `start..stop` without touching the selection and reports \
                   NOTHING — the core moved its mirror before sending this.",
         },
+        Record {
+            kind: 46,
+            name: "present_sheet",
+            fields: &[f("parent", FieldTy::U64), f("sheet", FieldTy::U64)],
+            payload: None,
+            doc: "Materialize a sheet over the parent surface, hidden until a \
+                  mount presents it.",
+        },
+        Record {
+            kind: 47,
+            name: "dismiss_sheet",
+            fields: &[f("sheet", FieldTy::U64)],
+            payload: None,
+            doc: "Dismiss the sheet and release its views, child sheets first; \
+                  a programmatic dismissal echoes nothing.",
+        },
+        Record {
+            kind: 48,
+            name: "set_sheet_prop",
+            fields: &[
+                f("sheet", FieldTy::U64),
+                f("prop", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+                f("value", FieldTy::Value),
+            ],
+            payload: None,
+            doc: "Set a sheet property to an already-resolved value.",
+        },
     ],
     occurrence: &[
         Record {
@@ -2911,6 +2990,25 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   collapsed caret is widget-local pending state and emits \
                   nothing: it becomes the runs of the next text_edited.",
         },
+        Record {
+            kind: 31,
+            name: "sheet_dismissed",
+            fields: &[f("sheet", FieldTy::U64)],
+            payload: None,
+            doc: "The user's cancel path closed a sheet natively (Esc, the back \
+                  gesture, a swipe, a tap outside) — informational and post-fact, \
+                  the entry_popped precedent; the core has already forgotten the \
+                  tree. A programmatic dismiss_sheet does not echo here.",
+        },
+        Record {
+            kind: 32,
+            name: "dismiss_requested",
+            fields: &[f("sheet", FieldTy::U64)],
+            payload: None,
+            doc: "The user drove the cancel path on a sheet whose \
+                  intercept_dismiss is armed. Nothing has gone; the app answers \
+                  with dismiss_sheet if it agrees — the back_requested veto class.",
+        },
     ],
     enums: &[
         EnumSpec {
@@ -3083,6 +3181,15 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
         EnumSpec {
             name: "eprop",
             variants: &[("title", 1), ("intercept_back", 2)],
+        },
+        EnumSpec {
+            name: "shprop",
+            variants: &[("title", 1), ("intercept_dismiss", 2), ("detent", 3)],
+        },
+        EnumSpec {
+            // docs/sheet-plan.md §1.4: the two heights both phones share.
+            name: "detent",
+            variants: &[("medium", 1), ("large", 2)],
         },
         EnumSpec {
             name: "sprop",
@@ -3465,6 +3572,9 @@ mod tests {
             ("set_rich_text", wire::TX_SET_RICH_TEXT),
             ("apply_edit", wire::TX_APPLY_EDIT),
             ("format_text", wire::TX_FORMAT_TEXT),
+            ("present_sheet", wire::TX_PRESENT_SHEET),
+            ("dismiss_sheet", wire::TX_DISMISS_SHEET),
+            ("set_sheet_prop", wire::TX_SET_SHEET_PROP),
         ];
         assert_eq!(pins.len(), SPEC.tx.len());
         for (name, kind) in pins {
@@ -3521,6 +3631,9 @@ mod tests {
                 ("set_rich_text", wire::APPLY_SET_RICH_TEXT),
                 ("apply_edit", wire::APPLY_APPLY_EDIT),
                 ("format_text", wire::APPLY_FORMAT_TEXT),
+                ("present_sheet", wire::APPLY_PRESENT_SHEET),
+                ("dismiss_sheet", wire::APPLY_DISMISS_SHEET),
+                ("set_sheet_prop", wire::APPLY_SET_SHEET_PROP),
             ]
         );
         // The WHOLE list, not indexed asserts: an indexed pin says
@@ -3560,6 +3673,8 @@ mod tests {
                 ("link_opened", crate::ring::REC_LINK_OPENED),
                 ("text_edited", crate::ring::REC_TEXT_EDITED),
                 ("text_formatted", crate::ring::REC_TEXT_FORMATTED),
+                ("sheet_dismissed", crate::ring::REC_SHEET_DISMISSED),
+                ("dismiss_requested", crate::ring::REC_DISMISS_REQUESTED),
             ]
         );
     }
@@ -3717,6 +3832,16 @@ mod tests {
             assert_eq!(name, ename);
             assert_eq!(id, eid);
         }
+        let shprop_enum = SPEC
+            .enums
+            .iter()
+            .find(|e| e.name == "shprop")
+            .expect("spec has a shprop enum");
+        assert_eq!(SHEET_PROPS.len(), shprop_enum.variants.len());
+        for ((name, id, _), (ename, eid)) in SHEET_PROPS.iter().zip(shprop_enum.variants) {
+            assert_eq!(name, ename);
+            assert_eq!(id, eid);
+        }
         let sprop_enum = SPEC
             .enums
             .iter()
@@ -3825,6 +3950,11 @@ mod tests {
                     ("wprop", "remember_frame") => wire::WPROP_REMEMBER_FRAME,
                     ("eprop", "title") => wire::EPROP_TITLE,
                     ("eprop", "intercept_back") => wire::EPROP_INTERCEPT_BACK,
+                    ("shprop", "title") => wire::SHPROP_TITLE,
+                    ("shprop", "intercept_dismiss") => wire::SHPROP_INTERCEPT_DISMISS,
+                    ("shprop", "detent") => wire::SHPROP_DETENT,
+                    ("detent", "medium") => wire::DETENT_MEDIUM,
+                    ("detent", "large") => wire::DETENT_LARGE,
                     ("sprop", "title") => wire::SPROP_TITLE,
                     ("sprop", "icon") => wire::SPROP_ICON,
                     ("sprop", "symbol") => wire::SPROP_SYMBOL,
@@ -4090,6 +4220,19 @@ mod tests {
             ],
         );
 
+        w.record(tx_record("present_sheet"), &[Arg::U64(0), Arg::U64(11)]);
+        {
+            let start = w.buf.len();
+            w.buf.extend_from_slice(&[0u8; 8]);
+            w.buf.extend_from_slice(&11u64.to_le_bytes());
+            w.buf.extend_from_slice(&wire::SHPROP_DETENT.to_le_bytes());
+            w.buf.extend_from_slice(&wire::SOURCE_CONST.to_le_bytes());
+            w.value(&Value::I64(i64::from(wire::DETENT_MEDIUM)));
+            let size = (w.buf.len() - start) as u32;
+            w.buf[start..start + 4].copy_from_slice(&size.to_le_bytes());
+            w.buf[start + 4..start + 6].copy_from_slice(&wire::TX_SET_SHEET_PROP.to_le_bytes());
+        }
+        w.record(tx_record("dismiss_sheet"), &[Arg::U64(11)]);
         w.record(tx_record("push_entry"), &[Arg::U64(0), Arg::U64(7)]);
         // set_entry_prop carries the SET_PROPERTY variable tail after
         // its fixed fields — spliced by hand, as a generated helper
@@ -4249,6 +4392,16 @@ mod tests {
                 actions: vec!["Delete".into(), "Archive".into()],
                 cancel: "Keep".into(),
             }),
+            TxOp::PresentSheet {
+                parent: WindowId(0),
+                sheet: WindowId(11),
+            },
+            TxOp::SetSheetProp {
+                sheet: WindowId(11),
+                prop: crate::protocol::SheetProp::Detent,
+                value: PropValue::Const(Value::I64(i64::from(wire::DETENT_MEDIUM))),
+            },
+            TxOp::DismissSheet { sheet: WindowId(11) },
             TxOp::PushEntry {
                 window: WindowId(0),
                 entry: WindowId(7),

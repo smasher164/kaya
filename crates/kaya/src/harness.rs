@@ -446,6 +446,20 @@ pub enum Step {
     /// emits back_requested and nothing pops; an unarmed top pops and
     /// reports entry_popped. An action, silent like click.
     Back(Option<u64>),
+    /// The number of live sheets over the primary window's chain, read
+    /// from the platform (docs/sheet-plan.md §4).
+    ExpectSheets(usize),
+    /// The topmost live sheet's title as the platform holds it (the
+    /// sheet window's own title on macOS, the dialog's header elsewhere).
+    ExpectSheet(String),
+    /// The height the platform reports for the topmost sheet: `medium`
+    /// or `large` on the phones, `none` on the desktops.
+    ExpectSheetDetent(String),
+    /// Drive the platform's own cancel path on the topmost sheet (Esc,
+    /// the back gesture, a swipe, the close button): an armed
+    /// intercept_dismiss sheet emits dismiss_requested and stays; an
+    /// unarmed one goes and reports sheet_dismissed. An action, silent.
+    DismissSheet,
     /// Expect the scroll viewport's content to exceed its visible
     /// extent — the observation that pins "there is something to
     /// scroll" (both readings are geometry from the toolkit).
@@ -704,6 +718,10 @@ impl Step {
             | Step::ExpectAlerts(..)
             | Step::ExpectEntries(..)
             | Step::Back(..)
+            | Step::ExpectSheets(..)
+            | Step::ExpectSheet(..)
+            | Step::ExpectSheetDetent(..)
+            | Step::DismissSheet
             | Step::MenuActivate(..)
             | Step::ExpectMenu(..)
             | Step::ExpectMenuSymbol(..)
@@ -804,6 +822,10 @@ impl Step {
             Step::ExpectAlerts { .. } => true,
             Step::ExpectEntries { .. } => true,
             Step::Back { .. } => false,
+            Step::ExpectSheets { .. } => true,
+            Step::ExpectSheet { .. } => true,
+            Step::ExpectSheetDetent { .. } => true,
+            Step::DismissSheet => false,
             Step::ExpectOverflow { .. } => true,
             Step::ScrollEnd { .. } => false,
             Step::ExpectAtEnd { .. } => true,
@@ -1183,6 +1205,18 @@ pub trait Stage: Send + 'static {
     fn entry_count(&self, window: u64) -> usize;
     /// Drive the window's REAL back affordance.
     fn back(&self, window: u64);
+    /// The number of live sheets in the primary window's chain, read from
+    /// the platform (the attached sheets, the open dialogs), never the
+    /// model (docs/sheet-plan.md §4).
+    fn sheet_count(&self) -> usize;
+    /// The topmost live sheet's title as the platform holds it, None when
+    /// no sheet is live.
+    fn sheet_title(&self) -> Option<String>;
+    /// The height the platform reports for the topmost sheet: "medium" or
+    /// "large" where the platform has detents, "none" where it does not.
+    fn sheet_detent(&self) -> String;
+    /// Drive the platform's own cancel path on the topmost sheet.
+    fn dismiss_sheet(&self);
     /// The progress bar's state, read from the toolkit: the determinate
     /// fraction as an integer percent ("42%" — the slider verdict's
     /// spelling) or "indeterminate" while activity mode is on.
@@ -1994,6 +2028,28 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     ));
                 }
                 Step::Back(window)
+            }
+            "expect_sheets" => {
+                let n = rest.trim().parse::<usize>().map_err(|_| {
+                    format!("expect_sheets wants a count: {line:?}")
+                })?;
+                Step::ExpectSheets(n)
+            }
+            "expect_sheet" => Step::ExpectSheet(parse_string(rest)?),
+            "expect_sheet_detent" => {
+                let detent = rest.trim();
+                if !matches!(detent, "medium" | "large" | "none") {
+                    return Err(format!(
+                        "expect_sheet_detent wants medium, large or none: {line:?}"
+                    ));
+                }
+                Step::ExpectSheetDetent(detent.to_owned())
+            }
+            "dismiss_sheet" => {
+                if !rest.trim().is_empty() {
+                    return Err(format!("dismiss_sheet takes no argument: {line:?}"));
+                }
+                Step::DismissSheet
             }
             "choose" => {
                 let (target, index) = rest
@@ -3845,6 +3901,15 @@ fn run_with_log(
                 await_answer(answered);
                 None
             }
+            Step::DismissSheet => {
+                // The cancel path, an action: the observable is whether the
+                // sheet went (expect_sheets) or the app's dismiss_requested.
+                await_quiet();
+                let answered = crate::scene::answers();
+                stage.dismiss_sheet();
+                await_answer(answered);
+                None
+            }
             Step::ScrollEnd(t) => {
                 // A SCROLL CONTAINER OR A TABLE (docs/tables-plan.md,
                 // ruled 2026-08-29): on a table these three read the
@@ -4292,6 +4357,27 @@ fn run_with_log(
                     Ok(format!("alerts {n}"))
                 } else {
                     Err(format!("alerts {got}, wanted {n}"))
+                }
+            })),
+            Step::ExpectSheets(n) => Some(poll(|| {
+                let got = stage.sheet_count();
+                if got == *n {
+                    Ok(format!("sheets {n}"))
+                } else {
+                    Err(format!("sheets {got}, wanted {n}"))
+                }
+            })),
+            Step::ExpectSheet(want) => Some(poll(|| match stage.sheet_title() {
+                Some(got) if got == *want => Ok(format!("sheet {want:?}")),
+                Some(got) => Err(format!("sheet {got:?}, wanted {want:?}")),
+                None => Err(format!("no sheet live, wanted {want:?}")),
+            })),
+            Step::ExpectSheetDetent(want) => Some(poll(|| {
+                let got = stage.sheet_detent();
+                if got == *want {
+                    Ok(format!("sheet detent {want}"))
+                } else {
+                    Err(format!("sheet detent {got}, wanted {want}"))
                 }
             })),
             Step::ExpectEntries(window, n) => {
@@ -5898,6 +5984,16 @@ mod tests {
             0
         }
         fn back(&self, _: u64) {}
+        fn sheet_count(&self) -> usize {
+            0
+        }
+        fn sheet_title(&self) -> Option<String> {
+            None
+        }
+        fn sheet_detent(&self) -> String {
+            "none".to_owned()
+        }
+        fn dismiss_sheet(&self) {}
         fn scroll_overflow(&self, _: Target) -> String {
             String::new()
         }
@@ -6785,6 +6881,16 @@ mod tests {
             0
         }
         fn back(&self, _: u64) {}
+        fn sheet_count(&self) -> usize {
+            0
+        }
+        fn sheet_title(&self) -> Option<String> {
+            None
+        }
+        fn sheet_detent(&self) -> String {
+            "none".to_owned()
+        }
+        fn dismiss_sheet(&self) {}
         fn scroll_overflow(&self, _: Target) -> String {
             String::new()
         }
@@ -7067,6 +7173,16 @@ mod tests {
             0
         }
         fn back(&self, _: u64) {}
+        fn sheet_count(&self) -> usize {
+            0
+        }
+        fn sheet_title(&self) -> Option<String> {
+            None
+        }
+        fn sheet_detent(&self) -> String {
+            "none".to_owned()
+        }
+        fn dismiss_sheet(&self) {}
         fn scroll_overflow(&self, _: Target) -> String {
             String::new()
         }

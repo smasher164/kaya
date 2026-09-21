@@ -433,6 +433,10 @@ path = "../../guests/rust/adaptive.rs"
 name = "sizepolicy"
 path = "../../guests/rust/sizepolicy.rs"
 
+[[example]]
+name = "sheet"
+path = "../../guests/rust/sheet.rs"
+
 # Android has no native process entry (Zygote forks and an Activity is
 # the way in), so this one is a cdylib exporting the JNI entry, not a bin.
 [[example]]

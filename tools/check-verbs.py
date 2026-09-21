@@ -1260,8 +1260,12 @@ for name, text in (("KayaSwiftUI.swift", swift),
 # scene's prop typing keeps the rest off the pump). ROLE and ALIGN joined
 # 2026-09-05: the `plain` role reached both interpreters by hand with no
 # gate reading either copy (docs/tasks-plan.md R6).
+# The entry, section and sheet prop tables and the detent enum joined the
+# alternation with the sheet slice (docs/sheet-plan.md §3): three typed
+# prop tables hand-copied into two interpreters with nothing pinning them.
 rows = re.findall(r"pub(?:\(crate\))? const ((?:APPLY|KIND|PROP|COMMAND|VALUE|"
-                  r"MENU_KIND|MPROP|ROLE|ALIGN)_[A-Z_0-9]+): u\d+ = (\d+);", wire)
+                  r"MENU_KIND|MPROP|ROLE|ALIGN|EPROP|SPROP|SHPROP|DETENT)"
+                  r"_[A-Z_0-9]+): u\d+ = (\d+);", wire)
 # THE CANVAS VOCABULARIES ride the op stream as i64 rather than u32, so
 # the sweep above cannot see them by type and their prefixes are not in
 # its alternation — five enums hand-copied into two interpreters, the
@@ -1811,6 +1815,10 @@ ACTION_VERBS = (
     # The Return key as its own verb (docs/rich-text-plan.md R10): the
     # widget answers it as it answers a keystroke.
     "press",
+    # The sheet's cancel path (docs/sheet-plan.md §4): the app answers it
+    # with dismiss_requested or the dismissal lands and it hears
+    # sheet_dismissed.
+    "dismiss_sheet",
 )
 
 # A VERB THE GUEST IS NEVER ASKED ABOUT HAS NO ANSWER TO WAIT FOR.
@@ -1849,6 +1857,7 @@ REFUSALS = {
     # No foreign source reaches a phone's app (docs/dnd-plan.md D9), so
     # the arm refuses rather than fake a drop.
     (KOTLIN, "drag_file"): "drag_file is a depth slice on android",
+    (KOTLIN, "dismiss_sheet"): 'depthStub("sheet")',
 }
 # A DEPTH STUB on an action verb is a refusal too, for as long as it stands:
 # its row here reads `(KOTLIN, "<verb>"): 'depthStub("<scene>")'` and the
@@ -1861,7 +1870,9 @@ KOTLIN_ACTS = "onUi("
 def rust_action_arm(src, verb):
     """One `Step::<Verb>(..) => { .. }` block of harness.rs's dispatch."""
     variant = "".join(w.capitalize() for w in verb.split("_"))
-    hits = list(re.finditer(r"Step::" + variant + r"\([^()]*\)\s*=>\s*\{", src))
+    # A unit variant (`Step::DismissSheet =>`) carries no parens: the
+    # sheet's cancel path names no target, the topmost sheet is the one.
+    hits = list(re.finditer(r"Step::" + variant + r"(?:\([^()]*\))?\s*=>\s*\{", src))
     if len(hits) != 1:
         return None
     return balanced(src, src.index("{", hits[0].end() - 1))

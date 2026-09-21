@@ -121,6 +121,8 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             Occurrence::CloseRequested { .. } | Occurrence::WindowClosed { .. } => {}
             Occurrence::EntryPopped { .. }
             | Occurrence::BackRequested { .. }
+            | Occurrence::SheetDismissed { .. }
+            | Occurrence::DismissRequested { .. }
             | Occurrence::SectionSelected { .. } => {}
             Occurrence::MenuActivated { .. }
             | Occurrence::InstanceMenuActivated { .. }

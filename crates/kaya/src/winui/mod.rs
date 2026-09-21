@@ -14044,6 +14044,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             });
             core.toolbar_buttons.retain(|(w, _), _| *w != window.0);
         }
+        ApplyOp::PresentSheet { .. } | ApplyOp::DismissSheet { .. } | ApplyOp::SetSheetProp { .. } => {
+            crate::depth_stub("sheet")
+        }
         ApplyOp::PushEntry { window, entry } => {
             core.nav_entries.insert(
                 entry.0,
@@ -21435,6 +21438,19 @@ impl crate::harness::Stage for WinUiStage {
         Self::on_ui(move |core| Ok(core.nav_stacks.get(&window).map_or(0, Vec::len)))
     }
 
+    // The sheet is a depth slice on this backend (docs/sheet-plan.md §8).
+    fn sheet_count(&self) -> usize {
+        crate::depth_stub("sheet")
+    }
+    fn sheet_title(&self) -> Option<String> {
+        crate::depth_stub("sheet")
+    }
+    fn sheet_detent(&self) -> String {
+        crate::depth_stub("sheet")
+    }
+    fn dismiss_sheet(&self) {
+        crate::depth_stub("sheet")
+    }
     fn back(&self, window: u64) {
         use bindings::Microsoft::UI::Xaml::Automation::Peers::{
             ButtonAutomationPeer, FrameworkElementAutomationPeer,

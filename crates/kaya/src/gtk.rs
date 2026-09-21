@@ -11053,6 +11053,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 reg.bar_of.retain(|_, w| *w != window.0);
             }
         }
+        ApplyOp::PresentSheet { .. } | ApplyOp::DismissSheet { .. } | ApplyOp::SetSheetProp { .. } => {
+            crate::depth_stub("sheet")
+        }
         ApplyOp::PushEntry { window, entry } => {
             // Materializes covered/incoming: on the stack now, the
             // mount fills and presents it.
@@ -18164,6 +18167,19 @@ impl crate::harness::Stage for GtkStage {
         })
     }
 
+    // The sheet is a depth slice on this backend (docs/sheet-plan.md §8).
+    fn sheet_count(&self) -> usize {
+        crate::depth_stub("sheet")
+    }
+    fn sheet_title(&self) -> Option<String> {
+        crate::depth_stub("sheet")
+    }
+    fn sheet_detent(&self) -> String {
+        crate::depth_stub("sheet")
+    }
+    fn dismiss_sheet(&self) {
+        crate::depth_stub("sheet")
+    }
     fn back(&self, window: u64) {
         Self::on_main(move |core| {
             // The REAL affordance: activate the header bar's back button, whose

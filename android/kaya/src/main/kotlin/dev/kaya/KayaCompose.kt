@@ -1351,7 +1351,7 @@ object KayaCompose {
     // but only the runtime assert catches a stale compiled APK against
     // a new libkaya. ULong because the fingerprint's high bit is fair
     // game and a Kotlin Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0x3854759c1c5d028cuL
+    private const val SPEC_HASH: ULong = 0xde79316215dcaa9euL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -1412,6 +1412,10 @@ object KayaCompose {
     private const val APPLY_SET_RICH_TEXT = 43
     private const val APPLY_APPLY_EDIT = 44
     private const val APPLY_FORMAT_TEXT = 45
+    // Sheets (docs/sheet-plan.md §3); the arm is a depth slice.
+    private const val APPLY_PRESENT_SHEET = 46
+    private const val APPLY_DISMISS_SHEET = 47
+    private const val APPLY_SET_SHEET_PROP = 48
     /** What a drop settles on (the wire's drag_op). */
     internal const val DRAG_OP_NONE = 0
     internal const val DRAG_OP_COPY = 1
@@ -1481,6 +1485,12 @@ object KayaCompose {
     // intercept_back is the close-veto class transplanted to POP.
     private const val EPROP_TITLE = 1
     private const val EPROP_INTERCEPT_BACK = 2
+    // Sheet properties (spec::SHEET_PROPS) and the wire's detent enum.
+    private const val SHPROP_TITLE = 1
+    private const val SHPROP_INTERCEPT_DISMISS = 2
+    private const val SHPROP_DETENT = 3
+    private const val DETENT_MEDIUM = 1
+    private const val DETENT_LARGE = 2
     private const val COMMAND_CLEAR = 1
     private const val COMMAND_FOCUS = 2
     // Menu item kinds (spec enum "menu_kind"; DESIGN.md, Menus): menu
@@ -1770,6 +1780,11 @@ object KayaCompose {
      * Named once so check-detekt sees them used, as CANVAS_VOCABULARY is
      * (docs/rich-text-plan.md §4; the arm is a depth slice).
      */
+    val SHEET_VOCABULARY: List<Long> = listOf(
+        SHPROP_TITLE.toLong(), SHPROP_INTERCEPT_DISMISS.toLong(), SHPROP_DETENT.toLong(),
+        DETENT_MEDIUM.toLong(), DETENT_LARGE.toLong(),
+    )
+
     val RICH_VOCABULARY: List<Long> = listOf(
         APPLY_SET_RICH_TEXT.toLong(), APPLY_APPLY_EDIT.toLong(), APPLY_FORMAT_TEXT.toLong(),
         PROP_RICH.toLong(),
@@ -2575,6 +2590,8 @@ object KayaCompose {
                     kayaRichApplyEdit(
                         enode, estart, estop, einserted, eruns, eselStart, eselStop)
                 }
+                APPLY_PRESENT_SHEET, APPLY_DISMISS_SHEET, APPLY_SET_SHEET_PROP ->
+                    depthStub("sheet")
                 APPLY_FORMAT_TEXT -> {
                     // { u64 id; u32 removed; u32 ranged; u64 start; u64 stop;
                     //   u32 count; u32 reserved; Str name; Str value } — the
@@ -8284,6 +8301,13 @@ object KayaCompose {
                             }
                         }
                         kayaAwaitAnswer(answered)
+                    }
+                    "expect_sheets", "expect_sheet", "expect_sheet_detent" -> {
+                        depthStub("sheet")
+                    }
+                    "dismiss_sheet" -> {
+                        // An action arm of its own: check-verbs' REFUSALS row.
+                        depthStub("sheet")
                     }
                     "expect_alerts" -> {
                         val want = parts[1].toIntOrNull() ?: -1

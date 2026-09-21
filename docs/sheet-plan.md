@@ -106,7 +106,7 @@ their own design pass if an app asks for them.
 
 | Platform | The native sheet | Cancel path | Veto | Detent | A sheet over a sheet |
 | --- | --- | --- | --- | --- | --- |
-| macOS (SwiftUI) | `.sheet`, a window-attached NSWindow sheet | Esc, natively (measured 2026-09-21: 2 ms from the key to `onDismiss`) | `interactiveDismissDisabled` (measured: Esc then inert, a programmatic dismiss still lands) | nothing to say | yes, measured: Esc closes the child first, the parent on the next press |
+| macOS (SwiftUI) | `.sheet`, a window-attached NSWindow sheet, 400×300 minimum, its title on the NSWindow (the accessibility name; no title bar is drawn) | Esc, natively (measured 2026-09-21: 2 ms from the key to `onDismiss`) | `interactiveDismissDisabled`, and kaya reads the armed sheet's Esc through a local key monitor, since `onExitCommand` fires only with a focused responder inside (U2b) | nothing to say | yes, measured: Esc closes the child first, the parent on the next press |
 | iOS (SwiftUI) | `.sheet` with `presentationDetents` | swipe-down, tap outside on medium | `interactiveDismissDisabled` | `.medium` / `.large` | yes |
 | Android (Compose) | material3 `ModalBottomSheet` (BOM 2024.10.01 carries it) | back gesture, scrim tap, swipe | `ModalBottomSheetProperties` disables back and scrim | `skipPartiallyExpanded` off / on | yes, each is its own window |
 | Linux (GTK4 + libadwaita) | `AdwDialog` (1.5; a bottom sheet on a narrow window, floating on a wide one) | Esc, the close button | `can-close` off plus the `close-attempt` signal | nothing to say | measured (U3) |
@@ -185,9 +185,10 @@ the window and entry records.
   the AdwDialogs present), never from the model.
 - `expect_sheet_detent <medium|large|none>`: the height the platform
   reports for the live sheet, iOS's selected detent and Android's sheet
-  state; the desktops answer `none`. The scene asserts it inside the
-  phone-only band the runners already skip on the desktops (the
-  `resize_window` precedent), which is settled at depth.
+  state; the desktops answer `none`. The shared script asserts `none`,
+  and the phone lanes cut that line and append `medium` through their
+  per-scene cut-and-append tables (the adaptive scene's precedent in
+  tools/lib/lanes/ios.py and android.py), settled at depth.
 - `expect_sheet "<title>"`: the live sheet's title as the platform draws
   it; on a platform that draws no header the model's title, and the
   observation says which.
@@ -277,11 +278,14 @@ phone-only feature with a desktop carve-out. The app writes one thing.
    container).~~ DONE 2026-09-21, docs/measurements/sheet-probes-2026-09-21.md;
    U4 (the keyboard under Android's sheet) is measured by the quick-add sheet
    itself in step 3.
-2. Depth on the mac: spec records and the hash, the core's surface table
+2. ~~Depth on the mac: spec records and the hash, the core's surface table
    and refusals with unit tests, the SwiftUI arm with U2's Esc wiring, the
    three harness verbs, the Rust sugar, `sheet.steps` and the Rust guest,
    check-verbs and check-sugar-surface rows, depth stubs on the other
-   three backends so check-stubs holds the fan-out open.
+   three backends so check-stubs holds the fan-out open.~~ DONE 2026-09-21;
+   the check-sugar-surface rows land with the eight bindings, as the
+   sliders' did, so the gate stays green at depth and the ledger holds the
+   fan-out open.
 3. Breadth: the eight bindings and guests, the three backend arms, S6 in
    the task manager on all five lanes.
 4. The matrix, then a review page with the sheet on every lane, each

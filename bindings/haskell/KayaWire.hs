@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x3854759c1c5d028c
+specHash = 0xde79316215dcaa9e
 
 valueBool :: Word32
 valueBool = 1
@@ -236,6 +236,16 @@ epropTitle :: Word32
 epropTitle = 1
 epropInterceptBack :: Word32
 epropInterceptBack = 2
+shpropTitle :: Word32
+shpropTitle = 1
+shpropInterceptDismiss :: Word32
+shpropInterceptDismiss = 2
+shpropDetent :: Word32
+shpropDetent = 3
+detentMedium :: Word32
+detentMedium = 1
+detentLarge :: Word32
+detentLarge = 2
 spropTitle :: Word32
 spropTitle = 1
 spropIcon :: Word32
@@ -556,6 +566,12 @@ txKindApplyEdit :: Word16
 txKindApplyEdit = 56
 txKindFormatText :: Word16
 txKindFormatText = 57
+txKindPresentSheet :: Word16
+txKindPresentSheet = 58
+txKindDismissSheet :: Word16
+txKindDismissSheet = 59
+txKindSetSheetProp :: Word16
+txKindSetSheetProp = 60
 applyKindCreate :: Word16
 applyKindCreate = 1
 applyKindSetProp :: Word16
@@ -642,6 +658,12 @@ applyKindApplyEdit :: Word16
 applyKindApplyEdit = 44
 applyKindFormatText :: Word16
 applyKindFormatText = 45
+applyKindPresentSheet :: Word16
+applyKindPresentSheet = 46
+applyKindDismissSheet :: Word16
+applyKindDismissSheet = 47
+applyKindSetSheetProp :: Word16
+applyKindSetSheetProp = 48
 occKindButtonClicked :: Word16
 occKindButtonClicked = 1
 occKindTextChanged :: Word16
@@ -702,6 +724,10 @@ occKindTextEdited :: Word16
 occKindTextEdited = 29
 occKindTextFormatted :: Word16
 occKindTextFormatted = 30
+occKindSheetDismissed :: Word16
+occKindSheetDismissed = 31
+occKindDismissRequested :: Word16
+occKindDismissRequested = 32
 
 -- Values self-pad to 8: they concatenate inside record bodies.
 encodeValue :: Value -> Builder
@@ -961,6 +987,18 @@ txApplyEdit widgetId start stop count runs text = wireRecord txKindApplyEdit (wo
 -- Format a `rich` textarea's CURRENT SELECTION through the widget's own act — what an app's toolbar button sends (docs/rich-text-plan.md R1): `attr` is two Str values, name then value; `removed` 1 takes the attribute off. `ranged` 1 formats `start..stop` (UTF-8 bytes) INSTEAD of the selection, which stays where it is: a document write, echoed by nothing, legal on a rich label too (docs/rich-text-plan.md §17, the notes demo's remote mark). The widget answers with text_formatted over the range it formatted, which is how the mirror moves; a collapsed selection arms the typing attribute and answers nothing until the next edit. A `block` act covers the selection's whole paragraphs, and `block` with value `body` removes. Refused on a textarea that is not `rich` and for a name outside wire::RICH_ATTRS.
 txFormatText :: Word64 -> Word32 -> Word32 -> Word64 -> Word64 -> [Value] -> Builder
 txFormatText widgetId removed ranged start stop attr = wireRecord txKindFormatText (word64LE widgetId <> word32LE removed <> word32LE ranged <> word64LE start <> word64LE stop <> encodeValues attr)
+
+-- Request a sheet over `parent` — a window (0 = the primary) or a live sheet, so modal-over-modal is a chain (docs/sheet-plan.md §1). `sheet` is a guest-allocated surface id in the one namespace windows and entries share. Materializes hidden; mounting a root into it presents it. A second live sheet over the same parent is refused at the root, as a second alert is; no capability gate, every host has one.
+txPresentSheet :: Word64 -> Word64 -> Builder
+txPresentSheet parent sheet = wireRecord txKindPresentSheet (word64LE parent <> word64LE sheet)
+
+-- Dismiss a live sheet and forget its tree, exactly as pop_entry does, its child sheets with it; also the dismiss-veto grammar's confirmation. An unknown or already-gone sheet is a scene error.
+txDismissSheet :: Word64 -> Builder
+txDismissSheet sheet = wireRecord txKindDismissSheet (word64LE sheet)
+
+-- Bind a sheet property (SHEET_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — sheets are not collection elements.
+txSetSheetProp :: Word64 -> Word32 -> Word32 -> Builder
+txSetSheetProp sheet prop source = wireRecord txKindSetSheetProp (word64LE sheet <> word32LE prop <> word32LE source)
 
 -- A civil date as the wire's I64: year * 10000 + month * 100 + day.
 packDate :: Int -> Int -> Int -> Int64
@@ -2088,7 +2126,7 @@ parseOccurrence ::
   IO (Maybe (Word16, Word64, [Value], Maybe Value, Maybe ClipValues, Maybe DropValues, [Value]))
 parseOccurrence redeem rec = do
   kind <- peekByteOff rec 4 :: IO Word16
-  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult && kind /= occKindClipboardResult && kind /= occKindPasted && kind /= occKindUndone && kind /= occKindRedone && kind /= occKindSortRequested && kind /= occKindDrawRequested && kind /= occKindTick && kind /= occKindDropped && kind /= occKindDragEnded && kind /= occKindDateChanged && kind /= occKindTimeChanged && kind /= occKindValueCommitted && kind /= occKindNotificationResult && kind /= occKindLinkOpened && kind /= occKindTextEdited && kind /= occKindTextFormatted
+  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult && kind /= occKindClipboardResult && kind /= occKindPasted && kind /= occKindUndone && kind /= occKindRedone && kind /= occKindSortRequested && kind /= occKindDrawRequested && kind /= occKindTick && kind /= occKindDropped && kind /= occKindDragEnded && kind /= occKindDateChanged && kind /= occKindTimeChanged && kind /= occKindValueCommitted && kind /= occKindNotificationResult && kind /= occKindLinkOpened && kind /= occKindTextEdited && kind /= occKindTextFormatted && kind /= occKindSheetDismissed && kind /= occKindDismissRequested
     then return Nothing
     else do
       ident <- peekByteOff rec 8 :: IO Word64
@@ -2130,7 +2168,7 @@ parseOccurrence redeem rec = do
           return (Just (kind, ident, [], Nothing, Just clip, Nothing, []))
         -- Surface lifecycle records carry the surface id alone
         -- (derived from the record shapes).
-        else if kind == occKindCloseRequested || kind == occKindWindowClosed || kind == occKindEntryPopped || kind == occKindBackRequested
+        else if kind == occKindCloseRequested || kind == occKindWindowClosed || kind == occKindEntryPopped || kind == occKindBackRequested || kind == occKindSheetDismissed || kind == occKindDismissRequested
           then return (Just (kind, ident, [], Nothing, Nothing, Nothing, []))
         -- Surface-pair records (window, section): the SECOND id
         -- keys the handler; the first rides as the payload.

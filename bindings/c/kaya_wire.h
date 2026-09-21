@@ -199,7 +199,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     }
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0x3854759c1c5d028cULL
+#define KAYA_SPEC_HASH 0xde79316215dcaa9eULL
 
 
 /* Create a signal holding `initial`. */
@@ -724,6 +724,30 @@ static inline void kaya_tx_format_text(KayaTx *tx, uint64_t widget_id, uint32_t 
     kaya_wire_u64(tx, start);
     kaya_wire_u64(tx, stop);
     kaya_wire_values(tx, attr, attr_len);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* Request a sheet over `parent` — a window (0 = the primary) or a live sheet, so modal-over-modal is a chain (docs/sheet-plan.md §1). `sheet` is a guest-allocated surface id in the one namespace windows and entries share. Materializes hidden; mounting a root into it presents it. A second live sheet over the same parent is refused at the root, as a second alert is; no capability gate, every host has one. */
+static inline void kaya_tx_present_sheet(KayaTx *tx, uint64_t parent, uint64_t sheet) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_PRESENT_SHEET);
+    kaya_wire_u64(tx, parent);
+    kaya_wire_u64(tx, sheet);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* Dismiss a live sheet and forget its tree, exactly as pop_entry does, its child sheets with it; also the dismiss-veto grammar's confirmation. An unknown or already-gone sheet is a scene error. */
+static inline void kaya_tx_dismiss_sheet(KayaTx *tx, uint64_t sheet) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_DISMISS_SHEET);
+    kaya_wire_u64(tx, sheet);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* Bind a sheet property (SHEET_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — sheets are not collection elements. */
+static inline void kaya_tx_set_sheet_prop(KayaTx *tx, uint64_t sheet, uint32_t prop, uint32_t source) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_SHEET_PROP);
+    kaya_wire_u64(tx, sheet);
+    kaya_wire_u32(tx, prop);
+    kaya_wire_u32(tx, source);
     kaya_wire_end(tx, kaya_at);
 }
 

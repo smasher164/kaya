@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0x3854759c1c5d028cn;
+export const SPEC_HASH = 0xde79316215dcaa9en;
 
 export const VALUE_BOOL = 1;
 export const VALUE_I64 = 2;
@@ -114,6 +114,11 @@ export const WPROP_APPEARANCE = 9;
 export const WPROP_REMEMBER_FRAME = 10;
 export const EPROP_TITLE = 1;
 export const EPROP_INTERCEPT_BACK = 2;
+export const SHPROP_TITLE = 1;
+export const SHPROP_INTERCEPT_DISMISS = 2;
+export const SHPROP_DETENT = 3;
+export const DETENT_MEDIUM = 1;
+export const DETENT_LARGE = 2;
 export const SPROP_TITLE = 1;
 export const SPROP_ICON = 2;
 export const SPROP_SYMBOL = 3;
@@ -275,6 +280,9 @@ export const TX_DECLARE_LINK_ROUTE = 54;
 export const TX_SET_RICH_TEXT = 55;
 export const TX_APPLY_EDIT = 56;
 export const TX_FORMAT_TEXT = 57;
+export const TX_PRESENT_SHEET = 58;
+export const TX_DISMISS_SHEET = 59;
+export const TX_SET_SHEET_PROP = 60;
 export const APPLY_CREATE = 1;
 export const APPLY_SET_PROP = 2;
 export const APPLY_ADD_CHILD = 3;
@@ -318,6 +326,9 @@ export const APPLY_SET_REORDERABLE = 40;
 export const APPLY_SET_RICH_TEXT = 43;
 export const APPLY_APPLY_EDIT = 44;
 export const APPLY_FORMAT_TEXT = 45;
+export const APPLY_PRESENT_SHEET = 46;
+export const APPLY_DISMISS_SHEET = 47;
+export const APPLY_SET_SHEET_PROP = 48;
 export const OCC_BUTTON_CLICKED = 1;
 export const OCC_TEXT_CHANGED = 2;
 export const OCC_TOGGLED = 3;
@@ -348,6 +359,8 @@ export const OCC_NOTIFICATION_RESULT = 27;
 export const OCC_LINK_OPENED = 28;
 export const OCC_TEXT_EDITED = 29;
 export const OCC_TEXT_FORMATTED = 30;
+export const OCC_SHEET_DISMISSED = 31;
+export const OCC_DISMISS_REQUESTED = 32;
 
 const text_encoder = new TextEncoder();
 const text_decoder = new TextDecoder("utf-8", { fatal: true });
@@ -999,6 +1012,30 @@ export function tx_format_text(widget_id: number, removed: number, ranged: numbe
   enc.u64(stop);
   enc.values(attr);
   return enc.end(TX_FORMAT_TEXT);
+}
+
+/** Request a sheet over `parent` — a window (0 = the primary) or a live sheet, so modal-over-modal is a chain (docs/sheet-plan.md §1). `sheet` is a guest-allocated surface id in the one namespace windows and entries share. Materializes hidden; mounting a root into it presents it. A second live sheet over the same parent is refused at the root, as a second alert is; no capability gate, every host has one. */
+export function tx_present_sheet(parent: number, sheet: number): Uint8Array {
+  enc.begin();
+  enc.u64(parent);
+  enc.u64(sheet);
+  return enc.end(TX_PRESENT_SHEET);
+}
+
+/** Dismiss a live sheet and forget its tree, exactly as pop_entry does, its child sheets with it; also the dismiss-veto grammar's confirmation. An unknown or already-gone sheet is a scene error. */
+export function tx_dismiss_sheet(sheet: number): Uint8Array {
+  enc.begin();
+  enc.u64(sheet);
+  return enc.end(TX_DISMISS_SHEET);
+}
+
+/** Bind a sheet property (SHEET_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — sheets are not collection elements. */
+export function tx_set_sheet_prop(sheet: number, prop: number, source: number): Uint8Array {
+  enc.begin();
+  enc.u64(sheet);
+  enc.u32(prop);
+  enc.u32(source);
+  return enc.end(TX_SET_SHEET_PROP);
 }
 
 /** A civil date as the wire's I64: year * 10000 + month * 100 + day. */
@@ -2061,7 +2098,7 @@ export function parse_occurrence(buf: Uint8Array): Occurrence {
   const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   const size = view.getUint32(0, true);
   const kind = view.getUint16(4, true);
-  if (![OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED].includes(kind)) return { kind, id: null, keys: [], payload: null };
+  if (![OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED].includes(kind)) return { kind, id: null, keys: [], payload: null };
   if (kind === OCC_ALERT_RESULT) {
     // A request's one answer: id + the u32 code.
     return { kind, id: read_u64(buf, 8), keys: [], payload: read_u32(buf, 16) };
@@ -2103,7 +2140,7 @@ export function parse_occurrence(buf: Uint8Array): Occurrence {
     const [clip] = parse_clip(buf, 16);
     return { kind, id: request, keys: [], payload: clip };
   }
-  if ([OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED].includes(kind)) {
+  if ([OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED].includes(kind)) {
     // Surface lifecycle records carry the surface id alone.
     return { kind, id: read_u64(buf, 8), keys: [], payload: null };
   }

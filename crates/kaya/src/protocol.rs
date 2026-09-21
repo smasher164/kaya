@@ -603,6 +603,13 @@ pub enum Occurrence {
     /// intercept_back is armed. Nothing has popped; the app answers
     /// with pop_entry if it agrees — the CloseRequested veto class.
     BackRequested { entry: WindowId },
+    /// The user's cancel path closed a sheet natively — informational and
+    /// post-fact (docs/sheet-plan.md §3); a programmatic dismiss_sheet does
+    /// not echo here.
+    SheetDismissed { sheet: WindowId },
+    /// The user drove the cancel path on an intercept_dismiss-armed sheet.
+    /// Nothing has gone; the app answers with dismiss_sheet if it agrees.
+    DismissRequested { sheet: WindowId },
     /// The user switched sections through the platform's own switcher —
     /// informational and post-fact. A programmatic SelectSection is
     /// configuration and stays silent (the echo doctrine).
@@ -1618,6 +1625,31 @@ pub enum EntryProp {
     InterceptBack,
 }
 
+/// Sheet property keys (spec::SHEET_PROPS; docs/sheet-plan.md §3): the
+/// entry table's stance one context over. Sheets share the surface-id
+/// namespace, so [`WindowId`] carries sheet ids too.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SheetProp {
+    /// The sheet's accessible name everywhere, and its drawn header where
+    /// the platform draws one (Str-valued).
+    Title,
+    /// The dismiss-veto class (Bool-valued; default false): armed, the
+    /// cancel path emits dismiss_requested and nothing goes until the app
+    /// answers with dismiss_sheet.
+    InterceptDismiss,
+    /// The height the phones open the sheet at (spec enum "detent",
+    /// I64-valued on the wire); the desktops have nothing to say.
+    Detent,
+}
+
+/// The `detent` vocabulary (spec enum "detent"): the two heights both
+/// phones share.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Detent {
+    Medium,
+    Large,
+}
+
 /// The one-shot command vocabulary: momentary verbs aimed at
 /// widget-owned state, the third arm of the ownership rule.
 /// Fire-and-forget — no state at rest, nothing replays on instance
@@ -1793,6 +1825,15 @@ pub enum TxOp {
     /// Bind a navigation-entry property. Element sources are rejected
     /// at decode — entries are not collection elements.
     SetEntryProp { entry: WindowId, prop: EntryProp, value: PropValue },
+    /// Request a sheet over a window or a live sheet (docs/sheet-plan.md
+    /// §3): a chain, one child per parent, refused at the root otherwise.
+    /// Materializes hidden; mounting a root into it presents it.
+    PresentSheet { parent: WindowId, sheet: WindowId },
+    /// Dismiss a live sheet and forget its tree, child sheets with it; also
+    /// the dismiss-veto grammar's confirmation.
+    DismissSheet { sheet: WindowId },
+    /// Bind a sheet property. Element sources are rejected at decode.
+    SetSheetProp { sheet: WindowId, prop: SheetProp, value: PropValue },
     /// Append a section to `window`'s section set (no capability gate
     /// — every platform has a sections idiom). The first added
     /// becomes selected; the set is append-only, and every section's
@@ -2031,6 +2072,11 @@ pub enum ApplyOp {
     /// (the multi-pop obligation; see DESIGN.md, Navigation).
     PopEntry { window: WindowId },
     SetEntryProp { entry: WindowId, prop: EntryProp, value: Value },
+    /// Materialize a sheet over the parent surface, hidden until a mount.
+    PresentSheet { parent: WindowId, sheet: WindowId },
+    /// Dismiss the sheet and release its views, child sheets first.
+    DismissSheet { sheet: WindowId },
+    SetSheetProp { sheet: WindowId, prop: SheetProp, value: Value },
     /// Append a section to the window's section set, its root hidden
     /// until a mount fills it; the first added becomes selected.
     AddSection { window: WindowId, section: WindowId },
@@ -2332,6 +2378,12 @@ impl OccSink {
                 }
                 Occurrence::BackRequested { entry } => {
                     ring.push_record(crate::ring::REC_BACK_REQUESTED, &entry.0.to_le_bytes());
+                }
+                Occurrence::SheetDismissed { sheet } => {
+                    ring.push_record(crate::ring::REC_SHEET_DISMISSED, &sheet.0.to_le_bytes());
+                }
+                Occurrence::DismissRequested { sheet } => {
+                    ring.push_record(crate::ring::REC_DISMISS_REQUESTED, &sheet.0.to_le_bytes());
                 }
                 Occurrence::SectionSelected { window, section } => {
                     let mut body = [0u8; 16];

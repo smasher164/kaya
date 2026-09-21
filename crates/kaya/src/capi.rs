@@ -99,6 +99,10 @@ pub const KAYA_OCCURRENCE_LINK_OPENED: u16 = 28;
 /// Offsets are UTF-8 bytes; a run's are relative to the inserted text.
 pub const KAYA_OCCURRENCE_TEXT_EDITED: u16 = 29;
 pub const KAYA_OCCURRENCE_TEXT_FORMATTED: u16 = 30;
+/// SHEET_DISMISSED { u64 sheet } — the user's cancel path closed it
+/// (post-fact); DISMISS_REQUESTED { u64 sheet } — armed, nothing has gone.
+pub const KAYA_OCCURRENCE_SHEET_DISMISSED: u16 = 31;
+pub const KAYA_OCCURRENCE_DISMISS_REQUESTED: u16 = 32;
 const _: () = assert!(
     KAYA_OCCURRENCE_PAD == ring::REC_PAD
         && KAYA_OCCURRENCE_BUTTON_CLICKED == ring::REC_BUTTON_CLICKED
@@ -110,6 +114,8 @@ const _: () = assert!(
         && KAYA_OCCURRENCE_ALERT_RESULT == ring::REC_ALERT_RESULT
         && KAYA_OCCURRENCE_ENTRY_POPPED == ring::REC_ENTRY_POPPED
         && KAYA_OCCURRENCE_BACK_REQUESTED == ring::REC_BACK_REQUESTED
+        && KAYA_OCCURRENCE_SHEET_DISMISSED == ring::REC_SHEET_DISMISSED
+        && KAYA_OCCURRENCE_DISMISS_REQUESTED == ring::REC_DISMISS_REQUESTED
         && KAYA_OCCURRENCE_SECTION_SELECTED == ring::REC_SECTION_SELECTED
         && KAYA_OCCURRENCE_MENU_ACTIVATED == ring::REC_MENU_ACTIVATED
         && KAYA_OCCURRENCE_MENU_TOGGLED == ring::REC_MENU_TOGGLED
@@ -195,6 +201,13 @@ pub const KAYA_TX_SHOW_ALERT: u16 = 21;
 pub const KAYA_TX_PUSH_ENTRY: u16 = 22;
 pub const KAYA_TX_POP_ENTRY: u16 = 23;
 pub const KAYA_TX_SET_ENTRY_PROP: u16 = 24;
+/// PRESENT_SHEET: u64 parent, u64 sheet — a sheet over a window or a live
+/// sheet, one child per parent (docs/sheet-plan.md §3). DISMISS_SHEET:
+/// u64 sheet. SET_SHEET_PROP: u64 sheet, u32 shprop, u32 source, then the
+/// SET_PROPERTY tail (element sources rejected).
+pub const KAYA_TX_PRESENT_SHEET: u16 = 58;
+pub const KAYA_TX_DISMISS_SHEET: u16 = 59;
+pub const KAYA_TX_SET_SHEET_PROP: u16 = 60;
 pub const KAYA_TX_ADD_SECTION: u16 = 25;
 pub const KAYA_TX_SELECT_SECTION: u16 = 26;
 pub const KAYA_TX_SET_SECTION_PROP: u16 = 27;
@@ -473,6 +486,9 @@ const _: () = assert!(
         && KAYA_TX_PUSH_ENTRY == wire::TX_PUSH_ENTRY
         && KAYA_TX_POP_ENTRY == wire::TX_POP_ENTRY
         && KAYA_TX_SET_ENTRY_PROP == wire::TX_SET_ENTRY_PROP
+        && KAYA_TX_PRESENT_SHEET == wire::TX_PRESENT_SHEET
+        && KAYA_TX_DISMISS_SHEET == wire::TX_DISMISS_SHEET
+        && KAYA_TX_SET_SHEET_PROP == wire::TX_SET_SHEET_PROP
         && KAYA_TX_ADD_SECTION == wire::TX_ADD_SECTION
         && KAYA_TX_SELECT_SECTION == wire::TX_SELECT_SECTION
         && KAYA_TX_SET_SECTION_PROP == wire::TX_SET_SECTION_PROP
@@ -527,6 +543,12 @@ pub const KAYA_APPLY_PRESENT_ALERT: u16 = 11;
 pub const KAYA_APPLY_PUSH_ENTRY: u16 = 12;
 pub const KAYA_APPLY_POP_ENTRY: u16 = 13;
 pub const KAYA_APPLY_SET_ENTRY_PROP: u16 = 14;
+/// PRESENT_SHEET: u64 parent, u64 sheet — materialize hidden; a mount
+/// presents it. DISMISS_SHEET: u64 sheet — release its views, children
+/// first. SET_SHEET_PROP: u64 sheet, u32 shprop, u32 pad, value.
+pub const KAYA_APPLY_PRESENT_SHEET: u16 = 46;
+pub const KAYA_APPLY_DISMISS_SHEET: u16 = 47;
+pub const KAYA_APPLY_SET_SHEET_PROP: u16 = 48;
 pub const KAYA_APPLY_ADD_SECTION: u16 = 15;
 pub const KAYA_APPLY_SELECT_SECTION: u16 = 16;
 pub const KAYA_APPLY_SET_SECTION_PROP: u16 = 17;
@@ -644,6 +666,9 @@ const _: () = assert!(
         && KAYA_APPLY_PUSH_ENTRY == wire::APPLY_PUSH_ENTRY
         && KAYA_APPLY_POP_ENTRY == wire::APPLY_POP_ENTRY
         && KAYA_APPLY_SET_ENTRY_PROP == wire::APPLY_SET_ENTRY_PROP
+        && KAYA_APPLY_PRESENT_SHEET == wire::APPLY_PRESENT_SHEET
+        && KAYA_APPLY_DISMISS_SHEET == wire::APPLY_DISMISS_SHEET
+        && KAYA_APPLY_SET_SHEET_PROP == wire::APPLY_SET_SHEET_PROP
         && KAYA_APPLY_ADD_SECTION == wire::APPLY_ADD_SECTION
         && KAYA_APPLY_SELECT_SECTION == wire::APPLY_SELECT_SECTION
         && KAYA_APPLY_SET_SECTION_PROP == wire::APPLY_SET_SECTION_PROP
@@ -847,6 +872,14 @@ pub const KAYA_WPROP_REMEMBER_FRAME: u32 = 10;
 pub const KAYA_EPROP_TITLE: u32 = 1;
 pub const KAYA_EPROP_INTERCEPT_BACK: u32 = 2;
 
+/// Sheet properties (spec::SHEET_PROPS; docs/sheet-plan.md §3) and the
+/// detent vocabulary (spec enum "detent").
+pub const KAYA_SHPROP_TITLE: u32 = 1;
+pub const KAYA_SHPROP_INTERCEPT_DISMISS: u32 = 2;
+pub const KAYA_SHPROP_DETENT: u32 = 3;
+pub const KAYA_DETENT_MEDIUM: u32 = 1;
+pub const KAYA_DETENT_LARGE: u32 = 2;
+
 /// Section properties (spec::SECTION_PROPS) — the third typed surface
 /// table (DESIGN.md, Sections). `icon` rides the blob channel.
 pub const KAYA_SPROP_TITLE: u32 = 1;
@@ -955,7 +988,7 @@ const _: () = assert!(
 // Completeness for the occurrence exports (docs/traps.md): a new spec
 // occurrence trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::SPEC.occurrence.len() == 30,
+    crate::spec::SPEC.occurrence.len() == 32,
     "spec occurrences grew: export the new KAYA_OCCURRENCE_* above, extend the pin, and \
      bump this count"
 );
@@ -1280,6 +1313,16 @@ const _: () = assert!(
     crate::spec::ENTRY_PROPS.len() == 2,
     "spec::ENTRY_PROPS grew: export the new KAYA_EPROP_* above, extend the pin, and bump \
      this count"
+);
+const _: () = assert!(
+    crate::spec::SHEET_PROPS.len() == 3
+        && KAYA_SHPROP_TITLE == wire::SHPROP_TITLE
+        && KAYA_SHPROP_INTERCEPT_DISMISS == wire::SHPROP_INTERCEPT_DISMISS
+        && KAYA_SHPROP_DETENT == wire::SHPROP_DETENT
+        && KAYA_DETENT_MEDIUM == wire::DETENT_MEDIUM
+        && KAYA_DETENT_LARGE == wire::DETENT_LARGE,
+    "spec::SHEET_PROPS grew or moved: export the new KAYA_SHPROP_* above, extend the pin, \
+     and bump this count"
 );
 
 /// set_property sources. SOURCE_ELEMENT is valid only inside a template.
@@ -2236,6 +2279,60 @@ pub extern "C" fn kaya_emit_back_requested(entry: u64) {
     state()
         .ring
         .push_record(ring::REC_BACK_REQUESTED, &entry.to_le_bytes());
+}
+
+pub(crate) fn sheet_user_dismissed(sheet: u64) {
+    PRESENTATION_SCENE
+        .lock()
+        .unwrap()
+        .as_mut()
+        .expect("kaya: sheet dismissed before any transaction was applied")
+        .user_dismissed(crate::protocol::WindowId(sheet));
+    if let Some(sink) = PRESENTATION_SINK.lock().unwrap().as_ref() {
+        sink.send(crate::protocol::Occurrence::SheetDismissed {
+            sheet: crate::protocol::WindowId(sheet),
+        });
+        return;
+    }
+    state()
+        .ring
+        .push_record(ring::REC_SHEET_DISMISSED, &sheet.to_le_bytes());
+}
+
+/// Presentation side: the user's cancel path closed a sheet natively
+/// (post-fact); the core forgets the tree inside this call. Exported
+/// everywhere, answerable where a guest-language presentation layer exists
+/// (the entry_popped shape, docs/sheet-plan.md §3).
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_emit_sheet_dismissed(sheet: u64) {
+    #[cfg(any(target_os = "macos", target_os = "ios", target_os = "android"))]
+    {
+        sheet_user_dismissed(sheet);
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "android")))]
+    {
+        let _ = sheet;
+        panic!(
+            "kaya: kaya_emit_sheet_dismissed is the interpreter platforms' entry — \
+             this host's backend reconciles dismissals on its own sink"
+        );
+    }
+}
+
+/// Presentation side: the user drove the cancel path on a sheet whose
+/// intercept_dismiss is armed. Nothing has gone; the app answers with
+/// dismiss_sheet if it agrees (the back_requested veto class).
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_emit_dismiss_requested(sheet: u64) {
+    if let Some(sink) = PRESENTATION_SINK.lock().unwrap().as_ref() {
+        sink.send(crate::protocol::Occurrence::DismissRequested {
+            sheet: crate::protocol::WindowId(sheet),
+        });
+        return;
+    }
+    state()
+        .ring
+        .push_record(ring::REC_DISMISS_REQUESTED, &sheet.to_le_bytes());
 }
 
 /// THE PICKED-FILE TABLE. Handles are integers into this map, and the map
@@ -4787,6 +4884,9 @@ mod tests {
             ("set_rich_text", KAYA_TX_SET_RICH_TEXT),
             ("apply_edit", KAYA_TX_APPLY_EDIT),
             ("format_text", KAYA_TX_FORMAT_TEXT),
+            ("present_sheet", KAYA_TX_PRESENT_SHEET),
+            ("dismiss_sheet", KAYA_TX_DISMISS_SHEET),
+            ("set_sheet_prop", KAYA_TX_SET_SHEET_PROP),
         ];
         let apply = [
             ("create", KAYA_APPLY_CREATE),
@@ -4832,6 +4932,9 @@ mod tests {
             ("set_rich_text", KAYA_APPLY_SET_RICH_TEXT),
             ("apply_edit", KAYA_APPLY_APPLY_EDIT),
             ("format_text", KAYA_APPLY_FORMAT_TEXT),
+            ("present_sheet", KAYA_APPLY_PRESENT_SHEET),
+            ("dismiss_sheet", KAYA_APPLY_DISMISS_SHEET),
+            ("set_sheet_prop", KAYA_APPLY_SET_SHEET_PROP),
         ];
         for (spec, consts) in [(crate::spec::SPEC.tx, &tx[..]), (crate::spec::SPEC.apply, &apply[..])] {
             assert_eq!(

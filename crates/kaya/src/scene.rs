@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::protocol::{
-    ApplyOp, CollectionId, CommandKind, EntryProp, Key, MenuItemId, MenuItemKind, MenuProp,
+    ApplyOp, CollectionId, CommandKind, EntryProp, SheetProp, Key, MenuItemId, MenuItemKind, MenuProp,
     NativeRange, NativeRun, Occurrence, Prop, PropValue, Record, SectionProp, SignalId,
     TextRange, TextRun,
     Transaction, TxOp, UndoDelta, UndoEntry, UndoOrder, Value, ValueType, WidgetId, WidgetKind,
@@ -623,6 +623,9 @@ fn undo_verdict(op: &TxOp) -> UndoVerdict {
         TxOp::PushEntry { .. } => UndoVerdict::Refused("push_entry"),
         TxOp::PopEntry { .. } => UndoVerdict::Refused("pop_entry"),
         TxOp::SetEntryProp { .. } => UndoVerdict::Refused("set_entry_prop"),
+        TxOp::PresentSheet { .. } => UndoVerdict::Refused("present_sheet"),
+        TxOp::DismissSheet { .. } => UndoVerdict::Refused("dismiss_sheet"),
+        TxOp::SetSheetProp { .. } => UndoVerdict::Refused("set_sheet_prop"),
         TxOp::AddSection { .. } => UndoVerdict::Refused("add_section"),
         TxOp::SelectSection { .. } => UndoVerdict::Refused("select_section"),
         TxOp::SetSectionProp { .. } => UndoVerdict::Refused("set_section_prop"),
@@ -695,6 +698,12 @@ pub(crate) struct Scene {
     /// user pops reconcile through `user_popped`.
     nav_stacks: HashMap<WindowId, Vec<WindowId>>,
     entry_bindings: HashMap<SignalId, Vec<(WindowId, EntryProp)>>,
+    /// Live sheets: sheet surface id -> the surface it is presented over,
+    /// a window or another sheet (docs/sheet-plan.md §1), and each
+    /// parent's one live child. Sheets share the surface namespace.
+    sheets: HashMap<WindowId, WindowId>,
+    child_sheet: HashMap<WindowId, WindowId>,
+    sheet_bindings: HashMap<SignalId, Vec<(WindowId, SheetProp)>>,
     /// Live sections: section surface id -> the window whose section
     /// set holds it, sharing the surface namespace with windows and
     /// entries. APPEND-ONLY by design: this grammar has no destruction
@@ -1633,6 +1642,20 @@ fn check_entry_prop_value(prop: EntryProp, value: &Value) {
         (EntryProp::Title, Value::Str(_)) => {}
         (EntryProp::InterceptBack, Value::Bool(_)) => {}
         (p, v) => panic!("kaya: entry property {p:?} rejects value {v:?}"),
+    }
+}
+
+fn check_sheet_prop_value(prop: SheetProp, value: &Value) {
+    match (prop, value) {
+        (SheetProp::Title, Value::Str(_)) => {}
+        (SheetProp::InterceptDismiss, Value::Bool(_)) => {}
+        // The enum's closed set (spec enum "detent"): the wire carries I64.
+        (SheetProp::Detent, Value::I64(v)) => assert!(
+            *v == i64::from(crate::wire::DETENT_MEDIUM)
+                || *v == i64::from(crate::wire::DETENT_LARGE),
+            "kaya: sheet property Detent rejects value {v:?} — medium or large"
+        ),
+        (p, v) => panic!("kaya: sheet property {p:?} rejects value {v:?}"),
     }
 }
 
@@ -2889,6 +2912,10 @@ impl Scene {
                         }
                     }
                     self.selected_section.remove(&window);
+                    // ... and its sheet chain: parent-bound, it goes with the window.
+                    if let Some(child) = self.child_sheet.get(&window).copied() {
+                        self.forget_sheet(child);
+                    }
                     // ... and its command catalog: the chords free with
                     // the window (window ids are recreatable, so a fresh
                     // window must not inherit a dead catalog's
@@ -3268,6 +3295,82 @@ impl Scene {
                     self.mounted_windows.remove(&entry);
                     out.push(ApplyOp::PopEntry { window });
                 }
+                TxOp::PresentSheet { parent, sheet } => {
+                    // A window or a LIVE SHEET: modal-over-modal is a
+                    // chain, one child per parent (docs/sheet-plan.md §1).
+                    assert!(
+                        parent == crate::protocol::DEFAULT_WINDOW
+                            || self.windows.contains(&parent)
+                            || self.sheets.contains_key(&parent),
+                        "kaya: present_sheet over unknown surface {parent:?} — a live \
+                         window or a live sheet (0 is the primary)"
+                    );
+                    assert!(
+                        sheet.0 != 0,
+                        "kaya: surface id 0 is the primary window, not a sheet"
+                    );
+                    assert!(
+                        sheet.0 & INTERNAL_BIT == 0,
+                        "kaya: sheet id {sheet:?} uses the reserved internal bit"
+                    );
+                    assert!(
+                        !self.windows.contains(&sheet)
+                            && !self.nav_entries.contains_key(&sheet)
+                            && !self.section_of.contains_key(&sheet)
+                            && !self.sheets.contains_key(&sheet),
+                        "kaya: surface id {sheet:?} already exists"
+                    );
+                    assert!(
+                        !self.child_sheet.contains_key(&parent),
+                        "kaya: surface {parent:?} already has a live sheet — one sheet \
+                         per parent; dismiss it first"
+                    );
+                    self.sheets.insert(sheet, parent);
+                    self.child_sheet.insert(parent, sheet);
+                    out.push(ApplyOp::PresentSheet { parent, sheet });
+                }
+                TxOp::DismissSheet { sheet } => {
+                    assert!(
+                        self.sheets.contains_key(&sheet),
+                        "kaya: dismiss_sheet of unknown sheet {sheet:?}"
+                    );
+                    self.forget_sheet(sheet);
+                    out.push(ApplyOp::DismissSheet { sheet });
+                }
+                TxOp::SetSheetProp { sheet, prop, value } => {
+                    assert!(
+                        self.sheets.contains_key(&sheet),
+                        "kaya: sheet prop on unknown sheet {sheet:?} — present_sheet first"
+                    );
+                    match value {
+                        PropValue::Const(v) => {
+                            check_sheet_prop_value(prop, &v);
+                            out.push(ApplyOp::SetSheetProp { sheet, prop, value: v })
+                        }
+                        PropValue::Signal(id) => {
+                            let current = self
+                                .signals
+                                .get(&id)
+                                .unwrap_or_else(|| {
+                                    panic!("kaya: binding to unknown signal {id:?}")
+                                })
+                                .clone();
+                            check_sheet_prop_value(prop, &current);
+                            self.sheet_bindings
+                                .entry(id)
+                                .or_default()
+                                .push((sheet, prop));
+                            out.push(ApplyOp::SetSheetProp {
+                                sheet,
+                                prop,
+                                value: current,
+                            });
+                        }
+                        PropValue::Element { .. } => {
+                            panic!("kaya: sheet properties cannot bind element sources")
+                        }
+                    }
+                }
                 TxOp::AddSection { window, section } => {
                     // No capability gate — every platform has a
                     // sections idiom (the push_entry stance).
@@ -3540,10 +3643,11 @@ impl Scene {
                         window == crate::protocol::DEFAULT_WINDOW
                             || self.windows.contains(&window)
                             || self.nav_entries.contains_key(&window)
-                            || self.section_of.contains_key(&window),
+                            || self.section_of.contains_key(&window)
+                            || self.sheets.contains_key(&window),
                         "kaya: mount into unknown surface {window:?} — \
-                         create_window, push_entry, or add_section first \
-                         (0 is the primary)"
+                         create_window, push_entry, add_section or present_sheet \
+                         first (0 is the primary)"
                     );
                     assert!(
                         self.widgets.contains_key(&root),
@@ -4350,6 +4454,15 @@ impl Scene {
                 for (entry, prop) in bound {
                     out.push(ApplyOp::SetEntryProp {
                         entry: *entry,
+                        prop: *prop,
+                        value: value.clone(),
+                    });
+                }
+            }
+            if let Some(bound) = self.sheet_bindings.get(&id) {
+                for (sheet, prop) in bound {
+                    out.push(ApplyOp::SetSheetProp {
+                        sheet: *sheet,
                         prop: *prop,
                         value: value.clone(),
                     });
@@ -5659,6 +5772,28 @@ impl Scene {
             "kaya: user pop of {entry:?} but the top of {window:?}'s stack is {top:?}"
         );
         self.mounted_windows.remove(&entry);
+    }
+
+    /// Forget a sheet and every sheet chained over it: the trees go the
+    /// way a popped entry's does, ids never reused.
+    fn forget_sheet(&mut self, sheet: WindowId) {
+        if let Some(child) = self.child_sheet.get(&sheet).copied() {
+            self.forget_sheet(child);
+        }
+        if let Some(parent) = self.sheets.remove(&sheet) {
+            self.child_sheet.remove(&parent);
+        }
+        self.mounted_windows.remove(&sheet);
+    }
+
+    /// The user's cancel path closed a sheet natively (post-fact): the
+    /// core reconciles, then the caller delivers the occurrence.
+    pub(crate) fn user_dismissed(&mut self, sheet: WindowId) {
+        assert!(
+            self.sheets.contains_key(&sheet),
+            "kaya: user dismissal of unknown sheet {sheet:?}"
+        );
+        self.forget_sheet(sheet);
     }
 
     // --- Menus -----------------------------------------------------------
@@ -11438,6 +11573,171 @@ mod tests {
             key: v("quiet"),
         }]);
         assert!(ops.is_empty());
+    }
+
+    // --- Sheets: the root-hosting modal (docs/sheet-plan.md) ---
+
+    #[test]
+    fn present_mount_dismiss_lifecycle() {
+        use crate::protocol::SheetProp;
+        let mut scene = Scene::new();
+        let ops = scene.apply(vec![
+            TxOp::PresentSheet { parent: DEFAULT_WINDOW, sheet: WindowId(11) },
+            TxOp::SetSheetProp {
+                sheet: WindowId(11),
+                prop: SheetProp::Title,
+                value: PropValue::Const(v("new task")),
+            },
+            TxOp::SetSheetProp {
+                sheet: WindowId(11),
+                prop: SheetProp::Detent,
+                value: PropValue::Const(Value::I64(i64::from(crate::wire::DETENT_MEDIUM))),
+            },
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Label },
+            TxOp::Mount { window: WindowId(11), root: WidgetId(1) },
+        ]);
+        assert_eq!(
+            format!("{ops:?}"),
+            format!(
+                "{:?}",
+                vec![
+                    ApplyOp::PresentSheet { parent: DEFAULT_WINDOW, sheet: WindowId(11) },
+                    ApplyOp::SetSheetProp {
+                        sheet: WindowId(11),
+                        prop: SheetProp::Title,
+                        value: v("new task"),
+                    },
+                    ApplyOp::SetSheetProp {
+                        sheet: WindowId(11),
+                        prop: SheetProp::Detent,
+                        value: Value::I64(i64::from(crate::wire::DETENT_MEDIUM)),
+                    },
+                    ApplyOp::Create { id: WidgetId(1), kind: WidgetKind::Label, tag: None },
+                    ApplyOp::Mount { window: WindowId(11), root: WidgetId(1) },
+                ]
+            )
+        );
+        let ops = scene.apply(vec![TxOp::DismissSheet { sheet: WindowId(11) }]);
+        assert_eq!(
+            format!("{ops:?}"),
+            format!("{:?}", vec![ApplyOp::DismissSheet { sheet: WindowId(11) }])
+        );
+        let err = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            scene.apply(vec![TxOp::Mount { window: WindowId(11), root: WidgetId(1) }]);
+        }));
+        assert!(err.is_err(), "mount into a dismissed sheet must fail loudly");
+    }
+
+    #[test]
+    fn a_sheet_chains_over_a_sheet_and_dismissal_takes_the_child() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::PresentSheet { parent: DEFAULT_WINDOW, sheet: WindowId(11) },
+            TxOp::PresentSheet { parent: WindowId(11), sheet: WindowId(12) },
+        ]);
+        let ops = scene.apply(vec![TxOp::DismissSheet { sheet: WindowId(11) }]);
+        assert_eq!(
+            format!("{ops:?}"),
+            format!("{:?}", vec![ApplyOp::DismissSheet { sheet: WindowId(11) }])
+        );
+        let err = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            scene.apply(vec![TxOp::DismissSheet { sheet: WindowId(12) }]);
+        }));
+        assert!(err.is_err(), "the chained child must be gone with its parent");
+        scene.apply(vec![TxOp::PresentSheet { parent: DEFAULT_WINDOW, sheet: WindowId(13) }]);
+    }
+
+    #[test]
+    #[should_panic(expected = "already has a live sheet")]
+    fn a_second_sheet_over_one_parent_is_refused() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::PresentSheet { parent: DEFAULT_WINDOW, sheet: WindowId(11) },
+            TxOp::PresentSheet { parent: DEFAULT_WINDOW, sheet: WindowId(12) },
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "present_sheet over unknown surface")]
+    fn a_sheet_over_an_unknown_surface_is_refused() {
+        let mut scene = Scene::new();
+        scene.apply(vec![TxOp::PresentSheet { parent: WindowId(9), sheet: WindowId(11) }]);
+    }
+
+    #[test]
+    #[should_panic(expected = "sheet prop on unknown sheet")]
+    fn sheet_prop_on_unknown_sheet_fails_loudly() {
+        use crate::protocol::SheetProp;
+        let mut scene = Scene::new();
+        scene.apply(vec![TxOp::SetSheetProp {
+            sheet: WindowId(11),
+            prop: SheetProp::Title,
+            value: PropValue::Const(v("ghost")),
+        }]);
+    }
+
+    #[test]
+    #[should_panic(expected = "rejects value")]
+    fn detent_rejects_an_unknown_height() {
+        use crate::protocol::SheetProp;
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::PresentSheet { parent: DEFAULT_WINDOW, sheet: WindowId(11) },
+            TxOp::SetSheetProp {
+                sheet: WindowId(11),
+                prop: SheetProp::Detent,
+                value: PropValue::Const(Value::I64(7)),
+            },
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "dismiss_sheet of unknown sheet")]
+    fn dismiss_of_unknown_sheet_fails_loudly() {
+        let mut scene = Scene::new();
+        scene.apply(vec![TxOp::DismissSheet { sheet: WindowId(11) }]);
+    }
+
+    #[test]
+    fn a_user_dismissal_forgets_the_chain_and_frees_the_parent() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::PresentSheet { parent: DEFAULT_WINDOW, sheet: WindowId(11) },
+            TxOp::PresentSheet { parent: WindowId(11), sheet: WindowId(12) },
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Label },
+            TxOp::Mount { window: WindowId(12), root: WidgetId(1) },
+        ]);
+        scene.user_dismissed(WindowId(11));
+        let err = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            scene.apply(vec![
+                TxOp::CreateWidget { id: WidgetId(2), kind: WidgetKind::Label },
+                TxOp::Mount { window: WindowId(12), root: WidgetId(2) },
+            ]);
+        }));
+        assert!(err.is_err(), "the chained child must be gone with its parent");
+        scene.apply(vec![TxOp::PresentSheet { parent: DEFAULT_WINDOW, sheet: WindowId(13) }]);
+    }
+
+    #[test]
+    fn destroying_a_window_takes_its_sheet_chain() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWindow { window: WindowId(7) },
+            TxOp::PresentSheet { parent: WindowId(7), sheet: WindowId(11) },
+            TxOp::PresentSheet { parent: WindowId(11), sheet: WindowId(12) },
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Label },
+            TxOp::Mount { window: WindowId(12), root: WidgetId(1) },
+        ]);
+        scene.apply(vec![TxOp::DestroyWindow { window: WindowId(7) }]);
+        for (gone, root) in [(WindowId(11), WidgetId(2)), (WindowId(12), WidgetId(3))] {
+            let err = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                scene.apply(vec![
+                    TxOp::CreateWidget { id: root, kind: WidgetKind::Label },
+                    TxOp::Mount { window: gone, root },
+                ]);
+            }));
+            assert!(err.is_err(), "sheet {gone:?} must go with its window");
+        }
     }
 
     // --- Navigation: the serial stack (DESIGN.md, Navigation) ---

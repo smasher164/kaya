@@ -12339,6 +12339,39 @@ every guest compile carries `-I bindings/swift/CKaya`; what the internal
 import buys is a compile-time rule: a `public` signature naming a C type
 is refused by name.
 
+## A SwiftUI sheet's Esc reaches `onExitCommand` only through a focused responder, and a nil handler beside a field swallows it (measured 2026-09-21)
+
+The sheet arm's first draft put `.onExitCommand(perform: armed ? handler :
+nil)` on the sheet's content, and the scene's first `dismiss_sheet` left
+the sheet up. Two probes on the U2 shape
+(docs/measurements/sheet-probes-2026-09-21.md, U2b): a nil handler alone
+lets the platform dismiss, a `TextField` alone lets it dismiss, the two
+together consume Esc with nothing done; and a real handler on an ARMED
+sheet fires only when the field editor is first responder, never when the
+sheet window itself is. So a cancel arm that rides the responder chain
+depends on what has focus, which no scene pins. The arm reads Esc for an
+armed sheet through a local `NSEvent` monitor on the topmost sheet window
+and its parent chain, and leaves an unarmed sheet's Esc to the platform.
+
+## A SwiftUI sheet presented into its own dismissal keeps the old content alive (measured on the mac lane 2026-09-21)
+
+The sheet host's first draft derived `.sheet(isPresented:)` from the model
+alone. The sheet scene's second present of the SAME surface id came
+one step after the first sheet's Esc, and by hand it was green three
+times; under the lane's pool the leg went red at `expect_sheets 1` with
+the bundle's diag lines telling it: the new sheet window registered at
++796 ms, the OLD sheet's accessor re-registered its dead window 6 ms
+later, and sixty seconds on the child sheet registered TWICE, once from
+each live copy of the parent's content. SwiftUI had not finished tearing
+the first presentation down when the binding went true again, so both
+contents lived, and the platform's own count read zero while a sheet was
+on screen. The host now presents ITEMS (the sheet id under a per-present
+token, so a re-presented id is a new item), holds one presentation per
+host and raises the next only from the last one's `onDismiss`; the
+accessor refuses to let a window with no sheet parent shadow a live one.
+The lane is the reproduction, not the hand run: a pool's timing is what
+closes the window between dismissal and the next present.
+
 ## A matrix's printed log path can point at an older run (measured 2026-09-19)
 
 `keep_lane_log` in tools/validate-all.py copied successful lanes into

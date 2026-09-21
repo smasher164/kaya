@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x3854759c1c5d028c
+	SpecHash uint64 = 0xde79316215dcaa9e
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -121,6 +121,11 @@ const (
 	WpropRememberFrame = 10
 	EpropTitle = 1
 	EpropInterceptBack = 2
+	ShpropTitle = 1
+	ShpropInterceptDismiss = 2
+	ShpropDetent = 3
+	DetentMedium = 1
+	DetentLarge = 2
 	SpropTitle = 1
 	SpropIcon = 2
 	SpropSymbol = 3
@@ -281,6 +286,9 @@ const (
 	txSetRichText = 55
 	txApplyEdit = 56
 	txFormatText = 57
+	txPresentSheet = 58
+	txDismissSheet = 59
+	txSetSheetProp = 60
 	applyCreate = 1
 	applySetProp = 2
 	applyAddChild = 3
@@ -324,6 +332,9 @@ const (
 	applySetRichText = 43
 	applyApplyEdit = 44
 	applyFormatText = 45
+	applyPresentSheet = 46
+	applyDismissSheet = 47
+	applySetSheetProp = 48
 	occButtonClicked = 1
 	occTextChanged = 2
 	occToggled = 3
@@ -354,6 +365,8 @@ const (
 	occLinkOpened = 28
 	occTextEdited = 29
 	occTextFormatted = 30
+	occSheetDismissed = 31
+	occDismissRequested = 32
 )
 
 func (s SectionsPresentation) String() string {
@@ -1110,6 +1123,30 @@ func TxFormatText(widgetId uint64, removed uint32, ranged uint32, start uint64, 
 	b = binary.LittleEndian.AppendUint64(b, start)
 	b = binary.LittleEndian.AppendUint64(b, stop)
 	b = encodeValues(b, attr)
+	return endRecord(b)
+}
+
+// TxPresentSheet: Request a sheet over `parent` — a window (0 = the primary) or a live sheet, so modal-over-modal is a chain (docs/sheet-plan.md §1). `sheet` is a guest-allocated surface id in the one namespace windows and entries share. Materializes hidden; mounting a root into it presents it. A second live sheet over the same parent is refused at the root, as a second alert is; no capability gate, every host has one.
+func TxPresentSheet(parent uint64, sheet uint64) []byte {
+	b := beginRecord(txPresentSheet)
+	b = binary.LittleEndian.AppendUint64(b, parent)
+	b = binary.LittleEndian.AppendUint64(b, sheet)
+	return endRecord(b)
+}
+
+// TxDismissSheet: Dismiss a live sheet and forget its tree, exactly as pop_entry does, its child sheets with it; also the dismiss-veto grammar's confirmation. An unknown or already-gone sheet is a scene error.
+func TxDismissSheet(sheet uint64) []byte {
+	b := beginRecord(txDismissSheet)
+	b = binary.LittleEndian.AppendUint64(b, sheet)
+	return endRecord(b)
+}
+
+// TxSetSheetProp: Bind a sheet property (SHEET_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — sheets are not collection elements.
+func TxSetSheetProp(sheet uint64, prop uint32, source uint32) []byte {
+	b := beginRecord(txSetSheetProp)
+	b = binary.LittleEndian.AppendUint64(b, sheet)
+	b = binary.LittleEndian.AppendUint32(b, prop)
+	b = binary.LittleEndian.AppendUint32(b, source)
 	return endRecord(b)
 }
 
@@ -2881,7 +2918,7 @@ func parseValue(rec []byte, at int) (any, int) {
 // false for pad/unknown records.
 func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload any, ok bool) {
 	kind = binary.LittleEndian.Uint16(rec[4:])
-	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected && kind != occMenuActivated && kind != occMenuToggled && kind != occMenuValueChanged && kind != occFileDialogResult && kind != occClipboardResult && kind != occPasted && kind != occUndone && kind != occRedone && kind != occSortRequested && kind != occDrawRequested && kind != occTick && kind != occDropped && kind != occDragEnded && kind != occDateChanged && kind != occTimeChanged && kind != occValueCommitted && kind != occNotificationResult && kind != occLinkOpened && kind != occTextEdited && kind != occTextFormatted {
+	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected && kind != occMenuActivated && kind != occMenuToggled && kind != occMenuValueChanged && kind != occFileDialogResult && kind != occClipboardResult && kind != occPasted && kind != occUndone && kind != occRedone && kind != occSortRequested && kind != occDrawRequested && kind != occTick && kind != occDropped && kind != occDragEnded && kind != occDateChanged && kind != occTimeChanged && kind != occValueCommitted && kind != occNotificationResult && kind != occLinkOpened && kind != occTextEdited && kind != occTextFormatted && kind != occSheetDismissed && kind != occDismissRequested {
 		return 0, 0, nil, nil, false
 	}
 	id = binary.LittleEndian.Uint64(rec[8:])
@@ -3024,7 +3061,7 @@ func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload an
 		name, _ := label.(string)
 		return kind, id, nil, undoReport{label: name, delta: delta}, true
 	}
-	if kind == occCloseRequested || kind == occWindowClosed || kind == occEntryPopped || kind == occBackRequested {
+	if kind == occCloseRequested || kind == occWindowClosed || kind == occEntryPopped || kind == occBackRequested || kind == occSheetDismissed || kind == occDismissRequested {
 		// Surface lifecycle records carry the surface id alone —
 		// no key path, no payload (derived from the record shapes).
 		return kind, id, nil, nil, true

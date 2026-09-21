@@ -174,6 +174,11 @@ pub struct KayaHostApi {
     /// top entry's intercept_back is armed and nothing popped.
     pub emit_entry_popped: extern "C" fn(u64),
     pub emit_back_requested: extern "C" fn(u64),
+    /// sheet_dismissed after the user's cancel path closed a sheet natively
+    /// (the core forgets the chain inside this call); dismiss_requested when
+    /// the sheet's intercept_dismiss is armed and nothing went.
+    pub emit_sheet_dismissed: extern "C" fn(u64),
+    pub emit_dismiss_requested: extern "C" fn(u64),
     /// The user switched sections through the platform switcher
     /// (post-fact). A programmatic select_section never arrives here.
     pub emit_section_selected: extern "C" fn(u64, u64),
@@ -430,6 +435,8 @@ pub(crate) fn run() -> i32 {
         emit_save_dialog_result: crate::capi::kaya_emit_save_dialog_result,
         emit_entry_popped: crate::capi::kaya_emit_entry_popped,
         emit_back_requested: crate::capi::kaya_emit_back_requested,
+        emit_sheet_dismissed: crate::capi::kaya_emit_sheet_dismissed,
+        emit_dismiss_requested: crate::capi::kaya_emit_dismiss_requested,
         emit_section_selected: crate::capi::kaya_emit_section_selected,
         emit_menu_activated: crate::capi::kaya_emit_menu_activated,
         emit_menu_toggled: crate::capi::kaya_emit_menu_toggled,

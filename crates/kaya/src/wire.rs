@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use crate::protocol::{
-    EntryProp, MenuItemId, MenuItemKind, MenuProp, SectionProp, WindowProp,
+    EntryProp, MenuItemId, MenuItemKind, MenuProp, SectionProp, SheetProp, WindowProp,
     AlertChoice, AlertId, AlertSpec,
     ApplyOp, Blob, CollectionId, CommandKind, Occurrence, Path, Prop, PropValue, Record, SignalId,
     NativeRun, TemplateNodeId, TextRange, TextRun, Transaction, TxOp, Value, ValueType,
@@ -44,6 +44,9 @@ pub(crate) const TX_SHOW_ALERT: u16 = 21;
 pub(crate) const TX_PUSH_ENTRY: u16 = 22;
 pub(crate) const TX_POP_ENTRY: u16 = 23;
 pub(crate) const TX_SET_ENTRY_PROP: u16 = 24;
+pub(crate) const TX_PRESENT_SHEET: u16 = 58;
+pub(crate) const TX_DISMISS_SHEET: u16 = 59;
+pub(crate) const TX_SET_SHEET_PROP: u16 = 60;
 pub(crate) const TX_ADD_SECTION: u16 = 25;
 pub(crate) const TX_SELECT_SECTION: u16 = 26;
 pub(crate) const TX_SET_SECTION_PROP: u16 = 27;
@@ -137,6 +140,9 @@ pub(crate) const APPLY_PRESENT_ALERT: u16 = 11;
 pub(crate) const APPLY_PUSH_ENTRY: u16 = 12;
 pub(crate) const APPLY_POP_ENTRY: u16 = 13;
 pub(crate) const APPLY_SET_ENTRY_PROP: u16 = 14;
+pub(crate) const APPLY_PRESENT_SHEET: u16 = 46;
+pub(crate) const APPLY_DISMISS_SHEET: u16 = 47;
+pub(crate) const APPLY_SET_SHEET_PROP: u16 = 48;
 pub(crate) const APPLY_ADD_SECTION: u16 = 15;
 pub(crate) const APPLY_SELECT_SECTION: u16 = 16;
 pub(crate) const APPLY_SET_SECTION_PROP: u16 = 17;
@@ -494,6 +500,14 @@ pub(crate) const PANES_THREE: u32 = 3;
 /// DESIGN.md, Navigation).
 pub(crate) const EPROP_TITLE: u32 = 1;
 pub(crate) const EPROP_INTERCEPT_BACK: u32 = 2;
+
+/// Sheet property ids (spec::SHEET_PROPS) and the detent vocabulary
+/// (spec enum "detent"; docs/sheet-plan.md §3).
+pub(crate) const SHPROP_TITLE: u32 = 1;
+pub(crate) const SHPROP_INTERCEPT_DISMISS: u32 = 2;
+pub(crate) const SHPROP_DETENT: u32 = 3;
+pub(crate) const DETENT_MEDIUM: u32 = 1;
+pub(crate) const DETENT_LARGE: u32 = 2;
 
 /// The alert_choice enum's wire values (spec enum "alert_choice"):
 /// action indices, and the deliberately-not-an-index cancel sentinel
@@ -1013,6 +1027,23 @@ fn entry_prop_raw(p: EntryProp) -> u32 {
     match p {
         EntryProp::Title => EPROP_TITLE,
         EntryProp::InterceptBack => EPROP_INTERCEPT_BACK,
+    }
+}
+
+fn sheet_prop(raw: u32) -> SheetProp {
+    match raw {
+        SHPROP_TITLE => SheetProp::Title,
+        SHPROP_INTERCEPT_DISMISS => SheetProp::InterceptDismiss,
+        SHPROP_DETENT => SheetProp::Detent,
+        other => panic!("kaya: unknown sheet property {other}"),
+    }
+}
+
+fn sheet_prop_raw(p: SheetProp) -> u32 {
+    match p {
+        SheetProp::Title => SHPROP_TITLE,
+        SheetProp::InterceptDismiss => SHPROP_INTERCEPT_DISMISS,
+        SheetProp::Detent => SHPROP_DETENT,
     }
 }
 
@@ -1650,6 +1681,27 @@ pub fn decode_transaction_with_blobs(
                     multiple,
                     filters,
                 })
+            }
+            TX_PRESENT_SHEET => TxOp::PresentSheet {
+                parent: WindowId(r.u64()),
+                sheet: WindowId(r.u64()),
+            },
+            TX_DISMISS_SHEET => TxOp::DismissSheet {
+                sheet: WindowId(r.u64()),
+            },
+            TX_SET_SHEET_PROP => {
+                let sheet = WindowId(r.u64());
+                let p = sheet_prop(r.u32());
+                let source = r.u32();
+                let value = match source {
+                    SOURCE_CONST => PropValue::Const(r.value()),
+                    SOURCE_SIGNAL => PropValue::Signal(SignalId(r.u64())),
+                    SOURCE_ELEMENT => {
+                        panic!("kaya: sheet properties cannot bind element sources")
+                    }
+                    other => panic!("kaya: unknown property source {other}"),
+                };
+                TxOp::SetSheetProp { sheet, prop: p, value }
             }
             TX_PUSH_ENTRY => TxOp::PushEntry {
                 window: WindowId(r.u64()),
@@ -3221,6 +3273,21 @@ impl Writer {
                 b.extend_from_slice(&command_raw(*command).to_le_bytes());
                 b.extend_from_slice(&0u32.to_le_bytes());
             }),
+            ApplyOp::PresentSheet { parent, sheet } => self.record(APPLY_PRESENT_SHEET, |b, _| {
+                b.extend_from_slice(&parent.0.to_le_bytes());
+                b.extend_from_slice(&sheet.0.to_le_bytes());
+            }),
+            ApplyOp::DismissSheet { sheet } => self.record(APPLY_DISMISS_SHEET, |b, _| {
+                b.extend_from_slice(&sheet.0.to_le_bytes());
+            }),
+            ApplyOp::SetSheetProp { sheet, prop, value } => {
+                self.record(APPLY_SET_SHEET_PROP, |b, blobs| {
+                    b.extend_from_slice(&sheet.0.to_le_bytes());
+                    b.extend_from_slice(&sheet_prop_raw(*prop).to_le_bytes());
+                    b.extend_from_slice(&0u32.to_le_bytes());
+                    write_value(b, value, blobs);
+                })
+            }
             ApplyOp::PushEntry { window, entry } => self.record(APPLY_PUSH_ENTRY, |b, _| {
                 b.extend_from_slice(&window.0.to_le_bytes());
                 b.extend_from_slice(&entry.0.to_le_bytes());
@@ -3724,6 +3791,32 @@ impl Writer {
                 b.extend_from_slice(&range.start.to_le_bytes());
                 b.extend_from_slice(&range.stop.to_le_bytes());
             }),
+            TxOp::PresentSheet { parent, sheet } => self.record(TX_PRESENT_SHEET, |b, _| {
+                b.extend_from_slice(&parent.0.to_le_bytes());
+                b.extend_from_slice(&sheet.0.to_le_bytes());
+            }),
+            TxOp::DismissSheet { sheet } => self.record(TX_DISMISS_SHEET, |b, _| {
+                b.extend_from_slice(&sheet.0.to_le_bytes());
+            }),
+            TxOp::SetSheetProp { sheet, prop, value } => {
+                self.record(TX_SET_SHEET_PROP, |b, blobs| {
+                    b.extend_from_slice(&sheet.0.to_le_bytes());
+                    b.extend_from_slice(&sheet_prop_raw(*prop).to_le_bytes());
+                    match value {
+                        PropValue::Const(v) => {
+                            b.extend_from_slice(&SOURCE_CONST.to_le_bytes());
+                            write_value(b, v, blobs);
+                        }
+                        PropValue::Signal(id) => {
+                            b.extend_from_slice(&SOURCE_SIGNAL.to_le_bytes());
+                            b.extend_from_slice(&id.0.to_le_bytes());
+                        }
+                        PropValue::Element { .. } => {
+                            panic!("kaya: sheet properties cannot bind element sources")
+                        }
+                    }
+                })
+            }
             TxOp::PushEntry { window, entry } => self.record(TX_PUSH_ENTRY, |b, _| {
                 b.extend_from_slice(&window.0.to_le_bytes());
                 b.extend_from_slice(&entry.0.to_le_bytes());

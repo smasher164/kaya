@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0x3854759c1c5d028cL;
+    public static final long SPEC_HASH = 0xde79316215dcaa9eL;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -120,6 +120,11 @@ public final class KayaWire {
     public static final int WPROP_REMEMBER_FRAME = 10;
     public static final int EPROP_TITLE = 1;
     public static final int EPROP_INTERCEPT_BACK = 2;
+    public static final int SHPROP_TITLE = 1;
+    public static final int SHPROP_INTERCEPT_DISMISS = 2;
+    public static final int SHPROP_DETENT = 3;
+    public static final int DETENT_MEDIUM = 1;
+    public static final int DETENT_LARGE = 2;
     public static final int SPROP_TITLE = 1;
     public static final int SPROP_ICON = 2;
     public static final int SPROP_SYMBOL = 3;
@@ -280,6 +285,9 @@ public final class KayaWire {
     public static final short TX_KIND_SET_RICH_TEXT = 55;
     public static final short TX_KIND_APPLY_EDIT = 56;
     public static final short TX_KIND_FORMAT_TEXT = 57;
+    public static final short TX_KIND_PRESENT_SHEET = 58;
+    public static final short TX_KIND_DISMISS_SHEET = 59;
+    public static final short TX_KIND_SET_SHEET_PROP = 60;
     public static final short APPLY_KIND_CREATE = 1;
     public static final short APPLY_KIND_SET_PROP = 2;
     public static final short APPLY_KIND_ADD_CHILD = 3;
@@ -323,6 +331,9 @@ public final class KayaWire {
     public static final short APPLY_KIND_SET_RICH_TEXT = 43;
     public static final short APPLY_KIND_APPLY_EDIT = 44;
     public static final short APPLY_KIND_FORMAT_TEXT = 45;
+    public static final short APPLY_KIND_PRESENT_SHEET = 46;
+    public static final short APPLY_KIND_DISMISS_SHEET = 47;
+    public static final short APPLY_KIND_SET_SHEET_PROP = 48;
     public static final short OCC_KIND_BUTTON_CLICKED = 1;
     public static final short OCC_KIND_TEXT_CHANGED = 2;
     public static final short OCC_KIND_TOGGLED = 3;
@@ -353,6 +364,8 @@ public final class KayaWire {
     public static final short OCC_KIND_LINK_OPENED = 28;
     public static final short OCC_KIND_TEXT_EDITED = 29;
     public static final short OCC_KIND_TEXT_FORMATTED = 30;
+    public static final short OCC_KIND_SHEET_DISMISSED = 31;
+    public static final short OCC_KIND_DISMISS_REQUESTED = 32;
 
     /** A blob value: the u64 handle from kaya_blob_register, consumed
      * by the next submit; the bytes never ride the record stream. */
@@ -978,6 +991,30 @@ public final class KayaWire {
         b.putLong(start);
         b.putLong(stop);
         encodeValues(b, attr);
+        return finish(b);
+    }
+
+    /** Request a sheet over `parent` — a window (0 = the primary) or a live sheet, so modal-over-modal is a chain (docs/sheet-plan.md §1). `sheet` is a guest-allocated surface id in the one namespace windows and entries share. Materializes hidden; mounting a root into it presents it. A second live sheet over the same parent is refused at the root, as a second alert is; no capability gate, every host has one. */
+    public static byte[] txPresentSheet(long parent, long sheet) {
+        Enc b = begin(TX_KIND_PRESENT_SHEET);
+        b.putLong(parent);
+        b.putLong(sheet);
+        return finish(b);
+    }
+
+    /** Dismiss a live sheet and forget its tree, exactly as pop_entry does, its child sheets with it; also the dismiss-veto grammar's confirmation. An unknown or already-gone sheet is a scene error. */
+    public static byte[] txDismissSheet(long sheet) {
+        Enc b = begin(TX_KIND_DISMISS_SHEET);
+        b.putLong(sheet);
+        return finish(b);
+    }
+
+    /** Bind a sheet property (SHEET_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — sheets are not collection elements. */
+    public static byte[] txSetSheetProp(long sheet, int prop, int source) {
+        Enc b = begin(TX_KIND_SET_SHEET_PROP);
+        b.putLong(sheet);
+        b.putInt(prop);
+        b.putInt(source);
         return finish(b);
     }
 
@@ -2437,7 +2474,7 @@ public final class KayaWire {
     public static Occ parseOccurrence(byte[] rec) {
         ByteBuffer b = ByteBuffer.wrap(rec).order(ByteOrder.LITTLE_ENDIAN);
         short kind = b.getShort(4);
-        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED && kind != OCC_KIND_FILE_DIALOG_RESULT && kind != OCC_KIND_CLIPBOARD_RESULT && kind != OCC_KIND_PASTED && kind != OCC_KIND_UNDONE && kind != OCC_KIND_REDONE && kind != OCC_KIND_SORT_REQUESTED && kind != OCC_KIND_DRAW_REQUESTED && kind != OCC_KIND_TICK && kind != OCC_KIND_DROPPED && kind != OCC_KIND_DRAG_ENDED && kind != OCC_KIND_DATE_CHANGED && kind != OCC_KIND_TIME_CHANGED && kind != OCC_KIND_VALUE_COMMITTED && kind != OCC_KIND_NOTIFICATION_RESULT && kind != OCC_KIND_LINK_OPENED && kind != OCC_KIND_TEXT_EDITED && kind != OCC_KIND_TEXT_FORMATTED) {
+        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED && kind != OCC_KIND_FILE_DIALOG_RESULT && kind != OCC_KIND_CLIPBOARD_RESULT && kind != OCC_KIND_PASTED && kind != OCC_KIND_UNDONE && kind != OCC_KIND_REDONE && kind != OCC_KIND_SORT_REQUESTED && kind != OCC_KIND_DRAW_REQUESTED && kind != OCC_KIND_TICK && kind != OCC_KIND_DROPPED && kind != OCC_KIND_DRAG_ENDED && kind != OCC_KIND_DATE_CHANGED && kind != OCC_KIND_TIME_CHANGED && kind != OCC_KIND_VALUE_COMMITTED && kind != OCC_KIND_NOTIFICATION_RESULT && kind != OCC_KIND_LINK_OPENED && kind != OCC_KIND_TEXT_EDITED && kind != OCC_KIND_TEXT_FORMATTED && kind != OCC_KIND_SHEET_DISMISSED && kind != OCC_KIND_DISMISS_REQUESTED) {
             return null;
         }
         long id = b.getLong(8);
@@ -2494,7 +2531,7 @@ public final class KayaWire {
         }
         // Surface lifecycle records carry the surface id alone
         // (derived from the record shapes).
-        if (kind == OCC_KIND_CLOSE_REQUESTED || kind == OCC_KIND_WINDOW_CLOSED || kind == OCC_KIND_ENTRY_POPPED || kind == OCC_KIND_BACK_REQUESTED) {
+        if (kind == OCC_KIND_CLOSE_REQUESTED || kind == OCC_KIND_WINDOW_CLOSED || kind == OCC_KIND_ENTRY_POPPED || kind == OCC_KIND_BACK_REQUESTED || kind == OCC_KIND_SHEET_DISMISSED || kind == OCC_KIND_DISMISS_REQUESTED) {
             return new Occ(kind, id, java.util.List.of(), null);
         }
         // Surface-pair records (window, section): the SECOND id

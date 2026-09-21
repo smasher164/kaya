@@ -118,7 +118,8 @@ pub use app::{Draw, FillRule, Paint, TextAlign, TextBaseline, Viewbox};
 /// a struct the one-variant case.
 pub use kaya_derive::KayaGen;
 pub use protocol::{
-    AlertChoice, AlertId, CollectionId, DEFAULT_WINDOW, Date, EntryProp, MenuItemId, MenuItemKind,
+    AlertChoice, AlertId, CollectionId, DEFAULT_WINDOW, Date, Detent, EntryProp, MenuItemId, MenuItemKind,
+    SheetProp,
     Appearance, MenuProp, NotificationId, NotificationOutcome, Occurrence, Path, Prop,
     SectionProp, SectionsPresentation, SignalId, TemplateNodeId, WindowProp,
     FileDialogId, FileMode, PickedFile, PickedId, Representation, Time, UndoDelta, UndoText, Value,

@@ -127,6 +127,14 @@
 #define KAYA_OCCURRENCE_TEXT_FORMATTED 30
 
 /**
+ * SHEET_DISMISSED { u64 sheet } — the user's cancel path closed it
+ * (post-fact); DISMISS_REQUESTED { u64 sheet } — armed, nothing has gone.
+ */
+#define KAYA_OCCURRENCE_SHEET_DISMISSED 31
+
+#define KAYA_OCCURRENCE_DISMISS_REQUESTED 32
+
+/**
  * Transaction record kinds (guest -> core, via kaya_submit). Layouts,
  * after the common 8-byte header, little-endian, 8-aligned:
  *   CREATE_SIGNAL:     u64 signal_id, value
@@ -217,6 +225,18 @@
 #define KAYA_TX_POP_ENTRY 23
 
 #define KAYA_TX_SET_ENTRY_PROP 24
+
+/**
+ * PRESENT_SHEET: u64 parent, u64 sheet — a sheet over a window or a live
+ * sheet, one child per parent (docs/sheet-plan.md §3). DISMISS_SHEET:
+ * u64 sheet. SET_SHEET_PROP: u64 sheet, u32 shprop, u32 source, then the
+ * SET_PROPERTY tail (element sources rejected).
+ */
+#define KAYA_TX_PRESENT_SHEET 58
+
+#define KAYA_TX_DISMISS_SHEET 59
+
+#define KAYA_TX_SET_SHEET_PROP 60
 
 #define KAYA_TX_ADD_SECTION 25
 
@@ -509,6 +529,17 @@
 #define KAYA_APPLY_POP_ENTRY 13
 
 #define KAYA_APPLY_SET_ENTRY_PROP 14
+
+/**
+ * PRESENT_SHEET: u64 parent, u64 sheet — materialize hidden; a mount
+ * presents it. DISMISS_SHEET: u64 sheet — release its views, children
+ * first. SET_SHEET_PROP: u64 sheet, u32 shprop, u32 pad, value.
+ */
+#define KAYA_APPLY_PRESENT_SHEET 46
+
+#define KAYA_APPLY_DISMISS_SHEET 47
+
+#define KAYA_APPLY_SET_SHEET_PROP 48
 
 #define KAYA_APPLY_ADD_SECTION 15
 
@@ -862,6 +893,20 @@
 #define KAYA_EPROP_TITLE 1
 
 #define KAYA_EPROP_INTERCEPT_BACK 2
+
+/**
+ * Sheet properties (spec::SHEET_PROPS; docs/sheet-plan.md §3) and the
+ * detent vocabulary (spec enum "detent").
+ */
+#define KAYA_SHPROP_TITLE 1
+
+#define KAYA_SHPROP_INTERCEPT_DISMISS 2
+
+#define KAYA_SHPROP_DETENT 3
+
+#define KAYA_DETENT_MEDIUM 1
+
+#define KAYA_DETENT_LARGE 2
 
 /**
  * Section properties (spec::SECTION_PROPS) — the third typed surface
@@ -1366,6 +1411,13 @@ typedef struct KayaHostApi {
   void (*emit_entry_popped)(uint64_t);
   void (*emit_back_requested)(uint64_t);
   /**
+   * sheet_dismissed after the user's cancel path closed a sheet natively
+   * (the core forgets the chain inside this call); dismiss_requested when
+   * the sheet's intercept_dismiss is armed and nothing went.
+   */
+  void (*emit_sheet_dismissed)(uint64_t);
+  void (*emit_dismiss_requested)(uint64_t);
+  /**
    * The user switched sections through the platform switcher
    * (post-fact). A programmatic select_section never arrives here.
    */
@@ -1851,6 +1903,21 @@ void kaya_emit_section_selected(uint64_t window, uint64_t section);
  * with pop_entry if it agrees (the close_requested veto class).
  */
 void kaya_emit_back_requested(uint64_t entry);
+
+/**
+ * Presentation side: the user's cancel path closed a sheet natively
+ * (post-fact); the core forgets the tree inside this call. Exported
+ * everywhere, answerable where a guest-language presentation layer exists
+ * (the entry_popped shape, docs/sheet-plan.md §3).
+ */
+void kaya_emit_sheet_dismissed(uint64_t sheet);
+
+/**
+ * Presentation side: the user drove the cancel path on a sheet whose
+ * intercept_dismiss is armed. Nothing has gone; the app answers with
+ * dismiss_sheet if it agrees (the back_requested veto class).
+ */
+void kaya_emit_dismiss_requested(uint64_t sheet);
 
 /**
  * Redeem a handle for an open descriptor. THE ONE ENTRY HERE THAT IS SAFE

@@ -19,9 +19,9 @@ pub use tasks::{AlertFutureRef, ClipboardFutureRef, DialogFuture, FileFutureRef,
 use crate::protocol::{
     Inbox,
     AlertChoice, AlertId, AlertSpec,
-    CollectionId, CommandKind, DEFAULT_WINDOW, EntryProp, MenuItemId, MenuItemKind, MenuProp,
+    CollectionId, CommandKind, DEFAULT_WINDOW, Detent, EntryProp, MenuItemId, MenuItemKind, MenuProp,
     Occurrence, Path, Prop, PropValue,
-    Record, SectionProp, SignalId, TypefaceRequest, WindowId, WindowProp,
+    Record, SectionProp, SheetProp, SignalId, TypefaceRequest, WindowId, WindowProp,
     TemplateNodeId, TextRange, Transaction, TxOp, Value, ValueType, WidgetId, WidgetKind,
 };
 
@@ -2414,6 +2414,37 @@ impl<'a> Tx<'a> {
         });
     }
 
+    /// Request a sheet over the primary window (docs/sheet-plan.md): a
+    /// modal hosting a root, presented by `mount_in`:
+    /// `let s = tx.present_sheet(WindowId(11)).title("new task").id();`
+    pub fn present_sheet(&mut self, sheet: WindowId) -> SheetRef<'_, 'a> {
+        self.present_sheet_over(DEFAULT_WINDOW, sheet)
+    }
+
+    /// Request a sheet over another window or over a LIVE SHEET (the
+    /// chain: one child per parent, a second refused at the root).
+    pub fn present_sheet_over(&mut self, parent: WindowId, sheet: WindowId) -> SheetRef<'_, 'a> {
+        self.ops.push(TxOp::PresentSheet { parent, sheet });
+        SheetRef { tx: self, sheet }
+    }
+
+    /// Dismiss a live sheet and forget its tree, child sheets with it;
+    /// also the dismiss-veto grammar's confirmation (answer a
+    /// dismiss_requested with this).
+    pub fn dismiss_sheet(&mut self, sheet: WindowId) {
+        self.ops.push(TxOp::DismissSheet { sheet });
+    }
+
+    /// Set a sheet property to a constant ([`SheetProp`]; the floor the
+    /// [`SheetRef`] chain rides).
+    pub fn set_sheet_prop(&mut self, sheet: WindowId, prop: SheetProp, value: impl Into<Value>) {
+        self.ops.push(TxOp::SetSheetProp {
+            sheet,
+            prop,
+            value: PropValue::Const(value.into()),
+        });
+    }
+
     /// Append a section to the primary surface's section set (ids are
     /// guest-allocated in the shared surface namespace). The first added
     /// becomes selected; the set is append-only. Mounting a root into it
@@ -4475,6 +4506,8 @@ pub struct Messages<M> {
     window_closed: RefCell<HashMap<u64, Box<dyn Fn() -> M>>>,
     back_requested: RefCell<HashMap<u64, Box<dyn Fn() -> M>>>,
     entry_popped: RefCell<HashMap<u64, Box<dyn Fn() -> M>>>,
+    dismiss_requested: RefCell<HashMap<u64, Box<dyn Fn() -> M>>>,
+    sheet_dismissed: RefCell<HashMap<u64, Box<dyn Fn() -> M>>>,
     section_selected: RefCell<HashMap<u64, Box<dyn Fn() -> M>>>,
     alerts: RefCell<HashMap<u64, Box<dyn Fn(AlertChoice) -> M>>>,
     notifications: RefCell<HashMap<u64, Box<dyn Fn(crate::protocol::NotificationOutcome) -> M>>>,
@@ -4621,6 +4654,8 @@ impl<M> Messages<M> {
             window_closed: RefCell::new(HashMap::new()),
             back_requested: RefCell::new(HashMap::new()),
             entry_popped: RefCell::new(HashMap::new()),
+            dismiss_requested: RefCell::new(HashMap::new()),
+            sheet_dismissed: RefCell::new(HashMap::new()),
             section_selected: RefCell::new(HashMap::new()),
             alerts: RefCell::new(HashMap::new()),
             notifications: RefCell::new(HashMap::new()),
@@ -5032,6 +5067,30 @@ impl<M> Messages<M> {
             .insert(entry.0, Box::new(move || msg.clone()));
     }
 
+    /// Bind the dismiss-veto handler to ONE sheet: fires each time the
+    /// user drives the cancel path on it while intercept_dismiss is
+    /// armed — nothing has gone; answer with dismiss_sheet to agree.
+    pub fn on_dismiss_requested(&self, sheet: WindowId, msg: M)
+    where
+        M: Clone + 'static,
+    {
+        self.dismiss_requested
+            .borrow_mut()
+            .insert(sheet.0, Box::new(move || msg.clone()));
+    }
+
+    /// Bind the dismissed handler to ONE sheet: fires when the user's
+    /// cancel path closes it natively (post-fact), and the registration
+    /// retires with it. A programmatic dismiss_sheet does not fire it.
+    pub fn on_sheet_dismissed(&self, sheet: WindowId, msg: M)
+    where
+        M: Clone + 'static,
+    {
+        self.sheet_dismissed
+            .borrow_mut()
+            .insert(sheet.0, Box::new(move || msg.clone()));
+    }
+
     /// Bind the selected handler to ONE section: fires each time the user
     /// switches TO it through the platform's switcher (post-fact). Not
     /// one-shot — sections never die.
@@ -5378,6 +5437,15 @@ impl<M> Messages<M> {
                     // retire with it.
                     self.back_requested.borrow_mut().remove(&entry.0);
                     self.entry_popped.borrow_mut().remove(&entry.0).map(|f| f())
+                }
+                Occurrence::DismissRequested { sheet } => {
+                    self.dismiss_requested.borrow().get(&sheet.0).map(|f| f())
+                }
+                Occurrence::SheetDismissed { sheet } => {
+                    // One-shot: the sheet is gone; both registrations
+                    // retire with it.
+                    self.dismiss_requested.borrow_mut().remove(&sheet.0);
+                    self.sheet_dismissed.borrow_mut().remove(&sheet.0).map(|f| f())
                 }
                 Occurrence::SectionSelected { section, .. } => {
                     // NOT one-shot: sections never die and the user can
@@ -6080,6 +6148,43 @@ impl EntryRef<'_, '_> {
 
     pub fn id(&self) -> WindowId {
         self.entry
+    }
+}
+
+pub struct SheetRef<'t, 'a> {
+    tx: &'t mut Tx<'a>,
+    sheet: WindowId,
+}
+
+impl SheetRef<'_, '_> {
+    /// The sheet's accessible name everywhere, and its drawn header where
+    /// the platform draws one (GNOME's and Windows' dialogs).
+    pub fn title(self, title: &str) -> Self {
+        self.tx.set_sheet_prop(self.sheet, SheetProp::Title, title);
+        self
+    }
+
+    /// The dismiss-veto class: armed, the cancel path emits
+    /// dismiss_requested and nothing goes until the app answers with
+    /// dismiss_sheet.
+    pub fn intercept_dismiss(self, on: bool) -> Self {
+        self.tx.set_sheet_prop(self.sheet, SheetProp::InterceptDismiss, on);
+        self
+    }
+
+    /// The height the phones open the sheet at; the desktops have nothing
+    /// to say and ignore it (docs/sheet-plan.md §1.4).
+    pub fn detent(self, detent: Detent) -> Self {
+        let raw = match detent {
+            Detent::Medium => crate::wire::DETENT_MEDIUM,
+            Detent::Large => crate::wire::DETENT_LARGE,
+        };
+        self.tx.set_sheet_prop(self.sheet, SheetProp::Detent, i64::from(raw));
+        self
+    }
+
+    pub fn id(&self) -> WindowId {
+        self.sheet
     }
 }
 
@@ -8712,6 +8817,8 @@ mod tests {
                     | Occurrence::FileDialogResult { .. }
                     | Occurrence::EntryPopped { .. }
                     | Occurrence::BackRequested { .. }
+                    | Occurrence::SheetDismissed { .. }
+                    | Occurrence::DismissRequested { .. }
                     | Occurrence::SectionSelected { .. }
                     | Occurrence::ValueChanged { .. }
                     | Occurrence::InstanceValueChanged { .. }

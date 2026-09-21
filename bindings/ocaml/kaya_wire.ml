@@ -30,7 +30,7 @@ type drop_values = {
 }
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0x3854759c1c5d028cL
+let spec_hash = 0xde79316215dcaa9eL
 
 let value_bool = 1
 let value_i64 = 2
@@ -137,6 +137,11 @@ let wprop_appearance = 9
 let wprop_remember_frame = 10
 let eprop_title = 1
 let eprop_intercept_back = 2
+let shprop_title = 1
+let shprop_intercept_dismiss = 2
+let shprop_detent = 3
+let detent_medium = 1
+let detent_large = 2
 let sprop_title = 1
 let sprop_icon = 2
 let sprop_symbol = 3
@@ -297,6 +302,9 @@ let tx_kind_declare_link_route = 54
 let tx_kind_set_rich_text = 55
 let tx_kind_apply_edit = 56
 let tx_kind_format_text = 57
+let tx_kind_present_sheet = 58
+let tx_kind_dismiss_sheet = 59
+let tx_kind_set_sheet_prop = 60
 let apply_kind_create = 1
 let apply_kind_set_prop = 2
 let apply_kind_add_child = 3
@@ -340,6 +348,9 @@ let apply_kind_set_reorderable = 40
 let apply_kind_set_rich_text = 43
 let apply_kind_apply_edit = 44
 let apply_kind_format_text = 45
+let apply_kind_present_sheet = 46
+let apply_kind_dismiss_sheet = 47
+let apply_kind_set_sheet_prop = 48
 let occ_kind_button_clicked = 1
 let occ_kind_text_changed = 2
 let occ_kind_toggled = 3
@@ -370,6 +381,8 @@ let occ_kind_notification_result = 27
 let occ_kind_link_opened = 28
 let occ_kind_text_edited = 29
 let occ_kind_text_formatted = 30
+let occ_kind_sheet_dismissed = 31
+let occ_kind_dismiss_requested = 32
 
 let pad8 b =
   while Buffer.length b mod 8 <> 0 do
@@ -837,6 +850,24 @@ let tx_format_text widget_id removed ranged start stop attr =
       Buffer.add_int64_le b start;
       Buffer.add_int64_le b stop;
       encode_values b attr)
+
+(* Request a sheet over `parent` — a window (0 = the primary) or a live sheet, so modal-over-modal is a chain (docs/sheet-plan.md §1). `sheet` is a guest-allocated surface id in the one namespace windows and entries share. Materializes hidden; mounting a root into it presents it. A second live sheet over the same parent is refused at the root, as a second alert is; no capability gate, every host has one. *)
+let tx_present_sheet parent sheet =
+  finish tx_kind_present_sheet (fun b ->
+      Buffer.add_int64_le b parent;
+      Buffer.add_int64_le b sheet)
+
+(* Dismiss a live sheet and forget its tree, exactly as pop_entry does, its child sheets with it; also the dismiss-veto grammar's confirmation. An unknown or already-gone sheet is a scene error. *)
+let tx_dismiss_sheet sheet =
+  finish tx_kind_dismiss_sheet (fun b ->
+      Buffer.add_int64_le b sheet)
+
+(* Bind a sheet property (SHEET_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — sheets are not collection elements. *)
+let tx_set_sheet_prop sheet prop source =
+  finish tx_kind_set_sheet_prop (fun b ->
+      Buffer.add_int64_le b sheet;
+      Buffer.add_int32_le b (Int32.of_int prop);
+      Buffer.add_int32_le b (Int32.of_int source))
 
 (* A civil date as the wire's I64: year * 10000 + month * 100 + day. *)
 let pack_date year month day =
@@ -2274,7 +2305,7 @@ let parse_clip byte at =
    value), None for clicks. None for pad/unknown kinds. *)
 let parse_occurrence byte =
   let kind = u16_at byte 4 in
-  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed && kind <> occ_kind_toggled && kind <> occ_kind_value_changed && kind <> occ_kind_close_requested && kind <> occ_kind_window_closed && kind <> occ_kind_alert_result && kind <> occ_kind_entry_popped && kind <> occ_kind_back_requested && kind <> occ_kind_section_selected && kind <> occ_kind_menu_activated && kind <> occ_kind_menu_toggled && kind <> occ_kind_menu_value_changed && kind <> occ_kind_file_dialog_result && kind <> occ_kind_clipboard_result && kind <> occ_kind_pasted && kind <> occ_kind_undone && kind <> occ_kind_redone && kind <> occ_kind_sort_requested && kind <> occ_kind_draw_requested && kind <> occ_kind_tick && kind <> occ_kind_dropped && kind <> occ_kind_drag_ended && kind <> occ_kind_date_changed && kind <> occ_kind_time_changed && kind <> occ_kind_value_committed && kind <> occ_kind_notification_result && kind <> occ_kind_link_opened && kind <> occ_kind_text_edited && kind <> occ_kind_text_formatted then None
+  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed && kind <> occ_kind_toggled && kind <> occ_kind_value_changed && kind <> occ_kind_close_requested && kind <> occ_kind_window_closed && kind <> occ_kind_alert_result && kind <> occ_kind_entry_popped && kind <> occ_kind_back_requested && kind <> occ_kind_section_selected && kind <> occ_kind_menu_activated && kind <> occ_kind_menu_toggled && kind <> occ_kind_menu_value_changed && kind <> occ_kind_file_dialog_result && kind <> occ_kind_clipboard_result && kind <> occ_kind_pasted && kind <> occ_kind_undone && kind <> occ_kind_redone && kind <> occ_kind_sort_requested && kind <> occ_kind_draw_requested && kind <> occ_kind_tick && kind <> occ_kind_dropped && kind <> occ_kind_drag_ended && kind <> occ_kind_date_changed && kind <> occ_kind_time_changed && kind <> occ_kind_value_committed && kind <> occ_kind_notification_result && kind <> occ_kind_link_opened && kind <> occ_kind_text_edited && kind <> occ_kind_text_formatted && kind <> occ_kind_sheet_dismissed && kind <> occ_kind_dismiss_requested then None
   else begin
     (* ids are guest-allocated and small; the low u32 is the story. *)
     let id = u32_at byte 8 in
@@ -2321,7 +2352,7 @@ let parse_occurrence byte =
     end
     (* Surface lifecycle records carry the surface id alone
        ( derived from the record shapes ). *)
-    else if kind = occ_kind_close_requested || kind = occ_kind_window_closed || kind = occ_kind_entry_popped || kind = occ_kind_back_requested
+    else if kind = occ_kind_close_requested || kind = occ_kind_window_closed || kind = occ_kind_entry_popped || kind = occ_kind_back_requested || kind = occ_kind_sheet_dismissed || kind = occ_kind_dismiss_requested
     then Some (kind, Int64.of_int id, [], None, None, None, [])
     (* Surface-pair records (window, section): the SECOND id
        keys the handler; the first rides as the payload. *)

@@ -24,7 +24,7 @@ public enum KayaValue: Hashable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0x3854759c1c5d028c
+let kayaSpecHash: UInt64 = 0xde79316215dcaa9e
 
 /// A civil date as the wire's I64: year * 10000 + month * 100 + day.
 func kayaPackDate(_ year: Int, _ month: Int, _ day: Int) -> Int64 {
@@ -645,6 +645,30 @@ struct KayaTx {
         self.u64(start)
         self.u64(stop)
         self.values(attr)
+        self.end(kayaAt)
+    }
+
+    /// Request a sheet over `parent` — a window (0 = the primary) or a live sheet, so modal-over-modal is a chain (docs/sheet-plan.md §1). `sheet` is a guest-allocated surface id in the one namespace windows and entries share. Materializes hidden; mounting a root into it presents it. A second live sheet over the same parent is refused at the root, as a second alert is; no capability gate, every host has one.
+    mutating func presentSheet(_ parent: UInt64, _ sheet: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_PRESENT_SHEET))
+        self.u64(parent)
+        self.u64(sheet)
+        self.end(kayaAt)
+    }
+
+    /// Dismiss a live sheet and forget its tree, exactly as pop_entry does, its child sheets with it; also the dismiss-veto grammar's confirmation. An unknown or already-gone sheet is a scene error.
+    mutating func dismissSheet(_ sheet: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_DISMISS_SHEET))
+        self.u64(sheet)
+        self.end(kayaAt)
+    }
+
+    /// Bind a sheet property (SHEET_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — sheets are not collection elements.
+    mutating func setSheetProp(_ sheet: UInt64, _ prop: UInt32, _ source: UInt32) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_SHEET_PROP))
+        self.u64(sheet)
+        self.u32(prop)
+        self.u32(source)
         self.end(kayaAt)
     }
 
@@ -2433,6 +2457,8 @@ func kayaParseOccurrence(_ rec: [UInt8]) -> KayaOccurrence? {
             || kind == UInt16(KAYA_OCCURRENCE_LINK_OPENED)
             || kind == UInt16(KAYA_OCCURRENCE_TEXT_EDITED)
             || kind == UInt16(KAYA_OCCURRENCE_TEXT_FORMATTED)
+            || kind == UInt16(KAYA_OCCURRENCE_SHEET_DISMISSED)
+            || kind == UInt16(KAYA_OCCURRENCE_DISMISS_REQUESTED)
         else { return nil }
         let id = raw.loadUnaligned(fromByteOffset: 8, as: UInt64.self)
         if kind == UInt16(KAYA_OCCURRENCE_ALERT_RESULT) {
@@ -2492,6 +2518,8 @@ func kayaParseOccurrence(_ rec: [UInt8]) -> KayaOccurrence? {
             || kind == UInt16(KAYA_OCCURRENCE_WINDOW_CLOSED)
             || kind == UInt16(KAYA_OCCURRENCE_ENTRY_POPPED)
             || kind == UInt16(KAYA_OCCURRENCE_BACK_REQUESTED)
+            || kind == UInt16(KAYA_OCCURRENCE_SHEET_DISMISSED)
+            || kind == UInt16(KAYA_OCCURRENCE_DISMISS_REQUESTED)
         {
             return (kind, id, [], nil, [], nil, nil, [])
         }
