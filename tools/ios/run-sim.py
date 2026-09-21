@@ -1335,6 +1335,8 @@ BRIDGE_VERBS = frozenset((
     "type", "compose", "file_dialog_goto", "file_choose", "file_dialog_name",
     "file_save", "expect_file_dialog", "expect_save_dialog", "clipboard_seed",
     "expect_clipboard", "drag_file",
+    # The sheet's cancel path is the driver's swipe (docs/sheet-plan.md §4).
+    "dismiss_sheet",
 ))
 
 
@@ -2629,7 +2631,18 @@ def queue_xcuidrive_proof(app, bundle_id):
     _leg_threads.append(th)
 
 
+# ONE SCENE BY HAND, the android runner's knob (tools/android/run-emulator.py):
+# `KAYA_ONLY=sheet` takes every suite's leg whose name starts with it, and a
+# filter that matches no leg is refused rather than a verdict over nothing.
+ONLY = os.environ.get("KAYA_ONLY", "")
+_selected = 0
+
+
 def queue_leg(name, *args, pad=False, **kwargs):
+    global _selected
+    if ONLY and not name.startswith(ONLY):
+        return
+    _selected += 1
     # THE MATRIX-WIDE TOKEN (tools/lib/exclusive.py): start nothing while
     # another lane holds it; for this lane's exclusive legs, empty the pool
     # first, then hold it and run the leg inline.
@@ -3136,6 +3149,13 @@ if not xcuidrive_census():
 # read as a pass (2026-08-29). tools/check-gates.py holds all five
 # runners to this.
 exclusive.summary("ios")
+if ONLY and _selected == 0:
+    print(f"run-sim: KAYA_ONLY={ONLY!r} matched no leg of this runner — a filter "
+          f"that selects nothing would print a verdict over a run of nothing",
+          file=sys.stderr)
+    status = 1
+elif ONLY:
+    print(f"run-sim: filtered run — KAYA_ONLY={ONLY}, {_selected} leg(s)")
 if status == 0:
     print("run-sim: ALL PASS")
 else:

@@ -359,6 +359,33 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("    }");
     }
 
+    // The sheet-prop duos (docs/sheet-plan.md §3); detent is an enum.
+    for (prop, _, kind) in crate::sheet_prop_variants(spec) {
+        let pc = pascal(prop);
+        let up = prop.to_uppercase();
+        let (p, ty, expr) = match kind {
+            crate::PropKind::Str => (camel(prop), "String", format!("encodeValue(b, {});", camel(prop))),
+            crate::PropKind::Bool => (camel(prop), "boolean", format!("encodeValue(b, {});", camel(prop))),
+            crate::PropKind::Enum(_) => (camel(prop), "long", format!("encodeValue(b, {});", camel(prop))),
+            other => unreachable!("no sheet prop carries {other:?}"),
+        };
+        c.line("");
+        c.line(&format!("    /** set_sheet_prop with a constant {prop} value. */"));
+        c.line(&format!("    public static byte[] txSetSheet{pc}(long sheet, {ty} {p}) {{"));
+        c.line("        Enc b = begin(TX_KIND_SET_SHEET_PROP);");
+        c.line(&format!("        b.putLong(sheet).putInt(SHPROP_{up}).putInt(SOURCE_CONST);"));
+        c.line(&format!("        {expr}"));
+        c.line("        return finish(b);");
+        c.line("    }");
+        c.line("");
+        c.line(&format!("    /** set_sheet_prop with a signal-bound {prop} value. */"));
+        c.line(&format!("    public static byte[] txBindSheet{pc}(long sheet, long signalId) {{"));
+        c.line("        Enc b = begin(TX_KIND_SET_SHEET_PROP);");
+        c.line(&format!("        b.putLong(sheet).putInt(SHPROP_{up}).putInt(SOURCE_SIGNAL).putLong(signalId);"));
+        c.line("        return finish(b);");
+        c.line("    }");
+    }
+
     // The section-prop duos; icon rides the blob channel (DESIGN.md,
     // Sections).
     for (prop, _, kind) in crate::section_prop_variants(spec) {

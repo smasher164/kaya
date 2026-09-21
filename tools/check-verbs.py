@@ -1857,7 +1857,6 @@ REFUSALS = {
     # No foreign source reaches a phone's app (docs/dnd-plan.md D9), so
     # the arm refuses rather than fake a drop.
     (KOTLIN, "drag_file"): "drag_file is a depth slice on android",
-    (KOTLIN, "dismiss_sheet"): 'depthStub("sheet")',
 }
 # A DEPTH STUB on an action verb is a refusal too, for as long as it stands:
 # its row here reads `(KOTLIN, "<verb>"): 'depthStub("<scene>")'` and the

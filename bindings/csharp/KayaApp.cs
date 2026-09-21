@@ -235,6 +235,14 @@ enum Appearance : long
     Dark = KayaWire.AppearanceDark,
 }
 
+/// The height the phones open a sheet at (docs/sheet-plan.md §1.4); the
+/// desktops have nothing to say and ignore it.
+enum Detent : long
+{
+    Medium = KayaWire.DetentMedium,
+    Large = KayaWire.DetentLarge,
+}
+
 /// THE CLOSED MENU-ROLE VOCABULARY (DESIGN.md, Menus;
 /// crates/kaya/src/scene.rs MENU_ROLES). Settings: macOS places it in the
 /// application menu and every other host leaves the item where the app
@@ -802,6 +810,10 @@ sealed record EntryPopped(ulong Id, List<object> Keys) : Occurrence(Id, Keys);
 
 sealed record BackRequested(ulong Id, List<object> Keys) : Occurrence(Id, Keys);
 
+sealed record SheetDismissed(ulong Id, List<object> Keys) : Occurrence(Id, Keys);
+
+sealed record DismissRequested(ulong Id, List<object> Keys) : Occurrence(Id, Keys);
+
 sealed record AlertAnswered(ulong Id, List<object> Keys, AlertChoice Choice) : Occurrence(Id, Keys);
 
 sealed record LinkArrived(ulong Id, List<object> Keys, string Url,
@@ -1283,6 +1295,9 @@ sealed class KayaApp
     internal readonly Dictionary<ulong, Action<Tx>> closeRequested = new();
     internal readonly Dictionary<ulong, Action<Tx>> entryPopped = new();
     internal readonly Dictionary<ulong, Action<Tx>> backRequested = new();
+    // Per-sheet, keyed by sheet surface id (docs/sheet-plan.md).
+    internal readonly Dictionary<ulong, Action<Tx>> sheetDismissed = new();
+    internal readonly Dictionary<ulong, Action<Tx>> dismissRequested = new();
     internal readonly Dictionary<ulong, Action<Tx>> sectionSelected = new();
     internal readonly Dictionary<ulong, Action<Tx>> windowClosed = new();
     // The ledger's two reports, keyed by WINDOW because the ledger is
@@ -2221,6 +2236,8 @@ sealed class KayaApp
             case KayaWire.OccKindSectionSelected: return new SectionSelected(id, keys);
             case KayaWire.OccKindEntryPopped: return new EntryPopped(id, keys);
             case KayaWire.OccKindBackRequested: return new BackRequested(id, keys);
+            case KayaWire.OccKindSheetDismissed: return new SheetDismissed(id, keys);
+            case KayaWire.OccKindDismissRequested: return new DismissRequested(id, keys);
             case KayaWire.OccKindAlertResult:
                 return new AlertAnswered(id, keys, AlertChoices.FromWire(code));
             case KayaWire.OccKindLinkOpened:
@@ -2403,6 +2420,16 @@ sealed class KayaApp
                     break;
                 case BackRequested back when backRequested.TryGetValue(back.Id, out var onBack):
                     Dispatch(tx => onBack(tx));
+                    break;
+                case SheetDismissed gone:
+                    // One-shot: the sheet is gone; both registrations
+                    // retire with it.
+                    dismissRequested.Remove(gone.Id);
+                    if (sheetDismissed.Remove(gone.Id, out var onDismissed))
+                        Dispatch(tx => onDismissed(tx));
+                    break;
+                case DismissRequested ask when dismissRequested.TryGetValue(ask.Id, out var onAsk):
+                    Dispatch(tx => onAsk(tx));
                     break;
                 // One-shot: the registration retires with the result.
                 case AlertAnswered alert:
@@ -4329,6 +4356,32 @@ sealed class Tx : IDisposable
     /// also the back-veto grammar's confirmation after
     /// OnBackRequested. Popping an empty stack is a scene error.
     public void PopEntry(ulong window = 0) => Records.Add(KayaWire.TxPopEntry(window));
+
+    /// Request a sheet over `parent` — a window (0, the primary) or a
+    /// LIVE SHEET, the chain (docs/sheet-plan.md): a modal hosting a
+    /// root, presented by MountIn. Sheet ids are guest-allocated in the
+    /// shared surface namespace. onDismissed fires when the user's
+    /// cancel path closes THIS sheet natively — post-fact, one-shot, and
+    /// a programmatic DismissSheet does not fire it. onDismissRequested
+    /// fires per cancel while interceptDismiss is armed; nothing has gone.
+    /// `detent:` is the height the phones open it at; the desktops ignore it.
+    public void PresentSheet(
+        ulong id, string? title = null, bool? interceptDismiss = null,
+        Detent? detent = null, Action<Tx>? onDismissed = null,
+        Action<Tx>? onDismissRequested = null, ulong parent = 0)
+    {
+        Records.Add(KayaWire.TxPresentSheet(parent, id));
+        if (title is { } t) Records.Add(KayaWire.TxSetSheetTitle(id, t));
+        if (interceptDismiss is { } i) Records.Add(KayaWire.TxSetSheetInterceptDismiss(id, i));
+        if (detent is { } d) Records.Add(KayaWire.TxSetSheetDetent(id, (long)d));
+        if (onDismissed is { } p) App.sheetDismissed[id] = p;
+        if (onDismissRequested is { } b) App.dismissRequested[id] = b;
+    }
+
+    /// Dismiss a live sheet and forget its tree, child sheets with it —
+    /// also the dismiss-veto grammar's confirmation after
+    /// OnDismissRequested. An unknown sheet is a scene error.
+    public void DismissSheet(ulong id) => Records.Add(KayaWire.TxDismissSheet(id));
 
     /// Append a section to the window's section set (ids guest-allocated
     /// in the shared surface namespace). Append-only, and every section's

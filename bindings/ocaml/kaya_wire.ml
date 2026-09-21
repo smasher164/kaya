@@ -2014,6 +2014,54 @@ let tx_bind_entry_intercept_back entry signal_id =
       Buffer.add_int32_le b (Int32.of_int source_signal);
       Buffer.add_int64_le b signal_id)
 
+(* set_sheet_prop with a constant title value. *)
+let tx_set_sheet_title sheet title =
+  finish tx_kind_set_sheet_prop (fun b ->
+      Buffer.add_int64_le b sheet;
+      Buffer.add_int32_le b (Int32.of_int shprop_title);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (Str title))
+
+(* set_sheet_prop with a signal-bound title value. *)
+let tx_bind_sheet_title sheet signal_id =
+  finish tx_kind_set_sheet_prop (fun b ->
+      Buffer.add_int64_le b sheet;
+      Buffer.add_int32_le b (Int32.of_int shprop_title);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_sheet_prop with a constant intercept_dismiss value. *)
+let tx_set_sheet_intercept_dismiss sheet intercept_dismiss =
+  finish tx_kind_set_sheet_prop (fun b ->
+      Buffer.add_int64_le b sheet;
+      Buffer.add_int32_le b (Int32.of_int shprop_intercept_dismiss);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (Bool intercept_dismiss))
+
+(* set_sheet_prop with a signal-bound intercept_dismiss value. *)
+let tx_bind_sheet_intercept_dismiss sheet signal_id =
+  finish tx_kind_set_sheet_prop (fun b ->
+      Buffer.add_int64_le b sheet;
+      Buffer.add_int32_le b (Int32.of_int shprop_intercept_dismiss);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_sheet_prop with a constant detent value. *)
+let tx_set_sheet_detent sheet detent =
+  finish tx_kind_set_sheet_prop (fun b ->
+      Buffer.add_int64_le b sheet;
+      Buffer.add_int32_le b (Int32.of_int shprop_detent);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (I64 detent))
+
+(* set_sheet_prop with a signal-bound detent value. *)
+let tx_bind_sheet_detent sheet signal_id =
+  finish tx_kind_set_sheet_prop (fun b ->
+      Buffer.add_int64_le b sheet;
+      Buffer.add_int32_le b (Int32.of_int shprop_detent);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
 (* set_section_prop with a constant title value. *)
 let tx_set_section_title section title =
   finish tx_kind_set_section_prop (fun b ->

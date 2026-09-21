@@ -79,6 +79,11 @@ module KayaApp
     Appearance (..),
     popEntry,
     EntryAttr (..),
+    presentSheet,
+    presentSheetOver,
+    dismissSheet,
+    SheetAttr (..),
+    Detent (..),
     destroyWindow,
     WindowAttr (..),
     brandAccent,
@@ -928,6 +933,52 @@ pushEntry n attrs = do
 -- the back-veto grammar's confirmation after 'onBackRequested'.
 popEntry :: Build ()
 popEntry = emitB (W.txPopEntry 0)
+
+-- | The height the phones open a sheet at (docs\/sheet-plan.md §1.4); the
+-- desktops have nothing to say and ignore it.
+data Detent = DetentMedium | DetentLarge
+  deriving (Eq, Show)
+
+detentWire :: Detent -> Int64
+detentWire d = fromIntegral $ case d of
+  DetentMedium -> W.detentMedium
+  DetentLarge -> W.detentLarge
+
+-- | Sheet construction attributes (docs\/sheet-plan.md) — the config-list
+-- spelling. 'ShOnDismissed' fires when the user's cancel path closes THIS
+-- sheet natively (a programmatic 'dismissSheet' does not fire it) and
+-- retires with the one dismissal; 'ShOnDismissRequested' fires per cancel
+-- while intercept_dismiss is armed — nothing has gone, answer with
+-- 'dismissSheet' to agree.
+data SheetAttr
+  = ShTitle Text
+  | ShInterceptDismiss Bool
+  | ShDetent Detent
+  | ShOnDismissed (IO ())
+  | ShOnDismissRequested (IO ())
+
+-- | Request a sheet over the primary window (sheet ids are guest-allocated
+-- in the shared surface namespace); 'mountIn' presents it.
+presentSheet :: Word64 -> [SheetAttr] -> Build ()
+presentSheet = presentSheetOver 0
+
+-- | Request a sheet over another window or over a LIVE SHEET (the chain:
+-- one child per parent).
+presentSheetOver :: Word64 -> Word64 -> [SheetAttr] -> Build ()
+presentSheetOver parent n attrs = do
+  emitB (W.txPresentSheet parent n)
+  mapM_ apply attrs
+  where
+    apply (ShTitle t) = emitB (W.txSetSheetTitle n (T.unpack t))
+    apply (ShInterceptDismiss v) = emitB (W.txSetSheetInterceptDismiss n v)
+    apply (ShDetent d) = emitB (W.txSetSheetDetent n (detentWire d))
+    apply (ShOnDismissed handler) = pendB (PSheetDismissed n handler)
+    apply (ShOnDismissRequested handler) = pendB (PDismissRequested n handler)
+
+-- | Dismiss a live sheet and forget its tree, child sheets with it — also
+-- the dismiss-veto grammar's confirmation after 'ShOnDismissRequested'.
+dismissSheet :: Word64 -> Build ()
+dismissSheet n = emitB (W.txDismissSheet n)
 
 -- | Append a section to the primary window's section set; the set is
 -- append-only — sections have no destruction grammar, and every
@@ -3655,6 +3706,8 @@ register app pending = case pending of
   PEntryPopped n handler -> modifyIORef' (app.appEntryPopped) (Map.insert n handler)
   PSectionSelected n handler -> modifyIORef' (app.appSectionSelected) (Map.insert n handler)
   PBackRequested n handler -> modifyIORef' (app.appBackRequested) (Map.insert n handler)
+  PSheetDismissed n handler -> modifyIORef' (app.appSheetDismissed) (Map.insert n handler)
+  PDismissRequested n handler -> modifyIORef' (app.appDismissRequested) (Map.insert n handler)
   PCloseRequested n handler -> modifyIORef' (app.appCloseRequested) (Map.insert n handler)
   PWindowClosed n handler -> modifyIORef' (app.appWindowClosed) (Map.insert n handler)
   -- The undo pair keys the same per-WINDOW tables the dispatch loop
@@ -3897,6 +3950,8 @@ newApp =
     <*> newIORef Map.empty -- appEntryPopped
     <*> newIORef Map.empty -- appSectionSelected
     <*> newIORef Map.empty -- appBackRequested
+    <*> newIORef Map.empty -- appSheetDismissed
+    <*> newIORef Map.empty -- appDismissRequested
     <*> newIORef Map.empty -- appAlertHandlers
     <*> newIORef Map.empty -- appNotificationHandlers
     <*> newIORef Nothing -- appNotificationActivation
@@ -4136,6 +4191,18 @@ dispatchLoop app = do
           dispatchLoop app
       | kind == W.occKindBackRequested -> do
           handlers <- readIORef (app.appBackRequested)
+          dispatch (mapM_ id (Map.lookup ident handlers))
+          dispatchLoop app
+      | kind == W.occKindSheetDismissed -> do
+          -- One-shot: the sheet is gone; both registrations retire
+          -- with it.
+          modifyIORef' (app.appDismissRequested) (Map.delete ident)
+          handlers <- readIORef (app.appSheetDismissed)
+          modifyIORef' (app.appSheetDismissed) (Map.delete ident)
+          dispatch (mapM_ id (Map.lookup ident handlers))
+          dispatchLoop app
+      | kind == W.occKindDismissRequested -> do
+          handlers <- readIORef (app.appDismissRequested)
           dispatch (mapM_ id (Map.lookup ident handlers))
           dispatchLoop app
       | kind == W.occKindSectionSelected -> do

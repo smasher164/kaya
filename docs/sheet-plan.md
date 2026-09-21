@@ -107,10 +107,10 @@ their own design pass if an app asks for them.
 | Platform | The native sheet | Cancel path | Veto | Detent | A sheet over a sheet |
 | --- | --- | --- | --- | --- | --- |
 | macOS (SwiftUI) | `.sheet`, a window-attached NSWindow sheet, 400×300 minimum, its title on the NSWindow (the accessibility name; no title bar is drawn) | Esc, natively (measured 2026-09-21: 2 ms from the key to `onDismiss`) | `interactiveDismissDisabled`, and kaya reads the armed sheet's Esc through a local key monitor, since `onExitCommand` fires only with a focused responder inside (U2b) | nothing to say | yes, measured: Esc closes the child first, the parent on the next press |
-| iOS (SwiftUI) | `.sheet` with `presentationDetents` | swipe-down, tap outside on medium | `interactiveDismissDisabled` | `.medium` / `.large` | yes |
-| Android (Compose) | material3 `ModalBottomSheet` (BOM 2024.10.01 carries it) | back gesture, scrim tap, swipe | `ModalBottomSheetProperties` disables back and scrim | `skipPartiallyExpanded` off / on | yes, each is its own window |
-| Linux (GTK4 + libadwaita) | `AdwDialog` (1.5; a bottom sheet on a narrow window, floating on a wide one) | Esc, the close button | `can-close` off plus the `close-attempt` signal | nothing to say | measured (U3) |
-| Windows (WinUI 3) | a modal `Popup` with a full-root backdrop (measured 2026-09-21: ContentDialog refuses a second one with `0x80000019`; a Popup takes a ContentDialog and a second Popup over it) | Esc through the popup's own key handler; a close button | the popup's key handler asks | nothing to say | yes, measured |
+| iOS (SwiftUI) | `.sheet` with `presentationDetents`; the harness's `dismiss_sheet` is the driver's REAL PAN from the sheet's top to the screen's bottom (an element swipe travels with the element's size, and a one-label sheet's fell short; measured 2026-09-21), after the presentation has settled | swipe-down, tap outside on medium | `interactiveDismissDisabled`, whose attempt SwiftUI never reports: the PRESENTED controller's presentation delegate takes a proxy while armed (`KayaSheetDismissProxy`, UIKit's `presentationControllerDidAttemptToDismiss`), forwarding the rest to SwiftUI's own — on the presented controller, not the NavigationStack's inner hosting controller (measured landing there first) | `.medium` / `.large`; the phone lanes drop `expect_sheet_detent none` and reopen the medium sheet at the end | yes |
+| Android (Compose) | material3 `ModalBottomSheet` (BOM 2024.10.01 carries it), a dialog window of its own; kaya draws the title row, nests a child inside its parent's content, and the harness's back key goes to the sheet's OWN window's decor view (the activity's dispatcher finished the app; measured 2026-09-21) | back gesture, scrim tap, swipe | `shouldDismissOnBackPress` off with kaya's own back handler asking; the scrim and the swipe hide first, so the sheet is shown again and the app asked | `skipPartiallyExpanded` off over full-height content (Material offers the partial anchor only to content taller than half the screen) / on; unset wraps the content | yes, each is its own window |
+| Linux (GTK4 + libadwaita) | `AdwDialog` (1.5) with a header bar over the root; OVER A PLAIN GtkWindow IT IS A TOPLEVEL OF ITS OWN, so the harness's Esc goes to that toplevel's X window (gdk4-x11's xid) with focus moved inside first, since the x11 lane has no window manager to activate it (measured 2026-09-21; docs/traps.md) | Esc, the close button | `can-close` off plus the `close-attempt` signal | nothing to say | measured (U3) |
+| Windows (WinUI 3) | a modal `Popup` with a full-root smoke and Fluent's layer card (measured 2026-09-21: ContentDialog refuses a second one with `0x80000019`; a Popup takes a ContentDialog and a second Popup over it); it opens at the mount, deferred to the root's Loaded when the island is not up yet (the alert arm's rule; the python, js and C# legs presented within milliseconds of launch) | Esc through the popup's own key handler; the header's close button — one function, which the harness's `dismiss_sheet` drives directly since an OS-global key belongs to legs that run alone | the same function asks | nothing to say | yes, measured |
 
 Measured facts already in hand: the linux image is Debian trixie with
 libadwaita 1.7.6, so `AdwDialog` exists at run time; the crate is pinned at
@@ -286,7 +286,9 @@ phone-only feature with a desktop carve-out. The app writes one thing.
    the check-sugar-surface rows land with the eight bindings, as the
    sliders' did, so the gate stays green at depth and the ledger holds the
    fan-out open.
-3. Breadth: the eight bindings and guests, the three backend arms, S6 in
-   the task manager on all five lanes.
+3. ~~Breadth: the eight bindings and guests, the three backend arms~~ DONE
+   2026-09-21 (the sheet scene green in nine languages on the mac, sixteen
+   linux legs, six windows legs, three android legs and the iOS leg), then
+   S6 in the task manager on all five lanes.
 4. The matrix, then a review page with the sheet on every lane, each
    capture viewed before it is published.

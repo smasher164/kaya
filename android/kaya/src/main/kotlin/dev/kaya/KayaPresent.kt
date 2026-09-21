@@ -215,6 +215,14 @@ object KayaPresent {
      * answers with pop_entry if it agrees. */
     @JvmStatic external fun emitBackRequested(entry: Long)
 
+    /** The user's cancel path closed a sheet natively (the core forgets
+     * the chain inside this call, post-fact). */
+    @JvmStatic external fun emitSheetDismissed(sheet: Long)
+
+    /** Cancel on an intercept_dismiss-armed sheet: nothing went; the app
+     * answers with dismiss_sheet if it agrees. */
+    @JvmStatic external fun emitDismissRequested(sheet: Long)
+
     /** The user switched sections through the platform switcher
      * (post-fact; the core's selection mirror reconciles inside).
      * Programmatic select_section never comes here — the echo

@@ -2053,6 +2053,51 @@ public final class KayaWire {
         return finish(b);
     }
 
+    /** set_sheet_prop with a constant title value. */
+    public static byte[] txSetSheetTitle(long sheet, String title) {
+        Enc b = begin(TX_KIND_SET_SHEET_PROP);
+        b.putLong(sheet).putInt(SHPROP_TITLE).putInt(SOURCE_CONST);
+        encodeValue(b, title);
+        return finish(b);
+    }
+
+    /** set_sheet_prop with a signal-bound title value. */
+    public static byte[] txBindSheetTitle(long sheet, long signalId) {
+        Enc b = begin(TX_KIND_SET_SHEET_PROP);
+        b.putLong(sheet).putInt(SHPROP_TITLE).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_sheet_prop with a constant intercept_dismiss value. */
+    public static byte[] txSetSheetInterceptDismiss(long sheet, boolean interceptDismiss) {
+        Enc b = begin(TX_KIND_SET_SHEET_PROP);
+        b.putLong(sheet).putInt(SHPROP_INTERCEPT_DISMISS).putInt(SOURCE_CONST);
+        encodeValue(b, interceptDismiss);
+        return finish(b);
+    }
+
+    /** set_sheet_prop with a signal-bound intercept_dismiss value. */
+    public static byte[] txBindSheetInterceptDismiss(long sheet, long signalId) {
+        Enc b = begin(TX_KIND_SET_SHEET_PROP);
+        b.putLong(sheet).putInt(SHPROP_INTERCEPT_DISMISS).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_sheet_prop with a constant detent value. */
+    public static byte[] txSetSheetDetent(long sheet, long detent) {
+        Enc b = begin(TX_KIND_SET_SHEET_PROP);
+        b.putLong(sheet).putInt(SHPROP_DETENT).putInt(SOURCE_CONST);
+        encodeValue(b, detent);
+        return finish(b);
+    }
+
+    /** set_sheet_prop with a signal-bound detent value. */
+    public static byte[] txBindSheetDetent(long sheet, long signalId) {
+        Enc b = begin(TX_KIND_SET_SHEET_PROP);
+        b.putLong(sheet).putInt(SHPROP_DETENT).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
     /** set_section_prop with a constant title value. */
     public static byte[] txSetSectionTitle(long section, String title) {
         Enc b = begin(TX_KIND_SET_SECTION_PROP);

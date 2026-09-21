@@ -1850,6 +1850,42 @@ export function tx_bind_entry_intercept_back(entry: number, signal_id: number): 
   return enc.end(TX_SET_ENTRY_PROP);
 }
 
+/** set_sheet_prop with a constant title value. */
+export function tx_set_sheet_title(sheet: number, title: string): Uint8Array {
+  enc.begin(); enc.u64(sheet); enc.u32(SHPROP_TITLE); enc.u32(SOURCE_CONST); enc.value(title);
+  return enc.end(TX_SET_SHEET_PROP);
+}
+
+/** set_sheet_prop with a signal-bound title value. */
+export function tx_bind_sheet_title(sheet: number, signal_id: number): Uint8Array {
+  enc.begin(); enc.u64(sheet); enc.u32(SHPROP_TITLE); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_SHEET_PROP);
+}
+
+/** set_sheet_prop with a constant intercept_dismiss value. */
+export function tx_set_sheet_intercept_dismiss(sheet: number, intercept_dismiss: boolean): Uint8Array {
+  enc.begin(); enc.u64(sheet); enc.u32(SHPROP_INTERCEPT_DISMISS); enc.u32(SOURCE_CONST); enc.value(intercept_dismiss);
+  return enc.end(TX_SET_SHEET_PROP);
+}
+
+/** set_sheet_prop with a signal-bound intercept_dismiss value. */
+export function tx_bind_sheet_intercept_dismiss(sheet: number, signal_id: number): Uint8Array {
+  enc.begin(); enc.u64(sheet); enc.u32(SHPROP_INTERCEPT_DISMISS); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_SHEET_PROP);
+}
+
+/** set_sheet_prop with a constant detent value. */
+export function tx_set_sheet_detent(sheet: number, detent: number): Uint8Array {
+  enc.begin(); enc.u64(sheet); enc.u32(SHPROP_DETENT); enc.u32(SOURCE_CONST); enc.value(new I64(detent));
+  return enc.end(TX_SET_SHEET_PROP);
+}
+
+/** set_sheet_prop with a signal-bound detent value. */
+export function tx_bind_sheet_detent(sheet: number, signal_id: number): Uint8Array {
+  enc.begin(); enc.u64(sheet); enc.u32(SHPROP_DETENT); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_SHEET_PROP);
+}
+
 /** set_section_prop with a constant title value. */
 export function tx_set_section_title(section: number, title: string): Uint8Array {
   enc.begin(); enc.u64(section); enc.u32(SPROP_TITLE); enc.u32(SOURCE_CONST); enc.value(title);

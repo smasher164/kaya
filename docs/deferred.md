@@ -40,20 +40,31 @@ platform's own path when unarmed and through a local key monitor when
 armed, measured in docs/measurements/sheet-probes-2026-09-21.md's U2b),
 `tools/scenes/sheet.steps` with guests/rust/sheet.rs on the mac's depth
 roster, and check-verbs' rows. What breadth still owes, held open here:
-  - **DEPTH STUB: sheet on gtk** — the AdwDialog arm (U3; needs the
-    libadwaita `v1_5` feature bump), the three verbs, `dismiss_sheet` as
-    Esc through the compositor's focus.
-  - **DEPTH STUB: sheet on winui** — the modal Popup arm (U1), the three
-    verbs, Esc on the popup's own key handler.
-  - **DEPTH STUB: sheet on compose** — the ModalBottomSheet arm with its
-    detent, the three verbs, back as the cancel path.
-  - **DEPTH STUB: sheet on swiftui/ios** — `dismiss_sheet` through the
-    XCUITest driver's swipe (the reads are written: presented controllers,
-    the selected detent); the phone lanes cut `expect_sheet_detent none`
-    and append the medium reading.
-  Beside them: the eight bindings' sugar and guests with
-  check-sugar-surface's row per binding, and the task manager's quick-add
-  sheet (S6).
+  - ~~**DEPTH STUB: sheet on gtk**~~ — LANDED 2026-09-21: the AdwDialog arm
+    under the libadwaita `v1_5` feature, a header bar with the title and
+    close button over the root, `can-close` as the veto, `force_close` as
+    the programmatic dismiss, Esc through wtype or xdotool.
+  - ~~**DEPTH STUB: sheet on winui**~~ — LANDED 2026-09-21: the modal Popup
+    arm (U1), Fluent's smoke over the root and its layer card with a
+    header, Esc on the popup's own key handler and the close button through
+    one cancel function, which the harness's `dismiss_sheet` drives directly
+    since an OS-global key belongs to legs that run alone.
+  - ~~**DEPTH STUB: sheet on compose**~~ — LANDED 2026-09-21: the M3
+    ModalBottomSheet arm, one window per sheet nested in its parent's
+    content, the detent as the partial anchor over full-height content,
+    back as the cancel path, the veto through the sheet's own back handler
+    and a re-show after the scrim or swipe hid it.
+  - ~~**DEPTH STUB: sheet on swiftui/ios**~~ — LANDED 2026-09-21:
+    `dismiss_sheet` as the XCUITest driver's swipe on the topmost sheet's
+    named element, the armed attempt heard through a presentation-delegate
+    proxy (`KayaSheetDismissProxy`), the reads off the presented
+    controllers and the selected detent; the phone lanes drop
+    `expect_sheet_detent none` and reopen the medium sheet at the end.
+  BREADTH LANDED 2026-09-21: the eight bindings' sugar and guests, the
+  generators' sheet-prop duos, check-sugar-surface's eleven-part census
+  with its 99 fake-stem negatives, and the four backend arms above, each
+  green by hand on its own lane. What remains of the slice is the task
+  manager's quick-add sheet (S6) and the review page.
 
 ## ~~BUILD — R1 async dialogs: explicit-transaction amendment approved (2026-09-19)~~ COMPLETE 2026-09-21: C#, Swift, Java and Rust awaitable tiers, explicit transaction scopes and honest task-error ownership are implemented; JS overlap and cleanup guards agree. Final Rust slice passed 644 core tests, 25 doctests (one ignored), 61 gates and all five matrix lanes: Mac 477, Linux 777, Windows 283, iOS 139, Android 148 in 1072 seconds, every timing ceiling held
 KEY: async dialogs, R1.4, R1.5, async void, SynchronizationContext, continuation rollback, explicit Build, Swift Task, app.task, task error ownership, Java CompletionStage, app.observe, Rust local future, Tx across await, poll boundary, scope-only, private begin, Go carve-out

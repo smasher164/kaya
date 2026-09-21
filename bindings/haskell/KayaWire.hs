@@ -1848,6 +1848,42 @@ txBindEntryInterceptBack entry signalId = wireRecord txKindSetEntryProp
   (word64LE entry <> word32LE epropInterceptBack <> word32LE sourceSignal
     <> word64LE signalId)
 
+-- set_sheet_prop with a constant title value.
+txSetSheetTitle :: Word64 -> String -> Builder
+txSetSheetTitle sheet title = wireRecord txKindSetSheetProp
+  (word64LE sheet <> word32LE shpropTitle <> word32LE sourceConst
+    <> encodeValue (VStr title))
+
+-- set_sheet_prop with a signal-bound title value.
+txBindSheetTitle :: Word64 -> Word64 -> Builder
+txBindSheetTitle sheet signalId = wireRecord txKindSetSheetProp
+  (word64LE sheet <> word32LE shpropTitle <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_sheet_prop with a constant intercept_dismiss value.
+txSetSheetInterceptDismiss :: Word64 -> Bool -> Builder
+txSetSheetInterceptDismiss sheet interceptDismiss = wireRecord txKindSetSheetProp
+  (word64LE sheet <> word32LE shpropInterceptDismiss <> word32LE sourceConst
+    <> encodeValue (VBool interceptDismiss))
+
+-- set_sheet_prop with a signal-bound intercept_dismiss value.
+txBindSheetInterceptDismiss :: Word64 -> Word64 -> Builder
+txBindSheetInterceptDismiss sheet signalId = wireRecord txKindSetSheetProp
+  (word64LE sheet <> word32LE shpropInterceptDismiss <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_sheet_prop with a constant detent value.
+txSetSheetDetent :: Word64 -> Int64 -> Builder
+txSetSheetDetent sheet detent = wireRecord txKindSetSheetProp
+  (word64LE sheet <> word32LE shpropDetent <> word32LE sourceConst
+    <> encodeValue (VI64 detent))
+
+-- set_sheet_prop with a signal-bound detent value.
+txBindSheetDetent :: Word64 -> Word64 -> Builder
+txBindSheetDetent sheet signalId = wireRecord txKindSetSheetProp
+  (word64LE sheet <> word32LE shpropDetent <> word32LE sourceSignal
+    <> word64LE signalId)
+
 -- set_section_prop with a constant title value.
 txSetSectionTitle :: Word64 -> String -> Builder
 txSetSectionTitle section title = wireRecord txKindSetSectionProp

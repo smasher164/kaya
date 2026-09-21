@@ -79,6 +79,15 @@ left both contents alive (docs/traps.md, the sheet presented into its own
 dismissal); the host presents one item per host now, the next raised from
 the last one's `onDismiss`.
 
+## Breadth, the same day: what each lane's first red measured
+
+| Lane | First reading | What it named |
+| --- | --- | --- |
+| linux x11, all eight | `sheets 1, wanted 0` after the Esc; the verb's own trace (added for it) read `gtk focus None inside the topmost sheet: false` while the dialog's root held a `GtkButton` | libadwaita presents an AdwDialog over a plain GtkWindow as its own toplevel; Esc had gone to the primary's X window. Focus into the dialog's root and Esc to its own xid: 16/16 |
+| android compose and jvm | `kaya: the harness has no mounted activity` right after the back | the activity's back dispatcher finished the app; a ModalBottomSheet is a dialog window with its own dispatch. KEYCODE_BACK to the sheet window's decor view: 3/3 (jvm's second red was the javahost selector lacking the scene) |
+| windows python, js, csharp | `applying Mount … failed: The operation completed successfully (0x0)` at +35 ms | the XamlRoot not live yet, the alert arm's known class; the popup's open defers to the root's Loaded: 6/6 |
+| ios | the unarmed swipe green at +1.7 s and red at +190 ms; the armed attempt unheard with the proxy on `NavigationStackHostingController`; the one-label child's swipe too short | the swipe waits for the presentation to settle, the proxy climbs to the presented controller, and the dismissal is a real pan from the sheet's top to the screen's bottom: 1/1 |
+
 ## U1, WinUI: a modal over a modal
 
 `tools/win/sheetprobe/` (the undo probe's route: a module of the backend

@@ -131,6 +131,12 @@ import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.ModalBottomSheetProperties
+import androidx.compose.material3.SheetState
+import androidx.compose.material3.SheetValue
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -225,6 +231,7 @@ import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.node.RootForTest
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.window.DialogWindowProvider
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -835,6 +842,10 @@ object KayaSceneModel {
     // stack.
     val navEntries = androidx.compose.runtime.mutableStateListOf<KayaNavEntry>()
     val navIndex = HashMap<Long, KayaNavEntry>()
+    // Live sheets in present order (docs/sheet-plan.md); the composables
+    // read the list, the apply arms the index.
+    val sheets = androidx.compose.runtime.mutableStateListOf<KayaSheet>()
+    val sheetIndex = HashMap<Long, KayaSheet>()
     // The window's section set (add order) and selection; non-empty
     // sections render as the M3 bottom NavigationBar — the phones'
     // physics regardless of the ADVISORY hint, which is recorded only.
@@ -992,6 +1003,20 @@ class KayaNavEntry(val id: Long) {
     var root by mutableStateOf<KayaNode?>(null)
     var title by mutableStateOf("")
     var interceptBack by mutableStateOf(false)
+}
+
+/** One sheet (docs/sheet-plan.md): a root-hosting modal over a surface,
+ * M3's ModalBottomSheet, one child per parent. `state` is the platform's
+ * own SheetState once composed — what the runner reads back. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+class KayaSheet(val id: Long, val parent: Long) {
+    var root by mutableStateOf<KayaNode?>(null)
+    var title by mutableStateOf("")
+    var interceptDismiss by mutableStateOf(false)
+    var detent by mutableStateOf(0L)
+    var state: SheetState? = null
+    /** The sheet's own dialog window, where the back key lands. */
+    var window: android.view.Window? = null
 }
 
 /** One menu item — a VERB, never a place (DESIGN.md, Menus). All
@@ -1489,8 +1514,8 @@ object KayaCompose {
     private const val SHPROP_TITLE = 1
     private const val SHPROP_INTERCEPT_DISMISS = 2
     private const val SHPROP_DETENT = 3
-    private const val DETENT_MEDIUM = 1
-    private const val DETENT_LARGE = 2
+    internal const val DETENT_MEDIUM = 1
+    internal const val DETENT_LARGE = 2
     private const val COMMAND_CLEAR = 1
     private const val COMMAND_FOCUS = 2
     // Menu item kinds (spec enum "menu_kind"; DESIGN.md, Menus): menu
@@ -2590,8 +2615,31 @@ object KayaCompose {
                     kayaRichApplyEdit(
                         enode, estart, estop, einserted, eruns, eselStart, eselStop)
                 }
-                APPLY_PRESENT_SHEET, APPLY_DISMISS_SHEET, APPLY_SET_SHEET_PROP ->
-                    depthStub("sheet")
+                APPLY_PRESENT_SHEET -> {
+                    val parent = b.long
+                    val sid = b.long
+                    val sheet = KayaSheet(sid, parent)
+                    KayaSceneModel.sheetIndex[sid] = sheet
+                    KayaSceneModel.sheets.add(sheet)
+                }
+                APPLY_DISMISS_SHEET -> {
+                    // Programmatic: the core already forgot the chain; the
+                    // model drop leaves the composition, no emit (the echo
+                    // doctrine).
+                    kayaForgetSheet(b.long)
+                }
+                APPLY_SET_SHEET_PROP -> {
+                    val sid = b.long
+                    val prop = b.int
+                    b.int // pad
+                    val sheet = KayaSceneModel.sheetIndex[sid]!!
+                    when (prop) {
+                        SHPROP_TITLE -> sheet.title = readString(b)
+                        SHPROP_INTERCEPT_DISMISS -> sheet.interceptDismiss = readBool(b)
+                        SHPROP_DETENT -> sheet.detent = readI64(b)
+                        else -> error("kaya: unknown sheet prop $prop")
+                    }
+                }
                 APPLY_FORMAT_TEXT -> {
                     // { u64 id; u32 removed; u32 ranged; u64 start; u64 stop;
                     //   u32 count; u32 reserved; Str name; Str value } — the
@@ -3039,7 +3087,12 @@ object KayaCompose {
                     val root = b.long
                     val entry = KayaSceneModel.navIndex[wid]
                     val section = KayaSceneModel.sectionIndex[wid]
-                    if (entry != null) entry.root = KayaSceneModel.nodes[root]
+                    val sheet = KayaSceneModel.sheetIndex[wid]
+                    if (sheet != null) {
+                        // Mounting presents: KayaSheetHost composes it.
+                        sheet.root = KayaSceneModel.nodes[root]
+                        notePresentedChanged()
+                    } else if (entry != null) entry.root = KayaSceneModel.nodes[root]
                     else if (section != null) section.root = KayaSceneModel.nodes[root]
                     else KayaSceneModel.root = KayaSceneModel.nodes[root]
                 }
@@ -3859,6 +3912,7 @@ object KayaCompose {
             for (entry in section.entries) entry.root?.let { stack.addLast(it) }
         }
         for (entry in KayaSceneModel.navEntries) entry.root?.let { stack.addLast(it) }
+        for (sheet in KayaSceneModel.sheets) sheet.root?.let { stack.addLast(it) }
         while (stack.isNotEmpty()) {
             val node = stack.removeLast()
             if (!ids.add(node.id)) continue
@@ -8302,12 +8356,64 @@ object KayaCompose {
                         }
                         kayaAwaitAnswer(answered)
                     }
-                    "expect_sheets", "expect_sheet", "expect_sheet_detent" -> {
-                        depthStub("sheet")
+                    "expect_sheets" -> {
+                        // The platform's truth: sheet states visible,
+                        // never the model.
+                        val want = parts[1].toIntOrNull() ?: -1
+                        val got = onUi(activity) {
+                            KayaSceneModel.sheets.count { kayaSheetVisible(it) }
+                        }
+                        if (got == want) {
+                            observed.add("sheets $want")
+                        } else {
+                            failures.add("sheets $got, wanted $want")
+                        }
+                    }
+                    "expect_sheet" -> {
+                        // The topmost live sheet's title: Material draws
+                        // no header, so the model's, which the sheet's
+                        // own title row draws.
+                        val want = quoted(parts.drop(1))
+                        val got = onUi(activity) { kayaTopmostSheet()?.title }
+                        if (got != null && got == want) {
+                            observed.add("sheet \"$want\"")
+                        } else if (got != null) {
+                            failures.add("sheet \"$got\", wanted \"$want\"")
+                        } else {
+                            failures.add("no sheet live, wanted \"$want\"")
+                        }
+                    }
+                    "expect_sheet_detent" -> {
+                        // The platform's own anchor: the partial one is
+                        // medium, the expanded one large.
+                        val want = parts.getOrNull(1) ?: ""
+                        val got = onUi(activity) { kayaSheetDetentWord(kayaTopmostSheet()) }
+                        if (got == want) {
+                            observed.add("sheet detent $want")
+                        } else {
+                            failures.add("sheet detent $got, wanted $want")
+                        }
                     }
                     "dismiss_sheet" -> {
-                        // An action arm of its own: check-verbs' REFUSALS row.
-                        depthStub("sheet")
+                        // The platform's own cancel path: the back key,
+                        // delivered to the topmost sheet's OWN window (a
+                        // ModalBottomSheet is a dialog window with its own
+                        // back dispatch; the activity's would finish the app,
+                        // measured 2026-09-21).
+                        kayaAwaitQuiet()
+                        val answered = kayaBatches
+                        val delivered = onUi(activity) {
+                            val window = kayaTopmostSheet()?.window ?: return@onUi false
+                            val decor = window.decorView
+                            decor.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BACK))
+                            decor.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_BACK))
+                            true
+                        }
+                        if (delivered) {
+                            kayaAwaitAnswer(answered)
+                        } else {
+                            failures.add("dismiss_sheet: no sheet window to deliver back to")
+                        }
                     }
                     "expect_alerts" -> {
                         val want = parts[1].toIntOrNull() ?: -1
@@ -14365,6 +14471,10 @@ fun KayaRoot() {
         enabled = kayaActiveEntries().isNotEmpty() && !kayaSplitArm()
     ) { kayaUserBack() }
 
+    // The sheets over the window, an entry or a section; a chain nests
+    // inside its parent sheet's content (docs/sheet-plan.md).
+    KayaSheetHost(null)
+
     KayaSceneModel.alertId?.let { alert ->
         // The platform's REAL modal dialog: M3 AlertDialog. Every
         // native dismissal (back, outside tap) IS the cancel slot;
@@ -15200,6 +15310,109 @@ fun kayaUserBack() {
         KayaCompose.notePresentedChanged()
         KayaCompose.refreshNavTitle()
         KayaPresent.emitEntryPopped(top.id)
+    }
+}
+
+/** Drop a sheet's model and its children's — the programmatic dismiss and
+ * the user's, once reported. */
+fun kayaForgetSheet(id: Long) {
+    for (child in KayaSceneModel.sheets.filter { it.parent == id }) kayaForgetSheet(child.id)
+    val sheet = KayaSceneModel.sheetIndex.remove(id) ?: return
+    KayaSceneModel.sheets.remove(sheet)
+    // The sheet's subtree stops answering targets from here.
+    KayaCompose.notePresentedChanged()
+}
+
+/** The user's cancel path (back, the scrim, the swipe) ended a sheet:
+ * post-fact, the model follows and the app hears sheet_dismissed. */
+fun kayaSheetUserDismissed(id: Long) {
+    if (!KayaSceneModel.sheetIndex.containsKey(id)) return
+    kayaForgetSheet(id)
+    KayaPresent.emitSheetDismissed(id)
+}
+
+/** Shown, by the platform's own state. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+fun kayaSheetVisible(sheet: KayaSheet): Boolean = sheet.state?.isVisible == true
+
+/** The platform's own anchor as the harness's word: the partial one is
+ * medium, the expanded one large. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+fun kayaSheetDetentWord(sheet: KayaSheet?): String =
+    when (sheet?.state?.currentValue) {
+        SheetValue.PartiallyExpanded -> "medium"
+        SheetValue.Expanded -> "large"
+        else -> "none"
+    }
+
+/** The live sheet with no live child: where back lands. */
+fun kayaTopmostSheet(): KayaSheet? {
+    val live = KayaSceneModel.sheets.filter { kayaSheetVisible(it) }
+    return live.filter { s -> live.none { it.parent == s.id } }.maxByOrNull { it.id }
+}
+
+/** The sheets over `parent` — null for every sheet over a NON-sheet
+ * surface (the window, an entry, a section), an id for that sheet's own
+ * child — each an M3 ModalBottomSheet, its own window, composed inside
+ * its parent's content so the chain stacks. */
+@Composable
+fun KayaSheetHost(parent: Long?) {
+    val ids = KayaSceneModel.sheets.map { it.id }.toSet()
+    for (sheet in KayaSceneModel.sheets) {
+        val mine = if (parent == null) sheet.parent !in ids else sheet.parent == parent
+        if (!mine) continue
+        val root = sheet.root ?: continue
+        androidx.compose.runtime.key(sheet.id) { KayaSheetView(sheet, root) }
+    }
+}
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun KayaSheetView(sheet: KayaSheet, root: KayaNode) {
+    // The detent is the platform's own anchor (docs/sheet-plan.md §1.4):
+    // medium opens at the partial (half-height) anchor, which Material
+    // offers only for content taller than half the screen, so a detented
+    // sheet fills the height; an unset detent wraps its content.
+    val detented = sheet.detent != 0L
+    val state = rememberModalBottomSheetState(
+        skipPartiallyExpanded = sheet.detent != KayaCompose.DETENT_MEDIUM.toLong())
+    sheet.state = state
+    val scope = rememberCoroutineScope()
+    ModalBottomSheet(
+        onDismissRequest = {
+            if (sheet.interceptDismiss) {
+                // Armed: nothing goes. The scrim and the swipe hide the
+                // sheet before asking, so it is shown again, and the app
+                // is asked.
+                scope.launch { state.show() }
+                KayaPresent.emitDismissRequested(sheet.id)
+            } else {
+                kayaSheetUserDismissed(sheet.id)
+            }
+        },
+        sheetState = state,
+        properties = ModalBottomSheetProperties(shouldDismissOnBackPress = !sheet.interceptDismiss),
+    ) {
+        // Armed: back asks the app; the sheet's own back handler is off.
+        androidx.activity.compose.BackHandler(enabled = sheet.interceptDismiss) {
+            KayaPresent.emitDismissRequested(sheet.id)
+        }
+        // The sheet is its own window; the runner's back key is delivered to
+        // it, not to the activity, whose dispatcher would finish the app.
+        val view = LocalView.current
+        androidx.compose.runtime.SideEffect {
+            sheet.window = (view.parent as? DialogWindowProvider)?.window
+        }
+        Column(modifier = if (detented) Modifier.fillMaxHeight() else Modifier) {
+            // The title row: Material draws no header of its own.
+            Text(
+                sheet.title,
+                style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            )
+            Box(modifier = Modifier.padding(16.dp)) { KayaRender(node = root, isRoot = true) }
+            KayaSheetHost(sheet.id)
+        }
     }
 }
 

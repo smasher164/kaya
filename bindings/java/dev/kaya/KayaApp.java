@@ -306,6 +306,9 @@ public final class KayaApp {
     final java.util.Map<Long, Consumer<Tx>> closeRequested = new java.util.HashMap<>();
     final java.util.Map<Long, Consumer<Tx>> entryPopped = new java.util.HashMap<>();
     final java.util.Map<Long, Consumer<Tx>> backRequested = new java.util.HashMap<>();
+    // Per-sheet, keyed by sheet surface id (docs/sheet-plan.md).
+    final java.util.Map<Long, Consumer<Tx>> sheetDismissed = new java.util.HashMap<>();
+    final java.util.Map<Long, Consumer<Tx>> dismissRequested = new java.util.HashMap<>();
     final java.util.Map<Long, Consumer<Tx>> sectionSelected = new java.util.HashMap<>();
     private final java.util.Map<Long, BiConsumer<Tx, java.util.List<PickedFile>>> fileDialogs =
             new java.util.HashMap<>();
@@ -1964,6 +1967,19 @@ public final class KayaApp {
 
     /** A window's advisory sections presentation — guest-chosen, never
      * wire-borne, so there is no {@code fromWire}. */
+    /** The height the phones open a sheet at (docs/sheet-plan.md §1.4);
+     * the desktops have nothing to say and ignore it. */
+    public enum Detent {
+        MEDIUM(KayaWire.DETENT_MEDIUM),
+        LARGE(KayaWire.DETENT_LARGE);
+
+        final long wire;
+
+        Detent(long wire) {
+            this.wire = wire;
+        }
+    }
+
     public enum SectionsPresentation {
         AUTO(KayaWire.SECTIONS_PRESENTATION_AUTO),
         BAR(KayaWire.SECTIONS_PRESENTATION_BAR),
@@ -2505,6 +2521,62 @@ public final class KayaApp {
         }
 
         /** The entry's surface id, for mountIn. */
+        public long id() {
+            return id;
+        }
+    }
+
+    /** Chains sheet props, the construction-sugar tier
+     * (docs/sheet-plan.md): tx.presentSheet(11).title("new task"). */
+    public static final class SheetRef {
+        private final Tx tx;
+        private final KayaApp app;
+        private final long id;
+
+        SheetRef(Tx tx, KayaApp app, long id) {
+            this.tx = tx;
+            this.app = app;
+            this.id = id;
+        }
+
+        /** The sheet's accessible name, drawn where the platform draws
+         * a header. */
+        public SheetRef title(String title) {
+            tx.emit(KayaWire.txSetSheetTitle(id, title));
+            return this;
+        }
+
+        /** Arms the dismiss veto: the cancel path emits
+         * dismiss_requested and nothing goes until dismissSheet agrees. */
+        public SheetRef interceptDismiss(boolean on) {
+            tx.emit(KayaWire.txSetSheetInterceptDismiss(id, on));
+            return this;
+        }
+
+        /** The height the phones open it at; the desktops ignore it. */
+        public SheetRef detent(Detent detent) {
+            tx.emit(KayaWire.txSetSheetDetent(id, detent.wire));
+            return this;
+        }
+
+        /** Binds the dismissed handler to THIS sheet: fires when the
+         * user's cancel path closes it natively (post-fact; a
+         * programmatic dismissSheet does not fire it), retiring with the
+         * one dismissal. */
+        public SheetRef onDismissed(Consumer<Tx> handler) {
+            app.sheetDismissed.put(id, handler);
+            return this;
+        }
+
+        /** Binds the dismiss-veto handler to THIS sheet: fires per cancel
+         * while interceptDismiss is armed — nothing has gone; answer
+         * with tx.dismissSheet to agree. */
+        public SheetRef onDismissRequested(Consumer<Tx> handler) {
+            app.dismissRequested.put(id, handler);
+            return this;
+        }
+
+        /** The sheet's surface id, for mountIn. */
         public long id() {
             return id;
         }
@@ -6218,6 +6290,33 @@ public final class KayaApp {
         }
 
         /**
+         * Request a sheet over the primary window (docs/sheet-plan.md):
+         * a modal hosting a root, presented by mountIn. Sheet ids are
+         * guest-allocated in the shared surface namespace:
+         * tx.presentSheet(11).title("new task").interceptDismiss(true).
+         */
+        public SheetRef presentSheet(long id) {
+            emit(KayaWire.txPresentSheet(0, id));
+            return new SheetRef(this, KayaApp.this, id);
+        }
+
+        /** Request a sheet over another window or over a LIVE SHEET (the
+         * chain: one child per parent). */
+        public SheetRef presentSheetOver(long parent, long id) {
+            emit(KayaWire.txPresentSheet(parent, id));
+            return new SheetRef(this, KayaApp.this, id);
+        }
+
+        /**
+         * Dismiss a live sheet and forget its tree, child sheets with
+         * it — also the dismiss-veto grammar's confirmation after
+         * onDismissRequested. An unknown sheet is a scene error.
+         */
+        public void dismissSheet(long id) {
+            emit(KayaWire.txDismissSheet(id));
+        }
+
+        /**
          * Append a section to the primary window's section set
          * (section ids are guest-allocated in the shared surface
          * namespace). The set is APPEND-ONLY — no destruction grammar —
@@ -8442,6 +8541,19 @@ public final class KayaApp {
                 }
             } else if (occ.kind == KayaWire.OCC_KIND_BACK_REQUESTED) {
                 Consumer<Tx> handler = backRequested.get(occ.id);
+                if (handler != null) {
+                    dispatch(handler);
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_SHEET_DISMISSED) {
+                // One-shot: the sheet is gone; both registrations
+                // retire with it.
+                dismissRequested.remove(occ.id);
+                Consumer<Tx> handler = sheetDismissed.remove(occ.id);
+                if (handler != null) {
+                    dispatch(handler);
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_DISMISS_REQUESTED) {
+                Consumer<Tx> handler = dismissRequested.get(occ.id);
                 if (handler != null) {
                     dispatch(handler);
                 }

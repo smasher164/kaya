@@ -96,6 +96,7 @@ LEGS = {
         # richtext's reason, and no IME_SCENES member — the copy's act is
         # the harness's format verb.
         "richrows-compose",
+        "sheet-compose",
     ],
     "jvm": [
         "jvm", "a11y-jvm", "entry-jvm",
@@ -112,6 +113,7 @@ LEGS = {
         "table-jvm", "save-jvm", "dirty-jvm",
         "ranges-jvm", "styling-jvm", "typeface-jvm",
         "assets-jvm", "dnd-jvm", "pickers-jvm", "sliders-jvm", "tooltips-jvm",
+        "sheet-jvm",
     ],
     "go": [
         "go", "a11y-go", "a11yrows-go",
@@ -128,6 +130,7 @@ LEGS = {
         "undo-go", "filedialog-go", "save-go",
         "dirty-go", "ranges-go", "editor-go",
         "dnd-go", "pickers-go", "sliders-go", "tooltips-go",
+        "sheet-go",
     ],
     "python": [
         "varied-python", "portfolio-python",
@@ -233,6 +236,15 @@ MODS = {
                   "append": "expect_folded column@summary column@ledger;"},
     "dirty": {"cut": ("close_window", "expect_dirty", ""),
               "append": 'expect_title "dirty"'},
+    # THE DETENT IS THE PHONES' TO ANSWER (docs/sheet-plan.md §4): the
+    # shared script asserts the desktops' `none`; this lane drops that
+    # step and reopens the medium sheet at the end to read the platform's
+    # own anchor back, then cancels it through back.
+    "sheet": {"drop": ((("expect_sheet_detent none",), "expect_sheet",
+                        "the phones answer the detent"),),
+              "append": "click button#0;expect_sheets 1;"
+                        "expect_sheet_detent medium;dismiss_sheet;"
+                        "expect_sheets 0;"},
     "editor": {"cut": ("close_window", "expect_dirty", "")},
     "identity": {"drop": ((("expect_title window#1",), "expect_app_icon",
                            "no auxiliary windows"),)},

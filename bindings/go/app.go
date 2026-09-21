@@ -256,6 +256,9 @@ type App struct {
 	windowClosed   map[uint64]func(*Tx)
 	entryPopped    map[uint64]func(*Tx)
 	backRequested  map[uint64]func(*Tx)
+	// Per-sheet, keyed by sheet surface id (docs/sheet-plan.md).
+	sheetDismissed   map[uint64]func(*Tx)
+	dismissRequested map[uint64]func(*Tx)
 	sectionSelected map[uint64]func(*Tx)
 	alerts         map[uint64]func(*Tx, AlertChoice)
 	// One-shot, keyed by the GUEST's notification id (the alert's
@@ -359,6 +362,8 @@ func NewApp() *App {
 		nodeDragEnded:  make(map[uint64]func(*Tx, []any, Op)),
 		entryPopped:    make(map[uint64]func(*Tx)),
 		backRequested:  make(map[uint64]func(*Tx)),
+		sheetDismissed:   make(map[uint64]func(*Tx)),
+		dismissRequested: make(map[uint64]func(*Tx)),
 		sectionSelected: make(map[uint64]func(*Tx)),
 		closeRequested: make(map[uint64]func(*Tx)),
 		windowClosed:   make(map[uint64]func(*Tx)),
@@ -2854,6 +2859,29 @@ func (tx *Tx) PopEntryIn(window uint64) {
 	tx.emit(TxPopEntry(window))
 }
 
+// PresentSheet requests a sheet over the primary window
+// (docs/sheet-plan.md): a modal hosting a root, presented by MountIn.
+// Sheet ids are guest-allocated in the shared surface namespace. Returns
+// the prop chain.
+func (tx *Tx) PresentSheet(id uint64) SheetRef {
+	tx.emit(TxPresentSheet(0, id))
+	return SheetRef{tx: tx, id: id}
+}
+
+// PresentSheetOver requests a sheet over another window or over a LIVE
+// SHEET (the chain: one child per parent).
+func (tx *Tx) PresentSheetOver(parent, id uint64) SheetRef {
+	tx.emit(TxPresentSheet(parent, id))
+	return SheetRef{tx: tx, id: id}
+}
+
+// DismissSheet dismisses a live sheet and forgets its tree, child sheets
+// with it — also the dismiss-veto grammar's confirmation after
+// OnDismissRequested. An unknown sheet is a scene error.
+func (tx *Tx) DismissSheet(id uint64) {
+	tx.emit(TxDismissSheet(id))
+}
+
 // AddSection appends a section to the primary window's section set. The
 // set is APPEND-ONLY, and every section's root is retained while covered
 // — switching is SELECTION, not lifecycle. A MountIn fills its pane.
@@ -3790,6 +3818,10 @@ func (w WindowRef) SectionsPresentation(hint SectionsPresentation) WindowRef {
 // AppearanceLight or AppearanceDark.
 type Appearance int64
 
+// Detent is the height the phones open a sheet at: DetentMedium or
+// DetentLarge (docs/sheet-plan.md §1.4); the desktops ignore it.
+type Detent int64
+
 // AlertChoice is an alert's answer: the action the user pressed, by its
 // slot (AlertChoiceAction0/Action1), or AlertChoiceCancel, which is
 // every platform-native dismissal.
@@ -3962,6 +3994,55 @@ func (e EntryRef) OnBackRequested(fn func(*Tx)) EntryRef {
 // Id returns the entry's surface id, for MountIn.
 func (e EntryRef) Id() uint64 {
 	return e.id
+}
+
+// SheetRef chains sheet props, the construction-sugar tier
+// (docs/sheet-plan.md).
+type SheetRef struct {
+	tx *Tx
+	id uint64
+}
+
+// Title is the sheet's accessible name, drawn where the platform draws a
+// header.
+func (s SheetRef) Title(title string) SheetRef {
+	s.tx.emit(TxSetSheetTitle(s.id, title))
+	return s
+}
+
+// InterceptDismiss arms the dismiss veto: the cancel path emits
+// dismiss_requested and nothing goes until DismissSheet agrees.
+func (s SheetRef) InterceptDismiss(on bool) SheetRef {
+	s.tx.emit(TxSetSheetInterceptDismiss(s.id, on))
+	return s
+}
+
+// Detent is the height the phones open the sheet at (DetentMedium or
+// DetentLarge); the desktops have nothing to say and ignore it.
+func (s SheetRef) Detent(d Detent) SheetRef {
+	s.tx.emit(TxSetSheetDetent(s.id, int64(d)))
+	return s
+}
+
+// OnDismissed binds the dismissed handler to THIS sheet: fires when the
+// user's cancel path closes it natively (post-fact; a programmatic
+// DismissSheet does not fire it), and retires with the one dismissal.
+func (s SheetRef) OnDismissed(fn func(*Tx)) SheetRef {
+	s.tx.app.sheetDismissed[s.id] = fn
+	return s
+}
+
+// OnDismissRequested binds the dismiss-veto handler to THIS sheet: fires
+// each time the user drives cancel while InterceptDismiss is armed, and
+// NOTHING HAS GONE — answer with tx.DismissSheet to agree.
+func (s SheetRef) OnDismissRequested(fn func(*Tx)) SheetRef {
+	s.tx.app.dismissRequested[s.id] = fn
+	return s
+}
+
+// Id returns the sheet's surface id, for MountIn.
+func (s SheetRef) Id() uint64 {
+	return s.id
 }
 
 // SectionRef is the prop chain an AddSection rides.
@@ -6018,6 +6099,18 @@ func (a *App) Serve() {
 			}
 		case kind == occBackRequested:
 			if fn := a.backRequested[id]; fn != nil {
+				a.dispatch(func(tx *Tx) { fn(tx) })
+			}
+		case kind == occSheetDismissed:
+			// One-shot: the sheet is gone; both registrations
+			// retire with it.
+			delete(a.dismissRequested, id)
+			if fn := a.sheetDismissed[id]; fn != nil {
+				delete(a.sheetDismissed, id)
+				a.dispatch(func(tx *Tx) { fn(tx) })
+			}
+		case kind == occDismissRequested:
+			if fn := a.dismissRequested[id]; fn != nil {
 				a.dispatch(func(tx *Tx) { fn(tx) })
 			}
 		case kind == occAlertResult:

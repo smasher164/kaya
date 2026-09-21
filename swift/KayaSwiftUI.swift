@@ -9297,10 +9297,62 @@ private func kayaRunScript(_ script: String) {
                             else { return }
                             NSApp.sendEvent(event)
                         }
-                    #else
-                        kayaDepthStub("sheet", on: "ios")
                     #endif
                 }
+                #if !os(macOS)
+                    // The platform's own cancel path on iOS is the swipe, a
+                    // real touch the driver makes on the topmost sheet's
+                    // element (tools/ios/xcuidrive); armed, the attempt reaches
+                    // KayaSheetDismissProxy and nothing goes.
+                    if let top = DispatchQueue.main.sync(execute: { kayaTopmostSheetId() }) {
+                        // THE SWIPE WAITS FOR THE PRESENTATION TO SETTLE: a
+                        // swipe sent into the sheet's own rise never reaches
+                        // the dismissal gesture (measured 2026-09-21: the same
+                        // swipe green at +1.7s and red at +190ms).
+                        let settleBy = Date().addingTimeInterval(3)
+                        var settled = false
+                        while Date() < settleBy {
+                            settled = DispatchQueue.main.sync(execute: {
+                                guard let vc = kayaPresentedSheetControllers().last else { return false }
+                                return !vc.isBeingPresented && vc.transitionCoordinator == nil
+                            })
+                            if settled { break }
+                            Thread.sleep(forTimeInterval: 0.05)
+                        }
+                        let before = DispatchQueue.main.sync(execute: {
+                            kayaPresentedSheetControllers().map { "\(type(of: $0)) modal=\($0.isModalInPresentation)" }
+                        })
+                        kayaDiag("dismiss_sheet: presentation settled=\(settled)")
+                        // A REAL PAN FROM THE SHEET'S TOP TO THE SCREEN'S BOTTOM:
+                        // XCUIElement's own swipe travels with the element's
+                        // size, and a one-label sheet's was too short to reach
+                        // the dismissal threshold (measured 2026-09-21).
+                        kayaDiag("dismiss_sheet: panning kayasheet-\(top) down over \(before)")
+                        let (fok, flines) = KayaSimdrive.ask("find kayasheet-\(top)", timeout: 30)
+                        let (aok, alines) = KayaSimdrive.ask("frame", timeout: 30)
+                        func box(_ line: String?) -> [Double]? {
+                            let parts = (line ?? "").split(separator: " ").first?.split(separator: ",")
+                                .compactMap { Double($0) } ?? []
+                            return parts.count == 4 ? parts : nil
+                        }
+                        var ok = false
+                        var lines: [String] = []
+                        if fok, aok, let el = box(flines.first), let app = box(alines.first) {
+                            let x = Int(el[0] + el[2] / 2)
+                            let from = Int(el[1] + 12)
+                            let to = Int(app[1] + app[3] - 12)
+                            (ok, lines) = KayaSimdrive.ask("drag \(x) \(from) \(x) \(to)", timeout: 30)
+                        } else {
+                            lines = fok ? alines : flines
+                        }
+                        kayaDiag("dismiss_sheet: driver answered ok=\(ok) \(lines)")
+                        if !ok {
+                            failures.append(
+                                "dismiss_sheet: the driver did not pan the sheet down — "
+                                    + (lines.first ?? "no reason given"))
+                        }
+                    }
+                #endif
                 kayaAwaitAnswer(answered)
             case "expect_alerts":
                 // The REAL screen truth on macOS: an attached sheet
@@ -19352,8 +19404,15 @@ struct KayaSheetRoot: View {
         #else
             NavigationStack {
                 content
+                    // ONE ELEMENT WITH A NAME, the driver's swipe target
+                    // (tools/ios/xcuidrive, `swipe kayasheet-<id> down`).
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("kayasheet-\(sheetId)")
                     .navigationTitle(sheet?.title ?? "")
                     .navigationBarTitleDisplayMode(.inline)
+                    .background(
+                        KayaSheetDismissWatcher(
+                            sheetId: sheetId, armed: sheet?.interceptDismiss ?? false))
             }
             .interactiveDismissDisabled(sheet?.interceptDismiss ?? false)
             .presentationDetents(kayaSheetDetents(sheet?.detent ?? 0))
@@ -19362,6 +19421,86 @@ struct KayaSheetRoot: View {
 }
 
 #if !os(macOS)
+    /// THE ARMED SHEET'S CANCEL ATTEMPT (docs/sheet-plan.md): SwiftUI's
+    /// interactiveDismissDisabled sets the presentation modal and reports
+    /// no attempt, so the sheet's hosting controller takes a delegate proxy
+    /// while armed — UIKit's own presentationControllerDidAttemptToDismiss
+    /// is the attempt — forwarding everything else to the delegate SwiftUI
+    /// installed, and restored when the arm goes.
+    final class KayaSheetDismissProxy: NSObject, UIAdaptivePresentationControllerDelegate {
+        let sheetId: UInt64
+        weak var original: UIAdaptivePresentationControllerDelegate?
+
+        init(sheetId: UInt64, original: UIAdaptivePresentationControllerDelegate?) {
+            self.sheetId = sheetId
+            self.original = original
+        }
+
+        func presentationControllerDidAttemptToDismiss(_ controller: UIPresentationController) {
+            kayaDiag("sheet \(sheetId): dismiss attempted (modal in presentation)")
+            KayaHost.emitDismissRequested(sheetId)
+        }
+
+        override func responds(to aSelector: Selector!) -> Bool {
+            super.responds(to: aSelector) || (original?.responds(to: aSelector) ?? false)
+        }
+
+        override func forwardingTarget(for aSelector: Selector!) -> Any? {
+            original
+        }
+    }
+
+    var kayaSheetProxies: [UInt64: KayaSheetDismissProxy] = [:]
+
+    struct KayaSheetDismissWatcher: UIViewRepresentable {
+        let sheetId: UInt64
+        let armed: Bool
+
+        func makeUIView(context: Context) -> UIView {
+            let view = UIView()
+            view.isUserInteractionEnabled = false
+            return view
+        }
+
+        func updateUIView(_ view: UIView, context: Context) {
+            // The hosting controller is up the responder chain; the
+            // presentation exists once the view is in a window.
+            DispatchQueue.main.async {
+                var next: UIResponder? = view
+                while let r = next, !(r is UIViewController) { next = r.next }
+                // THE PRESENTED CONTROLLER, not the NavigationStack's own
+                // hosting controller inside it (measured: the proxy went on
+                // the inner one, whose presentation is not the sheet's).
+                var top = next as? UIViewController
+                while let parent = top?.parent { top = parent }
+                guard let controller = top,
+                    let presentation = controller.presentationController
+                else {
+                    kayaDiag("sheet \(sheetId): watcher found no presentation controller")
+                    return
+                }
+                if armed {
+                    if kayaSheetProxies[sheetId] == nil {
+                        let proxy = KayaSheetDismissProxy(
+                            sheetId: sheetId, original: presentation.delegate)
+                        kayaSheetProxies[sheetId] = proxy
+                        presentation.delegate = proxy
+                        kayaDiag(
+                            "sheet \(sheetId): attempt proxy installed over \(String(describing: proxy.original.map { type(of: $0) })) modalInPresentation=\(controller.isModalInPresentation) presented=\(type(of: controller))")
+                    }
+                } else if let proxy = kayaSheetProxies.removeValue(forKey: sheetId) {
+                    presentation.delegate = proxy.original
+                    kayaDiag("sheet \(sheetId): attempt proxy removed")
+                }
+            }
+        }
+    }
+
+    /// The topmost live sheet's id, for the driver's swipe target.
+    func kayaTopmostSheetId() -> UInt64? {
+        kayaScene.sheets.keys.filter { kayaScene.childSheet[$0] == nil }.max()
+    }
+
     /// The wire's detent as the platform's: unset is the platform's own
     /// default (large), so the set is the one the sheet may rest at.
     func kayaSheetDetents(_ detent: Int64) -> Set<PresentationDetent> {

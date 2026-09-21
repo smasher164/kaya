@@ -124,8 +124,8 @@ const (
 	ShpropTitle = 1
 	ShpropInterceptDismiss = 2
 	ShpropDetent = 3
-	DetentMedium = 1
-	DetentLarge = 2
+	DetentMedium Detent = 1
+	DetentLarge Detent = 2
 	SpropTitle = 1
 	SpropIcon = 2
 	SpropSymbol = 3
@@ -368,6 +368,16 @@ const (
 	occSheetDismissed = 31
 	occDismissRequested = 32
 )
+
+func (d Detent) String() string {
+	switch d {
+	case DetentMedium:
+		return "medium"
+	case DetentLarge:
+		return "large"
+	}
+	return "Detent(" + strconv.FormatInt(int64(d), 10) + ")"
+}
 
 func (s SectionsPresentation) String() string {
 	switch s {
@@ -2557,6 +2567,66 @@ func TxBindEntryInterceptBack(entry uint64, signalID uint64) []byte {
 	b := beginRecord(txSetEntryProp)
 	b = binary.LittleEndian.AppendUint64(b, entry)
 	b = binary.LittleEndian.AppendUint32(b, EpropInterceptBack)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxSetSheetTitle: set_sheet_prop with a constant title value.
+func TxSetSheetTitle(sheet uint64, title string) []byte {
+	b := beginRecord(txSetSheetProp)
+	b = binary.LittleEndian.AppendUint64(b, sheet)
+	b = binary.LittleEndian.AppendUint32(b, ShpropTitle)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, title)
+	return endRecord(b)
+}
+
+// TxBindSheetTitle: set_sheet_prop with a signal-bound title value.
+func TxBindSheetTitle(sheet uint64, signalID uint64) []byte {
+	b := beginRecord(txSetSheetProp)
+	b = binary.LittleEndian.AppendUint64(b, sheet)
+	b = binary.LittleEndian.AppendUint32(b, ShpropTitle)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxSetSheetInterceptDismiss: set_sheet_prop with a constant intercept_dismiss value.
+func TxSetSheetInterceptDismiss(sheet uint64, interceptDismiss bool) []byte {
+	b := beginRecord(txSetSheetProp)
+	b = binary.LittleEndian.AppendUint64(b, sheet)
+	b = binary.LittleEndian.AppendUint32(b, ShpropInterceptDismiss)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, interceptDismiss)
+	return endRecord(b)
+}
+
+// TxBindSheetInterceptDismiss: set_sheet_prop with a signal-bound intercept_dismiss value.
+func TxBindSheetInterceptDismiss(sheet uint64, signalID uint64) []byte {
+	b := beginRecord(txSetSheetProp)
+	b = binary.LittleEndian.AppendUint64(b, sheet)
+	b = binary.LittleEndian.AppendUint32(b, ShpropInterceptDismiss)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxSetSheetDetent: set_sheet_prop with a constant detent value.
+func TxSetSheetDetent(sheet uint64, detent int64) []byte {
+	b := beginRecord(txSetSheetProp)
+	b = binary.LittleEndian.AppendUint64(b, sheet)
+	b = binary.LittleEndian.AppendUint32(b, ShpropDetent)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, detent)
+	return endRecord(b)
+}
+
+// TxBindSheetDetent: set_sheet_prop with a signal-bound detent value.
+func TxBindSheetDetent(sheet uint64, signalID uint64) []byte {
+	b := beginRecord(txSetSheetProp)
+	b = binary.LittleEndian.AppendUint64(b, sheet)
+	b = binary.LittleEndian.AppendUint32(b, ShpropDetent)
 	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
 	b = binary.LittleEndian.AppendUint64(b, signalID)
 	return endRecord(b)

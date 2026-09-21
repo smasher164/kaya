@@ -1342,6 +1342,36 @@ def tx_bind_entry_intercept_back(entry: int, signal_id: int) -> bytes:
     return record(TX_SET_ENTRY_PROP, struct.pack("<QIIQ", entry, EPROP_INTERCEPT_BACK, SOURCE_SIGNAL, signal_id))
 
 
+def tx_set_sheet_title(sheet: int, title: str) -> bytes:
+    """set_sheet_prop with a constant title value (str)."""
+    return record(TX_SET_SHEET_PROP, struct.pack("<QII", sheet, SHPROP_TITLE, SOURCE_CONST) + _enc.value(title))
+
+
+def tx_bind_sheet_title(sheet: int, signal_id: int) -> bytes:
+    """set_sheet_prop with a signal-bound title value."""
+    return record(TX_SET_SHEET_PROP, struct.pack("<QIIQ", sheet, SHPROP_TITLE, SOURCE_SIGNAL, signal_id))
+
+
+def tx_set_sheet_intercept_dismiss(sheet: int, intercept_dismiss: bool) -> bytes:
+    """set_sheet_prop with a constant intercept_dismiss value (bool)."""
+    return record(TX_SET_SHEET_PROP, struct.pack("<QII", sheet, SHPROP_INTERCEPT_DISMISS, SOURCE_CONST) + _enc.value(intercept_dismiss))
+
+
+def tx_bind_sheet_intercept_dismiss(sheet: int, signal_id: int) -> bytes:
+    """set_sheet_prop with a signal-bound intercept_dismiss value."""
+    return record(TX_SET_SHEET_PROP, struct.pack("<QIIQ", sheet, SHPROP_INTERCEPT_DISMISS, SOURCE_SIGNAL, signal_id))
+
+
+def tx_set_sheet_detent(sheet: int, detent: int) -> bytes:
+    """set_sheet_prop with a constant detent value (int)."""
+    return record(TX_SET_SHEET_PROP, struct.pack("<QII", sheet, SHPROP_DETENT, SOURCE_CONST) + _enc.value(int(detent)))
+
+
+def tx_bind_sheet_detent(sheet: int, signal_id: int) -> bytes:
+    """set_sheet_prop with a signal-bound detent value."""
+    return record(TX_SET_SHEET_PROP, struct.pack("<QIIQ", sheet, SHPROP_DETENT, SOURCE_SIGNAL, signal_id))
+
+
 def tx_set_section_title(section: int, title: str) -> bytes:
     """set_section_prop with a constant title value (str)."""
     return record(TX_SET_SECTION_PROP, struct.pack("<QII", section, SPROP_TITLE, SOURCE_CONST) + _enc.value(title))

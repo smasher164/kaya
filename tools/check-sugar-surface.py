@@ -2342,6 +2342,172 @@ if slider_commit_fake != 15:
 print(f"check-sugar-surface: slider surface watched: prop fake "
       f"{slider_fake}/16, commit fake {slider_commit_fake}/15")
 
+# --- THE SHEET SURFACE, all nine (docs/sheet-plan.md §5) --------------
+# A sheet is a SURFACE, not a kind and not a window prop, so neither
+# sweep above sees it while tx 58-60 and occurrences 31/32 reach every
+# binding through the generator: the entry's shape one context over. Each
+# part is read out of the binding's own file with the identifier INSIDE
+# the pattern, so the fake stems below must fire nine times per part —
+# present, present over a parent, dismiss, the three props reaching their
+# wire helpers, both handlers registered per sheet, both retiring at the
+# one sheet_dismissed (a table that kept the closure fires an old handler
+# for a REUSED id, which the shared scene does on its second present),
+# and the detent vocabulary as a TYPE, never a bare number.
+SHEET_FILES = {
+    "rust": "crates/kaya/src/app.rs",
+    "python": "bindings/python/kaya/__init__.py",
+    "go": "bindings/go/app.go",
+    "csharp": "bindings/csharp/KayaApp.cs",
+    "java": "bindings/java/dev/kaya/KayaApp.java",
+    "swift": "bindings/swift/KayaApp.swift",
+    "haskell": "bindings/haskell/KayaApp.hs",
+    "ocaml": "bindings/ocaml/kaya_app.ml",
+    "js": "bindings/js/kaya/index.ts",
+}
+
+
+def sheet_rows(part, s, P, c, d, D, T):
+    """(lang, rel, pattern) for one part; s/P/c spell the surface noun,
+    d/D the request verb and T the detent type, so a fake stem in any of
+    them reddens every row of the parts that name it."""
+    F = SHEET_FILES
+    if part == "present":
+        return [("rust", F["rust"], rf"pub fn present_{s}\("),
+                ("python", F["python"], rf"def {s}\(self, {s}_id: int"),
+                ("go", F["go"], rf"func \(tx \*Tx\) Present{P}\("),
+                ("csharp", F["csharp"], rf"public void Present{P}\("),
+                ("java", F["java"], rf"public {P}Ref present{P}\("),
+                ("swift", F["swift"], rf"func present{P}\("),
+                ("haskell", F["haskell"], rf"^present{P} ::"),
+                ("ocaml", F["ocaml"], rf"^let present_{s} "),
+                ("js", F["js"], rf"^  {c}<T>\(")]
+    if part == "parent":
+        return [("rust", F["rust"], rf"pub fn present_{s}_over\("),
+                ("python", F["python"], rf"def {s}\([^)]*parent: int"),
+                ("go", F["go"], rf"func \(tx \*Tx\) Present{P}Over\("),
+                ("csharp", F["csharp"],
+                 rf"Present{P}\([\s\S]{{0,400}}?ulong parent = 0"),
+                ("java", F["java"], rf"public {P}Ref present{P}Over\("),
+                ("swift", F["swift"],
+                 rf"func present{P}\([\s\S]{{0,400}}?parent: UInt64 = 0"),
+                ("haskell", F["haskell"], rf"^present{P}Over ::"),
+                ("ocaml", F["ocaml"], rf"^let present_{s} \?\(parent"),
+                ("js", F["js"], rf"{P}Options = \{{[\s\S]{{0,300}}?parent\?:")]
+    if part == "dismiss":
+        return [("rust", F["rust"], rf"pub fn dismiss_{s}\("),
+                ("python", F["python"], rf"^def dismiss_{s}\("),
+                ("go", F["go"], rf"func \(tx \*Tx\) Dismiss{P}\("),
+                ("csharp", F["csharp"], rf"public void Dismiss{P}\("),
+                ("java", F["java"], rf"public void dismiss{P}\("),
+                ("swift", F["swift"], rf"func dismiss{P}\("),
+                ("haskell", F["haskell"], rf"^dismiss{P} ::"),
+                ("ocaml", F["ocaml"], rf"^let dismiss_{s} "),
+                ("js", F["js"], rf"^export function dismiss{P}\(")]
+    if part in ("title", "intercept_dismiss", "detent"):
+        snake = part
+        pascal = "".join(w.capitalize() for w in part.split("_"))
+        return [("rust", F["rust"], rf"{P}Prop::{pascal}\b"),
+                ("python", F["python"], rf"wire\.tx_set_{s}_{snake}\("),
+                ("go", F["go"], rf"TxSet{P}{pascal}\("),
+                ("csharp", F["csharp"], rf"KayaWire\.TxSet{P}{pascal}\("),
+                ("java", F["java"], rf"KayaWire\.txSet{P}{pascal}\("),
+                ("swift", F["swift"], rf"tx\.set{P}{pascal}\("),
+                ("haskell", F["haskell"], rf"W\.txSet{P}{pascal} "),
+                ("ocaml", F["ocaml"], rf"Kaya_wire\.tx_set_{s}_{snake} "),
+                ("js", F["js"], rf"wire\.tx_set_{s}_{snake}\(")]
+    if part == "on_dismissed":
+        return [("rust", F["rust"], rf"pub fn on_{s}_dismissed\("),
+                ("python", F["python"], rf"_{s}_dismissed\[self\._window\] ="),
+                ("go", F["go"], rf"{c}Dismissed\[s\.id\] = fn"),
+                ("csharp", F["csharp"], rf"App\.{c}Dismissed\[id\] ="),
+                ("java", F["java"], rf"app\.{c}Dismissed\.put\(id"),
+                ("swift", F["swift"], rf"{c}Dismissed\[{c}\] = handler"),
+                ("haskell", F["haskell"], rf"P{P}Dismissed n handler"),
+                ("ocaml", F["ocaml"], rf"tx\.app\.{s}_dismissed id f"),
+                ("js", F["js"], rf"_{c}Dismissed\.set\({c}Id")]
+    if part == "on_dismiss_requested":
+        return [("rust", F["rust"], rf"pub fn on_{d}_requested\("),
+                ("python", F["python"], rf"_{d}_requested\[self\._window\] ="),
+                ("go", F["go"], rf"{d}Requested\[s\.id\] = fn"),
+                ("csharp", F["csharp"], rf"App\.{d}Requested\[id\] ="),
+                ("java", F["java"], rf"app\.{d}Requested\.put\(id"),
+                ("swift", F["swift"], rf"{d}Requested\[sheet\] = handler"),
+                ("haskell", F["haskell"], rf"P{D}Requested n handler"),
+                ("ocaml", F["ocaml"], rf"tx\.app\.{d}_requested id f"),
+                ("js", F["js"], rf"_{d}Requested\.set\(sheetId")]
+    if part == "retire_dismissed":
+        return [("rust", F["rust"],
+                 rf"{s}_dismissed\.borrow_mut\(\)\.remove\("),
+                ("python", F["python"], rf"_{s}_dismissed\.pop\(ident"),
+                ("go", F["go"], rf"delete\(a\.{c}Dismissed, id\)"),
+                ("csharp", F["csharp"], rf"{c}Dismissed\.Remove\(gone\.Id"),
+                ("java", F["java"], rf"{c}Dismissed\.remove\(occ\.id\)"),
+                ("swift", F["swift"],
+                 rf"{c}Dismissed\.removeValue\(forKey: id\)"),
+                ("haskell", F["haskell"],
+                 rf"app\.app{P}Dismissed\) \(Map\.delete ident"),
+                ("ocaml", F["ocaml"], rf"Hashtbl\.remove app\.{s}_dismissed id"),
+                ("js", F["js"], rf"_{c}Dismissed\.delete\(ident\)")]
+    if part == "retire_request":
+        return [("rust", F["rust"],
+                 rf"{d}_requested\.borrow_mut\(\)\.remove\("),
+                ("python", F["python"], rf"_{d}_requested\.pop\(ident"),
+                ("go", F["go"], rf"delete\(a\.{d}Requested, id\)"),
+                ("csharp", F["csharp"], rf"{d}Requested\.Remove\(gone\.Id\)"),
+                ("java", F["java"], rf"{d}Requested\.remove\(occ\.id\)"),
+                ("swift", F["swift"],
+                 rf"{d}Requested\.removeValue\(forKey: id\)"),
+                ("haskell", F["haskell"],
+                 rf"app\.app{D}Requested\) \(Map\.delete ident"),
+                ("ocaml", F["ocaml"], rf"Hashtbl\.remove app\.{d}_requested id"),
+                ("js", F["js"], rf"_{d}Requested\.delete\(ident\)")]
+    if part == "detent_type":
+        return [("rust", "crates/kaya/src/protocol.rs", rf"pub enum {T} \{{"),
+                ("python", F["python"], rf"^class {T}\(enum\.IntEnum\)"),
+                ("go", F["go"], rf"^type {T} int64"),
+                ("csharp", F["csharp"], rf"^enum {T} : long"),
+                ("java", F["java"], rf"public enum {T} \{{"),
+                ("swift", F["swift"], rf"public enum Kaya{T}: Int64"),
+                ("haskell", F["haskell"], rf"^data {T} = "),
+                ("ocaml", F["ocaml"], rf"^module {T} = struct"),
+                ("js", F["js"], rf"export type {T}Name =")]
+    raise AssertionError(part)
+
+
+SHEET_PARTS = ("present", "parent", "dismiss", "title", "intercept_dismiss",
+               "detent", "on_dismissed", "on_dismiss_requested",
+               "retire_dismissed", "retire_request", "detent_type")
+
+
+def check_sheet(stems, findings=None):
+    global status
+    for part in SHEET_PARTS:
+        for lang, rel, pattern in sheet_rows(part, *stems):
+            if not grep_file(pattern, rel):
+                msg = (f"check-sugar-surface: {lang} has no sugar for the "
+                       f"sheet's '{part}' (wanted /{pattern}/ in {rel})")
+                if findings is None:
+                    print(msg)
+                    status = 1
+                else:
+                    findings.append(msg)
+
+
+check_sheet(("sheet", "Sheet", "sheet", "dismiss", "Dismiss", "Detent"))
+
+# THE BUILT-IN NEGATIVE: every part must fire in all nine for stems that
+# exist nowhere, the slider discipline.
+fake = []
+check_sheet(("kayafake", "Kayafake", "kayafake", "kayafake", "Kayafake",
+             "Kayafake"), findings=fake)
+sheet_fake = sum(1 for m in fake if "has no sugar for the sheet's" in m)
+if sheet_fake != len(SHEET_PARTS) * 9:
+    selftest_exit(f"check-sugar-surface: self-test failed ({sheet_fake}/"
+                  f"{len(SHEET_PARTS) * 9} sheet patterns fired for stems "
+                  f"that exist nowhere)")
+print(f"check-sugar-surface: sheet surface watched: fake {sheet_fake}/"
+      f"{len(SHEET_PARTS) * 9}")
+
 # --- (c2f) THE DND SURFACE, all nine (docs/dnd-plan.md §4) ----------
 # Neither a KIND nor a WINDOW PROP, so both sweeps above are blind to it
 # while TX 49/50/51 and occurrences 22/23 reach every binding through the

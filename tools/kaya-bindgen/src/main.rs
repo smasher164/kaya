@@ -183,6 +183,13 @@ pub(crate) fn entry_prop_variants(
     kaya::spec::ENTRY_PROPS
 }
 
+/// Sheet properties (docs/sheet-plan.md §3).
+pub(crate) fn sheet_prop_variants(
+    _spec: &ProtocolSpec,
+) -> &'static [(&'static str, u32, PropKind)] {
+    kaya::spec::SHEET_PROPS
+}
+
 /// Section properties (DESIGN.md, Sections).
 pub(crate) fn section_prop_variants(
     _spec: &ProtocolSpec,

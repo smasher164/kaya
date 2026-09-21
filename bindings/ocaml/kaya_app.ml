@@ -241,6 +241,16 @@ module Appearance = struct
     | Dark -> Int64.of_int Kaya_wire.appearance_dark
 end
 
+(* The height the phones open a sheet at (docs/sheet-plan.md §1.4); the
+   desktops have nothing to say and ignore it. *)
+module Detent = struct
+  type t = Medium | Large
+
+  let wire = function
+    | Medium -> Int64.of_int Kaya_wire.detent_medium
+    | Large -> Int64.of_int Kaya_wire.detent_large
+end
+
 (* How a picked file is re-opened: read, write (truncates; a save
    destination only adds the create) or both. *)
 module File_mode = struct
@@ -576,6 +586,9 @@ type app = {
   close_requested : (int64, unit -> unit) Hashtbl.t;
   entry_popped : (int64, unit -> unit) Hashtbl.t;
   back_requested : (int64, unit -> unit) Hashtbl.t;
+  (* Per-sheet, keyed by sheet surface id (docs/sheet-plan.md). *)
+  sheet_dismissed : (int64, unit -> unit) Hashtbl.t;
+  dismiss_requested : (int64, unit -> unit) Hashtbl.t;
   section_selected : (int64, unit -> unit) Hashtbl.t;
   alert_handlers : (int64, Alert_choice.t -> unit) Hashtbl.t;
   mutable next_alert : int64;
@@ -752,6 +765,8 @@ let create () =
     close_requested = Hashtbl.create 8;
     entry_popped = Hashtbl.create 8;
     back_requested = Hashtbl.create 8;
+    sheet_dismissed = Hashtbl.create 8;
+    dismiss_requested = Hashtbl.create 8;
     section_selected = Hashtbl.create 8;
     alert_handlers = Hashtbl.create 8;
     next_alert = 0L;
@@ -2723,6 +2738,32 @@ let select_section ?(window = 0L) id =
 (* Pop the window's top navigation entry and forget its tree — also the
    back-veto grammar's confirmation after [on_back_requested]. *)
 let pop_entry ?(window = 0L) () = emit (the_tx ()) (Kaya_wire.tx_pop_entry window)
+
+(* Request a sheet over [~parent] — a window (0, the primary) or a LIVE
+   SHEET, the chain (docs/sheet-plan.md): a modal hosting a root,
+   [mount_in] presents it. [~on_dismissed] fires when the user's cancel
+   path closes it natively (a programmatic [dismiss_sheet] does not) and
+   retires with the one dismissal; [~on_dismiss_requested] fires per
+   cancel while [~intercept_dismiss] is armed, nothing has gone. *)
+let present_sheet ?(parent = 0L) ?title ?intercept_dismiss ?detent
+    ?on_dismissed ?on_dismiss_requested id =
+  let tx = the_tx () in
+  emit tx (Kaya_wire.tx_present_sheet parent id);
+  Option.iter (fun t -> emit tx (Kaya_wire.tx_set_sheet_title id t)) title;
+  Option.iter
+    (fun i -> emit tx (Kaya_wire.tx_set_sheet_intercept_dismiss id i))
+    intercept_dismiss;
+  Option.iter
+    (fun d -> emit tx (Kaya_wire.tx_set_sheet_detent id (Detent.wire d)))
+    detent;
+  Option.iter (fun f -> Hashtbl.replace tx.app.sheet_dismissed id f) on_dismissed;
+  Option.iter
+    (fun f -> Hashtbl.replace tx.app.dismiss_requested id f)
+    on_dismiss_requested
+
+(* Dismiss a live sheet and forget its tree, child sheets with it — also
+   the dismiss-veto grammar's confirmation after [on_dismiss_requested]. *)
+let dismiss_sheet id = emit (the_tx ()) (Kaya_wire.tx_dismiss_sheet id)
 
 (* Request a modal alert (the request/result grammar). The result handler
    rides the REQUEST and retires with its one answer — choice is an
@@ -4904,6 +4945,19 @@ let dispatch_loop app =
            | None -> ())
          else if kind = Kaya_wire.occ_kind_back_requested then
            (match Hashtbl.find_opt app.back_requested id with
+           | Some handler -> dispatch app handler
+           | None -> ())
+         else if kind = Kaya_wire.occ_kind_sheet_dismissed then (
+           (* One-shot: the sheet is gone; both registrations retire
+              with it. *)
+           Hashtbl.remove app.dismiss_requested id;
+           match Hashtbl.find_opt app.sheet_dismissed id with
+           | Some handler ->
+               Hashtbl.remove app.sheet_dismissed id;
+               dispatch app handler
+           | None -> ())
+         else if kind = Kaya_wire.occ_kind_dismiss_requested then
+           (match Hashtbl.find_opt app.dismiss_requested id with
            | Some handler -> dispatch app handler
            | None -> ())
          else if kind = Kaya_wire.occ_kind_section_selected then

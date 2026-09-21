@@ -12353,6 +12353,44 @@ depends on what has focus, which no scene pins. The arm reads Esc for an
 armed sheet through a local `NSEvent` monitor on the topmost sheet window
 and its parent chain, and leaves an unarmed sheet's Esc to the platform.
 
+## An AdwDialog over a plain GtkWindow is a toplevel of its own, and the x11 lane's Esc went to the primary (measured 2026-09-21)
+
+libadwaita presents an `AdwDialog` inside its parent only when the parent
+is an `AdwWindow` or `AdwApplicationWindow`; over kaya's plain
+`GtkWindow` it falls back to a separate toplevel. Two consequences the
+first x11 sheet legs measured (the verb trace, with the dismiss verb
+recording the tool it ran and the focus it met): the harness's Esc,
+delivered through `xdotool` to the pid's FIRST visible window, landed on
+the primary and met no dialog; and GTK's focus widget for the primary
+read `None` while the dialog's own root held a `GtkButton`, since the
+dialog's root is not the primary's. The dismiss verb now reads the
+topmost dialog's root, moves focus into the dialog when it is not there
+(the x11 lane has no window manager, so nothing activates the new
+toplevel), and sends Esc to that root's X window through gdk4-x11's xid.
+On wayland sway focuses the new toplevel itself, which is why the eight
+wayland legs were green before any of this. The Android sibling one lane
+over: a `ModalBottomSheet` is a dialog window too, and a back press
+through the ACTIVITY's dispatcher finished the app (`kaya: the harness
+has no mounted activity`); the verb delivers `KEYCODE_BACK` to the sheet's
+own window's decor view.
+
+## An XCUIElement swipe travels with the element's size, and a one-label sheet's fell short of the dismissal (measured 2026-09-21)
+
+`XCUIElement.swipeDown()` on the sheet's named content element dismissed
+the four-widget sheet and left the one-label child sheet up, with the
+driver answering `swiped down` both times: the swipe's travel is a
+fraction of the element's height, and a single line of text is not enough
+of a pan to cross the sheet's dismissal threshold. The same swipe sent 190
+ms after the present, into the sheet's own rise, dismissed nothing either.
+The iOS dismiss verb waits for the presented controller to settle
+(`isBeingPresented` false, no transition coordinator) and then asks the
+driver for a real pan from twelve points under the element's top to
+twelve points above the app frame's bottom. And the armed sheet's attempt
+proxy has to sit on the PRESENTED controller: the responder chain from a
+view inside the sheet reaches the NavigationStack's own hosting controller
+first, whose presentation is not the sheet's, so the walk climbs `parent`
+to the top before touching a delegate.
+
 ## A SwiftUI sheet presented into its own dismissal keeps the old content alive (measured on the mac lane 2026-09-21)
 
 The sheet host's first draft derived `.sheet(isPresented:)` from the model

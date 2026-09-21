@@ -34,6 +34,7 @@ static class Program
             case "window": WindowScene.Run(); break;
             case "panels": PanelsScene.Run(); break;
             case "nav": NavScene.Run(); break;
+            case "sheet": SheetScene.Run(); break;
             case "background": BackgroundScene.Run(); break;
             case "stall": StallScene.Run(); break;
             case "split": SplitScene.Run(); break;

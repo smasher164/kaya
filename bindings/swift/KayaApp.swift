@@ -391,6 +391,13 @@ public enum KayaAppearance: Int64 {
     case dark = 2
 }
 
+/// The height the phones open a sheet at (docs/sheet-plan.md §1.4); the
+/// desktops have nothing to say and ignore it.
+public enum KayaDetent: Int64 {
+    case medium = 1
+    case large = 2
+}
+
 /// THE CLOSED MENU-ROLE VOCABULARY (DESIGN.md, Menus;
 /// crates/kaya/src/scene.rs MENU_ROLES). `settings` is placed in the
 /// application menu on macOS and left where the app declared it
@@ -2218,6 +2225,9 @@ public final class KayaApp {
     private var closeRequested: [UInt64: (KayaAppTx) throws -> Void] = [:]
     private var entryPopped: [UInt64: (KayaAppTx) throws -> Void] = [:]
     private var backRequested: [UInt64: (KayaAppTx) throws -> Void] = [:]
+    // Per-sheet, keyed by sheet surface id (docs/sheet-plan.md).
+    private var sheetDismissed: [UInt64: (KayaAppTx) throws -> Void] = [:]
+    private var dismissRequested: [UInt64: (KayaAppTx) throws -> Void] = [:]
     private var sectionSelected: [UInt64: (KayaAppTx) throws -> Void] = [:]
     var alerts: [UInt64: (KayaAppTx, KayaAlertChoice) throws -> Void] = [:]
     var liveAlert: UInt64 = 0
@@ -3130,6 +3140,16 @@ public final class KayaApp {
         backRequested[entry] = handler
     }
 
+    /// Per-sheet registrations; the dismissed one retires with its one
+    /// dismissal.
+    func onSheetDismissed(_ sheet: UInt64, _ handler: @escaping (KayaAppTx) throws -> Void) {
+        sheetDismissed[sheet] = handler
+    }
+
+    func onDismissRequested(_ sheet: UInt64, _ handler: @escaping (KayaAppTx) throws -> Void) {
+        dismissRequested[sheet] = handler
+    }
+
     /// Per-section, NOT one-shot: the user can return any number of
     /// times; a programmatic selectSection never fires it (the echo
     /// doctrine).
@@ -3353,6 +3373,17 @@ public final class KayaApp {
                 }
             case (UInt16(KAYA_OCCURRENCE_BACK_REQUESTED), _):
                 if let handler = backRequested[id] {
+                    dispatch { try build(handler) }
+                }
+            case (UInt16(KAYA_OCCURRENCE_SHEET_DISMISSED), _):
+                // One-shot: the sheet is gone; both registrations
+                // retire with it.
+                dismissRequested.removeValue(forKey: id)
+                if let handler = sheetDismissed.removeValue(forKey: id) {
+                    dispatch { try build(handler) }
+                }
+            case (UInt16(KAYA_OCCURRENCE_DISMISS_REQUESTED), _):
+                if let handler = dismissRequested[id] {
                     dispatch { try build(handler) }
                 }
             case (UInt16(KAYA_OCCURRENCE_SECTION_SELECTED), _):
@@ -5383,6 +5414,36 @@ public final class KayaAppTx {
     /// back-veto grammar's confirmation after onBackRequested.
     public func popEntry(window: UInt64 = 0) {
         tx.popEntry(window)
+    }
+
+    /// Request a sheet over `parent` — a window (0, the primary) or a LIVE
+    /// SHEET, the chain (docs/sheet-plan.md): a modal hosting a root,
+    /// presented by mountIn. Sheet ids are guest-allocated in the shared
+    /// surface namespace. `onDismissed` fires when the user's cancel path
+    /// closes THIS sheet natively — never for a programmatic dismissSheet —
+    /// and retires with the one dismissal; `onDismissRequested` fires per
+    /// cancel while interceptDismiss is armed, with nothing yet gone, and
+    /// tx.dismissSheet is how you agree. `detent:` is the height the phones
+    /// open it at; the desktops ignore it.
+    public func presentSheet(
+        _ id: UInt64, title: String? = nil, interceptDismiss: Bool? = nil,
+        detent: KayaDetent? = nil,
+        onDismissed: ((KayaAppTx) throws -> Void)? = nil,
+        onDismissRequested: ((KayaAppTx) throws -> Void)? = nil,
+        parent: UInt64 = 0
+    ) {
+        tx.presentSheet(parent, id)
+        if let title { tx.setSheetTitle(id, title) }
+        if let interceptDismiss { tx.setSheetInterceptDismiss(id, interceptDismiss) }
+        if let detent { tx.setSheetDetent(id, detent.rawValue) }
+        if let onDismissed { app.onSheetDismissed(id, onDismissed) }
+        if let onDismissRequested { app.onDismissRequested(id, onDismissRequested) }
+    }
+
+    /// Dismiss a live sheet and forget its tree, child sheets with it — also
+    /// the dismiss-veto grammar's confirmation after onDismissRequested.
+    public func dismissSheet(_ id: UInt64) {
+        tx.dismissSheet(id)
     }
 
     /// Append a section to the window's section set (section ids are

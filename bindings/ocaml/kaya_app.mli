@@ -116,6 +116,12 @@ module Appearance : sig
   type t = System | Light | Dark
 end
 
+(* The height the phones open a sheet at (docs/sheet-plan.md §1.4); the
+   desktops ignore it. *)
+module Detent : sig
+  type t = Medium | Large
+end
+
 (* How a picked file is re-opened: read, write (truncates; a save
    destination only adds the create) or both. *)
 module File_mode : sig
@@ -1003,6 +1009,19 @@ val select_section : ?window:int64 -> int64 -> unit
 
 (* Pop the primary surface's top entry. *)
 val pop_entry : ?window:int64 -> unit -> unit
+
+(* Request a sheet over a window or a live sheet (docs/sheet-plan.md);
+   [mount_in] presents it. *)
+val present_sheet :
+  ?parent:int64 ->
+  ?title:string ->
+  ?intercept_dismiss:bool ->
+  ?detent:Detent.t ->
+  ?on_dismissed:(unit -> unit) ->
+  ?on_dismiss_requested:(unit -> unit) -> int64 -> unit
+
+(* Dismiss a live sheet and forget its tree, child sheets with it. *)
+val dismiss_sheet : int64 -> unit
 
 (* A dialog is a QUESTION: [show_alert ~title ~cancel ()] shows the alert
    when handed its continuation, the callback the binding runs on the app

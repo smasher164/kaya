@@ -259,6 +259,32 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("      Buffer.add_int64_le b signal_id)");
     }
 
+    // The sheet-prop duos (docs/sheet-plan.md §3); detent is an enum.
+    for (prop, _, kind) in crate::sheet_prop_variants(spec) {
+        let (ctor, param) = match kind {
+            crate::PropKind::Str => ("Str", *prop),
+            crate::PropKind::Bool => ("Bool", *prop),
+            crate::PropKind::Enum(_) => ("I64", *prop),
+            other => unreachable!("no sheet prop carries {other:?}"),
+        };
+        c.line("");
+        c.line(&format!("(* set_sheet_prop with a constant {prop} value. *)"));
+        c.line(&format!("let tx_set_sheet_{prop} sheet {param} ="));
+        c.line("  finish tx_kind_set_sheet_prop (fun b ->");
+        c.line("      Buffer.add_int64_le b sheet;");
+        c.line(&format!("      Buffer.add_int32_le b (Int32.of_int shprop_{prop});"));
+        c.line("      Buffer.add_int32_le b (Int32.of_int source_const);");
+        c.line(&format!("      encode_value b ({ctor} {param}))"));
+        c.line("");
+        c.line(&format!("(* set_sheet_prop with a signal-bound {prop} value. *)"));
+        c.line(&format!("let tx_bind_sheet_{prop} sheet signal_id ="));
+        c.line("  finish tx_kind_set_sheet_prop (fun b ->");
+        c.line("      Buffer.add_int64_le b sheet;");
+        c.line(&format!("      Buffer.add_int32_le b (Int32.of_int shprop_{prop});"));
+        c.line("      Buffer.add_int32_le b (Int32.of_int source_signal);");
+        c.line("      Buffer.add_int64_le b signal_id)");
+    }
+
     // The section-prop duos; icon rides the blob channel (DESIGN.md,
     // Sections).
     for (prop, _, kind) in crate::section_prop_variants(spec) {

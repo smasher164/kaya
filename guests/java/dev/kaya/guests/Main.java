@@ -76,6 +76,9 @@ public final class Main {
             case "nav":
                 app = Nav::app;
                 break;
+            case "sheet":
+                app = Sheet::app;
+                break;
             case "background":
                 app = Background::app;
                 break;

@@ -117,6 +117,14 @@ VERB_FEATURE = {
     # those legs off too.
     "clear_search": "search",
     "expect_placeholder": "search",
+    # docs/sheet-plan.md §4. The verbs, not the scene name: the task
+    # manager's quick-add will open a sheet without being called after
+    # it, and a backend still declaring depth_stub("sheet") has to hold
+    # those legs off too.
+    "expect_sheets": "sheet",
+    "expect_sheet": "sheet",
+    "expect_sheet_detent": "sheet",
+    "dismiss_sheet": "sheet",
 }
 
 # The verbs that take a menu PATH as their first argument. `shortcut` is

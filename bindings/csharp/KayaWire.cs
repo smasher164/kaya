@@ -2178,6 +2178,57 @@ static class KayaWire
         return Finish(stream, w, TxKindSetEntryProp);
     }
 
+    /// set_sheet_prop with a constant title value.
+    public static byte[] TxSetSheetTitle(ulong sheet, string title)
+    {
+        var w = Begin(out var stream);
+        w.Write(sheet); w.Write(ShpropTitle); w.Write(SourceConst);
+        EncodeValue(w, title);
+        return Finish(stream, w, TxKindSetSheetProp);
+    }
+
+    /// set_sheet_prop with a signal-bound title value.
+    public static byte[] TxBindSheetTitle(ulong sheet, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(sheet); w.Write(ShpropTitle); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetSheetProp);
+    }
+
+    /// set_sheet_prop with a constant intercept_dismiss value.
+    public static byte[] TxSetSheetInterceptDismiss(ulong sheet, bool interceptDismiss)
+    {
+        var w = Begin(out var stream);
+        w.Write(sheet); w.Write(ShpropInterceptDismiss); w.Write(SourceConst);
+        EncodeValue(w, interceptDismiss);
+        return Finish(stream, w, TxKindSetSheetProp);
+    }
+
+    /// set_sheet_prop with a signal-bound intercept_dismiss value.
+    public static byte[] TxBindSheetInterceptDismiss(ulong sheet, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(sheet); w.Write(ShpropInterceptDismiss); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetSheetProp);
+    }
+
+    /// set_sheet_prop with a constant detent value.
+    public static byte[] TxSetSheetDetent(ulong sheet, long detent)
+    {
+        var w = Begin(out var stream);
+        w.Write(sheet); w.Write(ShpropDetent); w.Write(SourceConst);
+        EncodeValue(w, detent);
+        return Finish(stream, w, TxKindSetSheetProp);
+    }
+
+    /// set_sheet_prop with a signal-bound detent value.
+    public static byte[] TxBindSheetDetent(ulong sheet, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(sheet); w.Write(ShpropDetent); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetSheetProp);
+    }
+
     /// set_section_prop with a constant title value.
     public static byte[] TxSetSectionTitle(ulong section, string title)
     {

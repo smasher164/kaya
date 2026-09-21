@@ -718,6 +718,16 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 fn_ptr: present_emit_back_requested as *mut _,
             },
             NativeMethod {
+                name: "emitSheetDismissed".into(),
+                sig: "(J)V".into(),
+                fn_ptr: present_emit_sheet_dismissed as *mut _,
+            },
+            NativeMethod {
+                name: "emitDismissRequested".into(),
+                sig: "(J)V".into(),
+                fn_ptr: present_emit_dismiss_requested as *mut _,
+            },
+            NativeMethod {
                 name: "emitSectionSelected".into(),
                 sig: "(JJ)V".into(),
                 fn_ptr: present_emit_section_selected as *mut _,
@@ -1821,6 +1831,17 @@ extern "system" fn present_emit_section_selected(
 /// entry — nothing popped; the app answers with pop_entry.
 extern "system" fn present_emit_back_requested(_env: JNIEnv, _class: JClass, entry: jlong) {
     crate::capi::kaya_emit_back_requested(entry as u64);
+}
+
+/// KayaPresent.emitSheetDismissed: the user's cancel path closed a sheet.
+extern "system" fn present_emit_sheet_dismissed(_env: JNIEnv, _class: JClass, sheet: jlong) {
+    crate::capi::kaya_emit_sheet_dismissed(sheet as u64);
+}
+
+/// KayaPresent.emitDismissRequested: cancel on an armed sheet — nothing
+/// went; the app answers with dismiss_sheet.
+extern "system" fn present_emit_dismiss_requested(_env: JNIEnv, _class: JClass, sheet: jlong) {
+    crate::capi::kaya_emit_dismiss_requested(sheet as u64);
 }
 
 /// KayaPresent.emitMenuActivated: a bar/overflow row, a context-menu row

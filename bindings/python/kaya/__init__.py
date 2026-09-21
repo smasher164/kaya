@@ -2032,6 +2032,13 @@ def pop_entry(window: int = 0) -> None:
     _records().append(wire.tx_pop_entry(int(window)))
 
 
+def dismiss_sheet(sheet_id: int) -> None:
+    """Dismiss a live sheet and forget its tree, child sheets with it —
+    also the dismiss-veto grammar's confirmation after
+    on_dismiss_requested. An unknown sheet is a scene error."""
+    _records().append(wire.tx_dismiss_sheet(int(sheet_id)))
+
+
 def select_section(section_id: int, *, window: int = 0) -> None:
     """Select a section programmatically: configuration, never echoes
     on_selected. The section must already be added."""
@@ -2082,6 +2089,19 @@ class Appearance(enum.IntEnum):
     def _missing_(cls, value: object) -> Any:
         return _vocab_missing(cls, value, "an appearance",
                               "kaya.Appearance.DARK")
+
+
+class Detent(enum.IntEnum):
+    """The height the phones open a sheet at (docs/sheet-plan.md §1.4);
+    the desktops have nothing to say and ignore it. Plain names accepted
+    too — `detent="medium"`."""
+
+    MEDIUM = wire.DETENT_MEDIUM
+    LARGE = wire.DETENT_LARGE
+
+    @classmethod
+    def _missing_(cls, value: object) -> Any:
+        return _vocab_missing(cls, value, "a detent", "kaya.Detent.MEDIUM")
 
 
 class AlertChoice(enum.IntEnum):
@@ -5161,7 +5181,12 @@ class _TxScope:
                  section: bool = False,
                  on_selected: Callable[[], object] | None = None,
                  host_window: int = 0, symbol: Symbol | None = None,
-                 badge: float | Signal[Any] | None = None) -> None:
+                 badge: float | Signal[Any] | None = None,
+                 sheet: bool = False, parent: int = 0,
+                 intercept_dismiss: bool | None = None,
+                 detent: Detent | str | int | None = None,
+                 on_dismissed: Callable[[], object] | None = None,
+                 on_dismiss_requested: Callable[[], object] | None = None) -> None:
         # FIRST, so __del__ below can read them even if this __init__
         # raises on one of its own conversions.
         self._entered = False
@@ -5191,6 +5216,13 @@ class _TxScope:
         # Already through _symbol_value at the add_section call site.
         self._symbol = symbol
         self._badge = badge
+        self._sheet = sheet
+        self._parent = int(parent)
+        self._intercept_dismiss = intercept_dismiss
+        # Refused HERE, not at the `with`, for the symbol's reason.
+        self._detent = None if detent is None else Detent(detent)
+        self._on_dismissed = on_dismissed
+        self._on_dismiss_requested = on_dismiss_requested
 
     def __del__(self) -> None:
         # A construct BUILT AND NEVER ENTERED emits nothing and says
@@ -5243,6 +5275,35 @@ class _TxScope:
             if self._on_selected is not None:
                 self._app._section_selected[self._window] = self._on_selected
             return self
+        if self._sheet:
+            # A sheet's scene scope (docs/sheet-plan.md): nests like a
+            # push, and the body's root mounts INTO the sheet on exit,
+            # which is what presents it.
+            self._nested = _tx is not None
+            if not self._nested:
+                _tx = []
+                _journal = {}
+            self._outer = (_recording, _pending_root)
+            _recording = True
+            _pending_root = None
+            _records().append(wire.tx_present_sheet(self._parent, self._window))
+            if self._title is not None:
+                _records().append(
+                    wire.tx_set_sheet_title(self._window, str(self._title)))
+            if self._intercept_dismiss is not None:
+                _records().append(wire.tx_set_sheet_intercept_dismiss(
+                    self._window, bool(self._intercept_dismiss)))
+            if self._detent is not None:
+                _records().append(
+                    wire.tx_set_sheet_detent(self._window, int(self._detent)))
+            # The dismissed registration retires with the one dismissal;
+            # the request one fires per request while armed.
+            if self._on_dismissed is not None:
+                self._app._sheet_dismissed[self._window] = self._on_dismissed
+            if self._on_dismiss_requested is not None:
+                self._app._dismiss_requested[self._window] = (
+                    self._on_dismiss_requested)
+            return self
         if self._push:
             # UNLIKE EVERY OTHER SCOPE this one NESTS inside an open
             # transaction — pushes happen from click handlers — so the
@@ -5287,7 +5348,7 @@ class _TxScope:
     def __exit__(self, exc_type: Any, exc: Any,
                  tb: Any) -> Literal[False]:
         global _tx, _recording, _journal, _pending_root
-        if self._section or self._push:
+        if self._section or self._push or self._sheet:
             # Submit only if this scope opened its own transaction:
             # inside a handler the ambient build owns commit and
             # rollback.
@@ -5300,8 +5361,8 @@ class _TxScope:
                 return False
             if root is None:
                 raise KayaStateError(
-                    "kaya: push_entry()/add_section() body declared no "
-                    "root container")
+                    "kaya: push_entry()/add_section()/sheet() body declared "
+                    "no root container")
             _records().append(wire.tx_mount(self._window, root.id))
             if not self._nested:
                 records, _tx = cast("list[bytes]", _tx), None
@@ -5390,6 +5451,9 @@ class App:
         # Per-entry navigation handlers, keyed by entry surface id.
         self._entry_popped: dict[int, Callable[[], object]] = {}
         self._back_requested: dict[int, Callable[[], object]] = {}
+        # Per-sheet handlers, keyed by sheet surface id (docs/sheet-plan.md).
+        self._sheet_dismissed: dict[int, Callable[[], object]] = {}
+        self._dismiss_requested: dict[int, Callable[[], object]] = {}
         self._section_selected: dict[int, Callable[[], object]] = {}
         # Per-window lifecycle handlers, keyed by window id.
         self._close_requested: dict[int, Callable[[], object]] = {}
@@ -5636,6 +5700,30 @@ class App:
             self, mount_on_exit=True, window=entry_id, push=True,
             title=title, intercept_back=intercept_back,
             on_popped=on_popped, on_back=on_back)
+
+    def sheet(self, sheet_id: int, *, title: str | None = None,
+              intercept_dismiss: bool | None = None,
+              detent: Detent | str | int | None = None,
+              on_dismissed: Callable[[], object] | None = None,
+              on_dismiss_requested: Callable[[], object] | None = None,
+              parent: int = 0) -> _TxScope:
+        """A sheet's scene scope (docs/sheet-plan.md): a modal hosting the
+        body's single top-level container, which mounts INTO IT on exit
+        and presents it. Sheet ids are guest-allocated in the shared
+        surface namespace; `parent=` is the window or LIVE SHEET it
+        opens over (the chain: one child per parent).
+
+        on_dismissed() fires when the user's cancel path closes THIS sheet
+        natively (a programmatic kaya.dismiss_sheet does not fire it) and
+        retires with the one dismissal. on_dismiss_requested() fires per
+        cancel while intercept_dismiss is armed, and NOTHING HAS GONE —
+        answer with kaya.dismiss_sheet to agree. `detent=` is the height
+        the phones open it at; the desktops ignore it."""
+        return _TxScope(
+            self, mount_on_exit=True, window=sheet_id, sheet=True,
+            parent=parent, title=title, intercept_dismiss=intercept_dismiss,
+            detent=detent, on_dismissed=on_dismissed,
+            on_dismiss_requested=on_dismiss_requested)
 
     def add_section(self, section_id: int, *, title: str | None = None,
                     symbol: Symbol | str | None = None,
@@ -5911,6 +5999,18 @@ class App:
                 continue
             if kind == wire.OCC_BACK_REQUESTED:
                 handler = self._back_requested.get(ident)
+                if handler is not None:
+                    self._dispatch(handler)
+                continue
+            if kind == wire.OCC_SHEET_DISMISSED:
+                # One-shot: the sheet is gone; both registrations retire.
+                self._dismiss_requested.pop(ident, None)
+                handler = self._sheet_dismissed.pop(ident, None)
+                if handler is not None:
+                    self._dispatch(handler)
+                continue
+            if kind == wire.OCC_DISMISS_REQUESTED:
+                handler = self._dismiss_requested.get(ident)
                 if handler is not None:
                     self._dispatch(handler)
                 continue

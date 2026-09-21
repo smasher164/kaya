@@ -254,6 +254,29 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("    <> word64LE signalId)");
     }
 
+    // The sheet-prop duos (docs/sheet-plan.md §3); detent is an enum.
+    for (prop, _, kind) in crate::sheet_prop_variants(spec) {
+        let pc = pascal(prop);
+        let (p, ty, ctor) = match kind {
+            crate::PropKind::Str => (camel(prop), "String", "VStr"),
+            crate::PropKind::Bool => (camel(prop), "Bool", "VBool"),
+            crate::PropKind::Enum(_) => (camel(prop), "Int64", "VI64"),
+            other => unreachable!("no sheet prop carries {other:?}"),
+        };
+        c.line("");
+        c.line(&format!("-- set_sheet_prop with a constant {prop} value."));
+        c.line(&format!("txSetSheet{pc} :: Word64 -> {ty} -> Builder"));
+        c.line(&format!("txSetSheet{pc} sheet {p} = wireRecord txKindSetSheetProp"));
+        c.line(&format!("  (word64LE sheet <> word32LE shprop{pc} <> word32LE sourceConst"));
+        c.line(&format!("    <> encodeValue ({ctor} {p}))"));
+        c.line("");
+        c.line(&format!("-- set_sheet_prop with a signal-bound {prop} value."));
+        c.line(&format!("txBindSheet{pc} :: Word64 -> Word64 -> Builder"));
+        c.line(&format!("txBindSheet{pc} sheet signalId = wireRecord txKindSetSheetProp"));
+        c.line(&format!("  (word64LE sheet <> word32LE shprop{pc} <> word32LE sourceSignal"));
+        c.line("    <> word64LE signalId)");
+    }
+
     // The section-prop duos; icon rides the blob channel (DESIGN.md,
     // Sections).
     for (prop, _, kind) in crate::section_prop_variants(spec) {

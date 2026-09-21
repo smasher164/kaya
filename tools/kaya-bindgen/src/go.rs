@@ -53,6 +53,8 @@ fn enum_go_type(name: &str) -> Option<&'static str> {
         "notification_outcome" => Some("NotificationOutcome"),
         "file_mode" => Some("FileMode"),
         "sections_presentation" => Some("SectionsPresentation"),
+        // The sheet's detent (docs/sheet-plan.md §1.4).
+        "detent" => Some("Detent"),
         _ => None,
     }
 }
@@ -370,6 +372,38 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("\tb := beginRecord(txSetEntryProp)");
         c.line("\tb = binary.LittleEndian.AppendUint64(b, entry)");
         c.line(&format!("\tb = binary.LittleEndian.AppendUint32(b, Eprop{pc})"));
+        c.line("\tb = binary.LittleEndian.AppendUint32(b, SourceSignal)");
+        c.line("\tb = binary.LittleEndian.AppendUint64(b, signalID)");
+        c.line("\treturn endRecord(b)");
+        c.line("}");
+    }
+
+    // The sheet-prop duos (docs/sheet-plan.md §3); detent is an enum.
+    for (prop, _, kind) in crate::sheet_prop_variants(spec) {
+        let pc = camel(prop);
+        let (ty, expr) = match kind {
+            crate::PropKind::Str => ("string", format!("encodeValue(b, {})", param(prop))),
+            crate::PropKind::Bool => ("bool", format!("encodeValue(b, {})", param(prop))),
+            crate::PropKind::Enum(_) => ("int64", format!("encodeValue(b, {})", param(prop))),
+            other => unreachable!("no sheet prop carries {other:?}"),
+        };
+        let p = param(prop);
+        c.line("");
+        c.line(&format!("// TxSetSheet{pc}: set_sheet_prop with a constant {prop} value."));
+        c.line(&format!("func TxSetSheet{pc}(sheet uint64, {p} {ty}) []byte {{"));
+        c.line("\tb := beginRecord(txSetSheetProp)");
+        c.line("\tb = binary.LittleEndian.AppendUint64(b, sheet)");
+        c.line(&format!("\tb = binary.LittleEndian.AppendUint32(b, Shprop{pc})"));
+        c.line("\tb = binary.LittleEndian.AppendUint32(b, SourceConst)");
+        c.line(&format!("\tb = {expr}"));
+        c.line("\treturn endRecord(b)");
+        c.line("}");
+        c.line("");
+        c.line(&format!("// TxBindSheet{pc}: set_sheet_prop with a signal-bound {prop} value."));
+        c.line(&format!("func TxBindSheet{pc}(sheet uint64, signalID uint64) []byte {{"));
+        c.line("\tb := beginRecord(txSetSheetProp)");
+        c.line("\tb = binary.LittleEndian.AppendUint64(b, sheet)");
+        c.line(&format!("\tb = binary.LittleEndian.AppendUint32(b, Shprop{pc})"));
         c.line("\tb = binary.LittleEndian.AppendUint32(b, SourceSignal)");
         c.line("\tb = binary.LittleEndian.AppendUint64(b, signalID)");
         c.line("\treturn endRecord(b)");

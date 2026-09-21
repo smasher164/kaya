@@ -1933,6 +1933,12 @@ export function popEntry(window = 0): void {
   records().push(wire.tx_pop_entry(window));
 }
 
+/** Dismiss a live sheet and forget its tree, child sheets with it — also
+ * the dismiss-veto grammar's confirmation after onDismissRequested. */
+export function dismissSheet(sheetId: number): void {
+  records().push(wire.tx_dismiss_sheet(sheetId));
+}
+
 /** Select a section programmatically: configuration, never echoes
  * onSelected (the echo doctrine). */
 export function selectSection(sectionId: number, window = 0): void {
@@ -3655,6 +3661,18 @@ function appearanceValue(value: unknown): number {
   return vocab(APPEARANCE_NAMES, "appearance", value, '"system"');
 }
 
+/** The height the phones open a sheet at (docs/sheet-plan.md §1.4); the
+ * desktops have nothing to say and ignore it. */
+export type DetentName = "medium" | "large";
+const DETENT_NAMES: Record<DetentName, number> = {
+  medium: wire.DETENT_MEDIUM,
+  large: wire.DETENT_LARGE,
+};
+
+function detentValue(value: unknown): number {
+  return vocab(DETENT_NAMES, "detent", value, '"medium"');
+}
+
 /** The menu item's standard-command vocabulary (crates/kaya/src/scene.rs
  * MENU_ROLES, tools/check-roles.py) — a string on the wire, with no
  * numeric encoding to pair it with. */
@@ -4308,7 +4326,7 @@ function windowProps(window: number, p: WindowProps): void {
   }
 }
 
-type ScopeKind = "window" | "build" | "push" | "section";
+type ScopeKind = "window" | "build" | "push" | "section" | "sheet";
 
 /** One scene scope: a transaction with a mount on exit (window, entry,
  * section) or without one (build). Entries and sections NEST inside an
@@ -4323,7 +4341,7 @@ function runScope<T>(
   open: () => void,
 ): T | undefined {
   requireAppThread();
-  if (kind === "push" || kind === "section") {
+  if (kind === "push" || kind === "section" || kind === "sheet") {
     const nested = _tx !== null;
     if (!nested) {
       _tx = [];
@@ -4354,7 +4372,7 @@ function runScope<T>(
             _tx = null;
             _journal = null;
           }
-          throw new Error("kaya: pushEntry()/addSection() body declared no root container");
+          throw new Error("kaya: pushEntry()/addSection()/sheet() body declared no root container");
         }
         _tx!.push(wire.tx_mount(surface, root.id));
         if (!nested) {
@@ -4412,6 +4430,14 @@ function runScope<T>(
 }
 
 export type EntryOptions = { title?: string; interceptBack?: boolean; onPopped?: () => void; onBack?: () => void };
+export type SheetOptions = {
+  title?: string;
+  interceptDismiss?: boolean;
+  detent?: DetentName;
+  onDismissed?: () => void;
+  onDismissRequested?: () => void;
+  parent?: number;
+};
 export type SectionOptions = { title?: string; symbol?: SymbolValue | SymbolName; badge?: number | Signal<number>; onSelected?: () => void; window?: number };
 export type BarMenuOptions = MenuOptions & { window?: number };
 export type BarRadioGroupOptions = RadioGroupOptions & { window?: number };
@@ -4445,6 +4471,8 @@ export class App {
   /** @internal */ readonly _menuHandlers = new Map<string, Handler>();
   /** @internal */ readonly _entryPopped = new Map<number, () => void>();
   /** @internal */ readonly _backRequested = new Map<number, () => void>();
+  /** @internal */ readonly _sheetDismissed = new Map<number, () => void>();
+  /** @internal */ readonly _dismissRequested = new Map<number, () => void>();
   /** @internal */ readonly _sectionSelected = new Map<number, () => void>();
   /** @internal */ readonly _closeRequested = new Map<number, () => void>();
   /** @internal */ readonly _windowClosed = new Map<number, () => void>();
@@ -4587,6 +4615,27 @@ export class App {
       if (opts.interceptBack !== undefined) records().push(wire.tx_set_entry_intercept_back(entryId, Boolean(opts.interceptBack)));
       if (opts.onPopped !== undefined) this._entryPopped.set(entryId, opts.onPopped);
       if (opts.onBack !== undefined) this._backRequested.set(entryId, opts.onBack);
+    });
+  }
+
+  /** A sheet's scene scope (docs/sheet-plan.md): present_sheet plus the
+   * sheet's props, and the body's root mounts INTO IT on exit, which
+   * presents it. `parent` is the window (0, the primary) or LIVE SHEET it
+   * opens over; `detent` is REFUSED HERE if it is not in the vocabulary.
+   * onDismissed fires when the user's cancel path closes it natively (a
+   * programmatic dismissSheet does not) and retires with the one
+   * dismissal; onDismissRequested fires per cancel while interceptDismiss
+   * is armed, with nothing gone. Nests inside a handler's transaction. */
+  sheet<T>(sheetId: number, opts: SheetOptions, body: () => T): T {
+    const detent = opts.detent === undefined ? null : detentValue(opts.detent);
+    const parent = opts.parent ?? 0;
+    return runScope<T>("sheet", body, sheetId, () => {
+      records().push(wire.tx_present_sheet(parent, sheetId));
+      if (opts.title !== undefined) records().push(wire.tx_set_sheet_title(sheetId, String(opts.title)));
+      if (opts.interceptDismiss !== undefined) records().push(wire.tx_set_sheet_intercept_dismiss(sheetId, Boolean(opts.interceptDismiss)));
+      if (detent !== null) records().push(wire.tx_set_sheet_detent(sheetId, detent));
+      if (opts.onDismissed !== undefined) this._sheetDismissed.set(sheetId, opts.onDismissed);
+      if (opts.onDismissRequested !== undefined) this._dismissRequested.set(sheetId, opts.onDismissRequested);
     });
   }
 
@@ -4830,6 +4879,19 @@ export class App {
     }
     if (kind === wire.OCC_BACK_REQUESTED) {
       const handler = this._backRequested.get(ident);
+      if (handler !== undefined) this._dispatch(handler);
+      return;
+    }
+    if (kind === wire.OCC_SHEET_DISMISSED) {
+      // One-shot: the sheet is gone; both registrations retire with it.
+      this._dismissRequested.delete(ident);
+      const handler = this._sheetDismissed.get(ident);
+      this._sheetDismissed.delete(ident);
+      if (handler !== undefined) this._dispatch(handler);
+      return;
+    }
+    if (kind === wire.OCC_DISMISS_REQUESTED) {
+      const handler = this._dismissRequested.get(ident);
       if (handler !== undefined) this._dispatch(handler);
       return;
     }

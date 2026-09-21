@@ -69,7 +69,7 @@ use bindings::Microsoft::UI::Xaml::Markup::XamlReader;
 use bindings::Microsoft::UI::Xaml::Input::KeyboardAccelerator;
 use bindings::Windows::System::{VirtualKey, VirtualKeyModifiers};
 use bindings::Microsoft::UI::Xaml::{
-    GridLength, GridUnitType, HorizontalAlignment, Style, Thickness, Visibility,
+    GridLength, GridUnitType, HorizontalAlignment, Style, Thickness, Visibility, XamlRoot,
 };
 // The styling pass's two resource types (docs/styling-plan.md D4): a role
 // lowers to a keyed Style or a keyed Brush, looked up out of the
@@ -561,6 +561,10 @@ struct CoreState {
     /// and title come back when its stack empties.
     nav_entries: HashMap<u64, WinNavEntry>,
     nav_stacks: HashMap<u64, Vec<u64>>,
+    /// Live sheets by surface id and each parent surface's one child
+    /// (docs/sheet-plan.md).
+    sheets: HashMap<u64, WinSheet>,
+    child_sheet: HashMap<u64, u64>,
     /// The declared pane CEILING per window (wprop 6;
     /// docs/multicolumn-plan.md D2), and the presentation refresh_nav ACTUALLY
     /// rendered — stamped by the arm that ran, never derived (docs/traps.md).
@@ -801,6 +805,21 @@ struct WinLiveAlert {
     window: u64,
     actions: usize,
     dialog: ContentDialog,
+}
+
+/// One sheet's materialized state (docs/sheet-plan.md U1): the modal
+/// Popup, its smoke and card, the header's title block, the content slot
+/// the mount fills, and the veto. `presented` turns at the mount.
+struct WinSheet {
+    parent: u64,
+    popup: Popup,
+    smoke: Grid,
+    header_title: TextBlock,
+    content: Grid,
+    close: Button,
+    title: String,
+    intercept_dismiss: bool,
+    presented: bool,
 }
 
 /// One menu item's retained state (the post-user mirror; see
@@ -2846,6 +2865,25 @@ const TABLE_CARD_XAML: &str = concat!(
     "HorizontalAlignment=\"Stretch\" VerticalAlignment=\"Stretch\"/>"
 );
 
+/// THE SHEET (docs/sheet-plan.md U1): a modal Popup, because ContentDialog
+/// refuses a second one (`0x80000019`) while a Popup takes an alert and a
+/// child sheet over it. Fluent's smoke over the whole root, and its layer
+/// card with a header (title, close) over the mounted root.
+const SHEET_SMOKE_XAML: &str = concat!(
+    "<Grid xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" ",
+    "Background=\"{ThemeResource SmokeFillColorDefaultBrush}\"/>"
+);
+// The brushes single-quoted on purpose: tools/check-table-card.py counts
+// the TABLE card's fill and stroke spellings exactly once in this file.
+const SHEET_CARD_XAML: &str = concat!(
+    "<Grid xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" ",
+    "Background='{ThemeResource CardBackgroundFillColorDefaultBrush}' ",
+    "BorderBrush='{ThemeResource CardStrokeColorDefaultBrush}' ",
+    "CornerRadius='{ThemeResource OverlayCornerRadius}' BorderThickness='1' ",
+    "MinWidth=\"400\" MinHeight=\"300\" ",
+    "HorizontalAlignment=\"Center\" VerticalAlignment=\"Center\"/>"
+);
+
 /// The card's interior, per side. FLUENT'S CARD CONTENT INSET is 12epx
 /// (the SettingsCard family's 12/16 pair, of which 12 is the tighter one
 /// and the one a DENSE table wants). Symmetric, because `pad` is one
@@ -4546,6 +4584,137 @@ fn mount_entry(
         refresh_nav(core, host)?;
     }
     Ok(())
+}
+
+/// The window that hosts a surface: a sheet's chain ends at a window, an
+/// entry's or a section's is its own.
+fn surface_window(core: &CoreState, surface: u64) -> u64 {
+    let mut host = surface;
+    loop {
+        if let Some(sheet) = core.sheets.get(&host) {
+            host = sheet.parent;
+        } else if let Some(entry) = core.nav_entries.get(&host) {
+            host = entry.window;
+        } else if let Some(pane) = core.section_panes.get(&host) {
+            host = pane.window;
+        } else {
+            return host;
+        }
+    }
+}
+
+/// The mount presents: the root goes into the card's content slot, the
+/// smoke takes the root's whole size and follows it, and the popup opens.
+fn mount_sheet(
+    core: &mut CoreState,
+    sheet_id: u64,
+    root: WidgetId,
+    element: UIElement,
+) -> windows_core::Result<()> {
+    core.mounted_roots.insert(sheet_id, root);
+    stamp_container_padding(core, root)?;
+    let record = core.sheets.get_mut(&sheet_id).expect("just checked");
+    let content_el: FrameworkElement = element.cast()?;
+    content_el.SetMargin(Thickness { Left: 16.0, Top: 4.0, Right: 16.0, Bottom: 16.0 })?;
+    record.content.Children()?.Append(&element)?;
+    open_sheet_popup(core, sheet_id)
+}
+
+/// The popup needs the host's LIVE XamlRoot (the alert arm's rule): a guest
+/// can present within milliseconds of launch, before the island exists —
+/// the python, js and C# legs did (2026-09-21) — so a root not live yet
+/// defers this to its own Loaded, the platform's "the island is up".
+fn open_sheet_popup(core: &mut CoreState, sheet_id: u64) -> windows_core::Result<()> {
+    let host = surface_window(core, sheet_id);
+    let content = winui_window(core, host)?.Content()?;
+    let root: FrameworkElement = windows_core::Interface::cast(&content)?;
+    let Ok(xaml_root) = root.XamlRoot() else {
+        let armed = std::sync::Mutex::new(true);
+        root.Loaded(&RoutedEventHandler::new(move |_, _| {
+            if !std::mem::take(&mut *armed.lock().unwrap()) {
+                return Ok(());
+            }
+            CORE.with_borrow_mut(|core| {
+                let Some(core) = core.as_mut() else { return Ok(()) };
+                if core.sheets.contains_key(&sheet_id) {
+                    open_sheet_popup(core, sheet_id)?;
+                }
+                Ok(())
+            })
+        }))?;
+        return Ok(());
+    };
+    let record = core.sheets.get_mut(&sheet_id).expect("the sheet is live");
+    let size = xaml_root.Size()?;
+    record.smoke.SetWidth(size.Width as f64)?;
+    record.smoke.SetHeight(size.Height as f64)?;
+    let smoke = record.smoke.clone();
+    let _ = xaml_root.Changed(&TypedEventHandler::new(move |sender: windows_core::Ref<'_, XamlRoot>, _| {
+        if let Some(root) = sender.as_ref() {
+            let size = root.Size()?;
+            smoke.SetWidth(size.Width as f64)?;
+            smoke.SetHeight(size.Height as f64)?;
+        }
+        Ok(())
+    }));
+    record.popup.SetXamlRoot(&xaml_root)?;
+    record.presented = true;
+    record.popup.SetIsOpen(true)?;
+    Ok(())
+}
+
+/// The cancel path (Esc in the popup, the header's close, the harness's
+/// dismiss_sheet): armed, the app is asked and nothing goes; unarmed, the
+/// sheet goes here, the core reconciles post-fact and sheet_dismissed is
+/// reported.
+fn user_cancel_sheet(core: &mut CoreState, sheet: u64) -> windows_core::Result<()> {
+    let Some(record) = core.sheets.get(&sheet) else {
+        return Ok(());
+    };
+    if record.intercept_dismiss {
+        core.occurrences.send(Occurrence::DismissRequested {
+            sheet: WindowId(sheet),
+        });
+        return Ok(());
+    }
+    forget_sheet(core, sheet)?;
+    core.scene.user_dismissed(WindowId(sheet));
+    core.occurrences.send(Occurrence::SheetDismissed {
+        sheet: WindowId(sheet),
+    });
+    Ok(())
+}
+
+/// Drop a sheet's record and its children's, closing their popups; the
+/// mounted root is remembered as dead, the pop's rule.
+fn forget_sheet(core: &mut CoreState, sheet: u64) -> windows_core::Result<()> {
+    if let Some(child) = core.child_sheet.get(&sheet).copied() {
+        forget_sheet(core, child)?;
+    }
+    let Some(record) = core.sheets.remove(&sheet) else {
+        return Ok(());
+    };
+    if core.child_sheet.get(&record.parent) == Some(&sheet) {
+        core.child_sheet.remove(&record.parent);
+    }
+    if let Some(root) = core.mounted_roots.remove(&sheet) {
+        core.dead_roots.insert(root.0);
+    }
+    record.popup.SetIsOpen(false)?;
+    Ok(())
+}
+
+/// The live sheet with no child of its own: the topmost, where Esc lands.
+fn topmost_sheet(core: &CoreState) -> Option<u64> {
+    core.sheets
+        .iter()
+        .filter(|(id, s)| {
+            s.presented
+                && s.popup.IsOpen().unwrap_or(false)
+                && !core.child_sheet.contains_key(id)
+        })
+        .map(|(id, _)| *id)
+        .max()
 }
 
 /// Assemble the window's sections chrome: a NavigationView whose items
@@ -13995,6 +14164,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 let _ = aux.Close();
             }
             core.tearing_down.remove(&window.0);
+            // ... its sheet chain, parent-bound (the core took it too) ...
+            if let Some(child) = core.child_sheet.get(&window.0).copied() {
+                forget_sheet(core, child)?;
+            }
             if let Some(root) = core.mounted_roots.remove(&window.0) {
                 core.dead_roots.insert(root.0);
             }
@@ -14044,8 +14217,126 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             });
             core.toolbar_buttons.retain(|(w, _), _| *w != window.0);
         }
-        ApplyOp::PresentSheet { .. } | ApplyOp::DismissSheet { .. } | ApplyOp::SetSheetProp { .. } => {
-            crate::depth_stub("sheet")
+        ApplyOp::PresentSheet { parent, sheet } => {
+            // Built hidden; the mount opens it (docs/sheet-plan.md U1).
+            let smoke: Grid = XamlReader::Load(&HSTRING::from(SHEET_SMOKE_XAML))?.cast()?;
+            let card: Grid = XamlReader::Load(&HSTRING::from(SHEET_CARD_XAML))?.cast()?;
+            let defs = card.RowDefinitions()?;
+            let bar = RowDefinition::new()?;
+            bar.SetHeight(GridLength { Value: 1.0, GridUnitType: GridUnitType::Auto })?;
+            defs.Append(&bar)?;
+            let fill = RowDefinition::new()?;
+            fill.SetHeight(GridLength { Value: 1.0, GridUnitType: GridUnitType::Star })?;
+            defs.Append(&fill)?;
+            // The header: the title and the close button, GNOME's dialog
+            // shape in Fluent's card.
+            let header = Grid::new()?;
+            let cols = header.ColumnDefinitions()?;
+            let grow = ColumnDefinition::new()?;
+            grow.SetWidth(GridLength { Value: 1.0, GridUnitType: GridUnitType::Star })?;
+            cols.Append(&grow)?;
+            let hug = ColumnDefinition::new()?;
+            hug.SetWidth(GridLength { Value: 1.0, GridUnitType: GridUnitType::Auto })?;
+            cols.Append(&hug)?;
+            header.SetPadding(Thickness { Left: 16.0, Top: 12.0, Right: 12.0, Bottom: 8.0 })?;
+            let header_title = text_block()?;
+            let title_el: FrameworkElement = header_title.cast()?;
+            Grid::SetColumn(&title_el, 0)?;
+            header.Children()?.Append(&header_title)?;
+            let close = Button::new()?;
+            let glyph = text_block()?;
+            glyph.SetText(&HSTRING::from("\u{2715}"))?;
+            close.SetContent(&glyph)?;
+            let close_el: FrameworkElement = close.cast()?;
+            Grid::SetColumn(&close_el, 1)?;
+            header.Children()?.Append(&close)?;
+            let header_el: FrameworkElement = header.cast()?;
+            Grid::SetRow(&header_el, 0)?;
+            card.Children()?.Append(&header)?;
+            let content = Grid::new()?;
+            let content_el: FrameworkElement = content.cast()?;
+            Grid::SetRow(&content_el, 1)?;
+            card.Children()?.Append(&content)?;
+            smoke.Children()?.Append(&card)?;
+            let popup = Popup::new()?;
+            popup.SetChild(&smoke)?;
+            popup.SetIsLightDismissEnabled(false)?;
+            popup.SetShouldConstrainToRootBounds(true)?;
+            // THE CANCEL PATH, one function for the key and the button: Esc
+            // anywhere in the popup (focus is inside it from the open) and
+            // the header's close. Both fire from the message loop, never
+            // under an apply borrow.
+            let sid = sheet.0;
+            smoke.KeyDown(&KeyEventHandler::new(move |_, args| {
+                let Some(args) = args.as_ref() else { return Ok(()) };
+                // Spelled apart from the search field's Escape test on
+                // purpose: tools/check-search.py cuts that one site.
+                let key = args.Key()?;
+                if key != VirtualKey::Escape {
+                    return Ok(());
+                }
+                args.SetHandled(true)?;
+                CORE.with_borrow_mut(|core| {
+                    let Some(core) = core.as_mut() else { return Ok(()) };
+                    user_cancel_sheet(core, sid)
+                })
+            }))?;
+            close.Click(&RoutedEventHandler::new(move |_, _| {
+                CORE.with_borrow_mut(|core| {
+                    let Some(core) = core.as_mut() else { return Ok(()) };
+                    user_cancel_sheet(core, sid)
+                })
+            }))?;
+            // Focus moves into the popup as it opens: the close button is
+            // the first focusable, and a control takes focus once loaded.
+            close.Loaded(&RoutedEventHandler::new(
+                move |sender: windows_core::Ref<'_, windows_core::IInspectable>, _| {
+                    if let Some(sender) = sender.as_ref() {
+                        let element: UIElement = windows_core::Interface::cast(sender)?;
+                        let _ = element.Focus(FocusState::Programmatic)?;
+                    }
+                    Ok(())
+                },
+            ))?;
+            core.sheets.insert(
+                sid,
+                WinSheet {
+                    parent: parent.0,
+                    popup,
+                    smoke,
+                    header_title,
+                    content,
+                    close,
+                    title: String::new(),
+                    intercept_dismiss: false,
+                    presented: false,
+                },
+            );
+            core.child_sheet.insert(parent.0, sid);
+        }
+        ApplyOp::DismissSheet { sheet } => {
+            // Programmatic: the core already forgot the chain; the popup
+            // closes with no emit (the echo doctrine).
+            forget_sheet(core, sheet.0)?;
+        }
+        ApplyOp::SetSheetProp { sheet, prop, value } => {
+            use crate::protocol::SheetProp;
+            let record = core
+                .sheets
+                .get_mut(&sheet.0)
+                .expect("scene validated the sheet id");
+            match (prop, &value) {
+                (SheetProp::Title, Value::Str(title)) => {
+                    record.title = title.clone();
+                    record.header_title.SetText(&HSTRING::from(title.as_str()))?;
+                }
+                (SheetProp::InterceptDismiss, Value::Bool(on)) => {
+                    record.intercept_dismiss = *on;
+                }
+                // The desktops have nothing to say about a detent.
+                (SheetProp::Detent, Value::I64(_)) => {}
+                (p, v) => unreachable!("scene validated sheet prop {p:?}/{v:?}"),
+            }
         }
         ApplyOp::PushEntry { window, entry } => {
             core.nav_entries.insert(
@@ -15547,6 +15838,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 if owner != 0 {
                     winui_window(core, owner)?.Activate()?;
                 }
+            } else if core.sheets.contains_key(&window.0) {
+                mount_sheet(core, window.0, root, element)?;
             } else if core.nav_entries.contains_key(&window.0) {
                 mount_entry(core, window.0, element)?;
             } else if window.0 == 0 {
@@ -17185,6 +17478,8 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             window,
             aux_windows: HashMap::new(),
             nav_entries: HashMap::new(),
+            sheets: HashMap::new(),
+            child_sheet: HashMap::new(),
             sections: HashMap::new(),
             section_panes: HashMap::new(),
             section_navs: HashMap::new(),
@@ -21438,18 +21733,37 @@ impl crate::harness::Stage for WinUiStage {
         Self::on_ui(move |core| Ok(core.nav_stacks.get(&window).map_or(0, Vec::len)))
     }
 
-    // The sheet is a depth slice on this backend (docs/sheet-plan.md §8).
     fn sheet_count(&self) -> usize {
-        crate::depth_stub("sheet")
+        // The platform's truth: popups open, never the model.
+        Self::on_ui_read(move |core| {
+            Ok(core
+                .sheets
+                .values()
+                .filter(|s| s.presented && s.popup.IsOpen().unwrap_or(false))
+                .count())
+        })
+        .unwrap_or(0)
     }
     fn sheet_title(&self) -> Option<String> {
-        crate::depth_stub("sheet")
+        // The header the card draws, read off its TextBlock.
+        Self::on_ui_read(move |core| {
+            let Some(id) = topmost_sheet(core) else { return Ok(None) };
+            Ok(Some(core.sheets[&id].header_title.Text()?.to_string()))
+        })
+        .unwrap_or(None)
     }
     fn sheet_detent(&self) -> String {
-        crate::depth_stub("sheet")
+        // A desktop sheet has no detent.
+        "none".to_owned()
     }
     fn dismiss_sheet(&self) {
-        crate::depth_stub("sheet")
+        // The close button's own route (the ContentDialog Hide precedent):
+        // an OS-global Escape belongs to legs that run alone, and this pool
+        // does not.
+        Self::on_ui_mut(|core| {
+            let Some(id) = topmost_sheet(core) else { return Ok(()) };
+            user_cancel_sheet(core, id)
+        });
     }
     fn back(&self, window: u64) {
         use bindings::Microsoft::UI::Xaml::Automation::Peers::{

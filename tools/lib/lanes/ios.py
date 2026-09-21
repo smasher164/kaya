@@ -30,7 +30,7 @@ SWIFT_ENTRIES = [
     "background", "undo", "ranges", "dirty", "filedialog",
     "save", "styling", "toolbar", "identity", "assets",
     "table", "canvas", "sizepolicy", "dnd", "pickers", "sliders",
-    "tooltips",
+    "tooltips", "sheet",
 ]
 
 # The go suite: the swift roster entry for entry minus the two
@@ -44,7 +44,7 @@ GO_SCENES = [
     "menus", "commands", "a11y", "a11yrows", "clipboard",
     "background", "undo", "ranges", "dirty", "filedialog",
     "save", "styling", "toolbar", "identity", "assets",
-    "table", "dnd", "pickers", "sliders", "tooltips",
+    "table", "dnd", "pickers", "sliders", "tooltips", "sheet",
 ]
 
 # CPython embedded in ONE bundle carrying every python scene
@@ -63,7 +63,7 @@ RUST_SCENES = [
     "a11y", "a11yrows", "styling", "ranges", "progress",
     "menus", "toolbar", "identity", "assets", "listdetail",
     "table", "windowed", "adaptive", "commands", "undo",
-    "dirty", "dnd", "pickers", "sliders", "tooltips",
+    "dirty", "dnd", "pickers", "sliders", "tooltips", "sheet",
     # The notification conformance scene: the activation is a REAL tap on
     # SpringBoard's own shade, driven by the xcui driver's notify_tap
     # (docs/tasks-s3-plan.md N5).
@@ -138,6 +138,22 @@ MODS = {
     # grammar is macOS-only (docs/dirty-plan.md D4).
     ("swift", "dirty"): {"cut": "close_window", "keep": "expect_dirty"},
     ("go", "dirty"): {"cut": "close_window", "keep": "expect_dirty"},
+    # THE DETENT IS THE PHONES' TO ANSWER (docs/sheet-plan.md §4): the
+    # shared script asserts the desktops' `none`; this lane drops that
+    # step and reopens the medium sheet at the end to read the platform's
+    # own detent back, then cancels it through the swipe.
+    ("swift", "sheet"): {
+        "drop": ("expect_sheet_detent", "none"), "keep": "expect_sheet",
+        "extra": "click button#0; expect_sheets 1; expect_sheet_detent medium; "
+                 "dismiss_sheet; expect_sheets 0"},
+    ("go", "sheet"): {
+        "drop": ("expect_sheet_detent", "none"), "keep": "expect_sheet",
+        "extra": "click button#0; expect_sheets 1; expect_sheet_detent medium; "
+                 "dismiss_sheet; expect_sheets 0"},
+    ("rust-swiftui", "sheet"): {
+        "drop": ("expect_sheet_detent", "none"), "keep": "expect_sheet",
+        "extra": "click button#0; expect_sheets 1; expect_sheet_detent medium; "
+                 "dismiss_sheet; expect_sheets 0"},
     ("rust-swiftui", "dirty"): {"cut": "close_window",
                                 "keep": "expect_dirty"},
     # The editor opens both pickers and ends past a chrome close

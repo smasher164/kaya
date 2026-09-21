@@ -30,7 +30,7 @@ eval "$(opam env 2>/dev/null)" || true
 
 # --lib builds the cdylib (libkaya.so) the foreign suites load;
 # --example alone would build only the rlib it depends on.
-SCENES="background stall milestone2 entry search gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive pickers sliders"
+SCENES="background stall milestone2 entry search gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive pickers sliders sheet"
 # Depth-slice scenes, rust only. `windowed` and `canvas` are rust BY
 # DESIGN rather than by depth — the compiled conformance scenes every
 # lane runs (docs/virtualization-plan.md §6.3, docs/canvas-plan.md
@@ -390,10 +390,16 @@ kaya_wanted() { # name proto
     return 1
 }
 
+# A FILTER THAT MATCHES NO LEG IS REFUSED, never a verdict over an empty
+# run: the sheet slice's first linux run printed ALL PASS with the legs
+# still unspelled (2026-09-21; the android runner's rule).
+KAYA_LEGS_TAKEN=0
+
 run() {
     local proto="$1" name="$2"
     shift 2
     kaya_wanted "$name" "$proto" || return 0
+    KAYA_LEGS_TAKEN=$((KAYA_LEGS_TAKEN + 1))
     # THE MATRIX-WIDE TOKEN (tools/linux/exclusive.sh): start nothing while
     # another lane holds it; for this lane's exclusive legs, let the pool empty,
     # then hold it and run the pooled body in the foreground.
@@ -1417,6 +1423,22 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh "$(hs_bin sliders)"
     run "$proto" sliders-java env KAYA_SELFTEST=sliders KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
+    run "$proto" sheet-rust env KAYA_SELFTEST=sheet \
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/sheet"
+    run "$proto" sheet-python env KAYA_SELFTEST=sheet KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh python3 guests/python/sheet.py
+    run "$proto" sheet-js env KAYA_SELFTEST=sheet KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh node guests/js/sheet.ts
+    run "$proto" sheet-go env KAYA_SELFTEST=sheet \
+        tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
+    run "$proto" sheet-csharp env KAYA_SELFTEST=sheet KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
+    run "$proto" sheet-ocaml env KAYA_SELFTEST=sheet KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh _build-linux/default/guests/ocaml/sheet.exe
+    run "$proto" sheet-haskell env KAYA_SELFTEST=sheet \
+        tools/linux/a11y-leg.sh "$(hs_bin sheet)"
+    run "$proto" sheet-java env KAYA_SELFTEST=sheet KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
     run "$proto" tooltips-rust env KAYA_SELFTEST=tooltips \
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/tooltips"
     # THE SEARCH FIELD (docs/search-plan.md). THROUGH a11y-leg.sh: the scene
@@ -1691,5 +1713,9 @@ flightrec_flush
 # Suites accumulate failures rather than abort, so a truncated log must
 # still end with the answer.
 kaya_exclusive_summary linux
+if [ -n "${KAYA_ONLY:-}" ] && [ "$KAYA_LEGS_TAKEN" = 0 ]; then
+    echo "run-suites: KAYA_ONLY=$KAYA_ONLY matched no leg of this runner — no verdict"
+    status=1
+fi
 if [ "$status" = 0 ]; then echo "run-suites: ALL PASS"; else echo "run-suites: FAILURES ABOVE"; fi
 exit "$status"

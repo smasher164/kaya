@@ -347,6 +347,34 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("    }");
     }
 
+    // The sheet-prop duos (docs/sheet-plan.md §3); detent is an enum.
+    for (prop, _, kind) in crate::sheet_prop_variants(spec) {
+        let pc = pascal(prop);
+        let (p, ty, expr) = match kind {
+            crate::PropKind::Str => (camel(prop), "string", format!("EncodeValue(w, {});", camel(prop))),
+            crate::PropKind::Bool => (camel(prop), "bool", format!("EncodeValue(w, {});", camel(prop))),
+            crate::PropKind::Enum(_) => (camel(prop), "long", format!("EncodeValue(w, {});", camel(prop))),
+            other => unreachable!("no sheet prop carries {other:?}"),
+        };
+        c.line("");
+        c.line(&format!("    /// set_sheet_prop with a constant {prop} value."));
+        c.line(&format!("    public static byte[] TxSetSheet{pc}(ulong sheet, {ty} {p})"));
+        c.line("    {");
+        c.line("        var w = Begin(out var stream);");
+        c.line(&format!("        w.Write(sheet); w.Write(Shprop{pc}); w.Write(SourceConst);"));
+        c.line(&format!("        {expr}"));
+        c.line("        return Finish(stream, w, TxKindSetSheetProp);");
+        c.line("    }");
+        c.line("");
+        c.line(&format!("    /// set_sheet_prop with a signal-bound {prop} value."));
+        c.line(&format!("    public static byte[] TxBindSheet{pc}(ulong sheet, ulong signalId)"));
+        c.line("    {");
+        c.line("        var w = Begin(out var stream);");
+        c.line(&format!("        w.Write(sheet); w.Write(Shprop{pc}); w.Write(SourceSignal); w.Write(signalId);"));
+        c.line("        return Finish(stream, w, TxKindSetSheetProp);");
+        c.line("    }");
+    }
+
     // The section-prop duos; icon rides the blob channel (DESIGN.md,
     // Sections).
     for (prop, _, kind) in crate::section_prop_variants(spec) {

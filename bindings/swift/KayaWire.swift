@@ -2064,6 +2064,66 @@ struct KayaTx {
         self.end(kayaAt)
     }
 
+    /// set_sheet_prop with a constant title value.
+    mutating func setSheetTitle(_ sheet: UInt64, _ title: String) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_SHEET_PROP))
+        self.u64(sheet)
+        self.u32(UInt32(KAYA_SHPROP_TITLE))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.str(title))
+        self.end(kayaAt)
+    }
+
+    /// set_sheet_prop with a signal-bound title value.
+    mutating func bindSheetTitle(_ sheet: UInt64, _ signalId: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_SHEET_PROP))
+        self.u64(sheet)
+        self.u32(UInt32(KAYA_SHPROP_TITLE))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(kayaAt)
+    }
+
+    /// set_sheet_prop with a constant intercept_dismiss value.
+    mutating func setSheetInterceptDismiss(_ sheet: UInt64, _ interceptDismiss: Bool) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_SHEET_PROP))
+        self.u64(sheet)
+        self.u32(UInt32(KAYA_SHPROP_INTERCEPT_DISMISS))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.bool(interceptDismiss))
+        self.end(kayaAt)
+    }
+
+    /// set_sheet_prop with a signal-bound intercept_dismiss value.
+    mutating func bindSheetInterceptDismiss(_ sheet: UInt64, _ signalId: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_SHEET_PROP))
+        self.u64(sheet)
+        self.u32(UInt32(KAYA_SHPROP_INTERCEPT_DISMISS))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(kayaAt)
+    }
+
+    /// set_sheet_prop with a constant detent value.
+    mutating func setSheetDetent(_ sheet: UInt64, _ detent: Int64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_SHEET_PROP))
+        self.u64(sheet)
+        self.u32(UInt32(KAYA_SHPROP_DETENT))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.i64(detent))
+        self.end(kayaAt)
+    }
+
+    /// set_sheet_prop with a signal-bound detent value.
+    mutating func bindSheetDetent(_ sheet: UInt64, _ signalId: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_SHEET_PROP))
+        self.u64(sheet)
+        self.u32(UInt32(KAYA_SHPROP_DETENT))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(kayaAt)
+    }
+
     /// set_section_prop with a constant title value.
     mutating func setSectionTitle(_ section: UInt64, _ title: String) {
         let kayaAt = self.begin(UInt16(KAYA_TX_SET_SECTION_PROP))

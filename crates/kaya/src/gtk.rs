@@ -4121,6 +4121,18 @@ struct GtkNavEntry {
     root: Option<gtk4::Widget>,
 }
 
+/// One sheet's materialized state (docs/sheet-plan.md, U3): the AdwDialog
+/// that chains and takes Esc topmost-first, its parent surface, the veto
+/// (`can-close` off) and the mounted root. `presented` turns at the mount.
+struct GtkSheet {
+    parent: u64,
+    dialog: adw::Dialog,
+    title: String,
+    intercept_dismiss: bool,
+    root: Option<gtk4::Widget>,
+    presented: bool,
+}
+
 /// One section's materialized state: the stack page's container Box
 /// (the mount target), its title, its own mounted root, and the
 /// hosting window.
@@ -4302,6 +4314,10 @@ struct CoreState {
     /// to top (DESIGN.md, Navigation).
     nav_entries: HashMap<u64, GtkNavEntry>,
     nav_stacks: HashMap<u64, Vec<u64>>,
+    /// Live sheets by surface id and each parent surface's one child
+    /// (docs/sheet-plan.md).
+    sheets: HashMap<u64, GtkSheet>,
+    child_sheet: HashMap<u64, u64>,
     /// The declared pane CEILING per window (wprop 6;
     /// docs/multicolumn-plan.md D2): how many side-by-side stack
     /// surfaces this window asks for. How many it GETS is GNOME's
@@ -5492,6 +5508,86 @@ struct WindowChrome {
 /// matches on; neither string is ever compared across platforms.
 const DIRTY_MARKER: &str = "\u{2022}";
 const DIRTY_MARKER_NAME: &str = "Unsaved changes";
+
+/// The user's cancel path ended a sheet (Esc, the header's close button):
+/// post-fact, the record and its children go, the core reconciles, and
+/// sheet_dismissed is reported. A record already forgotten (a programmatic
+/// dismiss ran first) reports nothing.
+fn user_dismissed_sheet(core: &mut CoreState, sheet: u64) {
+    if !core.sheets.contains_key(&sheet) {
+        return;
+    }
+    forget_sheet(core, sheet, false);
+    core.scene.user_dismissed(WindowId(sheet));
+    core.occurrences.send(Occurrence::SheetDismissed {
+        sheet: WindowId(sheet),
+    });
+}
+
+/// Drop a sheet's record and its children's — `close` force-closes the
+/// dialogs too (the programmatic dismiss, a destroyed window's chain); the
+/// user's own dismissal is already closing.
+fn forget_sheet(core: &mut CoreState, sheet: u64, close: bool) {
+    if let Some(child) = core.child_sheet.get(&sheet).copied() {
+        forget_sheet(core, child, close);
+    }
+    let Some(record) = core.sheets.remove(&sheet) else {
+        return;
+    };
+    if core.child_sheet.get(&record.parent) == Some(&sheet) {
+        core.child_sheet.remove(&record.parent);
+    }
+    note_dead_subtree(core, record.root);
+    if close {
+        use adw::prelude::AdwDialogExt;
+        record.dialog.force_close();
+    }
+}
+
+/// Focus into a presented sheet's dialog: its first focusable descendant,
+/// else the dialog itself. Recorded either way, since a red x11 leg reads
+/// this trace to learn what the key met.
+fn focus_into_sheet(dialog: &gtk4::Widget) {
+    let moved = dialog.child_focus(gtk4::DirectionType::TabForward)
+        || dialog.grab_focus();
+    let focus = dialog
+        .root()
+        .and_then(|r| r.focus())
+        .map(|f| f.type_().name().to_string());
+    crate::vtrace::note(
+        "sheet_focus",
+        format_args!("focus into the sheet: moved={moved} now {focus:?}"),
+    );
+}
+
+/// The widget a sheet presents over: its parent sheet's dialog, or the
+/// window hosting the parent surface (a window, an entry's or a section's).
+fn sheet_parent_widget(core: &mut CoreState, parent: u64) -> gtk4::Widget {
+    use gtk4::prelude::Cast;
+    if let Some(sheet) = core.sheets.get(&parent) {
+        return sheet.dialog.clone().upcast();
+    }
+    let mut host = parent;
+    loop {
+        if let Some(entry) = core.nav_entries.get(&host) {
+            host = entry.window;
+        } else if let Some(page) = core.section_pages.get(&host) {
+            host = page.window;
+        } else {
+            break;
+        }
+    }
+    gtk_window(core, host).upcast()
+}
+
+/// The live sheet with no child of its own: where Esc lands (U3).
+fn topmost_sheet(core: &CoreState) -> Option<u64> {
+    core.sheets
+        .iter()
+        .filter(|(id, s)| s.presented && s.dialog.is_mapped() && !core.child_sheet.contains_key(id))
+        .map(|(id, _)| *id)
+        .max()
+}
 
 /// A user-driven back on the window's top entry: an intercept_back-armed top
 /// emits back_requested and nothing pops; an unarmed top pops here,
@@ -11009,6 +11105,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 aux.destroy();
             }
             core.window_veto.borrow_mut().remove(&window.0);
+            // ... its sheet chain, parent-bound (the core took it too) ...
+            if let Some(child) = core.child_sheet.get(&window.0).copied() {
+                forget_sheet(core, child, true);
+            }
             // A destroyed window takes its navigation stack with it — and
             // every root it held is a subtree kaya knows is gone.
             for entry in core.nav_stacks.remove(&window.0).unwrap_or_default() {
@@ -11053,8 +11153,76 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 reg.bar_of.retain(|_, w| *w != window.0);
             }
         }
-        ApplyOp::PresentSheet { .. } | ApplyOp::DismissSheet { .. } | ApplyOp::SetSheetProp { .. } => {
-            crate::depth_stub("sheet")
+        ApplyOp::PresentSheet { parent, sheet } => {
+            // The platform's own dialog (docs/sheet-plan.md U3): AdwDialog
+            // chains, Esc reaches the topmost, `can-close` off is the veto
+            // and force_close the programmatic dismiss. Hidden until the
+            // mount presents it. Both signals defer one idle tick: they can
+            // fire inside apply, which holds CORE.
+            use adw::prelude::AdwDialogExt;
+            let dialog = adw::Dialog::new();
+            dialog.set_content_width(400);
+            dialog.set_content_height(300);
+            let sid = sheet.0;
+            dialog.connect_closed(move |_| {
+                glib::idle_add_local_once(move || {
+                    CORE.with_borrow_mut(|core| {
+                        let Some(core) = core.as_mut() else { return };
+                        user_dismissed_sheet(core, sid);
+                    });
+                });
+            });
+            dialog.connect_close_attempt(move |_| {
+                glib::idle_add_local_once(move || {
+                    CORE.with_borrow_mut(|core| {
+                        let Some(core) = core.as_mut() else { return };
+                        if core.sheets.contains_key(&sid) {
+                            core.occurrences.send(Occurrence::DismissRequested {
+                                sheet: WindowId(sid),
+                            });
+                        }
+                    });
+                });
+            });
+            core.sheets.insert(
+                sid,
+                GtkSheet {
+                    parent: parent.0,
+                    dialog,
+                    title: String::new(),
+                    intercept_dismiss: false,
+                    root: None,
+                    presented: false,
+                },
+            );
+            core.child_sheet.insert(parent.0, sid);
+        }
+        ApplyOp::DismissSheet { sheet } => {
+            // Programmatic: the core already forgot the chain; the record
+            // goes before force_close so `closed` reports nothing (the echo
+            // doctrine), and force_close ignores the veto (U3).
+            forget_sheet(core, sheet.0, true);
+        }
+        ApplyOp::SetSheetProp { sheet, prop, value } => {
+            use crate::protocol::SheetProp;
+            use adw::prelude::AdwDialogExt;
+            let record = core
+                .sheets
+                .get_mut(&sheet.0)
+                .expect("scene validated the sheet id");
+            match (prop, &value) {
+                (SheetProp::Title, Value::Str(title)) => {
+                    record.title = title.clone();
+                    record.dialog.set_title(title);
+                }
+                (SheetProp::InterceptDismiss, Value::Bool(on)) => {
+                    record.intercept_dismiss = *on;
+                    record.dialog.set_can_close(!*on);
+                }
+                // The desktops have nothing to say about a detent.
+                (SheetProp::Detent, Value::I64(_)) => {}
+                (p, v) => unreachable!("scene validated sheet prop {p:?}/{v:?}"),
+            }
         }
         ApplyOp::PushEntry { window, entry } => {
             // Materializes covered/incoming: on the stack now, the
@@ -13014,6 +13182,37 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     // (docs/app-identity-plan.md I4a).
                     apply_identity_icon(core, owner);
                 }
+            } else if core.sheets.contains_key(&window.0) {
+                forget_dead_subtree(core, &root_widget);
+                // GNOME's own dialog shape: a header bar carrying the title
+                // and the close button over the root (U3). Mounting presents,
+                // over the parent window or the parent sheet's dialog.
+                use adw::prelude::AdwDialogExt;
+                let view = adw::ToolbarView::new();
+                view.add_top_bar(&adw::HeaderBar::new());
+                view.set_content(Some(&root_widget));
+                let parent_id = core.sheets[&window.0].parent;
+                let parent = sheet_parent_widget(core, parent_id);
+                let record = core.sheets.get_mut(&window.0).expect("just checked");
+                record.root = Some(root_widget.clone());
+                record.dialog.set_child(Some(&view));
+                record.presented = true;
+                record.dialog.present(Some(&parent));
+                // FOCUS GOES INTO THE DIALOG HERE, not left to the toolkit:
+                // the dialog's Escape is a shortcut reached from a focus
+                // inside it, and on the x11 lane (no window manager, the
+                // toplevel never active) present() left GTK with NO focus
+                // widget at all — the first x11 leg's bundle read `gtk focus
+                // None inside the topmost sheet: false` and Esc went nowhere
+                // (docs/traps.md, the sheet's x11 focus). wayland's
+                // compositor activates the window and the toolkit does this
+                // itself; this makes the two lanes one.
+                let dialog = record.dialog.clone().upcast::<gtk4::Widget>();
+                // The child is not mapped at present(); the focus move waits
+                // for the map, where a focusable descendant exists to take it.
+                dialog.connect_map(|dialog| {
+                    focus_into_sheet(dialog);
+                });
             } else if core.nav_entries.contains_key(&window.0) {
                 forget_dead_subtree(core, &root_widget);
                 let entry = core.nav_entries.get_mut(&window.0).expect("just checked");
@@ -14601,6 +14800,8 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 aux_windows: HashMap::new(),
                 nav_entries: HashMap::new(),
                 nav_stacks: HashMap::new(),
+                sheets: HashMap::new(),
+                child_sheet: HashMap::new(),
                 panes: HashMap::new(),
                 remember_frame: HashMap::new(),
                 frame_memory: HashMap::from_iter(
@@ -14770,6 +14971,74 @@ struct GtkStage;
 /// choice at startup: an explicit GDK_BACKEND wins, else wayland when
 /// a display is offered.
 #[cfg(feature = "harness")]
+/// Esc through the platform's own input path, the type verb's two tools:
+/// wtype after the seat tap on wayland, xdotool with the pid's window
+/// focused on x11 — an AdwDialog lives INSIDE its window on both.
+fn send_escape_key(x11_window: Option<u64>) {
+    let hold = if TYPED_ONCE.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        "150"
+    } else {
+        "800"
+    };
+    let (tool, args): (&str, Vec<String>) = if linux_wayland_session() {
+        (
+            "wtype",
+            ["-P", "F24", "-s", hold, "-p", "F24", "-s", "20", "-k", "Escape"]
+                .iter()
+                .map(|a| (*a).to_owned())
+                .collect(),
+        )
+    } else {
+        // THE DIALOG'S OWN X WINDOW: over a plain GtkWindow parent libadwaita
+        // presents an AdwDialog as a toplevel of its own, so the pid's first
+        // window — the primary — is the wrong one, and Esc sent there met
+        // no dialog (the x11 leg's bundle, 2026-09-21; docs/traps.md).
+        let window = x11_window.map(|xid| xid.to_string()).unwrap_or_else(|| {
+            let pid = std::process::id().to_string();
+            let found = std::process::Command::new("xdotool")
+                .args(["search", "--onlyvisible", "--pid", pid.as_str()])
+                .output()
+                .ok()
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
+                .unwrap_or_default();
+            found.split_whitespace().next().unwrap_or("").to_owned()
+        });
+        let mut args: Vec<String> = Vec::new();
+        if !window.is_empty() {
+            args.extend([
+                "mousemove".to_owned(), "--window".to_owned(), window.clone(),
+                "40".to_owned(), "40".to_owned(), "windowfocus".to_owned(), window,
+            ]);
+        }
+        args.extend(["key".to_owned(), "Escape".to_owned()]);
+        ("xdotool", args)
+    };
+    let out = std::process::Command::new(tool)
+        .args(&args)
+        .output()
+        .unwrap_or_else(|e| {
+            panic!(
+                "kaya: dismiss_sheet needs {tool}: {e} — the lane image installs it \
+                 (tools/linux/Dockerfile)"
+            )
+        });
+    // The record a red reads: which tool, which window, and what it said.
+    crate::vtrace::note(
+        "dismiss_sheet",
+        format_args!(
+            "{tool} {} -> exit {:?} stderr={:?}",
+            args.join(" "),
+            out.status.code(),
+            String::from_utf8_lossy(&out.stderr).trim()
+        ),
+    );
+    assert!(
+        out.status.success(),
+        "kaya: {tool} failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
 fn linux_wayland_session() -> bool {
     match std::env::var("GDK_BACKEND") {
         Ok(b) if b.contains("wayland") => true,
@@ -18169,16 +18438,66 @@ impl crate::harness::Stage for GtkStage {
 
     // The sheet is a depth slice on this backend (docs/sheet-plan.md §8).
     fn sheet_count(&self) -> usize {
-        crate::depth_stub("sheet")
+        // The platform's truth: dialogs mapped, never the model.
+        Self::on_main(move |core| {
+            core.sheets
+                .values()
+                .filter(|s| s.presented && s.dialog.is_mapped())
+                .count()
+        })
     }
     fn sheet_title(&self) -> Option<String> {
-        crate::depth_stub("sheet")
+        Self::on_main(move |core| {
+            use adw::prelude::AdwDialogExt;
+            topmost_sheet(core).map(|id| core.sheets[&id].dialog.title().to_string())
+        })
     }
     fn sheet_detent(&self) -> String {
-        crate::depth_stub("sheet")
+        // A desktop sheet has no detent.
+        "none".to_owned()
     }
     fn dismiss_sheet(&self) {
-        crate::depth_stub("sheet")
+        // The platform's own cancel path on the topmost sheet: Esc through
+        // the compositor's input (U3 measured it reaching the topmost).
+        // The focus the key will meet is recorded first: an AdwDialog's
+        // Escape is a shortcut on the dialog, reached from a focus inside it.
+        let target = Self::on_main(move |core| {
+            let dialog = topmost_sheet(core)
+                .map(|id| core.sheets[&id].dialog.clone().upcast::<gtk4::Widget>())?;
+            // The dialog's ROOT, which over a plain GtkWindow parent is a
+            // toplevel of its own (libadwaita's fallback), never the primary.
+            let root = dialog.root();
+            let read = |root: &Option<gtk4::Root>| {
+                let focus = root.as_ref().and_then(|r| r.focus());
+                let inside =
+                    focus.as_ref().is_some_and(|f| f.is_ancestor(&dialog) || *f == dialog);
+                (focus.map(|f| f.type_().name().to_string()), inside)
+            };
+            let (mut focus, mut inside) = read(&root);
+            // The x11 lane has no window manager and the toplevel is never
+            // active, so the map-time move can find nothing to focus; the
+            // key needs a focus inside the dialog and it is put there here
+            // as well, the trace saying so (docs/traps.md, the sheet's x11
+            // focus).
+            if !inside {
+                focus_into_sheet(&dialog);
+                (focus, inside) = read(&root);
+            }
+            let xid = root
+                .and_then(|r| r.downcast::<gtk4::Window>().ok())
+                .and_then(|w| gtk4::prelude::NativeExt::surface(&w))
+                .and_then(|s| s.downcast::<gdk4_x11::X11Surface>().ok())
+                .map(|s| s.xid() as u64);
+            crate::vtrace::note(
+                "dismiss_sheet",
+                format_args!(
+                    "gtk focus {focus:?} inside the topmost sheet: {inside}; dialog x11 window {xid:?}"
+                ),
+            );
+            Some(xid)
+        });
+        let Some(xid) = target else { return };
+        send_escape_key(xid);
     }
     fn back(&self, window: u64) {
         Self::on_main(move |core| {

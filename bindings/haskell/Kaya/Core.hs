@@ -386,6 +386,8 @@ data Pending
   | PEntryPopped !Word64 (IO ())
   | PSectionSelected !Word64 (IO ())
   | PBackRequested !Word64 (IO ())
+  | PSheetDismissed !Word64 (IO ())
+  | PDismissRequested !Word64 (IO ())
   | PCloseRequested !Word64 (IO ())
   | PWindowClosed !Word64 (IO ())
   | PUndone !Word64 (Text -> UndoDelta -> IO ())
@@ -1576,6 +1578,9 @@ data App = App
     appEntryPopped :: IORef (Map.Map Word64 (IO ())),
     appSectionSelected :: IORef (Map.Map Word64 (IO ())),
     appBackRequested :: IORef (Map.Map Word64 (IO ())),
+    -- Per-sheet handlers, keyed by sheet surface id (docs/sheet-plan.md).
+    appSheetDismissed :: IORef (Map.Map Word64 (IO ())),
+    appDismissRequested :: IORef (Map.Map Word64 (IO ())),
     appAlertHandlers :: IORef (Map.Map Word64 (AlertChoice -> IO ())),
     -- One-shot, keyed by the GUEST's notification id (the alert's
     -- request/result grammar; many may be live at once).

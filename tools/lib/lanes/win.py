@@ -28,6 +28,7 @@ SCENES = [
     "menus", "commands", "a11y", "a11yrows", "filedialog",
     "clipboard", "undo", "dirty", "ranges", "save", "styling",
     "typeface", "toolbar", "identity", "assets", "adaptive", "dnd", "pickers", "sliders", "tooltips",
+    "sheet",
 ]
 
 # THE LEGS THAT RUN AS THE ONLY INPUT-DRIVING LEG ON THE HOST (tools/lib/
@@ -247,6 +248,9 @@ ORDER = [
      # their guests.
      "sliders_rust", "sliders_python", "sliders_js", "sliders_go", "sliders_csharp", "sliders_java",
     "tooltips_rust", "tooltips_python", "tooltips_js", "tooltips_go", "tooltips_csharp", "tooltips_java",
+     # The sheet pool: the modal Popup and the close button's own route,
+     # no real mouse and no OS-global key (docs/sheet-plan.md U1).
+     "sheet_rust", "sheet_python", "sheet_js", "sheet_go", "sheet_csharp", "sheet_java",
     ],
     # dirty_rust ALONE: the leg drives a real WM_CLOSE on its own
     # window and the veto keeps it — a window disappearing out from

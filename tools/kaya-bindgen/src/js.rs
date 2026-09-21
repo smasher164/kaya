@@ -343,6 +343,28 @@ export function record(kind: number, body: Uint8Array): Uint8Array {
         c.line("}");
     }
 
+    // The sheet-prop duos (docs/sheet-plan.md §3); detent is an enum.
+    for (prop, _, kind) in crate::sheet_prop_variants(spec) {
+        let up = prop.to_uppercase();
+        let (param, expr) = value_expr(kind, prop);
+        assert!(
+            matches!(kind, PropKind::Str | PropKind::Bool | PropKind::Enum(_)),
+            "no sheet prop carries {kind:?}"
+        );
+        c.line("");
+        c.line(&format!("/** set_sheet_prop with a constant {prop} value. */"));
+        c.line(&format!("export function tx_set_sheet_{prop}(sheet: number, {param}): Uint8Array {{"));
+        c.line(&format!("  enc.begin(); enc.u64(sheet); enc.u32(SHPROP_{up}); enc.u32(SOURCE_CONST); {expr};"));
+        c.line("  return enc.end(TX_SET_SHEET_PROP);");
+        c.line("}");
+        c.line("");
+        c.line(&format!("/** set_sheet_prop with a signal-bound {prop} value. */"));
+        c.line(&format!("export function tx_bind_sheet_{prop}(sheet: number, signal_id: number): Uint8Array {{"));
+        c.line(&format!("  enc.begin(); enc.u64(sheet); enc.u32(SHPROP_{up}); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);"));
+        c.line("  return enc.end(TX_SET_SHEET_PROP);");
+        c.line("}");
+    }
+
     // The section-prop duos; icon rides the blob channel (DESIGN.md,
     // Sections).
     for (prop, _, kind) in crate::section_prop_variants(spec) {
