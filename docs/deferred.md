@@ -10,7 +10,7 @@ scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
 ## BUILD — R1 async dialogs: explicit-transaction amendment approved (2026-09-19)
-KEY: async dialogs, R1.4, R1.5, async void, SynchronizationContext, continuation rollback, explicit Build, Swift Task, app.task, task error ownership, Java CompletionStage, app.observe, Rust local future, Tx across await, poll boundary
+KEY: async dialogs, R1.4, R1.5, async void, SynchronizationContext, continuation rollback, explicit Build, Swift Task, app.task, task error ownership, Java CompletionStage, app.observe, Rust local future, Tx across await, poll boundary, scope-only, private begin
 
 Akhil approved the seven recommendations in docs/async-dialogs-plan.md §5.
 C# feasibility against the real binding found that its proposed context
@@ -131,16 +131,29 @@ Android's invalid ffprobe option and missing recording-failure evidence, and
 Windows' lost recording tile identity; nine counted negatives and a native
 forced-red readback hold the recorder changes (docs/traps.md). Rust remains.
 
-RUST GUARD MEASUREMENT 2026-09-20, AWAITING A RULING: a local future holds the
-real Tx across an await and compiles. Requiring Send refuses both that case
-and the valid explicit-scope control because AppCtx is not Sync. Await inside
-apply is independently refused with E0728. Five compiler cases and four counted
-mutations: docs/measurements/async-dialogs-rust-2026-09-20.md. Recommended:
-replace the plan's retained-Tx compiler refusal with a runtime poll-boundary
-refusal, discard the offending task before any other work, and verify its
-transaction cleanup; completed scopes still stand. That guard is not approved,
-implemented or runtime-tested. Rust future ownership and dialog resolution
-remain to be measured after this decision. Java is already committed and pushed.
+RUST SCOPE-ONLY API APPROVED 2026-09-20: the initial five compiler cases found
+that a public begin permits owned Tx across await and that Send also rejects
+valid explicit-scope code. Follow-up research measured eleven cases: borrowing
+through apply rejects seven escape/await attempts while owned data and local
+state remain usable. A raw begin bypass and a manually polled nested future
+both compiled. Akhil approved private begin, the scoped public API and runtime
+reentry refusal as backup. The implementation closes begin and adds the
+occurrence-loop check before posts or events, including Messages::next. Eight
+compiler refusals and three accepted controls run through check-abort; three
+unit tests cover reentry, rollback and depth cleanup. Three one-substitution
+guard cuts were watched failing: occurrence-loop check, depth cleanup and
+private begin. Each was restored. Core validation passed 631 unit tests and
+25 doctests (one ignored), all 61 gates passed, and the standalone Mac lane
+passed all 477 legs. The full matrix passed: mac 477, linux 777, windows 283,
+iOS 139, android 148; 61/61 gates, 1112 seconds wall, every timing ceiling met.
+Rust stored-future ownership, scheduler reentry, shutdown cleanup and dialog
+resolution remain to be implemented. The record is
+docs/measurements/async-dialogs-rust-2026-09-20.md.
+The next API choice is awaiting Akhil: a separate task owner borrowing AppCtx,
+with tasks.spawn and tasks.next, versus a cloneable app-thread-only context
+keeping the current message-loop spelling. The recommendation is the scoped
+owner, preserving AppCtx's current ownership and Send behavior outside that
+scope. This is not yet a scheduler implementation or a native runtime proof.
 
 ## INVESTIGATE — iOS recording's step-named frames lead their stated scene state (2026-09-20)
 KEY: iOS recording, fiducial timestamp, step-named frames, confirm-swift, anchor-2

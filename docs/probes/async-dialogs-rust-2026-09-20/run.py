@@ -15,11 +15,12 @@ subprocess.run(["rustc", "--version"], check=True)
 held = gate.doctor("hold Tx across await", source,
                    r"let \(\) = ctx.apply\(\|_\| \{\}\);\s*pending::<\(\)>\(\).await;\s*ctx.apply\(\|_\| \{\}\);",
                    "let tx = ctx.begin();\n        pending::<()>().await;\n        tx.commit();", want=1)
-cases = [("explicit-scopes", source, None), ("held-transaction", held, None)]
+cases = [("explicit-scopes", source, None), ("held-transaction", held, "E0624")]
 for name, text in [("explicit-scopes", source), ("held-transaction", held)]:
     changed = gate.doctor(f"Send {name}", text, r"Future<Output = \(\)> \+ 'a",
                           "Future<Output = ()> + Send + 'a", want=1)
-    cases.append((f"send-{name}", changed, "future cannot be sent between threads safely"))
+    refusal = "E0624" if name == "held-transaction" else "future cannot be sent between threads safely"
+    cases.append((f"send-{name}", changed, refusal))
 changed = gate.doctor("await inside apply", source,
                       r"let \(\) = ctx.apply\(\|_\| \{\}\);",
                       "let () = ctx.apply(|_| { pending::<()>().await; });", want=1)
@@ -40,6 +41,6 @@ with scratch_dir("rust-async-boundary-") as tmp:
                 raise RuntimeError(result.stderr)
         elif result.returncode == 0 or refusal not in result.stderr:
             raise RuntimeError(f"missing {refusal}: {result.stderr}")
-        if name.startswith("send-") and "AppCtx` is not `Sync" not in result.stderr:
+        if name == "send-explicit-scopes" and "AppCtx` is not `Sync" not in result.stderr:
             raise RuntimeError(f"Send failed for another reason: {result.stderr}")
 print("rust-async-boundary: five compiler cases, four counted mutations; no runtime execution")

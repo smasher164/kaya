@@ -542,6 +542,15 @@ the dialog future's later branches. It queues a remaining failure onto the app
 thread without a transaction; guest recovery belongs before observe. Unlike
 app.post, it neither schedules guest work nor supplies a transaction.
 
+Rust's transaction API is scope-only (approved 2026-09-20): apply owns the Tx
+and lends it to a synchronous callback; begin is private. Its borrow cannot
+escape into the suspended outer task, while owned results can. This does not
+ban manually polling a nested future inside that callback. The occurrence loop
+refuses entry while a transaction is open, before running posted work or reading
+an occurrence. The compiler probes and reentry tests are recorded in
+docs/measurements/async-dialogs-rust-2026-09-20.md; the async scheduler remains
+separate work.
+
 **One id space for widgets and template nodes.** Every binding mints
 live widget ids and template node ids from ONE monotone counter per app
 — signals, collections, alerts/dialogs and menu items keep their own —

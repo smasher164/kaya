@@ -88,6 +88,8 @@ print("check-abort: timeout diagnostic retained both child streams")
 
 
 with scratch_dir("check-abort-") as tmp:
+    step("rust-scoped", [sys.executable, "tools/checks/rust-scoped.py"],
+         tmp / "rust-scoped.log", echo="rust-scoped:")
     step("go", ["go", "test", "dev.kaya/bindings/go"], tmp / "go.log")
 
     # Built as ONE module with the bindings: the internal mirrors are

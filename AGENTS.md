@@ -1040,7 +1040,11 @@ in docs/deferred.md.
    parked occurrence loop awakened by a foreign-thread failure. Fourteen counted
    runtime mutations and four callback/future compile refusals hold those paths;
    check-sugar-surface holds fifteen API and occurrence-wiring clauses, each cut
-   and watched red, plus an empty-reader refusal),
+   and watched red, plus an empty-reader refusal. RUST SCOPED TRANSACTIONS
+   add eleven compiler cases through tools/checks/rust-scoped.py: private begin,
+   seven borrowed-scope refusals and three accepted local-future controls.
+   app.rs unit tests hold occurrence-loop reentry before posts or events,
+   including a manually polled nested future, and depth cleanup on every exit),
    `tools/check-tx-liveness.py` (a transaction is usable only inside
    the build or handler that made it, on the app thread — the HANDLE
    bindings refuse a closed one at a single write chokepoint, the

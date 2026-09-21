@@ -1012,6 +1012,7 @@ pub struct Format {
 }
 
 pub struct AppCtx {
+    open_transactions: Cell<usize>,
     pub(crate) occurrences: Receiver<Inbox>,
     pub(crate) transactions: Sender<Transaction>,
     // Shared with every Poster, so a real lock — unlike every other field,
@@ -1061,6 +1062,7 @@ impl AppCtx {
             transactions,
             posted: Arc::new(Mutex::new(Vec::new())),
             wake,
+            open_transactions: Cell::new(0),
             next_signal: Cell::new(1),
             next_widget: Cell::new(1),
             next_alert: Cell::new(1),
@@ -1081,6 +1083,10 @@ impl AppCtx {
     /// means the core is shutting down, which is an occurrence, not an
     /// error.
     pub fn next(&self) -> Occurrence {
+        assert_eq!(
+            self.open_transactions.get(), 0,
+            "kaya: cannot enter the occurrence loop with an open transaction; return from apply first"
+        );
         loop {
             // Draining at the TOP is what makes the wake sufficient:
             // whatever brought this thread back looks here first.
@@ -1330,10 +1336,59 @@ impl AppCtx {
         }
     }
 
-    /// Run `body` in a fresh transaction — a batch of records applied
-    /// atomically — and commit it on return, handing the body's result
-    /// back. A panic inside the body abandons the transaction: commit is
-    /// never reached, and Tx's Drop rolls the model mirrors back.
+    /// docs/async-dialogs-plan.md section 2.4.
+    ///
+    /// ```compile_fail,E0624
+    /// async fn held(ctx: &kaya::AppCtx) {
+    ///     let tx = ctx.begin();
+    ///     std::future::pending::<()>().await;
+    ///     tx.commit();
+    /// }
+    /// ```
+    ///
+    /// ```compile_fail,E0728
+    /// fn await_inside(ctx: &kaya::AppCtx) {
+    ///     ctx.apply(|_| { std::future::pending::<()>().await; });
+    /// }
+    /// ```
+    ///
+    /// ```compile_fail
+    /// async fn escaped(ctx: &kaya::AppCtx) {
+    ///     let future = ctx.apply(|tx| async move {
+    ///         std::future::pending::<()>().await;
+    ///         std::hint::black_box(tx);
+    ///     });
+    ///     future.await;
+    /// }
+    /// ```
+    ///
+    /// ```compile_fail
+    /// fn escaped(ctx: &kaya::AppCtx) {
+    ///     let _tx = ctx.apply(|tx| tx);
+    /// }
+    /// ```
+    ///
+    /// ```compile_fail,E0521
+    /// fn escaped(ctx: &kaya::AppCtx) {
+    ///     let mut saved = None;
+    ///     ctx.apply(|tx| { saved = Some(tx); });
+    /// }
+    /// ```
+    ///
+    /// ```compile_fail,E0507
+    /// fn escaped(ctx: &kaya::AppCtx) {
+    ///     let _tx = ctx.apply(|tx| *tx);
+    /// }
+    /// ```
+    ///
+    /// ```
+    /// async fn scoped(ctx: &kaya::AppCtx) {
+    ///     let local = std::rc::Rc::new(7);
+    ///     let value = ctx.apply(|tx| { std::hint::black_box(tx); *local });
+    ///     std::future::pending::<()>().await;
+    ///     ctx.apply(|tx| { std::hint::black_box((tx, value, local)); });
+    /// }
+    /// ```
     pub fn apply<R>(&self, body: impl FnOnce(&mut Tx<'_>) -> R) -> R {
         let mut tx = self.begin();
         let out = body(&mut tx);
@@ -1341,7 +1396,8 @@ impl AppCtx {
         out
     }
 
-    pub fn begin(&self) -> Tx<'_> {
+    fn begin(&self) -> Tx<'_> {
+        self.open_transactions.set(self.open_transactions.get() + 1);
         Tx {
             ctx: self,
             ops: Vec::new(),
@@ -1912,6 +1968,7 @@ pub struct Tx<'a> {
 
 impl Drop for Tx<'_> {
     fn drop(&mut self) {
+        self.ctx.open_transactions.set(self.ctx.open_transactions.get() - 1);
         if !self.committed {
             let mut model = self.ctx.model.borrow_mut();
             for (id, snapshot) in self.journal.drain(..).rev() {
@@ -7614,6 +7671,82 @@ mod tests {
         let ctx = AppCtx::new(occ_rx, tx_tx, occ_tx);
         let poster = ctx.poster();
         (ctx, poster, tx_rx)
+    }
+
+    #[test]
+    fn scoped_tx_reentry_refuses_before_posts_or_occurrences() {
+        for typed in [false, true] {
+            let (ctx, poster, tx_rx) = posting_ctx();
+            let todos = ctx.apply(|tx| {
+                let todos = tx.collection::<Todo>();
+                tx.insert(&todos, "kept", Todo { title: "committed".into(), done: false });
+                todos
+            });
+            tx_rx.try_recv().unwrap();
+            let ran = Arc::new(Mutex::new(false));
+            let observed = Arc::clone(&ran);
+            poster.post(move |_| *observed.lock().unwrap() = true);
+            ctx.wake.send(Inbox::Occ(Occurrence::Shutdown)).unwrap();
+            let failed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                ctx.apply(|tx| {
+                    tx.insert(&todos, "lost", Todo { title: "uncommitted".into(), done: false });
+                    if typed {
+                        let msgs = super::Messages::<()>::new();
+                        msgs.next(&ctx);
+                    } else {
+                        ctx.next();
+                    }
+                });
+            })).expect_err("scoped transaction reentry was accepted");
+            let text = failed.downcast_ref::<String>().map(String::as_str)
+                .or_else(|| failed.downcast_ref::<&str>().copied()).unwrap();
+            assert!(text.contains("cannot enter the occurrence loop with an open transaction"), "{text}");
+            assert!(!*ran.lock().unwrap(), "reentry drained posted work before refusing");
+            assert!(tx_rx.try_recv().is_err(), "reentry submitted the failed scope");
+            assert_eq!(ctx.open_transactions.get(), 0);
+            ctx.apply(|tx| assert_eq!(tx.items(&todos).len(), 1));
+            tx_rx.try_recv().unwrap();
+            assert!(matches!(ctx.next(), Occurrence::Shutdown));
+            assert!(*ran.lock().unwrap(), "refusal lost the queued post");
+        }
+    }
+
+    #[test]
+    fn scoped_tx_nested_manual_poll_cannot_reenter() {
+        use std::future::{Future, pending};
+        let (ctx, _poster, _tx_rx) = posting_ctx();
+        ctx.wake.send(Inbox::Occ(Occurrence::Shutdown)).unwrap();
+        let failed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            ctx.apply(|tx| {
+                let mut future = std::pin::pin!(async {
+                    ctx.next();
+                    pending::<()>().await;
+                    std::hint::black_box(tx);
+                });
+                let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+                let _ = future.as_mut().poll(&mut cx);
+            });
+        }));
+        assert!(failed.is_err(), "nested manual poll reentered the occurrence loop");
+        assert_eq!(ctx.open_transactions.get(), 0);
+        assert!(matches!(ctx.next(), Occurrence::Shutdown));
+    }
+
+    #[test]
+    fn scoped_tx_depth_tracks_commit_abort_and_unwind() {
+        let (ctx, _poster, _tx_rx) = posting_ctx();
+        let outer = ctx.begin();
+        ctx.apply(|_| assert_eq!(ctx.open_transactions.get(), 2));
+        assert_eq!(ctx.open_transactions.get(), 1);
+        drop(outer);
+        assert_eq!(ctx.open_transactions.get(), 0);
+        let failed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            ctx.apply(|_| panic!("scoped tx unwind"));
+        }));
+        assert!(failed.is_err());
+        assert_eq!(ctx.open_transactions.get(), 0);
+        ctx.apply(|_| {});
+        assert_eq!(ctx.open_transactions.get(), 0);
     }
 
     // POST MUST QUEUE, NOT RUN. A closure executed on the caller's thread

@@ -13,8 +13,14 @@ AppCtx is not Sync. Await inside apply's synchronous closure was independently
 refused with E0728. Five compiler cases and four counted mutations are in
 docs/measurements/async-dialogs-rust-2026-09-20.md. This disproves the async
 plan's retained-Tx compiler-guard assumption, not its explicit-scope semantics.
-A runtime poll-boundary guard is proposed and awaits a ruling; no executor or
-rollback behavior was exercised by this compile-only measurement.
+That measured the public owned-Tx API, not every possible API design. The
+follow-up found that private begin plus apply's borrowed scope prevents the Tx
+escaping into the suspended outer task. Akhil approved that design with a
+runtime reentry check on 2026-09-20. A manually polled nested future inside
+apply still compiles, so the guarantee must not be stated as a universal ban on
+await syntax while any Tx exists. tools/checks/rust-scoped.py holds eight
+compiler refusals and three accepted controls through check-abort; app.rs's
+scoped_tx tests hold the occurrence-loop check before posts or events run.
 
 ## A Java dialog future does not observe a later stage's error (2026-09-20)
 
