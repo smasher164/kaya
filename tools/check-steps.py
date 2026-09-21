@@ -2727,6 +2727,45 @@ if sweep_c_floor():
     status = 1
 
 
+def save_missing_handles(text):
+    lines = [line.strip() for line in text.splitlines()
+             if line.strip() and not line.lstrip().startswith("#")]
+    prefix = ['expect label#0 "no file"', 'click button#1',
+              'expect label#0 "nothing open to save"', 'click button#3',
+              'expect label#0 "nothing to reopen"']
+    opened = ['expect label#0 "opened first draft"', 'click button#3',
+              'expect label#0 "nothing to reopen"', 'click button#1',
+              'expect label#0 "saved second draft"']
+    bad = []
+    if lines[:len(prefix)] != prefix:
+        bad.append("save.steps must exercise save/reopen before any handle exists")
+    if "\n".join(opened) not in "\n".join(lines):
+        bad.append("save.steps must exercise reopen with a source but no destination")
+    return bad
+
+
+save_script = read_rel("tools/scenes/save.steps")
+for finding in save_missing_handles(save_script):
+    print(f"check-steps: {finding}", file=sys.stderr)
+    status = 1
+for label, before, after in [
+    ("save before open", 'click button#1\nexpect label#0 "nothing open to save"\n', ""),
+    ("reopen before open",
+     'expect label#0 "nothing open to save"\nclick button#3\n'
+     'expect label#0 "nothing to reopen"\n',
+     'expect label#0 "nothing open to save"\n'),
+    ("reopen before destination",
+     'expect label#0 "opened first draft"\nclick button#3\n'
+     'expect label#0 "nothing to reopen"\n',
+     'expect label#0 "opened first draft"\n'),
+]:
+    changed, count = sub_count(re.escape(before), after, save_script)
+    findings = save_missing_handles(changed)
+    print(f"check-steps: {label}: {count} substitution(s), {len(findings)} finding(s)")
+    if count != 1 or len(findings) != 1:
+        selftest_fail(f"{label}: missing-handle script cut did not refuse exactly once")
+
+
 def java_dialog_coverage(rosters):
     return [f"{lane}: missing Java {scene} dialog leg"
             for lane, scenes in rosters.items()

@@ -9,7 +9,13 @@ import subprocess
 
 dev_shell_or_die()
 g = Gate("rust-scoped")
-subprocess.run(["cargo", "build", "-p", "kaya", "--lib", "--locked"], cwd=ROOT, check=True)
+# No build here: a `-p kaya` build is a different cargo unit from the sweep's
+# workspace build and relinks the shared host dylib under every guest and
+# probe loading it (docs/traps.md, the sweep-relinked-libkaya entry).
+RLIB = ROOT / "target/debug/deps/libkaya.rlib"
+if not RLIB.is_file():
+    print("rust-scoped: build libkaya first (cargo build --locked --lib)")
+    sys.exit(1)
 source = """#![allow(dead_code, unused_imports)]
 use std::future::{Future, pending};
 use std::hint::black_box;

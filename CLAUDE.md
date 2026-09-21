@@ -226,7 +226,8 @@ in docs/deferred.md.
    changed. It used to regenerate in place and diff against git, which
    silently reverted any hand-edit to a generated file and then called
    the tree clean),
-   `tools/check-steps.py`, `tools/check-shell.py`,
+   `tools/check-steps.py` (also requires the shared save scene's three
+   missing-handle cases, with three counted removal negatives), `tools/check-shell.py`,
    `tools/check-python.py` (check-shell's opposite number, and the
    gate the 2026-08-27 ruling asked for: the gate BODIES are python
    now, imported against tools/lib/kaya_gate.py — never a launcher,
@@ -285,15 +286,21 @@ in docs/deferred.md.
    gates.py's EXCLUDED table WITH A REASON — and it is what would have
    caught the four gates this paragraph was missing while the lane ran
    them. It also pins validate-all's launch order: ALL FIVE platform lanes
-   start together before the runner waits for Android's recorded lane pid;
-   the one gate sweep starts at niceness 10 after Android exits, FOUR
-   GATES WIDE since 2026-09-07, while any longer lanes continue. Launched
+   start together before the runner waits for Android's and the mac lane's
+   recorded lane pids; the one gate sweep starts at niceness 10 after both
+   exit, FOUR GATES WIDE since 2026-09-07, while any longer lanes continue.
+   THE MAC WAIT JOINED 2026-09-21: the mac guests load the host libkaya by
+   path, a gate's cargo build relinks it, and seven legs died in dyld when
+   the sweep overlapped a mac lane slowed by 470s of token waits; the sweep
+   and the mac lane now each refuse a verdict if that library's identity
+   moved under them, and the rust-scoped probe builds nothing
+   (docs/traps.md, the sweep-relinked-libkaya entry) Launched
    at t0 beside the lanes instead, four wide and niced, it cost every lane
    150-200s and every ceiling for a 116s gain
    (docs/measurements/gate-sweep-2026-09-07.md). It holds the runner and environment probe to the
    same four-phone pool; its self-tests watch lane count, pool width,
-   concurrent platform launch, pid provenance, single-sweep shape and
-   niceness red. AND THE HAND RUN AND THE LANE LAUNCH A LEG THROUGH ONE
+   concurrent platform launch, pid provenance, the mac wait and its
+   provenance, single-sweep shape and niceness red. AND THE HAND RUN AND THE LANE LAUNCH A LEG THROUGH ONE
    WIRING since 2026-09-18: tools/run-leg.py and validate-mac's pool both
    run their leg through the MacRecorder method that wraps it in the
    pool's `timeout 120` (also the sampler's pid anchor) and samples it,
@@ -1646,7 +1653,8 @@ in docs/deferred.md.
    the dialogs, the pastes) for the everyday matrix; `--exclusive` runs
    those alone, nothing else on the host; a commit wants both halves
    green on one tree, or the plain run (docs/HACKING.md, Exclusive legs).
-   After Android exits, the one `nice -n 10` gate sweep runs FOUR GATES
+   After Android and the mac lane exit (the mac wait since 2026-09-21,
+   docs/traps.md), the one `nice -n 10` gate sweep runs FOUR GATES
    WIDE (since 2026-09-07) and hides behind the longer lanes, so the wall
    is the slowest lane. One gate at a time it was Android plus the sweep
    in series, 654 + 422 = 1082s on the last such matrix; launched at t0

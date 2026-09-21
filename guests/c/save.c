@@ -305,8 +305,13 @@ static void *app(void *arg) {
                 kaya_tx_show_file_dialog(&tx, 0, open_dialog, 0, NULL, 0);
                 kaya_submit(tx.buf, tx.len);
             } else if (id == W_SAVE) {
-                /* No dialog: the handle the user chose with is writable. */
-                work("saved", source, 0, "second draft");
+                if (source == 0) {
+                    kaya_tx_write_signal(&tx, SIG_STATUS,
+                                         kaya_str("nothing open to save"));
+                    kaya_submit(tx.buf, tx.len);
+                } else {
+                    work("saved", source, 0, "second draft");
+                }
             } else if (id == W_SAVE_AS) {
                 /* THE EMPTY FILTER LIST MATTERS: with types set NSSavePanel
                  * appends an extension (docs/deferred.md). */
@@ -315,8 +320,13 @@ static void *app(void *arg) {
                                          NULL, 0);
                 kaya_submit(tx.buf, tx.len);
             } else if (id == W_REOPEN) {
-                /* A save-as through the ORIGINAL handle fails only here. */
-                work("reopened", source, destination, NULL);
+                if (source == 0 || destination == 0) {
+                    kaya_tx_write_signal(&tx, SIG_STATUS,
+                                         kaya_str("nothing to reopen"));
+                    kaya_submit(tx.buf, tx.len);
+                } else {
+                    work("reopened", source, destination, NULL);
+                }
             }
         } else if (parse_file_dialog_result(rec, &result)) {
             /* `local_path` is EMPTY ON BOTH PHONES: use the handle. */

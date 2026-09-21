@@ -14,8 +14,8 @@ dev_shell_or_die()
 # reads and believes. Plus the CENSUS clause (every gate script ON DISK
 # is in the list or in gates.py's EXCLUDED table WITH A REASON; nothing
 # else in the tree can see a gate nobody runs) and the matrix launch
-# (five lanes queued together, the niced sweep after Android exits, the
-# runner and probe agreeing on the four-phone pool). CLAUDE.md alone,
+# (five lanes queued together, the niced sweep after Android and the mac
+# lane exit, the runner and probe agreeing on the four-phone pool). CLAUDE.md alone,
 # not AGENTS.md: check-mirror.py holds those two level.
 
 import ast
@@ -132,6 +132,8 @@ PLATFORM_LAUNCHES = [
 GATE_LAUNCH = 'run_lane("gates", ["nice", "-n", "10", "tools/gates.py"])'
 ANDROID_PID = "android_lane_proc = lane_procs[-1]"
 ANDROID_WAIT = "android_lane_proc.wait()"
+MAC_PID = "mac_lane_proc = lane_procs[0]"
+MAC_WAIT = "mac_lane_proc.wait()"
 # The runners are python and the probe is shell, so each default is
 # spelled in two languages; these clauses hold BOTH.
 ANDROID_RUNNER_POOL = 'POOL = int(os.environ.get("KAYA_ANDROID_EMUS", "4"))'
@@ -170,11 +172,15 @@ def matrix_parallel_problem(text):
     # THE SWEEP WAITS FOR ANDROID, and is four wide (2026-09-07): at t0
     # beside the lanes it cost every lane 150-200s for a 116s gain
     # (matrix #24, docs/measurements/gate-sweep-2026-09-07.md).
-    tail = lines[at:at + 3]
-    if tail != [ANDROID_PID, ANDROID_WAIT, GATE_LAUNCH]:
-        return ("tools/validate-all.py must record Android's exact lane "
-                "process, wait for it, then start the one gate sweep at "
-                "niceness 10")
+    # AND FOR THE MAC LANE (2026-09-21): the mac guests load the host
+    # libkaya by path and a gate's cargo build relinks it — seven legs died
+    # in dyld under a sweep that overlapped a token-slowed mac lane
+    # (docs/traps.md, the sweep-relinked-libkaya entry).
+    tail = lines[at:at + 5]
+    if tail != [ANDROID_PID, MAC_PID, ANDROID_WAIT, MAC_WAIT, GATE_LAUNCH]:
+        return ("tools/validate-all.py must record Android's and the mac "
+                "lane's exact lane processes, wait for both, then start the "
+                "one gate sweep at niceness 10")
     run_lane = re.search(r"(?ms)^def run_lane\(.*?(?=^[A-Za-z_#])", text)
     if run_lane is None or not all(part in run_lane.group(0) for part in (
         "subprocess.Popen(argv, env=lane_env, stdout=lf, stderr=lf)",
@@ -760,6 +766,29 @@ if n != 1:
 elif matrix_parallel_problem(doctored) is None:
     fail("self-test N11: an immediate gate sweep passed as delayed")
 
+# N11b — the sweep must also wait for the mac lane: its guests load the
+# host libkaya by path (2026-09-21, seven dyld reds).
+doctored, n = re.subn(
+    r"(?m)^    mac_lane_proc\.wait\(\)\n", "", matrix_text, count=1)
+print("check-gates: self-test N11b removed the mac wait, "
+      f"{n} substitution(s)")
+if n != 1:
+    fail("self-test N11b did not remove exactly one mac wait — the delayed "
+         "sweep clause is not reading the real matrix")
+elif matrix_parallel_problem(doctored) is None:
+    fail("self-test N11b: a sweep that waits for Android alone passed")
+
+# N10b — and it must wait for THIS invocation's mac child.
+doctored, n = re.subn(
+    re.escape(MAC_PID), "mac_lane_proc = lane_procs[1]", matrix_text, count=1)
+print("check-gates: self-test N10b replaced mac pid provenance, "
+      f"{n} substitution(s)")
+if n != 1:
+    fail("self-test N10b did not replace exactly one mac pid capture — the "
+         "provenance clause is not reading the real matrix")
+elif matrix_parallel_problem(doctored) is None:
+    fail("self-test N10b: an unproven mac pid passed")
+
 # N12 — the sweep's lower priority is part of the measured schedule.
 doctored, n = re.subn(
     re.escape('["nice", "-n", "10", "tools/gates.py"]'),
@@ -1092,7 +1121,8 @@ if proof.returncode != 0:
 if status == 0:
     print(f"check-gates: OK ({len(GATES)} gates in one list, "
           f"{len(EXCLUDED)} excluded with a reason, five concurrent platform lanes, "
-          "delayed niced sweep, four-phone Android pool, three-sim iOS pool, "
+          "niced sweep delayed behind Android and the mac lane, four-phone "
+          "Android pool, three-sim iOS pool, "
           "five lanes each ending with their verdict and journaling every leg)")
 else:
     print("check-gates: FINDINGS ABOVE", file=sys.stderr)

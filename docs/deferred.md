@@ -211,16 +211,21 @@ records the film, marks and transcript needed for that measurement; do not
 publish step-named stills without viewing them. A timing correction and its
 independent alignment guard remain open.
 
-## BUG — Swift save's missing-handle branches retain the construction transaction (2026-09-20)
+## ~~BUG — Swift save's missing-handle branches retain the construction transaction (2026-09-20)~~ COMPLETE 2026-09-21: Swift's handlers use the handler transaction, the C floor refuses a missing handle with the same sentences, and the shared save scene visits all three missing-handle cases on every lane, held by three counted check-steps cuts; validation passed 644 core tests, 25 doctests (one ignored), 61 gates, 477 standalone Mac legs and all five matrix lanes: Mac 477, Linux 777, Windows 283, iOS 139, Android 148 in 1047 seconds, every timing ceiling held
 KEY: save.swift, nothing open to save, nothing to reopen, construction transaction
 
-Code review during the async-dialog slice found that save.swift's synchronous
-save and reopen handlers ignore their current transaction argument and use the
-outer construction tx in the missing-handle branches. The existing transaction
-liveness wall should refuse those writes; this is not yet a measured runtime
-finding. The shared save scene opens both handles before exercising the buttons,
-so it does not reach either branch. Follow up with a counted old/new negative,
-the current handler transaction, and an all-binding missing-handle audit.
+Measured 2026-09-21: separate native save/reopen probes trapped at 32/30 ms
+on the existing transaction-is-over wall. The nine-language audit found the
+other eight using current scopes; the C floor instead attempted zero-handle
+work, reproduced as Invalid argument in both branches. Four one-substitution
+script overrides were watched failing and their recorder bundles read.
+Swift now uses the handler tx and C emits the same missing-handle messages.
+The shared save.steps tests both empty-handle buttons and reopen with only a
+source; three counted check-steps cuts hold those tests. Corrected Swift/C
+native scenes and focused gates passed, then the full ladder (the matrix's first
+run lost seven mac legs to the gate sweep relinking libkaya, docs/traps.md,
+fixed in the same commit; the second run passed every lane).
+Record: docs/measurements/save-missing-handles-2026-09-21.md.
 
 ## INVESTIGATE — full-matrix host contention and Android startup ANR (2026-09-20)
 KEY: matrix host contention, Windows net ceiling, clipboard-jvm, startup FocusEvent, ANR history, system-events
@@ -7863,8 +7868,11 @@ crash-guards everywhere else — .expect, Option.get, fatalError,
 error, panic, throw — resting on "the scene opens a file before
 saving", which a swallowed dialog falsifies), and the crash took the
 process, ate the 62s timeout, and masked the step that actually
-failed. ALL EIGHT now write a sentence instead ("nothing open to
-save" / "nothing to reopen"), so a recurrence fails CLEANLY at the
+failed. Missing-handle sentences were added in all eight ("nothing open to
+save" / "nothing to reopen"). A 2026-09-21 audit later reproduced Swift's
+captured-expired-tx defect in those branches and the C floor's absent checks;
+both are corrected and the shared scene now visits them, held by check-steps
+(docs/measurements/save-missing-handles-2026-09-21.md). A recurrence can fail at the
 "opened first draft" expect with the dialog trace visible — which is
 what the next investigation reads first. The dialog-answers-nothing
 race itself is still open, NARROWED BY ONE FALSIFICATION: forcing

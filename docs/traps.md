@@ -4,6 +4,66 @@ Each of these cost a debugging session (or would have). Most now have a
 structural guard; the guard is named where it exists. Do not re-derive
 these the hard way.
 
+## The gate sweep relinked libkaya under the mac lane's guests (2026-09-21)
+
+The matrix on the save slice lost seven mac legs (dirty and ranges, the Go,
+Haskell, Swift and C guests) at 0s, each with `dyld: Library not loaded:
+.../target/debug/deps/libkaya.dylib ... (no such file)` in its leg log, at
+15:19:38-41Z; the other five languages passed in the same seconds. A find
+over target/ for that window showed deps/libkaya.rlib rewritten at 15:19:35Z
+and deps/libkaya.dylib at 15:19:38Z by the host lib unit with no features,
+under a cargo fingerprint directory nothing else had used. The sweep had
+started when Android exited at 788s, its pool's first four gates at 15:19:30,
+and check-abort's tools/checks/rust-scoped.py ran
+`cargo build -p kaya --lib --locked`.
+
+Two cargo facts make that a relink of the one file every mac guest loads by
+absolute path (otool -L): a workspace member's dylib is named WITHOUT a
+metadata hash in deps/, so every host build of the lib writes the same path;
+and `-p kaya` is a different unit from the workspace build
+`cargo build --locked --lib` (`CARGO_LOG=cargo::core::compiler::fingerprint=info`
+prints `dirty: UnitDependencyInfoChanged`), so each spelling relinks after the
+other, every time, 1.2-6s per relink; `--lib --example ...` beside plain `--lib`
+does the same at the mac lane's own start. Measured as well: `cargo test -p
+kaya --features harness ...`, with or without `--lib`, compiles the hashed
+test binary and does not touch the cdylib. Why it showed on this matrix and
+no earlier one: the mac lane ended at 864s against Android's 788s, after 470s
+of exclusive-token waits and one 60s host-idle wait; on every earlier matrix
+the mac lane finished first.
+
+Guards: tools/validate-all.py waits for the mac lane as well as Android before
+the sweep (tools/check-gates.py, N11b and N10b); tools/gates.py refuses its
+verdict if the host libkaya's inode or mtime moved while a gate ran, naming
+the gate and what ran beside it (its self-test E); tools/validate-mac.py
+refuses its verdict if it moved during the legs; and rust-scoped.py builds
+nothing. By hand: `cargo build --locked --lib` is the spelling of the host
+build, and a `-p kaya` or `--example` build from another terminal during a
+mac lane does the same damage.
+
+## An unvisited save error branch retained Swift's construction transaction (2026-09-21)
+
+The shared save scene opened both handles before it could visit either
+missing-handle branch. Swift's two handlers discarded their current tx and
+captured the expired construction tx; the transaction liveness wall therefore
+trapped when either branch was finally exercised. Separate native probes
+reached the save and reopen clicks at 32 and 30 ms, and the recorder named
+KayaApp.swift:3587 and the transaction-is-over precondition in both.
+
+The nine-language source sweep also inspected the C floor, whose branches
+attempted work with zero handles. Native save/reopen probes read `saved save
+failed: Invalid argument` and `reopened open failed: Invalid argument` instead
+of the existing missing-handle sentences. Each of the four probes printed one
+script substitution and was watched failing. The other eight guest languages
+already used their current transaction or explicit scope in these branches.
+
+Swift now uses the handler tx, and C checks missing handles before launching
+work. Guard: tools/scenes/save.steps exercises both buttons before opening a
+file and reopen again before a destination exists, on every save leg.
+tools/check-steps.py refuses removal of those three cases, with three counted
+cuts. The corrected Swift and C native round trips passed. See
+docs/measurements/save-missing-handles-2026-09-21.md for the all-language audit
+and full validation status.
+
 ## GTK hand capture hid a failed build and reused an old image (2026-09-21)
 
 The old tools/linux/shot-gtk.py payload piped cargo into tail, then placed

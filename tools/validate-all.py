@@ -206,6 +206,10 @@ if MODE == "parallel":
     # it cost every lane 150-200s and every ceiling for a 116s gain
     # (matrix #24, docs/measurements/gate-sweep-2026-09-07.md).
     #
+    # AND FOR THE MAC LANE (2026-09-21): its guests load the host libkaya
+    # by path, and a sweep that overlapped a token-slowed mac lane killed
+    # seven legs in dyld (docs/traps.md, the sweep-relinked-libkaya entry).
+    #
     # The token is a t0 fingerprint of every keyed gate's inputs, so the
     # mac lane can skip its own sweep; a hand-run has none and sweeps.
     # BUILT BEFORE THE TOKEN IS TAKEN, since the keys carry the
@@ -244,7 +248,9 @@ if MODE == "parallel":
     run_lane("ios", ["tools/ios/run-sim.py"])
     run_lane("android", ["tools/android/run-emulator.py"])
     android_lane_proc = lane_procs[-1]
+    mac_lane_proc = lane_procs[0]
     android_lane_proc.wait()
+    mac_lane_proc.wait()
     run_lane("gates", ["nice", "-n", "10", "tools/gates.py"])
 else:
     run_lane("mac", ["tools/validate-mac.py"])

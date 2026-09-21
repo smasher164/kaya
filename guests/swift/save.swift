@@ -98,9 +98,7 @@ KayaApp.run { app in
                     app.build { tx in picked(tx, files) }
                 }
             }
-            tx.button("save") { _ in  // button#1
-                // A missing handle gets its OWN sentence, never a crash: a crashed
-                // guest masks the real failure (docs/deferred.md, save-jvm WATCH).
+            tx.button("save") { tx in
                 guard let file = source else {
                     tx.write(status, .str("nothing open to save"))
                     return
@@ -113,9 +111,7 @@ KayaApp.run { app in
                     app.build { tx in saved(tx, file) }
                 }
             }
-            tx.button("reopen") { _ in  // button#3
-                // BOTH, in order: a save-as that wrote to the wrong handle passes
-                // every earlier step and fails here.
+            tx.button("reopen") { tx in
                 guard let first = source, let second = destination else {
                     tx.write(status, .str("nothing to reopen"))
                     return

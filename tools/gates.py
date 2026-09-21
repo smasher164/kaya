@@ -5,6 +5,7 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
 from kaya_gate import ROOT, dev_shell_or_die
 import exclusive
+from host_lib import HOST_LIB, host_lib_stamp
 
 dev_shell_or_die()
 
@@ -17,11 +18,13 @@ dev_shell_or_die()
 #                               check-keyed
 #   tools/gates.py --selftest   watch the count refuse
 #
-# TWO REFUSALS HOLD THIS UP. The sweep KNOWS HOW MANY GATES IT DECLARED
+# THREE REFUSALS HOLD THIS UP. The sweep KNOWS HOW MANY GATES IT DECLARED
 # and reports success only if that many ran and passed (a hand-rolled
-# shell loop once ran 1 gate of 24 and printed a clean run); and the list
+# shell loop once ran 1 gate of 24 and printed a clean run); the list
 # and the build are the same file, in that order, since a gate cannot
-# verify an artifact the run has not built yet.
+# verify an artifact the run has not built yet; and NO GATE MAY RELINK
+# THE HOST LIBKAYA — BUILD is its one writer, and a verdict is refused if
+# its identity moved while a gate ran (docs/traps.md, 2026-09-21).
 #
 # THERE IS DELIBERATELY NO SUBSET FLAG — a flag that runs part of the list
 # and still prints a verdict is that defect with an interface. To run one
@@ -33,6 +36,7 @@ import itertools
 import json
 import os
 import subprocess
+import tempfile
 import threading
 import time
 
@@ -356,7 +360,7 @@ def pool_order(rest):
     return order
 
 
-def sweep(gates, label="gates"):
+def sweep(gates, label="gates", lib_root=None):
     """Run every gate; return True only if every declared one passed.
 
     COUNT IN, COUNT OUT. `declared` comes from the list itself and
@@ -385,6 +389,13 @@ def sweep(gates, label="gates"):
     todo = list(gates)
     finished = {g[0]: threading.Event() for g in todo}
     lock = threading.Lock()
+    # The host libkaya's identity when the sweep starts; a gate that
+    # relinks it (any `cargo build` of the lib, in any spelling) is refused
+    # by name below, because the mac lane's guests and the pool's own
+    # probes load it by path (docs/traps.md, 2026-09-21).
+    lib_seen = {"stamp": host_lib_stamp(lib_root)}
+    running = set()
+    relinked = []
 
     def run_one(name, cmd, keyed):
         nonlocal ran
@@ -397,11 +408,27 @@ def sweep(gates, label="gates"):
         argv = ["tools/keyed.py", name, "--"] + cmd if keyed else list(cmd)
         print(f"        start {name}", flush=True)
         t0 = time.monotonic()
+        with lock:
+            running.add(name)
         got = subprocess.run(argv, cwd=ROOT, stdout=subprocess.PIPE,
                              stderr=subprocess.STDOUT, text=True,
                              encoding="utf-8", errors="replace", check=False)
         dt = time.monotonic() - t0
         with lock:
+            running.discard(name)
+            now = host_lib_stamp(lib_root)
+            if now != lib_seen["stamp"]:
+                lib_seen["stamp"] = now
+                beside = sorted(running)
+                relinked.append(name)
+                print(f"{label}: HOST LIBKAYA RELINKED while {name} ran "
+                      f"(also running: {' '.join(beside) or 'nothing'}) — "
+                      f"{' and '.join(HOST_LIB)} changed identity. A gate may not "
+                      f"build the host lib in any spelling; BUILD is its one "
+                      f"writer, before any gate, because the mac lane's guests "
+                      f"and this pool's probes load it by path and a launch "
+                      f"inside the relink dies in dyld before main "
+                      f"(docs/traps.md, 2026-09-21)", file=sys.stderr, flush=True)
             ran += 1
             print(f"[{ran:02d}/{declared:02d}] {name}")
             sys.stdout.write(got.stdout)
@@ -430,6 +457,10 @@ def sweep(gates, label="gates"):
         return False
     if failed:
         print(f"{label}: FAILED: {' '.join(failed)}", file=sys.stderr)
+        return False
+    if relinked:
+        print(f"{label}: THE HOST LIBKAYA WAS RELINKED DURING THE SWEEP "
+              f"(while {' '.join(relinked)} ran) — no verdict", file=sys.stderr)
         return False
     print(f"{label}: OK — {passed}/{declared}", flush=True)
     return True
@@ -487,9 +518,38 @@ def selftest():
               "exist reported OK", file=sys.stderr)
         ok = False
 
+    # E. a gate that relinks the host libkaya is refused BY NAME, and an
+    # all-green list over an untouched lib is not (2026-09-21). The lib
+    # root is a scratch dir; the relinking gate's path travels by env,
+    # since preflight refuses a path-shaped word that is not in the tree.
+    with tempfile.TemporaryDirectory(prefix="kaya-gates-lib-") as tmp:
+        base = pathlib.Path(tmp)
+        for rel in HOST_LIB:
+            (base / rel).parent.mkdir(parents=True, exist_ok=True)
+            (base / rel).write_bytes(b"libkaya")
+        os.environ["KAYA_GATES_SELFTEST_RELINK"] = str(base / HOST_LIB[1])
+        relink = [("a", ["true"], False, "x"),
+                  ("b", ["python3", "-c",
+                         "import os, pathlib; "
+                         "p = pathlib.Path(os.environ['KAYA_GATES_SELFTEST_RELINK']); "
+                         "q = p.with_name('relinked'); q.write_bytes(b'relinked'); "
+                         "os.replace(q, p)"], False, "x"),
+                  ("c", ["true"], False, "x")]
+        if not sweep(green, "selftest-E0", lib_root=base):
+            print("gates: SELF-TEST FAIL — an all-green list over an untouched "
+                  "host lib was refused", file=sys.stderr)
+            ok = False
+        if sweep(relink, "selftest-E", lib_root=base):
+            print("gates: SELF-TEST FAIL — a gate that relinked the host libkaya "
+                  "reported OK; the mac lane's guests would die in dyld under it",
+                  file=sys.stderr)
+            ok = False
+        del os.environ["KAYA_GATES_SELFTEST_RELINK"]
+
     if ok:
         print("gates: SELF-TEST OK — the count refused an under-run (1 of 3), "
-              "a failing gate and a missing script")
+              "a failing gate, a missing script and a gate that relinked the "
+              "host libkaya")
     return ok
 
 

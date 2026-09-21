@@ -26,6 +26,7 @@ import time
 from lanes import mac as lane
 import exclusive
 import flightrec_lane
+from host_lib import HOST_LIB, host_lib_stamp
 
 TEXT = {"text": True, "encoding": "utf-8", "errors": "replace"}
 
@@ -171,6 +172,11 @@ else:
     if run([str(ROOT / "tools/gates.py")]).returncode != 0:
         sys.exit(1)
 timing("core-build+gates")
+# The library every leg below loads by path, as built above: a relink
+# while the legs run is a dyld death for any guest launched inside it,
+# and a lane with no such launch must still say the lib moved
+# (docs/traps.md, the sweep-relinked-libkaya entry, 2026-09-21).
+LIB_STAMP = host_lib_stamp()
 
 status = 0
 
@@ -878,6 +884,14 @@ if os.environ.get("KAYA_RECORD"):
 # so a truncated log must still end with the answer.
 exclusive.summary("mac")
 lane.idle_summary()
+if host_lib_stamp() != LIB_STAMP:
+    print(f"validate-mac: {' or '.join(HOST_LIB)} CHANGED IDENTITY while the legs "
+          f"ran — another cargo build of the host lib relinked the library every "
+          f"guest loads by path, and a leg launched inside the relink dies in "
+          f"dyld before main. Under a matrix the writer was a gate; by hand it "
+          f"is a build from another terminal (docs/traps.md, 2026-09-21)",
+          file=sys.stderr)
+    status = 1
 if status == 0:
     print("validate-mac: ALL PASS")
 else:

@@ -519,7 +519,7 @@ APIs follow the separately approved explicit-transaction ruling below. See
 docs/measurements/swift-executor-2026-09-18.md for proof and validation status.
 
 **Async dialogs use explicit transaction scopes** (ruled 2026-09-19,
-docs/async-dialogs-plan.md R1, implementation in progress). Swift, C#, Java
+docs/async-dialogs-plan.md R1, completed 2026-09-21). Swift, C#, Java
 and Rust continuations resume on the app thread with no transaction open.
 Build/build/apply is the atomic scope: return commits, a throw through its
 synchronous body rolls back, and a later failure cannot undo a completed scope.
