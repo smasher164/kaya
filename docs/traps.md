@@ -12353,6 +12353,49 @@ depends on what has focus, which no scene pins. The arm reads Esc for an
 armed sheet through a local `NSEvent` monitor on the topmost sheet window
 and its parent chain, and leaves an unarmed sheet's Esc to the platform.
 
+## An AdwWindow's content bin allocates a kaya root its UNCONSTRAINED minimum, and a kaya tree's is every wrapping label one character wide (measured 2026-09-21)
+
+The AdwWindow adoption's own matrix lost all sixteen linux `grid` legs at
+`expect_root_fills` (`root hugs (540x464px at (0,46) inside 540x330px)`)
+while every other scene stayed green. A probe walking the tree from the
+failing leg read: the root column measures 122px tall at the window's
+width and 464px unconstrained; the GtkGrid inside it 48px and 390px; each
+label 20px and 77-229px, because a kaya label wraps `WordChar` (the
+2026-08-29 ruling) and so has a ONE-CHARACTER minimum width, at which
+"Engine programmer" is eleven lines. `AdwBreakpointBin`, which is what
+AdwWindow and AdwDialog put their content in, measures the child with
+`for_size` -1 in its allocate and hands it `MAX(available, minimum)` —
+libadwaita's own source, the overflow its documentation warns about — so
+the toolbar view was allocated 510px in a 320px bin and the root drew
+past the window. A plain GtkWindow never asked -1 of its child, which is
+why the same tree fit for months. The fix is `tight::host`, a kaya layout
+manager between the bin and every root kaya hands libadwaita (the
+window's toolbar view, the sheet's), which answers the unconstrained
+height as the height AT ITS OWN MINIMUM WIDTH and gives its child every
+pixel it gets; tools/check-gtk.py pins both slots to it. Two things to
+know next time: an AdwBreakpointBin WITH breakpoints reports no minimum
+at all, and a kaya flex container's own -1 height still compounds its
+children's (the column read 464 while 141 at its true minimum width),
+which only matters to a parent that asks -1.
+
+## The GTK backend compiled only with the harness, and no lane compiles it without one (measured 2026-09-21)
+
+`vtrace` is harness-gated (crates/kaya/src/lib.rs), and the sheet's x11
+focus note in the mount arm named `crate::vtrace::note` bare, so the tree
+at ab31ec09 failed `cargo check --locked --lib` on linux while every lane
+stayed green: the linux lane links the harness build for every leg,
+check-targets cannot compile the GTK backend (gtk-sys needs the distro's
+pkg-config world), and tools/check-gtk.py, whose first line is exactly
+that check, sits outside the sweep because it needs docker and was last
+run before the note was added. Seen the first time check-gtk ran after
+it (`error[E0433]: cannot find vtrace in crate`, gtk.rs:5564, in the
+session's check-gtk-adw.log). The shipped-code notes go through
+`sheet_note` and `clip_note`, which compile to nothing without the
+harness, and tools/linux/run-suites.sh runs the plain lib check beside its
+harness build, which is the path the matrix cannot skip. RUN check-gtk
+AFTER ANY gtk.rs CHANGE, as CLAUDE.md's gate list says; a green sweep does
+not include it.
+
 ## An AdwDialog over a plain GtkWindow is a toplevel of its own, and the x11 lane's Esc went to the primary (measured 2026-09-21)
 
 libadwaita presents an `AdwDialog` inside its parent only when the parent
@@ -12373,6 +12416,36 @@ over: a `ModalBottomSheet` is a dialog window too, and a back press
 through the ACTIVITY's dispatcher finished the app (`kaya: the harness
 has no mounted activity`); the verb delivers `KEYCODE_BACK` to the sheet's
 own window's decor view.
+
+RESOLVED ON THE GTK SIDE 2026-09-21 (the maintainer, from the review
+page's linux captures: "is that typically how sheets look? Uncentered
+dialogs in the top-left corner?"): kaya's windows are `AdwApplicationWindow`
+(the primary) and `AdwWindow` (auxiliaries) now, so the dialog is hosted
+IN the parent, centered over it with the dimmed backdrop, and the
+dismiss verb's Esc goes to the parent's own X window. The trap stays
+for the next backend that presents over a bare toolkit window: it is
+invisible to every sheet verb, since a fallback toplevel maps, carries
+the title and takes Esc exactly as a hosted dialog does. The GTK arm
+holds it three ways: tools/check-gtk.py's census pins both builders to
+the Adw classes, `install_nav_chrome` panics on any other window class,
+and `sheet_count` counts only dialogs rooted in their parent's window,
+naming an excluded one in the verb trace. THE HOSTED CHAIN'S OWN x11 RED,
+read from the bundle the same night: with both dialogs in one toplevel
+the key is routed by GTK's focus, and the chain's child sheet holds one
+label and a header bar whose window controls refuse focus, so
+`focus_into_sheet` moved nothing (`moved=false now Some('GtkButton')`,
+the parent's own button) and Esc asked the ARMED PARENT instead — 8/8
+x11 legs at `sheets 2, wanted 1`, 8/8 wayland green because sway
+activates the window and libadwaita focuses the dialog itself. Making
+the dialog focusable, then its toolbar view, changed nothing (same
+8/8 each): the move that matters is LIBADWAITA'S OWN, a moment after
+present() — a forced red 15s after the child presented read the focus
+as libadwaita's `AdwGizmo` inside the topmost sheet on BOTH regimes,
+while the x11 verb had read the parent's button 28ms after the click.
+wayland was green only because wtype's seat tap takes 150-800ms. The
+dismiss verb waits, bounded at 2s, for a focus inside the topmost
+sheet, moves one there itself only when the wait expires, and records
+the wait in the verb trace; the mount arm no longer moves focus at map.
 
 ## An XCUIElement swipe travels with the element's size, and a one-label sheet's fell short of the dismissal (measured 2026-09-21)
 

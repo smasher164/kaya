@@ -63,6 +63,31 @@ ENTRIES = (
     ("slider derivation test",
      "fn gtk_slider_snaps_clamps_and_derives()",
      "fn gtk_slider_snaps_clamps_and_derives_disabled()"),
+    # THE WINDOWS ARE AdwWindows (docs/traps.md, the AdwDialog toplevel;
+    # ruled 2026-09-21): libadwaita presents an AdwDialog INSIDE its parent
+    # only over an AdwWindow or AdwApplicationWindow, and over a plain
+    # GtkWindow falls back to a toplevel of its own with every sheet verb
+    # still answering — the shape that shipped in ab31ec09. The
+    # perturbation is that shipped spelling; install_nav_chrome panics on
+    # it at run time and sheet_count refuses a dialog rooted elsewhere.
+    # AND EVERY ROOT HANDED TO libadwaita GOES THROUGH THE TIGHT HOST
+    # (docs/traps.md, the AdwWindow content overflow): the content bin
+    # allocates a child its UNCONSTRAINED minimum, which for a kaya tree is
+    # every wrapping label at one character wide — the grid scene's 122px
+    # column read 464px and overflowed a 330px window, 16 linux legs red.
+    # Each perturbation is the bare slot the first draft shipped.
+    ("the window's content hosted tight",
+     "let hosted = tight::host(&view);",
+     "let hosted = view.clone();"),
+    ("the sheet's content hosted tight",
+     "record.dialog.set_child(Some(&tight::host(&view)));",
+     "record.dialog.set_child(Some(&view));"),
+    ("the primary window built as an AdwApplicationWindow",
+     "let window = adw::ApplicationWindow::builder()",
+     "let window = gtk4::ApplicationWindow::builder()"),
+    ("an auxiliary window built as an AdwWindow",
+     "let aux = adw::Window::builder()",
+     "let aux = gtk4::Window::builder()"),
     # THE VIEWPORT'S FLOOR (docs/deferred.md, closed 2026-08-25): a
     # scrollbar's own 58px minimum reaches the scroller through the
     # POLICY, so a policy pinned open silently brings the empty card back.

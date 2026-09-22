@@ -2344,6 +2344,80 @@ mod flex {
     }
 }
 
+/// The host between libadwaita's content bin and a kaya root (a window's
+/// toolbar view, a sheet's). AdwBreakpointBin allocates its child at the
+/// child's UNCONSTRAINED minimum when the bin is smaller, and a kaya tree's
+/// unconstrained height compounds every wrapping label at one character
+/// wide (docs/traps.md, the AdwWindow content overflow): the grid scene's
+/// 122px column reads 464px that way and overflowed a 330px window. This
+/// answers the unconstrained height as the height AT ITS OWN MINIMUM WIDTH,
+/// which is what a GtkWindow's child was asked, and hands its child every
+/// pixel it is given.
+mod tight {
+    use gtk4::glib;
+    use gtk4::prelude::*;
+    use gtk4::subclass::prelude::*;
+
+    #[derive(Default)]
+    pub struct TightHostLayoutInner;
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for TightHostLayoutInner {
+        const NAME: &'static str = "KayaTightHostLayout";
+        type Type = TightHostLayout;
+        type ParentType = gtk4::LayoutManager;
+    }
+
+    impl ObjectImpl for TightHostLayoutInner {}
+
+    impl LayoutManagerImpl for TightHostLayoutInner {
+        fn request_mode(&self, _widget: &gtk4::Widget) -> gtk4::SizeRequestMode {
+            gtk4::SizeRequestMode::HeightForWidth
+        }
+
+        fn measure(
+            &self,
+            widget: &gtk4::Widget,
+            orientation: gtk4::Orientation,
+            for_size: i32,
+        ) -> (i32, i32, i32, i32) {
+            let Some(child) = widget.first_child() else { return (0, 0, -1, -1) };
+            let (minimum, natural) = match orientation {
+                gtk4::Orientation::Vertical if for_size < 0 => {
+                    let (min_width, _, _, _) = child.measure(gtk4::Orientation::Horizontal, -1);
+                    let (m, n, _, _) = child.measure(orientation, min_width);
+                    (m, n)
+                }
+                _ => {
+                    let (m, n, _, _) = child.measure(orientation, for_size);
+                    (m, n)
+                }
+            };
+            (minimum, natural, -1, -1)
+        }
+
+        fn allocate(&self, widget: &gtk4::Widget, width: i32, height: i32, baseline: i32) {
+            if let Some(child) = widget.first_child() {
+                child.allocate(width, height, baseline, None);
+            }
+        }
+    }
+
+    glib::wrapper! {
+        pub struct TightHostLayout(ObjectSubclass<TightHostLayoutInner>)
+            @extends gtk4::LayoutManager;
+    }
+
+    /// A root wrapped for a libadwaita content slot.
+    pub fn host(root: &impl IsA<gtk4::Widget>) -> gtk4::Box {
+        let bin = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+        let layout: TightHostLayout = glib::Object::new();
+        bin.set_layout_manager(Some(layout));
+        bin.append(root);
+        bin
+    }
+}
+
 // --- The pickers (docs/datetime-plan.md §0, D3, D4, D6, D7) ------------
 // GTK 4.12 and libadwaita 1.4 ship neither a date nor a time control, and
 // composition is the platform idiom rather than a fallback: a date is a
@@ -5435,9 +5509,11 @@ fn read_app_icon(probe: &IdentityProbe) -> String {
 /// `dirty` PROP'S WHOLE LOWERING HERE (docs/dirty-plan.md D2) — GTK4 has no
 /// window-level modified affordance, so kaya draws GNOME Text Editor's shape,
 /// with an accessible label because a bare bullet publishes as `name='• '`.
-/// The empty invisible titlebar is GTK 4's CSD switch (docs/chrome-plan.md C2).
+/// The window is an AdwWindow, which installs GTK 4's CSD titlebar itself and
+/// hosts an AdwDialog IN the window (docs/traps.md, the AdwDialog toplevel).
 fn install_nav_chrome(window: &gtk4::Window, id: u64) -> WindowChrome {
-    use gtk4::prelude::{ButtonExt, GtkWindowExt, ObjectExt, WidgetExt};
+    use adw::prelude::{AdwApplicationWindowExt, AdwWindowExt};
+    use gtk4::prelude::{ButtonExt, ObjectExt, WidgetExt};
     let header = adw::HeaderBar::new();
     let back = gtk4::Button::from_icon_name("go-previous-symbolic");
     back.set_visible(false);
@@ -5484,12 +5560,19 @@ fn install_nav_chrome(window: &gtk4::Window, id: u64) -> WindowChrome {
         // would be writing down a decision it does not make.
         view.add_top_bar(&header);
     }
-    // The CSD switch (see this function's doc): an invisible titlebar
-    // widget, which is what AdwApplicationWindow installs internally.
-    let csd = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
-    csd.set_visible(false);
-    window.set_titlebar(Some(&csd));
-    window.set_child(Some(&view));
+    let hosted = tight::host(&view);
+    if let Some(primary) = window.downcast_ref::<adw::ApplicationWindow>() {
+        primary.set_content(Some(&hosted));
+    } else if let Some(aux) = window.downcast_ref::<adw::Window>() {
+        aux.set_content(Some(&hosted));
+    } else {
+        panic!(
+            "kaya: window#{id} is a {}, not an AdwWindow: libadwaita would present \
+             its sheets as toplevels of their own (docs/traps.md, the AdwDialog \
+             toplevel; tools/check-gtk.py holds the two builders)",
+            window.type_().name()
+        );
+    }
     WindowChrome { view, header, promoted, back, marker }
 }
 
@@ -5554,15 +5637,27 @@ fn focus_into_sheet(dialog: &gtk4::Widget) {
         .root()
         .and_then(|r| r.focus())
         .map(|f| f.type_().name().to_string());
-    crate::vtrace::note(
+    sheet_note(
         "sheet_focus",
         format_args!("focus into the sheet: moved={moved} now {focus:?}"),
     );
 }
 
+/// clip_note's shape: the sheet's premises into the flight recorder's ring
+/// when the harness is in, nothing when it is out. The mount arm calls this
+/// from shipped code, so a bare `crate::vtrace::note` there is a non-harness
+/// build that does not compile — which only the linux lane's plain lib
+/// check and tools/check-gtk.py can see (check-targets' linux hole).
+fn sheet_note(verb: &'static str, what: std::fmt::Arguments<'_>) {
+    #[cfg(feature = "harness")]
+    crate::vtrace::note(verb, what);
+    #[cfg(not(feature = "harness"))]
+    let _ = (verb, what);
+}
+
 /// The widget a sheet presents over: its parent sheet's dialog, or the
 /// window hosting the parent surface (a window, an entry's or a section's).
-fn sheet_parent_widget(core: &mut CoreState, parent: u64) -> gtk4::Widget {
+fn sheet_parent_widget(core: &CoreState, parent: u64) -> gtk4::Widget {
     use gtk4::prelude::Cast;
     if let Some(sheet) = core.sheets.get(&parent) {
         return sheet.dialog.clone().upcast();
@@ -5577,7 +5672,15 @@ fn sheet_parent_widget(core: &mut CoreState, parent: u64) -> gtk4::Widget {
             break;
         }
     }
-    gtk_window(core, host).upcast()
+    gtk_window_read(core, host)
+        .unwrap_or_else(|| {
+            panic!(
+                "kaya: sheet over surface#{parent} resolves to window#{host}, which this \
+                 process does not hold (live windows: {})",
+                live_windows(core)
+            )
+        })
+        .upcast()
 }
 
 /// The live sheet with no child of its own: where Esc lands (U3).
@@ -11064,10 +11167,11 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             if remembered.is_some() {
                 core.frame_memory.insert(window.0, FrameMemory::default());
             }
-            let aux = gtk4::Window::builder()
+            let aux = adw::Window::builder()
                 .default_width(aux_w)
                 .default_height(aux_h)
-                .build();
+                .build()
+                .upcast::<gtk4::Window>();
             watch_frame(&aux, window.0);
             watch_sidebar_width(&aux, window.0);
             // A NEW WINDOW WITH NO TITLE WEARS THE APP'S NAME
@@ -13195,24 +13299,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 let parent = sheet_parent_widget(core, parent_id);
                 let record = core.sheets.get_mut(&window.0).expect("just checked");
                 record.root = Some(root_widget.clone());
-                record.dialog.set_child(Some(&view));
+                record.dialog.set_child(Some(&tight::host(&view)));
                 record.presented = true;
                 record.dialog.present(Some(&parent));
-                // FOCUS GOES INTO THE DIALOG HERE, not left to the toolkit:
-                // the dialog's Escape is a shortcut reached from a focus
-                // inside it, and on the x11 lane (no window manager, the
-                // toplevel never active) present() left GTK with NO focus
-                // widget at all — the first x11 leg's bundle read `gtk focus
-                // None inside the topmost sheet: false` and Esc went nowhere
-                // (docs/traps.md, the sheet's x11 focus). wayland's
-                // compositor activates the window and the toolkit does this
-                // itself; this makes the two lanes one.
-                let dialog = record.dialog.clone().upcast::<gtk4::Widget>();
-                // The child is not mapped at present(); the focus move waits
-                // for the map, where a focusable descendant exists to take it.
-                dialog.connect_map(|dialog| {
-                    focus_into_sheet(dialog);
-                });
+                // The focus goes into the dialog a moment later, by the
+                // toolkit's own hand (docs/traps.md, the AdwDialog toplevel);
+                // the dismiss verb waits for that move.
             } else if core.nav_entries.contains_key(&window.0) {
                 forget_dead_subtree(core, &root_widget);
                 let entry = core.nav_entries.get_mut(&window.0).expect("just checked");
@@ -14543,7 +14635,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
         // below turns `restored_frame` into the launch declaration's veto.
         let restored_frame = remembered_frame(0);
         let (default_w, default_h) = restored_frame.unwrap_or((540, 330));
-        let window = gtk4::ApplicationWindow::builder()
+        let window = adw::ApplicationWindow::builder()
             .application(app)
             .title("kaya milestone 2")
             .default_width(default_w)
@@ -14974,6 +15066,7 @@ struct GtkStage;
 /// Esc through the platform's own input path, the type verb's two tools:
 /// wtype after the seat tap on wayland, xdotool with the pid's window
 /// focused on x11 — an AdwDialog lives INSIDE its window on both.
+#[cfg(feature = "harness")]
 fn send_escape_key(x11_window: Option<u64>) {
     let hold = if TYPED_ONCE.swap(true, std::sync::atomic::Ordering::SeqCst) {
         "150"
@@ -18438,12 +18531,40 @@ impl crate::harness::Stage for GtkStage {
 
     // The sheet is a depth slice on this backend (docs/sheet-plan.md §8).
     fn sheet_count(&self) -> usize {
-        // The platform's truth: dialogs mapped, never the model.
+        // The platform's truth: dialogs mapped, never the model, AND ROOTED
+        // IN THEIR PARENT'S WINDOW — libadwaita's fallback over a non-Adw
+        // window is a toplevel of its own, which no other read can tell from
+        // a sheet (docs/traps.md, the AdwDialog toplevel). Excluded ones are
+        // named in the verb trace, so a red reads as this and not as a
+        // present that never happened.
         Self::on_main(move |core| {
-            core.sheets
-                .values()
-                .filter(|s| s.presented && s.dialog.is_mapped())
-                .count()
+            let ids: Vec<u64> = core.sheets.keys().copied().collect();
+            let mut count = 0;
+            for id in ids {
+                let (presented, dialog, parent) = {
+                    let s = &core.sheets[&id];
+                    (s.presented, s.dialog.clone(), s.parent)
+                };
+                if !presented || !dialog.is_mapped() {
+                    continue;
+                }
+                let host = sheet_parent_widget(core, parent).root();
+                let root = dialog.root();
+                if root.is_some() && root == host {
+                    count += 1;
+                } else {
+                    crate::vtrace::note(
+                        "sheet_count",
+                        format_args!(
+                            "sheet {id} is mapped but rooted in {:?}, not its parent's \
+                             window {:?}: libadwaita presented it as a toplevel of its own",
+                            root.map(|r| r.type_().name().to_string()),
+                            host.map(|r| r.type_().name().to_string())
+                        ),
+                    );
+                }
+            }
+            count
         })
     }
     fn sheet_title(&self) -> Option<String> {
@@ -18458,32 +18579,46 @@ impl crate::harness::Stage for GtkStage {
     }
     fn dismiss_sheet(&self) {
         // The platform's own cancel path on the topmost sheet: Esc through
-        // the compositor's input (U3 measured it reaching the topmost).
-        // The focus the key will meet is recorded first: an AdwDialog's
-        // Escape is a shortcut on the dialog, reached from a focus inside it.
+        // the compositor's input (U3 measured it reaching the topmost). The
+        // key is routed by GTK's focus, and libadwaita moves the focus into
+        // a presented dialog A MOMENT AFTER present() — measured as its own
+        // AdwGizmo inside the topmost sheet on both regimes, and as the
+        // PARENT's button when the key is sent at once (docs/traps.md, the
+        // AdwDialog toplevel). So the verb waits, bounded, for a focus inside
+        // the topmost sheet, moves one there itself only when the wait
+        // expires, and records both.
+        let read = || {
+            Self::on_main(move |core| {
+                let dialog = topmost_sheet(core)
+                    .map(|id| core.sheets[&id].dialog.clone().upcast::<gtk4::Widget>())?;
+                let focus = dialog.root().and_then(|r| r.focus());
+                let inside =
+                    focus.as_ref().is_some_and(|f| f.is_ancestor(&dialog) || *f == dialog);
+                Some((focus.map(|f| f.type_().name().to_string()), inside))
+            })
+        };
+        let started = std::time::Instant::now();
+        let mut state = read();
+        while matches!(state, Some((_, false)))
+            && started.elapsed() < std::time::Duration::from_millis(2000)
+        {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            state = read();
+        }
+        let Some((focus, inside)) = state else { return };
+        let waited = started.elapsed().as_millis();
         let target = Self::on_main(move |core| {
             let dialog = topmost_sheet(core)
                 .map(|id| core.sheets[&id].dialog.clone().upcast::<gtk4::Widget>())?;
-            // The dialog's ROOT, which over a plain GtkWindow parent is a
-            // toplevel of its own (libadwaita's fallback), never the primary.
-            let root = dialog.root();
-            let read = |root: &Option<gtk4::Root>| {
-                let focus = root.as_ref().and_then(|r| r.focus());
-                let inside =
-                    focus.as_ref().is_some_and(|f| f.is_ancestor(&dialog) || *f == dialog);
-                (focus.map(|f| f.type_().name().to_string()), inside)
-            };
-            let (mut focus, mut inside) = read(&root);
-            // The x11 lane has no window manager and the toplevel is never
-            // active, so the map-time move can find nothing to focus; the
-            // key needs a focus inside the dialog and it is put there here
-            // as well, the trace saying so (docs/traps.md, the sheet's x11
-            // focus).
+            let (mut focus, mut inside) = (focus, inside);
             if !inside {
                 focus_into_sheet(&dialog);
-                (focus, inside) = read(&root);
+                let now = dialog.root().and_then(|r| r.focus());
+                inside = now.as_ref().is_some_and(|f| f.is_ancestor(&dialog) || *f == dialog);
+                focus = now.map(|f| f.type_().name().to_string());
             }
-            let xid = root
+            let xid = dialog
+                .root()
                 .and_then(|r| r.downcast::<gtk4::Window>().ok())
                 .and_then(|w| gtk4::prelude::NativeExt::surface(&w))
                 .and_then(|s| s.downcast::<gdk4_x11::X11Surface>().ok())
@@ -18491,7 +18626,8 @@ impl crate::harness::Stage for GtkStage {
             crate::vtrace::note(
                 "dismiss_sheet",
                 format_args!(
-                    "gtk focus {focus:?} inside the topmost sheet: {inside}; dialog x11 window {xid:?}"
+                    "gtk focus {focus:?} inside the topmost sheet: {inside} after waiting \
+                     {waited}ms for the toolkit's own move; host x11 window {xid:?}"
                 ),
             );
             Some(xid)

@@ -101,6 +101,11 @@ run_build java build_java
 CARGO_PROFILE_DEV_DEBUG=0 cargo build -j6 --locked --features harness --lib \
     "${BUILD_EXAMPLES[@]}" || exit 1
 tools/build-id.py --verify "$CARGO_TARGET_DIR/debug/libkaya.so" || exit 1
+# THE SHIPPED CONFIGURATION TOO: every leg links the harness build, and
+# check-targets cannot compile the GTK backend at all, so a non-harness
+# build that fails on linux is seen by nothing else on the matrix
+# (docs/traps.md, the GTK backend that compiled only with the harness).
+CARGO_PROFILE_DEV_DEBUG=0 cargo check -j6 --locked --lib || exit 1
 timing core-build
 
 # The repo is mounted at /work, not at the compile-time default.

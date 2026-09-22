@@ -70,7 +70,12 @@ roster, and check-verbs' rows. What breadth still owes, held open here:
   scene and the quick-add on each of the five lanes, every capture viewed
   before it was published; the windows sheet capture is a held run
   photographed through the lane's window shot, since the recorder's
-  stills for the one-second sheet leg were one frame.
+  stills for the one-second sheet leg were one frame. THE LINUX CAPTURES
+  ASKED ONE MORE THING of the maintainer ("is that typically how sheets
+  look?"): the AdwDialog sat beside the parent as a toplevel of its own,
+  and the GTK windows are AdwWindows since the same night, the dialog
+  hosted inside them (docs/traps.md, the AdwDialog toplevel, holds the
+  three guards).
 
 ## ~~BUILD — R1 async dialogs: explicit-transaction amendment approved (2026-09-19)~~ COMPLETE 2026-09-21: C#, Swift, Java and Rust awaitable tiers, explicit transaction scopes and honest task-error ownership are implemented; JS overlap and cleanup guards agree. Final Rust slice passed 644 core tests, 25 doctests (one ignored), 61 gates and all five matrix lanes: Mac 477, Linux 777, Windows 283, iOS 139, Android 148 in 1072 seconds, every timing ceiling held
 KEY: async dialogs, R1.4, R1.5, async void, SynchronizationContext, continuation rollback, explicit Build, Swift Task, app.task, task error ownership, Java CompletionStage, app.observe, Rust local future, Tx across await, poll boundary, scope-only, private begin, Go carve-out
