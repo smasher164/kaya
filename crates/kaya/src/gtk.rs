@@ -2163,6 +2163,12 @@ mod flex {
 // WITHOUT clamping to their minimum sizes — a clamp would silently
 // turn 1:3 into something else in a tight window, and the overflow
             // policy is one DESIGN still defers.
+            // A ROW MIRRORS UNDER RTL (docs/compliance-plan.md §1.1): GtkBox's
+            // own layout does this by itself and this manager did not, so an
+            // Arabic row laid its first child at the left edge with every
+            // label right-aligned — the formatar leg's `expect_mirrored`
+            // (2026-09-23). Columns stack the same way either way.
+            let rtl = !vertical && widget.direction() == gtk4::TextDirection::Rtl;
             let mut offset = 0;
             for (c, weight, natural) in &children {
                 let extent = if *weight > 0.0 {
@@ -2170,10 +2176,11 @@ mod flex {
                 } else {
                     *natural
                 };
+                let x = if rtl { width - offset - extent } else { offset };
                 let (w, h, x, y) = if vertical {
                     (cross_total, extent, 0, offset)
                 } else {
-                    (extent, cross_total, offset, 0)
+                    (extent, cross_total, x, 0)
                 };
                 let transform = gtk4::gsk::Transform::new()
                     .translate(&gtk4::graphene::Point::new(x as f32, y as f32));
@@ -2273,11 +2280,13 @@ mod flex {
         fn allocate(&self, widget: &gtk4::Widget, width: i32, _height: i32, _baseline: i32) {
             let spacing = self.spacing.get();
             let mut y = 0;
+            let rtl = widget.direction() == gtk4::TextDirection::Rtl;
             for (line, line_h) in flow_lines(widget, width, spacing) {
                 let mut x = 0;
                 for (c, w, h) in line {
+                    let px = if rtl { width - x - w } else { x };
                     let transform = gtk4::gsk::Transform::new()
-                        .translate(&gtk4::graphene::Point::new(x as f32, y as f32));
+                        .translate(&gtk4::graphene::Point::new(px as f32, y as f32));
                     super::set_child_track(&c, f64::from(w));
                     c.allocate(w, h, -1, Some(transform));
                     x += w + spacing;
@@ -14627,6 +14636,23 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
         // answers the forced scheme, including the one presentation_report
         // sends (tools/check-appearance.py).
         apply_appearance();
+        // THE TEXT SCALE (docs/compliance-plan.md §2.1): the knob's factor
+        // into the toolkit's own dpi — the value GNOME's text-scaling-factor
+        // writes — and the toolkit's reading reported back, whichever way
+        // it was set (tools/check-appearance.py holds both).
+        if let Some(settings) = gtk4::Settings::default() {
+            if let Some(factor) = crate::fmt::text_scale_override() {
+                settings.set_gtk_xft_dpi((96.0 * 1024.0 * factor) as i32);
+            }
+            crate::fmt::report_text_scale(f64::from(settings.gtk_xft_dpi()) / 1024.0 / 96.0);
+        }
+        // THE DIRECTION the knob's locale asks for, before the first widget:
+        // GTK derives its own from the translation catalog, which the lane
+        // image carries for Arabic, and the core's reading of the tag holds
+        // it either way (§2.2).
+        if std::env::var_os("KAYA_LOCALE").is_some() && crate::fmt::direction() == crate::fmt::Direction::Rtl {
+            gtk4::Widget::set_default_direction(gtk4::TextDirection::Rtl);
+        }
         let Some((occ_tx, tx_rx)) = ends.borrow_mut().take() else {
             return;
         };
@@ -18574,22 +18600,82 @@ impl crate::harness::Stage for GtkStage {
         })
     }
     fn text_scale(&self) -> f64 {
-        crate::depth_stub("format")
+        // The toolkit's own dpi, never the knob (tools/check-appearance.py).
+        Self::on_main(|_core| {
+            gtk4::Settings::default()
+                .map_or(1.0, |s| f64::from(s.gtk_xft_dpi()) / 1024.0 / 96.0)
+        })
     }
     fn clipping(&self) -> String {
-        crate::depth_stub("format")
+        // Every live label allocated at least what its text needs at its
+        // width: GTK's own measure at the allocated width against the
+        // allocation (docs/compliance-plan.md §4).
+        Self::on_main(|core| {
+            use gtk4::prelude::WidgetExt;
+            while glib::MainContext::default().iteration(false) {}
+            for label in &core.labels {
+                if !label.is_mapped() {
+                    continue;
+                }
+                let alloc = label.allocation();
+                if alloc.width() <= 0 {
+                    continue;
+                }
+                let (need, _, _, _) = label.measure(gtk4::Orientation::Vertical, alloc.width());
+                if need > alloc.height() + 1 {
+                    let text = label_text(&label.clone().upcast());
+                    return format!(
+                        "label {:?} needs {need}px at {}px wide and got {}px",
+                        text.chars().take(40).collect::<String>(),
+                        alloc.width(),
+                        alloc.height()
+                    );
+                }
+            }
+            String::new()
+        })
     }
     fn direction(&self) -> String {
-        crate::depth_stub("format")
+        Self::on_main(|core| {
+            use gtk4::prelude::WidgetExt;
+            if core.window.direction() == gtk4::TextDirection::Rtl { "rtl".to_owned() } else { "ltr".to_owned() }
+        })
     }
-    fn mirrored(&self, _: crate::harness::Target) -> String {
-        crate::depth_stub("format")
+    fn mirrored(&self, t: crate::harness::Target) -> String {
+        Self::on_main(move |core| {
+            use gtk4::prelude::WidgetExt;
+            let Some(i) = crate::harness::try_resolve(t.index, core.rows.len()) else {
+                return "no such row".to_owned();
+            };
+            let row = &core.rows[i];
+            while glib::MainContext::default().iteration(false) {}
+            let mut kids = Vec::new();
+            let mut child = row.first_child();
+            while let Some(widget) = child {
+                if let Some(bounds) = widget.compute_bounds(&core.window) {
+                    kids.push(bounds.x());
+                }
+                child = widget.next_sibling();
+            }
+            if kids.len() < 2 {
+                return format!("the row has {} child(ren)", kids.len());
+            }
+            let (first, last) = (kids[0], kids[kids.len() - 1]);
+            if first > last {
+                String::new()
+            } else {
+                format!("first child at x={}, last at x={}", first as i32, last as i32)
+            }
+        })
     }
     fn platform_locale(&self) -> String {
-        crate::depth_stub("format")
+        crate::fmt::locale().tag
     }
-    fn formatted(&self, _: &str, _: &str, _: &str) -> String {
-        crate::depth_stub("format")
+    fn formatted(&self, kind: &str, value: &str, length: &str) -> String {
+        // THE SAME PROCESS AND THE SAME LIBC: the harness IS this backend,
+        // so the platform answer is the door's own (R9); the door's one
+        // composition rule is held by fmt.rs's frozen-bytes test instead.
+        crate::fmt::platform_answer(kind, value, length)
     }
     fn sheet_detent(&self) -> String {
         // A desktop sheet has no detent.

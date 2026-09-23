@@ -156,6 +156,9 @@ objc2-foundation = "0.3.2"
 jni = "0.21"
 
 [target.'cfg(target_os = "linux")'.dependencies]
+# The formatter door's glibc arm (docs/compliance-plan.md §2.3): setlocale,
+# strftime, localeconv, nl_langinfo and strfmon straight off the C library.
+libc = "0.2"
 # The AT-SPI client, for the harness accessibility read ONLY — hence
 # optional and behind `harness`. GTK exposes no getter for accessible
 # properties (the accessible surface IS AT-SPI, so any other read would

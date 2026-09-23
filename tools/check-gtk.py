@@ -88,6 +88,15 @@ ENTRIES = (
     ("an auxiliary window built as an AdwWindow",
      "let aux = adw::Window::builder()",
      "let aux = gtk4::Window::builder()"),
+    # A ROW MIRRORS UNDER RTL (docs/compliance-plan.md §1.1; the formatar
+    # leg is the lane wall): kaya's own flex manager laid an Arabic row
+    # left to right until 2026-09-23. The perturbation is that shipped line.
+    ("the flex row's mirrored x under RTL",
+     "let x = if rtl { width - offset - extent } else { offset };",
+     "let x = offset;"),
+    ("the flowing row's mirrored x under RTL",
+     "let px = if rtl { width - x - w } else { x };",
+     "let px = x;"),
     # THE VIEWPORT'S FLOOR (docs/deferred.md, closed 2026-08-25): a
     # scrollbar's own 58px minimum reaches the scroller through the
     # POLICY, so a policy pinned open silently brings the empty card back.
@@ -438,6 +447,7 @@ PY
         && run_exact_test gtk::flex::tests::gtk_table_viewport_rejects_overflow \\
         && run_exact_test gtk::flex::tests::gtk_table_padded_card_convicts_nothing \\
         && run_exact_test gtk::flex::tests::gtk_slider_snaps_clamps_and_derives \\
+        && run_exact_test fmt::tests::the_glibc_arm_composes_in_the_locales_order \\
         && run_exact_test \\
             gtk::frame_tests::gtk_frame_memory_parses_clamps_and_opts_out \\
         && run_exact_test \\

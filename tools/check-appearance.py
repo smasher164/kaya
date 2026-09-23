@@ -112,6 +112,9 @@ INSTALLS = [
     (MAC, r"window\.traitOverrides\.preferredContentSizeCategory = category",
      r"if let factor = kayaTextScaleOverride\(\) \{",
      "the iOS arm sets the window's own content size category"),
+    (GTK, r"settings\.set_gtk_xft_dpi\(\(96\.0 \* 1024\.0 \* factor\) as i32\)",
+     r"if let Some\(factor\) = crate::fmt::text_scale_override\(\) \{",
+     "GTK writes the knob's factor into the toolkit's own dpi"),
 ]
 
 # The text-scale READ-BACK may not derive its factor from the knob
@@ -571,7 +574,14 @@ g.negative(
         '        guard let window = kayaHarnessWindow() else { return 1.0 }', "N22")),
     want="derives its factor from the knob",
 )
-g.negatives_ran(22)
+g.negative(
+    "N23 the GTK text-scale install no longer guarded by the asked function",
+    lambda: census(without(
+        GTK, r"if let Some\(factor\) = crate::fmt::text_scale_override\(\) \{",
+        "if let Some(factor) = Some(2.0) {", "N23")),
+    want="is not guarded by",
+)
+g.negatives_ran(23)
 
 # ---- The real census. --------------------------------------------------
 for line in census(src):

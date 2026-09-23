@@ -32,7 +32,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     xvfb xauth imagemagick x11-utils \
     weston sway ffmpeg \
     librsvg2-common adwaita-icon-theme \
+    locales \
     && rm -rf /var/lib/apt/lists/*
+# THE LOCALES THE FORMAT LEGS INSTALL (docs/compliance-plan.md §2.2, U2):
+# the image carried C and POSIX alone, and glibc formats nothing it has
+# not generated. The lane's everyday locale is en_US, as a desktop's is.
+RUN sed -i 's/^# en_US.UTF-8/en_US.UTF-8/; s/^# de_DE.UTF-8/de_DE.UTF-8/; s/^# ar_EG.UTF-8/ar_EG.UTF-8/' /etc/locale.gen \
+    && locale-gen
+ENV LANG=en_US.UTF-8
 
 # Node 24 for the JS guests (docs/js-plan.md §1): Debian's nodejs is 18,
 # below the type-stripping floor (22.18), so the official tarball is

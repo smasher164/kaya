@@ -291,3 +291,27 @@ arm cannot move the process's language; the knob installs the language
 by passing it to every formatter and by `Language` on each root element,
 and whether the CalendarDatePicker follows `Language` is the leg's own
 reading.
+
+## U2 again, glibc's own tables (measured 2026-09-23, a C probe in the lane image with the locales generated)
+
+| | C.UTF-8 | en_US.UTF-8 | de_DE.UTF-8 | ar_EG.UTF-8 |
+|---|---|---|---|---|
+| `D_FMT` | `%m/%d/%y` | `%m/%d/%Y` | `%d.%m.%Y` | `%d %b, %Y` |
+| `T_FMT` | `%H:%M:%S` | `%r` | `%T` | `%Z %I:%M:%S %p` |
+| `T_FMT_AMPM` | `%I:%M:%S %p` | `%I:%M:%S %p` | (empty) | `%Z %I:%M:%S %p` |
+| `_NL_TIME_FIRST_WEEKDAY` | 1 (Sunday) | 1 | 2 (Monday) | 7 (Saturday) |
+| decimal / thousands / grouping | `.` / none / 0 | `.` / `,` / 3 | `,` / `.` / 3 | `.` / `,` / 3 |
+| `int_curr_symbol` / symbol / fraction digits | none | `USD ` / `$` / 2 | `EUR ` / `€` / 2 | `EGP ` / `ج.م.` / 3 |
+| `strfmon("%n", 1234567.89)` | `1234567.89` | `$1,234,567.89` | `1.234.567,89 €` | `ج.م. 1,234,567.890` |
+| `%e %b %Y` / `%a %e %b` | ` 7 Sep 2026` / `Mon  7 Sep` | same | ` 7 Sep 2026` / `Mo  7 Sep` | ` 7 سبت 2026` / `ن  7 سبت` |
+
+The langinfo items are `D_FMT` 131113, `T_FMT` 131114, `T_FMT_AMPM` 131115,
+`D_T_FMT` 131112, `_NL_TIME_FIRST_WEEKDAY` 131176 (LC_TIME's base is
+2 << 16). Three limits the arm carries, stated: `strfmon` writes the
+LOCALE'S OWN currency and no other, so a foreign code takes the locale's
+placement around the code (`EUR1,234,567.89` in en_US); glibc knows no
+named medium or long date, so those are composed in `D_FMT`'s month/day
+order from the locale's own names; `%e` pads with a space and `%a %e`
+doubles it, which the arm collapses. `strfmon`'s `%i` in the probe read
+garbage because the probe passed one double for two conversions — a
+probe bug, not glibc's.

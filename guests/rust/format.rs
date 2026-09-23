@@ -11,7 +11,9 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     let d = kaya::Date::new(2026, 9, 7).unwrap();
     let t = kaya::Time::new(8, 30).unwrap();
     ctx.apply(|tx| {
-        tx.window(kaya::DEFAULT_WINDOW).title("format");
+        // Fourteen labels and a row: taller than the default window, which
+        // GTK would otherwise let the root overflow (expect_root_fills).
+        tx.window(kaya::DEFAULT_WINDOW).title("format").size(540.0, 560.0);
         let root = tx
             .column(|tx| {
                 let s = tx.signal(fmt::date(d, Length::Short));

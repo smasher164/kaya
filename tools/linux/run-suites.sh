@@ -42,7 +42,7 @@ SCENES="background stall milestone2 entry search gallery todos reorder feed grow
 # waits on the bindings sweep too (docs/tasks-s3-plan.md §6 step 3);
 # `richtext`, `ownundo` and `richlabel` wait on the eight other bindings'
 # Document/Edit/Format spelling (docs/rich-text-plan.md §4 step 3, §14, §15).
-DEPTH_SCENES="windowed canvas sizepolicy dnd tooltips tasks notify richtext ownundo richlabel notes richrows"
+DEPTH_SCENES="windowed canvas sizepolicy dnd tooltips tasks notify richtext ownundo richlabel notes richrows format"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 
@@ -1430,6 +1430,15 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
     run "$proto" sheet-rust env KAYA_SELFTEST=sheet \
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/sheet"
+    # THE FORMATTER DOOR AND THE CATALOG under three locales
+    # (docs/compliance-plan.md §6): the knob installs the generated locale
+    # (tools/linux/Dockerfile) and the reads ask glibc and GTK back.
+    run "$proto" format-rust env KAYA_SELFTEST=format \
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/format"
+    run "$proto" formatde-rust env KAYA_LOCALE=de-DE KAYA_SELFTEST=formatde \
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/format"
+    run "$proto" formatar-rust env KAYA_LOCALE=ar-EG KAYA_SELFTEST=formatar \
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/format"
     run "$proto" sheet-python env KAYA_SELFTEST=sheet KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh python3 guests/python/sheet.py
     run "$proto" sheet-js env KAYA_SELFTEST=sheet KAYA_LIB="$LIB" \

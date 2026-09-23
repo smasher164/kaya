@@ -44,8 +44,13 @@ interpreter-side locale install lost the race to a guest formatting at
 startup (docs/traps.md, the persisting-defaults entry), and a formatted
 date inside a composed label needs the template INSIDE `expect` rather
 than a verb of its own. What breadth still owes, held open here:
-  - **DEPTH STUB: format on gtk** — the formatter's GLib arm and the
-    seven verbs' reads (§2.3's Linux row, U2).
+  - ~~**DEPTH STUB: format on gtk**~~ — LANDED 2026-09-23: the glibc arm
+    (`strftime` under `LC_TIME`, `localeconv`, `strfmon` for the locale's
+    own currency, medium/long/weekday dates composed in `D_FMT`'s order,
+    the hour cycle from GNOME's `clock-format` when its schema is there),
+    the six reads off GTK, the xft-dpi text scale, the locale knob through
+    `setlocale` plus the environment GTK's init re-reads, the image's
+    generated locales, the format legs under three locales on both regimes.
   - **DEPTH STUB: format on winui** — the Windows.Globalization arm and
     the reads (§2.3's Windows row, U3, U5, U11).
   - **DEPTH STUB: format on compose** — the android.icu arm over JNI and

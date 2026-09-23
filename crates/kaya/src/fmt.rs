@@ -112,6 +112,45 @@ pub fn currency(value: f64, code: &str) -> String {
     platform::currency(value, code)
 }
 
+/// The `{fmt:…}` template's answer on the backends whose harness is this
+/// crate (GTK, WinUI): kind, value and length as the template spells them
+/// (harness.rs's `expand_template`), empty when the value does not parse.
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+pub(crate) fn platform_answer(kind: &str, value: &str, length: &str) -> String {
+    let len = match length {
+        "short" => Length::Short,
+        "long" => Length::Long,
+        _ => Length::Medium,
+    };
+    let parse_date = |s: &str| {
+        let p: Vec<i64> = s.split('-').filter_map(|x| x.parse().ok()).collect();
+        (p.len() == 3).then(|| Date::new(p[0] as i32, p[1] as u8, p[2] as u8).ok()).flatten()
+    };
+    let parse_time = |s: &str| {
+        let p: Vec<u8> = s.split(':').filter_map(|x| x.parse().ok()).collect();
+        (p.len() == 2).then(|| Time::new(p[0], p[1]).ok()).flatten()
+    };
+    match kind {
+        "date" => parse_date(value).map(|d| date(d, len)).unwrap_or_default(),
+        "date_weekday" => parse_date(value).map(date_weekday).unwrap_or_default(),
+        "time" => parse_time(value).map(|t| time(t, len)).unwrap_or_default(),
+        "date_time" => match value.split_once('T') {
+            Some((d, t)) => match (parse_date(d), parse_time(t)) {
+                (Some(d), Some(t)) => date_time(d, t, len),
+                _ => String::new(),
+            },
+            None => String::new(),
+        },
+        "number" => value.parse().map(|v| number(v, NumberOptions::default())).unwrap_or_default(),
+        "percent" => value.parse().map(|v| percent(v, NumberOptions::default())).unwrap_or_default(),
+        "currency" => match value.split_once(':') {
+            Some((amount, code)) => amount.parse().map(|v| currency(v, code)).unwrap_or_default(),
+            None => String::new(),
+        },
+        _ => String::new(),
+    }
+}
+
 /// The process locale and its settings, asked of the platform each time
 /// so a setting flipped while the app runs is seen.
 pub fn locale() -> LocaleInfo {
@@ -158,6 +197,21 @@ pub(crate) fn direction_of(tag: &str) -> Direction {
     } else {
         Direction::Ltr
     }
+}
+
+/// `KAYA_TEXT_SCALE=<factor>` for the arms that take a factor directly (GTK's
+/// xft dpi, Compose's density): unset installs nothing, a value outside
+/// 1.0..=3.1 dies naming the range. The SwiftUI interpreter parses its own
+/// copy, since its install is a category and its refusal on macOS is its own.
+#[cfg_attr(any(target_os = "macos", target_os = "ios"), allow(dead_code))]
+pub(crate) fn text_scale_override() -> Option<f64> {
+    let want = std::env::var("KAYA_TEXT_SCALE").ok()?;
+    let factor: f64 = want.parse().unwrap_or(f64::NAN);
+    assert!(
+        (1.0..=3.1).contains(&factor),
+        "kaya: KAYA_TEXT_SCALE={want:?} is not a factor in 1.0..=3.1"
+    );
+    Some(factor)
 }
 
 /// `KAYA_LOCALE=<bcp47>`, the harness's per-process locale, installed
@@ -472,7 +526,289 @@ mod platform {
     }
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "ios")))]
+/// glibc's own answers (docs/compliance-plan.md §2.3's Linux row, U2):
+/// `strftime` under `LC_TIME`, `localeconv` under `LC_NUMERIC` and
+/// `LC_MONETARY`, `strfmon` for the locale's own currency. glibc has no
+/// named date styles beyond `D_FMT`, so medium, long and the weekday date
+/// are COMPOSED here in the order `D_FMT` puts the month and the day, with
+/// the locale's own month and weekday names — the one rule of kaya's own
+/// in this arm, held by `the_glibc_arm_composes_in_the_locales_order`
+/// (tools/check-gtk.py runs it in the lane image). The hour cycle is
+/// GNOME's `clock-format` when the schema is installed, else the locale's
+/// `T_FMT`.
+#[cfg(target_os = "linux")]
+mod platform {
+    use super::{Date, Direction, HourCycle, Length, LocaleInfo, NumberOptions, Time};
+    use std::ffi::{c_char, c_int, c_long, CStr, CString};
+
+    // glibc's langinfo items (langinfo.h; measured in the lane image
+    // 2026-09-23): LC_TIME's base is 2 << 16.
+    const D_FMT: c_int = 131113;
+    const T_FMT: c_int = 131114;
+    const T_FMT_AMPM: c_int = 131115;
+    const NL_TIME_FIRST_WEEKDAY: c_int = 131176;
+
+    unsafe extern "C" {
+        fn nl_langinfo(item: c_int) -> *mut c_char;
+        fn strfmon(s: *mut c_char, max: usize, format: *const c_char, ...) -> isize;
+    }
+
+    fn info(item: c_int) -> String {
+        let p = unsafe { nl_langinfo(item) };
+        if p.is_null() {
+            return String::new();
+        }
+        unsafe { CStr::from_ptr(p) }.to_string_lossy().into_owned()
+    }
+
+    /// The locale as `setlocale` reports it: `en_US.UTF-8`, `C`, `POSIX`.
+    fn raw_locale() -> String {
+        let p = unsafe { libc::setlocale(libc::LC_ALL, std::ptr::null()) };
+        if p.is_null() {
+            return "C".to_owned();
+        }
+        unsafe { CStr::from_ptr(p) }.to_string_lossy().into_owned()
+    }
+
+    fn tm_of(d: Date, t: Option<Time>) -> libc::tm {
+        let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+        tm.tm_year = d.year - 1900;
+        tm.tm_mon = i32::from(d.month) - 1;
+        tm.tm_mday = i32::from(d.day);
+        let (h, m) = t.map_or((12, 0), |t| (i32::from(t.hour), i32::from(t.minute)));
+        tm.tm_hour = h;
+        tm.tm_min = m;
+        // The weekday, for `%a`: Zeller over the proleptic Gregorian date.
+        let (mut y, mut mo) = (d.year, i32::from(d.month));
+        if mo < 3 {
+            mo += 12;
+            y -= 1;
+        }
+        let k = y % 100;
+        let j = y / 100;
+        let h = (i32::from(d.day) + (13 * (mo + 1)) / 5 + k + k / 4 + j / 4 + 5 * j) % 7;
+        tm.tm_wday = (h + 6) % 7;
+        tm
+    }
+
+    fn strftime(pattern: &str, tm: &libc::tm) -> String {
+        let fmt = CString::new(pattern).expect("no NUL in a pattern");
+        let mut buf = vec![0 as c_char; 256];
+        let n = unsafe { libc::strftime(buf.as_mut_ptr(), buf.len(), fmt.as_ptr(), tm) };
+        let out = unsafe { CStr::from_ptr(buf.as_ptr()) }.to_string_lossy().into_owned();
+        // `%e` pads the day with a space; the composed patterns want none.
+        let _ = n;
+        out.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    /// Month before day, as `D_FMT` puts them: `%m/%d/%Y` (en_US) is
+    /// month-first, `%d.%m.%Y` (de_DE) and `%d %b, %Y` (ar_EG) are day-first.
+    fn month_first() -> bool {
+        let fmt = info(D_FMT);
+        let m = fmt.find("%m").or_else(|| fmt.find("%b")).or_else(|| fmt.find("%B"));
+        let d = fmt.find("%d").or_else(|| fmt.find("%e"));
+        match (m, d) {
+            (Some(m), Some(d)) => m < d,
+            _ => false,
+        }
+    }
+
+    pub(super) fn date(d: Date, length: Length) -> String {
+        let tm = tm_of(d, None);
+        let pattern = match (length, month_first()) {
+            (Length::Short, _) => info(D_FMT),
+            (Length::Medium, true) => "%b %e, %Y".to_owned(),
+            (Length::Medium, false) => "%e %b %Y".to_owned(),
+            (Length::Long, true) => "%B %e, %Y".to_owned(),
+            (Length::Long, false) => "%e %B %Y".to_owned(),
+        };
+        strftime(&pattern, &tm)
+    }
+
+    pub(super) fn date_weekday(d: Date) -> String {
+        let tm = tm_of(d, None);
+        let pattern = if month_first() { "%a, %b %e" } else { "%a %e %b" };
+        strftime(pattern, &tm)
+    }
+
+    fn twenty_four_hours() -> bool {
+        // GNOME's own setting when its schema is installed (the lane image
+        // carries it); otherwise the locale's own clock.
+        use gtk4::gio;
+        use gtk4::gio::prelude::SettingsExt;
+        if let Some(source) = gio::SettingsSchemaSource::default() {
+            if source.lookup("org.gnome.desktop.interface", true).is_some() {
+                let settings = gio::Settings::new("org.gnome.desktop.interface");
+                return settings.string("clock-format").as_str() == "24h";
+            }
+        }
+        !info(T_FMT).contains("%p") && !info(T_FMT).contains("%r")
+    }
+
+    pub(super) fn time(t: Time, length: Length) -> String {
+        let tm = tm_of(Date { year: 2000, month: 1, day: 1 }, Some(t));
+        let pattern = match (length, twenty_four_hours()) {
+            (Length::Short, true) => "%H:%M".to_owned(),
+            (Length::Short, false) => {
+                let ampm = info(T_FMT_AMPM);
+                if ampm.is_empty() { "%I:%M %p".to_owned() } else { ampm.replace(":%S", "").replace("%Z ", "") }
+            }
+            (Length::Medium, true) => "%H:%M:%S".to_owned(),
+            (Length::Medium, false) => {
+                let ampm = info(T_FMT_AMPM);
+                if ampm.is_empty() { "%I:%M:%S %p".to_owned() } else { ampm.replace("%Z ", "") }
+            }
+            (Length::Long, true) => "%H:%M:%S %Z".to_owned(),
+            (Length::Long, false) => {
+                let ampm = info(T_FMT_AMPM);
+                if ampm.is_empty() { "%I:%M:%S %p %Z".to_owned() } else { ampm.replace("%Z ", "") + " %Z" }
+            }
+        };
+        strftime(&pattern, &tm)
+    }
+
+    pub(super) fn date_time(d: Date, t: Time, length: Length) -> String {
+        format!("{} {}", date(d, length), time(t, length))
+    }
+
+    struct Numeric {
+        decimal: String,
+        thousands: String,
+        group: usize,
+    }
+
+    fn numeric() -> Numeric {
+        let lc = unsafe { libc::localeconv() };
+        let read = |p: *const c_char| {
+            if p.is_null() { String::new() } else { unsafe { CStr::from_ptr(p) }.to_string_lossy().into_owned() }
+        };
+        let (decimal, thousands, group) = unsafe {
+            let grouping = (*lc).grouping;
+            let g = if grouping.is_null() { 0 } else { *grouping as u8 };
+            (read((*lc).decimal_point), read((*lc).thousands_sep), if g == 0 || g == 255 { 0 } else { g as usize })
+        };
+        Numeric { decimal: if decimal.is_empty() { ".".to_owned() } else { decimal }, thousands, group }
+    }
+
+    fn grouped(value: f64, min_fraction: usize, max_fraction: usize, grouping: bool, n: &Numeric) -> String {
+        let rounded = format!("{:.*}", max_fraction, value.abs());
+        let (int_part, frac_part) = rounded.split_once('.').unwrap_or((rounded.as_str(), ""));
+        let mut frac = frac_part.trim_end_matches('0').to_owned();
+        while frac.len() < min_fraction {
+            frac.push('0');
+        }
+        let mut int_out = String::new();
+        if grouping && n.group > 0 && !n.thousands.is_empty() {
+            let digits: Vec<char> = int_part.chars().collect();
+            for (i, ch) in digits.iter().enumerate() {
+                if i > 0 && (digits.len() - i) % n.group == 0 {
+                    int_out.push_str(&n.thousands);
+                }
+                int_out.push(*ch);
+            }
+        } else {
+            int_out.push_str(int_part);
+        }
+        let sign = if value < 0.0 { "-" } else { "" };
+        if frac.is_empty() { format!("{sign}{int_out}") } else { format!("{sign}{int_out}{}{frac}", n.decimal) }
+    }
+
+    pub(super) fn number(value: f64, options: NumberOptions) -> String {
+        let n = numeric();
+        let min = usize::from(options.min_fraction_digits.unwrap_or(0));
+        let max = usize::from(options.max_fraction_digits.unwrap_or(3)).max(min);
+        grouped(value, min, max, options.grouping, &n)
+    }
+
+    pub(super) fn percent(value: f64, options: NumberOptions) -> String {
+        let n = numeric();
+        let min = usize::from(options.min_fraction_digits.unwrap_or(0));
+        let max = usize::from(options.max_fraction_digits.unwrap_or(0)).max(min);
+        format!("{}%", grouped(value * 100.0, min, max, options.grouping, &n))
+    }
+
+    pub(super) fn currency(value: f64, code: &str) -> String {
+        // The locale's OWN currency goes through strfmon, glibc's formatter
+        // for exactly that; any other code takes the locale's placement
+        // and separators around the code, since glibc knows no other
+        // currency's symbol (the measured limit, U2).
+        let lc = unsafe { libc::localeconv() };
+        let own = unsafe {
+            let p = (*lc).int_curr_symbol;
+            if p.is_null() { String::new() } else { CStr::from_ptr(p).to_string_lossy().trim().to_owned() }
+        };
+        if own == code {
+            let fmt = c"%n";
+            let mut buf = vec![0 as c_char; 128];
+            let n = unsafe { strfmon(buf.as_mut_ptr(), buf.len(), fmt.as_ptr(), value) };
+            if n >= 0 {
+                return unsafe { CStr::from_ptr(buf.as_ptr()) }.to_string_lossy().into_owned();
+            }
+        }
+        let digits = if code == "JPY" || code == "KRW" { 0 } else { 2 };
+        let n = numeric();
+        let amount = grouped(value, digits, digits, true, &n);
+        let (precedes, space) = unsafe {
+            let p = (*lc).p_cs_precedes as u8;
+            let sp = (*lc).p_sep_by_space as u8;
+            (p == 1, sp == 1)
+        };
+        let gap = if space { " " } else { "" };
+        if precedes { format!("{code}{gap}{amount}") } else { format!("{amount}{gap}{code}") }
+    }
+
+    pub(super) fn locale() -> LocaleInfo {
+        let raw = raw_locale();
+        let base = raw.split(['.', '@']).next().unwrap_or("C");
+        // CLDR's name for the POSIX locale, so a C container still answers
+        // a tag (`en-US-u-va-posix`).
+        let tag = if base == "C" || base == "POSIX" {
+            "en-US-u-va-posix".to_owned()
+        } else {
+            base.replace('_', "-")
+        };
+        let first = unsafe {
+            let p = nl_langinfo(NL_TIME_FIRST_WEEKDAY);
+            if p.is_null() { 1 } else { *p as u8 }
+        };
+        // glibc counts Sunday as 1; ISO counts Monday as 1.
+        let first_weekday = if first <= 1 { 7 } else { first - 1 };
+        LocaleInfo {
+            tag,
+            hour_cycle: if twenty_four_hours() { HourCycle::H23 } else { HourCycle::H12 },
+            first_weekday,
+            calendar: "gregorian".to_owned(),
+            numbering: "latn".to_owned(),
+        }
+    }
+
+    /// `setlocale` from the tag, and the environment GTK's own init reads —
+    /// `gtk_init` calls `setlocale(LC_ALL, "")`, which would put the
+    /// container's back. A locale the image has not generated is refused
+    /// naming tools/linux/Dockerfile.
+    pub(super) fn install_locale(tag: &str, direction: Direction) {
+        let posix = format!("{}.UTF-8", tag.replace('-', "_"));
+        let c = CString::new(posix.clone()).expect("no NUL in a tag");
+        let set = unsafe { libc::setlocale(libc::LC_ALL, c.as_ptr()) };
+        assert!(
+            !set.is_null(),
+            "kaya: KAYA_LOCALE={tag} needs the locale {posix} generated in this image \
+             (tools/linux/Dockerfile's locale-gen list)"
+        );
+        // Single-threaded here: run() calls this before the app thread exists.
+        unsafe {
+            std::env::set_var("LC_ALL", &posix);
+            std::env::set_var("LANG", &posix);
+            std::env::set_var("LANGUAGE", tag.replace('-', "_"));
+        }
+        let _ = direction;
+    }
+
+    #[allow(dead_code)]
+    fn _unused(_: c_long) {}
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "linux")))]
 mod platform {
     use super::{Date, Length, LocaleInfo, NumberOptions, Time};
 
@@ -545,6 +881,48 @@ mod tests {
         assert_eq!(Length::from_code(0), Some(Length::Short));
         assert_eq!(Length::from_code(2), Some(Length::Long));
         assert_eq!(Length::from_code(3), None);
+    }
+
+    /// The glibc arm's ONE rule of its own, the composed medium, long and
+    /// weekday dates in D_FMT's order, against the lane image's generated
+    /// locales (tools/check-gtk.py runs this in the container). Frozen
+    /// bytes, since the image is pinned; a locale missing there is a
+    /// refusal, not a skip.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_glibc_arm_composes_in_the_locales_order() {
+        let _serial = crate::assets::serially();
+        let d = Date::new(2026, 9, 7).unwrap();
+        let t = Time::new(8, 30).unwrap();
+        let set = |name: &str| {
+            let c = std::ffi::CString::new(name).unwrap();
+            assert!(!unsafe { libc::setlocale(libc::LC_ALL, c.as_ptr()) }.is_null(), "{name} is not generated in this image");
+        };
+        set("en_US.UTF-8");
+        assert_eq!(date(d, Length::Short), "09/07/2026");
+        assert_eq!(date(d, Length::Medium), "Sep 7, 2026");
+        assert_eq!(date(d, Length::Long), "September 7, 2026");
+        assert_eq!(date_weekday(d), "Mon, Sep 7");
+        assert_eq!(number(1234567.891, NumberOptions::default()), "1,234,567.891");
+        assert_eq!(percent(0.256, NumberOptions::default()), "26%");
+        assert_eq!(currency(1234567.89, "USD"), "$1,234,567.89");
+        assert_eq!(currency(1234567.89, "EUR"), "EUR1,234,567.89");
+        assert_eq!(locale().tag, "en-US");
+        set("de_DE.UTF-8");
+        assert_eq!(date(d, Length::Short), "07.09.2026");
+        assert_eq!(date(d, Length::Medium), "7 Sep 2026");
+        assert_eq!(date_weekday(d), "Mo 7 Sep");
+        assert_eq!(time(t, Length::Short), "08:30");
+        assert_eq!(number(1234567.891, NumberOptions::default()), "1.234.567,891");
+        assert_eq!(currency(1234567.89, "EUR"), "1.234.567,89 €");
+        assert_eq!(locale().first_weekday, 1);
+        set("ar_EG.UTF-8");
+        assert_eq!(date(d, Length::Short), "07 سبت, 2026");
+        assert_eq!(date(d, Length::Medium), "7 سبت 2026");
+        assert_eq!(date(d, Length::Long), "7 سبتمبر 2026");
+        assert_eq!(locale().first_weekday, 6);
+        set("C.UTF-8");
+        assert_eq!(locale().tag, "en-US-u-va-posix");
     }
 
     /// The Apple arm against this Mac's own locale: the shapes the probe
