@@ -227,6 +227,7 @@ import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.node.RootForTest
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -266,6 +267,8 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
@@ -1333,6 +1336,182 @@ internal fun depthStub(scene: String): Nothing =
             "it is a depth slice; see CLAUDE.md's sequencing"
     )
 
+/**
+ * `expect_no_clipping`'s reading: every LIVE label whose recorded layout
+ * overflowed (docs/compliance-plan.md §4, U8), and how many were measured
+ * — a census that measured nothing would agree with everything, so the
+ * count rides the observation.
+ */
+internal fun kayaClippingReport(presented: Set<Long>): Pair<String, Int> {
+    val live = KayaSceneModel.labels.filter { KayaSceneModel.nodes[it.id] === it && it.id in presented }
+    var measured = 0
+    val clipped = ArrayList<String>()
+    for (node in live) {
+        val layout = kayaLabelLayouts[node.id] ?: continue
+        measured += 1
+        if (layout.hasVisualOverflow) {
+            clipped.add(
+                "${kayaDebugQuoted(node.text)} overflows its ${layout.size.width}x${layout.size.height}px box " +
+                    "(${layout.lineCount} lines)"
+            )
+        }
+    }
+    return Pair(clipped.joinToString("; "), measured)
+}
+
+/** A label's text as harness.rs's `{got:?}` spells it. */
+internal fun kayaDebugQuoted(text: String): String =
+    "\"" + text.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n") + "\""
+
+/**
+ * The script of a label's LETTERS (harness.rs's `script_of`): the first
+ * script a letter belongs to, digits skipped, so an Arabic date with
+ * Latin digits still reads Arab. Null when nothing is a letter.
+ */
+internal fun kayaScriptOf(text: String): String? {
+    var i = 0
+    while (i < text.length) {
+        val u = text.codePointAt(i)
+        i += Character.charCount(u)
+        val script = when (u) {
+            in 0x0600..0x06FF, in 0x0750..0x077F, in 0x08A0..0x08FF, in 0xFB50..0xFDFF, in 0xFE70..0xFEFF -> "Arab"
+            in 0x0590..0x05FF, in 0xFB1D..0xFB4F -> "Hebr"
+            in 0x0041..0x005A, in 0x0061..0x007A, in 0x00C0..0x024F, in 0x1E00..0x1EFF -> "Latn"
+            else -> continue
+        }
+        if (u in 0x0030..0x0039 || u in 0x0660..0x0669 || u in 0x06F0..0x06F9) continue
+        return script
+    }
+    return null
+}
+
+/** One expanded expectation, or the sentence that refused it. */
+internal class KayaExpanded(val text: String, val refused: String?)
+
+/**
+ * `{fmt:<kind> <value> <length>}` expanded through the platform's own
+ * formatter (harness.rs's `expand_template`, the same grammar), asked
+ * INDEPENDENTLY of the core's door (R9): java.text and the platform's
+ * text-format class here, android.icu in KayaFormat.
+ */
+internal fun kayaExpandTemplate(context: android.content.Context, want: String): KayaExpanded {
+    if (!want.contains("{fmt:")) return KayaExpanded(want, null)
+    val out = StringBuilder()
+    var rest = want
+    while (true) {
+        val start = rest.indexOf("{fmt:")
+        if (start < 0) break
+        out.append(rest, 0, start)
+        val after = rest.substring(start + 5)
+        val end = after.indexOf('}')
+        if (end < 0) return KayaExpanded(want, "unterminated {fmt:…} in ${kayaDebugQuoted(want)}")
+        val spec = after.substring(0, end).trim().split(Regex("\\s+"))
+        val kind: String
+        val value: String
+        val length: String
+        when {
+            spec.size == 2 && spec[0] == "date_weekday" -> { kind = spec[0]; value = spec[1]; length = "medium" }
+            spec.size == 3 -> { kind = spec[0]; value = spec[1]; length = spec[2] }
+            else -> return KayaExpanded(want, "{fmt:${after.substring(0, end).trim()}} wants a kind, a value and a length")
+        }
+        val answer = kayaPlatformFormatted(context, kind, value, length)
+        if (answer.isEmpty()) {
+            return KayaExpanded(want, "this platform's formatter answered nothing for {fmt:$kind $value $length}")
+        }
+        out.append(answer)
+        rest = after.substring(end + 1)
+    }
+    out.append(rest)
+    return KayaExpanded(out.toString(), null)
+}
+
+/**
+ * What the platform writes for the harness's input, in the composition's
+ * own locale, by a SECOND spelling of each call (R9): java.text for the
+ * date and the numbers, java.text over the platform's own pattern for the
+ * time family (`getTimeFormat(context)` would read the ACTIVITY's locale,
+ * the system's, not the composition's; docs/traps.md, the Android time
+ * byte, is why the pattern generator serves both sides), ICU's
+ * SimpleDateFormat over the platform's pattern for the weekday date —
+ * never KayaFormat's own constructions. Empty when the input does not
+ * parse.
+ */
+internal fun kayaPlatformFormatted(context: android.content.Context, kind: String, value: String, length: String): String {
+    val locale = kayaRootLocale ?: java.util.Locale.getDefault()
+    fun style(l: String): Int = when (l) {
+        "short" -> java.text.DateFormat.SHORT
+        "long" -> java.text.DateFormat.LONG
+        else -> java.text.DateFormat.MEDIUM
+    }
+    fun parseDate(s: String): IntArray? {
+        val p = s.split("-").mapNotNull { it.toIntOrNull() }
+        return if (p.size == 3) intArrayOf(p[0], p[1], p[2]) else null
+    }
+    fun parseTime(s: String): IntArray? {
+        val p = s.split(":").mapNotNull { it.toIntOrNull() }
+        return if (p.size == 2) intArrayOf(p[0], p[1]) else null
+    }
+    fun at(y: Int, m: Int, d: Int, h: Int, mi: Int): java.util.Date =
+        java.util.Calendar.getInstance(locale).apply { clear(); set(y, m - 1, d, h, mi, 0) }.time
+    val twentyFour = KayaFormat.twentyFourHours(context, locale)
+    fun hourSkeleton(l: String): String = when (l) {
+        "short" -> if (twentyFour) "Hm" else "hm"
+        "long" -> if (twentyFour) "Hmsz" else "hmsz"
+        else -> if (twentyFour) "Hms" else "hms"
+    }
+    fun dateSkeleton(l: String): String = when (l) {
+        "short" -> "yyMd"
+        "long" -> "yMMMMd"
+        else -> "yMMMd"
+    }
+    fun platformPattern(skeleton: String): String =
+        android.text.format.DateFormat.getBestDateTimePattern(locale, skeleton)
+    fun bySkeleton(skeleton: String): android.icu.text.DateFormat =
+        android.icu.text.SimpleDateFormat(platformPattern(skeleton), android.icu.util.ULocale.forLocale(locale))
+    fun byJavaText(skeleton: String): java.text.DateFormat =
+        java.text.SimpleDateFormat(platformPattern(skeleton), locale)
+    return when (kind) {
+        "date" -> {
+            val d = parseDate(value) ?: return ""
+            java.text.DateFormat.getDateInstance(style(length), locale).format(at(d[0], d[1], d[2], 12, 0))
+        }
+        "date_weekday" -> {
+            val d = parseDate(value) ?: return ""
+            bySkeleton("EEEdMMM").format(at(d[0], d[1], d[2], 12, 0))
+        }
+        "time" -> {
+            val t = parseTime(value) ?: return ""
+            byJavaText(hourSkeleton(length)).format(at(2000, 1, 1, t[0], t[1]))
+        }
+        "date_time" -> {
+            val halves = value.split("T")
+            if (halves.size != 2) return ""
+            val d = parseDate(halves[0]) ?: return ""
+            val t = parseTime(halves[1]) ?: return ""
+            byJavaText(dateSkeleton(length) + hourSkeleton(length)).format(at(d[0], d[1], d[2], t[0], t[1]))
+        }
+        "number", "percent" -> {
+            val v = value.toDoubleOrNull() ?: return ""
+            val n = if (kind == "percent") java.text.NumberFormat.getPercentInstance(locale)
+            else java.text.NumberFormat.getInstance(locale)
+            n.isGroupingUsed = true
+            n.format(v)
+        }
+        "currency" -> {
+            val parts = value.split(":")
+            if (parts.size != 2) return ""
+            val v = parts[0].toDoubleOrNull() ?: return ""
+            val cur = try { java.util.Currency.getInstance(parts[1]) } catch (e: IllegalArgumentException) { return "" }
+            val n = java.text.NumberFormat.getCurrencyInstance(locale)
+            n.currency = cur
+            n.minimumFractionDigits = cur.defaultFractionDigits
+            n.maximumFractionDigits = cur.defaultFractionDigits
+            n.format(v)
+        }
+        else -> ""
+    }
+}
+
 internal fun kayaTagDigest(tag: ByteArray): String {
     val head = tag.take(8).joinToString("") { "%02x".format(it) }
     return "${tag.size}B/$head"
@@ -1905,6 +2084,42 @@ object KayaCompose {
     }
 
     /**
+     * The two compliance knobs (docs/compliance-plan.md §2.1, §2.2;
+     * tools/check-appearance.py's text-scale clauses). UNSET RECORDS
+     * NOTHING; a scale outside 1.0..3.1 dies naming the range, and a
+     * locale the core did not install before this mount dies naming both
+     * readings — the process default is what every formatter reads and it
+     * had to be set before the app thread existed (KayaFormat.installLocale,
+     * called by Kaya.attach).
+     */
+    internal var textScaleOverride: Double? = null
+    internal var localeOverride: String? = null
+
+    private fun readComplianceKnobs() {
+        System.getenv("KAYA_TEXT_SCALE")?.let { want ->
+            val factor = want.toDoubleOrNull()
+            check(factor != null && factor >= 1.0 && factor <= 3.1) {
+                "kaya: KAYA_TEXT_SCALE=$want is not a factor in 1.0..=3.1"
+            }
+            textScaleOverride = factor
+        }
+        System.getenv("KAYA_LOCALE")?.let { tag ->
+            val got = java.util.Locale.getDefault().toLanguageTag()
+            check(got.equals(tag, ignoreCase = true)) {
+                "kaya: KAYA_LOCALE=$tag but the platform reads $got: the core did not install " +
+                    "the knob before this process's locale was read"
+            }
+            localeOverride = tag
+        }
+    }
+
+    /** What text scale is asked for: the knob, or nothing (the platform's own). */
+    internal fun textScaleAsked(): Double? = textScaleOverride
+
+    /** What locale is asked for: the knob, or nothing (the platform's own). */
+    internal fun localeAsked(): String? = localeOverride
+
+    /**
      * THE WINDOW BACKGROUND HALF, the half `isSystemInDarkTheme()` cannot
      * move: without it the MANIFEST theme's background stays light behind
      * the composition's insets, the measured half-dark app D1 fixed.
@@ -1962,6 +2177,7 @@ object KayaCompose {
         // theme's again (tools/check-appearance.py).
         readAppearanceOverride()
         installAppearanceBackground(activity, appearanceAsked())
+        readComplianceKnobs()
         // THE LAG-FREE HALF OF THE STRAGGLER-BACK GATE
         // (KayaHarnessAccessibility.dismiss): a dialog on top means this
         // activity is PAUSED, and onActivityResult precedes onResume by
@@ -2015,7 +2231,7 @@ object KayaCompose {
         refreshNavTitle()
         // The ONE place this backend's theme is installed: every scene,
         // dialog and dropdown is a sub-composition of this one.
-        activity.setContent { KayaAppearance { KayaTheme { KayaRoot() } } }
+        activity.setContent { KayaAppearance { KayaCompliance { KayaTheme { KayaRoot() } } } }
         // A LIVE DIALOG OUTLIVES THE ACTIVITY THAT LAUNCHED IT: the
         // result belongs to the ActivityRecord, which a recreation
         // keeps, and androidx holds it under the launcher's key
@@ -7513,8 +7729,10 @@ object KayaCompose {
                         else kayaAwaitAnswer(answered)
                     }
                     "expect" -> {
-                        val want = quoted(parts.drop(2))
-                        if (want.contains("{fmt:")) depthStub("format")
+                        // `{fmt:…}` is this platform's own formatter's answer,
+                        // asked independently of the door (kayaExpandTemplate).
+                        val template = kayaExpandTemplate(activity, quoted(parts.drop(2)))
+                        val want = template.text
                         // The target kind picks the observation —
                         // harness.rs's routing. THE TEXT KINDS READ THE
                         // WIDGET, not the model mirror: `TextFieldState`
@@ -7548,6 +7766,7 @@ object KayaCompose {
                             else target(parts[1], "label", KayaSceneModel.labels)?.text
                         }
                         when {
+                            template.refused != null -> failures.add(template.refused)
                             got == null -> failures.add("no such target ${parts[1]}")
                             got == want -> observed.add(got)
                             else -> failures.add("${parts[1]} reads \"$got\", wanted \"$want\"")
@@ -8384,12 +8603,83 @@ object KayaCompose {
                             failures.add("no sheet live, wanted \"$want\"")
                         }
                     }
-                    "expect_text_scale" -> depthStub("format")
-                    "expect_no_clipping" -> depthStub("format")
-                    "expect_direction" -> depthStub("format")
-                    "expect_mirrored" -> depthStub("format")
-                    "expect_locale" -> depthStub("format")
-                    "expect_script" -> depthStub("format")
+                    "expect_text_scale" -> {
+                        // The TOOLKIT's factor — the root's LocalDensity.fontScale,
+                        // the setting every sp converts through — never the knob
+                        // (docs/compliance-plan.md §2.1, U8).
+                        val want = parts[1].toDoubleOrNull() ?: -1.0
+                        val got = onUi(activity) { kayaRootFontScale }
+                        if (Math.abs(got - want) <= 0.01) {
+                            observed.add("text scale ${parts[1]}")
+                        } else {
+                            failures.add("text scale $got, wanted ${parts[1]}")
+                        }
+                    }
+                    "expect_no_clipping" -> {
+                        val (clipped, measured) = onUi(activity) { kayaClippingReport(kayaLivePresentedIds()) }
+                        if (clipped.isEmpty()) {
+                            observed.add("no clipping ($measured labels measured)")
+                        } else {
+                            failures.add("clipped: $clipped")
+                        }
+                    }
+                    "expect_direction" -> {
+                        val want = parts[1]
+                        val got = onUi(activity) {
+                            if (kayaRootDirection == LayoutDirection.Rtl) "rtl" else "ltr"
+                        }
+                        if (got == want) {
+                            observed.add("direction $want")
+                        } else {
+                            failures.add("direction $got, wanted $want")
+                        }
+                    }
+                    "expect_mirrored" -> {
+                        // Geometry: the row's first child at the trailing edge.
+                        val verdict = onUi(activity) {
+                            val row = target(parts[1], "row", KayaSceneModel.rows)
+                            val kids = row?.laidOut
+                            when {
+                                row == null -> "no such row"
+                                kids == null || kids.size < 2 -> "the row has ${kids?.size ?: 0} child(ren)"
+                                else -> {
+                                    val first = kayaCellLefts[kids.first().id]
+                                    val last = kayaCellLefts[kids.last().id]
+                                    if (first == null || last == null) "no frame recorded for the row's children"
+                                    else if (first > last) ""
+                                    else "first child at x=${first.toInt()}, last at x=${last.toInt()}"
+                                }
+                            }
+                        }
+                        if (verdict.isEmpty()) {
+                            observed.add("${parts[1]} mirrored")
+                        } else {
+                            failures.add("${parts[1]} not mirrored: $verdict")
+                        }
+                    }
+                    "expect_locale" -> {
+                        // The composition's own locale, the configuration every
+                        // composable resolves under — never the knob.
+                        val want = parts[1]
+                        val got = onUi(activity) { kayaRootLocale?.toLanguageTag() ?: "" }
+                        if (got.equals(want, ignoreCase = true)) {
+                            observed.add("locale $want")
+                        } else {
+                            failures.add("locale $got, wanted $want")
+                        }
+                    }
+                    "expect_script" -> {
+                        val want = parts[2]
+                        val text = onUi(activity) { target(parts[1], "label", KayaSceneModel.labels)?.text }
+                        val found = text?.let { kayaScriptOf(it) }
+                        when {
+                            text == null -> failures.add("${parts[1]}: no such label")
+                            found == want -> observed.add("${parts[1]} in $want")
+                            found != null ->
+                                failures.add("${parts[1]} reads ${kayaDebugQuoted(text)}, whose letters are $found, wanted $want")
+                            else -> failures.add("${parts[1]} reads ${kayaDebugQuoted(text)}, which has no letters")
+                        }
+                    }
                     "expect_sheet_detent" -> {
                         // The platform's own anchor: the partial one is
                         // medium, the expanded one large.
@@ -9260,10 +9550,11 @@ object KayaCompose {
                         else failures.add("$got menus, wanted $want")
                     }
                     "expect_ax" -> {
-                        val want = quoted(parts.drop(2))
-                        if (want.contains("{fmt:")) depthStub("format")
+                        val template = kayaExpandTemplate(activity, quoted(parts.drop(2)))
+                        val want = template.text
                         val node = kayaWidgetTarget(parts[1])
                         when {
+                            template.refused != null -> failures.add(template.refused)
                             node == null ->
                                 failures.add("no such target ${parts[1]}")
                             node.a11yId.isEmpty() ->
@@ -12663,6 +12954,7 @@ private fun KayaRenderCore(
                         Modifier.onGloballyPositioned {
                             kayaMainExtents[child.id] = it.size.width.toDouble()
                             kayaDrawnExtents[child.id] = it.size.width.toDouble()
+                            kayaCellLefts[child.id] = it.positionInRoot().x.toDouble()
                             kayaCrossRects[child.id] = Pair(
                                 it.positionInParent().y.toDouble(),
                                 it.size.height.toDouble(),
@@ -12696,6 +12988,7 @@ private fun KayaRenderCore(
                 node.laidOut.forEach { child ->
                     var cell = Modifier.onGloballyPositioned {
                         kayaMainExtents[child.id] = it.size.width.toDouble()
+                        kayaCellLefts[child.id] = it.positionInRoot().x.toDouble()
                         kayaCrossRects[child.id] = Pair(
                             it.positionInParent().y.toDouble(),
                             it.size.height.toDouble(),
@@ -12885,6 +13178,7 @@ private fun KayaRenderCore(
                     },
                     color = if (node.role == KayaCompose.ROLE_CAPTION)
                         MaterialTheme.colorScheme.onSurfaceVariant else Color.Unspecified,
+                    onTextLayout = { kayaLabelLayouts[node.id] = it },
                     modifier = base,
                 )
             } else
@@ -12901,7 +13195,7 @@ private fun KayaRenderCore(
                     // this label takes its style from `typography`, so
                     // it goes on reading the platform face if the
                     // theme's first write is missing.
-                    onTextLayout = { kayaTypefaceSites["heading"] = it },
+                    onTextLayout = { kayaTypefaceSites["heading"] = it; kayaLabelLayouts[node.id] = it },
                     modifier = boxFill.then(a11y).semantics { heading() },
                 )
             } else if (node.role == KayaCompose.ROLE_CAPTION) {
@@ -12913,7 +13207,7 @@ private fun KayaRenderCore(
                     node.text,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    onTextLayout = { kayaTypefaceSites["caption"] = it },
+                    onTextLayout = { kayaTypefaceSites["caption"] = it; kayaLabelLayouts[node.id] = it },
                     modifier = boxFill.then(a11y),
                 )
             } else if (node.role == KayaCompose.ROLE_LINK) {
@@ -12937,6 +13231,7 @@ private fun KayaRenderCore(
                             append(node.text)
                         }
                     },
+                    onTextLayout = { kayaLabelLayouts[node.id] = it },
                     modifier = boxFill.then(a11y)
                         .semantics(mergeDescendants = true) { this[KayaAxKind] = "link" },
                 )
@@ -12951,7 +13246,7 @@ private fun KayaRenderCore(
                 // LocalTextStyle, the write the ramp cannot stand in for.
                 Text(
                     node.text,
-                    onTextLayout = { kayaTypefaceSites["label"] = it },
+                    onTextLayout = { kayaTypefaceSites["label"] = it; kayaLabelLayouts[node.id] = it },
                     modifier = boxFill.then(a11y),
                 )
             }
@@ -14075,6 +14370,23 @@ internal fun kayaApplyTypeface(
  */
 val kayaTypefaceSites = HashMap<String, androidx.compose.ui.text.TextLayoutResult>()
 
+/**
+ * Every label's own text layout, by node id, written in `onTextLayout` —
+ * `expect_no_clipping` reads `hasVisualOverflow` off it (docs/compliance-plan.md
+ * §4, U8), the only place the answer is true.
+ */
+val kayaLabelLayouts = HashMap<Long, androidx.compose.ui.text.TextLayoutResult>()
+
+/** Each flex cell's left edge in ROOT coordinates — what `expect_mirrored`
+ * compares between a row's first and last child. */
+val kayaCellLefts = HashMap<Long, Double>()
+
+/** The root composition's resolved font scale, layout direction and
+ * locale — the toolkit's readings for the three compliance verbs. */
+var kayaRootFontScale = 1.0
+var kayaRootDirection: LayoutDirection = LayoutDirection.Ltr
+var kayaRootLocale: java.util.Locale? = null
+
 /** The last face identity this process printed, so the read below logs
  *  ONE LINE PER STATE CHANGE. `expect_typeface` is a bounded retry like
  *  every observation, so a line per read is a thousand lines per failing
@@ -14296,6 +14608,53 @@ internal fun KayaAppearance(content: @Composable () -> Unit) {
 }
 
 /**
+ * THE COMPOSITION HALF of the two compliance knobs (docs/compliance-plan.md
+ * §2.1, §2.2; docs/measurements/compliance-probes-2026-09-21.md U8): the
+ * text scale is `fontScale` on the forced Configuration AND a Density
+ * carrying it, since every `sp` converts through LocalDensity and Android
+ * 14's non-linear scaling applies through Compose's own Density; the
+ * locale is `setLocales` plus `setLayoutDirection(locale)` on the same
+ * Configuration AND LocalLayoutDirection beside it, since Compose takes
+ * its direction from the view and not from the configuration it composes
+ * under. Nothing asked provides nothing. The process default the
+ * formatters read is the core's install (KayaFormat.installLocale).
+ */
+@Composable
+internal fun KayaCompliance(content: @Composable () -> Unit) {
+    val scale = KayaCompose.textScaleAsked()
+    val locale = KayaCompose.localeAsked()
+    if (scale == null && locale == null) {
+        content()
+        return
+    }
+    val base = LocalConfiguration.current
+    val density = LocalDensity.current
+    val compliant = remember(base, scale, locale) {
+        Configuration(base).apply {
+            if (scale != null) fontScale = scale.toFloat()
+            if (locale != null) {
+                val l = java.util.Locale.forLanguageTag(locale)
+                setLocales(android.os.LocaleList(l))
+                setLayoutDirection(l)
+            }
+        }
+    }
+    val compliantDensity = remember(density, scale) {
+        if (scale == null) density else Density(density.density, scale.toFloat())
+    }
+    val direction =
+        if (locale == null) LocalLayoutDirection.current
+        else if (compliant.layoutDirection == android.view.View.LAYOUT_DIRECTION_RTL) LayoutDirection.Rtl
+        else LayoutDirection.Ltr
+    CompositionLocalProvider(
+        LocalConfiguration provides compliant,
+        LocalDensity provides compliantDensity,
+        LocalLayoutDirection provides direction,
+        content = content,
+    )
+}
+
+/**
  * THE THEME ROOT, where this backend's appearance is decided, from three
  * inputs none of which are assumed: the brand SEED, the APPEARANCE and
  * the CONTRAST level (MDC #3524). MaterialTheme ALSO PROVIDES A TEXT
@@ -14396,6 +14755,17 @@ fun KayaRoot() {
     // where composition provides one (expect_fills sums it between
     // tracks).
     kayaDensity = LocalDensity.current.density.toDouble()
+    // THE COMPLIANCE READS (docs/compliance-plan.md §4), taken at the root
+    // from the locals every composable below reads — the toolkit's own
+    // resolution, never the knob — and the text scale reported to the core.
+    kayaRootFontScale = LocalDensity.current.fontScale.toDouble()
+    kayaRootDirection = LocalLayoutDirection.current
+    kayaRootLocale = LocalConfiguration.current.locales[0]
+    val reportedTextScale = kayaRootFontScale
+    LaunchedEffect(reportedTextScale) {
+        Log.i("kaya", "KAYA_TEXT_SCALE: $reportedTextScale")
+        KayaPresent.textScaleReport(reportedTextScale)
+    }
     // THE WINDOW'S SCALE AND APPEARANCE, reported to the core, which
     // re-rasters every canvas at them (docs/canvas-plan.md §5, §6); no
     // platform colour reaches a drawing. COMPOSITION IS THE CHANNEL, so

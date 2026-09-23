@@ -298,6 +298,13 @@ object KayaPresent {
     @JvmStatic external fun presentation(scale: Double, dark: Boolean)
 
     /**
+     * The toolkit's font scale as the root composition read it
+     * (docs/compliance-plan.md §2.1): the core latches it for
+     * `kaya_text_scale`. kaya_text_scale_report's JNI spelling.
+     */
+    @JvmStatic external fun textScaleReport(factor: Double)
+
+    /**
      * One canvas's CANONICAL raster: `"<16 hex> <ops>/<l>,<t>,<r>,<b>"`,
      * or `""` for an id no drawn canvas has (docs/canvas-plan.md §7.1).
      * Canonical is scale 1.0 and the light palette, pinned by the core

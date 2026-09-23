@@ -97,6 +97,10 @@ LEGS = {
         # the harness's format verb.
         "richrows-compose",
         "sheet-compose",
+        # The formatter door and the catalog (docs/compliance-plan.md §6):
+        # rust-only until the eight bindings' fmt lands, the same guest
+        # under the everyday locale and two more through SCENE_LOCALE.
+        "format-compose", "formatde-compose", "formatar-compose",
     ],
     "jvm": [
         "jvm", "a11y-jvm", "entry-jvm",
@@ -136,6 +140,11 @@ LEGS = {
         "varied-python", "portfolio-python",
     ],
 }
+
+# The locale a scene runs under, the knob the leg carries as an intent
+# extra (docs/compliance-plan.md §4); the reads ask the platform, never
+# this.
+SCENE_LOCALE = {"formatde": "de-DE", "formatar": "ar-EG"}
 
 # THE PLATFORM'S OWN DOOR FOR A SECOND ACT (docs/tasks-s9-plan.md R6, R7),
 # per scene that carries a `relaunch`: this lane's is a real tap on the

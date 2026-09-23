@@ -53,8 +53,15 @@ than a verb of its own. What breadth still owes, held open here:
     generated locales, the format legs under three locales on both regimes.
   - **DEPTH STUB: format on winui** — the Windows.Globalization arm and
     the reads (§2.3's Windows row, U3, U5, U11).
-  - **DEPTH STUB: format on compose** — the android.icu arm over JNI and
-    the reads (§2.3's Android row, U8, U10).
+  - ~~**DEPTH STUB: format on compose**~~ — LANDED 2026-09-23: the
+    android.icu arm over JNI (KayaFormat.kt, every time through the
+    `Hm`/`hm` skeleton under the platform's 24-hour setting), the six reads
+    off the root composition's own locals, the knobs as one `KayaCompliance`
+    composable beside `KayaAppearance` (the locale's process default
+    installed by the core at attach, before the app thread), the
+    `{fmt:…}` template answered by java.text and the platform's text-format
+    class, the three format legs on the android lane, check-appearance's
+    Compose clauses with three more watched negatives.
 
 ## ~~BUILD — sheets: the root-hosting modal (design pass approved 2026-09-21)~~ COMPLETE 2026-09-21: depth on the mac, breadth on all five lanes in nine languages, the task manager's quick-add sheet (S6) and the review page (https://claude.ai/artifact/549v7HfaFeTJv4rVuLt8RF) with the shared scene and the quick-add captured on every lane, each viewed before publication; the depth and breadth matrices ran ALL PASS and S6's ran with its closing commit
 KEY: sheet, present_sheet, dismiss_sheet, sheet_dismissed, dismiss_requested, intercept_dismiss, detent, SHEET_PROPS, expect_sheets, expect_sheet, expect_sheet_detent, AdwDialog, ModalBottomSheet, presentationDetents, Popup, sheetprobe, quick-add sheet

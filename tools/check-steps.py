@@ -651,8 +651,8 @@ def target_surfaces(harness_src=None, swift_src=None, kotlin_src=None):
                      "private fun startSelftest(", TARGET_KOTLIN)
     if kmount is not None:
         render = kmount.find(
-            "activity.setContent { KayaAppearance { KayaTheme { "
-            "KayaRoot() } } }")
+            "activity.setContent { KayaAppearance { KayaCompliance { "
+            "KayaTheme { KayaRoot() } } } }")
         admit = kmount.find("admitSelftestOnFirstDraw(activity)")
         if render < 0 or admit < render \
                 or "startSelftest(activity)" in kmount:

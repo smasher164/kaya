@@ -50,6 +50,12 @@ static APP_CONTEXT: std::sync::OnceLock<jni::objects::GlobalRef> = std::sync::On
 static PREFS_CLASS: std::sync::OnceLock<jni::objects::GlobalRef> =
     std::sync::OnceLock::new();
 
+/// dev.kaya.KayaFormat, the formatter door's arm (fmt.rs's android
+/// module), resolved beside KayaAssets for the same reason: the door is
+/// called from the APP THREAD.
+static FORMAT_CLASS: std::sync::OnceLock<jni::objects::GlobalRef> =
+    std::sync::OnceLock::new();
+
 /// The app's private files directory as the host handed it in
 /// (`Kaya.attach(activity, stateRoot)`), which is `app_data_dir()`'s
 /// answer here: only a Context knows it, so nothing may guess.
@@ -125,6 +131,10 @@ pub fn attach(
     if !claim_attach() {
         return PRESENT_GUEST;
     }
+
+    // THE LOCALE KNOB FIRST, before the app thread exists (lib.rs's `run`
+    // does the same on the other platforms; docs/compliance-plan.md §2.2).
+    crate::fmt::install_locale_knob();
 
     // BEFORE THE APP THREAD, because a process the tap started has no
     // scene in its environment and the guest reads its scene from
@@ -269,6 +279,20 @@ fn remember_context(env: &mut JNIEnv, activity: &JObject) {
                 let _ = env.exception_clear();
             }
             log::warn!("kaya: dev.kaya.KayaAssets did not resolve ({e}); this process cannot read its own APK's assets");
+        }
+    }
+    match env.find_class("dev/kaya/KayaFormat") {
+        Ok(class) => {
+            if let Ok(global) = env.new_global_ref(&class) {
+                let _ = FORMAT_CLASS.set(global);
+            }
+        }
+        Err(e) => {
+            if env.exception_check().unwrap_or(false) {
+                let _ = env.exception_describe();
+                let _ = env.exception_clear();
+            }
+            log::warn!("kaya: dev.kaya.KayaFormat did not resolve ({e}); the formatter door will refuse");
         }
     }
     match env.find_class("dev/kaya/KayaPrefs") {
@@ -523,6 +547,51 @@ pub(crate) fn pref_clear() {
         &[(context.as_obj()).into(), (&domain).into()],
     );
     pref_threw(&mut env, "clear");
+}
+
+/// One call into dev.kaya.KayaFormat (fmt.rs's android module): the
+/// application Context first when `with_context`, then `args`, then `text`
+/// as a String when given; the answer is the method's String. THE DOOR
+/// REFUSES OUT LOUD — a formatter that answered "" for a missing class
+/// would ship an empty date label with every lane green.
+pub(crate) fn format_call(
+    name: &str,
+    sig: &str,
+    with_context: bool,
+    args: &[jni::objects::JValue<'_, '_>],
+    text: Option<&str>,
+) -> String {
+    let (Some(vm), Some(class), Some(context)) = (JVM.get(), FORMAT_CLASS.get(), APP_CONTEXT.get())
+    else {
+        panic!(
+            "kaya: fmt::{name} before dev.kaya.KayaFormat was resolved — the formatter door \
+             is reachable only after Kaya.attach (crates/kaya/src/android.rs)"
+        );
+    };
+    let mut env = vm.attach_current_thread().expect("kaya: attaching the formatter's thread to the JVM");
+    let mut all: Vec<jni::objects::JValue<'_, '_>> = Vec::with_capacity(args.len() + 2);
+    if with_context {
+        all.push(context.as_obj().into());
+    }
+    all.extend_from_slice(args);
+    let string_arg = text.map(|s| env.new_string(s).expect("kaya: a formatter argument as a Java string"));
+    if let Some(s) = string_arg.as_ref() {
+        all.push(s.into());
+    }
+    let called = env.call_static_method(class, name, sig, &all);
+    if env.exception_check().unwrap_or(false) {
+        let _ = env.exception_describe();
+        let _ = env.exception_clear();
+        panic!("kaya: dev.kaya.KayaFormat.{name} threw (the exception is in logcat above)");
+    }
+    let obj = called
+        .and_then(|v| v.l())
+        .unwrap_or_else(|e| panic!("kaya: dev.kaya.KayaFormat.{name} answered no object ({e})"));
+    assert!(!obj.is_null(), "kaya: dev.kaya.KayaFormat.{name} answered null");
+    let text: jni::objects::JString = obj.into();
+    env.get_string(&text)
+        .map(Into::into)
+        .unwrap_or_else(|e| panic!("kaya: dev.kaya.KayaFormat.{name}'s answer did not read ({e})"))
 }
 
 /// A pending exception is read, described and cleared HERE: left standing
@@ -798,6 +867,11 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 name: "presentation".into(),
                 sig: "(DZ)V".into(),
                 fn_ptr: present_presentation as *mut _,
+            },
+            NativeMethod {
+                name: "textScaleReport".into(),
+                sig: "(D)V".into(),
+                fn_ptr: present_text_scale_report as *mut _,
             },
             NativeMethod {
                 name: "canvasProbe".into(),
@@ -1350,6 +1424,12 @@ extern "system" fn present_presentation(
     dark: jni::sys::jboolean,
 ) {
     crate::capi::kaya_presentation(scale, dark != 0);
+}
+
+/// KayaPresent.textScaleReport: the toolkit's font scale as the root
+/// composition read it (docs/compliance-plan.md §2.1).
+extern "system" fn present_text_scale_report(_env: JNIEnv, _class: JClass, factor: jni::sys::jdouble) {
+    crate::capi::kaya_text_scale_report(factor);
 }
 
 /// KayaPresent.canvasProbe: one canvas's canonical raster, as the ASCII

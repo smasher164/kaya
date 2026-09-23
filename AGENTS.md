@@ -1021,10 +1021,21 @@ in docs/deferred.md.
    the knob second, nothing third, and nothing puts the platform's default
    back — the asked function is held to falling through to the knob for
    the system choice, and the `expect_appearance` readers are held to the
-   toolkit, never the prop or the knob. Seventeen watched negatives,
-   counts printed. The runtime halves are the legs:
-   `canvas-*` is the unset proof and `canvasdark-*` the set proof, on all
-   five lanes, and the tasks scene's Dark-then-System round trip),
+   toolkit, never the prop or the knob.
+   AND THE TWO COMPLIANCE KNOBS SINCE 2026-09-23 (docs/compliance-plan.md
+   §2.1, §2.2), the appearance's twins with the same two failure shapes:
+   `KAYA_TEXT_SCALE` installed with the variable unset moves every leg to
+   a scale that is 1.0, which every lane already is, and a read-back that
+   echoed the knob would pass the tasksbig leg with every label still at
+   17pt. So each install site is dominated by its asked function (iOS's
+   trait override, GTK's xft dpi, Compose's `KayaCompliance` with its
+   forced Configuration, Density and LocalLayoutDirection under one inert
+   clause) and the `expect_text_scale`, `expect_direction` and
+   `expect_locale` readers may not name the knob or its asked function.
+   Twenty-six watched negatives, counts printed. The runtime halves are
+   the legs: `canvas-*` is the unset proof and `canvasdark-*` the set
+   proof, on all five lanes, the tasks scene's Dark-then-System round trip,
+   and the `format*` legs under three locales),
    `tools/check-abort.py` (uniform abort
    semantics, all languages. AND THE IDIOM PASS'S COMPILE-TIME WALLS
    SINCE 2026-09-16: the OCaml fixtures under bindings/ocaml/checks/negatives

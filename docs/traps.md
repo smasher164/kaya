@@ -12542,3 +12542,26 @@ requests. The load qualification, raw readings and test scope are in
 docs/measurements/winui-table-pixels-2026-09-18.md. The temporary chrome probe
 was removed after recording this evidence; the stamp trace and bounded
 layout-report fallback remain.
+
+## Android's java.text writes a plain space before AM where android.icu writes U+202F (measured 2026-09-23)
+
+The Compose arm of the formatter door (android/kaya/src/main/kotlin/dev/kaya/KayaFormat.kt)
+writes a short time through `android.icu`, and the harness's first
+independent spelling of `{fmt:time …}` went through `java.text`. The two
+agreed on every date, number and currency and disagreed on the time by one
+byte: `8:30\u202fAM` from ICU, `8:30 AM` from java.text
+(docs/measurements/compliance-probes-2026-09-21.md, the Compose arm's first
+run). CLDR 42+ puts the narrow no-break space before the day period; the
+platform's own time APIs write a plain space — java.text's patterns and
+`android.text.format.DateFormat.getBestDateTimePattern`'s pattern alike,
+measured on two runs — and only ICU's `getInstanceForSkeleton` keeps
+U+202F (CoreFoundation on the Apple lanes keeps it too, so a mac time and
+an Android time differ by that byte; expectations are per platform).
+Nothing renders differently, and a scene compares bytes. The door's time
+family takes the platform's pattern through ICU's SimpleDateFormat
+(`KayaFormat.byPlatformPattern`), which is what the platform's own text
+APIs write, and the harness's second spelling is java.text over the same platform
+pattern (`getTimeFormat(context)` reads the activity's locale, the
+system's, and answered English under the Arabic knob). A door arm that reached for `getInstanceForSkeleton` for a time
+would go red on the everyday leg by one invisible byte, which is the
+right red.

@@ -206,7 +206,9 @@ fn app(ctx: kaya::AppCtx) {
         Ok("pickers") => pickers::app(ctx),
         Ok("sliders") => sliders::app(ctx),
         Ok("sheet") => sheet::app(ctx),
-        Ok("format") => format::app(ctx),
+        // One guest under three locales (tools/lib/lanes/android.py's
+        // SCENE_LOCALE): a scene selects a SCRIPT, never an app.
+        Ok("format") | Ok("formatde") | Ok("formatar") => format::app(ctx),
         Ok("tooltips") => tooltips::app(ctx),
         Ok("search") => search::app(ctx),
         Ok("tasks") => tasks::app(ctx),

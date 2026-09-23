@@ -808,13 +808,145 @@ mod platform {
     fn _unused(_: c_long) {}
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "linux")))]
+/// Android's own formatter, `android.icu`, over JNI into
+/// dev.kaya.KayaFormat (android/kaya/src/main/kotlin/dev/kaya/KayaFormat.kt;
+/// docs/compliance-plan.md §2.3's Android row, U10). Every time goes
+/// through the platform's 24-hour SETTING, which ICU alone does not read
+/// (docs/measurements/compliance-probes-2026-09-21.md).
+#[cfg(target_os = "android")]
+mod platform {
+    use super::{Date, Direction, HourCycle, Length, LocaleInfo, NumberOptions, Time};
+    use crate::android::format_call;
+    use jni::objects::JValue;
+
+    const STRING: &str = "Ljava/lang/String;";
+
+    fn code(length: Length) -> JValue<'static, 'static> {
+        JValue::Int(match length {
+            Length::Short => 0,
+            Length::Medium => 1,
+            Length::Long => 2,
+        })
+    }
+
+    fn digits(options: NumberOptions) -> [JValue<'static, 'static>; 3] {
+        [
+            JValue::Int(options.min_fraction_digits.map_or(-1, i32::from)),
+            JValue::Int(options.max_fraction_digits.map_or(-1, i32::from)),
+            JValue::Bool(u8::from(options.grouping)),
+        ]
+    }
+
+    pub(super) fn date(d: Date, length: Length) -> String {
+        format_call(
+            "date",
+            &format!("(IIII){STRING}"),
+            false,
+            &[JValue::Int(d.year), JValue::Int(d.month.into()), JValue::Int(d.day.into()), code(length)],
+            None,
+        )
+    }
+
+    pub(super) fn date_weekday(d: Date) -> String {
+        format_call(
+            "dateWeekday",
+            &format!("(III){STRING}"),
+            false,
+            &[JValue::Int(d.year), JValue::Int(d.month.into()), JValue::Int(d.day.into())],
+            None,
+        )
+    }
+
+    pub(super) fn time(t: Time, length: Length) -> String {
+        format_call(
+            "time",
+            &format!("(Landroid/content/Context;III){STRING}"),
+            true,
+            &[JValue::Int(t.hour.into()), JValue::Int(t.minute.into()), code(length)],
+            None,
+        )
+    }
+
+    pub(super) fn date_time(d: Date, t: Time, length: Length) -> String {
+        format_call(
+            "dateTime",
+            &format!("(Landroid/content/Context;IIIIII){STRING}"),
+            true,
+            &[
+                JValue::Int(d.year),
+                JValue::Int(d.month.into()),
+                JValue::Int(d.day.into()),
+                JValue::Int(t.hour.into()),
+                JValue::Int(t.minute.into()),
+                code(length),
+            ],
+            None,
+        )
+    }
+
+    pub(super) fn number(value: f64, options: NumberOptions) -> String {
+        let [min, max, grouping] = digits(options);
+        format_call(
+            "number",
+            &format!("(DIIZ){STRING}"),
+            false,
+            &[JValue::Double(value), min, max, grouping],
+            None,
+        )
+    }
+
+    pub(super) fn percent(value: f64, options: NumberOptions) -> String {
+        let [min, max, grouping] = digits(options);
+        format_call(
+            "percent",
+            &format!("(DIIZ){STRING}"),
+            false,
+            &[JValue::Double(value), min, max, grouping],
+            None,
+        )
+    }
+
+    pub(super) fn currency(value: f64, code: &str) -> String {
+        format_call(
+            "currency",
+            &format!("(D{STRING}){STRING}"),
+            false,
+            &[JValue::Double(value)],
+            Some(code),
+        )
+    }
+
+    pub(super) fn locale() -> LocaleInfo {
+        let line = format_call("locale", &format!("(Landroid/content/Context;){STRING}"), true, &[], None);
+        let mut parts = line.split(' ');
+        let tag = parts.next().unwrap_or("en-US").to_owned();
+        let hour_cycle = if parts.next() == Some("h23") { HourCycle::H23 } else { HourCycle::H12 };
+        let first_weekday = parts.next().and_then(|s| s.parse().ok()).unwrap_or(1);
+        let calendar = parts.next().unwrap_or("gregorian").to_owned();
+        let numbering = parts.next().unwrap_or("latn").to_owned();
+        LocaleInfo { tag, hour_cycle, first_weekday, calendar, numbering }
+    }
+
+    /// The process default, which every ICU and java.text formatter
+    /// reads; the composition's half (the forced Configuration and layout
+    /// direction) is KayaCompose's own reading of the knob.
+    pub(super) fn install_locale(tag: &str, direction: Direction) {
+        let got = format_call("installLocale", &format!("({STRING}){STRING}"), false, &[], Some(tag));
+        assert!(
+            got.eq_ignore_ascii_case(tag),
+            "kaya: KAYA_LOCALE={tag} but the platform reads {got} back after Locale.setDefault"
+        );
+        let _ = direction;
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "linux", target_os = "android")))]
 mod platform {
     use super::{Date, Length, LocaleInfo, NumberOptions, Time};
 
-    // The three arms still owed (docs/compliance-plan.md §8 step 3: gtk,
-    // winui, android). The stub tools/check-stubs.py reads is the
-    // backend's own, in its Stage impl; this is the door's floor under it.
+    // The arm still owed (docs/compliance-plan.md §8 step 3: winui). The
+    // stub tools/check-stubs.py reads is the backend's own, in its Stage
+    // impl; this is the door's floor under it.
     fn refuse() -> ! {
         panic!(
             "kaya: the formatter has no arm on this platform yet — it is a depth \

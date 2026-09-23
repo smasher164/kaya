@@ -68,6 +68,8 @@ GUARD_KT = r'System\.getenv\("KAYA_APPEARANCE"\) \?: return'
 GUARD_KT_ASKED = r"installAppearanceBackground\(\w+, appearanceAsked\(\)\)"
 # KayaAppearance's own early-out, the composition half's inert clause.
 GUARD_KT_UI = r"if \(want == null\) \{"
+# KayaCompliance's, the two compliance knobs' inert clause.
+GUARD_KT_COMPLIANCE = r"if \(scale == null && locale == null\) \{"
 
 # How far a guard may sit above the call it dominates. The character
 # window is only a cap; what actually holds "same function" is
@@ -115,12 +117,34 @@ INSTALLS = [
     (GTK, r"settings\.set_gtk_xft_dpi\(\(96\.0 \* 1024\.0 \* factor\) as i32\)",
      r"if let Some\(factor\) = crate::fmt::text_scale_override\(\) \{",
      "GTK writes the knob's factor into the toolkit's own dpi"),
+    # COMPOSE'S THREE HALVES, one composable (KayaCompliance, docs/
+    # compliance-plan.md §2.1, §2.2): the forced Configuration carries the
+    # font scale and the locale, the Density carries the scale every sp
+    # converts through, and the layout direction rides beside them since
+    # Compose takes it from the view; the one early-out is the inert clause.
+    (COMPOSE, r"LocalConfiguration provides compliant,", GUARD_KT_COMPLIANCE,
+     "Compose forces the configuration's fontScale and locales"),
+    (COMPOSE, r"LocalDensity provides compliantDensity,", GUARD_KT_COMPLIANCE,
+     "Compose's text-scale half moves the Density every sp reads"),
+    (COMPOSE, r"LocalLayoutDirection provides direction,", GUARD_KT_COMPLIANCE,
+     "Compose's direction half moves LocalLayoutDirection"),
 ]
 
 # The text-scale READ-BACK may not derive its factor from the knob
 # (clause B's twin): a read that echoed KAYA_TEXT_SCALE would make the
 # tasksbig leg self-fulfilling with every label still at 17pt.
-TEXT_SCALE_READER = (MAC, "kayaTextScaleFactor")
+TEXT_SCALE_READERS = [
+    (MAC, "func kayaTextScaleFactor", ("KAYA_TEXT_SCALE", "kayaTextScaleOverride")),
+    (COMPOSE, '"expect_text_scale" ->',
+     ("KAYA_TEXT_SCALE", "textScaleOverride", "textScaleAsked")),
+]
+
+# And the two Compose readers beside it: the direction and the locale must
+# come from the composition's own resolution, never the knob.
+COMPOSE_LOCALE_READERS = [
+    ('"expect_direction" ->', ("KAYA_LOCALE", "localeOverride", "localeAsked")),
+    ('"expect_locale" ->', ("KAYA_LOCALE", "localeOverride", "localeAsked")),
+]
 
 # The files that REPORT a presentation. None of them may name the knob
 # outside its own install site — clause B.
@@ -240,16 +264,28 @@ def census(src):
             )
 
     # --- A2. The text-scale read-back reads the toolkit, never the knob. --
-    path, fn = TEXT_SCALE_READER
-    start = code[path].find(f"func {fn}")
-    if start < 0:
-        out.append(f"{path}: no `func {fn}` — the text-scale read-back is gone")
-    else:
+    for path, needle, banned in TEXT_SCALE_READERS:
+        start = code[path].find(needle)
+        if start < 0:
+            out.append(f"{path}: no `{needle}` — the text-scale read-back is gone")
+            continue
         body = code[path][start:start + 1200]
-        if "KAYA_TEXT_SCALE" in body or "kayaTextScaleOverride" in body:
+        if any(word in body for word in banned):
             out.append(
-                f"{path}: `{fn}` derives its factor from the knob — the read-back "
+                f"{path}: `{needle}` derives its factor from the knob — the read-back "
                 f"must ask the toolkit, or the scale leg is self-fulfilling"
+            )
+    for needle, banned in COMPOSE_LOCALE_READERS:
+        start = code[COMPOSE].find(needle)
+        if start < 0:
+            out.append(f"{COMPOSE}: no `{needle}` — the locale read-back is gone")
+            continue
+        body = code[COMPOSE][start:start + 900]
+        if any(word in body for word in banned):
+            out.append(
+                f"{COMPOSE}: `{needle}` derives its answer from the knob — the "
+                f"read-back must ask the composition, or the Arabic leg is "
+                f"self-fulfilling"
             )
 
     # --- B. No reporter may report the ENV instead of the platform. ------
@@ -581,7 +617,27 @@ g.negative(
         "if let Some(factor) = Some(2.0) {", "N23")),
     want="is not guarded by",
 )
-g.negatives_ran(23)
+g.negative(
+    "N24 the Compose compliance installs no longer guarded by the inert clause",
+    lambda: census(without(
+        COMPOSE, r"if \(scale == null && locale == null\) \{", "if (false) {", "N24")),
+    want="is not guarded by",
+)
+g.negative(
+    "N25 the Compose text-scale read-back echoing the knob",
+    lambda: census(without(
+        COMPOSE, r"val got = onUi\(activity\) \{ kayaRootFontScale \}",
+        "val got = KayaCompose.textScaleAsked() ?: 1.0", "N25")),
+    want="derives its factor from the knob",
+)
+g.negative(
+    "N26 the Compose locale read-back echoing the knob",
+    lambda: census(without(
+        COMPOSE, r'val got = onUi\(activity\) \{ kayaRootLocale\?\.toLanguageTag\(\) \?: "" \}',
+        'val got = KayaCompose.localeAsked() ?: ""', "N26")),
+    want="derives its answer from the knob",
+)
+g.negatives_ran(26)
 
 # ---- The real census. --------------------------------------------------
 for line in census(src):

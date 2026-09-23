@@ -242,6 +242,27 @@ kaya's label census, and the tasks scene's picker screens will show it;
 it is Android's answer, not kaya's to fix, and the review page will show
 it as such.
 
+## The Compose arm's first run (measured 2026-09-23, emulator pool, API 35)
+
+The door over `android.icu` and the harness's first second spelling over
+`java.text`, format.steps under the everyday locale: the six other reads
+agreed byte for byte and the two TIME reads did not — `label#3 reads
+"8:30 AM", wanted "8:30 AM"`, the code points `8 : 3 0 U+202F A M` from
+the door against `8 : 3 0 U+0020 A M` from java.text. ICU's CLDR 42+ time
+patterns carry the narrow no-break space before the day period, and the
+PLATFORM writes a plain space: java.text's patterns (run 1) and
+`android.text.format.DateFormat.getBestDateTimePattern`'s answer handed to
+ICU's own SimpleDateFormat (run 2, the same two code-point lists) both put
+U+0020 there, so only ICU's `getInstanceForSkeleton` keeps U+202F;
+CoreFoundation on the Apple lanes keeps it too. `DateUtils.formatDateTime`
+and java.time were not measured. The door's time family took the
+platform's pattern (run 3 green), and the harness's time family is
+java.text over the same pattern (`getTimeFormat(context)` answered
+`8:30 AM` under the Arabic knob: it reads the activity's locale). The German and Arabic legs were
+green on the same run: `07.09.2026`, `1.234.567,891`, `1.234.567,89 $`;
+`٠٧‏/٠٩‏/٢٠٢٦`, `٧ سبتمبر ٢٠٢٦`, `٨:٣٠ ص`, `١٬٢٣٤٬٥٦٧٫٨٩١`,
+`‏١٬٢٣٤٬٥٦٧٫٨٩ US$`, direction rtl, row#0 mirrored.
+
 ## U3, U5 and U11, Windows (measured 2026-09-23, the lane's VM, an unpackaged Rust console process over the `windows` crate 0.61)
 
 **U11, Windows.Globalization from Rust, unpackaged.** Every formatter
