@@ -36,6 +36,12 @@ fearless_simd = { version = "0.4.0", default-features = false, features = ["std"
 # outline scaler share ONE font parser.
 harfrust = "0.13.3"
 skrifa = "0.46.2"
+# The catalog's resolver (docs/compliance-plan.md §2.4): Fluent's message
+# syntax, plurals from its own small CLDR table, values through fmt.rs's
+# door. Pure Rust, the concurrent bundle, one process-wide catalog.
+fluent-bundle = "0.16.0"
+unic-langid = "0.9.6"
+intl-memoizer = "0.5.3"
 
 [dev-dependencies]
 # THE EXAMPLES' DEPENDENCIES, never the library's. The task manager's
@@ -437,6 +443,10 @@ path = "../../guests/rust/sizepolicy.rs"
 [[example]]
 name = "sheet"
 path = "../../guests/rust/sheet.rs"
+
+[[example]]
+name = "format"
+path = "../../guests/rust/format.rs"
 
 # Android has no native process entry (Zygote forks and an Activity is
 # the way in), so this one is a cdylib exporting the JNI entry, not a bin.

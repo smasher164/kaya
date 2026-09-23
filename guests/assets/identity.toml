@@ -31,6 +31,11 @@ icon = "guests/assets/icons/kaya-mark.png"
 # package ids are the LANES' host ids and stay theirs.
 id = "dev.kaya.aurora.notes"
 
+# THE CATALOG'S DEFAULT LOCALE (docs/compliance-plan.md §2.4): the last
+# file in the fallback chain, `l10n/<app>/<default_locale>.ftl`, the one
+# an app must ship.
+default_locale = "en"
+
 # THE LAUNCH SLOT (docs/tasks-s2-plan.md T4): what the platform draws
 # between the tap and the first frame. `image` defaults to `icon`, so
 # one picture stands for the app in the launcher AND on the way in.

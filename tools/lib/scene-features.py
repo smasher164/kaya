@@ -125,6 +125,12 @@ VERB_FEATURE = {
     "expect_sheet": "sheet",
     "expect_sheet_detent": "sheet",
     "dismiss_sheet": "sheet",
+    "expect_text_scale": "format",
+    "expect_no_clipping": "format",
+    "expect_direction": "format",
+    "expect_mirrored": "format",
+    "expect_locale": "format",
+    "expect_script": "format",
 }
 
 # The verbs that take a menu PATH as their first argument. `shortcut` is
@@ -169,6 +175,11 @@ def features(text: str, scene: str) -> dict:
     for n, line in significant(text):
         verb = line.split()[0]
         feat = VERB_FEATURE.get(verb)
+        # A `{fmt:…}` template inside an expectation is the platform
+        # formatter's answer (docs/compliance-plan.md §4), the format feature
+        # however the line's verb is spelled.
+        if "{fmt:" in line:
+            feat = "format"
         if feat and feat not in out:
             out[feat] = (n, line)
         if verb in MENU_VERBS:

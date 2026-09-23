@@ -7514,6 +7514,7 @@ object KayaCompose {
                     }
                     "expect" -> {
                         val want = quoted(parts.drop(2))
+                        if (want.contains("{fmt:")) depthStub("format")
                         // The target kind picks the observation —
                         // harness.rs's routing. THE TEXT KINDS READ THE
                         // WIDGET, not the model mirror: `TextFieldState`
@@ -8383,6 +8384,12 @@ object KayaCompose {
                             failures.add("no sheet live, wanted \"$want\"")
                         }
                     }
+                    "expect_text_scale" -> depthStub("format")
+                    "expect_no_clipping" -> depthStub("format")
+                    "expect_direction" -> depthStub("format")
+                    "expect_mirrored" -> depthStub("format")
+                    "expect_locale" -> depthStub("format")
+                    "expect_script" -> depthStub("format")
                     "expect_sheet_detent" -> {
                         // The platform's own anchor: the partial one is
                         // medium, the expanded one large.
@@ -9254,6 +9261,7 @@ object KayaCompose {
                     }
                     "expect_ax" -> {
                         val want = quoted(parts.drop(2))
+                        if (want.contains("{fmt:")) depthStub("format")
                         val node = kayaWidgetTarget(parts[1])
                         when {
                             node == null ->

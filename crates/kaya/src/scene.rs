@@ -167,6 +167,17 @@ pub(crate) fn declared_identity() -> Result<Declaration, String> {
     Ok(Declaration { name, icon, id })
 }
 
+/// The catalog's default locale (docs/compliance-plan.md §2.4): the
+/// manifest's `default_locale`, `en` when it declares none.
+pub(crate) fn declared_default_locale() -> String {
+    crate::assets::read(IDENTITY_MANIFEST)
+        .ok()
+        .and_then(|bytes| String::from_utf8(bytes).ok())
+        .and_then(|text| manifest_value(&text, "default_locale"))
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| "en".to_owned())
+}
+
 /// THE `[links]` TABLE (docs/app-links-plan.md L1, §4): the scheme the
 /// app owns and the web hosts it claims, both optional. `manifest_value`
 /// answers TOP-LEVEL keys only — it stops at the first `[` — so a table

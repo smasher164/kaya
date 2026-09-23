@@ -1760,6 +1760,9 @@ def run_swiftui_on(udid, slot, app, bundle_id, name, selftest, scene,
     # A simulator child sees only SIMCTL_CHILD_-prefixed variables.
     if appearance:
         env["SIMCTL_CHILD_KAYA_APPEARANCE"] = appearance
+    # The locale knob a scene carries (docs/compliance-plan.md §4).
+    if selftest in lane.SCENE_LOCALE:
+        env["SIMCTL_CHILD_KAYA_LOCALE"] = lane.SCENE_LOCALE[selftest]
     # THE VERB TRACE AND THE PANIC LOG, both RELATIVE names: the
     # interpreter resolves one under its Documents and the core the
     # other under $HOME/Documents — the same container directory —

@@ -14,6 +14,11 @@ mod canvas;
 // THAT ABORTS THE PROCESS IS THE WRONG SHAPE"); ungated — every target
 // has frames that cannot unwind.
 mod fault;
+/// The formatter door (docs/compliance-plan.md §2.3).
+pub mod fmt;
+/// The catalog (docs/compliance-plan.md §2.4).
+pub mod l10n;
+pub use l10n::{catalog, tr, Arg};
 // The second act's door-side half (docs/tasks-s9-plan.md R6a). Compiled
 // WHEREVER A HARNESS CAN RUN: behind `harness` for the Rust backends,
 // whose harness IS that feature, and always on the three interpreter
@@ -178,6 +183,9 @@ fn bundled_executable() -> bool {
 }
 
 pub fn run(app_main: impl FnOnce(AppCtx) + Send + 'static) -> ! {
+    // THE LOCALE KNOB FIRST, before any thread formats or any toolkit
+    // reads the locale (docs/compliance-plan.md §2.2).
+    fmt::install_locale_knob();
     // BEFORE THE APP THREAD: a process the platform started on a tap has
     // no scene in its environment, and the guest reads its scene from
     // KAYA_SELFTEST (docs/tasks-s9-plan.md R6a).

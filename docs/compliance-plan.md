@@ -228,9 +228,9 @@ The two queries: `locale()` (the BCP-47 tag plus the four settings) and
 
 ### 2.4 The catalog
 
-- **Files.** an `l10n/<app>/<locale>.ftl` tree under the asset root,
-  which every lane already stages as a unit and verifies by hash
-  (tools/check-assets.py). A locale file per language the app ships; the
+- **Files.** `l10n/<app>.<locale>.ftl` under the asset root, one flat
+  family as every family is (tools/check-assets.py's convention), which
+  every lane already stages as a unit and verifies by hash. A locale file per language the app ships; the
   app declares its DEFAULT locale in guests/assets/identity.toml beside
   its name and mark.
 - **Resolution.** The core loads the catalog for the process locale with
@@ -316,10 +316,15 @@ locale and the settings are PLATFORM facts, not scene properties, and the
 lookup and the formatters are pure. The spec hash does not move. The C
 API gains:
 
-- `kaya_locale_report(bcp47, hour_cycle, first_weekday, calendar,
-  numbering)` and `kaya_text_scale(factor)`, backend-to-core reports
-  beside `kaya_presentation`, latched like it, reported at init before
-  the scene mounts so a guest that formats first formats right.
+- `kaya_text_scale_report(factor)`, a backend-to-core report beside
+  `kaya_presentation`, latched like it. THE LOCALE NEEDS NO REPORT: the
+  door asks the platform's own locale on every call, and the knob is
+  installed BY THE CORE at the top of `run`, before the app thread
+  exists, through the platform's per-process route (the argument
+  domain on Apple) — measured 2026-09-23 when the interpreter-side
+  install lost the race to a guest formatting at startup. The
+  interpreter keeps a wall: with the knob set, its own locale must
+  already be the knob's.
 - `kaya_fmt_date`, `kaya_fmt_time`, `kaya_fmt_date_time`,
   `kaya_fmt_number`, `kaya_fmt_percent`, `kaya_fmt_currency`, and the
   queries `kaya_locale` (tag and settings) and `kaya_direction` (0 ltr,
@@ -335,7 +340,7 @@ beside it over `fluent-bundle` pinned in Cargo.lock.
 
 ## §4 THE HARNESS
 
-Verbs, all three harnesses, both interpreters (check-verbs' rows):
+Verbs, all three harnesses, both interpreters (check-verbs' rows), and one template:
 
 - `expect_text_scale <factor>` — the toolkit's factor within 0.01 (§2.1's
   read-back column), never the knob.
@@ -351,9 +356,14 @@ Verbs, all three harnesses, both interpreters (check-verbs' rows):
   edge: its frame's x exceeds its last child's. Geometry, toolkit-free.
 - `expect_locale <bcp47>` — the PLATFORM's own locale read back (the
   §2.2 column), never the knob and never the core's latch.
-- `expect_formatted label#N <kind> <value> <length>` — the label's bytes
-  equal what THIS PLATFORM'S formatter, asked independently by the
-  harness, writes for the same input. On the two interpreters the
+- `{fmt:<kind> <value> <length>}` INSIDE an `expect` or `expect_ax`
+  string — `expect label@caption[t3] "{fmt:date_weekday 2026-09-07}, Thesis"`
+  — expands to what THIS PLATFORM'S formatter, asked independently by
+  the harness, writes for the same input, so a composed label holds one
+  script on five lanes (a separate verb could not see a date inside a
+  sentence; ruled while building, 2026-09-23). The kinds are the six
+  plus `date_weekday`, the task list's idiom (`Mon, Sep 7`), which the
+  door gained for it. On the two interpreters the
   harness calls Foundation / `java.text` itself, not the core's door; on
   GTK and WinUI, where the harness is the Rust backend, the verb calls the
   platform API through a second, deliberately plain spelling (the
@@ -365,7 +375,7 @@ Verbs, all three harnesses, both interpreters (check-verbs' rows):
 - `expect_script label#N <script>` — the label's letters are in the
   named script (Arab, Hebr, Latn), the check that cannot be satisfied by
   a knob that failed to reach the platform, since then both the label
-  and `expect_formatted`'s answer would be wrong together.
+  and the template's answer would be wrong together.
 
 The knobs, `KAYA_TEXT_SCALE` and `KAYA_LOCALE`, with the lanes'
 `leg_env` carrying them the way `KAYA_APPEARANCE` rides today. The
@@ -399,8 +409,8 @@ prose), planted negative in each. Green today by measurement.
   becomes a `DATETIME($due)` argument, `2 in inbox` a message with a
   `$count` and its plural forms. The frozen strings in
   tools/scenes/tasks.steps stay English for the everyday leg (the `en`
-  catalog's bytes, identical on five lanes) and the date lines become
-  `expect_formatted`.
+  catalog's bytes, identical on five lanes) and the date lines carry
+  `{fmt:…}` templates.
 - **`tasksbig`** — the tasks scene's own script under
   `KAYA_TEXT_SCALE=2.0` (AX5 as a second iOS leg), with
   `expect_text_scale` at the top and `expect_no_clipping` after every
@@ -410,9 +420,9 @@ prose), planted negative in each. Green today by measurement.
   expectations swapped to the `ar` catalog's bytes (identical on five
   lanes), with `expect_locale`, `expect_direction rtl`,
   `expect_mirrored row@task[t1]`, `expect_script` on the date labels and
-  `expect_formatted` on them.
+  `{fmt:…}` templates in their expectations.
 - **`format.steps`**, one guest per language: the six formatters and
-  `tr` over fixed inputs, asserted through `expect_formatted` and
+  `tr` over fixed inputs, asserted through `{fmt:…}` templates and
   `expect_script` under the everyday locale, then `de-DE` and `ar-EG`
   through the knob, on every lane, in all nine languages — the proof
   that nine spellings are one implementation on each platform.
@@ -441,7 +451,7 @@ prose), planted negative in each. Green today by measurement.
 - **R8 — the catalog format is Fluent**, resolved in the core; the
   platform never sees a catalog.
 - **R9 — test expectations for formatted values are derived from the
-  platform** (`expect_formatted`), never stored, with the two composed
+  platform** (the `{fmt:…}` template), never stored, with the two composed
   styles held by unit tests and the knob's reach held by
   `expect_locale` and `expect_script`.
 
@@ -452,13 +462,19 @@ prose), planted negative in each. Green today by measurement.
 2. Depth on the mac and iOS: `fmt.rs` with the Apple arm; `l10n.rs` over
    fluent-bundle with unit tests over an Arabic six-form message; the
    reports and queries in the C API; the Rust `fmt` and `tr!` sugar; the
-   seven verbs in the Rust harness and the SwiftUI interpreter; the knobs
-   in the SwiftUI arm; `format.steps` with its Rust guest; the task
-   manager's catalog in `en` and `ar` and its dates through `fmt`;
-   check-verbs, check-appearance and check-l10n rows; depth stubs on GTK,
-   WinUI and Compose so check-stubs holds the fan-out open.
+   six verbs and the template in the Rust harness and the SwiftUI interpreter; the knobs
+   in the SwiftUI arm; `format.steps` with its Rust guest under three
+   locales on the mac and iOS; check-verbs, check-appearance and
+   check-l10n rows; depth stubs on GTK, WinUI and Compose so check-stubs
+   holds the fan-out open. THE TASK MANAGER'S CONVERSION WAITS FOR
+   BREADTH (moved while building, 2026-09-23): its dates and counts
+   through `fmt` and `tr` put `{fmt:…}` templates into tools/scenes/tasks.steps,
+   which every lane runs, and a lane whose formatter is still a stub
+   would go red on a scene it ran green yesterday. It lands with the
+   three arms.
 3. Breadth: the three formatter arms and their probes' findings, the
-   eight bindings' `fmt` and `tr` and their `format.steps` guests,
+   task manager's catalog in `en` and `ar` and its dates through `fmt`,
+   the eight bindings' `fmt` and `tr` and their `format.steps` guests,
    check-sugar-surface's census and direction gate, the three backend
    arms for scale and direction, the `tasksbig`, `tasksrtl`, `format` and
    `clock24` legs on every lane, the linux image's generated locales.

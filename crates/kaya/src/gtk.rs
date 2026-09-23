@@ -18573,6 +18573,24 @@ impl crate::harness::Stage for GtkStage {
             topmost_sheet(core).map(|id| core.sheets[&id].dialog.title().to_string())
         })
     }
+    fn text_scale(&self) -> f64 {
+        crate::depth_stub("format")
+    }
+    fn clipping(&self) -> String {
+        crate::depth_stub("format")
+    }
+    fn direction(&self) -> String {
+        crate::depth_stub("format")
+    }
+    fn mirrored(&self, _: crate::harness::Target) -> String {
+        crate::depth_stub("format")
+    }
+    fn platform_locale(&self) -> String {
+        crate::depth_stub("format")
+    }
+    fn formatted(&self, _: &str, _: &str, _: &str) -> String {
+        crate::depth_stub("format")
+    }
     fn sheet_detent(&self) -> String {
         // A desktop sheet has no detent.
         "none".to_owned()

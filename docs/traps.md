@@ -12378,6 +12378,22 @@ at all, and a kaya flex container's own -1 height still compounds its
 children's (the column read 464 while 141 at its true minimum width),
 which only matters to a parent that asks -1.
 
+## `UserDefaults.standard.set(_:forKey:)` for `AppleLanguages` persists in the app's plist, and the next plain run is still Arabic (measured 2026-09-23)
+
+The locale knob's first draft wrote `AppleLanguages`, `AppleLocale`,
+`AppleTextDirection` and `NSForceRightToLeftWritingDirection` with
+`set(_:forKey:)`; the process flipped as wanted, and so did the NEXT
+process launched with no knob at all — `defaults read <app>` showed the
+four keys in the app's own domain. Apple's per-process route is the
+ARGUMENT DOMAIN, `setVolatileDomain(_:forName: UserDefaults.argumentDomain)`,
+what `-AppleLanguages (ar-EG)` on a command line sets: measured flipping
+the process identically and leaving `defaults read` with no domain
+afterwards (docs/measurements/compliance-probes-2026-09-21.md U4). The
+core installs it (crates/kaya/src/fmt.rs `install_locale_knob`) at the top
+of `run`, before the app thread exists — the interpreter-side install was
+measured losing the race to a guest that formatted at startup — and the
+interpreter keeps a wall that dies if its own locale is not the knob's.
+
 ## The GTK backend compiled only with the harness, and no lane compiles it without one (measured 2026-09-21)
 
 `vtrace` is harness-gated (crates/kaya/src/lib.rs), and the sheet's x11

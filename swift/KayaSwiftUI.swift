@@ -4541,6 +4541,10 @@ enum KayaHost {
         guard api != nil else { return }
         api.presentation(Double(scale), dark)
     }
+    static func textScaleReport(_ factor: Double) {
+        guard api != nil else { return }
+        api.text_scale_report(factor)
+    }
 
     /// One canvas's CANONICAL raster, read back out of the core:
     /// `"<16 hex> <ops>/<l>,<t>,<r>,<b>"` (§7.1). Empty when the id
@@ -4972,6 +4976,7 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                         MainActor.assumeIsolated {
                             kayaAppearanceChoice = choice
                             kayaApplyAppearance()
+                            kayaApplyTextScale()
                         }
                     }
                 case (wpropSectionsPresentation, valueI64):
@@ -7837,7 +7842,12 @@ private func kayaRunScript(_ script: String) {
                     }
                 #endif
             case "expect":
-                let want = kayaQuoted(Array(parts[2...]))
+                // `{fmt:…}` in the expectation is this platform's own formatter's
+                // answer (docs/compliance-plan.md §4, R9), asked before the compare.
+                guard case .success(let want) = kayaExpandTemplate(kayaQuoted(Array(parts[2...]))) else {
+                    if case .failure(let refusal) = kayaExpandTemplate(kayaQuoted(Array(parts[2...]))) { failures.append(refusal.why) }
+                    break
+                }
                 // The target kind picks the observation: an entry reads the
                 // field's own displayed text, an image its decoded size
                 // ("WxH"/"0x0"), everything else label text — harness.rs's
@@ -9258,6 +9268,72 @@ private func kayaRunScript(_ script: String) {
                 } else {
                     failures.append("no sheet live, wanted \"\(want)\"")
                 }
+            case "expect_text_scale":
+                // The TOOLKIT's factor, never the knob (docs/compliance-plan.md §2.1).
+                let want = Double(parts[1]) ?? -1
+                let got = DispatchQueue.main.sync { kayaTextScaleFactor() }
+                if abs(got - want) <= 0.01 {
+                    observed.append("text scale \(parts[1])")
+                } else {
+                    failures.append("text scale \(got), wanted \(parts[1])")
+                }
+            case "expect_no_clipping":
+                let (clipped, measured) = DispatchQueue.main.sync { kayaClippingReport() }
+                if clipped.isEmpty {
+                    observed.append("no clipping (\(measured) labels measured)")
+                } else {
+                    failures.append("clipped: \(clipped)")
+                }
+            case "expect_direction":
+                let want = String(parts[1])
+                let got = DispatchQueue.main.sync { kayaLayoutDirectionWord() }
+                if got == want {
+                    observed.append("direction \(want)")
+                } else {
+                    failures.append("direction \(got), wanted \(want)")
+                }
+            case "expect_mirrored":
+                // Geometry: the row's first child at the trailing edge.
+                let verdict = DispatchQueue.main.sync { () -> String in
+                    guard let row = kayaTarget(parts[1], "row", kayaScene.rows) else {
+                        return "no such row"
+                    }
+                    let kids = row.children
+                    guard kids.count >= 2 else { return "the row has \(kids.count) child(ren)" }
+                    guard let first = kayaNodeFrames[kids[0].id], let last = kayaNodeFrames[kids[kids.count - 1].id] else {
+                        return "no frame recorded for the row's children"
+                    }
+                    if first.minX > last.minX { return "" }
+                    return "first child at x=\(Int(first.minX)), last at x=\(Int(last.minX))"
+                }
+                if verdict.isEmpty {
+                    observed.append("\(parts[1]) mirrored")
+                } else {
+                    failures.append("\(parts[1]) not mirrored: \(verdict)")
+                }
+            case "expect_locale":
+                let want = String(parts[1])
+                let got = kayaPlatformLocaleTag()
+                if got.lowercased() == want.lowercased() {
+                    observed.append("locale \(want)")
+                } else {
+                    failures.append("locale \(got), wanted \(want)")
+                }
+            case "expect_script":
+                let want = String(parts[2])
+                let got = DispatchQueue.main.sync { kayaTarget(parts[1], "label", kayaScene.labels)?.text }
+                guard let text = got else {
+                    failures.append("\(parts[1]): no such label")
+                    break
+                }
+                switch kayaScriptOf(text) {
+                case .some(let found) where found == want:
+                    observed.append("\(parts[1]) in \(want)")
+                case .some(let found):
+                    failures.append("\(parts[1]) reads \(text.debugDescription), whose letters are \(found), wanted \(want)")
+                case .none:
+                    failures.append("\(parts[1]) reads \(text.debugDescription), which has no letters")
+                }
             case "expect_sheet_detent":
                 // The height the platform reports: a desktop sheet has no
                 // detent and answers none; iOS reads the presentation
@@ -10227,7 +10303,10 @@ private func kayaRunScript(_ script: String) {
                 // accessibility tree. Routed through the identifier, so an
                 // element the platform never published is simply not found —
                 // which is the point of the verb.
-                let wantAx = kayaQuoted(Array(parts[2...]))
+                guard case .success(let wantAx) = kayaExpandTemplate(kayaQuoted(Array(parts[2...]))) else {
+                    if case .failure(let refusal) = kayaExpandTemplate(kayaQuoted(Array(parts[2...]))) { failures.append(refusal.why) }
+                    break
+                }
                 // The identifier resolves on the main thread, but the AX READ
                 // ITSELF runs on the harness thread ON PURPOSE: requests are
                 // serviced BY the main runloop, so querying from inside
@@ -10834,18 +10913,39 @@ private struct KayaTrackReader: View {
     var body: some View {
         GeometryReader { geo in
             Color.clear
-                .onAppear { record(geo.size) }
-                .onChange(of: geo.size) { _, size in record(size) }
-                .task(id: tableGeneration) { record(geo.size) }
+                .onAppear { record(geo.size, geo.frame(in: .global)) }
+                .onChange(of: geo.size) { _, size in record(size, geo.frame(in: .global)) }
+                .onChange(of: geo.frame(in: .global).origin) { _, _ in record(geo.size, geo.frame(in: .global)) }
+                .task(id: tableGeneration) { record(geo.size, geo.frame(in: .global)) }
         }
     }
 
-    private func record(_ size: CGSize) {
+    private func record(_ size: CGSize, _ frame: CGRect) {
         kayaTrackSizes[id] = size
+        kayaNodeFrames[id] = frame
         kayaMainExtents[id] = Double(vertical ? size.height : size.width)
         if let tableGeneration {
             kayaTableTrackSizes[id] = KayaTableTrackObservation(
                 generation: tableGeneration, size: size)
+        }
+    }
+}
+
+/// Every flex child's frame in the window's space, by node id — what
+/// `expect_mirrored` reads (docs/compliance-plan.md §4).
+var kayaNodeFrames: [UInt64: CGRect] = [:]
+
+/// Each label's own drawn size, by node id — what `expect_no_clipping`
+/// measures the text's need against (docs/compliance-plan.md §4, U7).
+var kayaLabelFrames: [UInt64: CGSize] = [:]
+
+private struct KayaLabelFrameReader: View {
+    let id: UInt64
+    var body: some View {
+        GeometryReader { geo in
+            Color.clear
+                .onAppear { kayaLabelFrames[id] = geo.size }
+                .onChange(of: geo.size) { _, size in kayaLabelFrames[id] = size }
         }
     }
 }
@@ -15122,6 +15222,234 @@ func kayaDeliveredNotificationTitle(_ id: UInt64) -> String? {
     }
 #endif
 
+// --- The compliance knobs (docs/compliance-plan.md §2.1, §2.2) -----------
+
+/// `KAYA_TEXT_SCALE=<factor>`, the harness's per-process text scale. UNSET
+/// RETURNS nil AND NOTHING IS INSTALLED; a value outside 1.0...3.1 dies
+/// here naming the range. macOS has no text size and the knob is REFUSED
+/// there rather than ignored (§1.5, R4): a leg that set it on the mac is
+/// asking for a reading the platform cannot give.
+func kayaTextScaleOverride() -> Double? {
+    guard let want = ProcessInfo.processInfo.environment["KAYA_TEXT_SCALE"] else { return nil }
+    guard let factor = Double(want), factor >= 1.0, factor <= 3.1 else {
+        fatalError("kaya: KAYA_TEXT_SCALE=\(want) is not a factor in 1.0...3.1")
+    }
+    #if os(macOS)
+        fatalError("kaya: KAYA_TEXT_SCALE=\(want) on macOS, which has no text size (docs/compliance-plan.md §1.5)")
+    #else
+        return factor
+    #endif
+}
+
+#if !os(macOS)
+    /// The category whose body size is nearest the factor — Apple's ramp is
+    /// twelve steps, not a dial (docs/measurements/compliance-probes-2026-09-21.md,
+    /// the category table).
+    func kayaContentSizeCategory(for factor: Double) -> UIContentSizeCategory {
+        let table: [(UIContentSizeCategory, Double)] = [
+            (.extraSmall, 14), (.small, 15), (.medium, 16), (.large, 17), (.extraLarge, 19),
+            (.extraExtraLarge, 21), (.extraExtraExtraLarge, 23), (.accessibilityMedium, 28),
+            (.accessibilityLarge, 33), (.accessibilityExtraLarge, 40),
+            (.accessibilityExtraExtraLarge, 47), (.accessibilityExtraExtraExtraLarge, 53),
+        ]
+        return table.min { abs($0.1 / 17.0 - factor) < abs($1.1 / 17.0 - factor) }!.0
+    }
+#endif
+
+/// Install the asked text scale on every window (the trait override every
+/// SwiftUI text style and hosted UIKit view below it reads, U1) and REPORT
+/// the toolkit's own factor to the core, whichever way it was set.
+@MainActor func kayaApplyTextScale() {
+    #if !os(macOS)
+        if let factor = kayaTextScaleOverride() {
+            let category = kayaContentSizeCategory(for: factor)
+            for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
+                for window in scene.windows {
+                    window.traitOverrides.preferredContentSizeCategory = category
+                }
+            }
+        }
+    #endif
+    KayaHost.textScaleReport(kayaTextScaleFactor())
+}
+
+/// `KAYA_LOCALE=<bcp47>` is installed by the CORE before any thread runs
+/// (fmt.rs, lib.rs's `run`; docs/compliance-plan.md §2.2). This is the
+/// wall that says so: with the knob set, the toolkit's own locale must
+/// already be the knob's, or the leg dies here naming both.
+func kayaInstallLocaleKnob() {
+    guard let tag = ProcessInfo.processInfo.environment["KAYA_LOCALE"] else { return }
+    let got = kayaPlatformLocaleTag()
+    guard got.lowercased() == tag.lowercased() else {
+        fatalError("kaya: KAYA_LOCALE=\(tag) but the toolkit reads \(got): the core did not install the knob before this process's locale was read")
+    }
+}
+
+// --- The compliance reads (docs/compliance-plan.md §4) -----------------
+
+/// The toolkit's text scale: the window's content size category as a
+/// factor on iOS (the body size over `.large`'s 17pt); 1.0 on macOS, which
+/// has no text size (§1.5).
+@MainActor func kayaTextScaleFactor() -> Double {
+    #if os(macOS)
+        return 1.0
+    #else
+        guard let window = kayaHarnessWindow() else { return 1.0 }
+        let body = UIFont.preferredFont(forTextStyle: .body, compatibleWith: window.traitCollection)
+        return Double(body.pointSize / 17.0)
+    #endif
+}
+
+/// The direction the toolkit resolved: the app's on macOS, the harness
+/// window's on iOS.
+@MainActor func kayaLayoutDirectionWord() -> String {
+    #if os(macOS)
+        return NSApp.userInterfaceLayoutDirection == .rightToLeft ? "rtl" : "ltr"
+    #else
+        let dir = kayaHarnessWindow()?.effectiveUserInterfaceLayoutDirection ?? .leftToRight
+        return dir == .rightToLeft ? "rtl" : "ltr"
+    #endif
+}
+
+/// The platform's own locale for the process as BCP-47, the overrides
+/// stripped (`en_US@calendar=japanese` is `en-US`).
+func kayaPlatformLocaleTag() -> String {
+    let raw = Locale.current.identifier
+    let bare = raw.split(separator: "@").first.map(String.init) ?? raw
+    return bare.replacingOccurrences(of: "_", with: "-")
+}
+
+/// Every live label allocated what its text needs at its width, or the
+/// first that is not: the resolved font's bounding rect at the recorded
+/// width against the recorded height (U7). Labels the layout has not
+/// placed are skipped and counted.
+@MainActor func kayaClippingReport() -> (String, Int) {
+    var measured = 0
+    for node in kayaScene.labels where !node.text.isEmpty {
+        guard let size = kayaLabelFrames[node.id], size.width > 0 else { continue }
+        measured += 1
+        let font = kayaLabelBaseFont(node)
+        let need = (node.text as NSString).boundingRect(
+            with: CGSize(width: size.width, height: 100_000),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: font], context: nil
+        ).height
+        if need > size.height + 1.0 {
+            return (
+                "label \(node.id) \(node.text.prefix(40).debugDescription) needs \(Int(need.rounded()))pt at \(Int(size.width.rounded()))pt wide and got \(Int(size.height.rounded()))pt",
+                measured)
+        }
+    }
+    return ("", measured)
+}
+
+/// The first script a letter of `text` belongs to, digits and marks skipped
+/// (harness.rs's `script_of`, the same ranges).
+func kayaScriptOf(_ text: String) -> String? {
+    for scalar in text.unicodeScalars {
+        let u = scalar.value
+        let script: String
+        switch u {
+        case 0x0600...0x06FF, 0x0750...0x077F, 0x08A0...0x08FF, 0xFB50...0xFDFF, 0xFE70...0xFEFF: script = "Arab"
+        case 0x0590...0x05FF, 0xFB1D...0xFB4F: script = "Hebr"
+        case 0x0041...0x005A, 0x0061...0x007A, 0x00C0...0x024F, 0x1E00...0x1EFF: script = "Latn"
+        default: continue
+        }
+        if (0x0660...0x0669).contains(u) || (0x06F0...0x06F9).contains(u) { continue }
+        return script
+    }
+    return nil
+}
+
+/// `{fmt:<kind> <value> <length>}` expanded through the platform's own
+/// formatter (harness.rs's `expand_template`, the same grammar).
+struct KayaTemplateRefusal: Error { let why: String }
+
+func kayaExpandTemplate(_ want: String) -> Result<String, KayaTemplateRefusal> {
+    var out = ""
+    var rest = Substring(want)
+    while let start = rest.range(of: "{fmt:") {
+        out += rest[..<start.lowerBound]
+        let after = rest[start.upperBound...]
+        guard let end = after.firstIndex(of: "}") else {
+            return .failure(KayaTemplateRefusal(why: "unterminated {fmt:…} in \(want.debugDescription)"))
+        }
+        let spec = after[..<end].split(separator: " ").map(String.init)
+        let kind: String, value: String, length: String
+        switch spec.count {
+        case 2 where spec[0] == "date_weekday": (kind, value, length) = (spec[0], spec[1], "medium")
+        case 3: (kind, value, length) = (spec[0], spec[1], spec[2])
+        default: return .failure(KayaTemplateRefusal(why: "{fmt:\(after[..<end])} wants a kind, a value and a length"))
+        }
+        let answer = kayaPlatformFormatted(kind: kind, value: value, length: length)
+        if answer.isEmpty {
+            return .failure(KayaTemplateRefusal(why: "this platform's formatter answered nothing for {fmt:\(kind) \(value) \(length)}"))
+        }
+        out += answer
+        rest = after[after.index(after: end)...]
+    }
+    out += rest
+    return .success(out)
+}
+
+/// What Foundation writes for the harness's input — the platform asked
+/// independently of the core's CoreFoundation door (R9). Empty when the
+/// input does not parse.
+func kayaPlatformFormatted(kind: String, value: String, length: String) -> String {
+    func dateStyle(_ l: String) -> DateFormatter.Style {
+        switch l { case "short": return .short; case "long": return .long; default: return .medium }
+    }
+    func parseDate(_ s: String) -> DateComponents? {
+        let p = s.split(separator: "-").compactMap { Int($0) }
+        guard p.count == 3 else { return nil }
+        return DateComponents(year: p[0], month: p[1], day: p[2], hour: 12)
+    }
+    func parseTime(_ s: String) -> (Int, Int)? {
+        let p = s.split(separator: ":").compactMap { Int($0) }
+        guard p.count == 2 else { return nil }
+        return (p[0], p[1])
+    }
+    let f = DateFormatter()
+    switch kind {
+    case "date":
+        guard let c = parseDate(value), let d = Calendar.current.date(from: c) else { return "" }
+        f.dateStyle = dateStyle(length); f.timeStyle = .none
+        return f.string(from: d)
+    case "date_weekday":
+        guard let c = parseDate(value), let d = Calendar.current.date(from: c) else { return "" }
+        f.setLocalizedDateFormatFromTemplate("EEEdMMM")
+        return f.string(from: d)
+    case "time":
+        guard let (h, m) = parseTime(value),
+            let d = Calendar.current.date(from: DateComponents(year: 2000, month: 1, day: 1, hour: h, minute: m))
+        else { return "" }
+        f.dateStyle = .none; f.timeStyle = dateStyle(length)
+        return f.string(from: d)
+    case "date_time":
+        let halves = value.split(separator: "T")
+        guard halves.count == 2, var c = parseDate(String(halves[0])), let (h, m) = parseTime(String(halves[1])) else { return "" }
+        c.hour = h; c.minute = m
+        guard let d = Calendar.current.date(from: c) else { return "" }
+        f.dateStyle = dateStyle(length); f.timeStyle = dateStyle(length)
+        return f.string(from: d)
+    case "number", "percent":
+        guard let v = Double(value) else { return "" }
+        let n = NumberFormatter()
+        n.numberStyle = kind == "percent" ? .percent : .decimal
+        n.usesGroupingSeparator = true
+        return n.string(from: NSNumber(value: v)) ?? ""
+    case "currency":
+        let parts = value.split(separator: ":")
+        guard parts.count == 2, let v = Double(parts[0]) else { return "" }
+        let n = NumberFormatter()
+        n.numberStyle = .currency
+        n.currencyCode = String(parts[1])
+        return n.string(from: NSNumber(value: v)) ?? ""
+    default:
+        return ""
+    }
+}
+
 /// `KAYA_APPEARANCE=light|dark`, the harness's per-process appearance. UNSET
 /// RETURNS nil AND NOTHING IS INSTALLED (tools/check-appearance.py's inert
 /// clause). A value that is neither word dies here naming both spellings: a
@@ -15836,6 +16164,7 @@ struct KayaRender: View {
                 kayaBaselineOffsets[node.id] = d[.firstTextBaseline] - d[.top]
                 return d[.top]
             }
+            .background(KayaLabelFrameReader(id: node.id))
         case kindCheckbox:
             // Uncontrolled toward the app, the entry's shape: the node
             // mirrors the box's state (SwiftUI needs the binding), and
@@ -21852,6 +22181,7 @@ private struct KayaPresentationReporter: ViewModifier {
                 // the trait, which fires the colorScheme onChange below, so the
                 // report corrects itself whatever order these run in.
                 kayaApplyAppearance()
+                kayaApplyTextScale()
                 report()
             }
             .onChange(of: displayScale) { _, _ in report() }

@@ -1,0 +1,17 @@
+# The formatter door and the catalog (docs/compliance-plan.md §6): every
+# value against what THIS platform's formatter writes for the same input,
+# asked independently by the harness (R9); the catalog's words byte for
+# byte. The everyday locale: whatever the lane's host is set to.
+expect label#0 "{fmt:date 2026-09-07 short}"
+expect label#1 "{fmt:date 2026-09-07 medium}"
+expect label#2 "{fmt:date 2026-09-07 long}"
+expect label#3 "{fmt:time 08:30 short}"
+expect label#4 "{fmt:date_time 2026-09-07T08:30 medium}"
+expect label#5 "{fmt:number 1234567.891 medium}"
+expect label#6 "{fmt:percent 0.256 medium}"
+expect label#7 "{fmt:currency 1234567.89:USD medium}"
+expect label#8 "one item"
+expect label#9 "3 items"
+expect label#10 "Hello, Ada"
+expect_direction ltr
+expect_root_fills

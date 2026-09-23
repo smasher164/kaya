@@ -29,7 +29,27 @@ widget and the lane image needs its locales generated; Android's ICU
 ignores the user's 24-hour setting and the arm asks the platform's own
 text-format class; Windows refuses `PrimaryLanguageOverride` unpackaged,
 reads a registry text scale in a fresh process, and its Region settings
-reach the formatters. Next: depth on the mac and iOS (§8 step 2).
+reach the formatters. DEPTH LANDED 2026-09-23 (§8 step 2): the fmt door
+with its CoreFoundation arm (six calls plus the weekday date, the locale
+and direction queries, the text-scale report), the Fluent catalog
+(`l10n/<app>.<locale>.ftl` under the asset root, the fallback chain,
+values through the door, a panic naming a missing key), the C API and the
+Rust `fmt`/`tr!`/`catalog` sugar, six verbs and the `{fmt:…}` template in
+the Rust harness and the SwiftUI interpreter, the two knobs (the locale
+installed BY THE CORE before any thread runs, the text scale on the iOS
+window's traits), `format.steps` under three locales green on the mac and
+iOS, tools/check-l10n.py with five watched negatives, check-appearance's
+text-scale clause. Building it found two things the probes had not: the
+interpreter-side locale install lost the race to a guest formatting at
+startup (docs/traps.md, the persisting-defaults entry), and a formatted
+date inside a composed label needs the template INSIDE `expect` rather
+than a verb of its own. What breadth still owes, held open here:
+  - **DEPTH STUB: format on gtk** — the formatter's GLib arm and the
+    seven verbs' reads (§2.3's Linux row, U2).
+  - **DEPTH STUB: format on winui** — the Windows.Globalization arm and
+    the reads (§2.3's Windows row, U3, U5, U11).
+  - **DEPTH STUB: format on compose** — the android.icu arm over JNI and
+    the reads (§2.3's Android row, U8, U10).
 
 ## ~~BUILD — sheets: the root-hosting modal (design pass approved 2026-09-21)~~ COMPLETE 2026-09-21: depth on the mac, breadth on all five lanes in nine languages, the task manager's quick-add sheet (S6) and the review page (https://claude.ai/artifact/549v7HfaFeTJv4rVuLt8RF) with the shared scene and the quick-add captured on every lane, each viewed before publication; the depth and breadth matrices ran ALL PASS and S6's ran with its closing commit
 KEY: sheet, present_sheet, dismiss_sheet, sheet_dismissed, dismiss_requested, intercept_dismiss, detent, SHEET_PROPS, expect_sheets, expect_sheet, expect_sheet_detent, AdwDialog, ModalBottomSheet, presentationDetents, Popup, sheetprobe, quick-add sheet

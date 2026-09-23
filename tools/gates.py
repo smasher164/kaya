@@ -90,6 +90,7 @@ GATES = [
      "them, so any add, delete or rename is a real input; a cache key that "
      "cheap to invalidate is a cache that never hits"),
     ("check-sugar-surface", ["tools/check-sugar-surface.py"], True, ""),
+    ("check-l10n", ["tools/check-l10n.py"], True, ""),
     ("check-universal-props", ["tools/check-universal-props.py"], True, ""),
     # MENU_ROLES is one line no generator reads, so a role can ship with
     # the root accepting it and every backend ignoring it. RED BY DESIGN

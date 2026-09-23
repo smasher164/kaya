@@ -1629,6 +1629,313 @@ pub unsafe extern "C" fn kaya_app_data_dir(out: *mut u8, cap: usize) -> usize {
     unsafe { fill(text.as_bytes(), out, cap) }
 }
 
+// --- Localization (docs/compliance-plan.md §3) ---------------------------
+// The formatter door and the catalog, for the eight bindings that reach
+// the core through this floor. Strings come out through `fill` (ask with
+// cap 0, size, ask again); a bad input is a `fault` with the sentence and
+// a 0 answer, never a silent empty string.
+
+/// `kaya_fmt_*`'s length: the numeric form.
+pub const KAYA_FMT_SHORT: i64 = 0;
+/// The abbreviated words.
+pub const KAYA_FMT_MEDIUM: i64 = 1;
+/// The full words.
+pub const KAYA_FMT_LONG: i64 = 2;
+
+/// What a number formatter may be told; -1 leaves the platform's default.
+#[repr(C)]
+pub struct KayaNumberOptions {
+    pub min_fraction_digits: i32,
+    pub max_fraction_digits: i32,
+    pub grouping: bool,
+}
+
+fn number_options(options: *const KayaNumberOptions) -> crate::fmt::NumberOptions {
+    if options.is_null() {
+        return crate::fmt::NumberOptions::default();
+    }
+    let o = unsafe { &*options };
+    let digits = |d: i32| if (0..=20).contains(&d) { Some(d as u8) } else { None };
+    crate::fmt::NumberOptions {
+        min_fraction_digits: digits(o.min_fraction_digits),
+        max_fraction_digits: digits(o.max_fraction_digits),
+        grouping: o.grouping,
+    }
+}
+
+fn fmt_length(length: i64, verb: &str) -> Option<crate::fmt::Length> {
+    let found = crate::fmt::Length::from_code(length);
+    if found.is_none() {
+        crate::fault::report(format!(
+            "kaya: {verb} was given length {length}; the lengths are 0 short, 1 medium, 2 long"
+        ));
+    }
+    found
+}
+
+fn fmt_date_arg(packed: i64, verb: &str) -> Option<crate::protocol::Date> {
+    match crate::protocol::Date::from_packed(packed) {
+        Ok(d) => Some(d),
+        Err(why) => {
+            crate::fault::report(format!("kaya: {verb}: {why}"));
+            None
+        }
+    }
+}
+
+fn fmt_time_arg(packed: i64, verb: &str) -> Option<crate::protocol::Time> {
+    match crate::protocol::Time::from_packed(packed) {
+        Ok(t) => Some(t),
+        Err(why) => {
+            crate::fault::report(format!("kaya: {verb}: {why}"));
+            None
+        }
+    }
+}
+
+/// The date (packed YYYYMMDD) at `length`, in the process locale.
+///
+/// # Safety
+/// `out` must be null or valid for `cap` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_fmt_date(packed: i64, length: i64, out: *mut u8, cap: usize) -> usize {
+    let (Some(d), Some(l)) = (fmt_date_arg(packed, "kaya_fmt_date"), fmt_length(length, "kaya_fmt_date")) else {
+        return 0;
+    };
+    unsafe { fill(crate::fmt::date(d, l).as_bytes(), out, cap) }
+}
+
+/// The date with its weekday and no year (`Mon, Sep 7` in en-US).
+///
+/// # Safety
+/// `out` must be null or valid for `cap` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_fmt_date_weekday(packed: i64, out: *mut u8, cap: usize) -> usize {
+    let Some(d) = fmt_date_arg(packed, "kaya_fmt_date_weekday") else { return 0 };
+    unsafe { fill(crate::fmt::date_weekday(d).as_bytes(), out, cap) }
+}
+
+/// The time (packed HHMM) at `length`, in the process locale and the
+/// user's hour cycle.
+///
+/// # Safety
+/// `out` must be null or valid for `cap` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_fmt_time(packed: i64, length: i64, out: *mut u8, cap: usize) -> usize {
+    let (Some(t), Some(l)) = (fmt_time_arg(packed, "kaya_fmt_time"), fmt_length(length, "kaya_fmt_time")) else {
+        return 0;
+    };
+    unsafe { fill(crate::fmt::time(t, l).as_bytes(), out, cap) }
+}
+
+/// Both together, one length.
+///
+/// # Safety
+/// `out` must be null or valid for `cap` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_fmt_date_time(
+    date: i64,
+    time: i64,
+    length: i64,
+    out: *mut u8,
+    cap: usize,
+) -> usize {
+    let (Some(d), Some(t), Some(l)) = (
+        fmt_date_arg(date, "kaya_fmt_date_time"),
+        fmt_time_arg(time, "kaya_fmt_date_time"),
+        fmt_length(length, "kaya_fmt_date_time"),
+    ) else {
+        return 0;
+    };
+    unsafe { fill(crate::fmt::date_time(d, t, l).as_bytes(), out, cap) }
+}
+
+/// A number with the locale's separators; `options` may be null.
+///
+/// # Safety
+/// `options` must be null or valid; `out` must be null or valid for `cap` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_fmt_number(
+    value: f64,
+    options: *const KayaNumberOptions,
+    out: *mut u8,
+    cap: usize,
+) -> usize {
+    unsafe { fill(crate::fmt::number(value, number_options(options)).as_bytes(), out, cap) }
+}
+
+/// A fraction as the locale's percentage; `options` may be null.
+///
+/// # Safety
+/// `options` must be null or valid; `out` must be null or valid for `cap` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_fmt_percent(
+    value: f64,
+    options: *const KayaNumberOptions,
+    out: *mut u8,
+    cap: usize,
+) -> usize {
+    unsafe { fill(crate::fmt::percent(value, number_options(options)).as_bytes(), out, cap) }
+}
+
+/// An amount in the ISO 4217 currency `code`.
+///
+/// # Safety
+/// `code` must be a NUL-terminated string; `out` must be null or valid for `cap` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_fmt_currency(
+    value: f64,
+    code: *const std::ffi::c_char,
+    out: *mut u8,
+    cap: usize,
+) -> usize {
+    let code = unsafe { cstr_arg(code) };
+    if code.len() != 3 || !code.bytes().all(|b| b.is_ascii_alphabetic()) {
+        crate::fault::report(format!(
+            "kaya: kaya_fmt_currency was given {code:?}; a currency is its three-letter ISO 4217 code"
+        ));
+        return 0;
+    }
+    unsafe { fill(crate::fmt::currency(value, &code).as_bytes(), out, cap) }
+}
+
+unsafe fn cstr_arg(s: *const std::ffi::c_char) -> String {
+    if s.is_null() {
+        return String::new();
+    }
+    unsafe { std::ffi::CStr::from_ptr(s) }.to_string_lossy().into_owned()
+}
+
+/// The process locale and its settings as one line: the BCP-47 tag, the
+/// hour cycle (`12` or `24`), the first weekday (1 Monday … 7 Sunday), the
+/// calendar and the numbering system, space-separated. Every binding
+/// answers a record from it.
+///
+/// # Safety
+/// `out` must be null or valid for `cap` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_locale(out: *mut u8, cap: usize) -> usize {
+    let info = crate::fmt::locale();
+    let line = format!(
+        "{} {} {} {} {}",
+        info.tag,
+        match info.hour_cycle {
+            crate::fmt::HourCycle::H12 => 12,
+            crate::fmt::HourCycle::H23 => 24,
+        },
+        info.first_weekday,
+        info.calendar,
+        info.numbering
+    );
+    unsafe { fill(line.as_bytes(), out, cap) }
+}
+
+/// The layout direction the locale asks for: 0 left-to-right, 1 right-to-left.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_direction() -> u32 {
+    match crate::fmt::direction() {
+        crate::fmt::Direction::Ltr => 0,
+        crate::fmt::Direction::Rtl => 1,
+    }
+}
+
+/// The text scale the platform reported, 1.0 until one does.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_text_scale() -> f64 {
+    crate::fmt::text_scale()
+}
+
+/// THE BACKEND'S REPORT (docs/compliance-plan.md §2.1): the toolkit's own
+/// factor, latched, so an app that scales its drawing can read it.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_text_scale_report(factor: f64) {
+    if !factor.is_finite() || factor <= 0.0 {
+        crate::fault::report(format!("kaya: kaya_text_scale_report was given {factor}"));
+        return;
+    }
+    crate::fmt::report_text_scale(factor);
+}
+
+/// Load the app's catalog, `l10n/<app>.<locale>.ftl` under the asset root
+/// with the fallback chain (docs/compliance-plan.md §2.4). Once, at startup.
+///
+/// # Safety
+/// `app` must be a NUL-terminated string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_catalog(app: *const std::ffi::c_char) {
+    let app = unsafe { cstr_arg(app) };
+    crate::l10n::catalog(&app);
+}
+
+/// `KayaTrArg.tag`: an integer in `i`.
+pub const KAYA_TR_INT: u32 = 0;
+/// A float in `f`.
+pub const KAYA_TR_FLOAT: u32 = 1;
+/// A string in `s`.
+pub const KAYA_TR_STR: u32 = 2;
+/// A packed date (YYYYMMDD) in `i`.
+pub const KAYA_TR_DATE: u32 = 3;
+/// A packed time (HHMM) in `i`.
+pub const KAYA_TR_TIME: u32 = 4;
+
+/// One argument to `kaya_tr`.
+#[repr(C)]
+pub struct KayaTrArg {
+    pub name: *const std::ffi::c_char,
+    pub tag: u32,
+    pub i: i64,
+    pub f: f64,
+    pub s: *const std::ffi::c_char,
+}
+
+/// The message `key` with `args` filled, from the loaded catalog.
+///
+/// # Safety
+/// `key` must be NUL-terminated; `args` must be null or valid for `nargs`
+/// records whose `name` and `s` are NUL-terminated; `out` must be null or
+/// valid for `cap` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_tr(
+    key: *const std::ffi::c_char,
+    args: *const KayaTrArg,
+    nargs: usize,
+    out: *mut u8,
+    cap: usize,
+) -> usize {
+    let key = unsafe { cstr_arg(key) };
+    let records: &[KayaTrArg] =
+        if args.is_null() || nargs == 0 { &[] } else { unsafe { std::slice::from_raw_parts(args, nargs) } };
+    let mut names = Vec::with_capacity(records.len());
+    let mut values = Vec::with_capacity(records.len());
+    for r in records {
+        names.push(unsafe { cstr_arg(r.name) });
+        let value = match r.tag {
+            KAYA_TR_INT => crate::l10n::Arg::Int(r.i),
+            KAYA_TR_FLOAT => crate::l10n::Arg::Float(r.f),
+            KAYA_TR_STR => crate::l10n::Arg::Str(unsafe { cstr_arg(r.s) }),
+            KAYA_TR_DATE => match fmt_date_arg(r.i, "kaya_tr") {
+                Some(d) => crate::l10n::Arg::Date(d),
+                None => return 0,
+            },
+            KAYA_TR_TIME => match fmt_time_arg(r.i, "kaya_tr") {
+                Some(t) => crate::l10n::Arg::Time(t),
+                None => return 0,
+            },
+            other => {
+                crate::fault::report(format!(
+                    "kaya: kaya_tr argument {:?} has tag {other}; the tags are 0 int, 1 float, 2 str, 3 date, 4 time",
+                    names.last().cloned().unwrap_or_default()
+                ));
+                return 0;
+            }
+        };
+        values.push(value);
+    }
+    let pairs: Vec<(&str, crate::l10n::Arg)> =
+        names.iter().map(|n| n.as_str()).zip(values.into_iter()).collect();
+    unsafe { fill(crate::l10n::tr(&key, &pairs).as_bytes(), out, cap) }
+}
+
 /// Copy out at most `cap` bytes and answer the true length.
 ///
 /// # Safety

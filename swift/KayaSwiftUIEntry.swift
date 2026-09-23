@@ -55,6 +55,7 @@ final class KayaAppDelegate: NSObject, NSApplicationDelegate {
         // BEFORE ANY WINDOW EXISTS, so every one of them inherits it and no
         // first frame is drawn in the host's mode (tools/check-appearance.py).
         kayaApplyAppearance()
+        kayaApplyTextScale()
         // The notification centre's delegate, before launching finishes, so
         // a launch caused by a tap is delivered (docs/tasks-s3-plan.md §3).
         if kayaCanPostNotifications() {
@@ -136,6 +137,8 @@ public func kayaSwiftUIRun(_ api: UnsafePointer<KayaHostApi>) -> Int32 {
                 + String(format: "%016llx", host)
                 + "; rebuild it (tools/swiftui/build-dylib.sh)")
     }
+    // The locale knob, before the app object exists (docs/compliance-plan.md §2.2).
+    kayaInstallLocaleKnob()
     KayaApp.main() // takes over the calling (main) thread; does not return
     return 0
 }

@@ -64,6 +64,9 @@ RUST_SCENES = [
     "menus", "toolbar", "identity", "assets", "listdetail",
     "table", "windowed", "adaptive", "commands", "undo",
     "dirty", "dnd", "pickers", "sliders", "tooltips", "sheet",
+    # The formatter door and the catalog under three locales
+    # (docs/compliance-plan.md §6); SCENE_LOCALE carries the knob.
+    "format", "formatde", "formatar",
     # The notification conformance scene: the activation is a REAL tap on
     # SpringBoard's own shade, driven by the xcui driver's notify_tap
     # (docs/tasks-s3-plan.md N5).
@@ -225,7 +228,11 @@ def swift_scene(entry):
 # Scene -> the cargo example it builds, where the two differ: a scene
 # selects a SCRIPT, never an app.
 RUST_EXAMPLE = {"listdetail": "split", "taskspersist": "tasks",
-                "links": "tasks"}
+                "links": "tasks", "formatde": "format", "formatar": "format"}
+
+# The locale a scene runs under, the knob the leg carries
+# (docs/compliance-plan.md §4); the reads ask the platform, never this.
+SCENE_LOCALE = {"formatde": "de-DE", "formatar": "ar-EG"}
 
 
 def rust_example(scene):

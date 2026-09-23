@@ -48,7 +48,8 @@ SCENES = [
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed — built and run rust-only until their guests arrive,
 # when they move into SCENES.
-DEPTH_SCENES = ["typeface", "windowed", "canvas", "dnd", "tasks", "notify", "notes", "richrows"]
+DEPTH_SCENES = ["typeface", "windowed", "canvas", "dnd", "tasks", "notify", "notes", "richrows",
+                "format"]
 # The C-floor scenes THIS LANE RUNS (guests/c/Makefile keeps the whole
 # list; this is the SCENES= override build_c passes, and check-steps'
 # sweep_c_floor reads it from the other side).
@@ -67,7 +68,12 @@ LANGS = ("rust", "python", "go", "csharp", "ocaml", "haskell", "swift",
 # SCRIPT, never an app). editor/portfolio/varied are single-language
 # apps whose launchers already name the right artifact.
 GUEST_STEM = {"listdetail": "split", "taskspersist": "tasks",
-              "links": "tasks"}
+              "links": "tasks", "formatde": "format", "formatar": "format"}
+
+# THE LOCALE A SCENE RUNS UNDER (docs/compliance-plan.md §4): the knob the
+# leg carries, so the same guest is read under German and Arabic; the
+# platform installs it and the reads ask the platform, never this table.
+SCENE_LOCALE = {"formatde": "de-DE", "formatar": "ar-EG"}
 
 # The dark half of expect_ink's frozen string, one leg instead of a
 # lane re-run (tools/check-appearance.py holds the leg here): canvas's
@@ -87,7 +93,9 @@ HAND_QUEUED = {"editor": "go", "portfolio": "python", "varied": "python",
                "taskspersist": "rust",
                # The app-links scene: the same rust example under a third
                # script (docs/app-links-plan.md L5).
-               "links": "rust"}
+               "links": "rust",
+               # The format guest under two more locales (SCENE_LOCALE).
+               "formatde": "rust", "formatar": "rust"}
 
 # The queue, in run order. Entries:
 #   (scene, (lang, ...))    a group: script export + one leg per lang
@@ -180,6 +188,12 @@ ORDER = [
     ("richrows", ("rust", "python", "js", "go", "csharp", "java", "swift",
                   "ocaml", "haskell")),
     ("sheet", LANGS),
+    # THE FORMATTER DOOR AND THE CATALOG (docs/compliance-plan.md §6): the
+    # Rust guest under the everyday locale, then under de-DE and ar-EG
+    # through the KAYA_LOCALE knob; the eight other bindings join at breadth.
+    ("format", ("rust",)),
+    ("formatde", ("rust",)),
+    ("formatar", ("rust",)),
     ("drain",),
     # WHAT SURVIVES A RELAUNCH (docs/tasks-s4-plan.md §4): the tasks
     # guest again under taskspersist.steps, act two through the PLAIN
@@ -826,6 +840,8 @@ def leg_env(root, scene, lang, appearance=""):
         env["PYTHONPATH"] = str(root / "bindings/python")
     if appearance:
         env["KAYA_APPEARANCE"] = appearance
+    if scene in SCENE_LOCALE:
+        env["KAYA_LOCALE"] = SCENE_LOCALE[scene]
     # ONE STATE HOME PER LEG: the harness's scratch stores and the act-two
     # marker are one tree per APP under it, and the pool runs many legs of
     # one app at once (docs/traps.md, 2026-09-09: a concurrent leg's act

@@ -65,6 +65,9 @@ GATES = {
     # guests/: the SCENE-TIER clause reads guests/*/entry.*. docs/ here and
     # below: keyed-inputs cannot tell a cited path from a read one.
     "check-sugar-surface": ["crates", "bindings", "guests", "docs"],
+    # The catalogs and the guests that name their keys both live under
+    # guests/ (docs/compliance-plan.md §2.4).
+    "check-l10n": ["guests"],
     "check-universal-props": ["crates", "bindings", "swift", "android"],
     # No binding sits between an authored role and the backends; same for
     # check-native-undo.

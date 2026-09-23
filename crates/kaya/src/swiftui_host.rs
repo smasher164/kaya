@@ -274,6 +274,9 @@ pub struct KayaHostApi {
     /// CANONICAL raster, composed in the core so five platforms compare
     /// a string kaya wrote.
     pub presentation: extern "C" fn(f64, bool),
+    /// The toolkit's text scale, latched for apps (capi::kaya_text_scale_report;
+    /// docs/compliance-plan.md §2.1).
+    pub text_scale_report: extern "C" fn(f64),
     pub canvas_probe: unsafe extern "C" fn(u64, *mut u8, usize) -> usize,
     /// THE SIZE POLICY (docs/canvas-plan.md §3.2.1). `canvas_track` reports
     /// what layout assigned one canvas, in points. `frame` is the platform's
@@ -462,6 +465,7 @@ pub(crate) fn run() -> i32 {
         window_geometry: crate::capi::kaya_window_geometry,
         row_extent: crate::capi::kaya_row_extent,
         presentation: crate::capi::kaya_presentation,
+        text_scale_report: crate::capi::kaya_text_scale_report,
         canvas_probe: crate::capi::kaya_canvas_probe,
         canvas_track: crate::capi::kaya_canvas_track,
         window_metrics: crate::capi::kaya_window_metrics,

@@ -455,6 +455,28 @@ pub enum Step {
     /// The height the platform reports for the topmost sheet: `medium`
     /// or `large` on the phones, `none` on the desktops.
     ExpectSheetDetent(String),
+    /// The text scale the TOOLKIT reports for the process, within 0.01
+    /// (docs/compliance-plan.md §2.1): the window's content size category
+    /// as a factor on iOS, the density's font scale on Compose, the xft
+    /// dpi on GTK, UISettings on WinUI; 1.0 on macOS, which has none.
+    ExpectTextScale(f64),
+    /// Every live label is allocated at least what its text needs at its
+    /// width — the read Apple's Larger Text criteria are about, which no
+    /// text expectation can see (docs/compliance-plan.md §4).
+    ExpectNoClipping,
+    /// The layout direction the toolkit resolved at the root: `ltr` or
+    /// `rtl`, read from the platform, never from the knob.
+    ExpectDirection(String),
+    /// The row's first child sits at the trailing edge: geometry, which
+    /// is what mirroring means.
+    ExpectMirrored(Target),
+    /// The PLATFORM's own locale for the process, as a BCP-47 tag, never
+    /// the knob and never the core's latch.
+    ExpectLocale(String),
+    /// The label's letters are in the named script (`Arab`, `Hebr`,
+    /// `Latn`): the check a knob that failed to reach the platform
+    /// cannot satisfy.
+    ExpectScript(Target, String),
     /// Drive the platform's own cancel path on the topmost sheet (Esc,
     /// the back gesture, a swipe, the close button): an armed
     /// intercept_dismiss sheet emits dismiss_requested and stays; an
@@ -648,6 +670,8 @@ impl Step {
             | Step::ExpectHelp(t, _)
             | Step::ExpectPlaceholder(t, _)
             | Step::ExpectHref(t, _)
+            | Step::ExpectMirrored(t)
+            | Step::ExpectScript(t, _)
             | Step::ExpectHighlights(t, _)
             | Step::ExpectSelection(t, _)
             | Step::ExpectDrawingHash(t, _)
@@ -721,6 +745,10 @@ impl Step {
             | Step::ExpectSheets(..)
             | Step::ExpectSheet(..)
             | Step::ExpectSheetDetent(..)
+            | Step::ExpectTextScale(..)
+            | Step::ExpectNoClipping
+            | Step::ExpectDirection(..)
+            | Step::ExpectLocale(..)
             | Step::DismissSheet
             | Step::MenuActivate(..)
             | Step::ExpectMenu(..)
@@ -826,6 +854,12 @@ impl Step {
             Step::ExpectSheet { .. } => true,
             Step::ExpectSheetDetent { .. } => true,
             Step::DismissSheet => false,
+            Step::ExpectTextScale(..) => true,
+            Step::ExpectNoClipping => true,
+            Step::ExpectDirection(..) => true,
+            Step::ExpectMirrored(..) => true,
+            Step::ExpectLocale(..) => true,
+            Step::ExpectScript(..) => true,
             Step::ExpectOverflow { .. } => true,
             Step::ScrollEnd { .. } => false,
             Step::ExpectAtEnd { .. } => true,
@@ -1217,6 +1251,27 @@ pub trait Stage: Send + 'static {
     fn sheet_detent(&self) -> String;
     /// Drive the platform's own cancel path on the topmost sheet.
     fn dismiss_sheet(&self);
+    /// The text scale the toolkit reports for the process
+    /// (docs/compliance-plan.md §2.1's read-back column); 1.0 where the
+    /// platform has no text size.
+    fn text_scale(&self) -> f64;
+    /// Empty when every live label is allocated what its text needs at its
+    /// width; else a sentence naming the first clipped label's text and
+    /// both sizes.
+    fn clipping(&self) -> String;
+    /// The layout direction the toolkit resolved at the root: "ltr"/"rtl".
+    fn direction(&self) -> String;
+    /// Empty when the row's first child sits at its trailing edge; else a
+    /// sentence with both children's leading x.
+    fn mirrored(&self, target: Target) -> String;
+    /// The platform's own locale for the process, BCP-47.
+    fn platform_locale(&self) -> String;
+    /// What THIS platform's formatter writes for `value` of `kind` at
+    /// `length`, asked independently of the core's door: the value is
+    /// `YYYY-MM-DD` for a date, `HH:MM` for a time, both joined by `T` for
+    /// date_time, a decimal for number and percent, `amount:CODE` for
+    /// currency. Empty when the platform cannot answer.
+    fn formatted(&self, kind: &str, value: &str, length: &str) -> String;
     /// The progress bar's state, read from the toolkit: the determinate
     /// fraction as an integer percent ("42%" — the slider verdict's
     /// spelling) or "indeterminate" while activity mode is on.
@@ -2036,6 +2091,56 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 Step::ExpectSheets(n)
             }
             "expect_sheet" => Step::ExpectSheet(parse_string(rest)?),
+            "expect_text_scale" => {
+                let factor: f64 = rest.trim().parse().map_err(|_| {
+                    format!("expect_text_scale wants a factor such as 2.0: {line:?}")
+                })?;
+                if !(0.5..=4.0).contains(&factor) {
+                    return Err(format!("expect_text_scale wants a factor in 0.5..=4.0: {line:?}"));
+                }
+                Step::ExpectTextScale(factor)
+            }
+            "expect_no_clipping" => {
+                if !rest.trim().is_empty() {
+                    return Err(format!("expect_no_clipping takes nothing: {line:?}"));
+                }
+                Step::ExpectNoClipping
+            }
+            "expect_direction" => {
+                let dir = rest.trim();
+                if dir != "ltr" && dir != "rtl" {
+                    return Err(format!("expect_direction wants ltr or rtl: {line:?}"));
+                }
+                Step::ExpectDirection(dir.to_owned())
+            }
+            "expect_mirrored" => {
+                let target = parse_target(rest.trim())?;
+                if target.kind != TargetKind::Row {
+                    return Err(format!("expect_mirrored wants a row target: {line:?}"));
+                }
+                Step::ExpectMirrored(target)
+            }
+            "expect_locale" => {
+                let tag = rest.trim();
+                if tag.is_empty() || !tag.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') {
+                    return Err(format!("expect_locale wants a BCP-47 tag such as ar-EG: {line:?}"));
+                }
+                Step::ExpectLocale(tag.to_owned())
+            }
+            "expect_script" => {
+                let (target, script) = rest.trim().split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("expect_script wants a label target and a script: {line:?}")
+                })?;
+                let target = parse_target(target)?;
+                if target.kind != TargetKind::Label {
+                    return Err(format!("expect_script wants a label target: {line:?}"));
+                }
+                let script = script.trim();
+                if !["Arab", "Hebr", "Latn"].contains(&script) {
+                    return Err(format!("expect_script knows Arab, Hebr and Latn: {line:?}"));
+                }
+                Step::ExpectScript(target, script.to_owned())
+            }
             "expect_sheet_detent" => {
                 let detent = rest.trim();
                 if !matches!(detent, "medium" | "large" | "none") {
@@ -3972,7 +4077,8 @@ fn run_with_log(
                         TargetKind::Select | TargetKind::Radio => stage.selected_label(*t),
                         _ => unreachable!(),
                     };
-                    if got == *want {
+                    let want = expand_template(&stage, want)?;
+                    if got == want {
                         Ok(got)
                     } else {
                         Err(format!("{t:?} reads {got:?}, wanted {want:?}"))
@@ -4367,6 +4473,54 @@ fn run_with_log(
                     Err(format!("sheets {got}, wanted {n}"))
                 }
             })),
+            Step::ExpectTextScale(want) => Some(poll(|| {
+                let got = stage.text_scale();
+                if (got - want).abs() <= 0.01 {
+                    Ok(format!("text scale {want}"))
+                } else {
+                    Err(format!("text scale {got}, wanted {want}"))
+                }
+            })),
+            Step::ExpectNoClipping => Some(poll(|| {
+                let got = stage.clipping();
+                if got.is_empty() {
+                    Ok("no clipping".to_owned())
+                } else {
+                    Err(format!("clipped: {got}"))
+                }
+            })),
+            Step::ExpectDirection(want) => Some(poll(|| {
+                let got = stage.direction();
+                if got == *want {
+                    Ok(format!("direction {want}"))
+                } else {
+                    Err(format!("direction {got}, wanted {want}"))
+                }
+            })),
+            Step::ExpectMirrored(t) => Some(poll(|| {
+                let got = stage.mirrored(*t);
+                if got.is_empty() {
+                    Ok(format!("{t:?} mirrored"))
+                } else {
+                    Err(format!("{t:?} not mirrored: {got}"))
+                }
+            })),
+            Step::ExpectLocale(want) => Some(poll(|| {
+                let got = stage.platform_locale();
+                if got.eq_ignore_ascii_case(want) {
+                    Ok(format!("locale {want}"))
+                } else {
+                    Err(format!("locale {got}, wanted {want}"))
+                }
+            })),
+            Step::ExpectScript(t, script) => Some(poll(|| {
+                let got = stage.read_label(*t);
+                match script_of(&got) {
+                    Some(found) if found == script => Ok(format!("{t:?} in {script}")),
+                    Some(found) => Err(format!("{t:?} reads {got:?}, whose letters are {found}, wanted {script}")),
+                    None => Err(format!("{t:?} reads {got:?}, which has no letters")),
+                }
+            })),
             Step::ExpectSheet(want) => Some(poll(|| match stage.sheet_title() {
                 Some(got) if got == *want => Ok(format!("sheet {want:?}")),
                 Some(got) => Err(format!("sheet {got:?}, wanted {want:?}")),
@@ -4694,7 +4848,8 @@ fn run_with_log(
             })),
             Step::ExpectAx(target, want) => Some(poll(|| {
                 let got = stage.ax(*target);
-                if got == *want {
+                let want = expand_template(&stage, want)?;
+                if got == want {
                     Ok(format!("ax {want:?}"))
                 } else {
                     Err(format!("ax {got:?}, wanted {want:?}"))
@@ -5336,6 +5491,68 @@ mod expand_tests {
             std::env::temp_dir().to_string_lossy().trim_end_matches('/')
         ));
     }
+}
+
+/// `{fmt:<kind> <value> <length>}` inside an expected string is what THIS
+/// platform's formatter writes for that input, asked of the stage
+/// independently of the core's door (docs/compliance-plan.md §4, R9):
+/// `{fmt:date 2026-09-07 medium}`, `{fmt:time 08:30 short}`,
+/// `{fmt:date_time 2026-09-07T08:30 medium}`, `{fmt:number 1234567.891 medium}`,
+/// `{fmt:percent 0.256 medium}`, `{fmt:currency 1234567.89:USD medium}`,
+/// `{fmt:date_weekday 2026-09-07}`. A placeholder the platform cannot
+/// answer is a refusal naming it, never an empty expectation.
+pub(crate) fn expand_template<S: Stage + ?Sized>(stage: &S, want: &str) -> Result<String, String> {
+    let mut out = String::new();
+    let mut rest = want;
+    while let Some(start) = rest.find("{fmt:") {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 5..];
+        let Some(end) = after.find('}') else {
+            return Err(format!("unterminated {{fmt:…}} in {want:?}"));
+        };
+        let spec: Vec<&str> = after[..end].split_whitespace().collect();
+        let (kind, value, length) = match spec.as_slice() {
+            ["date_weekday", value] => ("date_weekday", *value, "medium"),
+            [kind, value, length] => (*kind, *value, *length),
+            _ => return Err(format!("{{fmt:{}}} wants a kind, a value and a length", after[..end].trim())),
+        };
+        if !["date", "time", "date_time", "number", "percent", "currency", "date_weekday"].contains(&kind) {
+            return Err(format!("{{fmt:{kind} …}}: the kinds are date, time, date_time, number, percent, currency, date_weekday"));
+        }
+        if !["short", "medium", "long"].contains(&length) {
+            return Err(format!("{{fmt:{kind} {value} {length}}}: the lengths are short, medium, long"));
+        }
+        let answer = stage.formatted(kind, value, length);
+        if answer.is_empty() {
+            return Err(format!("this platform's formatter answered nothing for {{fmt:{kind} {value} {length}}}"));
+        }
+        out.push_str(&answer);
+        rest = &after[end + 1..];
+    }
+    out.push_str(rest);
+    Ok(out)
+}
+
+/// The script of a label's LETTERS: the first script a letter belongs to,
+/// digits, marks and punctuation skipped, so an Arabic date with Latin
+/// digits (glibc's ar_EG) still reads Arab. None when nothing is a letter.
+pub(crate) fn script_of(text: &str) -> Option<&'static str> {
+    for c in text.chars() {
+        let u = c as u32;
+        let script = match u {
+            0x0600..=0x06FF | 0x0750..=0x077F | 0x08A0..=0x08FF | 0xFB50..=0xFDFF | 0xFE70..=0xFEFF => "Arab",
+            0x0590..=0x05FF | 0xFB1D..=0xFB4F => "Hebr",
+            0x0041..=0x005A | 0x0061..=0x007A | 0x00C0..=0x024F | 0x1E00..=0x1EFF => "Latn",
+            _ => continue,
+        };
+        // Arabic-Indic digits and the Arabic day period sit in the Arab
+        // block but are not letters; skip digits, keep the rest.
+        if c.is_ascii_digit() || (0x0660..=0x0669).contains(&u) || (0x06F0..=0x06F9).contains(&u) {
+            continue;
+        }
+        return Some(script);
+    }
+    None
 }
 
 fn poll(eval: impl FnMut() -> Result<String, String>) -> Result<String, String> {
@@ -5986,6 +6203,24 @@ mod tests {
         fn back(&self, _: u64) {}
         fn sheet_count(&self) -> usize {
             0
+        }
+        fn text_scale(&self) -> f64 {
+            1.0
+        }
+        fn clipping(&self) -> String {
+            String::new()
+        }
+        fn direction(&self) -> String {
+            "ltr".to_owned()
+        }
+        fn mirrored(&self, _: Target) -> String {
+            String::new()
+        }
+        fn platform_locale(&self) -> String {
+            "en-US".to_owned()
+        }
+        fn formatted(&self, _: &str, _: &str, _: &str) -> String {
+            String::new()
         }
         fn sheet_title(&self) -> Option<String> {
             None
@@ -6884,6 +7119,24 @@ mod tests {
         fn sheet_count(&self) -> usize {
             0
         }
+        fn text_scale(&self) -> f64 {
+            1.0
+        }
+        fn clipping(&self) -> String {
+            String::new()
+        }
+        fn direction(&self) -> String {
+            "ltr".to_owned()
+        }
+        fn mirrored(&self, _: Target) -> String {
+            String::new()
+        }
+        fn platform_locale(&self) -> String {
+            "en-US".to_owned()
+        }
+        fn formatted(&self, _: &str, _: &str, _: &str) -> String {
+            String::new()
+        }
         fn sheet_title(&self) -> Option<String> {
             None
         }
@@ -7175,6 +7428,24 @@ mod tests {
         fn back(&self, _: u64) {}
         fn sheet_count(&self) -> usize {
             0
+        }
+        fn text_scale(&self) -> f64 {
+            1.0
+        }
+        fn clipping(&self) -> String {
+            String::new()
+        }
+        fn direction(&self) -> String {
+            "ltr".to_owned()
+        }
+        fn mirrored(&self, _: Target) -> String {
+            String::new()
+        }
+        fn platform_locale(&self) -> String {
+            "en-US".to_owned()
+        }
+        fn formatted(&self, _: &str, _: &str, _: &str) -> String {
+            String::new()
         }
         fn sheet_title(&self) -> Option<String> {
             None

@@ -1,0 +1,15 @@
+# The format guest under KAYA_LOCALE=ar-EG (docs/compliance-plan.md §6):
+# the platform's Arabic, the ar catalog's six plural forms, and the layout
+# mirrored — read from geometry and the toolkit, never the knob.
+expect_locale ar-EG
+expect label#1 "{fmt:date 2026-09-07 medium}"
+expect label#2 "{fmt:date 2026-09-07 long}"
+expect label#3 "{fmt:time 08:30 short}"
+expect label#5 "{fmt:number 1234567.891 medium}"
+expect label#7 "{fmt:currency 1234567.89:USD medium}"
+expect_script label#2 Arab
+expect label#8 "عنصر واحد"
+expect label#10 "مرحبًا، Ada"
+expect label#13 "ar-EG"
+expect_direction rtl
+expect_mirrored row#0

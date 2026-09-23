@@ -1197,6 +1197,46 @@
 #define KAYA_SOURCE_ELEMENT 2
 
 /**
+ * `kaya_fmt_*`'s length: the numeric form.
+ */
+#define KAYA_FMT_SHORT 0
+
+/**
+ * The abbreviated words.
+ */
+#define KAYA_FMT_MEDIUM 1
+
+/**
+ * The full words.
+ */
+#define KAYA_FMT_LONG 2
+
+/**
+ * `KayaTrArg.tag`: an integer in `i`.
+ */
+#define KAYA_TR_INT 0
+
+/**
+ * A float in `f`.
+ */
+#define KAYA_TR_FLOAT 1
+
+/**
+ * A string in `s`.
+ */
+#define KAYA_TR_STR 2
+
+/**
+ * A packed date (YYYYMMDD) in `i`.
+ */
+#define KAYA_TR_DATE 3
+
+/**
+ * A packed time (HHMM) in `i`.
+ */
+#define KAYA_TR_TIME 4
+
+/**
  * Returned by `kaya_next_occurrence` when the core has shut down.
  */
 #define KAYA_OCCURRENCE_SHUTDOWN 0
@@ -1236,6 +1276,40 @@ typedef struct Prop Prop;
 typedef struct StrKind StrKind;
 
 typedef struct WindowId WindowId;
+
+typedef const void *CFTypeRef;
+
+typedef const void *CFLocaleRef;
+
+typedef const void *CFStringRef;
+
+typedef const void *CFCalendarRef;
+
+typedef double CFAbsoluteTime;
+
+typedef const void *CFDateFormatterRef;
+
+typedef const void *CFNumberFormatterRef;
+
+/**
+ * What a number formatter may be told; -1 leaves the platform's default.
+ */
+typedef struct KayaNumberOptions {
+  int32_t min_fraction_digits;
+  int32_t max_fraction_digits;
+  bool grouping;
+} KayaNumberOptions;
+
+/**
+ * One argument to `kaya_tr`.
+ */
+typedef struct KayaTrArg {
+  const char *name;
+  uint32_t tag;
+  int64_t i;
+  double f;
+  const char *s;
+} KayaTrArg;
 
 /**
  * The occurrence ring's layout, for direct consumers.
@@ -1525,6 +1599,11 @@ typedef struct KayaHostApi {
    * a string kaya wrote.
    */
   void (*presentation)(double, bool);
+  /**
+   * The toolkit's text scale, latched for apps (capi::kaya_text_scale_report;
+   * docs/compliance-plan.md §2.1).
+   */
+  void (*text_scale_report)(double);
   uintptr_t (*canvas_probe)(uint64_t, uint8_t*, uintptr_t);
   /**
    * THE SIZE POLICY (docs/canvas-plan.md §3.2.1). `canvas_track` reports
@@ -1589,6 +1668,61 @@ typedef struct KayaHostApi {
 
 
 
+
+extern void CFRelease(CFTypeRef cf);
+
+extern CFLocaleRef CFLocaleCopyCurrent(void);
+
+extern CFTypeRef CFLocaleGetValue(CFLocaleRef locale, CFStringRef key);
+
+extern CFStringRef CFLocaleCreateCanonicalLanguageIdentifierFromString(const void *alloc,
+                                                                       CFStringRef id);
+
+extern CFCalendarRef CFCalendarCopyCurrent(void);
+
+extern CFStringRef CFCalendarGetIdentifier(CFCalendarRef cal);
+
+extern intptr_t CFCalendarGetFirstWeekday(CFCalendarRef cal);
+
+extern bool CFCalendarComposeAbsoluteTime(CFCalendarRef cal,
+                                          CFAbsoluteTime *at,
+                                          const char *desc,
+                                          ...);
+
+extern CFDateFormatterRef CFDateFormatterCreate(const void *alloc,
+                                                CFLocaleRef locale,
+                                                intptr_t date_style,
+                                                intptr_t time_style);
+
+extern CFStringRef CFDateFormatterCreateStringWithAbsoluteTime(const void *alloc,
+                                                               CFDateFormatterRef f,
+                                                               CFAbsoluteTime at);
+
+extern void CFDateFormatterSetFormat(CFDateFormatterRef f, CFStringRef format);
+
+extern CFStringRef CFDateFormatterCreateDateFormatFromTemplate(const void *alloc,
+                                                               CFStringRef template_,
+                                                               uint64_t options,
+                                                               CFLocaleRef locale);
+
+extern CFNumberFormatterRef CFNumberFormatterCreate(const void *alloc,
+                                                    CFLocaleRef locale,
+                                                    intptr_t style);
+
+extern void CFNumberFormatterSetProperty(CFNumberFormatterRef f, CFStringRef key, CFTypeRef value);
+
+extern CFStringRef CFNumberFormatterCreateStringWithValue(const void *alloc,
+                                                          CFNumberFormatterRef f,
+                                                          intptr_t ty,
+                                                          const void *ptr);
+
+extern CFTypeRef CFNumberCreate(const void *alloc, intptr_t ty, const void *ptr);
+
+extern CFStringRef CFStringCreateWithCString(const void *alloc, const char *s, uint32_t encoding);
+
+extern bool CFStringGetCString(CFStringRef s, char *buf, intptr_t cap, uint32_t encoding);
+
+extern intptr_t CFStringGetLength(CFStringRef s);
 
 extern void *dlopen(const char *path, int flag);
 
@@ -1699,6 +1833,123 @@ uintptr_t kaya_asset_why_not(const uint8_t *name, uintptr_t name_len, uint8_t *o
  * `out` must be null or valid for `cap` bytes.
  */
 uintptr_t kaya_app_data_dir(uint8_t *out, uintptr_t cap);
+
+/**
+ * The date (packed YYYYMMDD) at `length`, in the process locale.
+ *
+ * # Safety
+ * `out` must be null or valid for `cap` bytes.
+ */
+uintptr_t kaya_fmt_date(int64_t packed, int64_t length, uint8_t *out, uintptr_t cap);
+
+/**
+ * The date with its weekday and no year (`Mon, Sep 7` in en-US).
+ *
+ * # Safety
+ * `out` must be null or valid for `cap` bytes.
+ */
+uintptr_t kaya_fmt_date_weekday(int64_t packed, uint8_t *out, uintptr_t cap);
+
+/**
+ * The time (packed HHMM) at `length`, in the process locale and the
+ * user's hour cycle.
+ *
+ * # Safety
+ * `out` must be null or valid for `cap` bytes.
+ */
+uintptr_t kaya_fmt_time(int64_t packed, int64_t length, uint8_t *out, uintptr_t cap);
+
+/**
+ * Both together, one length.
+ *
+ * # Safety
+ * `out` must be null or valid for `cap` bytes.
+ */
+uintptr_t kaya_fmt_date_time(int64_t date,
+                             int64_t time,
+                             int64_t length,
+                             uint8_t *out,
+                             uintptr_t cap);
+
+/**
+ * A number with the locale's separators; `options` may be null.
+ *
+ * # Safety
+ * `options` must be null or valid; `out` must be null or valid for `cap` bytes.
+ */
+uintptr_t kaya_fmt_number(double value,
+                          const struct KayaNumberOptions *options,
+                          uint8_t *out,
+                          uintptr_t cap);
+
+/**
+ * A fraction as the locale's percentage; `options` may be null.
+ *
+ * # Safety
+ * `options` must be null or valid; `out` must be null or valid for `cap` bytes.
+ */
+uintptr_t kaya_fmt_percent(double value,
+                           const struct KayaNumberOptions *options,
+                           uint8_t *out,
+                           uintptr_t cap);
+
+/**
+ * An amount in the ISO 4217 currency `code`.
+ *
+ * # Safety
+ * `code` must be a NUL-terminated string; `out` must be null or valid for `cap` bytes.
+ */
+uintptr_t kaya_fmt_currency(double value, const char *code, uint8_t *out, uintptr_t cap);
+
+/**
+ * The process locale and its settings as one line: the BCP-47 tag, the
+ * hour cycle (`12` or `24`), the first weekday (1 Monday … 7 Sunday), the
+ * calendar and the numbering system, space-separated. Every binding
+ * answers a record from it.
+ *
+ * # Safety
+ * `out` must be null or valid for `cap` bytes.
+ */
+uintptr_t kaya_locale(uint8_t *out, uintptr_t cap);
+
+/**
+ * The layout direction the locale asks for: 0 left-to-right, 1 right-to-left.
+ */
+uint32_t kaya_direction(void);
+
+/**
+ * The text scale the platform reported, 1.0 until one does.
+ */
+double kaya_text_scale(void);
+
+/**
+ * THE BACKEND'S REPORT (docs/compliance-plan.md §2.1): the toolkit's own
+ * factor, latched, so an app that scales its drawing can read it.
+ */
+void kaya_text_scale_report(double factor);
+
+/**
+ * Load the app's catalog, `l10n/<app>.<locale>.ftl` under the asset root
+ * with the fallback chain (docs/compliance-plan.md §2.4). Once, at startup.
+ *
+ * # Safety
+ * `app` must be a NUL-terminated string.
+ */
+void kaya_catalog(const char *app);
+
+/**
+ * The message `key` with `args` filled, from the loaded catalog.
+ *
+ * # Safety
+ * `key` must be NUL-terminated; `args` must be null or valid for `nargs`
+ * records whose `name` and `s` are NUL-terminated; `out` must be null or
+ * valid for `cap` bytes.
+ */
+uintptr_t kaya_tr(const char *key,
+                  const struct KayaTrArg *args,
+                  uintptr_t nargs,
+                  uint8_t *out,
+                  uintptr_t cap);
 
 /**
  * 1 = present, with `*len` the full length and min(len, cap) bytes

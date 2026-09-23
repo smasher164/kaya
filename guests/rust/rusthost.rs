@@ -136,6 +136,8 @@ mod sliders;
 
 #[path = "sheet.rs"]
 mod sheet;
+#[path = "format.rs"]
+mod format;
 
 #[path = "tooltips.rs"]
 mod tooltips;
@@ -204,6 +206,7 @@ fn app(ctx: kaya::AppCtx) {
         Ok("pickers") => pickers::app(ctx),
         Ok("sliders") => sliders::app(ctx),
         Ok("sheet") => sheet::app(ctx),
+        Ok("format") => format::app(ctx),
         Ok("tooltips") => tooltips::app(ctx),
         Ok("search") => search::app(ctx),
         Ok("tasks") => tasks::app(ctx),

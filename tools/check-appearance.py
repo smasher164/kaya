@@ -103,7 +103,21 @@ INSTALLS = [
     (COMPOSE, r"CompositionLocalProvider\(LocalConfiguration provides forced",
      GUARD_KT_UI,
      "Compose moves the isSystemInDarkTheme half"),
+    # THE TEXT SCALE, the appearance's twin (docs/compliance-plan.md §2.1):
+    # the knob's asked function dominates the one iOS install, and the
+    # report beside it is unconditional — it carries the TOOLKIT's factor
+    # whichever way the scale was set.
+    (ENTRY, r"kayaApplyTextScale\(\)", None,
+     "macOS reports the text scale before its first window"),
+    (MAC, r"window\.traitOverrides\.preferredContentSizeCategory = category",
+     r"if let factor = kayaTextScaleOverride\(\) \{",
+     "the iOS arm sets the window's own content size category"),
 ]
+
+# The text-scale READ-BACK may not derive its factor from the knob
+# (clause B's twin): a read that echoed KAYA_TEXT_SCALE would make the
+# tasksbig leg self-fulfilling with every label still at 17pt.
+TEXT_SCALE_READER = (MAC, "kayaTextScaleFactor")
 
 # The files that REPORT a presentation. None of them may name the knob
 # outside its own install site — clause B.
@@ -220,6 +234,19 @@ def census(src):
                 f"{path}: a KAYA_APPEARANCE that is neither light nor dark is "
                 f"no longer refused — a typo would run the leg under the "
                 f"host's palette and freeze a wrong string"
+            )
+
+    # --- A2. The text-scale read-back reads the toolkit, never the knob. --
+    path, fn = TEXT_SCALE_READER
+    start = code[path].find(f"func {fn}")
+    if start < 0:
+        out.append(f"{path}: no `func {fn}` — the text-scale read-back is gone")
+    else:
+        body = code[path][start:start + 1200]
+        if "KAYA_TEXT_SCALE" in body or "kayaTextScaleOverride" in body:
+            out.append(
+                f"{path}: `{fn}` derives its factor from the knob — the read-back "
+                f"must ask the toolkit, or the scale leg is self-fulfilling"
             )
 
     # --- B. No reporter may report the ENV instead of the platform. ------
@@ -528,7 +555,23 @@ g.negative(
         MAC, r'NSApp\.appearance == nil \? "system" : "override"', '"system"', "N20")),
     want="answers no source word",
 )
-g.negatives_ran(20)
+g.negative(
+    "N21 the iOS text-scale install no longer guarded by the asked function",
+    lambda: census(without(
+        MAC, r"if let factor = kayaTextScaleOverride\(\) \{",
+        "if let factor = Optional(2.0) {", "N21")),
+    want="is not guarded by",
+)
+g.negative(
+    "N22 the text-scale read-back echoing the knob",
+    lambda: census(without(
+        MAC, r'guard let window = kayaHarnessWindow\(\) else \{ return 1\.0 \}',
+        'if let want = ProcessInfo.processInfo.environment["KAYA_TEXT_SCALE"], '
+        'let f = Double(want) { return f }\n'
+        '        guard let window = kayaHarnessWindow() else { return 1.0 }', "N22")),
+    want="derives its factor from the knob",
+)
+g.negatives_ran(22)
 
 # ---- The real census. --------------------------------------------------
 for line in census(src):
