@@ -57,6 +57,7 @@ use bindings::Microsoft::UI::Text::{
     TextGetOptions, TextSetOptions, UnderlineType,
 };
 use bindings::Windows::Foundation::{Point, TypedEventHandler};
+use bindings::Microsoft::UI::Xaml::FlowDirection;
 // A RICH LABEL'S INLINES (docs/rich-text-plan.md §15): the run table is drawn
 // as TextBlock.Inlines, and the three traits are TextElement properties.
 use bindings::Microsoft::UI::Text::FontWeights;
@@ -1351,6 +1352,10 @@ fn presentation_report(core: &mut CoreState) -> windows_core::Result<()> {
                 Ok(())
             }));
         }
+    }
+    // THE TEXT SCALE, the platform's own setting read back (§2.1, U3).
+    if let Ok(factor) = windows::UI::ViewManagement::UISettings::new().and_then(|s| s.TextScaleFactor()) {
+        crate::fmt::report_text_scale(factor);
     }
     let scale = root
         .XamlRoot()
@@ -7267,6 +7272,18 @@ fn window_ground(window: &Window) -> windows_core::Result<Grid> {
     }
     let ground: Grid =
         windows_core::Interface::cast(&XamlReader::Load(&HSTRING::from(WINDOW_GROUND_XAML))?)?;
+    // THE LOCALE AND ITS DIRECTION, per window ground (docs/compliance-plan.md
+    // §2.2, the WinUI row): a FrameworkElement's Language defaults to en-US
+    // whatever the user's is, and an unpackaged process cannot move its
+    // language (U5), so the ground says the process locale's — the knob's
+    // when set, the user's otherwise — and everything under it inherits.
+    let ground_element: FrameworkElement = windows_core::Interface::cast(&ground)?;
+    ground_element.SetLanguage(&HSTRING::from(crate::fmt::locale().tag.as_str()))?;
+    ground_element.SetFlowDirection(if crate::fmt::direction() == crate::fmt::Direction::Rtl {
+        FlowDirection::RightToLeft
+    } else {
+        FlowDirection::LeftToRight
+    })?;
     let old = window.Content().ok();
     window.SetContent(&windows_core::Interface::cast::<UIElement>(&ground)?)?;
     if let Some(old) = old {
@@ -16034,6 +16051,16 @@ fn bootstrap_windows_app_runtime_once() {
 /// the exit code; the host process decides how to exit (a library must
 /// not tear down someone else's process).
 pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
+    // No per-process text size exists on this platform: the lane writes the
+    // user's setting before a scale leg and deletes it after (R5, U3), so a
+    // knob here is REFUSED rather than ignored, macOS's rule one platform over.
+    if let Some(factor) = crate::fmt::text_scale_override() {
+        panic!(
+            "kaya: KAYA_TEXT_SCALE={factor} on Windows, which has no per-process text size: \
+             the lane writes HKCU\\Software\\Microsoft\\Accessibility\\TextScaleFactor \
+             (docs/compliance-plan.md R5)"
+        );
+    }
     install_seh_probe();
     bootstrap_windows_app_runtime();
 
@@ -21753,22 +21780,93 @@ impl crate::harness::Stage for WinUiStage {
         .unwrap_or(None)
     }
     fn text_scale(&self) -> f64 {
-        crate::depth_stub("format")
+        // The platform's own setting, which XAML applies by itself
+        // (docs/compliance-plan.md §2.1, U3); never a knob.
+        windows::UI::ViewManagement::UISettings::new()
+            .and_then(|s| s.TextScaleFactor())
+            .unwrap_or(1.0)
     }
     fn clipping(&self) -> String {
-        crate::depth_stub("format")
+        // Every live label: XAML's own trimming flag, and the arranged height
+        // against the desired one for a wrapping label its container cut
+        // (docs/compliance-plan.md §4).
+        Self::on_ui_read(|core| {
+            for label in &core.labels {
+                let element: FrameworkElement = windows_core::Interface::cast(label)?;
+                let width = element.ActualWidth()?;
+                if width <= 0.0 {
+                    continue;
+                }
+                let text: String = label.Text()?.to_string().chars().take(40).collect();
+                if label.IsTextTrimmed()? {
+                    return Ok(format!("label {text:?} is trimmed at {width}px wide"));
+                }
+                let need = f64::from(element.DesiredSize()?.Height);
+                let got = element.ActualHeight()?;
+                if need > got + 1.0 {
+                    return Ok(format!("label {text:?} needs {need}px at {width}px wide and got {got}px"));
+                }
+            }
+            Ok(String::new())
+        })
+        .unwrap_or_else(|e| format!("the labels could not be read: {e}"))
     }
     fn direction(&self) -> String {
-        crate::depth_stub("format")
+        // The ground's own resolved direction (window_ground writes it).
+        Self::on_ui_read(|core| {
+            let ground = window_ground(&core.window)?;
+            let element: FrameworkElement = windows_core::Interface::cast(&ground)?;
+            Ok(if element.FlowDirection()? == FlowDirection::RightToLeft { "rtl" } else { "ltr" }.to_owned())
+        })
+        .unwrap_or_else(|e| format!("unread: {e}"))
     }
-    fn mirrored(&self, _: crate::harness::Target) -> String {
-        crate::depth_stub("format")
+    fn mirrored(&self, t: crate::harness::Target) -> String {
+        Self::on_ui_read(move |core| {
+            let Some(i) = crate::harness::try_resolve(t.index, core.rows.len()) else {
+                return Ok("no such row".to_owned());
+            };
+            // SCREEN GEOMETRY, not flow geometry: under RightToLeft, XAML's
+            // TransformToVisual answers in a mirrored space whose x grows
+            // leftward from the surface's right edge (measured on the lane's
+            // VM 2026-09-23: a mirrored row read `first child at x=16, last
+            // at x=502`), so the flow x is turned back into a left edge.
+            let surface_element = window_surface(&core.window)?;
+            let surface: UIElement = windows_core::Interface::cast(&surface_element)?;
+            let rtl = surface_element.FlowDirection()? == FlowDirection::RightToLeft;
+            let surface_width = surface_element.ActualWidth()?;
+            let children = core.rows[i].Children()?;
+            let mut xs = Vec::new();
+            for k in 0..children.Size()? {
+                let child: FrameworkElement = windows_core::Interface::cast(&children.GetAt(k)?)?;
+                let flow_x = element_origin_x(&child, &surface)?;
+                xs.push(if rtl { surface_width - flow_x - child.ActualWidth()? } else { flow_x });
+            }
+            if xs.len() < 2 {
+                return Ok(format!("the row has {} child(ren)", xs.len()));
+            }
+            let (first, last) = (xs[0], xs[xs.len() - 1]);
+            Ok(if first > last {
+                String::new()
+            } else {
+                format!("first child at x={}, last at x={}", first as i32, last as i32)
+            })
+        })
+        .unwrap_or_else(|e| format!("unread: {e}"))
     }
     fn platform_locale(&self) -> String {
-        crate::depth_stub("format")
+        // The ground's own Language (window_ground writes it), the toolkit's
+        // reading and not the door's latch.
+        Self::on_ui_read(|core| {
+            let ground = window_ground(&core.window)?;
+            let element: FrameworkElement = windows_core::Interface::cast(&ground)?;
+            Ok(element.Language()?.to_string())
+        })
+        .unwrap_or_else(|e| format!("unread: {e}"))
     }
-    fn formatted(&self, _: &str, _: &str, _: &str) -> String {
-        crate::depth_stub("format")
+    fn formatted(&self, kind: &str, value: &str, length: &str) -> String {
+        // THE SAME PROCESS AND THE SAME PLATFORM: the harness IS this backend,
+        // so the platform answer is the door's own (R9), gtk.rs's shape.
+        crate::fmt::platform_answer(kind, value, length)
     }
     fn sheet_detent(&self) -> String {
         // A desktop sheet has no detent.

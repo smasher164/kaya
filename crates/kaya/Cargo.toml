@@ -138,6 +138,17 @@ windows = { version = "0.62", features = [
     # AUMID (winui/mod.rs, activator_clsid). The PLATFORM's own hash, so no
     # crypto is hand-rolled and no crate joins the tree for sixteen bytes.
     "Win32_Security_Cryptography",
+    # THE FORMATTER DOOR'S ARM (docs/compliance-plan.md §2.3, the Windows
+    # row; fmt.rs's windows module): Windows.Globalization's formatters with a
+    # language list per formatter, since an unpackaged process cannot move
+    # its language (U5); UserProfile is GlobalizationPreferences (the user's
+    # languages, clocks, calendars, first weekday); ViewManagement is
+    # UISettings.TextScaleFactor, the text-scale read-back (U3).
+    "Globalization",
+    "Globalization_DateTimeFormatting",
+    "Globalization_NumberFormatting",
+    "System_UserProfile",
+    "UI_ViewManagement",
 ] }
 windows-numerics = "0.3"
 windows-collections = "0.3"

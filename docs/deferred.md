@@ -51,8 +51,15 @@ than a verb of its own. What breadth still owes, held open here:
     the six reads off GTK, the xft-dpi text scale, the locale knob through
     `setlocale` plus the environment GTK's init re-reads, the image's
     generated locales, the format legs under three locales on both regimes.
-  - **DEPTH STUB: format on winui** — the Windows.Globalization arm and
-    the reads (§2.3's Windows row, U3, U5, U11).
+  - ~~**DEPTH STUB: format on winui**~~ — LANDED 2026-09-23: the
+    Windows.Globalization arm (a language list per formatter under the
+    knob, the user's own formatters otherwise; medium is the order-free
+    template Windows orders itself), the six reads off the toolkit (the
+    ground's Language and FlowDirection, IsTextTrimmed and the arranged
+    height, UISettings.TextScaleFactor), every window ground wearing the
+    process locale's Language and direction, the text-scale knob refused
+    since the platform has no per-process text size (R5), the three format
+    legs pooled on the windows lane.
   - ~~**DEPTH STUB: format on compose**~~ — LANDED 2026-09-23: the
     android.icu arm over JNI (KayaFormat.kt, every time through the
     `Hm`/`hm` skeleton under the platform's 24-hour setting), the six reads

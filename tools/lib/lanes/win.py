@@ -50,7 +50,11 @@ EXCLUSIVE = {"dnd_rust", "dnd_python", "dnd_js", "dnd_go", "dnd_csharp", "dnd_ja
 # THIS default; the runner calls depth_scenes(), which honours the
 # KAYA_WIN_DEPTH_SCENES override the lane uses for one-off slices.
 DEPTH_SCENES = ["windowed", "canvas", "sizepolicy", "tasks", "notify", "richtext",
-                "ownundo", "richlabel", "notes", "richrows"]
+                "ownundo", "richlabel", "notes", "richrows",
+                # The formatter door and the catalog (docs/compliance-plan.md
+                # §6): rust-only until the eight bindings' fmt lands; the
+                # SAME exe under three locales (run_format*_rust.cmd).
+                "format"]
 
 # THE PACKAGED LEGS (docs/packaging-plan.md P3): the SAME Rust guests, run
 # out of an installed MSIX instead of out of C:\kaya, because a kaya app is
@@ -268,6 +272,12 @@ ORDER = [
      "canvas_rust",
      "canvasdark_rust",
      "sizepolicy_rust",
+     # The format guest under the everyday locale and two knobs: POOLED,
+     # since the knob is per process (a language list per formatter and
+     # the window ground's own Language, U5) and nothing on the host moves.
+     "format_rust",
+     "formatde_rust",
+     "formatar_rust",
      # THE RICH LABEL (docs/rich-text-plan.md §15). POOLED, unlike its
      # richtext neighbour: a label is read-only, so the scene clicks two
      # buttons and reads the runs back — no typed input, no composition, no

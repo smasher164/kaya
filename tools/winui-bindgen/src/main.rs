@@ -83,6 +83,10 @@ fn main() {
         // `SetTextWrapping`/`SetTextTrimming` take.
         "Microsoft.UI.Xaml.TextWrapping".to_string(),
         "Microsoft.UI.Xaml.TextTrimming".to_string(),
+        // THE LAYOUT DIRECTION (docs/compliance-plan.md §2.2, the WinUI row):
+        // the enum `FrameworkElement.SetFlowDirection` takes, a pad until
+        // named, and the ground's `FlowDirection` read is the direction verb.
+        "Microsoft.UI.Xaml.FlowDirection".to_string(),
         // THE RICH LABEL'S INLINES (docs/rich-text-plan.md §15). A rich label
         // draws its run table as `TextBlock.Inlines`, and nothing in that
         // chain is pulled transitively: `Inlines` is a `usize` pad until

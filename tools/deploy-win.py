@@ -1427,6 +1427,18 @@ def unit_tests_on_windows():
         "captor held it ~40s past the grace, and TerminateProcess is what "
         "makes the invariant true. (atexit is NOT the hook: ExitProcess "
         "never runs it — the guest falsified that draft.)")
+    # THE FORMATTER DOOR'S DIGITS, which no leg can see: the harness on this
+    # backend answers {fmt:...} through the door itself (docs/compliance-plan.md
+    # R9), so DecimalFormatter's forced two digits read green everywhere and
+    # `3.00 items` only in the catalog's frozen bytes.
+    ok &= guest_unit_module(
+        ROOT / "crates/kaya/src/fmt.rs", "win_tests", "fmt::win_tests",
+        "the Windows.Globalization arm's unstated digit counts, CLDR's rather "
+        "than DecimalFormatter's forced two",
+        "This is the door measured against the guest's own formatters under "
+        "its user locale (en-US, the Region defaults): an integer bare, a "
+        "percent rounded on the shown digits and not the value, a currency "
+        "grouped.")
     # The binary goes whatever the verdict is: one left behind would be
     # the next run's stale exe waiting for a build that failed.
     run_ssh('cmd /c "del C:\\kaya\\kaya-unittests.exe 2>nul & exit /b 0"')

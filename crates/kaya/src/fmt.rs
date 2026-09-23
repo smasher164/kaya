@@ -940,13 +940,233 @@ mod platform {
     }
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "linux", target_os = "android")))]
+/// Windows.Globalization (docs/compliance-plan.md §2.3's Windows row; U5,
+/// U11). AN UNPACKAGED PROCESS CANNOT MOVE ITS LANGUAGE, so the knob is a
+/// language LIST handed to every formatter; with no knob the formatters
+/// are the user's own, which is where the Region settings' custom
+/// patterns reach. Windows names no medium date, so medium is the
+/// order-free template the platform orders itself (`07-Sep-26` in en-US),
+/// which docs/measurements/compliance-probes-2026-09-21.md records.
+#[cfg(target_os = "windows")]
+mod platform {
+    use super::{Date, Direction, HourCycle, Length, LocaleInfo, NumberOptions, Time};
+    use windows::Foundation::DateTime;
+    use windows::Globalization::Calendar;
+    use windows::Globalization::DateTimeFormatting::DateTimeFormatter;
+    use windows::Globalization::NumberFormatting::{
+        CurrencyFormatter, DecimalFormatter, INumberFormatter, INumberFormatterOptions,
+        INumberRounderOption, IncrementNumberRounder, PercentFormatter,
+    };
+    use windows::System::UserProfile::GlobalizationPreferences;
+    use windows_collections::IIterable;
+    use windows_core::{Interface, HSTRING};
+
+    static LOCALE_KNOB: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+    fn languages() -> Option<IIterable<HSTRING>> {
+        LOCALE_KNOB.get().map(|tag| IIterable::<HSTRING>::from(vec![HSTRING::from(tag.as_str())]))
+    }
+
+    fn fail(what: &str, e: windows_core::Error) -> ! {
+        panic!("kaya: Windows.Globalization refused {what}: {e}")
+    }
+
+    /// The instant at a local wall-clock date and time: a Gregorian calendar
+    /// on the 24-hour clock does the conversion, in the local time zone.
+    fn instant(d: Date, t: Time) -> DateTime {
+        let cal = match languages() {
+            Some(langs) => Calendar::CreateCalendar(
+                &langs,
+                &HSTRING::from("GregorianCalendar"),
+                &HSTRING::from("24HourClock"),
+            ),
+            None => Calendar::new().and_then(|c| {
+                c.ChangeCalendarSystem(&HSTRING::from("GregorianCalendar"))?;
+                c.ChangeClock(&HSTRING::from("24HourClock"))?;
+                Ok(c)
+            }),
+        }
+        .unwrap_or_else(|e| fail("a calendar", e));
+        let set = (|| {
+            cal.SetYear(d.year)?;
+            cal.SetMonth(i32::from(d.month))?;
+            cal.SetDay(i32::from(d.day))?;
+            cal.SetHour(i32::from(t.hour))?;
+            cal.SetMinute(i32::from(t.minute))?;
+            cal.SetSecond(0)?;
+            cal.SetNanosecond(0)?;
+            cal.GetDateTime()
+        })();
+        set.unwrap_or_else(|e| fail("the date", e))
+    }
+
+    fn formatter(template: &str) -> DateTimeFormatter {
+        match languages() {
+            Some(langs) => DateTimeFormatter::CreateDateTimeFormatterLanguages(&HSTRING::from(template), &langs),
+            None => DateTimeFormatter::CreateDateTimeFormatter(&HSTRING::from(template)),
+        }
+        .unwrap_or_else(|e| fail(template, e))
+    }
+
+    fn write(template: &str, at: DateTime) -> String {
+        formatter(template).Format(at).unwrap_or_else(|e| fail(template, e)).to_string()
+    }
+
+    fn date_template(length: Length) -> &'static str {
+        match length {
+            Length::Short => "shortdate",
+            Length::Medium => "month.abbreviated day year",
+            Length::Long => "longdate",
+        }
+    }
+
+    fn time_template(length: Length) -> &'static str {
+        match length {
+            Length::Short => "shorttime",
+            Length::Medium => "hour minute second",
+            Length::Long => "longtime",
+        }
+    }
+
+    pub(super) fn date(d: Date, length: Length) -> String {
+        write(date_template(length), instant(d, Time { hour: 12, minute: 0 }))
+    }
+
+    pub(super) fn date_weekday(d: Date) -> String {
+        write("dayofweek.abbreviated day month.abbreviated", instant(d, Time { hour: 12, minute: 0 }))
+    }
+
+    pub(super) fn time(t: Time, length: Length) -> String {
+        write(time_template(length), instant(Date { year: 2000, month: 1, day: 1 }, t))
+    }
+
+    pub(super) fn date_time(d: Date, t: Time, length: Length) -> String {
+        write(&format!("{} {}", date_template(length), time_template(length)), instant(d, t))
+    }
+
+    /// The options record onto a formatter, then the number: grouping and
+    /// the minimum fraction digits are formatter options, the maximum is a
+    /// rounder (the platform's own split). AN UNSTATED DIGIT COUNT IS CLDR'S
+    /// (`#,##0.###`, `#,##0%`), not DecimalFormatter's: its own default is
+    /// two FORCED fraction digits, so a catalog's `{ $count } items` read
+    /// `3.00 items` on the lane's VM where every other platform and the
+    /// catalog's frozen bytes say `3 items` (docs/compliance-plan.md §2.3).
+    /// A currency keeps the currency's own digits, as everywhere.
+    /// THE ROUNDER ROUNDS THE VALUE, NOT THE DIGITS SHOWN: a percent shows
+    /// value × 100, so its increment is scaled by `unit` (0.01) — with 1.0
+    /// the everyday leg read `0%` for 0.256 (the VM, 2026-09-23).
+    fn write_number<F: Interface>(
+        f: &F,
+        o: NumberOptions,
+        digits: Option<(u8, u8)>,
+        unit: f64,
+        value: f64,
+    ) -> String {
+        let set = (|| {
+            let opts: INumberFormatterOptions = f.cast()?;
+            opts.SetIsGrouped(o.grouping)?;
+            let min = o.min_fraction_digits.or(digits.map(|d| d.0));
+            let max = o.max_fraction_digits.or(digits.map(|d| d.1));
+            if let Some(min) = min {
+                opts.SetFractionDigits(i32::from(min))?;
+            }
+            if let Some(max) = max {
+                let rounder = IncrementNumberRounder::new()?;
+                rounder.SetIncrement(10f64.powi(-i32::from(max.max(min.unwrap_or(0)))) * unit)?;
+                f.cast::<INumberRounderOption>()?.SetNumberRounder(&rounder)?;
+            }
+            f.cast::<INumberFormatter>()?.FormatDouble(value)
+        })();
+        set.unwrap_or_else(|e| fail("a number", e)).to_string()
+    }
+
+    pub(super) fn number(value: f64, o: NumberOptions) -> String {
+        let f = match languages() {
+            Some(langs) => DecimalFormatter::CreateDecimalFormatter(&langs, &HSTRING::from("ZZ")),
+            None => DecimalFormatter::new(),
+        }
+        .unwrap_or_else(|e| fail("a decimal formatter", e));
+        write_number(&f, o, Some((0, 3)), 1.0, value)
+    }
+
+    pub(super) fn percent(value: f64, o: NumberOptions) -> String {
+        let f = match languages() {
+            Some(langs) => PercentFormatter::CreatePercentFormatter(&langs, &HSTRING::from("ZZ")),
+            None => PercentFormatter::new(),
+        }
+        .unwrap_or_else(|e| fail("a percent formatter", e));
+        write_number(&f, o, Some((0, 0)), 0.01, value)
+    }
+
+    pub(super) fn currency(value: f64, code: &str) -> String {
+        let f = match languages() {
+            Some(langs) => CurrencyFormatter::CreateCurrencyFormatterCodeContext(
+                &HSTRING::from(code),
+                &langs,
+                &HSTRING::from("ZZ"),
+            ),
+            None => CurrencyFormatter::CreateCurrencyFormatterCode(&HSTRING::from(code)),
+        }
+        .unwrap_or_else(|e| fail("a currency formatter", e));
+        // The platform's own default is ungrouped (U11 measured `$1234567.89`).
+        write_number(&f, NumberOptions::default(), None, 1.0, value)
+    }
+
+    fn first_of(list: windows_core::Result<windows_collections::IVectorView<HSTRING>>) -> Option<String> {
+        list.ok().and_then(|v| v.GetAt(0).ok()).map(|h| h.to_string())
+    }
+
+    pub(super) fn locale() -> LocaleInfo {
+        let tag = LOCALE_KNOB
+            .get()
+            .cloned()
+            .or_else(|| first_of(GlobalizationPreferences::Languages()))
+            .unwrap_or_else(|| "en-US".to_owned());
+        // The clock as the short time writes it: a knob's language takes the
+        // language's own clock, the user's takes the Region setting.
+        let one_pm = time(Time { hour: 13, minute: 0 }, Length::Short);
+        let hour_cycle = if one_pm.contains("13") || one_pm.contains("١٣") { HourCycle::H23 } else { HourCycle::H12 };
+        // DayOfWeek counts Sunday as 0; ISO counts Monday as 1.
+        let starts = GlobalizationPreferences::WeekStartsOn().map(|d| d.0).unwrap_or(0);
+        let first_weekday = if starts == 0 { 7 } else { starts as u8 };
+        let calendar = first_of(GlobalizationPreferences::Calendars())
+            .unwrap_or_else(|| "GregorianCalendar".to_owned())
+            .trim_end_matches("Calendar")
+            .to_ascii_lowercase();
+        let zero = number(0.0, NumberOptions::default());
+        let numbering = match zero.chars().next() {
+            Some('٠') => "arab",
+            Some('۰') => "arabext",
+            Some('०') => "deva",
+            Some('๐') => "thai",
+            _ => "latn",
+        }
+        .to_owned();
+        LocaleInfo { tag, hour_cycle, first_weekday, calendar, numbering }
+    }
+
+    /// `SetPrimaryLanguageOverride` is refused in an unpackaged process
+    /// (U5, 0x80073D54), so the knob is the language list every formatter
+    /// takes and the `Language` and `FlowDirection` every window ground
+    /// wears (winui/mod.rs's window_ground).
+    pub(super) fn install_locale(tag: &str, direction: Direction) {
+        let _ = LOCALE_KNOB.set(tag.to_owned());
+        let _ = direction;
+    }
+}
+
+#[cfg(not(any(
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "linux",
+    target_os = "android",
+    target_os = "windows"
+)))]
 mod platform {
     use super::{Date, Length, LocaleInfo, NumberOptions, Time};
 
-    // The arm still owed (docs/compliance-plan.md §8 step 3: winui). The
-    // stub tools/check-stubs.py reads is the backend's own, in its Stage
-    // impl; this is the door's floor under it.
+    // The floor under a platform with no backend at all; every backend has
+    // its arm (docs/compliance-plan.md §2.3).
     fn refuse() -> ! {
         panic!(
             "kaya: the formatter has no arm on this platform yet — it is a depth \
@@ -980,6 +1200,27 @@ mod platform {
     }
     pub(super) fn install_locale(_: &str, _: super::Direction) {
         refuse()
+    }
+}
+
+/// The Windows arm's own digits, run ON THE LANE'S VM by tools/deploy-win.py's
+/// unit phase (the guest's user locale is en-US with the Region defaults,
+/// U11): the harness on this backend answers `{fmt:…}` through the door
+/// itself, so a wrong default here reads green on every leg — the VM read
+/// `3.00 items` and `0%` on 2026-09-23 before these were written.
+#[cfg(all(test, target_os = "windows"))]
+mod win_tests {
+    use super::{currency, number, percent, NumberOptions};
+
+    #[test]
+    fn the_windows_arm_writes_cldr_defaults() {
+        assert_eq!(number(3.0, NumberOptions::default()), "3");
+        assert_eq!(number(1234567.891, NumberOptions::default()), "1,234,567.891");
+        assert_eq!(number(1234567.8912, NumberOptions::default()), "1,234,567.891");
+        assert_eq!(percent(0.256, NumberOptions::default()), "26%");
+        assert_eq!(currency(1234567.89, "USD"), "$1,234,567.89");
+        let two = NumberOptions { min_fraction_digits: Some(2), max_fraction_digits: Some(2), grouping: false };
+        assert_eq!(number(3.0, two), "3.00");
     }
 }
 

@@ -313,6 +313,27 @@ by passing it to every formatter and by `Language` on each root element,
 and whether the CalendarDatePicker follows `Language` is the leg's own
 reading.
 
+## The WinUI arm's first run (measured 2026-09-23, the lane's VM)
+
+Three legs, three reds, none of them the formatter's bytes: the everyday and
+German legs read the catalog's `{ $count } items` as `3.00 items` and
+`3,00 Elemente`, because `DecimalFormatter`'s own default is two FORCED
+fraction digits where CLDR's `#,##0.###` (ICU, CoreFoundation, glibc's
+composed form) writes an integer bare — so an unstated digit count on this
+arm is CLDR's, min 0 max 3 for a number and 0/0 for a percent, and the
+currency keeps its own. The Arabic leg read `direction rtl` and
+`locale ar-EG` and then `row#0 not mirrored: first child at x=16, last at
+x=502`: under RightToLeft, XAML's `TransformToVisual` answers in a mirrored
+space whose x grows leftward from the surface's right edge, so the row WAS
+mirrored (its first child 16px from the right) and the read was in flow
+coordinates; the mirror read turns a flow x back into a left edge
+(`surface width - x - child width`) under an RTL surface. The second run
+was green on all three and read `0%` for `{fmt:percent 0.256 medium}` on
+both sides, since `IncrementNumberRounder` rounds the VALUE and a percent
+shows the value × 100: the increment is scaled by 0.01 for a percent, and
+`fmt::win_tests` pins the digits on the guest's unit phase, because the
+harness on this backend answers the template through the door itself.
+
 ## U2 again, glibc's own tables (measured 2026-09-23, a C probe in the lane image with the locales generated)
 
 | | C.UTF-8 | en_US.UTF-8 | de_DE.UTF-8 | ar_EG.UTF-8 |

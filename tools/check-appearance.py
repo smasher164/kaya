@@ -137,13 +137,18 @@ TEXT_SCALE_READERS = [
     (MAC, "func kayaTextScaleFactor", ("KAYA_TEXT_SCALE", "kayaTextScaleOverride")),
     (COMPOSE, '"expect_text_scale" ->',
      ("KAYA_TEXT_SCALE", "textScaleOverride", "textScaleAsked")),
+    (GTK, "fn text_scale(&self) -> f64 {", ("KAYA_TEXT_SCALE", "text_scale_override")),
+    (WINUI, "fn text_scale(&self) -> f64 {", ("KAYA_TEXT_SCALE", "text_scale_override")),
 ]
 
-# And the two Compose readers beside it: the direction and the locale must
-# come from the composition's own resolution, never the knob.
-COMPOSE_LOCALE_READERS = [
-    ('"expect_direction" ->', ("KAYA_LOCALE", "localeOverride", "localeAsked")),
-    ('"expect_locale" ->', ("KAYA_LOCALE", "localeOverride", "localeAsked")),
+# And the direction and locale readers beside it, on the two toolkits that
+# read a root's own property back: never the knob, never the door's latch.
+LOCALE_READERS = [
+    (COMPOSE, '"expect_direction" ->', ("KAYA_LOCALE", "localeOverride", "localeAsked")),
+    (COMPOSE, '"expect_locale" ->', ("KAYA_LOCALE", "localeOverride", "localeAsked")),
+    (WINUI, "fn direction(&self) -> String {", ("KAYA_LOCALE", "install_locale", "fmt::locale()")),
+    (WINUI, "fn platform_locale(&self) -> String {",
+     ("KAYA_LOCALE", "install_locale", "fmt::locale()")),
 ]
 
 # The files that REPORT a presentation. None of them may name the knob
@@ -275,16 +280,16 @@ def census(src):
                 f"{path}: `{needle}` derives its factor from the knob — the read-back "
                 f"must ask the toolkit, or the scale leg is self-fulfilling"
             )
-    for needle, banned in COMPOSE_LOCALE_READERS:
-        start = code[COMPOSE].find(needle)
+    for path, needle, banned in LOCALE_READERS:
+        start = code[path].find(needle)
         if start < 0:
-            out.append(f"{COMPOSE}: no `{needle}` — the locale read-back is gone")
+            out.append(f"{path}: no `{needle}` — the locale read-back is gone")
             continue
-        body = code[COMPOSE][start:start + 900]
+        body = code[path][start:start + 900]
         if any(word in body for word in banned):
             out.append(
-                f"{COMPOSE}: `{needle}` derives its answer from the knob — the "
-                f"read-back must ask the composition, or the Arabic leg is "
+                f"{path}: `{needle}` derives its answer from the knob — the "
+                f"read-back must ask the toolkit, or the Arabic leg is "
                 f"self-fulfilling"
             )
 
@@ -637,7 +642,23 @@ g.negative(
         'val got = KayaCompose.localeAsked() ?: ""', "N26")),
     want="derives its answer from the knob",
 )
-g.negatives_ran(26)
+g.negative(
+    "N27 the WinUI locale read-back echoing the door's latch",
+    lambda: census(without(
+        WINUI, r"Ok\(element\.Language\(\)\?\.to_string\(\)\)",
+        "Ok(crate::fmt::locale().tag)", "N27")),
+    want="derives its answer from the knob",
+)
+g.negative(
+    "N28 the WinUI text-scale read-back echoing the knob",
+    lambda: census(without(
+        WINUI,
+        r"windows::UI::ViewManagement::UISettings::new\(\)\n\s*"
+        r"\.and_then\(\|s\| s\.TextScaleFactor\(\)\)\n\s*\.unwrap_or\(1\.0\)",
+        "crate::fmt::text_scale_override().unwrap_or(1.0)", "N28")),
+    want="derives its factor from the knob",
+)
+g.negatives_ran(28)
 
 # ---- The real census. --------------------------------------------------
 for line in census(src):

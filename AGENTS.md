@@ -1030,9 +1030,13 @@ in docs/deferred.md.
    17pt. So each install site is dominated by its asked function (iOS's
    trait override, GTK's xft dpi, Compose's `KayaCompliance` with its
    forced Configuration, Density and LocalLayoutDirection under one inert
-   clause) and the `expect_text_scale`, `expect_direction` and
-   `expect_locale` readers may not name the knob or its asked function.
-   Twenty-six watched negatives, counts printed. The runtime halves are
+   clause; WinUI has no per-process text size and REFUSES the knob naming
+   R5) and the `expect_text_scale`, `expect_direction` and `expect_locale`
+   readers on every backend may not name the knob, its asked function or
+   the door's own latch — WinUI's read the window ground's Language and
+   FlowDirection back, which the ground wears from the process locale
+   since a FrameworkElement's Language defaults to en-US whatever the
+   user's is. Twenty-eight watched negatives, counts printed. The runtime halves are
    the legs: `canvas-*` is the unset proof and `canvasdark-*` the set
    proof, on all five lanes, the tasks scene's Dark-then-System round trip,
    and the `format*` legs under three locales),

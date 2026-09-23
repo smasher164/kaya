@@ -9411,6 +9411,22 @@ pub mod Microsoft {
             }
             #[repr(transparent)]
             #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+            pub struct FlowDirection(pub i32);
+            impl FlowDirection {
+                pub const LeftToRight: Self = Self(0i32);
+                pub const RightToLeft: Self = Self(1i32);
+            }
+            impl windows_core::TypeKind for FlowDirection {
+                type TypeKind = windows_core::CopyType;
+            }
+            impl windows_core::RuntimeType for FlowDirection {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::from_slice(
+                        b"enum(Microsoft.UI.Xaml.FlowDirection;i4)",
+                    );
+            }
+            #[repr(transparent)]
+            #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
             pub struct FocusState(pub i32);
             impl FocusState {
                 pub const Unfocused: Self = Self(0i32);
@@ -10000,6 +10016,27 @@ pub mod Microsoft {
                             &mut result__,
                         )
                         .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
+                pub fn FlowDirection(&self) -> windows_core::Result<FlowDirection> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).FlowDirection)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn SetFlowDirection(&self, value: FlowDirection) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetFlowDirection)(
+                            windows_core::Interface::as_raw(this),
+                            value,
+                        )
+                        .ok()
                     }
                 }
                 pub fn RequestedTheme(&self) -> windows_core::Result<ElementTheme> {
@@ -12683,8 +12720,16 @@ pub mod Microsoft {
                     *mut core::ffi::c_void,
                     *mut *mut core::ffi::c_void,
                 ) -> windows_core::HRESULT,
-                FlowDirection: usize,
-                SetFlowDirection: usize,
+                pub FlowDirection: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut FlowDirection,
+                )
+                    -> windows_core::HRESULT,
+                pub SetFlowDirection: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    FlowDirection,
+                )
+                    -> windows_core::HRESULT,
                 pub RequestedTheme: unsafe extern "system" fn(
                     *mut core::ffi::c_void,
                     *mut ElementTheme,
@@ -29533,6 +29578,32 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn FlowDirection(&self) -> windows_core::Result<super::FlowDirection> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFlowDirection(
+                        &self,
+                        value: super::FlowDirection,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
@@ -33413,6 +33484,32 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn FlowDirection(&self) -> windows_core::Result<super::FlowDirection> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFlowDirection(
+                        &self,
+                        value: super::FlowDirection,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
@@ -37171,6 +37268,32 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn FlowDirection(&self) -> windows_core::Result<super::FlowDirection> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFlowDirection(
+                        &self,
+                        value: super::FlowDirection,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
                         }
                     }
                     pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
@@ -41243,6 +41366,32 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn FlowDirection(&self) -> windows_core::Result<super::FlowDirection> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFlowDirection(
+                        &self,
+                        value: super::FlowDirection,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
@@ -45041,6 +45190,32 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn FlowDirection(&self) -> windows_core::Result<super::FlowDirection> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFlowDirection(
+                        &self,
+                        value: super::FlowDirection,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
                         }
                     }
                     pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
@@ -49497,6 +49672,32 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn FlowDirection(&self) -> windows_core::Result<super::FlowDirection> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFlowDirection(
+                        &self,
+                        value: super::FlowDirection,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
@@ -53596,6 +53797,32 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn FlowDirection(&self) -> windows_core::Result<super::FlowDirection> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFlowDirection(
+                        &self,
+                        value: super::FlowDirection,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
@@ -57574,6 +57801,32 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn FlowDirection(&self) -> windows_core::Result<super::FlowDirection> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFlowDirection(
+                        &self,
+                        value: super::FlowDirection,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
@@ -61233,6 +61486,32 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn FlowDirection(&self) -> windows_core::Result<super::FlowDirection> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFlowDirection(
+                        &self,
+                        value: super::FlowDirection,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
                         }
                     }
                     pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
@@ -65331,6 +65610,32 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn FlowDirection(&self) -> windows_core::Result<super::FlowDirection> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFlowDirection(
+                        &self,
+                        value: super::FlowDirection,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
@@ -69032,6 +69337,32 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn FlowDirection(&self) -> windows_core::Result<super::FlowDirection> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFlowDirection(
+                        &self,
+                        value: super::FlowDirection,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
@@ -72121,6 +72452,32 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn FlowDirection(&self) -> windows_core::Result<super::FlowDirection> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFlowDirection(
+                        &self,
+                        value: super::FlowDirection,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
@@ -74995,6 +75352,32 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn FlowDirection(&self) -> windows_core::Result<super::FlowDirection> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFlowDirection(
+                        &self,
+                        value: super::FlowDirection,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
                         }
                     }
                     pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
@@ -79010,6 +79393,32 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn FlowDirection(&self) -> windows_core::Result<super::FlowDirection> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFlowDirection(
+                        &self,
+                        value: super::FlowDirection,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
                         }
                     }
                     pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
@@ -90044,6 +90453,32 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn FlowDirection(&self) -> windows_core::Result<super::FlowDirection> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFlowDirection(
+                        &self,
+                        value: super::FlowDirection,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
@@ -93021,6 +93456,32 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn FlowDirection(&self) -> windows_core::Result<super::FlowDirection> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFlowDirection(
+                        &self,
+                        value: super::FlowDirection,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
                         }
                     }
                     pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
@@ -96852,6 +97313,32 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn FlowDirection(&self) -> windows_core::Result<super::FlowDirection> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFlowDirection(
+                        &self,
+                        value: super::FlowDirection,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
                         }
                     }
                     pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
@@ -100788,6 +101275,32 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn FlowDirection(&self) -> windows_core::Result<super::FlowDirection> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFlowDirection(
+                        &self,
+                        value: super::FlowDirection,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
@@ -104715,6 +105228,32 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn FlowDirection(&self) -> windows_core::Result<super::FlowDirection> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFlowDirection(
+                        &self,
+                        value: super::FlowDirection,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
@@ -108329,6 +108868,32 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn FlowDirection(&self) -> windows_core::Result<super::FlowDirection> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFlowDirection(
+                        &self,
+                        value: super::FlowDirection,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
                         }
                     }
                     pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
@@ -112437,6 +113002,32 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn FlowDirection(&self) -> windows_core::Result<super::FlowDirection> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFlowDirection(
+                        &self,
+                        value: super::FlowDirection,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
@@ -116170,6 +116761,32 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn FlowDirection(&self) -> windows_core::Result<super::FlowDirection> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFlowDirection(
+                        &self,
+                        value: super::FlowDirection,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
@@ -119740,6 +120357,32 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn FlowDirection(&self) -> windows_core::Result<super::FlowDirection> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFlowDirection(
+                        &self,
+                        value: super::FlowDirection,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
                         }
                     }
                     pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
@@ -123351,6 +123994,32 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn FlowDirection(&self) -> windows_core::Result<super::FlowDirection> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFlowDirection(
+                        &self,
+                        value: super::FlowDirection,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
                         }
                     }
                     pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
@@ -127052,6 +127721,32 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn FlowDirection(&self) -> windows_core::Result<super::FlowDirection> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFlowDirection(
+                        &self,
+                        value: super::FlowDirection,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
                         }
                     }
                     pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
@@ -131736,6 +132431,32 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn FlowDirection(&self) -> windows_core::Result<super::FlowDirection> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFlowDirection(
+                        &self,
+                        value: super::FlowDirection,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
@@ -135633,6 +136354,32 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn FlowDirection(&self) -> windows_core::Result<super::FlowDirection> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFlowDirection(
+                        &self,
+                        value: super::FlowDirection,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
@@ -138599,6 +139346,32 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn FlowDirection(&self) -> windows_core::Result<super::FlowDirection> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFlowDirection(
+                        &self,
+                        value: super::FlowDirection,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
                         }
                     }
                     pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
@@ -142242,6 +143015,32 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn FlowDirection(&self) -> windows_core::Result<super::FlowDirection> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFlowDirection(
+                        &self,
+                        value: super::FlowDirection,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
                         }
                     }
                     pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
@@ -146094,6 +146893,32 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn FlowDirection(&self) -> windows_core::Result<super::FlowDirection> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFlowDirection(
+                        &self,
+                        value: super::FlowDirection,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
@@ -149893,6 +150718,32 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn FlowDirection(&self) -> windows_core::Result<super::FlowDirection> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFlowDirection(
+                        &self,
+                        value: super::FlowDirection,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
                         }
                     }
                     pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
@@ -153713,6 +154564,32 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn FlowDirection(&self) -> windows_core::Result<super::FlowDirection> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFlowDirection(
+                        &self,
+                        value: super::FlowDirection,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
                         }
                     }
                     pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
@@ -158471,6 +159348,32 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn FlowDirection(&self) -> windows_core::Result<super::FlowDirection> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFlowDirection(
+                        &self,
+                        value: super::FlowDirection,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
                         }
                     }
                     pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
@@ -163628,6 +164531,32 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn FlowDirection(&self) -> windows_core::Result<super::FlowDirection> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFlowDirection(
+                        &self,
+                        value: super::FlowDirection,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
@@ -167094,6 +168023,32 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn FlowDirection(&self) -> windows_core::Result<super::FlowDirection> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFlowDirection(
+                        &self,
+                        value: super::FlowDirection,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
@@ -170020,6 +170975,32 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn FlowDirection(&self) -> windows_core::Result<super::FlowDirection> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFlowDirection(
+                        &self,
+                        value: super::FlowDirection,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
                         }
                     }
                     pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
@@ -174161,6 +175142,32 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn FlowDirection(&self) -> windows_core::Result<super::FlowDirection> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFlowDirection(
+                        &self,
+                        value: super::FlowDirection,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
                         }
                     }
                     pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
@@ -179064,6 +180071,32 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn FlowDirection(&self) -> windows_core::Result<super::FlowDirection> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFlowDirection(
+                        &self,
+                        value: super::FlowDirection,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
@@ -182904,6 +183937,32 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn FlowDirection(&self) -> windows_core::Result<super::FlowDirection> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFlowDirection(
+                        &self,
+                        value: super::FlowDirection,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
                         }
                     }
                     pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
@@ -186865,6 +187924,32 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn FlowDirection(&self) -> windows_core::Result<super::FlowDirection> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFlowDirection(
+                        &self,
+                        value: super::FlowDirection,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
@@ -190632,6 +191717,32 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn FlowDirection(&self) -> windows_core::Result<super::FlowDirection> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFlowDirection(
+                        &self,
+                        value: super::FlowDirection,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
                         }
                     }
                     pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
@@ -194454,6 +195565,32 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn FlowDirection(&self) -> windows_core::Result<super::FlowDirection> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFlowDirection(
+                        &self,
+                        value: super::FlowDirection,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
                         }
                     }
                     pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
@@ -198326,6 +199463,32 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn FlowDirection(&self) -> windows_core::Result<super::FlowDirection> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFlowDirection(
+                        &self,
+                        value: super::FlowDirection,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
                         }
                     }
                     pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
@@ -203104,6 +204267,37 @@ pub mod Microsoft {
                                     &mut result__,
                                 )
                                 .and_then(|| windows_core::Type::from_abi(result__))
+                            }
+                        }
+                        pub fn FlowDirection(
+                            &self,
+                        ) -> windows_core::Result<super::super::FlowDirection>
+                        {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IFrameworkElement,
+                            >(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).FlowDirection)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn SetFlowDirection(
+                            &self,
+                            value: super::super::FlowDirection,
+                        ) -> windows_core::Result<()> {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IFrameworkElement,
+                            >(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).SetFlowDirection)(
+                                    windows_core::Interface::as_raw(this),
+                                    value,
+                                )
+                                .ok()
                             }
                         }
                         pub fn RequestedTheme(
@@ -207927,6 +209121,37 @@ pub mod Microsoft {
                                 .and_then(|| windows_core::Type::from_abi(result__))
                             }
                         }
+                        pub fn FlowDirection(
+                            &self,
+                        ) -> windows_core::Result<super::super::FlowDirection>
+                        {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IFrameworkElement,
+                            >(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).FlowDirection)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn SetFlowDirection(
+                            &self,
+                            value: super::super::FlowDirection,
+                        ) -> windows_core::Result<()> {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IFrameworkElement,
+                            >(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).SetFlowDirection)(
+                                    windows_core::Interface::as_raw(this),
+                                    value,
+                                )
+                                .ok()
+                            }
+                        }
                         pub fn RequestedTheme(
                             &self,
                         ) -> windows_core::Result<super::super::ElementTheme>
@@ -212114,6 +213339,37 @@ pub mod Microsoft {
                                     &mut result__,
                                 )
                                 .and_then(|| windows_core::Type::from_abi(result__))
+                            }
+                        }
+                        pub fn FlowDirection(
+                            &self,
+                        ) -> windows_core::Result<super::super::FlowDirection>
+                        {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IFrameworkElement,
+                            >(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).FlowDirection)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn SetFlowDirection(
+                            &self,
+                            value: super::super::FlowDirection,
+                        ) -> windows_core::Result<()> {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IFrameworkElement,
+                            >(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).SetFlowDirection)(
+                                    windows_core::Interface::as_raw(this),
+                                    value,
+                                )
+                                .ok()
                             }
                         }
                         pub fn RequestedTheme(
@@ -216458,6 +217714,37 @@ pub mod Microsoft {
                                     &mut result__,
                                 )
                                 .and_then(|| windows_core::Type::from_abi(result__))
+                            }
+                        }
+                        pub fn FlowDirection(
+                            &self,
+                        ) -> windows_core::Result<super::super::FlowDirection>
+                        {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IFrameworkElement,
+                            >(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).FlowDirection)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn SetFlowDirection(
+                            &self,
+                            value: super::super::FlowDirection,
+                        ) -> windows_core::Result<()> {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IFrameworkElement,
+                            >(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).SetFlowDirection)(
+                                    windows_core::Interface::as_raw(this),
+                                    value,
+                                )
+                                .ok()
                             }
                         }
                         pub fn RequestedTheme(
@@ -220978,6 +222265,37 @@ pub mod Microsoft {
                                 .and_then(|| windows_core::Type::from_abi(result__))
                             }
                         }
+                        pub fn FlowDirection(
+                            &self,
+                        ) -> windows_core::Result<super::super::FlowDirection>
+                        {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IFrameworkElement,
+                            >(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).FlowDirection)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn SetFlowDirection(
+                            &self,
+                            value: super::super::FlowDirection,
+                        ) -> windows_core::Result<()> {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IFrameworkElement,
+                            >(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).SetFlowDirection)(
+                                    windows_core::Interface::as_raw(this),
+                                    value,
+                                )
+                                .ok()
+                            }
+                        }
                         pub fn RequestedTheme(
                             &self,
                         ) -> windows_core::Result<super::super::ElementTheme>
@@ -225132,6 +226450,37 @@ pub mod Microsoft {
                                 .and_then(|| windows_core::Type::from_abi(result__))
                             }
                         }
+                        pub fn FlowDirection(
+                            &self,
+                        ) -> windows_core::Result<super::super::FlowDirection>
+                        {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IFrameworkElement,
+                            >(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).FlowDirection)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn SetFlowDirection(
+                            &self,
+                            value: super::super::FlowDirection,
+                        ) -> windows_core::Result<()> {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IFrameworkElement,
+                            >(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).SetFlowDirection)(
+                                    windows_core::Interface::as_raw(this),
+                                    value,
+                                )
+                                .ok()
+                            }
+                        }
                         pub fn RequestedTheme(
                             &self,
                         ) -> windows_core::Result<super::super::ElementTheme>
@@ -228777,8 +230126,16 @@ pub mod Microsoft {
                         *mut core::ffi::c_void,
                     )
                         -> windows_core::HRESULT,
-                    FlowDirection: usize,
-                    SetFlowDirection: usize,
+                    pub FlowDirection: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut super::FlowDirection,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetFlowDirection: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        super::FlowDirection,
+                    )
+                        -> windows_core::HRESULT,
                 }
                 windows_core::imp::define_interface!(
                     IRunStatics,
@@ -230055,6 +231412,30 @@ pub mod Microsoft {
                             (windows_core::Interface::vtable(this).SetText)(
                                 windows_core::Interface::as_raw(this),
                                 core::mem::transmute_copy(value),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn FlowDirection(&self) -> windows_core::Result<super::FlowDirection> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFlowDirection(
+                        &self,
+                        value: super::FlowDirection,
+                    ) -> windows_core::Result<()> {
+                        let this = self;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFlowDirection)(
+                                windows_core::Interface::as_raw(this),
+                                value,
                             )
                             .ok()
                         }
