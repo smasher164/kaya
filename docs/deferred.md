@@ -9,6 +9,28 @@ Landed history lives in git; this file only carries what is still open.
 scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
+## BUILD — the compliance pass: text scale, mirroring, and kaya-owned localization over the platform formatters (design pass and probes 2026-09-21..23)
+KEY: compliance pass, KAYA_TEXT_SCALE, KAYA_LOCALE, expect_text_scale, expect_no_clipping, expect_direction, expect_mirrored, expect_locale, expect_formatted, expect_script, fmt, tr, Fluent, catalog, check-l10n, tasksbig, tasksrtl, clock24, format.steps
+
+The maintainer picked roadmap #2 on 2026-09-21 and ruled on 2026-09-23,
+after two days of design conversation (docs/compliance-plan.md §7): kaya
+OWNS LOCALIZATION — a Fluent catalog on the asset root resolved in the
+core and a six-call formatter door in all nine bindings — and the values
+are formatted by the PLATFORM's own formatter, honoring the user's
+settings, with a bundled ICU4X measured and left out (its cost on the
+record in §1.3). The twelve unknowns were measured before any arm
+(docs/measurements/compliance-probes-2026-09-21.md): the iOS trait
+override moves SwiftUI and hosted UIKit alike and AX3 is Apple's 200%;
+the clipping read is `boundingRect` against the recorded frame on
+SwiftUI, `hasVisualOverflow` on Compose, `IsTextTrimmed` on WinUI, the
+measure on GTK; Apple's argument-domain defaults flip a process to
+Arabic and RTL with nothing persisted; GTK's `gtk-xft-dpi` scales every
+widget and the lane image needs its locales generated; Android's ICU
+ignores the user's 24-hour setting and the arm asks the platform's own
+text-format class; Windows refuses `PrimaryLanguageOverride` unpackaged,
+reads a registry text scale in a fresh process, and its Region settings
+reach the formatters. Next: depth on the mac and iOS (§8 step 2).
+
 ## ~~BUILD — sheets: the root-hosting modal (design pass approved 2026-09-21)~~ COMPLETE 2026-09-21: depth on the mac, breadth on all five lanes in nine languages, the task manager's quick-add sheet (S6) and the review page (https://claude.ai/artifact/549v7HfaFeTJv4rVuLt8RF) with the shared scene and the quick-add captured on every lane, each viewed before publication; the depth and breadth matrices ran ALL PASS and S6's ran with its closing commit
 KEY: sheet, present_sheet, dismiss_sheet, sheet_dismissed, dismiss_requested, intercept_dismiss, detent, SHEET_PROPS, expect_sheets, expect_sheet, expect_sheet_detent, AdwDialog, ModalBottomSheet, presentationDetents, Popup, sheetprobe, quick-add sheet
 
