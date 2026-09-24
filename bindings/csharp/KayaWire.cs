@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0x908b183fda12f8c1;
+    public const ulong SpecHash = 0x0e84cabd1d859673;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -288,6 +288,7 @@ static class KayaWire
     public const ushort TxKindPresentSheet = 58;
     public const ushort TxKindDismissSheet = 59;
     public const ushort TxKindSetSheetProp = 60;
+    public const ushort TxKindScrollToRow = 61;
     public const ushort ApplyKindCreate = 1;
     public const ushort ApplyKindSetProp = 2;
     public const ushort ApplyKindAddChild = 3;
@@ -334,6 +335,7 @@ static class KayaWire
     public const ushort ApplyKindPresentSheet = 46;
     public const ushort ApplyKindDismissSheet = 47;
     public const ushort ApplyKindSetSheetProp = 48;
+    public const ushort ApplyKindScrollToRow = 49;
     public const ushort OccKindButtonClicked = 1;
     public const ushort OccKindTextChanged = 2;
     public const ushort OccKindToggled = 3;
@@ -1050,6 +1052,15 @@ static class KayaWire
         w.Write(prop);
         w.Write(source);
         return Finish(stream, w, TxKindSetSheetProp);
+    }
+
+    /// Scroll the For mounted in `widget_id` so the row keyed `key` has its top at the viewport's top, clamped at the content's end (docs/scroll-to-plan.md S1, S2). THE LIST HALF OF DESIGN.md's scrollTo: its own record rather than a widget_command because the key is a payload that record has no room for. A PURE EFFECT like reveal_range: no state, permitted inside an undo group and not inverted (S5). A container that hosts no For, or a key the collection does not hold, applies NOTHING, silently — an instance-addressed command's rule, since a copy legitimately vanishes under rebuild (S3). Issued before the container's first layout it is held by the backend and lands after it (S4).
+    public static byte[] TxScrollToRow(ulong widgetId, object key)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId);
+        EncodeValue(w, key);
+        return Finish(stream, w, TxKindScrollToRow);
     }
 
     /// A civil date as the wire's I64: year * 10000 + month * 100 + day.

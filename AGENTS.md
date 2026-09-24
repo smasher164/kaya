@@ -628,6 +628,22 @@ in docs/deferred.md.
    keyboard action with Send and the `onPreviewKeyEvent` Enter arm), and
    every emit call in the file must sit inside one of them. 23 watched
    negatives, counts printed),
+   `tools/check-scroll-to.py` (THE APP'S SCROLL LANDS INSTANTLY, HOLDS
+   UNTIL LAYOUT AND SHARES THE TIERS' PARK (docs/scroll-to-plan.md S4, S6,
+   §3): tools/scenes/scrollto.steps asserts where a row lands and its
+   expects retry, so an arm that glides there over a second passes it as
+   an instant one does, and an arm that dropped the pre-layout hold still
+   passes on a backend that lays out before the batch returns. Per backend
+   it reads the command's one arm — SwiftUI's proxy scroll outside
+   withAnimation and its pending set drained at the proxy's registration,
+   GTK's adjustment `changed` hold and its `set_value`, WinUI's `Loaded`
+   hold and the animation-free ChangeView, Compose's `scrollTo` (never the
+   animated form) behind a frame-by-frame wait for the placement — the
+   harness verb's park on the two widget backends being the SAME
+   `park_table_row` the command calls, and every `expect_scrolled_to`
+   reading the layout's own geometry rather than the request, and a held
+   request on GTK and WinUI landing only while it is still its container's
+   latest. 15 watched negatives, counts printed),
    `tools/check-search.py` (THE SEARCH FIELD CLEARS ONE WAY AND SAYS WHAT
    IT IS (docs/search-plan.md S5, S7). Clearing is one act: the field's
    affordance, Escape on a desktop and the harness's clear_search empty

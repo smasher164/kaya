@@ -10,7 +10,7 @@ import UserNotifications
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0x908b183fda12f8c1
+let kayaSpecHash: UInt64 = 0x0e84cabd1d859673
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -62,6 +62,8 @@ private let applyFormatText: UInt16 = 45
 private let applyPresentSheet: UInt16 = 46
 private let applyDismissSheet: UInt16 = 47
 private let applySetSheetProp: UInt16 = 48
+/// The app's scroll to a row (docs/scroll-to-plan.md).
+private let applyScrollToRow: UInt16 = 49
 /// What a drop settles on (the wire's drag_op).
 let kayaDragOpNone: UInt32 = 0
 let kayaDragOpCopy: UInt32 = 1
@@ -709,6 +711,12 @@ final class KayaNode: Identifiable {
     var selectSeq = 0
     var revealRequest: NSRange?
     var revealSeq = 0
+    /// The app's scroll_to_row on this For's container, PENDING until the
+    /// tier can scroll (docs/scroll-to-plan.md S4): a windowed tier parks the
+    /// index, a realized one scrolls the copy's root to the viewport's top.
+    var scrollRowRequest: (copy: UInt64, index: Int)?
+    /// The scroll node's viewport in the window's space, for expect_scrolled_to.
+    var scrollViewportGlobal: CGRect = .zero
     /// RICH TEXT (docs/rich-text-plan.md), textarea only: the attribute runs
     /// in UTF-16 units, kept current from every edit so a remount pushes the
     /// document the widget held. `richSeq` marks a whole-document write.
@@ -1072,6 +1080,101 @@ var kayaOpenWindow: ((UInt64) -> Void)?
 var kayaDismissWindow: ((UInt64) -> Void)?
 /// The live ScrollViewReader proxies by scroll node id (main actor).
 var kayaScrollProxies: [UInt64: ScrollViewProxy] = [:]
+/// Containers holding a scroll_to_row nothing could apply yet (main actor):
+/// drained wherever a scroll proxy, a table window or a table driver
+/// registers or the scrolled content moves (docs/scroll-to-plan.md S4).
+var kayaPendingRowScrolls: Set<UInt64> = []
+
+/// Apply a container's pending scroll_to_row if its tier can scroll now
+/// (docs/scroll-to-plan.md §3): the mac driver or the synthesized window
+/// parks the row's index; a realized For scrolls the copy's root through the
+/// nearest scroll ancestor's proxy, instantly (S6). A container with no
+/// scroll ancestor drops the request (S3); one whose tier or copy has not
+/// laid out yet keeps it.
+func kayaTryScrollRow(_ node: KayaNode) {
+    guard let request = node.scrollRowRequest else {
+        kayaPendingRowScrolls.remove(node.id)
+        return
+    }
+    #if os(macOS)
+        if let driver = kayaTableDrivers[node.id] {
+            driver.scroll(toRow: request.index)
+            node.scrollRowRequest = nil
+            kayaPendingRowScrolls.remove(node.id)
+            return
+        }
+    #endif
+    if let window = kayaTableWindows[node.id] {
+        window.scroll(node, toRow: request.index)
+        node.scrollRowRequest = nil
+        kayaPendingRowScrolls.remove(node.id)
+        return
+    }
+    if !node.tableColumns.isEmpty || request.copy == 0 {
+        // A table whose tier has not registered, or an unrealized row of
+        // one: the tier's registration drains this.
+        kayaPendingRowScrolls.insert(node.id)
+        return
+    }
+    var scroll: KayaNode?
+    var current = node.id
+    while let parent = kayaScene.parents[current] {
+        if let candidate = kayaScene.nodes[parent], candidate.kind == kindScroll {
+            scroll = candidate
+            break
+        }
+        current = parent
+    }
+    guard let scroll else {
+        node.scrollRowRequest = nil
+        kayaPendingRowScrolls.remove(node.id)
+        return
+    }
+    guard let proxy = kayaScrollProxies[scroll.id], kayaNodeFrames[request.copy] != nil else {
+        kayaPendingRowScrolls.insert(node.id)
+        return
+    }
+    proxy.scrollTo(request.copy, anchor: .top)
+    node.scrollRowRequest = nil
+    kayaPendingRowScrolls.remove(node.id)
+}
+
+func kayaDrainRowScrolls() {
+    for id in kayaPendingRowScrolls {
+        if let node = kayaScene.nodes[id] { kayaTryScrollRow(node) }
+    }
+}
+
+/// expect_scrolled_to's reading (docs/scroll-to-plan.md S7), from the
+/// window-space frames the layout reported: nil when the row keyed `key`
+/// tops its scroll's viewport within two points, or sits wholly inside a
+/// viewport at its end; otherwise what the geometry says.
+func kayaScrolledTo(_ node: KayaNode, _ key: String) -> String? {
+    if !node.tableColumns.isEmpty {
+        return "\(node.a11yId) is a table; expect_window reads a windowed tier"
+    }
+    guard let copy = node.children.first(where: { kayaTableStamp($0.tag)?.keys == [key] }) else {
+        return "no realized row keyed \"\(key)\" among \(node.children.count) children"
+    }
+    var scroll: KayaNode?
+    var current = node.id
+    while let parent = kayaScene.parents[current] {
+        if let candidate = kayaScene.nodes[parent], candidate.kind == kindScroll {
+            scroll = candidate
+            break
+        }
+        current = parent
+    }
+    guard let scroll else { return "the container has no scroll ancestor" }
+    guard let row = kayaNodeFrames[copy.id] else { return "row \"\(key)\" has no frame yet" }
+    let viewport = scroll.scrollViewportGlobal
+    let top = row.minY - viewport.minY
+    if abs(top) <= 2 { return nil }
+    let atEnd = abs(scroll.scrollContentMaxY - scroll.scrollViewportH) <= 2
+    if atEnd, row.minY >= viewport.minY - 2, row.maxY <= viewport.maxY + 2 { return nil }
+    return "row top \(Int(top))pt from the viewport's top; content bottom "
+        + "\(Int(scroll.scrollContentMaxY)) vs viewport \(Int(scroll.scrollViewportH))"
+}
 /// Grid cell leading edges by child node id, in the grid's own coordinate
 /// space (main actor): geometry, never the model's columns copy.
 var kayaCellMinX: [UInt64: Double] = [:]
@@ -5993,6 +6096,16 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 // model drop ends the presentation, no emit (echo doctrine).
                 let sid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
                 kayaForgetSheet(sid)
+            case applyScrollToRow:
+                // { u64 container; u64 copy (0 = unrealized); u32 index; u32 pad }.
+                // A REQUEST held on the container until its tier can scroll
+                // (docs/scroll-to-plan.md S4), tried at once.
+                let cid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                let copy = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self)
+                let index = Int(raw.loadUnaligned(fromByteOffset: body + 16, as: UInt32.self))
+                let container = kayaScene.nodes[cid]!
+                container.scrollRowRequest = (copy: copy, index: index)
+                kayaTryScrollRow(container)
             case applySetSheetProp:
                 let sid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
                 let prop = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt32.self)
@@ -8714,6 +8827,24 @@ private func kayaRunScript(_ script: String) {
                                 - window.placement.columnsViewport)
                     }
                 }
+            case "expect_scrolled_to":
+                // docs/scroll-to-plan.md S7: the row's top at the viewport's
+                // top, or the row inside a viewport at its end — from the
+                // window-space frames the layout reported, never a model copy.
+                let rawKey = parts[2...].joined(separator: " ")
+                let key = rawKey.hasPrefix("\"") ? kayaQuoted(Array(parts[2...])) : rawKey
+                let off = DispatchQueue.main.sync { () -> String? in
+                    guard
+                        let node = kayaTarget(parts[1], "column", kayaScene.columns)
+                            ?? kayaTarget(parts[1], "row", kayaScene.rows)
+                    else { return "no such target \(parts[1])" }
+                    return kayaScrolledTo(node, key)
+                }
+                if let off {
+                    failures.append("\(parts[1]) not scrolled to \(key) (\(off))")
+                } else {
+                    observed.append("\(parts[1]) scrolled to \(key)")
+                }
             case "expect_at_end":
                 // The content's bottom edge coincides with the
                 // viewport's (within two units) — read back from the
@@ -11037,18 +11168,26 @@ private struct KayaCellReader: View {
     var body: some View {
         GeometryReader { geo in
             let frame = geo.frame(in: .named("kaya-box-\(parent)"))
+            // The window-space frame too, the flex path's KayaTrackReader
+            // record: a stamped row of a stacked For is what
+            // scroll_to_row's drain and expect_scrolled_to read
+            // (docs/scroll-to-plan.md S4, S7).
+            let global = geo.frame(in: .global)
             Color.clear
-                .onAppear { record(frame) }
-                .onChange(of: frame) { _, f in record(f) }
+                .onAppear { record(frame, global) }
+                .onChange(of: frame) { _, f in record(f, geo.frame(in: .global)) }
+                .onChange(of: global.origin) { _, _ in record(frame, geo.frame(in: .global)) }
         }
     }
 
-    private func record(_ frame: CGRect) {
+    private func record(_ frame: CGRect, _ global: CGRect) {
         kayaCrossRects[id] =
             vertical
             ? (Double(frame.minX), Double(frame.width))
             : (Double(frame.minY), Double(frame.height))
         kayaDrawnExtents[id] = Double(vertical ? frame.height : frame.width)
+        kayaNodeFrames[id] = global
+        kayaDrainRowScrolls()
     }
 }
 
@@ -12573,6 +12712,7 @@ private struct KayaNativeTable: View {
             }
             kayaTableDrivers[node.id] = self
             syncColumns()
+            kayaDrainRowScrolls()
             return scrollView
         }
 
@@ -13382,6 +13522,7 @@ typealias KayaTablePlaced = () -> Void
         viewportRect = viewport
         viewportHeight = Double(viewport.height)
         arrived(node)
+        kayaDrainRowScrolls()
     }
 
     func detach(_ node: KayaNode) {
@@ -16787,6 +16928,7 @@ struct KayaRender: View {
                                         .onChange(of: g.frame(in: .named("kaya-scroll-\(node.id)"))) { _, f in
                                             node.scrollContentH = f.height
                                             node.scrollContentMaxY = f.maxY
+                                            kayaDrainRowScrolls()
                                         }
                                 }
                             )
@@ -16800,11 +16942,17 @@ struct KayaRender: View {
                             .onAppear {
                                 node.scrollViewportH = g.size.height
                                 node.scrollViewportW = g.size.width
+                                node.scrollViewportGlobal = g.frame(in: .global)
                                 kayaScrollProxies[node.id] = proxy
+                                kayaDrainRowScrolls()
                             }
                             .onChange(of: g.size) { _, size in
                                 node.scrollViewportH = size.height
                                 node.scrollViewportW = size.width
+                                node.scrollViewportGlobal = g.frame(in: .global)
+                            }
+                            .onChange(of: g.frame(in: .global).origin) { _, _ in
+                                node.scrollViewportGlobal = g.frame(in: .global)
                             }
                     }
                 )

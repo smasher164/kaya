@@ -30,7 +30,7 @@ type drop_values = {
 }
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0x908b183fda12f8c1L
+let spec_hash = 0x0e84cabd1d859673L
 
 let value_bool = 1
 let value_i64 = 2
@@ -306,6 +306,7 @@ let tx_kind_format_text = 57
 let tx_kind_present_sheet = 58
 let tx_kind_dismiss_sheet = 59
 let tx_kind_set_sheet_prop = 60
+let tx_kind_scroll_to_row = 61
 let apply_kind_create = 1
 let apply_kind_set_prop = 2
 let apply_kind_add_child = 3
@@ -352,6 +353,7 @@ let apply_kind_format_text = 45
 let apply_kind_present_sheet = 46
 let apply_kind_dismiss_sheet = 47
 let apply_kind_set_sheet_prop = 48
+let apply_kind_scroll_to_row = 49
 let occ_kind_button_clicked = 1
 let occ_kind_text_changed = 2
 let occ_kind_toggled = 3
@@ -870,6 +872,12 @@ let tx_set_sheet_prop sheet prop source =
       Buffer.add_int64_le b sheet;
       Buffer.add_int32_le b (Int32.of_int prop);
       Buffer.add_int32_le b (Int32.of_int source))
+
+(* Scroll the For mounted in `widget_id` so the row keyed `key` has its top at the viewport's top, clamped at the content's end (docs/scroll-to-plan.md S1, S2). THE LIST HALF OF DESIGN.md's scrollTo: its own record rather than a widget_command because the key is a payload that record has no room for. A PURE EFFECT like reveal_range: no state, permitted inside an undo group and not inverted (S5). A container that hosts no For, or a key the collection does not hold, applies NOTHING, silently — an instance-addressed command's rule, since a copy legitimately vanishes under rebuild (S3). Issued before the container's first layout it is held by the backend and lands after it (S4). *)
+let tx_scroll_to_row widget_id key =
+  finish tx_kind_scroll_to_row (fun b ->
+      Buffer.add_int64_le b widget_id;
+      encode_value b key)
 
 (* A civil date as the wire's I64: year * 10000 + month * 100 + day. *)
 let pack_date year month day =

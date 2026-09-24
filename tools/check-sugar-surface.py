@@ -3883,7 +3883,7 @@ def swift_zone_probe():
 swift_zone = swift_zone_probe()
 WANT_SWIFT_ZONE = """column=applied:3 named:1 file-wide-still-green:True tpl-kept:True
 row=applied:1 named:1 file-wide-still-green:True tpl-kept:True
-scroll=applied:1 named:1 file-wide-still-green:True tpl-kept:True
+scroll=applied:2 named:1 file-wide-still-green:True tpl-kept:True
 grid=applied:1 named:1 file-wide-still-green:True tpl-kept:True
 labeled=applied:3 named:1 file-wide-still-green:True tpl-kept:True
 entry=applied:1 named:1 file-wide-still-green:True tpl-kept:True
@@ -4861,7 +4861,7 @@ discardable = tpl_discardable_probe()
 WANT_DISCARDABLE = """swift-row-member=applied:1 rc:1 named:True
 swift-arm-member=applied:1 rc:1 named:True
 swift-eliminator=applied:1 rc:1 named:True
-swift-census-floor=applied:12 rc:1 named:True"""
+swift-census-floor=applied:13 rc:1 named:True"""
 if discardable != WANT_DISCARDABLE:
     print("check-sugar-surface: SELF-TEST FAIL (the Swift generated-surface "
           "discard census did not catch its watched cuts). Wanted:",
@@ -5626,7 +5626,7 @@ def csharp_facade_probe():
     run("csharp-twin-reader",
         src.replace("sealed class TableItemRow\n",
                     "sealed class TableItemRowGone\n")
-        if n == 1 else src, n, "typed-row reader found only 9")
+        if n == 1 else src, n, "typed-row reader found only 10")
     return "\n".join(lines)
 
 
@@ -8837,6 +8837,86 @@ for _label, _which, _pattern, _repl, _want in [
         selftest_exit(f"check-sugar-surface: carve-out sugar negative {_label!r} did not refuse")
 if len(carveout_sugar_findings("", "", "")) < 13:
     selftest_exit("check-sugar-surface: the carve-out sugar reader read nothing and agreed")
+
+# THE SCROLL-TO COMMAND (docs/scroll-to-plan.md S8): `scroll_to_row` beside
+# `focus` and `reveal_range` in every binding, live zone only — a one-shot
+# effect the wire carries to all nine whether or not a binding spells it,
+# so a binding shipping without it is green on every scene that does not
+# scroll. Python's and JS's sit on the container HANDLE, where their
+# `focus()` does; the seven others on the transaction. Each row names its
+# identifier for the rename negative below.
+SCROLL_ROWS = [
+    ("rust", SLIDER_FILES["rust"],
+     r"pub fn scroll_to_row\(&mut self, container: WidgetId, key: impl Into<Value>\)",
+     "scroll_to_row"),
+    ("python", SLIDER_FILES["python"], r"def scroll_to_row\(self, key: Key\)", "scroll_to_row"),
+    ("go", SLIDER_FILES["go"], r"func \(tx \*Tx\) ScrollToRow\(w Widget, key any\)",
+     "ScrollToRow"),
+    ("csharp", SLIDER_FILES["csharp"], r"public void ScrollToRow\(Widget w, object key\)",
+     "ScrollToRow"),
+    ("java", SLIDER_FILES["java"], r"public void scrollToRow\(Widget w, Object key\)",
+     "scrollToRow"),
+    ("swift", SLIDER_FILES["swift"],
+     r"public func scrollToRow\(_ w: KayaWidget, _ key: KayaValue\)", "scrollToRow"),
+    ("haskell", SLIDER_FILES["haskell"], r"^scrollToRow :: Widget -> Key -> Build \(\)",
+     "scrollToRow"),
+    ("ocaml", "bindings/ocaml/kaya_app.mli", r"^val scroll_to_row : widget -> key -> unit",
+     "scroll_to_row"),
+    ("js", SLIDER_FILES["js"], r"^  scrollToRow\(key: Key\): void \{", "scrollToRow"),
+]
+
+
+def scroll_findings(rows, text_for=read_rel):
+    out = []
+    for lang, rel, pattern, _name in rows:
+        try:
+            text = text_for(rel)
+        except OSError:
+            out.append(f"check-sugar-surface: {lang} has no sugar for scroll_to_row: {rel} is "
+                       f"gone, so the census read nothing there")
+            continue
+        if not grep_e(pattern, text):
+            out.append(f"check-sugar-surface: {lang} has no sugar for scroll_to_row (wanted "
+                       f"/{pattern}/ in {rel})")
+    return out
+
+
+for _msg in scroll_findings(SCROLL_ROWS):
+    print(_msg)
+    status = 1
+_fake = [(lang, rel, pattern.replace(name, "kaya_fake_scroll"), name)
+         for lang, rel, pattern, name in SCROLL_ROWS]
+for _r, _f in zip(SCROLL_ROWS, _fake):
+    if _r[2] == _f[2]:
+        selftest_exit(f"check-sugar-surface: the {_r[0]} scroll_to_row row does not name its "
+                      f"identifier in its pattern")
+_fired = sum(1 for m in scroll_findings(_fake) if "has no sugar for scroll_to_row" in m)
+if _fired != len(SCROLL_ROWS):
+    selftest_exit(f"check-sugar-surface: self-test failed ({_fired}/{len(SCROLL_ROWS)} "
+                  f"scroll_to_row patterns fired for an identifier that exists nowhere)")
+_scroll_renames = 0
+for _lang, _rel, _pattern, _name in SCROLL_ROWS:
+    _text = read_rel(_rel)
+    _m = re.search(_pattern, _text, re.M)
+    if _m is None:
+        continue
+    _mangled, _n = sub_count(re.escape(_name), "kaya_fake_scroll", _m.group(0))
+    if _n < 1:
+        selftest_exit(f"check-sugar-surface: the {_lang} scroll_to_row negative perturbed NOTHING")
+    _doctored = _text[:_m.start()] + _mangled + _text[_m.end():]
+    _hit = [m for m in scroll_findings(
+        SCROLL_ROWS, text_for=lambda rel, _r=_rel, _d=_doctored: _d if rel == _r else read_rel(rel))
+        if m.startswith(f"check-sugar-surface: {_lang} has no sugar")]
+    if len(_hit) != 1:
+        selftest_exit(f"check-sugar-surface: renaming {_lang}'s scroll_to_row produced "
+                      f"{len(_hit)} findings, not 1")
+    _scroll_renames += 1
+print(f"check-sugar-surface: scroll_to_row census {len(SCROLL_ROWS)} rows, {len(SCROLL_ROWS)} "
+      f"fake-name and {_scroll_renames} rename negatives, counts printed")
+if _scroll_renames < len(SCROLL_ROWS):
+    print(f"check-sugar-surface: {len(SCROLL_ROWS) - _scroll_renames} scroll_to_row row(s) matched "
+          f"nothing on the tree and took no rename negative — they are red above")
+    status = 1
 
 # THE SUBMIT SURFACE (docs/submit-plan.md S7): `on_submit` where each
 # binding's own text-change handler is registered, in BOTH zones, and the

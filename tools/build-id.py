@@ -80,6 +80,7 @@ GATES = {
     # in three files; swift/ because the Mac and iOS arms live there.
     "check-search": ["crates", "swift", "android"],
     "check-submit": ["crates", "swift", "android"],
+    "check-scroll-to": ["crates", "swift", "android"],
     # The exclusive token is wired in tools/ alone, which every key already carries.
     "check-exclusive": [],
     # The recorder and all five lanes' collects live under tools/, which

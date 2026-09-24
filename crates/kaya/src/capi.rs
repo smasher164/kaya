@@ -212,6 +212,8 @@ pub const KAYA_TX_SET_ENTRY_PROP: u16 = 24;
 pub const KAYA_TX_PRESENT_SHEET: u16 = 58;
 pub const KAYA_TX_DISMISS_SHEET: u16 = 59;
 pub const KAYA_TX_SET_SHEET_PROP: u16 = 60;
+/// SCROLL_TO_ROW: u64 container, then the row's key value (docs/scroll-to-plan.md).
+pub const KAYA_TX_SCROLL_TO_ROW: u16 = 61;
 pub const KAYA_TX_ADD_SECTION: u16 = 25;
 pub const KAYA_TX_SELECT_SECTION: u16 = 26;
 pub const KAYA_TX_SET_SECTION_PROP: u16 = 27;
@@ -493,6 +495,7 @@ const _: () = assert!(
         && KAYA_TX_PRESENT_SHEET == wire::TX_PRESENT_SHEET
         && KAYA_TX_DISMISS_SHEET == wire::TX_DISMISS_SHEET
         && KAYA_TX_SET_SHEET_PROP == wire::TX_SET_SHEET_PROP
+        && KAYA_TX_SCROLL_TO_ROW == wire::TX_SCROLL_TO_ROW
         && KAYA_TX_ADD_SECTION == wire::TX_ADD_SECTION
         && KAYA_TX_SELECT_SECTION == wire::TX_SELECT_SECTION
         && KAYA_TX_SET_SECTION_PROP == wire::TX_SET_SECTION_PROP
@@ -553,6 +556,8 @@ pub const KAYA_APPLY_SET_ENTRY_PROP: u16 = 14;
 pub const KAYA_APPLY_PRESENT_SHEET: u16 = 46;
 pub const KAYA_APPLY_DISMISS_SHEET: u16 = 47;
 pub const KAYA_APPLY_SET_SHEET_PROP: u16 = 48;
+/// SCROLL_TO_ROW: u64 container, u64 copy (0 = unrealized), u32 index, u32 pad.
+pub const KAYA_APPLY_SCROLL_TO_ROW: u16 = 49;
 pub const KAYA_APPLY_ADD_SECTION: u16 = 15;
 pub const KAYA_APPLY_SELECT_SECTION: u16 = 16;
 pub const KAYA_APPLY_SET_SECTION_PROP: u16 = 17;
@@ -673,6 +678,7 @@ const _: () = assert!(
         && KAYA_APPLY_PRESENT_SHEET == wire::APPLY_PRESENT_SHEET
         && KAYA_APPLY_DISMISS_SHEET == wire::APPLY_DISMISS_SHEET
         && KAYA_APPLY_SET_SHEET_PROP == wire::APPLY_SET_SHEET_PROP
+        && KAYA_APPLY_SCROLL_TO_ROW == wire::APPLY_SCROLL_TO_ROW
         && KAYA_APPLY_ADD_SECTION == wire::APPLY_ADD_SECTION
         && KAYA_APPLY_SELECT_SECTION == wire::APPLY_SELECT_SECTION
         && KAYA_APPLY_SET_SECTION_PROP == wire::APPLY_SET_SECTION_PROP
@@ -5233,6 +5239,7 @@ mod tests {
             ("present_sheet", KAYA_TX_PRESENT_SHEET),
             ("dismiss_sheet", KAYA_TX_DISMISS_SHEET),
             ("set_sheet_prop", KAYA_TX_SET_SHEET_PROP),
+            ("scroll_to_row", KAYA_TX_SCROLL_TO_ROW),
         ];
         let apply = [
             ("create", KAYA_APPLY_CREATE),
@@ -5281,6 +5288,7 @@ mod tests {
             ("present_sheet", KAYA_APPLY_PRESENT_SHEET),
             ("dismiss_sheet", KAYA_APPLY_DISMISS_SHEET),
             ("set_sheet_prop", KAYA_APPLY_SET_SHEET_PROP),
+            ("scroll_to_row", KAYA_APPLY_SCROLL_TO_ROW),
         ];
         for (spec, consts) in [(crate::spec::SPEC.tx, &tx[..]), (crate::spec::SPEC.apply, &apply[..])] {
             assert_eq!(

@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x908b183fda12f8c1
+	SpecHash uint64 = 0x0e84cabd1d859673
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -290,6 +290,7 @@ const (
 	txPresentSheet = 58
 	txDismissSheet = 59
 	txSetSheetProp = 60
+	txScrollToRow = 61
 	applyCreate = 1
 	applySetProp = 2
 	applyAddChild = 3
@@ -336,6 +337,7 @@ const (
 	applyPresentSheet = 46
 	applyDismissSheet = 47
 	applySetSheetProp = 48
+	applyScrollToRow = 49
 	occButtonClicked = 1
 	occTextChanged = 2
 	occToggled = 3
@@ -1159,6 +1161,14 @@ func TxSetSheetProp(sheet uint64, prop uint32, source uint32) []byte {
 	b = binary.LittleEndian.AppendUint64(b, sheet)
 	b = binary.LittleEndian.AppendUint32(b, prop)
 	b = binary.LittleEndian.AppendUint32(b, source)
+	return endRecord(b)
+}
+
+// TxScrollToRow: Scroll the For mounted in `widget_id` so the row keyed `key` has its top at the viewport's top, clamped at the content's end (docs/scroll-to-plan.md S1, S2). THE LIST HALF OF DESIGN.md's scrollTo: its own record rather than a widget_command because the key is a payload that record has no room for. A PURE EFFECT like reveal_range: no state, permitted inside an undo group and not inverted (S5). A container that hosts no For, or a key the collection does not hold, applies NOTHING, silently — an instance-addressed command's rule, since a copy legitimately vanishes under rebuild (S3). Issued before the container's first layout it is held by the backend and lands after it (S4).
+func TxScrollToRow(widgetId uint64, key any) []byte {
+	b := beginRecord(txScrollToRow)
+	b = binary.LittleEndian.AppendUint64(b, widgetId)
+	b = encodeValue(b, key)
 	return endRecord(b)
 }
 

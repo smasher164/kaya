@@ -3024,6 +3024,12 @@ sealed class Tx : IDisposable
     public void RevealRange(Widget w, TextRange range) =>
         Records.Add(KayaWire.TxRevealRange(w.Id, range.Start, range.Stop));
 
+    /// Scroll the For mounted in `w` so the row keyed `key` tops the
+    /// viewport, clamped at the end (docs/scroll-to-plan.md). A pure
+    /// effect; a key the collection does not hold scrolls nothing.
+    public void ScrollToRow(Widget w, object key) =>
+        Records.Add(KayaWire.TxScrollToRow(w.Id, key));
+
     /// Replace a `rich` textarea's whole document: it echoes nothing
     /// and, like SetText, spends the native undo history
     /// (docs/undo-plan.md D7).

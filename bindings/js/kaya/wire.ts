@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0x908b183fda12f8c1n;
+export const SPEC_HASH = 0x0e84cabd1d859673n;
 
 export const VALUE_BOOL = 1;
 export const VALUE_I64 = 2;
@@ -284,6 +284,7 @@ export const TX_FORMAT_TEXT = 57;
 export const TX_PRESENT_SHEET = 58;
 export const TX_DISMISS_SHEET = 59;
 export const TX_SET_SHEET_PROP = 60;
+export const TX_SCROLL_TO_ROW = 61;
 export const APPLY_CREATE = 1;
 export const APPLY_SET_PROP = 2;
 export const APPLY_ADD_CHILD = 3;
@@ -330,6 +331,7 @@ export const APPLY_FORMAT_TEXT = 45;
 export const APPLY_PRESENT_SHEET = 46;
 export const APPLY_DISMISS_SHEET = 47;
 export const APPLY_SET_SHEET_PROP = 48;
+export const APPLY_SCROLL_TO_ROW = 49;
 export const OCC_BUTTON_CLICKED = 1;
 export const OCC_TEXT_CHANGED = 2;
 export const OCC_TOGGLED = 3;
@@ -1038,6 +1040,14 @@ export function tx_set_sheet_prop(sheet: number, prop: number, source: number): 
   enc.u32(prop);
   enc.u32(source);
   return enc.end(TX_SET_SHEET_PROP);
+}
+
+/** Scroll the For mounted in `widget_id` so the row keyed `key` has its top at the viewport's top, clamped at the content's end (docs/scroll-to-plan.md S1, S2). THE LIST HALF OF DESIGN.md's scrollTo: its own record rather than a widget_command because the key is a payload that record has no room for. A PURE EFFECT like reveal_range: no state, permitted inside an undo group and not inverted (S5). A container that hosts no For, or a key the collection does not hold, applies NOTHING, silently — an instance-addressed command's rule, since a copy legitimately vanishes under rebuild (S3). Issued before the container's first layout it is held by the backend and lands after it (S4). */
+export function tx_scroll_to_row(widget_id: number, key: WireValue): Uint8Array {
+  enc.begin();
+  enc.u64(widget_id);
+  enc.value(key);
+  return enc.end(TX_SCROLL_TO_ROW);
 }
 
 /** A civil date as the wire's I64: year * 10000 + month * 100 + day. */

@@ -3527,6 +3527,213 @@ fn offset_ref(value: f64) -> windows_core::Result<IReference<f64>> {
     PropertyValue::CreateDouble(value)?.cast()
 }
 
+/// Park a windowed table's band on `index` and scroll the row to the
+/// viewport's top: the harness's scroll_to_row and the app's
+/// (docs/scroll-to-plan.md §3) share it.
+fn park_table_row(core: &mut CoreState, id: u64, index: usize) -> windows_core::Result<()> {
+    let Some((host, band)) =
+        TABLES.with_borrow(|tables| tables.get(&id).map(|w| (w.host.clone(), w.band.clone())))
+    else {
+        return Ok(());
+    };
+    // SETTLE BEFORE MOVING: the viewport count this hands the core has
+    // to be a real one. A table whose first layout has not run reports
+    // no viewport at all, and the band it asks for is the whole
+    // collection (measured on the lane 2026-08-25 — `scroll_to_row
+    // r200` carried a count of 300 on a 300-row scene).
+    table_settle(core, id);
+    let count = TABLES
+        .with_borrow(|t| t.get(&id).and_then(|w| w.reported).map(|(_, c)| c))
+        .unwrap_or(1)
+        .max(1);
+    // THE BAND FOLLOWS THE ROW NEXT: the target is unrealized until it
+    // does, and the visible range may NOT be re-read in between,
+    // because the viewport is still where it was and would band
+    // straight back.
+    TABLES.with_borrow_mut(|t| {
+        if let Some(w) = t.get_mut(&id) {
+            w.reported = Some((index, count));
+            w.anchor = None;
+        }
+    });
+    table_band_to(core, id, (index, count))?;
+    band.UpdateLayout()?;
+    for _ in 0..TABLE_SETTLE_ROUNDS {
+        let measured = table_measure_rows(core, id, &band)?;
+        let spaced = table_write_spacers(core, id, &band)?;
+        if !measured && !spaced {
+            break;
+        }
+        band.UpdateLayout()?;
+    }
+    let (spacer_top, tracks) = band_tracks(&band)?;
+    let first = core.scene.window_geometry(id).first;
+    let offset = index.saturating_sub(first);
+    // Band space to host space (D7), the report's rule verbatim.
+    let want =
+        fold_extent(id) + spacer_top + tracks[..offset.min(tracks.len())].iter().sum::<f64>();
+    table_scroll_to(&host, id, want)?;
+    // Parked on the ROW, not on the pixel: every correction cycle
+    // re-parks it (§2.4, and docs/traps.md "The anchoring race").
+    TABLES.with_borrow_mut(|t| {
+        if let Some(w) = t.get_mut(&id) {
+            w.anchor = Some(index);
+        }
+    });
+    table_settle(core, id);
+    Ok(())
+}
+
+/// The app's scroll_to_row (docs/scroll-to-plan.md §3): a windowed table
+/// parks its band; a realized For scrolls the copy's root to its
+/// ScrollViewer's top (S2), once loaded (S4), instantly (S6).
+fn scroll_row(
+    core: &mut CoreState,
+    id: u64,
+    copy: Option<WidgetId>,
+    index: usize,
+) -> windows_core::Result<()> {
+    if TABLES.with_borrow(|tables| tables.contains_key(&id)) {
+        return park_table_row(core, id, index);
+    }
+    let Some(copy) = copy else {
+        return Ok(());
+    };
+    let Some(widget) = core.widgets.get(&copy) else {
+        return Ok(());
+    };
+    // ONE PENDING SCROLL PER CONTAINER (S4): the latest request is the one
+    // that lands, whatever order the holds release in — a jump clicked
+    // before the opening scroll's row had loaded saw both Loaded handlers
+    // fire together with the OPENING one last, and the list ended at its
+    // end instead of the jump's row (the windows lane's scrollto_go leg,
+    // matrix 2026-09-24).
+    PENDING_ROW_SCROLLS.with_borrow_mut(|pending| pending.insert(id, copy.0));
+    let element = widget.identity_element()?;
+    let fe: FrameworkElement = windows_core::Interface::cast(&element)?;
+    if fe.IsLoaded()? {
+        // AFTER THE BATCH, not inside it: a row inserted by this same batch
+        // is loaded but sits on the band's row 0 until reindex assigns its
+        // track at the batch's end (measured on the lane's VM 2026-09-24:
+        // the just-inserted row read content top 0 with the extent
+        // unchanged), so the scroll is posted behind the apply.
+        scroll_note(format_args!("row {} loaded: scrolling after the batch", copy.0));
+        return defer_scroll(id, copy.0, element);
+    }
+    scroll_note(format_args!("row {} not loaded: held on Loaded", copy.0));
+    // HELD UNTIL LOADED (S4), the focus arm's materialization class:
+    // one-shot, since Loaded re-fires on every re-attach.
+    let armed = std::sync::Mutex::new(true);
+    let deferred = RoutedEventHandler::new(
+        move |sender: windows_core::Ref<'_, windows_core::IInspectable>, _| {
+            if !std::mem::take(&mut *armed.lock().unwrap()) {
+                return Ok(());
+            }
+            if let Some(sender) = sender.as_ref() {
+                let element: UIElement = windows_core::Interface::cast(sender)?;
+                defer_scroll(id, copy.0, element)?;
+            }
+            Ok(())
+        },
+    );
+    fe.Loaded(&deferred)?;
+    Ok(())
+}
+
+/// The realized scroll, posted to the UI queue behind the apply batch and
+/// the reindex that places the batch's rows (defer_role_refresh's idiom),
+/// and applied only while it is still the container's latest request.
+fn defer_scroll(container: u64, copy: u64, element: UIElement) -> windows_core::Result<()> {
+    let run = move || -> windows_core::Result<()> {
+        let latest = PENDING_ROW_SCROLLS.with_borrow(|pending| pending.get(&container) == Some(&copy));
+        if !latest {
+            scroll_note(format_args!("row {copy} superseded before it landed"));
+            return Ok(());
+        }
+        PENDING_ROW_SCROLLS.with_borrow_mut(|pending| pending.remove(&container));
+        scroll_element_to_top(&element)
+    };
+    let Some(dispatcher) = DISPATCHER.get() else {
+        return run();
+    };
+    let handler = DispatcherQueueHandler::new(move || {
+        if let Err(trouble) = run() {
+            eprintln!("kaya: scroll_to_row: {trouble}");
+        }
+        Ok(())
+    });
+    let _ = dispatcher.0.TryEnqueue(&handler);
+    Ok(())
+}
+
+/// The nearest ScrollViewer above an element, by the framework's own
+/// parent chain.
+fn scroll_ancestor(element: &UIElement) -> windows_core::Result<Option<ScrollViewer>> {
+    let mut current: bindings::Microsoft::UI::Xaml::DependencyObject =
+        windows_core::Interface::cast(element)?;
+    loop {
+        let fe: windows_core::Result<FrameworkElement> = windows_core::Interface::cast(&current);
+        let Ok(fe) = fe else { return Ok(None) };
+        let Ok(parent) = fe.Parent() else { return Ok(None) };
+        if let Ok(viewer) = windows_core::Interface::cast::<ScrollViewer>(&parent) {
+            return Ok(Some(viewer));
+        }
+        current = parent;
+    }
+}
+
+/// The row's top in its ScrollViewer's CONTENT space — against the
+/// viewer's own Content, never the viewer: a transform to the viewer
+/// carries the scroll offset as the composition last ARRANGED it, one frame
+/// behind a ChangeView and a beat behind an insert (measured on the lane's
+/// VM 2026-09-24: a row read 243 with the offset already at 1372, and a
+/// just-inserted row read -1372), while the content's layout is what
+/// UpdateLayout settles. The row's height and the viewer ride along; None
+/// without a scrolled ancestor.
+fn row_top_in_content(element: &UIElement) -> windows_core::Result<Option<(f64, f64, ScrollViewer)>> {
+    let Some(viewer) = scroll_ancestor(element)? else { return Ok(None) };
+    viewer.UpdateLayout()?;
+    let content: UIElement = windows_core::Interface::cast(&viewer.Content()?)?;
+    let at = element.TransformToVisual(&content)?.TransformPoint(Point { X: 0.0, Y: 0.0 })?;
+    let fe: FrameworkElement = windows_core::Interface::cast(element)?;
+    Ok(Some((f64::from(at.Y), fe.ActualHeight()?, viewer)))
+}
+
+/// ChangeView is the REAL scrolling API (scroll_end's rule), animation
+/// off (S6); the viewer clamps at ScrollableHeight, S2's clamp at the end.
+fn scroll_element_to_top(element: &UIElement) -> windows_core::Result<()> {
+    let Some((top, height, viewer)) = row_top_in_content(element)? else {
+        scroll_note(format_args!("no ScrollViewer ancestor: nothing to scroll"));
+        return Ok(());
+    };
+    let want = top;
+    scroll_note(format_args!(
+        "row content top={top} height={height}; viewer offset={} viewport={} scrollable={} extent={} \
+         -> want {want}",
+        viewer.VerticalOffset()?,
+        viewer.ViewportHeight()?,
+        viewer.ScrollableHeight()?,
+        viewer.ExtentHeight()?
+    ));
+    let moved = viewer.ChangeViewWithOptionalAnimation(
+        None::<&IReference<f64>>,
+        &offset_ref(want.max(0.0))?,
+        None::<&IReference<f32>>,
+        true,
+    )?;
+    scroll_note(format_args!("ChangeView answered {moved}; offset now {}", viewer.VerticalOffset()?));
+    Ok(())
+}
+
+/// The scroll arm's readings, into the verb trace a red leg's bundle
+/// carries (the trace exists under the harness alone).
+fn scroll_note(what: std::fmt::Arguments<'_>) {
+    #[cfg(feature = "harness")]
+    crate::vtrace::note("scroll_row", what);
+    #[cfg(not(feature = "harness"))]
+    let _ = what;
+}
+
 /// THE HEADER TRAVELS WITH THE BODY, and a table just laid out shows its
 /// FIRST column (docs/tables-plan.md, the overflow ruling). Reached from
 /// `host`'s LayoutUpdated; every write here is gated on a number that MOVED,
@@ -10348,6 +10555,8 @@ thread_local! {
     /// The textareas whose Return submits (docs/submit-plan.md S2), read by
     /// each field's KeyDown at the keystroke.
     static SUBMITS: RefCell<std::collections::HashSet<u64>> = RefCell::new(std::collections::HashSet::new());
+    /// The latest scroll_to_row per container, by the copy it names (S4).
+    static PENDING_ROW_SCROLLS: RefCell<std::collections::HashMap<u64, u64>> = RefCell::new(std::collections::HashMap::new());
     /// Typing attributes armed over a collapsed caret. TOM applies the
     /// collapsed SELECTION's CharacterFormat to typed text by itself
     /// (measured 2026-09-11) and re-derives that format from the character
@@ -14977,6 +15186,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             // them — no opacity ladder, no foreground rule.
             apply_brand(&accent)?;
         }
+        ApplyOp::ScrollToRow { id, copy, index } => scroll_row(core, id.0, copy, index as usize)?,
         ApplyOp::RevealRange { id, range } => {
             let Some(field) = textarea_by_id(core, id.0) else {
                 return Ok(());
@@ -20921,13 +21131,11 @@ impl crate::harness::Stage for WinUiStage {
             let Some(id) = container_id(core, t) else {
                 return Ok(format!("no such target {t:?}"));
             };
-            let Some((host, band)) = TABLES
-                .with_borrow(|tables| tables.get(&id).map(|w| (w.host.clone(), w.band.clone())))
-            else {
+            if !TABLES.with_borrow(|tables| tables.contains_key(&id)) {
                 return Ok("that For is not a windowed tier on this backend \
                            (docs/virtualization-plan.md §4 windows declared tables here)"
                     .to_owned());
-            };
+            }
             // The core maps the KEY to an index in the collection's CURRENT
             // order and this tier scrolls that row to the viewport's TOP. A key
             // the collection does not hold is the caller's bug; this sentence
@@ -20938,52 +21146,7 @@ impl crate::harness::Stage for WinUiStage {
             else {
                 return Ok(format!("no row carries the key {key:?}"));
             };
-            // SETTLE BEFORE MOVING: the viewport count this hands the core has
-            // to be a real one. A table whose first layout has not run reports
-            // no viewport at all, and the band it asks for is the whole
-            // collection (measured on the lane 2026-08-25 — `scroll_to_row
-            // r200` carried a count of 300 on a 300-row scene).
-            table_settle(core, id);
-            let count = TABLES
-                .with_borrow(|t| t.get(&id).and_then(|w| w.reported).map(|(_, c)| c))
-                .unwrap_or(1)
-                .max(1);
-            // THE BAND FOLLOWS THE ROW NEXT: the target is unrealized until it
-            // does, and the visible range may NOT be re-read in between,
-            // because the viewport is still where it was and would band
-            // straight back.
-            TABLES.with_borrow_mut(|t| {
-                if let Some(w) = t.get_mut(&id) {
-                    w.reported = Some((index, count));
-                    w.anchor = None;
-                }
-            });
-            table_band_to(core, id, (index, count))?;
-            band.UpdateLayout()?;
-            for _ in 0..TABLE_SETTLE_ROUNDS {
-                let measured = table_measure_rows(core, id, &band)?;
-                let spaced = table_write_spacers(core, id, &band)?;
-                if !measured && !spaced {
-                    break;
-                }
-                band.UpdateLayout()?;
-            }
-            let (spacer_top, tracks) = band_tracks(&band)?;
-            let first = core.scene.window_geometry(id).first;
-            let offset = index.saturating_sub(first);
-            // Band space to host space (D7), the report's rule verbatim.
-            let want = fold_extent(id)
-                + spacer_top
-                + tracks[..offset.min(tracks.len())].iter().sum::<f64>();
-            table_scroll_to(&host, id, want)?;
-            // Parked on the ROW, not on the pixel: every correction cycle
-            // re-parks it (§2.4, and docs/traps.md "The anchoring race").
-            TABLES.with_borrow_mut(|t| {
-                if let Some(w) = t.get_mut(&id) {
-                    w.anchor = Some(index);
-                }
-            });
-            table_settle(core, id);
+            park_table_row(core, id, index)?;
             Ok(String::new())
         })
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
@@ -22432,6 +22595,43 @@ impl crate::harness::Stage for WinUiStage {
             }
             Ok(())
         })
+    }
+
+    fn scrolled_to(&self, t: crate::harness::Target, key: &str) -> String {
+        let key = key.to_owned();
+        Self::on_ui_read(move |core| {
+            let Some(id) = container_id(core, t) else {
+                return Ok("<no such target>".to_string());
+            };
+            if TABLES.with_borrow(|tables| tables.contains_key(&id)) {
+                return Ok("a table; expect_window reads a windowed tier".to_string());
+            }
+            let Some((_, copy)) = core.scene.row_copy(id, &Value::Str(key.clone())) else {
+                return Ok(format!("no row keyed {key:?} in a For this container hosts"));
+            };
+            let Some(widget) = copy.and_then(|c| core.widgets.get(&c)) else {
+                return Ok(format!("row {key:?} is not realized"));
+            };
+            let element = widget.identity_element()?;
+            let Some((content_top, height, viewer)) = row_top_in_content(&element)? else {
+                return Ok("the row has no ScrollViewer ancestor".to_string());
+            };
+            let top = content_top - viewer.VerticalOffset()?;
+            if top.abs() <= 2.0 {
+                return Ok(String::new());
+            }
+            let viewport = viewer.ViewportHeight()?;
+            let at_end = viewer.ScrollableHeight()? - viewer.VerticalOffset()? <= 2.0;
+            if at_end && top >= -2.0 && top + height <= viewport + 2.0 {
+                return Ok(String::new());
+            }
+            Ok(format!(
+                "row top {top} from the viewport's top (content {content_top}); offset {} of {}",
+                viewer.VerticalOffset()?,
+                viewer.ScrollableHeight()?
+            ))
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
     fn scroll_at_end(&self, t: crate::harness::Target) -> String {
@@ -26067,15 +26267,23 @@ mod tests {
                  has a link missing, and NO SCENE CAN SEE IT"
             );
         }
-        // scroll_to_row's own two halves: band by index, then park.
-        let scroll = method("scroll_to_row");
+        // scroll_to_row's own two halves, band by index then park, live in
+        // park_table_row since 2026-09-24 (docs/scroll-to-plan.md §3), which
+        // the harness verb AND the app's command both call.
+        let park = body("park_table_row");
         for call in ["table_band_to(core, id, (index, count))", "w.anchor = Some(index)"] {
+            assert!(park.contains(call), "park_table_row no longer calls `{call}`");
+        }
+        for (what, text) in [
+            ("the scroll_to_row verb", method("scroll_to_row")),
+            ("the app's scroll_row", body("scroll_row")),
+        ] {
             assert!(
-                scroll.contains(call),
-                "the scroll_to_row verb no longer calls `{call}`"
+                text.contains("park_table_row(core, id, index)"),
+                "{what} no longer calls park_table_row — the verb and the command would park apart"
             );
         }
-        println!("report-loop links held: {} clauses + 2", clauses.len());
+        println!("report-loop links held: {} clauses + 4", clauses.len());
     }
 
     #[test]

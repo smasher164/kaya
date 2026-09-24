@@ -493,6 +493,12 @@ pub enum Step {
     /// Drive the viewport to its end through the toolkit's REAL
     /// scrolling API. An action, silent like click.
     ScrollEnd(Target),
+    /// Expect the For in the target to have been scrolled to the row keyed
+    /// by the string: the row's top edge at the viewport's top within two
+    /// device units, or the row wholly inside a viewport that is at its end
+    /// (docs/scroll-to-plan.md S7) — geometry from the toolkit, never a
+    /// model copy.
+    ExpectScrolledTo(Target, String),
     /// Expect the content's end edge to coincide with the viewport's
     /// (within two device units) — read back from the toolkit, never a
     /// model copy.
@@ -648,6 +654,7 @@ impl Step {
             | Step::ExpectOverflow(t)
             | Step::ScrollEnd(t)
             | Step::ExpectAtEnd(t)
+            | Step::ExpectScrolledTo(t, _)
             | Step::ClearSearch(t)
             | Step::ContextOpen(t) => vec![t],
             Step::Toggle(t, _)
@@ -869,6 +876,7 @@ impl Step {
             Step::ExpectOverflow { .. } => true,
             Step::ScrollEnd { .. } => false,
             Step::ExpectAtEnd { .. } => true,
+            Step::ExpectScrolledTo { .. } => true,
             Step::Choose { .. } => false,
             Step::ExpectGridColumns { .. } => true,
             Step::MenuActivate { .. } => false,
@@ -1309,6 +1317,12 @@ pub trait Stage: Send + 'static {
     /// two device units): the empty string when it does, otherwise a
     /// description (failure text only).
     fn scroll_at_end(&self, target: Target) -> String;
+    /// Whether the For in `target` stands scrolled to the row keyed `key`
+    /// (docs/scroll-to-plan.md S7): the row's top at the viewport's top
+    /// within two device units, or the row wholly inside a viewport at its
+    /// end. The empty string when it does, otherwise what the toolkit's
+    /// geometry says (failure text only).
+    fn scrolled_to(&self, target: Target, key: &str) -> String;
     /// The primary window's section count, read from the REAL switcher
     /// control (tab bar items, stack pages), never the scene model.
     fn section_count(&self) -> usize;
@@ -2273,6 +2287,24 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
             "expect_overflow" => Step::ExpectOverflow(parse_target(rest.trim())?),
             "scroll_end" => Step::ScrollEnd(parse_target(rest.trim())?),
             "expect_at_end" => Step::ExpectAtEnd(parse_target(rest.trim())?),
+            "expect_scrolled_to" => {
+                // The row key's grammar is scroll_to_row's: one key, quoted
+                // only when it needs to be.
+                let (target, key) = rest.split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("expect_scrolled_to wants a target and a row key: {line:?}")
+                })?;
+                let key = key.trim();
+                let key = if key.starts_with('"') {
+                    parse_string(key)?
+                } else if key.is_empty() || key.split_whitespace().count() != 1 {
+                    return Err(format!(
+                        "expect_scrolled_to wants ONE row key, quoted if it has spaces: {line:?}"
+                    ));
+                } else {
+                    key.to_owned()
+                };
+                Step::ExpectScrolledTo(parse_target(target.trim())?, key)
+            }
             "menu_activate" => {
                 let path = parse_string(rest)?;
                 check_menu_path(&path).map_err(|e| format!("{e}: {line:?}"))?;
@@ -4608,6 +4640,20 @@ fn run_with_log(
                     }))
                 }
             }
+            Step::ExpectScrolledTo(t, key) => {
+                if !matches!(t.kind, TargetKind::Column | TargetKind::Row) {
+                    Some(Err(format!("{t:?} is not a container a For is mounted in")))
+                } else {
+                    Some(poll(|| {
+                        let off = stage.scrolled_to(*t, key);
+                        if off.is_empty() {
+                            Ok(format!("{} scrolled to {key}", target_spec(t)))
+                        } else {
+                            Err(format!("{} not scrolled to {key} ({off})", target_spec(t)))
+                        }
+                    }))
+                }
+            }
             Step::ExpectFills(t) => {
                 // ONE VERB, TWO SUBJECTS: a CONTAINER's children must
                 // span its content box, a WIDGET must span the track its
@@ -6262,6 +6308,9 @@ mod tests {
         fn scroll_at_end(&self, _: Target) -> String {
             String::new()
         }
+        fn scrolled_to(&self, _: Target, _: &str) -> String {
+            String::new()
+        }
         fn choose(&self, _: Target, _: usize) {}
         fn selected_label(&self, _: Target) -> String {
             String::new()
@@ -7180,6 +7229,9 @@ mod tests {
         fn scroll_at_end(&self, _: Target) -> String {
             String::new()
         }
+        fn scrolled_to(&self, _: Target, _: &str) -> String {
+            String::new()
+        }
         fn choose(&self, _: Target, _: usize) {}
         fn selected_label(&self, _: Target) -> String {
             String::new()
@@ -7491,6 +7543,9 @@ mod tests {
         }
         fn scroll_end(&self, _: Target) {}
         fn scroll_at_end(&self, _: Target) -> String {
+            String::new()
+        }
+        fn scrolled_to(&self, _: Target, _: &str) -> String {
             String::new()
         }
         fn choose(&self, _: Target, _: usize) {}

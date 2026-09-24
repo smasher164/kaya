@@ -14,7 +14,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, cast
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x908b183fda12f8c1
+SPEC_HASH = 0x0e84cabd1d859673
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -291,6 +291,7 @@ TX_FORMAT_TEXT = 57
 TX_PRESENT_SHEET = 58
 TX_DISMISS_SHEET = 59
 TX_SET_SHEET_PROP = 60
+TX_SCROLL_TO_ROW = 61
 APPLY_CREATE = 1
 APPLY_SET_PROP = 2
 APPLY_ADD_CHILD = 3
@@ -337,6 +338,7 @@ APPLY_FORMAT_TEXT = 45
 APPLY_PRESENT_SHEET = 46
 APPLY_DISMISS_SHEET = 47
 APPLY_SET_SHEET_PROP = 48
+APPLY_SCROLL_TO_ROW = 49
 OCC_BUTTON_CLICKED = 1
 OCC_TEXT_CHANGED = 2
 OCC_TOGGLED = 3
@@ -682,6 +684,10 @@ def tx_dismiss_sheet(sheet: int) -> bytes:
 def tx_set_sheet_prop(sheet: int, prop: int, source: int) -> bytes:
     """Bind a sheet property (SHEET_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — sheets are not collection elements."""
     return record(TX_SET_SHEET_PROP, struct.pack("<Q", sheet) + struct.pack("<I", prop) + struct.pack("<I", source))
+
+def tx_scroll_to_row(widget_id: int, key: Value) -> bytes:
+    """Scroll the For mounted in `widget_id` so the row keyed `key` has its top at the viewport's top, clamped at the content's end (docs/scroll-to-plan.md S1, S2). THE LIST HALF OF DESIGN.md's scrollTo: its own record rather than a widget_command because the key is a payload that record has no room for. A PURE EFFECT like reveal_range: no state, permitted inside an undo group and not inverted (S5). A container that hosts no For, or a key the collection does not hold, applies NOTHING, silently — an instance-addressed command's rule, since a copy legitimately vanishes under rebuild (S3). Issued before the container's first layout it is held by the backend and lands after it (S4)."""
+    return record(TX_SCROLL_TO_ROW, struct.pack("<Q", widget_id) + _enc.value(key))
 
 
 def tx_set_text(widget_id: int, text: str) -> bytes:

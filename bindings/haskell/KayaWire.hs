@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x908b183fda12f8c1
+specHash = 0x0e84cabd1d859673
 
 valueBool :: Word32
 valueBool = 1
@@ -574,6 +574,8 @@ txKindDismissSheet :: Word16
 txKindDismissSheet = 59
 txKindSetSheetProp :: Word16
 txKindSetSheetProp = 60
+txKindScrollToRow :: Word16
+txKindScrollToRow = 61
 applyKindCreate :: Word16
 applyKindCreate = 1
 applyKindSetProp :: Word16
@@ -666,6 +668,8 @@ applyKindDismissSheet :: Word16
 applyKindDismissSheet = 47
 applyKindSetSheetProp :: Word16
 applyKindSetSheetProp = 48
+applyKindScrollToRow :: Word16
+applyKindScrollToRow = 49
 occKindButtonClicked :: Word16
 occKindButtonClicked = 1
 occKindTextChanged :: Word16
@@ -1003,6 +1007,10 @@ txDismissSheet sheet = wireRecord txKindDismissSheet (word64LE sheet)
 -- Bind a sheet property (SHEET_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — sheets are not collection elements.
 txSetSheetProp :: Word64 -> Word32 -> Word32 -> Builder
 txSetSheetProp sheet prop source = wireRecord txKindSetSheetProp (word64LE sheet <> word32LE prop <> word32LE source)
+
+-- Scroll the For mounted in `widget_id` so the row keyed `key` has its top at the viewport's top, clamped at the content's end (docs/scroll-to-plan.md S1, S2). THE LIST HALF OF DESIGN.md's scrollTo: its own record rather than a widget_command because the key is a payload that record has no room for. A PURE EFFECT like reveal_range: no state, permitted inside an undo group and not inverted (S5). A container that hosts no For, or a key the collection does not hold, applies NOTHING, silently — an instance-addressed command's rule, since a copy legitimately vanishes under rebuild (S3). Issued before the container's first layout it is held by the backend and lands after it (S4).
+txScrollToRow :: Word64 -> Value -> Builder
+txScrollToRow widgetId key = wireRecord txKindScrollToRow (word64LE widgetId <> encodeValue key)
 
 -- A civil date as the wire's I64: year * 10000 + month * 100 + day.
 packDate :: Int -> Int -> Int -> Int64

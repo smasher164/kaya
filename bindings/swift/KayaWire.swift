@@ -24,7 +24,7 @@ public enum KayaValue: Hashable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0x908b183fda12f8c1
+let kayaSpecHash: UInt64 = 0x0e84cabd1d859673
 
 /// A civil date as the wire's I64: year * 10000 + month * 100 + day.
 func kayaPackDate(_ year: Int, _ month: Int, _ day: Int) -> Int64 {
@@ -669,6 +669,14 @@ struct KayaTx {
         self.u64(sheet)
         self.u32(prop)
         self.u32(source)
+        self.end(kayaAt)
+    }
+
+    /// Scroll the For mounted in `widget_id` so the row keyed `key` has its top at the viewport's top, clamped at the content's end (docs/scroll-to-plan.md S1, S2). THE LIST HALF OF DESIGN.md's scrollTo: its own record rather than a widget_command because the key is a payload that record has no room for. A PURE EFFECT like reveal_range: no state, permitted inside an undo group and not inverted (S5). A container that hosts no For, or a key the collection does not hold, applies NOTHING, silently — an instance-addressed command's rule, since a copy legitimately vanishes under rebuild (S3). Issued before the container's first layout it is held by the backend and lands after it (S4).
+    mutating func scrollToRow(_ widgetId: UInt64, _ key: KayaValue) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SCROLL_TO_ROW))
+        self.u64(widgetId)
+        self.value(key)
         self.end(kayaAt)
     }
 

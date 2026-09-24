@@ -1415,6 +1415,10 @@ let clear (Widget id) = emit (the_tx ()) (Kaya_wire.tx_widget_command id Kaya_wi
 (* Give this widget the keyboard focus. *)
 let focus (Widget id) = emit (the_tx ()) (Kaya_wire.tx_widget_command id Kaya_wire.command_focus)
 
+(* Scroll the For mounted in this container to the row keyed [key] (docs/scroll-to-plan.md S1). *)
+let scroll_to_row (Widget id) key =
+  emit (the_tx ()) (Kaya_wire.tx_scroll_to_row id (key_to_wire key))
+
 (* --- Text ranges: the three primitives an editor cannot write itself -
    A RANGE IS A PAIR OF UTF-8 BYTE OFFSETS [(start, stop)], half-open;
    OCaml's [string] IS a byte sequence, so this binding converts nothing.

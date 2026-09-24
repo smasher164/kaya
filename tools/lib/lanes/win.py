@@ -24,7 +24,7 @@ SCENES = [
     "background", "stall", "milestone2", "entry", "gallery", "todos",
     "reorder", "feed", "grow", "layout", "align", "window", "panels",
     "confirm", "nav", "split", "panes", "table", "scroll",
-    "progress", "select", "radio", "grid", "textarea", "search", "submit", "sections",
+    "progress", "select", "radio", "grid", "textarea", "search", "submit", "scrollto", "sections",
     "menus", "commands", "a11y", "a11yrows", "filedialog",
     "clipboard", "undo", "dirty", "ranges", "save", "styling",
     "typeface", "toolbar", "identity", "assets", "adaptive", "dnd", "pickers", "sliders", "tooltips",
@@ -477,6 +477,10 @@ ORDER = [
     ],
     [
      "submit_java",
+    ],
+    [
+     "scrollto_rust", "scrollto_python", "scrollto_js",
+     "scrollto_go", "scrollto_csharp", "scrollto_java",
     ],
     # The filedialog family, ONE LEG PER DRAIN: the Shell's dialog is
     # OS-GLOBAL modal chrome — it must hold the FOREGROUND to be driven,

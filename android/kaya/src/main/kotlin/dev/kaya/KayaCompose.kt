@@ -231,6 +231,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.layout.positionInWindow
+import kotlin.math.roundToInt
 import androidx.compose.ui.node.RootForTest
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalView
@@ -603,6 +604,12 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
      */
     var revealRequest by mutableStateOf<KayaRange?>(null)
     var revealSeq by mutableStateOf(0)
+    /** The app's scroll_to_row on this For's container, (copy, index), held
+     *  until the tier can scroll (docs/scroll-to-plan.md S4); keyed on
+     *  [scrollRowSeq] like the reveal, since a second scroll to the SAME row
+     *  still runs. */
+    var scrollRowRequest by mutableStateOf<Pair<Long, Int>?>(null)
+    var scrollRowSeq by mutableStateOf(0)
     val children = mutableStateListOf<KayaNode>()
 
     /**
@@ -692,6 +699,52 @@ var kayaLastClick: Triple<String, Int, Long>? = null
  * is what the grow contract talks about.
  */
 val kayaMainExtents = HashMap<Long, Double>()
+/** Every stacked child's and every scroll box's top and height in the root's
+ *  space, from onGloballyPositioned: what the app's scroll_to_row lands a
+ *  row by and what expect_scrolled_to reads (docs/scroll-to-plan.md S2, S7). */
+val kayaNodeTops = HashMap<Long, Float>()
+val kayaNodeHeights = HashMap<Long, Float>()
+
+/** The nearest scroll node above [node], through the model's parents. */
+fun kayaScrollAncestor(node: KayaNode): KayaNode? {
+    var current = node.id
+    while (true) {
+        val parent = KayaSceneModel.parents[current] ?: return null
+        val candidate = KayaSceneModel.nodes[parent]
+        if (candidate != null && candidate.kind == KayaCompose.KIND_SCROLL) return candidate
+        current = parent
+    }
+}
+
+/** Apply a container's pending scroll_to_row (docs/scroll-to-plan.md §3): a
+ *  windowed table parks the index; a realized For waits, bounded, for the
+ *  copy's and the scroll box's placement (S4) and scrolls the copy's top to
+ *  the box's top through the toolkit's own ScrollState, which clamps at its
+ *  end (S2) — `scrollTo`, never the animated form (S6). A container with no
+ *  scroll ancestor drops the request (S3). */
+suspend fun kayaScrollRow(node: KayaNode) {
+    val (copy, index) = node.scrollRowRequest ?: return
+    kayaTableWindows[node.id]?.let {
+        it.park(index)
+        node.scrollRowRequest = null
+        return
+    }
+    if (node.tableColumns.isNotEmpty() || copy == 0L) return
+    val scroll = kayaScrollAncestor(node)
+    if (scroll == null) {
+        node.scrollRowRequest = null
+        return
+    }
+    var frames = 0
+    while ((kayaNodeTops[copy] == null || kayaNodeTops[scroll.id] == null) && frames < 120) {
+        withFrameNanos { }
+        frames += 1
+    }
+    val top = kayaNodeTops[copy] ?: return
+    val boxTop = kayaNodeTops[scroll.id] ?: return
+    scroll.scrollState.scrollTo((top - boxTop + scroll.scrollState.value).roundToInt())
+    node.scrollRowRequest = null
+}
 
 /**
  * The main-axis extent each CONTAINER rendered at, by node id — what
@@ -1748,7 +1801,7 @@ object KayaCompose {
     // but only the runtime assert catches a stale compiled APK against
     // a new libkaya. ULong because the fingerprint's high bit is fair
     // game and a Kotlin Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0x908b183fda12f8c1uL
+    private const val SPEC_HASH: ULong = 0x0e84cabd1d859673uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -1813,6 +1866,8 @@ object KayaCompose {
     private const val APPLY_PRESENT_SHEET = 46
     private const val APPLY_DISMISS_SHEET = 47
     private const val APPLY_SET_SHEET_PROP = 48
+    /** The app's scroll to a row (docs/scroll-to-plan.md). */
+    private const val APPLY_SCROLL_TO_ROW = 49
     /** What a drop settles on (the wire's drag_op). */
     internal const val DRAG_OP_NONE = 0
     internal const val DRAG_OP_COPY = 1
@@ -3039,6 +3094,19 @@ object KayaCompose {
                     // model drop leaves the composition, no emit (the echo
                     // doctrine).
                     kayaForgetSheet(b.long)
+                }
+                APPLY_SCROLL_TO_ROW -> {
+                    // { u64 container; u64 copy (0 = unrealized); u32 index;
+                    // u32 pad }. A REQUEST the container's effect performs
+                    // once the layout exists (docs/scroll-to-plan.md S4).
+                    val cid = b.long
+                    val copy = b.long
+                    val index = b.int
+                    b.int // pad
+                    val container = KayaSceneModel.nodes[cid]
+                        ?: error("kaya: scroll_to_row on an unknown container $cid")
+                    container.scrollRowRequest = Pair(copy, index)
+                    container.scrollRowSeq += 1
                 }
                 APPLY_SET_SHEET_PROP -> {
                     val sid = b.long
@@ -4333,6 +4401,26 @@ object KayaCompose {
         kayaLiveIds = ids
         kayaLiveStamp = kayaPresentedGeneration
         return ids
+    }
+
+    /** expect_scrolled_to's reading (docs/scroll-to-plan.md S7): null when
+     *  the row keyed [key] tops its scroll box within two pixels, or sits
+     *  wholly inside a box at its end; otherwise what the placements say. */
+    private fun kayaScrolledTo(node: KayaNode, key: String): String? {
+        if (node.tableColumns.isNotEmpty()) return "a table; expect_window reads a windowed tier"
+        val copy = node.children.firstOrNull { tableStamp(it.tag)?.keys == listOf(key) }
+            ?: return "no realized row keyed \"$key\" among ${node.children.size} children"
+        val scroll = kayaScrollAncestor(node) ?: return "the container has no scroll ancestor"
+        val rowTop = kayaNodeTops[copy.id] ?: return "row \"$key\" has no placement yet"
+        val rowHeight = kayaNodeHeights[copy.id] ?: 0f
+        val boxTop = kayaNodeTops[scroll.id] ?: return "the scroll box has no placement yet"
+        val boxHeight = kayaNodeHeights[scroll.id] ?: 0f
+        val top = rowTop - boxTop
+        if (kotlin.math.abs(top) <= 2f) return null
+        val state = scroll.scrollState
+        val atEnd = state.maxValue - state.value <= 2
+        if (atEnd && top >= -2f && top + rowHeight <= boxHeight + 2f) return null
+        return "row top ${top.toInt()}px from the box's top; offset ${state.value} of ${state.maxValue}"
     }
 
     private fun target(spec: String, kind: String, registry: List<KayaNode>): KayaNode? {
@@ -9051,6 +9139,23 @@ object KayaCompose {
                             }
                         }
                     }
+                    "expect_scrolled_to" -> {
+                        // docs/scroll-to-plan.md S7: the row's top at the
+                        // scroll box's top, or the row inside a box at its
+                        // end — from the placements the layout reported.
+                        val rawKey = parts.drop(2).joinToString(" ")
+                        val key = if (rawKey.startsWith("\"")) quoted(parts.drop(2)) else rawKey
+                        val off = onUi(activity) {
+                            val node = target(parts[1], "column", KayaSceneModel.columns)
+                                ?: target(parts[1], "row", KayaSceneModel.rows)
+                            if (node == null) "no such target ${parts[1]}" else kayaScrolledTo(node, key)
+                        }
+                        if (off != null) {
+                            failures.add("${parts[1]} not scrolled to $key ($off)")
+                        } else {
+                            observed.add("${parts[1]} scrolled to $key")
+                        }
+                    }
                     "expect_at_end" -> {
                         val spec = parts.getOrNull(1) ?: ""
                         val st = onUi(activity) {
@@ -11934,6 +12039,11 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
     val window = remember(node.id) { KayaTableWindow(node) }
     DisposableEffect(window) {
         kayaTableWindows[node.id] = window
+        // A scroll_to_row that arrived before this tier registered (S4).
+        node.scrollRowRequest?.let {
+            window.park(it.second)
+            node.scrollRowRequest = null
+        }
         onDispose { if (kayaTableWindows[node.id] === window) kayaTableWindows.remove(node.id) }
     }
     // A scroll moves nothing this composition reads, so nothing else
@@ -13044,11 +13154,19 @@ private fun KayaRenderCore(
             // node's own ScrollState — the toolkit's real scrolling
             // machinery, which the runner's verbs read and drive.
             Box(
-                boxFill.then(a11y).verticalScroll(node.scrollState)
+                boxFill.then(a11y).onGloballyPositioned {
+                    kayaNodeTops[node.id] = it.positionInRoot().y
+                    kayaNodeHeights[node.id] = it.size.height.toFloat()
+                }.verticalScroll(node.scrollState)
             ) {
                 node.children.firstOrNull()?.let { KayaRender(it) }
             }
         KayaCompose.KIND_COLUMN, KayaCompose.KIND_ROW -> {
+            // The app's scroll_to_row lands from an effect, the reveal's
+            // reason: a scroll needs the layout (docs/scroll-to-plan.md S4).
+            LaunchedEffect(node.scrollRowSeq) {
+                if (node.scrollRowSeq > 0) kayaScrollRow(node)
+            }
             // ONE NODE, TWO CONSTRUCTOR SPELLINGS (docs/adaptive-layout-plan.md
             // D1): the kind names the INITIAL axis and the harness's
             // address; the axis prop, when set, is the arrangement truth.
@@ -13103,6 +13221,8 @@ private fun KayaRenderCore(
                     // measured height expect_shares reads.
                     var cell = Modifier.onGloballyPositioned {
                         kayaMainExtents[child.id] = it.size.height.toDouble()
+                        kayaNodeTops[child.id] = it.positionInRoot().y
+                        kayaNodeHeights[child.id] = it.size.height.toFloat()
                         kayaCrossRects[child.id] = Pair(
                             it.positionInParent().x.toDouble(),
                             it.size.width.toDouble(),

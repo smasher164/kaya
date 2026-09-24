@@ -38,7 +38,7 @@ import time
 SCENES = [
     "background", "stall", "milestone2", "entry", "gallery", "todos",
     "reorder", "feed", "grow", "layout", "align", "window", "panels",
-    "confirm", "nav", "split", "panes", "table", "scroll", "progress",
+    "confirm", "nav", "split", "panes", "table", "scroll", "scrollto", "progress",
     "select", "radio", "grid", "textarea", "sections", "menus",
     "commands", "a11y", "a11yrows", "filedialog", "clipboard", "undo",
     "dirty", "ranges", "save", "styling", "toolbar", "identity",
@@ -311,6 +311,7 @@ ORDER = [
     ("undo", ("js",)),
     ("drain",),
     ("scroll", LANGS),
+    ("scrollto", LANGS),
     ("progress", LANGS),
     ("select", LANGS),
     ("radio", LANGS),

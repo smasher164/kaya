@@ -30,7 +30,7 @@ eval "$(opam env 2>/dev/null)" || true
 
 # --lib builds the cdylib (libkaya.so) the foreign suites load;
 # --example alone would build only the rlib it depends on.
-SCENES="background stall milestone2 entry search gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive pickers sliders sheet submit"
+SCENES="background stall milestone2 entry search gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive pickers sliders sheet submit scrollto"
 # Depth-slice scenes, rust only. `windowed` and `canvas` are rust BY
 # DESIGN rather than by depth — the compiled conformance scenes every
 # lane runs (docs/virtualization-plan.md §6.3, docs/canvas-plan.md
@@ -1566,6 +1566,19 @@ for proto in x11 wayland; do
     run "$proto" submit-ocaml env KAYA_SELFTEST=submit KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/submit.exe
     run "$proto" submit-haskell env KAYA_SELFTEST=submit "$(hs_bin submit)"
     run "$proto" submit-java env KAYA_SELFTEST=submit KAYA_LIB="$LIB" \
+        java -cp /tmp/java-guests dev.kaya.guests.Main
+    # THE APP'S SCROLL-TO (docs/scroll-to-plan.md §5).
+    run "$proto" scrollto-rust env KAYA_SELFTEST=scrollto "$CARGO_TARGET_DIR/debug/examples/scrollto"
+    run "$proto" scrollto-python env KAYA_SELFTEST=scrollto KAYA_LIB="$LIB" \
+        python3 guests/python/scrollto.py
+    run "$proto" scrollto-js env KAYA_SELFTEST=scrollto KAYA_LIB="$LIB" \
+        node guests/js/scrollto.ts
+    run "$proto" scrollto-go env KAYA_SELFTEST=scrollto /tmp/go-guests/kaya-go
+    run "$proto" scrollto-csharp env KAYA_SELFTEST=scrollto KAYA_LIB="$LIB" \
+        dotnet exec "$CS_GUEST"
+    run "$proto" scrollto-ocaml env KAYA_SELFTEST=scrollto KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/scrollto.exe
+    run "$proto" scrollto-haskell env KAYA_SELFTEST=scrollto "$(hs_bin scrollto)"
+    run "$proto" scrollto-java env KAYA_SELFTEST=scrollto KAYA_LIB="$LIB" \
         java -cp /tmp/java-guests dev.kaya.guests.Main
     run "$proto" scroll-rust env KAYA_SELFTEST=scroll "$CARGO_TARGET_DIR/debug/examples/scroll"
     run "$proto" scroll-python env KAYA_SELFTEST=scroll KAYA_LIB="$LIB" \

@@ -244,6 +244,11 @@
 
 #define KAYA_TX_SET_SHEET_PROP 60
 
+/**
+ * SCROLL_TO_ROW: u64 container, then the row's key value (docs/scroll-to-plan.md).
+ */
+#define KAYA_TX_SCROLL_TO_ROW 61
+
 #define KAYA_TX_ADD_SECTION 25
 
 #define KAYA_TX_SELECT_SECTION 26
@@ -546,6 +551,11 @@
 #define KAYA_APPLY_DISMISS_SHEET 47
 
 #define KAYA_APPLY_SET_SHEET_PROP 48
+
+/**
+ * SCROLL_TO_ROW: u64 container, u64 copy (0 = unrealized), u32 index, u32 pad.
+ */
+#define KAYA_APPLY_SCROLL_TO_ROW 49
 
 #define KAYA_APPLY_ADD_SECTION 15
 

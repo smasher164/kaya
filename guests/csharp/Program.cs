@@ -43,6 +43,7 @@ static class Program
             case "pickers": PickersScene.Run(); break;
             case "listdetail": SplitScene.Run(); break;
             case "scroll": ScrollScene.Run(); break;
+            case "scrollto": ScrollToScene.Run(); break;
             case "search": SearchScene.Run(); break;
             case "submit": SubmitScene.Run(); break;
             case "progress": ProgressScene.Run(); break;

@@ -941,6 +941,14 @@ export class Widget extends Handle {
     return this;
   }
 
+  /** Scroll the For declared in this container so the row keyed `key` has
+   * its top at the viewport's top, clamped at the content's end; a key no
+   * row holds moves nothing (docs/scroll-to-plan.md S1-S3). */
+  scrollToRow(key: Key): void {
+    this._live("scrollToRow()");
+    records().push(wire.tx_scroll_to_row(this.id, keyValue(key)));
+  }
+
   // The rich document surface (docs/rich-text-plan.md R1); `rich()`
   // declares the widget and carries no _live guard, since a template
   // declares it too.
@@ -1639,6 +1647,10 @@ export type DraggableOptions = {
 };
 export type ColumnsOptions = RowsOptions & { sort?: Sort; onSort?: Handler };
 
+/** `rows()`'s loop, carrying the For's OWN container widget — what a
+ * `scrollToRow` addresses (docs/scroll-to-plan.md S1). */
+export type Rows<R> = Iterable<R> & { readonly container: Widget };
+
 export class Collection<E, R> extends BoundCollection<E, R> {
   /** @internal */ readonly _id: number;
   /** @internal */ readonly _instances = new Map<string, Map<unknown, unknown>>();
@@ -1675,14 +1687,19 @@ export class Collection<E, R> extends BoundCollection<E, R> {
 
   /** The ordinary For loop with its options: `for (const item of
    * items.rows({grow: 1, align: "stretch"}))`. */
-  rows(opts: RowsOptions = {}): Iterable<R> {
+  rows(opts: RowsOptions = {}): Rows<R> {
     const trace = this[Symbol.iterator]() as unknown as ForTrace;
     trace._grow = opts.grow ?? null;
     trace._align = opts.align ?? null;
     trace._a11yId = opts.a11yId ?? null;
     trace._reorderable = opts.reorderable ?? false;
     trace._onDrop = opts.onDrop ?? null;
-    return { [Symbol.iterator]: () => trace as unknown as Iterator<R> };
+    return {
+      [Symbol.iterator]: () => trace as unknown as Iterator<R>,
+      get container(): Widget {
+        return trace._container();
+      },
+    };
   }
 
   /** The column header bar on this collection's For — the table spelling
@@ -1855,6 +1872,15 @@ class ForTrace implements Iterator<unknown> {
     // A break: the template stays open on the record, and the
     // transaction exit refuses it by name.
     return { value: undefined, done: true };
+  }
+
+  /** The For's own container, `rows().container` (docs/scroll-to-plan.md S1). */
+  _container(): Widget {
+    const handle = this._template.handle as Widget | undefined;
+    if (handle === undefined) {
+      throw new Error("kaya: rows().container before the loop declared the For — `for (const x of rows) {...}` names the container, then rows.container addresses it");
+    }
+    return handle;
   }
 }
 

@@ -499,6 +499,7 @@ type platform = Mac | Ios | Linux | Windows | Android
 
 val clear : widget -> unit
 val focus : widget -> unit
+val scroll_to_row : widget -> key -> unit
 val highlight_ranges : widget -> (int * int) list -> unit
 val select_range : widget -> int * int -> unit
 val reveal_range : widget -> int * int -> unit

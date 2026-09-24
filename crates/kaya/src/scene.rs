@@ -600,9 +600,10 @@ fn undo_verdict(op: &TxOp) -> UndoVerdict {
         // of them a group admits. HIGHLIGHT looks like state and is not:
         // the core keeps no declared set to invert
         // (docs/ranges-plan.md D2).
-        TxOp::HighlightRanges { .. } | TxOp::SelectRange { .. } | TxOp::RevealRange { .. } => {
-            UndoVerdict::PureEffect
-        }
+        TxOp::HighlightRanges { .. }
+        | TxOp::SelectRange { .. }
+        | TxOp::RevealRange { .. }
+        | TxOp::ScrollToRow { .. } => UndoVerdict::PureEffect,
         // docs/rich-text-plan.md R6: the app owns the document's undo.
         TxOp::SetRichText { .. } => UndoVerdict::Refused("set_rich_text"),
         TxOp::ApplyEdit { .. } => UndoVerdict::Refused("apply_edit"),
@@ -4163,6 +4164,13 @@ impl Scene {
                     let text = self.range_text(widget, "reveal_range", &out);
                     let native = check_range(&text, widget, "reveal_range", range);
                     out.push(ApplyOp::RevealRange { id: widget, range: native });
+                }
+                TxOp::ScrollToRow { widget, key } => {
+                    // docs/scroll-to-plan.md S3: a container hosting no For
+                    // or a key the collection does not hold applies nothing.
+                    if let Some((index, copy)) = self.row_copy(widget.0, &key) {
+                        out.push(ApplyOp::ScrollToRow { id: widget, copy, index: index as u32 });
+                    }
                 }
                 TxOp::SetRichText { widget, text, runs } => {
                     self.require_rich(widget, "set_rich_text");
@@ -8068,6 +8076,23 @@ impl Scene {
         let upto = from.saturating_add(heights.len()).min(order.len());
         let window = &mut self.for_sites.get_mut(&site).unwrap().window;
         window.measured(from, &order[from..upto], &heights[..upto - from]);
+    }
+
+    /// The row keyed `key` in the For mounted in `container`: its index in
+    /// the current order and, when realized, its copy's root widget (None
+    /// when the container hosts no For or the key is not held) — what the
+    /// app's scroll_to_row lowers to and what a backend's `scrolled_to`
+    /// reads (docs/scroll-to-plan.md S1, S7).
+    pub(crate) fn row_copy(&self, container: u64, key: &Value) -> Option<(usize, Option<WidgetId>)> {
+        let (site, _) = self.for_sites.iter().find(|(_, s)| s.container == WidgetId(container))?;
+        let (collection, path) = site.clone();
+        let key = Key::from_value(key);
+        let index = self.coll_instances[&(collection.clone(), path.clone())]
+            .order
+            .iter()
+            .position(|k| *k == key)?;
+        let copy = self.stamps.get(&(collection, path, key)).and_then(|s| s.roots.first().copied());
+        Some((index, copy))
     }
 
     /// `scroll_to_row`'s core half: the row's position in the collection's
@@ -16690,6 +16715,40 @@ Destroy { id: WidgetId(9223372036854775809) }"#;
             0,
             "the order is data, and the index follows it"
         );
+    }
+
+    /// docs/scroll-to-plan.md S1, S3: the app's command resolves the key
+    /// to its index and, for a realized row, its copy's root; a missing
+    /// key or a container hosting no For applies nothing.
+    #[test]
+    fn scroll_to_row_command_resolves_index_and_copy_or_applies_nothing() {
+        let mut scene = rows_scene(100);
+        scene.window_moved(4, 0, 10);
+        let ops = scene.apply(vec![TxOp::ScrollToRow { widget: WidgetId(4), key: Value::I64(3) }]);
+        let scrolls: Vec<_> = ops.iter().filter(|op| matches!(op, ApplyOp::ScrollToRow { .. })).collect();
+        assert_eq!(scrolls.len(), 1);
+        let ApplyOp::ScrollToRow { id, copy, index } = scrolls[0] else { unreachable!() };
+        assert_eq!((*id, *index), (WidgetId(4), 3));
+        assert!(copy.is_some(), "row 3 is inside the band, so its copy's root is named");
+        let ops = scene.apply(vec![TxOp::ScrollToRow { widget: WidgetId(4), key: Value::I64(77) }]);
+        let ApplyOp::ScrollToRow { copy, index, .. } = ops
+            .iter()
+            .find(|op| matches!(op, ApplyOp::ScrollToRow { .. }))
+            .expect("an unrealized row still resolves")
+        else {
+            unreachable!()
+        };
+        assert_eq!((*copy, *index), (None, 77), "unrealized: index only");
+        for op in [
+            TxOp::ScrollToRow { widget: WidgetId(4), key: Value::I64(4_242) },
+            TxOp::ScrollToRow { widget: WidgetId(999), key: Value::I64(3) },
+        ] {
+            let ops = scene.apply(vec![op]);
+            assert!(
+                !ops.iter().any(|op| matches!(op, ApplyOp::ScrollToRow { .. })),
+                "a missing key or a container hosting no For applies nothing (S3)"
+            );
+        }
     }
 
     #[test]

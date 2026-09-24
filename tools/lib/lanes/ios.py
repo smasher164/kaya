@@ -22,7 +22,7 @@ body's IOS_*_SCENES assignments.
 # naming a different one where two scenes share an app: a scene selects a
 # SCRIPT, never an app (`listdetail:split` is the only such pair).
 SWIFT_ENTRIES = [
-    "milestone2", "stall", "entry", "search", "submit", "gallery", "todos",
+    "milestone2", "stall", "entry", "search", "submit", "scrollto", "gallery", "todos",
     "reorder", "feed", "grow", "align", "layout",
     "confirm", "nav", "listdetail:split", "scroll", "progress",
     "select", "radio", "grid", "textarea", "sections",
@@ -40,7 +40,7 @@ SWIFT_ENTRIES = [
 # rust-only canvas scenes, plus `editor` off-list below — a Go app with
 # no swift guest to mirror (docs/editor-plan.md).
 GO_SCENES = [
-    "milestone2", "stall", "entry", "search", "submit", "gallery", "todos",
+    "milestone2", "stall", "entry", "search", "submit", "scrollto", "gallery", "todos",
     "reorder", "feed", "grow", "align", "layout",
     "confirm", "nav", "listdetail", "scroll", "progress",
     "select", "radio", "grid", "textarea", "sections",
@@ -77,7 +77,7 @@ RUST_SCENES = [
     # The format guest under the 24-hour clock (SCENE_CLOCK).
     "clock24",
     # A row wider than its window (docs/flex-shrink-plan.md §6).
-    "flexshrink",
+    "flexshrink", "scrollto",
     # The submit gesture on the three text kinds (docs/submit-plan.md §5).
     "submit",
     # The notification conformance scene: the activation is a REAL tap on

@@ -139,6 +139,7 @@ module KayaApp
     highlightRanges,
     selectRange,
     revealRange,
+    scrollToRow,
     -- Rich text (docs\/rich-text-plan.md R1): the document, its edits and
     -- the widget's own acts.
     editSourceName,
@@ -1946,6 +1947,13 @@ selectRange (Widget n) (start, stop) =
 revealRange :: Widget -> (Int, Int) -> Build ()
 revealRange (Widget n) (start, stop) =
   emitB (W.txRevealRange n (fromIntegral start) (fromIntegral stop))
+
+-- | Scroll the For mounted in this container — the widget 'forEach'
+-- returns — so the row keyed @key@ tops the viewport, clamped at the end
+-- (docs\/scroll-to-plan.md). A pure effect; a key the collection does not
+-- hold scrolls nothing.
+scrollToRow :: Widget -> Key -> Build ()
+scrollToRow (Widget n) key = emitB (W.txScrollToRow n (keyValue key))
 
 -- --- Rich text (docs\/rich-text-plan.md R1) -------------------------
 -- EVERY OFFSET IS A UTF-8 BYTE OFFSET into the widget's text

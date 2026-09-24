@@ -60,6 +60,29 @@ digit measured unbounded against its pill, watched red on the windows
 tasksbig leg before the fix (`badge "2" needs 29.9px and its pill is 16px
 tall`). KEY: InfoBadge, TextScaleFactor, badge clipped.
 
+## DEFECT — a WinUI row of plain buttons clips their labels to a fragment (seen 2026-09-24 on the scroll-to review captures)
+KEY: WinUI button clip, button label fragment, ju nowh s, star column measure(0), flex row buttons, scrollto windows capture
+
+The scroll-to scene's button row (`jump`, `nowhere`, `send`, three
+fixed cells in a plain row with nothing grown, a window 940 wide) reads
+`ju`, `nowh`, `s` on the Windows lane while every other lane draws the
+whole words (target/session-notes/scrollto-2026-09-24/windows/open.png,
+on the review page). The flex row's fixed cells are star columns floored
+at what the child measures at zero width (docs/flex-shrink-plan.md, the
+WinUI row), and a Button's content measures at zero width as a fragment
+rather than its one word, so the floor is under the word and the star
+resolution hands the cells a width between the fragment and the natural
+that nothing asked to shrink — the row has hundreds of pixels to spare.
+Labels wrap whole words under WrapWholeWords; a Button's content
+TextBlock does not carry that setting, or the star's Max is not the
+natural width for a Button. `expect_no_clipping` reads labels and
+buttons' frames against the window and a label against its longest
+word, not a button's content against its own frame, which is why the
+scene stays green. Read the WinUI flex row's Button arm against the
+label arm, give the button's content the whole-word wrap and the cell
+its natural Max, and widen `expect_no_clipping`'s WinUI arm to a button's
+content, watched red on the scrollto windows leg first.
+
 ## DEFER — Go's secondary handlers register through the app object, not on the handle (the maintainer, 2026-09-24 afternoon, reviewing the submit slice)
 KEY: Go chained handlers, OnSubmit on Widget, app.OnSubmitted, app.OnValueCommitted, secondary handler registrar, Go handler family
 

@@ -181,6 +181,9 @@ public final class Main {
             case "submit":
                 app = Submit::app;
                 break;
+            case "scrollto":
+                app = ScrollTo::app;
+                break;
             default:
                 app = Milestone2::app;
                 break;

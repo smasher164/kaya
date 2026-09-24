@@ -1940,6 +1940,10 @@ pub enum TxOp {
     /// Scroll a range into the textarea's viewport. A pure effect:
     /// undo does not restore it (docs/undo-plan.md A2).
     RevealRange { widget: WidgetId, range: TextRange },
+    /// Scroll the For in `widget` so the row keyed `key` tops the viewport
+    /// (docs/scroll-to-plan.md). A pure effect; a key the collection does
+    /// not hold applies nothing.
+    ScrollToRow { widget: WidgetId, key: Value },
     /// Replace a `rich` textarea's whole document: echoes nothing, resets
     /// the native undo history like a text write (docs/undo-plan.md D7).
     SetRichText { widget: WidgetId, text: String, runs: Vec<TextRun> },
@@ -2143,6 +2147,11 @@ pub enum ApplyOp {
     SelectRange { id: WidgetId, range: NativeRange },
     /// Scroll the range into the widget's viewport, in native units.
     RevealRange { id: WidgetId, range: NativeRange },
+    /// Scroll the For in `id` to the row at `index` of its current order —
+    /// a windowed tier parks its band there; a realized tier scrolls
+    /// `copy`, the row's root widget, to the viewport's top
+    /// (docs/scroll-to-plan.md §3).
+    ScrollToRow { id: WidgetId, copy: Option<WidgetId>, index: u32 },
     /// The widget's whole content, runs in native units; the backend draws
     /// the `block` runs with nothing added to the text (rich-text-plan R3).
     SetRichText { id: WidgetId, text: String, runs: Vec<NativeRun> },

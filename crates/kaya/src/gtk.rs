@@ -3854,6 +3854,153 @@ fn scroll_axis(core: &CoreState, t: crate::harness::Target) -> Option<gtk4::Adju
     Some(core.scrolls[i].vadjustment())
 }
 
+/// Park a windowed table's band on `index` and scroll the row to the
+/// viewport's top: the harness's scroll_to_row and the app's
+/// (docs/scroll-to-plan.md §3) share it.
+fn park_table_row(core: &mut CoreState, id: u64, index: usize) {
+    // THE BAND FOLLOWS THE ROW BEFORE THE PIXELS DO: the range is
+    // reported from the index the CORE resolved rather than from
+    // an estimate off the scrollbar, which is the one reading that
+    // is exact on the corrected path too. Parking is then
+    // window_report's re-park, on the anchor set here.
+    let count = core.tables.get(&id).and_then(|t| t.reported).map_or(1, |(_, c)| c.max(1));
+    if let Some(table) = core.tables.get(&id) {
+        table.anchor.set(Some(index));
+    }
+    let scene = &mut core.scene;
+    let ops = crate::fault::guard("reporting a window range", || scene.window_moved(id, index, count));
+    if let Some(table) = core.tables.get_mut(&id) {
+        table.reported = Some((index, count));
+    }
+    for op in ops.unwrap_or_default() {
+        apply(core, op);
+    }
+    // The entering rows have to exist before the scroll can land
+    // on one, and the spacers above them have to be the core's
+    // before the adjustment's upper covers the row at all.
+    window_report(core, id);
+    reflow_table(core, id);
+    while glib::MainContext::default().iteration(false) {}
+    window_report(core, id);
+    reflow_table(core, id);
+}
+
+/// The app's scroll_to_row (docs/scroll-to-plan.md §3): a windowed table
+/// parks its band; a realized For scrolls the copy's root to its
+/// scrolled window's top (S2), once the content has laid out (S4).
+fn scroll_row(core: &mut CoreState, id: u64, copy: Option<WidgetId>, index: usize) {
+    if core.tables.contains_key(&id) {
+        park_table_row(core, id, index);
+        return;
+    }
+    let Some(copy) = copy else {
+        return;
+    };
+    let Some(root) = core.widgets.get(&copy).map(|w| w.control()) else {
+        return;
+    };
+    // ONE PENDING SCROLL PER CONTAINER (S4): the latest request lands,
+    // whatever order the holds release in (the windows lane measured two
+    // holds releasing with the older one last, 2026-09-24).
+    PENDING_ROW_SCROLLS.with_borrow_mut(|pending| pending.insert(id, copy.0));
+    if root.is_mapped() && root.width() > 0 {
+        PENDING_ROW_SCROLLS.with_borrow_mut(|pending| pending.remove(&id));
+        scroll_root_to_top(&root);
+        return;
+    }
+    // HELD UNTIL THE CONTENT LAYS OUT (S4), the focus arm's materialization
+    // class: the adjustment's `changed` fires when the content's extent
+    // moves, which is the first moment the row's bounds mean anything —
+    // and it fires INSIDE the viewport's allocation, where a value written
+    // at once never reached the child's transform (measured on the linux
+    // lane 2026-09-24: the opening scroll read as landed on the adjustment
+    // and the pixels stayed at 0), so the scroll runs from an idle after
+    // that pass. One-shot, on the scrolled window the root will sit in.
+    let Some(scrolled) = scroll_ancestor(&root) else { return };
+    let adj = scrolled.vadjustment();
+    let armed = Rc::new(RefCell::new(None));
+    let armed2 = armed.clone();
+    let weak = glib::WeakRef::<gtk4::Widget>::new();
+    weak.set(Some(&root));
+    let handler = adj.connect_changed(move |adj| {
+        let Some(root) = weak.upgrade() else {
+            if let Some(id) = armed2.borrow_mut().take() {
+                adj.disconnect(id);
+            }
+            return;
+        };
+        if !(root.is_mapped() && root.width() > 0) {
+            return;
+        }
+        if let Some(id) = armed2.borrow_mut().take() {
+            adj.disconnect(id);
+        }
+        glib::idle_add_local_once(move || {
+            let latest =
+                PENDING_ROW_SCROLLS.with_borrow(|pending| pending.get(&id) == Some(&copy.0));
+            if !latest {
+                scroll_note(format_args!("row {} superseded before it landed", copy.0));
+                return;
+            }
+            PENDING_ROW_SCROLLS.with_borrow_mut(|pending| pending.remove(&id));
+            scroll_root_to_top(&root);
+        });
+    });
+    *armed.borrow_mut() = Some(handler);
+}
+
+thread_local! {
+    /// The latest scroll_to_row per container, by the copy it names (S4).
+    static PENDING_ROW_SCROLLS: RefCell<std::collections::HashMap<u64, u64>> =
+        RefCell::new(std::collections::HashMap::new());
+}
+
+fn scroll_ancestor(widget: &gtk4::Widget) -> Option<gtk4::ScrolledWindow> {
+    widget.ancestor(gtk4::ScrolledWindow::static_type())?.downcast::<gtk4::ScrolledWindow>().ok()
+}
+
+/// The row's top in the scrolled CONTENT's space — `compute_bounds`
+/// against the GtkViewport's own child, never the viewport: bounds against
+/// the viewport carry the scroll transform as the LAST ALLOCATION left it,
+/// which is one pass behind a value just written (measured on the linux
+/// lane 2026-09-24: a click 11ms after the opening scroll read a row at
+/// its unscrolled offset with the value already at the end, and the jump
+/// clamped in place), while the content's layout does not move with the
+/// scroll at all. The row's height and the adjustment ride along; None
+/// while the row has no scrolled ancestor or no bounds yet.
+fn row_top_in_content(root: &gtk4::Widget) -> Option<(f64, f64, gtk4::Adjustment)> {
+    let scrolled = scroll_ancestor(root)?;
+    let viewport = scrolled.child()?;
+    let content = viewport.downcast_ref::<gtk4::Viewport>().and_then(|v| v.child()).unwrap_or(viewport);
+    let bounds = root.compute_bounds(&content)?;
+    Some((f64::from(bounds.y()), f64::from(bounds.height()), scrolled.vadjustment()))
+}
+
+/// The adjustment's value IS the scroll position (scroll_end's rule): the
+/// row's content offset is the value to write, and GTK clamps the write at
+/// `upper - page_size`, which is S2's clamp at the end.
+fn scroll_root_to_top(root: &gtk4::Widget) {
+    if let Some((top, height, adj)) = row_top_in_content(root) {
+        scroll_note(format_args!(
+            "root content top={top} height={height}; adjustment value={} page={} upper={} before",
+            adj.value(),
+            adj.page_size(),
+            adj.upper()
+        ));
+        adj.set_value(top);
+        scroll_note(format_args!("adjustment value={} after", adj.value()));
+    }
+}
+
+/// The scroll arm's readings, into the verb trace a red leg's bundle
+/// carries (sheet_note's shape: the trace exists under the harness alone).
+fn scroll_note(what: std::fmt::Arguments<'_>) {
+    #[cfg(feature = "harness")]
+    crate::vtrace::note("scroll_row", what);
+    #[cfg(not(feature = "harness"))]
+    let _ = what;
+}
+
 /// One report per main-loop turn, and never from inside the signal
 /// itself: a harness read pumps the main context WHILE IT HOLDS the CORE
 /// borrow, so a report that took a mutable one there would panic. Busy
@@ -12357,6 +12504,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 &core.css_error,
             );
         }
+        ApplyOp::ScrollToRow { id, copy, index } => scroll_row(core, id.0, copy, index as usize),
         ApplyOp::RevealRange { id, range } => {
             let Some(NativeWidget::Textarea(_, view)) = core.widgets.get(&id) else {
                 return;
@@ -17670,33 +17818,7 @@ impl crate::harness::Stage for GtkStage {
             }) else {
                 return format!("no row of this collection carries the key {key:?}");
             };
-            // THE BAND FOLLOWS THE ROW BEFORE THE PIXELS DO: the range is
-            // reported from the index the CORE resolved rather than from
-            // an estimate off the scrollbar, which is the one reading that
-            // is exact on the corrected path too. Parking is then
-            // window_report's re-park, on the anchor set here.
-            let count = core.tables.get(&id).and_then(|t| t.reported).map_or(1, |(_, c)| c.max(1));
-            if let Some(table) = core.tables.get(&id) {
-                table.anchor.set(Some(index));
-            }
-            let scene = &mut core.scene;
-            let ops = crate::fault::guard("reporting a window range", || {
-                scene.window_moved(id, index, count)
-            });
-            if let Some(table) = core.tables.get_mut(&id) {
-                table.reported = Some((index, count));
-            }
-            for op in ops.unwrap_or_default() {
-                apply(core, op);
-            }
-            // The entering rows have to exist before the scroll can land
-            // on one, and the spacers above them have to be the core's
-            // before the adjustment's upper covers the row at all.
-            window_report(core, id);
-            reflow_table(core, id);
-            while glib::MainContext::default().iteration(false) {}
-            window_report(core, id);
-            reflow_table(core, id);
+            park_table_row(core, id, index);
             String::new()
         })
     }
@@ -19262,6 +19384,56 @@ impl crate::harness::Stage for GtkStage {
                     adj.upper()
                 )
             }
+        })
+    }
+
+    fn scrolled_to(&self, t: crate::harness::Target, key: &str) -> String {
+        let key = key.to_owned();
+        Self::on_main(move |core| {
+            use crate::harness::TargetKind as K;
+            let container = match t.kind {
+                K::Column => crate::harness::try_resolve(t.index, core.columns.len())
+                    .map(|i| core.column_ids[i].0),
+                K::Row => crate::harness::try_resolve(t.index, core.rows.len()).and_then(|i| {
+                    let row = &core.rows[i];
+                    core.widgets.iter().find_map(|(id, w)| match w {
+                        NativeWidget::Row(b) if b == row => Some(id.0),
+                        _ => None,
+                    })
+                }),
+                _ => None,
+            };
+            let Some(id) = container else {
+                return "<no such target>".to_string();
+            };
+            if core.tables.contains_key(&id) {
+                return "a table; expect_window reads a windowed tier".to_string();
+            }
+            let Some((_, copy)) = core.scene.row_copy(id, &Value::Str(key.clone())) else {
+                return format!("no row keyed {key:?} in a For this container hosts");
+            };
+            let Some(root) = copy.and_then(|c| core.widgets.get(&c)).map(|w| w.control()) else {
+                return format!("row {key:?} is not realized");
+            };
+            while glib::MainContext::default().iteration(false) {}
+            let Some((content_top, height, adj)) = row_top_in_content(&root) else {
+                return "the row has no scrolled ancestor or no bounds yet".to_string();
+            };
+            let top = content_top - adj.value();
+            if top.abs() <= 2.0 {
+                return String::new();
+            }
+            let at_end = (adj.upper() - (adj.value() + adj.page_size())).abs() <= 2.0;
+            if at_end && top >= -2.0 && top + height <= adj.page_size() + 2.0 {
+                return String::new();
+            }
+            format!(
+                "row top {top} from the viewport's top (content {content_top}); adjustment value {} \
+                 page {} upper {}",
+                adj.value(),
+                adj.page_size(),
+                adj.upper()
+            )
         })
     }
 

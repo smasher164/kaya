@@ -95,6 +95,7 @@ class MainActivity : ComponentActivity() {
             "sliders" -> Sliders::app
             "tooltips" -> Tooltips::app
             "submit" -> Submit::app
+            "scrollto" -> ScrollTo::app
             // Desktop-only scenes, registered for the honest failure:
             // selecting one here dies on the capability gate at
             // create_window, never by silently running milestone2.

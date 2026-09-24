@@ -43,6 +43,7 @@ import (
 	"dev.kaya/guests/go/richtext"
 	"dev.kaya/guests/go/save"
 	"dev.kaya/guests/go/scroll"
+	"dev.kaya/guests/go/scrollto"
 	"dev.kaya/guests/go/search"
 	"dev.kaya/guests/go/sections"
 	selectscene "dev.kaya/guests/go/select"
@@ -112,6 +113,7 @@ var scenes = map[string]func() *kaya.App{
 	"table":      table.App,
 	"save":       save.App,
 	"scroll":     scroll.App,
+	"scrollto":   scrollto.App,
 	"sections":   sections.App,
 	"search":     search.App,
 	"select":     selectscene.App,

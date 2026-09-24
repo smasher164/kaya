@@ -4126,6 +4126,13 @@ public final class KayaAppTx {
         tx.widgetCommand(w.id, UInt32(KAYA_COMMAND_FOCUS))
     }
 
+    /// Scroll the For mounted in `w` so the row keyed `key` tops the
+    /// viewport, clamped at the end (docs/scroll-to-plan.md). A pure
+    /// effect; a key the collection does not hold scrolls nothing.
+    public func scrollToRow(_ w: KayaWidget, _ key: KayaValue) {
+        tx.scrollToRow(w.id, key)
+    }
+
     // --- Text ranges: decorate a set, select one, reveal one ----------
     // EVERY OFFSET HERE IS A UTF-8 BYTE OFFSET into the widget's current
     // text (docs/ranges-plan.md D1). Swift's strings are indexed by

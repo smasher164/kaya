@@ -5746,6 +5746,17 @@ public final class KayaApp {
         }
 
         /**
+         * Scroll the For mounted in {@code w} — the container a
+         * {@code rows.handle} names — so the row keyed {@code key} tops
+         * the viewport, clamped at the end (docs/scroll-to-plan.md). A
+         * pure effect; a key the collection does not hold scrolls
+         * nothing.
+         */
+        public void scrollToRow(Widget w, Object key) {
+            emit(KayaWire.txScrollToRow(w.id, key));
+        }
+
+        /**
          * Replace a {@code rich} textarea's whole document: it echoes
          * nothing and, like {@link #setText}, spends the native undo
          * history (docs/undo-plan.md D7).

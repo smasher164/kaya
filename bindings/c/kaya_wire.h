@@ -199,7 +199,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     }
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0x908b183fda12f8c1ULL
+#define KAYA_SPEC_HASH 0x0e84cabd1d859673ULL
 
 
 /* Create a signal holding `initial`. */
@@ -748,6 +748,14 @@ static inline void kaya_tx_set_sheet_prop(KayaTx *tx, uint64_t sheet, uint32_t p
     kaya_wire_u64(tx, sheet);
     kaya_wire_u32(tx, prop);
     kaya_wire_u32(tx, source);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* Scroll the For mounted in `widget_id` so the row keyed `key` has its top at the viewport's top, clamped at the content's end (docs/scroll-to-plan.md S1, S2). THE LIST HALF OF DESIGN.md's scrollTo: its own record rather than a widget_command because the key is a payload that record has no room for. A PURE EFFECT like reveal_range: no state, permitted inside an undo group and not inverted (S5). A container that hosts no For, or a key the collection does not hold, applies NOTHING, silently — an instance-addressed command's rule, since a copy legitimately vanishes under rebuild (S3). Issued before the container's first layout it is held by the backend and lands after it (S4). */
+static inline void kaya_tx_scroll_to_row(KayaTx *tx, uint64_t widget_id, KayaVal key) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SCROLL_TO_ROW);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_value(tx, key);
     kaya_wire_end(tx, kaya_at);
 }
 

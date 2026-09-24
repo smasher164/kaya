@@ -43,6 +43,8 @@ mod nav;
 mod split;
 #[path = "scroll.rs"]
 mod scroll;
+#[path = "scrollto.rs"]
+mod scrollto;
 #[path = "progress.rs"]
 mod progress;
 #[path = "select.rs"]
@@ -174,6 +176,7 @@ fn app(ctx: kaya::AppCtx) {
         // Two SCRIPTS, one app: this host cannot perform a resize.
         Ok("listdetail") => split::app(ctx),
         Ok("scroll") => scroll::app(ctx),
+        Ok("scrollto") => scrollto::app(ctx),
         Ok("progress") => progress::app(ctx),
         Ok("select") => select::app(ctx),
         Ok("radio") => radio::app(ctx),

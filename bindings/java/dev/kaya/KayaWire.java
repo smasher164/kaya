@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0x908b183fda12f8c1L;
+    public static final long SPEC_HASH = 0x0e84cabd1d859673L;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -289,6 +289,7 @@ public final class KayaWire {
     public static final short TX_KIND_PRESENT_SHEET = 58;
     public static final short TX_KIND_DISMISS_SHEET = 59;
     public static final short TX_KIND_SET_SHEET_PROP = 60;
+    public static final short TX_KIND_SCROLL_TO_ROW = 61;
     public static final short APPLY_KIND_CREATE = 1;
     public static final short APPLY_KIND_SET_PROP = 2;
     public static final short APPLY_KIND_ADD_CHILD = 3;
@@ -335,6 +336,7 @@ public final class KayaWire {
     public static final short APPLY_KIND_PRESENT_SHEET = 46;
     public static final short APPLY_KIND_DISMISS_SHEET = 47;
     public static final short APPLY_KIND_SET_SHEET_PROP = 48;
+    public static final short APPLY_KIND_SCROLL_TO_ROW = 49;
     public static final short OCC_KIND_BUTTON_CLICKED = 1;
     public static final short OCC_KIND_TEXT_CHANGED = 2;
     public static final short OCC_KIND_TOGGLED = 3;
@@ -1017,6 +1019,14 @@ public final class KayaWire {
         b.putLong(sheet);
         b.putInt(prop);
         b.putInt(source);
+        return finish(b);
+    }
+
+    /** Scroll the For mounted in `widget_id` so the row keyed `key` has its top at the viewport's top, clamped at the content's end (docs/scroll-to-plan.md S1, S2). THE LIST HALF OF DESIGN.md's scrollTo: its own record rather than a widget_command because the key is a payload that record has no room for. A PURE EFFECT like reveal_range: no state, permitted inside an undo group and not inverted (S5). A container that hosts no For, or a key the collection does not hold, applies NOTHING, silently — an instance-addressed command's rule, since a copy legitimately vanishes under rebuild (S3). Issued before the container's first layout it is held by the backend and lands after it (S4). */
+    public static byte[] txScrollToRow(long widgetId, Object key) {
+        Enc b = begin(TX_KIND_SCROLL_TO_ROW);
+        b.putLong(widgetId);
+        encodeValue(b, key);
         return finish(b);
     }
 

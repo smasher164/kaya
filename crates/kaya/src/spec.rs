@@ -1630,6 +1630,24 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — sheets \
                   are not collection elements.",
         },
+        Record {
+            kind: 61,
+            name: "scroll_to_row",
+            fields: &[f("widget_id", FieldTy::U64), f("key", FieldTy::Value)],
+            payload: None,
+            doc: "Scroll the For mounted in `widget_id` so the row keyed `key` \
+                  has its top at the viewport's top, clamped at the content's \
+                  end (docs/scroll-to-plan.md S1, S2). THE LIST HALF OF \
+                  DESIGN.md's scrollTo: its own record rather than a \
+                  widget_command because the key is a payload that record \
+                  has no room for. A PURE EFFECT like reveal_range: no state, \
+                  permitted inside an undo group and not inverted (S5). A \
+                  container that hosts no For, or a key the collection does \
+                  not hold, applies NOTHING, silently — an instance-addressed \
+                  command's rule, since a copy legitimately vanishes under \
+                  rebuild (S3). Issued before the container's first layout it \
+                  is held by the backend and lands after it (S4).",
+        },
     ],
     apply: &[
         Record {
@@ -2382,6 +2400,24 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             ],
             payload: None,
             doc: "Set a sheet property to an already-resolved value.",
+        },
+        Record {
+            kind: 49,
+            name: "scroll_to_row",
+            fields: &[
+                f("widget_id", FieldTy::U64),
+                f("copy", FieldTy::U64),
+                f("index", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+            ],
+            payload: None,
+            doc: "Scroll the For in `widget_id` to the row the core resolved: \
+                  `index` is its place in the collection's current order (a \
+                  windowed tier parks its band there) and `copy` is the id of \
+                  the realized copy's root widget, or 0 when the row is not \
+                  realized (a realized tier scrolls that widget's top to the \
+                  viewport's top). Instant, never animated (S6); held until \
+                  the container has laid out (S4).",
         },
     ],
     occurrence: &[
@@ -3596,6 +3632,7 @@ mod tests {
             ("present_sheet", wire::TX_PRESENT_SHEET),
             ("dismiss_sheet", wire::TX_DISMISS_SHEET),
             ("set_sheet_prop", wire::TX_SET_SHEET_PROP),
+            ("scroll_to_row", wire::TX_SCROLL_TO_ROW),
         ];
         assert_eq!(pins.len(), SPEC.tx.len());
         for (name, kind) in pins {
@@ -3655,6 +3692,7 @@ mod tests {
                 ("present_sheet", wire::APPLY_PRESENT_SHEET),
                 ("dismiss_sheet", wire::APPLY_DISMISS_SHEET),
                 ("set_sheet_prop", wire::APPLY_SET_SHEET_PROP),
+                ("scroll_to_row", wire::APPLY_SCROLL_TO_ROW),
             ]
         );
         // The WHOLE list, not indexed asserts: an indexed pin says
@@ -4321,6 +4359,7 @@ mod tests {
         );
         w.record(tx_record("select_range"), &[Arg::U64(2), Arg::U64(20), Arg::U64(25)]);
         w.record(tx_record("reveal_range"), &[Arg::U64(2), Arg::U64(20), Arg::U64(25)]);
+        w.record(tx_record("scroll_to_row"), &[Arg::U64(4), Arg::Value(Value::Str("m10".into()))]);
 
         // The brand typeface. The PAIR SHAPE is what this proves: the
         // spec says `platforms` is one Values field and wire.rs reads

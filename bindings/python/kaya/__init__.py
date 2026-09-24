@@ -829,6 +829,18 @@ class Widget(_Handle):
         """Give this widget the keyboard focus."""
         _records().append(wire.tx_widget_command(self.id, wire.COMMAND_FOCUS))
 
+    def scroll_to_row(self, key: Key) -> None:
+        """Scroll the For mounted in this container so the row keyed
+        `key` has its top at the viewport's top, clamped at the content's
+        end — `messages.container().scroll_to_row("m60")`
+        (docs/scroll-to-plan.md).
+
+        A PURE EFFECT: no state moves, and undo does not put the scroll
+        position back. A key the collection does not hold scrolls
+        nothing, silently, as does a container hosting no For. Issued
+        before the container's first layout it lands after it."""
+        _records().append(wire.tx_scroll_to_row(self.id, key))
+
     # The text-range surface (docs/ranges-plan.md D1).
 
     def set_text(self, text: str) -> Widget:
@@ -1585,6 +1597,9 @@ class Collection(_BoundCollection[T]):
     #: set_columns through getattr — declared, never assigned here, so its
     #: ABSENCE is still what "columns() has not run" means.
     _for_handle: int
+    #: The For node ANY trace closed over, read by container(); its absence
+    #: is what "no For has been declared over this collection" means.
+    _for_container: Widget
 
     def __init__(self, id: int,
                  record_type: type[T] | types.UnionType | None = None) -> None:
@@ -1662,6 +1677,26 @@ class Collection(_BoundCollection[T]):
         nested template; re-declare with set_columns() after sorting
         (docs/tables-plan.md)."""
         return _ColumnsTrace(self, list(titles), sort or Sort.NONE, on_sort, grow, a11y_id)
+
+    def container(self) -> Widget:
+        """The widget this collection's For is mounted in — what
+        `scroll_to_row` addresses (docs/scroll-to-plan.md S1). Declared by
+        the for-loop that traced the row template, and named after it:
+        `messages.container().scroll_to_row("m60")`."""
+        handle = getattr(self, "_for_container", None)
+        if handle is None:
+            raise KayaStateError(
+                "kaya: container() before the for-loop over this "
+                "collection — the For's own container is declared by "
+                "tracing the row template, then named here"
+            )
+        if isinstance(handle, Node):
+            raise KayaStateError(
+                "kaya: this collection's For was declared inside a "
+                "template, where every stamped copy has one — a command "
+                "names ONE live container"
+            )
+        return handle
 
     def _decode(self, variant: int, fields: Sequence[Any], current: Any) -> Any:
         """Rebuild a model value from an undo delta's wire record.
@@ -1954,6 +1989,7 @@ class _ForTrace(Generic[T]):
     second. THE BODY RUNS ONCE — stamping is the core's replay."""
 
     def __init__(self, coll: Collection[T]) -> None:
+        self._coll = coll
         self._template: _Template[T] = _Template(
             wire.tx_create_for, coll._id, is_for=True, coll=coll)
         self._grow: float | None = None
@@ -1983,6 +2019,7 @@ class _ForTrace(Generic[T]):
                 )
             _open_traces.pop()
             self._template._exit()
+            self._coll._for_container = self._template.handle
             if self._grow is not None:
                 _records().append(
                     wire.tx_set_grow(self._template.handle.id, float(self._grow)))

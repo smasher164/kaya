@@ -2980,6 +2980,13 @@ impl<'a> Tx<'a> {
         });
     }
 
+    /// Scroll the For mounted in `container` so the row keyed `key` tops
+    /// the viewport, clamped at the end (docs/scroll-to-plan.md). A pure
+    /// effect; a key the collection does not hold scrolls nothing.
+    pub fn scroll_to_row(&mut self, container: WidgetId, key: impl Into<Value>) {
+        self.ops.push(TxOp::ScrollToRow { widget: container, key: key.into() });
+    }
+
     /// A container takes its body as a closure and parents everything
     /// declared inside it through the ambient stack; [`Tx::container`]
     /// inside the body answers this container's own handle. The chain ends

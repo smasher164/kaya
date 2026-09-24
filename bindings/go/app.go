@@ -1296,6 +1296,14 @@ func (tx *Tx) RevealRange(w Widget, r TextRange) {
 	tx.emit(TxRevealRange(w.id, uint64(r.Start), uint64(r.End)))
 }
 
+// ScrollToRow scrolls the For mounted in w so the row keyed key tops the
+// viewport, clamped at the end (docs/scroll-to-plan.md). A pure effect; a
+// key the collection does not hold scrolls nothing. The container is the
+// For's own handle, Rows.Widget.
+func (tx *Tx) ScrollToRow(w Widget, key any) {
+	tx.emit(TxScrollToRow(w.id, key))
+}
+
 // Block is one paragraph kind, drawn and never stored
 // (docs/rich-text-plan.md R3). It rides as the `block` attribute's value.
 type Block string

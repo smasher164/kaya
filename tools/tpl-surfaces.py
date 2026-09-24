@@ -1176,7 +1176,7 @@ def table_js(_):
         got.add("on_sort")
 
     rows = ts_body(collection,
-                   r"^  rows\(opts: RowsOptions = \{\}\): Iterable<R> \{")
+                   r"^  rows\(opts: RowsOptions = \{\}\): Rows<R> \{")
     declared = re.search(r"^export type RowsOptions = \{([^}]*)\}", src, re.M)
     if rows and declared:
         row_points = (
@@ -1965,10 +1965,10 @@ def facade_csharp():
 # first leaves a nested typed For's body holding the raw Tpl
 # (docs/deferred.md, closed 2026-08-24). The floor is the census
 # discipline; sum surfaces have no `<Rec>Row`.
-CSHARP_TWIN_FLOOR = 10
+CSHARP_TWIN_FLOOR = 11
 
 
-JAVA_TWIN_FLOOR = 11
+JAVA_TWIN_FLOOR = 12
 
 
 def twins_java():

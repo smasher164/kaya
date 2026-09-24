@@ -343,6 +343,10 @@ name = "scroll"
 path = "../../guests/rust/scroll.rs"
 
 [[example]]
+name = "scrollto"
+path = "../../guests/rust/scrollto.rs"
+
+[[example]]
 name = "dnd"
 path = "../../guests/rust/dnd.rs"
 
