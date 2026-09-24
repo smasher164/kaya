@@ -1,6 +1,7 @@
 // KayaSwiftUI: the Swift half of the SwiftUI backend — an interpreter of
 // resolved apply-op records over the presentation-side C ABI.
 
+import CoreText
 import SwiftUI
 import UniformTypeIdentifiers
 import UserNotifications
@@ -15320,20 +15321,22 @@ func kayaPlatformLocaleTag() -> String {
 }
 
 /// Every live label allocated what its text needs at its width, or the
-/// first that is not: the resolved font's bounding rect at the recorded
-/// width against the recorded height (U7). Labels the layout has not
-/// placed are skipped and counted.
+/// first that is not: CoreText's own lines for the text at the recorded
+/// width, each line's ascent plus descent, against the recorded height
+/// (U7). Labels the layout has not placed are skipped and counted.
+/// WHAT SWIFTUI SIZES A LINE TO, measured 2026-09-24 (docs/traps.md, the
+/// clipping read's font): ascent plus descent and NO leading (an iOS
+/// footnote read 18pt against a 16pt frame with `.usesFontLeading`), from
+/// the fonts of the text's own runs and NOT the locale's — under ar-EG
+/// `preferredFont(forTextStyle:)` carries Arabic metrics and read a Latin
+/// label at 18pt against its 16pt frame, while CoreText's fallback run for
+/// Arabic glyphs grows a line the way SwiftUI grows the frame.
 @MainActor func kayaClippingReport() -> (String, Int) {
     var measured = 0
     for node in kayaScene.labels where !node.text.isEmpty {
         guard let size = kayaLabelFrames[node.id], size.width > 0 else { continue }
         measured += 1
-        let font = kayaLabelBaseFont(node)
-        let need = (node.text as NSString).boundingRect(
-            with: CGSize(width: size.width, height: 100_000),
-            options: [.usesLineFragmentOrigin, .usesFontLeading],
-            attributes: [.font: font], context: nil
-        ).height
+        let need = kayaTextNeed(node.text, kayaClippingFont(node), width: size.width)
         if need > size.height + 1.0 {
             return (
                 "label \(node.id) \(node.text.prefix(40).debugDescription) needs \(Int(need.rounded()))pt at \(Int(size.width.rounded()))pt wide and got \(Int(size.height.rounded()))pt",
@@ -15341,6 +15344,50 @@ func kayaPlatformLocaleTag() -> String {
         }
     }
     return ("", measured)
+}
+
+/// The font the clipping read measures with: the role's own size and weight
+/// with NO language attached, since SwiftUI's line takes its metrics from
+/// the text's own runs; a brand family keeps its font, which carries none.
+/// On iOS the size is the HARNESS WINDOW's category's — the plain
+/// `preferredFont` reads the application's, which a window trait override
+/// never moves, so a scale leg would measure unscaled text against scaled
+/// frames and pass on nothing.
+@MainActor func kayaClippingFont(_ node: KayaNode) -> KayaPlatformFont {
+    let style: KayaPlatformTextStyle =
+        node.role == roleHeading ? .headline : node.role == roleCaption ? .footnote : .body
+    if let brand = kayaPlatformFont(style) { return brand }
+    #if os(macOS)
+        let base = NSFont.preferredFont(forTextStyle: style)
+        let traits = base.fontDescriptor.object(forKey: .traits) as? [NSFontDescriptor.TraitKey: Any]
+        let weight = traits?[.weight] as? CGFloat ?? 0
+        return NSFont.systemFont(ofSize: base.pointSize, weight: NSFont.Weight(rawValue: weight))
+    #else
+        let base = UIFont.preferredFont(
+            forTextStyle: style, compatibleWith: kayaHarnessWindow()?.traitCollection)
+        let traits = base.fontDescriptor.object(forKey: .traits) as? [UIFontDescriptor.TraitKey: Any]
+        let weight = traits?[.weight] as? CGFloat ?? 0
+        return UIFont.systemFont(ofSize: base.pointSize, weight: UIFont.Weight(rawValue: weight))
+    #endif
+}
+
+/// CoreText's lines for `text` at `width` in `font`, each line's ascent plus
+/// descent summed — leading left out, since SwiftUI's frame leaves it out.
+func kayaTextNeed(_ text: String, _ font: KayaPlatformFont, width: CGFloat) -> CGFloat {
+    let attributed = NSAttributedString(string: text, attributes: [.font: font])
+    let setter = CTFramesetterCreateWithAttributedString(attributed)
+    let path = CGPath(rect: CGRect(x: 0, y: 0, width: width, height: 100_000), transform: nil)
+    let frame = CTFramesetterCreateFrame(setter, CFRange(location: 0, length: 0), path, nil)
+    let lines = CTFrameGetLines(frame) as! [CTLine]
+    var total: CGFloat = 0
+    for line in lines {
+        var ascent: CGFloat = 0
+        var descent: CGFloat = 0
+        var leading: CGFloat = 0
+        _ = CTLineGetTypographicBounds(line, &ascent, &descent, &leading)
+        total += ascent + descent
+    }
+    return total
 }
 
 /// The first script a letter of `text` belongs to, digits and marks skipped

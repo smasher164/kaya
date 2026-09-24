@@ -45,7 +45,16 @@ EXCLUSIVE = {"dnd_rust", "dnd_python", "dnd_js", "dnd_go", "dnd_csharp", "dnd_ja
              # neighbour's window is still taking the foreground; twice
              # red under a matrix, green alone (docs/deferred.md, the
              # PopupHost WATCH's second sighting, 2026-09-15).
-             "notes_rust"}
+             "notes_rust",
+             # THE TEXT-SCALE LEGS (docs/compliance-plan.md R5, U3): the
+             # setting is the user's, written before and deleted after, so
+             # nothing else may be running under it.
+             "tasksbig_rust", "formatbig_rust"}
+
+# The user's text scale a leg runs under, as HKCU\Software\Microsoft\
+# Accessibility's TextScaleFactor percentage, written by deploy-win before
+# the leg and deleted after (R5; a fresh process reads it, U3).
+TEXT_SCALE_LEGS = {"tasksbig_rust": 200, "formatbig_rust": 200}
 
 # Depth-slice scenes: a rust example + steps exist, the language
 # sweep has not landed. Built, shipped and run RUST-ONLY — the
@@ -337,6 +346,14 @@ ORDER = [
     [
      "taskspersist_rust",
     ],
+    # THE TEXT-SCALE LEGS, each alone: the registry setting is the user's
+    # (TEXT_SCALE_LEGS; docs/compliance-plan.md R5).
+    [
+     "tasksbig_rust",
+    ],
+    [
+     "formatbig_rust",
+    ],
     # WHAT A LINK OPENS (docs/app-links-plan.md L5), the tasks guest again
     # under its own scene: ALONE for the relaunch reason above and one more
     # this platform has by itself — every activation starts a NEW PROCESS that
@@ -582,7 +599,8 @@ def launcher(leg):
 # A scene that selects a SCRIPT over another scene's guest (the mac lane's
 # GUEST_STEM one platform over): the launcher runs the guest's own file.
 GUEST_STEM = {"listdetail": "split", "formatde": "format", "formatar": "format",
-              "taskspersist": "tasks", "links": "tasks", "tasksrtl": "tasks"}
+              "taskspersist": "tasks", "links": "tasks", "tasksrtl": "tasks",
+              "tasksbig": "tasks", "formatbig": "format"}
 
 
 def guest_stem(scene):

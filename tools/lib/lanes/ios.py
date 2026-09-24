@@ -71,8 +71,9 @@ RUST_SCENES = [
     # The formatter door and the catalog under three locales
     # (docs/compliance-plan.md §6); SCENE_LOCALE carries the knob.
     "format", "formatde", "formatar",
-    # The task manager in Arabic (docs/compliance-plan.md §6).
-    "tasksrtl",
+    # The task manager in Arabic, and at twice the text size, and the
+    # format guest at twice it (docs/compliance-plan.md §6; SCENE_TEXT_SCALE).
+    "tasksrtl", "tasksbig", "formatbig",
     # The notification conformance scene: the activation is a REAL tap on
     # SpringBoard's own shade, driven by the xcui driver's notify_tap
     # (docs/tasks-s3-plan.md N5).
@@ -138,6 +139,13 @@ MODS = {
                          "keep": "expect_app_icon"},
     ("rust-swiftui", "identity"): {"drop": ("expect_title", "window#1"),
                                    "keep": "expect_app_icon"},
+    # THE PHONE'S OWN STEP (docs/compliance-plan.md §2.1): the knob picks the
+    # content size category nearest 2.0, accessibilityLarge at 33pt over
+    # the 17pt body, and the read-back is that ratio — 1.94, never the
+    # knob's round number. The clipping read is what the leg exists for.
+    ("rust-swiftui", "formatbig"): {"drop": ("expect_text_scale", "2"),
+                                    "keep": "expect_no_clipping",
+                                    "extra": "expect_text_scale 1.94"},
     # The sections tail opens an aux window rejected by capability.
     ("swift", "sections"): {"cut": "expect_windows",
                             "keep": "expect_section expect_section_symbol"},
@@ -235,11 +243,15 @@ def swift_scene(entry):
 # selects a SCRIPT, never an app.
 RUST_EXAMPLE = {"listdetail": "split", "taskspersist": "tasks",
                 "links": "tasks", "formatde": "format", "formatar": "format",
-                "tasksrtl": "tasks"}
+                "tasksrtl": "tasks", "tasksbig": "tasks", "formatbig": "format"}
 
 # The locale a scene runs under, the knob the leg carries
 # (docs/compliance-plan.md §4); the reads ask the platform, never this.
 SCENE_LOCALE = {"formatde": "de-DE", "formatar": "ar-EG", "tasksrtl": "ar-EG"}
+
+# The text-scale knob a scene carries (docs/compliance-plan.md §2.1): the
+# window's content size category nearest the factor.
+SCENE_TEXT_SCALE = {"tasksbig": "2", "formatbig": "2"}
 
 
 def rust_example(scene):

@@ -14,6 +14,7 @@ expect label@inbox_count "{fmt:number 2 medium} في الوارد"
 expect label@title[t1] "Buy milk"
 expect_mirrored row@task[t1]
 expect label@caption[t2] ""
+expect_no_clipping
 expect_sheets 0
 click button@new
 expect_sheets 1
@@ -83,6 +84,7 @@ expect label@inbox_count "{fmt:number 2 medium} في الوارد"
 menu_activate "عرض>الإعدادات"
 expect_entries 1
 expect label@settings[s] "يبدأ الأسبوع الاثنين؛ الشارة ظاهرة؛ المنجزة تنتقل إلى السجل"
+expect_no_clipping
 expect_ax checkbox@hide_badge[s] "switch/إخفاء شارة اليوم"
 back
 expect_entries 0

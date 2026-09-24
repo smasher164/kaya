@@ -2988,6 +2988,8 @@ def run_suite_legs(suite):
             extras += ["--es", "KAYA_APPEARANCE", flags["appearance"]]
         if scene in lane.SCENE_LOCALE:
             extras += ["--es", "KAYA_LOCALE", lane.SCENE_LOCALE[scene]]
+        if scene in lane.SCENE_TEXT_SCALE:
+            extras += ["--es", "KAYA_TEXT_SCALE", lane.SCENE_TEXT_SCALE[scene]]
         # THE VERB TRACE, a RELATIVE name the interpreter resolves under
         # the app's own files dir — the one place run-as can read back
         # (crates/kaya/src/vtrace.rs).

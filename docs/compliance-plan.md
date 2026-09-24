@@ -425,7 +425,18 @@ prose), planted negative in each. Green today by measurement.
   `KAYA_TEXT_SCALE=2.0` (AX5 as a second iOS leg), with
   `expect_text_scale` at the top and `expect_no_clipping` after every
   screen the script visits — the lane's `MODS` append them. The mac leg
-  runs it at 1.0 (§1.5).
+  runs it at 1.0 (§1.5). BUILT 2026-09-24 as two scenes rather than one
+  with appends, since three lanes have no MODS: `tasksbig.steps` is the
+  tasks screens under the knob with `expect_no_clipping` after each (no
+  scale number, no notification act, relaunch or drag), and
+  `formatbig.steps` holds the scale's own read-back, `expect_text_scale 2`,
+  which the iOS lane drops for its nearest category's own ratio (1.94,
+  accessibilityLarge). Both are OFF on the mac by declaration
+  (tools/lib/lanes/mac.py's OFF_SCENES, read by check-steps), since the
+  knob is refused there (R4), and the everyday tasks and tasksrtl scripts
+  hold `expect_no_clipping` at 1.0 on every lane, the mac included. On
+  windows the two legs run alone with the user's TextScaleFactor written
+  before and deleted after (R5, tools/lib/lanes/win.py's TEXT_SCALE_LEGS).
 - **`tasksrtl`** — the same script under `KAYA_LOCALE=ar-EG`, its word
   expectations swapped to the `ar` catalog's bytes (identical on five
   lanes), with `expect_locale`, `expect_direction rtl`,

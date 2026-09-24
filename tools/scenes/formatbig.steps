@@ -1,0 +1,10 @@
+# The format guest under KAYA_TEXT_SCALE=2 (docs/compliance-plan.md §2.1,
+# §6): the toolkit's own factor read back, never the knob, and every label
+# still allocated what its text needs at twice the size. Off on the mac,
+# which has no text size (R4, tools/lib/lanes/mac.py's OFF_SCENES); the iOS
+# lane's nearest category is its own factor (tools/lib/lanes/ios.py's MODS).
+expect_text_scale 2
+expect label#8 "one item"
+expect label#9 "3 items"
+expect label#10 "Hello, Ada"
+expect_no_clipping

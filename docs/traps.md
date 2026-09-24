@@ -12586,3 +12586,29 @@ entry, whichever it is, adopts the environment's locale and installs the
 knob once (`fmt::install_locale_knob` behind a `Once`, called from every
 public door call, the catalog, `kaya_run`, both Android attach entries and
 `run()`), so who formats first no longer decides what they read.
+
+## The clipping read measured the locale's font and the font's leading, and neither is what SwiftUI sizes a line to (measured 2026-09-24)
+
+The Apple clipping read (`kayaClippingReport`, swift/KayaSwiftUI.swift)
+first took `boundingRect` with `.usesFontLeading` over
+`preferredFont(forTextStyle:)`, and the first legs that read clipping on
+every screen went red on labels that were not clipped: an iOS footnote
+caption read 18pt against a 16pt frame (the leading), and on the mac under
+ar-EG a Latin label read 18pt against 16pt while the Arabic ones passed.
+The probe (`preferredFont(.body)` under `-AppleLanguages (ar)`) answered
+`.SFNS-Regular` with ascender 13.32 and descender 3.99 where the same call
+under en answers 12.57 and 2.74: the locale's font carries Arabic line
+metrics for every glyph, while SwiftUI sizes a Latin line at 16 and an
+Arabic line at 18 whatever the locale, from the text's own runs and with no
+leading. `NSFont.systemFont(ofSize:)` and `CTFontCreateUIFontForLanguage`
+with no language answer the neutral metrics under both locales, and
+CoreText's framesetter grows a line for an Arabic fallback run (16.15 for
+`الوارد` at 13pt against 15.31 for `Buy milk`). So the read measures
+CoreText's own lines with a language-neutral system font at the role's
+size and weight, each line's ascent plus descent, and on iOS at the
+HARNESS WINDOW's category, since the plain `preferredFont` reads the
+application's category, which a window trait override never moves — a
+scale leg would otherwise measure unscaled text against scaled frames and
+pass on nothing. Beside it, the Compose read counted labels a section that
+is not selected composes at zero width (a caption as nineteen one-character
+lines); a visible label always has a width, so those are skipped.

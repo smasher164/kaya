@@ -1286,6 +1286,10 @@ for proto in x11 wayland; do
     # guest under the locale knob, no notification and no drag.
     run "$proto" tasksrtl-rust env KAYA_LOCALE=ar-EG KAYA_SELFTEST=tasksrtl \
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/tasks"
+    # At twice the text size (docs/compliance-plan.md §2.1): the knob is the
+    # xft dpi GNOME's own setting writes.
+    run "$proto" tasksbig-rust env KAYA_TEXT_SCALE=2 KAYA_SELFTEST=tasksbig \
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/tasks"
     # WHAT SURVIVES A RELAUNCH (docs/tasks-s4-plan.md §4), the SAME guest
     # under its own scene: the door here is the plain one — the app's
     # desktop entry through `gio launch`, with nothing pending — so this
@@ -1442,6 +1446,8 @@ for proto in x11 wayland; do
     run "$proto" formatde-rust env KAYA_LOCALE=de-DE KAYA_SELFTEST=formatde \
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/format"
     run "$proto" formatar-rust env KAYA_LOCALE=ar-EG KAYA_SELFTEST=formatar \
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/format"
+    run "$proto" formatbig-rust env KAYA_TEXT_SCALE=2 KAYA_SELFTEST=formatbig \
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/format"
     # The eight bindings' format guests under the same three locales
     # (docs/compliance-plan.md §6): nine spellings, one door.

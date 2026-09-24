@@ -91,10 +91,15 @@ than a verb of its own. What breadth still owes, held open here:
     already hold). Found: `DATETIME($time)` read `8:30:00 AM`, since the
     function's unstated length was medium where the bare placeable's is
     short (l10n.rs, now short for a time).
-  - **BREADTH STILL OWED**: `tasksbig` (KAYA_TEXT_SCALE=2.0 on the phones and
-    GTK, the registry write around the windows legs per R5, the mac at 1.0)
-    and `clock24` (§4), then the review page at 200% and in Arabic on every
-    lane.
+  - ~~**BREADTH: `tasksbig`**~~ — LANDED 2026-09-24 as `tasksbig.steps` and
+    `formatbig.steps` (docs/compliance-plan.md §6 says why two): the knob on
+    the phones and GTK through each lane's SCENE_TEXT_SCALE, the registry
+    write around the two windows legs (TEXT_SCALE_LEGS, alone), the mac
+    declaring both off (OFF_SCENES, R4) while its everyday tasks legs hold
+    `expect_no_clipping` at 1.0.
+  - **BREADTH STILL OWED**: `clock24` (§4, one OS-setting leg per lane
+    flipping 24-hour time through the platform's own knob), then the review
+    page at 200% and in Arabic on every lane.
   - **FOLLOW-UP — the windows launchers are 300 checked-in near-copies**
     (the maintainer, 2026-09-23: "do we need to be using a bunch of batch
     scripts like that?"): every leg is a tools/guest/run_<leg>.cmd because

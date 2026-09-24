@@ -1348,6 +1348,11 @@ internal fun kayaClippingReport(presented: Set<Long>): Pair<String, Int> {
     val clipped = ArrayList<String>()
     for (node in live) {
         val layout = kayaLabelLayouts[node.id] ?: continue
+        // A label the layout placed at no width is not on screen — a section
+        // that is not the selected one composes its rows into nothing, and
+        // its captions read as nineteen one-character lines (the android
+        // tasksbig leg, 2026-09-24); a visible label always has a width.
+        if (layout.size.width == 0) continue
         measured += 1
         if (layout.hasVisualOverflow) {
             clipped.add(

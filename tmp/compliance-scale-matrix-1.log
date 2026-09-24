@@ -1,0 +1,42 @@
+warning: Git tree '/Users/akhilindurti/Projects/kaya' is dirty
+host load at launch: 7.7 13.7 28.5 (1, 5, 15 min); HIDIdleTime 72s; top consumers: qemu-system-aarch64-headless 97%, spotlightknowledged.updater 8%, qemu-system-aarch64-headless 8%, qemu-system-aarch64-headless 4%
+exclusive: the token lives at /Users/akhilindurti/.local/state/kaya/exclusive
+exclusive: selftest broke a lock 301s old held by lane=ghost leg=x pid=1 scope=host host=h start=0 — an exclusive leg's own ceiling is far shorter, so its lane is gone
+exclusive: selftest waits to admit z — lane=other leg=y pid=1 scope=host host=h start=0 holds
+exclusive: selftest waited 0s to admit z; lane=other leg=y pid=1 scope=host host=h start=0 still holds — proceeding without exclusion
+exclusive: selftest waited 0.5s to admit z
+exclusive: selftest holds for w
+exclusive: selftest released after w (0.0s held)
+exclusive: self-test 8 watched, 0 failed
+build: market data (python3 tools/gen-market.py --ensure)
+current (stamp matches)
+build: libkaya (cargo build --locked --lib)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.08s
+build: libkaya id (tools/build-id.py --verify target/debug/libkaya.dylib)
+build: SwiftUI interpreter (tools/swiftui/build-dylib.sh)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+built target/swiftui/libkaya_swiftui.dylib (already carries this tree's id)
+mac: PASS (635s, 517 legs)
+mac: phases core-build+gates 38, guest-builds+bench 7, legs 589
+== mac log kept at /Users/akhilindurti/Projects/kaya/target/validate-lanes/mac.log ==
+mac: 234s of that waiting for the exclusive token; 401s net against the 1100s ceiling
+linux: PASS (1029s, 847 legs)
+linux: phases image-build 2, core-build 4, guest-builds 8, legs 1009, container-suites 1026
+== linux log kept at /Users/akhilindurti/Projects/kaya/target/validate-lanes/linux.log ==
+linux: 595s of that waiting for the exclusive token; 434s net against the 1250s ceiling
+windows: PASS (1099s, 310 legs)
+windows: phases check-targets 26, vm-ready 0, build 97, deploy 31, unit-tests 28, go-warm 1, package 7, desk-warm 3, caption-centre 25, suites 871
+== windows log kept at /Users/akhilindurti/Projects/kaya/target/validate-lanes/windows.log ==
+windows: 127s of that waiting for the exclusive token; 972s net against the 1350s ceiling
+ios: PASS (1040s, 154 legs)
+ios: phases boot 6, swift-built+queued 305, go-built+queued 174, python-built+queued 69, swiftui-built+queued 407, all-legs-drained 2, stills-extraction 0
+== ios log kept at /Users/akhilindurti/Projects/kaya/target/validate-lanes/ios.log ==
+ios: 490s of that waiting for the exclusive token; 550s net against the 1150s ceiling
+android: PASS (659s, 163 legs)
+android: phases preflight 30, boot 3, cliphelper 2, legs-compose 298, build-jvm 9, legs-jvm 124, build-go 8, legs-go 158, build-python 4, legs-python 17
+== android log kept at /Users/akhilindurti/Projects/kaya/target/validate-lanes/android.log ==
+android: 162s of that waiting for the exclusive token; 497s net against the 870s ceiling
+gates: PASS (328s, 0 legs)
+== gates log kept at /Users/akhilindurti/Projects/kaya/target/validate-lanes/gates.log ==
+TIMING matrix 1105s (parallel)
+validate-all: ALL PASS

@@ -1801,6 +1801,16 @@ def wired():
               "module's queue — it moved, and this clause is blind",
               file=sys.stderr)
         return 1
+    for decl, why in mac_lane.OFF_SCENES.items():
+        if decl not in roster:
+            print(f'check-steps: the mac lane module declares "{decl}" off '
+                  f"({why}), but no such scene exists", file=sys.stderr)
+            failed = 1
+        if decl in mac_wired:
+            print(f'check-steps: the mac lane module declares "{decl}" off '
+                  f"AND its queue lists it — one of the two is stale",
+                  file=sys.stderr)
+            failed = 1
     for p in STEPS:
         scene = p.stem
         for runner, text in runner_texts.items():
@@ -1830,10 +1840,10 @@ def wired():
                           file=sys.stderr)
                     failed = 1
             elif runner == "tools/lib/lanes/mac.py":
-                if scene not in mac_wired:
+                if scene not in mac_wired and scene not in mac_lane.OFF_SCENES:
                     print(f'check-steps: scene "{scene}" has no leg in '
-                          f"the mac lane module ({runner})",
-                          file=sys.stderr)
+                          f"the mac lane module and is not declared off "
+                          f"({runner})", file=sys.stderr)
                     failed = 1
             else:
                 sig = f'run "$proto" {scene}-'

@@ -1,0 +1,63 @@
+# The task manager at twice the text size (docs/compliance-plan.md §6): the
+# tasks screens under KAYA_TEXT_SCALE=2, with every label held to the room
+# its text needs after each screen the script visits. The scale's own
+# read-back is formatbig.steps's; this script asks only what a bigger user
+# sees. Off on the mac (R4); the tasks script's notification acts, relaunch
+# and drag stay with tasks.steps, whose doors the tasks legs already hold.
+expect_title "tasks"
+expect_sections 5
+expect_section "Inbox"
+expect label@inbox_count "2 in inbox"
+expect label@title[t1] "Buy milk"
+expect_no_clipping
+click button@new
+expect_sheets 1
+expect_sheet "New task"
+expect_no_clipping
+set_text entry@quick "Buy oat milk"
+click button@add
+expect_sheets 0
+expect label@inbox_count "3 in inbox"
+select_section 1
+expect_section "Today"
+expect label@today_count "2 today"
+expect label@caption[t3] "{fmt:date_weekday 2026-09-07}, Thesis"
+expect_no_clipping
+menu_activate "View>Logbook"
+expect_entries 1
+expect label@logbook_count "1 done"
+expect_no_clipping
+back
+expect_entries 0
+select_section 2
+expect_section "Upcoming"
+expect label@caption[t5] "{fmt:date_weekday 2026-09-09}, Trip"
+expect_no_clipping
+select_section 3
+expect_section "Anytime"
+expect label@caption[t6] "due {fmt:date_weekday 2026-09-30}, Trip"
+expect_no_clipping
+select_section 0
+click button@details[t2]
+expect_entries 1
+expect_ax date_picker@when "datetime/When: none"
+expect_placeholder textarea@notes "Notes"
+expect_no_clipping
+back
+expect_entries 0
+select_section 4
+expect_section "Projects"
+expect label@pcount[trip] "2 tasks"
+expect_no_clipping
+click button@open[trip]
+expect_entries 1
+expect_order column@rows "Book the flights|Renew passport"
+expect_no_clipping
+back
+expect_entries 0
+menu_activate "View>Settings"
+expect_entries 1
+expect label@settings[s] "Week starts Monday; badge shown; completed move to Logbook"
+expect_no_clipping
+back
+expect_entries 0

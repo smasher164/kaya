@@ -2231,7 +2231,20 @@ def run_suite(name):
             t.join()
         dismiss_toasts()
         with exclusive.hold("windows", name):
-            _leg_worker(name)
+            # THE USER'S TEXT SCALE around a scale leg (docs/compliance-plan.md
+            # R5, U3): written before the process starts, since only a fresh
+            # process reads it, and deleted after whatever the verdict — the
+            # value was absent before this lane touched it.
+            percent = lane.TEXT_SCALE_LEGS.get(name)
+            if percent:
+                must_ssh('reg add "HKCU\\Software\\Microsoft\\Accessibility" /v '
+                         f'TextScaleFactor /t REG_DWORD /d {percent} /f >nul')
+            try:
+                _leg_worker(name)
+            finally:
+                if percent:
+                    must_ssh('reg delete "HKCU\\Software\\Microsoft\\Accessibility" '
+                             '/v TextScaleFactor /f >nul')
         return
     t = threading.Thread(target=_leg_worker, args=(name,))
     t.start()

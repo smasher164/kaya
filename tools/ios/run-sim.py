@@ -1763,6 +1763,8 @@ def run_swiftui_on(udid, slot, app, bundle_id, name, selftest, scene,
     # The locale knob a scene carries (docs/compliance-plan.md §4).
     if selftest in lane.SCENE_LOCALE:
         env["SIMCTL_CHILD_KAYA_LOCALE"] = lane.SCENE_LOCALE[selftest]
+    if selftest in lane.SCENE_TEXT_SCALE:
+        env["SIMCTL_CHILD_KAYA_TEXT_SCALE"] = lane.SCENE_TEXT_SCALE[selftest]
     # THE VERB TRACE AND THE PANIC LOG, both RELATIVE names: the
     # interpreter resolves one under its Documents and the core the
     # other under $HOME/Documents — the same container directory —

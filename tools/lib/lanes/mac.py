@@ -78,6 +78,13 @@ GUEST_STEM = {"listdetail": "split", "taskspersist": "tasks",
 # platform installs it and the reads ask the platform, never this table.
 SCENE_LOCALE = {"formatde": "de-DE", "formatar": "ar-EG", "tasksrtl": "ar-EG"}
 
+# The scenes this lane DECLARES OFF, each with its reason, read by
+# tools/check-steps.py beside the phones' declarations: macOS has no text
+# size, so a knob that scales one is refused there (docs/compliance-plan.md
+# R4) and the two scale scenes run on the other four lanes.
+OFF_SCENES = {"tasksbig": "macOS has no text size (docs/compliance-plan.md R4)",
+              "formatbig": "macOS has no text size (docs/compliance-plan.md R4)"}
+
 # The dark half of expect_ink's frozen string, one leg instead of a
 # lane re-run (tools/check-appearance.py holds the leg here): canvas's
 # script and binary under KAYA_APPEARANCE=dark.

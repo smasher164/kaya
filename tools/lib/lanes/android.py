@@ -104,6 +104,9 @@ LEGS = {
         # The task manager in Arabic (docs/compliance-plan.md §6): no drag,
         # no notification, so pooled where tasks-compose is exclusive.
         "tasksrtl-compose",
+        # And at twice the text size, the tasks screens and the format
+        # guest (docs/compliance-plan.md §6; SCENE_TEXT_SCALE).
+        "tasksbig-compose", "formatbig-compose",
     ],
     "jvm": [
         "jvm", "a11y-jvm", "entry-jvm",
@@ -150,6 +153,10 @@ LEGS = {
 # extra (docs/compliance-plan.md §4); the reads ask the platform, never
 # this.
 SCENE_LOCALE = {"formatde": "de-DE", "formatar": "ar-EG", "tasksrtl": "ar-EG"}
+
+# The text-scale knob a scene carries (docs/compliance-plan.md §2.1): the
+# forced Configuration's fontScale and the Density every sp reads.
+SCENE_TEXT_SCALE = {"tasksbig": "2", "formatbig": "2"}
 
 # THE PLATFORM'S OWN DOOR FOR A SECOND ACT (docs/tasks-s9-plan.md R6, R7),
 # per scene that carries a `relaunch`: this lane's is a real tap on the

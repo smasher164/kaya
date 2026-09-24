@@ -208,13 +208,15 @@ fn app(ctx: kaya::AppCtx) {
         Ok("sheet") => sheet::app(ctx),
         // One guest under three locales (tools/lib/lanes/android.py's
         // SCENE_LOCALE): a scene selects a SCRIPT, never an app.
-        Ok("format") | Ok("formatde") | Ok("formatar") => format::app(ctx),
+        Ok("format") | Ok("formatde") | Ok("formatar") | Ok("formatbig") => format::app(ctx),
         Ok("tooltips") => tooltips::app(ctx),
         Ok("search") => search::app(ctx),
         Ok("tasks") => tasks::app(ctx),
         Ok("taskspersist") => tasks::app(ctx),
         // The same app under KAYA_LOCALE=ar-EG (tools/scenes/tasksrtl.steps).
         Ok("tasksrtl") => tasks::app(ctx),
+        // And at twice the text size (tools/scenes/tasksbig.steps).
+        Ok("tasksbig") => tasks::app(ctx),
         // The same app again: an app link opens the screen it names, and
         // the routes are declared on the handlers the tasks app already
         // has (docs/app-links-plan.md L4).

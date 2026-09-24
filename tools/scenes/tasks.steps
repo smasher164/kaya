@@ -23,6 +23,9 @@ expect_breadth column@inbox_list
 expect_fills row@task[t1]
 expect label@title[t2] "Call the plumber"
 expect label@caption[t2] ""
+# Every label allocated what its text needs, at this size (docs/compliance-plan.md
+# R4; tasksbig.steps asks the same at twice it).
+expect_no_clipping
 
 # Quick-add is a sheet (docs/tasks-plan.md S6): the button presents it,
 # Add lands the task in Inbox and dismisses it.
@@ -178,6 +181,7 @@ expect label@title[t1] "Buy milk"
 menu_activate "View>Settings"
 expect_entries 1
 expect label@settings[s] "Week starts Monday; badge shown; completed move to Logbook"
+expect_no_clipping
 choose select@week[s] 1
 # The two settings are switches (S2, R12): the platform's switch trait.
 expect_ax checkbox@hide_badge[s] "switch/Hide the Today badge"
