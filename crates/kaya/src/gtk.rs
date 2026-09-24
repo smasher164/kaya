@@ -1447,6 +1447,101 @@ fn set_child_track(widget: &gtk4::Widget, extent: f64) {
 /// object-data pattern as the grow weight.
 const ALIGN_KEY: &str = "kaya-align";
 
+/// THE BASELINE ROW (docs/flex-shrink-plan.md §9, §10): the deepest
+/// natural baseline is the row's; a cell with none is centred on the
+/// FIRST LINE BOX of the cell that set it — Pango's logical extents of
+/// that label's first line, above and below the baseline — and sits at
+/// the row's top when no line box can be read. A cell taller than the
+/// line overhangs it and the row grows so nothing sits above its top.
+struct BaselineRowLayout {
+    minimum: i32,
+    natural: i32,
+    baseline_min: i32,
+    baseline_nat: i32,
+    /// Per cell: the y of its natural box, and whether it has a baseline of
+    /// its own — the manager places every cell itself, since a vertical
+    /// GtkBox handed a baseline under BASELINE_FILL stacks from its top
+    /// (measured: the title column stayed at the row's top, its baseline
+    /// 7px above the button's).
+    ys: Vec<i32>,
+    baselines: Vec<i32>,
+}
+
+/// Ascent and descent of the first line of the first label under
+/// `widget`, in pixels: (above the baseline, below it).
+fn first_line_metrics(widget: &gtk4::Widget) -> Option<(i32, i32)> {
+    if let Some(label) = widget.downcast_ref::<gtk4::Label>() {
+        // The first line's baseline from the layout's top, and the line's
+        // logical height (measured on the linux lane: baseline 15394 units,
+        // the line's logical rect (0,-16,47x21)).
+        let layout = label.layout();
+        let line = layout.line_readonly(0)?;
+        let (_, logical) = line.pixel_extents();
+        let above = layout.baseline() / gtk4::pango::SCALE;
+        return Some((above, logical.height() - above));
+    }
+    let mut child = widget.first_child();
+    while let Some(c) = child {
+        if c.is_visible() {
+            if let Some(m) = first_line_metrics(&c) {
+                return Some(m);
+            }
+        }
+        child = c.next_sibling();
+    }
+    None
+}
+
+fn baseline_row_layout(
+    widgets: &[gtk4::Widget],
+    cells: &[(i32, i32, i32, i32)],
+) -> Option<BaselineRowLayout> {
+    let deepest_min = cells.iter().map(|c| c.2).max().unwrap_or(-1);
+    let deepest_nat = cells.iter().map(|c| c.3).max().unwrap_or(-1);
+    if deepest_nat < 0 {
+        return None;
+    }
+    let provider = cells.iter().position(|c| c.3 == deepest_nat)?;
+    let line = first_line_metrics(&widgets[provider]);
+    let mut ys_nat: Vec<i32> = Vec::new();
+    let mut ys_min: Vec<i32> = Vec::new();
+    for (cmin, cnat, bmin, bnat) in cells {
+        if *bnat >= 0 {
+            ys_nat.push(deepest_nat - bnat);
+            ys_min.push(deepest_min - bmin);
+        } else {
+            let (centre_nat, centre_min) = match line {
+                Some((above, below)) => (
+                    deepest_nat + (below - above) / 2,
+                    deepest_min + (below - above) / 2,
+                ),
+                None => (cnat / 2, cmin / 2),
+            };
+            ys_nat.push(centre_nat - cnat / 2);
+            ys_min.push(centre_min - cmin / 2);
+        }
+    }
+    let shift_nat = (-ys_nat.iter().copied().min().unwrap_or(0)).max(0);
+    let shift_min = (-ys_min.iter().copied().min().unwrap_or(0)).max(0);
+    let mut natural = 0;
+    let mut minimum = 0;
+    let mut ys = Vec::new();
+    for (i, (cmin, cnat, _, _)) in cells.iter().enumerate() {
+        let y_nat = ys_nat[i] + shift_nat;
+        natural = natural.max(y_nat + cnat);
+        minimum = minimum.max(ys_min[i] + shift_min + cmin);
+        ys.push(y_nat);
+    }
+    Some(BaselineRowLayout {
+        minimum,
+        natural,
+        baseline_min: deepest_min + shift_min,
+        baseline_nat: deepest_nat + shift_nat,
+        ys,
+        baselines: cells.iter().map(|c| c.3).collect(),
+    })
+}
+
 fn container_align(widget: &gtk4::Widget) -> i64 {
     // SAFETY: the key is private to this module and only ever set to
     // an i64 by set_container_align below.
@@ -2234,16 +2329,14 @@ mod flex {
                     natural = natural.max(*cnat);
                 }
                 if baseline_row {
-                    let deepest_min = cells.iter().map(|c| c.2).max().unwrap_or(-1);
-                    let deepest_nat = cells.iter().map(|c| c.3).max().unwrap_or(-1);
-                    if deepest_nat >= 0 {
-                        for (cmin, cnat, bmin, bnat) in &cells {
-                            if *bnat >= 0 {
-                                minimum = minimum.max(deepest_min - bmin + cmin);
-                                natural = natural.max(deepest_nat - bnat + cnat);
-                            }
-                        }
-                        return (minimum, natural, deepest_min, deepest_nat);
+                    let widgets: Vec<gtk4::Widget> = self
+                        .main_extents(widget, for_size, -1)
+                        .into_iter()
+                        .map(|(c, _)| c)
+                        .collect();
+                    let placed = super::baseline_row_layout(&widgets, &cells);
+                    if let Some(placed) = placed {
+                        return (placed.minimum, placed.natural, placed.baseline_min, placed.baseline_nat);
                     }
                 }
                 return (minimum, natural, -1, -1);
@@ -2302,32 +2395,47 @@ mod flex {
             // one, since BASELINE on such a widget fills instead.
             let cells = self.main_extents(widget, main_total, cross_total);
             let baseline_row = !vertical && super::container_align(widget) == 4;
-            let row_baseline = if baseline_row {
-                cells
+            let placed = if baseline_row {
+                let widgets: Vec<gtk4::Widget> = cells.iter().map(|(c, _)| c.clone()).collect();
+                let measured: Vec<(i32, i32, i32, i32)> = cells
                     .iter()
-                    .map(|(c, extent)| c.measure(gtk4::Orientation::Vertical, *extent).3)
-                    .max()
-                    .unwrap_or(-1)
+                    .map(|(c, extent)| c.measure(gtk4::Orientation::Vertical, *extent))
+                    .collect();
+                super::baseline_row_layout(&widgets, &measured)
             } else {
-                baseline
+                None
             };
             let mut offset = 0;
-            for (c, extent) in cells {
+            for (i, (c, extent)) in cells.into_iter().enumerate() {
                 let x = if rtl { width - offset - extent } else { offset };
                 let (w, h, x, y) = if vertical {
                     (cross_total, extent, 0, offset)
                 } else {
                     (extent, cross_total, x, 0)
                 };
-                let transform = gtk4::gsk::Transform::new()
-                    .translate(&gtk4::graphene::Point::new(x as f32, y as f32));
 // The track, recorded BEFORE the allocate: what GTK stores on the
 // child afterwards is the box its own align and margins shrank it to.
                 super::set_child_track(&c, f64::from(extent));
-                if baseline_row && c.measure(gtk4::Orientation::Vertical, extent).3 < 0 {
-                    c.set_valign(gtk4::Align::Start);
+                match &placed {
+                    // A BASELINE ROW PLACES EVERY CELL ITSELF at its natural
+                    // height (docs/flex-shrink-plan.md §9, §10): a text cell at
+                    // the row's baseline less its own, a textless one centred
+                    // on the provider's first line box. The cell's own
+                    // baseline rides the allocate so the align reader's
+                    // participation check still sees it.
+                    Some(placed) => {
+                        let y = placed.ys[i];
+                        let nat_h = c.measure(gtk4::Orientation::Vertical, extent).1;
+                        let transform = gtk4::gsk::Transform::new()
+                            .translate(&gtk4::graphene::Point::new(x as f32, y as f32));
+                        c.allocate(w, nat_h, placed.baselines[i], Some(transform));
+                    }
+                    None => {
+                        let transform = gtk4::gsk::Transform::new()
+                            .translate(&gtk4::graphene::Point::new(x as f32, y as f32));
+                        c.allocate(w, h, baseline, Some(transform));
+                    }
                 }
-                c.allocate(w, h, row_baseline, Some(transform));
                 offset += extent + self.spacing.get();
             }
         }
@@ -10351,6 +10459,13 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     let column = gtk4::Box::new(gtk4::Orientation::Vertical, CONTAINER_SPACING);
                     column.set_halign(gtk4::Align::Start);
                     column.set_valign(gtk4::Align::Start);
+                    // A COLUMN'S BASELINE IS ITS FIRST CHILD'S (docs/flex-shrink-plan.md
+                    // §9): a vertical GtkBoxLayout answers -1 until told which
+                    // child carries it (measured: the task row's title column
+                    // reported none and the Details button set the row's line).
+                    if let Some(layout) = column.layout_manager().and_then(|l| l.downcast::<gtk4::BoxLayout>().ok()) {
+                        layout.set_baseline_child(0);
+                    }
                     // The axis its PARENT will read to see it crossing.
                     set_container_vertical(column.upcast_ref::<gtk4::Widget>(), true);
 // No flex manager yet, deliberately: GtkBox's own layout stays

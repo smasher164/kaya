@@ -10995,6 +10995,15 @@ var kayaContainerAxis: [UInt64: Bool] = [:]
 var kayaCrossRects: [UInt64: (Double, Double)] = [:]
 var kayaBaselineOffsets: [UInt64: Double] = [:]
 
+/// A LABEL'S LINE HEIGHT (docs/flex-shrink-plan.md §10), recorded by its
+/// own firstTextBaseline guide — height − (last − first baseline) is one
+/// line whatever the wrap or the text scale — so a baseline row can
+/// centre a textless cell on the first line box of the label that set
+/// its baseline: [baseline − kayaBaselineOffsets, + kayaLineHeights].
+/// Read through the NODE, never a guide: a VStack answers a custom guide
+/// with the AVERAGE of its children's (measured: 12 for tops of 0 and 24).
+var kayaLineHeights: [UInt64: Double] = [:]
+
 /// The main-axis extent each flex child DREW at — what `expect_fills` compares
 /// against that child's track. THE TRACK'S SIBLING, DELIBERATELY NOT THE SAME
 /// NUMBER: the gap between the assigned rect and the drawn box is where a widget
@@ -14427,19 +14436,6 @@ struct KayaFlex: Layout {
         let gaps = spacing * CGFloat(max(0, subviews.count - 1))
         let naturalMain = natural.map { main($0) }.reduce(0, +) + gaps
         var naturalCross = natural.map { cross($0) }.max() ?? 0
-        if !vertical && align == alignBaseline {
-            let ext = extents(
-                mainExtent: proposal.width ?? naturalMain, subviews: subviews,
-                childProposal: childProposal)
-            let dims = subviews.indices.map { i in
-                subviews[i].dimensions(in: ProposedViewSize(width: ext[i], height: nil))
-            }
-            let bs = dims.map { Self.textBaseline($0) }
-            let deepest = bs.compactMap { $0 }.max() ?? 0
-            naturalCross = dims.indices.map { i in
-                bs[i].map { deepest - $0 + dims[i].height } ?? dims[i].height
-            }.max() ?? naturalCross
-        }
         // A row offered less than its fixed cells is as tall as its SHRUNK
         // cells: a wrapped label is taller than its one line.
         if !vertical, let offered = proposal.width, offered.isFinite, offered > 0,
@@ -14453,6 +14449,16 @@ struct KayaFlex: Layout {
             naturalCross = zip(subviews, shrunk).map { view, extent in
                 cross(view.sizeThatFits(ProposedViewSize(width: extent, height: nil)))
             }.max() ?? naturalCross
+        }
+        // LAST, over the same extents the placement uses: a baseline row is
+        // as tall as its dropped and shifted cells, which the plain maximum
+        // above ignores (the iOS tasksrtl leg, 2026-09-24: a two-line title
+        // shifted under an overhanging switch got one line's height).
+        if !vertical && align == alignBaseline {
+            let ext = extents(
+                mainExtent: proposal.width ?? naturalMain, subviews: subviews,
+                childProposal: childProposal)
+            naturalCross = baselineLayout(subviews: subviews, extents: ext).height
         }
         // Fill the MAIN axis from the proposal — what creates the free space the
         // growers divide — and hug the cross axis unless [fillCross]: filling it
@@ -14498,24 +14504,13 @@ struct KayaFlex: Layout {
         kayaTrace("flex v=\(vertical) bounds=\(Int(bounds.width))x\(Int(bounds.height)) "
             + "ids=\(nodes.map { $0.id }) grow=\(nodes.map { $0.grow }) "
             + "extents=\(extents.map { Int($0) })")
-        // BASELINE ROWS: each cell's first text baseline, read through
-        // KayaCell's explicit guide, and the deepest one is the row's.
-        let baselines: [CGFloat?] = (!vertical && align == alignBaseline)
-            ? subviews.indices.map { i in
-                Self.textBaseline(
-                    subviews[i].dimensions(in: ProposedViewSize(width: extents[i], height: nil)))
-            } : []
-        let rowBaseline = baselines.compactMap { $0 }.max() ?? 0
-        if !baselines.isEmpty {
-            kayaTrace("flex baselines ids=\(nodes.map { $0.id }) "
-                + "b=\(baselines.map { $0.map { String(format: "%.2f", $0) } ?? "none" }) "
-                + "raw=\(subviews.indices.map { String(format: "%.2f", subviews[$0].dimensions(in: ProposedViewSize(width: extents[$0], height: nil))[VerticalAlignment.firstTextBaseline]) }) "
-                + "row=\(Int(rowBaseline))")
-        }
+        let drops: [CGFloat] = (!vertical && align == alignBaseline)
+            ? baselineLayout(subviews: subviews, extents: extents).drops
+            : Array(repeating: 0, count: subviews.count)
         var offset: CGFloat = 0
         for i in subviews.indices {
             let extent = extents[i]
-            let drop = baselines.isEmpty ? 0 : (baselines[i].map { max(0, rowBaseline - $0) } ?? 0)
+            let drop = drops[i]
             let origin =
                 vertical
                 ? CGPoint(x: bounds.minX, y: bounds.minY + offset)
@@ -14535,6 +14530,43 @@ struct KayaFlex: Layout {
 
     private func weight(_ i: Int) -> Double {
         i < nodes.count ? nodes[i].grow : 0
+    }
+
+    /// THE BASELINE ROW (docs/flex-shrink-plan.md §9, §10): every cell with
+    /// a text baseline drops to meet the deepest one; a cell with none is
+    /// centred on the FIRST LINE BOX of the cell that set the row's
+    /// baseline, the strip from that line's top to one line height down,
+    /// so a switch beside a two-line title sits on the title's line at any
+    /// text scale; with no line box to read it sits at the row's top. A
+    /// cell taller than the line overhangs it, and the row grows so that
+    /// nothing is placed above its top.
+    func baselineLayout(subviews: Subviews, extents: [CGFloat]) -> (drops: [CGFloat], height: CGFloat) {
+        let dims = subviews.indices.map { i in
+            subviews[i].dimensions(in: ProposedViewSize(width: extents[i], height: nil))
+        }
+        let bs = dims.map { Self.textBaseline($0) }
+        let rowBaseline = bs.compactMap { $0 }.max() ?? 0
+        var lineBox: (CGFloat, CGFloat)? = nil
+        if let provider = bs.firstIndex(where: { $0 == rowBaseline }), provider < nodes.count,
+            let label = kayaFirstLabel(nodes[provider]),
+            let ascent = kayaBaselineOffsets[label.id], let lineHeight = kayaLineHeights[label.id],
+            lineHeight > 0
+        {
+            lineBox = (rowBaseline - ascent, rowBaseline - ascent + lineHeight)
+        }
+        var ys = dims.indices.map { i -> CGFloat in
+            if let b = bs[i] { return rowBaseline - b }
+            guard let (top, bottom) = lineBox else { return 0 }
+            return (top + bottom) / 2 - dims[i].height / 2
+        }
+        let shift = max(0, -(ys.min() ?? 0))
+        ys = ys.map { $0 + shift }
+        let height = dims.indices.map { ys[$0] + dims[$0].height }.max() ?? 0
+        kayaTrace("flex baselines ids=\(nodes.map { $0.id }) "
+            + "b=\(bs.map { $0.map { String(format: "%.2f", $0) } ?? "none" }) "
+            + "line=\(lineBox.map { String(format: "%.2f...%.2f", $0.0, $0.1) } ?? "none") "
+            + "ys=\(ys.map { String(format: "%.2f", $0) }) h=\(Int(height))")
+        return (ys, height)
     }
 
     /// A COLUMN'S BASELINE IS ITS FIRST CHILD'S; a row's is its deepest
@@ -15590,6 +15622,16 @@ func kayaPlatformLocaleTag() -> String {
 /// keeps its natural at the top level, where `natural` is known); a leaf
 /// with no text answers `natural`, 0 when nested. Nested leaves cannot
 /// be measured through a KayaCell, so their text stands in.
+/// The first label under a node, whose recorded metrics are the first
+/// line box a baseline row centres on (docs/flex-shrink-plan.md §10).
+func kayaFirstLabel(_ node: KayaNode) -> KayaNode? {
+    if node.kind == kindLabel { return node }
+    for child in node.laidOut {
+        if let label = kayaFirstLabel(child) { return label }
+    }
+    return nil
+}
+
 @MainActor func kayaMinContent(_ node: KayaNode, natural: CGFloat) -> CGFloat {
     switch node.kind {
     case kindLabel:
@@ -16502,6 +16544,13 @@ struct KayaRender: View {
             .alignmentGuide(.top) { d in
                 kayaBaselineOffsets[node.id] = d[.firstTextBaseline] - d[.top]
                 return d[.top]
+            }
+            // The baseline query is the one a baseline row makes before it
+            // reads the line box, so the record is fresh in the same pass.
+            .alignmentGuide(.firstTextBaseline) { d in
+                kayaBaselineOffsets[node.id] = d[.firstTextBaseline] - d[.top]
+                kayaLineHeights[node.id] = d.height - d[.lastTextBaseline] + d[.firstTextBaseline]
+                return d[.firstTextBaseline]
             }
             .background(KayaLabelFrameReader(id: node.id))
         case kindCheckbox:

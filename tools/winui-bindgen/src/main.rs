@@ -97,6 +97,12 @@ fn main() {
         // and SetTextDecorations are pads beside a real SetFontFamily —
         // and FontWeights is the statics class the bold weight comes from.
         "Microsoft.UI.Xaml.Documents.TextElement".to_string(),
+        // THE FIRST LINE BOX (docs/flex-shrink-plan.md §10): a baseline row
+        // centres its textless cells on the provider's first line, read as
+        // `TextBlock.ContentStart().GetCharacterRect(Forward)`; the pointer
+        // and the direction enum are pads until named.
+        "Microsoft.UI.Xaml.Documents.TextPointer".to_string(),
+        "Microsoft.UI.Xaml.Documents.LogicalDirection".to_string(),
         "Microsoft.UI.Xaml.Documents.Inline".to_string(),
         "Microsoft.UI.Xaml.Documents.InlineCollection".to_string(),
         "Microsoft.UI.Xaml.Documents.Run".to_string(),

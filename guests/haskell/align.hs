@@ -40,7 +40,7 @@ main :: IO ()
 main = kayaMain $ \app -> do
   buildTx app $ do
     probe <- signalText "align probe"
-    base <- signalText "base"
+    base <- signalText "base\nline"
     anchor <- signalText "anchor"
     fit <- signalText "fit"
     plain <- signalText "plain probe"

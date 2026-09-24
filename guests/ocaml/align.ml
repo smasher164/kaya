@@ -32,7 +32,7 @@ let () =
 
   build app (fun () ->
      let probe = signal Scalar.Str ("align probe") in
-     let base = signal Scalar.Str ("base") in
+     let base = signal Scalar.Str ("base\nline") in
      let anchor = signal Scalar.Str ("anchor") in
      let fit = signal Scalar.Str ("fit") in
      let plain = signal Scalar.Str ("plain probe") in

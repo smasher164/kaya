@@ -33,7 +33,7 @@ app = kaya.App()
 
 with app.window():
     probe = kaya.signal("align probe")
-    base = kaya.signal("base")
+    base = kaya.signal("base\nline")
     anchor = kaya.signal("anchor")
     fit = kaya.signal("fit")
     plain = kaya.signal("plain probe")

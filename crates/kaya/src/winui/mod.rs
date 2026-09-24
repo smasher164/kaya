@@ -1119,6 +1119,12 @@ fn apply_badge(item: &NavigationViewItem, count: f64) -> windows_core::Result<()
         // rule one property over.
         Err(_) => {
             let badge = InfoBadge::new()?;
+            // THE PILL GROWS WITH ITS DIGIT (docs/deferred.md's InfoBadge
+            // entry): the platform's style caps the badge at 16 while its
+            // text scales, so at 200% a 32px digit sat in a 16px pill.
+            let scale = windows::UI::ViewManagement::UISettings::new().and_then(|s| s.TextScaleFactor()).unwrap_or(1.0);
+            let pill: FrameworkElement = badge.cast()?;
+            pill.SetMaxHeight(16.0 * scale)?;
             item.SetInfoBadge(&badge)?;
             badge
         }
@@ -2711,7 +2717,7 @@ fn first_text_baseline(
     core: &CoreState,
     id: WidgetId,
     within: &FrameworkElement,
-) -> windows_core::Result<Option<f64>> {
+) -> windows_core::Result<Option<TextLine>> {
     for child in core.child_order.children(id).iter().copied() {
         let Some(widget) = core.widgets.get(&child) else { continue };
         match widget {
@@ -2719,7 +2725,7 @@ fn first_text_baseline(
                 let at = block
                     .TransformToVisual(within)?
                     .TransformPoint(bindings::Windows::Foundation::Point { X: 0.0, Y: 0.0 })?;
-                return Ok(Some(f64::from(at.Y) + block.BaselineOffset()?));
+                return Ok(Some(text_line(block, f64::from(at.Y))?));
             }
             NativeWidget::Column(_) | NativeWidget::Row(_) | NativeWidget::Labeled(_) => {
                 if let Some(b) = first_text_baseline(core, child, within)? {
@@ -2732,25 +2738,54 @@ fn first_text_baseline(
     Ok(None)
 }
 
+/// A text cell's first line, in its cell's space: the baseline, and the
+/// first line box's extent above and below it (docs/flex-shrink-plan.md §10).
+#[derive(Clone, Copy)]
+struct TextLine {
+    baseline: f64,
+    above: f64,
+    below: f64,
+}
+
+/// The block's first line, read through its first character's rectangle;
+/// `top` is where the block sits in the cell.
+fn text_line(block: &TextBlock, top: f64) -> windows_core::Result<TextLine> {
+    let baseline = block.BaselineOffset()?;
+    let rect = block
+        .ContentStart()?
+        .GetCharacterRect(bindings::Microsoft::UI::Xaml::Documents::LogicalDirection::Forward)?;
+    let (line_top, line_bottom) = if rect.Height > 0.0 {
+        (f64::from(rect.Y), f64::from(rect.Y + rect.Height))
+    } else {
+        (0.0, block.ActualHeight()?)
+    };
+    Ok(TextLine {
+        baseline: top + baseline,
+        above: baseline - line_top,
+        below: line_bottom - baseline,
+    })
+}
+
+/// THE BASELINE ROW (docs/flex-shrink-plan.md §9, §10): every text cell's
+/// top margin drops it to the deepest baseline; a cell with no text is
+/// centred on the FIRST LINE BOX of the cell that set the row's baseline,
+/// or sits at the row's top when none can be read; a cell taller than the
+/// line overhangs it and every margin shifts so nothing is above the row.
 fn baseline_compensate(
     core: &CoreState,
     grid: &Grid,
     order: &[WidgetId],
 ) -> windows_core::Result<()> {
     grid.UpdateLayout()?;
-    let mut offsets: Vec<(FrameworkElement, f64)> = Vec::new();
+    let mut cells: Vec<(FrameworkElement, Option<TextLine>)> = Vec::new();
     for child in order {
         let Some(widget) = core.widgets.get(child) else {
             continue;
         };
         let element: FrameworkElement = widget.element()?.cast()?;
-        let baseline = match widget {
-            NativeWidget::Label { block, .. } => Some(block.BaselineOffset()?),
-            NativeWidget::Checkbox { caption, switch: Some(_), .. }
-                if caption.Text()?.is_empty() =>
-            {
-                None
-            }
+        let line = match widget {
+            NativeWidget::Label { block, .. } => Some(text_line(block, 0.0)?),
+            NativeWidget::Checkbox { caption, .. } if caption.Text()?.is_empty() => None,
             NativeWidget::Button { caption, .. } | NativeWidget::Checkbox { caption, .. } => {
                 // The caption sits inside the control: its baseline in
                 // the CONTROL's space is its offset there plus its own
@@ -2758,33 +2793,41 @@ fn baseline_compensate(
                 let at = caption
                     .TransformToVisual(&element)?
                     .TransformPoint(bindings::Windows::Foundation::Point { X: 0.0, Y: 0.0 })?;
-                Some(f64::from(at.Y) + caption.BaselineOffset()?)
+                Some(text_line(caption, f64::from(at.Y))?)
             }
             // A CONTAINER'S BASELINE IS ITS FIRST LABEL'S (docs/flex-shrink-plan.md
             // §9): the task row's title sits in a column with its date, and
-            // the bottom-edge rule below put the checkbox on the date's line.
+            // the bottom-edge rule put the checkbox on the date's line.
             NativeWidget::Column(_) | NativeWidget::Row(_) | NativeWidget::Labeled(_) => {
                 first_text_baseline(core, *child, &element)?
             }
-            // A CELL WITH NO TEXT HAS NO BASELINE and sits at the row's top,
-            // one rule on four backends (docs/flex-shrink-plan.md §9).
             _ => None,
         };
-        if let Some(b) = baseline {
-            offsets.push((element, b));
-        }
+        cells.push((element, line));
     }
-    let Some(deepest) = offsets
+    let Some(provider) = cells
         .iter()
-        .map(|(_, b)| *b)
+        .filter_map(|(_, l)| l.map(|l| l.baseline))
         .max_by(|a, b| a.partial_cmp(b).unwrap())
+        .and_then(|deepest| cells.iter().find(|(_, l)| l.map(|l| l.baseline) == Some(deepest)))
+        .and_then(|(_, l)| *l)
     else {
         return Ok(());
     };
-    for (element, baseline) in offsets {
+    let deepest = provider.baseline;
+    let centre = deepest + (provider.below - provider.above) / 2.0;
+    let mut tops: Vec<f64> = Vec::new();
+    for (element, line) in &cells {
+        tops.push(match line {
+            Some(l) => deepest - l.baseline,
+            None => centre - element.ActualHeight()? / 2.0,
+        });
+    }
+    let shift = (-tops.iter().copied().fold(0.0_f64, f64::min)).max(0.0);
+    for ((element, _), top) in cells.iter().zip(tops) {
         element.SetMargin(Thickness {
             Left: 0.0,
-            Top: deepest - baseline,
+            Top: top + shift,
             Right: 0.0,
             Bottom: 0.0,
         })?;
@@ -21981,6 +22024,38 @@ impl crate::harness::Stage for WinUiStage {
                     if let Some(past) = off_screen(&element, "button", &text, &ground)? {
                         return Ok(past);
                     }
+                }
+            }
+            // THE BADGE (docs/deferred.md's InfoBadge entry): a switcher
+            // item's count is not a label, so the reads above never saw its
+            // digit cut — the badge's own ValueTextBlock against the pill it
+            // sits in.
+            // A badge inside the item's template has no logical parent chain
+            // to the ground (`presented` answered false for a drawn 21x16
+            // pill), so a drawn badge is one with a width.
+            for item in core.section_items.values() {
+                let Ok(badge) = item.InfoBadge() else { continue };
+                let pill: FrameworkElement = windows_core::Interface::cast(&badge)?;
+                if pill.ActualWidth()? <= 0.0 {
+                    continue;
+                }
+                let root: UIElement = windows_core::Interface::cast(&badge)?;
+                let Some(value) = named_descendant(&root, "ValueTextBlock")? else { continue };
+                let digits: TextBlock = windows_core::Interface::cast(&value)?;
+                // Measured unbounded: inside the pill the block's desired
+                // size is what the pill's cap left it, which is the clip.
+                let text_ui: UIElement = windows_core::Interface::cast(&value)?;
+                text_ui.Measure(bindings::Windows::Foundation::Size { Width: f32::INFINITY, Height: f32::INFINITY })?;
+                let need = f64::from(text_ui.DesiredSize()?.Height);
+                text_ui.InvalidateMeasure()?;
+                let got = pill.ActualHeight()?;
+                // The platform's own slack: at 1.0 the template draws its
+                // 17px line in a 16px pill (measured), the glyphs well inside.
+                if need > got + 2.0 {
+                    return Ok(format!(
+                        "badge {:?} needs {need}px and its pill is {got}px tall",
+                        digits.Text()?.to_string()
+                    ));
                 }
             }
             Ok(String::new())

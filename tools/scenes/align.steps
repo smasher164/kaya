@@ -2,8 +2,11 @@
 # answers stretch FIRST when all children span (docs/deferred.md):
 #   - column@centered's children have DIFFERENT natural widths, so
 #     coinciding centers can only be center.
-#   - row@baseline's TALL no-baseline image (2x64) is what stops a
-#     hug-height row collapsing the four modes into the tolerance
+#   - row@baseline's TALL no-baseline image (2x64) beside a TWO-LINE label is
+#     what separates baseline from center: a textless cell centres on the
+#     provider's FIRST LINE under baseline (docs/flex-shrink-plan.md §10) and
+#     on the whole label under center, ten points apart; a hug-height row of
+#     one-line text collapses the four modes into the tolerance
 #     (docs/traps.md — on macOS baseline placement equals center).
 #   - column@fitcol is grow=1 AND align=stretch, the shape that drew a
 #     third of itself with every model observable green; its two asserts

@@ -246,3 +246,90 @@ below, and built the same day:
   title's line (target/session-notes/flex-2026-09-24/<lane>/today.png,
   the mac's today-baseline3.png), each viewed; the review page is
   republished with them.
+
+## §10 The first line box (the maintainer, 2026-09-24, night)
+
+§9's "a cell with no text sits at the row's top" put the checkbox at the
+top of the title's LINE BOX, not at its ink: a line of text is a box
+taller than its letters, with the font's ascent above the capitals, and
+at 200% twice as much of it, so the checkbox read as aligned to an
+invisible box above the title and by a different amount on every platform
+(each toolkit's control pads its glyph its own way: Material's 48dp touch
+box, a 31pt UISwitch, a 24px GtkCheckButton around a 14px indicator, a
+20px CheckBox in a 32px minimum). GTK looked right at 100% by
+coincidence and wrong at 200%, where its indicator does not scale with
+the text. The maintainer: "I think this should be addressed".
+
+THE RULE: in a baseline row, a cell with no text is vertically centred
+on the FIRST LINE BOX of the cell that set the row's baseline — the strip
+from that line's top to one line height down, which scales with the
+text — and sits at the row's top only when no line box can be read. A
+cell taller than the line overhangs it, and the row grows so that
+nothing is placed above its top (CSS's own baseline-alignment growth).
+The line box is read per backend from the provider's first LABEL, by
+node, never by a guide:
+
+- SwiftUI: the label's own firstTextBaseline guide records
+  `kayaLineHeights[id] = height − (last − first baseline)`, one line at
+  any wrap or scale, beside the ascent `kayaBaselineOffsets` already
+  held; `KayaFlex.baselineLayout` finds the provider's first label
+  through `kayaFirstLabel(node)` and centres on
+  `[rowBaseline − ascent, + lineHeight]`. NOT a custom alignment guide:
+  a column renders as a VStack, and a VStack answers a custom guide with
+  the AVERAGE of its children's explicit values (measured: 12 for tops of
+  0 and 24, 27 for bottoms of 16 and 38), so the guide route read the
+  midpoint between the title and the date.
+- Compose: `KayaFlexRow` takes `lineLabels`, the first label id under each
+  cell, and reads `kayaLabelLayouts[id].getLineTop(0)/getLineBottom(0)`
+  against `firstBaseline` after measuring its children, when the text's
+  layout callback has fired.
+- GTK: `first_line_metrics` walks to the first GtkLabel and reads the
+  layout's baseline and line 0's logical height; `baseline_row_layout`
+  serves both the measure and the allocate, and THE MANAGER PLACES EVERY
+  CELL ITSELF at its natural height, a text cell at the row's baseline
+  less its own, since a vertical GtkBox handed the row's baseline under
+  BASELINE_FILL stacks from its top regardless (measured: the title column
+  stayed at the row's top with its baseline 7px above the button's, and
+  the checkbox, centred on the button's line, read 8px low); each cell's
+  own baseline still rides the allocate for the align reader's
+  participation check. AND THE PLAIN COLUMN'S BASELINE: a
+  column without a grower keeps GtkBox's own layout, and a vertical
+  GtkBoxLayout answers -1 until `set_baseline_child` names the child that
+  carries it — measured through the diagnostic: the task row's title
+  column reported `(44, 44, -1, -1)`, the Details button set the row's
+  line, and the checkbox centred on the button's line 7px under the
+  title's. §9's GTK column arm had only ever covered the flex-managed
+  column, and the top rule hid that. Every column names child 0 now.
+- WinUI: `text_line` reads `TextBlock.ContentStart().GetCharacterRect
+  (Forward)` beside `BaselineOffset` (the pointer and the direction enum
+  joined tools/winui-bindgen's filter); `baseline_compensate` sets every
+  child's top margin from one pass, the overhang shifting all of them.
+- macOS is out of the rule's reach in the task row: the AppKit checkbox
+  is an NSButton with a text baseline, so it is a text cell and meets the
+  baseline like a glyph, which is how AppKit's own forms align a checkbox
+  beside its label.
+
+AND THE ROW'S HEIGHT IS COMPUTED LAST on SwiftUI: `KayaFlex.sizeThatFits`
+re-measures a row offered less than its cells at the shrunk extents and
+took the plain maximum of their heights, which ignores the drops and the
+overhang shift; computed before that pass the baseline height was
+overwritten, and the first matrix's iOS tasksrtl leg read a two-line
+title shifted under its switch at one line's height (`needs 41pt at
+191pt wide and got 22pt`). The baseline block sits after the shrunk pass
+now and the gate holds the order.
+
+Guards: check-universal-props' BASELINE_LINKS hold each backend's line-box
+read and its centring, the order above, GTK's column baseline child and
+its self-placement, and the badge's cap and reader — 48 watched cuts in
+all: the textless cell put back at the row's top on all four, the line
+box read off the wrong label or dropped, SwiftUI's label no longer
+recording its line height, the two passes swapped back to the shipped
+order, GTK's cells handed back to GTK's own valign, a plain column with
+no baseline child, WinUI's rectangle read the wrong way, the badge capped
+at 16 again and its digit no longer measured. The runtime evidence is the captures: the Today row
+on all five lanes at 1.0, 200% and Arabic, the checkbox centred on the
+title's line. The layout trace (`KAYA_LAYOUT_TRACE=1` on the mac,
+`SIMCTL_CHILD_KAYA_LAYOUT_TRACE=1` through run-sim) prints each baseline
+row's baselines, line box and ys, which is how both measurements above
+were made.
+

@@ -9,7 +9,7 @@ static class AlignScene
         app.Build(tx =>
         {
             var probe = tx.Signal("align probe");
-            var @base = tx.Signal("base");
+            var @base = tx.Signal("base\nline");
             var anchor = tx.Signal("anchor");
             var fit = tx.Signal("fit");
             var plain = tx.Signal("plain probe");

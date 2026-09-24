@@ -34,7 +34,7 @@ func App() *kaya.App {
 
 	app.Build(func(tx *kaya.Tx) {
 		probe := tx.Signal("align probe")
-		base := tx.Signal("base")
+		base := tx.Signal("base\nline")
 		anchor := tx.Signal("anchor")
 		fit := tx.Signal("fit")
 		plain := tx.Signal("plain probe")

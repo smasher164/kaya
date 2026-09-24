@@ -51,27 +51,57 @@ FLEX_LINKS = (
 )
 
 
-# (file, the block that owns the arm, the lines the baseline row keeps): a
-# cell with no text has no baseline and sits at the row's top, and a column's
-# baseline is its first child's (docs/flex-shrink-plan.md §9) — the iOS
-# switch was dropped 16pt to sit its empty label's 0 on the title's line, and
-# no scene reads a cell's y.
+# (file, the block that owns the arm, the window, the lines the baseline row
+# keeps): a cell with no text has no baseline and is centred on the FIRST LINE
+# BOX of the cell that set the row's baseline, and a column's baseline is its
+# first child's (docs/flex-shrink-plan.md §9, §10) — the iOS switch was
+# dropped 16pt to sit its empty label's 0 on the title's line, then sat at the
+# row's top while the title's ink began a scaled ascent lower, and no scene
+# reads a cell's y.
 BASELINE_LINKS = (
     (SWIFTUI, "struct KayaFlex: Layout {", 24000, (
         "return (b < 1 || b > d.height - 1) ? nil : b",
-        "baselines[i].map { max(0, rowBaseline - $0) } ?? 0",
+        "if let b = bs[i] { return rowBaseline - b }",
+        "lineBox = (rowBaseline - ascent, rowBaseline - ascent + lineHeight)",
+        "return (top + bottom) / 2 - dims[i].height / 2",
         "subviews[0].dimensions(in: ProposedViewSize(width: bounds.width, height: ext[0]))",
     )),
-    (COMPOSE, "internal fun KayaFlexRow(", 4000, (
+    (SWIFTUI, "kayaLabelBaseFont(node), ground: true", 3000, (
+        "kayaLineHeights[node.id] = d.height - d[.lastTextBaseline] + d[.firstTextBaseline]",
+    )),
+    (COMPOSE, "internal fun KayaFlexRow(", 5000, (
         "if (fb == androidx.compose.ui.layout.AlignmentLine.Unspecified) null else fb",
         "KayaCompose.ALIGN_BASELINE -> drops[i]",
+        "lineCentre != null -> lineCentre - placeables[i].height / 2",
+        "kayaLabelLayouts[it]",
     )),
-    (GTK, "let baseline_row = !vertical && super::container_align(widget) == 4;", 2000,
-     ("c.set_valign(gtk4::Align::Start);",)),
+    (GTK, "let baseline_row = !vertical && super::container_align(widget) == 4;", 3000,
+     ("c.allocate(w, nat_h, placed.baselines[i], Some(transform));",)),
+    (GTK, "fn baseline_row_layout(", 2500, (
+        "let line = first_line_metrics(&widgets[provider]);",
+        "ys_nat.push(centre_nat - cnat / 2);",
+    )),
+    (GTK, "fn first_line_metrics(widget: &gtk4::Widget) -> Option<(i32, i32)> {", 400, (
+        "let above = layout.baseline() / gtk4::pango::SCALE;",
+    )),
     (GTK, "if vertical && self.is_main(orientation) {", 600,
      ("return (minimum, natural, bmin, bnat);",)),
-    (WINUI, "fn baseline_compensate(", 2500,
-     ("_ => None,", "first_text_baseline(core, *child, &element)?")),
+    (GTK, "WidgetKind::Column => {", 1200, ("layout.set_baseline_child(0);",)),
+    (WINUI, "fn baseline_compensate(", 3500, (
+        "_ => None,",
+        "first_text_baseline(core, *child, &element)?",
+        "None => centre - element.ActualHeight()? / 2.0,",
+        "let centre = deepest + (provider.below - provider.above) / 2.0;",
+    )),
+    (WINUI, "fn apply_badge(item: &NavigationViewItem, count: f64)", 1200, (
+        "pill.SetMaxHeight(16.0 * scale)?;",
+    )),
+    (WINUI, "fn clipping(&self) -> String {", 5000, (
+        'named_descendant(&root, "ValueTextBlock")?',
+    )),
+    (WINUI, "fn text_line(block: &TextBlock, top: f64)", 800, (
+        ".GetCharacterRect(bindings::Microsoft::UI::Xaml::Documents::LogicalDirection::Forward)?",
+    )),
 )
 
 
@@ -357,6 +387,21 @@ def census(files):
         for needle in needles:
             if needle not in body[start:start + window]:
                 bad.append(f"{path}: the baseline row lost {needle!r} under {block!r}")
+    # THE BASELINE HEIGHT IS COMPUTED LAST in KayaFlex.sizeThatFits, after the
+    # shrunk pass: the plain maximum of the shrunk cells' heights ignores the
+    # drops and the overhang shift, and computed first it was overwritten —
+    # a two-line title under an overhanging switch got one line's height
+    # (the iOS tasksrtl leg, 2026-09-24).
+    body = code_only(read(swiftui))
+    flex = body.find("struct KayaFlex: Layout {")
+    shrunk_at = body.find("let shrunk = extents(mainExtent: offered", flex)
+    baseline_at = body.find(
+        "naturalCross = baselineLayout(subviews: subviews, extents: ext).height", flex)
+    if flex < 0 or shrunk_at < 0 or baseline_at < 0:
+        bad.append(f"{swiftui}: KayaFlex.sizeThatFits lost its shrunk pass or its baseline height")
+    elif baseline_at < shrunk_at:
+        bad.append(f"{swiftui}: KayaFlex.sizeThatFits computes the baseline row's height "
+                   "BEFORE the shrunk pass, which then overwrites it with the plain maximum")
     return bad
 
 
@@ -366,7 +411,7 @@ def census(files):
 real = load()
 g = Gate("check-universal-props")
 RAN = 0
-DECLARED = 36
+DECLARED = 48
 for path, pattern, repl in (
     (COMPOSE, r"\ba11y\b", "kayaUnappliedProps"),
     (SWIFTUI, r"\bkayaA11y\b", "kayaUnappliedProps"),
@@ -488,8 +533,39 @@ for label, path, pattern, repl in (
     ("SwiftUI answering a baseline for every view", SWIFTUI,
      r"return \(b < 1 \|\| b > d\.height - 1\) \? nil : b", "return b"),
     ("SwiftUI dropping a textless cell onto the row's line", SWIFTUI,
-     r"baselines\[i\]\.map \{ max\(0, rowBaseline - \$0\) \} \?\? 0",
-     "max(0, rowBaseline - (baselines[i] ?? 0))"),
+     r"if let b = bs\[i\] \{ return rowBaseline - b \}",
+     "return rowBaseline - (bs[i] ?? 0)"),
+    ("SwiftUI's textless cell back at the row's top", SWIFTUI,
+     r"return \(top \+ bottom\) / 2 - dims\[i\]\.height / 2", "return 0"),
+    ("SwiftUI's line box read off the wrong label", SWIFTUI,
+     r"lineBox = \(rowBaseline - ascent, rowBaseline - ascent \+ lineHeight\)",
+     "lineBox = (0, lineHeight)"),
+    ("SwiftUI's baseline height computed before the shrunk pass (the shipped order)", SWIFTUI,
+     r"(        if !vertical, let offered = proposal\.width, offered\.isFinite, offered > 0,\n"
+     r"[\s\S]*?\n        \}\n)((?:        //[^\n]*\n)*"
+     r"        if !vertical && align == alignBaseline \{\n"
+     r"[\s\S]*?naturalCross = baselineLayout\(subviews: subviews, extents: ext\)\.height"
+     r"\n        \}\n)",
+     r"\2\1"),
+    ("SwiftUI's label no longer recording its line height", SWIFTUI,
+     r"kayaLineHeights\[node\.id\] = d\.height - d\[\.lastTextBaseline\] "
+     r"\+ d\[\.firstTextBaseline\]",
+     "kayaLineHeights[node.id] = d.height"),
+    ("Compose's textless cell back at the row's top", COMPOSE,
+     r"lineCentre != null -> lineCentre - placeables\[i\]\.height / 2", "lineCentre != null -> 0"),
+    ("GTK's line box no longer read off the provider", GTK,
+     r"let line = first_line_metrics\(&widgets\[provider\]\);", "let line = None;"),
+    ("GTK's textless cell back at the row's top", GTK,
+     r"ys_nat\.push\(centre_nat - cnat / 2\);", "ys_nat.push(0);"),
+    ("WinUI's textless cell back at the row's top", WINUI,
+     r"None => centre - element\.ActualHeight\(\)\? / 2\.0,", "None => 0.0,"),
+    ("WinUI's badge capped at the platform's 16 again (the shipped state)", WINUI,
+     r"pill\.SetMaxHeight\(16\.0 \* scale\)\?;", "pill.SetMaxHeight(16.0)?;"),
+    ("WinUI's clipping read no longer measuring the badge's digit", WINUI,
+     r'named_descendant\(&root, "ValueTextBlock"\)\?', 'named_descendant(&root, "NoSuchBlock")?'),
+    ("WinUI's line box read off the character rectangle no more", WINUI,
+     r"\.GetCharacterRect\(bindings::Microsoft::UI::Xaml::Documents::LogicalDirection::Forward\)\?",
+     ".GetCharacterRect(bindings::Microsoft::UI::Xaml::Documents::LogicalDirection::Backward)?"),
     ("SwiftUI's column answering no baseline of its own", SWIFTUI,
      r"return Self\.textBaseline\(\n\s*subviews\[0\]\.dimensions\(in: ProposedViewSize\("
      r"width: bounds\.width, height: ext\[0\]\)\)\)", "return nil"),
@@ -498,10 +574,13 @@ for label, path, pattern, repl in (
     ("Compose dropping a textless cell onto the row's line", COMPOSE,
      r"KayaCompose\.ALIGN_BASELINE -> drops\[i\]",
      "KayaCompose.ALIGN_BASELINE -> baselineRow - (baselines[i] ?: 0)"),
-    ("GTK filling a textless cell", GTK,
-     r"c\.set_valign\(gtk4::Align::Start\);", "c.set_valign(gtk4::Align::Fill);"),
+    ("GTK handing a baseline row's cells to GTK's own valign again", GTK,
+     r"c\.allocate\(w, nat_h, placed\.baselines\[i\], Some\(transform\)\);",
+     "c.allocate(w, h, placed.baseline_nat, Some(transform));"),
     ("GTK's column answering no baseline of its own", GTK,
      r"return \(minimum, natural, bmin, bnat\);", "return (minimum, natural, -1, -1);"),
+    ("GTK's plain column box answering no baseline (the shipped state)", GTK,
+     r"layout\.set_baseline_child\(0\);", "layout.set_baseline_child(-1);"),
     ("WinUI's bottom-edge rule for a textless cell", WINUI,
      r"(fn baseline_compensate\([\s\S]*?)_ => None,", r"\1_ => Some(element.ActualHeight()?),"),
     ("WinUI's column answering its bottom", WINUI,

@@ -28,7 +28,7 @@ const app = new kaya.App();
 
 app.window(() => {
   const probe = kaya.signal("align probe");
-  const base = kaya.signal("base");
+  const base = kaya.signal("base\nline");
   const anchor = kaya.signal("anchor");
   const fit = kaya.signal("fit");
   const plain = kaya.signal("plain probe");

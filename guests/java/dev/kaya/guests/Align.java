@@ -37,7 +37,7 @@ public final class Align {
 
         app.build(tx -> {
             KayaApp.Signal<String> probe = tx.signal("align probe");
-            KayaApp.Signal<String> base = tx.signal("base");
+            KayaApp.Signal<String> base = tx.signal("base\nline");
             KayaApp.Signal<String> anchor = tx.signal("anchor");
             KayaApp.Signal<String> fit = tx.signal("fit");
             KayaApp.Signal<String> plain = tx.signal("plain probe");

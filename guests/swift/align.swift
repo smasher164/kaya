@@ -33,7 +33,7 @@ let tallPNG = Data([
 KayaApp.run { app in
     app.build { tx in
         let probe = tx.signal(.str("align probe"))
-        let base = tx.signal(.str("base"))
+        let base = tx.signal(.str("base\nline"))
         let anchor = tx.signal(.str("anchor"))
         let fit = tx.signal(.str("fit"))
         let plain = tx.signal(.str("plain probe"))

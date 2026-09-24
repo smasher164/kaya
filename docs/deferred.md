@@ -9,7 +9,7 @@ Landed history lives in git; this file only carries what is still open.
 scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
-## ~~GAP — a flex row on the phones lets a fixed cell leave the screen or break a word, and expect_no_clipping sees neither (found 2026-09-24 by the compliance review page)~~ LANDED 2026-09-24: the flex-cell rule on all four backends (docs/flex-shrink-plan.md §2, §3: crates/kaya/src/flex.rs's arithmetic, SwiftUI's KayaFlex reading its minimum off the node, Compose's KayaFlexRow, GTK's shrink between minimum and natural, WinUI's star columns floored at the longest word), expect_no_clipping's off-screen clause over labels and buttons and its longest-word clause, the flexshrink scene on all five lanes, the task manager's row folded to title-over-caption since a phone at 200% cannot fit the pair beside the switch and the button, the Compose bar label ellipsized, the review page https://claude.ai/artifact/KPqemDy3TpQPhkmJWDnMAi with the Today screens on every lane; the WinUI InfoBadge at 200% (below) stays open
+## ~~GAP — a flex row on the phones lets a fixed cell leave the screen or break a word, and expect_no_clipping sees neither (found 2026-09-24 by the compliance review page)~~ LANDED 2026-09-24: the flex-cell rule on all four backends (docs/flex-shrink-plan.md §2, §3: crates/kaya/src/flex.rs's arithmetic, SwiftUI's KayaFlex reading its minimum off the node, Compose's KayaFlexRow, GTK's shrink between minimum and natural, WinUI's star columns floored at the longest word), expect_no_clipping's off-screen clause over labels and buttons and its longest-word clause, the flexshrink scene on all five lanes, the task manager's row folded to title-over-caption since a phone at 200% cannot fit the pair beside the switch and the button, the Compose bar label ellipsized, the review page https://claude.ai/artifact/KPqemDy3TpQPhkmJWDnMAi with the Today screens on every lane; the WinUI InfoBadge at 200% FIXED 2026-09-24 night (below)
 KEY: KayaFlex, flex cell, min-content, row overflow, word break, expect_no_clipping, off-screen frame, NavigationBarItem label, TextOverflow.Visible
 
 The review page's captures (docs/compliance-plan.md §8 step 4) show the task
@@ -47,10 +47,18 @@ on a green lane.
 
 BESIDE IT, from the same review (the maintainer, 2026-09-24): the WinUI
 navigation item's InfoBadge clips its digit at 200% text scale — the "2"
-beside Today on the Windows 200% capture. It is not a label, so the
-clipping read never measured it; the fix follows what the platform's own
-badge does under TextScaleFactor 200, measured on the VM first. KEY:
-InfoBadge, TextScaleFactor, badge clipped.
+beside Today on the Windows 200% capture. FIXED 2026-09-24 (night): the
+cause is the platform's own, read out of the shipped generic.xaml
+(third_party/winappsdk, `DefaultInfoBadgeStyle`): the badge's `MaxHeight`
+is the `InfoBadgeMaxHeight` resource, 16, while its `ValueTextBlock`
+scales with the text — measured on the VM at 200%, a 29.9px digit in a
+21x16 pill — so the platform's badge clips too. kaya's `apply_badge` lifts
+the badge's MaxHeight to 16 times the text scale factor and the pill's
+corner radius follows through the control's own template settings. The
+guard is `expect_no_clipping`'s badge clause on WinUI: every drawn badge's
+digit measured unbounded against its pill, watched red on the windows
+tasksbig leg before the fix (`badge "2" needs 29.9px and its pill is 16px
+tall`). KEY: InfoBadge, TextScaleFactor, badge clipped.
 
 ## BUILD — the compliance pass: text scale, mirroring, and kaya-owned localization over the platform formatters (design pass and probes 2026-09-21..23)
 KEY: compliance pass, KAYA_TEXT_SCALE, KAYA_LOCALE, expect_text_scale, expect_no_clipping, expect_direction, expect_mirrored, expect_locale, expect_formatted, expect_script, fmt, tr, Fluent, catalog, check-l10n, tasksbig, tasksrtl, clock24, format.steps

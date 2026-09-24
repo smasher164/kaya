@@ -88145,10 +88145,26 @@ pub mod Microsoft {
                         *mut *mut core::ffi::c_void,
                     )
                         -> windows_core::HRESULT,
-                    ContentStart: usize,
-                    ContentEnd: usize,
-                    SelectionStart: usize,
-                    SelectionEnd: usize,
+                    pub ContentStart: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub ContentEnd: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SelectionStart: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SelectionEnd: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
                     pub BaselineOffset: unsafe extern "system" fn(
                         *mut core::ffi::c_void,
                         *mut f64,
@@ -88257,7 +88273,12 @@ pub mod Microsoft {
                         ) -> windows_core::HRESULT,
                     pub SelectAll:
                         unsafe extern "system" fn(*mut core::ffi::c_void) -> windows_core::HRESULT,
-                    Select: usize,
+                    pub Select: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
                     GetAlphaMask: usize,
                     pub CopySelectionToClipboard:
                         unsafe extern "system" fn(*mut core::ffi::c_void) -> windows_core::HRESULT,
@@ -171640,6 +171661,58 @@ pub mod Microsoft {
                             .map(|| core::mem::transmute(result__))
                         }
                     }
+                    pub fn ContentStart(
+                        &self,
+                    ) -> windows_core::Result<super::Documents::TextPointer> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ContentStart)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn ContentEnd(
+                        &self,
+                    ) -> windows_core::Result<super::Documents::TextPointer> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ContentEnd)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SelectionStart(
+                        &self,
+                    ) -> windows_core::Result<super::Documents::TextPointer> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).SelectionStart)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SelectionEnd(
+                        &self,
+                    ) -> windows_core::Result<super::Documents::TextPointer> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).SelectionEnd)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
                     pub fn BaselineOffset(&self) -> windows_core::Result<f64> {
                         let this = self;
                         unsafe {
@@ -171877,6 +171950,21 @@ pub mod Microsoft {
                         unsafe {
                             (windows_core::Interface::vtable(this).SelectAll)(
                                 windows_core::Interface::as_raw(this),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn Select<P0, P1>(&self, start: P0, end: P1) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Documents::TextPointer>,
+                        P1: windows_core::Param<super::Documents::TextPointer>,
+                    {
+                        let this = self;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).Select)(
+                                windows_core::Interface::as_raw(this),
+                                start.param().abi(),
+                                end.param().abi(),
                             )
                             .ok()
                         }
@@ -229629,6 +229717,50 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn ContentStart(&self) -> windows_core::Result<TextPointer> {
+                        let this = &windows_core::Interface::cast::<ITextElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ContentStart)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn ContentEnd(&self) -> windows_core::Result<TextPointer> {
+                        let this = &windows_core::Interface::cast::<ITextElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ContentEnd)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn ElementStart(&self) -> windows_core::Result<TextPointer> {
+                        let this = &windows_core::Interface::cast::<ITextElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ElementStart)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn ElementEnd(&self) -> windows_core::Result<TextPointer> {
+                        let this = &windows_core::Interface::cast::<ITextElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ElementEnd)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
                     pub fn AllowFocusOnInteraction(&self) -> windows_core::Result<bool> {
                         let this = &windows_core::Interface::cast::<ITextElement>(self)?;
                         unsafe {
@@ -230307,10 +230439,26 @@ pub mod Microsoft {
                         super::super::super::super::Windows::UI::Text::TextDecorations,
                     )
                         -> windows_core::HRESULT,
-                    ContentStart: usize,
-                    ContentEnd: usize,
-                    ElementStart: usize,
-                    ElementEnd: usize,
+                    pub ContentStart: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub ContentEnd: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub ElementStart: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub ElementEnd: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
                     pub AllowFocusOnInteraction: unsafe extern "system" fn(
                         *mut core::ffi::c_void,
                         *mut bool,
@@ -230584,6 +230732,53 @@ pub mod Microsoft {
                     ForegroundProperty: usize,
                     BackgroundProperty: usize,
                 }
+                windows_core::imp::define_interface!(
+                    ITextPointer,
+                    ITextPointer_Vtbl,
+                    0x842eb385_ee41_5930_979b_438fa7525a51
+                );
+                impl windows_core::RuntimeType for ITextPointer {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct ITextPointer_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    pub Parent: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub VisualParent: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub LogicalDirection: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut LogicalDirection,
+                    )
+                        -> windows_core::HRESULT,
+                    pub Offset: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut i32,
+                    )
+                        -> windows_core::HRESULT,
+                    pub GetCharacterRect: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        LogicalDirection,
+                        *mut super::super::super::super::Windows::Foundation::Rect,
+                    )
+                        -> windows_core::HRESULT,
+                    pub GetPositionAtOffset: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        i32,
+                        LogicalDirection,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                }
                 #[repr(transparent)]
                 #[derive(Clone, Debug, Eq, PartialEq)]
                 pub struct Inline(windows_core::IUnknown);
@@ -230856,6 +231051,50 @@ pub mod Microsoft {
                                 value,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn ContentStart(&self) -> windows_core::Result<TextPointer> {
+                        let this = &windows_core::Interface::cast::<ITextElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ContentStart)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn ContentEnd(&self) -> windows_core::Result<TextPointer> {
+                        let this = &windows_core::Interface::cast::<ITextElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ContentEnd)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn ElementStart(&self) -> windows_core::Result<TextPointer> {
+                        let this = &windows_core::Interface::cast::<ITextElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ElementStart)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn ElementEnd(&self) -> windows_core::Result<TextPointer> {
+                        let this = &windows_core::Interface::cast::<ITextElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ElementEnd)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
                     pub fn AllowFocusOnInteraction(&self) -> windows_core::Result<bool> {
@@ -231348,6 +231587,22 @@ pub mod Microsoft {
                     }
                 }
                 #[repr(transparent)]
+                #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+                pub struct LogicalDirection(pub i32);
+                impl LogicalDirection {
+                    pub const Backward: Self = Self(0i32);
+                    pub const Forward: Self = Self(1i32);
+                }
+                impl windows_core::TypeKind for LogicalDirection {
+                    type TypeKind = windows_core::CopyType;
+                }
+                impl windows_core::RuntimeType for LogicalDirection {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::from_slice(
+                            b"enum(Microsoft.UI.Xaml.Documents.LogicalDirection;i4)",
+                        );
+                }
+                #[repr(transparent)]
                 #[derive(Clone, Debug, Eq, PartialEq)]
                 pub struct Run(windows_core::IUnknown);
                 windows_core::imp::interface_hierarchy!(
@@ -231671,6 +231926,50 @@ pub mod Microsoft {
                                 value,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn ContentStart(&self) -> windows_core::Result<TextPointer> {
+                        let this = &windows_core::Interface::cast::<ITextElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ContentStart)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn ContentEnd(&self) -> windows_core::Result<TextPointer> {
+                        let this = &windows_core::Interface::cast::<ITextElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ContentEnd)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn ElementStart(&self) -> windows_core::Result<TextPointer> {
+                        let this = &windows_core::Interface::cast::<ITextElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ElementStart)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn ElementEnd(&self) -> windows_core::Result<TextPointer> {
+                        let this = &windows_core::Interface::cast::<ITextElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ElementEnd)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
                     pub fn AllowFocusOnInteraction(&self) -> windows_core::Result<bool> {
@@ -232243,6 +232542,50 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn ContentStart(&self) -> windows_core::Result<TextPointer> {
+                        let this = &windows_core::Interface::cast::<ITextElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ContentStart)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn ContentEnd(&self) -> windows_core::Result<TextPointer> {
+                        let this = &windows_core::Interface::cast::<ITextElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ContentEnd)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn ElementStart(&self) -> windows_core::Result<TextPointer> {
+                        let this = &windows_core::Interface::cast::<ITextElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ElementStart)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn ElementEnd(&self) -> windows_core::Result<TextPointer> {
+                        let this = &windows_core::Interface::cast::<ITextElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ElementEnd)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
                     pub fn AllowFocusOnInteraction(&self) -> windows_core::Result<bool> {
                         let this = &windows_core::Interface::cast::<ITextElement>(self)?;
                         unsafe {
@@ -232772,6 +233115,50 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn ContentStart(&self) -> windows_core::Result<TextPointer> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ContentStart)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn ContentEnd(&self) -> windows_core::Result<TextPointer> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ContentEnd)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn ElementStart(&self) -> windows_core::Result<TextPointer> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ElementStart)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn ElementEnd(&self) -> windows_core::Result<TextPointer> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ElementEnd)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
                     pub fn AllowFocusOnInteraction(&self) -> windows_core::Result<bool> {
                         let this = self;
                         unsafe {
@@ -233213,6 +233600,106 @@ pub mod Microsoft {
                 }
                 unsafe impl Send for TextHighlighterBase {}
                 unsafe impl Sync for TextHighlighterBase {}
+                #[repr(transparent)]
+                #[derive(Clone, Debug, Eq, PartialEq)]
+                pub struct TextPointer(windows_core::IUnknown);
+                windows_core::imp::interface_hierarchy!(
+                    TextPointer,
+                    windows_core::IUnknown,
+                    windows_core::IInspectable
+                );
+                impl TextPointer {
+                    pub fn Parent(&self) -> windows_core::Result<super::DependencyObject> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Parent)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn VisualParent(&self) -> windows_core::Result<super::FrameworkElement> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).VisualParent)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn LogicalDirection(&self) -> windows_core::Result<LogicalDirection> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).LogicalDirection)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn Offset(&self) -> windows_core::Result<i32> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Offset)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn GetCharacterRect(
+                        &self,
+                        direction: LogicalDirection,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Rect>
+                    {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).GetCharacterRect)(
+                                windows_core::Interface::as_raw(this),
+                                direction,
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn GetPositionAtOffset(
+                        &self,
+                        offset: i32,
+                        direction: LogicalDirection,
+                    ) -> windows_core::Result<TextPointer> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).GetPositionAtOffset)(
+                                windows_core::Interface::as_raw(this),
+                                offset,
+                                direction,
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                }
+                impl windows_core::RuntimeType for TextPointer {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_class::<Self, ITextPointer>();
+                }
+                unsafe impl windows_core::Interface for TextPointer {
+                    type Vtable = <ITextPointer as windows_core::Interface>::Vtable;
+                    const IID: windows_core::GUID = <ITextPointer as windows_core::Interface>::IID;
+                }
+                impl windows_core::RuntimeName for TextPointer {
+                    const NAME: &'static str = "Microsoft.UI.Xaml.Documents.TextPointer";
+                }
+                unsafe impl Send for TextPointer {}
+                unsafe impl Sync for TextPointer {}
                 #[repr(C)]
                 #[derive(Clone, Copy, Debug, Default, PartialEq)]
                 pub struct TextRange {

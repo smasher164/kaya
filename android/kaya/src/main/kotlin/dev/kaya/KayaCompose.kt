@@ -760,6 +760,7 @@ internal fun KayaFlexRow(
     spacingPx: Int,
     grows: List<Double>,
     align: Long,
+    lineLabels: List<Long?> = emptyList(),
     content: @Composable () -> Unit,
 ) {
     Layout(content = content, modifier = modifier) { measurables, constraints ->
@@ -801,14 +802,34 @@ internal fun KayaFlexRow(
                 )
             )
         }
-        // A CELL WITH NO TEXT HAS NO BASELINE and sits at a baseline row's
-        // top, one rule on four backends (docs/flex-shrink-plan.md §9).
+        // THE BASELINE ROW (docs/flex-shrink-plan.md §9, §10): a text cell
+        // drops to the deepest baseline; a cell with no text is centred on
+        // the FIRST LINE BOX of the cell that set it, read off that label's
+        // own text layout, or sits at the row's top when none can be read;
+        // the row grows so that nothing is placed above its top.
         val baselines: List<Int?> = placeables.map { p ->
             val fb = p[androidx.compose.ui.layout.FirstBaseline]
             if (fb == androidx.compose.ui.layout.AlignmentLine.Unspecified) null else fb
         }
         val baselineRow = baselines.filterNotNull().maxOrNull() ?: 0
-        val drops = baselines.map { b -> if (align == KayaCompose.ALIGN_BASELINE && b != null) baselineRow - b else 0 }
+        val provider = baselines.indexOfFirst { it == baselineRow }
+        val lineCentre: Int? = lineLabels.getOrNull(provider)?.let { kayaLabelLayouts[it] }?.let { tl ->
+            val fb = tl.firstBaseline
+            val above = fb - tl.getLineTop(0)
+            val below = tl.getLineBottom(0) - fb
+            baselineRow + ((below - above) / 2f).toInt()
+        }
+        val raw = placeables.indices.map { i ->
+            val b = baselines[i]
+            when {
+                align != KayaCompose.ALIGN_BASELINE -> 0
+                b != null -> baselineRow - b
+                lineCentre != null -> lineCentre - placeables[i].height / 2
+                else -> 0
+            }
+        }
+        val shift = maxOf(0, -(raw.minOrNull() ?: 0))
+        val drops = raw.map { it + shift }
         val height = (placeables.indices.maxOfOrNull { placeables[it].height + drops[it] } ?: 0)
             .coerceIn(constraints.minHeight, if (constraints.hasBoundedHeight) constraints.maxHeight else Int.MAX_VALUE)
         val width = (widths.sum() + gaps)
@@ -829,6 +850,15 @@ internal fun KayaFlexRow(
             }
         }
     }
+}
+
+/** The first label under a cell, whose text layout carries the first line box. */
+internal fun kayaFirstLabel(node: KayaNode): Long? {
+    if (node.kind == KayaCompose.KIND_LABEL) return node.id
+    for (child in node.laidOut) {
+        kayaFirstLabel(child)?.let { return it }
+    }
+    return null
 }
 
 internal fun kayaFlexShrink(naturals: DoubleArray, minimums: DoubleArray, room: Double): DoubleArray {
@@ -13150,6 +13180,7 @@ private fun KayaRenderCore(
                 spacingPx = with(LocalDensity.current) { node.spacing.dp.roundToPx() },
                 grows = node.laidOut.map { it.grow },
                 align = node.align,
+                lineLabels = node.laidOut.map { kayaFirstLabel(it) },
             ) {
                 node.laidOut.forEach { child ->
                     var cell = Modifier.onGloballyPositioned {
