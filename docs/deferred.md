@@ -35,12 +35,21 @@ needs a second clause — a label whose frame leaves its window or scroll
 viewport is clipped — and the moment it has one the iOS tasks legs go red
 on the Today screen, which is why the clause waits for the layout rule.
 
-RULING ASKED (the maintainer): one rule for a flex cell on all four
-backends — a non-growing cell shrinks no further than its longest word and
-wraps inside that width, the row growing in height (CSS flexbox's
-`min-width: auto`), with `expect_no_clipping`'s off-screen clause landing
-in the same slice and the Compose bar label taking the platform's own
-ellipsis. Until then the iOS Today row is a known defect on a green lane.
+RULED 2026-09-24 (the maintainer: "that ruling makes sense to me"): one
+rule for a flex cell on all four backends — a non-growing cell shrinks no
+further than its longest word and wraps inside that width, the row growing
+in height (CSS flexbox's `min-width: auto`), with `expect_no_clipping`'s
+off-screen clause landing in the same slice and the Compose bar label
+taking the platform's own ellipsis. Sequenced after the matrix filter
+(the `--only` entry). Until then the iOS Today row is a known defect on a
+green lane.
+
+BESIDE IT, from the same review (the maintainer, 2026-09-24): the WinUI
+navigation item's InfoBadge clips its digit at 200% text scale — the "2"
+beside Today on the Windows 200% capture. It is not a label, so the
+clipping read never measured it; the fix follows what the platform's own
+badge does under TextScaleFactor 200, measured on the VM first. KEY:
+InfoBadge, TextScaleFactor, badge clipped.
 
 ## BUILD — the compliance pass: text scale, mirroring, and kaya-owned localization over the platform formatters (design pass and probes 2026-09-21..23)
 KEY: compliance pass, KAYA_TEXT_SCALE, KAYA_LOCALE, expect_text_scale, expect_no_clipping, expect_direction, expect_mirrored, expect_locale, expect_formatted, expect_script, fmt, tr, Fluent, catalog, check-l10n, tasksbig, tasksrtl, clock24, format.steps
