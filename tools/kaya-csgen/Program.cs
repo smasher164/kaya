@@ -359,22 +359,34 @@ static class Program
         Fwd("TimePicker", ["System.TimeOnly value", $"{onTime} onTime = null"], "value, onTime");
         Fwd("TimePicker", ["Signal value", $"{onTime} onTime = null"], "value, onTime");
         Fwd("TimePicker", ["Field<System.TimeOnly> f", $"{onTime} onTime = null"], "f, onTime");
-        Fwd("Entry", [$"{onText} onChange = null"], "onChange");
-        Fwd("Entry", ["string text", $"{onText} onChange = null"], "text, onChange");
-        Fwd("Entry", ["Signal text", $"{onText} onChange = null"], "text, onChange");
-        Fwd("Entry", ["Field<string> text", $"{onText} onChange = null"], "text, onChange");
-        Fwd("Textarea", [$"{onText} onChange = null"], "onChange");
-        Fwd("Textarea", ["string text", $"{onText} onChange = null"], "text, onChange");
-        Fwd("Textarea", ["Signal text", $"{onText} onChange = null"], "text, onChange");
-        Fwd("Textarea", ["Field<string> text", $"{onText} onChange = null"], "text, onChange");
+        Fwd("Entry", [$"{onText} onChange = null", $"{onText} onSubmit = null"],
+            "onChange, onSubmit");
+        Fwd("Entry", ["string text", $"{onText} onChange = null", $"{onText} onSubmit = null"],
+            "text, onChange, onSubmit");
+        Fwd("Entry", ["Signal text", $"{onText} onChange = null", $"{onText} onSubmit = null"],
+            "text, onChange, onSubmit");
+        Fwd("Entry", ["Field<string> text", $"{onText} onChange = null", $"{onText} onSubmit = null"],
+            "text, onChange, onSubmit");
+        Fwd("Textarea", [$"{onText} onChange = null", $"{onText} onSubmit = null"],
+            "onChange, onSubmit");
+        Fwd("Textarea", ["string text", $"{onText} onChange = null", $"{onText} onSubmit = null"],
+            "text, onChange, onSubmit");
+        Fwd("Textarea", ["Signal text", $"{onText} onChange = null", $"{onText} onSubmit = null"],
+            "text, onChange, onSubmit");
+        Fwd("Textarea", ["Field<string> text", $"{onText} onChange = null", $"{onText} onSubmit = null"],
+            "text, onChange, onSubmit");
         // The rich template textarea, whose source is a Document FIELD
         // of the row (docs/rich-text-plan.md §19).
-        Fwd("Textarea", ["Field<Document> document", $"{onText} onChange = null"],
-            "document, onChange");
-        Fwd("Search", [$"{onText} onChange = null"], "onChange");
-        Fwd("Search", ["string text", $"{onText} onChange = null"], "text, onChange");
-        Fwd("Search", ["Signal text", $"{onText} onChange = null"], "text, onChange");
-        Fwd("Search", ["Field<string> text", $"{onText} onChange = null"], "text, onChange");
+        Fwd("Textarea", ["Field<Document> document", $"{onText} onChange = null", $"{onText} onSubmit = null"],
+            "document, onChange, onSubmit");
+        Fwd("Search", [$"{onText} onChange = null", $"{onText} onSubmit = null"],
+            "onChange, onSubmit");
+        Fwd("Search", ["string text", $"{onText} onChange = null", $"{onText} onSubmit = null"],
+            "text, onChange, onSubmit");
+        Fwd("Search", ["Signal text", $"{onText} onChange = null", $"{onText} onSubmit = null"],
+            "text, onChange, onSubmit");
+        Fwd("Search", ["Field<string> text", $"{onText} onChange = null", $"{onText} onSubmit = null"],
+            "text, onChange, onSubmit");
         Fwd("Progress", ["double value"], "value");
         Fwd("Progress", ["Signal value"], "value");
         Fwd("Progress", ["Field<double> value"], "value");
@@ -455,6 +467,7 @@ static class Program
         Set("SetRole", ["Node n", "Role role"], "n, role");
         Set("SetInset", ["Node n", "double pad"], "n, pad");
         Set("SetFill", ["Node n", "bool on"], "n, on");
+        Set("SetSubmits", ["Node n", "bool on"], "n, on");
         Set("SetAlign", ["Node n", "Align align"], "n, align");
         Set("SetColumnsAuto", ["Node n", "double minWidth"], "n, minWidth");
         Set("SetWrap", ["Node n", "bool on"], "n, on");

@@ -135,6 +135,12 @@
 #define KAYA_OCCURRENCE_DISMISS_REQUESTED 32
 
 /**
+ * SUBMITTED { tag; Str text } — the field's text at the submit gesture
+ * (docs/submit-plan.md S1), TEXT_CHANGED's body under its own kind.
+ */
+#define KAYA_OCCURRENCE_SUBMITTED 33
+
+/**
  * Transaction record kinds (guest -> core, via kaya_submit). Layouts,
  * after the common 8-byte header, little-endian, 8-aligned:
  *   CREATE_SIGNAL:     u64 signal_id, value
@@ -840,6 +846,11 @@
 #define KAYA_PROP_DOCUMENT 36
 
 /**
+ * A textarea whose Return submits (docs/submit-plan.md S2).
+ */
+#define KAYA_PROP_SUBMITS 37
+
+/**
  * Window properties (spec::WINDOW_PROPS): their own namespace —
  * windows are not widgets. Window 0 is the primary surface.
  */
@@ -1411,6 +1422,10 @@ typedef struct KayaHostApi {
                             uint64_t,
                             uint8_t,
                             uint8_t);
+  /**
+   * The field submitted (docs/submit-plan.md S1): the tag and its text.
+   */
+  void (*emit_submitted)(const uint8_t*, uintptr_t, const uint8_t*, uintptr_t);
   void (*emit_toggled)(const uint8_t*, uintptr_t, uint8_t);
   void (*emit_value_changed)(const uint8_t*, uintptr_t, double);
   /**
@@ -2368,6 +2383,16 @@ void kaya_emit_value_changed(const uint8_t *tag, uintptr_t tag_len, double value
  * Do not combine with kaya_run.
  */
 void kaya_emit_value_committed(const uint8_t *tag, uintptr_t tag_len, double value);
+
+/**
+ * Presentation side: the field SUBMITTED (docs/submit-plan.md S1) — `tag`
+ * the field's CREATE tag, `text`/`text_len` its content at the gesture. The
+ * gesture's door alone calls this; an edit goes through kaya_emit_text_changed.
+ */
+void kaya_emit_submitted(const uint8_t *tag,
+                         uintptr_t tag_len,
+                         const uint8_t *text,
+                         uintptr_t text_len);
 
 /**
  * Presentation side: emit an entry edit — `tag` the entry's CREATE tag,

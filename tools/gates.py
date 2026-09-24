@@ -105,6 +105,7 @@ GATES = [
     # byte (measured 2026-09-04).
     ("check-slider-commit", ["tools/check-slider-commit.py"], True, ""),
     ("check-search", ["tools/check-search.py"], True, ""),
+    ("check-submit", ["tools/check-submit.py"], True, ""),
     ("check-exclusive", ["tools/check-exclusive.py"], True, ""),
     # A red leg's bundle names its cause on every lane, or says what it
     # measured instead: one declared section list, every section reached

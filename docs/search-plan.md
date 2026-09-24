@@ -171,8 +171,9 @@ S1 filters on every keystroke, so Return has nothing to publish. The
 phones show the Search key regardless (Compose forces the IME action;
 iOS takes `.submitLabel(.search)`), and pressing it dismisses the
 keyboard and nothing else, on both. The shape for the day a consumer
-arrives is `submitted`, occurrence 27 with `value_committed`'s layout and
-check-slider-commit's gate shape. The maintainer's amendment names the
+arrives is `submitted`, with `value_committed`'s layout and
+check-slider-commit's gate shape (built 2026-09-24 as occurrence 33,
+docs/submit-plan.md). The maintainer's amendment names the
 consumer: a chat app, whose compose field sends on Return, is the
 milestone that pays for it; the ledger entry carries that trigger (and a
 search that asks a server, and a form whose Return submits, beside it).

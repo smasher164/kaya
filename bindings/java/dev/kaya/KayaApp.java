@@ -281,6 +281,7 @@ public final class KayaApp {
     final Map<Long, MenuSelectHandler> menuSelectedNode = new HashMap<>();
     private final Map<Long, BiConsumer<Tx, List<Object>>> nodeHandlers = new HashMap<>();
     private final Map<Long, BiConsumer<Tx, String>> widgetChanges = new HashMap<>();
+    private final Map<Long, BiConsumer<Tx, String>> widgetSubmits = new HashMap<>();
     // A rich textarea's addressed edits and toolbar acts, plus the
     // mirror both fold into (docs/rich-text-plan.md R1).
     private final Map<Long, BiConsumer<Tx, Edit>> widgetEdits = new HashMap<>();
@@ -293,6 +294,7 @@ public final class KayaApp {
     private final Map<Long, FormatHandler> nodeFormats = new HashMap<>();
     private final Map<Long, long[]> documentBinds = new HashMap<>();
     private final Map<Long, ChangeHandler> nodeChanges = new HashMap<>();
+    private final Map<Long, ChangeHandler> nodeSubmits = new HashMap<>();
     private final Map<Long, BiConsumer<Tx, Boolean>> widgetToggles = new HashMap<>();
     private final Map<Long, BiConsumer<Tx, Double>> widgetValues = new HashMap<>();
     private final Map<Long, ValueHandler> nodeValues = new HashMap<>();
@@ -3261,6 +3263,19 @@ public final class KayaApp {
             return this;
         }
 
+        /** This textarea SUBMITS on Return, Shift+Return inserts the
+         * newline, and the phone keyboard's key says Send
+         * (docs/submit-plan.md S2). Same discipline as {@link #rich}. */
+        public Widget submits() {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: submits on a widget outside its build transaction"
+                    + " — declare it where the textarea is made");
+            }
+            tx.emit(KayaWire.txSetSubmits(id, true));
+            return this;
+        }
+
         /** The app owns this textarea's history: the platform's own undo
          * stack is off on it and Edit>Undo reaches the app's Undo item
          * (docs/rich-text-plan.md R6, §14). Same discipline as
@@ -4295,6 +4310,12 @@ public final class KayaApp {
          * ({@link Tpl#setWrap}). */
         public void setWrap(Node n, boolean on) {
             t.setWrap(n, on);
+        }
+
+        /** Whether this row's copy of that textarea submits on Return
+         * ({@link Tpl#setSubmits}). */
+        public void setSubmits(Node n, boolean on) {
+            t.setSubmits(n, on);
         }
 
         /** This row's copy of that slider's granularity (Tpl.setStep). */
@@ -6705,6 +6726,13 @@ public final class KayaApp {
             tx.emit(KayaWire.txSetWrap(n.id, on));
         }
 
+        /** A stamped textarea that submits on Return
+         * (docs/submit-plan.md S2), the blueprint twin of
+         * {@link Widget#submits()}. */
+        public void setSubmits(Node n, boolean on) {
+            tx.emit(KayaWire.txSetSubmits(n.id, on));
+        }
+
         /** A stamped slider's granularity (docs/slider-plan.md S1):
          * constant across the copies, like the range. */
         public void setStep(Node n, double step) {
@@ -7841,6 +7869,15 @@ public final class KayaApp {
     }
 
     /**
+     * Register a submit handler for a live text field: the field's text
+     * at the submit gesture — Return in an entry or a search field, the
+     * send gesture on a {@code submits} textarea (docs/submit-plan.md S1).
+     */
+    public void onSubmitted(Widget w, BiConsumer<Tx, String> handler) {
+        widgetSubmits.put(w.id, handler);
+    }
+
+    /**
      * Register a handler for one addressed user edit of a {@code rich}
      * textarea; {@link #onChange} still fires beside it
      * (docs/rich-text-plan.md R1).
@@ -8200,6 +8237,15 @@ public final class KayaApp {
      */
     public void onChange(Node n, ChangeHandler handler) {
         nodeChanges.put(n.id, handler);
+    }
+
+    /**
+     * Register a submit handler for a template text field; it also
+     * receives the stamped copy's keys, outermost first
+     * (docs/submit-plan.md S7).
+     */
+    public void onSubmitted(Node n, ChangeHandler handler) {
+        nodeSubmits.put(n.id, handler);
     }
 
     /**
@@ -8593,6 +8639,20 @@ public final class KayaApp {
                 }
             } else if (occ.kind == KayaWire.OCC_KIND_TEXT_CHANGED) {
                 ChangeHandler handler = nodeChanges.get(occ.id);
+                if (handler != null) {
+                    dispatch(tx -> {
+                        handler.accept(tx, occ.keys, (String) occ.payload);
+                    });
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_SUBMITTED && occ.keys.isEmpty()) {
+                BiConsumer<Tx, String> handler = widgetSubmits.get(occ.id);
+                if (handler != null) {
+                    dispatch(tx -> {
+                        handler.accept(tx, (String) occ.payload);
+                    });
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_SUBMITTED) {
+                ChangeHandler handler = nodeSubmits.get(occ.id);
                 if (handler != null) {
                     dispatch(tx -> {
                         handler.accept(tx, occ.keys, (String) occ.payload);

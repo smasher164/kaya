@@ -47,6 +47,10 @@ object KayaPresent {
         quiet: Boolean,
     )
 
+    /** The field SUBMITTED (docs/submit-plan.md S1): its text at the gesture.
+     * kaya_emit_submitted's JNI spelling; the gesture's door, never an edit's. */
+    @JvmStatic external fun emitSubmitted(tag: ByteArray, text: String)
+
     @JvmStatic external fun emitToggled(tag: ByteArray, checked: Boolean)
     @JvmStatic external fun emitValueChanged(tag: ByteArray, value: Double)
 

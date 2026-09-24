@@ -1794,6 +1794,14 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
         self
     }
 
+    /// This textarea SUBMITS on Return (docs/submit-plan.md S2): Return
+    /// publishes [`Messages::on_submit`] and Shift+Return inserts the
+    /// newline; the phone keyboard's key says Send. Off, Return is a newline.
+    pub fn submits(self) -> Self {
+        self.tx.set(self.id, Prop::Submits, true);
+        self
+    }
+
     /// The app owns this rich textarea's undo (docs/rich-text-plan.md R6,
     /// §14): the native stack is off, and Edit>Undo/Redo reach the app
     /// through the role item's own `on_activate` while [`Tx::can_undo`] /
@@ -4410,6 +4418,10 @@ impl<'b> Row<'_, 'b> {
         self.tpl().wrap(node, on)
     }
 
+    pub fn submits(&mut self, node: TemplateNodeId) {
+        self.tpl().submits(node)
+    }
+
     pub fn a11y_hint(&mut self, node: TemplateNodeId, src: impl Into<TplSource<StrKind>>) {
         self.tpl().a11y_hint(node, src)
     }
@@ -4732,6 +4744,17 @@ impl<M> Messages<M> {
         );
     }
 
+    /// The field's text when the user SUBMITTED it — Return in an entry or
+    /// a search field, the send gesture on a `submits` textarea
+    /// (docs/submit-plan.md S1); `on_change` has already carried every edit.
+    pub fn on_submit(&self, w: WidgetId, f: impl Fn(String) -> M + 'static) {
+        self.widgets.borrow_mut().entry(w.0).or_default().push(Box::new(move |occ| match occ {
+                Occurrence::Submitted { text, .. } => Some(f(text.clone())),
+                _ => None,
+            }),
+        );
+    }
+
     /// One addressed user edit of a `rich` textarea; `on_change` still fires
     /// beside it (docs/rich-text-plan.md R1).
     pub fn on_edit(&self, w: WidgetId, f: impl Fn(Edit) -> M + 'static) {
@@ -4829,6 +4852,17 @@ impl<M> Messages<M> {
     pub fn on_change_node(&self, n: TemplateNodeId, f: impl Fn(Path, String) -> M + 'static) {
         self.nodes.borrow_mut().entry(n.0).or_default().push(Box::new(move |occ| match occ {
                 Occurrence::InstanceTextChanged { path, text, .. } => {
+                    Some(f(path.clone(), text.clone()))
+                }
+                _ => None,
+            }),
+        );
+    }
+
+    /// A stamped field's submit, keys first (docs/submit-plan.md S7).
+    pub fn on_submit_node(&self, n: TemplateNodeId, f: impl Fn(Path, String) -> M + 'static) {
+        self.nodes.borrow_mut().entry(n.0).or_default().push(Box::new(move |occ| match occ {
+                Occurrence::InstanceSubmitted { path, text, .. } => {
                     Some(f(path.clone(), text.clone()))
                 }
                 _ => None,
@@ -5341,6 +5375,7 @@ impl<M> Messages<M> {
                 }
                 Occurrence::ButtonClicked { id }
                 | Occurrence::TextChanged { id, .. }
+                | Occurrence::Submitted { id, .. }
                 | Occurrence::Toggled { id, .. }
                 | Occurrence::ValueChanged { id, .. }
                 | Occurrence::ValueCommitted { id, .. }
@@ -5358,6 +5393,7 @@ impl<M> Messages<M> {
                     .and_then(|fs| fs.iter().rev().find_map(|f| f(&occ))),
                 Occurrence::InstanceButtonClicked { node, .. }
                 | Occurrence::InstanceTextChanged { node, .. }
+                | Occurrence::InstanceSubmitted { node, .. }
                 | Occurrence::InstanceToggled { node, .. }
                 | Occurrence::InstanceValueChanged { node, .. }
                 | Occurrence::InstanceValueCommitted { node, .. }
@@ -7391,6 +7427,11 @@ impl<'b> Tpl<'_, 'b> {
         self.widget(WidgetKind::Textarea)
     }
 
+    /// A stamped textarea that submits on Return (docs/submit-plan.md S2).
+    pub fn submits(&mut self, node: TemplateNodeId) {
+        self.apply_source(node, Prop::Submits, SourceInner::Const(Value::Bool(true)));
+    }
+
     /// A textarea seeded from any addressable source; [`Self::entry_bound`]'s
     /// reasoning, one kind over.
     pub fn textarea_bound(&mut self, src: impl Into<TplSource<StrKind>>) -> TemplateNodeId {
@@ -8816,6 +8857,8 @@ mod tests {
                     Occurrence::InstanceButtonClicked { .. } => {}
                     Occurrence::TextChanged { .. }
                     | Occurrence::InstanceTextChanged { .. }
+                    | Occurrence::Submitted { .. }
+                    | Occurrence::InstanceSubmitted { .. }
                     | Occurrence::TextEdited { .. }
                     | Occurrence::InstanceTextEdited { .. }
                     | Occurrence::TextFormatted { .. }

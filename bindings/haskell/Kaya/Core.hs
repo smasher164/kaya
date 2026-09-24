@@ -1548,6 +1548,9 @@ data App = App
     appNodeHandlers :: IORef (Map.Map Word64 ([Key] -> IO ())),
     appWidgetChanges :: IORef (Map.Map Word64 (Text -> IO ())),
     appNodeChanges :: IORef (Map.Map Word64 ([Key] -> Text -> IO ())),
+    -- The submit gesture's own tables (docs/submit-plan.md S7).
+    appWidgetSubmits :: IORef (Map.Map Word64 (Text -> IO ())),
+    appNodeSubmits :: IORef (Map.Map Word64 ([Key] -> Text -> IO ())),
     -- The rich mirror, one Document per @rich@ textarea
     -- (docs/rich-text-plan.md R1): folded from the two occurrences here
     -- and from the app's own setDocument/applyEdit as they are SENT.

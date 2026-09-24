@@ -215,6 +215,10 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     // Blob field of its row. Template zone only; the live zone's document
     // is set_rich_text.
     ("document", 36, PropKind::Blob),
+    // docs/submit-plan.md S2: a textarea whose Return SUBMITS (Shift+Return
+    // inserts the newline; the phone keyboard's key says Send). Off, Return
+    // is the newline it always was. Legal on the textarea alone.
+    ("submits", 37, PropKind::Bool),
 ];
 
 /// Window properties: the presentation-context twin of PROPS, in its
@@ -3009,6 +3013,22 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   intercept_dismiss is armed. Nothing has gone; the app answers \
                   with dismiss_sheet if it agrees — the back_requested veto class.",
         },
+        Record {
+            kind: 33,
+            name: "submitted",
+            fields: &[
+                f("id", FieldTy::U64),
+                f("path_len", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+            ],
+            payload: Some(PropKind::Str),
+            doc: "path_len key values follow, then the field's text as one \
+                  value: the user SUBMITTED it (docs/submit-plan.md S1) — \
+                  Return in an entry or a search field, the send gesture on a \
+                  textarea that says `submits`. The gesture alone publishes, \
+                  never an edit; the field keeps its text and its focus, and \
+                  a programmatic write never echoes — text_changed's stance.",
+        },
     ],
     enums: &[
         EnumSpec {
@@ -3161,6 +3181,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("can_undo", 34),
                 ("can_redo", 35),
                 ("document", 36),
+                ("submits", 37),
             ],
         },
         EnumSpec {
@@ -3675,6 +3696,7 @@ mod tests {
                 ("text_formatted", crate::ring::REC_TEXT_FORMATTED),
                 ("sheet_dismissed", crate::ring::REC_SHEET_DISMISSED),
                 ("dismiss_requested", crate::ring::REC_DISMISS_REQUESTED),
+                ("submitted", crate::ring::REC_SUBMITTED),
             ]
         );
     }
@@ -3938,6 +3960,7 @@ mod tests {
                     ("prop", "can_undo") => wire::PROP_CAN_UNDO,
                     ("prop", "can_redo") => wire::PROP_CAN_REDO,
                     ("prop", "document") => wire::PROP_DOCUMENT,
+                    ("prop", "submits") => wire::PROP_SUBMITS,
                     ("wprop", "title") => wire::WPROP_TITLE,
                     ("wprop", "width") => wire::WPROP_WIDTH,
                     ("wprop", "height") => wire::WPROP_HEIGHT,

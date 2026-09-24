@@ -13412,8 +13412,16 @@ derived collection (a predicate over a source collection, stamped like a
 For) versus a hide-without-forgetting prop, and DESIGN.md's own note
 prefers the prop for the second.
 
-## DEFERRED — a `submitted` occurrence for text fields (Return in an entry, textarea or search field publishes nothing) (recorded 2026-09-06; the chat app is its milestone)
+## ~~DEFERRED — a `submitted` occurrence for text fields (Return in an entry, textarea or search field publishes nothing) (recorded 2026-09-06; the chat app is its milestone)~~ — LANDED 2026-09-24 (docs/submit-plan.md): occurrence kind 33 `submitted` carrying the field's text, the Bool prop 37 `submits` on the textarea, four backend arms through the gesture's own door, `on_submit` and `submits` in both zones of all nine bindings, tools/scenes/submit.steps on five lanes and tools/check-submit.py, 21 watched negatives
 KEY: submitted occurrence, submit on Return, QuerySubmitted, onSubmit, search key, occurrence 27, chat app, compose field
+
+RESOLUTION (2026-09-24, the maintainer's pick — "i think the submitted
+occurrence makes sense next. let's have the chat app is the ultimate
+goal"): built as docs/submit-plan.md says, with two amendments the build
+made — the kind is 33, not the 27 this entry recorded (27 became
+`notification_result` on 2026-09-08), and the scene drives the existing
+`press return` rather than a new `submit` verb (S5). The chat app's own
+plan is the next slice.
 
 No occurrence in the spec reports Return in a text field; `text_changed`
 is the entry's only event. The search field's design pass

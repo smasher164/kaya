@@ -103,6 +103,9 @@ pub const KAYA_OCCURRENCE_TEXT_FORMATTED: u16 = 30;
 /// (post-fact); DISMISS_REQUESTED { u64 sheet } — armed, nothing has gone.
 pub const KAYA_OCCURRENCE_SHEET_DISMISSED: u16 = 31;
 pub const KAYA_OCCURRENCE_DISMISS_REQUESTED: u16 = 32;
+/// SUBMITTED { tag; Str text } — the field's text at the submit gesture
+/// (docs/submit-plan.md S1), TEXT_CHANGED's body under its own kind.
+pub const KAYA_OCCURRENCE_SUBMITTED: u16 = 33;
 const _: () = assert!(
     KAYA_OCCURRENCE_PAD == ring::REC_PAD
         && KAYA_OCCURRENCE_BUTTON_CLICKED == ring::REC_BUTTON_CLICKED
@@ -116,6 +119,7 @@ const _: () = assert!(
         && KAYA_OCCURRENCE_BACK_REQUESTED == ring::REC_BACK_REQUESTED
         && KAYA_OCCURRENCE_SHEET_DISMISSED == ring::REC_SHEET_DISMISSED
         && KAYA_OCCURRENCE_DISMISS_REQUESTED == ring::REC_DISMISS_REQUESTED
+        && KAYA_OCCURRENCE_SUBMITTED == ring::REC_SUBMITTED
         && KAYA_OCCURRENCE_SECTION_SELECTED == ring::REC_SECTION_SELECTED
         && KAYA_OCCURRENCE_MENU_ACTIVATED == ring::REC_MENU_ACTIVATED
         && KAYA_OCCURRENCE_MENU_TOGGLED == ring::REC_MENU_TOGGLED
@@ -838,6 +842,8 @@ pub const KAYA_PROP_OWN_UNDO: u32 = 33;
 pub const KAYA_PROP_CAN_UNDO: u32 = 34;
 pub const KAYA_PROP_CAN_REDO: u32 = 35;
 pub const KAYA_PROP_DOCUMENT: u32 = 36;
+/// A textarea whose Return submits (docs/submit-plan.md S2).
+pub const KAYA_PROP_SUBMITS: u32 = 37;
 
 /// Window properties (spec::WINDOW_PROPS): their own namespace —
 /// windows are not widgets. Window 0 is the primary surface.
@@ -988,7 +994,7 @@ const _: () = assert!(
 // Completeness for the occurrence exports (docs/traps.md): a new spec
 // occurrence trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::SPEC.occurrence.len() == 32,
+    crate::spec::SPEC.occurrence.len() == 33,
     "spec occurrences grew: export the new KAYA_OCCURRENCE_* above, extend the pin, and \
      bump this count"
 );
@@ -1053,6 +1059,7 @@ const _: () = assert!(
         && KAYA_PROP_CAN_UNDO == wire::PROP_CAN_UNDO
         && KAYA_PROP_CAN_REDO == wire::PROP_CAN_REDO
         && KAYA_PROP_DOCUMENT == wire::PROP_DOCUMENT
+        && KAYA_PROP_SUBMITS == wire::PROP_SUBMITS
         && KAYA_WPROP_TITLE == wire::WPROP_TITLE
         && KAYA_WPROP_WIDTH == wire::WPROP_WIDTH
         && KAYA_WPROP_HEIGHT == wire::WPROP_HEIGHT
@@ -1301,7 +1308,7 @@ const _: () = {
 // Completeness, not just agreement (docs/traps.md): a new spec prop
 // trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::PROPS.len() == 36,
+    crate::spec::PROPS.len() == 37,
     "spec::PROPS grew: export the new KAYA_PROP_* above, extend the pin, and bump this count"
 );
 const _: () = assert!(
@@ -3853,6 +3860,34 @@ pub unsafe extern "C" fn kaya_emit_value_committed(tag: *const u8, tag_len: usiz
     state()
         .ring
         .push_record(ring::REC_VALUE_COMMITTED, &wire::value_committed_body(tag, value));
+}
+
+/// Presentation side: the field SUBMITTED (docs/submit-plan.md S1) — `tag`
+/// the field's CREATE tag, `text`/`text_len` its content at the gesture. The
+/// gesture's door alone calls this; an edit goes through kaya_emit_text_changed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_emit_submitted(
+    tag: *const u8,
+    tag_len: usize,
+    text: *const u8,
+    text_len: usize,
+) {
+    assert!(!tag.is_null() && tag_len != 0, "kaya: empty field tag");
+    let tag = unsafe { std::slice::from_raw_parts(tag, tag_len) };
+    let text = if text_len == 0 {
+        ""
+    } else {
+        assert!(!text.is_null(), "kaya: null text with nonzero length");
+        std::str::from_utf8(unsafe { std::slice::from_raw_parts(text, text_len) })
+            .expect("kaya: submitted text must be UTF-8")
+    };
+    if let Some(sink) = PRESENTATION_SINK.lock().unwrap().as_ref() {
+        sink.send_submitted_tag(tag, text);
+        return;
+    }
+    state()
+        .ring
+        .push_record(ring::REC_SUBMITTED, &wire::submitted_body(tag, text));
 }
 
 /// Presentation side: emit an entry edit — `tag` the entry's CREATE tag,

@@ -51,6 +51,7 @@ import (
 	"dev.kaya/guests/go/split"
 	"dev.kaya/guests/go/stall"
 	"dev.kaya/guests/go/styling"
+	"dev.kaya/guests/go/submit"
 	"dev.kaya/guests/go/table"
 	"dev.kaya/guests/go/textarea"
 	"dev.kaya/guests/go/todos"
@@ -118,6 +119,7 @@ var scenes = map[string]func() *kaya.App{
 	"split":      split.App,
 	"stall":      stall.App,
 	"styling":    styling.App,
+	"submit":     submit.App,
 	"textarea":   textarea.App,
 	"todos":      todos.App,
 	"toolbar":    toolbar.App,

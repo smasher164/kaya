@@ -165,6 +165,7 @@ module KayaApp
     markEdit,
     setRich,
     setOwnUndo,
+    setSubmits,
     setDocument,
     applyEdit,
     formatText,
@@ -2196,6 +2197,11 @@ setRich (Widget n) on = emitB (W.txSetRich n on)
 setOwnUndo :: Widget -> Bool -> Build ()
 setOwnUndo (Widget n) on = emitB (W.txSetOwnUndo n on)
 
+-- | Return in this textarea publishes 'onSubmit' instead of inserting a
+-- newline (docs\/submit-plan.md S2); Shift+Return is then the newline.
+setSubmits :: Widget -> Bool -> Build ()
+setSubmits (Widget n) on = emitB (W.txSetSubmits n on)
+
 -- | Replace a @rich@ textarea's whole document: echoes nothing and, like
 -- 'setText', spends the native undo history (docs\/undo-plan.md D7).
 --
@@ -2610,6 +2616,10 @@ data Attr (c :: WClass) where
   -- | The app owns this textarea's undo history
   -- (docs\/rich-text-plan.md R6, §14). Textarea only.
   OwnUndo :: Bool -> Attr 'LeafW
+  -- | Return in this textarea publishes 'onSubmit' and Shift+Return
+  -- inserts the newline (docs\/submit-plan.md S2). Textarea only: an entry
+  -- and a search field submit on Return with nothing to declare.
+  Submits :: Bool -> Attr 'LeafW
   -- | The PROMPT this field shows while its text is empty
   -- (docs\/search-plan.md S3). Entry, textarea and search only; the root
   -- refuses it elsewhere, and an empty one by name.
@@ -2666,6 +2676,7 @@ applyAttr (Help h) w = setHelp w h
 applyAttr (HelpBound sig) w = bindHelp w sig
 applyAttr (Rich on) w = setRich w on
 applyAttr (OwnUndo on) w = setOwnUndo w on
+applyAttr (Submits on) w = setSubmits w on
 applyAttr (Placeholder p) w = setPlaceholder w p
 applyAttr (PlaceholderBound sig) w = bindPlaceholder w sig
 applyAttr (Href u) w = setHref w u
@@ -3410,6 +3421,10 @@ data TplAttr where
   -- appearance. A CONSTANT; which role fits which kind is the ROOT'S
   -- call.
   TplRole :: Role -> TplAttr
+  -- | Return in this stamped textarea sends (the live 'Submits'). A
+  -- CONSTANT and not a source, for 'TplGrow''s reason: every copy of one
+  -- blueprint has the same gesture.
+  TplSubmits :: Bool -> TplAttr
   -- | A stamped slider's granularity (docs\/slider-plan.md S1): constant
   -- across the copies, like the range.
   TplStep :: Double -> TplAttr
@@ -3459,6 +3474,7 @@ applyTplAttr (TplHref v) n = bindStrSource hrefProp n v
 applyTplAttr (TplHrefBound src) n = bindStrSource hrefProp n src
 applyTplAttr (TplHrefField src) n = bindStrSource hrefProp n src
 applyTplAttr (TplRole r) n = setNodeRole n r
+applyTplAttr (TplSubmits on) n = setNodeSubmits n on
 applyTplAttr (TplStep step) (Node n) = emitT (W.txSetStep n step)
 applyTplAttr (TplTickSpacing spacing) (Node n) = emitT (W.txSetTickSpacing n spacing)
 applyTplAttr (TplAccepts kinds) n = setNodeAccepts n kinds
@@ -3483,6 +3499,10 @@ setNodeInset (Node n) pad = emitT (W.txSetInset n pad)
 -- | A stamped copy carries attribute runs (the live 'setRich').
 setNodeRich :: Node -> Bool -> Tpl ()
 setNodeRich (Node n) on = emitT (W.txSetRich n on)
+
+-- | A stamped textarea sends on Return (the live 'setSubmits').
+setNodeSubmits :: Node -> Bool -> Tpl ()
+setNodeSubmits (Node n) on = emitT (W.txSetSubmits n on)
 
 setNodeRole :: Node -> Role -> Tpl ()
 setNodeRole (Node n) r = emitT (W.txSetRole n (roleWire r))
@@ -3943,6 +3963,10 @@ class HandlerTarget e where
   -- the text into its own state — there is no read-back, by doctrine.
   onChange :: App -> e -> Keyed e (Text -> IO ()) -> IO ()
 
+  -- | The field's text at the moment of the platform's submit gesture
+  -- (docs\/submit-plan.md S7).
+  onSubmit :: App -> e -> Keyed e (Text -> IO ()) -> IO ()
+
   -- | The box owns its checked bit and reports each flip here; the app
   -- folds it into its own state.
   onToggle :: App -> e -> Keyed e (Bool -> IO ()) -> IO ()
@@ -3984,6 +4008,8 @@ instance HandlerTarget Widget where
     modifyIORef' (app.appWidgetHandlers) (Map.insert n handler)
   onChange app (Widget n) handler =
     modifyIORef' (app.appWidgetChanges) (Map.insert n handler)
+  onSubmit app (Widget n) handler =
+    modifyIORef' (app.appWidgetSubmits) (Map.insert n handler)
   onToggle app (Widget n) handler =
     modifyIORef' (app.appWidgetToggles) (Map.insert n handler)
   onValueChanged app (Widget n) handler =
@@ -4005,6 +4031,8 @@ instance HandlerTarget Node where
     modifyIORef' (app.appNodeHandlers) (Map.insert n handler)
   onChange app (Node n) handler =
     modifyIORef' (app.appNodeChanges) (Map.insert n handler)
+  onSubmit app (Node n) handler =
+    modifyIORef' (app.appNodeSubmits) (Map.insert n handler)
   onToggle app (Node n) handler =
     modifyIORef' (app.appNodeToggles) (Map.insert n handler)
   onValueChanged app (Node n) handler =
@@ -4066,6 +4094,8 @@ newApp =
     <*> newIORef Map.empty -- appNodeHandlers
     <*> newIORef Map.empty -- appWidgetChanges
     <*> newIORef Map.empty -- appNodeChanges
+    <*> newIORef Map.empty -- appWidgetSubmits
+    <*> newIORef Map.empty -- appNodeSubmits
     <*> newIORef Map.empty -- appDocuments
     <*> newIORef Map.empty -- appDocumentBinds
     <*> newIORef Map.empty -- appNodeEdits
@@ -4254,6 +4284,16 @@ dispatchLoop app = do
               dispatch (mapM_ ($ content) (Map.lookup ident handlers))
             _ -> do
               handlers <- readIORef (app.appNodeChanges)
+              dispatch (mapM_ (\h -> h (keyPath keys) content) (Map.lookup ident handlers))
+          dispatchLoop app
+      | kind == W.occKindSubmitted -> do
+          let content = case payload of Just (W.VStr s) -> T.pack s; _ -> ""
+          case keys of
+            [] -> do
+              handlers <- readIORef (app.appWidgetSubmits)
+              dispatch (mapM_ ($ content) (Map.lookup ident handlers))
+            _ -> do
+              handlers <- readIORef (app.appNodeSubmits)
               dispatch (mapM_ (\h -> h (keyPath keys) content) (Map.lookup ident handlers))
           dispatchLoop app
       | kind == W.occKindToggled -> do

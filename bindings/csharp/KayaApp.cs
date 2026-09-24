@@ -782,6 +782,8 @@ sealed record ButtonClicked(ulong Id, List<object> Keys) : Occurrence(Id, Keys);
 
 sealed record TextChanged(ulong Id, List<object> Keys, string Text) : Occurrence(Id, Keys);
 
+sealed record Submitted(ulong Id, List<object> Keys, string Text) : Occurrence(Id, Keys);
+
 sealed record Toggled(ulong Id, List<object> Keys, bool Checked) : Occurrence(Id, Keys);
 
 sealed record ValueChanged(ulong Id, List<object> Keys, double Value) : Occurrence(Id, Keys);
@@ -1270,6 +1272,8 @@ sealed class KayaApp
     readonly Dictionary<ulong, Action<Tx, List<object>>> nodeHandlers = new();
     readonly Dictionary<ulong, Action<Tx, string>> widgetChanges = new();
     readonly Dictionary<ulong, Action<Tx, List<object>, string>> nodeChanges = new();
+    readonly Dictionary<ulong, Action<Tx, string>> widgetSubmits = new();
+    readonly Dictionary<ulong, Action<Tx, List<object>, string>> nodeSubmits = new();
     // A rich textarea's addressed edits and toolbar acts, plus the
     // mirror both fold into (docs/rich-text-plan.md R1).
     readonly Dictionary<ulong, Action<Tx, Edit>> widgetEdits = new();
@@ -1724,6 +1728,12 @@ sealed class KayaApp
     /// text and reports each edit here. There is no read-back.
     public void OnChange(Widget w, Action<Tx, string> handler) => widgetChanges[w.Id] = handler;
 
+    /// The field's text when the user SUBMITTED it — Return in an entry or
+    /// a search field, the send gesture on a `submits` textarea
+    /// (docs/submit-plan.md S1); OnChange has already carried every edit.
+    public void OnSubmitted(Widget w, Action<Tx, string> handler) =>
+        widgetSubmits[w.Id] = handler;
+
     /// One addressed user edit of a `rich` textarea; OnChange still
     /// fires beside it (docs/rich-text-plan.md R1).
     public void OnEdit(Widget w, Action<Tx, Edit> handler) => widgetEdits[w.Id] = handler;
@@ -1978,6 +1988,11 @@ sealed class KayaApp
     public void OnChange(Node n, Action<Tx, List<object>, string> handler) =>
         nodeChanges[n.Id] = handler;
 
+    /// A stamped field's submit; the handler also receives that copy's keys,
+    /// outermost first (docs/submit-plan.md S7).
+    public void OnSubmitted(Node n, Action<Tx, List<object>, string> handler) =>
+        nodeSubmits[n.Id] = handler;
+
     /// Register a toggle handler for a live checkbox: the box owns its
     /// checked bit and reports each flip here.
     public void OnToggle(Widget w, Action<Tx, bool> handler) => widgetToggles[w.Id] = handler;
@@ -2214,6 +2229,8 @@ sealed class KayaApp
             case KayaWire.OccKindButtonClicked: return new ButtonClicked(id, keys);
             case KayaWire.OccKindTextChanged:
                 return new TextChanged(id, keys, payload as string ?? "");
+            case KayaWire.OccKindSubmitted:
+                return new Submitted(id, keys, payload as string ?? "");
             case KayaWire.OccKindToggled: return new Toggled(id, keys, flag);
             case KayaWire.OccKindValueChanged: return new ValueChanged(id, keys, number);
             case KayaWire.OccKindValueCommitted: return new ValueCommitted(id, keys, number);
@@ -2325,6 +2342,14 @@ sealed class KayaApp
                 case TextChanged textRow
                     when nodeChanges.TryGetValue(textRow.Id, out var onTextRow):
                     Dispatch(tx => onTextRow(tx, textRow.Keys, textRow.Text));
+                    break;
+                case Submitted { Live: true } sentLive
+                    when widgetSubmits.TryGetValue(sentLive.Id, out var onSent):
+                    Dispatch(tx => onSent(tx, sentLive.Text));
+                    break;
+                case Submitted sentRow
+                    when nodeSubmits.TryGetValue(sentRow.Id, out var onSentRow):
+                    Dispatch(tx => onSentRow(tx, sentRow.Keys, sentRow.Text));
                     break;
                 // THE MIRROR FOLLOWS FIRST, and unconditionally — before the
                 // handler lookup, so a rich textarea nobody registered for
@@ -3128,10 +3153,12 @@ sealed class Tx : IDisposable
         return w;
     }
 
-    public Widget Entry(Action<Tx, string>? onChange = null, double? grow = null)
+    public Widget Entry(Action<Tx, string>? onChange = null, double? grow = null,
+        Action<Tx, string>? onSubmit = null)
     {
         var w = Widget(KayaWire.KindEntry);
         if (onChange != null) App.OnChange(w, onChange);
+        if (onSubmit != null) App.OnSubmitted(w, onSubmit);
         if (grow is double g) SetGrow(w, g);
         return w;
     }
@@ -3141,15 +3168,20 @@ sealed class Tx : IDisposable
     /// carry attribute runs — SetDocument, ApplyEdit, KayaApp.OnEdit
     /// (docs/rich-text-plan.md R1). `ownUndo: true` turns the platform's
     /// own undo stack off on this widget and routes Edit>Undo to the
-    /// app's Undo item (docs/rich-text-plan.md R6, §14).
+    /// app's Undo item (docs/rich-text-plan.md R6, §14). `submits: true`
+    /// sends on Return — KayaApp.OnSubmitted — and Shift+Return inserts
+    /// the newline (docs/submit-plan.md S2).
     public Widget Textarea(Action<Tx, string>? onChange = null, double? grow = null,
-        bool rich = false, bool ownUndo = false)
+        bool rich = false, bool ownUndo = false, bool submits = false,
+        Action<Tx, string>? onSubmit = null)
     {
         var w = Widget(KayaWire.KindTextarea);
         if (onChange != null) App.OnChange(w, onChange);
+        if (onSubmit != null) App.OnSubmitted(w, onSubmit);
         if (grow is double g) SetGrow(w, g);
         if (rich) Records.Add(KayaWire.TxSetRich(w.Id, true));
         if (ownUndo) Records.Add(KayaWire.TxSetOwnUndo(w.Id, true));
+        if (submits) Records.Add(KayaWire.TxSetSubmits(w.Id, true));
         return w;
     }
 
@@ -3157,10 +3189,12 @@ sealed class Tx : IDisposable
     /// platform's search chrome, filtering on every keystroke
     /// (docs/search-plan.md). The clear affordance arrives at onChange
     /// with "".
-    public Widget Search(Action<Tx, string>? onChange = null, double? grow = null)
+    public Widget Search(Action<Tx, string>? onChange = null, double? grow = null,
+        Action<Tx, string>? onSubmit = null)
     {
         var w = Widget(KayaWire.KindSearch);
         if (onChange != null) App.OnChange(w, onChange);
+        if (onSubmit != null) App.OnSubmitted(w, onSubmit);
         if (grow is double g) SetGrow(w, g);
         return w;
     }
@@ -4806,6 +4840,10 @@ sealed class Tpl
     public void SetFill(Node n, bool on) =>
         tx.Records.Add(KayaWire.TxSetFill(n.Id, on));
 
+    /// A stamped textarea that SENDS on Return (docs/submit-plan.md S2).
+    public void SetSubmits(Node n, bool on) =>
+        tx.Records.Add(KayaWire.TxSetSubmits(n.Id, on));
+
     /// A stamped container's cross-axis child placement (Tx.SetAlign).
     public void SetAlign(Node n, Align align) =>
         tx.Records.Add(KayaWire.TxSetAlign(n.Id, (long)align));
@@ -5055,30 +5093,35 @@ sealed class Tpl
     /// with that copy's keys, outermost first. The three below SEED the
     /// copy instead — seeding does not make it controlled, and a later
     /// write to the source replaces what the user typed, quietly.
-    public Node Entry(Action<Tx, List<object>, string>? onChange = null)
+    public Node Entry(Action<Tx, List<object>, string>? onChange = null,
+        Action<Tx, List<object>, string>? onSubmit = null)
     {
         var n = Widget(KayaWire.KindEntry);
         if (onChange != null) tx.App.OnChange(n, onChange);
+        if (onSubmit != null) tx.App.OnSubmitted(n, onSubmit);
         return n;
     }
 
-    public Node Entry(string text, Action<Tx, List<object>, string>? onChange = null)
+    public Node Entry(string text, Action<Tx, List<object>, string>? onChange = null,
+        Action<Tx, List<object>, string>? onSubmit = null)
     {
-        var n = Entry(onChange);
+        var n = Entry(onChange, onSubmit);
         SetText(n, text);
         return n;
     }
 
-    public Node Entry(Signal text, Action<Tx, List<object>, string>? onChange = null)
+    public Node Entry(Signal text, Action<Tx, List<object>, string>? onChange = null,
+        Action<Tx, List<object>, string>? onSubmit = null)
     {
-        var n = Entry(onChange);
+        var n = Entry(onChange, onSubmit);
         tx.Records.Add(KayaWire.TxBindText(n.Id, text.Id));
         return n;
     }
 
-    public Node Entry(Field<string> text, Action<Tx, List<object>, string>? onChange = null)
+    public Node Entry(Field<string> text, Action<Tx, List<object>, string>? onChange = null,
+        Action<Tx, List<object>, string>? onSubmit = null)
     {
-        var n = Entry(onChange);
+        var n = Entry(onChange, onSubmit);
         BindTextField(n, 0, text);
         return n;
     }
@@ -5086,30 +5129,35 @@ sealed class Tpl
     /// A multi-line editor in the blueprint: Entry's contract over the
     /// platform's real multi-line control, with the same four arms for
     /// the same reason.
-    public Node Textarea(Action<Tx, List<object>, string>? onChange = null)
+    public Node Textarea(Action<Tx, List<object>, string>? onChange = null,
+        Action<Tx, List<object>, string>? onSubmit = null)
     {
         var n = Widget(KayaWire.KindTextarea);
         if (onChange != null) tx.App.OnChange(n, onChange);
+        if (onSubmit != null) tx.App.OnSubmitted(n, onSubmit);
         return n;
     }
 
-    public Node Textarea(string text, Action<Tx, List<object>, string>? onChange = null)
+    public Node Textarea(string text, Action<Tx, List<object>, string>? onChange = null,
+        Action<Tx, List<object>, string>? onSubmit = null)
     {
-        var n = Textarea(onChange);
+        var n = Textarea(onChange, onSubmit);
         SetText(n, text);
         return n;
     }
 
-    public Node Textarea(Signal text, Action<Tx, List<object>, string>? onChange = null)
+    public Node Textarea(Signal text, Action<Tx, List<object>, string>? onChange = null,
+        Action<Tx, List<object>, string>? onSubmit = null)
     {
-        var n = Textarea(onChange);
+        var n = Textarea(onChange, onSubmit);
         tx.Records.Add(KayaWire.TxBindText(n.Id, text.Id));
         return n;
     }
 
-    public Node Textarea(Field<string> text, Action<Tx, List<object>, string>? onChange = null)
+    public Node Textarea(Field<string> text, Action<Tx, List<object>, string>? onChange = null,
+        Action<Tx, List<object>, string>? onSubmit = null)
     {
-        var n = Textarea(onChange);
+        var n = Textarea(onChange, onSubmit);
         BindTextField(n, 0, text);
         return n;
     }
@@ -5121,9 +5169,10 @@ sealed class Tpl
     /// widget's fold into its mirror, so the app writes a copy's document
     /// by patching the row and reads it back off the row.
     public Node Textarea(Field<Document> document,
-        Action<Tx, List<object>, string>? onChange = null)
+        Action<Tx, List<object>, string>? onChange = null,
+        Action<Tx, List<object>, string>? onSubmit = null)
     {
-        var n = Textarea(onChange);
+        var n = Textarea(onChange, onSubmit);
         tx.Records.Add(KayaWire.TxSetRich(n.Id, true));
         BindDocumentField(n, document);
         return n;
@@ -5132,30 +5181,35 @@ sealed class Tpl
     /// A search field in the blueprint: Entry's contract under the
     /// platform's search chrome, with the same four arms for the same
     /// reason (docs/search-plan.md).
-    public Node Search(Action<Tx, List<object>, string>? onChange = null)
+    public Node Search(Action<Tx, List<object>, string>? onChange = null,
+        Action<Tx, List<object>, string>? onSubmit = null)
     {
         var n = Widget(KayaWire.KindSearch);
         if (onChange != null) tx.App.OnChange(n, onChange);
+        if (onSubmit != null) tx.App.OnSubmitted(n, onSubmit);
         return n;
     }
 
-    public Node Search(string text, Action<Tx, List<object>, string>? onChange = null)
+    public Node Search(string text, Action<Tx, List<object>, string>? onChange = null,
+        Action<Tx, List<object>, string>? onSubmit = null)
     {
-        var n = Search(onChange);
+        var n = Search(onChange, onSubmit);
         SetText(n, text);
         return n;
     }
 
-    public Node Search(Signal text, Action<Tx, List<object>, string>? onChange = null)
+    public Node Search(Signal text, Action<Tx, List<object>, string>? onChange = null,
+        Action<Tx, List<object>, string>? onSubmit = null)
     {
-        var n = Search(onChange);
+        var n = Search(onChange, onSubmit);
         tx.Records.Add(KayaWire.TxBindText(n.Id, text.Id));
         return n;
     }
 
-    public Node Search(Field<string> text, Action<Tx, List<object>, string>? onChange = null)
+    public Node Search(Field<string> text, Action<Tx, List<object>, string>? onChange = null,
+        Action<Tx, List<object>, string>? onSubmit = null)
     {
-        var n = Search(onChange);
+        var n = Search(onChange, onSubmit);
         BindTextField(n, 0, text);
         return n;
     }

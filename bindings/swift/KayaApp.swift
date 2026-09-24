@@ -2389,6 +2389,8 @@ public final class KayaApp {
     private var nodeHandlers: [UInt64: (KayaAppTx, [KayaValue]) throws -> Void] = [:]
     private var widgetChanges: [UInt64: (KayaAppTx, String) throws -> Void] = [:]
     private var nodeChanges: [UInt64: (KayaAppTx, [KayaValue], String) throws -> Void] = [:]
+    private var widgetSubmits: [UInt64: (KayaAppTx, String) throws -> Void] = [:]
+    private var nodeSubmits: [UInt64: (KayaAppTx, [KayaValue], String) throws -> Void] = [:]
     private var widgetToggles: [UInt64: (KayaAppTx, Bool) throws -> Void] = [:]
     private var widgetValues: [UInt64: (KayaAppTx, Double) throws -> Void] = [:]
     private var nodeValues: [UInt64: (KayaAppTx, [KayaValue], Double) throws -> Void] = [:]
@@ -2810,6 +2812,21 @@ public final class KayaApp {
         _ n: KayaNodeHandle, _ handler: @escaping (KayaAppTx, [KayaValue], String) throws -> Void
     ) {
         nodeChanges[n.id] = handler
+    }
+
+    /// The field's text when the user SUBMITTED it (docs/submit-plan.md S7):
+    /// Return in an entry or a search field, the send gesture on a `submits`
+    /// textarea. `onChange` has already carried every edit.
+    public func onSubmitted(_ w: KayaWidget, _ handler: @escaping (KayaAppTx, String) throws -> Void) {
+        widgetSubmits[w.id] = handler
+    }
+
+    /// Register a submit handler for a template field; it also receives
+    /// the stamped copy's keys, outermost first.
+    func onSubmitted(
+        _ n: KayaNodeHandle, _ handler: @escaping (KayaAppTx, [KayaValue], String) throws -> Void
+    ) {
+        nodeSubmits[n.id] = handler
     }
 
     /// One addressed user edit of a `rich` textarea; `onChange` still
@@ -3451,6 +3468,14 @@ public final class KayaApp {
                 }
             case (UInt16(KAYA_OCCURRENCE_TEXT_CHANGED), false):
                 if let handler = nodeChanges[id] {
+                    dispatch { try build { tx in try handler(tx, keys, text ?? "") } }
+                }
+            case (UInt16(KAYA_OCCURRENCE_SUBMITTED), true):
+                if let handler = widgetSubmits[id] {
+                    dispatch { try build { tx in try handler(tx, text ?? "") } }
+                }
+            case (UInt16(KAYA_OCCURRENCE_SUBMITTED), false):
+                if let handler = nodeSubmits[id] {
                     dispatch { try build { tx in try handler(tx, keys, text ?? "") } }
                 }
             // THE MIRROR IS FOLDED BEFORE THE HANDLER RUNS, so a handler
@@ -4298,12 +4323,17 @@ public final class KayaAppTx {
         return w
     }
 
+    /// `onSubmit:` answers the Return gesture with the field's text
+    /// (docs/submit-plan.md S7); the field keeps its text and its focus.
     @discardableResult
     public func entry(
-        onChange: ((KayaAppTx, String) throws -> Void)? = nil, grow: Double? = nil
+        onChange: ((KayaAppTx, String) throws -> Void)? = nil,
+        onSubmit: ((KayaAppTx, String) throws -> Void)? = nil,
+        grow: Double? = nil
     ) -> KayaWidget {
         let w = widget(UInt32(KAYA_KIND_ENTRY))
         if let onChange { app.onChange(w, onChange) }
+        if let onSubmit { app.onSubmitted(w, onSubmit) }
         if let grow { setGrow(w, grow) }
         return w
     }
@@ -4312,10 +4342,14 @@ public final class KayaAppTx {
     /// `rich:` adds the attribute-run channel (docs/rich-text-plan.md R1):
     /// `onEdit:` and `onFormat:` answer only on one. `ownUndo:` turns the
     /// platform's own undo stack off on this widget and routes Edit>Undo
-    /// to the app's Undo item (docs/rich-text-plan.md R6, §14).
+    /// to the app's Undo item (docs/rich-text-plan.md R6, §14). `submits:`
+    /// makes Return the send gesture and Shift+Return the newline
+    /// (docs/submit-plan.md S2); off, Return is the newline.
     @discardableResult
     public func textarea(
         onChange: ((KayaAppTx, String) throws -> Void)? = nil,
+        onSubmit: ((KayaAppTx, String) throws -> Void)? = nil,
+        submits: Bool = false,
         rich: Bool = false,
         ownUndo: Bool = false,
         onEdit: ((KayaAppTx, KayaEdit) throws -> Void)? = nil,
@@ -4324,6 +4358,8 @@ public final class KayaAppTx {
     ) -> KayaWidget {
         let w = widget(UInt32(KAYA_KIND_TEXTAREA))
         if let onChange { app.onChange(w, onChange) }
+        if let onSubmit { app.onSubmitted(w, onSubmit) }
+        if submits { tx.setSubmits(w.id, true) }
         if rich { setRich(w, true) }
         if ownUndo { tx.setOwnUndo(w.id, true) }
         if let onEdit { app.onEdit(w, onEdit) }
@@ -4338,10 +4374,13 @@ public final class KayaAppTx {
     /// with "".
     @discardableResult
     public func search(
-        onChange: ((KayaAppTx, String) throws -> Void)? = nil, grow: Double? = nil
+        onChange: ((KayaAppTx, String) throws -> Void)? = nil,
+        onSubmit: ((KayaAppTx, String) throws -> Void)? = nil,
+        grow: Double? = nil
     ) -> KayaWidget {
         let w = widget(UInt32(KAYA_KIND_SEARCH))
         if let onChange { app.onChange(w, onChange) }
+        if let onSubmit { app.onSubmitted(w, onSubmit) }
         if let grow { setGrow(w, grow) }
         return w
     }
@@ -5795,6 +5834,11 @@ public final class KayaTpl {
         tx.tx.setWrap(n.id, on)
     }
 
+    /// A stamped textarea that SUBMITS on Return (docs/submit-plan.md S2).
+    public func setSubmits(_ n: KayaNodeHandle, _ on: Bool) {
+        tx.tx.setSubmits(n.id, on)
+    }
+
     /// What ACTIVATING a stamped copy does. Write a VERB PHRASE.
     /// Activation kinds only, refused by the ROOT at DECLARE time.
     public func setA11yHint(_ n: KayaNodeHandle, _ hint: String) {
@@ -6067,9 +6111,10 @@ public final class KayaTpl {
     /// naming this node AND the copy's key path.
     @discardableResult
     public func entry(
-        onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
+        onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil,
+        onSubmit: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
     ) -> KayaNodeHandle {
-        textFieldOf(UInt32(KAYA_KIND_ENTRY), onChange)
+        textFieldOf(UInt32(KAYA_KIND_ENTRY), onChange, onSubmit)
     }
 
     /// An entry seeded from an addressable source. HOW LONG THE SOURCE
@@ -6080,9 +6125,10 @@ public final class KayaTpl {
     @discardableResult
     func entry(
         _ text: String,
-        onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
+        onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil,
+        onSubmit: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
     ) -> KayaNodeHandle {
-        let n = textFieldOf(UInt32(KAYA_KIND_ENTRY), onChange)
+        let n = textFieldOf(UInt32(KAYA_KIND_ENTRY), onChange, onSubmit)
         setText(n, text)
         return n
     }
@@ -6090,9 +6136,10 @@ public final class KayaTpl {
     @discardableResult
     func entry(
         _ s: KayaSignal,
-        onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
+        onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil,
+        onSubmit: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
     ) -> KayaNodeHandle {
-        let n = textFieldOf(UInt32(KAYA_KIND_ENTRY), onChange)
+        let n = textFieldOf(UInt32(KAYA_KIND_ENTRY), onChange, onSubmit)
         tx.tx.bindText(n.id, s.id)
         return n
     }
@@ -6100,9 +6147,10 @@ public final class KayaTpl {
     @discardableResult
     func entry(
         _ f: KayaField<String>,
-        onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
+        onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil,
+        onSubmit: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
     ) -> KayaNodeHandle {
-        let n = textFieldOf(UInt32(KAYA_KIND_ENTRY), onChange)
+        let n = textFieldOf(UInt32(KAYA_KIND_ENTRY), onChange, onSubmit)
         bindTextField(n, f)
         return n
     }
@@ -6111,17 +6159,19 @@ public final class KayaTpl {
     /// contract and with the same four spellings.
     @discardableResult
     func textarea(
-        onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
+        onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil,
+        onSubmit: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
     ) -> KayaNodeHandle {
-        textFieldOf(UInt32(KAYA_KIND_TEXTAREA), onChange)
+        textFieldOf(UInt32(KAYA_KIND_TEXTAREA), onChange, onSubmit)
     }
 
     @discardableResult
     func textarea(
         _ text: String,
-        onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
+        onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil,
+        onSubmit: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
     ) -> KayaNodeHandle {
-        let n = textFieldOf(UInt32(KAYA_KIND_TEXTAREA), onChange)
+        let n = textFieldOf(UInt32(KAYA_KIND_TEXTAREA), onChange, onSubmit)
         setText(n, text)
         return n
     }
@@ -6129,9 +6179,10 @@ public final class KayaTpl {
     @discardableResult
     func textarea(
         _ s: KayaSignal,
-        onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
+        onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil,
+        onSubmit: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
     ) -> KayaNodeHandle {
-        let n = textFieldOf(UInt32(KAYA_KIND_TEXTAREA), onChange)
+        let n = textFieldOf(UInt32(KAYA_KIND_TEXTAREA), onChange, onSubmit)
         tx.tx.bindText(n.id, s.id)
         return n
     }
@@ -6139,9 +6190,10 @@ public final class KayaTpl {
     @discardableResult
     func textarea(
         _ f: KayaField<String>,
-        onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
+        onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil,
+        onSubmit: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
     ) -> KayaNodeHandle {
-        let n = textFieldOf(UInt32(KAYA_KIND_TEXTAREA), onChange)
+        let n = textFieldOf(UInt32(KAYA_KIND_TEXTAREA), onChange, onSubmit)
         bindTextField(n, f)
         return n
     }
@@ -6155,9 +6207,10 @@ public final class KayaTpl {
     @discardableResult
     public func textarea(
         document f: KayaField<KayaDocument>,
-        onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
+        onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil,
+        onSubmit: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
     ) -> KayaNodeHandle {
-        let n = textFieldOf(UInt32(KAYA_KIND_TEXTAREA), onChange)
+        let n = textFieldOf(UInt32(KAYA_KIND_TEXTAREA), onChange, onSubmit)
         tx.tx.setRich(n.id, true)
         // LEVEL 0 ONLY: the fold names the row by the occurrence's own
         // last key.
@@ -6171,17 +6224,19 @@ public final class KayaTpl {
     /// spellings (docs/search-plan.md).
     @discardableResult
     public func search(
-        onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
+        onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil,
+        onSubmit: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
     ) -> KayaNodeHandle {
-        textFieldOf(UInt32(KAYA_KIND_SEARCH), onChange)
+        textFieldOf(UInt32(KAYA_KIND_SEARCH), onChange, onSubmit)
     }
 
     @discardableResult
     public func search(
         _ text: String,
-        onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
+        onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil,
+        onSubmit: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
     ) -> KayaNodeHandle {
-        let n = textFieldOf(UInt32(KAYA_KIND_SEARCH), onChange)
+        let n = textFieldOf(UInt32(KAYA_KIND_SEARCH), onChange, onSubmit)
         setText(n, text)
         return n
     }
@@ -6189,9 +6244,10 @@ public final class KayaTpl {
     @discardableResult
     public func search(
         _ s: KayaSignal,
-        onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
+        onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil,
+        onSubmit: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
     ) -> KayaNodeHandle {
-        let n = textFieldOf(UInt32(KAYA_KIND_SEARCH), onChange)
+        let n = textFieldOf(UInt32(KAYA_KIND_SEARCH), onChange, onSubmit)
         tx.tx.bindText(n.id, s.id)
         return n
     }
@@ -6199,19 +6255,24 @@ public final class KayaTpl {
     @discardableResult
     public func search(
         _ f: KayaField<String>,
-        onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
+        onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil,
+        onSubmit: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
     ) -> KayaNodeHandle {
-        let n = textFieldOf(UInt32(KAYA_KIND_SEARCH), onChange)
+        let n = textFieldOf(UInt32(KAYA_KIND_SEARCH), onChange, onSubmit)
         bindTextField(n, f)
         return n
     }
 
-    /// The unsourced half of the text kinds: the widget and its handler.
+    /// The unsourced half of the text kinds: the widget and its handlers.
+    /// `onSubmit:` is the stamped copy's Return gesture, keys first
+    /// (docs/submit-plan.md S7).
     private func textFieldOf(
-        _ kind: UInt32, _ onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)?
+        _ kind: UInt32, _ onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)?,
+        _ onSubmit: ((KayaAppTx, [KayaValue], String) throws -> Void)?
     ) -> KayaNodeHandle {
         let n = widget(kind)
         if let onChange { tx.app.onChange(n, onChange) }
+        if let onSubmit { tx.app.onSubmitted(n, onSubmit) }
         return n
     }
 

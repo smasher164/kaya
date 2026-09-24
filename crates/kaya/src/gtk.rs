@@ -4608,6 +4608,9 @@ struct CoreState {
     /// The textareas `rich` is on for (docs/rich-text-plan.md R1); the buffer
     /// handlers read it to stay off every plain field.
     rich: std::rc::Rc<RefCell<std::collections::HashSet<u64>>>,
+    /// The textareas whose Return submits (docs/submit-plan.md S2), read by
+    /// each view's key controller at the keystroke.
+    submits: std::rc::Rc<RefCell<std::collections::HashSet<u64>>>,
     /// The textareas the APP owns the history of (docs/rich-text-plan.md §14);
     /// the buffer's own history is off there, which the typing verb's native
     /// proof has to know.
@@ -10433,6 +10436,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     set_text_field(entry.upcast_ref());
                     let sink = core.occurrences.clone();
                     let tag = tag.expect("entries carry a tag");
+                    let submit_tag = tag.clone();
                     let quiet = core.apply_quiet.clone();
                     let ledger_quiet = core.ledger_quiet.clone();
                     let dirty = core.native_dirty.clone();
@@ -10449,6 +10453,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                                 bank_text_changed(tag.clone(), text, widget_focused(e));
                             }
                         }
+                    });
+                    // RETURN SUBMITS (docs/submit-plan.md S2): GTK's own
+                    // `activate`, the gesture's door and never an edit's.
+                    let submit_sink = core.occurrences.clone();
+                    entry.connect_activate(move |e| {
+                        submit_sink.send_submitted_tag(&submit_tag, &lf(e.text().to_string()));
                     });
                     core.entries.push(entry.clone());
                     NativeWidget::Entry(entry)
@@ -10667,6 +10677,31 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     let wid = id.0;
                     let buffer = view.buffer();
                     install_rich_link_click(&view, wid);
+                    // A SUBMITTING TEXTAREA (docs/submit-plan.md S2): Return
+                    // publishes and inserts nothing, Shift+Return is the
+                    // newline; a plain textarea's Return reaches the buffer.
+                    // CAPTURE phase, ahead of the view's own key handling.
+                    let submits = core.submits.clone();
+                    let submit_sink = core.occurrences.clone();
+                    let submit_tag = tag.clone();
+                    let submit_buffer = buffer.clone();
+                    let keys = gtk4::EventControllerKey::new();
+                    keys.set_propagation_phase(gtk4::PropagationPhase::Capture);
+                    keys.connect_key_pressed(move |_, key, _code, state| {
+                        let is_return = key == gtk4::gdk::Key::Return || key == gtk4::gdk::Key::KP_Enter;
+                        if !is_return || !submits.borrow().contains(&wid) {
+                            return glib::Propagation::Proceed;
+                        }
+                        if state.contains(gtk4::gdk::ModifierType::SHIFT_MASK) {
+                            submit_buffer.insert_at_cursor("\n");
+                            return glib::Propagation::Stop;
+                        }
+                        let (start, end) = submit_buffer.bounds();
+                        let text = lf(submit_buffer.text(&start, &end, true).to_string());
+                        submit_sink.send_submitted_tag(&submit_tag, &text);
+                        glib::Propagation::Stop
+                    });
+                    view.add_controller(keys);
                     // A WEAK ref, not the view: the handler lives on the
                     // buffer the view owns, so a strong one would be a
                     // cycle that outlives the window.
@@ -10861,6 +10896,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     set_text_field(search.clone().upcast_ref());
                     let sink = core.occurrences.clone();
                     let tag = tag.expect("search fields carry a tag");
+                    let submit_tag = tag.clone();
                     let quiet = core.apply_quiet.clone();
                     let ledger_quiet = core.ledger_quiet.clone();
                     let dirty = core.native_dirty.clone();
@@ -10881,6 +10917,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
 // one `changed` — text_changed("") — with the focus untouched.
                     search.connect_stop_search(|e| {
                         gtk4::prelude::EditableExt::set_text(e, "");
+                    });
+                    // RETURN SUBMITS (docs/submit-plan.md S2), the entry's door.
+                    let submit_sink = core.occurrences.clone();
+                    search.connect_activate(move |e| {
+                        let text = lf(gtk4::prelude::EditableExt::text(e).to_string());
+                        submit_sink.send_submitted_tag(&submit_tag, &text);
                     });
                     core.searches.push(search.clone());
                     NativeWidget::Search(search)
@@ -12711,6 +12753,14 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     } else {
                         core.rich.borrow_mut().remove(&id.0);
                         core.rich_pending.borrow_mut().remove(&id.0);
+                    }
+                }
+                // docs/submit-plan.md S2: the set the view's key controller reads.
+                (NativeWidget::Textarea(..), Prop::Submits, Value::Bool(on)) => {
+                    if on {
+                        core.submits.borrow_mut().insert(id.0);
+                    } else {
+                        core.submits.borrow_mut().remove(&id.0);
                     }
                 }
                 // R8 (docs/rich-text-plan.md §15): the same prop on a LABEL,
@@ -15307,6 +15357,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 highlight_text: std::rc::Rc::new(RefCell::new(HashMap::new())),
                 preedit: std::rc::Rc::new(RefCell::new(HashMap::new())),
                 rich: std::rc::Rc::new(RefCell::new(std::collections::HashSet::new())),
+                submits: std::rc::Rc::new(RefCell::new(std::collections::HashSet::new())),
                 own_undo: RefCell::new(std::collections::HashSet::new()),
                 rich_links: HashMap::new(),
                 label_runs: HashMap::new(),

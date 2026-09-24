@@ -686,6 +686,11 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 fn_ptr: present_emit_text as *mut _,
             },
             NativeMethod {
+                name: "emitSubmitted".into(),
+                sig: "([BLjava/lang/String;)V".into(),
+                fn_ptr: present_emit_submitted as *mut _,
+            },
+            NativeMethod {
                 name: "emitToggled".into(),
                 sig: "([BZ)V".into(),
                 fn_ptr: present_emit_toggled as *mut _,
@@ -1124,6 +1129,24 @@ extern "system" fn present_emit_text(
             u8::from(quiet != 0),
         )
     };
+}
+
+/// KayaPresent.emitSubmitted: the field's text at the submit gesture
+/// (docs/submit-plan.md S1), kaya_emit_submitted's JNI spelling.
+extern "system" fn present_emit_submitted(
+    mut env: JNIEnv,
+    _class: JClass,
+    tag: JByteArray,
+    text: JString,
+) {
+    let bytes = env
+        .convert_byte_array(&tag)
+        .expect("kaya: reading the field tag failed");
+    let text: String = env
+        .get_string(&text)
+        .expect("kaya: reading the submitted text failed")
+        .into();
+    unsafe { crate::capi::kaya_emit_submitted(bytes.as_ptr(), bytes.len(), text.as_ptr(), text.len()) };
 }
 
 /// KayaPresent.undoRoute / redoRoute: kaya_undo_route's and

@@ -7783,6 +7783,43 @@ fn modifier_down(vkey: i32) -> bool {
     (unsafe { GetKeyState(vkey) }) < 0
 }
 
+/// THE SUBMIT GESTURE (docs/submit-plan.md S2), one door for the three text
+/// kinds: Enter on an entry or a search field publishes `submitted` with
+/// the field's text; on a textarea (`gated` names it) only while its
+/// `submits` prop is on, and never with Shift held, which is the newline
+/// the document keeps. The tunnelling PreviewKeyDown: a TextBox with
+/// AcceptsReturn handles Enter itself before the bubbling KeyDown, which
+/// then never fires (measured on the lane's VM 2026-09-24, docs/submit-plan.md
+/// §7.4), and a handled preview inserts nothing; an edit never reaches here.
+fn submit_on_enter(
+    field: Editable,
+    tag: Vec<u8>,
+    sink: OccSink,
+    gated: Option<u64>,
+) -> windows_core::Result<()> {
+    let element: UIElement = match &field {
+        Editable::Entry(f) => f.cast()?,
+        Editable::Textarea(f) => f.cast()?,
+    };
+    element.PreviewKeyDown(&KeyEventHandler::new(move |_, args| {
+        let Some(args) = args.as_ref() else { return Ok(()) };
+        if args.Key()? != VirtualKey::Enter {
+            return Ok(());
+        }
+        if let Some(id) = gated {
+            const VK_SHIFT: i32 = 0x10;
+            if !SUBMITS.with_borrow(|set| set.contains(&id)) || modifier_down(VK_SHIFT) {
+                return Ok(());
+            }
+        }
+        let text = lf(field.text()?);
+        sink.send_submitted_tag(&tag, &text);
+        args.SetHandled(true)?;
+        Ok(())
+    }))?;
+    Ok(())
+}
+
 /// VK_LBUTTON as of the message this thread is processing — which is the
 /// message that raised the event asking. A Slider MARKS ITS OWN PointerPressed
 /// AND PointerReleased HANDLED, so an instance handler hears neither and
@@ -10308,6 +10345,9 @@ thread_local! {
     /// `expect_runs`' corroboration (docs/rich-text-plan.md R1/R9). An entry
     /// exists exactly while the textarea is declared `rich`.
     static RICH_RUNS: RefCell<HashMap<u64, Vec<TextRun>>> = RefCell::new(HashMap::new());
+    /// The textareas whose Return submits (docs/submit-plan.md S2), read by
+    /// each field's KeyDown at the keystroke.
+    static SUBMITS: RefCell<std::collections::HashSet<u64>> = RefCell::new(std::collections::HashSet::new());
     /// Typing attributes armed over a collapsed caret. TOM applies the
     /// collapsed SELECTION's CharacterFormat to typed text by itself
     /// (measured 2026-09-11) and re-derives that format from the character
@@ -13433,6 +13473,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     watch_plain_composition(
                         &field, id.0, tag.clone(), core.occurrences.clone(),
                     )?;
+                    // RETURN SUBMITS (docs/submit-plan.md S2): the ordinary
+                    // KeyDown, the gesture's door and never an edit's.
+                    submit_on_enter(Editable::Entry(field.clone()), tag.clone(), core.occurrences.clone(), None)?;
                     // Paste's enablement is the offer/accepts
                     // intersection AT THE FOCUSED WIDGET; deferred a
                     // tick, because a programmatic Focus() inside apply
@@ -13546,6 +13589,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         }
                         Ok(())
                     }))?;
+                    // RETURN SUBMITS (docs/submit-plan.md S2), the entry's door.
+                    submit_on_enter(Editable::Entry(field.clone()), tag.clone(), core.occurrences.clone(), None)?;
                     let focus_handler = RoutedEventHandler::new(move |_, _| {
                         defer_role_refresh();
                         Ok(())
@@ -13768,6 +13813,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     let sink = core.occurrences.clone();
                     let tag = tag.expect("textareas carry a tag");
                     let handler_tag = tag.clone();
+                    // A SUBMITTING TEXTAREA (docs/submit-plan.md S2): Enter
+                    // publishes and inserts nothing, Shift+Enter is the
+                    // newline; a plain textarea's Enter reaches the document.
+                    submit_on_enter(Editable::Textarea(field.clone()), tag.clone(), core.occurrences.clone(), Some(id.0))?;
                     let bank_id = id.0;
                     let field_for_handler = Editable::Textarea(field.clone());
                     let swallow =
@@ -15254,6 +15303,16 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 // docs/rich-text-plan.md R1: the attributed surface exists only
                 // where the widget asked for it, and the table's own entry is
                 // what says so to every handler below.
+                // docs/submit-plan.md S2: the set the field's KeyDown reads.
+                (NativeWidget::Textarea(_), Prop::Submits, Value::Bool(on)) => {
+                    SUBMITS.with_borrow_mut(|set| {
+                        if on {
+                            set.insert(id.0);
+                        } else {
+                            set.remove(&id.0);
+                        }
+                    });
+                }
                 (NativeWidget::Textarea(field), Prop::Rich, Value::Bool(on)) => {
                     let field = field.clone();
                     if on {

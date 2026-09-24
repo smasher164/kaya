@@ -64,6 +64,8 @@ pub(crate) const REC_TEXT_EDITED: u16 = 29;
 pub(crate) const REC_TEXT_FORMATTED: u16 = 30;
 pub(crate) const REC_SHEET_DISMISSED: u16 = 31;
 pub(crate) const REC_DISMISS_REQUESTED: u16 = 32;
+/// A text field submitted, on a click tag with the text (docs/submit-plan.md S1).
+pub(crate) const REC_SUBMITTED: u16 = 33;
 
 /// Wire framing of every record, exported through the C header so direct
 /// consumers cast a pointer instead of bit-twiddling. Little-endian;

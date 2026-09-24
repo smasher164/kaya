@@ -213,6 +213,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
@@ -390,6 +391,10 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
 
     /** docs/rich-text-plan.md R1: the widget publishes attributed content. */
     var rich = false
+
+    /** docs/submit-plan.md S2: a textarea whose Return submits. Plain, like
+     *  `rich`: declared before the mount, never moved after. */
+    var submits = false
 
     /** docs/rich-text-plan.md §14: the app owns this widget's undo history,
      *  and answers whether it can walk it in either direction. The ROUTE is
@@ -1743,7 +1748,7 @@ object KayaCompose {
     // but only the runtime assert catches a stale compiled APK against
     // a new libkaya. ULong because the fingerprint's high bit is fair
     // game and a Kotlin Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0xde79316215dcaa9euL
+    private const val SPEC_HASH: ULong = 0x908b183fda12f8c1uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -1989,6 +1994,7 @@ object KayaCompose {
     // docs/rich-text-plan.md §19: a stamped copy's document, a template-zone
     // prop the core turns into set_rich_text before any arm sees it.
     private const val PROP_DOCUMENT = 36
+    private const val PROP_SUBMITS = 37
     private const val PROP_COLUMNS = 11
     // The accessibility identifier (never spoken) and label (spoken).
     // Universal: every widget kind carries both.
@@ -2833,6 +2839,8 @@ object KayaCompose {
                         // stays pinned as today.
                         PROP_RICH ->
                             KayaSceneModel.nodes[id]!!.rich = readBool(b)
+                        PROP_SUBMITS ->
+                            KayaSceneModel.nodes[id]!!.submits = readBool(b)
                         // docs/rich-text-plan.md §14: this platform's lever
                         // is `clearHistory()`, so taking ownership drops what
                         // the field had banked.
@@ -13739,16 +13747,33 @@ fun KayaTextField(
         // off a scroll node.
         scrollState = node.scrollState,
         // S8: a filter query is not prose, and the phone's Return key says
-        // Search. Autocorrection stays the platform's default.
+        // Search. Autocorrection stays the platform's default. A SUBMITTING
+        // textarea's key says Send (docs/submit-plan.md S2, S4).
         keyboardOptions =
             if (search) {
                 KeyboardOptions(
                     capitalization = KeyboardCapitalization.None,
                     imeAction = ImeAction.Search,
                 )
+            } else if (!singleLine && node.submits) {
+                KeyboardOptions(imeAction = ImeAction.Send)
             } else {
                 KeyboardOptions.Default
             },
+        // THE SUBMIT GESTURE (docs/submit-plan.md S2): the keyboard's action on
+        // an entry or a search field publishes and then does what the platform
+        // does (the search key still dismisses); a submitting textarea's Send
+        // publishes and inserts nothing; a plain textarea's key is its own.
+        onKeyboardAction = { performDefaultAction ->
+            if (singleLine) {
+                KayaPresent.emitSubmitted(node.tag, kayaLf(node.textState.text.toString()))
+                performDefaultAction()
+            } else if (node.submits) {
+                KayaPresent.emitSubmitted(node.tag, kayaLf(node.textState.text.toString()))
+            } else {
+                performDefaultAction()
+            }
+        },
         // The platform's own text layout, kept as the PROVIDER LAMBDA
         // and not as a result: reading it stays in the layout/draw phase
         // and never invalidates composition. Measured on this backend
@@ -13782,6 +13807,20 @@ fun KayaTextField(
                     Modifier
                 }
             )
+            // A HARDWARE RETURN (docs/submit-plan.md S2, §7.3): a key event
+            // never reaches onKeyboardAction, so a single-line field's Return
+            // publishes here, and a submitting textarea's publishes and
+            // inserts nothing; Shift+Return falls through to the newline.
+            .onPreviewKeyEvent { event ->
+                val hardwareReturn = event.type == KeyEventType.KeyDown &&
+                    (event.key == Key.Enter || event.key == Key.NumPadEnter)
+                if (hardwareReturn && (singleLine || (node.submits && !event.isShiftPressed))) {
+                    KayaPresent.emitSubmitted(node.tag, kayaLf(node.textState.text.toString()))
+                    true
+                } else {
+                    false
+                }
+            }
             // Gain-only back-propagation: onFocusChanged also fires with
             // the initial unfocused state at attach, and a loss branch
             // there would clear a focusedId the LaunchedEffect below has

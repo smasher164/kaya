@@ -107,7 +107,8 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             | Occurrence::InstanceDropped { .. }
             | Occurrence::DragEnded { .. }
             | Occurrence::InstanceDragEnded { .. }
-            | Occurrence::TextChanged { .. } | Occurrence::InstanceTextChanged { .. } => {}
+            | Occurrence::TextChanged { .. } | Occurrence::InstanceTextChanged { .. }
+            | Occurrence::Submitted { .. } | Occurrence::InstanceSubmitted { .. } => {}
             // No textarea here is `rich`.
             Occurrence::TextEdited { .. }
             | Occurrence::InstanceTextEdited { .. }

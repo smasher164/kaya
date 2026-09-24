@@ -458,6 +458,10 @@ func (sc SumCase[K, V]) SetColumnsAuto(n Node, minWidth float64) { sc.t.SetColum
 // (Tpl.SetWrap; docs/layout-knobs-plan.md §2).
 func (sc SumCase[K, V]) SetWrap(n Node, on bool) { sc.t.SetWrap(n, on) }
 
+// SetSubmits makes every stamped copy of this arm's textarea send on
+// Return (Tpl.SetSubmits; docs/submit-plan.md S2).
+func (sc SumCase[K, V]) SetSubmits(n Node, on bool) { sc.t.SetSubmits(n, on) }
+
 // SetAccepts declares what a copy of this arm takes from a paste; const
 // only, and the declaration App.OnPasteNode needs (Tpl.SetAccepts).
 func (sc SumCase[K, V]) SetAccepts(n Node, kinds ...string) { sc.t.SetAccepts(n, kinds...) }

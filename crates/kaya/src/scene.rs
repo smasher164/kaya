@@ -994,6 +994,8 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         // The textarea (docs/rich-text-plan.md R1) and, read-only with the
         // inline vocabulary, the label (R8, §15).
         Prop::Rich => matches!(kind, WidgetKind::Textarea | WidgetKind::Label),
+        // A submitting textarea (docs/submit-plan.md S2): the textarea alone.
+        Prop::Submits => matches!(kind, WidgetKind::Textarea),
         // A stamped copy's document (docs/rich-text-plan.md §19): the
         // textarea alone, and the template zone alone — the live zone is
         // refused where the prop is applied.
@@ -1582,7 +1584,7 @@ fn prop_value_type(prop: Prop) -> ValueType {
         Prop::Align => ValueType::I64,
         Prop::Axis => ValueType::I64,
         Prop::Role => ValueType::I64,
-        Prop::Indeterminate | Prop::Fill | Prop::Wrap | Prop::Rich => ValueType::Bool,
+        Prop::Indeterminate | Prop::Fill | Prop::Wrap | Prop::Rich | Prop::Submits => ValueType::Bool,
         Prop::Document => ValueType::Blob,
         Prop::OwnUndo | Prop::CanUndo | Prop::CanRedo => ValueType::Bool,
         Prop::Columns | Prop::MinColumnWidth => ValueType::F64,

@@ -415,6 +415,7 @@ pub(crate) const PROP_OWN_UNDO: u32 = 33;
 pub(crate) const PROP_CAN_UNDO: u32 = 34;
 pub(crate) const PROP_CAN_REDO: u32 = 35;
 pub(crate) const PROP_DOCUMENT: u32 = 36;
+pub(crate) const PROP_SUBMITS: u32 = 37;
 
 /// The clip representation masks (spec enum "clip"). BIT POSITIONS, not
 /// an ordinal: a copy carries several and a widget accepts several, so
@@ -909,6 +910,7 @@ fn prop(raw: u32) -> Prop {
         PROP_CAN_UNDO => Prop::CanUndo,
         PROP_CAN_REDO => Prop::CanRedo,
         PROP_DOCUMENT => Prop::Document,
+        PROP_SUBMITS => Prop::Submits,
         other => panic!("kaya: unknown property {other}"),
     }
 }
@@ -2910,6 +2912,29 @@ pub fn decode_text_changed_tag(tag: &[u8], text: &str) -> Occurrence {
     }
 }
 
+/// The submit twin (docs/submit-plan.md S1): text_changed's body, its own kind.
+pub fn submitted_body(tag: &[u8], text: &str) -> Vec<u8> {
+    text_changed_body(tag, text)
+}
+
+pub fn decode_submitted_tag(tag: &[u8], text: &str) -> Occurrence {
+    let mut r = Reader { buf: tag, at: 0, blobs: &|_| None };
+    let id = r.u64();
+    let path = r.path();
+    if path.is_empty() {
+        Occurrence::Submitted {
+            id: WidgetId(id),
+            text: text.to_owned(),
+        }
+    } else {
+        Occurrence::InstanceSubmitted {
+            node: TemplateNodeId(id),
+            path,
+            text: text.to_owned(),
+        }
+    }
+}
+
 // --- Menu occurrence tags --------------------------------------------------
 //
 // The item id plus a NOUN: empty for a bar action or a live-widget
@@ -4259,6 +4284,7 @@ fn prop_raw(prop: Prop) -> u32 {
         Prop::CanUndo => PROP_CAN_UNDO,
         Prop::CanRedo => PROP_CAN_REDO,
         Prop::Document => PROP_DOCUMENT,
+        Prop::Submits => PROP_SUBMITS,
     }
 }
 

@@ -4861,7 +4861,7 @@ discardable = tpl_discardable_probe()
 WANT_DISCARDABLE = """swift-row-member=applied:1 rc:1 named:True
 swift-arm-member=applied:1 rc:1 named:True
 swift-eliminator=applied:1 rc:1 named:True
-swift-census-floor=applied:11 rc:1 named:True"""
+swift-census-floor=applied:12 rc:1 named:True"""
 if discardable != WANT_DISCARDABLE:
     print("check-sugar-surface: SELF-TEST FAIL (the Swift generated-surface "
           "discard census did not catch its watched cuts). Wanted:",
@@ -5626,7 +5626,7 @@ def csharp_facade_probe():
     run("csharp-twin-reader",
         src.replace("sealed class TableItemRow\n",
                     "sealed class TableItemRowGone\n")
-        if n == 1 else src, n, "typed-row reader found only 8")
+        if n == 1 else src, n, "typed-row reader found only 9")
     return "\n".join(lines)
 
 
@@ -8837,6 +8837,196 @@ for _label, _which, _pattern, _repl, _want in [
         selftest_exit(f"check-sugar-surface: carve-out sugar negative {_label!r} did not refuse")
 if len(carveout_sugar_findings("", "", "")) < 13:
     selftest_exit("check-sugar-surface: the carve-out sugar reader read nothing and agreed")
+
+# THE SUBMIT SURFACE (docs/submit-plan.md S7): `on_submit` where each
+# binding's own text-change handler is registered, in BOTH zones, and the
+# `submits` prop on the live textarea where `rich` rides. The occurrence
+# and the prop reach every binding through the generator whether or not a
+# guest can spell either, so a binding shipping without its sugar is green
+# on every scene that does not use it. Nine spellings, written out: Go and
+# C# say `OnSubmitted` beside `OnChange`, Java and Swift `onSubmitted`, and
+# the bindings whose handlers ride the constructor take an `onSubmit`
+# argument (C#, Swift), a `?on_submit` labelled argument (OCaml), an
+# `on_submit=` keyword (Python) or an `onSubmit` option (JS) — Python's and
+# JS's one constructor serves both zones, so their stamped row is the
+# registration line itself, and Haskell's one class method serves both
+# through its two instances. Every row names the identifier it reads, so
+# the rename negative below can mangle it in a copy.
+SUBMIT_FILES = dict(SLIDER_FILES)
+F = SUBMIT_FILES
+SUBMIT_ROWS = {
+    "on_submit (live)": [
+        ("rust", F["rust"], r"pub fn on_submit\(&self, w: WidgetId", "on_submit"),
+        ("python", F["python"], r"def entry\([^)]*\bon_submit\s*[:=]", "on_submit"),
+        ("python", F["python"], r"def search\([^)]*\bon_submit\s*[:=]", "on_submit"),
+        ("python", F["python"], r"def textarea\([^)]*\bon_submit\s*[:=]", "on_submit"),
+        ("go", F["go"], r"func \(a \*App\) OnSubmitted\(w Widget", "OnSubmitted"),
+        ("csharp", F["csharp"], r"public void OnSubmitted\(Widget w", "OnSubmitted"),
+        ("csharp", F["csharp"],
+         r"public Widget Entry\([\s\S]{0,200}?Action<Tx, string>\? onSubmit = null\)", "onSubmit"),
+        ("csharp", F["csharp"],
+         r"public Widget Search\([\s\S]{0,200}?Action<Tx, string>\? onSubmit = null\)", "onSubmit"),
+        ("csharp", F["csharp"],
+         r"public Widget Textarea\([\s\S]{0,300}?Action<Tx, string>\? onSubmit = null\)",
+         "onSubmit"),
+        ("java", F["java"], r"public void onSubmitted\(Widget w", "onSubmitted"),
+        ("swift", F["swift"], r"func onSubmitted\(_ w: KayaWidget", "onSubmitted"),
+        ("swift", F["swift"],
+         r"onSubmit: \(\(KayaAppTx, String\) throws -> Void\)\? = nil", "onSubmit"),
+        ("haskell", F["haskell"],
+         r"^  onSubmit :: App -> e -> Keyed e \(Text -> IO \(\)\) -> IO \(\)", "onSubmit"),
+        ("haskell", F["haskell"], r"^  onSubmit app \(Widget n\) handler =", "onSubmit"),
+        ("ocaml", F["ocaml"], r"^let entry [^\n]*\?on_submit\b", "on_submit"),
+        ("ocaml", F["ocaml"], r"^let search [^\n]*\?on_submit\b", "on_submit"),
+        ("ocaml", F["ocaml"], r"^let textarea [^\n]*\?on_submit\b", "on_submit"),
+        ("js", F["js"], r"TextInputOptions = [^\n]*\bonSubmit\?:", "onSubmit"),
+        ("js", F["js"],
+         r"export function entry\([\s\S]{0,800}?_register\(handle, wire\.OCC_SUBMITTED, "
+         r"opts\.onSubmit\)",
+         "onSubmit"),
+        ("js", F["js"],
+         r"export function search\([\s\S]{0,800}?_register\(handle, wire\.OCC_SUBMITTED, "
+         r"opts\.onSubmit\)",
+         "onSubmit"),
+        ("js", F["js"],
+         r"export function textarea\([\s\S]{0,1200}?_register\(handle, wire\.OCC_SUBMITTED, "
+         r"opts\.onSubmit\)",
+         "onSubmit"),
+    ],
+    "on_submit (stamped)": [
+        ("rust", F["rust"], r"pub fn on_submit_node\(&self, n: TemplateNodeId", "on_submit_node"),
+        ("python", F["python"], r"_app\._register\(handle, wire\.OCC_SUBMITTED, on_submit\)",
+         "on_submit"),
+        ("go", F["go"], r"func \(a \*App\) OnSubmittedNode\(n Node", "OnSubmittedNode"),
+        ("csharp", F["csharp"], r"public void OnSubmitted\(Node n", "OnSubmitted"),
+        ("csharp", F["csharp"],
+         r"public Node Entry\(Action<Tx, List<object>, string>\? onChange = null,\s*"
+         r"Action<Tx, List<object>, string>\? onSubmit = null\)", "onSubmit"),
+        ("csharp", F["csharp"],
+         r"public Node Search\(Action<Tx, List<object>, string>\? onChange = null,\s*"
+         r"Action<Tx, List<object>, string>\? onSubmit = null\)", "onSubmit"),
+        ("csharp", F["csharp"],
+         r"public Node Textarea\(Action<Tx, List<object>, string>\? onChange = null,\s*"
+         r"Action<Tx, List<object>, string>\? onSubmit = null\)", "onSubmit"),
+        ("java", F["java"], r"public void onSubmitted\(Node n", "onSubmitted"),
+        ("swift", F["swift"], r"func onSubmitted\(\s*_ n: KayaNodeHandle", "onSubmitted"),
+        ("swift", F["swift"],
+         r"onSubmit: \(\(KayaAppTx, \[KayaValue\], String\) throws -> Void\)\? = nil", "onSubmit"),
+        ("haskell", F["haskell"], r"^  onSubmit app \(Node n\) handler =", "onSubmit"),
+        ("ocaml", F["ocaml"], r"^  let entry [\s\S]{0,800}?\?on_submit\b", "on_submit"),
+        ("ocaml", F["ocaml"], r"^  let search [\s\S]{0,800}?\?on_submit\b", "on_submit"),
+        ("ocaml", F["ocaml"], r"^  let textarea [\s\S]{0,800}?\?on_submit\b", "on_submit"),
+        ("js", F["js"], r"_register\(handle, wire\.OCC_SUBMITTED, opts\.onSubmit\)", "onSubmit"),
+    ],
+    "submits": [
+        ("rust", F["rust"], r"pub fn submits\(self\) -> Self", "submits"),
+        ("python", F["python"], r"def textarea\([^)]*\bsubmits\s*[:=]", "submits"),
+        ("python", F["python"], r"def submits\(self: H, on: bool = True\) -> H", "submits"),
+        ("go", F["go"], r"func \(w Widget\) Submits\(", "Submits"),
+        ("csharp", F["csharp"], r"public Widget Textarea\([\s\S]{0,300}?bool submits\b", "submits"),
+        ("java", F["java"], r"public Widget submits\(", "submits"),
+        ("swift", F["swift"], r"public func textarea\([\s\S]{0,300}?submits: Bool", "submits"),
+        ("haskell", F["haskell"], r"^  Submits :: Bool -> Attr 'LeafW", "Submits"),
+        ("ocaml", F["ocaml"], r"^let textarea [^\n]*\?submits\b", "submits"),
+        ("js", F["js"], r"TextAreaOptions = [^\n]*\bsubmits\?:", "submits"),
+        ("js", F["js"], r"^  submits\(on = true\): this \{", "submits"),
+    ],
+}
+
+
+def submit_findings(what, rows, text_for=read_rel):
+    out = []
+    for lang, rel, pattern, _name in rows:
+        try:
+            text = text_for(rel)
+        except OSError:
+            out.append(f"check-sugar-surface: {lang} has no sugar for the submit "
+                       f"gesture's '{what}': {rel} is gone, so the census read nothing there")
+            continue
+        if not grep_e(pattern, text):
+            out.append(f"check-sugar-surface: {lang} has no sugar for the submit "
+                       f"gesture's '{what}' (wanted /{pattern}/ in {rel})")
+    return out
+
+
+submit_seen = {lang: 0 for lang in SUBMIT_FILES}
+submit_rows_total = 0
+for _what, _rows in SUBMIT_ROWS.items():
+    for _msg in submit_findings(_what, _rows):
+        print(_msg)
+        status = 1
+    for _lang, _rel, _pattern, _name in _rows:
+        submit_rows_total += 1
+        if grep_e(_pattern, read_rel(_rel)):
+            submit_seen[_lang] += 1
+print(f"check-sugar-surface: submit surface census ({submit_rows_total} rows): "
+      + ", ".join(f"{lang} {n}" for lang, n in submit_seen.items()))
+if submit_seen["rust"] == 0:
+    selftest_exit("check-sugar-surface: the submit census matched NOTHING in the reference "
+                  "binding (crates/kaya/src/app.rs) — the sugar is gone or every pattern has "
+                  "rotted, and a census that reads nothing agrees with everything")
+
+# ITS NEGATIVES. First a fake-name census: every row's identifier mangled
+# in the PATTERN must fire on every row. Then the rename-in-a-copy, the
+# rich census's shape: each row's identifier mangled in the matched text of
+# a COPY, the census re-run through the same reader, exactly that row
+# demanded, the file re-read from disk afterwards.
+submit_fake = 0
+for _what, _rows in SUBMIT_ROWS.items():
+    _fake_rows = [(lang, rel, pattern.replace(name, "kaya_fake_submit"), name)
+                  for lang, rel, pattern, name in _rows]
+    for _r, _f in zip(_rows, _fake_rows):
+        if _r[2] == _f[2]:
+            selftest_exit(f"check-sugar-surface: the {_r[0]} submit row '{_what}' does not name "
+                          f"its identifier ({_r[3]!r}) in its pattern, so nothing can mangle it")
+    _fired = sum(1 for m in submit_findings(_what, _fake_rows)
+                 if "has no sugar for the submit" in m)
+    if _fired != len(_rows):
+        selftest_exit(f"check-sugar-surface: self-test failed ({_fired}/{len(_rows)} submit "
+                      f"'{_what}' patterns fired for an identifier that exists nowhere)")
+    submit_fake += _fired
+submit_renames = 0
+for _what, _rows in SUBMIT_ROWS.items():
+    _counts = []
+    for _lang, _rel, _pattern, _name in _rows:
+        _text = read_rel(_rel)
+        if not grep_e(_pattern, _text):
+            continue
+        # EVERY match, rich_rename's rule: a binding with three constructors
+        # taking the argument would otherwise satisfy the pattern through
+        # the two left alone (measured on Swift's live row, 2026-09-24).
+        _out, _at, _n = [], 0, 0
+        for _found in re.finditer(_pattern, _text, re.M):
+            _mangled, _k = sub_count(re.escape(_name), "kaya_fake_submit", _found.group(0))
+            _n += _k
+            _out.append(_text[_at:_found.start()])
+            _out.append(_mangled)
+            _at = _found.end()
+        _out.append(_text[_at:])
+        _doctored = "".join(_out)
+        if _n < 1:
+            selftest_exit(f"check-sugar-surface: self-test failed — the {_lang} submit "
+                          f"'{_what}' negative perturbed NOTHING in {_rel}")
+        _counts.append(f"{_lang}={_n}")
+        _fired = [m for m in submit_findings(
+            _what, _rows,
+            text_for=lambda rel, _r=_rel, _d=_doctored: _d if rel == _r else read_rel(rel))
+            if m.startswith(f"check-sugar-surface: {_lang} has no sugar")]
+        if len(_fired) < 1:
+            selftest_exit(f"check-sugar-surface: self-test failed — renaming {_lang}'s submit "
+                          f"'{_what}' spelling produced no finding")
+        if (ROOT / _rel).read_text(encoding="utf-8") != _text:
+            selftest_exit(f"check-sugar-surface: self-test failed — {_rel} changed on disk "
+                          f"during the submit '{_what}' negative")
+        submit_renames += 1
+    print(f"check-sugar-surface: submit rename negatives, '{_what}': " + " ".join(_counts))
+print(f"check-sugar-surface: submit negatives: {submit_fake} fake-name, {submit_renames} "
+      f"rename-in-a-copy, counts printed")
+if submit_renames < submit_rows_total:
+    print(f"check-sugar-surface: {submit_rows_total - submit_renames} submit row(s) matched "
+          f"nothing on the tree and so took no rename negative — they are red above")
+    status = 1
+
 
 check_scene_sugar()
 

@@ -22,7 +22,7 @@ body's IOS_*_SCENES assignments.
 # naming a different one where two scenes share an app: a scene selects a
 # SCRIPT, never an app (`listdetail:split` is the only such pair).
 SWIFT_ENTRIES = [
-    "milestone2", "stall", "entry", "search", "gallery", "todos",
+    "milestone2", "stall", "entry", "search", "submit", "gallery", "todos",
     "reorder", "feed", "grow", "align", "layout",
     "confirm", "nav", "listdetail:split", "scroll", "progress",
     "select", "radio", "grid", "textarea", "sections",
@@ -40,7 +40,7 @@ SWIFT_ENTRIES = [
 # rust-only canvas scenes, plus `editor` off-list below — a Go app with
 # no swift guest to mirror (docs/editor-plan.md).
 GO_SCENES = [
-    "milestone2", "stall", "entry", "search", "gallery", "todos",
+    "milestone2", "stall", "entry", "search", "submit", "gallery", "todos",
     "reorder", "feed", "grow", "align", "layout",
     "confirm", "nav", "listdetail", "scroll", "progress",
     "select", "radio", "grid", "textarea", "sections",
@@ -78,6 +78,8 @@ RUST_SCENES = [
     "clock24",
     # A row wider than its window (docs/flex-shrink-plan.md §6).
     "flexshrink",
+    # The submit gesture on the three text kinds (docs/submit-plan.md §5).
+    "submit",
     # The notification conformance scene: the activation is a REAL tap on
     # SpringBoard's own shade, driven by the xcui driver's notify_tap
     # (docs/tasks-s3-plan.md N5).
@@ -150,6 +152,16 @@ MODS = {
     ("rust-swiftui", "formatbig"): {"drop": ("expect_text_scale", "2"),
                                     "keep": "expect_no_clipping",
                                     "extra": "expect_text_scale 1.94"},
+    # THE PLATFORM'S RETURN ON A SINGLE-LINE FIELD ENDS EDITING
+    # (docs/submit-plan.md S3, §7.1): SwiftUI's TextField resigns on
+    # Return, so the entry publishes and the keyboard goes with the focus;
+    # the submitting textarea's Send keeps its focus and that step stays.
+    ("rust-swiftui", "submit"): {"drop": ("expect_focused", "entry#0"),
+                                 "keep": "expect"},
+    ("swift", "submit"): {"drop": ("expect_focused", "entry#0"),
+                          "keep": "expect"},
+    ("go", "submit"): {"drop": ("expect_focused", "entry#0"),
+                       "keep": "expect"},
     # The sections tail opens an aux window rejected by capability.
     ("swift", "sections"): {"cut": "expect_windows",
                             "keep": "expect_section expect_section_symbol"},

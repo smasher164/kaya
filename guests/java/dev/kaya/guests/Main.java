@@ -178,6 +178,9 @@ public final class Main {
             case "adaptive":
                 app = Adaptive::app;
                 break;
+            case "submit":
+                app = Submit::app;
+                break;
             default:
                 app = Milestone2::app;
                 break;

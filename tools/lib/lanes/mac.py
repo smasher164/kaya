@@ -44,6 +44,7 @@ SCENES = [
     "dirty", "ranges", "save", "styling", "toolbar", "identity",
     "assets", "sizepolicy", "adaptive", "pickers", "sliders",
     "tooltips", "search", "richtext", "ownundo", "richlabel", "sheet",
+    "submit",
 ]
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed — built and run rust-only until their guests arrive,
@@ -130,6 +131,8 @@ ORDER = [
     ("milestone2", LANGS),
     ("entry", LANGS),
     ("search", LANGS),
+    # The submit gesture on the three text kinds (docs/submit-plan.md §5).
+    ("submit", LANGS),
     ("gallery", LANGS),
     ("todos", LANGS),
     ("reorder", LANGS),

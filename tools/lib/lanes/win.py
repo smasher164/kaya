@@ -24,7 +24,7 @@ SCENES = [
     "background", "stall", "milestone2", "entry", "gallery", "todos",
     "reorder", "feed", "grow", "layout", "align", "window", "panels",
     "confirm", "nav", "split", "panes", "table", "scroll",
-    "progress", "select", "radio", "grid", "textarea", "search", "sections",
+    "progress", "select", "radio", "grid", "textarea", "search", "submit", "sections",
     "menus", "commands", "a11y", "a11yrows", "filedialog",
     "clipboard", "undo", "dirty", "ranges", "save", "styling",
     "typeface", "toolbar", "identity", "assets", "adaptive", "dnd", "pickers", "sliders", "tooltips",
@@ -457,6 +457,26 @@ ORDER = [
     ],
     [
      "search_java",
+    ],
+    # EACH submit LEG ALONE, search's reason: its `type` and `press return`
+    # are real keystrokes on the system queue (docs/submit-plan.md §5).
+    [
+     "submit_rust",
+    ],
+    [
+     "submit_python",
+    ],
+    [
+     "submit_js",
+    ],
+    [
+     "submit_go",
+    ],
+    [
+     "submit_csharp",
+    ],
+    [
+     "submit_java",
     ],
     # The filedialog family, ONE LEG PER DRAIN: the Shell's dialog is
     # OS-GLOBAL modal chrome — it must hold the FOREGROUND to be driven,

@@ -690,6 +690,14 @@ export class Handle {
     return this;
   }
 
+  /** This textarea SUBMITS on Return (docs/submit-plan.md S2): Return
+   * publishes `onSubmit` and Shift+Return inserts the newline; the phone
+   * keyboard's key says Send. Off, Return is a newline. Chains. */
+  submits(on = true): this {
+    records().push(wire.tx_set_submits(this.id, Boolean(on)));
+    return this;
+  }
+
   /** The app owns this rich textarea's undo (docs/rich-text-plan.md R6,
    * §14): the native stack is off, and Edit>Undo/Redo reach the app
    * through the role item's own `onActivate` while canUndo/canRedo say
@@ -4135,20 +4143,24 @@ export function timePicker(opts: TimePickerOptions = {}): Widget {
   return handle;
 }
 
-export type TextInputOptions = GrowOption & { text?: string; onChange?: Handler; placeholder?: string };
+export type TextInputOptions = GrowOption & { text?: string; onChange?: Handler; onSubmit?: Handler; placeholder?: string };
 
 /** A single-line text field. Uncontrolled, by doctrine: the widget owns
- * its text and reports each edit to onChange; there is no read-back. */
+ * its text and reports each edit to onChange; there is no read-back.
+ *
+ * `onSubmit(text)` — fn(row, text) for a stamped copy — is the text the
+ * user SUBMITTED, Return here (docs/submit-plan.md S1). */
 export function entry(opts: TextInputOptions = {}): Widget {
   const handle = widget(wire.KIND_ENTRY);
   if (opts.text !== undefined) records().push(wire.tx_set_text(handle.id, textValue("entry text", opts.text)));
   if (opts.placeholder !== undefined) handle.placeholder(opts.placeholder);
   if (opts.onChange !== undefined) app()._register(handle, wire.OCC_TEXT_CHANGED, opts.onChange);
+  if (opts.onSubmit !== undefined) app()._register(handle, wire.OCC_SUBMITTED, opts.onSubmit);
   setGrow(handle, opts);
   return handle;
 }
 
-export type TextAreaOptions = TextInputOptions & { rich?: boolean; ownUndo?: boolean; onEdit?: Handler; onFormat?: Handler; document?: FieldRef };
+export type TextAreaOptions = TextInputOptions & { rich?: boolean; submits?: boolean; ownUndo?: boolean; onEdit?: Handler; onFormat?: Handler; document?: FieldRef };
 
 /** A stamped copy's document, bound to a `Document` FIELD of its row
  * (docs/rich-text-plan.md §19): `rich` FIRST — the core refuses
@@ -4188,15 +4200,20 @@ function bindDocument(handle: Widget, field: unknown): void {
  * arrive with a row handle that already reads current.
  *
  * `ownUndo: true` puts the history in the app's hands
- * (docs/rich-text-plan.md R6, §14). */
+ * (docs/rich-text-plan.md R6, §14).
+ *
+ * `submits: true` sends on Return and keeps Shift+Return for the newline
+ * (docs/submit-plan.md S2); off, Return is the newline. */
 export function textarea(opts: TextAreaOptions = {}): Widget {
   const handle = widget(wire.KIND_TEXTAREA);
   if (opts.text !== undefined) records().push(wire.tx_set_text(handle.id, textValue("textarea text", opts.text)));
   if (opts.document !== undefined) bindDocument(handle, opts.document);
   else if (opts.rich === true) handle.rich(true);
+  if (opts.submits === true) handle.submits(true);
   if (opts.ownUndo === true) handle.ownUndo(true);
   if (opts.placeholder !== undefined) handle.placeholder(opts.placeholder);
   if (opts.onChange !== undefined) app()._register(handle, wire.OCC_TEXT_CHANGED, opts.onChange);
+  if (opts.onSubmit !== undefined) app()._register(handle, wire.OCC_SUBMITTED, opts.onSubmit);
   if (opts.onEdit !== undefined) app()._register(handle, wire.OCC_TEXT_EDITED, opts.onEdit);
   if (opts.onFormat !== undefined) app()._register(handle, wire.OCC_TEXT_FORMATTED, opts.onFormat);
   setGrow(handle, opts);
@@ -4205,12 +4222,15 @@ export function textarea(opts: TextAreaOptions = {}): Widget {
 
 /** A search field: the entry's uncontrolled contract under the platform's
  * search chrome (docs/search-plan.md), filtering on every keystroke. The
- * clear affordance arrives at onChange with "". */
+ * clear affordance arrives at onChange with "".
+ *
+ * Return publishes `onSubmit` with the query (docs/submit-plan.md S2). */
 export function search(opts: TextInputOptions = {}): Widget {
   const handle = widget(wire.KIND_SEARCH);
   if (opts.text !== undefined) records().push(wire.tx_set_text(handle.id, textValue("search text", opts.text)));
   if (opts.placeholder !== undefined) handle.placeholder(opts.placeholder);
   if (opts.onChange !== undefined) app()._register(handle, wire.OCC_TEXT_CHANGED, opts.onChange);
+  if (opts.onSubmit !== undefined) app()._register(handle, wire.OCC_SUBMITTED, opts.onSubmit);
   setGrow(handle, opts);
   return handle;
 }

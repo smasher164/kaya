@@ -610,6 +610,24 @@ in docs/deferred.md.
    counts printed — per backend the per-movement commit, the missing end
    and an end that is not final, WinUI's pointer read renamed away, and
    the withheld row),
+   `tools/check-submit.py` (SUBMITTED PUBLISHES THROUGH THE GESTURE'S DOOR
+   ALONE (docs/submit-plan.md S1-S4, S6): an entry's or search field's
+   Return and a submitting textarea's Return or Send key, and no scene can
+   see an emit that moved — tools/scenes/submit.steps drives `press return`
+   and reads the label, so an emit on the text-change path or the apply arm
+   (a programmatic write echoing as a submit, the S3 class), a textarea
+   emit no longer dominated by `submits`, a Shift+Return arm cut out or a
+   handled Return that still inserts all pass it byte for byte, since the
+   scene never types Shift+Return, never writes a focused field from the
+   app and reads no keyboard's label. Per backend the doors are read out of
+   their own blocks (SwiftUI's `.onSubmit`, the mac `doCommandBy` and iOS
+   `shouldChangeTextIn` arms with the phone key keyed on the prop; GTK's
+   `activate` on both single-line kinds and a CAPTURE-phase key controller
+   on the textarea; WinUI's one `submit_on_enter` KeyDown door, gated on
+   the textarea's own id and ungated on the two single-line arms; Compose's
+   keyboard action with Send and the `onPreviewKeyEvent` Enter arm), and
+   every emit call in the file must sit inside one of them. 23 watched
+   negatives, counts printed),
    `tools/check-search.py` (THE SEARCH FIELD CLEARS ONE WAY AND SAYS WHAT
    IT IS (docs/search-plan.md S5, S7). Clearing is one act: the field's
    affordance, Escape on a desktop and the harness's clear_search empty

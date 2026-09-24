@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0xde79316215dcaa9e
+specHash = 0x908b183fda12f8c1
 
 valueBool :: Word32
 valueBool = 1
@@ -212,6 +212,8 @@ propCanRedo :: Word32
 propCanRedo = 35
 propDocument :: Word32
 propDocument = 36
+propSubmits :: Word32
+propSubmits = 37
 wpropTitle :: Word32
 wpropTitle = 1
 wpropWidth :: Word32
@@ -728,6 +730,8 @@ occKindSheetDismissed :: Word16
 occKindSheetDismissed = 31
 occKindDismissRequested :: Word16
 occKindDismissRequested = 32
+occKindSubmitted :: Word16
+occKindSubmitted = 33
 
 -- Values self-pad to 8: they concatenate inside record bodies.
 encodeValue :: Value -> Builder
@@ -1704,6 +1708,25 @@ txBindDocumentElement widgetId level field = wireRecord txKindSetProperty
   (word64LE widgetId <> word32LE propDocument <> word32LE sourceElement
     <> word32LE level <> word32LE field)
 
+-- set_property with a constant submits value.
+txSetSubmits :: Word64 -> Bool -> Builder
+txSetSubmits widgetId submits = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propSubmits <> word32LE sourceConst
+    <> encodeValue (VBool submits))
+
+-- set_property with a signal-bound submits value.
+txBindSubmits :: Word64 -> Word64 -> Builder
+txBindSubmits widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propSubmits <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindSubmitsElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindSubmitsElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propSubmits <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
 -- set_window_prop with a constant title value (window 0, the primary surface).
 txSetWindowTitle :: Word64 -> String -> Builder
 txSetWindowTitle window title = wireRecord txKindSetWindowProp
@@ -2162,7 +2185,7 @@ parseOccurrence ::
   IO (Maybe (Word16, Word64, [Value], Maybe Value, Maybe ClipValues, Maybe DropValues, [Value]))
 parseOccurrence redeem rec = do
   kind <- peekByteOff rec 4 :: IO Word16
-  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult && kind /= occKindClipboardResult && kind /= occKindPasted && kind /= occKindUndone && kind /= occKindRedone && kind /= occKindSortRequested && kind /= occKindDrawRequested && kind /= occKindTick && kind /= occKindDropped && kind /= occKindDragEnded && kind /= occKindDateChanged && kind /= occKindTimeChanged && kind /= occKindValueCommitted && kind /= occKindNotificationResult && kind /= occKindLinkOpened && kind /= occKindTextEdited && kind /= occKindTextFormatted && kind /= occKindSheetDismissed && kind /= occKindDismissRequested
+  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult && kind /= occKindClipboardResult && kind /= occKindPasted && kind /= occKindUndone && kind /= occKindRedone && kind /= occKindSortRequested && kind /= occKindDrawRequested && kind /= occKindTick && kind /= occKindDropped && kind /= occKindDragEnded && kind /= occKindDateChanged && kind /= occKindTimeChanged && kind /= occKindValueCommitted && kind /= occKindNotificationResult && kind /= occKindLinkOpened && kind /= occKindTextEdited && kind /= occKindTextFormatted && kind /= occKindSheetDismissed && kind /= occKindDismissRequested && kind /= occKindSubmitted
     then return Nothing
     else do
       ident <- peekByteOff rec 8 :: IO Word64
@@ -2230,7 +2253,7 @@ parseOccurrence redeem rec = do
                 op <- peekByteOff rec at' :: IO Word32
                 return (Just (VI64 (fromIntegral op)))
               else
-            if kind == occKindTextChanged || kind == occKindToggled || kind == occKindValueChanged || kind == occKindMenuToggled || kind == occKindMenuValueChanged || kind == occKindDateChanged || kind == occKindTimeChanged || kind == occKindValueCommitted
+            if kind == occKindTextChanged || kind == occKindToggled || kind == occKindValueChanged || kind == occKindMenuToggled || kind == occKindMenuValueChanged || kind == occKindDateChanged || kind == occKindTimeChanged || kind == occKindValueCommitted || kind == occKindSubmitted
               then do
                 (v, _) <- parseValue rec at'
                 return (Just v)

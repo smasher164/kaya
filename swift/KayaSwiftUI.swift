@@ -10,7 +10,7 @@ import UserNotifications
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0xde79316215dcaa9e
+let kayaSpecHash: UInt64 = 0x908b183fda12f8c1
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -224,6 +224,7 @@ private let propCanRedo: UInt32 = 35
 // docs/rich-text-plan.md §19: a stamped copy's document, a template-zone
 // prop the core turns into set_rich_text before any arm sees it.
 private let propDocument: UInt32 = 36
+private let propSubmits: UInt32 = 37
 // THE RICH TEXT VOCABULARIES, hand-copied APPEND-ONLY wire values held
 // against the core's by tools/check-verbs.py (docs/rich-text-plan.md R3).
 // An attribute NAME rides the wire as a string; these are the numbers the
@@ -719,6 +720,8 @@ final class KayaNode: Identifiable {
     var ownUndo = false
     var canUndo = false
     var canRedo = false
+    /// A textarea whose Return submits (docs/submit-plan.md S2).
+    var submits = false
     var children: [KayaNode] = []
     /// The stacked fold (D7): non-zero = the table whose viewport this
     /// node renders inside. Identity stays here — only layout moves.
@@ -4712,6 +4715,17 @@ enum KayaHost {
         }
     }
 
+    /// The field SUBMITTED (docs/submit-plan.md S1): its text at the gesture,
+    /// through the gesture's own door and never an edit's.
+    static func emitSubmitted(_ node: KayaNode, _ text: String) {
+        let utf8 = Array(text.utf8)
+        node.tag.withUnsafeBufferPointer { t in
+            utf8.withUnsafeBufferPointer { s in
+                api.emit_submitted(t.baseAddress, UInt(t.count), s.baseAddress, UInt(s.count))
+            }
+        }
+    }
+
     /// The privileged read's one answer; nil is the universal no.
     static func emitClipboardResult(_ request: UInt64, _ value: KayaClipValue?) {
         kayaWithRepresentation(value) { rep in
@@ -5493,6 +5507,8 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     kayaScene.nodes[id]!.checked = raw[body + 24] != 0
                 case (propRich, valueBool):
                     kayaScene.nodes[id]!.rich = raw[body + 24] != 0
+                case (propSubmits, valueBool):
+                    kayaScene.nodes[id]!.submits = raw[body + 24] != 0
                 case (propOwnUndo, valueBool):
                     kayaScene.nodes[id]!.ownUndo = raw[body + 24] != 0
                 case (propCanUndo, valueBool):
@@ -20596,6 +20612,9 @@ struct KayaEntry: View {
             maxWidth: (node.grow > 0 || (flexVertical == true && node.fill != false))
                 ? .infinity : 200)
         .focused($focused)
+        // Return SUBMITS (docs/submit-plan.md S2): the platform's own gesture,
+        // never an edit; the field keeps its text and its focus.
+        .onSubmit { KayaHost.emitSubmitted(node, node.text) }
         .onAppear { focused = kayaScene.focusedId == node.id }
         .onChange(of: kayaScene.focusedId) { _, newValue in
             focused = newValue == node.id
@@ -20653,10 +20672,16 @@ struct KayaSearch: View {
             .focused($focused)
             #if os(macOS)
                 .onExitCommand { kayaSearchClear(node) }
+                .onSubmit { KayaHost.emitSubmitted(node, node.text) }
             #else
                 .textInputAutocapitalization(.never)
                 .submitLabel(.search)
-                .onSubmit { focused = false }
+                // The Search key still dismisses the keyboard (S4's refusal
+                // stands) AND submits (docs/submit-plan.md S2).
+                .onSubmit {
+                    focused = false
+                    KayaHost.emitSubmitted(node, node.text)
+                }
                 .onKeyPress(.escape) {
                     kayaSearchClear(node)
                     return .handled
@@ -21055,6 +21080,23 @@ private struct KayaMacTextarea: NSViewRepresentable {
                 } ?? nil
             }
             return true
+        }
+
+        /// A SUBMITTING TEXTAREA (docs/submit-plan.md S2): Return publishes and
+        /// inserts nothing; Shift+Return is the newline, which AppKit spells
+        /// `insertLineBreak:` (a line separator by default), so the newline is
+        /// inserted here as text. A plain textarea takes neither branch.
+        func textView(_ textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+            guard let node, node.submits else { return false }
+            if selector == #selector(NSResponder.insertNewline(_:)) {
+                KayaHost.emitSubmitted(node, node.text)
+                return true
+            }
+            if selector == #selector(NSResponder.insertLineBreak(_:)) {
+                textView.insertText("\n", replacementRange: textView.selectedRange())
+                return true
+            }
+            return false
         }
 
         // R5's transform needs the selection the widget holds, not the one the
@@ -21678,6 +21720,13 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
                 _ textView: UITextView, shouldChangeTextIn affected: NSRange,
                 replacementText replacement: String
             ) -> Bool {
+                // A SUBMITTING TEXTAREA (docs/submit-plan.md S2): the Send key,
+                // and a Return on a hardware keyboard, publish and insert
+                // nothing; a plain textarea inserts its newline as ever.
+                if let node, node.submits, replacement == "\n" {
+                    KayaHost.emitSubmitted(node, node.text)
+                    return false
+                }
                 guard let node, node.rich else { return true }
                 let text = textView.text ?? ""
                 let start = kayaByteOffset(text, affected.location)
@@ -21778,6 +21827,7 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
             view.contentInsetAdjustmentBehavior = .never
             view.nodeId = node.id
             view.rich = node.rich
+            view.returnKeyType = node.submits ? .send : .default
             // REGISTERED AT CREATION, not at the first update: an act that
             // resolves the view between the two reads "no text view", and the
             // registry's weak entry is what the format/compose waits read
@@ -21806,6 +21856,11 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
             if let own = view as? KayaTextView {
                 own.nodeId = node.id
                 own.rich = rich
+            }
+            let key: UIReturnKeyType = node.submits ? .send : .default
+            if view.returnKeyType != key {
+                view.returnKeyType = key
+                view.reloadInputViews()
             }
             // THE PUSH KAYA OWNS — AND NOT WHILE THE USER IS COMPOSING (D4).
             // Measured 2026-08-06: a programmatic `view.text =` mid-composition

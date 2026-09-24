@@ -44,6 +44,7 @@ static class Program
             case "listdetail": SplitScene.Run(); break;
             case "scroll": ScrollScene.Run(); break;
             case "search": SearchScene.Run(); break;
+            case "submit": SubmitScene.Run(); break;
             case "progress": ProgressScene.Run(); break;
             case "select": SelectScene.Run(); break;
             case "radio": RadioScene.Run(); break;

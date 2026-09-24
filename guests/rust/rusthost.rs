@@ -140,6 +140,9 @@ mod sheet;
 mod format;
 mod flexshrink;
 
+#[path = "submit.rs"]
+mod submit;
+
 #[path = "tooltips.rs"]
 mod tooltips;
 
@@ -211,6 +214,7 @@ fn app(ctx: kaya::AppCtx) {
         // SCENE_LOCALE): a scene selects a SCRIPT, never an app.
         Ok("format") | Ok("formatde") | Ok("formatar") | Ok("formatbig") | Ok("clock24") => format::app(ctx),
         Ok("flexshrink") => flexshrink::app(ctx),
+        Ok("submit") => submit::app(ctx),
         Ok("tooltips") => tooltips::app(ctx),
         Ok("search") => search::app(ctx),
         Ok("tasks") => tasks::app(ctx),

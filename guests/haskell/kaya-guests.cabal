@@ -310,6 +310,11 @@ executable tooltips
   main-is: tooltips.hs
   build-depends: kaya-guests
 
+executable submit
+  import: shared
+  main-is: submit.hs
+  build-depends: kaya-guests
+
 executable encodebench
   import: shared
   main-is: encodebench.hs

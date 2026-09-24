@@ -559,6 +559,10 @@ type app = {
   node_handlers : (int64, Kaya_wire.value list -> unit) Hashtbl.t;
   widget_changes : (int64, string -> unit) Hashtbl.t;
   node_changes : (int64, Kaya_wire.value list -> string -> unit) Hashtbl.t;
+  (* The submit gesture's two tables, [widget_changes]'s twins
+     (docs/submit-plan.md S7). *)
+  widget_submits : (int64, string -> unit) Hashtbl.t;
+  node_submits : (int64, Kaya_wire.value list -> string -> unit) Hashtbl.t;
   (* The rich mirror, one document per [rich] textarea
      (docs/rich-text-plan.md R1): folded from the two occurrences and
      from the app's own [set_document]/[apply_edit] as they are SENT. *)
@@ -750,6 +754,8 @@ let create () =
     node_handlers = Hashtbl.create 8;
     widget_changes = Hashtbl.create 8;
     node_changes = Hashtbl.create 8;
+    widget_submits = Hashtbl.create 8;
+    node_submits = Hashtbl.create 8;
     documents = Hashtbl.create 8;
     document_binds = Hashtbl.create 8;
     node_edits = Hashtbl.create 8;
@@ -1676,6 +1682,11 @@ let document (Widget id) = the_document (the_tx ()).app id
    (docs/rich-text-plan.md R8, §15). *)
 let set_rich (Widget id) on = emit (the_tx ()) (Kaya_wire.tx_set_rich id on)
 
+(* This textarea sends on the platform's submit gesture instead of taking
+   the newline (docs/submit-plan.md S2). *)
+let set_submits (Widget id) on =
+  emit (the_tx ()) (Kaya_wire.tx_set_submits id on)
+
 (* The app owns this textarea's history (docs/rich-text-plan.md R6, §14):
    the platform's own stack goes off and Edit>Undo reaches the app through
    the role item's activation. *)
@@ -1812,7 +1823,7 @@ let button ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help
    the platform's real multi-line editor. [~rich:true] adds the
    attribute-run channel (docs/rich-text-plan.md R1); [~on_edit] and
    [~on_format] answer only on one. *)
-let textarea ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?placeholder ?placeholder_bind ?on_change ?rich ?own_undo ?on_edit ?on_format () =
+let textarea ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?placeholder ?placeholder_bind ?on_change ?on_submit ?rich ?submits ?own_undo ?on_edit ?on_format () =
   let tx = the_tx () in
   let w = widget Kaya_wire.kind_textarea in
   Option.iter (fun g -> set_grow w g) grow;
@@ -1821,10 +1832,14 @@ let textarea ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?he
   Option.iter (fun v -> set_placeholder w v) placeholder;
   Option.iter (fun s -> bind_placeholder w s) placeholder_bind;
   Option.iter (fun v -> set_rich w v) rich;
+  Option.iter (fun v -> set_submits w v) submits;
   Option.iter (fun v -> set_own_undo w v) own_undo;
   let (Widget id) = w in
   (match on_change with
   | Some handler -> Hashtbl.replace tx.app.widget_changes id handler
+  | None -> ());
+  (match on_submit with
+  | Some handler -> Hashtbl.replace tx.app.widget_submits id handler
   | None -> ());
   Option.iter (Hashtbl.replace tx.app.widget_edits id) on_edit;
   Option.iter (Hashtbl.replace tx.app.widget_formats id) on_format;
@@ -1857,7 +1872,7 @@ let heading ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?hel
 let caption ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?text ?bind () =
   label ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ~role:Caption ?text ?bind ()
 
-let entry ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?placeholder ?placeholder_bind ?on_change () =
+let entry ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?placeholder ?placeholder_bind ?on_change ?on_submit () =
   let tx = the_tx () in
   let w = widget Kaya_wire.kind_entry in
   Option.iter (fun g -> set_grow w g) grow;
@@ -1870,12 +1885,17 @@ let entry ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help 
       let (Widget id) = w in
       Hashtbl.replace tx.app.widget_changes id handler
   | None -> ());
+  (match on_submit with
+  | Some handler ->
+      let (Widget id) = w in
+      Hashtbl.replace tx.app.widget_submits id handler
+  | None -> ());
   w
 
 (* A search field: the entry's uncontrolled contract under the platform's
    search chrome (docs/search-plan.md), filtering on every keystroke. The
    clear affordance reaches [~on_change] with "". *)
-let search ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?placeholder ?placeholder_bind ?on_change () =
+let search ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?placeholder ?placeholder_bind ?on_change ?on_submit () =
   let tx = the_tx () in
   let w = widget Kaya_wire.kind_search in
   Option.iter (fun g -> set_grow w g) grow;
@@ -1887,6 +1907,11 @@ let search ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help
   | Some handler ->
       let (Widget id) = w in
       Hashtbl.replace tx.app.widget_changes id handler
+  | None -> ());
+  (match on_submit with
+  | Some handler ->
+      let (Widget id) = w in
+      Hashtbl.replace tx.app.widget_submits id handler
   | None -> ());
   w
 
@@ -3887,6 +3912,11 @@ module Tpl = struct
     (* A stamped copy carries attribute runs (the live [set_rich]). *)
     let set_rich (Node id) on = emit (the_tx ()) (Kaya_wire.tx_set_rich id on)
 
+    (* A stamped copy sends on the submit gesture (the live [set_submits],
+       docs/submit-plan.md S2). *)
+    let set_submits (Node id) on =
+      emit (the_tx ()) (Kaya_wire.tx_set_submits id on)
+
     (* Bind a stamped rich textarea's whole document to one field of the
        element; a (_, document) field only. The core refuses [document]
        without [rich] before it, which is why [Tpl.textarea] sends the
@@ -4069,7 +4099,8 @@ module Tpl = struct
   let textarea ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
       ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?placeholder
       ?placeholder_bind ?placeholder_field ?accepts ?text ?bind ?bind_field
-      ?document_field ?(level = 0) ?(a11y_level = level) ?on_change () =
+      ?document_field ?submits ?(level = 0) ?(a11y_level = level) ?on_change
+      ?on_submit () =
     let n = Floor.widget Kaya_wire.kind_textarea in
     Option.iter (fun g -> Floor.set_grow n g) grow;
     Option.iter (fun v -> Floor.set_fill n v) fill;
@@ -4096,10 +4127,17 @@ module Tpl = struct
         | None -> ());
         Floor.bind_document_field ~level n fd)
       document_field;
+    Option.iter (fun v -> Floor.set_submits n v) submits;
     (match on_change with
     | Some handler ->
         let (Node id) = n in
         Hashtbl.replace (the_tx ()).app.node_changes id (fun keys s ->
+            handler (List.map key_of_wire keys) s)
+    | None -> ());
+    (match on_submit with
+    | Some handler ->
+        let (Node id) = n in
+        Hashtbl.replace (the_tx ()).app.node_submits id (fun keys s ->
             handler (List.map key_of_wire keys) s)
     | None -> ());
     n
@@ -4148,7 +4186,7 @@ module Tpl = struct
   let entry ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
       ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?placeholder
       ?placeholder_bind ?placeholder_field ?accepts ?text ?bind ?bind_field
-      ?(level = 0) ?(a11y_level = level) ?on_change () =
+      ?(level = 0) ?(a11y_level = level) ?on_change ?on_submit () =
     let n = Floor.widget Kaya_wire.kind_entry in
     Option.iter (fun g -> Floor.set_grow n g) grow;
     Option.iter (fun v -> Floor.set_fill n v) fill;
@@ -4167,6 +4205,12 @@ module Tpl = struct
         Hashtbl.replace (the_tx ()).app.node_changes id (fun keys s ->
             handler (List.map key_of_wire keys) s)
     | None -> ());
+    (match on_submit with
+    | Some handler ->
+        let (Node id) = n in
+        Hashtbl.replace (the_tx ()).app.node_submits id (fun keys s ->
+            handler (List.map key_of_wire keys) s)
+    | None -> ());
     n
 
   (* A search field per stamped copy: [entry]'s uncontrolled contract
@@ -4174,7 +4218,7 @@ module Tpl = struct
   let search ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
       ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?placeholder
       ?placeholder_bind ?placeholder_field ?accepts ?text ?bind ?bind_field
-      ?(level = 0) ?(a11y_level = level) ?on_change () =
+      ?(level = 0) ?(a11y_level = level) ?on_change ?on_submit () =
     let n = Floor.widget Kaya_wire.kind_search in
     Option.iter (fun g -> Floor.set_grow n g) grow;
     Option.iter (fun v -> Floor.set_fill n v) fill;
@@ -4191,6 +4235,12 @@ module Tpl = struct
     | Some handler ->
         let (Node id) = n in
         Hashtbl.replace (the_tx ()).app.node_changes id (fun keys s ->
+            handler (List.map key_of_wire keys) s)
+    | None -> ());
+    (match on_submit with
+    | Some handler ->
+        let (Node id) = n in
+        Hashtbl.replace (the_tx ()).app.node_submits id (fun keys s ->
             handler (List.map key_of_wire keys) s)
     | None -> ());
     n
@@ -4952,6 +5002,17 @@ let dispatch_loop app =
                | None -> ())
            | Some (Kaya_wire.Str text), keys ->
                (match Hashtbl.find_opt app.node_changes id with
+               | Some handler -> dispatch app (fun () -> handler keys text)
+               | None -> ())
+           | _ -> ()
+         else if kind = Kaya_wire.occ_kind_submitted then
+           match (payload, keys) with
+           | Some (Kaya_wire.Str text), [] ->
+               (match Hashtbl.find_opt app.widget_submits id with
+               | Some handler -> dispatch app (fun () -> handler text)
+               | None -> ())
+           | Some (Kaya_wire.Str text), keys ->
+               (match Hashtbl.find_opt app.node_submits id with
                | Some handler -> dispatch app (fun () -> handler keys text)
                | None -> ())
            | _ -> ()

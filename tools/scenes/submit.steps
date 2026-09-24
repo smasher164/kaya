@@ -1,0 +1,43 @@
+# THE SUBMIT GESTURE (docs/submit-plan.md §5): Return in an entry and a
+# search field publishes `submitted` with the field's text; a plain
+# textarea's Return is its newline and publishes nothing; a textarea that
+# says `submits` publishes on Return and keeps its text. The app writes
+# each submit into a label, which is the observation — an occurrence is
+# asserted by what the app did with it, like every other.
+expect label@sent "sent: -"
+click entry@name
+expect_focused entry@name
+type "milk"
+press return
+expect label@sent "sent: milk"
+# On iOS the platform's Return on a single-line field ends editing, so
+# the iOS lane drops the next step (tools/lib/lanes/ios.py MODS, S3);
+# it is spelled by index so the drop can name it apart from the one
+# above (entry#0 is entry@name).
+expect entry@name "milk"
+expect_focused entry#0
+click search@find
+type "eggs"
+press return
+expect label@sent "sent: eggs"
+expect search@find "eggs"
+# A plain textarea: Return inserts the newline, and nothing is sent.
+click textarea@plain
+type "a"
+press return
+type "b"
+expect textarea@plain "a\nb"
+expect label@sent "sent: eggs"
+# A submitting textarea: Return sends and inserts nothing, and the
+# field keeps its focus on every platform (S3): the compose case.
+click textarea@compose
+type "hello"
+press return
+expect label@sent "sent: hello"
+expect textarea@compose "hello"
+expect_focused textarea@compose
+# A stamped entry in a row: the copy's key rides the submit.
+click entry@reply[r2]
+type "yes"
+press return
+expect label@sent "sent: r2: yes"

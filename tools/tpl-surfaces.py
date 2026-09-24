@@ -265,6 +265,8 @@ TPL_PROPS = ["grow", "a11y_id", "a11y_label", "a11y_hint", "accepts", "role", "i
              # child placement, R5's own escape hatch, which no collection
              # row could reach until 2026-09-24.
              "align",
+             # docs/submit-plan.md S2: a stamped textarea that sends on Return.
+             "submits",
              # docs/rich-text-plan.md §19: a stamped copy's document, bound
              # to a Document field of its row. Three bindings spell it as an
              # OVERLOAD or a labelled argument of the bound-text textarea, so
@@ -283,6 +285,7 @@ PROP_MEMBERS = {
         "href": "href", "fill": "fill", "align": "align",
         "columns_auto": "columns_auto", "wrap": "wrap",
         "document": "textarea_rich_bound",
+        "submits": "submits",
     },
     "go": {
         "grow": "SetGrow", "a11y_id": "SetA11yID", "a11y_label": "SetA11yLabel",
@@ -292,6 +295,7 @@ PROP_MEMBERS = {
         "align": "SetAlign",
         "columns_auto": "SetColumnsAuto", "wrap": "SetWrap",
         "document": "TextareaRichBound",
+        "submits": "SetSubmits",
     },
     "csharp": {
         "grow": "SetGrow", "a11y_id": "SetA11yId", "a11y_label": "SetA11yLabel",
@@ -301,6 +305,7 @@ PROP_MEMBERS = {
         "align": "SetAlign",
         "columns_auto": "SetColumnsAuto", "wrap": "SetWrap",
         "document": "Textarea(Field<Document>",
+        "submits": "SetSubmits",
     },
     "java": {
         "grow": "setGrow", "a11y_id": "setA11yId", "a11y_label": "setA11yLabel",
@@ -310,6 +315,7 @@ PROP_MEMBERS = {
         "align": "setAlign",
         "columns_auto": "setColumnsAuto", "wrap": "setWrap",
         "document": "textareaRich",
+        "submits": "setSubmits",
     },
     "swift": {
         "grow": "setGrow", "a11y_id": "setA11yId", "a11y_label": "setA11yLabel",
@@ -319,6 +325,7 @@ PROP_MEMBERS = {
         "align": "setAlign",
         "columns_auto": "setColumnsAuto", "wrap": "setWrap",
         "document": "textarea(document:",
+        "submits": "setSubmits",
     },
     "ocaml": {
         "grow": "set_grow", "a11y_id": "set_a11y_id", "a11y_label": "set_a11y_label",
@@ -328,6 +335,7 @@ PROP_MEMBERS = {
         "align": "set_align",
         "columns_auto": "set_columns_auto", "wrap": "set_wrap",
         "document": "bind_document_field",
+        "submits": "set_submits",
     },
     # Haskell's template props are not methods but CONSTRUCTORS of the
     # `TplAttr` GADT, applied by `applyTplAttr`.
@@ -339,6 +347,7 @@ PROP_MEMBERS = {
         "align": "TplAlign",
         "columns_auto": "TplColumnsAuto", "wrap": "TplWrap",
         "document": "bindDocumentField",
+        "submits": "TplSubmits",
     },
     # JS spells five of the seven as chainable methods on the base handle
     # and the other two as CONSTRUCTOR OPTIONS; members_js says why the
@@ -350,6 +359,7 @@ PROP_MEMBERS = {
         "href": "href", "fill": "fill", "align": "align",
         "columns_auto": "columnsAuto", "wrap": "wrap",
         "document": "document",
+        "submits": "submits",
     },
 }
 
@@ -1955,10 +1965,10 @@ def facade_csharp():
 # first leaves a nested typed For's body holding the raw Tpl
 # (docs/deferred.md, closed 2026-08-24). The floor is the census
 # discipline; sum surfaces have no `<Rec>Row`.
-CSHARP_TWIN_FLOOR = 9
+CSHARP_TWIN_FLOOR = 10
 
 
-JAVA_TWIN_FLOOR = 9
+JAVA_TWIN_FLOOR = 11
 
 
 def twins_java():

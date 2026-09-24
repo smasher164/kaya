@@ -83,6 +83,7 @@ LEGS = {
         "taskspersist-compose",
         "tooltips-compose",
         "search-compose",
+        "submit-compose",
         # The notification conformance scene: rust-only for now, so it
         # rides the compose suite alone (docs/tasks-s3-plan.md §5).
         "notify-compose",
@@ -127,7 +128,7 @@ LEGS = {
         "align-jvm", "layout-jvm", "stall-jvm",
         "confirm-jvm", "nav-jvm", "scroll-jvm",
         "progress-jvm", "select-jvm", "radio-jvm",
-        "grid-jvm", "textarea-jvm", "search-jvm", "sections-jvm",
+        "grid-jvm", "textarea-jvm", "search-jvm", "submit-jvm", "sections-jvm",
         "menus-jvm", "toolbar-jvm", "identity-jvm",
         "listdetail-jvm", "commands-jvm", "clipboard-jvm",
         "background-jvm", "undo-jvm", "filedialog-jvm",
@@ -147,7 +148,7 @@ LEGS = {
         "layout-go", "stall-go", "confirm-go",
         "nav-go", "scroll-go", "progress-go",
         "select-go", "radio-go", "grid-go",
-        "textarea-go", "search-go", "sections-go", "menus-go",
+        "textarea-go", "search-go", "submit-go", "sections-go", "menus-go",
         "toolbar-go", "identity-go", "listdetail-go",
         "commands-go", "clipboard-go", "background-go",
         "undo-go", "filedialog-go", "save-go",

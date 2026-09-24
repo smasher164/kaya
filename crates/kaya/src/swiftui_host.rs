@@ -10,7 +10,8 @@
 use std::ffi::{CString, c_char, c_int, c_void};
 
 use crate::capi::{
-    kaya_blob_count, kaya_blob_data, kaya_emit_clicked, kaya_emit_text_changed, kaya_emit_toggled,
+    kaya_blob_count, kaya_blob_data, kaya_emit_clicked, kaya_emit_submitted, kaya_emit_text_changed,
+    kaya_emit_toggled,
     kaya_emit_value_changed, kaya_emit_value_committed, kaya_next_commands, kaya_emit_date_changed,
     kaya_emit_time_changed,
 };
@@ -116,6 +117,8 @@ pub struct KayaHostApi {
     /// LEDGER-QUIET (a native undo the backend routed and reports through
     /// note_native_undo instead).
     pub emit_text_changed: unsafe extern "C" fn(*const u8, usize, *const u8, usize, u64, u8, u8),
+    /// The field submitted (docs/submit-plan.md S1): the tag and its text.
+    pub emit_submitted: unsafe extern "C" fn(*const u8, usize, *const u8, usize),
     pub emit_toggled: unsafe extern "C" fn(*const u8, usize, u8),
     pub emit_value_changed: unsafe extern "C" fn(*const u8, usize, f64),
     /// The value a slider gesture settled on (docs/slider-plan.md S2).
@@ -419,6 +422,7 @@ pub(crate) fn run() -> i32 {
         emit_clicked: kaya_emit_clicked,
         next_commands: kaya_next_commands,
         emit_text_changed: kaya_emit_text_changed,
+        emit_submitted: kaya_emit_submitted,
         emit_toggled: kaya_emit_toggled,
         emit_value_changed: kaya_emit_value_changed,
         emit_value_committed: kaya_emit_value_committed,

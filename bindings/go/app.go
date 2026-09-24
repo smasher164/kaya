@@ -232,6 +232,8 @@ type App struct {
 	nodeHandlers   map[uint64]func(*Tx, []any)
 	widgetChanges  map[uint64]func(*Tx, string)
 	nodeChanges    map[uint64]func(*Tx, []any, string)
+	widgetSubmits  map[uint64]func(*Tx, string)
+	nodeSubmits    map[uint64]func(*Tx, []any, string)
 	// A rich textarea's addressed edits and toolbar acts, plus the
 	// mirror both fold into (docs/rich-text-plan.md R1).
 	widgetEdits    map[uint64]func(*Tx, Edit)
@@ -370,6 +372,8 @@ func NewApp() *App {
 		nodeHandlers:   make(map[uint64]func(*Tx, []any)),
 		widgetChanges:  make(map[uint64]func(*Tx, string)),
 		nodeChanges:    make(map[uint64]func(*Tx, []any, string)),
+		widgetSubmits:  make(map[uint64]func(*Tx, string)),
+		nodeSubmits:    make(map[uint64]func(*Tx, []any, string)),
 		widgetEdits:    make(map[uint64]func(*Tx, Edit)),
 		widgetFormats:  make(map[uint64]func(*Tx, Format)),
 		documents:      make(map[uint64]Document),
@@ -1551,6 +1555,14 @@ func (f Format) IsFlag() bool { return !f.Removed && f.Value == FlagValue }
 // reads it, and no delta ever comes back (docs/rich-text-plan.md R8, §15).
 func (w Widget) Rich() Widget {
 	w.tx.emit(TxSetRich(w.id, true))
+	return w
+}
+
+// Submits declares this textarea a compose field (docs/submit-plan.md
+// S2): Return publishes App.OnSubmitted and Shift+Return inserts the
+// newline; the phone keyboard's key says Send. Off, Return is a newline.
+func (w Widget) Submits() Widget {
+	w.tx.emit(TxSetSubmits(w.id, true))
 	return w
 }
 
@@ -4619,6 +4631,12 @@ func (t *Tpl) SetWrap(n Node, on bool) {
 	t.tx.emit(TxSetWrap(n.id, on))
 }
 
+// SetSubmits makes every stamped copy of this textarea send on Return
+// (Widget.Submits, docs/submit-plan.md S2), or opts it out.
+func (t *Tpl) SetSubmits(n Node, on bool) {
+	t.tx.emit(TxSetSubmits(n.id, on))
+}
+
 // SetAccepts declares what each stamped copy takes from a paste. Entry
 // and textarea only, checked at the root. CONST ONLY: an accept list
 // describes the PROTOTYPE, not the row. THIS IS THE DECLARATION THAT
@@ -5573,6 +5591,19 @@ func (a *App) OnChangeNode(n Node, fn func(*Tx, []any, string)) {
 	a.nodeChanges[n.id] = fn
 }
 
+// OnSubmitted registers a handler for a live field's SUBMIT gesture:
+// Return in an entry or a search field, the send gesture on a Submits
+// textarea (docs/submit-plan.md S1). OnChange has carried every edit.
+func (a *App) OnSubmitted(w Widget, fn func(*Tx, string)) {
+	a.widgetSubmits[w.id] = fn
+}
+
+// OnSubmittedNode registers a submit handler for a template field; the
+// handler also receives the stamped copy's keys, outermost first.
+func (a *App) OnSubmittedNode(n Node, fn func(*Tx, []any, string)) {
+	a.nodeSubmits[n.id] = fn
+}
+
 // OnEdit registers a handler for one addressed user edit of a rich
 // textarea; OnChange still fires beside it
 // (docs/rich-text-plan.md R1).
@@ -5994,6 +6025,14 @@ func (a *App) Serve() {
 			}
 		case kind == occTextChanged:
 			if fn := a.nodeChanges[id]; fn != nil {
+				a.dispatch(func(tx *Tx) { fn(tx, keys, text) })
+			}
+		case kind == occSubmitted && len(keys) == 0:
+			if fn := a.widgetSubmits[id]; fn != nil {
+				a.dispatch(func(tx *Tx) { fn(tx, text) })
+			}
+		case kind == occSubmitted:
+			if fn := a.nodeSubmits[id]; fn != nil {
 				a.dispatch(func(tx *Tx) { fn(tx, keys, text) })
 			}
 		// THE MIRROR FOLLOWS FIRST, and unconditionally — before the

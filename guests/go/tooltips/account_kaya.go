@@ -63,6 +63,10 @@ func (r accountRow) Checkbox(f kaya.Field[bool], onToggle func(*kaya.Tx, string,
 	return r.c.Checkbox(r.t, f, onToggle)
 }
 
+func (r accountRow) Entry(onChange func(*kaya.Tx, string, string)) kaya.Node {
+	return r.c.Entry(r.t, onChange)
+}
+
 func (r accountRow) TextareaRich(f kaya.Field[kaya.Document], onEdit func(*kaya.Tx, string, kaya.Edit), onFormat func(*kaya.Tx, string, kaya.Format)) kaya.Node {
 	return r.c.TextareaRich(r.t, f, onEdit, onFormat)
 }
@@ -120,6 +124,8 @@ func (r accountRow) SetAlign(n kaya.Node, mode kaya.Align) { r.t.SetAlign(n, mod
 func (r accountRow) SetColumnsAuto(n kaya.Node, minWidth float64) { r.t.SetColumnsAuto(n, minWidth) }
 
 func (r accountRow) SetWrap(n kaya.Node, on bool) { r.t.SetWrap(n, on) }
+
+func (r accountRow) SetSubmits(n kaya.Node, on bool) { r.t.SetSubmits(n, on) }
 
 func (r accountRow) Draggable(n kaya.Node) kaya.TplDragRef { return r.t.Draggable(n) }
 

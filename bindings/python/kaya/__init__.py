@@ -598,6 +598,14 @@ class _Handle:
         _records().append(wire.tx_set_rich(self.id, bool(on)))
         return self
 
+    def submits(self: H, on: bool = True) -> H:
+        """This textarea SUBMITS on Return (docs/submit-plan.md S2):
+        Return publishes `on_submit` and Shift+Return inserts the
+        newline; the phone keyboard's key says Send. Off, Return is a
+        newline and nothing is published. Returns the handle."""
+        _records().append(wire.tx_set_submits(self.id, bool(on)))
+        return self
+
     def own_undo(self: H, on: bool = True) -> H:
         """The app owns this rich textarea's undo (docs/rich-text-plan.md
         R6, §14): the native stack is off, and Edit>Undo/Redo reach the
@@ -4746,11 +4754,15 @@ def time_picker(value: datetime.time | Source | None = None, *,
 
 
 def entry(text: str | None = None, *, on_change: Handler | None = None,
+          on_submit: Handler | None = None,
           grow: float | None = None,
           placeholder: TextSource | None = None) -> Widget:
     """A single-line text field. UNCONTROLLED: the widget owns its text
     and reports each edit to `on_change`, template copies getting their
-    `Row` first. There is no read-back."""
+    `Row` first. There is no read-back.
+
+    `on_submit(text)` is the Return gesture (docs/submit-plan.md S1): the
+    field's text at the press, the field keeping its text and focus."""
     handle = _widget(wire.KIND_ENTRY)
     if text is not None:
         _records().append(wire.tx_set_text(handle.id, _text_value("entry text", text)))
@@ -4758,6 +4770,8 @@ def entry(text: str | None = None, *, on_change: Handler | None = None,
         handle.placeholder(placeholder)
     if on_change is not None:
         _app._register(handle, wire.OCC_TEXT_CHANGED, on_change)
+    if on_submit is not None:
+        _app._register(handle, wire.OCC_SUBMITTED, on_submit)
     _set_grow(handle, grow)
     return handle
 
@@ -4784,8 +4798,10 @@ def _bind_document(handle: Widget, field: object) -> None:
 
 
 def textarea(text: str | None = None, *, on_change: Handler | None = None,
+             on_submit: Handler | None = None,
              grow: float | None = None,
              placeholder: TextSource | None = None, rich: bool = False,
+             submits: bool = False,
              own_undo: bool = False, on_edit: Handler | None = None,
              on_format: Handler | None = None,
              document: Document | FieldRef[Any] | None = None) -> Widget:
@@ -4805,6 +4821,10 @@ def textarea(text: str | None = None, *, on_change: Handler | None = None,
     `on_format` arrive with the row's key and the row already reads
     current.
 
+    `submits=True` sends on Return and keeps Shift+Return's newline
+    (docs/submit-plan.md S2), reaching `on_submit(text)`; off, Return is
+    the newline and nothing is published.
+
     `own_undo=True` puts the history in the app's hands
     (docs/rich-text-plan.md R6, §14)."""
     handle = _widget(wire.KIND_TEXTAREA)
@@ -4814,12 +4834,16 @@ def textarea(text: str | None = None, *, on_change: Handler | None = None,
         _bind_document(handle, document)
     elif rich:
         handle.rich(True)
+    if submits:
+        handle.submits(True)
     if own_undo:
         handle.own_undo(True)
     if placeholder is not None:
         handle.placeholder(placeholder)
     if on_change is not None:
         _app._register(handle, wire.OCC_TEXT_CHANGED, on_change)
+    if on_submit is not None:
+        _app._register(handle, wire.OCC_SUBMITTED, on_submit)
     if on_edit is not None:
         _app._register(handle, wire.OCC_TEXT_EDITED, on_edit)
     if on_format is not None:
@@ -4829,11 +4853,15 @@ def textarea(text: str | None = None, *, on_change: Handler | None = None,
 
 
 def search(text: str | None = None, *, on_change: Handler | None = None,
+           on_submit: Handler | None = None,
            grow: float | None = None,
            placeholder: TextSource | None = None) -> Widget:
     """A search field (docs/search-plan.md): the entry's uncontrolled
     contract under the platform's search chrome, filtering on every
-    keystroke. The clear affordance reaches `on_change` with ""."""
+    keystroke. The clear affordance reaches `on_change` with "".
+
+    `on_submit(text)` is Return, for a search that asks a server
+    (docs/submit-plan.md S2); one that filters as it goes ignores it."""
     handle = _widget(wire.KIND_SEARCH)
     if text is not None:
         _records().append(wire.tx_set_text(handle.id, _text_value("search text", text)))
@@ -4841,6 +4869,8 @@ def search(text: str | None = None, *, on_change: Handler | None = None,
         handle.placeholder(placeholder)
     if on_change is not None:
         _app._register(handle, wire.OCC_TEXT_CHANGED, on_change)
+    if on_submit is not None:
+        _app._register(handle, wire.OCC_SUBMITTED, on_submit)
     _set_grow(handle, grow)
     return handle
 

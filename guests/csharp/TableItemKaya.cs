@@ -132,57 +132,57 @@ sealed class TableItemRow
         System.Action<Tx, System.Collections.Generic.List<object>, System.TimeOnly>? onTime = null) =>
         t.TimePicker(f, onTime);
 
-    public Node Entry(
-        System.Action<Tx, System.Collections.Generic.List<object>, string>? onChange = null) =>
-        t.Entry(onChange);
+    public Node Entry(System.Action<Tx, System.Collections.Generic.List<object>, string>? onChange = null,
+        System.Action<Tx, System.Collections.Generic.List<object>, string>? onSubmit = null) =>
+        t.Entry(onChange, onSubmit);
 
-    public Node Entry(string text,
-        System.Action<Tx, System.Collections.Generic.List<object>, string>? onChange = null) =>
-        t.Entry(text, onChange);
+    public Node Entry(string text, System.Action<Tx, System.Collections.Generic.List<object>, string>? onChange = null,
+        System.Action<Tx, System.Collections.Generic.List<object>, string>? onSubmit = null) =>
+        t.Entry(text, onChange, onSubmit);
 
-    public Node Entry(Signal text,
-        System.Action<Tx, System.Collections.Generic.List<object>, string>? onChange = null) =>
-        t.Entry(text, onChange);
+    public Node Entry(Signal text, System.Action<Tx, System.Collections.Generic.List<object>, string>? onChange = null,
+        System.Action<Tx, System.Collections.Generic.List<object>, string>? onSubmit = null) =>
+        t.Entry(text, onChange, onSubmit);
 
-    public Node Entry(Field<string> text,
-        System.Action<Tx, System.Collections.Generic.List<object>, string>? onChange = null) =>
-        t.Entry(text, onChange);
+    public Node Entry(Field<string> text, System.Action<Tx, System.Collections.Generic.List<object>, string>? onChange = null,
+        System.Action<Tx, System.Collections.Generic.List<object>, string>? onSubmit = null) =>
+        t.Entry(text, onChange, onSubmit);
 
-    public Node Textarea(
-        System.Action<Tx, System.Collections.Generic.List<object>, string>? onChange = null) =>
-        t.Textarea(onChange);
+    public Node Textarea(System.Action<Tx, System.Collections.Generic.List<object>, string>? onChange = null,
+        System.Action<Tx, System.Collections.Generic.List<object>, string>? onSubmit = null) =>
+        t.Textarea(onChange, onSubmit);
 
-    public Node Textarea(string text,
-        System.Action<Tx, System.Collections.Generic.List<object>, string>? onChange = null) =>
-        t.Textarea(text, onChange);
+    public Node Textarea(string text, System.Action<Tx, System.Collections.Generic.List<object>, string>? onChange = null,
+        System.Action<Tx, System.Collections.Generic.List<object>, string>? onSubmit = null) =>
+        t.Textarea(text, onChange, onSubmit);
 
-    public Node Textarea(Signal text,
-        System.Action<Tx, System.Collections.Generic.List<object>, string>? onChange = null) =>
-        t.Textarea(text, onChange);
+    public Node Textarea(Signal text, System.Action<Tx, System.Collections.Generic.List<object>, string>? onChange = null,
+        System.Action<Tx, System.Collections.Generic.List<object>, string>? onSubmit = null) =>
+        t.Textarea(text, onChange, onSubmit);
 
-    public Node Textarea(Field<string> text,
-        System.Action<Tx, System.Collections.Generic.List<object>, string>? onChange = null) =>
-        t.Textarea(text, onChange);
+    public Node Textarea(Field<string> text, System.Action<Tx, System.Collections.Generic.List<object>, string>? onChange = null,
+        System.Action<Tx, System.Collections.Generic.List<object>, string>? onSubmit = null) =>
+        t.Textarea(text, onChange, onSubmit);
 
-    public Node Textarea(Field<Document> document,
-        System.Action<Tx, System.Collections.Generic.List<object>, string>? onChange = null) =>
-        t.Textarea(document, onChange);
+    public Node Textarea(Field<Document> document, System.Action<Tx, System.Collections.Generic.List<object>, string>? onChange = null,
+        System.Action<Tx, System.Collections.Generic.List<object>, string>? onSubmit = null) =>
+        t.Textarea(document, onChange, onSubmit);
 
-    public Node Search(
-        System.Action<Tx, System.Collections.Generic.List<object>, string>? onChange = null) =>
-        t.Search(onChange);
+    public Node Search(System.Action<Tx, System.Collections.Generic.List<object>, string>? onChange = null,
+        System.Action<Tx, System.Collections.Generic.List<object>, string>? onSubmit = null) =>
+        t.Search(onChange, onSubmit);
 
-    public Node Search(string text,
-        System.Action<Tx, System.Collections.Generic.List<object>, string>? onChange = null) =>
-        t.Search(text, onChange);
+    public Node Search(string text, System.Action<Tx, System.Collections.Generic.List<object>, string>? onChange = null,
+        System.Action<Tx, System.Collections.Generic.List<object>, string>? onSubmit = null) =>
+        t.Search(text, onChange, onSubmit);
 
-    public Node Search(Signal text,
-        System.Action<Tx, System.Collections.Generic.List<object>, string>? onChange = null) =>
-        t.Search(text, onChange);
+    public Node Search(Signal text, System.Action<Tx, System.Collections.Generic.List<object>, string>? onChange = null,
+        System.Action<Tx, System.Collections.Generic.List<object>, string>? onSubmit = null) =>
+        t.Search(text, onChange, onSubmit);
 
-    public Node Search(Field<string> text,
-        System.Action<Tx, System.Collections.Generic.List<object>, string>? onChange = null) =>
-        t.Search(text, onChange);
+    public Node Search(Field<string> text, System.Action<Tx, System.Collections.Generic.List<object>, string>? onChange = null,
+        System.Action<Tx, System.Collections.Generic.List<object>, string>? onSubmit = null) =>
+        t.Search(text, onChange, onSubmit);
 
     public Node Progress(double value) => t.Progress(value);
 
@@ -312,6 +312,8 @@ sealed class TableItemRow
     public void SetInset(Node n, double pad) => t.SetInset(n, pad);
 
     public void SetFill(Node n, bool on) => t.SetFill(n, on);
+
+    public void SetSubmits(Node n, bool on) => t.SetSubmits(n, on);
 
     public void SetAlign(Node n, Align align) => t.SetAlign(n, align);
 

@@ -594,7 +594,9 @@ val textarea :
   ?placeholder:string ->
   ?placeholder_bind:string signal ->
   ?on_change:(string -> unit) ->
+  ?on_submit:(string -> unit) ->
   ?rich:bool ->
+  ?submits:bool ->
   ?own_undo:bool ->
   ?on_edit:(edit -> unit) ->
   ?on_format:(format_act -> unit) -> unit -> widget
@@ -647,7 +649,8 @@ val entry :
   ?help_bind:string signal ->
   ?placeholder:string ->
   ?placeholder_bind:string signal ->
-  ?on_change:(string -> unit) -> unit -> widget
+  ?on_change:(string -> unit) ->
+  ?on_submit:(string -> unit) -> unit -> widget
 
 val search :
   ?grow:float ->
@@ -660,7 +663,8 @@ val search :
   ?help_bind:string signal ->
   ?placeholder:string ->
   ?placeholder_bind:string signal ->
-  ?on_change:(string -> unit) -> unit -> widget
+  ?on_change:(string -> unit) ->
+  ?on_submit:(string -> unit) -> unit -> widget
 
 val progress :
   ?grow:float ->
@@ -1398,8 +1402,11 @@ module Tpl : sig
     ?bind:string signal ->
     ?bind_field:('e, string) field ->
     ?document_field:('f, document) field ->
+    ?submits:bool ->
     ?level:int ->
-    ?a11y_level:int -> ?on_change:(key list -> string -> unit) -> unit -> node
+    ?a11y_level:int ->
+    ?on_change:(key list -> string -> unit) ->
+    ?on_submit:(key list -> string -> unit) -> unit -> node
 
   val label :
     ?grow:float ->
@@ -1479,7 +1486,9 @@ module Tpl : sig
     ?bind:string signal ->
     ?bind_field:('e, string) field ->
     ?level:int ->
-    ?a11y_level:int -> ?on_change:(key list -> string -> unit) -> unit -> node
+    ?a11y_level:int ->
+    ?on_change:(key list -> string -> unit) ->
+    ?on_submit:(key list -> string -> unit) -> unit -> node
 
   val search :
     ?grow:float ->
@@ -1501,7 +1510,9 @@ module Tpl : sig
     ?bind:string signal ->
     ?bind_field:('e, string) field ->
     ?level:int ->
-    ?a11y_level:int -> ?on_change:(key list -> string -> unit) -> unit -> node
+    ?a11y_level:int ->
+    ?on_change:(key list -> string -> unit) ->
+    ?on_submit:(key list -> string -> unit) -> unit -> node
 
   val progress :
     ?grow:float ->

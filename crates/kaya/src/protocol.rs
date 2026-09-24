@@ -532,6 +532,12 @@ pub enum Occurrence {
     TextChanged { id: WidgetId, text: String },
     /// The user edited a stamped copy of a template entry.
     InstanceTextChanged { node: TemplateNodeId, path: Path, text: String },
+    /// The user SUBMITTED a text field — Return in an entry or a search
+    /// field, the send gesture on a `submits` textarea — and this is its
+    /// text at that moment (docs/submit-plan.md S1). The gesture alone
+    /// publishes; the field keeps its text and its focus.
+    Submitted { id: WidgetId, text: String },
+    InstanceSubmitted { node: TemplateNodeId, path: Path, text: String },
     /// One addressed user edit: `range` into the text BEFORE the edit,
     /// `runs` relative to `inserted`, `source` from wire::EDIT_SOURCES.
     /// Emitted beside TextChanged (docs/rich-text-plan.md R1/R4).
@@ -1411,6 +1417,8 @@ pub enum Prop {
     /// A textarea that carries attribute runs (Bool-valued;
     /// docs/rich-text-plan.md R1).
     Rich,
+    /// A textarea whose Return submits (Bool-valued; docs/submit-plan.md S2).
+    Submits,
     /// The app owns a rich textarea's undo (Bool-valued; docs/rich-text-plan.md
     /// R6, §14): the native stack is off, the ledger never banks it, and
     /// Edit>Undo/Redo reach the app through the role item's own activation.
@@ -2271,6 +2279,16 @@ impl OccSink {
                     let body = crate::wire::text_changed_body(&tag, &text);
                     ring.push_record(crate::ring::REC_TEXT_CHANGED, &body);
                 }
+                Occurrence::Submitted { id, text } => {
+                    let tag = crate::wire::click_tag(id.0, &[]);
+                    let body = crate::wire::submitted_body(&tag, &text);
+                    ring.push_record(crate::ring::REC_SUBMITTED, &body);
+                }
+                Occurrence::InstanceSubmitted { node, path, text } => {
+                    let tag = crate::wire::click_tag(node.0, &path);
+                    let body = crate::wire::submitted_body(&tag, &text);
+                    ring.push_record(crate::ring::REC_SUBMITTED, &body);
+                }
                 Occurrence::TextEdited { id, range, inserted, runs, source } => {
                     let tag = crate::wire::click_tag(id.0, &[]);
                     let body =
@@ -2589,6 +2607,23 @@ impl OccSink {
                 ring.push_record(
                     crate::ring::REC_TEXT_CHANGED,
                     &crate::wire::text_changed_body(tag, text),
+                );
+            }
+        }
+    }
+
+    /// The submit twin (docs/submit-plan.md S1): the stored tag plus the
+    /// field's text at the gesture.
+    pub(crate) fn send_submitted_tag(&self, tag: &[u8], text: &str) {
+        match self {
+            OccSink::Mpsc(tx) => {
+                crate::stall::enqueued();
+                let _ = tx.send(Inbox::Occ(crate::wire::decode_submitted_tag(tag, text)));
+            }
+            OccSink::Ring(ring) => {
+                ring.push_record(
+                    crate::ring::REC_SUBMITTED,
+                    &crate::wire::submitted_body(tag, text),
                 );
             }
         }
