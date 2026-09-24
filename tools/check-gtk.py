@@ -116,8 +116,8 @@ ENTRIES = (
      "(minimum, natural) = main_children.iter().fold((0, 0), "
      "|(mi, na), (_, cmin, cnat)| (mi + cmin, na + cnat));"),
     ("cross-axis natural read",
-     "c.measure(self.orientation.get(), if vertical { cross_total } else { -1 }).1",
-     "c.measure(self.orientation.get(), if vertical { cross_total } else { -1 }).0"),
+     "c.measure(self.orientation.get(), if vertical { cross_total } else { -1 });",
+     "c.measure(self.orientation.get(), if vertical { -1 } else { cross_total });"),
     ("leading-edge collection",
      "let min_start = edges[0];",
      "let min_start = 0.0;"),

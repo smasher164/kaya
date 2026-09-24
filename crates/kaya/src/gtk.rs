@@ -1380,6 +1380,42 @@ fn drop_stale_highlights(
     buffer.remove_all_tags(&buffer.start_iter(), &buffer.end_iter());
 }
 
+/// THE SECOND CLAUSE of `expect_no_clipping` (docs/flex-shrink-plan.md §4):
+/// a widget whose bounds leave the window across, or down unless a scroll
+/// carries it, is clipped whatever its own height says.
+#[cfg(feature = "harness")]
+fn off_screen(core: &CoreState, what: &str, text: &str, widget: &gtk4::Widget) -> Option<String> {
+    use gtk4::prelude::WidgetExt;
+    let bounds = widget.compute_bounds(&core.window)?;
+    let room_w = f64::from(core.window.width());
+    let room_h = f64::from(core.window.height());
+    if room_w <= 0.0 || room_h <= 0.0 {
+        return None;
+    }
+    let (x0, x1) = (f64::from(bounds.x()), f64::from(bounds.x() + bounds.width()));
+    let (y0, y1) = (f64::from(bounds.y()), f64::from(bounds.y() + bounds.height()));
+    let across = x0 < -1.0 || x1 > room_w + 1.0;
+    let mut in_scroll = false;
+    let mut parent = widget.parent();
+    while let Some(p) = parent {
+        if p.is::<gtk4::ScrolledWindow>() {
+            in_scroll = true;
+            break;
+        }
+        parent = p.parent();
+    }
+    let down = !in_scroll && (y0 < -1.0 || y1 > room_h + 1.0);
+    (across || down).then(|| {
+        format!(
+            "{what} {text:?} spans {}...{}px across and {}...{}px down, past its {room_w}x{room_h}px window",
+            x0.round(),
+            x1.round(),
+            y0.round(),
+            y1.round()
+        )
+    })
+}
+
 fn grow_weight(widget: &gtk4::Widget) -> f64 {
     // SAFETY: the key is private to this module and only ever set to an
     // f64 by set_grow_weight below.
@@ -2133,17 +2169,19 @@ mod flex {
             while let Some(c) = child {
                 if c.is_visible() {
                     let weight = super::grow_weight(&c);
-                    let natural = if weight > 0.0 {
+                    let (minimum, natural) = if weight > 0.0 {
                         // A grower's own natural size is deliberately not
                         // consulted: the contract is flex-basis 0.
-                        0
+                        (0, 0)
                     } else {
                         // Height-for-width (request_mode above): a row's
                         // child is asked its width at -1, a column's its
                         // height at the column's width.
-                        c.measure(self.orientation.get(), if vertical { cross_total } else { -1 }).1
+                        let (min, nat, _, _) =
+                            c.measure(self.orientation.get(), if vertical { cross_total } else { -1 });
+                        (min, nat)
                     };
-                    children.push((c.clone(), weight, natural));
+                    children.push((c.clone(), weight, minimum, natural));
                 }
                 child = c.next_sibling();
             }
@@ -2151,11 +2189,24 @@ mod flex {
                 return;
             }
             let gaps = self.spacing.get() * (children.len() as i32 - 1);
-            let fixed: i32 = children.iter().map(|(_, _, nat)| *nat).sum();
+            // A ROW'S FIXED CELLS SHRINK TO THEIR LONGEST WORD
+            // (docs/flex-shrink-plan.md §2, crate::flex): a label's minimum
+            // is its longest word under WrapMode::Word. Rows only.
+            let extents_fixed: Vec<i32> = if vertical {
+                children.iter().map(|(_, _, _, nat)| *nat).collect()
+            } else {
+                let naturals: Vec<f64> = children.iter().map(|(_, _, _, nat)| f64::from(*nat)).collect();
+                let minimums: Vec<f64> = children.iter().map(|(_, _, min, _)| f64::from(*min)).collect();
+                crate::flex::shrink(&naturals, &minimums, f64::from(main_total - gaps))
+                    .into_iter()
+                    .map(|x| x.round() as i32)
+                    .collect()
+            };
+            let fixed: i32 = extents_fixed.iter().sum();
             let leftover = (main_total - fixed - gaps).max(0);
             let weights: Vec<f64> = children
                 .iter()
-                .filter_map(|(_, weight, _)| (*weight > 0.0).then_some(*weight))
+                .filter_map(|(_, weight, _, _)| (*weight > 0.0).then_some(*weight))
                 .collect();
             let mut shares = grow_shares(leftover, &weights).into_iter();
 
@@ -2170,11 +2221,11 @@ mod flex {
             // (2026-09-23). Columns stack the same way either way.
             let rtl = !vertical && widget.direction() == gtk4::TextDirection::Rtl;
             let mut offset = 0;
-            for (c, weight, natural) in &children {
+            for (i, (c, weight, _, _)) in children.iter().enumerate() {
                 let extent = if *weight > 0.0 {
                     shares.next().expect("a grower has a computed share")
                 } else {
-                    *natural
+                    extents_fixed[i]
                 };
                 let x = if rtl { width - offset - extent } else { offset };
                 let (w, h, x, y) = if vertical {
@@ -10342,7 +10393,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     // wrap AT the parent's width — a requisition cannot depend
                     // on its parent — so the natural width is bounded too.
                     label.set_wrap(true);
-                    label.set_wrap_mode(gtk4::pango::WrapMode::WordChar);
+                    // BY WORD (docs/flex-shrink-plan.md §3): a wrapping
+                    // label's minimum is then its longest word, the floor
+                    // the flex row shrinks a cell to.
+                    label.set_wrap_mode(gtk4::pango::WrapMode::Word);
                     label.set_max_width_chars(KAYA_LABEL_MAX_WIDTH_CHARS);
                     core.labels.push(label.clone().upcast());
                     NativeWidget::Label(label)
@@ -18609,7 +18663,8 @@ impl crate::harness::Stage for GtkStage {
     fn clipping(&self) -> String {
         // Every live label allocated at least what its text needs at its
         // width: GTK's own measure at the allocated width against the
-        // allocation (docs/compliance-plan.md §4).
+        // allocation (docs/compliance-plan.md §4); then the two clauses of
+        // docs/flex-shrink-plan.md §4, the off-screen one over the buttons too.
         Self::on_main(|core| {
             use gtk4::prelude::WidgetExt;
             while glib::MainContext::default().iteration(false) {}
@@ -18621,15 +18676,33 @@ impl crate::harness::Stage for GtkStage {
                 if alloc.width() <= 0 {
                     continue;
                 }
+                let text: String = label_text(&label.clone().upcast()).chars().take(40).collect();
                 let (need, _, _, _) = label.measure(gtk4::Orientation::Vertical, alloc.width());
                 if need > alloc.height() + 1 {
-                    let text = label_text(&label.clone().upcast());
                     return format!(
-                        "label {:?} needs {need}px at {}px wide and got {}px",
-                        text.chars().take(40).collect::<String>(),
+                        "label {text:?} needs {need}px at {}px wide and got {}px",
                         alloc.width(),
                         alloc.height()
                     );
+                }
+                if let Some(past) = off_screen(core, "label", &text, &label.clone().upcast()) {
+                    return past;
+                }
+                let (word, _, _, _) = label.measure(gtk4::Orientation::Horizontal, -1);
+                if word > alloc.width() + 1 {
+                    return format!(
+                        "label {text:?} is {}px wide, narrower than its longest word at {word}px",
+                        alloc.width()
+                    );
+                }
+            }
+            for button in &core.buttons {
+                if !button.is_mapped() {
+                    continue;
+                }
+                let text: String = button.label().map(|l| l.to_string()).unwrap_or_default().chars().take(40).collect();
+                if let Some(past) = off_screen(core, "button", &text, &button.clone().upcast()) {
+                    return past;
                 }
             }
             String::new()

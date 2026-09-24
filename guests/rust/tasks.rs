@@ -794,10 +794,17 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                             let done = t.checkbox(TaskRow::done());
                             t.a11y_id(done, "done");
                             msgs.on_toggle_node(done, Msg::Toggle);
-                            let title = t.label(TaskRow::title());
-                            t.a11y_id(title, "title");
-                            let caption = t.caption(TaskRow::caption());
-                            t.a11y_id(caption, "caption");
+                            // The title with its date beneath, the platform's
+                            // own list shape: side by side the pair's longest
+                            // words plus the switch and the button overflow a
+                            // phone at twice the text size (docs/flex-shrink-plan.md
+                            // §2, "the app's to fix"; the iOS tasksbig leg).
+                            t.column(|t| {
+                                let title = t.label(TaskRow::title());
+                                t.a11y_id(title, "title");
+                                let caption = t.caption(TaskRow::caption());
+                                t.a11y_id(caption, "caption");
+                            });
                             // The trailing accessory: a spacer takes the row's
                             // free width so every Details button shares one edge.
                             t.spacer();

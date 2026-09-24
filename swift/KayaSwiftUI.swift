@@ -10950,14 +10950,31 @@ var kayaNodeFrames: [UInt64: CGRect] = [:]
 /// Each label's own drawn size, by node id — what `expect_no_clipping`
 /// measures the text's need against (docs/compliance-plan.md §4, U7).
 var kayaLabelFrames: [UInt64: CGSize] = [:]
+/// And its frames in the window's own space — the verb's second clause
+/// (docs/flex-shrink-plan.md §4): a frame placed past the window's edge
+/// is clipped however tall it is. PER RENDERING, keyed by the reader's own
+/// token: a NavigationStack renders a pushed destination twice while it
+/// slides, and the staged copy sits past the window's edge ("1 done" at
+/// 976...1008pt in a 960pt window, the mac tasks leg 2026-09-24), so one
+/// frame per id would keep whichever copy wrote last. A rendering that
+/// leaves the tree takes its frame with it.
+var kayaLabelWindowFrames: [UInt64: [UUID: CGRect]] = [:]
 
 private struct KayaLabelFrameReader: View {
     let id: UInt64
+    @State private var token = UUID()
     var body: some View {
         GeometryReader { geo in
             Color.clear
-                .onAppear { kayaLabelFrames[id] = geo.size }
+                .onAppear {
+                    kayaLabelFrames[id] = geo.size
+                    kayaLabelWindowFrames[id, default: [:]][token] = geo.frame(in: .global)
+                }
+                .onDisappear { kayaLabelWindowFrames[id]?[token] = nil }
                 .onChange(of: geo.size) { _, size in kayaLabelFrames[id] = size }
+                .onChange(of: geo.frame(in: .global)) { _, frame in
+                    kayaLabelWindowFrames[id, default: [:]][token] = frame
+                }
         }
     }
 }
@@ -14311,57 +14328,38 @@ struct KayaFlex: Layout {
             : ProposedViewSize(width: nil, height: offered)
     }
 
-    func sizeThatFits(
-        proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
-    ) -> CGSize {
-        // THE OFFERED CROSS BOUNDS THE MEASUREMENT (ruled 2026-08-29): a child
-        // asked with `.unspecified` answers its whole text on one line, so a
-        // container hung off the screen and left a grown sibling a negative
-        // track. It is also what makes wrapping possible (docs/traps.md).
-        let childProposal = Self.bounded(proposal, vertical: vertical)
-        let natural = subviews.map { $0.sizeThatFits(childProposal) }
-        let gaps = spacing * CGFloat(max(0, subviews.count - 1))
-        let naturalMain = natural.map { main($0) }.reduce(0, +) + gaps
-        let naturalCross = natural.map { cross($0) }.max() ?? 0
-        // Fill the MAIN axis from the proposal — what creates the free space the
-        // growers divide — and hug the cross axis unless [fillCross]: filling it
-        // unconditionally made a row claim its column's whole height. THE
-        // FALLBACK IS PER-AXIS, or a natural-size pass is poisoned.
-        let fallback = vertical
-            ? CGSize(width: naturalCross, height: naturalMain)
-            : CGSize(width: naturalMain, height: naturalCross)
-        let extent = proposal.replacingUnspecifiedDimensions(by: fallback)
-        let filledMain = vertical ? extent.height : extent.width
-        let filledCross = vertical ? extent.width : extent.height
-        // NEVER WIDER THAN WE WERE OFFERED. A hugging container still hugs
-        // — it just cannot answer with more than it was given.
-        let crossExtent: CGFloat
-        if let offered = Self.offeredCross(proposal, vertical: vertical) {
-            crossExtent = fillCross ? offered : min(naturalCross, offered)
-        } else {
-            crossExtent = fillCross ? max(naturalCross, filledCross) : naturalCross
-        }
-        return vertical
-            ? CGSize(width: crossExtent, height: filledMain)
-            : CGSize(width: filledMain, height: crossExtent)
-    }
-
-    func placeSubviews(
-        in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
-    ) {
-        guard !subviews.isEmpty else { return }
-        let gaps = spacing * CGFloat(subviews.count - 1)
+    /// The main-axis extent of every child at `mainExtent`
+    /// (docs/flex-shrink-plan.md §2): a fixed cell's natural size, a
+    /// grower's share of the leftover — and in a ROW whose fixed cells do
+    /// not fit, each fixed cell shrunk in proportion to its slack above
+    /// its longest word (what a Text answers a zero-width proposal with),
+    /// never below it; the growers divide what is left after that.
+    func extents(mainExtent: CGFloat, subviews: Subviews, childProposal: ProposedViewSize)
+        -> [CGFloat]
+    {
         // A grower's natural size is deliberately not consulted: the contract is
-        // flex-basis 0. MEASURED AGAINST THE BOX WE ARE PLACING INTO — a wrapped
-        // label's height depends on the width it gets, so `.unspecified` here
-        // lays every line after the first outside the container.
-        let childProposal = Self.bounded(
-            ProposedViewSize(bounds.size), vertical: vertical)
+        // flex-basis 0.
         var extents = subviews.indices.map { i -> CGFloat in
             weight(i) > 0 ? 0 : main(subviews[i].sizeThatFits(childProposal))
         }
+        let gaps = spacing * CGFloat(max(0, subviews.count - 1))
         let fixed = extents.reduce(0, +)
-        let leftover = max(0, main(bounds.size) - fixed - gaps)
+        if !vertical && fixed + gaps > mainExtent {
+            // A cell's minimum is its MIN-CONTENT, read off the node since
+            // the subview is a KayaCell, which answers a proposal with the
+            // proposal (docs/traps.md): a label's longest word, a column's
+            // widest child, a row's children end to end, a leaf's natural.
+            let minimums = subviews.indices.map { i -> CGFloat in
+                guard weight(i) == 0, i < nodes.count else { return 0 }
+                // Layout runs on the main thread; the font reader is main-actor.
+                let word = MainActor.assumeIsolated { kayaMinContent(nodes[i], natural: extents[i]) }
+                return min(extents[i], word)
+            }
+            extents = Self.shrink(
+                naturals: extents, minimums: minimums, room: mainExtent - gaps,
+                fixed: subviews.indices.map { weight($0) == 0 })
+        }
+        let leftover = max(0, mainExtent - extents.reduce(0, +) - gaps)
         let pool = subviews.indices.map { weight($0) }.reduce(0, +)
         if pool > 0 {
             let growers = subviews.indices.filter { weight($0) > 0 }
@@ -14378,6 +14376,75 @@ struct KayaFlex: Layout {
                 }
             }
         }
+        return extents
+    }
+
+    func sizeThatFits(
+        proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+    ) -> CGSize {
+        // THE OFFERED CROSS BOUNDS THE MEASUREMENT (ruled 2026-08-29): a child
+        // asked with `.unspecified` answers its whole text on one line, so a
+        // container hung off the screen and left a grown sibling a negative
+        // track. It is also what makes wrapping possible (docs/traps.md).
+        let childProposal = Self.bounded(proposal, vertical: vertical)
+        let natural = subviews.map { $0.sizeThatFits(childProposal) }
+        let gaps = spacing * CGFloat(max(0, subviews.count - 1))
+        let naturalMain = natural.map { main($0) }.reduce(0, +) + gaps
+        var naturalCross = natural.map { cross($0) }.max() ?? 0
+        // A row offered less than its fixed cells is as tall as its SHRUNK
+        // cells: a wrapped label is taller than its one line.
+        if !vertical, let offered = proposal.width, offered.isFinite, offered > 0,
+            naturalMain > offered
+        {
+            // HEIGHT LEFT OPEN: a KayaCell answers a proposed height with
+            // that height, so passing the row's own proposal through would
+            // echo a List's probe (0, then inf) instead of measuring the
+            // wrapped text (the iOS project screen, 2026-09-24).
+            let shrunk = extents(mainExtent: offered, subviews: subviews, childProposal: childProposal)
+            naturalCross = zip(subviews, shrunk).map { view, extent in
+                cross(view.sizeThatFits(ProposedViewSize(width: extent, height: nil)))
+            }.max() ?? naturalCross
+        }
+        // Fill the MAIN axis from the proposal — what creates the free space the
+        // growers divide — and hug the cross axis unless [fillCross]: filling it
+        // unconditionally made a row claim its column's whole height. THE
+        // FALLBACK IS PER-AXIS, or a natural-size pass is poisoned.
+        let fallback = vertical
+            ? CGSize(width: naturalCross, height: naturalMain)
+            : CGSize(width: naturalMain, height: naturalCross)
+        let extent = proposal.replacingUnspecifiedDimensions(by: fallback)
+        let filledMain = vertical ? extent.height : extent.width
+        let filledCross = vertical ? extent.width : extent.height
+        // NEVER WIDER THAN WE WERE OFFERED. A hugging container still hugs
+        // — it just cannot answer with more than it was given. A ROW IS AS
+        // TALL AS ITS CELLS, offered less or not (docs/flex-shrink-plan.md
+        // §2): its cross is text height, and a row that answered a stack's
+        // equal-share probe with the probe got 37.55pt for 42pt of wrapped
+        // text on the iOS project screen (2026-09-24).
+        let crossExtent: CGFloat
+        if let offered = Self.offeredCross(proposal, vertical: vertical) {
+            crossExtent = vertical
+                ? (fillCross ? offered : min(naturalCross, offered))
+                : (fillCross ? max(offered, naturalCross) : naturalCross)
+        } else {
+            crossExtent = fillCross ? max(naturalCross, filledCross) : naturalCross
+        }
+        return vertical
+            ? CGSize(width: crossExtent, height: filledMain)
+            : CGSize(width: filledMain, height: crossExtent)
+    }
+
+    func placeSubviews(
+        in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+    ) {
+        guard !subviews.isEmpty else { return }
+        // MEASURED AGAINST THE BOX WE ARE PLACING INTO — a wrapped label's
+        // height depends on the width it gets, so `.unspecified` here lays
+        // every line after the first outside the container.
+        let childProposal = Self.bounded(
+            ProposedViewSize(bounds.size), vertical: vertical)
+        let extents = extents(
+            mainExtent: main(bounds.size), subviews: subviews, childProposal: childProposal)
 
         kayaTrace("flex v=\(vertical) bounds=\(Int(bounds.width))x\(Int(bounds.height)) "
             + "ids=\(nodes.map { $0.id }) grow=\(nodes.map { $0.grow }) "
@@ -14404,6 +14471,36 @@ struct KayaFlex: Layout {
 
     private func weight(_ i: Int) -> Double {
         i < nodes.count ? nodes[i].grow : 0
+    }
+
+    /// crates/kaya/src/flex.rs's arithmetic, the interpreter's copy: the
+    /// fixed cells shrink in proportion to their natural size, a cell that
+    /// would go below its minimum is frozen there and the rest
+    /// redistributed. Growers (`fixed[i] == false`) stay at 0 here.
+    static func shrink(naturals: [CGFloat], minimums: [CGFloat], room: CGFloat, fixed: [Bool])
+        -> [CGFloat]
+    {
+        var extents = naturals
+        var frozen = fixed.map { !$0 }
+        while true {
+            let excess = extents.indices.filter { fixed[$0] }.map { extents[$0] }.reduce(0, +) - room
+            if excess <= 0 { return extents }
+            let basis = extents.indices.filter { !frozen[$0] }.map { naturals[$0] }.reduce(0, +)
+            if basis <= 0 { return extents }
+            var froze = false
+            for i in extents.indices where !frozen[i] {
+                if extents[i] - excess * naturals[i] / basis < minimums[i] {
+                    extents[i] = minimums[i]
+                    frozen[i] = true
+                    froze = true
+                }
+            }
+            if froze { continue }
+            for i in extents.indices where !frozen[i] {
+                extents[i] -= excess * naturals[i] / basis
+            }
+            return extents
+        }
     }
 }
 
@@ -15353,8 +15450,95 @@ func kayaPlatformLocaleTag() -> String {
                 "label \(node.id) \(node.text.prefix(40).debugDescription) needs \(Int(need.rounded()))pt at \(Int(size.width.rounded()))pt wide and got \(Int(size.height.rounded()))pt",
                 measured)
         }
+        if let past = kayaOffScreen("label", node) { return (past, measured) }
+        // THE THIRD CLAUSE: a label narrower than its longest word has had
+        // the word broken (the Compose task manager's "Detai/ls",
+        // 2026-09-24), and both lines fit their taller frame.
+        let word = kayaLongestWord(node.text, kayaClippingFont(node))
+        if word > size.width + 1.0 {
+            return (
+                "label \(node.id) \(node.text.prefix(40).debugDescription) is \(Int(size.width.rounded()))pt wide, narrower than its longest word at \(Int(word.rounded()))pt",
+                measured)
+        }
+    }
+    // THE BUTTONS TOO: the cell a flex row places past its end is as often
+    // the row's trailing button as a label (the iOS task manager's
+    // "Details", 2026-09-24); a button's text is the platform's to fit.
+    for node in kayaScene.buttons where kayaScene.nodes[node.id] === node {
+        if let past = kayaOffScreen("button", node) { return (past, measured) }
     }
     return ("", measured)
+}
+
+/// THE SECOND CLAUSE (docs/flex-shrink-plan.md §4): the frame must lie
+/// inside the window across, and down unless a scroll carries it — a row
+/// that placed its last cell past the window's edge is clipped with every
+/// label's height intact (the iOS task manager's Today row, 2026-09-24).
+@MainActor func kayaOffScreen(_ what: String, _ node: KayaNode) -> String? {
+    guard let frames = kayaLabelWindowFrames[node.id]?.values.filter({ $0.width > 0 }),
+        !frames.isEmpty, let room = kayaWindowRoom()
+    else { return nil }
+    let inScroll = kayaInsideScroll(node.id)
+    func past(_ frame: CGRect) -> Bool {
+        let across = frame.minX < -1 || frame.maxX > room.width + 1
+        let down = !inScroll && (frame.minY < -1 || frame.maxY > room.height + 1)
+        return across || down
+    }
+    // One rendering inside the window is the one the user sees.
+    guard frames.allSatisfy(past), let frame = frames.first else { return nil }
+    return "\(what) \(node.id) \(node.text.prefix(40).debugDescription) spans \(Int(frame.minX.rounded()))...\(Int(frame.maxX.rounded()))pt across and \(Int(frame.minY.rounded()))...\(Int(frame.maxY.rounded()))pt down, past its \(Int(room.width.rounded()))x\(Int(room.height.rounded()))pt window"
+}
+
+/// A node's MIN-CONTENT width (docs/flex-shrink-plan.md §2): a label's
+/// longest word; a column's or wrap row's widest child; a row's children
+/// end to end with its gaps; a text-bearing leaf's longest word (a button
+/// keeps its natural at the top level, where `natural` is known); a leaf
+/// with no text answers `natural`, 0 when nested. Nested leaves cannot
+/// be measured through a KayaCell, so their text stands in.
+@MainActor func kayaMinContent(_ node: KayaNode, natural: CGFloat) -> CGFloat {
+    switch node.kind {
+    case kindLabel:
+        return node.text.isEmpty ? 0 : kayaLongestWord(node.text, kayaClippingFont(node))
+    case kindColumn, kindGrid, kindScroll:
+        return node.laidOut.map { kayaMinContent($0, natural: 0) }.max() ?? 0
+    case kindRow:
+        if node.wrap { return node.laidOut.map { kayaMinContent($0, natural: 0) }.max() ?? 0 }
+        let gaps = node.spacing * CGFloat(max(0, node.laidOut.count - 1))
+        return node.laidOut.map { kayaMinContent($0, natural: 0) }.reduce(0, +) + gaps
+    default:
+        if natural > 0 { return natural }
+        return node.text.isEmpty ? 0 : kayaLongestWord(node.text, kayaClippingFont(node))
+    }
+}
+
+/// The widest whitespace-separated unit of `text` set in `font`: the
+/// min-content width a flex cell may not shrink below (docs/flex-shrink-plan.md §2).
+func kayaLongestWord(_ text: String, _ font: KayaPlatformFont) -> CGFloat {
+    var widest: CGFloat = 0
+    for word in text.split(whereSeparator: { $0.isWhitespace || $0.isNewline }) {
+        let line = CTLineCreateWithAttributedString(
+            NSAttributedString(string: String(word), attributes: [.font: font]))
+        widest = max(widest, CTLineGetTypographicBounds(line, nil, nil, nil))
+    }
+    return widest
+}
+
+/// The window's content size in the space `GeometryReader`'s `.global`
+/// reports: the content view on macOS, the window on iOS.
+@MainActor func kayaWindowRoom() -> CGSize? {
+    #if os(macOS)
+        return NSApp.windows.first(where: { $0.isVisible })?.contentView?.bounds.size
+    #else
+        return kayaHarnessWindow()?.bounds.size
+    #endif
+}
+
+/// Whether a node sits under one of the scene's scroll containers.
+@MainActor func kayaInsideScroll(_ id: UInt64) -> Bool {
+    func holds(_ node: KayaNode) -> Bool {
+        node.children.contains { $0.id == id || holds($0) }
+    }
+    return kayaScene.scrolls.contains { holds($0) }
 }
 
 /// The font the clipping read measures with: the role's own size and weight
@@ -16158,6 +16342,7 @@ struct KayaRender: View {
                         kayaBaselineOffsets[node.id] = d[.firstTextBaseline] - d[.top]
                         return d[.top]
                     }
+                    .background(KayaLabelFrameReader(id: node.id))
             #else
                 // SwiftUI's own role vocabulary (docs/styling-plan.md D4):
                 // destructive rides Button(role:), prominence is the
@@ -16176,6 +16361,7 @@ struct KayaRender: View {
                     kayaBaselineOffsets[node.id] = d[.firstTextBaseline] - d[.top]
                     return d[.top]
                 }
+                .background(KayaLabelFrameReader(id: node.id))
             #endif
         case kindLabel:
             // The heading role (docs/styling-plan.md D4) is BOTH facts at once:

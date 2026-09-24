@@ -12628,3 +12628,38 @@ into the ONE volatile argument domain beside `AppleLanguages`, since
 `setVolatileDomain` replaces the domain whole and two writers would drop
 each other's keys. The other three lanes flip the OS's own setting outside
 the process and the knob is refused there naming their route.
+
+## A KayaCell answers a proposal with the proposal, so a probe through it measures nothing (measured 2026-09-24)
+
+`KayaCell` (swift/KayaSwiftUI.swift) is the track every flex child sits
+in, and its `sizeThatFits` returns `proposal.width ?? natural.width` by
+design: the cell IS the track. Two readings through it lied the same day
+(docs/flex-shrink-plan.md §3): a zero-width probe for a cell's minimum
+answered 0, so every label shrank past its longest word ("Renew passport"
+at 88pt on the iOS project screen); and a probe carrying the row's own
+proposed height answered that height, so a List's 0-then-inf probes
+came back as the row's height and two lines of text got 20pt ("Book the
+flights", 41pt needed). Read a cell's minimum off its NODE
+(`kayaLongestWord` for a label, natural for the rest) and measure a
+shrunk cell's height with the height left open.
+
+## Compose's `boundsInRoot` is the composition's root, not kaya's padded root (measured 2026-09-24)
+
+`kayaRootSize` is the padded root Box the scene mounts into (328dp on a
+360dp phone); `LayoutCoordinates.boundsInRoot()` reports in the whole
+content's space (360dp). The first off-screen read compared one against
+the other and refused a button ending at 344dp "past its 328dp root"
+while it sat inside the window. The room is
+`findRootCoordinates().size` (`kayaContentSize`), read where the root's
+own size is.
+
+## A NavigationStack renders a pushed destination twice while it slides, and one copy sits past the window (measured 2026-09-24)
+
+On macOS a `NavigationStack` push stages the incoming destination beside
+the outgoing one for the slide, and a `GeometryReader` on a label in that
+destination reports BOTH renderings, the staged one at 976...1008pt in a
+960pt window ("1 done" on the mac tasks leg; -46...-16pt under RTL). A
+frame dictionary keyed by node id keeps whichever copy wrote last, so the
+off-screen clause of `expect_no_clipping` refused a label the user could
+see. The reader keys its frames by its own per-rendering token and drops
+them on disappear; a node is off-screen only when EVERY live rendering is.

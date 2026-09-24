@@ -12,10 +12,14 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     let t = kaya::Time::new(8, 30).unwrap();
     ctx.apply(|tx| {
         // Fourteen labels and a row: taller than the default window, which
-        // GTK would otherwise let the root overflow (expect_root_fills).
+        // GTK would otherwise let the root overflow (expect_root_fills), and
+        // taller than a phone at twice the text size, so the column scrolls
+        // (the iOS formatbig leg under expect_no_clipping's off-screen
+        // clause, docs/flex-shrink-plan.md §4).
         tx.window(kaya::DEFAULT_WINDOW).title("format").size(540.0, 560.0);
         let root = tx
-            .column(|tx| {
+            .scroll(|tx| {
+                tx.column(|tx| {
                 let s = tx.signal(fmt::date(d, Length::Short));
                 tx.label(s); // label#0
                 let s = tx.signal(fmt::date(d, Length::Medium));
@@ -48,6 +52,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 let info = fmt::locale();
                 let s = tx.signal(info.tag);
                 tx.label(s); // label#13
+                });
             })
             .id();
         tx.mount(root);

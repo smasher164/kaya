@@ -33,7 +33,8 @@ def image_bytes(path):
     return blob
 
 
-def capture(scene, guest, out, crop, settle):
+def capture(scene, out, crop, settle, guest=None):
+    guest = guest or scene
     target = ROOT / "target-linux"
     checked("build", ["cargo", "build", "-p", "kaya", "--features", "harness",
                       "--locked", "--lib", "--example", guest],
@@ -76,7 +77,9 @@ def photograph(args, out, script):
     with tempfile.TemporaryDirectory(prefix="kaya-shot-gtk-") as directory:
         scratch = pathlib.Path(directory)
         env = ["-e", "KAYA_DEV_SHELL", "-e", f"KAYA_SELFTEST_SCRIPT={script}"]
-        for pair in args.env:
+        # check-build-id's probe builds `args` by hand (tools/checks/gtk-capture.py),
+        # so the two newer options are read with a default.
+        for pair in getattr(args, "env", []):
             env += ["-e", pair]
         if args.layout:
             cfg = scratch / "config/gtk-4.0"
@@ -93,7 +96,7 @@ def photograph(args, out, script):
                      "-w", "/work", "kaya-linux", "xvfb-run", "-a", "python3",
                      "/work/tools/linux/shot-gtk.py", args.scene, "/capture/crop.png",
                      "--in-container", "--settle-seconds", str(args.settle_seconds),
-                     "--guest", args.guest,
+                     *(["--guest", args.guest] if getattr(args, "guest", None) else []),
                      *options], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, check=False)
             finally:
                 guest_log = scratch / "guest.log"
@@ -143,8 +146,7 @@ def main(argv=None):
     try:
         out.parent.mkdir(parents=True, exist_ok=True)
         if args.in_container:
-            capture(args.scene, args.guest or args.scene, out, args.crop,
-                    args.settle_seconds)
+            capture(args.scene, out, args.crop, args.settle_seconds, guest=args.guest)
         else:
             photograph(args, out, "\n".join(held) + "\n")
     except (OSError, RuntimeError) as error:

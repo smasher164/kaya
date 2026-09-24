@@ -62,6 +62,8 @@ LEGS = {
         "gallery-compose", "todos-compose", "remount-compose",
         "remount-nav-compose", "reorder-compose", "table-compose",
         "windowed-compose", "canvas-compose", "canvasdark-compose",
+        # A row wider than its window (docs/flex-shrink-plan.md §6).
+        "flexshrink-compose",
         "sizepolicy-compose", "adaptive-compose", "feed-compose",
         "grow-compose", "align-compose", "layout-compose",
         "stall-compose", "confirm-compose", "filedialog-compose",

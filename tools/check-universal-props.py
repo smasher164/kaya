@@ -40,6 +40,17 @@ def load(over=None):
     return files
 
 
+# (file, the block that owns the flex row, the min-content read inside it).
+FLEX_LINKS = (
+    (SWIFTUI, "struct KayaFlex: Layout {", "kayaMinContent(nodes[i], natural: extents[i])"),
+    (COMPOSE, "internal fun KayaFlexRow(", "measurables[i].minIntrinsicWidth(heightHint)"),
+    (GTK, "fn allocate(&self, widget: &gtk4::Widget, width: i32, height: i32, baseline: i32) {",
+     "crate::flex::shrink(&naturals, &minimums, f64::from(main_total - gaps))"),
+    (WINUI, "fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {",
+     "def.SetMinWidth(minimum.min(natural))?;"),
+)
+
+
 def census(files):
     compose, swiftui, gtk, winui, wire = COMPOSE, SWIFTUI, GTK, WINUI, WIRE
     read = files.__getitem__
@@ -300,6 +311,19 @@ def census(files):
                         f"{path}: the Prop::{prop} arm binds {binder.strip()!r} — "
                         "the universal props must match the prop alone, never one kind")
 
+    # THE FLEX ROW SHRINKS TO ITS LONGEST WORD ON EVERY BACKEND
+    # (docs/flex-shrink-plan.md §6): each arm names its min-content read
+    # inside its own row layout, since a copy that dropped it passes the
+    # flexshrink scene wherever the window is wide.
+    for path, block, needle in FLEX_LINKS:
+        body = code_only(read(path))
+        start = body.find(block)
+        if start < 0:
+            bad.append(f"{path}: the flex row's block {block!r} is missing")
+            continue
+        if needle not in body[start:start + 12000]:
+            bad.append(f"{path}: the flex row no longer reads its min-content ({needle!r} missing "
+                       f"under {block!r})")
     return bad
 
 
@@ -309,7 +333,7 @@ def census(files):
 real = load()
 g = Gate("check-universal-props")
 RAN = 0
-DECLARED = 23
+DECLARED = 27
 for path, pattern, repl in (
     (COMPOSE, r"\ba11y\b", "kayaUnappliedProps"),
     (SWIFTUI, r"\bkayaA11y\b", "kayaUnappliedProps"),
@@ -399,6 +423,25 @@ for label, pattern, repl in (
 ):
     doctored = g.doctor(label, real[COMPOSE], pattern, repl, want=1)
     findings = census(load({COMPOSE: doctored}))
+    if not findings:
+        raise SystemExit(f"check-universal-props: self-test failed: {label} still passed")
+    print(f"check-universal-props: {label}: {findings[0]}")
+    RAN += 1
+
+# THE FLEX ROW's four: each arm's min-content read cut from a copy.
+for label, path, pattern, repl in (
+    ("SwiftUI's minimum read off the node deleted", SWIFTUI,
+     r"kayaMinContent\(nodes\[i\], natural: extents\[i\]\)", "extents[i]"),
+    ("Compose's minimum intrinsic read deleted", COMPOSE,
+     r"measurables\[i\]\.minIntrinsicWidth\(heightHint\)\.toDouble\(\)", "0.0"),
+    ("GTK's shrink call deleted", GTK,
+     r"crate::flex::shrink\(&naturals, &minimums, f64::from\(main_total - gaps\)\)",
+     "naturals"),
+    ("WinUI's column floor deleted", WINUI,
+     r"def\.SetMinWidth\(minimum\.min\(natural\)\)\?;", ""),
+):
+    doctored = g.doctor(label, real[path], pattern, repl, want=1)
+    findings = census(load({path: doctored}))
     if not findings:
         raise SystemExit(f"check-universal-props: self-test failed: {label} still passed")
     print(f"check-universal-props: {label}: {findings[0]}")

@@ -76,6 +76,8 @@ RUST_SCENES = [
     "tasksrtl", "tasksbig", "formatbig",
     # The format guest under the 24-hour clock (SCENE_CLOCK).
     "clock24",
+    # A row wider than its window (docs/flex-shrink-plan.md §6).
+    "flexshrink",
     # The notification conformance scene: the activation is a REAL tap on
     # SpringBoard's own shade, driven by the xcui driver's notify_tap
     # (docs/tasks-s3-plan.md N5).

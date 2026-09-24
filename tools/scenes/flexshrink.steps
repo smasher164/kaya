@@ -1,0 +1,18 @@
+# A FLEX CELL SHRINKS TO ITS LONGEST WORD (docs/flex-shrink-plan.md §2,
+# ruled 2026-09-24). The window is 360 wide on the desktops and the screen
+# on the phones, and the row's three fixed cells are wider than either at
+# their natural widths, and a grown spacer between them makes the row a
+# flex row (the task manager's shape; a row with no grower is the
+# platform's own stack). The rule shrinks the two labels in proportion,
+# never below a word, and wraps them; the button cannot wrap and keeps its
+# width, and the spacer gets nothing. Before the rule no scene had a row wider than its window on any
+# desktop, and the iOS task manager shipped with its Today row off-screen.
+expect label#0 "Draft the third chapter"
+expect label#1 "Monday, September the seventh, Thesis"
+# ALL THREE CLAUSES: no label needs more height than its frame (a squeezed
+# cell that did not grow), no label's frame leaves the window (a cell
+# placed past the row's end, the iOS shape), and no label is narrower
+# than its longest word (a cell squeezed until the word broke, the
+# Compose shape). expect_fills cannot serve here: the mac records a
+# track only for a grown child.
+expect_no_clipping

@@ -224,6 +224,7 @@ import androidx.compose.ui.draganddrop.DragAndDropTarget
 import androidx.compose.ui.draganddrop.DragAndDropTransferData
 import androidx.compose.ui.draganddrop.toAndroidDragEvent
 import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.findRootCoordinates
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
@@ -741,6 +742,113 @@ var kayaDensity = 1.0
  * hugging the mounted container.
  */
 var kayaRootSize = androidx.compose.ui.unit.IntSize.Zero
+/** The composition's whole content, the space `boundsInRoot` reports in. */
+var kayaContentSize = androidx.compose.ui.unit.IntSize.Zero
+
+/**
+ * The flex ROW (docs/flex-shrink-plan.md §2, §3): crates/kaya/src/flex.rs's
+ * arithmetic, this interpreter's copy. A grower's basis is 0 and it takes
+ * a share of the leftover; a fixed cell takes its natural width, and when
+ * the fixed cells do not fit they shrink in proportion to their natural
+ * width, each frozen at its minimum (a Text's longest word) with the rest
+ * redistributed. Compose's own Row measured the fixed cells in order
+ * against what was left, squeezing the last below a word ("Detai/ls").
+ */
+@Composable
+internal fun KayaFlexRow(
+    modifier: Modifier,
+    spacingPx: Int,
+    grows: List<Double>,
+    align: Long,
+    content: @Composable () -> Unit,
+) {
+    Layout(content = content, modifier = modifier) { measurables, constraints ->
+        val n = measurables.size
+        val gaps = spacingPx * maxOf(0, n - 1)
+        val bounded = constraints.hasBoundedWidth
+        val room = if (bounded) constraints.maxWidth - gaps else Int.MAX_VALUE
+        val heightHint = if (constraints.hasBoundedHeight) constraints.maxHeight else Int.MAX_VALUE
+        val grow = DoubleArray(n) { grows.getOrElse(it) { 0.0 } }
+        val naturals = DoubleArray(n) { i ->
+            if (grow[i] > 0) 0.0 else measurables[i].maxIntrinsicWidth(heightHint).toDouble()
+        }
+        val minimums = DoubleArray(n) { i ->
+            if (grow[i] > 0) 0.0 else measurables[i].minIntrinsicWidth(heightHint).toDouble()
+        }
+        val extents = if (bounded) kayaFlexShrink(naturals, minimums, room.toDouble())
+            else naturals.copyOf()
+        val fixed = extents.sum()
+        val leftover = maxOf(0.0, (if (bounded) room else 0) - fixed)
+        val pool = grow.sum()
+        if (pool > 0) {
+            var spent = 0.0
+            val growers = (0 until n).filter { grow[it] > 0 }
+            growers.forEachIndexed { k, i ->
+                extents[i] = if (k == growers.size - 1) leftover - spent
+                    else Math.round(leftover * grow[i] / pool).toDouble().also { spent += it }
+            }
+        }
+        val widths = IntArray(n) { Math.round(extents[it]).toInt().coerceAtLeast(0) }
+        val placeables = measurables.mapIndexed { i, m ->
+            val exact = grow[i] > 0 || widths[i] < Math.round(naturals[i]).toInt()
+            m.measure(
+                Constraints(
+                    minWidth = if (exact) widths[i] else 0,
+                    maxWidth = widths[i],
+                    minHeight = 0,
+                    maxHeight = if (constraints.hasBoundedHeight) constraints.maxHeight
+                        else Constraints.Infinity,
+                )
+            )
+        }
+        val height = (placeables.maxOfOrNull { it.height } ?: 0)
+            .coerceIn(constraints.minHeight, if (constraints.hasBoundedHeight) constraints.maxHeight else Int.MAX_VALUE)
+        val width = (widths.sum() + gaps)
+            .coerceIn(constraints.minWidth, if (bounded) constraints.maxWidth else Int.MAX_VALUE)
+        val rtl = layoutDirection == androidx.compose.ui.unit.LayoutDirection.Rtl
+        val baselines = placeables.map { p ->
+            val fb = p[androidx.compose.ui.layout.FirstBaseline]
+            if (fb == androidx.compose.ui.layout.AlignmentLine.Unspecified) p.height else fb
+        }
+        val baselineRow = baselines.maxOrNull() ?: 0
+        layout(width, height) {
+            var x = 0
+            placeables.forEachIndexed { i, p ->
+                val y = when (align) {
+                    KayaCompose.ALIGN_CENTER -> (height - p.height) / 2
+                    KayaCompose.ALIGN_END -> height - p.height
+                    KayaCompose.ALIGN_BASELINE -> baselineRow - baselines[i]
+                    else -> 0
+                }
+                val left = if (rtl) width - x - widths[i] else x
+                p.place(left, y)
+                x += widths[i] + spacingPx
+            }
+        }
+    }
+}
+
+internal fun kayaFlexShrink(naturals: DoubleArray, minimums: DoubleArray, room: Double): DoubleArray {
+    val extents = naturals.copyOf()
+    if (naturals.sum() <= room) return extents
+    val frozen = BooleanArray(naturals.size)
+    while (true) {
+        val excess = extents.sum() - room
+        if (excess <= 0) return extents
+        val basis = naturals.indices.filter { !frozen[it] }.sumOf { naturals[it] }
+        if (basis <= 0) return extents
+        var froze = false
+        for (i in naturals.indices) {
+            if (frozen[i]) continue
+            if (extents[i] - excess * naturals[i] / basis < minimums[i]) {
+                extents[i] = minimums[i]; frozen[i] = true; froze = true
+            }
+        }
+        if (froze) continue
+        for (i in naturals.indices) if (!frozen[i]) extents[i] -= excess * naturals[i] / basis
+        return extents
+    }
+}
 var kayaAvailableSize = androidx.compose.ui.unit.IntSize.Zero
 
 /** The padding container's OUTER size — captured before the window
@@ -1359,9 +1467,51 @@ internal fun kayaClippingReport(presented: Set<Long>): Pair<String, Int> {
                 "${kayaDebugQuoted(node.text)} overflows its ${layout.size.width}x${layout.size.height}px box " +
                     "(${layout.lineCount} lines)"
             )
+            continue
+        }
+        kayaOffScreen("label", node)?.let { clipped.add(it); return@let }
+        // THE THIRD CLAUSE (docs/flex-shrink-plan.md §4): a label narrower
+        // than its longest word has had the word broken ("Detai/ls").
+        val word = layout.multiParagraph.minIntrinsicWidth
+        if (word > layout.size.width + 1f) {
+            clipped.add(
+                "label ${kayaDebugQuoted(node.text)} is ${layout.size.width}px wide, narrower than its " +
+                    "longest word at ${Math.round(word)}px"
+            )
         }
     }
+    for (node in KayaSceneModel.buttons) {
+        if (KayaSceneModel.nodes[node.id] !== node || node.id !in presented) continue
+        kayaOffScreen("button", node)?.let { clipped.add(it) }
+    }
     return Pair(clipped.joinToString("; "), measured)
+}
+
+/** Each label's and button's bounds in the root's space (docs/flex-shrink-plan.md §4). */
+internal val kayaTextRects = HashMap<Long, androidx.compose.ui.geometry.Rect>()
+
+/**
+ * THE SECOND CLAUSE of `expect_no_clipping`: a widget whose bounds leave the
+ * root across, or down unless a scroll carries it, is clipped whatever its
+ * own height says (the iOS task manager's Today row, 2026-09-24).
+ */
+internal fun kayaOffScreen(what: String, node: KayaNode): String? {
+    val rect = kayaTextRects[node.id] ?: return null
+    if (rect.width <= 0f) return null
+    val room = kayaContentSize
+    if (room.width <= 0 || room.height <= 0) return null
+    val across = rect.left < -1f || rect.right > room.width + 1f
+    var inScroll = false
+    var at: Long? = KayaSceneModel.parents[node.id]
+    while (at != null) {
+        if (KayaSceneModel.scrolls.any { it.id == at }) { inScroll = true; break }
+        at = KayaSceneModel.parents[at]
+    }
+    val down = !inScroll && (rect.top < -1f || rect.bottom > room.height + 1f)
+    if (!across && !down) return null
+    return "$what ${kayaDebugQuoted(node.text)} spans ${Math.round(rect.left)}...${Math.round(rect.right)}px " +
+        "across and ${Math.round(rect.top)}...${Math.round(rect.bottom)}px down, past its " +
+        "${room.width}x${room.height}px root"
 }
 
 /** A label's text as harness.rs's `{got:?}` spells it. */
@@ -12981,7 +13131,7 @@ private fun KayaRenderCore(
                     }
                 }
             }
-            else Row(
+            else KayaFlexRow(
                 // The inset pair brackets the padding (see the column's
                 // note).
                 modifier = boxFill.then(hugCross).then(a11y).onGloballyPositioned {
@@ -12994,12 +13144,9 @@ private fun KayaRenderCore(
                     kayaContainerCross[node.id] = it.size.height.toDouble()
                     kayaContainerAxis[node.id] = false
                 },
-                horizontalArrangement = Arrangement.spacedBy(node.spacing.dp),
-                verticalAlignment = when (node.align) {
-                    KayaCompose.ALIGN_CENTER -> Alignment.CenterVertically
-                    KayaCompose.ALIGN_END -> Alignment.Bottom
-                    else -> Alignment.Top
-                },
+                spacingPx = with(LocalDensity.current) { node.spacing.dp.roundToPx() },
+                grows = node.laidOut.map { it.grow },
+                align = node.align,
             ) {
                 node.laidOut.forEach { child ->
                     var cell = Modifier.onGloballyPositioned {
@@ -13018,15 +13165,14 @@ private fun KayaRenderCore(
                         }
                         layout(placeable.width, placeable.height) { placeable.place(0, 0) }
                     }
-                    if (child.grow > 0) cell = cell.weight(child.grow.toFloat())
                     // The crossing COLUMN's track — the column arm's
-                    // sibling, one axis over.
+                    // sibling, one axis over; the row's Layout hands a
+                    // stretched cell the row's own height.
                     if (node.align == KayaCompose.ALIGN_STRETCH ||
                         child.kind == KayaCompose.KIND_COLUMN
                     ) {
                         cell = cell.fillMaxHeight()
                     }
-                    if (node.align == KayaCompose.ALIGN_BASELINE) cell = cell.alignByBaseline()
                     // The drawn-extent reader, the column arm's sibling.
                     Box(cell) {
                         Box(
@@ -13108,7 +13254,8 @@ private fun KayaRenderCore(
                 )
             }
         }
-        KayaCompose.KIND_BUTTON ->
+        KayaCompose.KIND_BUTTON -> {
+            val buttonRect = Modifier.onGloballyPositioned { kayaTextRects[node.id] = it.boundsInRoot() }
             // THE ROLE TIER, in M3's own emphasis ladder
             // (docs/styling-plan.md D4). THE FLOOR IS OUTLINED, filled
             // reserved for `prominent`, or a roleless button would leave
@@ -13119,7 +13266,7 @@ private fun KayaRenderCore(
                 KayaCompose.ROLE_PROMINENT ->
                     Button(
                         onClick = { KayaPresent.emitClicked(node.tag) },
-                        modifier = boxFill.then(a11y),
+                        modifier = boxFill.then(a11y).then(buttonRect),
                     ) {
                         // A button's label is Material's OWN rung
                         // (`Button` provides labelLarge internally), so
@@ -13130,7 +13277,7 @@ private fun KayaRenderCore(
                 KayaCompose.ROLE_DESTRUCTIVE ->
                     Button(
                         onClick = { KayaPresent.emitClicked(node.tag) },
-                        modifier = boxFill.then(a11y),
+                        modifier = boxFill.then(a11y).then(buttonRect),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = MaterialTheme.colorScheme.errorContainer,
                             contentColor = MaterialTheme.colorScheme.onErrorContainer,
@@ -13142,7 +13289,7 @@ private fun KayaRenderCore(
                 KayaCompose.ROLE_PLAIN ->
                     TextButton(
                         onClick = { KayaPresent.emitClicked(node.tag) },
-                        modifier = boxFill.then(a11y),
+                        modifier = boxFill.then(a11y).then(buttonRect),
                     ) {
                         Text(node.text, onTextLayout = { kayaTypefaceSites["button"] = it })
                     }
@@ -13154,11 +13301,12 @@ private fun KayaRenderCore(
                         // modifier onto the Surface, so the chrome spans
                         // the track the way GTK's Fill and XAML's Stretch
                         // already do (grow.steps' button#0).
-                        modifier = boxFill.then(a11y),
+                        modifier = boxFill.then(a11y).then(buttonRect),
                     ) {
                         Text(node.text, onTextLayout = { kayaTypefaceSites["button"] = it })
                     }
             }
+        }
         KayaCompose.KIND_LABEL ->
             // A RICH LABEL draws its inline runs READ-ONLY over the role's
             // own style (docs/rich-text-plan.md §15).
@@ -13182,9 +13330,10 @@ private fun KayaRenderCore(
                 val document = remember(node, node.text, node.richSeq, palette) {
                     kayaRichAnnotated(node.text, node.richRuns, palette)
                 }
+                val rectRead = Modifier.onGloballyPositioned { kayaTextRects[node.id] = it.boundsInRoot() }
                 val base = if (node.role == KayaCompose.ROLE_HEADING)
-                    boxFill.then(a11y).semantics { heading() }
-                else boxFill.then(a11y)
+                    boxFill.then(a11y).then(rectRead).semantics { heading() }
+                else boxFill.then(a11y).then(rectRead)
                 Text(
                     document,
                     style = when (node.role) {
@@ -15122,7 +15271,10 @@ private fun KayaSurface() {
                 // The wrapper hugs the mounted container, so its size IS
                 // the root's — what expect_root_fills compares against the
                 // offer recorded above.
-                Box(Modifier.onGloballyPositioned { kayaRootSize = it.size }) {
+                Box(Modifier.onGloballyPositioned {
+                    kayaRootSize = it.size
+                    kayaContentSize = it.findRootCoordinates().size
+                }) {
                     KayaRender(root, isRoot = true)
                 }
             }
@@ -15654,14 +15806,15 @@ fun KayaSectionsScaffold(active: KayaSection) {
                             KayaSymbolIcon(section.symbol)
                         }
                     },
-                    // ONE LINE: the item's label slot is 56dp on a 360dp
-                    // phone with five sections, and "Upcoming" wrapped to
-                    // "Upcomin" / "g" (captured 2026-09-06). A long title
-                    // overflows its padding rather than breaking a word.
+                    // ONE LINE, ELLIPSIZED (docs/flex-shrink-plan.md §5): the
+                    // item's label slot is 56dp on a 360dp phone with five
+                    // sections, and "Upcoming" wrapped to "Upcomin" / "g"
+                    // (captured 2026-09-06); Visible then overlapped the five
+                    // labels at 200% text size (the review page, 2026-09-24).
                     label = {
                         Text(
                             section.title, maxLines = 1, softWrap = false,
-                            overflow = TextOverflow.Visible)
+                            overflow = TextOverflow.Ellipsis)
                     },
                 )
             }

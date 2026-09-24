@@ -2527,7 +2527,29 @@ fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
         defs.Clear()?;
         for child in order {
             let def = ColumnDefinition::new()?;
-            def.SetWidth(track(core.grow.get(child).copied().unwrap_or(0.0)))?;
+            let weight = core.grow.get(child).copied().unwrap_or(0.0);
+            // A FIXED CELL SHRINKS TO ITS LONGEST WORD (docs/flex-shrink-plan.md
+            // §3): a star column weighted by the cell's natural width, floored
+            // at what it measures at zero width (a wrapping TextBlock answers
+            // its longest word) and capped at its natural, so the Grid's own
+            // star resolution is crate::flex's arithmetic — proportional to
+            // the basis, frozen at the minimum, the growers (star by weight)
+            // taking what the caps release. Auto is kept for a cell that has
+            // no width yet; a label's text arm marks its row to come back.
+            match (weight > 0.0, core.widgets.get(child)) {
+                (false, Some(widget)) => {
+                    let element: FrameworkElement = widget.element()?.cast()?;
+                    let (natural, minimum) = measured_widths(&element)?;
+                    if natural > 0.0 {
+                        def.SetWidth(GridLength { Value: natural, GridUnitType: GridUnitType::Star })?;
+                        def.SetMinWidth(minimum.min(natural))?;
+                        def.SetMaxWidth(natural)?;
+                    } else {
+                        def.SetWidth(track(0.0))?;
+                    }
+                }
+                _ => def.SetWidth(track(weight))?,
+            }
             defs.Append(&def)?;
         }
     }
@@ -2783,6 +2805,91 @@ fn fold_extent(id: u64) -> f64 {
                 .map_or(0.0, |p| f64::from(p.Y))
         })
     })
+}
+
+/// A cell's natural width (measured unbounded) and its minimum (measured at
+/// zero width, which a wrapping TextBlock answers with its longest word), the
+/// element handed back to the next layout pass.
+fn measured_widths(element: &FrameworkElement) -> windows_core::Result<(f64, f64)> {
+    let ui: UIElement = element.cast()?;
+    ui.Measure(bindings::Windows::Foundation::Size { Width: f32::INFINITY, Height: f32::INFINITY })?;
+    let natural = f64::from(ui.DesiredSize()?.Width);
+    ui.Measure(bindings::Windows::Foundation::Size { Width: 0.0, Height: f32::INFINITY })?;
+    let minimum = f64::from(ui.DesiredSize()?.Width);
+    ui.InvalidateMeasure()?;
+    Ok((natural, minimum))
+}
+
+/// THE SECOND CLAUSE of `expect_no_clipping` (docs/flex-shrink-plan.md §4):
+/// an element whose bounds leave the window ground across, or down unless
+/// a ScrollViewer carries it, is clipped whatever its own height says. The
+/// origin is read in the ground's space and turned back into a left edge
+/// under RightToLeft, the mirror read's lesson.
+#[cfg(feature = "harness")]
+fn off_screen(
+    element: &FrameworkElement,
+    what: &str,
+    text: &str,
+    ground: &FrameworkElement,
+) -> windows_core::Result<Option<String>> {
+    let (w, h) = (element.ActualWidth()?, element.ActualHeight()?);
+    if w <= 0.0 || !presented(element, ground)? {
+        return Ok(None);
+    }
+    let (room_w, room_h) = (ground.ActualWidth()?, ground.ActualHeight()?);
+    if room_w <= 0.0 || room_h <= 0.0 {
+        return Ok(None);
+    }
+    let ui: UIElement = element.cast()?;
+    let ground_ui: UIElement = ground.cast()?;
+    let origin = ui.TransformToVisual(&ground_ui)?.TransformPoint(Point { X: 0.0, Y: 0.0 })?;
+    let rtl = ground.FlowDirection()? == FlowDirection::RightToLeft;
+    let x0 = if rtl { room_w - f64::from(origin.X) - w } else { f64::from(origin.X) };
+    let y0 = f64::from(origin.Y);
+    let (x1, y1) = (x0 + w, y0 + h);
+    let across = x0 < -1.0 || x1 > room_w + 1.0;
+    let mut in_scroll = false;
+    let mut parent = element.Parent().ok();
+    while let Some(p) = parent {
+        if windows_core::Interface::cast::<ScrollViewer>(&p).is_ok() {
+            in_scroll = true;
+            break;
+        }
+        parent = windows_core::Interface::cast::<FrameworkElement>(&p).ok().and_then(|f| f.Parent().ok());
+    }
+    let down = !in_scroll && (y0 < -1.0 || y1 > room_h + 1.0);
+    Ok((across || down).then(|| {
+        format!(
+            "{what} {text:?} spans {}...{}px across and {}...{}px down, past its {room_w}x{room_h}px window",
+            x0.round(),
+            x1.round(),
+            y0.round(),
+            y1.round()
+        )
+    }))
+}
+
+/// Whether an element is in the arranged tree under `ground`: an
+/// unselected section's pane is DETACHED (show_section_pane hands the
+/// NavigationView one pane at a time), and a detached element keeps its
+/// last ActualWidth and answers TransformToVisual under RightToLeft as if
+/// it sat past the left edge ("Kitchen" at -46...0px on the windows
+/// tasksrtl leg, 2026-09-24); a collapsed ancestor's children are the same
+/// class. The off-screen and longest-word clauses skip both.
+#[cfg(feature = "harness")]
+fn presented(element: &FrameworkElement, ground: &FrameworkElement) -> windows_core::Result<bool> {
+    let mut at: Option<FrameworkElement> = Some(element.clone());
+    while let Some(fe) = at {
+        if &fe == ground {
+            return Ok(true);
+        }
+        let ui: UIElement = fe.cast()?;
+        if ui.Visibility()? == Visibility::Collapsed {
+            return Ok(false);
+        }
+        at = fe.Parent().ok().and_then(|p| windows_core::Interface::cast::<FrameworkElement>(&p).ok());
+    }
+    Ok(false)
 }
 
 fn track(weight: f64) -> GridLength {
@@ -12092,7 +12199,10 @@ fn text_block() -> windows_core::Result<TextBlock> {
     // construction, so a long label would force its container wider than the
     // window. The enum needed the bindgen filter to name it before there was a
     // setter to call at all (tools/winui-bindgen/src/main.rs).
-    block.SetTextWrapping(TextWrapping::Wrap)?;
+    // WHOLE WORDS (docs/flex-shrink-plan.md §3): measured at zero width a
+    // wrapping TextBlock then answers its longest word, the floor its row
+    // shrinks it to; plain Wrap breaks characters and answers one glyph.
+    block.SetTextWrapping(TextWrapping::WrapWholeWords)?;
     if let Some(source) = brand_typeface() {
         block.SetFontFamily(&FontFamily::CreateInstanceWithName(&HSTRING::from(source))?)?;
     }
@@ -14995,6 +15105,22 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 }
                 (NativeWidget::Label { block, .. }, Prop::Text, Value::Str(s)) => {
                     block.SetText(&HSTRING::from(&s))?;
+                    // Its row's star columns carry the OLD natural width
+                    // (docs/flex-shrink-plan.md §3); a row, never a column,
+                    // and never a TABLE's row, whose columns are the table's
+                    // stamped tracks (table_stamp) — a reindex here replaced
+                    // them and the portfolio's rows fell out of alignment
+                    // (matrix, 2026-09-24).
+                    if let Some(parent) = core.child_order.parent_of(id)
+                        && matches!(core.widgets.get(&parent), Some(NativeWidget::Row(_)))
+                        && !effective_vertical(core, parent)
+                        && !core
+                            .child_order
+                            .parent_of(parent)
+                            .is_some_and(|table| TABLES.with_borrow(|t| t.contains_key(&table.0)))
+                    {
+                        core.child_order.mark(parent);
+                    }
                     // A plain write is a whole document with no runs
                     // (docs/rich-text-plan.md §8, §15): the SetText above has
                     // already dropped the inlines, and the table stays (rich
@@ -21789,8 +21915,10 @@ impl crate::harness::Stage for WinUiStage {
     fn clipping(&self) -> String {
         // Every live label: XAML's own trimming flag, and the arranged height
         // against the desired one for a wrapping label its container cut
-        // (docs/compliance-plan.md §4).
+        // (docs/compliance-plan.md §4); then docs/flex-shrink-plan.md §4's
+        // two clauses, the off-screen one over the buttons too.
         Self::on_ui_read(|core| {
+            let ground: FrameworkElement = windows_core::Interface::cast(&window_ground(&core.window)?)?;
             for label in &core.labels {
                 let element: FrameworkElement = windows_core::Interface::cast(label)?;
                 let width = element.ActualWidth()?;
@@ -21805,6 +21933,24 @@ impl crate::harness::Stage for WinUiStage {
                 let got = element.ActualHeight()?;
                 if need > got + 1.0 {
                     return Ok(format!("label {text:?} needs {need}px at {width}px wide and got {got}px"));
+                }
+                if let Some(past) = off_screen(&element, "label", &text, &ground)? {
+                    return Ok(past);
+                }
+                let (_, word) = measured_widths(&element)?;
+                if presented(&element, &ground)? && word > width + 1.0 {
+                    return Ok(format!(
+                        "label {text:?} is {width}px wide, narrower than its longest word at {word}px"
+                    ));
+                }
+            }
+            for widget in core.widgets.values() {
+                if let NativeWidget::Button { button, caption } = widget {
+                    let element: FrameworkElement = windows_core::Interface::cast(button)?;
+                    let text: String = caption.Text()?.to_string().chars().take(40).collect();
+                    if let Some(past) = off_screen(&element, "button", &text, &ground)? {
+                        return Ok(past);
+                    }
                 }
             }
             Ok(String::new())
