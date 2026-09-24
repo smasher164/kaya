@@ -473,6 +473,10 @@ pub enum Step {
     /// The PLATFORM's own locale for the process, as a BCP-47 tag, never
     /// the knob and never the core's latch.
     ExpectLocale(String),
+    /// The platform's own clock as the door reads it, `12` or `24`: the
+    /// setting a lane flipped through the OS's knob reaching the process
+    /// (docs/compliance-plan.md §4, the clock leg).
+    ExpectHourCycle(String),
     /// The label's letters are in the named script (`Arab`, `Hebr`,
     /// `Latn`): the check a knob that failed to reach the platform
     /// cannot satisfy.
@@ -749,6 +753,7 @@ impl Step {
             | Step::ExpectNoClipping
             | Step::ExpectDirection(..)
             | Step::ExpectLocale(..)
+            | Step::ExpectHourCycle(..)
             | Step::DismissSheet
             | Step::MenuActivate(..)
             | Step::ExpectMenu(..)
@@ -859,6 +864,7 @@ impl Step {
             Step::ExpectDirection(..) => true,
             Step::ExpectMirrored(..) => true,
             Step::ExpectLocale(..) => true,
+            Step::ExpectHourCycle(..) => true,
             Step::ExpectScript(..) => true,
             Step::ExpectOverflow { .. } => true,
             Step::ScrollEnd { .. } => false,
@@ -1266,6 +1272,8 @@ pub trait Stage: Send + 'static {
     fn mirrored(&self, target: Target) -> String;
     /// The platform's own locale for the process, BCP-47.
     fn platform_locale(&self) -> String;
+    /// The platform's own clock as the door reads it, `12` or `24`.
+    fn hour_cycle(&self) -> String;
     /// What THIS platform's formatter writes for `value` of `kind` at
     /// `length`, asked independently of the core's door: the value is
     /// `YYYY-MM-DD` for a date, `HH:MM` for a time, both joined by `T` for
@@ -2126,6 +2134,13 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     return Err(format!("expect_locale wants a BCP-47 tag such as ar-EG: {line:?}"));
                 }
                 Step::ExpectLocale(tag.to_owned())
+            }
+            "expect_hour_cycle" => {
+                let cycle = rest.trim();
+                if cycle != "12" && cycle != "24" {
+                    return Err(format!("expect_hour_cycle wants 12 or 24: {line:?}"));
+                }
+                Step::ExpectHourCycle(cycle.to_owned())
             }
             "expect_script" => {
                 let (target, script) = rest.trim().split_once(char::is_whitespace).ok_or_else(|| {
@@ -4513,6 +4528,14 @@ fn run_with_log(
                     Err(format!("locale {got}, wanted {want}"))
                 }
             })),
+            Step::ExpectHourCycle(want) => Some(poll(|| {
+                let got = stage.hour_cycle();
+                if got == *want {
+                    Ok(format!("hour cycle {want}"))
+                } else {
+                    Err(format!("hour cycle {got}, wanted {want}"))
+                }
+            })),
             Step::ExpectScript(t, script) => Some(poll(|| {
                 let got = stage.read_label(*t);
                 match script_of(&got) {
@@ -6219,6 +6242,9 @@ mod tests {
         fn platform_locale(&self) -> String {
             "en-US".to_owned()
         }
+        fn hour_cycle(&self) -> String {
+            "12".to_owned()
+        }
         fn formatted(&self, _: &str, _: &str, _: &str) -> String {
             String::new()
         }
@@ -7134,6 +7160,9 @@ mod tests {
         fn platform_locale(&self) -> String {
             "en-US".to_owned()
         }
+        fn hour_cycle(&self) -> String {
+            "12".to_owned()
+        }
         fn formatted(&self, _: &str, _: &str, _: &str) -> String {
             String::new()
         }
@@ -7443,6 +7472,9 @@ mod tests {
         }
         fn platform_locale(&self) -> String {
             "en-US".to_owned()
+        }
+        fn hour_cycle(&self) -> String {
+            "12".to_owned()
         }
         fn formatted(&self, _: &str, _: &str, _: &str) -> String {
             String::new()

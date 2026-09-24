@@ -334,6 +334,16 @@ shows the value × 100: the increment is scaled by 0.01 for a percent, and
 `fmt::win_tests` pins the digits on the guest's unit phase, because the
 harness on this backend answers the template through the door itself.
 
+## The lane image's clock setting (measured 2026-09-24, kaya-linux:latest)
+
+`gsettings get org.gnome.desktop.interface clock-format` answers `12h` in
+the image (libdconfsettings.so is installed, no daemon runs, no `dconf` on
+the path), so the everyday container legs format a 12-hour clock. With
+`GSETTINGS_BACKEND=keyfile` and `XDG_CONFIG_HOME` pointing at a directory
+holding `glib-2.0/settings/keyfile` with `clock-format='24h'` the same call
+answers `24h`, which is how the clock24 leg flips GNOME's own key for one
+process (tools/linux/clock24).
+
 ## U2 again, glibc's own tables (measured 2026-09-23, a C probe in the lane image with the locales generated)
 
 | | C.UTF-8 | en_US.UTF-8 | de_DE.UTF-8 | ar_EG.UTF-8 |

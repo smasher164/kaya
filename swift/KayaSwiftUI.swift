@@ -9320,6 +9320,17 @@ private func kayaRunScript(_ script: String) {
                 } else {
                     failures.append("locale \(got), wanted \(want)")
                 }
+            case "expect_hour_cycle":
+                // Foundation's own clock for the process: the localized
+                // pattern for the `j` skeleton is 24-hour when it spells H or k.
+                let want = String(parts[1])
+                let pattern = DateFormatter.dateFormat(fromTemplate: "j", options: 0, locale: Locale.current) ?? ""
+                let got = pattern.contains("H") || pattern.contains("k") ? "24" : "12"
+                if got == want {
+                    observed.append("hour cycle \(want)")
+                } else {
+                    failures.append("hour cycle \(got), wanted \(want)")
+                }
             case "expect_script":
                 let want = String(parts[2])
                 let got = DispatchQueue.main.sync { kayaTarget(parts[1], "label", kayaScene.labels)?.text }

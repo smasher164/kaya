@@ -1669,7 +1669,22 @@ def queue_leg(name, script, args, tablet=False):
         for t in [*_leg_threads, *_tablet_threads]:
             t.join()
         with exclusive.hold("android", name):
-            _leg_worker(name, script, args, tablet)
+            # THE DEVICE'S OWN SETTING around a setting leg (lanes/android.py's
+            # SCENE_SETTINGS): every phone in the pool, since the worker picks
+            # its device below; deleted after whatever the verdict, since the
+            # value was absent before this lane touched it.
+            setting = lane.SCENE_SETTINGS.get(lane.scene_of(name))
+            if setting:
+                namespace, key, value = setting
+                for serial in SERIALS:
+                    adb(serial, "shell", "settings", "put", namespace, key, value)
+            try:
+                _leg_worker(name, script, args, tablet)
+            finally:
+                if setting:
+                    namespace, key, _ = setting
+                    for serial in SERIALS:
+                        adb(serial, "shell", "settings", "delete", namespace, key)
         return
     t = threading.Thread(target=_leg_worker,
                          args=(name, script, args, tablet))

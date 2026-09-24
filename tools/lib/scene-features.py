@@ -130,6 +130,7 @@ VERB_FEATURE = {
     "expect_direction": "format",
     "expect_mirrored": "format",
     "expect_locale": "format",
+    "expect_hour_cycle": "format",
     "expect_script": "format",
 }
 

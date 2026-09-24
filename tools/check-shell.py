@@ -378,6 +378,41 @@ if probe_exec != 1:
           f"run)", file=sys.stderr)
     status = 1
 
+# A LEG'S HOME NEVER POINTS INTO THE MOUNTED TREE: kaya keeps its preference
+# store under XDG_CONFIG_HOME (crates/kaya/src/prefs.rs), so a leg handed
+# a config home under /work writes the guest's own files into the checkout,
+# and the clock24 leg's preferences were committed once (2026-09-24). A
+# checked-in fixture is COPIED into the leg's scratch (run-suites.sh's
+# clock24_config_home) and the leg is pointed there.
+TREE_HOME = re.compile(r"\b(HOME|XDG_(?:CONFIG|STATE|DATA|CACHE)_HOME)="
+                       r"[\"']?/work/(?!target-linux/)")
+badhome = []
+home_pop = sorted((ROOT / "tools/linux").glob("*.sh"))
+for f in home_pop:
+    rel = f.relative_to(ROOT)
+    for n, line in enumerate(f.read_text(encoding="utf-8").splitlines(),
+                             1):
+        if TREE_HOME.search(line):
+            badhome.append(f"{rel}:{n}:{line}")
+if badhome:
+    print("check-shell: a leg's home points into the mounted tree, so the "
+          "guest's own files (its preference store) land in the checkout; "
+          "copy the fixture into the leg's scratch and point there:",
+          file=sys.stderr)
+    print("\n".join(badhome), file=sys.stderr)
+    status = 1
+home_lines = [
+    "        XDG_CONFIG_HOME=/work/tools/linux/clock24 KAYA_SELFTEST=clock24 \\",
+    '    export HOME="/work/target-linux/home"',
+    '        XDG_CONFIG_HOME="$(clock24_config_home "$proto")" KAYA_SELFTEST=clock24 \\',
+]
+probe_home = sum(1 for ln in home_lines if TREE_HOME.search(ln))
+if probe_home != 1 or len(home_pop) < 5:
+    print(f"check-shell: self-test failed — the tree-home scan matched "
+          f"{probe_home} of 3 lines, want exactly 1 (the tree path), over "
+          f"{len(home_pop)} tools/linux scripts (floor 5)", file=sys.stderr)
+    status = 1
+
 if status == 0:
     print("check-shell: OK")
 else:

@@ -222,6 +222,36 @@ pub(crate) fn text_scale_override() -> Option<f64> {
     Some(factor)
 }
 
+/// `KAYA_CLOCK=24|12`, the harness's per-process clock ON THE APPLE LANES
+/// ONLY: the platform's own key, `AppleICUForce24HourTime`, in the
+/// process's volatile argument domain beside the locale's — a launch
+/// argument carrying the same key does not reach CoreFoundation in a
+/// process that formats before its defaults exist (measured on the mac and
+/// the simulator 2026-09-24, docs/traps.md), and the other three lanes flip
+/// the OS's own setting outside the process, so the knob is refused there.
+/// Unset installs nothing.
+pub(crate) fn clock_knob() -> Option<bool> {
+    let want = std::env::var("KAYA_CLOCK").ok()?;
+    match want.as_str() {
+        "24" => Some(true),
+        "12" => Some(false),
+        _ => panic!("kaya: KAYA_CLOCK={want:?} is not a clock; use 24 or 12"),
+    }
+}
+
+/// The three lanes whose clock is the OS's own setting refuse the Apple
+/// knob rather than ignore it, naming their route.
+#[cfg_attr(any(target_os = "macos", target_os = "ios"), allow(dead_code))]
+pub(crate) fn refuse_clock_knob(route: &str) {
+    if let Some(clock24) = clock_knob() {
+        panic!(
+            "kaya: KAYA_CLOCK={} is the Apple lanes' per-process route; on this platform the \
+             lane flips the OS's own setting, {route} (docs/compliance-plan.md §4)",
+            if clock24 { 24 } else { 12 }
+        );
+    }
+}
+
 /// `KAYA_LOCALE=<bcp47>`, the harness's per-process locale, installed
 /// through the platform's own per-process route BEFORE the app thread
 /// exists (lib.rs's `run`), so a guest that formats first formats right
@@ -516,7 +546,14 @@ mod platform {
         LocaleInfo { tag, hour_cycle, first_weekday, calendar, numbering }
     }
 
-    pub(super) fn adopt_environment() {}
+    /// The clock knob alone, when no locale knob will write the domain.
+    pub(super) fn adopt_environment() {
+        if std::env::var("KAYA_LOCALE").is_err() {
+            if let Some(clock24) = super::clock_knob() {
+                install_argument_domain(None, Direction::Ltr, clock24);
+            }
+        }
+    }
 
     /// Apple's own route: the ARGUMENT domain of the standard defaults,
     /// what `-AppleLanguages` on a command line sets — volatile, nothing
@@ -525,21 +562,41 @@ mod platform {
     /// direction defaults are Apple's RTL test knob, set when the tag's
     /// script runs right to left.
     pub(super) fn install_locale(tag: &str, direction: Direction) {
+        install_argument_domain(Some(tag), direction, super::clock_knob().unwrap_or(false));
+    }
+
+    /// ONE volatile argument domain for both knobs, since `setVolatileDomain`
+    /// replaces the domain whole: the locale's keys when a tag is given, the
+    /// RTL pair when its script runs right to left, and Apple's own
+    /// `AppleICUForce24HourTime` for the clock.
+    fn install_argument_domain(tag: Option<&str>, direction: Direction, clock24: bool) {
         use objc2::runtime::AnyObject;
         use objc2_foundation::{NSArgumentDomain, NSArray, NSDictionary, NSNumber, NSString, NSUserDefaults};
-        let languages = NSArray::from_slice(&[&*NSString::from_str(tag)]);
-        let locale = NSString::from_str(&tag.replace('-', "_"));
+        let tag_text = tag.unwrap_or_default();
+        let languages = NSArray::from_slice(&[&*NSString::from_str(tag_text)]);
+        let locale = NSString::from_str(&tag_text.replace('-', "_"));
         let yes = NSNumber::new_bool(true);
         let k_languages = NSString::from_str("AppleLanguages");
         let k_locale = NSString::from_str("AppleLocale");
         let k_text = NSString::from_str("AppleTextDirection");
         let k_force = NSString::from_str("NSForceRightToLeftWritingDirection");
-        let mut keys: Vec<&NSString> = vec![&k_languages, &k_locale];
-        let mut objects: Vec<&AnyObject> = vec![&languages, &locale];
-        if direction == Direction::Rtl {
-            keys.push(&k_text);
-            keys.push(&k_force);
-            objects.push(&yes);
+        let k_clock = NSString::from_str("AppleICUForce24HourTime");
+        let mut keys: Vec<&NSString> = Vec::new();
+        let mut objects: Vec<&AnyObject> = Vec::new();
+        if tag.is_some() {
+            keys.push(&k_languages);
+            keys.push(&k_locale);
+            objects.push(&languages);
+            objects.push(&locale);
+            if direction == Direction::Rtl {
+                keys.push(&k_text);
+                keys.push(&k_force);
+                objects.push(&yes);
+                objects.push(&yes);
+            }
+        }
+        if clock24 {
+            keys.push(&k_clock);
             objects.push(&yes);
         }
         let domain: objc2::rc::Retained<NSDictionary<NSString, AnyObject>> =
@@ -809,6 +866,7 @@ mod platform {
     /// `setlocale(LC_ALL, "")`, what `gtk_init` does and a guest that formats
     /// before it would otherwise miss; idempotent under GTK's own call.
     pub(super) fn adopt_environment() {
+        super::refuse_clock_knob("GNOME's clock-format through a settings backend");
         unsafe { libc::setlocale(libc::LC_ALL, c"".as_ptr()) };
     }
 
@@ -957,7 +1015,9 @@ mod platform {
         LocaleInfo { tag, hour_cycle, first_weekday, calendar, numbering }
     }
 
-    pub(super) fn adopt_environment() {}
+    pub(super) fn adopt_environment() {
+        super::refuse_clock_knob("`settings put system time_12_24`");
+    }
 
     /// The process default, which every ICU and java.text formatter
     /// reads; the composition's half (the forced Configuration and layout
@@ -1177,7 +1237,9 @@ mod platform {
         LocaleInfo { tag, hour_cycle, first_weekday, calendar, numbering }
     }
 
-    pub(super) fn adopt_environment() {}
+    pub(super) fn adopt_environment() {
+        super::refuse_clock_knob("the Region keys iTime and sShortTime");
+    }
 
     /// `SetPrimaryLanguageOverride` is refused in an unpackaged process
     /// (U5, 0x80073D54), so the knob is the language list every formatter

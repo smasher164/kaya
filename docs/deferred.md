@@ -97,9 +97,14 @@ than a verb of its own. What breadth still owes, held open here:
     write around the two windows legs (TEXT_SCALE_LEGS, alone), the mac
     declaring both off (OFF_SCENES, R4) while its everyday tasks legs hold
     `expect_no_clipping` at 1.0.
-  - **BREADTH STILL OWED**: `clock24` (§4, one OS-setting leg per lane
-    flipping 24-hour time through the platform's own knob), then the review
-    page at 200% and in Arabic on every lane.
+  - ~~**BREADTH: `clock24`**~~ — LANDED 2026-09-24: one OS-setting leg per
+    lane over the format guest (§4 says each lane's knob), asserted through
+    the new `expect_hour_cycle` read-back of the platform's own clock plus
+    the time template; Apple's key rides `KAYA_CLOCK` into the argument
+    domain since a launch argument does not reach a guest that formats
+    before its defaults exist (docs/traps.md).
+  - **BREADTH STILL OWED**: the review page at 200% and in Arabic on every
+    lane, each capture viewed before it is published.
   - **FOLLOW-UP — the windows launchers are 300 checked-in near-copies**
     (the maintainer, 2026-09-23: "do we need to be using a bunch of batch
     scripts like that?"): every leg is a tools/guest/run_<leg>.cmd because

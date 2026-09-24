@@ -18668,6 +18668,13 @@ impl crate::harness::Stage for GtkStage {
             }
         })
     }
+    fn hour_cycle(&self) -> String {
+        // The door's own reading of the platform's clock (fmt.rs's arm).
+        match crate::fmt::locale().hour_cycle {
+            crate::fmt::HourCycle::H12 => "12".to_owned(),
+            crate::fmt::HourCycle::H23 => "24".to_owned(),
+        }
+    }
     fn platform_locale(&self) -> String {
         crate::fmt::locale().tag
     }

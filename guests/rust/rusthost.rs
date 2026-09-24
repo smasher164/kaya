@@ -208,7 +208,7 @@ fn app(ctx: kaya::AppCtx) {
         Ok("sheet") => sheet::app(ctx),
         // One guest under three locales (tools/lib/lanes/android.py's
         // SCENE_LOCALE): a scene selects a SCRIPT, never an app.
-        Ok("format") | Ok("formatde") | Ok("formatar") | Ok("formatbig") => format::app(ctx),
+        Ok("format") | Ok("formatde") | Ok("formatar") | Ok("formatbig") | Ok("clock24") => format::app(ctx),
         Ok("tooltips") => tooltips::app(ctx),
         Ok("search") => search::app(ctx),
         Ok("tasks") => tasks::app(ctx),

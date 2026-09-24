@@ -395,7 +395,27 @@ platform's own knob (a simulator default on Apple, `settings put` on
 Android, the registry on Windows, `LC_TIME` in the container) and
 asserts the time label moving from `8:30 AM` to `08:30`: the measured
 proof that the door honors the user, which is the whole reason the
-platform formats.
+platform formats. BUILT 2026-09-24 as `clock24.steps` over the format
+guest: `expect_hour_cycle 24`, a read-back of the platform's own clock as
+the door reads it (Foundation's pattern for the `j` skeleton, the
+platform's text-format class over the composition's locale, the door's
+own `locale()` on the Rust backends), which a knob that failed to reach
+the platform cannot satisfy, then the time label through the template —
+a STORED `08:30` was the first draft and Windows refused it by its own
+left-to-right marks between the fields (U11), so no stored string could
+hold on five lanes. The knobs: on the Apple
+lanes Apple's own `AppleICUForce24HourTime` in this process's volatile
+argument domain, written by the core from `KAYA_CLOCK=24` beside the
+locale's keys — a LAUNCH ARGUMENT carrying the key was measured not
+reaching CoreFoundation in a guest that formats before its defaults exist,
+on the mac and the simulator alike, even with the standard defaults
+created first (docs/traps.md) — `settings put system time_12_24 24` on every
+pooled phone before the leg and deleted after, the Region keys `iTime` and
+`sShortTime` written before the windows leg and put back after, and GNOME's
+`clock-format` through GIO's keyfile backend over tools/linux/clock24 in
+the container, whose dconf answers `12h` with no daemon to write to. The
+android and windows legs run alone, since those settings are the
+device's.
 
 ## §5 THE BINDINGS
 
@@ -453,7 +473,7 @@ prose), planted negative in each. Green today by measurement.
   `expect_script` under the everyday locale, then `de-DE` and `ar-EG`
   through the knob, on every lane, in all nine languages — the proof
   that nine spellings are one implementation on each platform.
-- **`clock24-*`** — the OS-setting leg (§4).
+- **`clock24-*`** — the OS-setting leg (§4; BUILT 2026-09-24).
 - **The review page**: the tasks app at 200% and in Arabic on every
   lane, each capture viewed before it is published.
 

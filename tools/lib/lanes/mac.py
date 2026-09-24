@@ -71,7 +71,7 @@ LANGS = ("rust", "python", "go", "csharp", "ocaml", "haskell", "swift",
 # apps whose launchers already name the right artifact.
 GUEST_STEM = {"listdetail": "split", "taskspersist": "tasks",
               "links": "tasks", "formatde": "format", "formatar": "format",
-              "tasksrtl": "tasks"}
+              "tasksrtl": "tasks", "clock24": "format"}
 
 # THE LOCALE A SCENE RUNS UNDER (docs/compliance-plan.md §4): the knob the
 # leg carries, so the same guest is read under German and Arabic; the
@@ -84,6 +84,13 @@ SCENE_LOCALE = {"formatde": "de-DE", "formatar": "ar-EG", "tasksrtl": "ar-EG"}
 # R4) and the two scale scenes run on the other four lanes.
 OFF_SCENES = {"tasksbig": "macOS has no text size (docs/compliance-plan.md R4)",
               "formatbig": "macOS has no text size (docs/compliance-plan.md R4)"}
+
+# The clock a scene runs under (docs/compliance-plan.md §4): the core writes
+# Apple's own `AppleICUForce24HourTime` into this process's volatile argument
+# domain from KAYA_CLOCK, so the maintainer's Mac is never touched. A launch
+# argument carrying the key was measured NOT reaching CoreFoundation in a
+# guest that formats before its defaults exist (docs/traps.md).
+SCENE_CLOCK = {"clock24": "24"}
 
 # The dark half of expect_ink's frozen string, one leg instead of a
 # lane re-run (tools/check-appearance.py holds the leg here): canvas's
@@ -107,7 +114,9 @@ HAND_QUEUED = {"editor": "go", "portfolio": "python", "varied": "python",
                # The format guest under two more locales (SCENE_LOCALE).
                "formatde": "rust", "formatar": "rust",
                # The task manager in Arabic (SCENE_LOCALE).
-               "tasksrtl": "rust"}
+               "tasksrtl": "rust",
+               # The format guest under the 24-hour clock (SCENE_CLOCK).
+               "clock24": "rust"}
 
 # The queue, in run order. Entries:
 #   (scene, (lang, ...))    a group: script export + one leg per lang
@@ -209,6 +218,8 @@ ORDER = [
     ("format", LANGS + ("c",)),
     ("formatde", LANGS + ("c",)),
     ("formatar", LANGS + ("c",)),
+    # The user's 24-hour clock reaching the door (docs/compliance-plan.md §4).
+    ("clock24", ("rust",)),
     ("drain",),
     # WHAT SURVIVES A RELAUNCH (docs/tasks-s4-plan.md §4): the tasks
     # guest again under taskspersist.steps, act two through the PLAIN
@@ -857,6 +868,8 @@ def leg_env(root, scene, lang, appearance=""):
         env["KAYA_APPEARANCE"] = appearance
     if scene in SCENE_LOCALE:
         env["KAYA_LOCALE"] = SCENE_LOCALE[scene]
+    if scene in SCENE_CLOCK:
+        env["KAYA_CLOCK"] = SCENE_CLOCK[scene]
     # ONE STATE HOME PER LEG: the harness's scratch stores and the act-two
     # marker are one tree per APP under it, and the pool runs many legs of
     # one app at once (docs/traps.md, 2026-09-09: a concurrent leg's act

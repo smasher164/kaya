@@ -21853,6 +21853,13 @@ impl crate::harness::Stage for WinUiStage {
         })
         .unwrap_or_else(|e| format!("unread: {e}"))
     }
+    fn hour_cycle(&self) -> String {
+        // The door's own reading of the platform's clock (fmt.rs's arm).
+        match crate::fmt::locale().hour_cycle {
+            crate::fmt::HourCycle::H12 => "12".to_owned(),
+            crate::fmt::HourCycle::H23 => "24".to_owned(),
+        }
+    }
     fn platform_locale(&self) -> String {
         // The ground's own Language (window_ground writes it), the toolkit's
         // reading and not the door's latch.

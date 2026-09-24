@@ -43,7 +43,16 @@ SUITES = ("compose", "jvm", "go", "python")
 # its activation is a REAL tap on SystemUI's notification shade, driven
 # from the host (docs/tasks-s3-plan.md N5).
 EXCLUSIVE = {"dnd-compose", "dnd-jvm", "dnd-go", "tasks-compose",
-             "notify-compose"}
+             "notify-compose",
+             # The device's own 24-hour setting is every process's
+             # (SCENE_SETTINGS), so nothing else runs under it.
+             "clock24-compose"}
+
+# A device setting a scene runs under, `settings put <namespace> <key>
+# <value>` on every phone in the pool before the leg and deleted after
+# (docs/compliance-plan.md §4; U10 measured `time_12_24 24` reaching the
+# platform's text-format class and not ICU).
+SCENE_SETTINGS = {"clock24": ("system", "time_12_24", "24")}
 
 # The roster, per suite and in queue order. Leg names are the census
 # surface every gate reads; the exceptions ride FLAGS below.
@@ -107,6 +116,7 @@ LEGS = {
         # And at twice the text size, the tasks screens and the format
         # guest (docs/compliance-plan.md §6; SCENE_TEXT_SCALE).
         "tasksbig-compose", "formatbig-compose",
+        "clock24-compose",
     ],
     "jvm": [
         "jvm", "a11y-jvm", "entry-jvm",

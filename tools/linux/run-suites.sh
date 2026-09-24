@@ -251,6 +251,16 @@ if ! GTK_A11Y=none GDK_BACKEND=wayland XDG_RUNTIME_DIR=/tmp/xdg-wl-0 \
     exit 1
 fi
 LEGS_DIR="$(mktemp -d)"
+# The clock24 leg's config home is a COPY of the checked-in keyfile under
+# the leg's scratch, never the tree: kaya's preference store lives under
+# XDG_CONFIG_HOME too, and the leg's own writes landed in tools/linux/clock24
+# and were committed once (2026-09-24; check-shell holds the rule).
+clock24_config_home() {
+    local home="$LEGS_DIR/clock24-$1.config"
+    mkdir -p "$home/glib-2.0/settings"
+    cp /work/tools/linux/clock24/glib-2.0/settings/keyfile "$home/glib-2.0/settings/keyfile"
+    echo "$home"
+}
 leg_names=()
 leg_pids=()
 
@@ -1448,6 +1458,13 @@ for proto in x11 wayland; do
     run "$proto" formatar-rust env KAYA_LOCALE=ar-EG KAYA_SELFTEST=formatar \
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/format"
     run "$proto" formatbig-rust env KAYA_TEXT_SCALE=2 KAYA_SELFTEST=formatbig \
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/format"
+    # THE USER'S 24-HOUR SETTING (docs/compliance-plan.md §4): GNOME's own
+    # clock-format key, which the glibc arm reads first, through GIO's
+    # keyfile backend over tools/linux/clock24 — the image's dconf answers
+    # 12h with no daemon to write to (measured 2026-09-24).
+    run "$proto" clock24-rust env GSETTINGS_BACKEND=keyfile \
+        XDG_CONFIG_HOME="$(clock24_config_home "$proto")" KAYA_SELFTEST=clock24 \
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/format"
     # The eight bindings' format guests under the same three locales
     # (docs/compliance-plan.md §6): nine spellings, one door.

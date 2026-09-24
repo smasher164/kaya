@@ -8673,6 +8673,17 @@ object KayaCompose {
                             failures.add("locale $got, wanted $want")
                         }
                     }
+                    "expect_hour_cycle" -> {
+                        // The platform's own setting over the composition's locale,
+                        // the rule the door reads (KayaFormat.twentyFourHours).
+                        val want = parts[1]
+                        val got = if (KayaFormat.twentyFourHours(activity, kayaRootLocale ?: java.util.Locale.getDefault())) "24" else "12"
+                        if (got == want) {
+                            observed.add("hour cycle $want")
+                        } else {
+                            failures.add("hour cycle $got, wanted $want")
+                        }
+                    }
                     "expect_script" -> {
                         val want = parts[2]
                         val text = onUi(activity) { target(parts[1], "label", KayaSceneModel.labels)?.text }

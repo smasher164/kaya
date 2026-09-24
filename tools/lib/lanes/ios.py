@@ -74,6 +74,8 @@ RUST_SCENES = [
     # The task manager in Arabic, and at twice the text size, and the
     # format guest at twice it (docs/compliance-plan.md §6; SCENE_TEXT_SCALE).
     "tasksrtl", "tasksbig", "formatbig",
+    # The format guest under the 24-hour clock (SCENE_CLOCK).
+    "clock24",
     # The notification conformance scene: the activation is a REAL tap on
     # SpringBoard's own shade, driven by the xcui driver's notify_tap
     # (docs/tasks-s3-plan.md N5).
@@ -243,7 +245,8 @@ def swift_scene(entry):
 # selects a SCRIPT, never an app.
 RUST_EXAMPLE = {"listdetail": "split", "taskspersist": "tasks",
                 "links": "tasks", "formatde": "format", "formatar": "format",
-                "tasksrtl": "tasks", "tasksbig": "tasks", "formatbig": "format"}
+                "tasksrtl": "tasks", "tasksbig": "tasks", "formatbig": "format",
+                "clock24": "format"}
 
 # The locale a scene runs under, the knob the leg carries
 # (docs/compliance-plan.md §4); the reads ask the platform, never this.
@@ -252,6 +255,12 @@ SCENE_LOCALE = {"formatde": "de-DE", "formatar": "ar-EG", "tasksrtl": "ar-EG"}
 # The text-scale knob a scene carries (docs/compliance-plan.md §2.1): the
 # window's content size category nearest the factor.
 SCENE_TEXT_SCALE = {"tasksbig": "2", "formatbig": "2"}
+
+# The clock a scene runs under (docs/compliance-plan.md §4): the core writes
+# Apple's own key into the process's volatile argument domain from
+# KAYA_CLOCK; a `simctl launch` argument was measured not reaching
+# CoreFoundation in a guest that formats before its defaults exist.
+SCENE_CLOCK = {"clock24": "24"}
 
 
 def rust_example(scene):

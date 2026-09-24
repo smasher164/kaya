@@ -12612,3 +12612,19 @@ scale leg would otherwise measure unscaled text against scaled frames and
 pass on nothing. Beside it, the Compose read counted labels a section that
 is not selected composes at zero width (a caption as nineteen one-character
 lines); a visible label always has a width, so those are skipped.
+
+## A launch argument's `-AppleICUForce24HourTime YES` does not reach CoreFoundation in a kaya guest (measured 2026-09-24)
+
+Xcode schemes set `AppleLanguages` and friends as launch arguments, so the
+clock24 leg first handed the mac guest `-AppleICUForce24HourTime YES` on its
+command line (tools/lib/lanes/mac.py's leg argv) and the simulator guest
+the same through `simctl launch`. Both read `8:30 AM`, and creating
+`NSUserDefaults.standardUserDefaults()` on the door's first entry, so the
+argument domain would be parsed before the first format, changed nothing.
+The route measured working is the in-process one the locale knob already
+uses, `setVolatileDomain(_:forName: NSArgumentDomain)` with the key
+(scratchpad rtlprobe, U9): so the core writes the key from `KAYA_CLOCK=24`
+into the ONE volatile argument domain beside `AppleLanguages`, since
+`setVolatileDomain` replaces the domain whole and two writers would drop
+each other's keys. The other three lanes flip the OS's own setting outside
+the process and the knob is refused there naming their route.

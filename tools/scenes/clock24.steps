@@ -1,0 +1,13 @@
+# THE USER'S 24-HOUR SETTING REACHING THE DOOR (docs/compliance-plan.md §4):
+# the format guest with the platform's own clock knob flipped BY THE LANE —
+# Apple's AppleICUForce24HourTime in this process's argument domain, written
+# by the core from KAYA_CLOCK since a launch argument does not reach a guest
+# that formats before its defaults exist; `settings put system time_12_24 24`
+# on Android; the Region keys iTime and sShortTime on Windows; GNOME's
+# clock-format through a keyfile settings backend in the container. The
+# cycle is read back from the platform's own setting, which a knob that
+# failed to reach it cannot satisfy, and the label is the platform's own
+# rendering under it — Windows writes left-to-right marks between the
+# fields, so no stored string could hold on five lanes.
+expect_hour_cycle 24
+expect label#3 "{fmt:time 08:30 short}"

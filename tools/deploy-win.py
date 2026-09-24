@@ -2239,12 +2239,24 @@ def run_suite(name):
             if percent:
                 must_ssh('reg add "HKCU\\Software\\Microsoft\\Accessibility" /v '
                          f'TextScaleFactor /t REG_DWORD /d {percent} /f >nul')
+            # THE USER'S 24-HOUR CLOCK around the clock leg (lanes/win.py's
+            # CLOCK24_LEGS): the Region keys written before, and put back to
+            # the VM's own values after (U11 read them as `0` and `h:mm tt`).
+            clock = name in lane.CLOCK24_LEGS
+            if clock:
+                must_ssh('reg add "HKCU\\Control Panel\\International" /v iTime /t REG_SZ '
+                         '/d 1 /f >nul && reg add "HKCU\\Control Panel\\International" '
+                         '/v sShortTime /t REG_SZ /d HH:mm /f >nul')
             try:
                 _leg_worker(name)
             finally:
                 if percent:
                     must_ssh('reg delete "HKCU\\Software\\Microsoft\\Accessibility" '
                              '/v TextScaleFactor /f >nul')
+                if clock:
+                    must_ssh('reg add "HKCU\\Control Panel\\International" /v iTime /t REG_SZ '
+                             '/d 0 /f >nul && reg add "HKCU\\Control Panel\\International" '
+                             '/v sShortTime /t REG_SZ /d "h:mm tt" /f >nul')
         return
     t = threading.Thread(target=_leg_worker, args=(name,))
     t.start()

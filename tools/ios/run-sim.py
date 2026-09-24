@@ -1765,6 +1765,8 @@ def run_swiftui_on(udid, slot, app, bundle_id, name, selftest, scene,
         env["SIMCTL_CHILD_KAYA_LOCALE"] = lane.SCENE_LOCALE[selftest]
     if selftest in lane.SCENE_TEXT_SCALE:
         env["SIMCTL_CHILD_KAYA_TEXT_SCALE"] = lane.SCENE_TEXT_SCALE[selftest]
+    if selftest in lane.SCENE_CLOCK:
+        env["SIMCTL_CHILD_KAYA_CLOCK"] = lane.SCENE_CLOCK[selftest]
     # THE VERB TRACE AND THE PANIC LOG, both RELATIVE names: the
     # interpreter resolves one under its Documents and the core the
     # other under $HOME/Documents — the same container directory —
