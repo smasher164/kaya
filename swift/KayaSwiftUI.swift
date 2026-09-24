@@ -11186,9 +11186,16 @@ struct KayaCell: Layout {
             default: y = 0
             }
         }
+        // THE CHILD GETS WHAT IT ASKED FOR, not the whole cell
+        // (docs/flex-shrink-plan.md §9): a control handed the row's full
+        // height centres its glyph inside it, so a checkbox beside a two-line
+        // item drifted to the middle under align Start (the maintainer,
+        // 2026-09-24). A crossing container answers the full cell and still
+        // spans it; text and controls answer their own size and sit where
+        // the mode puts them.
         child.place(
             at: CGPoint(x: bounds.minX + x, y: bounds.minY + y),
-            anchor: .topLeading, proposal: full)
+            anchor: .topLeading, proposal: ProposedViewSize(size))
     }
 }
 
@@ -16427,12 +16434,17 @@ struct KayaRender: View {
             // docs/tasks-s2-plan.md T1).
             #if os(macOS)
                 .kayaToggleStyle(asSwitch: node.role == roleSwitch)
+                // ITS OWN HEIGHT (docs/flex-shrink-plan.md §9): a Toggle
+                // answers the height it is offered and centres its glyph in
+                // it, so a checkbox beside a two-line item sat mid-row under
+                // align Start (the maintainer, 2026-09-24).
+                .fixedSize(horizontal: false, vertical: true)
             #else
                 // A UIKit switch is greedy on width: unfixed, it took a task
                 // row's whole free width and pushed its neighbours to the
                 // right (tools/scenes/tasks.steps, 2026-09-05). A grower
-                // keeps its track.
-                .fixedSize(horizontal: node.grow == 0, vertical: false)
+                // keeps its track. And its own height, as on the mac (§9).
+                .fixedSize(horizontal: node.grow == 0, vertical: true)
             #endif
             .alignmentGuide(.top) { d in
                 kayaBaselineOffsets[node.id] = d[.firstTextBaseline] - d[.top]

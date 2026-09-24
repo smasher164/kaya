@@ -178,3 +178,28 @@ the Today screen on the phones after.
 ## §8 Built
 
 Landed 2026-09-24 in 880fe020 and the GTK measure follow-up after it; matrix ALL PASS (Mac 519, Linux 851, Windows 312, iOS 156, Android 165 legs, 62 gates); the review page https://claude.ai/artifact/KPqemDy3TpQPhkmJWDnMAi.
+
+## §9 The folded row's checkbox (the maintainer, 2026-09-24)
+
+The folded task row put its checkbox mid-row: "it looks weird". That is
+R5 (docs/tasks-plan.md, taken 2026-09-05): a row centres its children on
+the cross axis, the core emitting `align = center` on every new row, live
+and template alike, unless the app sets an align of its own. Nothing
+drifted; the row grew a second line and the centre moved with it. What the
+fold DID expose is that Start and End were not honest for CONTROLS on the
+Apple lanes: a `KayaCell` handed its child the whole cell and a `Toggle`
+answers the height it is offered and centres its glyph in it, so under
+Start a checkbox sat mid-row exactly as under Center. A `KayaCell` places
+its child with the size the child asked for now (a crossing container
+asks for the whole cell and still spans it) and the Apple toggles keep
+their own height (`fixedSize(vertical: true)`); GTK's `GtkCheckButton`,
+WinUI's `CheckBox` and Material's `Checkbox` already honoured the mode
+inside their own minimum boxes (24, 32 and 48).
+
+To put the checkbox on the title's line, the platform shape of Apple's
+own lists, the task manager's row has to SAY `align start`, and the
+TEMPLATE zone has no align setter in any binding (Python's and JS's
+`rows(opts)` are the only route; tpl-surfaces' PROP_MEMBERS lists none).
+OPEN for the maintainer: add `align` to the template zone in all nine
+bindings (one member each, the census row, the task row saying Start), or
+keep R5's centre for two-line rows.
