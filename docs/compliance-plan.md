@@ -474,8 +474,10 @@ prose), planted negative in each. Green today by measurement.
   through the knob, on every lane, in all nine languages — the proof
   that nine spellings are one implementation on each platform.
 - **`clock24-*`** — the OS-setting leg (§4; BUILT 2026-09-24).
-- **The review page**: the tasks app at 200% and in Arabic on every
-  lane, each capture viewed before it is published.
+- **The review page** (PUBLISHED 2026-09-24, https://claude.ai/artifact/FGJashLzHA17NNZ5YUFMBr):
+  the tasks app at 200% and in Arabic on every lane, each capture viewed
+  before it is published. It found the phones' flex row overflowing
+  (docs/deferred.md, the flex-cell GAP entry; ruling asked).
 
 ## §7 RULINGS (the maintainer, 2026-09-23)
 
@@ -526,4 +528,5 @@ prose), planted negative in each. Green today by measurement.
    arms for scale and direction, the `tasksbig`, `tasksrtl`, `format` and
    `clock24` legs on every lane, the linux image's generated locales.
 4. The matrix, then the review page with the tasks app at 200% and in
-   Arabic on every lane, each capture viewed before it is published.
+   Arabic on every lane, each capture viewed before it is published
+   (DONE 2026-09-24: https://claude.ai/artifact/FGJashLzHA17NNZ5YUFMBr).

@@ -9,6 +9,39 @@ Landed history lives in git; this file only carries what is still open.
 scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
+## GAP — a flex row on the phones lets a fixed cell leave the screen or break a word, and expect_no_clipping sees neither (found 2026-09-24 by the compliance review page)
+KEY: KayaFlex, flex cell, min-content, row overflow, word break, expect_no_clipping, off-screen frame, NavigationBarItem label, TextOverflow.Visible
+
+The review page's captures (docs/compliance-plan.md §8 step 4) show the task
+manager's Today row running off the iPhone's screen, in Arabic, at 200% AND
+in English at 1.0, the control taken for it: the first row's details link
+reads "Deta" on every tasks leg that has ever run on iOS. The mechanism is
+KayaFlex's placement (swift/KayaSwiftUI.swift `placeSubviews`): every
+non-growing cell is given its natural one-line width and the cells are
+placed in turn, with no step that shrinks one when their sum exceeds the
+bounds, so the offsets run past the row. Compose's row is the opposite
+failure: a non-growing cell is measured against whatever width is left, so
+the caption wraps (right) and the details link, last in the row, is squeezed
+below one word and breaks it — "التفاصي/ل" at 1.0 under ar-EG, "Detai/ls" at
+200%. GTK and WinUI show neither on the review captures, whose windows are
+wide; their behaviour at a narrow width is unmeasured. Beside it the Compose
+bottom bar at 200%: five one-line labels with `TextOverflow.Visible` (the
+2026-09-06 choice that stopped "Upcomin/g") overlap each other.
+
+`expect_no_clipping` is green on every one of those screens: it compares a
+label's laid-out height to its frame, so a frame placed OFF-SCREEN and a
+word broken across two lines that both fit read as unclipped. The verb
+needs a second clause — a label whose frame leaves its window or scroll
+viewport is clipped — and the moment it has one the iOS tasks legs go red
+on the Today screen, which is why the clause waits for the layout rule.
+
+RULING ASKED (the maintainer): one rule for a flex cell on all four
+backends — a non-growing cell shrinks no further than its longest word and
+wraps inside that width, the row growing in height (CSS flexbox's
+`min-width: auto`), with `expect_no_clipping`'s off-screen clause landing
+in the same slice and the Compose bar label taking the platform's own
+ellipsis. Until then the iOS Today row is a known defect on a green lane.
+
 ## BUILD — the compliance pass: text scale, mirroring, and kaya-owned localization over the platform formatters (design pass and probes 2026-09-21..23)
 KEY: compliance pass, KAYA_TEXT_SCALE, KAYA_LOCALE, expect_text_scale, expect_no_clipping, expect_direction, expect_mirrored, expect_locale, expect_formatted, expect_script, fmt, tr, Fluent, catalog, check-l10n, tasksbig, tasksrtl, clock24, format.steps
 
@@ -103,8 +136,13 @@ than a verb of its own. What breadth still owes, held open here:
     the time template; Apple's key rides `KAYA_CLOCK` into the argument
     domain since a launch argument does not reach a guest that formats
     before its defaults exist (docs/traps.md).
-  - **BREADTH STILL OWED**: the review page at 200% and in Arabic on every
-    lane, each capture viewed before it is published.
+  - ~~**BREADTH: the review page**~~ — PUBLISHED 2026-09-24
+    (https://claude.ai/artifact/FGJashLzHA17NNZ5YUFMBr): the task manager under ar-EG on
+    five lanes and at 200% on the four with a text size, seventeen
+    captures each viewed first. It found the flex-row overflow on the
+    phones (the GAP entry above, ruling asked) and two glibc facts on the
+    record there: ar_EG counts in ASCII digits and abbreviates Monday to
+    one letter.
   - **FOLLOW-UP — the windows launchers are 300 checked-in near-copies**
     (the maintainer, 2026-09-23: "do we need to be using a bunch of batch
     scripts like that?"): every leg is a tools/guest/run_<leg>.cmd because

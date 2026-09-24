@@ -33,16 +33,16 @@ def image_bytes(path):
     return blob
 
 
-def capture(scene, out, crop, settle):
+def capture(scene, guest, out, crop, settle):
     target = ROOT / "target-linux"
     checked("build", ["cargo", "build", "-p", "kaya", "--features", "harness",
-                      "--locked", "--lib", "--example", scene],
+                      "--locked", "--lib", "--example", guest],
             env=dict(os.environ, CARGO_TARGET_DIR=str(target)))
     checked("build verification", ["python3", "tools/build-id.py", "--verify",
                                    str(target / "debug/libkaya.so")])
     raw = out.with_name("root.png")
     with open(out.with_name("guest.log"), "wb") as log:
-        guest = subprocess.Popen([str(target / "debug/examples" / scene)], cwd=ROOT,
+        guest = subprocess.Popen([str(target / "debug/examples" / guest)], cwd=ROOT,
                                  env=dict(os.environ, KAYA_SELFTEST=scene),
                                  stdout=log, stderr=subprocess.STDOUT)
         try:
@@ -76,6 +76,8 @@ def photograph(args, out, script):
     with tempfile.TemporaryDirectory(prefix="kaya-shot-gtk-") as directory:
         scratch = pathlib.Path(directory)
         env = ["-e", "KAYA_DEV_SHELL", "-e", f"KAYA_SELFTEST_SCRIPT={script}"]
+        for pair in args.env:
+            env += ["-e", pair]
         if args.layout:
             cfg = scratch / "config/gtk-4.0"
             cfg.mkdir(parents=True)
@@ -91,6 +93,7 @@ def photograph(args, out, script):
                      "-w", "/work", "kaya-linux", "xvfb-run", "-a", "python3",
                      "/work/tools/linux/shot-gtk.py", args.scene, "/capture/crop.png",
                      "--in-container", "--settle-seconds", str(args.settle_seconds),
+                     "--guest", args.guest,
                      *options], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, check=False)
             finally:
                 guest_log = scratch / "guest.log"
@@ -111,8 +114,15 @@ def main(argv=None):
                     help="the step line after which the scene is held (0: at the start)")
     ap.add_argument("--crop", help="WxH from the top-left; default trims to the kaya window")
     ap.add_argument("--settle-seconds", type=float, default=6.0)
+    ap.add_argument("--guest", help="the example binary when it is not the scene's "
+                    "name (tasksrtl and tasksbig run the tasks example)")
+    ap.add_argument("--env", action="append", default=[], metavar="KEY=VALUE",
+                    help="a knob for the guest (KAYA_LOCALE=ar-EG, KAYA_TEXT_SCALE=2)")
     ap.add_argument("--in-container", action="store_true", help=argparse.SUPPRESS)
     args = ap.parse_args(argv)
+    for pair in args.env:
+        if not re.fullmatch(r"KAYA_[A-Z_]+=[^\s]+", pair):
+            ap.error(f"--env {pair!r}: want KAYA_<NAME>=<value>")
     if args.crop and not re.fullmatch(r"[1-9][0-9]*x[1-9][0-9]*", args.crop):
         ap.error("--crop must be positive WxH")
     if not math.isfinite(args.settle_seconds) or args.settle_seconds < 0:
@@ -133,7 +143,8 @@ def main(argv=None):
     try:
         out.parent.mkdir(parents=True, exist_ok=True)
         if args.in_container:
-            capture(args.scene, out, args.crop, args.settle_seconds)
+            capture(args.scene, args.guest or args.scene, out, args.crop,
+                    args.settle_seconds)
         else:
             photograph(args, out, "\n".join(held) + "\n")
     except (OSError, RuntimeError) as error:
