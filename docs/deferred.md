@@ -84,10 +84,10 @@ right under the current rule and must not move. KEY: first line box,
 textless cell, cap height, checkbox too high, kayaFirstLabel,
 baselineLayout, first_line_metrics, text_line, lineCentre.
 
-## BUILD — the compliance pass: text scale, mirroring, and kaya-owned localization over the platform formatters (design pass and probes 2026-09-21..23)
+## ~~BUILD — the compliance pass: text scale, mirroring, and kaya-owned localization over the platform formatters (design pass and probes 2026-09-21..23)~~ COMPLETE 2026-09-24: the depth on the mac and iOS (bf3ae678), the GTK, Compose and WinUI arms (e5e6197c, 16fc8139, f1fe4924), the breadth across the nine bindings and the task manager's catalog (86348fe4), the text-scale legs (6048838a), the clock leg (bea05668) and the review page https://claude.ai/artifact/FGJashLzHA17NNZ5YUFMBr (b6647277), matrix ALL PASS on every slice; the flex-cell rule and the first-line-box rule the review page's captures asked for are the two entries above
 KEY: compliance pass, KAYA_TEXT_SCALE, KAYA_LOCALE, expect_text_scale, expect_no_clipping, expect_direction, expect_mirrored, expect_locale, expect_formatted, expect_script, fmt, tr, Fluent, catalog, check-l10n, tasksbig, tasksrtl, clock24, format.steps
 
-The maintainer picked roadmap #2 on 2026-09-21 and ruled on 2026-09-23,
+COMPLETE 2026-09-24 (see the headline). The maintainer picked roadmap #2 on 2026-09-21 and ruled on 2026-09-23,
 after two days of design conversation (docs/compliance-plan.md §7): kaya
 OWNS LOCALIZATION — a Fluent catalog on the asset root resolved in the
 core and a six-call formatter door in all nine bindings — and the values
