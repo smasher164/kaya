@@ -98,6 +98,23 @@ BASELINE_LINKS = (
     )),
     (WINUI, "fn clipping(&self) -> String {", 5000, (
         'named_descendant(&root, "ValueTextBlock")?',
+        # A BUTTON'S CAPTION AGAINST ITS OWN ROOM, and a reader that refuses a
+        # VACUOUS answer (docs/deferred.md's WinUI button clip): before the
+        # tree is attached nothing is `presented`, every clause is skipped and
+        # this verb answered "no clipping" on its first poll about a window
+        # that had drawn nothing — three buttons with their words cut passed
+        # it on the lane, 2026-09-24.
+        "let room = element.ActualWidth()? - pad.Left - pad.Right;",
+        "if natural > room + 1.0 {",
+        "if candidates > 0 && read == 0 {",
+    )),
+    # THE MEASURE THE COLUMN IS SIZED FROM: a control with no template yet
+    # answers its content's width and none of its chrome, so the cell comes
+    # back when the platform says the template arrived.
+    (WINUI, "fn remeasure_when_loaded(", 900, (
+        "if element.IsLoaded()? {",
+        "core.child_order.mark(parent);",
+        "element.Loaded(&handler)?;",
     )),
     (WINUI, "fn text_line(block: &TextBlock, top: f64)", 800, (
         ".GetCharacterRect(bindings::Microsoft::UI::Xaml::Documents::LogicalDirection::Forward)?",
@@ -411,7 +428,7 @@ def census(files):
 real = load()
 g = Gate("check-universal-props")
 RAN = 0
-DECLARED = 48
+DECLARED = 51
 for path, pattern, repl in (
     (COMPOSE, r"\ba11y\b", "kayaUnappliedProps"),
     (SWIFTUI, r"\bkayaA11y\b", "kayaUnappliedProps"),
@@ -563,6 +580,12 @@ for label, path, pattern, repl in (
      r"pill\.SetMaxHeight\(16\.0 \* scale\)\?;", "pill.SetMaxHeight(16.0)?;"),
     ("WinUI's clipping read no longer measuring the badge's digit", WINUI,
      r'named_descendant\(&root, "ValueTextBlock"\)\?', 'named_descendant(&root, "NoSuchBlock")?'),
+    ("WinUI's clipping read no longer measuring a button's caption", WINUI,
+     r"if natural > room \+ 1\.0 \{", "if false {"),
+    ("WinUI's clipping read agreeing about a window it never read", WINUI,
+     r"if candidates > 0 && read == 0 \{", "if false {"),
+    ("WinUI's cell never coming back for a measure with its template", WINUI,
+     r"element\.Loaded\(&handler\)\?;", "let _ = handler;"),
     ("WinUI's line box read off the character rectangle no more", WINUI,
      r"\.GetCharacterRect\(bindings::Microsoft::UI::Xaml::Documents::LogicalDirection::Forward\)\?",
      ".GetCharacterRect(bindings::Microsoft::UI::Xaml::Documents::LogicalDirection::Backward)?"),

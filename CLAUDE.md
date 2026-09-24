@@ -561,7 +561,13 @@ in docs/deferred.md.
    per-arm, SwiftUI's one wrapper unbypassed, GTK/WinUI's apply arm
    still keyed on the prop alone. Android drag completion belongs to the stable
    scene root, with captured source identity and native-event session identity;
-   eight counted cuts hold that ownership through source removal and row restamps),
+   eight counted cuts hold that ownership through source removal and row restamps;
+   and the WinUI clipping reader's own two halves since 2026-09-24 — a button's
+   caption against the room its padding leaves, and a REFUSAL when the reader
+   saw none of the window's labels and buttons presented, which is how three
+   buttons drawn with their words cut passed that verb on its first poll — with
+   the cell coming back for a measure when the platform says its template
+   arrived, since a control with none answers its content's width and no chrome),
    `tools/check-roles.py` (the role vocabulary reaches every backend:
    `MENU_ROLES` is one line, it is not in the spec hash, and adding an
    entry regenerates nothing — so before this gate a role could ship with

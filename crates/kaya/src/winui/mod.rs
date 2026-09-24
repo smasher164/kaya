@@ -2545,6 +2545,16 @@ fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
             match (weight > 0.0, core.widgets.get(child)) {
                 (false, Some(widget)) => {
                     let element: FrameworkElement = widget.element()?.cast()?;
+                    // A CONTROL WITH NO TEMPLATE MEASURES WITHOUT ITS CHROME:
+                    // until it is in the live tree a Button answers its
+                    // CAPTION's width and none of the 11+11 its style pads by,
+                    // so the star column below left the word no room and the
+                    // button drew `ju` for `jump` (docs/deferred.md's WinUI
+                    // button clip, measured on the lane 2026-09-24: 10px of
+                    // room for 32px of word). The platform's own "now I have
+                    // one" is Loaded, the focus arm's materialization class,
+                    // and the row comes back for a real measure then.
+                    remeasure_when_loaded(*child, &element)?;
                     let (natural, minimum) = measured_widths(&element)?;
                     if natural > 0.0 {
                         def.SetWidth(GridLength { Value: natural, GridUnitType: GridUnitType::Star })?;
@@ -2883,6 +2893,51 @@ fn fold_extent(id: u64) -> f64 {
 /// A cell's natural width (measured unbounded) and its minimum (measured at
 /// zero width, which a wrapping TextBlock answers with its longest word), the
 /// element handed back to the next layout pass.
+/// A TEXT WRITE MOVES ITS ROW'S STAR COLUMNS (docs/flex-shrink-plan.md §3):
+/// the columns carry the natural width `measured_widths` read when the row
+/// was last indexed, so a caption or a label that grew leaves them stale —
+/// `ju` for `jump` on a button built empty (docs/deferred.md's WinUI button
+/// clip). A ROW, never a column, and never a TABLE's row, whose columns are
+/// the table's stamped tracks (table_stamp): a reindex there replaced them
+/// and the portfolio's rows fell out of alignment (matrix, 2026-09-24).
+/// ONE BODY, both text arms — the label's alone is how the button's went
+/// missing.
+fn mark_row_for_remeasure(core: &mut CoreState, id: WidgetId) {
+    if let Some(parent) = core.child_order.parent_of(id)
+        && matches!(core.widgets.get(&parent), Some(NativeWidget::Row(_)))
+        && !effective_vertical(core, parent)
+        && !core
+            .child_order
+            .parent_of(parent)
+            .is_some_and(|table| TABLES.with_borrow(|t| t.contains_key(&table.0)))
+    {
+        core.child_order.mark(parent);
+    }
+}
+
+/// Arm ONE Loaded handler per widget that re-marks its container, so a cell
+/// measured before its control had a template is measured again with one.
+/// Armed once: reindex runs many times before a mount and a handler per pass
+/// would pile up.
+fn remeasure_when_loaded(child: WidgetId, element: &FrameworkElement) -> windows_core::Result<()> {
+    if element.IsLoaded()? {
+        return Ok(());
+    }
+    if !REMEASURE_ARMED.with_borrow_mut(|armed| armed.insert(child.0)) {
+        return Ok(());
+    }
+    let handler = RoutedEventHandler::new(move |_, _| {
+        CORE.with_borrow_mut(|core| {
+            let Some(core) = core.as_mut() else { return Ok(()) };
+            let Some(parent) = core.child_order.parent_of(child) else { return Ok(()) };
+            core.child_order.mark(parent);
+            flush_tracks(core)
+        })
+    });
+    element.Loaded(&handler)?;
+    Ok(())
+}
+
 fn measured_widths(element: &FrameworkElement) -> windows_core::Result<(f64, f64)> {
     let ui: UIElement = element.cast()?;
     ui.Measure(bindings::Windows::Foundation::Size { Width: f32::INFINITY, Height: f32::INFINITY })?;
@@ -10555,6 +10610,8 @@ thread_local! {
     /// The textareas whose Return submits (docs/submit-plan.md S2), read by
     /// each field's KeyDown at the keystroke.
     static SUBMITS: RefCell<std::collections::HashSet<u64>> = RefCell::new(std::collections::HashSet::new());
+    /// Widgets whose Loaded re-measure is already armed (remeasure_when_loaded).
+    static REMEASURE_ARMED: RefCell<std::collections::HashSet<u64>> = RefCell::new(std::collections::HashSet::new());
     /// The latest scroll_to_row per container, by the copy it names (S4).
     static PENDING_ROW_SCROLLS: RefCell<std::collections::HashMap<u64, u64>> = RefCell::new(std::collections::HashMap::new());
     /// Typing attributes armed over a collapsed caret. TOM applies the
@@ -15434,25 +15491,14 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             match (widget, prop, value) {
                 (NativeWidget::Button { caption, .. }, Prop::Text, Value::Str(s)) => {
                     caption.SetText(&HSTRING::from(&s))?;
+                    // A BUTTON'S CAPTION MOVES ITS ROW'S COLUMNS TOO: the
+                    // label's arm marked and this one did not, so a caption
+                    // that grew after its row was indexed kept the old natural.
+                    mark_row_for_remeasure(core, id);
                 }
                 (NativeWidget::Label { block, .. }, Prop::Text, Value::Str(s)) => {
                     block.SetText(&HSTRING::from(&s))?;
-                    // Its row's star columns carry the OLD natural width
-                    // (docs/flex-shrink-plan.md §3); a row, never a column,
-                    // and never a TABLE's row, whose columns are the table's
-                    // stamped tracks (table_stamp) — a reindex here replaced
-                    // them and the portfolio's rows fell out of alignment
-                    // (matrix, 2026-09-24).
-                    if let Some(parent) = core.child_order.parent_of(id)
-                        && matches!(core.widgets.get(&parent), Some(NativeWidget::Row(_)))
-                        && !effective_vertical(core, parent)
-                        && !core
-                            .child_order
-                            .parent_of(parent)
-                            .is_some_and(|table| TABLES.with_borrow(|t| t.contains_key(&table.0)))
-                    {
-                        core.child_order.mark(parent);
-                    }
+                    mark_row_for_remeasure(core, id);
                     // A plain write is a whole document with no runs
                     // (docs/rich-text-plan.md §8, §15): the SetText above has
                     // already dropped the inlines, and the table stays (rich
@@ -22214,6 +22260,15 @@ impl crate::harness::Stage for WinUiStage {
         // two clauses, the off-screen one over the buttons too.
         Self::on_ui_read(|core| {
             let ground: FrameworkElement = windows_core::Interface::cast(&window_ground(&core.window)?)?;
+            // A CENSUS THAT READS NOTHING AGREES WITH EVERYTHING, and this one
+            // polls: before the tree is attached no label or button is
+            // `presented`, every clause below is skipped and the verb answered
+            // "no clipping" on its FIRST attempt about a window that had drawn
+            // nothing (measured 2026-09-24 — three buttons drawn with their
+            // words cut passed it on the lane). `read` is what the verb
+            // actually looked at, and a scene with labels or buttons that shows
+            // none yet is told to come back.
+            let mut read = 0usize;
             for label in &core.labels {
                 let element: FrameworkElement = windows_core::Interface::cast(label)?;
                 let width = element.ActualWidth()?;
@@ -22221,6 +22276,9 @@ impl crate::harness::Stage for WinUiStage {
                     continue;
                 }
                 let text: String = label.Text()?.to_string().chars().take(40).collect();
+                if presented(&element, &ground)? {
+                    read += 1;
+                }
                 if label.IsTextTrimmed()? {
                     return Ok(format!("label {text:?} is trimmed at {width}px wide"));
                 }
@@ -22245,6 +22303,30 @@ impl crate::harness::Stage for WinUiStage {
                     let text: String = caption.Text()?.to_string().chars().take(40).collect();
                     if let Some(past) = off_screen(&element, "button", &text, &ground)? {
                         return Ok(past);
+                    }
+                    // THE CAPTION AGAINST ITS OWN BUTTON, the label clause one
+                    // widget over (docs/deferred.md's WinUI button clip): the
+                    // off-screen read above sees a button INSIDE the window
+                    // whose word the button cut, which is what a row that
+                    // measured the button empty leaves behind.
+                    // THE CAPTION AGAINST THE BUTTON'S OWN ROOM, which is the
+                    // half the off-screen read above cannot see: a button
+                    // INSIDE the window whose chrome cut its word
+                    // (docs/deferred.md's WinUI button clip — three buttons
+                    // each drawn exactly their caption's width, with no room
+                    // left for the 11+11 the template pads by).
+                    if !presented(&element, &ground)? || element.ActualWidth()? <= 0.0 {
+                        continue;
+                    }
+                    read += 1;
+                    let block: FrameworkElement = windows_core::Interface::cast(caption)?;
+                    let (natural, _) = measured_widths(&block)?;
+                    let pad = button.Padding()?;
+                    let room = element.ActualWidth()? - pad.Left - pad.Right;
+                    if natural > room + 1.0 {
+                        return Ok(format!(
+                            "button {text:?} has {room}px between its padding and needs {natural}px"
+                        ));
                     }
                 }
             }
@@ -22279,6 +22361,13 @@ impl crate::harness::Stage for WinUiStage {
                         digits.Text()?.to_string()
                     ));
                 }
+            }
+            let candidates = core.labels.len()
+                + core.widgets.values().filter(|w| matches!(w, NativeWidget::Button { .. })).count();
+            if candidates > 0 && read == 0 {
+                return Ok(format!(
+                    "none of this window's {candidates} label(s) and button(s) is presented yet"
+                ));
             }
             Ok(String::new())
         })

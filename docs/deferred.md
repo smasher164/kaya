@@ -60,8 +60,8 @@ digit measured unbounded against its pill, watched red on the windows
 tasksbig leg before the fix (`badge "2" needs 29.9px and its pill is 16px
 tall`). KEY: InfoBadge, TextScaleFactor, badge clipped.
 
-## DEFECT — a WinUI row of plain buttons clips their labels to a fragment (seen 2026-09-24 on the scroll-to review captures)
-KEY: WinUI button clip, button label fragment, ju nowh s, star column measure(0), flex row buttons, scrollto windows capture
+## ~~DEFECT — a WinUI row of plain buttons clips their labels to a fragment (seen 2026-09-24 on the scroll-to review captures)~~ — FIXED 2026-09-24: a control measured before its template is applied answers its CONTENT's width with none of its chrome, so the row's star column left the caption no room; the cell comes back for a measure when the platform's Loaded says the template arrived, and `expect_no_clipping`'s WinUI arm now reads a button's caption against that room and refuses a vacuous answer
+KEY: WinUI button clip, button label fragment, ju nowh s, star column measure(0), flex row buttons, scrollto windows capture, remeasure_when_loaded, clipping vacuous answer
 
 The scroll-to scene's button row (`jump`, `nowhere`, `send`, three
 fixed cells in a plain row with nothing grown, a window 940 wide) reads
@@ -75,13 +75,34 @@ resolution hands the cells a width between the fragment and the natural
 that nothing asked to shrink — the row has hundreds of pixels to spare.
 Labels wrap whole words under WrapWholeWords; a Button's content
 TextBlock does not carry that setting, or the star's Max is not the
-natural width for a Button. `expect_no_clipping` reads labels and
+natural width for a Button. `expect_no_clipping` read labels and
 buttons' frames against the window and a label against its longest
 word, not a button's content against its own frame, which is why the
-scene stays green. Read the WinUI flex row's Button arm against the
-label arm, give the button's content the whole-word wrap and the cell
-its natural Max, and widen `expect_no_clipping`'s WinUI arm to a button's
-content, watched red on the scrollto windows leg first.
+scene stayed green.
+
+RESOLUTION (2026-09-24). THE CAUSE WAS NOT THE WRAP: the caption already
+carries WrapWholeWords, and the star column's Max already is the natural
+width. A control measured while it is NOT YET IN THE LIVE TREE has no
+template, so `measured_widths` read a Button's DesiredSize as its
+CAPTION's width with none of the 11+11 its style pads by — measured on
+the lane by returning the numbers as a verdict: `jump` drawn 32px wide,
+its caption needing 32px, with 10px between its padding. The row is
+re-measured when the platform says the template arrived
+(`remeasure_when_loaded`, one Loaded handler per widget, the focus arm's
+materialization class), and the button's own text arm now marks its row
+the way the label's always did — one body, `mark_row_for_remeasure`,
+since the label's alone is how the button's went missing.
+
+AND THE VERB THAT SHOULD HAVE CAUGHT IT, which took three tries to make
+fire: `expect_no_clipping` POLLS, and every clause was skipped while
+nothing was `presented` yet, so it answered "no clipping" about a window
+that had drawn nothing and passed on its FIRST attempt. It now counts
+what it read and refuses to answer when a window with labels or buttons
+shows none of them, and reads each button's caption against the room its
+padding leaves. Watched red on the windows scrollto leg before the fix
+(`button "jump" has 10px between its padding and needs 32px`), green
+after, with the capture retaken. check-universal-props holds all three,
+three watched negatives.
 
 ## DEFER — Go's secondary handlers register through the app object, not on the handle (the maintainer, 2026-09-24 afternoon, reviewing the submit slice)
 KEY: Go chained handlers, OnSubmit on Widget, app.OnSubmitted, app.OnValueCommitted, secondary handler registrar, Go handler family

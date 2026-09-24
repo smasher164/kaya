@@ -5,6 +5,9 @@
 # handler names a key no row holds and nothing moves (S3), and a handler
 # inserts a row and follows it to the end.
 expect label@count "60 messages"
+# The row of three plain buttons, whose captions a cell measured before its
+# text arrived would cut (docs/deferred.md, the WinUI button clip).
+expect_no_clipping
 expect_at_end scroll#0
 click button@jump
 expect_scrolled_to column@messages m10
