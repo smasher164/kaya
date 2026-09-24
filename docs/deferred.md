@@ -60,6 +60,30 @@ digit measured unbounded against its pill, watched red on the windows
 tasksbig leg before the fix (`badge "2" needs 29.9px and its pill is 16px
 tall`). KEY: InfoBadge, TextScaleFactor, badge clipped.
 
+## DEFER — the checkbox reads a touch high beside the title's first line on Android, iOS and Windows (the maintainer, 2026-09-24 morning, off the recaptured review page)
+
+The first-line-box rule (docs/flex-shrink-plan.md §10, landed 24ae2bdc)
+centres a textless cell on the geometric middle of the provider's first
+LINE BOX, the strip from the line's top to one line height down. The
+maintainer's read of the recaptures: "it looks a lot better now", with
+minor deviances on Android, iOS and Windows where the checkbox sits a
+little too far up; GTK and the mac read right. The likely cause is that
+the line box's middle is not the ink's middle: a line box carries the
+font's ascent above the capitals and its descent below, and those are
+not equal, so the box's centre sits above the x-height's centre by
+roughly (ascent − cap height − descent)/2, a few points that grow with
+the text scale. A refinement would centre on the CAP HEIGHT (or the
+x-height) of the first line — baseline − capHeight/2 — which every
+toolkit can read (UIFont.capHeight, Pango's font metrics, WinUI's
+FontFamily metrics, Compose's Paragraph), keeping the row-growth and
+no-line-box rules as they are. DEFERRED by the maintainer, who is
+willing to live with the residual for now; measure the offset in pixels
+on each lane against the title's ink before choosing the metric, since
+the mac (an AppKit checkbox with its own text baseline) and GTK read
+right under the current rule and must not move. KEY: first line box,
+textless cell, cap height, checkbox too high, kayaFirstLabel,
+baselineLayout, first_line_metrics, text_line, lineCentre.
+
 ## BUILD — the compliance pass: text scale, mirroring, and kaya-owned localization over the platform formatters (design pass and probes 2026-09-21..23)
 KEY: compliance pass, KAYA_TEXT_SCALE, KAYA_LOCALE, expect_text_scale, expect_no_clipping, expect_direction, expect_mirrored, expect_locale, expect_formatted, expect_script, fmt, tr, Fluent, catalog, check-l10n, tasksbig, tasksrtl, clock24, format.steps
 

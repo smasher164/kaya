@@ -333,3 +333,10 @@ title's line. The layout trace (`KAYA_LAYOUT_TRACE=1` on the mac,
 row's baselines, line box and ys, which is how both measurements above
 were made.
 
+REVIEWED 2026-09-24 morning, every capture retaken on 24ae2bdc with its
+time stamped (the review page, version 5). The maintainer: "it looks a
+lot better now"; a residual where Android, iOS and Windows place the
+checkbox a touch high beside the title's first line is DEFERRED on the
+ledger (docs/deferred.md, the checkbox-too-high entry), with the
+cap-height centring as the candidate refinement.
+
