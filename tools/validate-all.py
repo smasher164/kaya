@@ -14,7 +14,8 @@ dev_shell_or_die()
 # default. --serial is for single-lane benchmarking, debugging under
 # contention, and recording mode (one screen, one recorder).
 #
-# Usage: validate-all.py [--serial] [--exclusive | --no-exclusive] [windows-host]
+# Usage: validate-all.py [--serial] [--exclusive | --no-exclusive]
+#                        [--only <prefix,...>] [windows-host]
 #
 # tools/check-gates.py pins the parallel launch block.
 
@@ -35,15 +36,28 @@ HOST = "akhil@192.168.64.2"
 # and no flag runs everything (the maintainer, 2026-09-06: a flag filters;
 # its absence skips nothing). The choice rides to every lane and to the
 # sweep as KAYA_EXCLUSIVE.
-for arg in sys.argv[1:]:
+# --only <prefix,...> runs the legs whose names start with a prefix, on
+# every lane, and nothing else (tools/lib/only.py): the debugging tool the
+# maintainer asked for on 2026-09-24, never the record.
+_args = sys.argv[1:]
+while _args:
+    arg = _args.pop(0)
     if arg == "--serial":
         MODE = "serial"
     elif arg == "--exclusive":
         os.environ["KAYA_EXCLUSIVE"] = "only"
     elif arg == "--no-exclusive":
         os.environ["KAYA_EXCLUSIVE"] = "skip"
+    elif arg == "--only":
+        if not _args or _args[0].startswith("--"):
+            print("validate-all: --only takes a comma-separated list of leg "
+                  "prefixes", file=sys.stderr)
+            sys.exit(2)
+        os.environ["KAYA_ONLY"] = _args.pop(0)
     else:
         HOST = arg
+# only reads KAYA_ONLY at import, so it comes after the flag above.
+import only  # noqa: E402
 
 LANES_DIR = pathlib.Path(tempfile.mkdtemp())
 # A FAILING LANE OR DURATION ANOMALY'S LOG OUTLIVES THE RUN: a
@@ -88,6 +102,11 @@ def keep_lane_log(name, where=None):
 
 EXCLUSIVE_LEGS = {"mac": _mac.EXCLUSIVE, "windows": _win.EXCLUSIVE,
                   "ios": _ios.EXCLUSIVE, "android": _android.EXCLUSIVE}
+# The four rosters the filter can consult before a launch; linux has none
+# in python and refuses at run time instead (its setup is a cached image).
+ROSTERS = {"mac": lambda: [name for name, _s, _l in _mac.legs()],
+           "windows": _win.legs, "ios": _ios.legs, "android": _android.legs}
+ONLY_LEGS = {}
 
 
 def run_lane(name, argv, env=None):
@@ -109,6 +128,21 @@ def run_lane(name, argv, env=None):
             lane_done[name] = ("PASS", 0)
             lane_names.append(name)
         return
+    if only.active() and (name == "gates" or (
+            name in ROSTERS and not only.matches(ROSTERS[name]()))):
+        # A filtered run is the legs it names: no gate sweep, and a lane
+        # whose roster has no matching leg is not launched (the mac lane's
+        # setup is 481s before its first leg). The row reads SKIP, never
+        # PASS, so the verdict below can count what actually ran.
+        what = ("the gate sweep is not run" if name == "gates"
+                else f"no leg matches KAYA_ONLY={','.join(only.PREFIXES)}")
+        print(f"only: {name}: {what}; not launched", flush=True)
+        if MODE == "serial":
+            print(f"{name}: SKIP (0s)")
+        else:
+            lane_done[name] = ("SKIP", 0)
+            lane_names.append(name)
+        return
     if MODE == "serial":
         print(f"== {name} ==")
         t0 = time.monotonic()
@@ -119,6 +153,8 @@ def run_lane(name, argv, env=None):
         secs = int(time.monotonic() - t0)
         if rc == 0:
             print(f"{name}: PASS ({secs}s)")
+        elif rc == only.REFUSED and only.active():
+            print(f"{name}: SKIP ({secs}s; no leg matched KAYA_ONLY)")
         else:
             print((LANES_DIR / f"{name}.log").read_text(
                 encoding="utf-8", errors="replace"), end="")
@@ -138,8 +174,10 @@ def run_lane(name, argv, env=None):
     # siblings' time.
     def _wait(name=name, proc=proc, t0=t0):
         rc = proc.wait()
-        lane_done[name] = ("PASS" if rc == 0 else "FAIL",
-                           int(time.monotonic() - t0))
+        verdict = "PASS" if rc == 0 else "FAIL"
+        if rc == only.REFUSED and only.active():
+            verdict = "SKIP"
+        lane_done[name] = (verdict, int(time.monotonic() - t0))
 
     waiter = threading.Thread(target=_wait)
     waiter.start()
@@ -403,7 +441,7 @@ if MODE == "parallel":
         log = LANES_DIR / f"{name}.log"
         log_text = (log.read_text(encoding="utf-8", errors="replace")
                     if log.is_file() else "")
-        if verdict != "PASS":
+        if verdict == "FAIL":
             print(f"== {name} (log) ==")
             print(log_text, end="")
             if not keep_lane_log(name):
@@ -411,6 +449,7 @@ if MODE == "parallel":
             status = 1
         legs = sum(1 for line in log_text.splitlines()
                    if ": PASS" in line)
+        ONLY_LEGS[name] = legs
         print(f"{name}: {verdict} ({secs}s, {legs} legs)")
         # The lane's own phase clock, on the record beside its row: where
         # a lane's seconds went is the question every wall question
@@ -452,6 +491,25 @@ if MODE == "parallel":
 
 print(f"TIMING matrix {int(time.monotonic() - T0)}s ({MODE})",
       flush=True)
+if only.active():
+    # A filtered verdict SAYS it is one, in the same line every reader
+    # greps, so a run of the legs one change touched is never mistaken for
+    # the record; and a filter that matched nothing anywhere is a refusal,
+    # since a verdict over no legs is the false-green class with a flag.
+    ran = sum(ONLY_LEGS.values())
+    lanes = sum(1 for v in ONLY_LEGS.values() if v)
+    if ran == 0:
+        print(f"validate-all: KAYA_ONLY={','.join(only.PREFIXES)!r} matched "
+              f"no leg on any lane — no verdict", file=sys.stderr)
+        sys.exit(only.REFUSED)
+    if status == 0:
+        print(f"validate-all: ALL PASS — FILTERED (KAYA_ONLY="
+              f"{','.join(only.PREFIXES)}: {ran} legs on {lanes} lane(s); "
+              f"the gate sweep was not run; not the record)")
+    else:
+        print("validate-all: FAILURES ABOVE — FILTERED (KAYA_ONLY="
+              f"{','.join(only.PREFIXES)})")
+    sys.exit(status)
 if status == 0:
     print("validate-all: ALL PASS")
 else:

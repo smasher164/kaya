@@ -618,6 +618,20 @@ container already sees at `/flightrec-state/kaya/exclusive`.
   nothing (654s, linux became the wall), the windows pool at four instead
   of six read 589s where six read 644s with every other lane unchanged
   (matrix #30, 594s of wall), and the matrix sets KAYA_WIN_JOBS=4 since.
+- ONE FILTER ON THE MATRIX (the maintainer, 2026-09-24, after two locale
+  races took two full matrices to find): `tools/validate-all.py --only
+  <prefix,...>` runs the legs whose names start with a prefix, on every
+  lane, and nothing else — `--only clock24,tasksrtl` is those two families
+  on all five lanes in a few minutes. It rides to the lanes as
+  `KAYA_ONLY` (tools/lib/only.py; the shell runner spells the same loop),
+  a lane whose roster has no matching leg is not launched, a lane that
+  finds none at run time refuses with exit 3 and reads SKIP, the gate
+  sweep is not run, and the verdict line says FILTERED and counts the
+  legs — a filtered run is the debugging tool, and the record is still one
+  plain run on the frozen tree. The same variable filters a lane by hand:
+  `KAYA_ONLY=formatde-python tools/validate-linux.py`,
+  `KAYA_ONLY=formatde tools/android/run-emulator.py`, and the iOS, mac and
+  windows runners alike.
 - EXCLUSION CANNOT MAKE A MATRIX FASTER, and the maintainer expected it might
   (2026-09-06): it trades parallelism for isolation. The wall is the
   slowest lane, and no lane is shortened by another holding still; the

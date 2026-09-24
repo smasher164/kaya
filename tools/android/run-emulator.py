@@ -30,6 +30,7 @@ from packaging import android as packaging_android
 from packaging import identity as app_identity
 from lanes import android as lane
 import exclusive
+import only  # noqa: E402
 import scene_cut
 import flightrec_lane
 
@@ -2912,13 +2913,11 @@ def build_suite(suite):
 # taskspersist leg. A filter that selects NOTHING is refused below rather
 # than printing ALL PASS over an empty run, and the verdict names the
 # filter so a probe can never be read as a lane.
-ONLY = os.environ.get("KAYA_ONLY", "")
 _selected = 0
 
 
 def selected_legs(suite):
-    legs = lane.suite_legs(suite)
-    return [leg for leg in legs if leg.startswith(ONLY)] if ONLY else legs
+    return only.matches(lane.suite_legs(suite))
 
 
 # ---------------------------------------- the real preferences domain
@@ -3036,16 +3035,13 @@ def run_suite_legs(suite):
 for _suite in lane.SUITES:
     if SUITE not in (_suite, "all"):
         continue
-    if ONLY and not selected_legs(_suite):
+    if only.active() and not selected_legs(_suite):
         continue
     if not build_suite(_suite):
         sys.exit(1)
     run_suite_legs(_suite)
 
-if ONLY and _selected == 0:
-    die(f"run-emulator: KAYA_ONLY={ONLY!r} matched no leg of "
-        f"{'every suite' if SUITE == 'all' else SUITE} — a filter that "
-        f"selects nothing would print a verdict over a run of nothing")
+only.summary("run-emulator", _selected)
 
 # Suites accumulate failures rather than abort, so a truncated log must
 # still end with the answer: a killed lane otherwise reads exactly like
@@ -3053,8 +3049,6 @@ if ONLY and _selected == 0:
 # read as a pass (2026-08-29). tools/check-gates.py holds all five
 # runners to this.
 exclusive.summary("android")
-if ONLY:
-    print(f"run-emulator: filtered run — KAYA_ONLY={ONLY}, {_selected} leg(s)")
 print(f"run-emulator: the core's own diagnostics reached logcat on "
       f"{CORE_DIAG['seen']} of {CORE_DIAG['legs']} answered leg(s)")
 if CORE_DIAG["legs"] and not CORE_DIAG["seen"]:

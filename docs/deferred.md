@@ -41,8 +41,9 @@ further than its longest word and wraps inside that width, the row growing
 in height (CSS flexbox's `min-width: auto`), with `expect_no_clipping`'s
 off-screen clause landing in the same slice and the Compose bar label
 taking the platform's own ellipsis. Sequenced after the matrix filter
-(the `--only` entry). Until then the iOS Today row is a known defect on a
-green lane.
+(`validate-all.py --only`, landed the same day); the slice's plan is
+docs/flex-shrink-plan.md. Until then the iOS Today row is a known defect
+on a green lane.
 
 BESIDE IT, from the same review (the maintainer, 2026-09-24): the WinUI
 navigation item's InfoBadge clips its digit at 200% text scale — the "2"

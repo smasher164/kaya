@@ -43,6 +43,7 @@ from packaging import identity as app_identity
 from packaging import ios as packaging_ios
 from lanes import ios as lane
 import exclusive
+import only  # noqa: E402
 import scene_cut
 import flightrec_lane
 from swift_sdk import require_ios_sdk
@@ -2638,16 +2639,15 @@ def queue_xcuidrive_proof(app, bundle_id):
     _leg_threads.append(th)
 
 
-# ONE SCENE BY HAND, the android runner's knob (tools/android/run-emulator.py):
-# `KAYA_ONLY=sheet` takes every suite's leg whose name starts with it, and a
-# filter that matches no leg is refused rather than a verdict over nothing.
-ONLY = os.environ.get("KAYA_ONLY", "")
+# ONE FILTER ON THE MATRIX (tools/lib/only.py): `KAYA_ONLY=sheet,tasks`
+# takes every suite's leg whose name starts with a prefix, and a filter that
+# matches no leg is refused rather than a verdict over nothing.
 _selected = 0
 
 
 def queue_leg(name, *args, pad=False, **kwargs):
     global _selected
-    if ONLY and not name.startswith(ONLY):
+    if not only.wanted(name):
         return
     _selected += 1
     # THE MATRIX-WIDE TOKEN (tools/lib/exclusive.py): start nothing while
@@ -3156,13 +3156,7 @@ if not xcuidrive_census():
 # read as a pass (2026-08-29). tools/check-gates.py holds all five
 # runners to this.
 exclusive.summary("ios")
-if ONLY and _selected == 0:
-    print(f"run-sim: KAYA_ONLY={ONLY!r} matched no leg of this runner — a filter "
-          f"that selects nothing would print a verdict over a run of nothing",
-          file=sys.stderr)
-    status = 1
-elif ONLY:
-    print(f"run-sim: filtered run — KAYA_ONLY={ONLY}, {_selected} leg(s)")
+only.summary("run-sim", _selected)
 if status == 0:
     print("run-sim: ALL PASS")
 else:

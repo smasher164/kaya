@@ -1707,6 +1707,12 @@ in docs/deferred.md.
    the dialogs, the pastes) for the everyday matrix; `--exclusive` runs
    those alone, nothing else on the host; a commit wants both halves
    green on one tree, or the plain run (docs/HACKING.md, Exclusive legs).
+   `--only <prefix,...>` runs the legs whose names start with a prefix on
+   every lane and nothing else, no gate sweep, verdict marked FILTERED
+   (tools/lib/only.py; the maintainer, 2026-09-24): the legs a change
+   touched, in minutes, BEFORE the matrix — two locale races took two full
+   matrices to find when six filtered legs would have said it. Never the
+   record.
    After Android and the mac lane exit (the mac wait since 2026-09-21,
    docs/traps.md), the one `nice -n 10` gate sweep runs FOUR GATES
    WIDE (since 2026-09-07) and hides behind the longer lanes, so the wall

@@ -1118,12 +1118,93 @@ if proof.returncode != 0:
          "an under-run, so a sweep that ran nothing could print OK:\n"
          + proof.stdout)
 
+
+# ONE FILTER ON THE MATRIX (tools/lib/only.py; the maintainer, 2026-09-24:
+# "you only need one filter on the matrix"): `--only <prefix,...>` rides to
+# every lane as KAYA_ONLY, each python lane reads it through the one module
+# and refuses a run that queued nothing, the shell lane spells the same
+# comma loop and the same refusal exit, and the matrix marks its verdict
+# FILTERED and never counts a refusal as a pass. A lane that stopped
+# reading the filter would run its whole roster under a flag that promised
+# a few legs, and nothing but this clause could tell.
+ONLY_FILES = {
+    "tools/validate-mac.py": ("only.wanted(", "only.summary(\"validate-mac\""),
+    "tools/ios/run-sim.py": ("only.wanted(", "only.summary(\"run-sim\""),
+    "tools/android/run-emulator.py": ("only.matches(", "only.summary(\"run-emulator\""),
+    "tools/deploy-win.py": ("only.matches(lane.legs())", "only.summary(\"deploy-win\""),
+}
+ONLY_SHELL = ('IFS=, read -r -a kaya_prefixes <<< "$KAYA_ONLY"',
+              'matched no leg of this runner — no verdict" >&2\n    exit 3')
+ONLY_MATRIX = ('os.environ["KAYA_ONLY"] = _args.pop(0)',
+               "rc == only.REFUSED and only.active()",
+               'verdict = "SKIP"',
+               "validate-all: ALL PASS — FILTERED (KAYA_ONLY=",
+               "matched \"\n              f\"no leg on any lane — no verdict")
+
+
+def only_problem(texts):
+    """texts: {rel: text} for the six files; None when the filter is wired."""
+    for rel, needles in ONLY_FILES.items():
+        for needle in needles:
+            if needle not in code_lines_text(texts[rel]):
+                return f"{rel} no longer reads the matrix filter ({needle!r} missing)"
+    for needle in ONLY_SHELL:
+        if needle not in texts["tools/linux/run-suites.sh"]:
+            return f"tools/linux/run-suites.sh no longer spells the filter's loop or refusal ({needle[:40]!r})"
+    for needle in ONLY_MATRIX:
+        if needle not in texts["tools/validate-all.py"]:
+            return f"tools/validate-all.py no longer threads --only, skips a refusal or marks a filtered verdict ({needle[:40]!r})"
+    return None
+
+
+def code_lines_text(text):
+    return "\n".join(code_lines(text))
+
+
+only_texts = {rel: (root / rel).read_text(encoding="utf-8")
+              for rel in [*ONLY_FILES, "tools/linux/run-suites.sh", "tools/validate-all.py"]}
+problem = only_problem(only_texts)
+if problem:
+    fail("the matrix filter: " + problem)
+
+# N24 — a python lane that stopped filtering its queue must be reported.
+doctored, n = re.subn(r"only\.wanted\(name\)", "True", only_texts["tools/ios/run-sim.py"], count=1)
+print(f"check-gates: self-test N24 unhooked the iOS runner's filter, {n} substitution(s)")
+if n != 1:
+    fail("self-test N24 did not unhook exactly one filter read — the clause is not reading the real runner")
+elif only_problem({**only_texts, "tools/ios/run-sim.py": doctored}) is None:
+    fail("self-test N24: an iOS runner ignoring KAYA_ONLY passed")
+
+# N25 — the shell lane's refusal must be the shared exit, not a status.
+doctored, n = re.subn(r'no verdict" >&2\n    exit 3', 'no verdict"\n    status=1', only_texts["tools/linux/run-suites.sh"], count=1)
+print(f"check-gates: self-test N25 turned the linux refusal back into a red verdict, {n} substitution(s)")
+if n != 1:
+    fail("self-test N25 did not change exactly one refusal — the clause is not reading the real runner")
+elif only_problem({**only_texts, "tools/linux/run-suites.sh": doctored}) is None:
+    fail("self-test N25: a linux refusal that reads as a lane failure passed")
+
+# N26 — the matrix counting a refusal as a pass, or a filtered verdict
+# spelled like the record, must be reported.
+doctored, n = re.subn(r'verdict = "SKIP"', 'verdict = "PASS"', only_texts["tools/validate-all.py"], count=1)
+print(f"check-gates: self-test N26 made the matrix read a refusal as PASS, {n} substitution(s)")
+if n != 1:
+    fail("self-test N26 did not change exactly one verdict — the clause is not reading the real matrix")
+elif only_problem({**only_texts, "tools/validate-all.py": doctored}) is None:
+    fail("self-test N26: a matrix passing a lane that ran nothing passed")
+doctored, n = re.subn(r"ALL PASS — FILTERED \(KAYA_ONLY=", "ALL PASS (KAYA_ONLY=", only_texts["tools/validate-all.py"], count=1)
+print(f"check-gates: self-test N27 spelled the filtered verdict like the record, {n} substitution(s)")
+if n != 1:
+    fail("self-test N27 did not change exactly one verdict line — the clause is not reading the real matrix")
+elif only_problem({**only_texts, "tools/validate-all.py": doctored}) is None:
+    fail("self-test N27: a filtered verdict spelled like the record passed")
+
 if status == 0:
     print(f"check-gates: OK ({len(GATES)} gates in one list, "
           f"{len(EXCLUDED)} excluded with a reason, five concurrent platform lanes, "
           "niced sweep delayed behind Android and the mac lane, four-phone "
           "Android pool, three-sim iOS pool, "
-          "five lanes each ending with their verdict and journaling every leg)")
+          "five lanes each ending with their verdict and journaling every leg, "
+          "one matrix filter read by all five)")
 else:
     print("check-gates: FINDINGS ABOVE", file=sys.stderr)
 sys.exit(status)

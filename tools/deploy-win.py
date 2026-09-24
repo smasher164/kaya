@@ -48,6 +48,7 @@ from lanes import win as lane
 from packaging import identity as app_identity
 from packaging import windows as win_package
 import exclusive
+import only  # noqa: E402
 import flightrec_lane
 
 SELF = pathlib.Path(__file__).resolve()
@@ -134,6 +135,13 @@ for arg in sys.argv[2:]:
     else:
         print(f"unknown argument: {arg}", file=sys.stderr)
         sys.exit(2)
+# ONE FILTER ON THE MATRIX (tools/lib/only.py): the matrix hands KAYA_ONLY
+# to this lane, which has no queue to filter at and runs its legs as a
+# list instead, in roster order; nothing matched refuses before the deploy.
+if only.active() and SUITE == "all" and not LEGS:
+    LEGS = only.matches(lane.legs())
+    only.summary("deploy-win", len(LEGS))
+    SUITE = "only"
 
 TARGET = ROOT / "target/aarch64-pc-windows-msvc/release"
 SDK = ROOT / "third_party/winappsdk"

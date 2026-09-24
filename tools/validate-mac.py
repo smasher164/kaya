@@ -25,6 +25,7 @@ import time
 
 from lanes import mac as lane
 import exclusive
+import only  # noqa: E402
 import flightrec_lane
 from host_lib import HOST_LIB, host_lib_stamp
 
@@ -656,8 +657,16 @@ def _leg_worker(name, argv, env, scene=None):
     FR.mac_leg(name, verdict, secs, log, scratch)
 
 
+_only_selected = 0
+
+
 def queue_leg(name, argv, env, scene=None):
-    global status
+    global status, _only_selected
+    # ONE FILTER ON THE MATRIX (tools/lib/only.py): a leg the filter does
+    # not name is not queued, and a runner that queued none refuses.
+    if not only.wanted(name):
+        return
+    _only_selected += 1
     # THE MATRIX-WIDE TOKEN (tools/lib/exclusive.py): start nothing while
     # another lane holds it; hold it, alone, for this lane's exclusive legs.
     exclusive.wait("mac", name)
@@ -884,6 +893,7 @@ if os.environ.get("KAYA_RECORD"):
 # so a truncated log must still end with the answer.
 exclusive.summary("mac")
 lane.idle_summary()
+only.summary("validate-mac", _only_selected)
 if host_lib_stamp() != LIB_STAMP:
     print(f"validate-mac: {' or '.join(HOST_LIB)} CHANGED IDENTITY while the legs "
           f"ran — another cargo build of the host lib relinked the library every "

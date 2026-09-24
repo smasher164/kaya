@@ -396,12 +396,19 @@ if [ -z "${KAYA_RECORD:-}" ]; then
 fi
 focus_ring_start
 
-# KAYA_ONLY is a prefix, so `KAYA_ONLY=menus-java` takes both protocols
-# and `KAYA_ONLY=menus-java-wayland` takes one. Empty means every leg.
+# KAYA_ONLY is a comma-separated list of prefixes (tools/lib/only.py, the
+# python lanes' reader; tools/check-gates.py holds the two equal):
+# `KAYA_ONLY=menus-java` takes both protocols, `KAYA_ONLY=menus-java-wayland`
+# takes one, `KAYA_ONLY=clock24,tasksrtl` takes both families. Empty means
+# every leg.
 kaya_wanted() { # name proto
     [ -z "${KAYA_ONLY:-}" ] && return 0
-    case "$1-$2" in "$KAYA_ONLY"*) return 0 ;; esac
-    case "$1" in "$KAYA_ONLY"*) return 0 ;; esac
+    local kaya_prefix kaya_prefixes
+    IFS=, read -r -a kaya_prefixes <<< "$KAYA_ONLY"
+    for kaya_prefix in "${kaya_prefixes[@]}"; do
+        case "$1-$2" in "$kaya_prefix"*) return 0 ;; esac
+        case "$1" in "$kaya_prefix"*) return 0 ;; esac
+    done
     return 1
 }
 
@@ -1799,8 +1806,11 @@ flightrec_flush
 # still end with the answer.
 kaya_exclusive_summary linux
 if [ -n "${KAYA_ONLY:-}" ] && [ "$KAYA_LEGS_TAKEN" = 0 ]; then
-    echo "run-suites: KAYA_ONLY=$KAYA_ONLY matched no leg of this runner — no verdict"
-    status=1
+    echo "run-suites: KAYA_ONLY=$KAYA_ONLY matched no leg of this runner — no verdict" >&2
+    exit 3
+fi
+if [ -n "${KAYA_ONLY:-}" ]; then
+    echo "run-suites: filtered run — KAYA_ONLY=$KAYA_ONLY, $KAYA_LEGS_TAKEN leg(s)"
 fi
 if [ "$status" = 0 ]; then echo "run-suites: ALL PASS"; else echo "run-suites: FAILURES ABOVE"; fi
 exit "$status"
