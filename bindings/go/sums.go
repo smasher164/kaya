@@ -445,6 +445,10 @@ func (sc SumCase[K, V]) BindHref(n Node, sel func(*V) *string) {
 // stretch (Tpl.SetFill; docs/layout-knobs-plan.md §1).
 func (sc SumCase[K, V]) SetFill(n Node, on bool) { sc.t.SetFill(n, on) }
 
+// SetAlign gives every stamped copy of this arm the same cross-axis child
+// placement (Tpl.SetAlign).
+func (sc SumCase[K, V]) SetAlign(n Node, mode Align) { sc.t.SetAlign(n, mode) }
+
 // SetColumnsAuto gives every stamped grid of this arm as many columns as
 // fit its width at minWidth DIP each (Tpl.SetColumnsAuto;
 // docs/layout-knobs-plan.md §3).

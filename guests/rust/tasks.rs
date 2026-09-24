@@ -814,6 +814,10 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                             msgs.on_click_node(details, Msg::Details);
                         });
                         row.a11y_id(task_row, "task");
+                        // The checkbox and the details link on the title's
+                        // line, not the pair's middle (docs/flex-shrink-plan.md
+                        // §9; R5's centre unless the app says otherwise).
+                        row.align(task_row, kaya::Align::Baseline);
                     }
                     // The list's column is named so the scene can hold it to
                     // the section's width (R7): a hugging list hides behind

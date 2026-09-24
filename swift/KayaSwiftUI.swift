@@ -11158,6 +11158,31 @@ struct KayaCell: Layout {
         return out
     }
 
+    /// The cell's text baseline is its child's, moved by where the mode
+    /// puts the child (docs/flex-shrink-plan.md §9); a Layout answers no
+    /// guide by default and a baseline row would read the cell's bottom.
+    func explicitAlignment(
+        of guide: VerticalAlignment, in bounds: CGRect, proposal: ProposedViewSize,
+        subviews: Subviews, cache: inout ()
+    ) -> CGFloat? {
+        guard guide == .firstTextBaseline || guide == .lastTextBaseline,
+            let child = subviews.first
+        else { return nil }
+        let full = ProposedViewSize(width: bounds.width, height: bounds.height)
+        let size = child.sizeThatFits(full)
+        let y: CGFloat
+        if vertical {
+            y = 0
+        } else {
+            switch align {
+            case alignCenter: y = (bounds.height - size.height) / 2
+            case alignEnd: y = bounds.height - size.height
+            default: y = 0
+            }
+        }
+        return y + child.dimensions(in: ProposedViewSize(size))[guide]
+    }
+
     func placeSubviews(
         in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
     ) {
@@ -14303,6 +14328,10 @@ private struct KayaSynthesizedTable: View {
 struct KayaFlex: Layout {
     let vertical: Bool
     let spacing: CGFloat
+    /// The container's cross-axis align mode: a ROW under `alignBaseline`
+    /// places each cell so its first text baseline meets the row's
+    /// (docs/flex-shrink-plan.md §9; the HStack arm has it from SwiftUI).
+    var align: Int64 = 0
     /// Parallel to `subviews`, in the same order — the weights live on
     /// the model, not on the views.
     let nodes: [KayaNode]
@@ -14398,6 +14427,19 @@ struct KayaFlex: Layout {
         let gaps = spacing * CGFloat(max(0, subviews.count - 1))
         let naturalMain = natural.map { main($0) }.reduce(0, +) + gaps
         var naturalCross = natural.map { cross($0) }.max() ?? 0
+        if !vertical && align == alignBaseline {
+            let ext = extents(
+                mainExtent: proposal.width ?? naturalMain, subviews: subviews,
+                childProposal: childProposal)
+            let dims = subviews.indices.map { i in
+                subviews[i].dimensions(in: ProposedViewSize(width: ext[i], height: nil))
+            }
+            let bs = dims.map { Self.textBaseline($0) }
+            let deepest = bs.compactMap { $0 }.max() ?? 0
+            naturalCross = dims.indices.map { i in
+                bs[i].map { deepest - $0 + dims[i].height } ?? dims[i].height
+            }.max() ?? naturalCross
+        }
         // A row offered less than its fixed cells is as tall as its SHRUNK
         // cells: a wrapped label is taller than its one line.
         if !vertical, let offered = proposal.width, offered.isFinite, offered > 0,
@@ -14456,13 +14498,28 @@ struct KayaFlex: Layout {
         kayaTrace("flex v=\(vertical) bounds=\(Int(bounds.width))x\(Int(bounds.height)) "
             + "ids=\(nodes.map { $0.id }) grow=\(nodes.map { $0.grow }) "
             + "extents=\(extents.map { Int($0) })")
+        // BASELINE ROWS: each cell's first text baseline, read through
+        // KayaCell's explicit guide, and the deepest one is the row's.
+        let baselines: [CGFloat?] = (!vertical && align == alignBaseline)
+            ? subviews.indices.map { i in
+                Self.textBaseline(
+                    subviews[i].dimensions(in: ProposedViewSize(width: extents[i], height: nil)))
+            } : []
+        let rowBaseline = baselines.compactMap { $0 }.max() ?? 0
+        if !baselines.isEmpty {
+            kayaTrace("flex baselines ids=\(nodes.map { $0.id }) "
+                + "b=\(baselines.map { $0.map { String(format: "%.2f", $0) } ?? "none" }) "
+                + "raw=\(subviews.indices.map { String(format: "%.2f", subviews[$0].dimensions(in: ProposedViewSize(width: extents[$0], height: nil))[VerticalAlignment.firstTextBaseline]) }) "
+                + "row=\(Int(rowBaseline))")
+        }
         var offset: CGFloat = 0
         for i in subviews.indices {
             let extent = extents[i]
+            let drop = baselines.isEmpty ? 0 : (baselines[i].map { max(0, rowBaseline - $0) } ?? 0)
             let origin =
                 vertical
                 ? CGPoint(x: bounds.minX, y: bounds.minY + offset)
-                : CGPoint(x: bounds.minX + offset, y: bounds.minY)
+                : CGPoint(x: bounds.minX + offset, y: bounds.minY + drop)
             // The cross axis is offered the container's full extent and the
             // child decides: a nested container fills it, a label keeps its
             // intrinsic width. That reproduces the stack behaviour the other
@@ -14470,7 +14527,7 @@ struct KayaFlex: Layout {
             let sized =
                 vertical
                 ? ProposedViewSize(width: bounds.width, height: extent)
-                : ProposedViewSize(width: extent, height: bounds.height)
+                : ProposedViewSize(width: extent, height: bounds.height - drop)
             subviews[i].place(at: origin, anchor: .topLeading, proposal: sized)
             offset += extent + spacing
         }
@@ -14478,6 +14535,37 @@ struct KayaFlex: Layout {
 
     private func weight(_ i: Int) -> Double {
         i < nodes.count ? nodes[i].grow : 0
+    }
+
+    /// A COLUMN'S BASELINE IS ITS FIRST CHILD'S; a row's is its deepest
+    /// cell's (docs/flex-shrink-plan.md §9), so a title-over-date column
+    /// in a baseline row sits on the title's line.
+    func explicitAlignment(
+        of guide: VerticalAlignment, in bounds: CGRect, proposal: ProposedViewSize,
+        subviews: Subviews, cache: inout ()
+    ) -> CGFloat? {
+        guard guide == .firstTextBaseline, !subviews.isEmpty else { return nil }
+        let childProposal = Self.bounded(ProposedViewSize(bounds.size), vertical: vertical)
+        let ext = extents(mainExtent: main(bounds.size), subviews: subviews, childProposal: childProposal)
+        if vertical {
+            return Self.textBaseline(
+                subviews[0].dimensions(in: ProposedViewSize(width: bounds.width, height: ext[0])))
+        }
+        return subviews.indices.compactMap { i in
+            Self.textBaseline(subviews[i].dimensions(in: ProposedViewSize(width: ext[i], height: nil)))
+        }.max()
+    }
+
+    /// A CELL WITH NO TEXT HAS NO BASELINE and sits at a baseline row's top,
+    /// as on the other three backends (docs/flex-shrink-plan.md §9). SwiftUI
+    /// answers the guide for every view: a textless one reads its bottom,
+    /// and a UISwitch its empty label's, a fraction of a point under its top
+    /// (measured on the iOS tasks row, which dropped the switch 16pt to sit
+    /// that line on the title's). A baseline within a point of either edge
+    /// is no text's: an ascent or a descent is more than that at any size.
+    static func textBaseline(_ d: ViewDimensions) -> CGFloat? {
+        let b = d[VerticalAlignment.firstTextBaseline]
+        return (b < 1 || b > d.height - 1) ? nil : b
     }
 
     /// crates/kaya/src/flex.rs's arithmetic, the interpreter's copy: the
@@ -16233,8 +16321,8 @@ struct KayaRender: View {
                     #endif
                 } else if boxFills || node.laidOut.contains(where: { $0.grow > 0 }) {
                     KayaFlex(
-                        vertical: vertical, spacing: node.spacing, nodes: node.laidOut,
-                        fillCross: boxFills
+                        vertical: vertical, spacing: node.spacing, align: node.align,
+                        nodes: node.laidOut, fillCross: boxFills
                     ) {
                         ForEach(node.laidOut) { child in
                             // The cell fills the track KayaFlex proposes; the

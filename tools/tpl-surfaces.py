@@ -261,6 +261,10 @@ ZONES = [
 # (docs/tpl-props-plan.md P1/P2, docs/styling-plan.md D3/D4).
 TPL_PROPS = ["grow", "a11y_id", "a11y_label", "a11y_hint", "accepts", "role", "inset",
              "help", "placeholder", "href", "fill", "columns_auto", "wrap",
+             # docs/flex-shrink-plan.md §9: a stamped container's cross-axis
+             # child placement, R5's own escape hatch, which no collection
+             # row could reach until 2026-09-24.
+             "align",
              # docs/rich-text-plan.md §19: a stamped copy's document, bound
              # to a Document field of its row. Three bindings spell it as an
              # OVERLOAD or a labelled argument of the bound-text textarea, so
@@ -276,7 +280,7 @@ PROP_MEMBERS = {
         "grow": "set", "a11y_id": "a11y_id", "a11y_label": "a11y_label",
         "a11y_hint": "a11y_hint", "accepts": "accepts", "role": "role",
         "inset": "inset", "help": "help", "placeholder": "placeholder",
-        "href": "href", "fill": "fill",
+        "href": "href", "fill": "fill", "align": "align",
         "columns_auto": "columns_auto", "wrap": "wrap",
         "document": "textarea_rich_bound",
     },
@@ -285,6 +289,7 @@ PROP_MEMBERS = {
         "a11y_hint": "SetA11yHint", "accepts": "SetAccepts", "role": "SetRole",
         "inset": "SetInset", "help": "SetHelp",
         "placeholder": "SetPlaceholder", "href": "SetHref", "fill": "SetFill",
+        "align": "SetAlign",
         "columns_auto": "SetColumnsAuto", "wrap": "SetWrap",
         "document": "TextareaRichBound",
     },
@@ -293,6 +298,7 @@ PROP_MEMBERS = {
         "a11y_hint": "SetA11yHint", "accepts": "SetAccepts", "role": "SetRole",
         "inset": "SetInset", "help": "SetHelp",
         "placeholder": "SetPlaceholder", "href": "SetHref", "fill": "SetFill",
+        "align": "SetAlign",
         "columns_auto": "SetColumnsAuto", "wrap": "SetWrap",
         "document": "Textarea(Field<Document>",
     },
@@ -301,6 +307,7 @@ PROP_MEMBERS = {
         "a11y_hint": "setA11yHint", "accepts": "setAccepts", "role": "setRole",
         "inset": "setInset", "help": "setHelp",
         "placeholder": "setPlaceholder", "href": "setHref", "fill": "setFill",
+        "align": "setAlign",
         "columns_auto": "setColumnsAuto", "wrap": "setWrap",
         "document": "textareaRich",
     },
@@ -309,6 +316,7 @@ PROP_MEMBERS = {
         "a11y_hint": "setA11yHint", "accepts": "setAccepts", "role": "setRole",
         "inset": "setInset", "help": "setHelp",
         "placeholder": "setPlaceholder", "href": "setHref", "fill": "setFill",
+        "align": "setAlign",
         "columns_auto": "setColumnsAuto", "wrap": "setWrap",
         "document": "textarea(document:",
     },
@@ -317,6 +325,7 @@ PROP_MEMBERS = {
         "a11y_hint": "set_a11y_hint", "accepts": "set_accepts", "role": "set_role",
         "inset": "set_inset", "help": "set_help",
         "placeholder": "set_placeholder", "href": "set_href", "fill": "set_fill",
+        "align": "set_align",
         "columns_auto": "set_columns_auto", "wrap": "set_wrap",
         "document": "bind_document_field",
     },
@@ -327,6 +336,7 @@ PROP_MEMBERS = {
         "a11y_hint": "TplA11yHint", "accepts": "TplAccepts", "role": "TplRole",
         "inset": "TplInset", "help": "TplHelp",
         "placeholder": "TplPlaceholder", "href": "TplHref", "fill": "TplFill",
+        "align": "TplAlign",
         "columns_auto": "TplColumnsAuto", "wrap": "TplWrap",
         "document": "bindDocumentField",
     },
@@ -337,7 +347,7 @@ PROP_MEMBERS = {
         "grow": "grow", "a11y_id": "a11yId", "a11y_label": "a11yLabel",
         "a11y_hint": "a11yHint", "accepts": "accepts", "role": "role",
         "inset": "inset", "help": "help", "placeholder": "placeholder",
-        "href": "href", "fill": "fill",
+        "href": "href", "fill": "fill", "align": "align",
         "columns_auto": "columnsAuto", "wrap": "wrap",
         "document": "document",
     },
@@ -432,6 +442,7 @@ def members_js(_):
     names.discard("document")
     for prop, writer, emitter in (("grow", grow, "wire.tx_set_grow("),
                                   ("inset", layout, "wire.tx_set_inset("),
+                                  ("align", layout, "wire.tx_set_align("),
                                   ("document", textarea, "bindDocument(")):
         if emitter in writer and "isNode" not in writer and "_tplDepth" not in writer:
             names.add(prop)

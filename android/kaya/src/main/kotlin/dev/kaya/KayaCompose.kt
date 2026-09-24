@@ -801,23 +801,26 @@ internal fun KayaFlexRow(
                 )
             )
         }
-        val height = (placeables.maxOfOrNull { it.height } ?: 0)
+        // A CELL WITH NO TEXT HAS NO BASELINE and sits at a baseline row's
+        // top, one rule on four backends (docs/flex-shrink-plan.md §9).
+        val baselines: List<Int?> = placeables.map { p ->
+            val fb = p[androidx.compose.ui.layout.FirstBaseline]
+            if (fb == androidx.compose.ui.layout.AlignmentLine.Unspecified) null else fb
+        }
+        val baselineRow = baselines.filterNotNull().maxOrNull() ?: 0
+        val drops = baselines.map { b -> if (align == KayaCompose.ALIGN_BASELINE && b != null) baselineRow - b else 0 }
+        val height = (placeables.indices.maxOfOrNull { placeables[it].height + drops[it] } ?: 0)
             .coerceIn(constraints.minHeight, if (constraints.hasBoundedHeight) constraints.maxHeight else Int.MAX_VALUE)
         val width = (widths.sum() + gaps)
             .coerceIn(constraints.minWidth, if (bounded) constraints.maxWidth else Int.MAX_VALUE)
         val rtl = layoutDirection == androidx.compose.ui.unit.LayoutDirection.Rtl
-        val baselines = placeables.map { p ->
-            val fb = p[androidx.compose.ui.layout.FirstBaseline]
-            if (fb == androidx.compose.ui.layout.AlignmentLine.Unspecified) p.height else fb
-        }
-        val baselineRow = baselines.maxOrNull() ?: 0
         layout(width, height) {
             var x = 0
             placeables.forEachIndexed { i, p ->
                 val y = when (align) {
                     KayaCompose.ALIGN_CENTER -> (height - p.height) / 2
                     KayaCompose.ALIGN_END -> height - p.height
-                    KayaCompose.ALIGN_BASELINE -> baselineRow - baselines[i]
+                    KayaCompose.ALIGN_BASELINE -> drops[i]
                     else -> 0
                 }
                 val left = if (rtl) width - x - widths[i] else x

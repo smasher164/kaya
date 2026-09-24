@@ -1353,6 +1353,7 @@ module Tpl : sig
 
   val set_drop_target : node -> Op.t list -> unit
   val set_accepts : node -> string list -> unit
+  val set_align : node -> align -> unit
   val when_ : bool signal -> (unit -> 'a) -> unit -> node * 'a
 
   val button :

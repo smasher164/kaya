@@ -4600,6 +4600,12 @@ func (t *Tpl) SetFill(n Node, on bool) {
 	t.tx.emit(TxSetFill(n.id, on))
 }
 
+// SetAlign sets a stamped container's cross-axis child placement, the
+// blueprint twin of Tx.SetAlign (docs/flex-shrink-plan.md §9).
+func (t *Tpl) SetAlign(n Node, mode Align) {
+	t.tx.emit(TxSetAlign(n.id, int64(mode)))
+}
+
 // SetColumnsAuto gives every stamped grid as many columns as fit its
 // width at minWidth DIP each (Tx.SetColumnsAuto).
 func (t *Tpl) SetColumnsAuto(n Node, minWidth float64) {

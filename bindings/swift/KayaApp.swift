@@ -5779,6 +5779,11 @@ public final class KayaTpl {
         tx.tx.setFill(n.id, on)
     }
 
+    /// A stamped container's cross-axis child placement (KayaTx.setAlign).
+    public func setAlign(_ n: KayaNodeHandle, _ align: KayaAlign) {
+        tx.tx.setAlign(n.id, align.rawValue)
+    }
+
     /// A stamped grid's auto columns at a floor (KayaTx.setColumnsAuto).
     public func setColumnsAuto(_ n: KayaNodeHandle, _ minWidth: Double) {
         tx.tx.setColumns(n.id, 0)

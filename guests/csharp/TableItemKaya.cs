@@ -313,6 +313,8 @@ sealed class TableItemRow
 
     public void SetFill(Node n, bool on) => t.SetFill(n, on);
 
+    public void SetAlign(Node n, Align align) => t.SetAlign(n, align);
+
     public void SetColumnsAuto(Node n, double minWidth) =>
         t.SetColumnsAuto(n, minWidth);
 

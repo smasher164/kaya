@@ -2705,6 +2705,33 @@ fn flush_tracks(core: &mut CoreState) -> windows_core::Result<()> {
 /// a text baseline get a top margin lifting them to the deepest one.
 /// BaselineOffset is only meaningful after a measure pass; UpdateLayout
 /// forces it synchronously, the child_shares precedent.
+/// The first label's baseline under `id`, in `within`'s own coordinates,
+/// walking the children in order (docs/flex-shrink-plan.md §9).
+fn first_text_baseline(
+    core: &CoreState,
+    id: WidgetId,
+    within: &FrameworkElement,
+) -> windows_core::Result<Option<f64>> {
+    for child in core.child_order.children(id).iter().copied() {
+        let Some(widget) = core.widgets.get(&child) else { continue };
+        match widget {
+            NativeWidget::Label { block, .. } => {
+                let at = block
+                    .TransformToVisual(within)?
+                    .TransformPoint(bindings::Windows::Foundation::Point { X: 0.0, Y: 0.0 })?;
+                return Ok(Some(f64::from(at.Y) + block.BaselineOffset()?));
+            }
+            NativeWidget::Column(_) | NativeWidget::Row(_) | NativeWidget::Labeled(_) => {
+                if let Some(b) = first_text_baseline(core, child, within)? {
+                    return Ok(Some(b));
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(None)
+}
+
 fn baseline_compensate(
     core: &CoreState,
     grid: &Grid,
@@ -2733,12 +2760,15 @@ fn baseline_compensate(
                     .TransformPoint(bindings::Windows::Foundation::Point { X: 0.0, Y: 0.0 })?;
                 Some(f64::from(at.Y) + caption.BaselineOffset()?)
             }
-            // No text baseline: the bottom-edge rule — the child's
-            // baseline IS its bottom (the CSS replaced-element rule), so
-            // a tall image drags the common baseline down and the text
-            // children lift to meet it. Text-only compensation is
-            // geometrically indistinguishable from start.
-            _ => Some(element.ActualHeight()?),
+            // A CONTAINER'S BASELINE IS ITS FIRST LABEL'S (docs/flex-shrink-plan.md
+            // §9): the task row's title sits in a column with its date, and
+            // the bottom-edge rule below put the checkbox on the date's line.
+            NativeWidget::Column(_) | NativeWidget::Row(_) | NativeWidget::Labeled(_) => {
+                first_text_baseline(core, *child, &element)?
+            }
+            // A CELL WITH NO TEXT HAS NO BASELINE and sits at the row's top,
+            // one rule on four backends (docs/flex-shrink-plan.md §9).
+            _ => None,
         };
         if let Some(b) = baseline {
             offsets.push((element, b));

@@ -442,6 +442,7 @@ func generateRecord(w func(string, ...any), strct *ast.StructType, name, key str
 	w("func (r %sRow) SetAccepts(n kaya.Node, kinds ...string) { r.t.SetAccepts(n, kinds...) }", lowerFirst(name))
 	w("")
 	w("func (r %sRow) SetFill(n kaya.Node, on bool) { r.t.SetFill(n, on) }", lowerFirst(name))
+	w("func (r %sRow) SetAlign(n kaya.Node, mode kaya.Align) { r.t.SetAlign(n, mode) }", lowerFirst(name))
 	w("")
 	w("func (r %sRow) SetColumnsAuto(n kaya.Node, minWidth float64) { r.t.SetColumnsAuto(n, minWidth) }", lowerFirst(name))
 	w("")

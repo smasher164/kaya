@@ -161,7 +161,9 @@ pass, not this one's.
   CORE emits `align = center` right after every new Row, live and
   template, unless the app sets `align` itself, so all four backends see
   an explicit prop and none carries a default of its own. Columns keep
-  `start`. A GRID'S CELLS FOLLOW THE SAME RULE — each centres in its
+  `start`. RE-AFFIRMED 2026-09-24 for the two-line row, which says
+  `Align::Baseline` through the template zone's new `align` setter
+  (docs/flex-shrink-plan.md §9). A GRID'S CELLS FOLLOW THE SAME RULE — each centres in its
   row — and a grid's cells are separated by default (GTK's and WinUI's
   bare grids packed them edge to edge, the Linux and Windows captures
   showed four buttons' corners meeting), so GTK and WinUI grids take

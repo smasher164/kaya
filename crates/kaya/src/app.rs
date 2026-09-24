@@ -4398,6 +4398,10 @@ impl<'b> Row<'_, 'b> {
         self.tpl().fill(node, on)
     }
 
+    pub fn align(&mut self, node: TemplateNodeId, align: Align) {
+        self.tpl().align(node, align)
+    }
+
     pub fn columns_auto(&mut self, node: TemplateNodeId, min_width: f64) {
         self.tpl().columns_auto(node, min_width)
     }
@@ -7488,6 +7492,14 @@ impl<'b> Tpl<'_, 'b> {
     /// A stamped copy's cross-axis stretch (docs/layout-knobs-plan.md §1).
     pub fn fill(&mut self, node: TemplateNodeId, on: bool) {
         self.set(node, Prop::Fill, on);
+    }
+
+    /// A stamped container's cross-axis child placement, the blueprint twin
+    /// of [`Tx::align`] (docs/flex-shrink-plan.md §9: R5's centre holds
+    /// unless the app says otherwise, and until this a collection's row
+    /// could not).
+    pub fn align(&mut self, node: TemplateNodeId, align: Align) {
+        self.set(node, Prop::Align, align.wire());
     }
 
     /// A stamped grid's auto columns at a floor (docs/layout-knobs-plan.md §3).

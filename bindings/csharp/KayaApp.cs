@@ -4806,6 +4806,10 @@ sealed class Tpl
     public void SetFill(Node n, bool on) =>
         tx.Records.Add(KayaWire.TxSetFill(n.Id, on));
 
+    /// A stamped container's cross-axis child placement (Tx.SetAlign).
+    public void SetAlign(Node n, Align align) =>
+        tx.Records.Add(KayaWire.TxSetAlign(n.Id, (long)align));
+
     /// A stamped grid's auto columns at a floor (Tx.SetColumnsAuto).
     public void SetColumnsAuto(Node n, double minWidth)
     {

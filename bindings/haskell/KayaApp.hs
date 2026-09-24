@@ -3358,6 +3358,8 @@ data TplAttr where
   -- | Whether this stamped element spans its container's cross axis. A
   -- CONSTANT and not a source, for 'TplGrow''s reason.
   TplFill :: Bool -> TplAttr
+  -- | A stamped container's cross-axis child placement (the live 'Align').
+  TplAlign :: Align -> TplAttr
   -- | A stamped grid's auto columns at a floor, the blueprint twin of
   -- 'ColumnsAuto'. A CONSTANT, for 'TplGrow''s reason.
   TplColumnsAuto :: Double -> TplAttr
@@ -3434,6 +3436,7 @@ data TplAttr where
 applyTplAttr :: TplAttr -> Node -> Tpl ()
 applyTplAttr (TplGrow weight) n = setGrow n weight
 applyTplAttr (TplFill on) n = setFill n on
+applyTplAttr (TplAlign a) n = setAlignWire n (alignWire a)
 applyTplAttr (TplColumnsAuto minWidth) n = setColumnsAuto n minWidth
 applyTplAttr (TplWrap on) n = setWrap n on
 applyTplAttr (TplInset pad) n = setNodeInset n pad

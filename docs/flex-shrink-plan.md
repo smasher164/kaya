@@ -197,9 +197,52 @@ WinUI's `CheckBox` and Material's `Checkbox` already honoured the mode
 inside their own minimum boxes (24, 32 and 48).
 
 To put the checkbox on the title's line, the platform shape of Apple's
-own lists, the task manager's row has to SAY `align start`, and the
-TEMPLATE zone has no align setter in any binding (Python's and JS's
-`rows(opts)` are the only route; tpl-surfaces' PROP_MEMBERS lists none).
-OPEN for the maintainer: add `align` to the template zone in all nine
-bindings (one member each, the census row, the task row saying Start), or
-keep R5's centre for two-line rows.
+own lists, the task manager's row has to SAY so, and the TEMPLATE zone had
+no align setter in any binding (Python's and JS's `rows(opts)` were the
+only route; tpl-surfaces' PROP_MEMBERS listed none).
+
+RULED 2026-09-24 (the maintainer: "add the setter"), on the recommendation
+below, and built the same day:
+
+- THE DEFAULT STAYS CENTRE. R5's reason holds: Material's checkbox is a
+  48dp touch box around a 20dp glyph, so under Start a one-line title hugs
+  the row's top beside it, and a Start default would not put the glyph on
+  the title's line either, only near the row's top. Centre is right for a
+  one-line row on every platform; it is the two-line row that wants
+  something else, and that row can say so now.
+- `align` IS A TEMPLATE PROP in all nine bindings, spelled where each
+  binding's other template props are (Rust's `Tpl::align` and the `Row`
+  facade, Go's `SetAlign` on Tpl, SumCase and the generated `<Name>Row`,
+  C#'s `SetAlign` on Tpl and the generated `<Rec>Row`, Java's `setAlign`
+  on Tpl and RowSurface, Swift's `setAlign`, OCaml's `Tpl.set_align`,
+  Haskell's `TplAlign` attribute, Python's and JS's existing `align` in
+  `rows(opts)`), held by tpl-surfaces' PROP_MEMBERS row and the two
+  generators' forwards (check-sugar-surface).
+- THE TASK ROW SAYS `Align::Baseline`, the Reminders shape: the checkbox
+  sits on the title's line whatever the row's height, and a taller text
+  scale moves nothing. Start would put the glyph near the row's top and
+  leave the title's line to the font.
+- A BASELINE ROW ON FOUR BACKENDS, two rules no scene can read (no verb
+  reads a cell's y), held by check-universal-props' BASELINE_LINKS with
+  nine watched cuts: A COLUMN'S BASELINE IS ITS FIRST CHILD'S (a row's is
+  its deepest cell's), so a title-over-date column sits on the title's
+  line — SwiftUI's `KayaFlex.explicitAlignment` and `KayaCell`'s, GTK's
+  measure returning the first visible child's baselines, WinUI's
+  `first_text_baseline` walking to the first Label, Compose's Layout
+  natively; and A CELL WITH NO TEXT HAS NO BASELINE AND SITS AT THE ROW'S
+  TOP. That second rule is where the four had drifted: SwiftUI answers the
+  guide for every view (a textless one reads its bottom, the iOS switch its
+  empty label's line a fraction of a point under its top, measured through
+  the layout trace: the switch was dropped 16pt to sit that line on the
+  title's), Compose and WinUI used the CSS replaced-element rule (baseline
+  = bottom, which put a 31pt switch mostly above a 17pt title), GTK's
+  BASELINE valign on a baseline-less widget fills. Now SwiftUI's
+  `textBaseline` answers nil within a point of either edge, Compose's
+  `KayaFlexRow` keeps `null` for an unspecified FirstBaseline and sizes the
+  row for its drops, WinUI's `baseline_compensate` compensates nothing for
+  a textless child and a column with no label, and GTK's allocate sets
+  Start on a cell whose measure reports none.
+- Captures on all five lanes, the Today row with the checkbox on the
+  title's line (target/session-notes/flex-2026-09-24/<lane>/today.png,
+  the mac's today-baseline3.png), each viewed; the review page is
+  republished with them.

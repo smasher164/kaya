@@ -4279,6 +4279,12 @@ public final class KayaApp {
             t.setFill(n, on);
         }
 
+        /** This row's copy of that container's cross-axis child placement
+         * ({@link Tpl#setAlign}). */
+        public void setAlign(Node n, Align align) {
+            t.setAlign(n, align);
+        }
+
         /** This row's copy of that grid's auto columns at a floor
          * ({@link Tpl#setColumnsAuto}). */
         public void setColumnsAuto(Node n, double minWidth) {
@@ -6678,6 +6684,12 @@ public final class KayaApp {
          * {@link Tx#setFill(Widget, boolean)}. */
         public void setFill(Node n, boolean on) {
             tx.emit(KayaWire.txSetFill(n.id, on));
+        }
+
+        /** A stamped container's cross-axis child placement, the blueprint
+         * twin of {@link Tx#setAlign(Widget, Align)}. */
+        public void setAlign(Node n, Align align) {
+            tx.emit(KayaWire.txSetAlign(n.id, align.wire));
         }
 
         /** A stamped grid's auto columns at a floor, the blueprint twin

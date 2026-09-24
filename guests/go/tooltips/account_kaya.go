@@ -114,7 +114,8 @@ func (r accountRow) Href(n kaya.Node, f kaya.Field[string]) { r.c.Href(r.t, n, f
 
 func (r accountRow) SetAccepts(n kaya.Node, kinds ...string) { r.t.SetAccepts(n, kinds...) }
 
-func (r accountRow) SetFill(n kaya.Node, on bool) { r.t.SetFill(n, on) }
+func (r accountRow) SetFill(n kaya.Node, on bool)          { r.t.SetFill(n, on) }
+func (r accountRow) SetAlign(n kaya.Node, mode kaya.Align) { r.t.SetAlign(n, mode) }
 
 func (r accountRow) SetColumnsAuto(n kaya.Node, minWidth float64) { r.t.SetColumnsAuto(n, minWidth) }
 

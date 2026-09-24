@@ -455,6 +455,7 @@ static class Program
         Set("SetRole", ["Node n", "Role role"], "n, role");
         Set("SetInset", ["Node n", "double pad"], "n, pad");
         Set("SetFill", ["Node n", "bool on"], "n, on");
+        Set("SetAlign", ["Node n", "Align align"], "n, align");
         Set("SetColumnsAuto", ["Node n", "double minWidth"], "n, minWidth");
         Set("SetWrap", ["Node n", "bool on"], "n, on");
         // Fwd leaves a trailing blank line; the class brace closes on it.

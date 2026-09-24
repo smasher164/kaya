@@ -3718,6 +3718,9 @@ module Tpl = struct
     (* A stamped copy's cross-axis stretch (the live [set_fill]). *)
     let set_fill (Node id) on = emit (the_tx ()) (Kaya_wire.tx_set_fill id on)
 
+    (* A stamped container's cross-axis child placement (the live [set_align]). *)
+    let set_align (Node id) a = emit (the_tx ()) (Kaya_wire.tx_set_align id (align_wire a))
+
     (* A stamped grid's auto columns at a floor (the live
        [set_columns_auto]; docs/layout-knobs-plan.md §3). *)
     let set_columns_auto (Node id) min_width =
@@ -3830,7 +3833,6 @@ module Tpl = struct
        CONST ONLY: an accept list describes the PROTOTYPE. *)
     let set_accepts (Node id) kinds =
       emit (the_tx ()) (Kaya_wire.tx_set_accepts id (accept_list kinds))
-
 
     (* --- The signal leg ----------------------------------------------
        A signal is app-wide, so every stamped copy reads the SAME value:
@@ -4021,6 +4023,7 @@ module Tpl = struct
      paste list, so the zone's own surface must carry the declaration
      [set_drop_target] reads. *)
   let set_accepts n kinds = Floor.set_accepts n kinds
+  let set_align n a = Floor.set_align n a
 
   let when_ (s : bool signal) body () =
     let tx = the_tx () in

@@ -51,6 +51,30 @@ FLEX_LINKS = (
 )
 
 
+# (file, the block that owns the arm, the lines the baseline row keeps): a
+# cell with no text has no baseline and sits at the row's top, and a column's
+# baseline is its first child's (docs/flex-shrink-plan.md §9) — the iOS
+# switch was dropped 16pt to sit its empty label's 0 on the title's line, and
+# no scene reads a cell's y.
+BASELINE_LINKS = (
+    (SWIFTUI, "struct KayaFlex: Layout {", 24000, (
+        "return (b < 1 || b > d.height - 1) ? nil : b",
+        "baselines[i].map { max(0, rowBaseline - $0) } ?? 0",
+        "subviews[0].dimensions(in: ProposedViewSize(width: bounds.width, height: ext[0]))",
+    )),
+    (COMPOSE, "internal fun KayaFlexRow(", 4000, (
+        "if (fb == androidx.compose.ui.layout.AlignmentLine.Unspecified) null else fb",
+        "KayaCompose.ALIGN_BASELINE -> drops[i]",
+    )),
+    (GTK, "let baseline_row = !vertical && super::container_align(widget) == 4;", 2000,
+     ("c.set_valign(gtk4::Align::Start);",)),
+    (GTK, "if vertical && self.is_main(orientation) {", 600,
+     ("return (minimum, natural, bmin, bnat);",)),
+    (WINUI, "fn baseline_compensate(", 2500,
+     ("_ => None,", "first_text_baseline(core, *child, &element)?")),
+)
+
+
 def census(files):
     compose, swiftui, gtk, winui, wire = COMPOSE, SWIFTUI, GTK, WINUI, WIRE
     read = files.__getitem__
@@ -324,6 +348,15 @@ def census(files):
         if needle not in body[start:start + 12000]:
             bad.append(f"{path}: the flex row no longer reads its min-content ({needle!r} missing "
                        f"under {block!r})")
+    for path, block, window, needles in BASELINE_LINKS:
+        body = code_only(read(path))
+        start = body.find(block)
+        if start < 0:
+            bad.append(f"{path}: the baseline row's block {block!r} is missing")
+            continue
+        for needle in needles:
+            if needle not in body[start:start + window]:
+                bad.append(f"{path}: the baseline row lost {needle!r} under {block!r}")
     return bad
 
 
@@ -333,7 +366,7 @@ def census(files):
 real = load()
 g = Gate("check-universal-props")
 RAN = 0
-DECLARED = 27
+DECLARED = 36
 for path, pattern, repl in (
     (COMPOSE, r"\ba11y\b", "kayaUnappliedProps"),
     (SWIFTUI, r"\bkayaA11y\b", "kayaUnappliedProps"),
@@ -439,6 +472,40 @@ for label, path, pattern, repl in (
      "naturals"),
     ("WinUI's column floor deleted", WINUI,
      r"def\.SetMinWidth\(minimum\.min\(natural\)\)\?;", ""),
+):
+    doctored = g.doctor(label, real[path], pattern, repl, want=1)
+    findings = census(load({path: doctored}))
+    if not findings:
+        raise SystemExit(f"check-universal-props: self-test failed: {label} still passed")
+    print(f"check-universal-props: {label}: {findings[0]}")
+    RAN += 1
+
+# THE BASELINE ROW's nine: the textless cell handed a baseline (SwiftUI's
+# every-view answer, Compose's and WinUI's bottom-edge rule, GTK's fill), the
+# drop taken off a cell that has none, and each hand-written column baseline
+# returned to the container's bottom.
+for label, path, pattern, repl in (
+    ("SwiftUI answering a baseline for every view", SWIFTUI,
+     r"return \(b < 1 \|\| b > d\.height - 1\) \? nil : b", "return b"),
+    ("SwiftUI dropping a textless cell onto the row's line", SWIFTUI,
+     r"baselines\[i\]\.map \{ max\(0, rowBaseline - \$0\) \} \?\? 0",
+     "max(0, rowBaseline - (baselines[i] ?? 0))"),
+    ("SwiftUI's column answering no baseline of its own", SWIFTUI,
+     r"return Self\.textBaseline\(\n\s*subviews\[0\]\.dimensions\(in: ProposedViewSize\("
+     r"width: bounds\.width, height: ext\[0\]\)\)\)", "return nil"),
+    ("Compose's bottom-edge rule for a textless cell", COMPOSE,
+     r"AlignmentLine\.Unspecified\) null else fb", "AlignmentLine.Unspecified) p.height else fb"),
+    ("Compose dropping a textless cell onto the row's line", COMPOSE,
+     r"KayaCompose\.ALIGN_BASELINE -> drops\[i\]",
+     "KayaCompose.ALIGN_BASELINE -> baselineRow - (baselines[i] ?: 0)"),
+    ("GTK filling a textless cell", GTK,
+     r"c\.set_valign\(gtk4::Align::Start\);", "c.set_valign(gtk4::Align::Fill);"),
+    ("GTK's column answering no baseline of its own", GTK,
+     r"return \(minimum, natural, bmin, bnat\);", "return (minimum, natural, -1, -1);"),
+    ("WinUI's bottom-edge rule for a textless cell", WINUI,
+     r"(fn baseline_compensate\([\s\S]*?)_ => None,", r"\1_ => Some(element.ActualHeight()?),"),
+    ("WinUI's column answering its bottom", WINUI,
+     r"first_text_baseline\(core, \*child, &element\)\?", "Some(element.ActualHeight()?)"),
 ):
     doctored = g.doctor(label, real[path], pattern, repl, want=1)
     findings = census(load({path: doctored}))

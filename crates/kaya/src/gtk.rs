@@ -2219,11 +2219,32 @@ mod flex {
             // measured at the row's whole width, a label wrapped by the
             // allocate read one line tall (the linux flexshrink leg, 2026-09-24).
             if !vertical && !self.is_main(orientation) && for_size >= 0 {
+                // A BASELINE ROW (docs/flex-shrink-plan.md §9) is as tall as
+                // its deepest baseline plus the tallest remainder under it,
+                // and reports that baseline as its own.
+                let baseline_row = super::container_align(widget) == 4;
+                let cells: Vec<(i32, i32, i32, i32)> = self
+                    .main_extents(widget, for_size, -1)
+                    .into_iter()
+                    .map(|(c, extent)| c.measure(orientation, extent))
+                    .collect();
                 let (mut minimum, mut natural) = (0, 0);
-                for (c, extent) in self.main_extents(widget, for_size, -1) {
-                    let (cmin, cnat, _, _) = c.measure(orientation, extent);
-                    minimum = minimum.max(cmin);
-                    natural = natural.max(cnat);
+                for (cmin, cnat, _, _) in &cells {
+                    minimum = minimum.max(*cmin);
+                    natural = natural.max(*cnat);
+                }
+                if baseline_row {
+                    let deepest_min = cells.iter().map(|c| c.2).max().unwrap_or(-1);
+                    let deepest_nat = cells.iter().map(|c| c.3).max().unwrap_or(-1);
+                    if deepest_nat >= 0 {
+                        for (cmin, cnat, bmin, bnat) in &cells {
+                            if *bnat >= 0 {
+                                minimum = minimum.max(deepest_min - bmin + cmin);
+                                natural = natural.max(deepest_nat - bnat + cnat);
+                            }
+                        }
+                        return (minimum, natural, deepest_min, deepest_nat);
+                    }
                 }
                 return (minimum, natural, -1, -1);
             }
@@ -2246,6 +2267,19 @@ mod flex {
             if self.is_main(orientation) {
                 (minimum, natural) = main_axis_measure(&main_children, self.spacing.get());
             }
+            // A COLUMN'S BASELINE IS ITS FIRST CHILD'S (docs/flex-shrink-plan.md
+            // §9): a title-over-date column in a baseline row sits on the
+            // title's line; the first child starts at the column's top.
+            if vertical && self.is_main(orientation) {
+                let mut child = widget.first_child();
+                while let Some(c) = child {
+                    if c.is_visible() {
+                        let (_, _, bmin, bnat) = c.measure(orientation, for_size);
+                        return (minimum, natural, bmin, bnat);
+                    }
+                    child = c.next_sibling();
+                }
+            }
             (minimum, natural, -1, -1)
         }
 
@@ -2262,8 +2296,23 @@ mod flex {
             // label right-aligned — the formatar leg's `expect_mirrored`
             // (2026-09-23). Columns stack the same way either way.
             let rtl = !vertical && widget.direction() == gtk4::TextDirection::Rtl;
+            // A BASELINE ROW hands every cell the deepest natural baseline
+            // among them, which GTK's own valign meets; a cell with no
+            // baseline of its own (a bare check button) is a top-aligned
+            // one, since BASELINE on such a widget fills instead.
+            let cells = self.main_extents(widget, main_total, cross_total);
+            let baseline_row = !vertical && super::container_align(widget) == 4;
+            let row_baseline = if baseline_row {
+                cells
+                    .iter()
+                    .map(|(c, extent)| c.measure(gtk4::Orientation::Vertical, *extent).3)
+                    .max()
+                    .unwrap_or(-1)
+            } else {
+                baseline
+            };
             let mut offset = 0;
-            for (c, extent) in self.main_extents(widget, main_total, cross_total) {
+            for (c, extent) in cells {
                 let x = if rtl { width - offset - extent } else { offset };
                 let (w, h, x, y) = if vertical {
                     (cross_total, extent, 0, offset)
@@ -2275,7 +2324,10 @@ mod flex {
 // The track, recorded BEFORE the allocate: what GTK stores on the
 // child afterwards is the box its own align and margins shrank it to.
                 super::set_child_track(&c, f64::from(extent));
-                c.allocate(w, h, baseline, Some(transform));
+                if baseline_row && c.measure(gtk4::Orientation::Vertical, extent).3 < 0 {
+                    c.set_valign(gtk4::Align::Start);
+                }
+                c.allocate(w, h, row_baseline, Some(transform));
                 offset += extent + self.spacing.get();
             }
         }
