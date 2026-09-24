@@ -3460,8 +3460,7 @@ def js_launchers(files, node_version):
             bad.append(f"tools/guest/{name}: not CRLF throughout — "
                        f"cmd.exe reads a lone LF as part of the command")
         text = raw.decode("ascii", "replace")
-        guest = ("milestone2" if leg == "js"
-                 else "split" if scene == "listdetail" else scene)
+        guest = "milestone2" if leg == "js" else win_lane.guest_stem(scene)
         selftest = "1" if leg == "js" else scene
         for want in (
                 "set KAYA_LIB=C:\\kaya\\kaya.dll",

@@ -29,6 +29,9 @@ SCENES = [
     "clipboard", "undo", "dirty", "ranges", "save", "styling",
     "typeface", "toolbar", "identity", "assets", "adaptive", "dnd", "pickers", "sliders", "tooltips",
     "sheet",
+    # The formatter door and the catalog in every language this lane runs
+    # (docs/compliance-plan.md §6); formatde/formatar reuse its guests.
+    "format",
 ]
 
 # THE LEGS THAT RUN AS THE ONLY INPUT-DRIVING LEG ON THE HOST (tools/lib/
@@ -50,11 +53,7 @@ EXCLUSIVE = {"dnd_rust", "dnd_python", "dnd_js", "dnd_go", "dnd_csharp", "dnd_ja
 # THIS default; the runner calls depth_scenes(), which honours the
 # KAYA_WIN_DEPTH_SCENES override the lane uses for one-off slices.
 DEPTH_SCENES = ["windowed", "canvas", "sizepolicy", "tasks", "notify", "richtext",
-                "ownundo", "richlabel", "notes", "richrows",
-                # The formatter door and the catalog (docs/compliance-plan.md
-                # §6): rust-only until the eight bindings' fmt lands; the
-                # SAME exe under three locales (run_format*_rust.cmd).
-                "format"]
+                "ownundo", "richlabel", "notes", "richrows"]
 
 # THE PACKAGED LEGS (docs/packaging-plan.md P3): the SAME Rust guests, run
 # out of an installed MSIX instead of out of C:\kaya, because a kaya app is
@@ -272,12 +271,15 @@ ORDER = [
      "canvas_rust",
      "canvasdark_rust",
      "sizepolicy_rust",
-     # The format guest under the everyday locale and two knobs: POOLED,
+     # The format guests under the everyday locale and two knobs: POOLED,
      # since the knob is per process (a language list per formatter and
      # the window ground's own Language, U5) and nothing on the host moves.
-     "format_rust",
-     "formatde_rust",
-     "formatar_rust",
+     "format_rust", "format_python", "format_js", "format_go", "format_csharp", "format_java",
+     "formatde_rust", "formatde_python", "formatde_js", "formatde_go", "formatde_csharp", "formatde_java",
+     "formatar_rust", "formatar_python", "formatar_js", "formatar_go", "formatar_csharp", "formatar_java",
+     # The task manager in Arabic (docs/compliance-plan.md §6): POOLED,
+     # unlike tasks_rust — no drag, no notification, no relaunch.
+     "tasksrtl_rust",
      # THE RICH LABEL (docs/rich-text-plan.md §15). POOLED, unlike its
      # richtext neighbour: a label is read-only, so the scene clicks two
      # buttons and reads the runs back — no typed input, no composition, no
@@ -575,6 +577,16 @@ def scene_lang(leg):
 def launcher(leg):
     """The checked-in guest launcher a leg runs (tools/guest/)."""
     return f"run_{leg}.cmd"
+
+
+# A scene that selects a SCRIPT over another scene's guest (the mac lane's
+# GUEST_STEM one platform over): the launcher runs the guest's own file.
+GUEST_STEM = {"listdetail": "split", "formatde": "format", "formatar": "format",
+              "taskspersist": "tasks", "links": "tasks", "tasksrtl": "tasks"}
+
+
+def guest_stem(scene):
+    return GUEST_STEM.get(scene, scene)
 
 
 def alone(leg):

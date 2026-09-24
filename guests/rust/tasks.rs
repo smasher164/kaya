@@ -343,13 +343,6 @@ fn civil(z: i64) -> kaya::Date {
     date((if m <= 2 { y + 1 } else { y }) as i32, m, d)
 }
 
-fn short(d: kaya::Date) -> String {
-    const DAYS: [&str; 7] = ["Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"];
-    const MONTHS: [&str; 12] = [
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-    ];
-    format!("{} {} {}", DAYS[days(d).rem_euclid(7) as usize], d.day, MONTHS[(d.month - 1) as usize])
-}
 
 /// A REMINDER'S NOTIFICATION ID IS ITS TASK'S KEY (docs/tasks-s9-plan.md
 /// R2): a relaunched process has none of the old one's memory, so the id
@@ -484,15 +477,9 @@ impl App {
         let total = self.tasks.values().filter(|(l, _)| *l == list).count();
         let hidden = self.hidden.values().filter(|(l, _)| *l == list).count();
         if self.queries.get(&list).is_some_and(|q| !q.is_empty()) {
-            return format!("{} of {total} match", total - hidden);
+            return kaya::tr!("match-count", shown = (total - hidden) as i64, total = total as i64);
         }
-        match list {
-            List::Inbox => format!("{total} in inbox"),
-            List::Today => format!("{total} today"),
-            List::Upcoming => format!("{total} upcoming"),
-            List::Anytime => format!("{total} anytime"),
-            List::Logbook => format!("{total} done"),
-        }
+        kaya::tr!(count_key(list), count = total as i64)
     }
 
     fn update_count(&self, tx: &mut kaya::Tx, list: List) {
@@ -544,10 +531,10 @@ impl App {
     fn caption(&self, row: &TaskRow) -> String {
         let mut parts = Vec::new();
         if let Some(w) = parse_date(&row.when) {
-            parts.push(short(w));
+            parts.push(kaya::fmt::date_weekday(w));
         }
         if let Some(d) = parse_date(&row.deadline) {
-            parts.push(format!("due {}", short(d)));
+            parts.push(kaya::tr!("due", date = d));
         }
         if let Some(name) = self.projects.get(&row.project) {
             parts.push(name.clone());
@@ -606,7 +593,7 @@ impl App {
             .values()
             .filter(|(_, r)| r.project == project && !r.done)
             .count();
-        let text = if n == 1 { "1 task".to_string() } else { format!("{n} tasks") };
+        let text = kaya::tr!("project-tasks", count = n as i64);
         self.projects_coll.patch(tx, project.to_string()).count(text);
     }
 
@@ -642,11 +629,11 @@ impl App {
             appearance: self.appearance as f64,
             hide_badge: self.hide_badge,
             keep_done: self.keep_done,
-            line: format!(
-                "Week starts {}; badge {}; completed {}",
-                ["Monday", "Sunday"][self.week_start],
-                if self.hide_badge { "hidden" } else { "shown" },
-                if self.keep_done { "stay in place" } else { "move to Logbook" },
+            line: kaya::tr!(
+                "settings-line",
+                day = kaya::tr!(["monday", "sunday"][self.week_start]),
+                badge = kaya::tr!(if self.hide_badge { "badge-hidden" } else { "badge-shown" }),
+                done = kaya::tr!(if self.keep_done { "done-stay" } else { "done-move" }),
             ),
         }
     }
@@ -695,6 +682,9 @@ impl App {
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::new();
+    // THE WORDS, before the first build (docs/compliance-plan.md §6): every
+    // label below is the catalog's, guests/assets/l10n/tasks.<locale>.ftl.
+    kaya::catalog("tasks");
     // THE APP LINKS, BEFORE THE FIRST TRANSACTION (docs/app-links-plan.md
     // §4): the declarations ride its head, so a link that STARTED this
     // process is matched the moment that batch lands.
@@ -730,34 +720,34 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             // the first frame (S2b R1, P7).
             .appearance(appearance_mode(appearance))
             .sections_presentation(kaya::SectionsPresentation::Sidebar)
-            .menu("Edit", |m| {
-                m.item("Undo").role(kaya::MenuRole::Undo).id();
-                m.item("Redo").role(kaya::MenuRole::Redo).id();
+            .menu(kaya::tr!("edit").as_str(), |m| {
+                m.item(kaya::tr!("undo").as_str()).role(kaya::MenuRole::Undo).id();
+                m.item(kaya::tr!("redo").as_str()).role(kaya::MenuRole::Redo).id();
             })
             .id();
         tx.window(kaya::DEFAULT_WINDOW)
-            .menu("View", |m| {
-            let logbook = m.item("Logbook").symbol(kaya::Symbol::Done).id();
+            .menu(kaya::tr!("view").as_str(), |m| {
+            let logbook = m.item(kaya::tr!("logbook").as_str()).symbol(kaya::Symbol::Done).id();
             msgs.on_menu_item(logbook, Msg::OpenLogbook);
             // Promoted into the chrome: a gear on the phones' top bar and
             // the desktops' toolbar (DESIGN.md, chrome promotion).
-            let settings = m.item("Settings").symbol(kaya::Symbol::Settings).primary(true).id();
+            let settings = m.item(kaya::tr!("settings").as_str()).symbol(kaya::Symbol::Settings).primary(true).id();
             msgs.on_menu_item(settings, Msg::OpenSettings);
             })
             .id();
 
         let sections = [
-            (List::Inbox, INBOX, "Inbox", kaya::Symbol::Home),
-            (List::Today, TODAY, "Today", kaya::Symbol::Star),
-            (List::Upcoming, UPCOMING, "Upcoming", kaya::Symbol::Forward),
-            (List::Anytime, ANYTIME, "Anytime", kaya::Symbol::More),
+            (List::Inbox, INBOX, kaya::tr!("inbox"), kaya::Symbol::Home),
+            (List::Today, TODAY, kaya::tr!("today"), kaya::Symbol::Star),
+            (List::Upcoming, UPCOMING, kaya::tr!("upcoming"), kaya::Symbol::Forward),
+            (List::Anytime, ANYTIME, kaya::tr!("anytime"), kaya::Symbol::More),
         ];
         let mut lists = Vec::new();
         let mut counts = BTreeMap::new();
         let today_badge = tx.signal(0.0);
         let link_note = tx.signal("");
         for (list, window, name, symbol) in sections {
-            let mut declared = tx.add_section(window).title(name).symbol(symbol);
+            let mut declared = tx.add_section(window).title(&name).symbol(symbol);
             if list == List::Today {
                 declared = declared.badge(today_badge);
             }
@@ -766,13 +756,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             let coll = tx.collection::<TaskRow>();
             // Written by the app (count_text): a derived signal could count
             // the visible rows and not the total a filter hides.
-            let count = tx.signal(match list {
-                List::Inbox => "0 in inbox",
-                List::Today => "0 today",
-                List::Upcoming => "0 upcoming",
-                List::Anytime => "0 anytime",
-                List::Logbook => "0 done",
-            });
+            let count = tx.signal(kaya::tr!(count_key(list), count = 0));
             counts.insert(list, count);
             let count_id = match list {
                 List::Inbox => "inbox_count",
@@ -787,7 +771,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     // alone (docs/search-plan.md S10).
                     let find = tx
                         .search()
-                        .placeholder("Search")
+                        .placeholder(kaya::tr!("search"))
                         .a11y_id(format!("{}_find", count_id.trim_end_matches("_count")))
                         .id();
                     msgs.on_change(find, move |q| Msg::Search(list, q));
@@ -800,7 +784,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     // QUICK-ADD IS A SHEET (S6): the button presents it, and
                     // the field and the Add button live inside it.
                     if list == List::Inbox {
-                        let new = tx.button("New task").a11y_id("new").id();
+                        let new = tx.button(&kaya::tr!("new-task")).a11y_id("new").id();
                         msgs.on_click(new, Msg::QuickAdd);
                     }
                     let rows = coll.rows(tx);
@@ -817,7 +801,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                             // The trailing accessory: a spacer takes the row's
                             // free width so every Details button shares one edge.
                             t.spacer();
-                            let details = t.button("Details");
+                            let details = t.button(kaya::tr!("details").as_str());
                             t.a11y_id(details, "details");
                             t.role(details, kaya::Role::Plain);
                             msgs.on_click_node(details, Msg::Details);
@@ -837,7 +821,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         // its rows are shown by the View>Logbook screen, stamped on open.
         lists.push((List::Logbook, tx.collection::<TaskRow>()));
 
-        let projects_section = tx.add_section(PROJECTS).title("Projects").symbol(kaya::Symbol::Edit).id();
+        let projects_section = tx.add_section(PROJECTS).title(&kaya::tr!("projects")).symbol(kaya::Symbol::Edit).id();
         msgs.on_section_selected(projects_section, Msg::Section(PROJECTS));
         let projects_coll = tx.collection::<ProjectRow>();
         let projects_root = tx
@@ -849,7 +833,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                         let count = t.caption(ProjectRow::count());
                         t.a11y_id(count, "pcount");
                         t.spacer();
-                        let open = t.button("Open");
+                        let open = t.button(kaya::tr!("open").as_str());
                         t.a11y_id(open, "open");
                         t.role(open, kaya::Role::Plain);
                         msgs.on_click_node(open, Msg::OpenProject);
@@ -992,14 +976,14 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 let sheet = ctx.apply(|tx| {
                     let sheet = tx
                         .present_sheet(QUICK_SHEET)
-                        .title("New task")
+                        .title(&kaya::tr!("new-task"))
                         .detent(kaya::Detent::Medium)
                         .id();
                     let body = tx
                         .column(|tx| {
                             let field = tx.entry().a11y_id("quick").id();
                             msgs.on_change(field, Msg::Draft);
-                            let add = tx.button("Add").a11y_id("add").id();
+                            let add = tx.button(&kaya::tr!("add")).a11y_id("add").id();
                             msgs.on_click(add, Msg::Add);
                         })
                         .id();
@@ -1033,7 +1017,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     project: String::new(),
                 };
                 ctx.apply(|tx| {
-                    tx.undoable(format!("add {}", row.title));
+                    tx.undoable(kaya::tr!("undo-add", title = row.title.as_str()));
                     app.place(tx, &key, row);
                 });
                 ctx.apply(|tx| {
@@ -1182,7 +1166,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 app.tasks.remove(&key);
                 let hidden = app.hidden.remove(&key).is_some();
                 ctx.apply(|tx| {
-                    tx.undoable(format!("delete {}", row.title));
+                    tx.undoable(kaya::tr!("undo-delete", title = row.title.as_str()));
                     if !hidden {
                         tx.remove(&app.coll(list), key.clone());
                     }
@@ -1214,7 +1198,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     let lines = tx.collection::<Line>();
                     let root = tx
                         .column(|tx| {
-                            let pnew = tx.button("New task").a11y_id("pnew").id();
+                            let pnew = tx.button(&kaya::tr!("new-task")).a11y_id("pnew").id();
                             msgs.on_click(pnew, Msg::ProjectQuickAdd);
                             let rows = lines.rows(tx);
                             let list = rows.id();
@@ -1242,14 +1226,14 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 let sheet = ctx.apply(|tx| {
                     let sheet = tx
                         .present_sheet_over(PROJECT, PROJECT_QUICK_SHEET)
-                        .title("New task")
+                        .title(&kaya::tr!("new-task"))
                         .detent(kaya::Detent::Medium)
                         .id();
                     let body = tx
                         .column(|tx| {
                             let pquick = tx.entry().a11y_id("pquick").id();
                             msgs.on_change(pquick, Msg::ProjectDraft);
-                            let padd = tx.button("Add").a11y_id("padd").id();
+                            let padd = tx.button(&kaya::tr!("add")).a11y_id("padd").id();
                             msgs.on_click(padd, Msg::ProjectAdd);
                         })
                         .id();
@@ -1280,7 +1264,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 };
                 app.order.entry(project.clone()).or_default().push(key.clone());
                 ctx.apply(|tx| {
-                    tx.undoable(format!("add {}", row.title));
+                    tx.undoable(kaya::tr!("undo-add", title = row.title.as_str()));
                     tx.insert(&lines, key.clone(), Line { title: row.title.clone() });
                     app.place(tx, &key, row);
                     app.project_count(tx, &project);
@@ -1366,9 +1350,9 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     .collect();
                 let active = app.active;
                 let screen = ctx.apply(|tx| {
-                    let entry = tx.push_entry_in(active, LOGBOOK_SCREEN).title("Logbook").id();
+                    let entry = tx.push_entry_in(active, LOGBOOK_SCREEN).title(&kaya::tr!("logbook")).id();
                     let screen = tx.collection::<TaskRow>();
-                    let count = screen.derive(tx, |items| format!("{} done", items.len()));
+                    let count = screen.derive(tx, |items| kaya::tr!("done-count", count = items.len() as i64));
                     let root = tx
                         .column(|tx| {
                             tx.caption(count).a11y_id("logbook_count").id();
@@ -1406,36 +1390,40 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 let active = app.active;
                 let row = app.settings_row();
                 let screen = ctx.apply(|tx| {
-                    let entry = tx.push_entry_in(active, SETTINGS_SCREEN).title("Settings").id();
+                    let entry = tx.push_entry_in(active, SETTINGS_SCREEN).title(&kaya::tr!("settings")).id();
                     let screen = tx.collection::<Settings>();
                     let root = tx
                         .column(|tx| {
                             for mut row in screen.rows(tx) {
                                 row.column(|t| {
-                                    t.caption("Week starts on");
-                                    let week = t.select(&["Monday", "Sunday"], Settings::week_start());
+                                    t.caption(kaya::tr!("week-starts-on").as_str());
+                                    let days = [kaya::tr!("monday"), kaya::tr!("sunday")];
+                                    let week = t.select(&[days[0].as_str(), days[1].as_str()], Settings::week_start());
                                     t.a11y_id(week, "week");
                                     msgs.on_value_node(week, |_, index| Msg::WeekStart(index));
-                                    t.caption("Appearance");
-                                    let appearance =
-                                        t.select(&["System", "Light", "Dark"], Settings::appearance());
+                                    t.caption(kaya::tr!("appearance").as_str());
+                                    let modes = [kaya::tr!("system"), kaya::tr!("light"), kaya::tr!("dark")];
+                                    let appearance = t.select(
+                                        &[modes[0].as_str(), modes[1].as_str(), modes[2].as_str()],
+                                        Settings::appearance(),
+                                    );
                                     t.a11y_id(appearance, "appearance");
                                     msgs.on_value_node(appearance, |_, index| Msg::Appearance(index));
                                     t.row(|t| {
                                         let hide = t.checkbox(Settings::hide_badge());
                                         t.role(hide, kaya::Role::Switch);
-                                        t.a11y_label(hide, "Hide the Today badge");
+                                        t.a11y_label(hide, kaya::tr!("hide-badge").as_str());
                                         t.a11y_id(hide, "hide_badge");
                                         msgs.on_toggle_node(hide, |_, on| Msg::HideBadge(on));
-                                        t.label("Hide the Today badge");
+                                        t.label(kaya::tr!("hide-badge").as_str());
                                     });
                                     t.row(|t| {
                                         let keep = t.checkbox(Settings::keep_done());
                                         t.role(keep, kaya::Role::Switch);
-                                        t.a11y_label(keep, "Keep completed tasks in their list");
+                                        t.a11y_label(keep, kaya::tr!("keep-done").as_str());
                                         t.a11y_id(keep, "keep_done");
                                         msgs.on_toggle_node(keep, |_, on| Msg::KeepDone(on));
-                                        t.label("Keep completed tasks in their list");
+                                        t.label(kaya::tr!("keep-done").as_str());
                                     });
                                     let line = t.caption(Settings::line());
                                     t.a11y_id(line, "settings");
@@ -1467,27 +1455,28 @@ fn open_details(app: &mut App, ctx: &kaya::AppCtx, msgs: &kaya::Messages<Msg>, k
     let Some((list, row)) = app.tasks.get(&key).cloned() else { return };
     let Some(section) = section_of(list) else { return };
     let names: Vec<String> = app.projects.values().cloned().collect();
-    let mut options = vec!["No project"];
+    let none = kaya::tr!("no-project");
+    let mut options = vec![none.as_str()];
     options.extend(names.iter().map(String::as_str));
     let selected = app.projects.keys().position(|k| *k == row.project).map_or(0, |i| i + 1);
     let today = app.today;
     let detail = ctx.apply(|tx| {
         let entry = tx.push_entry_in(section, DETAIL).title(&row.title).id();
-        let when_text = tx.signal(when_line("When", parse_date(&row.when)));
-        let deadline_text = tx.signal(when_line("Deadline", parse_date(&row.deadline)));
+        let when_text = tx.signal(when_line(true, parse_date(&row.when)));
+        let deadline_text = tx.signal(when_line(false, parse_date(&row.deadline)));
         let reminder_text = tx.signal(reminder_line(parse_time(&row.reminder)));
         let when_sig = tx.signal(parse_date(&row.when).unwrap_or(today));
         let deadline_sig = tx.signal(parse_date(&row.deadline).unwrap_or(today));
         let reminder_sig = tx.signal(parse_time(&row.reminder).unwrap_or(kaya::Time::new(9, 0).unwrap()));
-        let project_label = tx.signal("Project");
+        let project_label = tx.signal(kaya::tr!("project"));
         // A form scrolls: on a phone it is taller than the screen.
         let root = tx
             .scroll(|tx| {
                 tx.column(|tx| {
-                let notes = tx.textarea().placeholder("Notes").a11y_id("notes").id();
+                let notes = tx.textarea().placeholder(kaya::tr!("notes")).a11y_id("notes").id();
                 tx.set_text(notes, &row.notes);
                 msgs.on_change(notes, Msg::Notes);
-                let reference_text = tx.signal("Reference");
+                let reference_text = tx.signal(kaya::tr!("reference"));
                 let reference = tx.label(reference_text).role(kaya::Role::Link).a11y_id("reference").id();
                 tx.href(reference, format!("https://example.com/tasks/{key}"));
                 // The form (docs/forms-plan.md): four labelled rows,
@@ -1496,21 +1485,21 @@ fn open_details(app: &mut App, ctx: &kaya::AppCtx, msgs: &kaya::Messages<Msg>, k
                     tx.labeled(when_text, |tx| {
                         let picker = tx.date_picker_bound(when_sig).a11y_id("when").id();
                         msgs.on_date(picker, Msg::When);
-                        let clear = tx.button("Clear").a11y_id("clear_when").id();
+                        let clear = tx.button(&kaya::tr!("clear")).a11y_id("clear_when").id();
                         msgs.on_click(clear, Msg::ClearWhen);
                     })
                     .id();
                     tx.labeled(deadline_text, |tx| {
                         let picker = tx.date_picker_bound(deadline_sig).a11y_id("deadline").id();
                         msgs.on_date(picker, Msg::Deadline);
-                        let clear = tx.button("Clear").a11y_id("clear_deadline").id();
+                        let clear = tx.button(&kaya::tr!("clear")).a11y_id("clear_deadline").id();
                         msgs.on_click(clear, Msg::ClearDeadline);
                     })
                     .id();
                     tx.labeled(reminder_text, |tx| {
                         let picker = tx.time_picker_bound(reminder_sig).a11y_id("reminder").id();
                         msgs.on_time(picker, Msg::Reminder);
-                        let clear = tx.button("Clear").a11y_id("clear_reminder").id();
+                        let clear = tx.button(&kaya::tr!("clear")).a11y_id("clear_reminder").id();
                         msgs.on_click(clear, Msg::ClearReminder);
                     })
                     .id();
@@ -1523,7 +1512,7 @@ fn open_details(app: &mut App, ctx: &kaya::AppCtx, msgs: &kaya::Messages<Msg>, k
                 .a11y_id("details")
                 .id();
                 let delete = tx
-                    .button("Delete")
+                    .button(&kaya::tr!("delete"))
                     .role(kaya::Role::Destructive)
                     .a11y_id("delete")
                     .id();
@@ -1539,17 +1528,29 @@ fn open_details(app: &mut App, ctx: &kaya::AppCtx, msgs: &kaya::Messages<Msg>, k
     app.detail = Some(detail);
 }
 
-fn when_line(what: &str, d: Option<kaya::Date>) -> String {
-    match d {
-        Some(d) => format!("{what}: {}", short(d)),
-        None => format!("{what}: none"),
+fn count_key(list: List) -> &'static str {
+    match list {
+        List::Inbox => "inbox-count",
+        List::Today => "today-count",
+        List::Upcoming => "upcoming-count",
+        List::Anytime => "anytime-count",
+        List::Logbook => "done-count",
+    }
+}
+
+fn when_line(is_when: bool, d: Option<kaya::Date>) -> String {
+    match (is_when, d) {
+        (true, Some(d)) => kaya::tr!("when-label", date = d),
+        (true, None) => kaya::tr!("when-none"),
+        (false, Some(d)) => kaya::tr!("deadline-label", date = d),
+        (false, None) => kaya::tr!("deadline-none"),
     }
 }
 
 fn reminder_line(t: Option<kaya::Time>) -> String {
     match t {
-        Some(t) => format!("Reminder: {:02}:{:02}", t.hour, t.minute),
-        None => "Reminder: none".to_string(),
+        Some(t) => kaya::tr!("reminder-label", time = t),
+        None => kaya::tr!("reminder-none"),
     }
 }
 
@@ -1557,10 +1558,10 @@ impl App {
     fn set_date(&mut self, ctx: &kaya::AppCtx, msgs: &kaya::Messages<Msg>, is_when: bool, d: Option<kaya::Date>) {
         let Some(detail) = self.detail.as_ref() else { return };
         let key = detail.key.clone();
-        let (text_sig, what) = if is_when {
-            (detail.when_text, "When")
+        let (text_sig, undo_key) = if is_when {
+            (detail.when_text, "undo-set-when")
         } else {
-            (detail.deadline_text, "Deadline")
+            (detail.deadline_text, "undo-set-deadline")
         };
         let Some((_, row)) = self.tasks.get(&key).cloned() else { return };
         let row = if is_when {
@@ -1568,9 +1569,9 @@ impl App {
         } else {
             TaskRow { deadline: date_field(d), ..row }
         };
-        let line = when_line(what, d);
+        let line = when_line(is_when, d);
         ctx.apply(|tx| {
-            tx.undoable(format!("set {}", what.to_lowercase()));
+            tx.undoable(kaya::tr!(undo_key));
             tx.write(text_sig, line);
             self.place(tx, &key, row.clone());
         });
@@ -1611,7 +1612,7 @@ impl App {
         let Some(id) = notification_id(key) else { return };
         let day = parse_date(&row.when).unwrap_or(self.today);
         let at = (days(day) * 86_400 + i64::from(t.hour) * 3_600 + i64::from(t.minute) * 60) as u64;
-        let shown = tx.show_notification(id).title(&row.title).body(&short(day)).at(at).show();
+        let shown = tx.show_notification(id).title(&row.title).body(&kaya::fmt::date_weekday(day)).at(at).show();
         let key = key.to_string();
         msgs.on_notification(shown, move |outcome| Msg::Reminded(key.clone(), outcome));
     }

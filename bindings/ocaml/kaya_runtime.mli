@@ -10,6 +10,31 @@
    handed one over. *)
 val app_data_dir : unit -> string option
 
+(* The formatter door and the catalog, raw (docs/compliance-plan.md §3):
+   packed dates (YYYYMMDD) and times (HHMM), the length as the C API's
+   0/1/2, digit counts -1 for the platform's default; [None] is the core's
+   fault, already printed. Kaya_app.Fmt and Kaya_app.tr are the surface. *)
+val fmt_date : int64 -> int -> string option
+val fmt_date_weekday : int64 -> string option
+val fmt_time : int64 -> int -> string option
+val fmt_date_time : int64 -> int64 -> int -> string option
+val fmt_number : float -> int -> int -> bool -> string option
+val fmt_percent : float -> int -> int -> bool -> string option
+val fmt_currency : float -> string -> string option
+val locale_line : unit -> string option
+val direction_bit : unit -> int
+val text_scale : unit -> float
+val catalog : string -> unit
+
+type tr_arg =
+  | Tr_int of int64
+  | Tr_float of float
+  | Tr_str of string
+  | Tr_date of int64
+  | Tr_time of int64
+
+val tr : string -> (string * tr_arg) list -> string option
+
 val pref_get_string : string -> string option
 val pref_get_i64 : string -> int64 option
 val pref_get_f64 : string -> float option

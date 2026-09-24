@@ -7,6 +7,7 @@ import (
 
 	"dev.kaya/guests/go/a11y"
 	"dev.kaya/guests/go/sheet"
+	"dev.kaya/guests/go/format"
 	"dev.kaya/guests/go/a11yrows"
 	"dev.kaya/guests/go/adaptive"
 	"dev.kaya/guests/go/align"
@@ -92,6 +93,9 @@ var scenes = map[string]func() *kaya.App{
 	"menus":      menus.App,
 	"nav":        nav.App,
 	"sheet":      sheet.App,
+	"format":     format.App,
+	"formatde":   format.App,
+	"formatar":   format.App,
 	"ownundo":    ownundo.App,
 	"panels":     panels.App,
 	"panes":      panes.App,

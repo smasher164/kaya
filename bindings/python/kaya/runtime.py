@@ -8,6 +8,7 @@ import ctypes
 import os
 import pathlib
 import sys
+from collections.abc import Callable, Sequence
 from typing import IO, Any
 
 from . import wire
@@ -121,6 +122,64 @@ _lib.kaya_pref_set_bool.argtypes = [ctypes.c_char_p, ctypes.c_size_t,
 _lib.kaya_pref_set_bool.restype = None
 _lib.kaya_pref_remove.argtypes = [ctypes.c_char_p, ctypes.c_size_t]
 _lib.kaya_pref_remove.restype = None
+
+# The formatter door and the catalog (docs/compliance-plan.md §3; the C
+# API block in crates/kaya/src/capi.rs).
+_lib.kaya_fmt_date.argtypes = [ctypes.c_int64, ctypes.c_int64, ctypes.c_char_p,
+                               ctypes.c_size_t]
+_lib.kaya_fmt_date.restype = ctypes.c_size_t
+_lib.kaya_fmt_date_weekday.argtypes = [ctypes.c_int64, ctypes.c_char_p,
+                                       ctypes.c_size_t]
+_lib.kaya_fmt_date_weekday.restype = ctypes.c_size_t
+_lib.kaya_fmt_time.argtypes = [ctypes.c_int64, ctypes.c_int64, ctypes.c_char_p,
+                               ctypes.c_size_t]
+_lib.kaya_fmt_time.restype = ctypes.c_size_t
+_lib.kaya_fmt_date_time.argtypes = [ctypes.c_int64, ctypes.c_int64,
+                                    ctypes.c_int64, ctypes.c_char_p,
+                                    ctypes.c_size_t]
+_lib.kaya_fmt_date_time.restype = ctypes.c_size_t
+
+
+class KayaNumberOptions(ctypes.Structure):
+    _fields_ = [("min_fraction_digits", ctypes.c_int32),
+                ("max_fraction_digits", ctypes.c_int32),
+                ("grouping", ctypes.c_bool)]
+
+
+_lib.kaya_fmt_number.argtypes = [ctypes.c_double,
+                                 ctypes.POINTER(KayaNumberOptions),
+                                 ctypes.c_char_p, ctypes.c_size_t]
+_lib.kaya_fmt_number.restype = ctypes.c_size_t
+_lib.kaya_fmt_percent.argtypes = [ctypes.c_double,
+                                  ctypes.POINTER(KayaNumberOptions),
+                                  ctypes.c_char_p, ctypes.c_size_t]
+_lib.kaya_fmt_percent.restype = ctypes.c_size_t
+_lib.kaya_fmt_currency.argtypes = [ctypes.c_double, ctypes.c_char_p,
+                                   ctypes.c_char_p, ctypes.c_size_t]
+_lib.kaya_fmt_currency.restype = ctypes.c_size_t
+_lib.kaya_locale.argtypes = [ctypes.c_char_p, ctypes.c_size_t]
+_lib.kaya_locale.restype = ctypes.c_size_t
+_lib.kaya_direction.restype = ctypes.c_uint32
+_lib.kaya_text_scale.restype = ctypes.c_double
+_lib.kaya_catalog.argtypes = [ctypes.c_char_p]
+_lib.kaya_catalog.restype = None
+
+
+class KayaTrArg(ctypes.Structure):
+    _fields_ = [("name", ctypes.c_char_p), ("tag", ctypes.c_uint32),
+                ("i", ctypes.c_int64), ("f", ctypes.c_double),
+                ("s", ctypes.c_char_p)]
+
+
+TR_INT = 0
+TR_FLOAT = 1
+TR_STR = 2
+TR_DATE = 3
+TR_TIME = 4
+
+_lib.kaya_tr.argtypes = [ctypes.c_char_p, ctypes.POINTER(KayaTrArg),
+                         ctypes.c_size_t, ctypes.c_char_p, ctypes.c_size_t]
+_lib.kaya_tr.restype = ctypes.c_size_t
 
 # CAP_AUX_WINDOWS is the core's number written again — ctypes has no
 # header to read it out of; tools/check-sugar-surface.py holds it to
@@ -324,6 +383,94 @@ def app_data_dir() -> str | None:
 def _key(key: str) -> tuple[bytes, int]:
     raw = key.encode("utf-8")
     return raw, len(raw)
+
+
+def _filled(verb: str, ask: Callable[[Any, int], int]) -> str:
+    """The fill shape (app_data_dir's): size, then read. A 0 answer is the
+    core's FAULT (its sentence is already on stderr), never an empty
+    string handed on."""
+    needed = ask(None, 0)
+    if needed == 0:
+        raise RuntimeError(f"kaya: {verb} refused its input (the core's sentence is above)")
+    out = ctypes.create_string_buffer(needed)
+    written = ask(out, needed)
+    return out.raw[:min(written, needed)].decode("utf-8", "replace")
+
+
+def fmt_date(packed: int, length: int) -> str:
+    return _filled("kaya_fmt_date", lambda o, c: _lib.kaya_fmt_date(packed, length, o, c))
+
+
+def fmt_date_weekday(packed: int) -> str:
+    return _filled("kaya_fmt_date_weekday",
+                   lambda o, c: _lib.kaya_fmt_date_weekday(packed, o, c))
+
+
+def fmt_time(packed: int, length: int) -> str:
+    return _filled("kaya_fmt_time", lambda o, c: _lib.kaya_fmt_time(packed, length, o, c))
+
+
+def fmt_date_time(date: int, time: int, length: int) -> str:
+    return _filled("kaya_fmt_date_time",
+                   lambda o, c: _lib.kaya_fmt_date_time(date, time, length, o, c))
+
+
+def _number_options(min_digits: int | None, max_digits: int | None,
+                    grouping: bool) -> KayaNumberOptions:
+    return KayaNumberOptions(-1 if min_digits is None else min_digits,
+                             -1 if max_digits is None else max_digits, grouping)
+
+
+def fmt_number(value: float, min_digits: int | None, max_digits: int | None,
+               grouping: bool) -> str:
+    options = _number_options(min_digits, max_digits, grouping)
+    return _filled("kaya_fmt_number",
+                   lambda o, c: _lib.kaya_fmt_number(value, ctypes.byref(options), o, c))
+
+
+def fmt_percent(value: float, min_digits: int | None, max_digits: int | None,
+                grouping: bool) -> str:
+    options = _number_options(min_digits, max_digits, grouping)
+    return _filled("kaya_fmt_percent",
+                   lambda o, c: _lib.kaya_fmt_percent(value, ctypes.byref(options), o, c))
+
+
+def fmt_currency(value: float, code: str) -> str:
+    raw = code.encode("utf-8")
+    return _filled("kaya_fmt_currency",
+                   lambda o, c: _lib.kaya_fmt_currency(value, raw, o, c))
+
+
+def locale_line() -> str:
+    """kaya_locale's one line: tag, hour cycle, first weekday, calendar,
+    numbering, space-separated."""
+    return _filled("kaya_locale", lambda o, c: _lib.kaya_locale(o, c))
+
+
+def direction() -> int:
+    """0 left-to-right, 1 right-to-left."""
+    return _lib.kaya_direction()
+
+
+def text_scale() -> float:
+    return _lib.kaya_text_scale()
+
+
+def catalog(app: str) -> None:
+    _lib.kaya_catalog(app.encode("utf-8"))
+
+
+def tr(key: str, args: Sequence[tuple[str, int, int, float, str]]) -> str:
+    """`args` are (name, tag, i, f, s) records in the C API's own shape."""
+    packed = (KayaTrArg * max(len(args), 1))()
+    keep: list[bytes] = []
+    for at, (name, tag, i, f, s) in enumerate(args):
+        raw_name = name.encode("utf-8")
+        raw_s = s.encode("utf-8")
+        keep.extend((raw_name, raw_s))
+        packed[at] = KayaTrArg(raw_name, tag, i, f, raw_s)
+    raw_key = key.encode("utf-8")
+    return _filled("kaya_tr", lambda o, c: _lib.kaya_tr(raw_key, packed, len(args), o, c))
 
 
 def pref_get_string(key: str) -> str | None:

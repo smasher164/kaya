@@ -205,7 +205,10 @@ extern "system" fn Java_dev_kaya_KayaRing_attach(
     if !claim_attach() {
         return;
     }
-    // The `attach` above's order, one tier over.
+    // The `attach` above's order, one tier over: the locale knob first
+    // (docs/compliance-plan.md §2.2; the jvm and go knob legs died at the
+    // mount's wall on the first breadth matrix, 2026-09-23).
+    crate::fmt::install_locale_knob();
     arm_state(&mut env, &state_root);
     grant_measured_capabilities(&mut env, &activity);
     crate::jvm::register_ring_natives(&mut env)

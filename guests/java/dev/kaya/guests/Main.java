@@ -79,6 +79,11 @@ public final class Main {
             case "sheet":
                 app = Sheet::app;
                 break;
+            case "format":
+            case "formatde":
+            case "formatar":
+                app = Format::app;
+                break;
             case "background":
                 app = Background::app;
                 break;

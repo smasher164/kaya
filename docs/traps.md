@@ -12565,3 +12565,24 @@ pattern (`getTimeFormat(context)` reads the activity's locale, the
 system's, and answered English under the Arabic knob). A door arm that reached for `getInstanceForSkeleton` for a time
 would go red on the everyday leg by one invisible byte, which is the
 right red.
+
+## A guest that formats before the toolkit starts formats in the process's birth locale, and the knob's one install site was the Rust tier's (measured 2026-09-23)
+
+Two shapes of one race, both found by the first breadth matrix of the
+compliance pass. On the mac, every non-Rust knob leg died at the
+interpreter's wall (`KAYA_LOCALE=de-DE but the toolkit reads en-US`): the
+knob was installed by lib.rs's `run()`, which the Rust tier calls before
+spawning its app thread, while a Python, Go, C# or Java guest formats in its
+first build closure BEFORE `kaya_run`, and Foundation caches the process
+locale at that first read. On linux, six everyday-locale legs read
+`09/07/26`, `08:30` and `1234567.891` from Python, JS, Go, C#, OCaml and
+Haskell while Rust and Java read `09/07/2026`, `08:30 AM` and
+`1,234,567.891`: a C process is born in the "C" locale until
+`setlocale(LC_ALL, "")` runs, which GTK's init does later than a guest's
+first format, and the JVM does it for itself at startup. On Android the jvm
+and go hosts attach through the ring's own entry, not rusthost's, and that
+entry never installed the knob. The rule that holds now: the door's first
+entry, whichever it is, adopts the environment's locale and installs the
+knob once (`fmt::install_locale_knob` behind a `Once`, called from every
+public door call, the catalog, `kaya_run`, both Android attach entries and
+`run()`), so who formats first no longer decides what they read.

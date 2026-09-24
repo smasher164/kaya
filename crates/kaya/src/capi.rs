@@ -1373,6 +1373,10 @@ fn state() -> &'static CState {
 pub extern "C" fn kaya_run() -> i32 {
     // The panic log, for hosts whose stderr is not durable (fault.rs).
     crate::fault::log_panics();
+    // THE LOCALE KNOB, once, here as in lib.rs's run: a guest that formatted
+    // before this call already installed it (fmt.rs); one that did not needs
+    // it before the toolkit's first read (docs/compliance-plan.md §2.2).
+    crate::fmt::install_locale_knob();
     // BEFORE THE CORE STARTS: the second act's marker is the only source
     // of the scene in a process the platform started on a tap
     // (docs/tasks-s9-plan.md R6a).

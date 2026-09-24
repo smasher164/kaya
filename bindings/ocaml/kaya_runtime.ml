@@ -85,6 +85,152 @@ let kaya_pref_get_string =
     (string @-> size_t @-> ptr char @-> size_t @-> ptr size_t
     @-> returning int)
 
+(* The formatter door and the catalog (docs/compliance-plan.md §3; the C
+   API's fill shape: ask with cap 0, size, ask again). *)
+let kaya_fmt_date =
+  foreign ~from:lib "kaya_fmt_date"
+    (int64_t @-> int64_t @-> ptr char @-> size_t @-> returning size_t)
+
+let kaya_fmt_date_weekday =
+  foreign ~from:lib "kaya_fmt_date_weekday"
+    (int64_t @-> ptr char @-> size_t @-> returning size_t)
+
+let kaya_fmt_time =
+  foreign ~from:lib "kaya_fmt_time"
+    (int64_t @-> int64_t @-> ptr char @-> size_t @-> returning size_t)
+
+let kaya_fmt_date_time =
+  foreign ~from:lib "kaya_fmt_date_time"
+    (int64_t @-> int64_t @-> int64_t @-> ptr char @-> size_t
+    @-> returning size_t)
+
+type number_options
+let number_options : number_options structure typ = structure "KayaNumberOptions"
+let no_min = field number_options "min_fraction_digits" int32_t
+let no_max = field number_options "max_fraction_digits" int32_t
+let no_grouping = field number_options "grouping" bool
+let () = seal number_options
+
+let kaya_fmt_number =
+  foreign ~from:lib "kaya_fmt_number"
+    (double @-> ptr number_options @-> ptr char @-> size_t @-> returning size_t)
+
+let kaya_fmt_percent =
+  foreign ~from:lib "kaya_fmt_percent"
+    (double @-> ptr number_options @-> ptr char @-> size_t @-> returning size_t)
+
+let kaya_fmt_currency =
+  foreign ~from:lib "kaya_fmt_currency"
+    (double @-> string @-> ptr char @-> size_t @-> returning size_t)
+
+let kaya_locale =
+  foreign ~from:lib "kaya_locale" (ptr char @-> size_t @-> returning size_t)
+
+let kaya_direction = foreign ~from:lib "kaya_direction" (void @-> returning uint32_t)
+let kaya_text_scale = foreign ~from:lib "kaya_text_scale" (void @-> returning double)
+let kaya_catalog = foreign ~from:lib "kaya_catalog" (string @-> returning void)
+
+type tr_arg_c
+let tr_arg_c : tr_arg_c structure typ = structure "KayaTrArg"
+let ta_name = field tr_arg_c "name" (ptr char)
+let ta_tag = field tr_arg_c "tag" uint32_t
+let ta_i = field tr_arg_c "i" int64_t
+let ta_f = field tr_arg_c "f" double
+let ta_s = field tr_arg_c "s" (ptr char)
+let () = seal tr_arg_c
+
+let kaya_tr =
+  foreign ~from:lib "kaya_tr"
+    (string @-> ptr tr_arg_c @-> size_t @-> ptr char @-> size_t @-> returning size_t)
+
+(* Ask with cap 0, size, ask again; [None] is the core's fault (it printed
+   the sentence), never a legitimately empty answer. *)
+let fill (ask : char ptr -> Unsigned.size_t -> Unsigned.size_t) =
+  let len =
+    Unsigned.Size_t.to_int
+      (ask (Ctypes.from_voidp Ctypes.char Ctypes.null) (Unsigned.Size_t.of_int 0))
+  in
+  if len = 0 then None
+  else begin
+    let buf = CArray.make char len in
+    let written =
+      Unsigned.Size_t.to_int (ask (CArray.start buf) (Unsigned.Size_t.of_int len))
+    in
+    Some (String.init (min written len) (fun i -> CArray.get buf i))
+  end
+
+let fmt_date packed length = fill (kaya_fmt_date packed (Int64.of_int length))
+let fmt_date_weekday packed = fill (kaya_fmt_date_weekday packed)
+let fmt_time packed length = fill (kaya_fmt_time packed (Int64.of_int length))
+
+let fmt_date_time date time length =
+  fill (kaya_fmt_date_time date time (Int64.of_int length))
+
+let with_number_options min max grouping ask =
+  let o = make number_options in
+  setf o no_min (Int32.of_int min);
+  setf o no_max (Int32.of_int max);
+  setf o no_grouping grouping;
+  fill (ask (addr o))
+
+let fmt_number value min max grouping =
+  with_number_options min max grouping (kaya_fmt_number value)
+
+let fmt_percent value min max grouping =
+  with_number_options min max grouping (kaya_fmt_percent value)
+
+let fmt_currency value code = fill (kaya_fmt_currency value code)
+let locale_line () = fill kaya_locale
+let direction_bit () = Unsigned.UInt32.to_int (kaya_direction ())
+let text_scale () = kaya_text_scale ()
+let catalog app = kaya_catalog app
+
+type tr_arg =
+  | Tr_int of int64
+  | Tr_float of float
+  | Tr_str of string
+  | Tr_date of int64
+  | Tr_time of int64
+
+(* A C string the GC cannot move: a char array, kept alive past the call. *)
+let c_string s =
+  let n = String.length s in
+  let a = CArray.make char (n + 1) in
+  String.iteri (fun i c -> CArray.set a i c) s;
+  CArray.set a n '\000';
+  a
+
+let tr key args =
+  let n = List.length args in
+  let records = CArray.make tr_arg_c (max n 1) in
+  let keep = ref [] in
+  List.iteri
+    (fun idx (name, arg) ->
+      let r = CArray.get records idx in
+      let name_c = c_string name in
+      keep := name_c :: !keep;
+      setf r ta_name (CArray.start name_c);
+      setf r ta_i 0L;
+      setf r ta_f 0.0;
+      setf r ta_s (Ctypes.from_voidp Ctypes.char Ctypes.null);
+      (match arg with
+       | Tr_int i -> setf r ta_tag (Unsigned.UInt32.of_int 0); setf r ta_i i
+       | Tr_float f -> setf r ta_tag (Unsigned.UInt32.of_int 1); setf r ta_f f
+       | Tr_str s ->
+           let s_c = c_string s in
+           keep := s_c :: !keep;
+           setf r ta_tag (Unsigned.UInt32.of_int 2);
+           setf r ta_s (CArray.start s_c)
+       | Tr_date d -> setf r ta_tag (Unsigned.UInt32.of_int 3); setf r ta_i d
+       | Tr_time t -> setf r ta_tag (Unsigned.UInt32.of_int 4); setf r ta_i t);
+      CArray.set records idx r)
+    args;
+  let answer =
+    fill (kaya_tr key (CArray.start records) (Unsigned.Size_t.of_int n))
+  in
+  ignore (Sys.opaque_identity !keep);
+  answer
+
 let kaya_pref_get_i64 =
   foreign ~from:lib "kaya_pref_get_i64"
     (string @-> size_t @-> ptr int64_t @-> returning int)

@@ -69,6 +69,40 @@ than a verb of its own. What breadth still owes, held open here:
     `{fmt:…}` template answered by java.text and the platform's text-format
     class, the three format legs on the android lane, check-appearance's
     Compose clauses with three more watched negatives.
+  - ~~**BREADTH: the eight bindings' fmt/tr/catalog**~~ — LANDED 2026-09-23
+    (four forks, two bindings each, the spellings of §1.4 with three
+    deviations the sugar census records): every binding's door over the C
+    API's fill shape, a 0 answer raised by name, the format guest in nine
+    languages plus the C floor, the legs under three locales on the mac in
+    all ten, check-sugar-surface's twelve-part census and check-l10n's
+    nine lookup spellings. Building it found the knob's ONE install site
+    (lib.rs's run) was the Rust tier's alone: a Python, Go or C# guest
+    formats in its first build closure BEFORE kaya_run, Foundation caches
+    the locale at that first read, and every non-Rust knob leg died at the
+    interpreter's wall — so the install is a Once behind every door entry,
+    the catalog and kaya_run (fmt.rs). The Node addon gained the twelve
+    entries (node.rs).
+  - ~~**BREADTH: the task manager localizes through kaya**~~ — LANDED
+    2026-09-23: guests/assets/l10n/tasks.en.ftl and guests/assets/l10n/tasks.ar.ftl, every word of
+    guests/rust/tasks.rs through `tr!` and every date through the door,
+    tasks.steps's dates as `{fmt:…}` templates, and `tasksrtl` on all five
+    lanes (the tasks screens under ar-EG without the notification acts,
+    the relaunch and the drag, which drive platform doors the tasks legs
+    already hold). Found: `DATETIME($time)` read `8:30:00 AM`, since the
+    function's unstated length was medium where the bare placeable's is
+    short (l10n.rs, now short for a time).
+  - **BREADTH STILL OWED**: `tasksbig` (KAYA_TEXT_SCALE=2.0 on the phones and
+    GTK, the registry write around the windows legs per R5, the mac at 1.0)
+    and `clock24` (§4), then the review page at 200% and in Arabic on every
+    lane.
+  - **FOLLOW-UP — the windows launchers are 300 checked-in near-copies**
+    (the maintainer, 2026-09-23: "do we need to be using a bunch of batch
+    scripts like that?"): every leg is a tools/guest/run_<leg>.cmd because
+    schtasks starts a command line and the environment has to be set
+    before the guest, but the files are templated by language and could be
+    DERIVED from the roster at deploy time, with check-staging reading the
+    derivation instead of the files. KEY: run_<leg>.cmd, tools/guest,
+    launcher(leg).
 
 ## ~~BUILD — sheets: the root-hosting modal (design pass approved 2026-09-21)~~ COMPLETE 2026-09-21: depth on the mac, breadth on all five lanes in nine languages, the task manager's quick-add sheet (S6) and the review page (https://claude.ai/artifact/549v7HfaFeTJv4rVuLt8RF) with the shared scene and the quick-add captured on every lane, each viewed before publication; the depth and breadth matrices ran ALL PASS and S6's ran with its closing commit
 KEY: sheet, present_sheet, dismiss_sheet, sheet_dismissed, dismiss_requested, intercept_dismiss, detent, SHEET_PROPS, expect_sheets, expect_sheet, expect_sheet_detent, AdwDialog, ModalBottomSheet, presentationDetents, Popup, sheetprobe, quick-add sheet

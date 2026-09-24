@@ -35,6 +35,24 @@ type Floor = {
   prefSetF64(key: string, value: number): void;
   prefSetBool(key: string, value: number): void;
   prefRemove(key: string): void;
+  // The formatter door and the catalog (docs/compliance-plan.md §3): the
+  // C API's kaya_fmt_* / kaya_locale / kaya_direction / kaya_text_scale /
+  // kaya_catalog / kaya_tr, dates and times PACKED (YYYYMMDD, HHMM),
+  // lengths 0/1/2, digit counts -1 for the platform's default, a tr
+  // argument as [name, tag, i, f, s] in the C API's own record; a
+  // refused input THROWS out of the addon with the core's sentence.
+  fmtDate(packed: number, length: number): string;
+  fmtDateWeekday(packed: number): string;
+  fmtTime(packed: number, length: number): string;
+  fmtDateTime(date: number, time: number, length: number): string;
+  fmtNumber(value: number, minDigits: number, maxDigits: number, grouping: number): string;
+  fmtPercent(value: number, minDigits: number, maxDigits: number, grouping: number): string;
+  fmtCurrency(value: number, code: string): string;
+  locale(): string;
+  direction(): number;
+  textScale(): number;
+  catalog(app: string): void;
+  tr(key: string, args: [string, number, number, number, string][]): string;
   openPicked(handle: number, mode: number): { raw: number; seekable: boolean };
   pickedRead(handle: number): Uint8Array;
   pickedWrite(handle: number, bytes: Uint8Array): void;
@@ -222,6 +240,63 @@ export function prefSetBool(key: string, value: boolean): void {
 
 export function prefRemove(key: string): void {
   lib.prefRemove(key);
+}
+
+export function fmtDate(packed: number, length: number): string {
+  return lib.fmtDate(packed, length);
+}
+
+export function fmtDateWeekday(packed: number): string {
+  return lib.fmtDateWeekday(packed);
+}
+
+export function fmtTime(packed: number, length: number): string {
+  return lib.fmtTime(packed, length);
+}
+
+export function fmtDateTime(date: number, time: number, length: number): string {
+  return lib.fmtDateTime(date, time, length);
+}
+
+export function fmtNumber(value: number, minDigits: number, maxDigits: number, grouping: boolean): string {
+  return lib.fmtNumber(value, minDigits, maxDigits, grouping ? 1 : 0);
+}
+
+export function fmtPercent(value: number, minDigits: number, maxDigits: number, grouping: boolean): string {
+  return lib.fmtPercent(value, minDigits, maxDigits, grouping ? 1 : 0);
+}
+
+export function fmtCurrency(value: number, code: string): string {
+  return lib.fmtCurrency(value, code);
+}
+
+/** kaya_locale's one line: tag, hour cycle, first weekday, calendar,
+ * numbering, space-separated. */
+export function localeLine(): string {
+  return lib.locale();
+}
+
+/** 0 left-to-right, 1 right-to-left. */
+export function direction(): number {
+  return lib.direction();
+}
+
+export function textScale(): number {
+  return lib.textScale();
+}
+
+export function catalog(app: string): void {
+  lib.catalog(app);
+}
+
+export const TR_INT = 0;
+export const TR_FLOAT = 1;
+export const TR_STR = 2;
+export const TR_DATE = 3;
+export const TR_TIME = 4;
+
+export function tr(key: string, args: [string, number, number, number, string][]): string {
+  return lib.tr(key, args);
 }
 
 export function openPicked(handle: number, mode: number): { fd: number; seekable: boolean } {

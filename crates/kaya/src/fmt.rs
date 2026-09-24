@@ -76,32 +76,38 @@ pub struct LocaleInfo {
 
 /// The date, in the process locale.
 pub fn date(d: Date, length: Length) -> String {
+    install_locale_knob();
     platform::date(d, length)
 }
 
 /// The date with its weekday and no year — a task list's idiom (`Mon, Sep 7`
 /// in en-US): the platform orders the `EEE d MMM` fields for the locale.
 pub fn date_weekday(d: Date) -> String {
+    install_locale_knob();
     platform::date_weekday(d)
 }
 
 /// The time, in the process locale and the user's hour cycle.
 pub fn time(t: Time, length: Length) -> String {
+    install_locale_knob();
     platform::time(t, length)
 }
 
 /// The date and the time together, one length for both.
 pub fn date_time(d: Date, t: Time, length: Length) -> String {
+    install_locale_knob();
     platform::date_time(d, t, length)
 }
 
 /// A number with the locale's separators.
 pub fn number(value: f64, options: NumberOptions) -> String {
+    install_locale_knob();
     platform::number(value, options)
 }
 
 /// A fraction as the locale's percentage: 0.256 is `26%` in en-US.
 pub fn percent(value: f64, options: NumberOptions) -> String {
+    install_locale_knob();
     platform::percent(value, options)
 }
 
@@ -109,6 +115,7 @@ pub fn percent(value: f64, options: NumberOptions) -> String {
 /// with the locale's symbol placement and the currency's own fraction
 /// digits (a yen has none).
 pub fn currency(value: f64, code: &str) -> String {
+    install_locale_knob();
     platform::currency(value, code)
 }
 
@@ -154,6 +161,7 @@ pub(crate) fn platform_answer(kind: &str, value: &str, length: &str) -> String {
 /// The process locale and its settings, asked of the platform each time
 /// so a setting flipped while the app runs is seen.
 pub fn locale() -> LocaleInfo {
+    install_locale_knob();
     platform::locale()
 }
 
@@ -219,11 +227,25 @@ pub(crate) fn text_scale_override() -> Option<f64> {
 /// exists (lib.rs's `run`), so a guest that formats first formats right
 /// and the toolkit's every read agrees (docs/compliance-plan.md §2.2).
 /// UNSET INSTALLS NOTHING; a malformed tag dies here naming the shape.
+/// ONCE, FROM WHICHEVER ENTRY COMES FIRST: `run()` on the Rust tier, but a
+/// Python, Go or C# guest formats or loads its catalog in its first build
+/// closure BEFORE `kaya_run`, and Foundation caches the process locale at
+/// its first read (measured 2026-09-23: every non-Rust knob leg died at the
+/// interpreter's wall), so the door's own entries install it too.
 pub(crate) fn install_locale_knob() {
-    let Ok(tag) = std::env::var("KAYA_LOCALE") else { return };
-    let ok = !tag.is_empty() && tag.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-');
-    assert!(ok, "kaya: KAYA_LOCALE={tag:?} is not a BCP-47 tag such as ar-EG");
-    platform::install_locale(&tag, direction_of(&tag));
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        // The environment's own locale first, where the platform does not
+        // adopt it by itself: a C process starts in the "C" locale until
+        // setlocale(LC_ALL, "") runs, which GTK's init does LATER than a
+        // guest's first format (six linux legs read `09/07/26` and
+        // `1234567.891` on 2026-09-23, docs/traps.md).
+        platform::adopt_environment();
+        let Ok(tag) = std::env::var("KAYA_LOCALE") else { return };
+        let ok = !tag.is_empty() && tag.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-');
+        assert!(ok, "kaya: KAYA_LOCALE={tag:?} is not a BCP-47 tag such as ar-EG");
+        platform::install_locale(&tag, direction_of(&tag));
+    });
 }
 
 /// A Date and a Time as the platform's own instant, local time zone.
@@ -493,6 +515,8 @@ mod platform {
         .to_owned();
         LocaleInfo { tag, hour_cycle, first_weekday, calendar, numbering }
     }
+
+    pub(super) fn adopt_environment() {}
 
     /// Apple's own route: the ARGUMENT domain of the standard defaults,
     /// what `-AppleLanguages` on a command line sets — volatile, nothing
@@ -782,6 +806,12 @@ mod platform {
         }
     }
 
+    /// `setlocale(LC_ALL, "")`, what `gtk_init` does and a guest that formats
+    /// before it would otherwise miss; idempotent under GTK's own call.
+    pub(super) fn adopt_environment() {
+        unsafe { libc::setlocale(libc::LC_ALL, c"".as_ptr()) };
+    }
+
     /// `setlocale` from the tag, and the environment GTK's own init reads —
     /// `gtk_init` calls `setlocale(LC_ALL, "")`, which would put the
     /// container's back. A locale the image has not generated is refused
@@ -926,6 +956,8 @@ mod platform {
         let numbering = parts.next().unwrap_or("latn").to_owned();
         LocaleInfo { tag, hour_cycle, first_weekday, calendar, numbering }
     }
+
+    pub(super) fn adopt_environment() {}
 
     /// The process default, which every ICU and java.text formatter
     /// reads; the composition's half (the forced Configuration and layout
@@ -1145,6 +1177,8 @@ mod platform {
         LocaleInfo { tag, hour_cycle, first_weekday, calendar, numbering }
     }
 
+    pub(super) fn adopt_environment() {}
+
     /// `SetPrimaryLanguageOverride` is refused in an unpackaged process
     /// (U5, 0x80073D54), so the knob is the language list every formatter
     /// takes and the `Language` and `FlowDirection` every window ground
@@ -1201,6 +1235,7 @@ mod platform {
     pub(super) fn install_locale(_: &str, _: super::Direction) {
         refuse()
     }
+    pub(super) fn adopt_environment() {}
 }
 
 /// The Windows arm's own digits, run ON THE LANE'S VM by tools/deploy-win.py's

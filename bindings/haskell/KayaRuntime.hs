@@ -14,6 +14,19 @@ module KayaRuntime
     openAsset,
     assetMissSentence,
     appDataDir,
+    fmtDateRaw,
+    fmtDateWeekdayRaw,
+    fmtTimeRaw,
+    fmtDateTimeRaw,
+    fmtNumberRaw,
+    fmtPercentRaw,
+    fmtCurrencyRaw,
+    localeLine,
+    directionBit,
+    textScaleRaw,
+    catalogRaw,
+    TrArgRaw (..),
+    trRaw,
     prefGetString,
     prefGetI64,
     prefGetF64,
@@ -60,7 +73,8 @@ import Data.Word (Word16, Word32, Word64, Word8)
 import Foreign.C.Types (CBool (..), CInt (..), CSize (..))
 import Foreign.Marshal.Alloc (alloca, allocaBytes, mallocBytes)
 import Foreign.Ptr (Ptr, castPtr, nullPtr, plusPtr)
-import Foreign.Storable (peek, peekByteOff, poke)
+import Foreign.Storable (peek, peekByteOff, poke, pokeByteOff)
+import Control.Monad (foldM_)
 -- Text's own UTF-8 codec, not Foreign.C.String and not GHC.Foreign: the
 -- first marshals through the LOCALE's encoding, so LANG=C would
 -- round-trip differently, and the second needs a String to do it.
@@ -146,6 +160,45 @@ foreign import ccall unsafe "kaya_asset_why_not"
 -- asset calls are: none of these parks.
 foreign import ccall unsafe "kaya_app_data_dir"
   c_kaya_app_data_dir :: Ptr Word8 -> CSize -> IO CSize
+
+-- The formatter door and the catalog (docs/compliance-plan.md §3), the
+-- C API's fill shape: ask with cap 0, size, ask again. `unsafe` because
+-- none of these parks.
+foreign import ccall unsafe "kaya_fmt_date"
+  c_kaya_fmt_date :: Int64 -> Int64 -> Ptr Word8 -> CSize -> IO CSize
+
+foreign import ccall unsafe "kaya_fmt_date_weekday"
+  c_kaya_fmt_date_weekday :: Int64 -> Ptr Word8 -> CSize -> IO CSize
+
+foreign import ccall unsafe "kaya_fmt_time"
+  c_kaya_fmt_time :: Int64 -> Int64 -> Ptr Word8 -> CSize -> IO CSize
+
+foreign import ccall unsafe "kaya_fmt_date_time"
+  c_kaya_fmt_date_time :: Int64 -> Int64 -> Int64 -> Ptr Word8 -> CSize -> IO CSize
+
+foreign import ccall unsafe "kaya_fmt_number"
+  c_kaya_fmt_number :: Double -> Ptr Word8 -> Ptr Word8 -> CSize -> IO CSize
+
+foreign import ccall unsafe "kaya_fmt_percent"
+  c_kaya_fmt_percent :: Double -> Ptr Word8 -> Ptr Word8 -> CSize -> IO CSize
+
+foreign import ccall unsafe "kaya_fmt_currency"
+  c_kaya_fmt_currency :: Double -> Ptr Word8 -> Ptr Word8 -> CSize -> IO CSize
+
+foreign import ccall unsafe "kaya_locale"
+  c_kaya_locale :: Ptr Word8 -> CSize -> IO CSize
+
+foreign import ccall unsafe "kaya_direction"
+  c_kaya_direction :: IO Word32
+
+foreign import ccall unsafe "kaya_text_scale"
+  c_kaya_text_scale :: IO Double
+
+foreign import ccall unsafe "kaya_catalog"
+  c_kaya_catalog :: Ptr Word8 -> IO ()
+
+foreign import ccall unsafe "kaya_tr"
+  c_kaya_tr :: Ptr Word8 -> Ptr Word8 -> CSize -> Ptr Word8 -> CSize -> IO CSize
 
 foreign import ccall unsafe "kaya_pref_get_string"
   c_kaya_pref_get_string ::
@@ -278,6 +331,102 @@ appDataDir = do
     else allocaBytes (fromIntegral len) $ \out -> do
       written <- c_kaya_app_data_dir out len
       T.unpack <$> peekUtf8 out (min written len)
+
+-- The door's answer, 'assetMissSentence''s two-call shape; 'Nothing' is
+-- the core's fault (its sentence is on stderr), never an empty answer.
+fillDoor :: (Ptr Word8 -> CSize -> IO CSize) -> IO (Maybe Text)
+fillDoor ask = do
+  len <- ask nullPtr 0
+  if len == 0
+    then return Nothing
+    else allocaBytes (fromIntegral len) $ \out -> do
+      written <- ask out len
+      Just <$> peekUtf8 out (min written len)
+
+-- A NUL-terminated copy of a Text, for the C API's `const char *` arguments.
+withCString0 :: Text -> (Ptr Word8 -> IO a) -> IO a
+withCString0 text body =
+  let bytes = TE.encodeUtf8 text <> BS.singleton 0
+   in unsafeUseAsCStringLen bytes $ \(p, _) -> body (castPtr p)
+
+fmtDateRaw :: Int64 -> Int64 -> IO (Maybe Text)
+fmtDateRaw packed len = fillDoor (c_kaya_fmt_date packed len)
+
+fmtDateWeekdayRaw :: Int64 -> IO (Maybe Text)
+fmtDateWeekdayRaw packed = fillDoor (c_kaya_fmt_date_weekday packed)
+
+fmtTimeRaw :: Int64 -> Int64 -> IO (Maybe Text)
+fmtTimeRaw packed len = fillDoor (c_kaya_fmt_time packed len)
+
+fmtDateTimeRaw :: Int64 -> Int64 -> Int64 -> IO (Maybe Text)
+fmtDateTimeRaw date time len = fillDoor (c_kaya_fmt_date_time date time len)
+
+-- KayaNumberOptions by hand: two i32 and a bool, twelve bytes.
+withNumberOptions :: Int32 -> Int32 -> Bool -> (Ptr Word8 -> IO a) -> IO a
+withNumberOptions minD maxD grouped body =
+  allocaBytes 12 $ \o -> do
+    pokeByteOff o 0 minD
+    pokeByteOff o 4 maxD
+    pokeByteOff o 8 (if grouped then 1 else 0 :: Word8)
+    body o
+
+fmtNumberRaw :: Double -> Int32 -> Int32 -> Bool -> IO (Maybe Text)
+fmtNumberRaw v minD maxD grouped =
+  withNumberOptions minD maxD grouped $ \o -> fillDoor (c_kaya_fmt_number v o)
+
+fmtPercentRaw :: Double -> Int32 -> Int32 -> Bool -> IO (Maybe Text)
+fmtPercentRaw v minD maxD grouped =
+  withNumberOptions minD maxD grouped $ \o -> fillDoor (c_kaya_fmt_percent v o)
+
+fmtCurrencyRaw :: Double -> Text -> IO (Maybe Text)
+fmtCurrencyRaw v code = withCString0 code $ \c -> fillDoor (c_kaya_fmt_currency v c)
+
+localeLine :: IO (Maybe Text)
+localeLine = fillDoor c_kaya_locale
+
+directionBit :: IO Word32
+directionBit = c_kaya_direction
+
+textScaleRaw :: IO Double
+textScaleRaw = c_kaya_text_scale
+
+catalogRaw :: Text -> IO ()
+catalogRaw app = withCString0 app c_kaya_catalog
+
+-- KayaTrArg's five tags, the packed date and time as the wire packs them.
+data TrArgRaw = TrInt Int64 | TrFloat Double | TrStr Text | TrDate Int64 | TrTime Int64
+
+-- Every string alive for the whole call, nested.
+withStrings :: [Text] -> ([Ptr Word8] -> IO a) -> IO a
+withStrings [] body = body []
+withStrings (s : rest) body = withCString0 s $ \p -> withStrings rest $ \ps -> body (p : ps)
+
+-- KayaTrArg by hand: name ptr, u32 tag (padded), i64, f64, s ptr — forty
+-- bytes at offsets 0, 8, 16, 24, 32.
+trRaw :: Text -> [(Text, TrArgRaw)] -> IO (Maybe Text)
+trRaw key args =
+  withCString0 key $ \k ->
+    withStrings (map fst args) $ \names ->
+      withStrings [s | (_, TrStr s) <- args] $ \strs ->
+        allocaBytes (max 1 n * 40) $ \records -> do
+          let write (i, (name, arg)) rest = do
+                let r = records `plusPtr` (i * 40)
+                pokeByteOff r 0 name
+                pokeByteOff r 16 (0 :: Int64)
+                pokeByteOff r 24 (0 :: Double)
+                pokeByteOff r 32 (nullPtr :: Ptr Word8)
+                case arg of
+                  TrInt v -> pokeByteOff r 8 (0 :: Word32) >> pokeByteOff r 16 v >> return rest
+                  TrFloat v -> pokeByteOff r 8 (1 :: Word32) >> pokeByteOff r 24 v >> return rest
+                  TrStr _ -> case rest of
+                    (s : more) -> pokeByteOff r 8 (2 :: Word32) >> pokeByteOff r 32 s >> return more
+                    [] -> return []
+                  TrDate v -> pokeByteOff r 8 (3 :: Word32) >> pokeByteOff r 16 v >> return rest
+                  TrTime v -> pokeByteOff r 8 (4 :: Word32) >> pokeByteOff r 16 v >> return rest
+          foldM_ (flip write) strs (zip [0 ..] (zip names (map snd args)))
+          fillDoor (c_kaya_tr k records (fromIntegral n))
+  where
+    n = length args
 
 -- | The stored string, or 'Nothing' when the key is absent or holds
 -- another type.

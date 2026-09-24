@@ -372,6 +372,57 @@ val string_of_time : time -> string
 val pack_date : date -> int64
 val pack_time : time -> int64
 val date_of_packed : int64 -> date
+
+(* The formatter door (docs/compliance-plan.md §1.4, the OCaml row): a
+   value in, the platform's own string out, in the process locale; pure,
+   any thread, no transaction. An unstated digit count is the platform's
+   default. A fault at the floor raises by name. *)
+module Fmt : sig
+  type length = [ `Short | `Medium | `Long ]
+
+  val date : ?length:length -> date -> string
+  val date_weekday : date -> string
+  val time : ?length:length -> time -> string
+  val date_time : ?length:length -> date -> time -> string
+
+  val number :
+    ?min_fraction_digits:int -> ?max_fraction_digits:int -> ?grouping:bool -> float -> string
+
+  val percent :
+    ?min_fraction_digits:int -> ?max_fraction_digits:int -> ?grouping:bool -> float -> string
+
+  (* [currency 12.5 "USD"]: the ISO 4217 code. *)
+  val currency : float -> string -> string
+
+  (* Who the user is: the BCP-47 tag, the hour cycle (12 or 24), the first
+     weekday (1 Monday .. 7 Sunday), the calendar and the numbering system. *)
+  type locale = {
+    tag : string;
+    hour_cycle : int;
+    first_weekday : int;
+    calendar : string;
+    numbering : string;
+  }
+
+  val locale : unit -> locale
+
+  type direction = [ `Ltr | `Rtl ]
+
+  val direction : unit -> direction
+  val text_scale : unit -> float
+end
+
+(* The catalog (docs/compliance-plan.md §2.4): [catalog "tasks"] loads
+   l10n/tasks.<locale>.ftl under the asset root once at startup, and
+   [tr "tasks-due" [ "count", `Int 3; "date", `Date d ]] is the message
+   with its arguments filled, dates and numbers through the door. A missing
+   key or argument is the core's panic naming it. *)
+val catalog : string -> unit
+
+type tr_arg =
+  [ `Int of int | `Float of float | `Text of string | `Date of date | `Time of time ]
+
+val tr : string -> (string * tr_arg) list -> string
 val time_of_packed : int64 -> time
 
 (* THE TYPE WITNESS, one for the binding: a GADT, OCaml's own answer to

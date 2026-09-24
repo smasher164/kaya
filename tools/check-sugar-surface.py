@@ -2508,6 +2508,135 @@ if sheet_fake != len(SHEET_PARTS) * 9:
 print(f"check-sugar-surface: sheet surface watched: fake {sheet_fake}/"
       f"{len(SHEET_PARTS) * 9}")
 
+# --- THE FORMATTER DOOR AND THE CATALOG, all nine (docs/compliance-plan.md
+# §1.4) ------------------------------------------------------------------
+# Neither a KIND nor a WINDOW PROP nor a wire record: the door is a C API
+# family (kaya_fmt_*, kaya_locale, kaya_direction, kaya_text_scale,
+# kaya_catalog, kaya_tr) that reaches every binding through the header
+# whether or not a guest can spell one call of it, so a binding could ship
+# formatting nothing and every scene it runs stays green — the format
+# scene runs in nine languages, but a language whose guest is missing is
+# check-steps' finding, not this one's, and a door with one call missing
+# (a percent, the weekday date) is nobody's. Twelve parts, read out of each
+# binding's own file, the identifier INSIDE the pattern so the fake stems
+# below fire nine times per part. Three bindings do not use kaya's own
+# word and the table says so: Go's `Direction()` answers a `LayoutDirection`
+# because a Go function and type cannot share a name, Swift's records are
+# `KayaNumberSpec` and `KayaArg` because the C header holds
+# `KayaNumberOptions` and `KayaTrArg`, and Java's and Swift's statics live
+# on `KayaApp` (`KayaApp.fmt()`, `KayaApp.fmt`) because that is the class
+# every other process-wide call of theirs lives on.
+L10N_FILES = {
+    "rust": ("crates/kaya/src/fmt.rs", "crates/kaya/src/l10n.rs"),
+    "python": ("bindings/python/kaya/fmt.py", "bindings/python/kaya/__init__.py"),
+    "go": ("bindings/go/l10n.go", "bindings/go/l10n.go"),
+    "csharp": ("bindings/csharp/KayaFmt.cs", "bindings/csharp/KayaFmt.cs"),
+    "java": ("bindings/java/dev/kaya/KayaApp.java", "bindings/java/dev/kaya/KayaApp.java"),
+    "swift": ("bindings/swift/KayaApp.swift", "bindings/swift/KayaApp.swift"),
+    "haskell": ("bindings/haskell/KayaApp.hs", "bindings/haskell/KayaApp.hs"),
+    "ocaml": ("bindings/ocaml/kaya_app.ml", "bindings/ocaml/kaya_app.ml"),
+    "js": ("bindings/js/kaya/index.ts", "bindings/js/kaya/index.ts"),
+}
+
+# The door's calls: (snake, pascal, camel, haskell) per part.
+L10N_DOOR = [
+    ("date", "Date", "date", "fmtDate"),
+    ("date_weekday", "DateWeekday", "dateWeekday", "fmtDateWeekday"),
+    ("time", "Time", "time", "fmtTime"),
+    ("date_time", "DateTime", "dateTime", "fmtDateTime"),
+    ("number", "Number", "number", "fmtNumber"),
+    ("percent", "Percent", "percent", "fmtPercent"),
+    ("currency", "Currency", "currency", "fmtCurrency"),
+    ("locale", "Locale", "locale", "locale"),
+    ("direction", "Direction", "direction", "direction"),
+    ("text_scale", "TextScale", "textScale", "textScale"),
+]
+
+
+def l10n_rows(part, snake, pascal, camel, hs):
+    """(lang, rel, pattern) for one door call, each binding's own idiom:
+    a module of functions on Rust, Python, OCaml and Haskell, a `Format*`
+    family on Go, a `Fmt` class on C#, Java and Swift, a frozen object on JS."""
+    F = L10N_FILES
+    go = f"Format{pascal}" if part not in ("locale", "direction", "text_scale") else pascal
+    return [("rust", F["rust"][0], rf"^pub fn {snake}\("),
+            ("python", F["python"][0], rf"^def {snake}\("),
+            ("go", F["go"][0], rf"^func {go}\("),
+            ("csharp", F["csharp"][0], rf"public static \S+ {pascal}\("),
+            ("java", F["java"][0], rf"        public \S+ {camel}\("),
+            ("swift", F["swift"][0], rf"    public static func {camel}\("),
+            ("haskell", F["haskell"][0], rf"^{hs} ::"),
+            ("ocaml", F["ocaml"][0], rf"^  let {snake} "),
+            ("js", F["js"][0], rf"^  {camel}\(")]
+
+
+def l10n_catalog_rows(which, s, P, c):
+    """The catalog pair: `catalog(app)` and `tr(key, args)`."""
+    F = L10N_FILES
+    if which == "catalog":
+        return [("rust", F["rust"][1], rf"^pub fn {s}\(app: &str\)"),
+                ("python", F["python"][1], rf"^def {s}\(app: str\)"),
+                ("go", F["go"][1], rf"^func {P}\(app string\)"),
+                ("csharp", F["csharp"][1], rf"public static void {P}\(string app\)"),
+                ("java", F["java"][1], rf"public static void {c}\(String app\)"),
+                ("swift", F["swift"][1], rf"public static func {c}\(_ app: String\)"),
+                ("haskell", F["haskell"][1], rf"^{c} :: Text -> IO \(\)"),
+                ("ocaml", F["ocaml"][1], rf"^let {s} app "),
+                ("js", F["js"][1], rf"^export function {c}\(app: string\)")]
+    return [("rust", F["rust"][1], rf"^macro_rules! {s} \{{"),
+            ("python", F["python"][1], rf"^def {s}\(key: str, \*\*args"),
+            ("go", F["go"][1], rf"^func {P}\(key string, args Args\)"),
+            ("csharp", F["csharp"][1], rf"public static string {P}\(string key, params"),
+            ("java", F["java"][1],
+             rf"public static String {c}\(String key, Map<String, \?> args\)"),
+            ("swift", F["swift"][1],
+             rf"public static func {c}\(_ key: String, _ args: \[String: KayaArg\]"),
+            ("haskell", F["haskell"][1], rf"^{c} :: Text -> \[\(Text, Arg\)\] -> IO Text"),
+            ("ocaml", F["ocaml"][1], rf"^let {s} key \(args : \(string \* tr_arg\) list\)"),
+            ("js", F["js"][1], rf"^export function {c}\(key: string, args: Record<string, TrArg>")]
+
+
+def check_l10n_surface(door, catalog, findings=None):
+    global status
+    for part, snake, pascal, camel, hs in door:
+        for lang, rel, pattern in l10n_rows(part, snake, pascal, camel, hs):
+            if not grep_file(pattern, rel):
+                msg = (f"check-sugar-surface: {lang} has no sugar for the "
+                       f"formatter door's '{part}' (wanted /{pattern}/ in {rel})")
+                if findings is None:
+                    print(msg)
+                    status = 1
+                else:
+                    findings.append(msg)
+    for which, stems in catalog:
+        for lang, rel, pattern in l10n_catalog_rows(which, *stems):
+            if not grep_file(pattern, rel):
+                msg = (f"check-sugar-surface: {lang} has no sugar for the "
+                       f"catalog's '{which}' (wanted /{pattern}/ in {rel})")
+                if findings is None:
+                    print(msg)
+                    status = 1
+                else:
+                    findings.append(msg)
+
+
+check_l10n_surface([(s, s, P, c, hs) for s, P, c, hs in L10N_DOOR],
+                   [("catalog", ("catalog", "Catalog", "catalog")),
+                    ("tr", ("tr", "Tr", "tr"))])
+
+# THE BUILT-IN NEGATIVE: every part must fire in all nine for stems that
+# exist nowhere.
+fake = []
+check_l10n_surface([("kayafake", "kayafake", "Kayafake", "kayafake", "kayafake")],
+                   [("catalog", ("kayafake", "Kayafake", "kayafake")),
+                    ("tr", ("kayafake", "Kayafake", "kayafake"))], findings=fake)
+l10n_fake = sum(1 for m in fake if "has no sugar for the formatter door's" in m
+                or "has no sugar for the catalog's" in m)
+if l10n_fake != 3 * 9:
+    selftest_exit(f"check-sugar-surface: self-test failed ({l10n_fake}/27 "
+                  f"formatter and catalog patterns fired for stems that exist nowhere)")
+print(f"check-sugar-surface: formatter door and catalog watched: fake {l10n_fake}/27")
+
 # --- (c2f) THE DND SURFACE, all nine (docs/dnd-plan.md §4) ----------
 # Neither a KIND nor a WINDOW PROP, so both sweeps above are blind to it
 # while TX 49/50/51 and occurrences 22/23 reach every binding through the

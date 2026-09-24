@@ -3,7 +3,9 @@
 # list at a time, so `label@title[t3]` names its current copy wherever it
 # sits. The clock is fixed at Monday 2026-09-07 under the harness. Five
 # sections (R4): the Logbook and Settings are View-menu screens pushed
-# onto the active section's stack.
+# onto the active section's stack. THE WORDS ARE THE en CATALOG'S BYTES and
+# every date is the platform's own through `{fmt:…}` (docs/compliance-plan.md
+# §6); tasksrtl.steps is this script's Arabic half.
 expect_title "tasks"
 expect_sections 5
 expect_section "Inbox"
@@ -54,8 +56,8 @@ expect_section_symbol "Today" "star"
 expect label@today_count "2 today"
 expect_section_badge "Today" 2
 expect label@title[t3] "Draft chapter 3"
-expect label@caption[t3] "Mon 7 Sep, Thesis"
-expect label@caption[t4] "Mon 7 Sep"
+expect label@caption[t3] "{fmt:date_weekday 2026-09-07}, Thesis"
+expect label@caption[t4] "{fmt:date_weekday 2026-09-07}"
 toggle checkbox@done[t3] on
 expect label@today_count "1 today"
 expect_section_badge "Today" 1
@@ -77,12 +79,12 @@ expect_section_badge "Today" 2
 select_section 2
 expect_section "Upcoming"
 expect label@upcoming_count "2 upcoming"
-expect label@caption[t5] "Wed 9 Sep, Trip"
-expect label@caption[t8] "Sat 12 Sep, Thesis"
+expect label@caption[t5] "{fmt:date_weekday 2026-09-09}, Trip"
+expect label@caption[t8] "{fmt:date_weekday 2026-09-12}, Thesis"
 select_section 3
 expect_section "Anytime"
 expect label@anytime_count "2 anytime"
-expect label@caption[t6] "due Wed 30 Sep, Trip"
+expect label@caption[t6] "due {fmt:date_weekday 2026-09-30}, Trip"
 expect label@caption[t7] "Kitchen"
 
 # Details: a when-date set on the pushed screen re-routes the task.
@@ -99,7 +101,7 @@ expect_placeholder textarea@notes "Notes"
 expect_href label@reference "https://example.com/tasks/t2"
 expect_ax label@reference "link/Reference"
 set_date date_picker@when 2026-09-08
-expect_ax date_picker@when "datetime/When: Tue 8 Sep"
+expect_ax date_picker@when "datetime/When: {fmt:date_weekday 2026-09-08}"
 back
 expect_entries 0
 # A popped screen's widgets answer no target (harness.rs ExpectNoTarget).
@@ -113,12 +115,12 @@ click button@details[t1]
 expect_entries 1
 # 08:30, not the bound default (09:00): the same value drives nothing.
 set_time time_picker@reminder 08:30
-expect_ax time_picker@reminder "datetime/Reminder: 08:30"
+expect_ax time_picker@reminder "datetime/Reminder: {fmt:time 08:30 short}"
 expect_notification 1 "Buy milk"
 click button@clear_reminder
 expect_no_notification 1
 set_time time_picker@reminder 09:30
-expect_ax time_picker@reminder "datetime/Reminder: 09:30"
+expect_ax time_picker@reminder "datetime/Reminder: {fmt:time 09:30 short}"
 # THE SAME ID AS THE POST BEFORE IT (docs/tasks-s9-plan.md R2): the id is
 # the task's own key, so a re-post replaces rather than piling up.
 expect_notification 1 "Buy milk"
@@ -134,7 +136,7 @@ expect_entries 0
 expect_no_target time_picker@reminder
 select_section 2
 expect label@upcoming_count "3 upcoming"
-expect label@caption[t2] "Tue 8 Sep"
+expect label@caption[t2] "{fmt:date_weekday 2026-09-08}"
 
 # The project screen: keyed Open, its own quick-add, and reorder by drag.
 select_section 4

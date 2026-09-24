@@ -504,7 +504,7 @@ class Derived<T, U> extends Signal<U> {
  * kaya.fmt`${count} items left` (docs/js-plan.md §4). A signal
  * interpolates as its current value and the string is recomputed
  * binding-side whenever any of them moves. */
-export function fmt(strings: TemplateStringsArray, ...parts: readonly unknown[]): Signal<string> {
+function fmtTemplate(strings: TemplateStringsArray, ...parts: readonly unknown[]): Signal<string> {
   if (!Array.isArray(strings) || !("raw" in strings)) {
     throw new TypeError("kaya: fmt is a template tag — kaya.fmt`${signal} text`; Signal.fmt((v) => ...) is the function form");
   }
@@ -3428,6 +3428,160 @@ const thePrefs: Prefs = Object.freeze({
 /** The app's preferences store — one per process. */
 export function prefs(): Prefs {
   return thePrefs;
+}
+
+/** How much of a date or time to write: the numeric form, the abbreviated
+ * words, the full words (docs/compliance-plan.md §1.4). */
+export type Length = "short" | "medium" | "long";
+
+function lengthCode(length: unknown): number {
+  const code = ({ short: 0, medium: 1, long: 2 } as Record<string, number>)[length as string];
+  if (code === undefined) throw new RangeError(`kaya: length ${JSON.stringify(length)} is not one of short, medium, long`);
+  return code;
+}
+
+function finiteNumber(what: string, v: unknown): number {
+  if (typeof v !== "number" || !Number.isFinite(v)) throw new TypeError(`kaya: ${what} is a number, not ${runtime.describe(v)}`);
+  return v;
+}
+
+/** What a number formatter may be told; an unstated digit count is the
+ * platform's default. */
+export type NumberOptions = { minFractionDigits?: number; maxFractionDigits?: number; grouping?: boolean };
+
+function digitCount(what: string, v: unknown): number {
+  if (v === undefined) return -1;
+  if (typeof v !== "number" || !Number.isInteger(v) || v < 0 || v > 20) {
+    throw new RangeError(`kaya: ${what} is a digit count in 0..20, not ${runtime.describe(v) === "number" ? String(v) : runtime.describe(v)}`);
+  }
+  return v;
+}
+
+/** Who the user is, as the platform reports it. */
+export type Locale = {
+  /** BCP-47, `en-US`. */
+  readonly tag: string;
+  /** 12 or 24. */
+  readonly hourCycle: number;
+  /** 1 Monday … 7 Sunday. */
+  readonly firstWeekday: number;
+  /** CLDR's calendar name: `gregorian`, `japanese`, … */
+  readonly calendar: string;
+  /** CLDR's numbering system: `latn`, `arab`, … */
+  readonly numbering: string;
+};
+
+/** The formatter door (docs/compliance-plan.md §1.4, §2.3): dates, times,
+ * numbers, percentages and money written the way the user's platform
+ * writes them, by the platform's own formatter. Pure functions, any
+ * thread, no transaction; `kaya.fmt.date(d, "medium")`. */
+const fmtDoor = Object.freeze({
+  /** The date, in the process locale. */
+  date(value: CivilDate, length: Length = "medium"): string {
+    return runtime.fmtDate(wire.pack_date(...dateParts("fmt.date's value", value)), lengthCode(length));
+  },
+  /** The date with its weekday and no year (`Mon, Sep 7` in en-US). */
+  dateWeekday(value: CivilDate): string {
+    return runtime.fmtDateWeekday(wire.pack_date(...dateParts("fmt.dateWeekday's value", value)));
+  },
+  /** The time, in the process locale and the user's hour cycle. */
+  time(value: CivilTime, length: Length = "short"): string {
+    return runtime.fmtTime(wire.pack_time(...timeParts("fmt.time's value", value)), lengthCode(length));
+  },
+  /** The date and the time together, one length for both. */
+  dateTime(date: CivilDate, time: CivilTime, length: Length = "medium"): string {
+    return runtime.fmtDateTime(
+      wire.pack_date(...dateParts("fmt.dateTime's date", date)),
+      wire.pack_time(...timeParts("fmt.dateTime's time", time)),
+      lengthCode(length),
+    );
+  },
+  /** A number with the locale's separators. */
+  number(value: number, opts: NumberOptions = {}): string {
+    return runtime.fmtNumber(
+      finiteNumber("fmt.number's value", value),
+      digitCount("minFractionDigits", opts.minFractionDigits),
+      digitCount("maxFractionDigits", opts.maxFractionDigits),
+      opts.grouping ?? true,
+    );
+  },
+  /** A fraction as the locale's percentage: 0.256 is `26%` in en-US. */
+  percent(value: number, opts: NumberOptions = {}): string {
+    return runtime.fmtPercent(
+      finiteNumber("fmt.percent's value", value),
+      digitCount("minFractionDigits", opts.minFractionDigits),
+      digitCount("maxFractionDigits", opts.maxFractionDigits),
+      opts.grouping ?? true,
+    );
+  },
+  /** An amount in the currency named by its ISO 4217 code (`USD`). */
+  currency(value: number, code: string): string {
+    if (typeof code !== "string" || !/^[A-Za-z]{3}$/.test(code)) {
+      throw new RangeError(`kaya: a currency is its three-letter ISO 4217 code, not ${JSON.stringify(code)}`);
+    }
+    return runtime.fmtCurrency(finiteNumber("fmt.currency's value", value), code);
+  },
+  /** The process locale and its settings, asked of the platform each time. */
+  locale(): Locale {
+    const [tag, cycle, first, calendar, numbering] = runtime.localeLine().split(" ", 5);
+    return { tag: tag ?? "", hourCycle: Number(cycle), firstWeekday: Number(first), calendar: calendar ?? "", numbering: numbering ?? "" };
+  },
+  /** The layout direction the locale asks for. */
+  direction(): "ltr" | "rtl" {
+    return runtime.direction() === 1 ? "rtl" : "ltr";
+  },
+  /** The text scale the platform reported, 1.0 until one does. */
+  textScale(): number {
+    return runtime.textScale();
+  },
+});
+
+/** ONE NAME, TWO USES: `kaya.fmt\`${count} items\`` is the derived-string
+ * template tag above, and `kaya.fmt.date(d, "medium")` is the formatter
+ * door — the door's calls ride the tag as properties, since the plan's
+ * spelling and the tag's predate each other (docs/compliance-plan.md §1.4). */
+export const fmt: typeof fmtTemplate & typeof fmtDoor = Object.assign(fmtTemplate, fmtDoor);
+
+/** Load the app's catalog, `l10n/<app>.<locale>.ftl` under the asset root
+ * with the fallback chain (docs/compliance-plan.md §2.4). Once, at
+ * startup, before any tr. */
+export function catalog(app: string): void {
+  if (typeof app !== "string" || app === "") throw new TypeError(`kaya: catalog takes the app's name, not ${runtime.describe(app)}`);
+  runtime.catalog(app);
+}
+
+/** A placeable's value: an integer, a float, a string, a civil date or a
+ * civil time. A number that is whole travels as an integer, which is what
+ * a plural selector needs; a fraction as a float. */
+export type TrArg = number | string | CivilDate | CivilTime;
+
+function trArg(name: string, v: unknown): [string, number, number, number, string] {
+  if (typeof v === "number") {
+    if (!Number.isFinite(v)) throw new TypeError(`kaya: tr's argument ${JSON.stringify(name)} is not a finite number`);
+    return Number.isInteger(v) ? [name, runtime.TR_INT, v, 0, ""] : [name, runtime.TR_FLOAT, 0, v, ""];
+  }
+  if (typeof v === "string") return [name, runtime.TR_STR, 0, 0, v];
+  if (typeof v === "object" && v !== null && "hour" in v && !("year" in v)) {
+    return [name, runtime.TR_TIME, wire.pack_time(...timeParts(`tr's argument ${JSON.stringify(name)}`, v)), 0, ""];
+  }
+  if (typeof v === "object" && v !== null && "year" in v) {
+    return [name, runtime.TR_DATE, wire.pack_date(...dateParts(`tr's argument ${JSON.stringify(name)}`, v)), 0, ""];
+  }
+  throw new TypeError(
+    `kaya: tr's argument ${JSON.stringify(name)} is ${runtime.describe(v)}; a placeable is a number, a string, a civil date or a civil time`,
+  );
+}
+
+/** The message `key` from the loaded catalog with its placeables filled:
+ * `kaya.tr("tasks-due", { count: 3, date: d })`. Numbers and dates inside
+ * the message are written through the formatter door; a missing key or
+ * argument is the core's own refusal naming it. */
+export function tr(key: string, args: Record<string, TrArg> = {}): string {
+  if (typeof key !== "string" || key === "") throw new TypeError(`kaya: tr takes the message's key, not ${runtime.describe(key)}`);
+  return runtime.tr(
+    key,
+    Object.entries(args).map(([name, v]) => trArg(name, v)),
+  );
 }
 
 /** Declare a signal: a render pipe with no read. A number is an F64 on

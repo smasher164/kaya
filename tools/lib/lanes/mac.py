@@ -54,7 +54,9 @@ DEPTH_SCENES = ["typeface", "windowed", "canvas", "dnd", "tasks", "notify", "not
 # list; this is the SCENES= override build_c passes, and check-steps'
 # sweep_c_floor reads it from the other side).
 C_SCENES = ["undo", "dirty", "ranges", "save", "a11yrows", "styling",
-            "assets"]
+            "assets",
+            # The formatter door at the floor (docs/compliance-plan.md §1.4).
+            "format"]
 
 # The nine hosted languages in their DEFAULT group order; a group
 # that deviates spells its own order in ORDER below. js is the ninth
@@ -68,12 +70,13 @@ LANGS = ("rust", "python", "go", "csharp", "ocaml", "haskell", "swift",
 # SCRIPT, never an app). editor/portfolio/varied are single-language
 # apps whose launchers already name the right artifact.
 GUEST_STEM = {"listdetail": "split", "taskspersist": "tasks",
-              "links": "tasks", "formatde": "format", "formatar": "format"}
+              "links": "tasks", "formatde": "format", "formatar": "format",
+              "tasksrtl": "tasks"}
 
 # THE LOCALE A SCENE RUNS UNDER (docs/compliance-plan.md §4): the knob the
 # leg carries, so the same guest is read under German and Arabic; the
 # platform installs it and the reads ask the platform, never this table.
-SCENE_LOCALE = {"formatde": "de-DE", "formatar": "ar-EG"}
+SCENE_LOCALE = {"formatde": "de-DE", "formatar": "ar-EG", "tasksrtl": "ar-EG"}
 
 # The dark half of expect_ink's frozen string, one leg instead of a
 # lane re-run (tools/check-appearance.py holds the leg here): canvas's
@@ -95,7 +98,9 @@ HAND_QUEUED = {"editor": "go", "portfolio": "python", "varied": "python",
                # script (docs/app-links-plan.md L5).
                "links": "rust",
                # The format guest under two more locales (SCENE_LOCALE).
-               "formatde": "rust", "formatar": "rust"}
+               "formatde": "rust", "formatar": "rust",
+               # The task manager in Arabic (SCENE_LOCALE).
+               "tasksrtl": "rust"}
 
 # The queue, in run order. Entries:
 #   (scene, (lang, ...))    a group: script export + one leg per lang
@@ -172,6 +177,9 @@ ORDER = [
     ("drain",),
     # The task manager: a RUST app by design (docs/tasks-plan.md §0).
     ("tasks", ("rust",)),
+    # The task manager in Arabic (docs/compliance-plan.md §6): the ar
+    # catalog's bytes, the platform's dates, the layout mirrored.
+    ("tasksrtl", ("rust",)),
     # The notification scene, bundled (BUNDLED_SCENES); rust-only until the
     # breadth slice (docs/tasks-s3-plan.md §6).
     ("notify", ("rust",)),
@@ -188,12 +196,12 @@ ORDER = [
     ("richrows", ("rust", "python", "js", "go", "csharp", "java", "swift",
                   "ocaml", "haskell")),
     ("sheet", LANGS),
-    # THE FORMATTER DOOR AND THE CATALOG (docs/compliance-plan.md §6): the
-    # Rust guest under the everyday locale, then under de-DE and ar-EG
-    # through the KAYA_LOCALE knob; the eight other bindings join at breadth.
-    ("format", ("rust",)),
-    ("formatde", ("rust",)),
-    ("formatar", ("rust",)),
+    # THE FORMATTER DOOR AND THE CATALOG (docs/compliance-plan.md §6): every
+    # binding's guest under the everyday locale, then under de-DE and ar-EG
+    # through the KAYA_LOCALE knob (SCENE_LOCALE).
+    ("format", LANGS + ("c",)),
+    ("formatde", LANGS + ("c",)),
+    ("formatar", LANGS + ("c",)),
     ("drain",),
     # WHAT SURVIVES A RELAUNCH (docs/tasks-s4-plan.md §4): the tasks
     # guest again under taskspersist.steps, act two through the PLAIN

@@ -1282,6 +1282,10 @@ for proto in x11 wayland; do
     run "$proto" tasks-rust env KAYA_SELFTEST=tasks \
         tools/linux/notify-leg.sh portal \
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/tasks"
+    # The task manager in Arabic (docs/compliance-plan.md §6): the SAME
+    # guest under the locale knob, no notification and no drag.
+    run "$proto" tasksrtl-rust env KAYA_LOCALE=ar-EG KAYA_SELFTEST=tasksrtl \
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/tasks"
     # WHAT SURVIVES A RELAUNCH (docs/tasks-s4-plan.md §4), the SAME guest
     # under its own scene: the door here is the plain one — the app's
     # desktop entry through `gio launch`, with nothing pending — so this
@@ -1439,6 +1443,50 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/format"
     run "$proto" formatar-rust env KAYA_LOCALE=ar-EG KAYA_SELFTEST=formatar \
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/format"
+    # The eight bindings' format guests under the same three locales
+    # (docs/compliance-plan.md §6): nine spellings, one door.
+    run "$proto" format-python env KAYA_SELFTEST=format KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh python3 guests/python/format.py
+    run "$proto" format-js env KAYA_SELFTEST=format KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh node guests/js/format.ts
+    run "$proto" format-go env KAYA_SELFTEST=format\
+        tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
+    run "$proto" format-csharp env KAYA_SELFTEST=format KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
+    run "$proto" format-ocaml env KAYA_SELFTEST=format KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh _build-linux/default/guests/ocaml/format.exe
+    run "$proto" format-haskell env KAYA_SELFTEST=format\
+        tools/linux/a11y-leg.sh "$(hs_bin format)"
+    run "$proto" format-java env KAYA_SELFTEST=format KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
+    run "$proto" formatde-python env KAYA_LOCALE=de-DE KAYA_SELFTEST=formatde KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh python3 guests/python/format.py
+    run "$proto" formatde-js env KAYA_LOCALE=de-DE KAYA_SELFTEST=formatde KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh node guests/js/format.ts
+    run "$proto" formatde-go env KAYA_LOCALE=de-DE KAYA_SELFTEST=formatde\
+        tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
+    run "$proto" formatde-csharp env KAYA_LOCALE=de-DE KAYA_SELFTEST=formatde KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
+    run "$proto" formatde-ocaml env KAYA_LOCALE=de-DE KAYA_SELFTEST=formatde KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh _build-linux/default/guests/ocaml/format.exe
+    run "$proto" formatde-haskell env KAYA_LOCALE=de-DE KAYA_SELFTEST=formatde\
+        tools/linux/a11y-leg.sh "$(hs_bin format)"
+    run "$proto" formatde-java env KAYA_LOCALE=de-DE KAYA_SELFTEST=formatde KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
+    run "$proto" formatar-python env KAYA_LOCALE=ar-EG KAYA_SELFTEST=formatar KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh python3 guests/python/format.py
+    run "$proto" formatar-js env KAYA_LOCALE=ar-EG KAYA_SELFTEST=formatar KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh node guests/js/format.ts
+    run "$proto" formatar-go env KAYA_LOCALE=ar-EG KAYA_SELFTEST=formatar\
+        tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
+    run "$proto" formatar-csharp env KAYA_LOCALE=ar-EG KAYA_SELFTEST=formatar KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
+    run "$proto" formatar-ocaml env KAYA_LOCALE=ar-EG KAYA_SELFTEST=formatar KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh _build-linux/default/guests/ocaml/format.exe
+    run "$proto" formatar-haskell env KAYA_LOCALE=ar-EG KAYA_SELFTEST=formatar\
+        tools/linux/a11y-leg.sh "$(hs_bin format)"
+    run "$proto" formatar-java env KAYA_LOCALE=ar-EG KAYA_SELFTEST=formatar KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
     run "$proto" sheet-python env KAYA_SELFTEST=sheet KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh python3 guests/python/sheet.py
     run "$proto" sheet-js env KAYA_SELFTEST=sheet KAYA_LIB="$LIB" \

@@ -1028,6 +1028,92 @@ let pack_time t =
     invalid_arg (Printf.sprintf "kaya: %d is not a minute (0..59)" t.minute);
   Kaya_wire.pack_time t.hour t.minute
 
+(* The formatter door and the catalog (docs/compliance-plan.md §1.4, the
+   OCaml row): pure calls over the core, any thread, no transaction. A
+   fault at the floor is raised here by name, never an empty string. *)
+let door name = function
+  | Some s -> s
+  | None -> failwith (Printf.sprintf "kaya: %s reported a fault (the sentence is on stderr)" name)
+
+module Fmt = struct
+  type length = [ `Short | `Medium | `Long ]
+
+  let code = function `Short -> 0 | `Medium -> 1 | `Long -> 2
+  let digits = function Some d -> d | None -> -1
+
+  let date ?(length = `Medium) d =
+    door "kaya_fmt_date" (Kaya_runtime.fmt_date (pack_date d) (code length))
+
+  let date_weekday d =
+    door "kaya_fmt_date_weekday" (Kaya_runtime.fmt_date_weekday (pack_date d))
+
+  let time ?(length = `Short) t =
+    door "kaya_fmt_time" (Kaya_runtime.fmt_time (pack_time t) (code length))
+
+  let date_time ?(length = `Medium) d t =
+    door "kaya_fmt_date_time"
+      (Kaya_runtime.fmt_date_time (pack_date d) (pack_time t) (code length))
+
+  let number ?min_fraction_digits ?max_fraction_digits ?(grouping = true) v =
+    door "kaya_fmt_number"
+      (Kaya_runtime.fmt_number v (digits min_fraction_digits)
+         (digits max_fraction_digits) grouping)
+
+  let percent ?min_fraction_digits ?max_fraction_digits ?(grouping = true) v =
+    door "kaya_fmt_percent"
+      (Kaya_runtime.fmt_percent v (digits min_fraction_digits)
+         (digits max_fraction_digits) grouping)
+
+  let currency v code = door "kaya_fmt_currency" (Kaya_runtime.fmt_currency v code)
+
+  type locale = {
+    tag : string;
+    hour_cycle : int;
+    first_weekday : int;
+    calendar : string;
+    numbering : string;
+  }
+
+  let locale () =
+    match String.split_on_char ' ' (door "kaya_locale" (Kaya_runtime.locale_line ())) with
+    | [ tag; cycle; first; calendar; numbering ] ->
+        {
+          tag;
+          hour_cycle = int_of_string cycle;
+          first_weekday = int_of_string first;
+          calendar;
+          numbering;
+        }
+    | _ -> failwith "kaya: kaya_locale answered a line this binding cannot read"
+
+  type direction = [ `Ltr | `Rtl ]
+
+  let direction () : direction =
+    if Kaya_runtime.direction_bit () = 1 then `Rtl else `Ltr
+
+  let text_scale () = Kaya_runtime.text_scale ()
+end
+
+let catalog app = Kaya_runtime.catalog app
+
+type tr_arg =
+  [ `Int of int | `Float of float | `Text of string | `Date of date | `Time of time ]
+
+let tr key (args : (string * tr_arg) list) =
+  let raw =
+    List.map
+      (fun (name, arg) ->
+        ( name,
+          match arg with
+          | `Int i -> Kaya_runtime.Tr_int (Int64.of_int i)
+          | `Float f -> Kaya_runtime.Tr_float f
+          | `Text s -> Kaya_runtime.Tr_str s
+          | `Date d -> Kaya_runtime.Tr_date (pack_date d)
+          | `Time t -> Kaya_runtime.Tr_time (pack_time t) ))
+      args
+  in
+  door "kaya_tr" (Kaya_runtime.tr key raw)
+
 let date_of_packed packed =
   let year, month, day = Kaya_wire.unpack_date packed in
   { year; month; day }

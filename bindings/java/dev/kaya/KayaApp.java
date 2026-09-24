@@ -1278,6 +1278,196 @@ public final class KayaApp {
         return Prefs.THE;
     }
 
+    // --- The formatter door and the catalog (docs/compliance-plan.md §1.4) --
+
+    /** How much of a date or time to write: the numeric form, the
+     * abbreviated words, the full words. */
+    public enum Length {
+        SHORT, MEDIUM, LONG;
+
+        long code() {
+            return ordinal();
+        }
+    }
+
+    /** What a number formatter may be told; a null digit count leaves the
+     * platform's default. */
+    public record NumberOptions(Integer minFractionDigits, Integer maxFractionDigits, boolean grouping) {
+        public static final NumberOptions DEFAULT = new NumberOptions(null, null, true);
+
+        int min() {
+            return minFractionDigits == null ? -1 : minFractionDigits;
+        }
+
+        int max() {
+            return maxFractionDigits == null ? -1 : maxFractionDigits;
+        }
+    }
+
+    /** Who the user is, as the platform reports it: the BCP-47 tag, the hour
+     * cycle (12 or 24), the first weekday (1 Monday … 7 Sunday), the calendar
+     * and the numbering system. */
+    public record LocaleInfo(String tag, int hourCycle, int firstWeekday, String calendar, String numbering) {}
+
+    /** Which way the layout runs, decided by the locale's script. */
+    public enum Direction {
+        LTR, RTL
+    }
+
+    private static long packDate(LocalDate d) {
+        return d.getYear() * 10_000L + d.getMonthValue() * 100L + d.getDayOfMonth();
+    }
+
+    private static long packTime(LocalTime t) {
+        return t.getHour() * 100L + t.getMinute();
+    }
+
+    /** A NULL answer is the core's fault for the input, already reported
+     * with its sentence; a formatter never legitimately writes nothing. */
+    private static String answer(byte[] bytes, String call) {
+        if (bytes == null) {
+            throw new IllegalArgumentException("kaya: " + call + " refused its input (the fault names it)");
+        }
+        return new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    /**
+     * The formatter door: dates, times, numbers, percentages and money
+     * written the way the user's platform writes them, by the platform's
+     * own formatter. Pure functions, any thread, no transaction.
+     */
+    public static final class Fmt {
+        private static final Fmt THE = new Fmt();
+
+        private Fmt() {}
+
+        public String date(LocalDate d, Length length) {
+            return answer(KayaRing.fmtDate(packDate(d), length.code()), "fmt.date");
+        }
+
+        /** The date with its weekday and no year ({@code Mon, Sep 7} in en-US). */
+        public String dateWeekday(LocalDate d) {
+            return answer(KayaRing.fmtDateWeekday(packDate(d)), "fmt.dateWeekday");
+        }
+
+        public String time(LocalTime t, Length length) {
+            return answer(KayaRing.fmtTime(packTime(t), length.code()), "fmt.time");
+        }
+
+        public String dateTime(LocalDate d, LocalTime t, Length length) {
+            return answer(KayaRing.fmtDateTime(packDate(d), packTime(t), length.code()), "fmt.dateTime");
+        }
+
+        public String number(double value) {
+            return number(value, NumberOptions.DEFAULT);
+        }
+
+        public String number(double value, NumberOptions o) {
+            return answer(KayaRing.fmtNumber(value, o.min(), o.max(), o.grouping()), "fmt.number");
+        }
+
+        public String percent(double value) {
+            return percent(value, NumberOptions.DEFAULT);
+        }
+
+        public String percent(double value, NumberOptions o) {
+            return answer(KayaRing.fmtPercent(value, o.min(), o.max(), o.grouping()), "fmt.percent");
+        }
+
+        /** An amount in the ISO 4217 currency {@code code}. */
+        public String currency(double value, String code) {
+            return answer(KayaRing.fmtCurrency(value, code.getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+                    "fmt.currency");
+        }
+
+        /** The process locale and its settings, asked of the platform each time. */
+        public LocaleInfo locale() {
+            String[] parts = answer(KayaRing.locale(), "fmt.locale").split(" ");
+            return new LocaleInfo(parts[0], Integer.parseInt(parts[1]), Integer.parseInt(parts[2]), parts[3],
+                    parts[4]);
+        }
+
+        public Direction direction() {
+            return KayaRing.direction() == 1 ? Direction.RTL : Direction.LTR;
+        }
+
+        /** The text scale the platform reported, 1.0 until one does. */
+        public double textScale() {
+            return KayaRing.textScale();
+        }
+    }
+
+    /** The formatter door — one per process. */
+    public static Fmt fmt() {
+        return Fmt.THE;
+    }
+
+    /** Load the app's catalog, {@code l10n/<app>.<locale>.ftl} under the
+     * asset root with the fallback chain (docs/compliance-plan.md §2.4).
+     * Once, at startup, before the first {@link #tr}. */
+    public static void catalog(String app) {
+        KayaRing.catalog(app.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    /** The message {@code key} with no arguments. */
+    public static String tr(String key) {
+        return tr(key, Map.of());
+    }
+
+    /**
+     * The message {@code key} with {@code args} filled from the loaded
+     * catalog: an argument is an Integer/Long, a Double/Float, a String, a
+     * LocalDate or a LocalTime, the dates and times formatted through the
+     * door. A missing message or argument is the core's panic naming the
+     * key and the locale.
+     */
+    public static String tr(String key, Map<String, ?> args) {
+        java.io.ByteArrayOutputStream packed = new java.io.ByteArrayOutputStream();
+        java.io.DataOutputStream out = new java.io.DataOutputStream(packed);
+        try {
+            for (Map.Entry<String, ?> e : args.entrySet()) {
+                byte[] name = e.getKey().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                out.writeInt(name.length);
+                out.write(name);
+                Object v = e.getValue();
+                int tag;
+                long i = 0;
+                double f = 0.0;
+                byte[] s = new byte[0];
+                if (v instanceof Integer || v instanceof Long || v instanceof Short || v instanceof Byte) {
+                    tag = 0;
+                    i = ((Number) v).longValue();
+                } else if (v instanceof Double || v instanceof Float) {
+                    tag = 1;
+                    f = ((Number) v).doubleValue();
+                } else if (v instanceof String str) {
+                    tag = 2;
+                    s = str.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                } else if (v instanceof LocalDate d) {
+                    tag = 3;
+                    i = packDate(d);
+                } else if (v instanceof LocalTime tm) {
+                    tag = 4;
+                    i = packTime(tm);
+                } else {
+                    throw new IllegalArgumentException("kaya: tr argument \"" + e.getKey()
+                            + "\" is a " + (v == null ? "null" : v.getClass().getName())
+                            + "; the arguments are integers, doubles, strings, LocalDate and LocalTime");
+                }
+                out.writeInt(tag);
+                out.writeLong(i);
+                out.writeDouble(f);
+                out.writeInt(s.length);
+                out.write(s);
+            }
+            out.flush();
+        } catch (java.io.IOException impossible) {
+            throw new IllegalStateException(impossible);
+        }
+        return answer(KayaRing.tr(key.getBytes(java.nio.charset.StandardCharsets.UTF_8), packed.toByteArray(),
+                args.size()), "tr(\"" + key + "\")");
+    }
+
     /**
      * The notification_result decision, in a method of its own because
      * the ring loop's switch has no seam a test can reach (the ring is

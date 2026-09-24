@@ -1878,6 +1878,20 @@ if (isMainThread) {
 
   console.log(`rich text: ${richChecks.length} checks over the fold, driven from packed occurrence bytes through App._onOccurrence`);
 
+  // THE FORMATTER DOOR AND THE CATALOG (docs/compliance-plan.md §1.4): the
+  // binding's own walls, each refused by name before the addon is asked —
+  // a length outside the three, a Date instant where a civil date is
+  // taken, a digit count off the scale, a currency that is not a code, a
+  // placeable that is none of the five — and the tag's other use kept.
+  const civil: K.CivilDate = { year: 2026, month: 9, day: 7 };
+  check("fmt.date refuses a length outside short, medium, long naming them", throws(() => kaya.fmt.date(civil, "huge" as K.Length), /short, medium, long/));
+  check("fmt.date refuses a Date instant where a civil date is taken", throws(() => kaya.fmt.date(new Date() as unknown as K.CivilDate, "medium"), /civil date/));
+  check("fmt.number refuses a digit count outside 0..20", throws(() => kaya.fmt.number(1, { maxFractionDigits: 99 }), /0\.\.20/));
+  check("fmt.currency refuses a name where a code is taken", throws(() => kaya.fmt.currency(1, "dollars"), /ISO 4217/));
+  check("tr refuses a placeable that is none of the five", throws(() => kaya.tr("items", { count: true as unknown as K.TrArg }), /a placeable is/));
+  check("tr refuses an empty key", throws(() => kaya.tr(""), /message's key/));
+  check("fmt is still the derived-string template tag", typeof kaya.fmt === "function" && typeof kaya.fmt.date === "function");
+
   if (failures.length > 0) {
     console.log(`kaya_app_checks: ${failures.length} FAILED`);
     process.exit(1);

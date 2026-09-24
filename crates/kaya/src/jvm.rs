@@ -132,6 +132,35 @@ pub(crate) fn register_ring_natives(env: &mut JNIEnv) -> jni::errors::Result<()>
                 sig: "([BZ)V".into(),
                 fn_ptr: ring_pref_set_bool as *mut _,
             },
+            // The formatter door and the catalog (docs/compliance-plan.md §3).
+            NativeMethod { name: "fmtDate".into(), sig: "(JJ)[B".into(), fn_ptr: ring_fmt_date as *mut _ },
+            NativeMethod {
+                name: "fmtDateWeekday".into(),
+                sig: "(J)[B".into(),
+                fn_ptr: ring_fmt_date_weekday as *mut _,
+            },
+            NativeMethod { name: "fmtTime".into(), sig: "(JJ)[B".into(), fn_ptr: ring_fmt_time as *mut _ },
+            NativeMethod {
+                name: "fmtDateTime".into(),
+                sig: "(JJJ)[B".into(),
+                fn_ptr: ring_fmt_date_time as *mut _,
+            },
+            NativeMethod { name: "fmtNumber".into(), sig: "(DIIZ)[B".into(), fn_ptr: ring_fmt_number as *mut _ },
+            NativeMethod {
+                name: "fmtPercent".into(),
+                sig: "(DIIZ)[B".into(),
+                fn_ptr: ring_fmt_percent as *mut _,
+            },
+            NativeMethod {
+                name: "fmtCurrency".into(),
+                sig: "(D[B)[B".into(),
+                fn_ptr: ring_fmt_currency as *mut _,
+            },
+            NativeMethod { name: "locale".into(), sig: "()[B".into(), fn_ptr: ring_locale as *mut _ },
+            NativeMethod { name: "direction".into(), sig: "()I".into(), fn_ptr: ring_direction as *mut _ },
+            NativeMethod { name: "textScale".into(), sig: "()D".into(), fn_ptr: ring_text_scale as *mut _ },
+            NativeMethod { name: "catalog".into(), sig: "([B)V".into(), fn_ptr: ring_catalog as *mut _ },
+            NativeMethod { name: "tr".into(), sig: "([B[BI)[B".into(), fn_ptr: ring_tr as *mut _ },
             NativeMethod {
                 name: "prefRemove".into(),
                 sig: "([B)V".into(),
@@ -322,6 +351,157 @@ extern "system" fn ring_app_data_dir<'a>(env: JNIEnv<'a>, _class: JClass<'a>) ->
     }
     env.byte_array_from_slice(&buf)
         .expect("kaya: handing over the data directory failed")
+}
+
+// --- The formatter door and the catalog (docs/compliance-plan.md §3) -----
+// Each answer is the C API's `fill` shape read twice; a 0 length is the
+// core's fault for the input (the sentence is already reported) and comes
+// back NULL, which KayaApp turns into an exception naming the call.
+
+fn filled<'a>(env: &JNIEnv<'a>, ask: impl Fn(*mut u8, usize) -> usize) -> JByteArray<'a> {
+    let len = ask(std::ptr::null_mut(), 0);
+    if len == 0 {
+        return null_ref();
+    }
+    let mut buf = vec![0u8; len];
+    let got = ask(buf.as_mut_ptr(), len);
+    buf.truncate(got.min(len));
+    env.byte_array_from_slice(&buf).expect("kaya: handing over a formatted string failed")
+}
+
+extern "system" fn ring_fmt_date<'a>(env: JNIEnv<'a>, _class: JClass<'a>, packed: jlong, length: jlong) -> JByteArray<'a> {
+    filled(&env, |out, cap| unsafe { crate::capi::kaya_fmt_date(packed, length, out, cap) })
+}
+
+extern "system" fn ring_fmt_date_weekday<'a>(env: JNIEnv<'a>, _class: JClass<'a>, packed: jlong) -> JByteArray<'a> {
+    filled(&env, |out, cap| unsafe { crate::capi::kaya_fmt_date_weekday(packed, out, cap) })
+}
+
+extern "system" fn ring_fmt_time<'a>(env: JNIEnv<'a>, _class: JClass<'a>, packed: jlong, length: jlong) -> JByteArray<'a> {
+    filled(&env, |out, cap| unsafe { crate::capi::kaya_fmt_time(packed, length, out, cap) })
+}
+
+extern "system" fn ring_fmt_date_time<'a>(
+    env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    date: jlong,
+    time: jlong,
+    length: jlong,
+) -> JByteArray<'a> {
+    filled(&env, |out, cap| unsafe { crate::capi::kaya_fmt_date_time(date, time, length, out, cap) })
+}
+
+fn number_options(min: jint, max: jint, grouping: jboolean) -> crate::capi::KayaNumberOptions {
+    crate::capi::KayaNumberOptions { min_fraction_digits: min, max_fraction_digits: max, grouping: grouping != 0 }
+}
+
+extern "system" fn ring_fmt_number<'a>(
+    env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    value: jdouble,
+    min: jint,
+    max: jint,
+    grouping: jboolean,
+) -> JByteArray<'a> {
+    let options = number_options(min, max, grouping);
+    filled(&env, |out, cap| unsafe { crate::capi::kaya_fmt_number(value, &options, out, cap) })
+}
+
+extern "system" fn ring_fmt_percent<'a>(
+    env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    value: jdouble,
+    min: jint,
+    max: jint,
+    grouping: jboolean,
+) -> JByteArray<'a> {
+    let options = number_options(min, max, grouping);
+    filled(&env, |out, cap| unsafe { crate::capi::kaya_fmt_percent(value, &options, out, cap) })
+}
+
+extern "system" fn ring_fmt_currency<'a>(
+    env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    value: jdouble,
+    code: JByteArray<'a>,
+) -> JByteArray<'a> {
+    let code = env.convert_byte_array(&code).expect("kaya: reading the currency code failed");
+    let code = std::ffi::CString::new(code).unwrap_or_default();
+    filled(&env, |out, cap| unsafe { crate::capi::kaya_fmt_currency(value, code.as_ptr(), out, cap) })
+}
+
+extern "system" fn ring_locale<'a>(env: JNIEnv<'a>, _class: JClass<'a>) -> JByteArray<'a> {
+    filled(&env, |out, cap| unsafe { crate::capi::kaya_locale(out, cap) })
+}
+
+extern "system" fn ring_direction(_env: JNIEnv, _class: JClass) -> jint {
+    crate::capi::kaya_direction() as jint
+}
+
+extern "system" fn ring_text_scale(_env: JNIEnv, _class: JClass) -> jdouble {
+    crate::capi::kaya_text_scale()
+}
+
+extern "system" fn ring_catalog<'a>(env: JNIEnv<'a>, _class: JClass<'a>, app: JByteArray<'a>) {
+    let app = env.convert_byte_array(&app).expect("kaya: reading the catalog name failed");
+    let app = std::ffi::CString::new(app).unwrap_or_default();
+    unsafe { crate::capi::kaya_catalog(app.as_ptr()) };
+}
+
+/// KayaRing.tr: the arguments arrive as ONE byte array KayaApp.TrArgs packs
+/// — per argument a name (i32 length, UTF-8), a tag (i32), an i64, an f64
+/// and a string (i32 length, UTF-8), all big-endian — since a JNI array of
+/// records would need a class lookup per call here.
+extern "system" fn ring_tr<'a>(
+    env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    key: JByteArray<'a>,
+    args: JByteArray<'a>,
+    nargs: jint,
+) -> JByteArray<'a> {
+    let key = env.convert_byte_array(&key).expect("kaya: reading the message key failed");
+    let key = std::ffi::CString::new(key).unwrap_or_default();
+    let packed = if args.is_null() {
+        Vec::new()
+    } else {
+        env.convert_byte_array(&args).expect("kaya: reading the tr arguments failed")
+    };
+    fn take<'b>(packed: &'b [u8], at: &mut usize, n: usize) -> &'b [u8] {
+        let slice = packed.get(*at..*at + n).expect("kaya: a tr argument is truncated");
+        *at += n;
+        slice
+    }
+    fn take_i32(packed: &[u8], at: &mut usize) -> i32 {
+        i32::from_be_bytes(take(packed, at, 4).try_into().expect("four bytes"))
+    }
+    let mut at = 0usize;
+    let mut names = Vec::new();
+    let mut strings = Vec::new();
+    let mut records: Vec<(u32, i64, f64)> = Vec::new();
+    for _ in 0..nargs.max(0) {
+        let n = take_i32(&packed, &mut at) as usize;
+        let name = std::ffi::CString::new(take(&packed, &mut at, n)).unwrap_or_default();
+        let tag = take_i32(&packed, &mut at) as u32;
+        let i = i64::from_be_bytes(take(&packed, &mut at, 8).try_into().expect("eight bytes"));
+        let f = f64::from_be_bytes(take(&packed, &mut at, 8).try_into().expect("eight bytes"));
+        let sn = take_i32(&packed, &mut at) as usize;
+        let s = std::ffi::CString::new(take(&packed, &mut at, sn)).unwrap_or_default();
+        names.push(name);
+        strings.push(s);
+        records.push((tag, i, f));
+    }
+    let args: Vec<crate::capi::KayaTrArg> = records
+        .iter()
+        .enumerate()
+        .map(|(k, (tag, i, f))| crate::capi::KayaTrArg {
+            name: names[k].as_ptr(),
+            tag: *tag,
+            i: *i,
+            f: *f,
+            s: strings[k].as_ptr(),
+        })
+        .collect();
+    filled(&env, |out, cap| unsafe { crate::capi::kaya_tr(key.as_ptr(), args.as_ptr(), args.len(), out, cap) })
 }
 
 /// The null object reference every absent answer below returns.

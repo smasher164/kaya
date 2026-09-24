@@ -31,6 +31,9 @@ SWIFT_ENTRIES = [
     "save", "styling", "toolbar", "identity", "assets",
     "table", "canvas", "sizepolicy", "dnd", "pickers", "sliders",
     "tooltips", "sheet",
+    # The formatter door and the catalog under three locales
+    # (docs/compliance-plan.md §6): one app, three scripts (SCENE_LOCALE).
+    "format", "formatde:format", "formatar:format",
 ]
 
 # The go suite: the swift roster entry for entry minus the two
@@ -45,6 +48,7 @@ GO_SCENES = [
     "background", "undo", "ranges", "dirty", "filedialog",
     "save", "styling", "toolbar", "identity", "assets",
     "table", "dnd", "pickers", "sliders", "tooltips", "sheet",
+    "format", "formatde", "formatar",
 ]
 
 # CPython embedded in ONE bundle carrying every python scene
@@ -67,6 +71,8 @@ RUST_SCENES = [
     # The formatter door and the catalog under three locales
     # (docs/compliance-plan.md §6); SCENE_LOCALE carries the knob.
     "format", "formatde", "formatar",
+    # The task manager in Arabic (docs/compliance-plan.md §6).
+    "tasksrtl",
     # The notification conformance scene: the activation is a REAL tap on
     # SpringBoard's own shade, driven by the xcui driver's notify_tap
     # (docs/tasks-s3-plan.md N5).
@@ -228,11 +234,12 @@ def swift_scene(entry):
 # Scene -> the cargo example it builds, where the two differ: a scene
 # selects a SCRIPT, never an app.
 RUST_EXAMPLE = {"listdetail": "split", "taskspersist": "tasks",
-                "links": "tasks", "formatde": "format", "formatar": "format"}
+                "links": "tasks", "formatde": "format", "formatar": "format",
+                "tasksrtl": "tasks"}
 
 # The locale a scene runs under, the knob the leg carries
 # (docs/compliance-plan.md §4); the reads ask the platform, never this.
-SCENE_LOCALE = {"formatde": "de-DE", "formatar": "ar-EG"}
+SCENE_LOCALE = {"formatde": "de-DE", "formatar": "ar-EG", "tasksrtl": "ar-EG"}
 
 
 def rust_example(scene):

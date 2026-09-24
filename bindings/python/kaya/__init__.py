@@ -18,6 +18,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from typing import (IO, Any, Generic, Literal, NoReturn, TypeVar, cast,
                     overload)
 
+from . import fmt
 from . import runtime
 from . import wire
 
@@ -3911,6 +3912,55 @@ def capabilities() -> Capabilities:
     return Capabilities(
         aux_windows=bool(bits & runtime.CAP_AUX_WINDOWS),
         notifications=bool(bits & runtime.CAP_NOTIFICATIONS))
+
+
+def catalog(app: str) -> None:
+    """Load the app's catalog, `l10n/<app>.<locale>.ftl` under the asset
+    root with the fallback chain (docs/compliance-plan.md §2.4). Once, at
+    startup, before any `tr`."""
+    if not isinstance(app, str) or not app:
+        raise KayaTypeError(
+            f"kaya: catalog takes the app's name, not {app!r}")
+    runtime.catalog(app)
+
+
+TrArg = int | float | str | datetime.date | datetime.time
+
+
+def _tr_arg(name: str, value: object) -> tuple[str, int, int, float, str]:
+    """One placeable in the C API's record: a bool is refused BEFORE int,
+    which it subclasses; a datetime is refused as a date, the pickers'
+    rule."""
+    if isinstance(value, bool):
+        raise KayaTypeError(
+            f"kaya: tr's argument {name!r} is a bool; a placeable is an int, "
+            "a float, a str, a datetime.date or a datetime.time")
+    if isinstance(value, int):
+        return (name, runtime.TR_INT, value, 0.0, "")
+    if isinstance(value, float):
+        return (name, runtime.TR_FLOAT, 0, value, "")
+    if isinstance(value, str):
+        return (name, runtime.TR_STR, 0, 0.0, value)
+    if isinstance(value, datetime.time):
+        packed = wire.pack_time(*_time_parts(f"tr's argument {name!r}", value))
+        return (name, runtime.TR_TIME, packed, 0.0, "")
+    if isinstance(value, datetime.date):
+        packed = wire.pack_date(*_date_parts(f"tr's argument {name!r}", value))
+        return (name, runtime.TR_DATE, packed, 0.0, "")
+    raise KayaTypeError(
+        f"kaya: tr's argument {name!r} is a {type(value).__name__}; a "
+        "placeable is an int, a float, a str, a datetime.date or a "
+        "datetime.time")
+
+
+def tr(key: str, **args: TrArg) -> str:
+    """The message `key` from the loaded catalog with its placeables
+    filled: `kaya.tr("tasks-due", count=3, date=d)`. Numbers and dates
+    inside the message are written through the formatter door; a missing
+    key or argument is the core's own refusal naming it."""
+    if not isinstance(key, str) or not key:
+        raise KayaTypeError(f"kaya: tr takes the message's key, not {key!r}")
+    return runtime.tr(key, [_tr_arg(name, value) for name, value in args.items()])
 
 
 def app_data_dir() -> pathlib.Path:

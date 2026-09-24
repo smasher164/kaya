@@ -155,6 +155,11 @@ executable sheet
   main-is: sheet.hs
   build-depends: kaya-guests
 
+executable format
+  import: shared
+  main-is: format.hs
+  build-depends: kaya-guests, time
+
 executable split
   import: shared
   main-is: split.hs

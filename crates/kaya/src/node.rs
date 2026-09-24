@@ -68,6 +68,8 @@ node_api! {
     napi_call_function: fn(Env, Value, Value, usize, *const Value, *mut Value) -> Status,
     napi_get_and_clear_last_exception: fn(Env, *mut Value) -> Status,
     napi_coerce_to_string: fn(Env, Value, *mut Value) -> Status,
+    napi_get_array_length: fn(Env, Value, *mut u32) -> Status,
+    napi_get_element: fn(Env, Value, u32, *mut Value) -> Status,
 }
 
 static NAPI: OnceLock<NodeApi> = OnceLock::new();
@@ -158,6 +160,20 @@ pub unsafe extern "C" fn napi_register_module_v1(env: Env, exports: Value) -> Va
         ("openPicked", open_picked),
         ("pickedRead", picked_read),
         ("pickedWrite", picked_write),
+        // The formatter door and the catalog (docs/compliance-plan.md §3;
+        // bindings/js/kaya/runtime.ts's Floor spells the shapes).
+        ("fmtDate", fmt_date),
+        ("fmtDateWeekday", fmt_date_weekday),
+        ("fmtTime", fmt_time),
+        ("fmtDateTime", fmt_date_time),
+        ("fmtNumber", fmt_number),
+        ("fmtPercent", fmt_percent),
+        ("fmtCurrency", fmt_currency),
+        ("locale", locale),
+        ("direction", direction),
+        ("textScale", text_scale),
+        ("catalog", catalog),
+        ("tr", tr),
         ("startPump", start_pump),
         ("exit", exit),
     ];
@@ -431,6 +447,153 @@ unsafe extern "C" fn app_data_dir(env: Env, _info: CbInfo) -> Value {
     let written = unsafe { capi::kaya_app_data_dir(buf.as_mut_ptr(), needed) };
     buf.truncate(written.min(needed));
     unsafe { string(env, &buf) }
+}
+
+/// The fill shape (capi.rs): ask with cap 0, size, ask again. A 0 answer is
+/// the core's reported fault, thrown here by name rather than an empty
+/// string.
+unsafe fn filled(env: Env, what: &str, ask: impl Fn(*mut u8, usize) -> usize) -> Value {
+    let needed = ask(ptr::null_mut(), 0);
+    if needed == 0 {
+        return unsafe { throw(env, &format!("kaya: {what} answered nothing — the core reported the fault on stderr")) };
+    }
+    let mut buf = vec![0u8; needed];
+    let written = ask(buf.as_mut_ptr(), needed);
+    buf.truncate(written.min(needed));
+    unsafe { string(env, &buf) }
+}
+
+unsafe fn i64_arg(env: Env, v: Value, what: &str) -> Result<i64, String> {
+    let d = unsafe { f64_arg(env, v, what)? };
+    if d.fract() != 0.0 || d.abs() > 9_007_199_254_740_991.0 {
+        return Err(format!("kaya: {what} is not a safe integer: {d}"));
+    }
+    Ok(d as i64)
+}
+
+unsafe fn number_options(env: Env, min: Value, max: Value, grouping: Value, what: &str) -> Result<capi::KayaNumberOptions, String> {
+    Ok(capi::KayaNumberOptions {
+        min_fraction_digits: unsafe { i64_arg(env, min, what)? } as i32,
+        max_fraction_digits: unsafe { i64_arg(env, max, what)? } as i32,
+        grouping: unsafe { f64_arg(env, grouping, what)? } != 0.0,
+    })
+}
+
+unsafe extern "C" fn fmt_date(env: Env, info: CbInfo) -> Value {
+    let [d, l] = unsafe { args::<2>(env, info) };
+    let packed = try_or_throw!(env, unsafe { i64_arg(env, d, "fmtDate date") });
+    let length = try_or_throw!(env, unsafe { i64_arg(env, l, "fmtDate length") });
+    unsafe { filled(env, "fmtDate", |out, cap| capi::kaya_fmt_date(packed, length, out, cap)) }
+}
+
+unsafe extern "C" fn fmt_date_weekday(env: Env, info: CbInfo) -> Value {
+    let [d] = unsafe { args::<1>(env, info) };
+    let packed = try_or_throw!(env, unsafe { i64_arg(env, d, "fmtDateWeekday date") });
+    unsafe { filled(env, "fmtDateWeekday", |out, cap| capi::kaya_fmt_date_weekday(packed, out, cap)) }
+}
+
+unsafe extern "C" fn fmt_time(env: Env, info: CbInfo) -> Value {
+    let [t, l] = unsafe { args::<2>(env, info) };
+    let packed = try_or_throw!(env, unsafe { i64_arg(env, t, "fmtTime time") });
+    let length = try_or_throw!(env, unsafe { i64_arg(env, l, "fmtTime length") });
+    unsafe { filled(env, "fmtTime", |out, cap| capi::kaya_fmt_time(packed, length, out, cap)) }
+}
+
+unsafe extern "C" fn fmt_date_time(env: Env, info: CbInfo) -> Value {
+    let [d, t, l] = unsafe { args::<3>(env, info) };
+    let date = try_or_throw!(env, unsafe { i64_arg(env, d, "fmtDateTime date") });
+    let time = try_or_throw!(env, unsafe { i64_arg(env, t, "fmtDateTime time") });
+    let length = try_or_throw!(env, unsafe { i64_arg(env, l, "fmtDateTime length") });
+    unsafe { filled(env, "fmtDateTime", |out, cap| capi::kaya_fmt_date_time(date, time, length, out, cap)) }
+}
+
+unsafe extern "C" fn fmt_number(env: Env, info: CbInfo) -> Value {
+    let [v, min, max, g] = unsafe { args::<4>(env, info) };
+    let value = try_or_throw!(env, unsafe { f64_arg(env, v, "fmtNumber value") });
+    let options = try_or_throw!(env, unsafe { number_options(env, min, max, g, "fmtNumber options") });
+    unsafe { filled(env, "fmtNumber", |out, cap| capi::kaya_fmt_number(value, &options, out, cap)) }
+}
+
+unsafe extern "C" fn fmt_percent(env: Env, info: CbInfo) -> Value {
+    let [v, min, max, g] = unsafe { args::<4>(env, info) };
+    let value = try_or_throw!(env, unsafe { f64_arg(env, v, "fmtPercent value") });
+    let options = try_or_throw!(env, unsafe { number_options(env, min, max, g, "fmtPercent options") });
+    unsafe { filled(env, "fmtPercent", |out, cap| capi::kaya_fmt_percent(value, &options, out, cap)) }
+}
+
+unsafe extern "C" fn fmt_currency(env: Env, info: CbInfo) -> Value {
+    let [v, c] = unsafe { args::<2>(env, info) };
+    let value = try_or_throw!(env, unsafe { f64_arg(env, v, "fmtCurrency value") });
+    let code = try_or_throw!(env, unsafe { string_arg(env, c, "fmtCurrency code") });
+    let code = try_or_throw!(env, CString::new(code).map_err(|_| "kaya: fmtCurrency code holds a NUL".to_owned()));
+    unsafe { filled(env, "fmtCurrency", |out, cap| capi::kaya_fmt_currency(value, code.as_ptr(), out, cap)) }
+}
+
+unsafe extern "C" fn locale(env: Env, _info: CbInfo) -> Value {
+    unsafe { filled(env, "locale", |out, cap| capi::kaya_locale(out, cap)) }
+}
+
+unsafe extern "C" fn direction(env: Env, _info: CbInfo) -> Value {
+    unsafe { number(env, f64::from(capi::kaya_direction())) }
+}
+
+unsafe extern "C" fn text_scale(env: Env, _info: CbInfo) -> Value {
+    unsafe { number(env, capi::kaya_text_scale()) }
+}
+
+unsafe extern "C" fn catalog(env: Env, info: CbInfo) -> Value {
+    let [a] = unsafe { args::<1>(env, info) };
+    let app = try_or_throw!(env, unsafe { string_arg(env, a, "catalog app") });
+    let app = try_or_throw!(env, CString::new(app).map_err(|_| "kaya: catalog app holds a NUL".to_owned()));
+    unsafe { capi::kaya_catalog(app.as_ptr()) };
+    unsafe { undefined(env) }
+}
+
+/// `tr(key, [[name, tag, i, f, s], …])`: one record per argument, the
+/// tag KAYA_TR_*, `i` and `f` as numbers, `s` a string ("" when unused).
+unsafe extern "C" fn tr(env: Env, info: CbInfo) -> Value {
+    let [k, a] = unsafe { args::<2>(env, info) };
+    let key = try_or_throw!(env, unsafe { string_arg(env, k, "tr key") });
+    let key = try_or_throw!(env, CString::new(key).map_err(|_| "kaya: tr key holds a NUL".to_owned()));
+    let mut count: u32 = 0;
+    if unsafe { (api().napi_get_array_length)(env, a, &mut count) } != NAPI_OK {
+        return unsafe { throw(env, "kaya: tr takes an array of [name, tag, i, f, s] records") };
+    }
+    let mut names: Vec<CString> = Vec::with_capacity(count as usize);
+    let mut texts: Vec<CString> = Vec::with_capacity(count as usize);
+    let mut records: Vec<capi::KayaTrArg> = Vec::with_capacity(count as usize);
+    for index in 0..count {
+        let mut record: Value = ptr::null_mut();
+        unsafe { (api().napi_get_element)(env, a, index, &mut record) };
+        let field = |at: u32| {
+            let mut v: Value = ptr::null_mut();
+            unsafe { (api().napi_get_element)(env, record, at, &mut v) };
+            v
+        };
+        let (name, tag, i, f, s) = (field(0), field(1), field(2), field(3), field(4));
+        let name = try_or_throw!(env, unsafe { string_arg(env, name, "tr argument name") });
+        let name = try_or_throw!(env, CString::new(name).map_err(|_| "kaya: a tr argument name holds a NUL".to_owned()));
+        let tag = try_or_throw!(env, unsafe { i64_arg(env, tag, "tr argument tag") });
+        let i = try_or_throw!(env, unsafe { i64_arg(env, i, "tr argument i") });
+        let f = try_or_throw!(env, unsafe { f64_arg(env, f, "tr argument f") });
+        let s = try_or_throw!(env, unsafe { string_arg(env, s, "tr argument s") });
+        let s = try_or_throw!(env, CString::new(s).map_err(|_| "kaya: a tr argument holds a NUL".to_owned()));
+        names.push(name);
+        texts.push(s);
+        records.push(capi::KayaTrArg {
+            name: names.last().map_or(ptr::null(), |c| c.as_ptr()),
+            tag: tag as u32,
+            i,
+            f,
+            s: texts.last().map_or(ptr::null(), |c| c.as_ptr()),
+        });
+    }
+    let _ = (&names, &texts);
+    unsafe {
+        filled(env, "tr", |out, cap| {
+            capi::kaya_tr(key.as_ptr(), records.as_ptr(), records.len(), out, cap)
+        })
+    }
 }
 
 unsafe extern "C" fn pref_get_string(env: Env, info: CbInfo) -> Value {

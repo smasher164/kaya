@@ -3,7 +3,7 @@ import pathlib
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
-from kaya_gate import Gate, dev_shell_or_die
+from kaya_gate import ROOT, Gate, dev_shell_or_die
 
 dev_shell_or_die()
 
@@ -21,11 +21,26 @@ import re
 
 L10N = "guests/assets/l10n"
 MANIFEST = "guests/assets/identity.toml"
-GUEST_GLOBS = ("guests/rust/*.rs",)
-# The lookup's spelling per language (docs/compliance-plan.md §1.4); the
-# breadth pass adds a row per binding as its `tr` lands.
-CALL = re.compile(r"""\btr!\(\s*"([a-z][a-z0-9-]*)"|\bl10n::tr\(\s*"([a-z][a-z0-9-]*)\"""")
-CATALOG_CALL = re.compile(r"""\bcatalog\(\s*"([a-z][a-z0-9-]*)"\s*\)""")
+# (directory, pattern): the walk is rooted UNDER each guest tree, because a
+# bare `guests/ocaml/*.ml` pattern also reads dune's `_build/.../*.pp.ml`
+# preprocessor output, which is not UTF-8 (measured 2026-09-23).
+GUEST_TREES = (("guests/rust", "*.rs"), ("guests/python", "*.py"), ("guests/js", "*.ts"),
+               ("guests/go", "*.go"), ("guests/csharp", "*.cs"), ("guests/java", "*.java"),
+               ("guests/swift", "*.swift"), ("guests/ocaml", "*.ml"), ("guests/haskell", "*.hs"),
+               ("guests/c", "*.c"))
+# The lookup's spelling per language (docs/compliance-plan.md §1.4), one
+# alternation: Rust's `tr!(`, Python's and JS's `kaya.tr(`, Go's `kaya.Tr(`,
+# C#'s `Kaya.Tr(`, Java's and Swift's `KayaApp.tr(`, OCaml's and Haskell's
+# bare `tr "`, and on the C floor the `tr_ask` literal `{"key", &args, n}`
+# that guests/c/format.c hands kaya_tr (the floor asks through a buffer
+# helper, so the key is never on the call's own line).
+KEY = r'([a-z][a-z0-9-]*)'
+CALL = re.compile(
+    rf'\btr!\(\s*"{KEY}"|\bl10n::tr\(\s*"{KEY}"|\bkaya\.tr\(\s*"{KEY}"|\bkaya\.Tr\(\s*"{KEY}"|'
+    rf'\bKaya\.Tr\(\s*"{KEY}"|\bKayaApp\.tr\(\s*"{KEY}"|(?<![\w.])tr\s+"{KEY}"|'
+    rf'\bkaya_tr\(\s*"{KEY}"|\{{"{KEY}", &\w+, \d+\}}')
+CATALOG_CALL = re.compile(
+    rf'\b(?:catalog|Catalog|kaya_catalog)\(\s*"{KEY}"\s*\)|(?<![\w.])catalog\s+"{KEY}"')
 MESSAGE = re.compile(r"^([a-zA-Z][a-zA-Z0-9_-]*)\s*=", re.M)
 ARG = re.compile(r"\$([a-zA-Z][a-zA-Z0-9_-]*)")
 
@@ -97,8 +112,8 @@ def census(catalogs, guests, manifest):
                         f"the default's takes {sorted(base[key])}")
     # Every key a guest names exists in its app's default catalog.
     for rel, text in sorted(guests.items()):
-        named = CATALOG_CALL.findall(text)
-        keys = [a or b for a, b in CALL.findall(text)]
+        named = [next(g for g in m if g) for m in CATALOG_CALL.findall(text)]
+        keys = [next(g for g in m if g) for m in CALL.findall(text)]
         if not keys:
             continue
         if not named:
@@ -118,8 +133,9 @@ def census(catalogs, guests, manifest):
 catalog_paths = [str(p) for p in gate.walk("*.ftl", under=L10N)]
 gate.counted("catalogs", catalog_paths, floor=3)
 catalogs = {p: gate.read(p) for p in catalog_paths}
-guest_paths = [str(p) for g in GUEST_GLOBS for p in gate.walk(g)]
-gate.counted("guest sources", guest_paths, floor=40)
+guest_paths = [str(pathlib.Path(p).resolve().relative_to(ROOT))
+               for under, pattern in GUEST_TREES for p in gate.walk(pattern, under=under)]
+gate.counted("guest sources", guest_paths, floor=300)
 guests = {p: gate.read(p) for p in guest_paths}
 manifest = gate.read(MANIFEST)
 
@@ -151,14 +167,28 @@ gate.negative("N2 an argument that disagrees across locales",
               want="'greeting' takes []")
 ran += 1
 
-# N3: a guest asking for a key no catalog has.
-doctored_guests = dict(guests)
-doctored_guests[guest] = gate.doctor("N3 the guest asks for a missing key", guests[guest],
-                                     r'tr!\("greeting"', 'tr!("farewell"')
-gate.negative("N3 a guest key the catalog lacks",
-              lambda: census(catalogs, doctored_guests, manifest),
-              want="asks for 'farewell'")
-ran += 1
+# N3: a guest asking for a key no catalog has — once per language's
+# spelling, so a pattern that reads nothing in some binding is a failed test.
+for rel, pattern, repl in (
+    (guest, r'tr!\("greeting"', 'tr!("farewell"'),
+    ("guests/python/format.py", r'kaya\.tr\("greeting"', 'kaya.tr("farewell"'),
+    ("guests/js/format.ts", r'kaya\.tr\("greeting"', 'kaya.tr("farewell"'),
+    ("guests/go/format/format.go", r'kaya\.Tr\("greeting"', 'kaya.Tr("farewell"'),
+    ("guests/csharp/FormatScene.cs", r'Kaya\.Tr\("greeting"', 'Kaya.Tr("farewell"'),
+    ("guests/java/dev/kaya/guests/Format.java", r'KayaApp\.tr\("greeting"',
+     'KayaApp.tr("farewell"'),
+    ("guests/swift/format.swift", r'KayaApp\.tr\("greeting"', 'KayaApp.tr("farewell"'),
+    ("guests/ocaml/format.ml", r'tr "greeting"', 'tr "farewell"'),
+    ("guests/haskell/format.hs", r'tr "greeting"', 'tr "farewell"'),
+    ("guests/c/format.c", r'\{"greeting", &name, 1\}', '{"farewell", &name, 1}'),
+):
+    doctored_guests = dict(guests)
+    doctored_guests[rel] = gate.doctor(f"N3 {rel} asks for a missing key", guests[rel],
+                                       pattern, repl)
+    gate.negative(f"N3 a guest key the catalog lacks ({rel})",
+                  lambda d=doctored_guests: census(catalogs, d, manifest),
+                  want="asks for 'farewell'")
+    ran += 1
 
 # N4: a catalog that no longer parses.
 doctored = dict(catalogs)

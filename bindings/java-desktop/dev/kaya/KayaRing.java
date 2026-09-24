@@ -123,5 +123,25 @@ public final class KayaRing {
 
     public static native void prefRemove(byte[] key);
 
+    /**
+     * The formatter door and the catalog (docs/compliance-plan.md §3; the
+     * kaya_fmt_*, kaya_locale, kaya_direction, kaya_text_scale, kaya_catalog
+     * and kaya_tr JNI spellings). A NULL answer from a formatter or tr means
+     * the core reported a fault for the input; KayaApp throws naming the call.
+     * tr's arguments ride one packed byte array (KayaApp.TrArgs).
+     */
+    public static native byte[] fmtDate(long packed, long length);
+    public static native byte[] fmtDateWeekday(long packed);
+    public static native byte[] fmtTime(long packed, long length);
+    public static native byte[] fmtDateTime(long date, long time, long length);
+    public static native byte[] fmtNumber(double value, int minFractionDigits, int maxFractionDigits, boolean grouping);
+    public static native byte[] fmtPercent(double value, int minFractionDigits, int maxFractionDigits, boolean grouping);
+    public static native byte[] fmtCurrency(double value, byte[] code);
+    public static native byte[] locale();
+    public static native int direction();
+    public static native double textScale();
+    public static native void catalog(byte[] app);
+    public static native byte[] tr(byte[] key, byte[] args, int nargs);
+
     private KayaRing() {}
 }

@@ -107,6 +107,41 @@ object KayaRing {
      */
     @JvmStatic external fun prefGetString(key: ByteArray): ByteArray?
 
+    /**
+     * The formatter door and the catalog (docs/compliance-plan.md §3), the
+     * desktop ring's twelve (bindings/java-desktop/dev/kaya/KayaRing.java)
+     * on the shared registration list: dates and times PACKED (YYYYMMDD,
+     * HHMM), lengths 0/1/2, digit counts -1 for the platform's default, a
+     * NULL answer the core's reported fault.
+     */
+    @JvmStatic external fun fmtDate(packed: Long, length: Long): ByteArray?
+
+    @JvmStatic external fun fmtDateWeekday(packed: Long): ByteArray?
+
+    @JvmStatic external fun fmtTime(packed: Long, length: Long): ByteArray?
+
+    @JvmStatic external fun fmtDateTime(date: Long, time: Long, length: Long): ByteArray?
+
+    @JvmStatic external fun fmtNumber(
+        value: Double, minFractionDigits: Int, maxFractionDigits: Int, grouping: Boolean,
+    ): ByteArray?
+
+    @JvmStatic external fun fmtPercent(
+        value: Double, minFractionDigits: Int, maxFractionDigits: Int, grouping: Boolean,
+    ): ByteArray?
+
+    @JvmStatic external fun fmtCurrency(value: Double, code: ByteArray): ByteArray?
+
+    @JvmStatic external fun locale(): ByteArray?
+
+    @JvmStatic external fun direction(): Int
+
+    @JvmStatic external fun textScale(): Double
+
+    @JvmStatic external fun catalog(app: ByteArray)
+
+    @JvmStatic external fun tr(key: ByteArray, args: ByteArray, nargs: Int): ByteArray?
+
     @JvmStatic external fun prefGetI64(key: ByteArray): LongArray?
 
     @JvmStatic external fun prefGetF64(key: ByteArray): DoubleArray?

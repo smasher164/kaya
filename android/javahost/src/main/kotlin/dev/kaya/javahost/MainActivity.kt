@@ -49,6 +49,9 @@ class MainActivity : ComponentActivity() {
             "stall" -> Stall::app
             "nav" -> Nav::app
             "sheet" -> Sheet::app
+            "format" -> Format::app
+            "formatde" -> Format::app
+            "formatar" -> Format::app
             // One app behind both list-detail scripts. `split` itself
             // is desktop-only (it drives resize_window, which this host
             // rejects), so only `listdetail` is wired.

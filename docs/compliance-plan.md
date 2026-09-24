@@ -122,6 +122,16 @@ its own idiom over one core implementation.
 | JS | `kaya.tr("tasks-due", { count: 3, date: d })` | `kaya.fmt.date(d, "medium")` |
 | C | `kaya_tr(...)` and `kaya_fmt_date(&d, KAYA_FMT_MEDIUM, buf, cap)`, the explicit buffer shape |
 
+BUILT 2026-09-23 in all nine plus the floor (tools/check-sugar-surface.py's
+door census holds the twelve parts), with three spellings that are not the
+table's, each for a reason the census records: Go answers `Direction()` as a
+`LayoutDirection` type, Swift's records are `KayaNumberSpec` and `KayaArg`
+(the C header holds `KayaNumberOptions` and `KayaTrArg`), and Java's and
+Swift's statics live on `KayaApp` (`KayaApp.fmt().date(…)`,
+`KayaApp.fmt.date(…)`, `KayaApp.tr`, `KayaApp.catalog`) beside their other
+process-wide calls. OCaml's string argument is `` `Text `` rather than
+`` `Str ``, the wire's own constructor.
+
 ### 1.5 The whole thing, and what is deliberately not in it
 
 IN: a text-scale knob and its two read-backs on every lane; a locale
@@ -420,7 +430,13 @@ prose), planted negative in each. Green today by measurement.
   expectations swapped to the `ar` catalog's bytes (identical on five
   lanes), with `expect_locale`, `expect_direction rtl`,
   `expect_mirrored row@task[t1]`, `expect_script` on the date labels and
-  `{fmt:…}` templates in their expectations.
+  `{fmt:…}` templates in their expectations. BUILT 2026-09-23 as the tasks
+  script's screens WITHOUT its notification acts, its relaunch and its
+  drag: those drive platform doors keyed by scene name on every lane
+  (notify_tap, the COM activator, the portal) and the tasks legs already
+  hold them; the counts ride `{fmt:number N medium}` since a count's digits
+  are the platform's own under ar-EG (Arabic-Indic on four lanes, Latin on
+  glibc).
 - **`format.steps`**, one guest per language: the six formatters and
   `tr` over fixed inputs, asserted through `{fmt:…}` templates and
   `expect_script` under the everyday locale, then `de-DE` and `ar-EG`

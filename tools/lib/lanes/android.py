@@ -101,6 +101,9 @@ LEGS = {
         # rust-only until the eight bindings' fmt lands, the same guest
         # under the everyday locale and two more through SCENE_LOCALE.
         "format-compose", "formatde-compose", "formatar-compose",
+        # The task manager in Arabic (docs/compliance-plan.md §6): no drag,
+        # no notification, so pooled where tasks-compose is exclusive.
+        "tasksrtl-compose",
     ],
     "jvm": [
         "jvm", "a11y-jvm", "entry-jvm",
@@ -118,6 +121,7 @@ LEGS = {
         "ranges-jvm", "styling-jvm", "typeface-jvm",
         "assets-jvm", "dnd-jvm", "pickers-jvm", "sliders-jvm", "tooltips-jvm",
         "sheet-jvm",
+        "format-jvm", "formatde-jvm", "formatar-jvm",
     ],
     "go": [
         "go", "a11y-go", "a11yrows-go",
@@ -135,6 +139,7 @@ LEGS = {
         "dirty-go", "ranges-go", "editor-go",
         "dnd-go", "pickers-go", "sliders-go", "tooltips-go",
         "sheet-go",
+        "format-go", "formatde-go", "formatar-go",
     ],
     "python": [
         "varied-python", "portfolio-python",
@@ -144,7 +149,7 @@ LEGS = {
 # The locale a scene runs under, the knob the leg carries as an intent
 # extra (docs/compliance-plan.md §4); the reads ask the platform, never
 # this.
-SCENE_LOCALE = {"formatde": "de-DE", "formatar": "ar-EG"}
+SCENE_LOCALE = {"formatde": "de-DE", "formatar": "ar-EG", "tasksrtl": "ar-EG"}
 
 # THE PLATFORM'S OWN DOOR FOR A SECOND ACT (docs/tasks-s9-plan.md R6, R7),
 # per scene that carries a `relaunch`: this lane's is a real tap on the

@@ -4374,4 +4374,51 @@ check("a stamped registration with no enclosing For is refused naming the "
       "registers inside a For" in _r2_owner_said)
 kaya.runtime.submit = _real_ship
 
+# THE FORMATTER DOOR AND THE CATALOG (docs/compliance-plan.md §1.4): the
+# binding's own walls — a length outside the three, a datetime where a
+# civil date is taken, a bool placeable (a bool IS an int in Python), a
+# currency that is not a code — each refused by name before the core is
+# asked; and the door answered for real, since the checks load libkaya.
+import datetime as _dt
+
+_fmt_said = ""
+try:
+    kaya.fmt.date(_dt.date(2026, 9, 7), length="huge")  # type: ignore[arg-type]
+except kaya.KayaValueError as e:
+    _fmt_said = str(e)
+check("fmt.date refuses a length outside short, medium, long naming them",
+      "short, medium, long" in _fmt_said)
+_fmt_said = ""
+try:
+    kaya.fmt.date(_dt.datetime(2026, 9, 7, 8, 30))
+except kaya.KayaTypeError as e:
+    _fmt_said = str(e)
+check("fmt.date refuses a datetime.datetime as the pickers do",
+      "never an instant" in _fmt_said)
+_fmt_said = ""
+try:
+    kaya.tr("items", count=True)
+except kaya.KayaTypeError as e:
+    _fmt_said = str(e)
+check("tr refuses a bool placeable before int claims it", "is a bool" in _fmt_said)
+_fmt_said = ""
+try:
+    kaya.fmt.currency(1.0, "dollars")
+except kaya.KayaValueError as e:
+    _fmt_said = str(e)
+check("fmt.currency refuses a name where a code is taken", "ISO 4217" in _fmt_said)
+_fmt_said = ""
+try:
+    kaya.fmt.number(1.0, max_fraction_digits=99)
+except kaya.KayaValueError as e:
+    _fmt_said = str(e)
+check("fmt.number refuses a digit count outside 0..20", "0..20" in _fmt_said)
+check("fmt.number answers the platform's own bytes for a grouped number",
+      kaya.fmt.number(1234567.891) not in ("", "1234567.891"))
+check("fmt.locale answers a BCP-47 tag with a hyphen or a bare language",
+      kaya.fmt.locale().tag.replace("-", "").isalnum())
+check("fmt.direction answers one of the two words",
+      kaya.fmt.direction() in ("ltr", "rtl"))
+check("fmt.text_scale answers a factor", kaya.fmt.text_scale() >= 1.0)
+
 sys.exit(1 if failures else 0)

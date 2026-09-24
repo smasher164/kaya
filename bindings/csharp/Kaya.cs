@@ -237,7 +237,7 @@ sealed class UndoDelta
 /// the core put back.
 sealed record UndoStep(string Label, UndoDelta Delta);
 
-static class Kaya
+static partial class Kaya
 {
     [StructLayout(LayoutKind.Sequential)]
     struct RingInfo

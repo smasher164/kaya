@@ -143,6 +143,7 @@ fn through_the_door(value: &FluentValue<'_>, _: &intl_memoizer::concurrent::Intl
 /// language alone, then the default the identity manifest declares. Called
 /// once at startup by the app; every binding spells it.
 pub fn catalog(app: &str) {
+    crate::fmt::install_locale_knob();
     let locale = crate::fmt::locale().tag;
     let default = crate::scene::declared_default_locale();
     let mut chain: Vec<String> = vec![locale.clone()];
@@ -180,13 +181,24 @@ pub fn catalog(app: &str) {
                         Some(FluentValue::Custom(c)) => {
                             let any: &dyn std::any::Any = c.as_ref().as_any();
                             if let Some(d) = any.downcast_ref::<DateValue>() {
-                                FluentValue::String(
-                                    crate::fmt::date(d.0, length_named(named.get("length"))).into(),
-                                )
+                                // `length: "weekday"` is the task list's idiom,
+                                // the door's date_weekday (docs/compliance-plan.md §6).
+                                let weekday = matches!(named.get("length"), Some(FluentValue::String(s)) if s == "weekday");
+                                FluentValue::String(if weekday {
+                                    crate::fmt::date_weekday(d.0).into()
+                                } else {
+                                    crate::fmt::date(d.0, length_named(named.get("length"))).into()
+                                })
                             } else if let Some(t) = any.downcast_ref::<TimeValue>() {
-                                FluentValue::String(
-                                    crate::fmt::time(t.0, length_named(named.get("length"))).into(),
-                                )
+                                // A time's unstated length is SHORT, as the bare
+                                // placeable's is: the tasks leg read `8:30:00 AM`
+                                // for `DATETIME($time)` on 2026-09-23.
+                                let length = if named.get("length").is_some() {
+                                    length_named(named.get("length"))
+                                } else {
+                                    crate::fmt::Length::Short
+                                };
+                                FluentValue::String(crate::fmt::time(t.0, length).into())
                             } else {
                                 FluentValue::Error
                             }

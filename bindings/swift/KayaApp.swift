@@ -1614,6 +1614,141 @@ public struct KayaCapabilities {
     let notifications: Bool
 }
 
+// --- The formatter door and the catalog (docs/compliance-plan.md §1.4) ------
+
+/// How much of a date or time to write: the numeric form, the abbreviated
+/// words, the full words.
+public enum KayaLength: Int64, Sendable {
+    case short = 0
+    case medium = 1
+    case long = 2
+}
+
+/// What a number formatter may be told; a nil digit count leaves the
+/// platform's default.
+public struct KayaNumberSpec: Sendable {
+    public var minFractionDigits: Int?
+    public var maxFractionDigits: Int?
+    public var grouping: Bool
+
+    public init(minFractionDigits: Int? = nil, maxFractionDigits: Int? = nil, grouping: Bool = true) {
+        self.minFractionDigits = minFractionDigits
+        self.maxFractionDigits = maxFractionDigits
+        self.grouping = grouping
+    }
+}
+
+/// Who the user is, as the platform reports it: the BCP-47 tag, the hour
+/// cycle (12 or 24), the first weekday (1 Monday … 7 Sunday), the calendar
+/// and the numbering system.
+public struct KayaLocaleInfo: Sendable {
+    public let tag: String
+    public let hourCycle: Int
+    public let firstWeekday: Int
+    public let calendar: String
+    public let numbering: String
+}
+
+/// Which way the layout runs, decided by the locale's script.
+public enum KayaDirection: Sendable {
+    case ltr
+    case rtl
+}
+
+/// One argument to `KayaApp.tr`; integer, float and string literals
+/// convert, a date or time is spelled `.date(d)` / `.time(t)`.
+public enum KayaArg: Sendable, ExpressibleByIntegerLiteral, ExpressibleByFloatLiteral,
+    ExpressibleByStringLiteral
+{
+    case int(Int64)
+    case float(Double)
+    case str(String)
+    case date(KayaDate)
+    case time(KayaTime)
+
+    public init(integerLiteral value: Int64) { self = .int(value) }
+    public init(floatLiteral value: Double) { self = .float(value) }
+    public init(stringLiteral value: String) { self = .str(value) }
+}
+
+/// The C API's fill shape read twice; a 0 length is the core's fault for
+/// the input (the sentence is already reported), and a formatter never
+/// legitimately writes nothing.
+func kayaFilled(_ what: String, _ ask: (UnsafeMutablePointer<UInt8>?, UInt) -> UInt) -> String {
+    let len = ask(nil, 0)
+    precondition(len > 0, "kaya: \(what) refused its input (the fault names it)")
+    var out = [UInt8](repeating: 0, count: Int(len))
+    let written = out.withUnsafeMutableBufferPointer { buf in ask(buf.baseAddress, len) }
+    return String(decoding: out[0..<Int(min(written, len))], as: UTF8.self)
+}
+
+/// The formatter door: dates, times, numbers, percentages and money
+/// written the way the user's platform writes them, by the platform's own
+/// formatter. Pure functions, any thread, no transaction.
+public enum KayaFmt {
+    public static func date(_ d: KayaDate, _ length: KayaLength = .medium) -> String {
+        let packed = kayaPackedDate("fmt.date", d)
+        return kayaFilled("fmt.date") { kaya_fmt_date(packed, length.rawValue, $0, $1) }
+    }
+
+    /// The date with its weekday and no year (`Mon, Sep 7` in en-US).
+    public static func dateWeekday(_ d: KayaDate) -> String {
+        let packed = kayaPackedDate("fmt.dateWeekday", d)
+        return kayaFilled("fmt.dateWeekday") { kaya_fmt_date_weekday(packed, $0, $1) }
+    }
+
+    public static func time(_ t: KayaTime, _ length: KayaLength = .short) -> String {
+        let packed = kayaPackedTime("fmt.time", t)
+        return kayaFilled("fmt.time") { kaya_fmt_time(packed, length.rawValue, $0, $1) }
+    }
+
+    public static func dateTime(_ d: KayaDate, _ t: KayaTime, _ length: KayaLength = .medium) -> String {
+        let date = kayaPackedDate("fmt.dateTime", d)
+        let time = kayaPackedTime("fmt.dateTime", t)
+        return kayaFilled("fmt.dateTime") { kaya_fmt_date_time(date, time, length.rawValue, $0, $1) }
+    }
+
+    private static func options(_ o: KayaNumberSpec) -> KayaNumberOptions {
+        KayaNumberOptions(
+            min_fraction_digits: Int32(o.minFractionDigits ?? -1),
+            max_fraction_digits: Int32(o.maxFractionDigits ?? -1),
+            grouping: o.grouping)
+    }
+
+    public static func number(_ value: Double, _ o: KayaNumberSpec = KayaNumberSpec()) -> String {
+        var opts = options(o)
+        return kayaFilled("fmt.number") { kaya_fmt_number(value, &opts, $0, $1) }
+    }
+
+    public static func percent(_ value: Double, _ o: KayaNumberSpec = KayaNumberSpec()) -> String {
+        var opts = options(o)
+        return kayaFilled("fmt.percent") { kaya_fmt_percent(value, &opts, $0, $1) }
+    }
+
+    /// An amount in the ISO 4217 currency `code`.
+    public static func currency(_ value: Double, _ code: String) -> String {
+        code.withCString { c in kayaFilled("fmt.currency") { kaya_fmt_currency(value, c, $0, $1) } }
+    }
+
+    /// The process locale and its settings, asked of the platform each time.
+    public static func locale() -> KayaLocaleInfo {
+        let parts = kayaFilled("fmt.locale") { kaya_locale($0, $1) }.split(separator: " ").map(String.init)
+        precondition(parts.count == 5, "kaya: kaya_locale answered \(parts)")
+        return KayaLocaleInfo(
+            tag: parts[0], hourCycle: Int(parts[1]) ?? 12, firstWeekday: Int(parts[2]) ?? 1,
+            calendar: parts[3], numbering: parts[4])
+    }
+
+    public static func direction() -> KayaDirection {
+        kaya_direction() == 1 ? .rtl : .ltr
+    }
+
+    /// The text scale the platform reported, 1.0 until one does.
+    public static func textScale() -> Double {
+        kaya_text_scale()
+    }
+}
+
 /// The app's preferences store (docs/tasks-s4-plan.md P2/P3): a small
 /// typed key-value record under the app's id, the platform's own where
 /// the platform has one — UserDefaults on Apple, SharedPreferences on
@@ -2174,6 +2309,48 @@ public final class KayaApp {
 
     /// The app's preferences store — one per process.
     static func prefs() -> KayaPrefs { KayaPrefs() }
+
+    /// The formatter door (docs/compliance-plan.md §1.4): `KayaApp.fmt.date(d, .medium)`.
+    public static var fmt: KayaFmt.Type { KayaFmt.self }
+
+    /// Load the app's catalog, `l10n/<app>.<locale>.ftl` under the asset root
+    /// with the fallback chain (docs/compliance-plan.md §2.4). Once, at
+    /// startup, before the first `tr`.
+    public static func catalog(_ app: String) {
+        app.withCString { kaya_catalog($0) }
+    }
+
+    /// The message `key` with `args` filled from the loaded catalog; dates
+    /// and times are formatted through the door. A missing message or
+    /// argument is the core's panic naming the key and the locale.
+    public static func tr(_ key: String, _ args: [String: KayaArg] = [:]) -> String {
+        var owned: [UnsafeMutablePointer<CChar>] = []
+        defer { owned.forEach { free($0) } }
+        func keep(_ s: String) -> UnsafePointer<CChar>? {
+            guard let p = strdup(s) else { return nil }
+            owned.append(p)
+            return UnsafePointer(p)
+        }
+        var records: [KayaTrArg] = []
+        for (name, arg) in args {
+            var record = KayaTrArg(name: keep(name), tag: 0, i: 0, f: 0, s: nil)
+            switch arg {
+            case .int(let v): record.tag = UInt32(KAYA_TR_INT); record.i = v
+            case .float(let v): record.tag = UInt32(KAYA_TR_FLOAT); record.f = v
+            case .str(let v): record.tag = UInt32(KAYA_TR_STR); record.s = keep(v)
+            case .date(let v): record.tag = UInt32(KAYA_TR_DATE); record.i = kayaPackedDate("tr(\(key))", v)
+            case .time(let v): record.tag = UInt32(KAYA_TR_TIME); record.i = kayaPackedTime("tr(\(key))", v)
+            }
+            records.append(record)
+        }
+        return key.withCString { k in
+            records.withUnsafeBufferPointer { buf in
+                kayaFilled("tr(\"\(key)\")") { out, cap in
+                    kaya_tr(k, buf.baseAddress, UInt(buf.count), out, cap)
+                }
+            }
+        }
+    }
 
     /// This host's capabilities, constant for the life of the process.
     /// `KAYA_CAP_AUX_WINDOWS` is the CORE'S OWN `#define`, imported

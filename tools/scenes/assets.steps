@@ -10,7 +10,7 @@
 # quoted `;` is the wall holding the three statement splitters equal.
 expect label#0 "assets"
 expect image#0 "2x2"
-expect label#1 "kaya: no asset named "icons/nope.png"; the package carries fonts/OFL.txt, fonts/README.md, fonts/sora-wght.ttf, icons/README.md, icons/kaya-mark.png, identity.toml, images/README.md, images/a11y-logo.png, l10n/README.md, l10n/format.ar.ftl, l10n/format.de.ftl, l10n/format.en.ftl, market/README.md, market/prices.csv, market/transactions.csv, win/README.md, win/minimal-resources.pri"
+expect label#1 "kaya: no asset named "icons/nope.png"; the package carries fonts/OFL.txt, fonts/README.md, fonts/sora-wght.ttf, icons/README.md, icons/kaya-mark.png, identity.toml, images/README.md, images/a11y-logo.png, l10n/README.md, l10n/format.ar.ftl, l10n/format.de.ftl, l10n/format.en.ftl, l10n/tasks.ar.ftl, l10n/tasks.en.ftl, market/README.md, market/prices.csv, market/transactions.csv, win/README.md, win/minimal-resources.pri"
 # 111400 is the vendored font's WHOLE size, so a reader that truncated
 # into a fixed buffer fails here. "no complaint" is the query's positive
 # answer (the empty string) rendered.

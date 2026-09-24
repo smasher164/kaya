@@ -1,0 +1,88 @@
+# The task manager under KAYA_LOCALE=ar-EG (docs/compliance-plan.md §6): the
+# ar catalog's bytes for every word, the platform's own Arabic dates and
+# digits through `{fmt:…}`, the layout mirrored — the tasks script's screens
+# without its notification acts, its relaunch and its drag, which drive
+# platform doors the tasks legs already hold. The everyday half is
+# tasks.steps; a message this script asserts is in guests/assets/l10n/tasks.ar.ftl.
+expect_locale ar-EG
+expect_direction rtl
+expect_title "tasks"
+expect_sections 5
+expect_section "الوارد"
+expect_section_symbol "الوارد" "home"
+expect label@inbox_count "{fmt:number 2 medium} في الوارد"
+expect label@title[t1] "Buy milk"
+expect_mirrored row@task[t1]
+expect label@caption[t2] ""
+expect_sheets 0
+click button@new
+expect_sheets 1
+expect_sheet "مهمة جديدة"
+set_text entry@quick "Buy oat milk"
+click button@add
+expect_sheets 0
+expect label@inbox_count "{fmt:number 3 medium} في الوارد"
+expect label@title[t10] "Buy oat milk"
+expect_placeholder search@inbox_find "بحث"
+set_text search@inbox_find "oat"
+expect label@inbox_count "{fmt:number 1 medium} من {fmt:number 3 medium} مطابقة"
+clear_search search@inbox_find
+expect label@inbox_count "{fmt:number 3 medium} في الوارد"
+select_section 1
+expect_section "اليوم"
+expect label@today_count "{fmt:number 2 medium} اليوم"
+expect label@caption[t3] "{fmt:date_weekday 2026-09-07}, Thesis"
+expect_script label@caption[t3] Arab
+expect label@caption[t4] "{fmt:date_weekday 2026-09-07}"
+toggle checkbox@done[t3] on
+expect label@today_count "{fmt:number 1 medium} اليوم"
+menu_activate "عرض>السجل"
+expect_entries 1
+expect label@logbook_count "{fmt:number 2 medium} منجزة"
+toggle checkbox@lb_done[t3] off
+expect label@logbook_count "{fmt:number 1 medium} منجزة"
+back
+expect_entries 0
+select_section 2
+expect_section "القادمة"
+expect label@upcoming_count "{fmt:number 2 medium} قادمة"
+expect label@caption[t5] "{fmt:date_weekday 2026-09-09}, Trip"
+select_section 3
+expect_section "في أي وقت"
+expect label@anytime_count "{fmt:number 2 medium} في أي وقت"
+expect label@caption[t6] "مستحق {fmt:date_weekday 2026-09-30}, Trip"
+select_section 0
+click button@details[t2]
+expect_entries 1
+expect_ax date_picker@when "datetime/متى: بلا"
+expect_placeholder textarea@notes "ملاحظات"
+expect_ax label@reference "link/مرجع"
+set_date date_picker@when 2026-09-08
+expect_ax date_picker@when "datetime/متى: {fmt:date_weekday 2026-09-08}"
+back
+expect_entries 0
+select_section 2
+expect label@upcoming_count "{fmt:number 3 medium} قادمة"
+expect label@caption[t2] "{fmt:date_weekday 2026-09-08}"
+select_section 4
+expect_section "المشاريع"
+expect label@pcount[trip] "مهمتان"
+click button@open[trip]
+expect_entries 1
+expect_order column@rows "Book the flights|Renew passport"
+back
+expect_entries 0
+select_section 0
+click button@details[t1]
+expect_entries 1
+click button@delete
+expect_entries 0
+expect label@inbox_count "{fmt:number 1 medium} في الوارد"
+menu_activate "تحرير>تراجع"
+expect label@inbox_count "{fmt:number 2 medium} في الوارد"
+menu_activate "عرض>الإعدادات"
+expect_entries 1
+expect label@settings[s] "يبدأ الأسبوع الاثنين؛ الشارة ظاهرة؛ المنجزة تنتقل إلى السجل"
+expect_ax checkbox@hide_badge[s] "switch/إخفاء شارة اليوم"
+back
+expect_entries 0

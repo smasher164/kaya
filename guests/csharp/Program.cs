@@ -35,6 +35,7 @@ static class Program
             case "panels": PanelsScene.Run(); break;
             case "nav": NavScene.Run(); break;
             case "sheet": SheetScene.Run(); break;
+            case "format": case "formatde": case "formatar": FormatScene.Run(); break;
             case "background": BackgroundScene.Run(); break;
             case "stall": StallScene.Run(); break;
             case "split": SplitScene.Run(); break;

@@ -28,6 +28,26 @@ module KayaApp
     Capabilities (..),
     capabilities,
     appDataDir,
+    -- The formatter door and the catalog (docs\/compliance-plan.md §1.4).
+    Length (..),
+    NumberOptions (..),
+    numberOptions,
+    fmtDate,
+    fmtDateWeekday,
+    fmtTime,
+    fmtDateTime,
+    fmtNumber,
+    fmtPercent,
+    fmtCurrency,
+    Locale (..),
+    locale,
+    Direction (..),
+    direction,
+    textScale,
+    catalog,
+    Arg,
+    TrArg (..),
+    tr,
     Prefs (..),
     prefs,
     kayaMain,
@@ -370,7 +390,7 @@ import Data.Bits ((.&.))
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BC
 import Data.ByteString.Builder (Builder)
-import Data.Int (Int64)
+import Data.Int (Int32, Int64)
 import Data.IORef
 import Data.List (elemIndex)
 import Data.Maybe (fromMaybe, listToMaybe)
@@ -484,6 +504,120 @@ notificationResult app ident wire = do
 -- A 'FilePath' and not 'Text', deliberately: this is a place to build
 -- paths under, and @(\<\/\>)@, @createDirectoryIfMissing@ and @openFile@
 -- all take one.
+-- | How much of a date or time to write: the numeric form, the
+-- abbreviated words, the full words.
+data Length = Short | Medium | Long deriving (Eq, Show)
+
+lengthCode :: Length -> Int64
+lengthCode Short = 0
+lengthCode Medium = 1
+lengthCode Long = 2
+
+-- | What a number formatter may be told; 'Nothing' is the platform's own
+-- default, 'numberOptions' the record that states nothing.
+data NumberOptions = NumberOptions
+  { minFractionDigits :: Maybe Int,
+    maxFractionDigits :: Maybe Int,
+    grouping :: Bool
+  }
+  deriving (Eq, Show)
+
+numberOptions :: NumberOptions
+numberOptions = NumberOptions Nothing Nothing True
+
+-- A fault at the floor is raised BY NAME, never an empty string.
+door :: String -> IO (Maybe Text) -> IO Text
+door name ask = ask >>= maybe (ioError (userError ("kaya: " ++ name ++ " reported a fault (the sentence is on stderr)"))) return
+
+digitsOf :: Maybe Int -> Int32
+digitsOf = maybe (-1) fromIntegral
+
+-- | The date at a length, in the process locale (the door's Apple,
+-- glibc, android.icu or Windows.Globalization arm).
+fmtDate :: Length -> Day -> IO Text
+fmtDate len day = door "kaya_fmt_date" (R.fmtDateRaw (packDay day) (lengthCode len))
+
+-- | The date with its weekday and no year, the task list's idiom.
+fmtDateWeekday :: Day -> IO Text
+fmtDateWeekday day = door "kaya_fmt_date_weekday" (R.fmtDateWeekdayRaw (packDay day))
+
+fmtTime :: Length -> TimeOfDay -> IO Text
+fmtTime len t = door "kaya_fmt_time" (R.fmtTimeRaw (packTimeOfDay t) (lengthCode len))
+
+fmtDateTime :: Length -> Day -> TimeOfDay -> IO Text
+fmtDateTime len day t =
+  door "kaya_fmt_date_time" (R.fmtDateTimeRaw (packDay day) (packTimeOfDay t) (lengthCode len))
+
+fmtNumber :: NumberOptions -> Double -> IO Text
+fmtNumber o v =
+  door "kaya_fmt_number" (R.fmtNumberRaw v (digitsOf o.minFractionDigits) (digitsOf o.maxFractionDigits) o.grouping)
+
+fmtPercent :: NumberOptions -> Double -> IO Text
+fmtPercent o v =
+  door "kaya_fmt_percent" (R.fmtPercentRaw v (digitsOf o.minFractionDigits) (digitsOf o.maxFractionDigits) o.grouping)
+
+-- | @fmtCurrency 12.5 "USD"@: the ISO 4217 code.
+fmtCurrency :: Double -> Text -> IO Text
+fmtCurrency v code = door "kaya_fmt_currency" (R.fmtCurrencyRaw v code)
+
+-- | Who the user is: the BCP-47 tag, the hour cycle (12 or 24), the first
+-- weekday (1 Monday .. 7 Sunday), the calendar and the numbering system.
+data Locale = Locale
+  { localeTag :: Text,
+    localeHourCycle :: Int,
+    localeFirstWeekday :: Int,
+    localeCalendar :: Text,
+    localeNumbering :: Text
+  }
+  deriving (Eq, Show)
+
+locale :: IO Locale
+locale = do
+  line <- door "kaya_locale" R.localeLine
+  case T.words line of
+    [tag, cycle, first, cal, num] ->
+      return (Locale tag (read (T.unpack cycle)) (read (T.unpack first)) cal num)
+    _ -> ioError (userError "kaya: kaya_locale answered a line this binding cannot read")
+
+data Direction = Ltr | Rtl deriving (Eq, Show)
+
+direction :: IO Direction
+direction = (\bit -> if bit == 1 then Rtl else Ltr) <$> R.directionBit
+
+textScale :: IO Double
+textScale = R.textScaleRaw
+
+-- | @catalog "tasks"@ loads l10n\/tasks.<locale>.ftl under the asset root
+-- once at startup (docs\/compliance-plan.md §2.4).
+catalog :: Text -> IO ()
+catalog = R.catalogRaw
+
+-- | One argument to 'tr': an int, a float, a string, a 'Day' or a
+-- 'TimeOfDay', written @arg x@ so the list reads as one shape.
+type Arg = R.TrArgRaw
+
+class TrArg a where
+  arg :: a -> Arg
+
+instance TrArg Int where arg = R.TrInt . fromIntegral
+
+instance TrArg Integer where arg = R.TrInt . fromIntegral
+
+instance TrArg Int64 where arg = R.TrInt
+
+instance TrArg Double where arg = R.TrFloat
+
+instance TrArg Text where arg = R.TrStr
+
+instance TrArg Day where arg = R.TrDate . packDay
+
+instance TrArg TimeOfDay where arg = R.TrTime . packTimeOfDay
+
+-- | The message with its arguments filled, dates and numbers through the
+-- door; a missing key or argument is the core's panic naming it.
+tr :: Text -> [(Text, Arg)] -> IO Text
+tr key args = door "kaya_tr" (R.trRaw key args)
+
 appDataDir :: IO FilePath
 appDataDir = do
   dir <- R.appDataDir
