@@ -1844,7 +1844,12 @@ mod flex {
     }
 
     fn main_axis_measure(children: &[(f64, i32, i32)], spacing: i32) -> (i32, i32) {
-        let mut fixed = 0_i32;
+        // A FIXED CELL'S MINIMUM IS ITS OWN (docs/flex-shrink-plan.md §3): a
+        // row that summed its cells' naturals into its minimum could never
+        // be allocated less, so GTK widened the flexshrink window from the
+        // declared 360 to 510 and the shrink never ran (2026-09-24).
+        let mut fixed_minimum = 0_i32;
+        let mut fixed_natural = 0_i32;
         let mut minimum_growers = Vec::new();
         let mut natural_growers = Vec::new();
         for (weight, minimum, natural) in children {
@@ -1852,16 +1857,17 @@ mod flex {
                 minimum_growers.push((*weight, *minimum));
                 natural_growers.push((*weight, *natural));
             } else {
-                fixed = fixed.saturating_add(*natural);
+                fixed_minimum = fixed_minimum.saturating_add(*minimum);
+                fixed_natural = fixed_natural.saturating_add(*natural);
             }
         }
         let count = i32::try_from(children.len()).unwrap_or(i32::MAX);
         let gaps = spacing.saturating_mul(count.saturating_sub(1));
         (
-            fixed
+            fixed_minimum
                 .saturating_add(required_grow_pool(&minimum_growers))
                 .saturating_add(gaps),
-            fixed
+            fixed_natural
                 .saturating_add(required_grow_pool(&natural_growers))
                 .saturating_add(gaps),
         )
@@ -1918,7 +1924,7 @@ mod flex {
 
             assert_eq!(
                 main_axis_measure(&[(0.0, 10, 100), (1.0, 50, 70)], 8),
-                (158, 178)
+                (68, 178)
             );
         }
 
@@ -2115,6 +2121,79 @@ mod flex {
         }
     }
 
+    impl FlexLayoutInner {
+        /// Every visible child with its main-axis extent at `main_total`
+        /// (docs/flex-shrink-plan.md §2): a fixed cell's natural, shrunk
+        /// between its minimum and natural in a row that does not fit
+        /// (crate::flex); a grower's share of what is left. Shared by the
+        /// allocate and by a row's height-for-width measure.
+        fn main_extents(&self, widget: &gtk4::Widget, main_total: i32, cross_total: i32) -> Vec<(gtk4::Widget, i32)> {
+            let vertical = self.orientation.get() == gtk4::Orientation::Vertical;
+            // Pass 1: what the non-growers need, and the weight pool.
+            let mut children = Vec::new();
+            let mut child = widget.first_child();
+            while let Some(c) = child {
+                if c.is_visible() {
+                    let weight = super::grow_weight(&c);
+                    let (minimum, natural) = if weight > 0.0 {
+                        // A grower's own natural size is deliberately not
+                        // consulted: the contract is flex-basis 0.
+                        (0, 0)
+                    } else {
+                        // Height-for-width (request_mode above): a row's
+                        // child is asked its width at -1, a column's its
+                        // height at the column's width.
+                        let (min, nat, _, _) =
+                            c.measure(self.orientation.get(), if vertical { cross_total } else { -1 });
+                        (min, nat)
+                    };
+                    children.push((c.clone(), weight, minimum, natural));
+                }
+                child = c.next_sibling();
+            }
+            if children.is_empty() {
+                return Vec::new();
+            }
+            let gaps = self.spacing.get() * (children.len() as i32 - 1);
+            // A ROW'S FIXED CELLS SHRINK TO THEIR LONGEST WORD
+            // (docs/flex-shrink-plan.md §2, crate::flex): a label's minimum
+            // is its longest word under WrapMode::Word. Rows only.
+            let extents_fixed: Vec<i32> = if vertical {
+                children.iter().map(|(_, _, _, nat)| *nat).collect()
+            } else {
+                let naturals: Vec<f64> = children.iter().map(|(_, _, _, nat)| f64::from(*nat)).collect();
+                let minimums: Vec<f64> = children.iter().map(|(_, _, min, _)| f64::from(*min)).collect();
+                crate::flex::shrink(&naturals, &minimums, f64::from(main_total - gaps))
+                    .into_iter()
+                    .map(|x| x.round() as i32)
+                    .collect()
+            };
+            let fixed: i32 = extents_fixed.iter().sum();
+            let leftover = (main_total - fixed - gaps).max(0);
+            let weights: Vec<f64> = children
+                .iter()
+                .filter_map(|(_, weight, _, _)| (*weight > 0.0).then_some(*weight))
+                .collect();
+            let mut shares = grow_shares(leftover, &weights).into_iter();
+            // The growers' shares are handed out exactly, WITHOUT clamping to
+            // their minimum sizes — a clamp would silently turn 1:3 into
+            // something else in a tight window, and the overflow policy is
+            // one DESIGN still defers.
+            children
+                .iter()
+                .enumerate()
+                .map(|(i, (c, weight, _, _))| {
+                    let extent = if *weight > 0.0 {
+                        shares.next().expect("a grower has a computed share")
+                    } else {
+                        extents_fixed[i]
+                    };
+                    (c.clone(), extent)
+                })
+                .collect()
+        }
+    }
+
     impl LayoutManagerImpl for FlexLayoutInner {
         // HEIGHT-FOR-WIDTH, GTK's box convention: a width is asked at -1
         // and a height for a width. A flex box that passed its height
@@ -2133,6 +2212,21 @@ mod flex {
             for_size: i32,
         ) -> (i32, i32, i32, i32) {
             let for_size = if orientation == gtk4::Orientation::Horizontal { -1 } else { for_size };
+            let vertical = self.orientation.get() == gtk4::Orientation::Vertical;
+            // A ROW'S HEIGHT FOLLOWS ITS SHRUNK CELLS (docs/flex-shrink-plan.md
+            // §2): asked its height for a width, the row lays its cells out at
+            // that width first and measures each at the width it will get —
+            // measured at the row's whole width, a label wrapped by the
+            // allocate read one line tall (the linux flexshrink leg, 2026-09-24).
+            if !vertical && !self.is_main(orientation) && for_size >= 0 {
+                let (mut minimum, mut natural) = (0, 0);
+                for (c, extent) in self.main_extents(widget, for_size, -1) {
+                    let (cmin, cnat, _, _) = c.measure(orientation, extent);
+                    minimum = minimum.max(cmin);
+                    natural = natural.max(cnat);
+                }
+                return (minimum, natural, -1, -1);
+            }
             let (mut minimum, mut natural) = (0, 0);
             let mut main_children = Vec::new();
             let mut child = widget.first_child();
@@ -2162,58 +2256,6 @@ mod flex {
             } else {
                 (width, height)
             };
-
-            // Pass 1: what the non-growers need, and the weight pool.
-            let mut children = Vec::new();
-            let mut child = widget.first_child();
-            while let Some(c) = child {
-                if c.is_visible() {
-                    let weight = super::grow_weight(&c);
-                    let (minimum, natural) = if weight > 0.0 {
-                        // A grower's own natural size is deliberately not
-                        // consulted: the contract is flex-basis 0.
-                        (0, 0)
-                    } else {
-                        // Height-for-width (request_mode above): a row's
-                        // child is asked its width at -1, a column's its
-                        // height at the column's width.
-                        let (min, nat, _, _) =
-                            c.measure(self.orientation.get(), if vertical { cross_total } else { -1 });
-                        (min, nat)
-                    };
-                    children.push((c.clone(), weight, minimum, natural));
-                }
-                child = c.next_sibling();
-            }
-            if children.is_empty() {
-                return;
-            }
-            let gaps = self.spacing.get() * (children.len() as i32 - 1);
-            // A ROW'S FIXED CELLS SHRINK TO THEIR LONGEST WORD
-            // (docs/flex-shrink-plan.md §2, crate::flex): a label's minimum
-            // is its longest word under WrapMode::Word. Rows only.
-            let extents_fixed: Vec<i32> = if vertical {
-                children.iter().map(|(_, _, _, nat)| *nat).collect()
-            } else {
-                let naturals: Vec<f64> = children.iter().map(|(_, _, _, nat)| f64::from(*nat)).collect();
-                let minimums: Vec<f64> = children.iter().map(|(_, _, min, _)| f64::from(*min)).collect();
-                crate::flex::shrink(&naturals, &minimums, f64::from(main_total - gaps))
-                    .into_iter()
-                    .map(|x| x.round() as i32)
-                    .collect()
-            };
-            let fixed: i32 = extents_fixed.iter().sum();
-            let leftover = (main_total - fixed - gaps).max(0);
-            let weights: Vec<f64> = children
-                .iter()
-                .filter_map(|(_, weight, _, _)| (*weight > 0.0).then_some(*weight))
-                .collect();
-            let mut shares = grow_shares(leftover, &weights).into_iter();
-
-// Pass 2: place them. The growers' shares are handed out exactly,
-// WITHOUT clamping to their minimum sizes — a clamp would silently
-// turn 1:3 into something else in a tight window, and the overflow
-            // policy is one DESIGN still defers.
             // A ROW MIRRORS UNDER RTL (docs/compliance-plan.md §1.1): GtkBox's
             // own layout does this by itself and this manager did not, so an
             // Arabic row laid its first child at the left edge with every
@@ -2221,12 +2263,7 @@ mod flex {
             // (2026-09-23). Columns stack the same way either way.
             let rtl = !vertical && widget.direction() == gtk4::TextDirection::Rtl;
             let mut offset = 0;
-            for (i, (c, weight, _, _)) in children.iter().enumerate() {
-                let extent = if *weight > 0.0 {
-                    shares.next().expect("a grower has a computed share")
-                } else {
-                    extents_fixed[i]
-                };
+            for (c, extent) in self.main_extents(widget, main_total, cross_total) {
                 let x = if rtl { width - offset - extent } else { offset };
                 let (w, h, x, y) = if vertical {
                     (cross_total, extent, 0, offset)
@@ -2237,7 +2274,7 @@ mod flex {
                     .translate(&gtk4::graphene::Point::new(x as f32, y as f32));
 // The track, recorded BEFORE the allocate: what GTK stores on the
 // child afterwards is the box its own align and margins shrank it to.
-                super::set_child_track(c, f64::from(extent));
+                super::set_child_track(&c, f64::from(extent));
                 c.allocate(w, h, baseline, Some(transform));
                 offset += extent + self.spacing.get();
             }

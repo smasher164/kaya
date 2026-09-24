@@ -44,7 +44,7 @@ def load(over=None):
 FLEX_LINKS = (
     (SWIFTUI, "struct KayaFlex: Layout {", "kayaMinContent(nodes[i], natural: extents[i])"),
     (COMPOSE, "internal fun KayaFlexRow(", "measurables[i].minIntrinsicWidth(heightHint)"),
-    (GTK, "fn allocate(&self, widget: &gtk4::Widget, width: i32, height: i32, baseline: i32) {",
+    (GTK, "fn main_extents(&self, widget: &gtk4::Widget, main_total: i32, cross_total: i32)",
      "crate::flex::shrink(&naturals, &minimums, f64::from(main_total - gaps))"),
     (WINUI, "fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {",
      "def.SetMinWidth(minimum.min(natural))?;"),

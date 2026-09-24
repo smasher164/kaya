@@ -81,7 +81,11 @@ any of them.
   went with the Row; growers take the leftover by the same arithmetic.
 - **GTK**: `allocate` reads each fixed child's (minimum, natural) and
   shrinks between them; labels move to `WrapMode::Word` so the minimum a
-  label reports is its longest word rather than one character. The site
+  label reports is its longest word rather than one character; and
+  `measure` reports a row's MINIMUM as its fixed cells' minimums, since
+  a minimum that summed their naturals could never be allocated less and
+  GTK widened the flexshrink window from the declared 360 to 510 with the
+  shrink never running (the first capture, 2026-09-24). The site
   chose `WordChar` under the 2026-08-29 wrapping ruling for wrapping's
   sake, not for the character break, so nothing is lost.
 - **WinUI**: `Auto` columns cannot shrink, and the Grid's own STAR
@@ -170,3 +174,7 @@ Depth on SwiftUI with the verb clause and the scene, green on mac and
 iOS by hand (`--only flexshrink,tasks`), then the three other arms, the
 filtered run on all five lanes, the plain matrix, the review page with
 the Today screen on the phones after.
+
+## §8 Built
+
+Landed 2026-09-24 in 880fe020 and the GTK measure follow-up after it; matrix ALL PASS (Mac 519, Linux 851, Windows 312, iOS 156, Android 165 legs, 62 gates); the review page https://claude.ai/artifact/KPqemDy3TpQPhkmJWDnMAi.
