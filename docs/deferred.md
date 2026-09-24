@@ -60,6 +60,35 @@ digit measured unbounded against its pill, watched red on the windows
 tasksbig leg before the fix (`badge "2" needs 29.9px and its pill is 16px
 tall`). KEY: InfoBadge, TextScaleFactor, badge clipped.
 
+## DEFER — Go's secondary handlers register through the app object, not on the handle (the maintainer, 2026-09-24 afternoon, reviewing the submit slice)
+KEY: Go chained handlers, OnSubmit on Widget, app.OnSubmitted, app.OnValueCommitted, secondary handler registrar, Go handler family
+
+Go's constructors take ONE handler positionally (`tx.Textarea(onChange)`,
+`tx.Slider(min, max, value, onChange)`, `tx.Button(text, onClick)`) and
+every SECOND handler a widget can carry is registered through the app
+object keyed by the widget: `app.OnSubmitted(w, fn)`, `OnValueCommitted`,
+`OnEdit`, `OnFormat`, `OnPaste`, `OnDrop`, `OnDragEnded`, `OnSort` and
+their `Node` twins, sixteen registrars, about thirty guest call sites.
+That shape dates from the first bindings commit (7b5c5bce) and never
+moved; the registration is per widget id, so the scope is the widget
+even though the spelling names the app. Reviewing the submit slice the
+maintainer expected the chained form, which Go has no reason not to
+have: `Widget` holds its `Tx` and the `Tx` holds the `App`, so
+`tx.Textarea(nil).Submits().A11yID("compose").OnSubmit(wrote)` is a
+three-line forward into the same table. THE SHAPE, when it is picked up:
+the whole family moves onto the handle (`OnSubmit`, `OnValueCommitted`,
+`OnEdit`, `OnFormat`, `OnPaste`, `OnDrop`, `OnDragEnded`, `OnSort` on
+`Widget`, the same names on `Node` for the template zone, each returning
+the handle so the chain continues), the `app.OnX` forms REMOVED rather
+than kept as aliases (the idiom survey's rule against two spellings of
+one thing), the guests' thirty sites rewritten, tools/gen-guests.py's
+Go row façade forwarding the `Node` set, and check-sugar-surface's Go
+rows for `on_sort`, the rich handlers and `on_submit` re-keyed to the
+handle with their negatives re-run. Submit alone must NOT move ahead of
+the family. DEFERRED by the maintainer ("let's put this off for later")
+with scroll-to and the chat app ahead of it; a Go-only slice, about an
+hour, best done before the chat app is written against the old shape.
+
 ## DEFER — the checkbox reads a touch high beside the title's first line on Android, iOS and Windows (the maintainer, 2026-09-24 morning, off the recaptured review page)
 
 The first-line-box rule (docs/flex-shrink-plan.md §10, landed 24ae2bdc)

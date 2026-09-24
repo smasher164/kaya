@@ -266,7 +266,7 @@ message search (optional for v1); and, all shipped, notifications,
 badges, rich text with links, the search field, RTL mirroring, sheets,
 image display, clipboard with images, file dialogs and drag and drop.
 Its own design pass follows this slice and scroll-to, as
-docs/chat-plan.md, on the task manager's model: what is ratified, the
+the chat app's own plan, written once scroll-to is in, on the task manager's model: what is ratified, the
 screens, the scene, the sequencing. A detail the compose field decides
 here: a chat app on a phone shows a Send BUTTON beside the field as well
 as the key, since a user with a hardware keyboard or a dictation flow may
