@@ -51,7 +51,7 @@ What the app owns and kaya owns follows the task manager's rule: the
 conversations, the unread counts and the peer's script are the app's;
 the bubble's alignment, the scroll position and the keyboard are kaya's.
 
-## §2 — The scene (tools/scenes/chat.steps)
+## §2 — The scene (a new `chat` scene, written with C0)
 
 One shared scene, as for every app: open the first conversation, read the
 newest message, type a message and press Return, read it back as the
