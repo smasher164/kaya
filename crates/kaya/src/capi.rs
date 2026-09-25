@@ -3457,6 +3457,9 @@ pub unsafe extern "C" fn kaya_emit_dropped(
         } else {
             unsafe { std::slice::from_raw_parts(tag, tag_len) }
         };
+        if !bytes.is_empty() && !stamped_tag_is_live(bytes, "a drop") {
+            return;
+        }
         let anchor_path = if anchor.is_null() || anchor_len == 0 {
             Vec::new()
         } else {
@@ -3529,6 +3532,9 @@ pub unsafe extern "C" fn kaya_emit_drag_ended(tag: *const u8, tag_len: usize, op
         } else {
             unsafe { std::slice::from_raw_parts(tag, tag_len) }
         };
+        if !bytes.is_empty() && !stamped_tag_is_live(bytes, "a drag end") {
+            return;
+        }
         let occurrence = match crate::wire::decode_click_tag(bytes) {
             crate::protocol::Occurrence::ButtonClicked { id } => {
                 crate::protocol::Occurrence::DragEnded { id, operation }
@@ -3615,6 +3621,9 @@ pub unsafe extern "C" fn kaya_emit_pasted(
         } else {
             unsafe { std::slice::from_raw_parts(tag, tag_len) }
         };
+        if !bytes.is_empty() && !stamped_tag_is_live(bytes, "a paste") {
+            return;
+        }
         let occurrence = match crate::wire::decode_click_tag(bytes) {
             crate::protocol::Occurrence::ButtonClicked { id } => {
                 crate::protocol::Occurrence::Pasted { id, clip }
@@ -3770,6 +3779,9 @@ fn stamped_tag_is_live(tag: &[u8], what: &str) -> bool {
 pub unsafe extern "C" fn kaya_emit_sort_requested(tag: *const u8, tag_len: usize, column: u32) {
     assert!(!tag.is_null() && tag_len != 0, "kaya: empty sort tag");
     let tag = unsafe { std::slice::from_raw_parts(tag, tag_len) };
+    if !stamped_tag_is_live(tag, "a sort request") {
+        return;
+    }
     if let Some(sink) = PRESENTATION_SINK.lock().unwrap().as_ref() {
         sink.send_sort_tag(tag, column);
         return;
@@ -3787,6 +3799,9 @@ pub unsafe extern "C" fn kaya_emit_sort_requested(tag: *const u8, tag_len: usize
 pub unsafe extern "C" fn kaya_emit_toggled(tag: *const u8, tag_len: usize, checked: u8) {
     assert!(!tag.is_null() && tag_len != 0, "kaya: empty checkbox tag");
     let tag = unsafe { std::slice::from_raw_parts(tag, tag_len) };
+    if !stamped_tag_is_live(tag, "a toggle") {
+        return;
+    }
     if let Some(sink) = PRESENTATION_SINK.lock().unwrap().as_ref() {
         sink.send_toggle_tag(tag, checked != 0);
         return;
@@ -3805,6 +3820,9 @@ pub unsafe extern "C" fn kaya_emit_toggled(tag: *const u8, tag_len: usize, check
 pub unsafe extern "C" fn kaya_emit_date_changed(tag: *const u8, tag_len: usize, packed: i64) {
     assert!(!tag.is_null() && tag_len != 0, "kaya: empty date picker tag");
     let tag = unsafe { std::slice::from_raw_parts(tag, tag_len) };
+    if !stamped_tag_is_live(tag, "a date change") {
+        return;
+    }
     if let Err(why) = crate::protocol::Date::from_packed(packed) {
         panic!("kaya: kaya_emit_date_changed: {why}");
     }
@@ -3823,6 +3841,9 @@ pub unsafe extern "C" fn kaya_emit_date_changed(tag: *const u8, tag_len: usize, 
 pub unsafe extern "C" fn kaya_emit_time_changed(tag: *const u8, tag_len: usize, packed: i64) {
     assert!(!tag.is_null() && tag_len != 0, "kaya: empty time picker tag");
     let tag = unsafe { std::slice::from_raw_parts(tag, tag_len) };
+    if !stamped_tag_is_live(tag, "a time change") {
+        return;
+    }
     if let Err(why) = crate::protocol::Time::from_packed(packed) {
         panic!("kaya: kaya_emit_time_changed: {why}");
     }
@@ -3843,6 +3864,9 @@ pub unsafe extern "C" fn kaya_emit_time_changed(tag: *const u8, tag_len: usize, 
 pub unsafe extern "C" fn kaya_emit_value_changed(tag: *const u8, tag_len: usize, value: f64) {
     assert!(!tag.is_null() && tag_len != 0, "kaya: empty slider tag");
     let tag = unsafe { std::slice::from_raw_parts(tag, tag_len) };
+    if !stamped_tag_is_live(tag, "a value change") {
+        return;
+    }
     if let Some(sink) = PRESENTATION_SINK.lock().unwrap().as_ref() {
         sink.send_value_tag(tag, value);
         return;
@@ -3859,6 +3883,9 @@ pub unsafe extern "C" fn kaya_emit_value_changed(tag: *const u8, tag_len: usize,
 pub unsafe extern "C" fn kaya_emit_value_committed(tag: *const u8, tag_len: usize, value: f64) {
     assert!(!tag.is_null() && tag_len != 0, "kaya: empty slider tag");
     let tag = unsafe { std::slice::from_raw_parts(tag, tag_len) };
+    if !stamped_tag_is_live(tag, "a value commit") {
+        return;
+    }
     if let Some(sink) = PRESENTATION_SINK.lock().unwrap().as_ref() {
         sink.send_value_committed_tag(tag, value);
         return;
@@ -3880,6 +3907,9 @@ pub unsafe extern "C" fn kaya_emit_submitted(
 ) {
     assert!(!tag.is_null() && tag_len != 0, "kaya: empty field tag");
     let tag = unsafe { std::slice::from_raw_parts(tag, tag_len) };
+    if !stamped_tag_is_live(tag, "a submit") {
+        return;
+    }
     let text = if text_len == 0 {
         ""
     } else {
@@ -3914,6 +3944,9 @@ pub unsafe extern "C" fn kaya_emit_text_changed(
 ) {
     assert!(!tag.is_null() && tag_len != 0, "kaya: empty entry tag");
     let tag = unsafe { std::slice::from_raw_parts(tag, tag_len) };
+    if !stamped_tag_is_live(tag, "a text change") {
+        return;
+    }
     let text = if text_len == 0 {
         ""
     } else {
@@ -4847,6 +4880,66 @@ mod tests {
     /// 2026-09-17). Read out of this file's own text, since the race cannot
     /// be scheduled on purpose; the perturbation back to the one-liner is
     /// watched failing on every run.
+    /// EVERY DOOR THAT TAKES A WIDGET TAG DROPS A TORN-DOWN COPY'S,
+    /// not just the click one. A backend's registry keeps a removed
+    /// stamped copy addressable, so a tag naming it still arrives; the
+    /// click door has refused one since 2026-09-14 and the other eleven
+    /// forwarded it, which is a mutation of whatever row now answers to
+    /// that key and no scene can see it (docs/deferred.md, the
+    /// stamped-occurrence doors entry). Read out of this file's own
+    /// text, since the race needs a backend registry to stage; the
+    /// doctored copy below is watched being refused on every run.
+    #[test]
+    fn every_tag_door_drops_a_torn_down_stamped_copy() {
+        let src = include_str!("capi.rs");
+        assert!(
+            census_of_unguarded_tag_doors(src).is_empty(),
+            "kaya: these emit doors take a widget tag and never ask whether it \
+             names a live stamped copy: {:?} — route each through \
+             stamped_tag_is_live, as kaya_emit_clicked does",
+            census_of_unguarded_tag_doors(src)
+        );
+        // THE NEGATIVE, in process: one door's check removed. A census
+        // nobody has seen refuse is a census that agrees with everything.
+        let door = "kaya_emit_toggled";
+        let at = src.find(door).expect("the toggled door moved");
+        let cut = src[at..].find("if !stamped_tag_is_live").expect("no check to cut");
+        let end = src[at + cut..].find("}\n").expect("unterminated check") + 2;
+        let doctored = format!("{}{}", &src[..at + cut], &src[at + cut + end..]);
+        assert_ne!(doctored.len(), src.len(), "the perturbation applied nothing");
+        let found = census_of_unguarded_tag_doors(&doctored);
+        assert!(
+            found.iter().any(|d| d == door),
+            "kaya: the census did not refuse a copy with {door}'s check removed — \
+             it found {found:?}, so it agrees with everything"
+        );
+    }
+
+    /// The doors that take a widget tag and do not check it. One reader,
+    /// so the test above and its own negative cannot drift apart.
+    fn census_of_unguarded_tag_doors(src: &str) -> Vec<String> {
+        let mut open = Vec::new();
+        let mut at = 0;
+        while let Some(i) = src[at..].find("pub unsafe extern \"C\" fn kaya_emit_") {
+            let start = at + i;
+            let name_at = start + "pub unsafe extern \"C\" fn ".len();
+            let name: String = src[name_at..]
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_')
+                .collect();
+            let rest = &src[start + 1..];
+            let end = rest
+                .find("\npub unsafe extern")
+                .map_or(src.len(), |e| start + 1 + e);
+            let body = &src[start..end];
+            if body.contains("from_raw_parts(tag") && !body.contains("stamped_tag_is_live") {
+                open.push(name);
+            }
+            at = start + 1;
+        }
+        open
+    }
+
     #[test]
     fn the_scene_slot_is_locked_before_the_scene_is_seeded() {
         let src = include_str!("capi.rs");
