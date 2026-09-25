@@ -467,6 +467,16 @@ the source to pass the drag threshold, then 30-40 steps at 60ms, a 400ms
 pause on the target, one 2px nudge, `LEFTUP`. A drag verb can be a port of
 `drive.ps1`'s `Drag` function.
 
+THAT SHAPE IS NO LONGER WHAT SHIPS (2026-09-24). Every number in it was
+written here to get a first drag working and none of them was ever a
+measured floor: the dnd scene passes 20/20 at 53ms of sleep per drag
+against the 3,660ms this shape spends, and `inject_drag` now waits on
+kaya's own `DragStarting` and hover counters instead of dwelling
+(docs/measurements/win-drag-pace-2026-09-24.md). `drive.ps1` keeps the
+pacing above, because changing it would change what this document
+measured; `tools/guest/dnd-witness.ps1` keeps it because one end of a
+cross-app drag answers nothing a script can read.
+
 Two cautions for the leg: an Explorer-sourced drag flaked once in three
 with a `DragLeave` and no drop (§2b), and the drop point must be inside
 the ISLAND (the frame border belongs to the top-level window and produces

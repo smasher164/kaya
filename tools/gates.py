@@ -271,6 +271,11 @@ BUILD = [
     ("market data", ["python3", "tools/gen-market.py", "--ensure"]),
     ("libkaya", ["cargo", "build", "--locked", "--lib"]),
     ("libkaya id", ["tools/build-id.py", "--verify", "target/debug/libkaya.dylib"]),
+    # RUNG 1, HERE BECAUSE IT RELINKS: `cargo test` builds the lib, which
+    # no GATE may do (the relink refusal below), and nothing automatic ran
+    # the ladder's first rung at all — two tests sat red on main across
+    # four commits while every matrix read ALL PASS (2026-09-24).
+    ("the unit suite (rung 1)", ["tools/unit-suite.py"]),
     ("SwiftUI interpreter", ["tools/swiftui/build-dylib.sh"]),
 ]
 
@@ -474,10 +479,12 @@ def build():
     for what, cmd in BUILD:
         print(f"build: {what} ({' '.join(cmd)})", flush=True)
         if subprocess.call(cmd, cwd=ROOT) != 0:
-            print(f"gates: BUILD FAILED at {what} — no gate ran. A gate cannot "
-                  f"verify something that was never built, and a lane that "
-                  f"continued here would be reporting on the PREVIOUS run's "
-                  f"artifacts.", file=sys.stderr)
+            print(f"gates: BUILD FAILED at {what} — no gate ran. This phase "
+                  f"builds what the gates read and runs the ladder's first "
+                  f"rung, so a failure here is either an artifact that was "
+                  f"never built — a lane continuing would report on the "
+                  f"PREVIOUS run's — or the unit suite the whole ladder "
+                  f"stands on going red.", file=sys.stderr)
             return False
     return True
 

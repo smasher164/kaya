@@ -8374,6 +8374,19 @@ issued and the interpreter's navigation model reflecting it —
 `expect_entries` reads that model, and the mac harness has no
 debounce of the kind the android window-list reads needed.
 
+AND A SECOND iOS FACE (2026-09-24, editor-go again, the
+windows-drag-pacing matrix at 1571s with the iOS lane waiting 542s of
+its 1215s for the exclusive token): `choose notes` tapped a row the
+driver had just read — its own wait log counts the read, the row was
+offered in the round, and the picker then listed ["decoy", "notes"]
+still up — and the leg died on the one-per-process wall two steps
+later. The bundle named it without help: the driver's wait log, the
+simdrive timings (`verb=choose rc=1 ms=2035`) and a kept simulator
+screenshot. PASS (17s) standalone on the same tree minutes later,
+against FAIL (125s) contended. Logged, not chased; the family's iOS
+face now has two sightings, both editor-go, both on a picker under
+peak contention.
+
 THE HUNT'S FIRST CATCH WAS A DIFFERENT GHOST WEARING THE SAME MASK
 (2026-08-20, filedialog-jvm, full buffers + an at-fail dumpsys in
 hand): the OPEN picker was up with its list unreadable (DocumentsUI's
@@ -14097,6 +14110,26 @@ append. No public binding surface changed; the toast watch stays armed.
 See docs/measurements/winui-typing-2026-09-19.md and the trap "A Windows
 type can replace the selection it moved away from". The KEY sweep names
 these new records only; the older notes toast findings remain distinct.
+
+## The two cross-app witness legs still drive their drag on guessed dwells (recorded 2026-09-24 by the drag-pacing measurement)
+KEY: dnd-witness.ps1, Drag, Start-Sleep, inject_drag, HOVERS_ANSWERED, dndwitness, dndforeign
+
+`inject_drag` releases when kaya's own window answers a hover, which cut
+a windows drag from 3,660ms of sleep to 465ms
+(docs/measurements/win-drag-pace-2026-09-24.md). `tools/guest/dnd-witness.ps1`
+could not follow: it drives the `dndwitness_rust` and `dndforeign_rust`
+legs, where one end of the drag is the stock Win32 reader under
+`tools/win/dragprobe/stock`, in another process, answering nothing a
+PowerShell script can read — so it keeps the 2026-09-03 dwells, and those
+were never measured either.
+
+What it would take: the stock reader already has a DragOver handler, so
+it can append a line to a file the script polls, and the script then
+waits for the destination's own answer exactly as `inject_drag` does.
+About 3.6s per leg, on the two most fragile drags the lane has, which is
+why it was not taken with the in-process one. The `-Direction in` leg
+lands on KAYA's window, so that half could instead read kaya's own
+counter if the guest were made to write it out.
 
 ## RULING WANTED — a lost dialog answers the app as a cancel; should the app be able to tell the two apart? (recorded 2026-09-06)
 KEY: lost dialog, KAYA_DIALOG_LOST, file_dialog_result reason, cancelled versus lost, DIALOG_RESULT_BUDGET_MS, dialog occurrence

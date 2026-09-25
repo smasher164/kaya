@@ -4517,6 +4517,10 @@ mod tests {
                 widget: WidgetId(2),
                 range: TextRange::new(20, 25),
             },
+            TxOp::ScrollToRow {
+                widget: WidgetId(4),
+                key: Value::Str("m10".into()),
+            },
             TxOp::SetBrandTypeface(crate::protocol::TypefaceRequest {
                 family: "Georgia".into(),
                 platforms: vec![

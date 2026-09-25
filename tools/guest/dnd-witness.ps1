@@ -65,10 +65,16 @@ function MoveTo($x, $y) {
     [W]::SetCursorPos($x, $y) | Out-Null
 }
 
-# The measured gesture (docs/probes/dnd-probe-windows-2026-09-03.md's
-# drive.ps1, which is also the shape inject_drag takes): a settle, the
-# press, six small moves inside the source past the system's drag
-# threshold, a stepped path, a pause, one nudge, the release.
+# The 2026-09-03 gesture (docs/probes/dnd-probe-windows-2026-09-03.md's
+# drive.ps1): a settle, the press, six small moves inside the source past
+# the system's drag threshold, a stepped path, a pause, one nudge, the
+# release. NO LONGER inject_drag's shape, and the reason is the other end:
+# that one now releases when KAYA'S OWN window answers a hover, and the
+# two dwells it dropped were 3.66s of guessed sleep per drag
+# (docs/measurements/win-drag-pace-2026-09-24.md). Here one end of the
+# drag is a STOCK WIN32 READER in another process, which answers nothing
+# this script can read, so the dwells stay and stay guessed
+# (docs/deferred.md's witness-drag dwell entry).
 function Drag($x1, $y1, $x2, $y2) {
     Say "drag $x1,$y1 -> $x2,$y2"
     MoveTo $x1 $y1

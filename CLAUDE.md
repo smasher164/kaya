@@ -205,7 +205,21 @@ in docs/deferred.md.
    is 309/312 on that guest; the 3 are POSIX assumptions in harness
    tests, and fixing them is what widens the filter.
 2. Fast gates. `tools/gates.py` runs ALL of them and is the only thing
-   that should. It builds libkaya and the SwiftUI interpreter FIRST — a
+   that should. IT RUNS RUNG 1 FIRST, in that same build phase and for a
+   mechanical reason: `cargo test` relinks the host libkaya and NO GATE
+   MAY (the sweep refuses a verdict if that library moves under it), while
+   BUILD is the library's one writer. Nothing automatic ran rung 1 before
+   2026-09-24 — the windows lane runs the core's tests on the GUEST
+   filtered to `capi::picked_tests`, and the mac suite is a command
+   someone types — so the spec round trip and the window-report guard sat
+   RED on main across four commits while every matrix read ALL PASS.
+   `tools/unit-suite.py` is the step: the rung's own command, a refusal
+   for a FAILED binary, for a suite that never built, for a nonzero exit
+   under green lines, and for a COLLAPSE below a floor of 600, which is
+   the `harness` feature's wall — without the feature the harness tests
+   vanish rather than fail. Four watched negatives over doctored
+   transcripts, the count printed. It builds libkaya and the SwiftUI
+   interpreter FIRST — a
    gate cannot verify an artifact the run has not built yet, and one
    that tried read the PREVIOUS run's dylib and called it stale, which
    was true and useless — and then runs every gate below and REFUSES A
@@ -227,7 +241,8 @@ in docs/deferred.md.
    silently reverted any hand-edit to a generated file and then called
    the tree clean),
    `tools/check-steps.py` (also requires the shared save scene's three
-   missing-handle cases, with three counted removal negatives), `tools/check-shell.py`,
+   missing-handle cases, with three counted removal negatives),
+   `tools/check-shell.py`,
    `tools/check-python.py` (check-shell's opposite number, and the
    gate the 2026-08-27 ruling asked for: the gate BODIES are python
    now, imported against tools/lib/kaya_gate.py — never a launcher,

@@ -3685,7 +3685,14 @@ fn park_table_row(core: &mut CoreState, id: u64, index: usize) -> windows_core::
         band.UpdateLayout()?;
     }
     let (spacer_top, tracks) = band_tracks(&band)?;
-    let first = core.scene.window_geometry(id).first;
+    // The window read sits under the guard like every other report
+    // caller: this runs from the harness verb AND from an apply, and a
+    // refusal here must redden the leg rather than abort the process
+    // (fault.rs's every_window_report_caller_sits_under_a_guard).
+    let first = crate::fault::guard("reading window geometry to park a row", || {
+        core.scene.window_geometry(id).first
+    })
+    .unwrap_or(0);
     let offset = index.saturating_sub(first);
     // Band space to host space (D7), the report's rule verbatim.
     let want =
@@ -9484,6 +9491,7 @@ fn wire_dnd(core: &mut CoreState, id: u64) -> windows_core::Result<()> {
             };
             args.SetAllowedOperations(package_op(operations))?;
             start_drag_payload(args.Data()?, clip, operations, args.GetDeferral()?);
+            drag_started();
             Ok(())
         },
     ))?;
@@ -9539,6 +9547,7 @@ fn xaml_drag_event(
     });
     args.SetAcceptedOperation(package_op(verdict))?;
     args.SetHandled(true)?;
+    hover_answered();
     let element = CORE.with_borrow(|core| {
         core.as_ref()
             .and_then(|core| core.widgets.get(&WidgetId(id)))
@@ -19348,14 +19357,79 @@ fn target_widget_id(core: &CoreState, target: crate::harness::Target) -> Option<
     (ids[at] != 0).then_some(ids[at])
 }
 
-/// The measured drag: a settle, the press, six small moves inside the
-/// source past SM_CXDRAG/SM_CYDRAG, a stepped path, a pause, one nudge,
-/// the release (docs/probes/dnd-probe-windows-2026-09-03.md's drive.ps1,
-/// which drove a real XAML source through DragStarting to DropCompleted
-/// and a real Explorer drag into an OLE target). THE VERB DOES NOT WAIT
-/// FOR THE DROP: the scene's expects retry.
+/// WHAT THE HARNESS'S BLIND DRAG WAITS FOR, bumped where kaya's own
+/// window answers: `DragStarting` on the source, and every hover its
+/// drop targets answer. `inject_drag` releases when the destination has
+/// answered rather than after a dwell it guessed
+/// (docs/measurements/win-drag-pace-2026-09-24.md).
+#[cfg(feature = "harness")]
+static DRAGS_STARTED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+#[cfg(feature = "harness")]
+static HOVERS_ANSWERED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+#[cfg(feature = "harness")]
+fn drag_started() {
+    DRAGS_STARTED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+
+#[cfg(not(feature = "harness"))]
+fn drag_started() {}
+
+#[cfg(feature = "harness")]
+fn hover_answered() {
+    HOVERS_ANSWERED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+
+#[cfg(not(feature = "harness"))]
+fn hover_answered() {}
+
+/// How many of `counter` arrived inside `bound`, and how long it took.
+/// BOUNDED, because a destination that is no drop target answers nothing
+/// at all and the button must still come up.
+#[cfg(feature = "harness")]
+fn await_answers(
+    counter: &std::sync::atomic::AtomicU64,
+    from: u64,
+    want: u64,
+    bound: u64,
+) -> (u64, u64) {
+    let began = std::time::Instant::now();
+    loop {
+        let got = counter.load(std::sync::atomic::Ordering::Relaxed) - from;
+        let waited = began.elapsed().as_millis() as u64;
+        if got >= want || waited >= bound {
+            return (got, waited);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+}
+
+/// The drag: a settle, the press, six small moves inside the source past
+/// SM_CXDRAG/SM_CYDRAG, the wait for the source's own DragStarting, a
+/// stepped path, the wait for the destination's own hover, one nudge,
+/// the release (docs/probes/dnd-probe-windows-2026-09-03.md's drive.ps1
+/// drove the first version of this shape through a real XAML source and
+/// a real Explorer drag). THE TWO WAITS ARE WHY IT IS FAST: the dwells
+/// they replaced were guesses that nothing had measured, and the drag
+/// cost 3.66s of sleep whatever the app was doing
+/// (docs/measurements/win-drag-pace-2026-09-24.md). THE VERB DOES NOT
+/// WAIT FOR THE DROP: the scene's expects retry.
 #[cfg(feature = "harness")]
 fn inject_drag(from: (i32, i32), to: (i32, i32)) {
+    /// The cursor at the source before the press, and the press before
+    /// the first move: neither end has a signal to wait for, so these
+    /// two stay sleeps.
+    const SETTLE_MS: u64 = 100;
+    const PRESS_MS: u64 = 100;
+    /// Per move, crossing the threshold and along the path.
+    const STEP_MS: u64 = 15;
+    const TRAVEL_STEPS: i32 = 8;
+    /// CEILINGS, not dwells: each is the longest the drag waits for an
+    /// answer that arrived in 0ms and 2ms on an idle guest, and they are
+    /// what the drag pays when the destination is no drop target of
+    /// kaya's and answers nothing at all.
+    const STARTING_BOUND_MS: u64 = 600;
+    const NUDGED_BOUND_MS: u64 = 600;
     const MOVE: u32 = 0x0001;
     const ABSOLUTE: u32 = 0x8000;
     const LEFTDOWN: u32 = 0x0002;
@@ -19373,28 +19447,50 @@ fn inject_drag(from: (i32, i32), to: (i32, i32)) {
         SetCursorPos(x, y);
     };
     let nap = |ms: u64| std::thread::sleep(std::time::Duration::from_millis(ms));
+    use std::sync::atomic::Ordering::Relaxed;
+    let began = std::time::Instant::now();
+    let starts = DRAGS_STARTED.load(Relaxed);
     move_to(from.0, from.1);
-    nap(500);
+    nap(SETTLE_MS);
     unsafe { mouse_event(LEFTDOWN, 0, 0, 0, 0) };
-    nap(300);
+    nap(PRESS_MS);
     for step in 1..=6 {
         move_to(from.0 + step * 3, from.1 + step * 2);
-        nap(60);
+        nap(STEP_MS);
     }
-    const STEPS: i32 = 30;
-    for step in 1..=STEPS {
-        let at = f64::from(step) / f64::from(STEPS);
+    let (started, start_wait) =
+        await_answers(&DRAGS_STARTED, starts, 1, STARTING_BOUND_MS);
+    for step in 1..=TRAVEL_STEPS {
+        let at = f64::from(step) / f64::from(TRAVEL_STEPS);
         move_to(
             from.0 + (f64::from(to.0 - from.0) * at) as i32,
             from.1 + (f64::from(to.1 - from.1) * at) as i32,
         );
-        nap(60);
+        nap(STEP_MS);
     }
-    move_to(to.0, to.1);
-    nap(400);
+    // THE NUDGE IS THE ARRIVAL, and the wait is on ITS answer: the travel's
+    // last step already lands exactly on `to`, so a further move there is
+    // no move at all — Windows sends nothing, no hover is answered, and a
+    // wait on that one sat out its whole ceiling on every drag (0/1 in
+    // 601ms, eight times over, measured 2026-09-24). A hover answered for
+    // the nudge's position is the stronger signal anyway: the messages
+    // arrive in order, so it says every move before it was processed too,
+    // and it is the position the button comes up at.
+    let hovers = HOVERS_ANSWERED.load(Relaxed);
     move_to(to.0 + 2, to.1 + 1);
-    nap(300);
+    let (nudged, nudge_wait) = await_answers(&HOVERS_ANSWERED, hovers, 1, NUDGED_BOUND_MS);
     unsafe { mouse_event(LEFTUP, 0, 0, 0, 0) };
+    // WHAT EACH WAIT SAW, never what it hoped for: a destination that is
+    // no drop target of kaya's answers no hover at all, and the drop that
+    // follows then fails for a reason this line is the only record of.
+    let saw = format!(
+        "{} start in {start_wait}ms, {nudged}/1 hover at the release point in \
+         {nudge_wait}ms, {}ms in all",
+        if started >= 1 { "began" } else { "NO" },
+        began.elapsed().as_millis()
+    );
+    crate::vtrace::note("drag", format_args!("<- {saw}"));
+    eprintln!("kaya: winui drag {saw}");
 }
 
 /// Both centres in SCREEN pixels, or the sentence naming what stopped
