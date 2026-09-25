@@ -151,10 +151,18 @@ def ink_tolerance(harness_src=None, swift_src=None, kotlin_src=None):
 # alone matches harness.rs's PARSER first, and a reader anchored on the
 # name found ZERO observations there.
 AX_OBS = {"ax": 'ax "<v>"', "ax hint": 'ax hint "<v>"',
-          "help": 'help "<v>"'}
+          "help": 'help "<v>"',
+          # THE WINDOW PREFIX COMES FIRST, like every other windowed
+          # observation. SwiftUI spelled it `sections window#1 sidebar`
+          # where harness.rs and Compose spell `window#1 sections
+          # sidebar`, and tools/scenes/sections.steps asserts the
+          # WINDOWED form, so the mac lane's verdict text differed from
+          # the other three every run (found 2026-09-24; docs/deferred.md).
+          "sections": "<v>sections <v>"}
 AX_WANTED = {"ax": 'ax "<v>", wanted "<v>"',
              "ax hint": 'ax hint "<v>", wanted "<v>"',
-             "help": 'help "<v>", wanted "<v>"'}
+             "help": 'help "<v>", wanted "<v>"',
+             "sections": "<v>sections presentation <v>, wanted <v>"}
 
 AX_HARNESSES = [
     ("harness.rs", HARNESS, "rust",
@@ -165,17 +173,23 @@ AX_HARNESSES = [
       # HELP rides the same rule: three harnesses, one spelling
       # (docs/tooltip-plan.md T5).
       ("help", r"Step::ExpectHelp\([^()]*\) => Some\(poll\(",
+       "\n            Step::"),
+      ("sections", r"Step::ExpectSectionsPresentation\([^()]*\) => \{",
        "\n            Step::")],
      r"Ok\(format!\(", r"Err\(format!\("),
     ("KayaSwiftUI.swift", SWIFT, "swift",
      [("ax", 'case "expect_ax":', "\n            case "),
       ("ax hint", 'case "expect_ax_hint":', "\n            case "),
-      ("help", 'case "expect_help":', "\n            case ")],
+      ("help", 'case "expect_help":', "\n            case "),
+      ("sections", 'case "expect_sections_presentation":',
+       "\n            case ")],
      r"observed\.append\(", r"failures\.append\("),
     ("KayaCompose.kt", KOTLIN, "kotlin",
      [("ax", '"expect_ax" ->', '\n                    "'),
       ("ax hint", '"expect_ax_hint" ->', '\n                    "'),
-      ("help", '"expect_help" ->', '\n                    "')],
+      ("help", '"expect_help" ->', '\n                    "'),
+      ("sections", '"expect_sections_presentation" ->',
+       '\n                    "')],
      r"observed\.add\(", r"failures\.add\("),
 ]
 
@@ -306,7 +320,7 @@ def ax_spelling(harness_src=None, swift_src=None, kotlin_src=None):
                                  "apart")
 
     # A census that reads nothing agrees with everything.
-    if not bad and seen < 9:
+    if not bad and seen < 12:
         bad.append("only " + str(seen) + " ax observations found "
                    "across three harnesses — the reader is matching "
                    "almost nothing and would pass any spelling")
@@ -977,6 +991,16 @@ for rel, pattern, repl, slot, label, finding in (
     (KOTLIN, r'(observed\.add\("help )\\"\$want\\""', '$want"',
      "kotlin", "the Compose help observation unquoted",
      r"^KayaCompose\.kt records the help observation as help <v>, "),
+    # AND THE SECTIONS OBSERVATION PUT BACK THE WAY IT SHIPPED: the
+    # window prefix after the word instead of before it, which is what
+    # the mac lane printed against the other three for months while
+    # tools/scenes/sections.steps asserted the windowed form every run
+    # (found 2026-09-24).
+    (SWIFT, r'(observed\.append\(")\\\(armPrefix\)sections \\\(wantArm\)"',
+     'sections \\(armPrefix)\\(wantArm)"', "swift",
+     "the mac sections observation with its window prefix after the word",
+     r"^KayaSwiftUI\.swift records the sections observation as "
+     r"sections <v><v>, "),
 ):
     drifted = perturb(f"ax-spelling ({label})", rel, pattern, repl)
     kwargs = {f"{slot}_src": drifted}

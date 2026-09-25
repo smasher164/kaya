@@ -10587,10 +10587,10 @@ private func kayaRunScript(_ script: String) {
                     return window.sectionsRendered
                 }
                 if gotArm == wantArm {
-                    observed.append("sections \(armPrefix)\(wantArm)")
+                    observed.append("\(armPrefix)sections \(wantArm)")
                 } else {
                     failures.append(
-                        "sections \(armPrefix)presentation \(gotArm), wanted \(wantArm)")
+                        "\(armPrefix)sections presentation \(gotArm), wanted \(wantArm)")
                 }
             case "expect_split":
                 // `<size class>/<presentation>`. BOTH halves off the window
