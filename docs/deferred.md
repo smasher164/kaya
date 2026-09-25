@@ -14131,6 +14131,49 @@ why it was not taken with the in-process one. The `-Direction in` leg
 lands on KAYA's window, so that half could instead read kaya's own
 counter if the guest were made to write it out.
 
+## DEFECT — a WinUI row with a ONE-LINE cell is 32px taller than it was, and taller than the same row with TWO lines (found 2026-09-24 by the maintainer watching the tasks lane)
+KEY: inbox row pitch, one-line row, baseline_compensate, line box, row grows, WinUI row height, 72px
+
+The maintainer saw the task manager's entries sitting far apart on the
+windows lane. Measured from captures of the SAME screen, the Inbox, ink
+top to ink top:
+
+| capture | row pitch |
+| --- | --- |
+| WinUI Inbox, ar-EG, 2026-09-23 evening | 40px |
+| WinUI Inbox, English, today | 72px |
+| WinUI Inbox, ar-EG, today | 72px |
+| GTK Inbox, English, today | 59px |
+| WinUI TODAY screen (two-line rows), today | 58px |
+
+Two things are wrong at once. The pitch went 40 -> 72 on one backend
+between 2026-09-23 evening and now, in BOTH locales, so the locale is
+not the variable. And a WinUI row whose middle cell is ONE label is now
+TALLER than the same backend's row whose middle cell is a two-line
+column (72 against 58), which cannot be right whatever the number
+should be: the Inbox row has strictly less content.
+
+NO LANE CAN SEE IT. No verb reads a cell's or a row's y — that is the
+same hole a3e23bfe and 24ae2bdc were written under — so every windows
+leg is green at both pitches, and the only witness is a capture someone
+looks at.
+
+THE SUSPECTS, in the window: 880fe020 (the flex-cell rule, WinUI's star
+columns), a3e23bfe (a textless cell sits at the row's top) and 24ae2bdc,
+whose own rule is the shape of this symptom — "where it is taller than
+the line the row grows so nothing is placed above its top". On the Today
+row the middle column is two lines tall and absorbs a control's height;
+on the Inbox row the line box is one line, so a control taller than it
+grows the row at both ends. That is a hypothesis and not a measurement:
+the bisect is four cross-builds of the WinUI backend and four captures
+through tools/win-shot, about ten minutes, and it has not been run.
+
+WHAT THE FIX OWES A GUARD: a row's height against its line box is
+readable from the backend, so this wants an observable rather than
+another capture review — the row pitch, or a cell's box, asserted in the
+shared scene, which is what would have caught it and what would keep the
+other three backends honest at the same time.
+
 ## RULING WANTED — a lost dialog answers the app as a cancel; should the app be able to tell the two apart? (recorded 2026-09-06)
 KEY: lost dialog, KAYA_DIALOG_LOST, file_dialog_result reason, cancelled versus lost, DIALOG_RESULT_BUDGET_MS, dialog occurrence
 
