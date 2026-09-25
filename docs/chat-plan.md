@@ -21,12 +21,19 @@ docs/probes/roadmap-app-needs-2026-09-05.md §A2.
   screen depends on who sent them, and notifications a user can answer.
 - **Synthetic, deterministic data**, as in the task manager and the
   portfolio: a fixed set of conversations and a scripted peer that answers
-  from a table. No network. A transport is not a UI toolkit feature, and
-  a network in a lane is a flake with a URL.
-- **The peer answers through `post`**, the existing way for another thread
-  to hand the app a change (`AppCtx::post` / `Poster`). A scripted reply
-  arriving while the user types is exactly the case a chat app exists
-  for, and the harness can wait on it with `expect`.
+  from a table.
+- **Real traffic over loopback, through the guest language's own network
+  stack** (the maintainer, 2026-09-25). The peer is a scripted server the
+  app starts inside its own process on `127.0.0.1`, on a port the OS
+  picks, so every lane (the phones included) needs no host networking and
+  parallel legs never collide. The client reads the socket on its own
+  thread and hands each message to the app through `post`
+  (`AppCtx::post` / `Poster`), which is the path a real chat app lives on
+  and the one this app exists to exercise. Android needs the INTERNET
+  permission even for loopback. iOS's App Transport Security governs
+  URLSession, not a raw socket. Binding loopback rather than every
+  interface should raise no firewall prompt on the mac or Windows; C0
+  confirms that rather than assuming it.
 
 ## §1 — The surface (v0, on today's kaya)
 
@@ -38,9 +45,14 @@ Everything in v0 exists today. Three screens:
 2. **The thread**: a `For` of messages inside a `scroll`. Each message is
    a row whose bubble sits at the leading edge for the peer and the
    trailing edge for the user (a spacer on one side; §4 R3). Messages
-   hold rich text with links (docs/rich-text-plan.md). The thread opens
-   at its newest message and `scroll_to_row` brings the first unread into
-   view.
+   hold rich text with links (docs/rich-text-plan.md).
+   `scroll_to_row` carries the thread's navigation, one kind of jump each:
+   the thread OPENS at its first unread message (the newest when nothing
+   is unread), a row that has never been laid out; a reply's QUOTE jumps
+   to the message it quotes, far above the fold in a long thread; a
+   search RESULT jumps to its message while the list is filtered; and a
+   "jump to newest" button, shown once the user has scrolled up, returns
+   to the end.
 3. **The compose row**: a `textarea` with `submits` (Return sends,
    Shift+Return inserts a newline on the desktops; the keyboard's Send
    key on the phones) and a Send `button` beside it, which the phones need
@@ -53,11 +65,13 @@ the bubble's alignment, the scroll position and the keyboard are kaya's.
 
 ## §2 — The scene (a new `chat` scene, written with C0)
 
-One shared scene, as for every app: open the first conversation, read the
-newest message, type a message and press Return, read it back as the
-newest row, wait for the peer's scripted reply, check the unread badge on
-another conversation, open it and read that its first unread message is
-in view. Every assertion uses verbs that exist today (`type`,
+One shared scene, as for every app: open a conversation and read that
+its first unread message is in view, type a message and press Return,
+read it back as the newest row, wait for the peer's reply off the socket,
+tap a quote and read that the quoted message is in view, scroll up and
+use the jump-to-newest button, and check the unread count on another
+conversation. Each `scroll_to_row` jump is asserted with
+`expect_scrolled_to`. Every assertion uses verbs that exist today (`type`,
 `press return`, `expect`, `expect_scrolled_to`, `expect_section_badge`,
 `select_section`, `expect_no_clipping`, `expect_height_fits` on a bubble
 row).
@@ -101,10 +115,9 @@ row).
   first (§3). If any backend does not do this by itself, it becomes a
   scroll prop (`follows_end`) with one meaning on every backend, designed
   in its own pass.
-- **R5 — the peer's pace.** The scripted reply arrives after a fixed delay
-  on a timer thread. RECOMMENDED: **a delay the harness does not wait
-  for by sleeping**. The scene waits on the reply with `expect`'s retry,
-  and the delay is short (200ms), so the scene never sleeps.
+- **R5 — the peer's pace.** The server answers after a short delay
+  (200ms). RECOMMENDED: the scene waits on the reply with `expect`'s
+  retry and never sleeps.
 
 ## §5 — Sequencing (one forced feature per stage)
 
@@ -118,7 +131,8 @@ row).
 | C5 | an emoji button beside the compose field | the platform emoji picker (GTK EmojiChooser, the mac character palette, WinUI's emoji panel, the phones' keyboards) |
 | C6 | an image attachment shown inline | nothing new for display; the photo picker on the phones |
 | C7 | swipe a conversation to archive it on the phones | swipe actions |
-| C8 | a Search field over the thread | nothing new (the search field) |
+| C8 | a Search field over the thread; a result jumps to its message | nothing new (the search field, `scroll_to_row` into a filtered list) |
+| C9 | the connection drops and comes back; messages queue meanwhile | nothing new in kaya; the app's reconnect over `post` |
 
 Video and audio playback, which the survey lists as must-have for chat,
 stay with the video editor (docs/video-editor-plan.md) and are not
