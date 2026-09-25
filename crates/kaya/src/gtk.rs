@@ -18486,6 +18486,47 @@ impl crate::harness::Stage for GtkStage {
         })
     }
 
+    fn height_fits(&self, t: crate::harness::Target) -> String {
+        Self::on_main(move |core| {
+            use gtk4::prelude::WidgetExt;
+            let Some(control) = target_widget(core, t) else {
+                return "<no such target>".to_string();
+            };
+            let Some(widget) = core.widgets.values().find_map(|w| match w {
+                NativeWidget::Row(_) if w.control() == control => Some(w.widget()),
+                _ => None,
+            }) else {
+                return "the target is not a row".to_string();
+            };
+            while glib::MainContext::default().iteration(false) {}
+            let (mut top, mut bottom, mut content) = (i32::MAX, i32::MIN, 0usize);
+            for child in children_of(&widget) {
+                let spacer = core.widgets.values().any(|w| {
+                    matches!(w, NativeWidget::Column(_) | NativeWidget::Row(_))
+                        && w.widget() == child
+                        && child.first_child().is_none()
+                });
+                let a = child.allocation();
+                if spacer || !child.is_visible() || a.height() <= 0 {
+                    continue;
+                }
+                content += 1;
+                top = top.min(a.y());
+                bottom = bottom.max(a.y() + a.height());
+            }
+            if content == 0 {
+                return "no laid-out content child to measure against".to_string();
+            }
+            let spent = widget.height();
+            let asked = bottom - top;
+            if spent <= asked + 1 {
+                String::new()
+            } else {
+                format!("{spent}px around {asked}px of content, its first content child {top}px down")
+            }
+        })
+    }
+
     fn widget_spans_breadth(&self, t: crate::harness::Target) -> String {
         Self::on_main(move |core| {
             use gtk4::prelude::{Cast, WidgetExt};

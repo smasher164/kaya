@@ -2675,23 +2675,26 @@ unpicked.
   after two intervening `resize_window`s; a row whose middle cell is a
   bare label rather than a column; and a STAMPED row from a `For`,
   asserted against an identical static row beside it, which was the shape
-  this entry previously said a runtime guard "would have to" use. It is
-  not enough either. What the Inbox screen has and none of those have is
-  the rest of its context — a For inside a SCROLL, reached by a section
-  navigation — and the runaway is an accumulation over the reindex passes
-  that context provokes.
-  SO check-universal-props' static clause remains that defect's guard,
-  and the next thing to try is not a fifth scene shape but a different
-  QUESTION: every attempt so far compares one row against another, and the
-  runaway's own signature is a row taller than its own tallest cell wants
-  to be (62dip around a cell wanting 43). A one-target verb asking that —
-  a row spends no height its content did not ask for — needs no second row
-  and no cross-screen comparison, which is what defeated the row-to-row
-  form, since within any one screen the runaway moves every row together. The verb IS watched discriminating: the two targets swapped
+  this entry previously said a runtime guard "would have to" use. ~~What
+  the Inbox screen has and none of those have is the rest of its context.~~
+  WRONG, 2026-09-25: the plain listrow rows DO run away with the fix cut
+  (the verb below reads it); two rows that both grew compare equal.
+  ~~SO check-universal-props' static clause remains that defect's guard.~~
+  A RUNTIME GUARD LANDED 2026-09-25, and it asks a different question:
+  `expect_height_fits <row>`, ONE target — a row spends no height its
+  content children did not ask for (an empty container is a spacer and is
+  not content). Every earlier attempt compared one row against another, and
+  the runaway moves every row of a screen together. With the fix cut from a
+  copy the windows lane went RED on both scenes that carry it: listrow's
+  two-line row read "64dip around 49dip of content, its first content child
+  15dip down", and the tasks Inbox row (`row@task[t1]`) the same, which is
+  the runaway's own signature. Green with the fix back. The verb is in
+  harness.rs and all four backends; the static clause stays beside it.
+  The verb that compares two rows IS watched discriminating: the two targets swapped
   read "row@row_two is taller than row@row_one (37pt against 24pt)".
   KEY: list-row layout scene, hugging control, grown entry,
   checkbox MinWidth, fixedSize, stamped row spans, hexpand,
-  expect_not_taller, not_taller_than, listrow
+  expect_not_taller, not_taller_than, listrow, expect_height_fits, height_fits
 - Horizontal scroll axis: an axis enum prop — decide when a scene
   needs it (the scroll depth ledger's remaining item).
 - Command completion observability (awaitable commands — the Compose
@@ -14197,7 +14200,7 @@ why it was not taken with the in-process one. The `-Direction in` leg
 lands on KAYA's window, so that half could instead read kaya's own
 counter if the guest were made to write it out.
 
-## ~~DEFECT — a WinUI row with a ONE-LINE cell is 32px taller than it was, and taller than the same row with TWO lines (found 2026-09-24 by the maintainer watching the tasks lane)~~ FIXED 2026-09-24, AND IT WAS A RUNAWAY, not an offset: `baseline_compensate` centres a textless cell on the line box using its `ActualHeight`, which for a cell that STRETCHES to the row IS the row's height, so the centring gave a negative top, the shift grew by that much, every margin followed, the row grew and the cell with it. The task row's grown spacer is exactly that cell, and the instrumented lane printed the loop: grid_h 43 -> 50 -> 58 -> 62 over four passes, with the spacer's own height tracking it and `shift` 0.8 -> 9.3 -> 13.3 -> 15.3. A cell that stretches has no height of its own to centre, so it is left at the row's top and takes no part in the shift. The Inbox reads 57px now against 72, beside GTK's 59 on the same screen, and the Today screen is unmoved at 57 with the checkbox still on the title's line. THE OTHER THREE BACKENDS WERE NEVER EXPOSED and the clause says why: SwiftUI proposes `height: nil` and takes the ideal, GTK and Compose take the measured natural, so only WinUI read a height the row had handed it. GUARD: check-universal-props' baseline_compensate block requires the Stretch arm, with the arm cut and watched red — that negative IS the shipped runaway. The observable this still owes is the list-row layout scene (the entry below), since no verb reads a row's height on any backend
+## ~~DEFECT — a WinUI row with a ONE-LINE cell is 32px taller than it was, and taller than the same row with TWO lines (found 2026-09-24 by the maintainer watching the tasks lane)~~ FIXED 2026-09-24, AND IT WAS A RUNAWAY, not an offset: `baseline_compensate` centres a textless cell on the line box using its `ActualHeight`, which for a cell that STRETCHES to the row IS the row's height, so the centring gave a negative top, the shift grew by that much, every margin followed, the row grew and the cell with it. The task row's grown spacer is exactly that cell, and the instrumented lane printed the loop: grid_h 43 -> 50 -> 58 -> 62 over four passes, with the spacer's own height tracking it and `shift` 0.8 -> 9.3 -> 13.3 -> 15.3. A cell that stretches has no height of its own to centre, so it is left at the row's top and takes no part in the shift. The Inbox reads 57px now against 72, beside GTK's 59 on the same screen, and the Today screen is unmoved at 57 with the checkbox still on the title's line. THE OTHER THREE BACKENDS WERE NEVER EXPOSED and the clause says why: SwiftUI proposes `height: nil` and takes the ideal, GTK and Compose take the measured natural, so only WinUI read a height the row had handed it. GUARD: check-universal-props' baseline_compensate block requires the Stretch arm, with the arm cut and watched red — that negative IS the shipped runaway. Its runtime observable is `expect_height_fits` on the tasks Inbox row and the list-row scene (2026-09-25, the list-row entry), watched red with this fix cut
 KEY: inbox row pitch, one-line row, baseline_compensate, line box, row grows, WinUI row height, 72px
 
 The maintainer saw the task manager's entries sitting far apart on the
@@ -14241,72 +14244,33 @@ another capture review — the row pitch, or a cell's box, asserted in the
 shared scene, which is what would have caught it and what would keep the
 other three backends honest at the same time.
 
-## DEFECT — a WinUI baseline row squeezes a BARE label beside a grown spacer (found 2026-09-24 while writing the list-row scene)
-KEY: bare label in a baseline row, star column, longest word floor, listrow, 18.62px, grown spacer squeeze
+## ~~DEFECT — a WinUI baseline row squeezes a BARE label beside a grown spacer (found 2026-09-24 while writing the list-row scene)~~ FIXED 2026-09-25, AND IT WAS NEVER A SQUEEZE: the clipping READER was wrong, not the row
+KEY: bare label in a baseline row, star column, longest word floor, listrow, 18.62px, grown spacer squeeze, DesiredSize includes the margin
 
 A row of `checkbox("")`, a BARE `label`, `spacer().grow(1.0)` and a button,
-under `Align::Baseline` in a 420px window, draws the label at 18.62px where
-its own text needs 25px. `expect_no_clipping` catches it and names both
-numbers, which is how it was found: the first draft of tools/scenes/listrow.steps
-had that shape and went red on the windows lane.
+under `Align::Baseline`, went red on the windows lane with `expect_no_clipping`
+saying the label "needs 25px and got 18.62px". Only under `Align::Baseline`;
+a column-wrapped label was green.
 
-IT IS NOT THE ROW-HEIGHT RUNAWAY struck above. The same leg is red with that
-fix in place and with it cut, so the two are independent.
+WHAT IT WAS (2026-09-25): XAML's `DesiredSize` INCLUDES the element's
+`Margin` and `ActualHeight` does not. The baseline row drops each text cell
+with a top margin, and the clipping reader compared `DesiredSize.Height`
+against `ActualHeight`, so it counted the 6.38dip drop as text the label
+needed. 18.62 is exactly one line of 14px Segoe UI. A window shot of the red
+leg shows the label drawn whole, descenders and all. The column-wrapped form
+was green because its margin sits on the column, which the reader does not
+read. The reader now subtracts the margin, and the list-row scene carries
+the bare-label row (`row_bare`), green on the windows lane.
 
-THE ONE DIFFERENCE THAT CLEARS IT: wrapping the label in a `column`, which is
-what the task manager's own row does and why no shipped scene shows this. So
-the squeeze wants a BARE label as a flex child of a baseline row — the shape
-an app writes first, before it needs a caption under the title.
+THE 2026-09-24 READING IS WITHDRAWN. It said the arrange "takes the drop out
+of the CONTENT" and recorded three fixes that did not work (InvalidateMeasure,
+a SetMinHeight floor that ratcheted, a synchronous UpdateLayout). All three
+were chasing a number that already meant "content plus margin", and the
+remedy that entry proposed, moving the drop into a RenderTransform, is not
+needed: `baseline_compensate` is unchanged. docs/traps.md has the finding.
 
-MEASURED 2026-09-24, and it is a HEIGHT, not a width: the clipping clause
-that fires compares `DesiredSize.Height` against `ActualHeight`, and the
-label draws 18.62dip where it needs 25, at 52.36dip wide. It happens ONLY
-under `Align::Baseline` — the same row without it is green — so it is the
-baseline row's own compensation and nothing to do with the star columns.
-
-THE MECHANISM, off an instrumented lane: `baseline_compensate` gives each
-cell its drop as a TOP MARGIN, and a margin is INSIDE the measure. The cell
-was sized before the row knew where to put it, so the arrange that follows
-takes the drop out of the CONTENT rather than moving the box — every dropped
-cell in the row loses exactly its own margin of height. The trace, on a row
-44dip tall with room to spare:
-
-    [h=24.0 want=28.0 top=3.7]   the checkbox, short by its drop
-    [h=18.6 want=25.0 top=6.0]   the label, short by its drop
-    [h=32.0 want=32.0 top=0.0]   the button, not dropped, correct
-
-The passes ALTERNATE — one lays the label at 26dip and the next at 18.6 —
-because the margin set at the end of one pass is only measured on the next,
-and `baseline_compensate` runs again and resets it. The verdict reads
-whichever pass was last. A column-wrapped label hides it: the column is the
-cell that loses the height, and it has slack the label does not, which is
-why no shipped scene shows this and why tools/scenes/listrow.steps carries
-the column form.
-
-THREE FIXES TRIED AND REJECTED, so nobody repeats them. `InvalidateMeasure`
-on the grid after the margins changed nothing: the pass it schedules is not
-the one that arranges these cells. Flooring each cell with
-`SetMinHeight(desired - margin)` RATCHETS, because the next pass reads a
-`DesiredSize` that already contains the floor and the wanted height climbed
-25 -> 44 in two passes. And a SYNCHRONOUS `grid.UpdateLayout()` right after
-the margins — the same call the function already opens with, one step later,
-guarded to run only when a drop actually moved — leaves the label at 18.62
-exactly as before, which is the one that rules out "the measure simply had
-not run yet" as the explanation.
-
-THE DIRECTION THAT IS LEFT, now that a forced synchronous measure has been
-ruled out: the drop must stop being a margin at all. Either it moves the cell
-with a `RenderTransform`, which does not enter the measure — the row's growth
-is already handled separately by `shift`, so nothing else has to change — or
-the compensation runs where it can measure WITH the drop in hand instead of
-setting it after the fact. Both are real changes to that function, on the one
-backend, and want doing deliberately rather than at the end of a session.
-THE RULE ITSELF DOES NOT MOVE: which mechanism a backend uses to drop a cell
-is the toolkit's spelling, not kaya's semantics, so this needs no carve-out.
-
-WHAT IT BLOCKS: nothing shipped — no in-tree guest writes a bare label into a
-baseline row — but it is the shape the list-row scene wanted, and that scene
-now carries the column form instead, with this entry as the reason.
+GUARD: check-universal-props holds the WinUI clipping reader to subtracting
+the margin, with the shipped reader restored as a watched negative.
 
 ## RULING WANTED — a lost dialog answers the app as a cancel; should the app be able to tell the two apart? (recorded 2026-09-06)
 KEY: lost dialog, KAYA_DIALOG_LOST, file_dialog_result reason, cancelled versus lost, DIALOG_RESULT_BUDGET_MS, dialog occurrence

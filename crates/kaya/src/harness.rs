@@ -311,6 +311,11 @@ pub enum Step {
     /// 59 on GTK, so an absolute number would be five numbers and a
     /// comparison inside one scene is none.
     ExpectNotTaller(Target, Target),
+    /// One target: a row spends no height its content did not ask for — its
+    /// height is its content children's extent plus its own padding. The
+    /// WinUI runaway moved every row of a screen together, which no
+    /// row-to-row comparison can see (docs/deferred.md's list-row entry).
+    ExpectHeightFits(Target),
     /// How many LINES a row's children sit on — the runs of children
     /// whose cross-axis boxes overlap (docs/layout-knobs-plan.md §2, the
     /// `wrap` observation).
@@ -662,7 +667,8 @@ impl Step {
             | Step::ExpectAtEnd(t)
             | Step::ExpectScrolledTo(t, _)
             | Step::ClearSearch(t)
-            | Step::ContextOpen(t) => vec![t],
+            | Step::ContextOpen(t)
+            | Step::ExpectHeightFits(t) => vec![t],
             Step::ExpectNotTaller(a, b) => vec![a, b],
             Step::Toggle(t, _)
             | Step::SetValue(t, _)
@@ -834,6 +840,7 @@ impl Step {
             Step::ExpectNoTarget { .. } => true,
             Step::ExpectHugs { .. } => true,
             Step::ExpectNotTaller { .. } => true,
+            Step::ExpectHeightFits { .. } => true,
             Step::ExpectLines { .. } => true,
             Step::ExpectAligned { .. } => true,
             Step::ExpectAxis { .. } => true,
@@ -1140,6 +1147,11 @@ pub trait Stage: Send + 'static {
     /// passed all of them — a WinUI row of one line shipped 14px taller
     /// than the same backend's row of two (docs/deferred.md, 2026-09-24).
     fn not_taller_than(&self, target: Target, against: Target) -> String;
+    /// Empty when the ROW `target`'s drawn height exceeds the extent of its content
+    /// children (every child but an empty container, which is a spacer and
+    /// asks for nothing) plus its padding by no more than one device unit;
+    /// otherwise both numbers. A container with no content child is refused.
+    fn height_fits(&self, target: Target) -> String;
     /// The container's cross-axis placement, CLASSIFIED from geometry after
     /// forcing pending layout: "start", "center", "end", "stretch", or
     /// "baseline" when the coincidence holds for every child (within two
@@ -1698,6 +1710,7 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
             }
             "expect_fills" => Step::ExpectFills(parse_target(rest)?),
             "expect_breadth" => Step::ExpectBreadth(parse_target(rest)?),
+            "expect_height_fits" => Step::ExpectHeightFits(parse_target(rest)?),
             "expect_not_taller" => {
                 let (first, second) = rest.split_once(char::is_whitespace).ok_or_else(|| {
                     format!("expect_not_taller wants two targets, got {rest:?}")
@@ -4734,6 +4747,14 @@ fn run_with_log(
                     }
                 }))
             }
+            Step::ExpectHeightFits(t) => Some(poll(|| {
+                let off = stage.height_fits(*t);
+                if off.is_empty() {
+                    Ok(format!("{} fits its content", target_spec(t)))
+                } else {
+                    Err(format!("{} spends height its content did not ask for ({off})", target_spec(t)))
+                }
+            })),
             Step::ExpectNoTarget(kind, id, keys) => {
                 let spec = target_spec(&Target { kind: *kind, index: 0, id: Some(id), keys: *keys });
                 Some(poll(|| match stage.resolve_id(*kind, id, *keys) {
@@ -6474,6 +6495,9 @@ mod tests {
                 String::new()
             }
         }
+        fn height_fits(&self, t: Target) -> String {
+            if t.index > 0 { "62pt around 43pt of content".into() } else { String::new() }
+        }
         fn cross_mode(&self, _: Target) -> String {
             "center".into()
         }
@@ -7312,6 +7336,9 @@ mod tests {
             fn not_taller_than(&self, _: Target, _: Target) -> String {
                 String::new()
             }
+            fn height_fits(&self, _: Target) -> String {
+                String::new()
+            }
             fn cross_mode(&self, _: Target) -> String {
                 "start".into()
             }
@@ -7631,6 +7658,9 @@ mod tests {
             fn not_taller_than(&self, _: Target, _: Target) -> String {
                 String::new()
             }
+            fn height_fits(&self, _: Target) -> String {
+                String::new()
+            }
             fn cross_mode(&self, _: Target) -> String {
                 "start".into()
             }
@@ -7821,6 +7851,29 @@ mod tests {
         let (code, verdict) = rx.recv().unwrap();
         assert_eq!(code, 0, "{verdict}");
         assert!(verdict.contains("column#0 spans its breadth"), "{verdict}");
+    }
+
+    #[test]
+    fn expect_height_fits_reads_one_row_against_its_own_content() {
+        let steps = parse("expect_height_fits row#0").unwrap();
+        assert_eq!(
+            steps[0],
+            Step::ExpectHeightFits(Target { kind: TargetKind::Row, index: 0, id: None, keys: None })
+        );
+        let (tx, rx) = std::sync::mpsc::channel();
+        run(steps, MockStage { seen: &SEEN, verdict: tx });
+        let (code, verdict) = rx.recv().unwrap();
+        assert_eq!(code, 0, "{verdict}");
+        assert_eq!(verdict, "KAYA_SELFTEST: OK (row#0 fits its content)");
+        let steps = parse("expect_height_fits row#1").unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        run(steps, MockStage { seen: &SEEN, verdict: tx });
+        let (code, verdict) = rx.recv().unwrap();
+        assert_ne!(code, 0);
+        assert!(
+            verdict.contains("row#1 spends height its content did not ask for (62pt around 43pt of content)"),
+            "{verdict}"
+        );
     }
 
     #[test]

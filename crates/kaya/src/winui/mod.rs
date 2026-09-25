@@ -21945,6 +21945,63 @@ impl crate::harness::Stage for WinUiStage {
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
+    fn height_fits(&self, t: crate::harness::Target) -> String {
+        Self::on_ui_read(move |core| {
+            let Some(element) = target_element(core, t)? else {
+                return Ok("<no such target>".to_owned());
+            };
+            let Some((id, grid)) = core.widgets.iter().find_map(|(id, w)| match w {
+                NativeWidget::Row(g)
+                    if g.cast::<bindings::Microsoft::UI::Xaml::UIElement>().ok().as_ref() == Some(&element) =>
+                {
+                    Some((*id, g.clone()))
+                }
+                _ => None,
+            }) else {
+                return Ok("the target is not a row".to_owned());
+            };
+            let (mut top, mut bottom, mut content) = (f64::INFINITY, f64::NEG_INFINITY, 0usize);
+            for child in core.child_order.children(id) {
+                let Some(widget) = core.widgets.get(child) else { continue };
+                if matches!(widget, NativeWidget::Row(_) | NativeWidget::Column(_))
+                    && core.child_order.children(*child).is_empty()
+                {
+                    continue;
+                }
+                let cell: FrameworkElement = widget.element()?.cast()?;
+                let h = cell.ActualHeight()?;
+                if h <= 0.0 {
+                    continue;
+                }
+                let y = f64::from(
+                    cell.TransformToVisual(&grid)?
+                        .TransformPoint(bindings::Windows::Foundation::Point { X: 0.0, Y: 0.0 })?
+                        .Y,
+                );
+                content += 1;
+                top = top.min(y);
+                bottom = bottom.max(y + h);
+            }
+            if content == 0 {
+                return Ok("no laid-out content child to measure against".to_owned());
+            }
+            let pad = grid.Padding()?;
+            let spent = grid.ActualHeight()?;
+            let asked = bottom - top + pad.Top + pad.Bottom;
+            Ok(if spent <= asked + 1.0 {
+                String::new()
+            } else {
+                format!(
+                    "{}dip around {}dip of content, its first content child {}dip down",
+                    spent.round() as i64,
+                    asked.round() as i64,
+                    (top - pad.Top).round() as i64
+                )
+            })
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
+    }
+
     fn widget_spans_breadth(&self, t: crate::harness::Target) -> String {
         Self::on_ui_read(move |core| {
             let element: FrameworkElement = match target_element(core, t)? {
@@ -22489,10 +22546,16 @@ impl crate::harness::Stage for WinUiStage {
                 if label.IsTextTrimmed()? {
                     return Ok(format!("label {text:?} is trimmed at {width}px wide"));
                 }
-                let need = f64::from(element.DesiredSize()?.Height);
+                // DesiredSize carries the margin and ActualHeight does not; a
+                // baseline row's drop is a margin (docs/deferred.md's bare-label entry).
+                let margin = element.Margin()?;
+                let need = f64::from(element.DesiredSize()?.Height) - margin.Top - margin.Bottom;
                 let got = element.ActualHeight()?;
                 if need > got + 1.0 {
-                    return Ok(format!("label {text:?} needs {need}px at {width}px wide and got {got}px"));
+                    return Ok(format!(
+                        "label {text:?} needs {need}px at {width}px wide and got {got}px (margin {}+{})",
+                        margin.Top, margin.Bottom
+                    ));
                 }
                 if let Some(past) = off_screen(&element, "label", &text, &ground)? {
                     return Ok(past);

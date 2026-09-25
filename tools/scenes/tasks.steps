@@ -21,6 +21,9 @@ expect label@title[t1] "Buy milk"
 # row of same-size text reads both on Compose.
 expect_breadth column@inbox_list
 expect_fills row@task[t1]
+# The row spends no height its content did not ask for: the WinUI
+# runaway grew this row to 72px (docs/deferred.md's list-row entry).
+expect_height_fits row@task[t1]
 expect label@title[t2] "Call the plumber"
 expect label@caption[t2] ""
 # Every label allocated what its text needs, at this size (docs/compliance-plan.md

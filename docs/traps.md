@@ -12663,3 +12663,18 @@ frame dictionary keyed by node id keeps whichever copy wrote last, so the
 off-screen clause of `expect_no_clipping` refused a label the user could
 see. The reader keys its frames by its own per-rendering token and drops
 them on disappear; a node is off-screen only when EVERY live rendering is.
+
+## WinUI's `DesiredSize` includes the margin and `ActualHeight` does not, so a baseline row's drop read as a squeezed label (measured 2026-09-25)
+
+XAML's `FrameworkElement.DesiredSize` is the element's size plus its
+`Margin`; `ActualHeight` and `ActualWidth` are the box alone. The WinUI
+baseline row drops each text cell with a TOP MARGIN, so the clipping
+reader's `DesiredSize.Height > ActualHeight` refused a bare label in such
+a row as "needs 25px and got 18.62px" while the label was drawn whole:
+18.62 is one line of 14px Segoe UI, and the other 6.38 was the drop. A
+window shot of that red leg shows "Call the dentist" uncut, descenders
+and all. The mechanism an earlier session built on that reading, a
+margin "taken out of the content", was never there, and its three
+"fixes" chased it (docs/deferred.md's bare-label entry). Subtract the
+margin before comparing a desired size with an actual one;
+check-universal-props holds the reader to it.

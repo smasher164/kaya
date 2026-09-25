@@ -18,6 +18,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         let one = tx.signal("Buy milk");
         let two = tx.signal("Draft chapter three");
         let when = tx.signal("Monday, Sep 7");
+        let bare = tx.signal("Call the dentist");
         let root = tx
             .column(|tx| {
                 // ROW A — one line in the middle cell.
@@ -48,11 +49,22 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 .a11y_id("row_two")
                 .align(kaya::Align::Baseline)
                 .spacing(8.0);
+                // ROW C — a BARE label as the flex child, the shape an app
+                // writes first (docs/deferred.md's bare-label entry).
+                tx.row(|tx| {
+                    tx.checkbox(""); // checkbox#2
+                    tx.label(bare); // label#3
+                    tx.spacer().grow(1.0);
+                    tx.button("Details"); // button#2
+                })
+                .a11y_id("row_bare")
+                .align(kaya::Align::Baseline)
+                .spacing(8.0);
                 // A GROWN ENTRY BESIDE A BUTTON: the entry takes the track
                 // and the button hugs its caption.
                 tx.row(|tx| {
                     tx.entry().placeholder("Name").grow(1.0).a11y_id("name");
-                    tx.button("Add"); // button#2
+                    tx.button("Add"); // button#3
                 })
                 .a11y_id("row_entry")
                 .spacing(8.0);

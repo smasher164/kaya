@@ -126,6 +126,9 @@ BASELINE_LINKS = (
         # (measured 2026-09-24, the windows flexshrink leg).
         "let word = longest_word_width(label)?;",
         "let word = longest_word_width(caption)?;",
+        # DesiredSize carries the margin and ActualHeight does not
+        # (docs/traps.md, WinUI DesiredSize includes the margin).
+        "let need = f64::from(element.DesiredSize()?.Height) - margin.Top - margin.Bottom;",
     )),
     # THE MEASURE THE COLUMN IS SIZED FROM: a control with no template yet
     # answers its content's width and none of its chrome, so the cell comes
@@ -513,7 +516,7 @@ def drag_waits(winui_text):
 real = load()
 g = Gate("check-universal-props")
 RAN = 0
-DECLARED = 57
+DECLARED = 58
 for path, pattern, repl in (
     (COMPOSE, r"\ba11y\b", "kayaUnappliedProps"),
     (SWIFTUI, r"\bkayaA11y\b", "kayaUnappliedProps"),
@@ -709,6 +712,9 @@ for label, path, pattern, repl in (
     ("WinUI's shrink floor back on the clamped zero-width measure", WINUI,
      r"minimum = minimum\.max\(longest_word_width\(&block\)\? \+ chrome\);",
      "minimum = minimum.max(chrome);"),
+    ("WinUI's clipping read counting a baseline drop as text (the shipped state)", WINUI,
+     r"let need = f64::from\(element\.DesiredSize\(\)\?\.Height\) - margin\.Top - margin\.Bottom;",
+     "let need = f64::from(element.DesiredSize()?.Height);"),
     ("WinUI's clipping read agreeing about a window it never read", WINUI,
      r"if candidates > 0 && read == 0 \{", "if false {"),
     ("WinUI's cell never coming back for a measure with its template", WINUI,

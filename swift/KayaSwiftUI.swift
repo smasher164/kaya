@@ -9954,6 +9954,18 @@ private func kayaRunScript(_ script: String) {
                 } else {
                     failures.append("\(parts[1]) is short of its breadth (\(short))")
                 }
+            case "expect_height_fits":
+                // harness.rs Step::ExpectHeightFits.
+                let off = DispatchQueue.main.sync { kayaHeightFits(parts[1]) }
+                guard let off else {
+                    failures.append("no such target: \(parts[1])")
+                    break
+                }
+                if off.isEmpty {
+                    observed.append("\(parts[1]) fits its content")
+                } else {
+                    failures.append("\(parts[1]) spends height its content did not ask for (\(off))")
+                }
             case "expect_not_taller":
                 // harness.rs Step::ExpectNotTaller: two targets, one
                 // comparison, because a height is not portable — the same
@@ -11274,6 +11286,28 @@ private struct KayaBoxReader: View {
 /// THE READER NO OTHER VERB HAS HERE: every geometry reader in this file
 /// answers about width or about a cross-axis span, so a row taller than a
 /// row with more in it passed all of them (docs/deferred.md, 2026-09-24).
+/// A row's drawn height against its content children's extent — nil when the
+/// spec names no row, "" when it spends no more than a point beyond them.
+/// An empty container is a spacer and asks for nothing (harness.rs
+/// Stage::height_fits).
+func kayaHeightFits(_ spec: Substring) -> String? {
+    guard let row = kayaTarget(spec, "row", kayaScene.rows) else { return nil }
+    guard let spent = kayaContainerCross[row.id], spent > 0 else {
+        return "no box recorded — not laid out"
+    }
+    let boxes = row.laidOut
+        .filter { !(($0.kind == kindColumn || $0.kind == kindRow) && $0.children.isEmpty) }
+        .compactMap { kayaCrossRects[$0.id] }
+        .filter { $0.1 > 0 }
+    guard let top = boxes.map({ $0.0 }).min(), let bottom = boxes.map({ $0.0 + $0.1 }).max() else {
+        return "no laid-out content child to measure against"
+    }
+    let asked = bottom - top
+    if spent <= asked + 1 { return "" }
+    return "\(Int(spent.rounded()))pt around \(Int(asked.rounded()))pt of content, "
+        + "its first content child \(Int(top.rounded()))pt down"
+}
+
 func kayaNotTallerThan(_ spec: Substring, _ against: Substring) -> String? {
     guard let mine = kayaAnyTarget(spec), let theirs = kayaAnyTarget(against) else {
         return nil

@@ -6312,6 +6312,29 @@ object KayaCompose {
     /// READER NO OTHER VERB HAS HERE: every geometry reader on this backend
     /// answers about width or a cross-axis span, so a row taller than a row
     /// with more in it passed all of them (docs/deferred.md, 2026-09-24).
+    /// A row's drawn height against its content children's extent — null when
+    /// the spec names no row, "" when it spends no more than a pixel beyond
+    /// them. An empty container is a spacer and asks for nothing (harness.rs
+    /// Stage::height_fits).
+    private fun kayaHeightFits(spec: String): String? {
+        val row = kayaWidgetTarget(spec)?.takeIf { it.kind == KIND_ROW } ?: return null
+        val spent = kayaContainerCross[row.id]?.takeIf { it > 0 }
+            ?: return "no box recorded — not laid out"
+        val boxes = row.laidOut
+            .filterNot { (it.kind == KIND_COLUMN || it.kind == KIND_ROW) && it.children.isEmpty() }
+            .mapNotNull { kayaCrossRects[it.id] }
+            .filter { it.second > 0 }
+        if (boxes.isEmpty()) return "no laid-out content child to measure against"
+        val top = boxes.minOf { it.first }
+        val asked = boxes.maxOf { it.first + it.second } - top
+        return if (spent <= asked + 1) {
+            ""
+        } else {
+            "${Math.round(spent)}px around ${Math.round(asked)}px of content, " +
+                "its first content child ${Math.round(top)}px down"
+        }
+    }
+
     private fun kayaNotTallerThan(spec: String, against: String): String? {
         val mine = kayaWidgetTarget(spec) ?: return null
         val theirs = kayaWidgetTarget(against) ?: return null
@@ -9703,6 +9726,18 @@ object KayaCompose {
                             observed.add("${parts[1]} spans its breadth")
                         } else {
                             failures.add("${parts[1]} is short of its breadth ($short)")
+                        }
+                    }
+                    "expect_height_fits" -> {
+                        // harness.rs Step::ExpectHeightFits.
+                        val off = onUi(activity) { kayaHeightFits(parts[1]) }
+                        if (off == null) {
+                            failures.add("no such target: ${parts[1]}")
+                        } else if (off.isEmpty()) {
+                            observed.add("${parts[1]} fits its content")
+                        } else {
+                            failures.add(
+                                "${parts[1]} spends height its content did not ask for ($off)")
                         }
                     }
                     "expect_not_taller" -> {

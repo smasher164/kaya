@@ -7,17 +7,14 @@
 expect_title "listrow"
 expect label#0 "Buy milk"
 expect label#1 "Draft chapter three"
-# WHAT THIS CLAUSE DOES AND DOES NOT CATCH, measured rather than assumed:
-# it discriminates (the two targets swapped read "37pt against 24pt" on the
-# mac), and it holds the shape a one-line row must keep against a two-line
-# one. It does NOT reproduce the 2026-09-24 WinUI runaway: that fix was cut
-# from a copy and this scene stayed green on the windows lane four times,
-# with and without two intervening resizes. The runaway accumulates over the
-# repeated reindex passes a For inside a scroll provokes, which a scene that
-# builds once and settles never reaches — so the static clause in
-# check-universal-props remains that defect's guard, and a runtime one would
-# have to put these rows inside a collection.
+# expect_not_taller cannot see the 2026-09-24 WinUI runaway, which moves
+# every row of a screen together; expect_height_fits below can, and was
+# watched red on the windows lane with that fix cut (docs/deferred.md's
+# list-row entry).
 expect_not_taller row@row_one row@row_two
+expect_height_fits row@row_one
+expect_height_fits row@row_two
+expect_height_fits row@row_bare
 # The entry takes its grow track, which is the half of this shape that
 # went wrong before (a SwiftUI entry refusing its grow track).
 expect_fills entry@name
