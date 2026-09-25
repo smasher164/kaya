@@ -9,6 +9,21 @@ Landed history lives in git; this file only carries what is still open.
 scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
+## DEFECT — the chat app's C0 captures: Android's pushed thread, iOS's missing title, Windows' unbounded list pane (found 2026-09-25, https://claude.ai/artifact/AJnJYozbyhRN7jvHzEcua3)
+KEY: chat app, pushed thread, status bar inset, keyboard opens by itself, IME inset, thread title, list pane boundary, chat.steps
+
+Every step of tools/scenes/chat.steps passes on all five lanes; the captures
+of its last frame found what no step reads.
+  - ANDROID: the pushed thread has no top bar and runs under the status bar;
+    the keyboard opens on its own when the thread is pushed (a capture held
+    before the scene focuses the compose field already shows it); and with
+    it up the message list shrinks to a few rows, a gap opens between the
+    compose row and the keyboard, and the newest messages leave the view.
+  - iOS: the thread's navigation bar shows the back button but not the
+    conversation's name; the quote's ↩ draws as a colour emoji.
+  - WINDOWS: the list pane has no boundary against the thread (no divider,
+    no pane ground), where the mac and GTK draw one.
+
 ## ~~BUILD — tints and the filled container (design pass ruled 2026-09-25)~~ COMPLETE 2026-09-25: depth on the mac and iOS, breadth on GTK, WinUI and Compose, all nine bindings in both zones, the tints scene light and dark on five lanes (4d000f54, matrix ALL PASS), the review page https://claude.ai/artifact/EhjJoWe5B7FZjM54p2DRDn, and Windows' accent as Fluent 2's own pale brand surface
 KEY: filled, Tint, tint, expect_fill, fill_tint, kayaFillRead, tints scene, filled container
 

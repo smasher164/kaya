@@ -33,17 +33,26 @@ def image_bytes(path):
     return blob
 
 
-def capture(scene, out, crop, settle, guest=None):
+def capture(scene, out, crop, settle, guest=None, go=False):
     guest = guest or scene
     target = ROOT / "target-linux"
+    # A GO APP (docs/chat-plan.md) is one binary for every Go scene, built
+    # the way the lane builds it (tools/linux/run-suites.sh's build_go),
+    # against the library this build writes.
+    example = [] if go else ["--example", guest]
     checked("build", ["cargo", "build", "-p", "kaya", "--features", "harness",
-                      "--locked", "--lib", "--example", guest],
+                      "--locked", "--lib", *example],
             env=dict(os.environ, CARGO_TARGET_DIR=str(target)))
     checked("build verification", ["python3", "tools/build-id.py", "--verify",
                                    str(target / "debug/libkaya.so")])
+    if go:
+        binary = target / "kaya-go"
+        checked("go build", ["go", "build", "-o", str(binary), "dev.kaya/guests/go/cmd"])
+    else:
+        binary = target / "debug/examples" / guest
     raw = out.with_name("root.png")
     with open(out.with_name("guest.log"), "wb") as log:
-        guest = subprocess.Popen([str(target / "debug/examples" / guest)], cwd=ROOT,
+        guest = subprocess.Popen([str(binary)], cwd=ROOT,
                                  env=dict(os.environ, KAYA_SELFTEST=scene),
                                  stdout=log, stderr=subprocess.STDOUT)
         try:
@@ -97,6 +106,7 @@ def photograph(args, out, script):
                      "/work/tools/linux/shot-gtk.py", args.scene, "/capture/crop.png",
                      "--in-container", "--settle-seconds", str(args.settle_seconds),
                      *(["--guest", args.guest] if getattr(args, "guest", None) else []),
+                     *(["--go"] if getattr(args, "go", False) else []),
                      *options], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, check=False)
             finally:
                 guest_log = scratch / "guest.log"
@@ -121,6 +131,8 @@ def main(argv=None):
                     "name (tasksrtl and tasksbig run the tasks example)")
     ap.add_argument("--env", action="append", default=[], metavar="KEY=VALUE",
                     help="a knob for the guest (KAYA_LOCALE=ar-EG, KAYA_TEXT_SCALE=2)")
+    ap.add_argument("--go", action="store_true",
+                    help="the scene is a Go app's (the chat app): build and run the Go guests")
     ap.add_argument("--in-container", action="store_true", help=argparse.SUPPRESS)
     args = ap.parse_args(argv)
     for pair in args.env:
@@ -146,7 +158,8 @@ def main(argv=None):
     try:
         out.parent.mkdir(parents=True, exist_ok=True)
         if args.in_container:
-            capture(args.scene, out, args.crop, args.settle_seconds, guest=args.guest)
+            capture(args.scene, out, args.crop, args.settle_seconds, guest=args.guest,
+                    go=args.go)
         else:
             photograph(args, out, "\n".join(held) + "\n")
     except (OSError, RuntimeError) as error:
