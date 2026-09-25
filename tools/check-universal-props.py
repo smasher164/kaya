@@ -105,15 +105,35 @@ BASELINE_LINKS = (
         # that had drawn nothing — three buttons with their words cut passed
         # it on the lane, 2026-09-24.
         "let room = element.ActualWidth()? - pad.Left - pad.Right;",
-        "if natural > room + 1.0 {",
+        "if word > room + 1.0 {",
         "if candidates > 0 && read == 0 {",
+        # THE WORD IS MEASURED DIRECTLY, never off a zero-width measure: WinUI
+        # clamps DesiredSize to the width it was offered, so that reading is 0
+        # for any text and both this wall and the shrink floor were vacuous
+        # (measured 2026-09-24, the windows flexshrink leg).
+        "let word = longest_word_width(label)?;",
+        "let word = longest_word_width(caption)?;",
     )),
     # THE MEASURE THE COLUMN IS SIZED FROM: a control with no template yet
     # answers its content's width and none of its chrome, so the cell comes
     # back when the platform says the template arrived.
-    (WINUI, "fn remeasure_when_loaded(", 900, (
+    # THE CELL THE FLOOR IS FOR: the call sites, so the two helpers above are
+    # held to being REACHED and not merely present.
+    (WINUI, "fn reindex(core: &CoreState, parent: WidgetId)", 6000, (
+        "remeasure_when_loaded(*child, &element)?;",
+        "minimum = minimum.max(longest_word_width(&block)? + chrome);",
+    )),
+    (WINUI, "fn longest_word_width(block: &TextBlock)", 900, (
+        "for word in text.split_whitespace() {",
+        "Width: f32::INFINITY,",
+    )),
+    (WINUI, "fn remeasure_when_loaded(", 1200, (
         "if element.IsLoaded()? {",
-        "core.child_order.mark(parent);",
+        # THROUGH THE TEXT ARMS' OWN BODY, which keeps a TABLE's stamped row
+        # out of the re-measure: a reindex there replaces the table's tracks
+        # and its rows fall out of alignment (the windows table legs, matrix
+        # 2026-09-24).
+        "mark_row_for_remeasure(core, child);",
         "element.Loaded(&handler)?;",
     )),
     (WINUI, "fn text_line(block: &TextBlock, top: f64)", 800, (
@@ -428,7 +448,7 @@ def census(files):
 real = load()
 g = Gate("check-universal-props")
 RAN = 0
-DECLARED = 51
+DECLARED = 52
 for path, pattern, repl in (
     (COMPOSE, r"\ba11y\b", "kayaUnappliedProps"),
     (SWIFTUI, r"\bkayaA11y\b", "kayaUnappliedProps"),
@@ -581,7 +601,10 @@ for label, path, pattern, repl in (
     ("WinUI's clipping read no longer measuring the badge's digit", WINUI,
      r'named_descendant\(&root, "ValueTextBlock"\)\?', 'named_descendant(&root, "NoSuchBlock")?'),
     ("WinUI's clipping read no longer measuring a button's caption", WINUI,
-     r"if natural > room \+ 1\.0 \{", "if false {"),
+     r"if word > room \+ 1\.0 \{", "if false {"),
+    ("WinUI's shrink floor back on the clamped zero-width measure", WINUI,
+     r"minimum = minimum\.max\(longest_word_width\(&block\)\? \+ chrome\);",
+     "minimum = minimum.max(chrome);"),
     ("WinUI's clipping read agreeing about a window it never read", WINUI,
      r"if candidates > 0 && read == 0 \{", "if false {"),
     ("WinUI's cell never coming back for a measure with its template", WINUI,

@@ -222,6 +222,17 @@ impl NativeWidget {
         }
     }
 
+    /// The block a widget draws its OWN text in — a label's, a button's
+    /// caption — for the shrink floor's longest-word measure. A widget whose
+    /// text is not a TextBlock (a field, a check's caption) answers None.
+    fn text_block(&self) -> Option<TextBlock> {
+        match self {
+            NativeWidget::Label { block, .. } => Some(block.clone()),
+            NativeWidget::Button { caption, .. } => Some(caption.clone()),
+            _ => None,
+        }
+    }
+
     /// The editable behind a text widget, if this is one — the ONE place
     /// that knows which kinds are editable.
     fn editable(&self) -> Option<Editable> {
@@ -2555,7 +2566,31 @@ fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
                     // one" is Loaded, the focus arm's materialization class,
                     // and the row comes back for a real measure then.
                     remeasure_when_loaded(*child, &element)?;
-                    let (natural, minimum) = measured_widths(&element)?;
+                    let (natural, mut minimum) = measured_widths(&element)?;
+                    // A BUTTON MAY SHRINK TO ITS CAPTION'S LONGEST WORD AND NO
+                    // FURTHER (docs/flex-shrink-plan.md §3's floor, one kind
+                    // over): measured at zero width a Button answers its
+                    // CHROME alone — its content presenter gives the caption
+                    // nothing and a TextBlock offered nothing answers nothing —
+                    // so the floor sat under the word and a shrunk row cut
+                    // `Details` to `Deta` (the windows flexshrink leg, matrix
+                    // 2026-09-24). The chrome is what the button needs beyond
+                    // its caption, so the floor is the word plus it.
+                    // A CELL SHRINKS TO ITS LONGEST WORD AND NO FURTHER
+                    // (docs/flex-shrink-plan.md §3), and on this platform the
+                    // zero-width measure cannot say what that word is: WinUI
+                    // CLAMPS DesiredSize to the constraint it was given, so a
+                    // TextBlock offered 0 answers 0 — the floor was nothing at
+                    // all, and a shrunk row cut `Details` to `Deta` (measured
+                    // on the lane 2026-09-24, the windows flexshrink leg).
+                    // The word is measured directly instead, and a control's
+                    // chrome is what it needs beyond its own text.
+                    if let Some(block) = widget.text_block() {
+                        let inner: FrameworkElement = windows_core::Interface::cast(&block)?;
+                        let (text_natural, _) = measured_widths(&inner)?;
+                        let chrome = (natural - text_natural).max(0.0);
+                        minimum = minimum.max(longest_word_width(&block)? + chrome);
+                    }
                     if natural > 0.0 {
                         def.SetWidth(GridLength { Value: natural, GridUnitType: GridUnitType::Star })?;
                         def.SetMinWidth(minimum.min(natural))?;
@@ -2929,13 +2964,41 @@ fn remeasure_when_loaded(child: WidgetId, element: &FrameworkElement) -> windows
     let handler = RoutedEventHandler::new(move |_, _| {
         CORE.with_borrow_mut(|core| {
             let Some(core) = core.as_mut() else { return Ok(()) };
-            let Some(parent) = core.child_order.parent_of(child) else { return Ok(()) };
-            core.child_order.mark(parent);
+            // THROUGH THE SAME BODY THE TEXT ARMS USE, which is what keeps a
+            // TABLE's stamped row out of it: a reindex there replaces the
+            // table's own tracks and its rows fall out of alignment (the
+            // windows table legs, matrix 2026-09-24).
+            mark_row_for_remeasure(core, child);
             flush_tracks(core)
         })
     });
     element.Loaded(&handler)?;
     Ok(())
+}
+
+/// THE WIDEST WORD a block would draw, measured directly: WinUI clamps a
+/// measure's DesiredSize to the width it was offered, so `measured_widths`'
+/// zero-width reading answers 0 for any text and cannot be the shrink floor
+/// (docs/flex-shrink-plan.md §3). A probe block wearing the same face is
+/// measured unbounded, once per word.
+fn longest_word_width(block: &TextBlock) -> windows_core::Result<f64> {
+    let text = block.Text()?.to_string();
+    let mut widest: f64 = 0.0;
+    let probe = TextBlock::new()?;
+    probe.SetFontFamily(&block.FontFamily()?)?;
+    probe.SetFontSize(block.FontSize()?)?;
+    probe.SetFontWeight(block.FontWeight()?)?;
+    probe.SetFontStyle(block.FontStyle()?)?;
+    let ui: UIElement = probe.cast()?;
+    for word in text.split_whitespace() {
+        probe.SetText(&HSTRING::from(word))?;
+        ui.Measure(bindings::Windows::Foundation::Size {
+            Width: f32::INFINITY,
+            Height: f32::INFINITY,
+        })?;
+        widest = widest.max(f64::from(ui.DesiredSize()?.Width));
+    }
+    Ok(widest)
 }
 
 fn measured_widths(element: &FrameworkElement) -> windows_core::Result<(f64, f64)> {
@@ -22290,7 +22353,7 @@ impl crate::harness::Stage for WinUiStage {
                 if let Some(past) = off_screen(&element, "label", &text, &ground)? {
                     return Ok(past);
                 }
-                let (_, word) = measured_widths(&element)?;
+                let word = longest_word_width(label)?;
                 if presented(&element, &ground)? && word > width + 1.0 {
                     return Ok(format!(
                         "label {text:?} is {width}px wide, narrower than its longest word at {word}px"
@@ -22319,13 +22382,13 @@ impl crate::harness::Stage for WinUiStage {
                         continue;
                     }
                     read += 1;
-                    let block: FrameworkElement = windows_core::Interface::cast(caption)?;
-                    let (natural, _) = measured_widths(&block)?;
+                    let word = longest_word_width(caption)?;
                     let pad = button.Padding()?;
                     let room = element.ActualWidth()? - pad.Left - pad.Right;
-                    if natural > room + 1.0 {
+                    if word > room + 1.0 {
                         return Ok(format!(
-                            "button {text:?} has {room}px between its padding and needs {natural}px"
+                            "button {text:?} has {room}px between its padding and its longest \
+                             word needs {word}px"
                         ));
                     }
                 }
