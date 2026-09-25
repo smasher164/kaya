@@ -403,8 +403,6 @@ struct CoreState {
     container_insets: HashMap<WidgetId, f64>,
     /// Each filled container's tint (docs/tints-plan.md T2).
     filled: HashMap<WidgetId, i64>,
-    /// Each label's role, for the on-accent restyle ([`restyle_on_accent`]).
-    label_roles: HashMap<WidgetId, i64>,
     /// The minted padding host around a SCROLL mounted as a window's root: a
     /// ScrollViewer's default template ignores Control.Padding (the
     /// retemplated entry ScrollViewer in this file exists for that reason), so
@@ -2079,7 +2077,7 @@ const FILLED_DEFAULT_INSET: f64 = 12.0;
 /// The Fluent brush a tint fills with (docs/probes/platform-tokens-2026-09-25.md).
 fn tint_brush_key(tint: i64) -> &'static str {
     match tint {
-        1 => "AccentFillColorDefaultBrush",
+        1 => ACCENT_SURFACE_KEY,
         2 => "SystemFillColorSuccessBackgroundBrush",
         3 => "SystemFillColorCautionBackgroundBrush",
         4 => "SystemFillColorCriticalBackgroundBrush",
@@ -2106,36 +2104,40 @@ fn filled_style(tint: i64) -> windows_core::Result<Style> {
     XamlReader::Load(&HSTRING::from(markup))?.cast()
 }
 
-/// Whether an ancestor of `id` is filled with the accent.
-fn on_accent(core: &CoreState, id: WidgetId) -> bool {
-    let mut at = id.0;
-    while let Some(&parent) = core.tree_parent.get(&at) {
-        if core.filled.get(&WidgetId(parent)) == Some(&1) {
-            return true;
-        }
-        at = parent;
-    }
-    false
+/// THE ACCENT AS A SURFACE is a pale step of the accent ramp with ordinary
+/// text, as Fluent's chat app draws the user's own messages, not the accent
+/// BUTTON's saturated fill (docs/tints-plan.md §3, ruled 2026-09-25). Fluent
+/// ships no such brush, so kaya installs one, once, per theme.
+const ACCENT_SURFACE_KEY: &str = "KayaAccentSurfaceBrush";
+
+thread_local! {
+    static ACCENT_SURFACE: RefCell<bool> = const { RefCell::new(false) };
 }
 
-/// Every label at or under `id` inside an accent fill takes Fluent's
-/// on-accent text brush on top of its role's own style. A TextBlock's
-/// foreground is not reached by a theme-dictionary override on the Grid
-/// (measured 2026-09-25, docs/tints-plan.md §4.1), so it is set per label.
-fn restyle_on_accent(core: &CoreState, id: WidgetId) -> windows_core::Result<()> {
-    if let Some(NativeWidget::Label { block, .. }) = core.widgets.get(&id) {
-        if on_accent(core, id) {
-            let (based_on, brush) = match core.label_roles.get(&id) {
-                Some(3) => (Some("SubtitleTextBlockStyle"), "TextOnAccentFillColorPrimaryBrush"),
-                Some(4) => (Some("CaptionTextBlockStyle"), "TextOnAccentFillColorSecondaryBrush"),
-                _ => (None, "TextOnAccentFillColorPrimaryBrush"),
-            };
-            block.SetStyle(&themed_foreground_style("TextBlock", based_on, brush)?)?;
-        }
+fn ensure_accent_surface() -> windows_core::Result<()> {
+    if ACCENT_SURFACE.with_borrow(|done| *done) {
+        return Ok(());
     }
-    for child in core.child_order.children(id).to_vec() {
-        restyle_on_accent(core, child)?;
-    }
+    let markup = format!(
+        "<ResourceDictionary xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" \
+           xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\">\
+           <ResourceDictionary.ThemeDictionaries>\
+             <ResourceDictionary x:Key=\"Light\">\
+               <SolidColorBrush x:Key=\"{ACCENT_SURFACE_KEY}\" Color=\"{{ThemeResource SystemAccentColorLight3}}\"/>\
+             </ResourceDictionary>\
+             <ResourceDictionary x:Key=\"Dark\">\
+               <SolidColorBrush x:Key=\"{ACCENT_SURFACE_KEY}\" Color=\"{{ThemeResource SystemAccentColorDark3}}\"/>\
+             </ResourceDictionary>\
+           </ResourceDictionary.ThemeDictionaries>\
+         </ResourceDictionary>"
+    );
+    let dictionary: bindings::Microsoft::UI::Xaml::ResourceDictionary =
+        XamlReader::Load(&HSTRING::from(markup))?.cast()?;
+    APP.with_borrow(|app| {
+        let app = app.as_ref().expect("apply runs on the UI thread, where the Application lives");
+        app.Resources()?.MergedDictionaries()?.Append(&dictionary)
+    })?;
+    ACCENT_SURFACE.with_borrow_mut(|done| *done = true);
     Ok(())
 }
 
@@ -15722,10 +15724,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 // where the widget asked for it, and the table's own entry is
                 // what says so to every handler below.
                 (NativeWidget::Column(grid) | NativeWidget::Row(grid), Prop::Filled, Value::I64(tint)) => {
+                    ensure_accent_surface()?;
                     grid.SetStyle(&filled_style(tint)?)?;
                     core.filled.insert(id, tint);
                     stamp_container_padding(core, id)?;
-                    restyle_on_accent(core, id)?;
                 }
                 // docs/submit-plan.md S2: the set the field's KeyDown reads.
                 (NativeWidget::Textarea(_), Prop::Submits, Value::Bool(on)) => {
@@ -16213,8 +16215,6 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     // size, weight and line height are the platform's
                     // scale — picking numbers out of it is what D4 refuses.
                     label.SetStyle(&theme_resource::<Style>("SubtitleTextBlockStyle")?)?;
-                    core.label_roles.insert(id, 3);
-                    restyle_on_accent(core, id)?;
                 }
                 (NativeWidget::Label { block: label, .. }, Prop::Role, Value::I64(4)) => {
                     // The caption role: Fluent's own caption step of the
@@ -16227,8 +16227,6 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         Some("CaptionTextBlockStyle"),
                         "TextFillColorSecondaryBrush",
                     )?)?;
-                    core.label_roles.insert(id, 4);
-                    restyle_on_accent(core, id)?;
                 }
                 (_, prop, value) => {
                     panic!("kaya: winui cannot apply {prop:?} = {value:?} here")
@@ -16239,7 +16237,6 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             // BEFORE THE BRANCHES, every one of which returns early for a
             // container this backend does not lower to a panel.
             core.tree_parent.insert(child.0, parent.0);
-            restyle_on_accent(core, child)?;
             // The viewport's one child (the scene rejects a second):
             // ScrollViewer is a ContentControl, not a panel.
             if let NativeWidget::Scroll(viewer) =
@@ -18122,7 +18119,6 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             inset: 16.0,
             container_insets: HashMap::new(),
             filled: HashMap::new(),
-            label_roles: HashMap::new(),
             scroll_root_hosts: HashMap::new(),
             transactions: tx_rx,
             // THIS BACKEND WINDOWS ROWS (docs/deferred.md, the
@@ -22076,6 +22072,7 @@ impl crate::harness::Stage for WinUiStage {
                 let c = probe.Background()?.cast::<SolidColorBrush>()?.Color()?;
                 Ok([c.R, c.G, c.B, c.A].map(f64::from))
             };
+            ensure_accent_surface()?;
             let ground = resolve("ApplicationPageBackgroundThemeBrush")?;
             let mut candidates = vec![("none", [ground[0], ground[1], ground[2]])];
             for (name, tint) in [("accent", 1), ("success", 2), ("warning", 3), ("critical", 4), ("neutral", 5)] {

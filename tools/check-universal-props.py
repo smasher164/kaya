@@ -485,19 +485,6 @@ def fill_reads_rust_and_compose(gtk_text, winui_text, compose_text):
         if re.search(forbidden, block):
             bad.append(f"{path}: the fill reader names the model's own fill — the verdict must "
                        "come from the pixels, not the prop it is judging")
-    # WinUI's on-accent text is set PER LABEL (a Grid has no Foreground to
-    # inherit), so it must run wherever a label can come to sit inside an
-    # accent fill: the fill itself, a child joining, a role restyling it.
-    # expect_fill reads the fill and cannot see the text (docs/tints-plan.md §4.1).
-    for anchor, call in (
-        ("ApplyOp::AddChild { parent, child } => {", "restyle_on_accent(core, child)?;"),
-        ("grid.SetStyle(&filled_style(tint)?)?;", "restyle_on_accent(core, id)?;"),
-        ('core.label_roles.insert(id, 3);', "restyle_on_accent(core, id)?;"),
-        ('core.label_roles.insert(id, 4);', "restyle_on_accent(core, id)?;"),
-    ):
-        at = winui_text.find(anchor)
-        if at < 0 or call not in winui_text[at:at + 400]:
-            bad.append(f"{WINUI}: the on-accent text restyle no longer runs after {anchor!r}")
     return bad
 
 
@@ -583,7 +570,7 @@ def drag_waits(winui_text):
 real = load()
 g = Gate("check-universal-props")
 RAN = 0
-DECLARED = 64
+DECLARED = 63
 for path, pattern, repl in (
     (COMPOSE, r"\ba11y\b", "kayaUnappliedProps"),
     (SWIFTUI, r"\bkayaA11y\b", "kayaUnappliedProps"),
@@ -800,10 +787,6 @@ for label, path, pattern, repl in (
      "            val ground = (decor.background as? "
      "android.graphics.drawable.ColorDrawable)?.color\n"
      "            node?.filled\n"),
-    ("WinUI's on-accent text skipped for a joining child", WINUI,
-     r"            core\.tree_parent\.insert\(child\.0, parent\.0\);\n"
-     r"            restyle_on_accent\(core, child\)\?;",
-     "            core.tree_parent.insert(child.0, parent.0);"),
     ("WinUI's clipping read agreeing about a window it never read", WINUI,
      r"if candidates > 0 && read == 0 \{", "if false {"),
     ("WinUI's cell never coming back for a measure with its template", WINUI,

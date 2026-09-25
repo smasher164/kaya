@@ -17,7 +17,10 @@ row or column, the chat bubble its first consumer. DEPTH in progress on
 the mac and iOS LANDED 2026-09-25: the spec prop and enum, the Rust binding
 in both zones, the SwiftUI arm, `expect_fill` reading the pixels, the tints
 scene green in light and dark on both, check-universal-props' fill-read
-clause with two watched negatives. What breadth owes, held open here:
+clause with two watched negatives. BREADTH LANDED the same day (4d000f54,
+matrix ALL PASS); the review page is
+https://claude.ai/artifact/EhjJoWe5B7FZjM54p2DRDn, with one visual question
+open on it (how pale Windows' accent surface should be). What breadth owed:
   - ~~**DEPTH STUB: tints on gtk**~~ — LANDED 2026-09-25: libadwaita's
     named `*_bg_color`/`*_fg_color` pairs at the card's 12px radius, neutral
     as libadwaita's own `.card`, the fill read off the container's own
@@ -30,6 +33,13 @@ clause with two watched negatives. What breadth owes, held open here:
     roles, success and warning harmonized toward primary through
     material-color-utilities, the fill read through PixelCopy; green light
     and dark.
+  - **A branded Windows app's accent surface is the USER's accent.** The
+    pale surface reads `SystemAccentColorLight3` under Light and `Dark3`
+    under Dark, and the brand dictionary overrides only the stops each
+    theme's own fills read (Dark1-3 under Light, Light1-3 under Dark), so a
+    branded app's accent bubble takes the user's accent at that step. The
+    brand needs a pale stop of its own per theme; no in-tree branded scene
+    fills a container yet.
   - ~~The eight other bindings' `filled` sugar in both construction
     zones.~~ LANDED 2026-09-25: Go, C#, Java, Swift, OCaml (a `Tint` module,
     since `Warning` is a symbol), Haskell, Python and JS, both zones and the

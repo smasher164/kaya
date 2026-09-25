@@ -21,7 +21,7 @@ exactly as it was while the text around it changes.
 
 | tint | Apple | Material 3 (Compose) | libadwaita | WinUI |
 |---|---|---|---|---|
-| accent | `accentColor`, white text (convention; iOS has no public on-accent token) | `primary` / `onPrimary` | `accent_bg_color` / `accent_fg_color` | `AccentFillColorDefault` / `TextOnAccentFillColorPrimary` |
+| accent | `accentColor`, white text (convention; iOS has no public on-accent token) | `primary` / `onPrimary` | `accent_bg_color` / `accent_fg_color` | a pale accent step (`SystemAccentColorLight3` light, `Dark3` dark) + primary text, ruled 2026-09-25 (§3) |
 | success | `systemGreen` | none in the scheme: a harmonized custom colour's `accent` / `onAccent` (material-color-utilities, already a dependency) | `success_bg_color` / `success_fg_color` | `SystemFillColorSuccessBackground` + primary text |
 | warning | `systemOrange` | harmonized custom colour, as success | `warning_bg_color` / `warning_fg_color` | `SystemFillColorCautionBackground` + primary text |
 | critical | `systemRed` | `error` / `onError` | `error_bg_color` / `error_fg_color` | `SystemFillColorCriticalBackground` + primary text |
@@ -87,6 +87,15 @@ Two things the table says that the design has to carry:
 - **Neutral on macOS 13.** The fill family needs macOS 14. The depth slice
   measures the pre-14 route (`.quaternary` as a fill, or the grouped
   list's own card colour) and records which matches on 14 byte for byte.
+- **Windows draws the accent as a SURFACE, not a button** (the maintainer,
+  2026-09-25). Fluent keeps saturated fills for small marks and the accent
+  button; a surface that carries text is a pale tint with ordinary text,
+  which is how Teams draws the user's own messages and how InfoBar draws
+  severity. So Windows' `accent` is a pale step of the accent ramp
+  (Light3 in light, Dark3 in dark) with primary text, beside the pale
+  severity backgrounds, and the four other platforms keep their solid
+  accent. Fluent has no brush for it, so the backend installs one per theme
+  (`KayaAccentSurfaceBrush`).
 - **Label tints come second.** Text in a tint (`success_color`,
   `systemGreen`, Fluent's `SystemFillColorSuccess`) is the same vocabulary
   on a second prop, a slice after the container.
