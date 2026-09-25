@@ -1,6 +1,7 @@
 # The chat app — the design pass
 
-Status: DRAFT 2026-09-25, awaiting the maintainer's rulings in §4. The
+Status: R1, R2, R4 and R5 RULED 2026-09-25 as recommended; R3 (the
+bubble) reopened the same day and awaits the maintainer. The
 goal was named on 2026-09-24 ("let's have the chat app be the ultimate
 goal", docs/submit-plan.md §8). Both prerequisites exist: the `submitted`
 occurrence (docs/submit-plan.md) and `scroll_to_row`
@@ -44,7 +45,8 @@ Everything in v0 exists today. Three screens:
    first line as a caption, and an unread count as a badge.
 2. **The thread**: a `For` of messages inside a `scroll`. Each message is
    a row whose bubble sits at the leading edge for the peer and the
-   trailing edge for the user (a spacer on one side; §4 R3). Messages
+   trailing edge for the user (a spacer on one side; how the bubble is
+   drawn is §4 R3). Messages
    hold rich text with links (docs/rich-text-plan.md).
    `scroll_to_row` carries the thread's navigation, one kind of jump each:
    the thread OPENS at its first unread message (the newest when nothing
@@ -104,11 +106,21 @@ row).
   client look, and it scales past a handful. RECOMMENDED: **list-detail**.
   The list's rows then carry the unread badge as a label, since section
   badges belong to sections.
-- **R3 — the bubble's side is the app's layout, not a kaya kind.** A
-  bubble is a row with a spacer before or after it, plus a background.
-  RECOMMENDED: **no `bubble` kind**. If v0 shows a platform drawing
-  bubbles differently in a way a row cannot express, that becomes a
-  finding.
+- **R3 — the bubble (OPEN).** No platform ships a chat bubble: Messages
+  on macOS and iOS draws its balloons in the private ChatKit framework,
+  Google Messages and Fractal draw their own (Android's "Bubbles" API is
+  the floating conversation heads, not this), and WinUI has no such
+  control. And kaya refuses per-widget colours, radii and padding
+  (docs/styling-plan.md §2), so an app cannot give a row a filled rounded
+  background. The three answers: (1) a CONTAINER ROLE, `outgoing` and
+  `incoming`, each backend drawing it from its own tokens (the accent
+  fill for the user's, a neutral fill for the peer's, the platform's own
+  corner radius) — styling-plan D5's "closed to apps, extensible by kaya",
+  as the button and label roles are; a spec change on four backends.
+  (2) a canvas per bubble, which loses selection, links, accessibility and
+  the platform's text layout. (3) no bubble, messages as plain rows on
+  alternating sides. RECOMMENDED: (1), without a tail. An emoji-only
+  message then takes no role, which is how Messages shows one.
 - **R4 — stick to the bottom.** When the user is at the newest message and
   a new one arrives, every chat client keeps the view at the bottom; when
   the user has scrolled up, it does not move them. RECOMMENDED: measure
@@ -133,6 +145,11 @@ row).
 | C7 | swipe a conversation to archive it on the phones | swipe actions |
 | C8 | a Search field over the thread; a result jumps to its message | nothing new (the search field, `scroll_to_row` into a filtered list) |
 | C9 | the connection drops and comes back; messages queue meanwhile | nothing new in kaya; the app's reconnect over `post` |
+
+A LATER REVISION carries emoji and images beyond C5 and C6. Colour emoji
+inside a message body need nothing from kaya on four platforms; the linux
+container very likely lacks a colour emoji font, the missing-librsvg
+class (docs/styling-plan.md D6), and the first emoji leg will say so.
 
 Video and audio playback, which the survey lists as must-have for chat,
 stay with the video editor (docs/video-editor-plan.md) and are not
