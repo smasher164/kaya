@@ -143,22 +143,25 @@ _token = os.environ.get("KAYA_MATRIX_GATES_TOKEN", "")
 # Line one is the token, line two the per-gate keys behind it.
 _fp_lines = (out_of([str(ROOT / "tools/gates.py"), "--fingerprint"])
              .strip().splitlines() if _token else [])
-if _token and _fp_lines and _fp_lines[0] == _token:
-    print(f"gates: skipped — validate-all ran the sweep in this matrix "
-          f"run and the tree's gate fingerprint still matches "
-          f"({_token})")
-    if run([str(ROOT / "tools/swiftui/build-dylib.sh")]).returncode != 0:
-        sys.exit(1)
-    if run([str(ROOT / "tools/build-id.py"), "--verify",
-            "--component", "swiftui",
-            "target/swiftui/libkaya_swiftui.dylib"]).returncode != 0:
-        sys.exit(1)
-else:
-    if _token:
-        # THE MISMATCH NAMES ITS MOVER: the lane is about to spend the
-        # whole sweep under peak load, and the token alone cannot say
-        # which gate's inputs changed between validate-all's sweep and
-        # this start (matrix #9, 2026-09-05).
+if _token:
+    # A MATRIX SWEEPS ONCE, AND IT IS NEVER THIS ONE. validate-all runs
+    # the sweep itself after Android and this lane exit, over the same
+    # tree, so a second sweep here decides nothing — and under a plain
+    # matrix it decided nothing for 314s and 611s, twice breaching the
+    # mac ceiling (docs/deferred.md's mac-lane re-sweep entry, measured
+    # 2026-09-07). The mismatch that triggered it was never a source
+    # edit: the movers are the OTHER LANES' build-time writes landing
+    # between validate-all's keying and this lane's start, which is why
+    # the same six gates moved on both runs. A real source edit mid-run
+    # is refused by validate-all's own sweep exactly as before, and no
+    # other lane has ever swept.
+    if _fp_lines and _fp_lines[0] == _token:
+        print(f"gates: skipped — validate-all sweeps this matrix and the "
+              f"tree's gate fingerprint still matches ({_token})")
+    else:
+        # THE MISMATCH STILL NAMES ITS MOVER, because which inputs moved
+        # under a running matrix is the measurement this entry wants
+        # (matrix #9, 2026-09-05); it just no longer costs a sweep.
         import json
         try:
             handed = json.loads(os.environ.get("KAYA_MATRIX_GATES_KEYS", "{}"))
@@ -167,9 +170,17 @@ else:
             handed, mine = {}, {}
         moved = sorted(n for n in set(handed) | set(mine)
                        if handed.get(n) != mine.get(n))
-        print(f"gates: the matrix token {_token} does not match this "
-              f"tree — running the sweep here; gates whose inputs moved "
-              f"since validate-all keyed them: {moved or 'none named'}")
+        print(f"gates: skipped — validate-all sweeps this matrix. Its token "
+              f"{_token} does not match this tree; gates whose inputs moved "
+              f"since it keyed them, which under a matrix are the other "
+              f"lanes' own build writes: {moved or 'none named'}")
+    if run([str(ROOT / "tools/swiftui/build-dylib.sh")]).returncode != 0:
+        sys.exit(1)
+    if run([str(ROOT / "tools/build-id.py"), "--verify",
+            "--component", "swiftui",
+            "target/swiftui/libkaya_swiftui.dylib"]).returncode != 0:
+        sys.exit(1)
+else:
     if run([str(ROOT / "tools/gates.py")]).returncode != 0:
         sys.exit(1)
 timing("core-build+gates")

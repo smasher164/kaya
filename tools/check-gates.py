@@ -115,6 +115,49 @@ def direct_invocations(text):
     return hits
 
 
+def mac_sweep_problem(text):
+    """A MATRIX SWEEPS ONCE, and it is never the mac lane's.
+
+    validate-all runs the sweep itself after Android and the mac lane
+    exit, over the same tree, so a second sweep inside the lane decides
+    nothing — and under a plain matrix it cost 314s and 611s of
+    `core-build+gates`, breaching the 1000s mac ceiling twice, because
+    the token it compared against had been moved by the OTHER LANES'
+    build-time writes rather than by any source edit (docs/deferred.md's
+    mac-lane re-sweep entry, measured 2026-09-07). The lane still sweeps
+    when it runs standalone, which is the branch with no token.
+    """
+    lines = text.splitlines()
+    branch = next((i for i, line in enumerate(lines)
+                   if line.strip() == "if _token:"), None)
+    if branch is None:
+        return ("tools/validate-mac.py has no `if _token:` branch — the "
+                "matrix handshake moved, and with it the rule that a matrix "
+                "sweeps once")
+    # The SWEEP call, never the `--fingerprint` read of the same script
+    # two lines above the branch (which is how this clause's own first
+    # draft read 143 < 145 and agreed with everything).
+    sweeps = [i for i, line in enumerate(lines)
+              if 'ROOT / "tools/gates.py"' in line and "--fingerprint" not in line]
+    if not sweeps:
+        return None          # the delegation clause above owns that finding
+    # The `else:` at column 0 that closes the matrix branch.
+    closing = next((i for i, line in enumerate(lines)
+                    if i > branch and line == "else:"), len(lines))
+    inside = [i + 1 for i in sweeps if branch < i < closing]
+    if inside:
+        return ("tools/validate-mac.py runs tools/gates.py INSIDE its "
+                f"`if _token:` branch (line {inside[0]}) — under a matrix "
+                "that is a second sweep of a tree validate-all sweeps "
+                "anyway, and it cost the mac ceiling twice "
+                "(docs/deferred.md's mac-lane re-sweep entry)")
+    if "skipped — validate-all sweeps this matrix" not in text:
+        return ("tools/validate-mac.py no longer says it skipped because "
+                "validate-all sweeps the matrix — the phases row is what "
+                "makes this legible, and a silent skip reads as a lost gate")
+    return None
+
+
 def census(on_disk, listed, excluded):
     """Gate scripts that exist and are in neither list."""
     return sorted(set(on_disk) - set(listed) - set(excluded))
@@ -643,6 +686,26 @@ else:
             fail(f"self-test N2: {victim} was dropped from the list and the "
                  f"comparison did not report it")
 
+# N2b — the mac lane's sweep put BACK inside the matrix branch, which is
+# the shipped state that cost the ceiling twice. The perturbation moves
+# the delegation up into the `if _token:` arm.
+moved = mac_text.replace(
+    '    if run([str(ROOT / "tools/swiftui/build-dylib.sh")]).returncode != 0:\n'
+    '        sys.exit(1)\n',
+    '    if run([str(ROOT / "tools/gates.py")]).returncode != 0:\n'
+    '        sys.exit(1)\n'
+    '    if run([str(ROOT / "tools/swiftui/build-dylib.sh")]).returncode != 0:\n'
+    '        sys.exit(1)\n', 1)
+print(f"check-gates: self-test N2b moved the sweep into the matrix branch, "
+      f"{0 if moved == mac_text else 1} substitution(s)")
+if moved == mac_text:
+    fail("self-test N2b applied NO substitution — validate-mac.py's skip "
+         "path does not look the way this negative expects, so the "
+         "one-sweep clause is measuring nothing")
+elif mac_sweep_problem(moved) is None:
+    fail("self-test N2b: the mac lane sweeping inside the matrix branch was "
+         "NOT refused — the one-sweep clause agrees with everything")
+
 # N3 — a gate invoked DIRECTLY by validate-mac must be reported. The
 # perturbation plants one into validate-mac.py's real text (the python
 # spelling: an argv naming the gate's path).
@@ -891,6 +954,10 @@ if direct:
 if not re.search(r'ROOT / "tools/gates\.py"', mac_text):
     fail("tools/validate-mac.py does not call tools/gates.py — the lane runs "
          "no gate sweep at all")
+
+problem = mac_sweep_problem(mac_text)
+if problem is not None:
+    fail(problem)
 
 problem = matrix_parallel_problem(matrix_text)
 if problem is not None:
