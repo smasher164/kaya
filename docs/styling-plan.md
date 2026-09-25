@@ -240,8 +240,12 @@ they are recorded here so slice 2 starts from evidence:
 
 ## §2 — what this pass does NOT do (recorded)
 
-- No per-widget appearance: no colors, radii, or padding on a widget.
-  Unchanged, load-bearing, the ceiling's whole point.
+- ~~No per-widget appearance: no colors, radii, or padding on a widget.
+  Unchanged, load-bearing, the ceiling's whole point.~~ AMENDED
+  2026-09-25 (docs/tints-plan.md): colours enter as a closed vocabulary of
+  platform TINTS on a `filled` container role, each lowered to the
+  platform's own fill and foreground pair; raw values stay refused, and
+  data colours wait for a consumer.
 - No stylesheet or theme-object surface. The comparative survey's
   no-ceiling cases (Flutter, CMP, Electron) all pay in native fidelity;
   kaya's bet is the opposite one.

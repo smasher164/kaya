@@ -1,9 +1,9 @@
 # The chat app — the design pass
 
 Status: R1-R5 RULED 2026-09-25 (R3: a container role draws the bubble).
-OPEN the same day: whether that role is chat-only or a general filled
-container with a tint from a closed set of platform colours, which
-reopens part of docs/styling-plan.md §2's no-colours ceiling. The
+The same day the maintainer ruled that role general: a `filled`
+container with a closed set of platform tints (docs/tints-plan.md), the
+bubble `accent` for the user and `neutral` for the peer. The
 goal was named on 2026-09-24 ("let's have the chat app be the ultimate
 goal", docs/submit-plan.md §8). Both prerequisites exist: the `submitted`
 occurrence (docs/submit-plan.md) and `scroll_to_row`
