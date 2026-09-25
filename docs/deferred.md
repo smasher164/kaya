@@ -14283,19 +14283,26 @@ cell that loses the height, and it has slack the label does not, which is
 why no shipped scene shows this and why tools/scenes/listrow.steps carries
 the column form.
 
-TWO FIXES TRIED AND REJECTED, so nobody repeats them: `InvalidateMeasure`
-on the grid after the margins changed nothing (the measure it forces still
-predates the margin on the pass that matters); and flooring each cell with
+THREE FIXES TRIED AND REJECTED, so nobody repeats them. `InvalidateMeasure`
+on the grid after the margins changed nothing: the pass it schedules is not
+the one that arranges these cells. Flooring each cell with
 `SetMinHeight(desired - margin)` RATCHETS, because the next pass reads a
 `DesiredSize` that already contains the floor and the wanted height climbed
-25 -> 44 in two passes.
+25 -> 44 in two passes. And a SYNCHRONOUS `grid.UpdateLayout()` right after
+the margins — the same call the function already opens with, one step later,
+guarded to run only when a drop actually moved — leaves the label at 18.62
+exactly as before, which is the one that rules out "the measure simply had
+not run yet" as the explanation.
 
-THE DIRECTION THAT IS LEFT: the drop must not be a margin. Either it moves
-the cell with a `RenderTransform`, which does not enter the measure, with
-the row's growth handled separately as it already is by `shift`; or the
-compensation must run where it can measure WITH the drop in hand instead of
-setting it after the fact. Both are real changes to that function and want
-doing deliberately rather than at the end of a session.
+THE DIRECTION THAT IS LEFT, now that a forced synchronous measure has been
+ruled out: the drop must stop being a margin at all. Either it moves the cell
+with a `RenderTransform`, which does not enter the measure — the row's growth
+is already handled separately by `shift`, so nothing else has to change — or
+the compensation runs where it can measure WITH the drop in hand instead of
+setting it after the fact. Both are real changes to that function, on the one
+backend, and want doing deliberately rather than at the end of a session.
+THE RULE ITSELF DOES NOT MOVE: which mechanism a backend uses to drop a cell
+is the toolkit's spelling, not kaya's semantics, so this needs no carve-out.
 
 WHAT IT BLOCKS: nothing shipped — no in-tree guest writes a bare label into a
 baseline row — but it is the shape the list-row scene wanted, and that scene
