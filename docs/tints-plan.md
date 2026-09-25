@@ -98,16 +98,18 @@ Two things the table says that the design has to carry:
   (`KayaAccentSurfaceBrush`). THE AMOUNT IS FLUENT'S OWN, researched rather
   than picked (docs/probes/fluent-surface-2026-09-25.md): Teams' own bubble
   is Fluent 2's `colorBrandBackground2`, brand160 in light and brand20 in
-  dark, and the accent blended 8% over white reproduces the shipped brand160
-  (#EBF4FC for the default blue) while 22% over the dark window lands beside
-  Teams' brand20 and WinUI's own InfoBar backgrounds. The first cut used
+  dark, and 22% over the dark window lands beside Teams' brand20 and WinUI's
+  own InfoBar backgrounds. LIGHT IS 14% OVER WHITE, not web Fluent's 8%
+  (the maintainer, 2026-09-25: "that light blue on top of the light grey
+  feels barely there"): 8% gives #EBF4FC at CIELAB L 95.7 against the
+  window ground's 95.8, so only a faint hue told them apart, because web
+  Fluent's token is drawn for a white page. 14% gives #DBECF9 at L 92.5,
+  a clear step below the ground, beside Teams' shipped bubble (#E8EBFA,
+  L 93.2) and WinUI's pale Critical background (L 93.4). The first cut used
   `SystemAccentColorLight3`/`Dark3`, which are TEXT stops and read as a
   bright cyan and a deep navy. The blend takes the accent in effect, the
   brand's seed when one is declared and the user's otherwise, so a branded
-  app's bubble is its brand. The pale accent sits a few units from the
-  window ground (#EBF4FC against #F3F3F3), so expect_fill's margin between
-  `accent` and `none` is thin on Windows in light; it classifies exactly
-  today.
+  app's bubble is its brand.
 - **Label tints come second.** Text in a tint (`success_color`,
   `systemGreen`, Fluent's `SystemFillColorSuccess`) is the same vocabulary
   on a second prop, a slice after the container.

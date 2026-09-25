@@ -2109,12 +2109,14 @@ fn filled_style(tint: i64) -> windows_core::Result<Style> {
 /// the accent BUTTON's fill (docs/tints-plan.md §3, ruled 2026-09-25).
 /// WinUI ships no such brush and the SystemAccentColor ramp's palest stops
 /// are TEXT colours, so kaya composites the accent in effect — the brand's
-/// when one is declared, the user's otherwise — over a fixed base: 8% over
-/// white reproduces Fluent 2's shipped brand160, 22% over the dark window
-/// lands beside Teams' brand20 and WinUI's own InfoBar backgrounds
-/// (docs/probes/fluent-surface-2026-09-25.md). Installed once, per theme.
+/// when one is declared, the user's otherwise — over a fixed base. Light is
+/// 14% over white, CIELAB L 92.5 for the default blue: web Fluent's 8% sat
+/// at the window ground's own lightness (95.7 against 95.8) and read as
+/// nothing, while Teams' shipped bubble is 93.2 (the maintainer, 2026-09-25).
+/// Dark is 22% over the dark window, beside Teams' brand20 and WinUI's own
+/// InfoBar backgrounds (docs/probes/fluent-surface-2026-09-25.md).
 const ACCENT_SURFACE_KEY: &str = "KayaAccentSurfaceBrush";
-const ACCENT_SURFACE_LIGHT: (u32, f64) = (0xFFFFFF, 0.08);
+const ACCENT_SURFACE_LIGHT: (u32, f64) = (0xFFFFFF, 0.14);
 const ACCENT_SURFACE_DARK: (u32, f64) = (0x202020, 0.22);
 
 thread_local! {
@@ -27466,13 +27468,13 @@ mod tests {
     /// size on ONE window and stays green with the opt-out ignored, with
     /// the clamp gone, with a malformed stored line taken at face value,
     /// and with a zero-sized frame written over a good one.
-    /// The accent surface for the default Windows blue lands on Fluent 2's
-    /// shipped brand160 in light (docs/probes/fluent-surface-2026-09-25.md),
-    /// and a dark one far from the SystemAccentColorDark3 navy it replaced.
+    /// The accent surface for the default Windows blue: a light one a clear
+    /// step darker than the window ground, a dark one far from the
+    /// SystemAccentColorDark3 navy it replaced (docs/tints-plan.md §3).
     #[test]
     fn accent_surface_blends_toward_fluents_brand_background() {
         let (base, alpha) = ACCENT_SURFACE_LIGHT;
-        assert_eq!(blend(base, 0x0078D4, alpha), 0xEBF4FC);
+        assert_eq!(blend(base, 0x0078D4, alpha), 0xDBECF9);
         let (base, alpha) = ACCENT_SURFACE_DARK;
         assert_eq!(blend(base, 0x0078D4, alpha), 0x193348);
     }
