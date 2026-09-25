@@ -1,6 +1,6 @@
 # Fluent's pale accent surface for text: research (2026-09-25)
 
-Status: complete. Sources were read from GitHub raw source at `master`/`main` on 2026-09-25. Local copies and the python port are in `scratchpad/fs/`: `ramp.py` is a line-for-line port of the theme designer's generator, and `calc.py` holds the contrast and compositing helpers.
+Status: complete. Sources were read from GitHub raw source at `master`/`main` on 2026-09-25. The python port and helpers are in `docs/probes/fluent-surface/`: `ramp.py` is a line-for-line port of the theme designer's generator, and `calc.py` holds the contrast and compositing helpers.
 
 Short answer: Fluent 2 draws the user's own chat bubble with **`colorBrandBackground2`**, which is **brand[160] in light and brand[20] in dark**, with **`colorNeutralForeground1`** text. WinUI 3 has no brush for a pale accent surface. `SystemAccentColorLight3` and `Dark3` are Windows' text and emphasis shades, not surface shades. The rule that reproduces Fluent 2's own step in light and lands in WinUI's own severity-background lightness band in dark is **the accent composited at about 8% over white in light and about 20-25% over the dark base in dark**.
 
@@ -94,7 +94,7 @@ Why this rule:
 
 The alternative is a perceptual rule: keep the accent's CIELAB hue and set L\*=95, C\*=0.12×C_accent (light) and L\*=20, C\*=0.33×C_accent (dark). These are the ratios measured on the shipped ramps. It gives nearly the same results for blue. It keeps chroma more even across hues, but it needs a Lab path in the backend and can push yellow down to muddy brown in dark (`#3F2C03` below).
 
-Computed for the default Windows blue **#0078D4** (python, `scratchpad/fs/calc.py`):
+Computed for the default Windows blue **#0078D4** (python, `docs/probes/fluent-surface/calc.py`):
 
 | Candidate | Light | Dark |
 |---|---|---|
