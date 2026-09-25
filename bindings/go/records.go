@@ -782,7 +782,7 @@ func (c RecordCollection[K, T]) Button[S interface {
 	n := t.Widget(KindButton)
 	t.applyRecordText[T](n, src)
 	if onClick != nil {
-		t.tx.app.OnClickNode(n, func(tx *Tx, keys []any) {
+		n.OnClick(func(tx *Tx, keys []any) {
 			onClick(tx, keys[0].(K))
 		})
 	}
@@ -798,7 +798,7 @@ func (c RecordCollection[K, T]) Checkbox[S interface {
 	n := t.Widget(KindCheckbox)
 	t.applyRecordChecked[T](n, src)
 	if onToggle != nil {
-		t.tx.app.OnToggleNode(n, func(tx *Tx, keys []any, checked bool) {
+		n.OnToggle(func(tx *Tx, keys []any, checked bool) {
 			onToggle(tx, keys[0].(K), checked)
 		})
 	}
@@ -850,7 +850,7 @@ func (c RecordCollection[K, T]) onChangeOf(t *Tpl, n Node, onChange func(*Tx, K,
 	if onChange == nil {
 		return
 	}
-	t.tx.app.OnChangeNode(n, func(tx *Tx, keys []any, text string) {
+	n.OnChange(func(tx *Tx, keys []any, text string) {
 		onChange(tx, keys[0].(K), text)
 	})
 }
@@ -916,7 +916,7 @@ func (c RecordCollection[K, T]) onValueOf(t *Tpl, n Node, onChange func(*Tx, K, 
 	if onChange == nil {
 		return
 	}
-	t.tx.app.OnValueChangedNode(n, func(tx *Tx, keys []any, v float64) {
+	n.OnValueChanged(func(tx *Tx, keys []any, v float64) {
 		onChange(tx, keys[0].(K), v)
 	})
 }
@@ -929,12 +929,12 @@ func (c RecordCollection[K, T]) onValueOf(t *Tpl, n Node, onChange func(*Tx, K, 
 func (c RecordCollection[K, T]) TextareaRich(t *Tpl, f Field[Document], onEdit func(*Tx, K, Edit), onFormat func(*Tx, K, Format)) Node {
 	n := t.TextareaRichBound(f)
 	if onEdit != nil {
-		t.tx.app.OnEditNode(n, func(tx *Tx, keys []any, edit Edit) {
+		n.OnEdit(func(tx *Tx, keys []any, edit Edit) {
 			onEdit(tx, keys[0].(K), edit)
 		})
 	}
 	if onFormat != nil {
-		t.tx.app.OnFormatNode(n, func(tx *Tx, keys []any, act Format) {
+		n.OnFormat(func(tx *Tx, keys []any, act Format) {
 			onFormat(tx, keys[0].(K), act)
 		})
 	}
@@ -951,7 +951,7 @@ func (c RecordCollection[K, T]) DatePicker[S interface {
 	n := t.Widget(KindDatePicker)
 	t.applyRecordDate[T](n, src)
 	if onDate != nil {
-		t.tx.app.OnDateNode(n, func(tx *Tx, keys []any, d Date) {
+		n.OnDate(func(tx *Tx, keys []any, d Date) {
 			onDate(tx, keys[0].(K), d)
 		})
 	}
@@ -966,7 +966,7 @@ func (c RecordCollection[K, T]) TimePicker[S interface {
 	n := t.Widget(KindTimePicker)
 	t.applyRecordTime[T](n, src)
 	if onTime != nil {
-		t.tx.app.OnTimeNode(n, func(tx *Tx, keys []any, v Time) {
+		n.OnTime(func(tx *Tx, keys []any, v Time) {
 			onTime(tx, keys[0].(K), v)
 		})
 	}

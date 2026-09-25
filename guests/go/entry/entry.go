@@ -32,10 +32,10 @@ func App() *kaya.App {
 	})
 
 	draft := ""
-	app.OnChange(field, func(tx *kaya.Tx, text string) {
+	field.OnChange(func(tx *kaya.Tx, text string) {
 		draft = text
 	})
-	app.OnClick(add, func(tx *kaya.Tx) {
+	add.OnClick(func(tx *kaya.Tx) {
 		if draft == "" {
 			total := tx.Len(todos)
 			tx.Write(status, fmt.Sprintf("nothing to add, %d total", total))

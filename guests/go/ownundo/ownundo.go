@@ -65,7 +65,7 @@ func App() *kaya.App {
 				A11yID("native").A11yLabel("Native") // textarea#0
 			owned = tx.Textarea(nil).Rich().OwnUndo().
 				A11yID("owned").A11yLabel("Owned") // textarea#1
-			app.OnEdit(owned, func(tx *kaya.Tx, _ kaya.Edit) {
+			owned.OnEdit(func(tx *kaya.Tx, _ kaya.Edit) {
 				undo = append(undo, current)
 				current = app.Document(owned)
 				redo = redo[:0]

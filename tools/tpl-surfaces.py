@@ -621,8 +621,7 @@ def table_go(_):
     )
     on_sort_node = go_func_body(
         src,
-        r"^func \(a \*App\) OnSortNode\(n Node, "
-        r"fn func\(\*Tx, \[\]any, uint32\)\) \{",
+        r"^func \(n Node\) OnSort\(fn func\(\*Tx, \[\]any, uint32\)\) Node \{",
     )
     routed = re.search(
         r"case kind == occSortRequested:\s*\n"
@@ -632,9 +631,9 @@ def table_go(_):
     )
     if (
         chain_sort
-        and "r.st.tx.app.OnSortNode(r.Node(), fn)" in chain_sort
+        and "r.Node().OnSort(fn)" in chain_sort
         and on_sort_node
-        and "a.nodeSorts[n.id] = fn" in on_sort_node
+        and "n.tx.app.nodeSorts[n.id] = fn" in on_sort_node
         and routed
     ):
         got.add("on_sort")
@@ -1535,7 +1534,7 @@ TABLE_ZONES = [
     (
         "go",
         table_go,
-        "Tpl.Rows's NodeRows chain + App.OnSortNode + Tx.ColumnsAt "
+        "Tpl.Rows's NodeRows chain + Node.OnSort + Tx.ColumnsAt "
         "(bindings/go/app.go)",
     ),
     (

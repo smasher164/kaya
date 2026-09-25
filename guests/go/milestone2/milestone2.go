@@ -62,7 +62,7 @@ func App() *kaya.App {
 		}))
 	})
 
-	app.OnClickNode(removeButton, func(tx *kaya.Tx, keys []any) {
+	removeButton.OnClick(func(tx *kaya.Tx, keys []any) {
 		group, item := keys[0].(string), keys[1].(string)
 		todos := items.At(group)
 		tx.Remove(todos, item)

@@ -482,6 +482,12 @@ in docs/deferred.md.
    ZERO refuses a verdict, because Rust is the reference the patterns
    were calibrated against and a census that reads nothing agrees with
    everything.
+   AND GO'S HANDLERS LIVE ON THE HANDLE SINCE 2026-09-24 (docs/deferred.md,
+   the Go handler-family entry): every registrar that names a widget or a
+   stamped node is a chained method ON it, so a second handler reads like the
+   first, and a `func (a *App) On…` taking a Widget or a Node is a finding —
+   the app's own notification activation, which names no widget, exempt by
+   name and held to still existing. Census printed, one watched negative.
    AND THE WIRE STOPS AT THE BINDING BOUNDARY SINCE 2026-09-16 (the idiom
    survey's naive-port test, DESIGN.md's Binding conventions): no
    hand-written guest names a wire constructor or constant — `VStr`,

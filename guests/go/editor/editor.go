@@ -479,29 +479,29 @@ func App() *kaya.App {
 
 	// REGISTERED AGAINST THE TEMPLATE NODE, once, for every copy ever
 	// stamped.
-	app.OnChangeNode(query, func(tx *kaya.Tx, _ []any, s string) {
+	query.OnChange(func(tx *kaya.Tx, _ []any, s string) {
 		pattern = s
 		refind(tx)
 		// The one place the selection moves without a person asking.
 		show(tx, 0)
 	})
-	app.OnClickNode(prev, func(tx *kaya.Tx, _ []any) { show(tx, at-1) })
-	app.OnClickNode(next, func(tx *kaya.Tx, _ []any) { show(tx, at+1) })
+	prev.OnClick(func(tx *kaya.Tx, _ []any) { show(tx, at-1) })
+	next.OnClick(func(tx *kaya.Tx, _ []any) { show(tx, at+1) })
 
 	// THE ACTS, each over the widget's own selection (docs/rich-text-plan.md
 	// §7): an inline attribute goes on, a block kind is set, body takes the
 	// block off. The widget answers through OnFormat.
 	for _, name := range []string{"bold", "italic", "underline", "strike", "code"} {
 		name := name
-		app.OnClickNode(acts[name], func(tx *kaya.Tx, _ []any) { tx.FormatFlag(buffer, name, true) })
+		acts[name].OnClick(func(tx *kaya.Tx, _ []any) { tx.FormatFlag(buffer, name, true) })
 	}
 	for id, kind := range map[string]kaya.Block{
 		"heading1": kaya.Heading1, "heading2": kaya.Heading2, "quote": kaya.Quote, "body": kaya.Body,
 	} {
 		kind := kind
-		app.OnClickNode(acts[id], func(tx *kaya.Tx, _ []any) { tx.SetBlock(buffer, kind) })
+		acts[id].OnClick(func(tx *kaya.Tx, _ []any) { tx.SetBlock(buffer, kind) })
 	}
-	app.OnFormat(buffer, func(tx *kaya.Tx, f kaya.Format) {
+	buffer.OnFormat(func(tx *kaya.Tx, f kaya.Format) {
 		switch {
 		case f.Removed:
 			tx.Write(status, fmt.Sprintf("%s off %d:%d", f.Name, f.Range.Start, f.Range.End))
@@ -514,7 +514,7 @@ func App() *kaya.App {
 
 	// Dismiss TEARS THE BAR DOWN; nothing clears the query field, so the
 	// next Find… stamps a NEW one.
-	app.OnClickNode(done, func(tx *kaya.Tx, _ []any) {
+	done.OnClick(func(tx *kaya.Tx, _ []any) {
 		open = false
 		pattern = ""
 		tx.Remove(findRows, findKey)

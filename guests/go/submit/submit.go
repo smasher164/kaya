@@ -28,14 +28,10 @@ func App() *kaya.App {
 			wrote := func(tx *kaya.Tx, text string) {
 				tx.Write(sent, fmt.Sprintf("sent: %s", text))
 			}
-			name := tx.Entry(nil).Placeholder("Name").A11yID("name")
-			app.OnSubmitted(name, wrote)
-			find := tx.Search(nil).Placeholder("Search").A11yID("find")
-			app.OnSubmitted(find, wrote)
-			plain := tx.Textarea(nil).A11yID("plain")
-			app.OnSubmitted(plain, wrote)
-			compose := tx.Textarea(nil).Submits().A11yID("compose")
-			app.OnSubmitted(compose, wrote)
+			tx.Entry(nil).Placeholder("Name").A11yID("name").OnSubmitted(wrote)
+			tx.Search(nil).Placeholder("Search").A11yID("find").OnSubmitted(wrote)
+			tx.Textarea(nil).A11yID("plain").OnSubmitted(wrote)
+			tx.Textarea(nil).Submits().A11yID("compose").OnSubmitted(wrote)
 			for row := range ThreadRows(tx, threads).All() {
 				row.Label(row.Title())
 				reply = row.Entry(nil)
@@ -43,7 +39,7 @@ func App() *kaya.App {
 			}
 		}))
 
-		app.OnSubmittedNode(reply, func(tx *kaya.Tx, keys []any, text string) {
+		reply.OnSubmitted(func(tx *kaya.Tx, keys []any, text string) {
 			tx.Write(sent, fmt.Sprintf("sent: %v: %s", keys[0], text))
 		})
 

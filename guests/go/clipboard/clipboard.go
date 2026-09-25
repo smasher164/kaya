@@ -155,7 +155,7 @@ func App() *kaya.App {
 			})
 
 			rich = tx.Entry(nil).Accepts(kaya.AcceptText).A11yID("rich") // entry#0
-			app.OnPaste(rich, func(tx *kaya.Tx, clip kaya.Representation) {
+			rich.OnPaste(func(tx *kaya.Tx, clip kaya.Representation) {
 				if text, ok := clip.(kaya.TextClip); ok {
 					tx.Write(status, "pasted "+text.Text)
 					return
@@ -171,7 +171,7 @@ func App() *kaya.App {
 			for row := range tx.Rows(notes).All() {
 				note := row.Entry() // entry#2, one stamped copy
 				row.SetAccepts(note, kaya.AcceptText)
-				app.OnPasteNode(note, func(tx *kaya.Tx, keys []any, clip kaya.Representation) {
+				note.OnPaste(func(tx *kaya.Tx, keys []any, clip kaya.Representation) {
 					if text, ok := clip.(kaya.TextClip); ok {
 						tx.Write(rowStatus, "row "+keys[0].(string)+" pasted "+text.Text)
 						return

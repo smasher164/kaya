@@ -34,7 +34,10 @@ type Widget struct {
 // Node is a template node: a blueprint entry, stamped per collection
 // entry. Never on screen by itself; clicks on its copies arrive with
 // the copy's key path.
-type Node struct{ id uint64 }
+type Node struct {
+	id uint64
+	tx *Tx
+}
 
 // Collection is a collection instance handle: the collection plus the
 // key path selecting one stamped copy's table. Tx.Collection returns the
@@ -1796,7 +1799,7 @@ func (tx *Tx) Button(text string, onClick func(*Tx)) Widget {
 	w := tx.Widget(KindButton)
 	tx.SetText(w, text)
 	if onClick != nil {
-		tx.app.OnClick(w, onClick)
+		w.OnClick(onClick)
 	}
 	return w
 }
@@ -1850,7 +1853,7 @@ func (tx *Tx) ColumnsAt(n Node, keys []any, titles []string, sort Sort) {
 func (tx *Tx) Textarea(onChange func(*Tx, string)) Widget {
 	w := tx.Widget(KindTextarea)
 	if onChange != nil {
-		tx.app.OnChange(w, onChange)
+		w.OnChange(onChange)
 	}
 	return w
 }
@@ -1898,7 +1901,7 @@ func (tx *Tx) Caption(s Signal[string]) Widget {
 func (tx *Tx) Entry(onChange func(*Tx, string)) Widget {
 	w := tx.Widget(KindEntry)
 	if onChange != nil {
-		tx.app.OnChange(w, onChange)
+		w.OnChange(onChange)
 	}
 	return w
 }
@@ -1910,7 +1913,7 @@ func (tx *Tx) Entry(onChange func(*Tx, string)) Widget {
 func (tx *Tx) Search(onChange func(*Tx, string)) Widget {
 	w := tx.Widget(KindSearch)
 	if onChange != nil {
-		tx.app.OnChange(w, onChange)
+		w.OnChange(onChange)
 	}
 	return w
 }
@@ -1940,7 +1943,7 @@ func (tx *Tx) DatePicker(date Date, onDate func(*Tx, Date)) Widget {
 	w := tx.Widget(KindDatePicker)
 	tx.emit(TxSetDate(w.id, date.Year, date.Month, date.Day))
 	if onDate != nil {
-		tx.app.OnDate(w, onDate)
+		w.OnDate(onDate)
 	}
 	return w
 }
@@ -1951,7 +1954,7 @@ func (tx *Tx) DatePickerBound(date Signal[Date], onDate func(*Tx, Date)) Widget 
 	w := tx.Widget(KindDatePicker)
 	tx.emit(TxBindDate(w.id, date.id))
 	if onDate != nil {
-		tx.app.OnDate(w, onDate)
+		w.OnDate(onDate)
 	}
 	return w
 }
@@ -1964,7 +1967,7 @@ func (tx *Tx) TimePicker(t Time, onTime func(*Tx, Time)) Widget {
 	w := tx.Widget(KindTimePicker)
 	tx.emit(TxSetTime(w.id, t.Hour, t.Minute))
 	if onTime != nil {
-		tx.app.OnTime(w, onTime)
+		w.OnTime(onTime)
 	}
 	return w
 }
@@ -1974,7 +1977,7 @@ func (tx *Tx) TimePickerBound(t Signal[Time], onTime func(*Tx, Time)) Widget {
 	w := tx.Widget(KindTimePicker)
 	tx.emit(TxBindTime(w.id, t.id))
 	if onTime != nil {
-		tx.app.OnTime(w, onTime)
+		w.OnTime(onTime)
 	}
 	return w
 }
@@ -2178,7 +2181,7 @@ func (tx *Tx) Slider(min, max, value float64, onChange func(*Tx, float64)) Widge
 	tx.emit(TxSetMax(w.id, max))
 	tx.emit(TxSetValue(w.id, value))
 	if onChange != nil {
-		tx.app.OnValueChanged(w, onChange)
+		w.OnValueChanged(onChange)
 	}
 	return w
 }
@@ -2208,7 +2211,7 @@ func (tx *Tx) SliderBound(min, max float64, value Signal[float64], onChange func
 	tx.emit(TxSetMax(w.id, max))
 	tx.emit(TxBindValue(w.id, value.id))
 	if onChange != nil {
-		tx.app.OnValueChanged(w, onChange)
+		w.OnValueChanged(onChange)
 	}
 	return w
 }
@@ -2227,7 +2230,7 @@ func (tx *Tx) Select(options []string, selected int, onSelect func(*Tx, int)) Wi
 	tx.app.parents = tx.app.parents[:len(tx.app.parents)-1]
 	tx.emit(TxSetValue(w.id, float64(selected)))
 	if onSelect != nil {
-		tx.app.OnValueChanged(w, func(tx *Tx, v float64) { onSelect(tx, int(v)) })
+		w.OnValueChanged(func(tx *Tx, v float64) { onSelect(tx, int(v)) })
 	}
 	return w
 }
@@ -2244,7 +2247,7 @@ func (tx *Tx) Radio(options []string, selected int, onSelect func(*Tx, int)) Wid
 	tx.app.parents = tx.app.parents[:len(tx.app.parents)-1]
 	tx.emit(TxSetValue(w.id, float64(selected)))
 	if onSelect != nil {
-		tx.app.OnValueChanged(w, func(tx *Tx, v float64) { onSelect(tx, int(v)) })
+		w.OnValueChanged(func(tx *Tx, v float64) { onSelect(tx, int(v)) })
 	}
 	return w
 }
@@ -2257,7 +2260,7 @@ func (tx *Tx) Checkbox(text string, onToggle func(*Tx, bool)) Widget {
 		tx.SetText(w, text)
 	}
 	if onToggle != nil {
-		tx.app.OnToggle(w, onToggle)
+		w.OnToggle(onToggle)
 	}
 	return w
 }
@@ -2397,7 +2400,7 @@ func (r *Rows) Columns(titles []string, sort Sort) *Rows {
 // REQUEST: nothing has changed on screen; reorder the collection by key
 // and re-declare the bar with Tx.Columns.
 func (r *Rows) OnSort(fn func(*Tx, uint32)) *Rows {
-	r.st.tx.app.OnSort(r.Widget(), fn)
+	r.Widget().OnSort(fn)
 	return r
 }
 
@@ -2412,7 +2415,7 @@ func (r *Rows) Reorderable(enabled bool) *Rows {
 // their creator. The moved row's key rides in the clip, the row it
 // landed on is the anchor, and the app confirms with a move.
 func (r *Rows) OnDrop(fn func(*Tx, Dropped)) *Rows {
-	r.st.tx.app.OnDrop(r.Widget(), fn)
+	r.Widget().OnDrop(fn)
 	return r
 }
 
@@ -2429,7 +2432,7 @@ func (t *Tpl) Rows(c Collection) *NodeRows { return &NodeRows{t.tx.openRows(c)} 
 
 // Node is the nested For's template node — what Tx.ColumnsAt takes back
 // to re-declare ONE stamped copy's bar.
-func (r *NodeRows) Node() Node { return Node{r.st.id} }
+func (r *NodeRows) Node() Node { return Node{r.st.id, r.st.tx} }
 
 // Columns declares the header bar of this nested For for EVERY copy the
 // enclosing template stamps. The record lands after template_end, in the
@@ -2444,7 +2447,7 @@ func (r *NodeRows) Columns(titles []string, sort Sort) *NodeRows {
 // node. The keys are the clicking copy's, outermost first, and they are
 // what Tx.ColumnsAt takes back to move THAT copy's indicator.
 func (r *NodeRows) OnSort(fn func(*Tx, []any, uint32)) *NodeRows {
-	r.st.tx.app.OnSortNode(r.Node(), fn)
+	r.Node().OnSort(fn)
 	return r
 }
 
@@ -3586,18 +3589,20 @@ func (w Widget) Accepts(kinds ...string) Widget {
 // user gesture, so it is its own authorisation — iOS raises no prompt
 // and the focus rules are satisfied by construction. Only fires for a
 // widget that declared what it Accepts.
-func (a *App) OnPaste(w Widget, fn func(*Tx, Representation)) {
-	a.widgetPastes[w.id] = fn
+func (w Widget) OnPaste(fn func(*Tx, Representation)) Widget {
+	w.tx.app.widgetPastes[w.id] = fn
+	return w
 }
 
-// OnPasteNode registers a paste handler for a template node; the handler
+// OnPaste registers a paste handler for a template node; the handler
 // also receives the stamped copy's keys, outermost first.
 //
 // FIRES ONLY FOR COPIES WHOSE TEMPLATE DECLARED WHAT IT ACCEPTS
 // (Tpl.SetAccepts), like the live hook (docs/tpl-props-plan.md §1). A
 // copy that declares nothing gets the platform's own insertion.
-func (a *App) OnPasteNode(n Node, fn func(*Tx, []any, Representation)) {
-	a.nodePastes[n.id] = fn
+func (n Node) OnPaste(fn func(*Tx, []any, Representation)) Node {
+	n.tx.app.nodePastes[n.id] = fn
+	return n
 }
 
 // Op is a drag operation (docs/dnd-plan.md D3): copy and move, nothing
@@ -3786,26 +3791,30 @@ func (tx *Tx) SetReorderable(container Widget, enabled bool) {
 // OnDrop registers where dropped content lands: the widget's own drops,
 // or a reorderable For container's landings (docs/dnd-plan.md D8). Only
 // fires for a widget that declared DropTarget over an Accepts list.
-func (a *App) OnDrop(w Widget, fn func(*Tx, Dropped)) {
-	a.widgetDrops[w.id] = fn
+func (w Widget) OnDrop(fn func(*Tx, Dropped)) Widget {
+	w.tx.app.widgetDrops[w.id] = fn
+	return w
 }
 
 // OnDragEnded registers what a drag that began on this widget settled
 // on: OpNone for a cancelled or refused drag, which is not an error.
-func (a *App) OnDragEnded(w Widget, fn func(*Tx, Op)) {
-	a.dragEnded[w.id] = fn
+func (w Widget) OnDragEnded(fn func(*Tx, Op)) Widget {
+	w.tx.app.dragEnded[w.id] = fn
+	return w
 }
 
-// OnDropNode is OnDrop's template flavor: a drop on a stamped copy of n,
+// OnDrop is OnDrop's template flavor: a drop on a stamped copy of n,
 // the copy's keys first.
-func (a *App) OnDropNode(n Node, fn func(*Tx, []any, Dropped)) {
-	a.nodeDrops[n.id] = fn
+func (n Node) OnDrop(fn func(*Tx, []any, Dropped)) Node {
+	n.tx.app.nodeDrops[n.id] = fn
+	return n
 }
 
-// OnDragEndedNode is OnDragEnded's template flavor: a stamped copy of n
+// OnDragEnded is OnDragEnded's template flavor: a stamped copy of n
 // — a reorderable row is one — finished its drag, the copy's keys first.
-func (a *App) OnDragEndedNode(n Node, fn func(*Tx, []any, Op)) {
-	a.nodeDragEnded[n.id] = fn
+func (n Node) OnDragEnded(fn func(*Tx, []any, Op)) Node {
+	n.tx.app.nodeDragEnded[n.id] = fn
+	return n
 }
 
 // WindowRef chains window props, the construction-sugar tier.
@@ -4479,7 +4488,7 @@ type Tpl struct {
 
 func (t *Tpl) Widget(kind uint32) Node {
 	t.tx.app.c.widget++
-	n := Node{t.tx.app.c.widget}
+	n := Node{t.tx.app.c.widget, t.tx}
 	t.tx.emit(TxCreateWidget(n.id, kind))
 	t.tx.autoParent(n.id)
 	return n
@@ -5369,7 +5378,7 @@ func (t *Tpl) ContextMenu(n Node, c *ContextCatalog) {
 
 func (t *Tpl) When(s Signal[bool], fn func(*Tpl)) Node {
 	t.tx.app.c.widget++
-	n := Node{t.tx.app.c.widget}
+	n := Node{t.tx.app.c.widget, t.tx}
 	t.tx.emit(TxCreateWhen(n.id, s.id))
 	t.tx.app.tplDepth++
 	fn(&Tpl{tx: t.tx})
@@ -5560,83 +5569,95 @@ func (a *App) absorbUndo(delta UndoDelta) {
 }
 
 // OnClick registers a handler for a live widget's clicks.
-func (a *App) OnClick(w Widget, fn func(*Tx)) {
-	a.widgetHandlers[w.id] = fn
+func (w Widget) OnClick(fn func(*Tx)) Widget {
+	w.tx.app.widgetHandlers[w.id] = fn
+	return w
 }
 
 // OnSort registers the table's header-click handler at its For — the
 // handler receives the 0-based column of a sort REQUEST: nothing has
 // changed on screen; reorder the collection by key and re-declare the
 // header with Columns (docs/tables-plan.md).
-func (a *App) OnSort(w Widget, fn func(*Tx, uint32)) {
-	a.sortHandlers[w.id] = fn
+func (w Widget) OnSort(fn func(*Tx, uint32)) Widget {
+	w.tx.app.sortHandlers[w.id] = fn
+	return w
 }
 
-// OnSortNode registers a nested table's header-click handler at its For
+// OnSort registers a nested table's header-click handler at its For
 // node — the Node NodeRows.Node hands out, whose bar NodeRows.Columns
 // declares. The keys are the clicking copy's, outermost first, and they
 // are what Tx.ColumnsAt takes back to move THAT copy's indicator
 // (docs/tables-plan.md).
-func (a *App) OnSortNode(n Node, fn func(*Tx, []any, uint32)) {
-	a.nodeSorts[n.id] = fn
+func (n Node) OnSort(fn func(*Tx, []any, uint32)) Node {
+	n.tx.app.nodeSorts[n.id] = fn
+	return n
 }
 
-// OnClickNode registers a handler for a template node's clicks; the
+// OnClick registers a handler for a template node's clicks; the
 // handler also receives the stamped copy's keys, outermost first.
-func (a *App) OnClickNode(n Node, fn func(*Tx, []any)) {
-	a.nodeHandlers[n.id] = fn
+func (n Node) OnClick(fn func(*Tx, []any)) Node {
+	n.tx.app.nodeHandlers[n.id] = fn
+	return n
 }
 
 // OnChange registers a handler for a live entry's edits: the widget owns
 // its text and reports each edit here. There is no read-back.
-func (a *App) OnChange(w Widget, fn func(*Tx, string)) {
-	a.widgetChanges[w.id] = fn
+func (w Widget) OnChange(fn func(*Tx, string)) Widget {
+	w.tx.app.widgetChanges[w.id] = fn
+	return w
 }
 
-// OnChangeNode registers a change handler for a template entry; the
+// OnChange registers a change handler for a template entry; the
 // handler also receives the stamped copy's keys, outermost first.
-func (a *App) OnChangeNode(n Node, fn func(*Tx, []any, string)) {
-	a.nodeChanges[n.id] = fn
+func (n Node) OnChange(fn func(*Tx, []any, string)) Node {
+	n.tx.app.nodeChanges[n.id] = fn
+	return n
 }
 
 // OnSubmitted registers a handler for a live field's SUBMIT gesture:
 // Return in an entry or a search field, the send gesture on a Submits
 // textarea (docs/submit-plan.md S1). OnChange has carried every edit.
-func (a *App) OnSubmitted(w Widget, fn func(*Tx, string)) {
-	a.widgetSubmits[w.id] = fn
+func (w Widget) OnSubmitted(fn func(*Tx, string)) Widget {
+	w.tx.app.widgetSubmits[w.id] = fn
+	return w
 }
 
-// OnSubmittedNode registers a submit handler for a template field; the
+// OnSubmitted registers a submit handler for a template field; the
 // handler also receives the stamped copy's keys, outermost first.
-func (a *App) OnSubmittedNode(n Node, fn func(*Tx, []any, string)) {
-	a.nodeSubmits[n.id] = fn
+func (n Node) OnSubmitted(fn func(*Tx, []any, string)) Node {
+	n.tx.app.nodeSubmits[n.id] = fn
+	return n
 }
 
 // OnEdit registers a handler for one addressed user edit of a rich
 // textarea; OnChange still fires beside it
 // (docs/rich-text-plan.md R1).
-func (a *App) OnEdit(w Widget, fn func(*Tx, Edit)) {
-	a.widgetEdits[w.id] = fn
+func (w Widget) OnEdit(fn func(*Tx, Edit)) Widget {
+	w.tx.app.widgetEdits[w.id] = fn
+	return w
 }
 
 // OnFormat registers a handler for the user formatting a range. A
 // format over a COLLAPSED caret is pending state and arrives as the next
 // edit's runs, never here.
-func (a *App) OnFormat(w Widget, fn func(*Tx, Format)) {
-	a.widgetFormats[w.id] = fn
+func (w Widget) OnFormat(fn func(*Tx, Format)) Widget {
+	w.tx.app.widgetFormats[w.id] = fn
+	return w
 }
 
-// OnEditNode registers a handler for a stamped rich copy's edit, with
+// OnEdit registers a handler for a stamped rich copy's edit, with
 // its row's key path — OnEdit one zone over (docs/rich-text-plan.md
 // §19). The row's Document field has already taken the edit when this
 // fires.
-func (a *App) OnEditNode(n Node, fn func(*Tx, []any, Edit)) {
-	a.nodeEdits[n.id] = fn
+func (n Node) OnEdit(fn func(*Tx, []any, Edit)) Node {
+	n.tx.app.nodeEdits[n.id] = fn
+	return n
 }
 
-// OnFormatNode is OnEditNode's twin for a stamped copy's toolbar act.
-func (a *App) OnFormatNode(n Node, fn func(*Tx, []any, Format)) {
-	a.nodeFormats[n.id] = fn
+// OnFormat is OnEditNode's twin for a stamped copy's toolbar act.
+func (n Node) OnFormat(fn func(*Tx, []any, Format)) Node {
+	n.tx.app.nodeFormats[n.id] = fn
+	return n
 }
 
 // Document is this app's copy of a rich textarea's content, folded from
@@ -5860,64 +5881,74 @@ func decodedSpan(what string, start, end int) TextRange {
 
 // OnValueChanged registers a handler for a live slider's moves, or a
 // select's picks (same record, the index as a float64).
-func (a *App) OnValueChanged(w Widget, fn func(*Tx, float64)) {
-	a.widgetValues[w.id] = fn
+func (w Widget) OnValueChanged(fn func(*Tx, float64)) Widget {
+	w.tx.app.widgetValues[w.id] = fn
+	return w
 }
 
-// OnValueChangedNode registers a value handler for a template slider,
+// OnValueChanged registers a value handler for a template slider,
 // select or radio group; the handler also receives the stamped copy's
 // keys, outermost first.
-func (a *App) OnValueChangedNode(n Node, fn func(*Tx, []any, float64)) {
-	a.nodeValues[n.id] = fn
+func (n Node) OnValueChanged(fn func(*Tx, []any, float64)) Node {
+	n.tx.app.nodeValues[n.id] = fn
+	return n
 }
 
 // OnValueCommitted registers a handler for the value a live slider's
 // gesture SETTLED ON — once per release or key move, after that
 // gesture's OnValueChanged moves (docs/slider-plan.md S2).
-func (a *App) OnValueCommitted(w Widget, fn func(*Tx, float64)) {
-	a.widgetCommits[w.id] = fn
+func (w Widget) OnValueCommitted(fn func(*Tx, float64)) Widget {
+	w.tx.app.widgetCommits[w.id] = fn
+	return w
 }
 
-// OnValueCommittedNode registers a settled-value handler for a template
+// OnValueCommitted registers a settled-value handler for a template
 // slider; the handler also receives the stamped copy's keys, outermost
 // first.
-func (a *App) OnValueCommittedNode(n Node, fn func(*Tx, []any, float64)) {
-	a.nodeCommits[n.id] = fn
+func (n Node) OnValueCommitted(fn func(*Tx, []any, float64)) Node {
+	n.tx.app.nodeCommits[n.id] = fn
+	return n
 }
 
 // OnDate registers a handler for a live date picker's COMMITTED picks
 // (docs/datetime-plan.md D7): the control owns its value and reports each
 // pick here; a programmatic write never echoes.
-func (a *App) OnDate(w Widget, fn func(*Tx, Date)) {
-	a.widgetDates[w.id] = fn
+func (w Widget) OnDate(fn func(*Tx, Date)) Widget {
+	w.tx.app.widgetDates[w.id] = fn
+	return w
 }
 
-// OnDateNode registers a pick handler for a template date picker; the
+// OnDate registers a pick handler for a template date picker; the
 // handler also receives the stamped copy's keys, outermost first.
-func (a *App) OnDateNode(n Node, fn func(*Tx, []any, Date)) {
-	a.nodeDates[n.id] = fn
+func (n Node) OnDate(fn func(*Tx, []any, Date)) Node {
+	n.tx.app.nodeDates[n.id] = fn
+	return n
 }
 
 // OnTime registers a handler for a live time picker's committed picks.
-func (a *App) OnTime(w Widget, fn func(*Tx, Time)) {
-	a.widgetTimes[w.id] = fn
+func (w Widget) OnTime(fn func(*Tx, Time)) Widget {
+	w.tx.app.widgetTimes[w.id] = fn
+	return w
 }
 
-// OnTimeNode registers a pick handler for a template time picker.
-func (a *App) OnTimeNode(n Node, fn func(*Tx, []any, Time)) {
-	a.nodeTimes[n.id] = fn
+// OnTime registers a pick handler for a template time picker.
+func (n Node) OnTime(fn func(*Tx, []any, Time)) Node {
+	n.tx.app.nodeTimes[n.id] = fn
+	return n
 }
 
 // OnToggle registers a handler for a live checkbox's toggles: the box
 // owns its checked bit and reports each flip here.
-func (a *App) OnToggle(w Widget, fn func(*Tx, bool)) {
-	a.widgetToggles[w.id] = fn
+func (w Widget) OnToggle(fn func(*Tx, bool)) Widget {
+	w.tx.app.widgetToggles[w.id] = fn
+	return w
 }
 
-// OnToggleNode registers a toggle handler for a template checkbox; the
+// OnToggle registers a toggle handler for a template checkbox; the
 // handler also receives the stamped copy's keys, outermost first.
-func (a *App) OnToggleNode(n Node, fn func(*Tx, []any, bool)) {
-	a.nodeToggles[n.id] = fn
+func (n Node) OnToggle(fn func(*Tx, []any, bool)) Node {
+	n.tx.app.nodeToggles[n.id] = fn
+	return n
 }
 
 // answerCanvasAsk answers one draw_requested or tick. A method rather

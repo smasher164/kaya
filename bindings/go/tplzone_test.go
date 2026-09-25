@@ -476,12 +476,13 @@ func readSource(t *testing.T, path string) string {
 // one template node. A map from id to ONE closure loses the first.
 func TestADropAndADragEndedRegistrationCoexistOnOneID(t *testing.T) {
 	app := NewApp()
-	w := Widget{id: 7}
-	n := Node{id: 7}
-	app.OnDrop(w, func(*Tx, Dropped) {})
-	app.OnDragEnded(w, func(*Tx, Op) {})
-	app.OnDropNode(n, func(*Tx, []any, Dropped) {})
-	app.OnDragEndedNode(n, func(*Tx, []any, Op) {})
+	tx := &Tx{app: app}
+	w := Widget{id: 7, tx: tx}
+	n := Node{id: 7, tx: tx}
+	w.OnDrop(func(*Tx, Dropped) {})
+	w.OnDragEnded(func(*Tx, Op) {})
+	n.OnDrop(func(*Tx, []any, Dropped) {})
+	n.OnDragEnded(func(*Tx, []any, Op) {})
 	for what, present := range map[string]bool{
 		"widget drop":   app.widgetDrops[w.id] != nil,
 		"widget end":    app.dragEnded[w.id] != nil,

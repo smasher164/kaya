@@ -172,13 +172,13 @@ func App() *kaya.App {
 				}
 			}
 		}
-		app.OnDrop(textID, dropped("text target", textTarget))
-		app.OnDrop(noteID2, dropped("note target", noteTarget))
-		app.OnDrop(filesID, dropped("files target", filesTarget))
-		app.OnDragEnded(source, func(tx *kaya.Tx, op kaya.Op) {
+		textID.OnDrop(dropped("text target", textTarget))
+		noteID2.OnDrop(dropped("note target", noteTarget))
+		filesID.OnDrop(dropped("files target", filesTarget))
+		source.OnDragEnded(func(tx *kaya.Tx, op kaya.Op) {
 			tx.Write(dragStatus, fmt.Sprintf("drag ended %s", word(op)))
 		})
-		app.OnDropNode(itemLabel, func(tx *kaya.Tx, keys []any, d kaya.Dropped) {
+		itemLabel.OnDrop(func(tx *kaya.Tx, keys []any, d kaya.Dropped) {
 			op := word(d.Operation)
 			if clip, ok := d.Clip.(kaya.TextClip); ok {
 				tx.Write(dropStatus, fmt.Sprintf("item %s got text %s (%s)", keyWord(keys), clip.Text, op))
@@ -191,8 +191,8 @@ func App() *kaya.App {
 				tx.Write(dragStatus, fmt.Sprintf("%s %s drag ended %s", what, keyWord(keys), word(op)))
 			}
 		}
-		app.OnDragEndedNode(itemLabel, nodeEnded("item"))
-		app.OnDragEndedNode(rowLabel, nodeEnded("row"))
+		itemLabel.OnDragEnded(nodeEnded("item"))
+		rowLabel.OnDragEnded(nodeEnded("row"))
 		// The moved row's key rides as the kaya-private custom
 		// representation; the anchor is the row it landed on (D8).
 		rows.OnDrop(func(tx *kaya.Tx, d kaya.Dropped) {

@@ -104,7 +104,27 @@ padding leaves. Watched red on the windows scrollto leg before the fix
 after, with the capture retaken. check-universal-props holds all three,
 three watched negatives.
 
-## DEFER — Go's secondary handlers register through the app object, not on the handle (the maintainer, 2026-09-24 afternoon, reviewing the submit slice)
+## WATCH — the linux tasksbig wayland leg hung on a keyed row that never resolved, once (first sighting 2026-09-24, matrix)
+KEY: tasksbig wayland hang, Label@pcount[trip], keyed target unresolved, 180s timeout, no verb trace
+
+The leg was killed by the pool's 180s timeout with no verdict and no verb
+trace — the ring is dumped on a FAILED verdict or by the step watchdog,
+and a kill reaches neither — so the bundle carries the leg log, the shot
+and nothing else. THE LOG NAMES WHAT IT WAS DOING: `expect` retried
+`Label@pcount[trip]` to the end, every attempt printing `keyed target
+Label@pcount[trip] unresolved: 8 in the registry, 0 carrying the id (0 of
+them live), 2 tagged` — the row keyed `trip` was never stamped, or its
+label never took the id, on this run alone. The same leg passed on the
+matrix before it and passed again on a re-run minutes later, both on
+wayland.
+ON SIGHTING 2: the bundle needs the scene's own collection state at the
+moment of the retry — the log says what the registry held but not what
+the model did, and the two together are what tells a row that never
+stamped from a label that never took its id. The shot is kept and shows
+the screen; read it first.
+TRIGGER: a second sighting, or any tasksbig red on wayland.
+
+## ~~DEFER — Go's secondary handlers register through the app object, not on the handle (the maintainer, 2026-09-24 afternoon, reviewing the submit slice)~~ — DONE 2026-09-24: all 28 registrars are chained methods on `Widget` and `Node`, the app forms removed rather than aliased, a Node carries its transaction, 30 guest sites and the two surface gates moved, and check-sugar-surface refuses a handler that names a handle and lives on the app
 KEY: Go chained handlers, OnSubmit on Widget, app.OnSubmitted, app.OnValueCommitted, secondary handler registrar, Go handler family
 
 Go's constructors take ONE handler positionally (`tx.Textarea(onChange)`,
@@ -132,6 +152,22 @@ handle with their negatives re-run. Submit alone must NOT move ahead of
 the family. DEFERRED by the maintainer ("let's put this off for later")
 with scroll-to and the chat app ahead of it; a Go-only slice, about an
 hour, best done before the chat app is written against the old shape.
+
+RESOLUTION (2026-09-24, the maintainer: "tackle those ledger items
+first"): done as written. `Node` gained the transaction it needed to
+reach its app — five internal constructions and two tests followed — and
+all 28 registrars became chained methods returning their receiver, the
+`Node` suffix dropped because the receiver's type names the zone. The
+app forms are GONE, not aliased; the one registrar that names no widget,
+`OnNotificationActivation`, stays and is exempt by name in the gate,
+held to still existing. 13 internal calls in the binding, 12 in the
+record and sum generators and 30 in the guests moved with them, and the
+submit guest chains now (`tx.Entry(nil).Placeholder("Name").A11yID("name")
+.OnSubmitted(wrote)`), which is the shape the maintainer expected.
+tools/check-sugar-surface.py's Go rows read the handle spelling and one
+new clause refuses any `func (a *App) On…` that names a Widget or a Node,
+with the census printed and one watched negative that moves OnClick back
+onto the app.
 
 ## DEFER — the checkbox reads a touch high beside the title's first line on Android, iOS and Windows (the maintainer, 2026-09-24 morning, off the recaptured review page)
 

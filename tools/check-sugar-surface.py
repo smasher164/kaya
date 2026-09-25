@@ -1791,7 +1791,7 @@ def check_table_on_sort(snake, pascal, camel, findings=None):
     want_table("python", "bindings/python/kaya/__init__.py", snake,
                f"def columns\\(self[\\s\\S]*?{snake}[\\s]*[:=]", findings)
     want_table("go", "bindings/go/app.go", snake,
-               f"func \\(a \\*App\\) {pascal}\\(", findings)
+               f"func \\(w Widget\\) {pascal}\\(", findings)
     want_table("csharp", "bindings/csharp/KayaApp.cs", snake,
                f"public void {pascal}\\(", findings)
     want_table("java", "bindings/java/dev/kaya/KayaApp.java", snake,
@@ -2289,9 +2289,9 @@ def check_slider_commit(snake, pascal, camel, ml, findings=None):
     want_slider("python", F["python"], snake,
                 rf"def slider\([^)]*{snake}[\s]*[:=]", findings)
     want_slider("go-live", F["go"], snake,
-                rf"func \(a \*App\) {pascal}\(w Widget", findings)
+                rf"func \(w Widget\) {pascal}\(", findings)
     want_slider("go-tpl", F["go"], snake,
-                rf"func \(a \*App\) {pascal}Node\(n Node", findings)
+                rf"func \(n Node\) {pascal}\(", findings)
     want_slider("csharp-live", F["csharp"], snake,
                 rf"public void {pascal}\(Widget w", findings)
     want_slider("csharp-tpl", F["csharp"], snake,
@@ -2756,7 +2756,7 @@ def check_dnd_handler(snake, pascal, camel, payload, findings=None):
     # App-registered in the registry family, where this binding's own
     # click handler is registered.
     want_dnd("go", "bindings/go/app.go", snake,
-             f"func \\(a \\*App\\) {pascal}\\(w Widget, "
+             f"func \\(w Widget\\) {pascal}\\("
              f"fn func\\(\\*Tx, {go_ty}\\)\\)", findings)
     want_dnd("csharp", "bindings/csharp/KayaApp.cs", snake,
              f"public void {pascal}\\(Widget w, "
@@ -3022,7 +3022,7 @@ def check_dnd_node_handler(snake, pascal, camel, payload, findings=None):
     want_dnd("python", "bindings/python/kaya/__init__.py", snake,
              f"def {snake}\\(self[^,]*, fn[^)]*\\)", findings)
     want_dnd("go", "bindings/go/app.go", snake,
-             f"func \\(a \\*App\\) {pascal}Node\\(n Node, "
+             f"func \\(n Node\\) {pascal}\\("
              f"fn func\\(\\*Tx, \\[\\]any, {go_ty}\\)\\)", findings)
     want_dnd("csharp", "bindings/csharp/KayaApp.cs", snake,
              f"public void {pascal}\\(Node n, "
@@ -3362,7 +3362,7 @@ def rich_handler_rows(snake, pascal, camel):
     return [
         ("rust", F["rust"], rf"pub fn {snake}\(&self, w: WidgetId"),
         ("python", F["python"], rf"def textarea\([^)]*\b{snake}\s*[:=]"),
-        ("go", F["go"], rf"func \(a \*App\) {pascal}\(w Widget"),
+        ("go", F["go"], rf"func \(w Widget\) {pascal}\("),
         ("csharp", F["csharp"], rf"public void {pascal}\(Widget w"),
         ("java", F["java"], rf"public void {camel}\(Widget w"),
         ("swift", F["swift"],
@@ -4183,12 +4183,11 @@ def tpl_table_probe():
          "func (t *Tpl) Rows(c Collection) *NodeRows {",
          "func (t *Tpl) RowsRemoved(c Collection) *NodeRows {"),
         ("go-sort", "on_sort",
-         "func (a *App) OnSortNode(n Node, fn func(*Tx, []any, "
-         "uint32)) {",
-         "func (a *App) OnSortNode(n Node, fn func(*Tx, uint32)) {"),
+         "func (n Node) OnSort(fn func(*Tx, []any, uint32)) Node {",
+         "func (n Node) OnSort(fn func(*Tx, uint32)) Node {"),
         ("go-sort-chain", "on_sort",
-         "\tr.st.tx.app.OnSortNode(r.Node(), fn)",
-         "\tr.st.tx.app.OnSortNode(Node{}, fn)"),
+         "\tr.Node().OnSort(fn)",
+         "\tNode{}.OnSort(fn)"),
         ("go-sort-dispatch", "on_sort",
          "a.dispatch(func(tx *Tx) { fn(tx, keys, column) })",
          "a.dispatch(func(tx *Tx) { fn(tx, nil, column) })"),
@@ -6642,7 +6641,7 @@ check("rust", "crates/kaya/src/app.rs", "on_paste",
 check("python", "bindings/python/kaya/__init__.py", "on_paste",
       r"def on_paste\(self[^,]*, fn[^)]*\)")
 check("go", "bindings/go/app.go", "on_paste",
-      r"func \(a \*App\) OnPaste\(")
+      r"func \(w Widget\) OnPaste\(")
 check("csharp", "bindings/csharp/KayaApp.cs", "on_paste",
       r"public void OnPaste\(")
 check("java", "bindings/java/dev/kaya/KayaApp.java", "on_paste",
@@ -8838,6 +8837,42 @@ for _label, _which, _pattern, _repl, _want in [
 if len(carveout_sugar_findings("", "", "")) < 13:
     selftest_exit("check-sugar-surface: the carve-out sugar reader read nothing and agreed")
 
+# GO'S HANDLERS LIVE ON THE HANDLE (docs/deferred.md, the Go handler-family
+# entry, ruled 2026-09-24): every registrar that names a widget or a stamped
+# node is a method ON that handle, chained, so a second handler reads like the
+# first rather than through the app object. The one registrar that names NO
+# widget — the app's own notification activation — is exempt by name, and
+# held to still existing so the exemption cannot outlive it.
+GO_APP_EXEMPT = ("OnNotificationActivation",)
+_go_src = read_rel("bindings/go/app.go")
+for _name in GO_APP_EXEMPT:
+    if not grep_e(rf"^func \(a \*App\) {_name}\(", _go_src):
+        selftest_exit(f"check-sugar-surface: the Go app-registrar exemption names {_name}, which "
+                      f"bindings/go/app.go no longer declares — a stale exemption is the next "
+                      f"stale audit")
+_go_on_app = [m for m in re.findall(r"^func \(a \*App\) (On[A-Za-z]+)\(([^)]*)\)", _go_src, re.M)
+              if m[0] not in GO_APP_EXEMPT and ("w Widget" in m[1] or "n Node" in m[1])]
+for _name, _args in _go_on_app:
+    print(f"check-sugar-surface: go registers {_name} through the app object and names a "
+          f"handle in its arguments — a handler scopes to its widget and is spelled on it "
+          f"(docs/deferred.md, the Go handler-family entry)")
+    status = 1
+print(f"check-sugar-surface: go handler census: "
+      f"{len(re.findall(r'^func \(w Widget\) On[A-Za-z]+\(', _go_src, re.M))} on Widget, "
+      f"{len(re.findall(r'^func \(n Node\) On[A-Za-z]+\(', _go_src, re.M))} on Node, "
+      f"{len(GO_APP_EXEMPT)} exempt on the app")
+_planted = _go_src.replace(
+    "func (w Widget) OnClick(fn func(*Tx)) Widget {",
+    "func (a *App) OnClick(w Widget, fn func(*Tx)) {", 1)
+if _planted == _go_src:
+    selftest_exit("check-sugar-surface: the Go handler negative perturbed NOTHING")
+_fired = [m for m in re.findall(r"^func \(a \*App\) (On[A-Za-z]+)\(([^)]*)\)", _planted, re.M)
+          if m[0] not in GO_APP_EXEMPT and ("w Widget" in m[1] or "n Node" in m[1])]
+if len(_fired) != 1:
+    selftest_exit(f"check-sugar-surface: self-test failed — a handler moved back onto the app "
+                  f"was not refused ({len(_fired)} found)")
+print("check-sugar-surface: go handler negative: 1 substitution, 1 finding")
+
 # THE SCROLL-TO COMMAND (docs/scroll-to-plan.md S8): `scroll_to_row` beside
 # `focus` and `reveal_range` in every binding, live zone only — a one-shot
 # effect the wire carries to all nine whether or not a binding spells it,
@@ -8940,7 +8975,7 @@ SUBMIT_ROWS = {
         ("python", F["python"], r"def entry\([^)]*\bon_submit\s*[:=]", "on_submit"),
         ("python", F["python"], r"def search\([^)]*\bon_submit\s*[:=]", "on_submit"),
         ("python", F["python"], r"def textarea\([^)]*\bon_submit\s*[:=]", "on_submit"),
-        ("go", F["go"], r"func \(a \*App\) OnSubmitted\(w Widget", "OnSubmitted"),
+        ("go", F["go"], r"func \(w Widget\) OnSubmitted\(", "OnSubmitted"),
         ("csharp", F["csharp"], r"public void OnSubmitted\(Widget w", "OnSubmitted"),
         ("csharp", F["csharp"],
          r"public Widget Entry\([\s\S]{0,200}?Action<Tx, string>\? onSubmit = null\)", "onSubmit"),
@@ -8977,7 +9012,7 @@ SUBMIT_ROWS = {
         ("rust", F["rust"], r"pub fn on_submit_node\(&self, n: TemplateNodeId", "on_submit_node"),
         ("python", F["python"], r"_app\._register\(handle, wire\.OCC_SUBMITTED, on_submit\)",
          "on_submit"),
-        ("go", F["go"], r"func \(a \*App\) OnSubmittedNode\(n Node", "OnSubmittedNode"),
+        ("go", F["go"], r"func \(n Node\) OnSubmitted\(", "OnSubmitted"),
         ("csharp", F["csharp"], r"public void OnSubmitted\(Node n", "OnSubmitted"),
         ("csharp", F["csharp"],
          r"public Node Entry\(Action<Tx, List<object>, string>\? onChange = null,\s*"

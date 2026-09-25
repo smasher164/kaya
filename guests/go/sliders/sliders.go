@@ -41,7 +41,7 @@ func App() *kaya.App {
 			master := tx.SliderBound(0.0, 100.0, pos, func(tx *kaya.Tx, v float64) {
 				tx.Write(levelText, fmt.Sprintf("value: %s", spelled(v)))
 			}).Step(5).TickSpacing(25).A11yID("master").A11yLabel("Level") // slider#0
-			app.OnValueCommitted(master, func(tx *kaya.Tx, _ float64) {
+			master.OnValueCommitted(func(tx *kaya.Tx, _ float64) {
 				commits++
 				tx.Write(commitText, fmt.Sprintf("commits: %d", commits))
 			})
@@ -60,7 +60,7 @@ func App() *kaya.App {
 			}
 		}))
 
-		app.OnValueCommittedNode(level, func(tx *kaya.Tx, keys []any, v float64) {
+		level.OnValueCommitted(func(tx *kaya.Tx, keys []any, v float64) {
 			tx.Write(rowText, fmt.Sprintf("row %v: %s", keys[0], spelled(v)))
 		})
 

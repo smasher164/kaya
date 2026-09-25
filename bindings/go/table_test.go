@@ -151,7 +151,7 @@ func TestNestedColumnsDeclareTheTemplateNodesBarForEveryCopy(t *testing.T) {
 // One copy's keys ride OUTERMOST FIRST, ahead of the titles.
 func TestColumnsAtEmitsTheCopyKeysBeforeTheTitles(t *testing.T) {
 	app := NewApp()
-	table := Node{41}
+	table := Node{id: 41}
 	// TWO keys and THREE titles, deliberately: with the two counts equal,
 	// a path_len that counted the titles would be indistinguishable from
 	// one that counted the keys and the clause below would pass

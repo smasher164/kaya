@@ -178,7 +178,7 @@ func App() *kaya.App {
 
 	// One rule, two arrival paths. A stamped copy's handler registers once
 	// against the TEMPLATE NODE and hands the copy's keys.
-	app.OnChangeNode(note, func(tx *kaya.Tx, path []any, text string) {
+	note.OnChange(func(tx *kaya.Tx, path []any, text string) {
 		key := rowKey(path)
 		if text == "" {
 			delete(rowNotes, key)

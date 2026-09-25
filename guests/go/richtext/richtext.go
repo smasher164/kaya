@@ -41,12 +41,12 @@ func App() *kaya.App {
 
 		tx.Mount(tx.Column(func() {
 			editor = tx.Textarea(nil).Rich().A11yID("doc").A11yLabel("Document")
-			app.OnEdit(editor, func(tx *kaya.Tx, edit kaya.Edit) {
+			editor.OnEdit(func(tx *kaya.Tx, edit kaya.Edit) {
 				tx.Write(last, fmt.Sprintf("edit %d:%d <%s> %s [%s]",
 					edit.Range.Start, edit.Range.End, edit.Inserted, edit.Source, spell(edit.Runs)))
 				tx.Write(runs, spell(app.Document(editor).Runs))
 			})
-			app.OnFormat(editor, func(tx *kaya.Tx, act kaya.Format) {
+			editor.OnFormat(func(tx *kaya.Tx, act kaya.Format) {
 				value := act.Value
 				if act.Removed {
 					value = "off"

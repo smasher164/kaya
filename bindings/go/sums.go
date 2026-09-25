@@ -244,7 +244,7 @@ func (sc SumCase[K, V]) Checkbox(sel func(*V) *bool, onToggle func(*Tx, K, bool)
 	n := sc.t.Widget(KindCheckbox)
 	sc.t.BindCheckedField(n, 0, FieldBy(sel))
 	if onToggle != nil {
-		sc.t.tx.app.OnToggleNode(n, func(tx *Tx, keys []any, checked bool) {
+		n.OnToggle(func(tx *Tx, keys []any, checked bool) {
 			onToggle(tx, keys[0].(K), checked)
 		})
 	}
@@ -271,7 +271,7 @@ func (sc SumCase[K, V]) onClick(n Node, onClick func(*Tx, K)) {
 	if onClick == nil {
 		return
 	}
-	sc.t.tx.app.OnClickNode(n, func(tx *Tx, keys []any) { onClick(tx, keys[0].(K)) })
+	n.OnClick(func(tx *Tx, keys []any) { onClick(tx, keys[0].(K)) })
 }
 
 // Entry is an EMPTY text field with its change handler co-located:
@@ -311,7 +311,7 @@ func (sc SumCase[K, V]) onChange(n Node, onChange func(*Tx, K, string)) {
 	if onChange == nil {
 		return
 	}
-	sc.t.tx.app.OnChangeNode(n, func(tx *Tx, keys []any, text string) {
+	n.OnChange(func(tx *Tx, keys []any, text string) {
 		onChange(tx, keys[0].(K), text)
 	})
 }
@@ -367,7 +367,7 @@ func (sc SumCase[K, V]) onValue(n Node, onChange func(*Tx, K, float64)) {
 	if onChange == nil {
 		return
 	}
-	sc.t.tx.app.OnValueChangedNode(n, func(tx *Tx, keys []any, v float64) {
+	n.OnValueChanged(func(tx *Tx, keys []any, v float64) {
 		onChange(tx, keys[0].(K), v)
 	})
 }
