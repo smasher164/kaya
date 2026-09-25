@@ -668,6 +668,17 @@ enum Align : long
     Baseline = 4,
 }
 
+/// What a filled container's surface means (docs/tints-plan.md T1): each
+/// backend draws it in the platform's own fill and foreground pair.
+enum Tint : long
+{
+    Accent = KayaWire.TintAccent,
+    Success = KayaWire.TintSuccess,
+    Warning = KayaWire.TintWarning,
+    Critical = KayaWire.TintCritical,
+    Neutral = KayaWire.TintNeutral,
+}
+
 /// A container's arrangement axis (docs/adaptive-layout-plan.md D1/D2).
 /// A widget stays addressable by its CREATION kind whatever the axis
 /// says today.
@@ -2885,6 +2896,12 @@ sealed class Tx : IDisposable
     public void SetAlign(Widget w, Align align) =>
         Records.Add(KayaWire.TxSetAlign(w.Id, (long)align));
 
+    /// A row or column filled with a platform tint: kaya chooses the fill,
+    /// the corner radius, the inset (unless SetInset set one) and the
+    /// foreground of what sits inside (docs/tints-plan.md T2).
+    public void SetFilled(Widget w, Tint tint) =>
+        Records.Add(KayaWire.TxSetFilled(w.Id, (long)tint));
+
     /// A container's arrangement axis (the creation kind's own is the
     /// default — row horizontal, column vertical). Containers only; the
     /// widget stays addressable by its creation kind whatever this says
@@ -3445,14 +3462,14 @@ sealed class Tx : IDisposable
     /// ambient stack). `inset:` is this container's own padding.
     public void Column(
         Action<Widget> body, double? grow = null, double? spacing = null, Align? align = null,
-        double? inset = null) =>
+        double? inset = null, Tint? filled = null) =>
         ContainerOf<object?>(KayaWire.KindColumn, c => { body(c); return null; },
-            grow, spacing, align, inset);
+            grow, spacing, align, inset, filled: filled);
 
     public T Column<T>(
         Func<Widget, T> body, double? grow = null, double? spacing = null, Align? align = null,
-        double? inset = null) =>
-        ContainerOf(KayaWire.KindColumn, body, grow, spacing, align, inset);
+        double? inset = null, Tint? filled = null) =>
+        ContainerOf(KayaWire.KindColumn, body, grow, spacing, align, inset, filled: filled);
 
     /// `stackWhen:` stacks this row's children vertically while the
     /// window's SIZE CLASS is the named one (SizeClass.Compact, the only
@@ -3460,14 +3477,14 @@ sealed class Tx : IDisposable
     /// the class (docs/adaptive-layout-plan.md D3).
     public void Row(
         Action<Widget> body, double? grow = null, double? spacing = null, Align? align = null,
-        double? inset = null, SizeClass? stackWhen = null) =>
+        double? inset = null, SizeClass? stackWhen = null, Tint? filled = null) =>
         ContainerOf<object?>(KayaWire.KindRow, c => { body(c); return null; },
-            grow, spacing, align, inset, stackWhen);
+            grow, spacing, align, inset, stackWhen, filled);
 
     public T Row<T>(
         Func<Widget, T> body, double? grow = null, double? spacing = null, Align? align = null,
-        double? inset = null, SizeClass? stackWhen = null) =>
-        ContainerOf(KayaWire.KindRow, body, grow, spacing, align, inset, stackWhen);
+        double? inset = null, SizeClass? stackWhen = null, Tint? filled = null) =>
+        ContainerOf(KayaWire.KindRow, body, grow, spacing, align, inset, stackWhen, filled);
 
     /// A vertical scroll viewport over EXACTLY ONE child. Pass grow: so
     /// the enclosing track CONSTRAINS it — an unconstrained viewport
@@ -3549,12 +3566,14 @@ sealed class Tx : IDisposable
 
     T ContainerOf<T>(
         uint kind, Func<Widget, T> body, double? grow = null, double? spacing = null,
-        Align? align = null, double? inset = null, SizeClass? stackWhen = null)
+        Align? align = null, double? inset = null, SizeClass? stackWhen = null,
+        Tint? filled = null)
     {
         var parent = Widget(kind);
         if (grow is double g) SetGrow(parent, g);
         if (spacing is double gap) SetSpacing(parent, gap);
         if (align is Align a) SetAlign(parent, a);
+        if (filled is Tint t) SetFilled(parent, t);
         if (inset is double pad) SetInset(parent, pad);
         if (stackWhen is SizeClass when) StackWhen(parent, when);
         App.Parents.Add(parent.Id);
@@ -4853,6 +4872,11 @@ sealed class Tpl
     /// A stamped container's cross-axis child placement (Tx.SetAlign).
     public void SetAlign(Node n, Align align) =>
         tx.Records.Add(KayaWire.TxSetAlign(n.Id, (long)align));
+
+    /// A stamped container filled with a platform tint (Tx.SetFilled) — a
+    /// chat thread's bubbles are stamped rows.
+    public void SetFilled(Node n, Tint tint) =>
+        tx.Records.Add(KayaWire.TxSetFilled(n.Id, (long)tint));
 
     /// A stamped grid's auto columns at a floor (Tx.SetColumnsAuto).
     public void SetColumnsAuto(Node n, double minWidth)

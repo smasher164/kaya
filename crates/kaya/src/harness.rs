@@ -316,6 +316,9 @@ pub enum Step {
     /// WinUI runaway moved every row of a screen together, which no
     /// row-to-row comparison can see (docs/deferred.md's list-row entry).
     ExpectHeightFits(Target),
+    /// A filled container's drawn surface, classified as the nearest of the
+    /// five tints or `none` (docs/tints-plan.md §4).
+    ExpectFill(Target, String),
     /// How many LINES a row's children sit on — the runs of children
     /// whose cross-axis boxes overlap (docs/layout-knobs-plan.md §2, the
     /// `wrap` observation).
@@ -668,7 +671,8 @@ impl Step {
             | Step::ExpectScrolledTo(t, _)
             | Step::ClearSearch(t)
             | Step::ContextOpen(t)
-            | Step::ExpectHeightFits(t) => vec![t],
+            | Step::ExpectHeightFits(t)
+            | Step::ExpectFill(t, _) => vec![t],
             Step::ExpectNotTaller(a, b) => vec![a, b],
             Step::Toggle(t, _)
             | Step::SetValue(t, _)
@@ -841,6 +845,7 @@ impl Step {
             Step::ExpectHugs { .. } => true,
             Step::ExpectNotTaller { .. } => true,
             Step::ExpectHeightFits { .. } => true,
+            Step::ExpectFill { .. } => true,
             Step::ExpectLines { .. } => true,
             Step::ExpectAligned { .. } => true,
             Step::ExpectAxis { .. } => true,
@@ -1152,6 +1157,14 @@ pub trait Stage: Send + 'static {
     /// asks for nothing) plus its padding by no more than one device unit;
     /// otherwise both numbers. A container with no content child is refused.
     fn height_fits(&self, target: Target) -> String;
+    /// The tint a container's drawn surface is nearest to — `accent`,
+    /// `success`, `warning`, `critical`, `neutral`, or `none` for the bare
+    /// ground — sampled 4 units inside its RIGHT edge at mid-height, in the
+    /// padding band and clear of the corners, against the platform's
+    /// own colours resolved in the current appearance, then what it
+    /// sampled and the nearest candidates for the failure sentence; `<...>`
+    /// when unread.
+    fn fill_tint(&self, target: Target) -> String;
     /// The container's cross-axis placement, CLASSIFIED from geometry after
     /// forcing pending layout: "start", "center", "end", "stretch", or
     /// "baseline" when the coincidence holds for every child (within two
@@ -1711,6 +1724,18 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
             "expect_fills" => Step::ExpectFills(parse_target(rest)?),
             "expect_breadth" => Step::ExpectBreadth(parse_target(rest)?),
             "expect_height_fits" => Step::ExpectHeightFits(parse_target(rest)?),
+            "expect_fill" => {
+                let (target, tint) = rest.split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("expect_fill wants a target and a tint, got {rest:?}")
+                })?;
+                let tint = tint.trim();
+                if !["accent", "success", "warning", "critical", "neutral", "none"].contains(&tint) {
+                    return Err(format!(
+                        "expect_fill's tint is accent, success, warning, critical, neutral or none, got {tint:?}"
+                    ));
+                }
+                Step::ExpectFill(parse_target(target.trim())?, tint.to_owned())
+            }
             "expect_not_taller" => {
                 let (first, second) = rest.split_once(char::is_whitespace).ok_or_else(|| {
                     format!("expect_not_taller wants two targets, got {rest:?}")
@@ -4747,6 +4772,14 @@ fn run_with_log(
                     }
                 }))
             }
+            Step::ExpectFill(t, want) => Some(poll(|| {
+                let got = stage.fill_tint(*t);
+                if got.split(' ').next() == Some(want.as_str()) {
+                    Ok(format!("{} filled {want}", target_spec(t)))
+                } else {
+                    Err(format!("{} reads filled {got}, wanted {want}", target_spec(t)))
+                }
+            })),
             Step::ExpectHeightFits(t) => Some(poll(|| {
                 let off = stage.height_fits(*t);
                 if off.is_empty() {
@@ -6498,6 +6531,9 @@ mod tests {
         fn height_fits(&self, t: Target) -> String {
             if t.index > 0 { "62pt around 43pt of content".into() } else { String::new() }
         }
+        fn fill_tint(&self, t: Target) -> String {
+            if t.index == 0 { "accent".into() } else { "none".into() }
+        }
         fn cross_mode(&self, _: Target) -> String {
             "center".into()
         }
@@ -7339,6 +7375,9 @@ mod tests {
             fn height_fits(&self, _: Target) -> String {
                 String::new()
             }
+            fn fill_tint(&self, _: Target) -> String {
+                String::new()
+            }
             fn cross_mode(&self, _: Target) -> String {
                 "start".into()
             }
@@ -7661,6 +7700,9 @@ mod tests {
             fn height_fits(&self, _: Target) -> String {
                 String::new()
             }
+            fn fill_tint(&self, _: Target) -> String {
+                String::new()
+            }
             fn cross_mode(&self, _: Target) -> String {
                 "start".into()
             }
@@ -7851,6 +7893,23 @@ mod tests {
         let (code, verdict) = rx.recv().unwrap();
         assert_eq!(code, 0, "{verdict}");
         assert!(verdict.contains("column#0 spans its breadth"), "{verdict}");
+    }
+
+    #[test]
+    fn expect_fill_compares_the_nearest_tint_by_name() {
+        let steps = parse("expect_fill row#0 accent").unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        run(steps, MockStage { seen: &SEEN, verdict: tx });
+        let (code, verdict) = rx.recv().unwrap();
+        assert_eq!(code, 0, "{verdict}");
+        assert_eq!(verdict, "KAYA_SELFTEST: OK (row#0 filled accent)");
+        let steps = parse("expect_fill row#1 accent").unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        run(steps, MockStage { seen: &SEEN, verdict: tx });
+        let (code, verdict) = rx.recv().unwrap();
+        assert_ne!(code, 0);
+        assert!(verdict.contains("row#1 reads filled none, wanted accent"), "{verdict}");
+        assert!(parse("expect_fill row#0 blue").unwrap_err().contains("got \"blue\""));
     }
 
     #[test]

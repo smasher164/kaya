@@ -151,6 +151,16 @@ public enum KayaAlign: Int64 {
     case baseline = 4
 }
 
+/// What a filled container's surface means (docs/tints-plan.md T1): each
+/// backend draws it in the platform's own fill and foreground pair.
+public enum KayaTint: Int64 {
+    case accent = 1
+    case success = 2
+    case warning = 3
+    case critical = 4
+    case neutral = 5
+}
+
 /// A container's ARRANGEMENT AXIS: identity is the creation kind
 /// (`row#N` stays `row#N` whatever this says), presentation is the prop
 /// (docs/adaptive-layout-plan.md D1/D2).
@@ -3991,6 +4001,13 @@ public final class KayaAppTx {
         tx.setAlign(w.id, align.rawValue)
     }
 
+    /// A row or column filled with a platform tint: kaya chooses the fill,
+    /// the corner radius, the inset (unless one was set) and the foreground
+    /// of what sits inside (docs/tints-plan.md T2).
+    func setFilled(_ w: KayaWidget, _ tint: KayaTint) {
+        tx.setFilled(w.id, tint.rawValue)
+    }
+
     /// A container's arrangement axis, the dynamic path beside the
     /// creation kind (docs/adaptive-layout-plan.md D2). Containers only.
     public func setAxis(_ w: KayaWidget, _ axis: KayaAxis) {
@@ -4658,12 +4675,12 @@ public final class KayaAppTx {
     @discardableResult
     public func column<R>(
         grow: Double? = nil, spacing: Double? = nil, inset: Double? = nil,
-        align: KayaAlign? = nil,
+        align: KayaAlign? = nil, filled: KayaTint? = nil,
         _ children: (KayaWidget) throws -> R
     ) rethrows -> R {
         try containerOf(
             UInt32(KAYA_KIND_COLUMN), children, grow: grow, spacing: spacing,
-            inset: inset, align: align)
+            inset: inset, align: align, filled: filled)
     }
 
     /// A vertical scroll viewport over EXACTLY ONE child. Pass grow: so
@@ -4681,12 +4698,12 @@ public final class KayaAppTx {
     @discardableResult
     public func row<R>(
         grow: Double? = nil, spacing: Double? = nil, inset: Double? = nil,
-        align: KayaAlign? = nil,
+        align: KayaAlign? = nil, filled: KayaTint? = nil,
         _ children: (KayaWidget) throws -> R
     ) rethrows -> R {
         try containerOf(
             UInt32(KAYA_KIND_ROW), children, grow: grow, spacing: spacing,
-            inset: inset, align: align)
+            inset: inset, align: align, filled: filled)
     }
 
     /// A grid laying its children out row-major into `columns` columns —
@@ -4765,7 +4782,7 @@ public final class KayaAppTx {
 
     private func containerOf<R>(
         _ kind: UInt32, _ children: (KayaWidget) throws -> R, grow: Double? = nil, spacing: Double? = nil,
-        inset: Double? = nil, align: KayaAlign? = nil
+        inset: Double? = nil, align: KayaAlign? = nil, filled: KayaTint? = nil
     ) rethrows -> R {
         // Parent before children: creation order is observable (column#N)
         // and statement-shaped construction is parent-first in every
@@ -4775,6 +4792,7 @@ public final class KayaAppTx {
         if let spacing { setSpacing(parent, spacing) }
         if let inset { setInset(parent, inset) }
         if let align { setAlign(parent, align) }
+        if let filled { setFilled(parent, filled) }
         app.childFrames.append(KayaApp.KayaFrame(template: false))
         defer {
             let ids = app.childFrames.removeLast().ids
@@ -5828,6 +5846,12 @@ public final class KayaTpl {
     /// A stamped container's cross-axis child placement (KayaTx.setAlign).
     public func setAlign(_ n: KayaNodeHandle, _ align: KayaAlign) {
         tx.tx.setAlign(n.id, align.rawValue)
+    }
+
+    /// A stamped container filled with a platform tint (KayaTx.setFilled) —
+    /// a chat thread's bubbles are stamped rows.
+    public func setFilled(_ n: KayaNodeHandle, _ tint: KayaTint) {
+        tx.tx.setFilled(n.id, tint.rawValue)
     }
 
     /// A stamped grid's auto columns at a floor (KayaTx.setColumnsAuto).

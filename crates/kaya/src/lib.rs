@@ -112,7 +112,7 @@ pub use app::{
     Field, ForScope, KayaCases, KayaField, KayaPatch, KayaRecord, KayaSum, MenuAnchor, MenuItemRef,
     PathKey,
     MenuItems, MenuRef, MenuSource, Messages, OptionRef, PropToken, RadioGroupRef, RadioOptions,
-    CatalogHome, MenuRole, Platform, Role, SizeClass, Sort, Symbol, ToggleRef, Tpl, TplSource, Tx,
+    CatalogHome, MenuRole, Platform, Role, SizeClass, Sort, Symbol, Tint, ToggleRef, Tpl, TplSource, Tx,
     ValueKind,
     props, Dropped, Op, Block, Document, Edit, EditSource, Format, Run,
     AlertFutureRef, ClipboardFutureRef, DialogFuture, FileFutureRef, SaveFutureRef, TaskOutcome, TaskScope,

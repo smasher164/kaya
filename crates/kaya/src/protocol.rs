@@ -1419,6 +1419,9 @@ pub enum Prop {
     Rich,
     /// A textarea whose Return submits (Bool-valued; docs/submit-plan.md S2).
     Submits,
+    /// A row or column filled with a platform tint (the tint enum, I64;
+    /// docs/tints-plan.md T2).
+    Filled,
     /// The app owns a rich textarea's undo (Bool-valued; docs/rich-text-plan.md
     /// R6, §14): the native stack is off, the ledger never banks it, and
     /// Edit>Undo/Redo reach the app through the role item's own activation.

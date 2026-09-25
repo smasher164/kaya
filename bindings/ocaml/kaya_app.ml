@@ -1285,6 +1285,21 @@ let align_wire = function
 
 let set_align (Widget id) a = emit (the_tx ()) (Kaya_wire.tx_set_align id (align_wire a))
 
+(* What a filled container's surface means (docs/tints-plan.md T1); its own
+   module because [Warning] is already a symbol. *)
+module Tint = struct
+  type t = Accent | Success | Warning | Critical | Neutral
+
+  let wire = function
+    | Accent -> 1L
+    | Success -> 2L
+    | Warning -> 3L
+    | Critical -> 4L
+    | Neutral -> 5L
+end
+
+let set_filled (Widget id) t = emit (the_tx ()) (Kaya_wire.tx_set_filled id (Tint.wire t))
+
 (* A container's ARRANGEMENT AXIS (docs/adaptive-layout-plan.md D1/D2):
    identity is the creation kind, presentation is this prop, so a widget
    built by [row] stays addressable as [row#N] whatever its axis says.
@@ -2215,7 +2230,7 @@ let canvas ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help
    child list literal only allocates closures and the container realizes
    them left to right ([List.iter]'s specified order IS document order).
    Props are labeled optional arguments, the lablgtk idiom. *)
-let container ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?align ?inset kind children () =
+let container ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?align ?inset ?filled kind children () =
   let parent = widget kind in
   Option.iter (fun g -> set_grow parent g) grow;
   Option.iter (fun v -> set_fill parent v) fill;
@@ -2223,6 +2238,7 @@ let container ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?h
   Option.iter (fun s -> set_spacing parent s) spacing;
   Option.iter (fun a -> set_align parent a) align;
   Option.iter (fun p -> set_inset parent p) inset;
+  Option.iter (fun t -> set_filled parent t) filled;
   List.iter (fun child -> add_child parent (child ())) children;
   parent
 
@@ -2286,8 +2302,8 @@ let spacer ?(grow = 1.0) () =
   set_grow w grow;
   w
 
-let column ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?align ?inset children =
-  container ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?align ?inset Kaya_wire.kind_column
+let column ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?align ?inset ?filled children =
+  container ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?align ?inset ?filled Kaya_wire.kind_column
     children
 
 (* A vertical scroll viewport over EXACTLY ONE child (the signature
@@ -2302,9 +2318,9 @@ let scroll ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help
    core-evaluated breakpoint (docs/adaptive-layout-plan.md D3). LIVE
    ONLY: [Tpl.row] carries no such label, since a breakpoint's setters
    name live widgets and a template row is stamped per entry. *)
-let row ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?align ?inset ?stack_when ?wrap children () =
+let row ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?align ?inset ?filled ?stack_when ?wrap children () =
   let parent =
-    container ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?align ?inset Kaya_wire.kind_row
+    container ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?align ?inset ?filled Kaya_wire.kind_row
       children ()
   in
   Option.iter (fun v -> set_wrap parent v) wrap;
@@ -3750,6 +3766,9 @@ module Tpl = struct
     (* A stamped container's cross-axis child placement (the live [set_align]). *)
     let set_align (Node id) a = emit (the_tx ()) (Kaya_wire.tx_set_align id (align_wire a))
 
+    (* A stamped container filled with a platform tint (the live [~filled]). *)
+    let set_filled (Node id) t = emit (the_tx ()) (Kaya_wire.tx_set_filled id (Tint.wire t))
+
     (* A stamped grid's auto columns at a floor (the live
        [set_columns_auto]; docs/layout-knobs-plan.md §3). *)
     let set_columns_auto (Node id) min_width =
@@ -4058,6 +4077,7 @@ module Tpl = struct
      [set_drop_target] reads. *)
   let set_accepts n kinds = Floor.set_accepts n kinds
   let set_align n a = Floor.set_align n a
+  let set_filled n t = Floor.set_filled n t
 
   let when_ (s : bool signal) body () =
     let tx = the_tx () in

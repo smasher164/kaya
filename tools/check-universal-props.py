@@ -456,6 +456,73 @@ def census(files):
         bad.append(f"{swiftui}: KayaFlex.sizeThatFits computes the baseline row's height "
                    "BEFORE the shrunk pass, which then overwrites it with the plain maximum")
     bad += drag_waits(read(winui))
+    bad += fill_reads(read(swiftui))
+    bad += fill_reads_rust_and_compose(read(gtk), read(winui), read(compose))
+    return bad
+
+
+# The other three readers, the same rule: each block renders or prints the
+# window and never names the model's own record of the fill.
+def fill_reads_rust_and_compose(gtk_text, winui_text, compose_text):
+    bad = []
+    for path, text, start_at, needle, forbidden in (
+        (GTK, gtk_text, "fn fill_tint(&self, t: crate::harness::Target)",
+         "renderer.render_texture(&node, None)",
+         r"Prop::Filled|FILLED_CLASS|TINT_CLASSES|kaya-tint-"),
+        (WINUI, winui_text, "fn fill_tint(&self, t: crate::harness::Target)",
+         "grab_canvas(&at)", r"core\.filled\b"),
+        (COMPOSE, compose_text, "private fun kayaFillRead(",
+         "android.view.PixelCopy.request(", r"\.filled\b"),
+    ):
+        start = text.find(start_at)
+        if start < 0:
+            bad.append(f"{path}: the fill reader {start_at!r} is missing")
+            continue
+        end = text.find("\n    }\n", start)
+        block = text[start:end if end > 0 else len(text)]
+        if needle not in block:
+            bad.append(f"{path}: the fill reader no longer reads the window ({needle!r} missing)")
+        if re.search(forbidden, block):
+            bad.append(f"{path}: the fill reader names the model's own fill — the verdict must "
+                       "come from the pixels, not the prop it is judging")
+    # WinUI's on-accent text is set PER LABEL (a Grid has no Foreground to
+    # inherit), so it must run wherever a label can come to sit inside an
+    # accent fill: the fill itself, a child joining, a role restyling it.
+    # expect_fill reads the fill and cannot see the text (docs/tints-plan.md §4.1).
+    for anchor, call in (
+        ("ApplyOp::AddChild { parent, child } => {", "restyle_on_accent(core, child)?;"),
+        ("grid.SetStyle(&filled_style(tint)?)?;", "restyle_on_accent(core, id)?;"),
+        ('core.label_roles.insert(id, 3);', "restyle_on_accent(core, id)?;"),
+        ('core.label_roles.insert(id, 4);', "restyle_on_accent(core, id)?;"),
+    ):
+        at = winui_text.find(anchor)
+        if at < 0 or call not in winui_text[at:at + 400]:
+            bad.append(f"{WINUI}: the on-accent text restyle no longer runs after {anchor!r}")
+    return bad
+
+
+# A FILL IS READ OFF THE PIXELS (docs/tints-plan.md §4). A reader that
+# answered from the node's own `filled` would pass tints.steps with nothing
+# drawn, and no scene could tell. SwiftUI's reader samples the window on
+# both platforms and never names the prop, and the container arm applies
+# the surface the reader is judging.
+def fill_reads(swiftui_text):
+    bad = []
+    body = swiftui_text
+    start = body.find("func kayaFillRead(")
+    if start < 0:
+        return [f"{SWIFTUI}: kayaFillRead is missing — expect_fill has no reader"]
+    end = body.find("\n}\n", start)
+    reader = body[start:end if end > 0 else len(body)]
+    for needle in ("content.cacheDisplay(in: rect, to: rep)",
+                   "window.drawHierarchy(in: window.bounds, afterScreenUpdates: false)"):
+        if needle not in reader:
+            bad.append(f"{SWIFTUI}: kayaFillRead no longer samples the window ({needle!r} missing)")
+    if re.search(r"\.filled\b", reader):
+        bad.append(f"{SWIFTUI}: kayaFillRead reads the node's `filled` — the verdict must come "
+                   "from the pixels, not the prop it is judging")
+    if ".modifier(KayaFilledSurface(tint: node.filled))" not in body:
+        bad.append(f"{SWIFTUI}: the row/column arm no longer applies KayaFilledSurface")
     return bad
 
 
@@ -516,7 +583,7 @@ def drag_waits(winui_text):
 real = load()
 g = Gate("check-universal-props")
 RAN = 0
-DECLARED = 58
+DECLARED = 64
 for path, pattern, repl in (
     (COMPOSE, r"\ba11y\b", "kayaUnappliedProps"),
     (SWIFTUI, r"\bkayaA11y\b", "kayaUnappliedProps"),
@@ -715,6 +782,28 @@ for label, path, pattern, repl in (
     ("WinUI's clipping read counting a baseline drop as text (the shipped state)", WINUI,
      r"let need = f64::from\(element\.DesiredSize\(\)\?\.Height\) - margin\.Top - margin\.Bottom;",
      "let need = f64::from(element.DesiredSize()?.Height);"),
+    ("SwiftUI's fill read answering from the prop", SWIFTUI,
+     r"    let probe = CGRect\(x: frame\.maxX - 8, ",
+     "    _ = node.filled\n    let probe = CGRect(x: frame.maxX - 8, "),
+    ("SwiftUI's fill read no longer sampling the mac window", SWIFTUI,
+     r'return "<no bitmap for \\\(rect\)>" \}\n        content\.cacheDisplay\(in: rect, to: rep\)',
+     'return "<no bitmap for \\(rect)>" }\n        _ = rect'),
+    ("GTK's fill read answering from the tint class", GTK,
+     r"            let \(px, py\) = \(w - 4\.0, h / 2\.0\);",
+     "            let _ = TINT_CLASSES;\n            let (px, py) = (w - 4.0, h / 2.0);"),
+    ("WinUI's fill read answering from the model", WINUI,
+     r"            let y = \(grab\.height / 2\) as usize;",
+     "            let y = (grab.height / 2) as usize;\n            let _ = core.filled.len();"),
+    ("Compose's fill read answering from the node", COMPOSE,
+     r"            val ground = \(decor\.background as\? "
+     r"android\.graphics\.drawable\.ColorDrawable\)\?\.color\n",
+     "            val ground = (decor.background as? "
+     "android.graphics.drawable.ColorDrawable)?.color\n"
+     "            node?.filled\n"),
+    ("WinUI's on-accent text skipped for a joining child", WINUI,
+     r"            core\.tree_parent\.insert\(child\.0, parent\.0\);\n"
+     r"            restyle_on_accent\(core, child\)\?;",
+     "            core.tree_parent.insert(child.0, parent.0);"),
     ("WinUI's clipping read agreeing about a window it never read", WINUI,
      r"if candidates > 0 && read == 0 \{", "if false {"),
     ("WinUI's cell never coming back for a measure with its template", WINUI,

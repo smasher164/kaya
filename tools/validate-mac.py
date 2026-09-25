@@ -884,9 +884,9 @@ for _entry in lane.ORDER:
         if not panel_mode_restore():
             status = 1
     elif _kind == "dark_leg":
-        _name, _scene, _lang = lane.DARK_LEG
-        queue_leg(_name, leg_argv(_scene, _lang),
-                  leg_env(_scene, _lang, appearance="dark"), _scene)
+        for _name, _scene, _lang in lane.DARK_LEGS:
+            queue_leg(_name, leg_argv(_scene, _lang),
+                      leg_env(_scene, _lang, appearance="dark"), _scene)
     else:
         _scene, _langs = _entry
         for _lang in _langs:

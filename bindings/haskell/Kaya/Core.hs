@@ -586,6 +586,8 @@ class Monad m => Declare m where
   -- | A container's cross-axis child placement, as its wire number
   -- (KayaApp's 'Align' spells it); rows centre by default (R5).
   setAlignWire :: El m -> Int64 -> m ()
+  -- | A container's fill, as its tint's wire number (KayaApp's 'Tint').
+  setFilledWire :: El m -> Int64 -> m ()
   -- | THE GRID THAT FITS (docs\/layout-knobs-plan.md §3): as many columns
   -- as fit this grid's width at that many DIP each, sharing the extra.
   -- An explicit 'columnsWhen' still wins while its class holds.
@@ -638,6 +640,7 @@ instance Declare Build where
   setGrow (Widget n) weight = emitB (W.txSetGrow n weight)
   setFill (Widget n) on = emitB (W.txSetFill n on)
   setAlignWire (Widget n) a = emitB (W.txSetAlign n a)
+  setFilledWire (Widget n) t = emitB (W.txSetFilled n t)
   setColumnsAuto (Widget n) minWidth =
     emitB (W.txSetColumns n 0) >> emitB (W.txSetMinColumnWidth n minWidth)
   setWrap (Widget n) on = emitB (W.txSetWrap n on)
@@ -680,6 +683,7 @@ instance Declare Tpl where
   setGrow (Node n) weight = emitT (W.txSetGrow n weight)
   setFill (Node n) on = emitT (W.txSetFill n on)
   setAlignWire (Node n) a = emitT (W.txSetAlign n a)
+  setFilledWire (Node n) t = emitT (W.txSetFilled n t)
   setColumnsAuto (Node n) minWidth =
     emitT (W.txSetColumns n 0) >> emitT (W.txSetMinColumnWidth n minWidth)
   setWrap (Node n) on = emitT (W.txSetWrap n on)

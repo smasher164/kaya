@@ -30,7 +30,7 @@ type drop_values = {
 }
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0x0e84cabd1d859673L
+let spec_hash = 0xc64e96d98712b19bL
 
 let value_bool = 1
 let value_i64 = 2
@@ -126,6 +126,7 @@ let prop_can_undo = 34
 let prop_can_redo = 35
 let prop_document = 36
 let prop_submits = 37
+let prop_filled = 38
 let wprop_title = 1
 let wprop_width = 2
 let wprop_height = 3
@@ -191,6 +192,11 @@ let axis_vertical = 1
 let size_class_none = 0
 let size_class_compact = 1
 let size_class_regular = 2
+let tint_accent = 1
+let tint_success = 2
+let tint_warning = 3
+let tint_critical = 4
+let tint_neutral = 5
 let role_destructive = 1
 let role_prominent = 2
 let role_heading = 3
@@ -1854,6 +1860,32 @@ let tx_bind_submits_element ?(level = 0) ?(field = 0) widget_id =
   finish tx_kind_set_property (fun b ->
       Buffer.add_int64_le b widget_id;
       Buffer.add_int32_le b (Int32.of_int prop_submits);
+      Buffer.add_int32_le b (Int32.of_int source_element);
+      Buffer.add_int32_le b (Int32.of_int level);
+      Buffer.add_int32_le b (Int32.of_int field))
+
+(* set_property with a constant filled value. *)
+let tx_set_filled widget_id filled =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_filled);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (I64 filled))
+
+(* set_property with a signal-bound filled value. *)
+let tx_bind_filled widget_id signal_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_filled);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_property bound to one field of the element of the enclosing
+   For, `level` Fors up (0 = nearest; field 0 for a scalar). *)
+let tx_bind_filled_element ?(level = 0) ?(field = 0) widget_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_filled);
       Buffer.add_int32_le b (Int32.of_int source_element);
       Buffer.add_int32_le b (Int32.of_int level);
       Buffer.add_int32_le b (Int32.of_int field))

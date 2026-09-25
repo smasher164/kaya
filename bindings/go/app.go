@@ -965,6 +965,28 @@ func (w Widget) Align(mode Align) Widget {
 	return w
 }
 
+// Tint is what a filled container's surface means (TintAccent..TintNeutral;
+// docs/tints-plan.md T1): each backend draws it in the platform's own fill
+// and foreground pair.
+type Tint int64
+
+// SetFilled fills a row or column with a platform tint: kaya chooses the
+// fill, the corner radius, the inset (unless SetInset set one) and the
+// foreground of what sits inside (docs/tints-plan.md T2).
+func (tx *Tx) SetFilled(w Widget, tint Tint) {
+	tx.emit(TxSetFilled(w.id, int64(tint)))
+}
+
+// Filled fills this container with a platform tint at construction. Same
+// transaction discipline as Grow.
+func (w Widget) Filled(tint Tint) Widget {
+	if w.tx == nil || w.tx.closed {
+		panic("kaya: Filled on a widget outside its build transaction — use Tx.SetFilled inside a live transaction")
+	}
+	w.tx.SetFilled(w, tint)
+	return w
+}
+
 // Axis is a container's arrangement axis: AxisHorizontal or AxisVertical.
 type Axis int64
 
@@ -4633,6 +4655,12 @@ func (t *Tpl) SetFill(n Node, on bool) {
 // blueprint twin of Tx.SetAlign (docs/flex-shrink-plan.md §9).
 func (t *Tpl) SetAlign(n Node, mode Align) {
 	t.tx.emit(TxSetAlign(n.id, int64(mode)))
+}
+
+// SetFilled fills a stamped container with a platform tint, the blueprint
+// twin of Tx.SetFilled — a chat thread's bubbles are stamped rows.
+func (t *Tpl) SetFilled(n Node, tint Tint) {
+	t.tx.emit(TxSetFilled(n.id, int64(tint)))
 }
 
 // SetColumnsAuto gives every stamped grid as many columns as fit its

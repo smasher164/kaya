@@ -66,6 +66,10 @@ LEGS = {
         "flexshrink-compose",
         # The common list-row shapes (docs/deferred.md).
         "listrow-compose",
+        # The platform tints on a filled container, light and dark
+        # (docs/tints-plan.md).
+        "tints-compose",
+        "tintsdark-compose",
         "scrollto-compose",
         "sizepolicy-compose", "adaptive-compose", "feed-compose",
         "grow-compose", "align-compose", "layout-compose",
@@ -230,6 +234,7 @@ FLAGS = {
     # The dark half of expect_ink's frozen string, one leg instead of a
     # lane re-run (check-appearance holds the leg here).
     "canvasdark-compose": {"scene": "canvas", "appearance": "dark"},
+    "tintsdark-compose": {"scene": "tints", "appearance": "dark"},
     # The one leg on the 1280dp tablet, and the two appended claims the
     # shared file may not carry — the split literal, and the BACK rule
     # (with both panes on screen back reveals nothing, so it must not

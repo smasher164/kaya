@@ -861,6 +861,11 @@
 #define KAYA_PROP_SUBMITS 37
 
 /**
+ * A row or column filled with a platform tint (docs/tints-plan.md T2).
+ */
+#define KAYA_PROP_FILLED 38
+
+/**
  * Window properties (spec::WINDOW_PROPS): their own namespace —
  * windows are not widgets. Window 0 is the primary surface.
  */
@@ -1114,6 +1119,21 @@
 #define KAYA_ROLE_SWITCH 6
 
 #define KAYA_ROLE_LINK 7
+
+/**
+ * The tint enum's values (spec enum "tint"; docs/tints-plan.md T1): what
+ * a filled container's surface MEANS, each backend lowering it to the
+ * platform's own fill and foreground pair.
+ */
+#define KAYA_TINT_ACCENT 1
+
+#define KAYA_TINT_SUCCESS 2
+
+#define KAYA_TINT_WARNING 3
+
+#define KAYA_TINT_CRITICAL 4
+
+#define KAYA_TINT_NEUTRAL 5
 
 /**
  * The SEMANTIC ICON VOCABULARY (spec enum "symbol"; docs/styling-plan.md

@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0x0e84cabd1d859673n;
+export const SPEC_HASH = 0xc64e96d98712b19bn;
 
 export const VALUE_BOOL = 1;
 export const VALUE_I64 = 2;
@@ -103,6 +103,7 @@ export const PROP_CAN_UNDO = 34;
 export const PROP_CAN_REDO = 35;
 export const PROP_DOCUMENT = 36;
 export const PROP_SUBMITS = 37;
+export const PROP_FILLED = 38;
 export const WPROP_TITLE = 1;
 export const WPROP_WIDTH = 2;
 export const WPROP_HEIGHT = 3;
@@ -168,6 +169,11 @@ export const AXIS_VERTICAL = 1;
 export const SIZE_CLASS_NONE = 0;
 export const SIZE_CLASS_COMPACT = 1;
 export const SIZE_CLASS_REGULAR = 2;
+export const TINT_ACCENT = 1;
+export const TINT_SUCCESS = 2;
+export const TINT_WARNING = 3;
+export const TINT_CRITICAL = 4;
+export const TINT_NEUTRAL = 5;
 export const ROLE_DESTRUCTIVE = 1;
 export const ROLE_PROMINENT = 2;
 export const ROLE_HEADING = 3;
@@ -1733,6 +1739,24 @@ export function tx_bind_submits(widget_id: number, signal_id: number): Uint8Arra
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_submits_element(widget_id: number, level = 0, field = 0): Uint8Array {
   enc.begin(); enc.u64(widget_id); enc.u32(PROP_SUBMITS); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a constant filled value. */
+export function tx_set_filled(widget_id: number, filled: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_FILLED); enc.u32(SOURCE_CONST); enc.value(new I64(filled));
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a signal-bound filled value. */
+export function tx_bind_filled(widget_id: number, signal_id: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_FILLED); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_filled_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_FILLED); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
   return enc.end(TX_SET_PROPERTY);
 }
 

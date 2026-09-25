@@ -104,6 +104,22 @@ public final class KayaApp {
     }
 
     /**
+     * What a filled container's surface means (docs/tints-plan.md T1):
+     * each backend draws it in the platform's own fill and foreground pair.
+     */
+    public enum Tint {
+        ACCENT(KayaWire.TINT_ACCENT), SUCCESS(KayaWire.TINT_SUCCESS),
+        WARNING(KayaWire.TINT_WARNING), CRITICAL(KayaWire.TINT_CRITICAL),
+        NEUTRAL(KayaWire.TINT_NEUTRAL);
+
+        final long wire;
+
+        Tint(long wire) {
+            this.wire = wire;
+        }
+    }
+
+    /**
      * A container's arrangement axis (docs/adaptive-layout-plan.md
      * D1/D2): row and column are ONE node this parameterizes, and the
      * prop is mutable. A widget stays addressable by its CREATION kind
@@ -3220,6 +3236,18 @@ public final class KayaApp {
             return this;
         }
 
+        /** This container filled with a platform tint at construction:
+         * tx.row(() -> {...}).filled(Tint.ACCENT). */
+        public Widget filled(Tint tint) {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: filled on a widget outside its build transaction"
+                    + " — use Tx.setFilled inside a live transaction");
+            }
+            tx.setFilled(this, tint);
+            return this;
+        }
+
         /**
          * This widget's SEMANTIC EMPHASIS at construction:
          * tx.button("Delete").role(Role.DESTRUCTIVE). What the widget
@@ -4300,6 +4328,11 @@ public final class KayaApp {
             t.setAlign(n, align);
         }
 
+        /** This row's copy of that container's fill ({@link Tpl#setFilled}). */
+        public void setFilled(Node n, Tint tint) {
+            t.setFilled(n, tint);
+        }
+
         /** This row's copy of that grid's auto columns at a floor
          * ({@link Tpl#setColumnsAuto}). */
         public void setColumnsAuto(Node n, double minWidth) {
@@ -5041,6 +5074,15 @@ public final class KayaApp {
          */
         public void setAlign(Widget w, Align align) {
             emit(KayaWire.txSetAlign(w.id, align.wire));
+        }
+
+        /**
+         * A row or column filled with a platform tint: kaya chooses the
+         * fill, the corner radius, the inset (unless setInset set one)
+         * and the foreground of what sits inside (docs/tints-plan.md T2).
+         */
+        public void setFilled(Widget w, Tint tint) {
+            emit(KayaWire.txSetFilled(w.id, tint.wire));
         }
 
         /**
@@ -6722,6 +6764,13 @@ public final class KayaApp {
          * twin of {@link Tx#setAlign(Widget, Align)}. */
         public void setAlign(Node n, Align align) {
             tx.emit(KayaWire.txSetAlign(n.id, align.wire));
+        }
+
+        /** A stamped container filled with a platform tint, the blueprint
+         * twin of {@link Tx#setFilled(Widget, Tint)} — a chat thread's
+         * bubbles are stamped rows. */
+        public void setFilled(Node n, Tint tint) {
+            tx.emit(KayaWire.txSetFilled(n.id, tint.wire));
         }
 
         /** A stamped grid's auto columns at a floor, the blueprint twin

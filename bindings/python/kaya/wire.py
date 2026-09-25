@@ -14,7 +14,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, cast
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x0e84cabd1d859673
+SPEC_HASH = 0xc64e96d98712b19b
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -110,6 +110,7 @@ PROP_CAN_UNDO = 34
 PROP_CAN_REDO = 35
 PROP_DOCUMENT = 36
 PROP_SUBMITS = 37
+PROP_FILLED = 38
 WPROP_TITLE = 1
 WPROP_WIDTH = 2
 WPROP_HEIGHT = 3
@@ -175,6 +176,11 @@ AXIS_VERTICAL = 1
 SIZE_CLASS_NONE = 0
 SIZE_CLASS_COMPACT = 1
 SIZE_CLASS_REGULAR = 2
+TINT_ACCENT = 1
+TINT_SUCCESS = 2
+TINT_WARNING = 3
+TINT_CRITICAL = 4
+TINT_NEUTRAL = 5
 ROLE_DESTRUCTIVE = 1
 ROLE_PROMINENT = 2
 ROLE_HEADING = 3
@@ -1243,6 +1249,21 @@ def tx_bind_submits(widget_id: int, signal_id: int) -> bytes:
 def tx_bind_submits_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_SUBMITS, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_filled(widget_id: int, filled: int) -> bytes:
+    """set_property with a constant filled value (int)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_FILLED, SOURCE_CONST) + _enc.value(int(filled)))
+
+
+def tx_bind_filled(widget_id: int, signal_id: int) -> bytes:
+    """set_property with a signal-bound filled value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_FILLED, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_filled_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_FILLED, SOURCE_ELEMENT, level, field))
 
 
 def tx_set_window_title(window: int, title: str) -> bytes:

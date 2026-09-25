@@ -206,6 +206,7 @@ module KayaApp
     setSpacing,
     setInset,
     setAlign,
+    setFilled,
     setAxis,
     stackWhen,
     columnsWhen,
@@ -217,6 +218,7 @@ module KayaApp
     setHref,
     setRole,
     Align (..),
+    Tint (..),
     Axis (..),
     SizeClass (..),
     Role (..),
@@ -2410,6 +2412,30 @@ alignWire AlignBaseline = 4
 setAlign :: Widget -> Align -> Build ()
 setAlign (Widget w) a = emitB (W.txSetAlign w (alignWire a))
 
+-- | What a filled container's surface means (docs\/tints-plan.md T1): each
+-- backend draws it in the platform's own fill and foreground pair.
+data Tint
+  = TintAccent
+  | TintSuccess
+  | TintWarning
+  | TintCritical
+  | TintNeutral
+  deriving (Eq, Show)
+
+tintWire :: Tint -> Int64
+tintWire TintAccent = 1
+tintWire TintSuccess = 2
+tintWire TintWarning = 3
+tintWire TintCritical = 4
+tintWire TintNeutral = 5
+
+-- | A row or column filled with a platform tint: kaya chooses the fill, the
+-- corner radius, the inset (unless one was set) and the foreground of what
+-- sits inside. The dynamic path; the declarative spelling is the 'Filled'
+-- attr.
+setFilled :: Widget -> Tint -> Build ()
+setFilled (Widget w) t = emitB (W.txSetFilled w (tintWire t))
+
 -- | A container's arrangement direction: row and column are ONE node
 -- this parameterizes, and the creation kind's own is the default
 -- (docs\/adaptive-layout-plan.md D1).
@@ -2591,6 +2617,8 @@ data Attr (c :: WClass) where
   -- | This container's cross-axis child placement. Containers only,
   -- held by the index like 'Spacing'.
   Align :: Align -> Attr 'BoxW
+  -- | This container filled with a platform tint. Containers only.
+  Filled :: Tint -> Attr 'BoxW
   -- | Stack this row's children vertically while the window's size
   -- class is the named one. Containers only, and LIVE ZONE ONLY —
   -- 'TplAttr' has no counterpart.
@@ -2673,6 +2701,7 @@ applyAttr (Wrap on) w = setWrap w on
 applyAttr (Spacing gap) w = setSpacing w gap
 applyAttr (Inset pad) w = setInset w pad
 applyAttr (Align a) w = setAlign w a
+applyAttr (Filled t) w = setFilled w t
 applyAttr (StackWhen when) w = stackWhen w when
 applyAttr (A11yId i) w = setA11yId w i
 applyAttr (A11yIdBound sig) w = bindA11yId w sig
@@ -3379,6 +3408,9 @@ data TplAttr where
   TplFill :: Bool -> TplAttr
   -- | A stamped container's cross-axis child placement (the live 'Align').
   TplAlign :: Align -> TplAttr
+  -- | A stamped container filled with a platform tint (the live 'Filled') —
+  -- a chat thread's bubbles are stamped rows.
+  TplFilled :: Tint -> TplAttr
   -- | A stamped grid's auto columns at a floor, the blueprint twin of
   -- 'ColumnsAuto'. A CONSTANT, for 'TplGrow''s reason.
   TplColumnsAuto :: Double -> TplAttr
@@ -3460,6 +3492,7 @@ applyTplAttr :: TplAttr -> Node -> Tpl ()
 applyTplAttr (TplGrow weight) n = setGrow n weight
 applyTplAttr (TplFill on) n = setFill n on
 applyTplAttr (TplAlign a) n = setAlignWire n (alignWire a)
+applyTplAttr (TplFilled t) n = setFilledWire n (tintWire t)
 applyTplAttr (TplColumnsAuto minWidth) n = setColumnsAuto n minWidth
 applyTplAttr (TplWrap on) n = setWrap n on
 applyTplAttr (TplInset pad) n = setNodeInset n pad

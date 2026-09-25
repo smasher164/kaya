@@ -1107,6 +1107,15 @@ export class Widget extends Handle {
     return this;
   }
 
+  /** This row or column filled with a platform tint (kaya.Tint or its
+   * name): kaya chooses the fill, the corner radius, the inset (unless one
+   * was set) and the foreground inside (docs/tints-plan.md T2). */
+  filled(tint: TintValue | TintName): this {
+    this._live("filled()");
+    records().push(wire.tx_set_filled(this.id, tintValue(tint)));
+    return this;
+  }
+
   /** This container's arrangement direction (kaya.Axis or its name) —
    * the user-driven orientation toggle (docs/adaptive-layout-plan.md
    * D2). Row/column only. */
@@ -3747,6 +3756,18 @@ export type AlignValue = (typeof Align)[keyof typeof Align];
 export type AlignName = "start" | "center" | "end" | "stretch" | "baseline";
 const ALIGN_NAMES: Record<string, number> = Object.fromEntries(Object.entries(Align).map(([k, v]) => [k.toLowerCase(), v]));
 
+/** What a filled container's surface means (docs/tints-plan.md T1). */
+export const Tint = Object.freeze({
+  ACCENT: wire.TINT_ACCENT,
+  SUCCESS: wire.TINT_SUCCESS,
+  WARNING: wire.TINT_WARNING,
+  CRITICAL: wire.TINT_CRITICAL,
+  NEUTRAL: wire.TINT_NEUTRAL,
+});
+export type TintValue = (typeof Tint)[keyof typeof Tint];
+export type TintName = "accent" | "success" | "warning" | "critical" | "neutral";
+const TINT_NAMES: Record<string, number> = Object.fromEntries(Object.entries(Tint).map(([k, v]) => [k.toLowerCase(), v]));
+
 export const Axis = Object.freeze({ HORIZONTAL: wire.AXIS_HORIZONTAL, VERTICAL: wire.AXIS_VERTICAL });
 export type AxisValue = (typeof Axis)[keyof typeof Axis];
 export type AxisName = "horizontal" | "vertical";
@@ -3769,6 +3790,10 @@ function axisValue(axis: unknown): number {
 
 function alignValue(align: unknown): number {
   return vocab(ALIGN_NAMES, "align", align, "kaya.Align.CENTER");
+}
+
+function tintValue(tint: unknown): number {
+  return vocab(TINT_NAMES, "filled", tint, "kaya.Tint.ACCENT");
 }
 
 /** SEMANTIC EMPHASIS, the closed vocabulary (docs/styling-plan.md D4). */
@@ -3877,13 +3902,19 @@ function menuRoleValue(role: unknown): string {
 // -------------------------------------------------------------- widgets
 
 export type GrowOption = { grow?: number };
-export type ContainerOptions = GrowOption & { spacing?: number; align?: AlignValue | AlignName; inset?: number };
+export type ContainerOptions = GrowOption & {
+  spacing?: number;
+  align?: AlignValue | AlignName;
+  inset?: number;
+  filled?: TintValue | TintName;
+};
 
 function setLayout(handle: Handle, opts: ContainerOptions): void {
   if (opts.grow !== undefined) records().push(wire.tx_set_grow(handle.id, Number(opts.grow)));
   if (opts.spacing !== undefined) records().push(wire.tx_set_spacing(handle.id, Number(opts.spacing)));
   if (opts.align !== undefined) records().push(wire.tx_set_align(handle.id, alignValue(opts.align)));
   if (opts.inset !== undefined) records().push(wire.tx_set_inset(handle.id, Number(opts.inset)));
+  if (opts.filled !== undefined) records().push(wire.tx_set_filled(handle.id, tintValue(opts.filled)));
 }
 
 function setGrow(handle: Handle, opts: GrowOption): void {

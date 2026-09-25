@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x0e84cabd1d859673
+specHash = 0xc64e96d98712b19b
 
 valueBool :: Word32
 valueBool = 1
@@ -214,6 +214,8 @@ propDocument :: Word32
 propDocument = 36
 propSubmits :: Word32
 propSubmits = 37
+propFilled :: Word32
+propFilled = 38
 wpropTitle :: Word32
 wpropTitle = 1
 wpropWidth :: Word32
@@ -344,6 +346,16 @@ sizeClassCompact :: Word32
 sizeClassCompact = 1
 sizeClassRegular :: Word32
 sizeClassRegular = 2
+tintAccent :: Word32
+tintAccent = 1
+tintSuccess :: Word32
+tintSuccess = 2
+tintWarning :: Word32
+tintWarning = 3
+tintCritical :: Word32
+tintCritical = 4
+tintNeutral :: Word32
+tintNeutral = 5
 roleDestructive :: Word32
 roleDestructive = 1
 roleProminent :: Word32
@@ -1733,6 +1745,25 @@ txBindSubmits widgetId signalId = wireRecord txKindSetProperty
 txBindSubmitsElement :: Word64 -> Word32 -> Word32 -> Builder
 txBindSubmitsElement widgetId level field = wireRecord txKindSetProperty
   (word64LE widgetId <> word32LE propSubmits <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
+-- set_property with a constant filled value.
+txSetFilled :: Word64 -> Int64 -> Builder
+txSetFilled widgetId filled = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propFilled <> word32LE sourceConst
+    <> encodeValue (VI64 filled))
+
+-- set_property with a signal-bound filled value.
+txBindFilled :: Word64 -> Word64 -> Builder
+txBindFilled widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propFilled <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindFilledElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindFilledElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propFilled <> word32LE sourceElement
     <> word32LE level <> word32LE field)
 
 -- set_window_prop with a constant title value (window 0, the primary surface).

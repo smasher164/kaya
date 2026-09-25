@@ -50,7 +50,7 @@ SCENES = [
 # has not landed — built and run rust-only until their guests arrive,
 # when they move into SCENES.
 DEPTH_SCENES = ["typeface", "windowed", "canvas", "dnd", "tasks", "notify", "notes", "richrows",
-                "format", "flexshrink", "listrow"]
+                "format", "flexshrink", "listrow", "tints"]
 # The C-floor scenes THIS LANE RUNS (guests/c/Makefile keeps the whole
 # list; this is the SCENES= override build_c passes, and check-steps'
 # sweep_c_floor reads it from the other side).
@@ -95,8 +95,10 @@ SCENE_CLOCK = {"clock24": "24"}
 
 # The dark half of expect_ink's frozen string, one leg instead of a
 # lane re-run (tools/check-appearance.py holds the leg here): canvas's
-# script and binary under KAYA_APPEARANCE=dark.
-DARK_LEG = ("canvasdark-rust-swiftui", "canvas", "rust")
+# script and binary under KAYA_APPEARANCE=dark; and the tints resolved in
+# the dark appearance (docs/tints-plan.md §4).
+DARK_LEGS = (("canvasdark-rust-swiftui", "canvas", "rust"),
+             ("tintsdark-rust-swiftui", "tints", "rust"))
 
 # EXCLUSIVE and the idle wait are below, after legs() — the set is derived
 # from the queue rather than spelled.
@@ -124,7 +126,7 @@ HAND_QUEUED = {"editor": "go", "portfolio": "python", "varied": "python",
 #   ("drain",)              the pool barrier
 #   ("panel_mode", n, name) rotate the machine-wide file-panel view mode
 #   ("panel_check",)        the modes-run census + restore
-#   ("dark_leg",)           the canvasdark leg (DARK_LEG above)
+#   ("dark_leg",)           the dark legs (DARK_LEGS above)
 # The single-language groups between drains ARE the serial families, each
 # with its reason at the group.
 ORDER = [
@@ -199,6 +201,8 @@ ORDER = [
     # The common list-row shapes, and the height comparison nothing else
     # could make (docs/deferred.md's list-row layout scene).
     ("listrow", ("rust",)),
+    # The platform tints on a filled container (docs/tints-plan.md).
+    ("tints", ("rust",)),
     # The task manager: a RUST app by design (docs/tasks-plan.md §0).
     ("tasks", ("rust",)),
     # The task manager in Arabic (docs/compliance-plan.md §6): the ar
@@ -357,8 +361,7 @@ def legs():
     out = []
     for entry in ORDER:
         if entry[0] == "dark_leg":
-            name, scene, lang = DARK_LEG
-            out.append((name, scene, lang))
+            out.extend(DARK_LEGS)
         elif entry[0] not in ("drain", "panel_mode", "panel_check"):
             scene, langs = entry
             out.extend((leg_name(scene, lang), scene, lang)
@@ -375,7 +378,7 @@ def blocks():
             if out[-1]:
                 out.append([])
         elif entry[0] == "dark_leg":
-            out[-1].append(DARK_LEG[0])
+            out[-1].extend(name for name, _, _ in DARK_LEGS)
         elif entry[0] not in ("panel_mode", "panel_check"):
             scene, langs = entry
             out[-1].extend(leg_name(scene, lang) for lang in langs)

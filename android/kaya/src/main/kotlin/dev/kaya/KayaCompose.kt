@@ -129,6 +129,7 @@ import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.LocalContentColor
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -581,6 +582,9 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
      * default). See Prop::Align.
      */
     var align by mutableStateOf(0L)
+    /** A filled container's tint (docs/tints-plan.md T2); 0 = not filled. */
+    var filled by mutableStateOf(0L)
+    var insetSet by mutableStateOf(false)
 
     /// The arrangement axis (null = the creation kind's own — row
     /// horizontal, column vertical). One node, two constructor
@@ -662,6 +666,81 @@ val kayaTextBoxes = HashMap<Long, android.graphics.Rect>()
  * coordinates, and `kayaPhotograph` is the one place that crosses.
  */
 val kayaCanvasBoxes = HashMap<Long, android.graphics.Rect>()
+
+/** A filled container's box in window space, expect_fill's crop. */
+val kayaFillBoxes = HashMap<Long, android.graphics.Rect>()
+
+/**
+ * The five tint fills as the live ColorScheme resolved them at the last
+ * composition of a filled container, in tint order — expect_fill's
+ * candidates (docs/tints-plan.md §4).
+ */
+@Volatile var kayaTintFills: List<Int> = emptyList()
+
+/** A filled container's inset when the app set none (docs/tints-plan.md §3). */
+const val KAYA_FILLED_DEFAULT_INSET = 12.0
+
+fun kayaFilledInset(node: KayaNode): Double =
+    if (node.filled != 0L && !node.insetSet) KAYA_FILLED_DEFAULT_INSET else node.inset
+
+private val KAYA_SUCCESS_DESIGN = Color(0xFF2E7D32)
+private val KAYA_WARNING_DESIGN = Color(0xFFF9A825)
+
+/**
+ * A custom colour the Material way (m3 "custom colors"): the design hue
+ * harmonized toward the scheme's primary, its fill and foreground at the
+ * tones Material gives primary and onPrimary.
+ */
+@Composable
+private fun kayaCustomPair(design: Color): Pair<Color, Color> {
+    val scheme = MaterialTheme.colorScheme
+    val dark = scheme.surface.luminance() < 0.5f
+    val harmonized = com.materialkolor.blend.Blend.harmonize(design.toArgb(), scheme.primary.toArgb())
+    val palette = com.materialkolor.palettes.TonalPalette.fromInt(harmonized)
+    return Pair(
+        Color(palette.tone(if (dark) 80 else 40)),
+        Color(palette.tone(if (dark) 20 else 100)),
+    )
+}
+
+/** The platform's fill for a tint and the foreground paired with it. */
+@Composable
+fun kayaTintPair(tint: Long): Pair<Color, Color> {
+    val scheme = MaterialTheme.colorScheme
+    return when (tint) {
+        1L -> Pair(scheme.primary, scheme.onPrimary)
+        2L -> kayaCustomPair(KAYA_SUCCESS_DESIGN)
+        3L -> kayaCustomPair(KAYA_WARNING_DESIGN)
+        4L -> Pair(scheme.error, scheme.onError)
+        else -> Pair(scheme.surfaceContainerHigh, scheme.onSurface)
+    }
+}
+
+/** The fill itself, at Material's medium shape, and the box expect_fill crops. */
+@Composable
+fun kayaFilledSurface(node: KayaNode): Modifier {
+    if (node.filled == 0L) return Modifier
+    kayaTintFills = (1L..5L).map { kayaTintPair(it).first.toArgb() }
+    return Modifier
+        .onGloballyPositioned {
+            val r = it.boundsInWindow()
+            kayaFillBoxes[node.id] = android.graphics.Rect(
+                r.left.toInt(), r.top.toInt(), r.right.toInt(), r.bottom.toInt())
+        }
+        .background(kayaTintPair(node.filled).first, MaterialTheme.shapes.medium)
+}
+
+/** What sits inside a filled container takes the pair's foreground. */
+@Composable
+inline fun KayaFilledContent(node: KayaNode, crossinline content: @Composable () -> Unit) {
+    if (node.filled == 0L) {
+        content()
+    } else {
+        CompositionLocalProvider(LocalContentColor provides kayaTintPair(node.filled).second) {
+            content()
+        }
+    }
+}
 
 /**
  * Whether the scene's `frame` verb owns the tick clock, so the canvas
@@ -1801,7 +1880,7 @@ object KayaCompose {
     // but only the runtime assert catches a stale compiled APK against
     // a new libkaya. ULong because the fingerprint's high bit is fair
     // game and a Kotlin Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0x0e84cabd1d859673uL
+    private const val SPEC_HASH: ULong = 0xc64e96d98712b19buL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -2050,6 +2129,7 @@ object KayaCompose {
     // prop the core turns into set_rich_text before any arm sees it.
     private const val PROP_DOCUMENT = 36
     private const val PROP_SUBMITS = 37
+    private const val PROP_FILLED = 38
     private const val PROP_COLUMNS = 11
     // The accessibility identifier (never spoken) and label (spoken).
     // Universal: every widget kind carries both.
@@ -2896,6 +2976,8 @@ object KayaCompose {
                             KayaSceneModel.nodes[id]!!.rich = readBool(b)
                         PROP_SUBMITS ->
                             KayaSceneModel.nodes[id]!!.submits = readBool(b)
+                        PROP_FILLED ->
+                            KayaSceneModel.nodes[id]!!.filled = readI64(b)
                         // docs/rich-text-plan.md §14: this platform's lever
                         // is `clearHistory()`, so taking ownership drops what
                         // the field had banked.
@@ -2931,8 +3013,10 @@ object KayaCompose {
                             KayaSceneModel.nodes[id]!!.accepts = readString(b)
                         PROP_ROLE ->
                             KayaSceneModel.nodes[id]!!.role = readI64(b)
-                        PROP_INSET ->
+                        PROP_INSET -> {
                             KayaSceneModel.nodes[id]!!.inset = readF64(b)
+                            KayaSceneModel.nodes[id]!!.insetSet = true
+                        }
                         PROP_DATE -> KayaSceneModel.nodes[id]!!.date = readI64(b)
                         PROP_TIME -> KayaSceneModel.nodes[id]!!.time = readI64(b)
                         PROP_MIN_DATE -> KayaSceneModel.nodes[id]!!.minDate = readI64(b)
@@ -6026,6 +6110,68 @@ object KayaCompose {
      * APPEARANCE RIDES THE ANSWER (§6). Not on the UI thread, for
      * `kayaHighlightRead`'s reason.
      */
+    /**
+     * expect_fill's read (docs/tints-plan.md §4): the window's own pixel 4dp
+     * inside the container's RIGHT edge at mid-height, classified against
+     * the five tint
+     * fills the live scheme resolved and the window's own ground.
+     */
+    private fun kayaFillRead(activity: ComponentActivity, spec: String): String {
+        val gathered = onUi(activity) {
+            val node = kayaWidgetTarget(spec)
+            val decor = activity.window.decorView
+            val loc = IntArray(2)
+            decor.getLocationInWindow(loc)
+            val ground = (decor.background as? android.graphics.drawable.ColorDrawable)?.color
+            listOf(
+                node?.let { kayaFillBoxes[it.id] },
+                android.graphics.Point(loc[0], loc[1]),
+                ground,
+                activity.resources.displayMetrics.density,
+            )
+        }
+        val box = gathered[0] as android.graphics.Rect?
+            ?: return "none (no fill box recorded for $spec)"
+        val origin = gathered[1] as android.graphics.Point
+        val ground = gathered[2] as Int?
+            ?: return "<the window's background is not a plain colour>"
+        val density = gathered[3] as Float
+        val y = box.centerY() + origin.y
+        val x = box.right + origin.x - (4 * density).toInt() - 1
+        val src = android.graphics.Rect(x, y, x + 1, y + 1)
+        val bitmap = android.graphics.Bitmap.createBitmap(1, 1, android.graphics.Bitmap.Config.ARGB_8888)
+        val latch = java.util.concurrent.CountDownLatch(1)
+        var result = -1
+        android.view.PixelCopy.request(
+            activity.window, src, bitmap,
+            { code -> result = code; latch.countDown() },
+            android.os.Handler(android.os.Looper.getMainLooper()),
+        )
+        latch.await(2, java.util.concurrent.TimeUnit.SECONDS)
+        if (result != android.view.PixelCopy.SUCCESS) {
+            bitmap.recycle()
+            return "<PixelCopy answered $result for $src>"
+        }
+        val px = bitmap.getPixel(0, 0)
+        bitmap.recycle()
+        fun rgb(c: Int) = intArrayOf((c shr 16) and 0xFF, (c shr 8) and 0xFF, c and 0xFF)
+        fun over(c: Int): IntArray {
+            val a = ((c ushr 24) and 0xFF) / 255.0
+            val f = rgb(c); val g = rgb(ground)
+            return IntArray(3) { Math.round(f[it] * a + g[it] * (1 - a)).toInt() }
+        }
+        val names = listOf("accent", "success", "warning", "critical", "neutral")
+        val fills = kayaTintFills
+        if (fills.size != 5) return "<no filled container has composed, so no tint resolved>"
+        val candidates = listOf("none" to rgb(ground)) + names.zip(fills.map { over(it) })
+        val got = rgb(px)
+        fun dist(c: IntArray) = (0..2).sumOf { (c[it] - got[it]) * (c[it] - got[it]) }
+        val ranked = candidates.sortedBy { dist(it.second) }
+        fun hex(c: IntArray) = String.format("%02X%02X%02X", c[0], c[1], c[2])
+        return "${ranked[0].first} (sampled ${hex(got)} at ($x,$y); " +
+            ranked.take(3).joinToString(", ") { "${it.first} ${hex(it.second)}" } + ")"
+    }
+
     private fun kayaCanvasInk(
         activity: ComponentActivity,
         spec: String,
@@ -9728,6 +9874,15 @@ object KayaCompose {
                             failures.add("${parts[1]} is short of its breadth ($short)")
                         }
                     }
+                    "expect_fill" -> {
+                        // harness.rs Step::ExpectFill.
+                        val got = kayaFillRead(activity, parts[1])
+                        if (got.substringBefore(' ') == parts[2]) {
+                            observed.add("${parts[1]} filled ${parts[2]}")
+                        } else {
+                            failures.add("${parts[1]} reads filled $got, wanted ${parts[2]}")
+                        }
+                    }
                     "expect_height_fits" -> {
                         // harness.rs Step::ExpectHeightFits.
                         val off = onUi(activity) { kayaHeightFits(parts[1]) }
@@ -13233,7 +13388,7 @@ private fun KayaRenderCore(
             ) {
                 node.children.firstOrNull()?.let { KayaRender(it) }
             }
-        KayaCompose.KIND_COLUMN, KayaCompose.KIND_ROW -> {
+        KayaCompose.KIND_COLUMN, KayaCompose.KIND_ROW -> KayaFilledContent(node) {
             // The app's scroll_to_row lands from an effect, the reveal's
             // reason: a scroll needs the layout (docs/scroll-to-plan.md S4).
             LaunchedEffect(node.scrollRowSeq) {
@@ -13271,7 +13426,7 @@ private fun KayaRenderCore(
                 modifier = boxFill.then(hugCross).then(a11y).onGloballyPositioned {
                     kayaInsetOuter[node.id] =
                         Pair(it.size.width.toDouble(), it.size.height.toDouble())
-                }.padding(node.inset.dp).then(formGroup).onGloballyPositioned {
+                }.then(kayaFilledSurface(node)).padding(kayaFilledInset(node).dp).then(formGroup).onGloballyPositioned {
                     kayaInsetInner[node.id] =
                         Pair(it.size.width.toDouble(), it.size.height.toDouble())
                     kayaContainerExtents[node.id] = it.size.height.toDouble()
@@ -13338,7 +13493,7 @@ private fun KayaRenderCore(
                 modifier = boxFill.then(a11y).onGloballyPositioned {
                     kayaInsetOuter[node.id] =
                         Pair(it.size.width.toDouble(), it.size.height.toDouble())
-                }.padding(node.inset.dp).onGloballyPositioned {
+                }.then(kayaFilledSurface(node)).padding(kayaFilledInset(node).dp).onGloballyPositioned {
                     kayaInsetInner[node.id] =
                         Pair(it.size.width.toDouble(), it.size.height.toDouble())
                     kayaContainerExtents[node.id] = it.size.width.toDouble()
@@ -13370,7 +13525,7 @@ private fun KayaRenderCore(
                 modifier = boxFill.then(hugCross).then(a11y).onGloballyPositioned {
                     kayaInsetOuter[node.id] =
                         Pair(it.size.width.toDouble(), it.size.height.toDouble())
-                }.padding(node.inset.dp).onGloballyPositioned {
+                }.then(kayaFilledSurface(node)).padding(kayaFilledInset(node).dp).onGloballyPositioned {
                     kayaInsetInner[node.id] =
                         Pair(it.size.width.toDouble(), it.size.height.toDouble())
                     kayaContainerExtents[node.id] = it.size.width.toDouble()

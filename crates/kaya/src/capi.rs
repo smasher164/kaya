@@ -850,6 +850,8 @@ pub const KAYA_PROP_CAN_REDO: u32 = 35;
 pub const KAYA_PROP_DOCUMENT: u32 = 36;
 /// A textarea whose Return submits (docs/submit-plan.md S2).
 pub const KAYA_PROP_SUBMITS: u32 = 37;
+/// A row or column filled with a platform tint (docs/tints-plan.md T2).
+pub const KAYA_PROP_FILLED: u32 = 38;
 
 /// Window properties (spec::WINDOW_PROPS): their own namespace —
 /// windows are not widgets. Window 0 is the primary surface.
@@ -1066,6 +1068,7 @@ const _: () = assert!(
         && KAYA_PROP_CAN_REDO == wire::PROP_CAN_REDO
         && KAYA_PROP_DOCUMENT == wire::PROP_DOCUMENT
         && KAYA_PROP_SUBMITS == wire::PROP_SUBMITS
+        && KAYA_PROP_FILLED == wire::PROP_FILLED
         && KAYA_WPROP_TITLE == wire::WPROP_TITLE
         && KAYA_WPROP_WIDTH == wire::WPROP_WIDTH
         && KAYA_WPROP_HEIGHT == wire::WPROP_HEIGHT
@@ -1169,6 +1172,22 @@ const _: () = assert!(
         && KAYA_ROLE_PLAIN == wire::ROLE_PLAIN
         && KAYA_ROLE_SWITCH == wire::ROLE_SWITCH
         && KAYA_ROLE_LINK == wire::ROLE_LINK
+);
+
+/// The tint enum's values (spec enum "tint"; docs/tints-plan.md T1): what
+/// a filled container's surface MEANS, each backend lowering it to the
+/// platform's own fill and foreground pair.
+pub const KAYA_TINT_ACCENT: u32 = 1;
+pub const KAYA_TINT_SUCCESS: u32 = 2;
+pub const KAYA_TINT_WARNING: u32 = 3;
+pub const KAYA_TINT_CRITICAL: u32 = 4;
+pub const KAYA_TINT_NEUTRAL: u32 = 5;
+const _: () = assert!(
+    KAYA_TINT_ACCENT == wire::TINT_ACCENT
+        && KAYA_TINT_SUCCESS == wire::TINT_SUCCESS
+        && KAYA_TINT_WARNING == wire::TINT_WARNING
+        && KAYA_TINT_CRITICAL == wire::TINT_CRITICAL
+        && KAYA_TINT_NEUTRAL == wire::TINT_NEUTRAL
 );
 
 /// The SEMANTIC ICON VOCABULARY (spec enum "symbol"; docs/styling-plan.md
@@ -1314,7 +1333,7 @@ const _: () = {
 // Completeness, not just agreement (docs/traps.md): a new spec prop
 // trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::PROPS.len() == 37,
+    crate::spec::PROPS.len() == 38,
     "spec::PROPS grew: export the new KAYA_PROP_* above, extend the pin, and bump this count"
 );
 const _: () = assert!(

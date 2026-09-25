@@ -219,6 +219,10 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     // inserts the newline; the phone keyboard's key says Send). Off, Return
     // is the newline it always was. Legal on the textarea alone.
     ("submits", 37, PropKind::Bool),
+    // docs/tints-plan.md T1/T2: a row or column FILLED with a platform
+    // tint, kaya choosing the fill, radius, inset and foreground from the
+    // platform's own pair. One prop so a tint cannot exist unfilled.
+    ("filled", 38, PropKind::Enum("tint")),
 ];
 
 /// Window properties: the presentation-context twin of PROPS, in its
@@ -3218,6 +3222,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("can_redo", 35),
                 ("document", 36),
                 ("submits", 37),
+                ("filled", 38),
             ],
         },
         EnumSpec {
@@ -3363,6 +3368,16 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("none", 0),
                 ("compact", 1),
                 ("regular", 2),
+            ],
+        },
+        EnumSpec {
+            name: "tint",
+            variants: &[
+                ("accent", 1),
+                ("success", 2),
+                ("warning", 3),
+                ("critical", 4),
+                ("neutral", 5),
             ],
         },
         EnumSpec {
@@ -3999,6 +4014,7 @@ mod tests {
                     ("prop", "can_redo") => wire::PROP_CAN_REDO,
                     ("prop", "document") => wire::PROP_DOCUMENT,
                     ("prop", "submits") => wire::PROP_SUBMITS,
+                    ("prop", "filled") => wire::PROP_FILLED,
                     ("wprop", "title") => wire::WPROP_TITLE,
                     ("wprop", "width") => wire::WPROP_WIDTH,
                     ("wprop", "height") => wire::WPROP_HEIGHT,
@@ -4083,6 +4099,11 @@ mod tests {
                     ("role", "plain") => wire::ROLE_PLAIN,
                     ("role", "switch") => wire::ROLE_SWITCH,
                     ("role", "link") => wire::ROLE_LINK,
+                    ("tint", "accent") => wire::TINT_ACCENT,
+                    ("tint", "success") => wire::TINT_SUCCESS,
+                    ("tint", "warning") => wire::TINT_WARNING,
+                    ("tint", "critical") => wire::TINT_CRITICAL,
+                    ("tint", "neutral") => wire::TINT_NEUTRAL,
                     ("symbol", "add") => wire::SYMBOL_ADD,
                     ("symbol", "remove") => wire::SYMBOL_REMOVE,
                     ("symbol", "delete") => wire::SYMBOL_DELETE,

@@ -401,6 +401,10 @@ struct CoreState {
     /// Padding where SwiftUI and Compose nest two boxes — see
     /// `container_padding`, the only thing that writes it.
     container_insets: HashMap<WidgetId, f64>,
+    /// Each filled container's tint (docs/tints-plan.md T2).
+    filled: HashMap<WidgetId, i64>,
+    /// Each label's role, for the on-accent restyle ([`restyle_on_accent`]).
+    label_roles: HashMap<WidgetId, i64>,
     /// The minted padding host around a SCROLL mounted as a window's root: a
     /// ScrollViewer's default template ignores Control.Padding (the
     /// retemplated entry ScrollViewer in this file exists for that reason), so
@@ -2053,7 +2057,9 @@ fn trace_enabled() -> bool {
 /// the window inset around the container's own padding — so a root's Padding
 /// is the SUM, and every writer goes through here.
 fn container_padding(core: &CoreState, id: WidgetId) -> f64 {
-    let own = core.container_insets.get(&id).copied().unwrap_or(0.0);
+    let own = core.container_insets.get(&id).copied().unwrap_or(
+        if core.filled.contains_key(&id) { FILLED_DEFAULT_INSET } else { 0.0 },
+    );
     let root = core.mounted_roots.values().any(|&r| r == id);
     // A DECLARED TABLE'S CARD INTERIOR RIDES THIS NUMBER deliberately
     // (TABLE_CARD_XAML): it is the one every track arithmetic already
@@ -2065,6 +2071,72 @@ fn container_padding(core: &CoreState, id: WidgetId) -> f64 {
         0.0
     };
     own + card + if root { core.inset } else { 0.0 }
+}
+
+/// A filled container's inset when the app set none (docs/tints-plan.md §3).
+const FILLED_DEFAULT_INSET: f64 = 12.0;
+
+/// The Fluent brush a tint fills with (docs/probes/platform-tokens-2026-09-25.md).
+fn tint_brush_key(tint: i64) -> &'static str {
+    match tint {
+        1 => "AccentFillColorDefaultBrush",
+        2 => "SystemFillColorSuccessBackgroundBrush",
+        3 => "SystemFillColorCautionBackgroundBrush",
+        4 => "SystemFillColorCriticalBackgroundBrush",
+        _ => "CardBackgroundFillColorDefaultBrush",
+    }
+}
+
+/// The fill as a style of {ThemeResource} setters, so it follows the
+/// element's own theme; the neutral card wears Fluent's card stroke, since
+/// its fill alone is a translucent white.
+fn filled_style(tint: i64) -> windows_core::Result<Style> {
+    let stroke = if tint == 5 {
+        "<Setter Property=\"BorderBrush\" Value=\"{ThemeResource CardStrokeColorDefaultBrush}\"/>\
+         <Setter Property=\"BorderThickness\" Value=\"1\"/>"
+    } else {
+        ""
+    };
+    let markup = format!(
+        "<Style xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" TargetType=\"Grid\">\
+         <Setter Property=\"Background\" Value=\"{{ThemeResource {}}}\"/>\
+         <Setter Property=\"CornerRadius\" Value=\"{{ThemeResource OverlayCornerRadius}}\"/>{stroke}</Style>",
+        tint_brush_key(tint)
+    );
+    XamlReader::Load(&HSTRING::from(markup))?.cast()
+}
+
+/// Whether an ancestor of `id` is filled with the accent.
+fn on_accent(core: &CoreState, id: WidgetId) -> bool {
+    let mut at = id.0;
+    while let Some(&parent) = core.tree_parent.get(&at) {
+        if core.filled.get(&WidgetId(parent)) == Some(&1) {
+            return true;
+        }
+        at = parent;
+    }
+    false
+}
+
+/// Every label at or under `id` inside an accent fill takes Fluent's
+/// on-accent text brush on top of its role's own style. A TextBlock's
+/// foreground is not reached by a theme-dictionary override on the Grid
+/// (measured 2026-09-25, docs/tints-plan.md §4.1), so it is set per label.
+fn restyle_on_accent(core: &CoreState, id: WidgetId) -> windows_core::Result<()> {
+    if let Some(NativeWidget::Label { block, .. }) = core.widgets.get(&id) {
+        if on_accent(core, id) {
+            let (based_on, brush) = match core.label_roles.get(&id) {
+                Some(3) => (Some("SubtitleTextBlockStyle"), "TextOnAccentFillColorPrimaryBrush"),
+                Some(4) => (Some("CaptionTextBlockStyle"), "TextOnAccentFillColorSecondaryBrush"),
+                _ => (None, "TextOnAccentFillColorPrimaryBrush"),
+            };
+            block.SetStyle(&themed_foreground_style("TextBlock", based_on, brush)?)?;
+        }
+    }
+    for child in core.child_order.children(id).to_vec() {
+        restyle_on_accent(core, child)?;
+    }
+    Ok(())
 }
 
 /// Write [`container_padding`] onto a container, or onto the minted HOST of a
@@ -13734,8 +13806,13 @@ struct Placement {
 /// by where the client area sits inside the window's outer rect.
 #[cfg(feature = "harness")]
 fn placement(core: &CoreState, image: &Image) -> windows_core::Result<Placement> {
+    element_placement(core, &windows_core::Interface::cast::<FrameworkElement>(image)?)
+}
+
+#[cfg(feature = "harness")]
+fn element_placement(core: &CoreState, element: &FrameworkElement) -> windows_core::Result<Placement> {
     let root = core.window.Content()?;
-    let element: FrameworkElement = windows_core::Interface::cast(image)?;
+    let image = element;
     // THE SAME SCALE THE CORE RASTERED AT: `presentation_report` sends
     // `RasterizationScale`, so any other reading of the DPI would sample
     // the right picture at the wrong place.
@@ -15644,6 +15721,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 // docs/rich-text-plan.md R1: the attributed surface exists only
                 // where the widget asked for it, and the table's own entry is
                 // what says so to every handler below.
+                (NativeWidget::Column(grid) | NativeWidget::Row(grid), Prop::Filled, Value::I64(tint)) => {
+                    grid.SetStyle(&filled_style(tint)?)?;
+                    core.filled.insert(id, tint);
+                    stamp_container_padding(core, id)?;
+                    restyle_on_accent(core, id)?;
+                }
                 // docs/submit-plan.md S2: the set the field's KeyDown reads.
                 (NativeWidget::Textarea(_), Prop::Submits, Value::Bool(on)) => {
                     SUBMITS.with_borrow_mut(|set| {
@@ -16130,6 +16213,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     // size, weight and line height are the platform's
                     // scale — picking numbers out of it is what D4 refuses.
                     label.SetStyle(&theme_resource::<Style>("SubtitleTextBlockStyle")?)?;
+                    core.label_roles.insert(id, 3);
+                    restyle_on_accent(core, id)?;
                 }
                 (NativeWidget::Label { block: label, .. }, Prop::Role, Value::I64(4)) => {
                     // The caption role: Fluent's own caption step of the
@@ -16142,6 +16227,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         Some("CaptionTextBlockStyle"),
                         "TextFillColorSecondaryBrush",
                     )?)?;
+                    core.label_roles.insert(id, 4);
+                    restyle_on_accent(core, id)?;
                 }
                 (_, prop, value) => {
                     panic!("kaya: winui cannot apply {prop:?} = {value:?} here")
@@ -16152,6 +16239,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             // BEFORE THE BRANCHES, every one of which returns early for a
             // container this backend does not lower to a panel.
             core.tree_parent.insert(child.0, parent.0);
+            restyle_on_accent(core, child)?;
             // The viewport's one child (the scene rejects a second):
             // ScrollViewer is a ContentControl, not a panel.
             if let NativeWidget::Scroll(viewer) =
@@ -18033,6 +18121,8 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
         *core = Some(CoreState {
             inset: 16.0,
             container_insets: HashMap::new(),
+            filled: HashMap::new(),
+            label_roles: HashMap::new(),
             scroll_root_hosts: HashMap::new(),
             transactions: tx_rx,
             // THIS BACKEND WINDOWS ROWS (docs/deferred.md, the
@@ -21941,6 +22031,73 @@ impl crate::harness::Stage for WinUiStage {
             } else {
                 format!("{}dip against {}dip", a.round() as i64, b.round() as i64)
             })
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
+    }
+
+    fn fill_tint(&self, t: crate::harness::Target) -> String {
+        Self::on_ui_read(move |core| {
+            let Some(element) = target_element(core, t)? else {
+                return Ok("<no such target>".to_owned());
+            };
+            let element: FrameworkElement = element.cast()?;
+            if element.ActualWidth()? < 8.0 || element.ActualHeight()? < 8.0 {
+                return Ok(format!(
+                    "<the container laid out at {}x{}>",
+                    element.ActualWidth()?,
+                    element.ActualHeight()?
+                ));
+            }
+            let at = element_placement(core, &element)?;
+            let grab = match grab_canvas(&at) {
+                Ok(grab) => grab,
+                Err(why) => return Ok(format!("<the container could not be printed: {why}>")),
+            };
+            let x = (grab.width - 1 - (4.0 * at.scale).round() as i32).max(0) as usize;
+            let y = (grab.height / 2) as usize;
+            let i = (y * grab.width as usize + x) * 4;
+            let got = [grab.pixels[i + 2], grab.pixels[i + 1], grab.pixels[i]].map(f64::from);
+            // Each key resolved in the WINDOW'S theme through a detached
+            // element that requests it, the fill's own route.
+            let dark = core
+                .window
+                .Content()
+                .ok()
+                .and_then(|root| windows_core::Interface::cast::<FrameworkElement>(&root).ok())
+                .and_then(|e| e.ActualTheme().ok())
+                .is_some_and(|theme| theme == ElementTheme::Dark);
+            let resolve = |key: &str| -> windows_core::Result<[f64; 4]> {
+                let markup = format!(
+                    "<Grid xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" \
+                     RequestedTheme=\"{}\" Background=\"{{ThemeResource {key}}}\"/>",
+                    if dark { "Dark" } else { "Light" }
+                );
+                let probe: Grid = XamlReader::Load(&HSTRING::from(markup))?.cast()?;
+                let c = probe.Background()?.cast::<SolidColorBrush>()?.Color()?;
+                Ok([c.R, c.G, c.B, c.A].map(f64::from))
+            };
+            let ground = resolve("ApplicationPageBackgroundThemeBrush")?;
+            let mut candidates = vec![("none", [ground[0], ground[1], ground[2]])];
+            for (name, tint) in [("accent", 1), ("success", 2), ("warning", 3), ("critical", 4), ("neutral", 5)] {
+                let c = resolve(tint_brush_key(tint))?;
+                let a = c[3] / 255.0;
+                let over = |k: usize| c[k] * a + ground[k] * (1.0 - a);
+                candidates.push((name, [over(0), over(1), over(2)]));
+            }
+            let dist = |c: &[f64; 3]| (0..3).map(|k| (c[k] - got[k]).powi(2)).sum::<f64>();
+            candidates.sort_by(|a, b| dist(&a.1).total_cmp(&dist(&b.1)));
+            let hex = |c: &[f64; 3]| {
+                format!("{:02X}{:02X}{:02X}", c[0].round() as u8, c[1].round() as u8, c[2].round() as u8)
+            };
+            Ok(format!(
+                "{} (sampled {} at ({x},{y}) of a {}x{} print, {}; {})",
+                candidates[0].0,
+                hex(&got),
+                grab.width,
+                grab.height,
+                if dark { "dark" } else { "light" },
+                candidates.iter().take(3).map(|(n, c)| format!("{n} {}", hex(c))).collect::<Vec<_>>().join(", ")
+            ))
         })
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }

@@ -113,6 +113,7 @@ func (r messageRow) SetAccepts(n kaya.Node, kinds ...string) { r.t.SetAccepts(n,
 
 func (r messageRow) SetFill(n kaya.Node, on bool)          { r.t.SetFill(n, on) }
 func (r messageRow) SetAlign(n kaya.Node, mode kaya.Align) { r.t.SetAlign(n, mode) }
+func (r messageRow) SetFilled(n kaya.Node, tint kaya.Tint) { r.t.SetFilled(n, tint) }
 
 func (r messageRow) SetColumnsAuto(n kaya.Node, minWidth float64) { r.t.SetColumnsAuto(n, minWidth) }
 

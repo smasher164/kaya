@@ -6772,6 +6772,38 @@ padding: 0px 6px; min-width: 12px; font-size: 0.8em; }
 
 const BADGE_CLASS: &str = "kaya-badge";
 
+/// A filled container (docs/tints-plan.md): libadwaita's named fill and
+/// foreground pairs at the card's 12px radius. NEUTRAL IS libadwaita's own
+/// `.card`, shadow included, since the plan takes each platform's card as it
+/// is. The padding class is the default inset, dropped when the app set one.
+const TINT_CSS: &str = "\
+.kaya-filled { border-radius: 12px; }
+.kaya-filled-pad { padding: 12px; }
+.kaya-tint-accent { background-color: @accent_bg_color; color: @accent_fg_color; }
+.kaya-tint-success { background-color: @success_bg_color; color: @success_fg_color; }
+.kaya-tint-warning { background-color: @warning_bg_color; color: @warning_fg_color; }
+.kaya-tint-critical { background-color: @error_bg_color; color: @error_fg_color; }
+";
+
+const FILLED_CLASS: &str = "kaya-filled";
+const FILLED_PAD_CLASS: &str = "kaya-filled-pad";
+const TINT_CLASSES: [&str; 5] =
+    ["kaya-tint-accent", "kaya-tint-success", "kaya-tint-warning", "kaya-tint-critical", "card"];
+
+/// The container's fill: exactly one tint class, the default inset unless the
+/// app set one.
+fn set_filled(widget: &gtk4::Widget, tint: i64) {
+    use gtk4::prelude::WidgetExt;
+    for class in TINT_CLASSES {
+        widget.remove_css_class(class);
+    }
+    widget.add_css_class(FILLED_CLASS);
+    widget.add_css_class(TINT_CLASSES[(tint.clamp(1, 5) - 1) as usize]);
+    if !widget.css_classes().iter().any(|c| c.starts_with(INSET_CLASS)) {
+        widget.add_css_class(FILLED_PAD_CLASS);
+    }
+}
+
 /// The style class the sidebar's row list wears — libadwaita's own sidebar
 /// list, so kaya's rows are the platform's shape and not a hand-drawn one.
 const SIDEBAR_CLASS: &str = "navigation-sidebar";
@@ -12903,6 +12935,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                         core.rich_pending.borrow_mut().remove(&id.0);
                     }
                 }
+                (NativeWidget::Column(container), Prop::Filled, Value::I64(tint))
+                | (NativeWidget::Row(container), Prop::Filled, Value::I64(tint)) => {
+                    set_filled(&container.clone().upcast::<gtk4::Widget>(), tint);
+                }
                 // docs/submit-plan.md S2: the set the view's key controller reads.
                 (NativeWidget::Textarea(..), Prop::Submits, Value::Bool(on)) => {
                     if on {
@@ -13900,6 +13936,7 @@ fn set_container_inset(core: &mut CoreState, widget: &gtk4::Widget, pad: f64) {
         }
     }
     widget.add_css_class(&format!("{INSET_CLASS}{px}"));
+    widget.remove_css_class(FILLED_PAD_CLASS);
     if core.container_insets.insert(px) {
         let sheet: String = core
             .container_insets
@@ -15177,6 +15214,9 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
         let badge_css = gtk4::CssProvider::new();
         watch_css_errors(&badge_css, &css_error);
         load_kaya_css(&badge_css, "section badge", BADGE_CSS, &css_error);
+        let tint_css = gtk4::CssProvider::new();
+        watch_css_errors(&tint_css, &css_error);
+        load_kaya_css(&tint_css, "tints", TINT_CSS, &css_error);
         // The label weights, at the WISH until a brand font says otherwise
         // (weight_css_for). Kept in CoreState, not handed to the display and
         // forgotten, because a SetTypeface with font bytes rewrites it.
@@ -15243,6 +15283,11 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
             gtk4::style_context_add_provider_for_display(
                 &display,
                 &badge_css,
+                gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
+            );
+            gtk4::style_context_add_provider_for_display(
+                &display,
+                &tint_css,
                 gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
             );
             gtk4::style_context_add_provider_for_display(
@@ -18483,6 +18528,101 @@ impl crate::harness::Stage for GtkStage {
             } else {
                 format!("{}px against {}px", a.round(), b.round())
             }
+        })
+    }
+
+    fn fill_tint(&self, t: crate::harness::Target) -> String {
+        Self::on_main(move |core| {
+            use gtk4::prelude::{NativeExt, PaintableExt, WidgetExt};
+            let Some(control) = target_widget(core, t) else {
+                return "<no such target>".to_string();
+            };
+            let widget = core
+                .widgets
+                .values()
+                .find(|w| w.control() == control)
+                .map_or(control, |w| w.widget());
+            while glib::MainContext::default().iteration(false) {}
+            let Some(native) = widget.native() else {
+                return "<the container is in no toplevel>".to_owned();
+            };
+            let (w, h) = (f64::from(widget.width()), f64::from(widget.height()));
+            if w < 8.0 || h < 8.0 {
+                return format!("<the container laid out at {w}x{h}>");
+            }
+            let Some(renderer) = native.renderer() else {
+                return "<this toplevel has no GSK renderer>".to_owned();
+            };
+            // THE CONTAINER'S OWN SNAPSHOT, in its own coordinates: the
+            // toplevel's snapshot sat a few units off `compute_bounds` on x11
+            // (the CSD shadow), which a probe near an edge reads as a blend.
+            let paintable = gtk4::WidgetPaintable::new(Some(&widget));
+            let snapshot = gtk4::Snapshot::new();
+            paintable.snapshot(&snapshot, w, h);
+            let Some(node) = snapshot.to_node() else {
+                return format!("<the container snapshotted to nothing at {w}x{h}>");
+            };
+            let shot = renderer.render_texture(&node, None);
+            let (tw, th) = (shot.width(), shot.height());
+            if tw < 1 || th < 1 {
+                return format!("<the container rendered to {tw}x{th} pixels>");
+            }
+            let (sx, sy) = (f64::from(tw) / w, f64::from(th) / h);
+            let stride = tw as usize * 4;
+            let mut buf = vec![0u8; stride * th as usize];
+            gtk4::gdk::prelude::TextureExtManual::download(&shot, &mut buf, stride);
+            let (px, py) = (w - 4.0, h / 2.0);
+            let x = ((px * sx) as i32).clamp(0, tw - 1) as usize;
+            let y = ((py * sy) as i32).clamp(0, th - 1) as usize;
+            let at = y * stride + x * 4;
+            let word = u32::from_ne_bytes([buf[at], buf[at + 1], buf[at + 2], buf[at + 3]]);
+            // The platform's own named colours, resolved in THIS widget's
+            // style context now, so the appearance and any brand apply.
+            #[allow(deprecated)]
+            let lookup = |name: &str| {
+                gtk4::prelude::StyleContextExt::lookup_color(&widget.style_context(), name)
+                    .map(|c| [c.red(), c.green(), c.blue(), c.alpha()].map(f64::from))
+            };
+            let Some(ground) = lookup("window_bg_color") else {
+                return "<window_bg_color did not resolve>".to_owned();
+            };
+            // Premultiplied, so the drawn colour over the ground is the
+            // sample plus the ground's share of what it left uncovered.
+            let alpha = f64::from((word >> 24) & 0xff) / 255.0;
+            let got = [(word >> 16) & 0xff, (word >> 8) & 0xff, word & 0xff]
+                .map(f64::from)
+                .into_iter()
+                .zip(ground)
+                .map(|(p, g)| p + g * 255.0 * (1.0 - alpha))
+                .collect::<Vec<_>>();
+            let got = [got[0], got[1], got[2]];
+            let mut candidates = vec![("none", [ground[0] * 255.0, ground[1] * 255.0, ground[2] * 255.0])];
+            for (name, color) in [
+                ("accent", "accent_bg_color"),
+                ("success", "success_bg_color"),
+                ("warning", "warning_bg_color"),
+                ("critical", "error_bg_color"),
+                ("neutral", "card_bg_color"),
+            ] {
+                let Some(c) = lookup(color) else {
+                    return format!("<{color} did not resolve>");
+                };
+                let over = |i: usize| (c[i] * c[3] + ground[i] * (1.0 - c[3])) * 255.0;
+                candidates.push((name, [over(0), over(1), over(2)]));
+            }
+            let dist = |c: &[f64; 3]| (0..3).map(|i| (c[i] - got[i]).powi(2)).sum::<f64>();
+            candidates.sort_by(|a, b| dist(&a.1).total_cmp(&dist(&b.1)));
+            let hex = |c: &[f64; 3]| {
+                format!("{:02X}{:02X}{:02X}", c[0].round() as u8, c[1].round() as u8, c[2].round() as u8)
+            };
+            format!(
+                "{} (sampled {} at ({},{}); {})",
+                candidates[0].0,
+                hex(&got),
+                px.round(),
+                py.round(),
+                candidates.iter().take(3).map(|(n, c)| format!("{n} {}", hex(c))).collect::<Vec<_>>().join(", ")
+            )
         })
     }
 

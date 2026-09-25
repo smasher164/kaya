@@ -80,6 +80,8 @@ RUST_SCENES = [
     "flexshrink", "scrollto",
     # The common list-row shapes (docs/deferred.md).
     "listrow",
+    # The platform tints on a filled container (docs/tints-plan.md).
+    "tints",
     # The submit gesture on the three text kinds (docs/submit-plan.md §5).
     "submit",
     # The notification conformance scene: the activation is a REAL tap on
@@ -114,6 +116,10 @@ RUST_SCENES = [
 # lowering. The value is the leg's EXTRA step; table's is empty by
 # decision 5's design — the tiers present identical bytes, and the leg
 # buys that the native path executes at all.
+# Scenes that also run under KAYA_APPEARANCE=dark, as `<scene>dark-swiftui`:
+# the tints resolved in the dark appearance (docs/tints-plan.md §4).
+DARK_EXTRAS = ("tints",)
+
 PAD_EXTRAS = {
     "menus": 'expect_menu_presentation "regular/bar"',
     "listdetail": 'expect_split "regular/split"',

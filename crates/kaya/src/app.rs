@@ -1563,6 +1563,30 @@ impl Align {
     }
 }
 
+/// What a FILLED container's surface means (docs/tints-plan.md T1): each
+/// backend lowers it to the platform's own fill and foreground pair, so it
+/// holds in dark mode and the contrast settings. Rides the wire as I64.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Tint {
+    Accent,
+    Success,
+    Warning,
+    Critical,
+    Neutral,
+}
+
+impl Tint {
+    fn wire(self) -> i64 {
+        match self {
+            Tint::Accent => 1,
+            Tint::Success => 2,
+            Tint::Warning => 3,
+            Tint::Critical => 4,
+            Tint::Neutral => 5,
+        }
+    }
+}
+
 /// A container's arrangement axis (docs/adaptive-layout-plan.md D1/D2):
 /// row and column are one node this parameterizes, and the prop is mutable,
 /// so a breakpoint diff or a handler toggle is an ordinary property write.
@@ -1698,6 +1722,12 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
     /// the same number one level down.
     pub fn inset(self, pad: f64) -> Self {
         self.tx.inset(self.id, pad);
+        self
+    }
+
+    /// This container filled with a platform tint — [`Tx::filled`] chained.
+    pub fn filled(self, tint: Tint) -> Self {
+        self.tx.filled(self.id, tint);
         self
     }
 
@@ -2647,6 +2677,13 @@ impl<'a> Tx<'a> {
     /// rows-only. See [`Prop::Align`].
     pub fn align(&mut self, widget: WidgetId, align: Align) {
         self.set(widget, Prop::Align, align.wire());
+    }
+
+    /// A row or column FILLED with a platform tint: kaya chooses the fill,
+    /// the corner radius, the inset (unless [`Tx::inset`] set one) and the
+    /// foreground of what sits inside (docs/tints-plan.md T2).
+    pub fn filled(&mut self, widget: WidgetId, tint: Tint) {
+        self.set(widget, Prop::Filled, tint.wire());
     }
 
     /// A container's arrangement axis (the creation kind's own is the
@@ -4415,6 +4452,10 @@ impl<'b> Row<'_, 'b> {
 
     pub fn align(&mut self, node: TemplateNodeId, align: Align) {
         self.tpl().align(node, align)
+    }
+
+    pub fn filled(&mut self, node: TemplateNodeId, tint: Tint) {
+        self.tpl().filled(node, tint)
     }
 
     pub fn columns_auto(&mut self, node: TemplateNodeId, min_width: f64) {
@@ -7548,6 +7589,12 @@ impl<'b> Tpl<'_, 'b> {
     /// could not).
     pub fn align(&mut self, node: TemplateNodeId, align: Align) {
         self.set(node, Prop::Align, align.wire());
+    }
+
+    /// A stamped container filled with a platform tint, the blueprint twin
+    /// of [`Tx::filled`] — a chat thread's bubbles are stamped rows.
+    pub fn filled(&mut self, node: TemplateNodeId, tint: Tint) {
+        self.set(node, Prop::Filled, tint.wire());
     }
 
     /// A stamped grid's auto columns at a floor (docs/layout-knobs-plan.md §3).

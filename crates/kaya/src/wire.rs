@@ -418,6 +418,7 @@ pub(crate) const PROP_CAN_UNDO: u32 = 34;
 pub(crate) const PROP_CAN_REDO: u32 = 35;
 pub(crate) const PROP_DOCUMENT: u32 = 36;
 pub(crate) const PROP_SUBMITS: u32 = 37;
+pub(crate) const PROP_FILLED: u32 = 38;
 
 /// The clip representation masks (spec enum "clip"). BIT POSITIONS, not
 /// an ordinal: a copy carries several and a widget accepts several, so
@@ -634,6 +635,12 @@ pub(crate) const ROLE_CAPTION: u32 = 4;
 pub(crate) const ROLE_PLAIN: u32 = 5;
 pub(crate) const ROLE_SWITCH: u32 = 6;
 pub(crate) const ROLE_LINK: u32 = 7;
+
+pub(crate) const TINT_ACCENT: u32 = 1;
+pub(crate) const TINT_SUCCESS: u32 = 2;
+pub(crate) const TINT_WARNING: u32 = 3;
+pub(crate) const TINT_CRITICAL: u32 = 4;
+pub(crate) const TINT_NEUTRAL: u32 = 5;
 
 /// The semantic icon vocabulary's wire values (spec enum "symbol";
 /// docs/styling-plan.md D6). APPEND-ONLY: every backend keys its
@@ -913,6 +920,7 @@ fn prop(raw: u32) -> Prop {
         PROP_CAN_REDO => Prop::CanRedo,
         PROP_DOCUMENT => Prop::Document,
         PROP_SUBMITS => Prop::Submits,
+        PROP_FILLED => Prop::Filled,
         other => panic!("kaya: unknown property {other}"),
     }
 }
@@ -4298,6 +4306,7 @@ fn prop_raw(prop: Prop) -> u32 {
         Prop::CanRedo => PROP_CAN_REDO,
         Prop::Document => PROP_DOCUMENT,
         Prop::Submits => PROP_SUBMITS,
+        Prop::Filled => PROP_FILLED,
     }
 }
 

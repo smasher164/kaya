@@ -65,9 +65,13 @@ Two things the table says that the design has to carry:
 
 ## §3 — The details (RECOMMENDED)
 
-- **The role's name: `filled`.** "card" means a specific look on each
-  platform (a shadowed card on Adwaita, a Material Card component); a
-  filled container is only the fill, the radius and the foreground.
+- **The name: `filled`.** "card" means a specific look on each platform
+  (a shadowed card on Adwaita, a Material Card component); a filled
+  container is only the fill, the radius and the foreground. BUILT AS ONE
+  PROP, not a role beside a `tint` prop (2026-09-25, the depth slice):
+  `filled` on a row or column takes the tint as its value, so a tint can
+  never be set on a container nothing fills — the silent no-op the
+  a11y-empty-label entry paid for. The app writes `.filled(Tint::Accent)`.
 - **The radius is the platform's.** libadwaita's card radius is 12px (a
   stylesheet constant, not readable), Fluent's `OverlayCornerRadius` is 8,
   Material's medium shape is 12dp. Apple has no token; 12pt continuous,
@@ -89,14 +93,53 @@ Two things the table says that the design has to carry:
 
 ## §4 — How a leg sees it
 
-`expect_fill <target> <tint>`: the backend reads a pixel inside the
-container's interior and compares it, within the ink tolerance
+`expect_fill <target> <tint>`: the backend reads the pixel 4 units inside
+the container's RIGHT edge at mid-height — a filled container's padding
+band, clear of the rounded corners — and compares it, within the ink tolerance
 (docs/canvas-plan.md §7.2), against the platform token for that tint
 resolved at that moment. The verdict is the tint's NAME, never a colour,
 so the scene is byte-identical on every lane. A reader that compared
 against the prop instead of the pixels would pass with nothing drawn, so
 check-universal-props holds each reader to its toolkit. The dark half
 runs under `KAYA_APPEARANCE=dark` (the canvasdark legs' route).
+
+## §4.1 — Measured in the depth slice (2026-09-25, mac and iOS)
+
+- The mac reader's capture (`cacheDisplay` on the content view) carries NO
+  window background where nothing was drawn, so a translucent fill and the
+  bare ground both read as black until the capture is composited over the
+  resolved ground. The reader does that now; the first run read
+  `000000` for the neutral and plain rows.
+- Apple's accent, green, orange and red read back within one unit of the
+  resolved system colours in both appearances (`FF393C` drawn against
+  `FF383C` resolved), and the neutral fill is `EBEBEB` over a white ground
+  in light and `303030` over `1E1E1E` in dark.
+- A probe 3 units inside the TOP edge read a blend on GTK (`C0D7F4`, the
+  accent a third of the way over white; `273E5D` in dark), stable across
+  every retry, while the capture showed the fill whole: the root snapshot
+  put the probe on the edge's own blended row. The probe moved to the left
+  edge at mid-height, and then to the RIGHT edge, since an UNFILLED row
+  has no padding band and the left probe read the plain row's "P" (the
+  windows lane and wayland dark alike): `expect_fill <row> none` is asserted
+  on a row whose right edge is empty. GTK's blend was the toplevel snapshot
+  sitting a few units off `compute_bounds` on x11 (the CSD shadow), so the
+  GTK reader snapshots the container itself and composites over the ground.
+- WinUI's accent text: a theme-dictionary override on the filled Grid
+  (`TextFillColorPrimaryBrush` remapped to `TextOnAccentFillColorPrimaryBrush`,
+  lightweight styling) left every label at its default foreground — black
+  on the dark accent in light mode, white on the light accent in dark —
+  while the fill read passed, since it reads fills and not text. Each label
+  inside an accent fill now takes a style based on its role's own with the
+  on-accent brush, applied when the fill is set, when a child joins and when
+  a role restyles it; check-universal-props holds all three sites.
+- Windows resolves each candidate through a detached Grid that requests the
+  window's theme and reads its `{ThemeResource}` background back; on the
+  lane that answered the drawn colours in both appearances.
+- `window.tintColor` is nil on the simulator's key window; the accent the
+  reader resolves is `UIColor.tintColor`.
+- White text on the system green and orange is Apple's own convention and
+  reads weakly (libadwaita uses dark text on its warning fill). A visual
+  ruling for the maintainer, recorded on the review page.
 
 ## §5 — Sequencing
 

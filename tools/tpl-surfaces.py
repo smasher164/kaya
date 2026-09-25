@@ -265,6 +265,9 @@ TPL_PROPS = ["grow", "a11y_id", "a11y_label", "a11y_hint", "accepts", "role", "i
              # child placement, R5's own escape hatch, which no collection
              # row could reach until 2026-09-24.
              "align",
+             # docs/tints-plan.md T2: a stamped container's fill, the chat
+             # bubble's own spelling.
+             "filled",
              # docs/submit-plan.md S2: a stamped textarea that sends on Return.
              "submits",
              # docs/rich-text-plan.md §19: a stamped copy's document, bound
@@ -282,7 +285,7 @@ PROP_MEMBERS = {
         "grow": "set", "a11y_id": "a11y_id", "a11y_label": "a11y_label",
         "a11y_hint": "a11y_hint", "accepts": "accepts", "role": "role",
         "inset": "inset", "help": "help", "placeholder": "placeholder",
-        "href": "href", "fill": "fill", "align": "align",
+        "href": "href", "fill": "fill", "align": "align", "filled": "filled",
         "columns_auto": "columns_auto", "wrap": "wrap",
         "document": "textarea_rich_bound",
         "submits": "submits",
@@ -292,7 +295,7 @@ PROP_MEMBERS = {
         "a11y_hint": "SetA11yHint", "accepts": "SetAccepts", "role": "SetRole",
         "inset": "SetInset", "help": "SetHelp",
         "placeholder": "SetPlaceholder", "href": "SetHref", "fill": "SetFill",
-        "align": "SetAlign",
+        "align": "SetAlign", "filled": "SetFilled",
         "columns_auto": "SetColumnsAuto", "wrap": "SetWrap",
         "document": "TextareaRichBound",
         "submits": "SetSubmits",
@@ -302,7 +305,7 @@ PROP_MEMBERS = {
         "a11y_hint": "SetA11yHint", "accepts": "SetAccepts", "role": "SetRole",
         "inset": "SetInset", "help": "SetHelp",
         "placeholder": "SetPlaceholder", "href": "SetHref", "fill": "SetFill",
-        "align": "SetAlign",
+        "align": "SetAlign", "filled": "SetFilled",
         "columns_auto": "SetColumnsAuto", "wrap": "SetWrap",
         "document": "Textarea(Field<Document>",
         "submits": "SetSubmits",
@@ -312,7 +315,7 @@ PROP_MEMBERS = {
         "a11y_hint": "setA11yHint", "accepts": "setAccepts", "role": "setRole",
         "inset": "setInset", "help": "setHelp",
         "placeholder": "setPlaceholder", "href": "setHref", "fill": "setFill",
-        "align": "setAlign",
+        "align": "setAlign", "filled": "setFilled",
         "columns_auto": "setColumnsAuto", "wrap": "setWrap",
         "document": "textareaRich",
         "submits": "setSubmits",
@@ -322,7 +325,7 @@ PROP_MEMBERS = {
         "a11y_hint": "setA11yHint", "accepts": "setAccepts", "role": "setRole",
         "inset": "setInset", "help": "setHelp",
         "placeholder": "setPlaceholder", "href": "setHref", "fill": "setFill",
-        "align": "setAlign",
+        "align": "setAlign", "filled": "setFilled",
         "columns_auto": "setColumnsAuto", "wrap": "setWrap",
         "document": "textarea(document:",
         "submits": "setSubmits",
@@ -332,7 +335,7 @@ PROP_MEMBERS = {
         "a11y_hint": "set_a11y_hint", "accepts": "set_accepts", "role": "set_role",
         "inset": "set_inset", "help": "set_help",
         "placeholder": "set_placeholder", "href": "set_href", "fill": "set_fill",
-        "align": "set_align",
+        "align": "set_align", "filled": "set_filled",
         "columns_auto": "set_columns_auto", "wrap": "set_wrap",
         "document": "bind_document_field",
         "submits": "set_submits",
@@ -344,7 +347,7 @@ PROP_MEMBERS = {
         "a11y_hint": "TplA11yHint", "accepts": "TplAccepts", "role": "TplRole",
         "inset": "TplInset", "help": "TplHelp",
         "placeholder": "TplPlaceholder", "href": "TplHref", "fill": "TplFill",
-        "align": "TplAlign",
+        "align": "TplAlign", "filled": "TplFilled",
         "columns_auto": "TplColumnsAuto", "wrap": "TplWrap",
         "document": "bindDocumentField",
         "submits": "TplSubmits",
@@ -356,7 +359,7 @@ PROP_MEMBERS = {
         "grow": "grow", "a11y_id": "a11yId", "a11y_label": "a11yLabel",
         "a11y_hint": "a11yHint", "accepts": "accepts", "role": "role",
         "inset": "inset", "help": "help", "placeholder": "placeholder",
-        "href": "href", "fill": "fill", "align": "align",
+        "href": "href", "fill": "fill", "align": "align", "filled": "filled",
         "columns_auto": "columnsAuto", "wrap": "wrap",
         "document": "document",
         "submits": "submits",
@@ -453,6 +456,7 @@ def members_js(_):
     for prop, writer, emitter in (("grow", grow, "wire.tx_set_grow("),
                                   ("inset", layout, "wire.tx_set_inset("),
                                   ("align", layout, "wire.tx_set_align("),
+                                  ("filled", layout, "wire.tx_set_filled("),
                                   ("document", textarea, "bindDocument(")):
         if emitter in writer and "isNode" not in writer and "_tplDepth" not in writer:
             names.add(prop)

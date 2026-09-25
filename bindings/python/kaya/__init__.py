@@ -1044,6 +1044,13 @@ class Widget(_Handle):
         rejects it anywhere else; baseline is rows-only."""
         _records().append(wire.tx_set_align(self.id, _align_value(mode)))
 
+    def filled(self, tint: Tint | str) -> None:
+        """Fill this row or column with a platform tint (see kaya.Tint;
+        strings accepted): kaya chooses the fill, the corner radius, the
+        inset (unless one was set) and the foreground of what sits inside
+        (docs/tints-plan.md T2)."""
+        _records().append(wire.tx_set_filled(self.id, _tint_value(tint)))
+
     def axis(self, mode: Axis | str) -> None:
         """Set this container's arrangement direction (see kaya.Axis;
         strings accepted) — the user-driven orientation toggle
@@ -4241,6 +4248,33 @@ def _align_value(align: Align | str | int) -> Align:
     return Align(align)
 
 
+class Tint(enum.IntEnum):
+    """What a filled container's surface means (docs/tints-plan.md T1):
+    each backend draws it in the platform's own fill and foreground pair."""
+    ACCENT = wire.TINT_ACCENT
+    SUCCESS = wire.TINT_SUCCESS
+    WARNING = wire.TINT_WARNING
+    CRITICAL = wire.TINT_CRITICAL
+    NEUTRAL = wire.TINT_NEUTRAL
+
+
+def _tint_value(tint: Tint | str) -> Tint:
+    if isinstance(tint, Tint):
+        return tint
+    if isinstance(tint, str) and tint.upper() in Tint.__members__:
+        return Tint[tint.upper()]
+    raise KayaTypeError(
+        f"kaya: filled takes kaya.Tint.ACCENT or its name "
+        f"(accent, success, warning, critical, neutral), not {tint!r}"
+    )
+
+
+def _set_filled(handle: _Handle, tint: Tint | str | None) -> None:
+    if tint is None:
+        return
+    _records().append(wire.tx_set_filled(handle.id, _tint_value(tint)))
+
+
 class Role(enum.IntEnum):
     """The role enum: SEMANTIC EMPHASIS, the closed vocabulary
     (docs/styling-plan.md D4). Plain names accepted too.
@@ -4478,15 +4512,17 @@ def spacer(grow: float = 1.0) -> Widget:
 
 def column(*, grow: float | None = None, spacing: float | None = None,
            align: Align | str | None = None,
-           inset: float | None = None) -> _Container:
+           inset: float | None = None,
+           filled: Tint | str | None = None) -> _Container:
     """A column container: parents everything declared inside it. `grow`
     is its flex weight; `spacing` its inter-child gap (main axis, DIP,
-    default 8); `inset` its own padding."""
+    default 8); `inset` its own padding; `filled` a platform tint."""
     handle = _widget(wire.KIND_COLUMN)
     _set_grow(handle, grow)
     _set_spacing(handle, spacing)
     _set_align(handle, align)
     _set_inset(handle, inset)
+    _set_filled(handle, filled)
     return _Container(handle)
 
 
@@ -4536,10 +4572,12 @@ def button(text: str | None = None, bind: TextSource | None = None, *,
 
 def row(*, grow: float | None = None, spacing: float | None = None,
         align: Align | str | None = None, inset: float | None = None,
-        stack_when: SizeClass | None = None) -> _Container:
+        stack_when: SizeClass | None = None,
+        filled: Tint | str | None = None) -> _Container:
     """A row container: column turned sideways. `grow` is its flex
     weight; `spacing` its inter-child gap (main axis, DIP, default 8);
-    `inset` its own padding.
+    `inset` its own padding; `filled` a platform tint (a chat thread's
+    bubble, in a template row).
 
     `stack_when` stacks the children vertically while the window's SIZE
     CLASS is the named one — a core-evaluated breakpoint, reverting when
@@ -4572,6 +4610,7 @@ def row(*, grow: float | None = None, spacing: float | None = None,
     _set_spacing(handle, spacing)
     _set_align(handle, align)
     _set_inset(handle, inset)
+    _set_filled(handle, filled)
     return _Container(handle)
 
 

@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0x0e84cabd1d859673L;
+    public static final long SPEC_HASH = 0xc64e96d98712b19bL;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -109,6 +109,7 @@ public final class KayaWire {
     public static final int PROP_CAN_REDO = 35;
     public static final int PROP_DOCUMENT = 36;
     public static final int PROP_SUBMITS = 37;
+    public static final int PROP_FILLED = 38;
     public static final int WPROP_TITLE = 1;
     public static final int WPROP_WIDTH = 2;
     public static final int WPROP_HEIGHT = 3;
@@ -174,6 +175,11 @@ public final class KayaWire {
     public static final int SIZE_CLASS_NONE = 0;
     public static final int SIZE_CLASS_COMPACT = 1;
     public static final int SIZE_CLASS_REGULAR = 2;
+    public static final int TINT_ACCENT = 1;
+    public static final int TINT_SUCCESS = 2;
+    public static final int TINT_WARNING = 3;
+    public static final int TINT_CRITICAL = 4;
+    public static final int TINT_NEUTRAL = 5;
     public static final int ROLE_DESTRUCTIVE = 1;
     public static final int ROLE_PROMINENT = 2;
     public static final int ROLE_HEADING = 3;
@@ -1904,6 +1910,29 @@ public final class KayaWire {
     public static byte[] txBindSubmitsElement(long widgetId, int level, int field) {
         Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_SUBMITS).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
+    /** set_property with a constant filled value. */
+    public static byte[] txSetFilled(long widgetId, long filled) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_FILLED).putInt(SOURCE_CONST);
+        encodeValue(b, filled);
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound filled value. */
+    public static byte[] txBindFilled(long widgetId, long signalId) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_FILLED).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindFilledElement(long widgetId, int level, int field) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_FILLED).putInt(SOURCE_ELEMENT)
                 .putInt(level).putInt(field);
         return finish(b);
     }

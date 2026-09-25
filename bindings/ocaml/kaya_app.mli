@@ -458,6 +458,11 @@ val set_inset : widget -> float -> unit
 (* A container's cross-axis child placement. *)
 type align = Start | Center | End | Stretch | Baseline
 
+(* What a filled container's surface means (docs/tints-plan.md T1). *)
+module Tint : sig
+  type t = Accent | Success | Warning | Critical | Neutral
+end
+
 (* A container's ARRANGEMENT AXIS (docs/adaptive-layout-plan.md D1/D2). *)
 type axis = Horizontal | Vertical
 
@@ -850,7 +855,7 @@ val column :
   ?help:string ->
   ?help_bind:string signal ->
   ?spacing:float ->
-  ?align:align -> ?inset:float -> (unit -> widget) list -> unit -> widget
+  ?align:align -> ?inset:float -> ?filled:Tint.t -> (unit -> widget) list -> unit -> widget
 
 val scroll :
   ?grow:float ->
@@ -876,6 +881,7 @@ val row :
   ?spacing:float ->
   ?align:align ->
   ?inset:float ->
+  ?filled:Tint.t ->
   ?stack_when:size_class ->
   ?wrap:bool -> (unit -> widget) list -> unit -> widget
 
@@ -1359,6 +1365,7 @@ module Tpl : sig
   val set_drop_target : node -> Op.t list -> unit
   val set_accepts : node -> string list -> unit
   val set_align : node -> align -> unit
+  val set_filled : node -> Tint.t -> unit
   val when_ : bool signal -> (unit -> 'a) -> unit -> node * 'a
 
   val button :

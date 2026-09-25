@@ -3138,6 +3138,10 @@ if SUITE in ("rust-swiftui", "all"):
                             f"{scene}-swiftui-pad", app,
                             f"dev.kaya.{scene}swiftui", scene, scene,
                             pad=True)
+        if scene in lane.DARK_EXTRAS:
+            queue_scene_leg("rust-swiftui", scene, f"{scene}dark-swiftui", app,
+                            f"dev.kaya.{scene}swiftui", scene, scene,
+                            appearance="dark")
     suite_end("swiftui")
 
 # The interleaved pool's one collection point.

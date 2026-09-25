@@ -1,0 +1,12 @@
+# docs/tints-plan.md: each filled row reads back as its own tint off the
+# drawn pixels, the unfilled row as the bare ground, and a stamped row
+# filled from the template zone (a chat bubble's shape) as accent.
+expect_title "tints"
+expect_fill row@t_accent accent
+expect_fill row@t_success success
+expect_fill row@t_warning warning
+expect_fill row@t_critical critical
+expect_fill row@t_neutral neutral
+expect_fill row@t_plain none
+expect_fill row@bubble[n1] accent
+expect_no_clipping

@@ -12678,3 +12678,15 @@ margin "taken out of the content", was never there, and its three
 "fixes" chased it (docs/deferred.md's bare-label entry). Subtract the
 margin before comparing a desired size with an actual one;
 check-universal-props holds the reader to it.
+
+## A WinUI TextBlock's foreground does not follow a theme-dictionary override on its Grid (measured 2026-09-25)
+
+Remapping `TextFillColorPrimaryBrush` to `TextOnAccentFillColorPrimaryBrush`
+in a filled Grid's own `Resources` (ThemeDictionaries for Default and
+Light, the lightweight-styling route that works for a control's template
+resources) changed no label under it: the tints scene's accent rows drew
+black text on the dark accent in light mode and white on the light accent
+in dark. A Grid has no `Foreground` of its own to inherit either. What
+works is a per-label style built with `{ThemeResource}` setters
+(`themed_foreground_style`), based on the label's role style, which still
+follows the theme (docs/tints-plan.md §4.1).

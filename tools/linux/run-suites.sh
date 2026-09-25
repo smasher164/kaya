@@ -42,7 +42,7 @@ SCENES="background stall milestone2 entry search gallery todos reorder feed grow
 # waits on the bindings sweep too (docs/tasks-s3-plan.md §6 step 3);
 # `richtext`, `ownundo` and `richlabel` wait on the eight other bindings'
 # Document/Edit/Format spelling (docs/rich-text-plan.md §4 step 3, §14, §15).
-DEPTH_SCENES="windowed canvas sizepolicy dnd tooltips tasks notify richtext ownundo richlabel notes richrows format flexshrink listrow"
+DEPTH_SCENES="windowed canvas sizepolicy dnd tooltips tasks notify richtext ownundo richlabel notes richrows format flexshrink listrow tints"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 
@@ -1286,6 +1286,11 @@ for proto in x11 wayland; do
         "$CARGO_TARGET_DIR/debug/examples/flexshrink"
     run "$proto" listrow-rust env KAYA_SELFTEST=listrow \
         "$CARGO_TARGET_DIR/debug/examples/listrow"
+    # The platform tints, light and dark (docs/tints-plan.md).
+    run "$proto" tints-rust env KAYA_SELFTEST=tints \
+        "$CARGO_TARGET_DIR/debug/examples/tints"
+    run "$proto" tintsdark-rust env KAYA_APPEARANCE=dark KAYA_SELFTEST=tints \
+        "$CARGO_TARGET_DIR/debug/examples/tints"
     # THE CLOSED-APP CLICK'S DOOR ON THIS LANE (docs/tasks-s9-plan.md R6):
     # the tasks scene's `relaunch` is answered by the daemon's ActionInvoked,
     # which xdg-desktop-portal-gtk reads as the notification's `app.`-prefixed

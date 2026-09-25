@@ -1037,6 +1037,7 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         // The arrangement axis: the two constructor kinds are one node
         // this parameterizes (docs/adaptive-layout-plan.md D1).
         Prop::Axis => matches!(kind, WidgetKind::Column | WidgetKind::Row),
+        Prop::Filled => matches!(kind, WidgetKind::Column | WidgetKind::Row),
         // A container's own padding (docs/styling-plan.md D3): spacing's
         // kinds exactly, and for spacing's reason — the prop is about a
         // container's relation to ITS children.
@@ -1583,6 +1584,7 @@ fn prop_value_type(prop: Prop) -> ValueType {
         Prop::Spacing => ValueType::F64,
         Prop::Inset => ValueType::F64,
         Prop::Align => ValueType::I64,
+        Prop::Filled => ValueType::I64,
         Prop::Axis => ValueType::I64,
         Prop::Role => ValueType::I64,
         Prop::Indeterminate | Prop::Fill | Prop::Wrap | Prop::Rich | Prop::Submits => ValueType::Bool,
@@ -2089,13 +2091,15 @@ fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
             2 => "prominent",
             3 => "heading",
             4 => "caption",
-            _ => "plain",
+            5 => "plain",
+            6 => "switch",
+            _ => "link",
         };
         assert!(
             ok,
             "kaya: role {name} does not fit {kind:?} — destructive, \
-             prominent and plain are button emphasis, heading and caption \
-             are label hierarchy"
+             prominent and plain are button emphasis, heading, caption and \
+             link are labels, switch is a checkbox"
         );
     }
     // The accept list's own domain: at least one token, no token twice.
@@ -2181,6 +2185,12 @@ fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
         assert!(
             !(*mode == 4 && kind == WidgetKind::Column),
             "kaya: baseline alignment applies to rows only"
+        );
+    }
+    if let (Prop::Filled, Value::I64(tint)) = (prop, value) {
+        assert!(
+            (1..=5).contains(tint),
+            "kaya: filled takes a tint (accent=1, success=2, warning=3, critical=4, neutral=5), got {tint}"
         );
     }
     // The axis enum's two values, nothing else: horizontal 0,
@@ -9556,6 +9566,41 @@ mod tests {
                 value: PropValue::Const(Value::I64(3)),
             },
         ]);
+    }
+
+    fn declare(kind: WidgetKind, prop: Prop, value: i64) {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind },
+            TxOp::SetProperty { widget: WidgetId(1), prop, value: PropValue::Const(Value::I64(value)) },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "role link does not fit Button")]
+    fn a_link_button_dies_naming_link() {
+        declare(WidgetKind::Button, Prop::Role, 7);
+    }
+
+    #[test]
+    #[should_panic(expected = "Label has no property Filled")]
+    fn a_filled_label_dies_at_declare() {
+        declare(WidgetKind::Label, Prop::Filled, 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "filled takes a tint")]
+    fn a_filled_row_refuses_a_value_outside_the_tints() {
+        declare(WidgetKind::Row, Prop::Filled, 6);
+    }
+
+    #[test]
+    fn a_row_and_a_column_take_every_tint() {
+        for tint in 1..=5 {
+            declare(WidgetKind::Row, Prop::Filled, tint);
+            declare(WidgetKind::Column, Prop::Filled, tint);
+        }
     }
 
     /// THE EMPTY ACCESSIBLE NAME, both carriers. Four backends had four

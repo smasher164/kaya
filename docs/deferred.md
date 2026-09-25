@@ -9,6 +9,32 @@ Landed history lives in git; this file only carries what is still open.
 scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
+## BUILD — tints and the filled container (design pass ruled 2026-09-25)
+KEY: filled, Tint, tint, expect_fill, fill_tint, kayaFillRead, tints scene, filled container
+
+docs/tints-plan.md: a closed vocabulary of platform tints on a `filled`
+row or column, the chat bubble its first consumer. DEPTH in progress on
+the mac and iOS LANDED 2026-09-25: the spec prop and enum, the Rust binding
+in both zones, the SwiftUI arm, `expect_fill` reading the pixels, the tints
+scene green in light and dark on both, check-universal-props' fill-read
+clause with two watched negatives. What breadth owes, held open here:
+  - ~~**DEPTH STUB: tints on gtk**~~ — LANDED 2026-09-25: libadwaita's
+    named `*_bg_color`/`*_fg_color` pairs at the card's 12px radius, neutral
+    as libadwaita's own `.card`, the fill read off the container's own
+    snapshot; tints and tintsdark green on x11 and wayland.
+  - ~~**DEPTH STUB: tints on winui**~~ — LANDED 2026-09-25: the Fluent
+    brushes as a `{ThemeResource}` style at OverlayCornerRadius, the neutral
+    card with its stroke, the on-accent text per label, the fill read through
+    PrintWindow; tints and tintsdark green on the lane.
+  - ~~**DEPTH STUB: tints on compose**~~ — LANDED 2026-09-25: the Material 3
+    roles, success and warning harmonized toward primary through
+    material-color-utilities, the fill read through PixelCopy; green light
+    and dark.
+  - ~~The eight other bindings' `filled` sugar in both construction
+    zones.~~ LANDED 2026-09-25: Go, C#, Java, Swift, OCaml (a `Tint` module,
+    since `Warning` is a symbol), Haskell, Python and JS, both zones and the
+    generated Go and C# row façades, held by tpl-surfaces' prop census.
+
 ## ~~GAP — a flex row on the phones lets a fixed cell leave the screen or break a word, and expect_no_clipping sees neither (found 2026-09-24 by the compliance review page)~~ LANDED 2026-09-24: the flex-cell rule on all four backends (docs/flex-shrink-plan.md §2, §3: crates/kaya/src/flex.rs's arithmetic, SwiftUI's KayaFlex reading its minimum off the node, Compose's KayaFlexRow, GTK's shrink between minimum and natural, WinUI's star columns floored at the longest word), expect_no_clipping's off-screen clause over labels and buttons and its longest-word clause, the flexshrink scene on all five lanes, the task manager's row folded to title-over-caption since a phone at 200% cannot fit the pair beside the switch and the button, the Compose bar label ellipsized, the review page https://claude.ai/artifact/KPqemDy3TpQPhkmJWDnMAi with the Today screens on every lane; the WinUI InfoBadge at 200% FIXED 2026-09-24 night (below)
 KEY: KayaFlex, flex cell, min-content, row overflow, word break, expect_no_clipping, off-screen frame, NavigationBarItem label, TextOverflow.Visible
 

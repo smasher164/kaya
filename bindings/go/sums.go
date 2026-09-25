@@ -449,6 +449,10 @@ func (sc SumCase[K, V]) SetFill(n Node, on bool) { sc.t.SetFill(n, on) }
 // placement (Tpl.SetAlign).
 func (sc SumCase[K, V]) SetAlign(n Node, mode Align) { sc.t.SetAlign(n, mode) }
 
+// SetFilled fills every stamped copy of this arm's container with the same
+// platform tint (Tpl.SetFilled).
+func (sc SumCase[K, V]) SetFilled(n Node, tint Tint) { sc.t.SetFilled(n, tint) }
+
 // SetColumnsAuto gives every stamped grid of this arm as many columns as
 // fit its width at minWidth DIP each (Tpl.SetColumnsAuto;
 // docs/layout-knobs-plan.md §3).

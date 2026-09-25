@@ -120,6 +120,7 @@ func (r trackRow) SetAccepts(n kaya.Node, kinds ...string) { r.t.SetAccepts(n, k
 
 func (r trackRow) SetFill(n kaya.Node, on bool)          { r.t.SetFill(n, on) }
 func (r trackRow) SetAlign(n kaya.Node, mode kaya.Align) { r.t.SetAlign(n, mode) }
+func (r trackRow) SetFilled(n kaya.Node, tint kaya.Tint) { r.t.SetFilled(n, tint) }
 
 func (r trackRow) SetColumnsAuto(n kaya.Node, minWidth float64) { r.t.SetColumnsAuto(n, minWidth) }
 

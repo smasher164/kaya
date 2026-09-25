@@ -10,7 +10,7 @@ import UserNotifications
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0x0e84cabd1d859673
+let kayaSpecHash: UInt64 = 0xc64e96d98712b19b
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -227,6 +227,12 @@ private let propCanRedo: UInt32 = 35
 // prop the core turns into set_rich_text before any arm sees it.
 private let propDocument: UInt32 = 36
 private let propSubmits: UInt32 = 37
+private let propFilled: UInt32 = 38
+private let tintAccent: Int64 = 1
+private let tintSuccess: Int64 = 2
+private let tintWarning: Int64 = 3
+private let tintCritical: Int64 = 4
+private let tintNeutral: Int64 = 5
 // THE RICH TEXT VOCABULARIES, hand-copied APPEND-ONLY wire values held
 // against the core's by tools/check-verbs.py (docs/rich-text-plan.md R3).
 // An attribute NAME rides the wire as a string; these are the numbers the
@@ -631,6 +637,9 @@ final class KayaNode: Identifiable {
     /// A container's own padding (docs/styling-plan.md D3): DIP between its
     /// bounds and its children, uniform. 0 = flush, every container's default.
     var inset: Double = 0
+    var insetSet = false
+    /// A filled container's tint (docs/tints-plan.md T2); 0 = not filled.
+    var filled: Int64 = 0
     /// The widget's accept list, verbatim; empty means it takes nothing.
     var accepts = ""
     /// A `role link` label's destination (docs/tasks-s2-plan.md T3).
@@ -5702,6 +5711,10 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 case (propInset, valueF64):
                     kayaScene.nodes[id]!.inset =
                         raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
+                    kayaScene.nodes[id]!.insetSet = true
+                case (propFilled, valueI64):
+                    kayaScene.nodes[id]!.filled =
+                        raw.loadUnaligned(fromByteOffset: body + 24, as: Int64.self)
                 case (propSource, valueBlob):
                     // The value's payload is a u64 batch-local handle;
                     // the pump prefetched the bytes into `blobs`.
@@ -9965,6 +9978,23 @@ private func kayaRunScript(_ script: String) {
                     observed.append("\(parts[1]) fits its content")
                 } else {
                     failures.append("\(parts[1]) spends height its content did not ask for (\(off))")
+                }
+            case "expect_fill":
+                // harness.rs Step::ExpectFill: the NEAREST tint to the drawn
+                // pixel, so the verdict is a name on every lane.
+                let want = String(parts[2])
+                let got = DispatchQueue.main.sync { () -> String? in
+                    guard let node = kayaAnyTarget(parts[1]) else { return nil }
+                    return kayaFillRead(node)
+                }
+                guard let got else {
+                    failures.append("no such target: \(parts[1])")
+                    break
+                }
+                if got.split(separator: " ").first.map(String.init) == want {
+                    observed.append("\(parts[1]) filled \(want)")
+                } else {
+                    failures.append("\(parts[1]) reads filled \(got), wanted \(want)")
                 }
             case "expect_not_taller":
                 // harness.rs Step::ExpectNotTaller: two targets, one
@@ -14884,6 +14914,167 @@ func kayaRowAlignment(_ mode: Int64) -> VerticalAlignment {
 /// other half of the measured-inset observation.
 @MainActor var kayaOuterSize: CGSize = .zero
 
+// MARK: - Tints (docs/tints-plan.md)
+
+/// The corner radius and the inset a filled container takes when the app set
+/// none: Apple has no token for either (docs/probes/platform-tokens-2026-09-25.md).
+let kayaFilledRadius: CGFloat = 12
+let kayaFilledDefaultInset: Double = 10
+
+func kayaFilledInset(_ node: KayaNode) -> Double {
+    node.filled != 0 && !node.insetSet ? kayaFilledDefaultInset : node.inset
+}
+
+/// The platform's fill for a tint, and the foreground paired with it.
+@MainActor func kayaTintPair(_ tint: Int64) -> (fill: AnyShapeStyle, fore: AnyShapeStyle) {
+    switch tint {
+    case tintAccent:
+        if let brand = kayaScene.brand {
+            #if os(macOS)
+                let dark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            #else
+                let dark = UITraitCollection.current.userInterfaceStyle == .dark
+            #endif
+            return (AnyShapeStyle(kayaRGB(dark ? brand[6] : brand[1])),
+                    AnyShapeStyle(kayaRGB(dark ? brand[7] : brand[2])))
+        }
+        return (AnyShapeStyle(Color.accentColor), AnyShapeStyle(Color.white))
+    case tintSuccess: return (AnyShapeStyle(Color.green), AnyShapeStyle(Color.white))
+    case tintWarning: return (AnyShapeStyle(Color.orange), AnyShapeStyle(Color.white))
+    case tintCritical: return (AnyShapeStyle(Color.red), AnyShapeStyle(Color.white))
+    default:
+        #if os(macOS)
+            if #available(macOS 14, *) {
+                return (AnyShapeStyle(Color(nsColor: .secondarySystemFill)), AnyShapeStyle(.primary))
+            }
+            return (AnyShapeStyle(.quaternary), AnyShapeStyle(.primary))
+        #else
+            return (AnyShapeStyle(Color(uiColor: .secondarySystemFill)), AnyShapeStyle(.primary))
+        #endif
+    }
+}
+
+private func kayaRGB(_ rgb: UInt32) -> Color {
+    Color(
+        red: Double((rgb >> 16) & 0xFF) / 255.0,
+        green: Double((rgb >> 8) & 0xFF) / 255.0,
+        blue: Double(rgb & 0xFF) / 255.0)
+}
+
+struct KayaFilledSurface: ViewModifier {
+    let tint: Int64
+
+    func body(content: Content) -> some View {
+        if tint == 0 {
+            content
+        } else {
+            let pair = kayaTintPair(tint)
+            content
+                .foregroundStyle(pair.fore)
+                .background(pair.fill, in: RoundedRectangle(cornerRadius: kayaFilledRadius, style: .continuous))
+        }
+    }
+}
+
+/// expect_fill's read (docs/tints-plan.md §4): the pixel 4pt inside the
+/// container's RIGHT edge at mid-height, in the fill's padding band and
+/// clear of the rounded corners, classified against every
+/// tint's platform colour and the bare ground, each resolved NOW in the
+/// window's appearance and composited over the ground where translucent. The
+/// answer is the nearest name, so a container that drew nothing reads "none".
+@MainActor func kayaFillRead(_ node: KayaNode) -> String {
+    guard let frame = kayaNodeFrames[node.id], frame.width > 8, frame.height > 8 else {
+        return "<no laid-out frame: \(kayaNodeFrames[node.id].map(String.init(describing:)) ?? "none recorded")>"
+    }
+    let probe = CGRect(x: frame.maxX - 8, y: frame.midY - 4, width: 8, height: 8)
+    #if os(macOS)
+        guard let window = NSApp.windows.first(where: { $0.isVisible }), let content = window.contentView else {
+            return "<no visible window>"
+        }
+        let y = content.isFlipped ? probe.minY : content.bounds.height - probe.maxY
+        let rect = CGRect(x: probe.minX, y: y, width: probe.width, height: probe.height)
+        guard let rep = content.bitmapImageRepForCachingDisplay(in: rect) else { return "<no bitmap for \(rect)>" }
+        content.cacheDisplay(in: rect, to: rep)
+        guard let cg = rep.cgImage else { return "<no image for \(rect)>" }
+        let appearance = window.effectiveAppearance
+        func rgba(_ c: NSColor) -> [Double] {
+            var out: [Double] = [0, 0, 0, 1]
+            appearance.performAsCurrentDrawingAppearance {
+                if let s = c.usingColorSpace(.sRGB) {
+                    out = [s.redComponent, s.greenComponent, s.blueComponent, s.alphaComponent]
+                }
+            }
+            return out
+        }
+        let dark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        let ground = rgba(.windowBackgroundColor)
+        let neutral: NSColor
+        if #available(macOS 14, *) { neutral = .secondarySystemFill } else { neutral = .quaternaryLabelColor }
+        var accent = rgba(.controlAccentColor)
+        let others = [("success", rgba(.systemGreen)), ("warning", rgba(.systemOrange)),
+                      ("critical", rgba(.systemRed)), ("neutral", rgba(neutral))]
+    #else
+        guard let window = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene })
+            .flatMap({ $0.windows }).first(where: { $0.isKeyWindow }) else { return "<no key window>" }
+        let cg = UIGraphicsImageRenderer(bounds: probe).image { _ in
+            window.drawHierarchy(in: window.bounds, afterScreenUpdates: false)
+        }.cgImage
+        guard let cg else { return "<no image for \(probe)>" }
+        let traits = window.traitCollection
+        func rgba(_ c: UIColor) -> [Double] {
+            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 1
+            c.resolvedColor(with: traits).getRed(&r, green: &g, blue: &b, alpha: &a)
+            return [Double(r), Double(g), Double(b), Double(a)]
+        }
+        let dark = traits.userInterfaceStyle == .dark
+        let ground = rgba(.systemBackground)
+        var accent = rgba(.tintColor)
+        let others = [("success", rgba(.systemGreen)), ("warning", rgba(.systemOrange)),
+                      ("critical", rgba(.systemRed)), ("neutral", rgba(.secondarySystemFill))]
+    #endif
+    if let brand = kayaScene.brand {
+        let rgb = dark ? brand[6] : brand[1]
+        accent = [Double((rgb >> 16) & 0xFF) / 255, Double((rgb >> 8) & 0xFF) / 255, Double(rgb & 0xFF) / 255, 1]
+    }
+    func over(_ c: [Double]) -> [Double] {
+        (0..<3).map { c[$0] * c[3] + ground[$0] * (1 - c[3]) }
+    }
+    // The capture carries no window background where nothing was drawn, so
+    // it is composited over the resolved ground, as the screen composites it.
+    var buf = [UInt8](repeating: 0, count: 4)
+    let drawn = buf.withUnsafeMutableBytes { raw -> Bool in
+        guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+            let ctx = CGContext(
+                data: raw.baseAddress, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+                space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return false }
+        ctx.setFillColor(red: ground[0], green: ground[1], blue: ground[2], alpha: 1)
+        ctx.fill(CGRect(x: 0, y: 0, width: 1, height: 1))
+        ctx.interpolationQuality = .none
+        let w = CGFloat(cg.width), h = CGFloat(cg.height)
+        ctx.draw(cg, in: CGRect(x: -w / 2, y: -h / 2, width: w, height: h))
+        return true
+    }
+    guard drawn else { return "<no bitmap context for the sample>" }
+    let px = buf.prefix(3).map { Double($0) / 255 }
+    let got = String(format: "%02X%02X%02X", buf[0], buf[1], buf[2])
+    let candidates = [("none", Array(ground.prefix(3))), ("accent", over(accent))] + others.map { ($0.0, over($0.1)) }
+    func hex(_ c: [Double]) -> String {
+        String(format: "%02X%02X%02X", Int((c[0] * 255).rounded()), Int((c[1] * 255).rounded()), Int((c[2] * 255).rounded()))
+    }
+    func distance(_ c: [Double]) -> Double {
+        var sum = 0.0
+        for i in 0..<3 { sum += (c[i] - px[i]) * (c[i] - px[i]) }
+        return sum
+    }
+    let ranked: [(String, [Double], Double)] = candidates
+        .map { (name: String, c: [Double]) in (name, c, distance(c)) }
+        .sorted { $0.2 < $1.2 }
+    let probeAt = "(\(Int(probe.midX)),\(Int(probe.midY)))"
+    return "\(ranked[0].0) (sampled \(got) at \(probeAt); "
+        + ranked.prefix(3).map { "\($0.0) \(hex($0.1))" }.joined(separator: ", ") + ")"
+}
+
 /// The brand tint for the CURRENT appearance, or nil for "no request". A
 /// DECLARED BRAND WINS ON EVERY PLATFORM (docs/styling-plan.md D2): `.tint()` is
 /// an explicit environment value the system does not arbitrate. A BRANDLESS app
@@ -16652,8 +16843,9 @@ struct KayaRender: View {
                     id: node.id, vertical: vertical,
                     crossInset: kayaIsGroupedFlow(node) ? Double(2 * kayaFoldSectionPadX) : 0))
             .background(KayaInsetReader(id: node.id, outer: false))
-            .padding(node.inset)
+            .padding(kayaFilledInset(node))
             .background(KayaInsetReader(id: node.id, outer: true))
+            .modifier(KayaFilledSurface(tint: node.filled))
         case kindLabeled:
             // THE LABELLED ROW (docs/forms-plan.md §3): the label names the
             // control — LabeledContent is the platform's own pair, and it
