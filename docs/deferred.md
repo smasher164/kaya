@@ -2670,13 +2670,24 @@ unpicked.
   every other one reads width or a cross-axis span, which is why a WinUI
   row of one line shipped 14px taller than the same backend's row of two.
   IT DOES NOT CATCH THAT RUNAWAY, and that is measured rather than
-  assumed: the fix was cut from a copy and this scene stayed GREEN on the
-  windows lane four times, with and without two intervening resizes. The
-  runaway accumulates over the repeated reindex passes a For inside a
-  scroll provokes, and a scene that builds once and settles never reaches
-  it — so check-universal-props' static clause remains that defect's
-  guard, and a runtime one would have to put these rows inside a
-  collection. The verb IS watched discriminating: the two targets swapped
+  assumed. The fix was cut from a copy and the scene stayed GREEN on the
+  windows lane through FOUR shapes, 2026-09-24: plain rows; plain rows
+  after two intervening `resize_window`s; a row whose middle cell is a
+  bare label rather than a column; and a STAMPED row from a `For`,
+  asserted against an identical static row beside it, which was the shape
+  this entry previously said a runtime guard "would have to" use. It is
+  not enough either. What the Inbox screen has and none of those have is
+  the rest of its context — a For inside a SCROLL, reached by a section
+  navigation — and the runaway is an accumulation over the reindex passes
+  that context provokes.
+  SO check-universal-props' static clause remains that defect's guard,
+  and the next thing to try is not a fifth scene shape but a different
+  QUESTION: every attempt so far compares one row against another, and the
+  runaway's own signature is a row taller than its own tallest cell wants
+  to be (62dip around a cell wanting 43). A one-target verb asking that —
+  a row spends no height its content did not ask for — needs no second row
+  and no cross-screen comparison, which is what defeated the row-to-row
+  form, since within any one screen the runaway moves every row together. The verb IS watched discriminating: the two targets swapped
   read "row@row_two is taller than row@row_one (37pt against 24pt)".
   KEY: list-row layout scene, hugging control, grown entry,
   checkbox MinWidth, fixedSize, stamped row spans, hexpand,
