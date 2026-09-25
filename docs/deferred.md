@@ -2443,8 +2443,13 @@ unpicked.
   2026-07-31 and save 2026-08-10, the clipboard is checked off at the
   top of this file, and drag and drop shipped 2026-09-03 (`0ed93441`;
   the record is at the end of this entry and in docs/dnd-plan.md) — so
-  what this entry still holds open is NOTIFICATIONS, which the spec
-  does not mention today, plus printing behind it. The survey's framing follows
+  what this entry still holds open is PRINTING, and nothing else
+  (swept 2026-09-24). NOTIFICATIONS SHIPPED 2026-09-08 — `891ad047`, TX
+  52/53, occurrence 27, all four backends and all nine bindings, the
+  `notify` scene on five lanes, the struck task-manager S3 entry below —
+  and this sentence went on naming them for two and a half weeks, which
+  is invariant 9's own failure: a reader taking the headline at face
+  value would have started on work that was done. The survey's framing follows
   unchanged, because the ordering argument is what the entry is for.
   In the order real apps need them: **file dialogs**
   — NOT a widget, a presentation context returning a result. RATIFIED
@@ -2488,19 +2493,21 @@ unpicked.
   tools/lib/lanes/android.py's MODS drops it with the one assertion it
   feeds, and the runner's `drop` grammar became a contiguous BLOCK named
   by step specs to say so, five watched negatives at every launch.
-  STILL OPEN
-  under this entry: the four other lanes' backend arms (§5 step 5), the
-  files drop's picked-table redemption (§5 step 4, D6), the TEMPLATE
-  ZONE IN THE EIGHT OTHER BINDINGS — the core and Rust carry both its
-  shapes and the Compose backend proves them on a device (above), while
-  Python, Go, JS, C#, Java, Swift, OCaml and Haskell still refuse a
-  stamped copy by name or by type, so `on_drop_node` and
-  `on_drag_ended_node` — the registration a STAMPED COPY'S OWN
-  `drag_ended` had lacked, which the sweep found through Go's
-  live-arm/node-arm pairing test and docs/dnd-plan.md §4 states — reach
-  the Rust guest alone, and `dnd-jvm` and `dnd-go` are the android
-  lane's two red legs until they follow — and the cross-app witnesses
-  (§5 step 7).
+  ~~STILL OPEN under this entry: the four other lanes' backend
+  arms (§5 step 5), the files drop's picked-table redemption (§5 step 4,
+  D6), the TEMPLATE ZONE IN THE EIGHT OTHER BINDINGS, and the cross-app
+  witnesses (§5 step 7).~~ ALL FOUR CLOSED, swept against the lane logs
+  2026-09-24 rather than argued: the dnd scene passes on every lane and
+  in every language it has a guest for — linux runs rust, python, js,
+  go, csharp, ocaml, haskell and java, windows runs six, android runs
+  compose, jvm and go, mac runs four and iOS three — so the four
+  backend arms are built, the stamped copy's own handlers work in every
+  binding (the scene's `drag label@item[y]` IS the template zone, and it
+  is green in all of them), and the cross-app witnesses run on both
+  desktops (`dndwitness-out-x11`, `dndwitness-in-x11`, `dndwitness_rust`,
+  `dndforeign_rust`). The sentence this replaces called `dnd-jvm` and
+  `dnd-go` "the android lane's two red legs"; both read PASS on the last
+  android lane, at 52s and 50s.
   KEY: drag and drop, dropped, drag_ended, drop_target, draggable,
   reorderable, dnd-plan, DataPackage, GtkDropTargetAsync, input draganddrop
 - **Standard commands LANDED 2026-07-24** (the follow-up milestone to
@@ -2560,11 +2567,17 @@ unpicked.
   artifact running on iPad with a keyboard. Android's equivalent route
   IS live (each host Activity forwards `dispatchKeyShortcutEvent` into
   the same table).
-- scrollTo + ref markers (per-instance handles): brings the first
+- ~~scrollTo + ref markers (per-instance handles): brings the first
   instance-addressed command (TemplateNodeId + key path target) and the
   silent vanished-target no-op (live-zone commands fail loudly; stamped
   copies legitimately vanish under rebuild). Wants a long-list scene —
-  which pairs with row-window virtualization for For.
+  which pairs with row-window virtualization for For.~~ SHIPPED
+  2026-09-24 as `scroll_to_row` (`b3b6098b`): TX 61, apply 49, the
+  instance-addressed command this asked for, with exactly the silent
+  no-op for a key the collection does not hold, in all nine bindings on
+  five lanes, and tools/scenes/scrollto.steps is the long-list scene.
+  WHAT REMAINS IS NARROWER AND IS THE NOTE BELOW, not this headline: a
+  stamped copy's WIDGET state that is not model.
   NOTE 2026-09-16: the rich textarea was this item's first customer and is
   not any more — a stamped copy's document is a Blob FIELD of its row bound
   through the template `document` prop, written by patching the row
@@ -2696,8 +2709,17 @@ unpicked.
 
 ## Bindings / ergonomics
 
-- **IDIOM PASS — the nine bindings read as their own language, not as a
-  port (survey 2026-09-16, Akhil's rulings the same night).** The survey
+- ~~**IDIOM PASS — the nine bindings read as their own language, not as a
+  port (survey 2026-09-16, Akhil's rulings the same night).**~~ COMPLETE
+  2026-09-21: every slice inside it landed (X3, R1, R2, R3's three thirds,
+  the Haskell redo, the correction slice, the wire-alias census, the OCaml
+  .mli files, the Swift 6 guest entry), and R4 is NOT TAKEN by ruling,
+  which is terminal too. Struck 2026-09-24, when the headline still read
+  "(in flight)" over an entry whose every named slice was already struck —
+  invariant 9's own failure mode, and this entry was one of six the survey
+  of that day found. THE ONE THING STILL OPEN under it is small and named
+  at its end: whether a hand run should consume one of the journal's
+  newest-20 run slots (`KAYA_FLIGHTREC_KEEP`), which is a ruling. The survey
   (nine read-only auditors, one per language, the sugar tier plus every
   guest first committed on or after 2026-08-25) answered the maintainer's
   question — "are our bindings a naive port of one language to another?"
@@ -2712,7 +2734,7 @@ unpicked.
   findings: 54 spelling, 1 semantics, 10 capability. The record is the
   review page (kaya Idiom Survey, 2026-09-16) and the coordinator's
   synthesis beside the nine auditors' notes.
-  THE PASS (in flight): one implementer per language lands every
+  THE PASS: one implementer per language lands every
   spelling finding — the wire stops at the binding boundary in nine
   spellings, one keyed read of a row in all nine (Rust, Go and C# had
   none), handles out of a scope (JS scope bodies return their value;
@@ -3072,8 +3094,10 @@ The same
     for Swift (the checked-in generated files are held by gen-guests
     --check); Go's must-use diagnostic through runtime.AddCleanup (a
     GC-time warning is nondeterministic).
+  FIFTH BUNDLE (matrix #35 on the R3 tree, 2026-09-17 13:54 local, windows-notes_rust, 19s): the same shape to the byte — 15000ms of toast in the guest's own sentence, the bundle's foreground text ShellExperienceHost 'New notification' with one element walked and none named, desktop-live SKIPPED because the lane sampler's two sights of the CoreWindow fell outside the leg's window, the database holding the Widgets TILE alone (19:26:21Z, eighty minutes before the leg), and the leg green standalone a minute later (1s). Five bundles that name the class and not the sender is the recorder's defect (the 2026-09-16 ruling), so the growth is charged now rather than filed again: the guest's own wait copies the notification database and takes the desktop picture AT THE MOMENT it first sees the toast, the recorder pulls both as a toast-moment section, and the wait outlasts a long toast (25s is the platform's own long duration; 15s cannot). LANDED THE SAME DAY (one Opus agent; the job's tmp/idiom/notes-toast.md): the guest's wait copies wpndatabase.db WITH ITS WAL (the newest rows live there — 2.5MB of WAL against 0.7MB of database on the VM) and BitBlts the virtual screen with CAPTUREBLT on the first turn it sees the toast, writes one sentence into the verb-trace FILE directly (`vtrace::line`; the ring never reaches disk on the panic this path ends in, which is why every earlier notes bundle read verb-trace.skip), and waits 30s; the recorder pulls both as the `toast-moment` section, rendered through the one wpn reader both sections share, with every row newer than the leg's start marked; check-flightrec holds the section reachable (a new `reachable_py` clause — the plain name test stayed green with the call cut) and the three file names across guest, pull and pre-leg delete, 13 watched negatives. PROVEN ON A FORCED RED: tools/guest/toast-probe.ps1 raised forty `scenario="reminder"` toasts under PowerShell's own AUMID, notes_rust went red at 34s, and toast-moment.txt named the AUMID and the toast's text on forty rows marked as arriving inside the leg while toast-moment.png (viewed) showed the guest window under three stacked banners. MEASURED ON THE WAY, and the reason the class is intermittent: a banner on this VM is normally drawn by explorer's `Xaml_WindowedPopupClass` PopupHost, which NEVER takes the foreground (reminder, incomingCall and the packaged notify identity all measured so); only a freshly restarted ShellExperienceHost draws the `Windows.UI.Core.CoreWindow` titled "New notification" that the wait tests for and that the five reds saw, and it holds the foreground continuously only under a BURST of toasts with distinct tags. So the five reds are a restarted shell plus something raising toasts in a burst near the lane's start (the Widgets tile row stamps there each time); the wait's test stays as it is, since PopupHost holds nothing, and the next sighting's section names the sender. The reminder toast survives History.Clear and Escape; killing ShellExperienceHost (Windows restarts it on demand) is what took it down, and the guest was proven clean afterwards.
+
   KEY: idiom pass, idiom survey, wire-tag clause, naive port, keyed read,
-  async dialogs, row handles python, JDK 21, Swift 6, py.typed, kaya_app. FIFTH BUNDLE (matrix #35 on the R3 tree, 2026-09-17 13:54 local, windows-notes_rust, 19s): the same shape to the byte — 15000ms of toast in the guest's own sentence, the bundle's foreground text ShellExperienceHost 'New notification' with one element walked and none named, desktop-live SKIPPED because the lane sampler's two sights of the CoreWindow fell outside the leg's window, the database holding the Widgets TILE alone (19:26:21Z, eighty minutes before the leg), and the leg green standalone a minute later (1s). Five bundles that name the class and not the sender is the recorder's defect (the 2026-09-16 ruling), so the growth is charged now rather than filed again: the guest's own wait copies the notification database and takes the desktop picture AT THE MOMENT it first sees the toast, the recorder pulls both as a toast-moment section, and the wait outlasts a long toast (25s is the platform's own long duration; 15s cannot). LANDED THE SAME DAY (one Opus agent; the job's tmp/idiom/notes-toast.md): the guest's wait copies wpndatabase.db WITH ITS WAL (the newest rows live there — 2.5MB of WAL against 0.7MB of database on the VM) and BitBlts the virtual screen with CAPTUREBLT on the first turn it sees the toast, writes one sentence into the verb-trace FILE directly (`vtrace::line`; the ring never reaches disk on the panic this path ends in, which is why every earlier notes bundle read verb-trace.skip), and waits 30s; the recorder pulls both as the `toast-moment` section, rendered through the one wpn reader both sections share, with every row newer than the leg's start marked; check-flightrec holds the section reachable (a new `reachable_py` clause — the plain name test stayed green with the call cut) and the three file names across guest, pull and pre-leg delete, 13 watched negatives. PROVEN ON A FORCED RED: tools/guest/toast-probe.ps1 raised forty `scenario="reminder"` toasts under PowerShell's own AUMID, notes_rust went red at 34s, and toast-moment.txt named the AUMID and the toast's text on forty rows marked as arriving inside the leg while toast-moment.png (viewed) showed the guest window under three stacked banners. MEASURED ON THE WAY, and the reason the class is intermittent: a banner on this VM is normally drawn by explorer's `Xaml_WindowedPopupClass` PopupHost, which NEVER takes the foreground (reminder, incomingCall and the packaged notify identity all measured so); only a freshly restarted ShellExperienceHost draws the `Windows.UI.Core.CoreWindow` titled "New notification" that the wait tests for and that the five reds saw, and it holds the foreground continuously only under a BURST of toasts with distinct tags. So the five reds are a restarted shell plus something raising toasts in a burst near the lane's start (the Widgets tile row stamps there each time); the wait's test stays as it is, since PopupHost holds nothing, and the next sighting's section names the sender. The reminder toast survives History.Clear and Escape; killing ShellExperienceHost (Windows restarts it on demand) is what took it down, and the guest was proven clean afterwards.mli,
+  async dialogs, row handles python, JDK 21, Swift 6, py.typed, kaya_app.mli,
   Haskell module split, decision log comments, py-typecheck, verifytypes,
   EXEMPT table, coll[key], sum element Any
 
@@ -4895,7 +4919,7 @@ reach.
 - Attach/embedding tooling rework (parked at milestone 0).
 
 
-## Retire the hand-edited shell and cmd scripts
+## ~~Retire the hand-edited shell and cmd scripts~~ DONE TO THE RULING'S BOUNDARY, struck 2026-09-24 to match this entry's own closing census, which has said so since 2026-09-01: the gate tier converted 2026-08-31, the runners 2026-09-01, and the 40 shell bodies that remain are each in a declared class (the in-container payload and its leg wrappers, the in-toolchain launchers, the three shared libraries with shell consumers, and the stated survivors). THE ONE REMAINDER IS NOT THIS ENTRY'S: the tools/guest/*.cmd generation problem is the HOLD below, which owns it, and two entries sharing one remainder is how a reader ends up believing both are open
 
 Raised 2026-07-31, after file dialogs. The repo already bans sed and awk
 for ad-hoc text work because BSD and GNU diverge; this is the same
@@ -13140,8 +13164,16 @@ a duration scaled off the one-minute load and capped at 4.5s
 host's LEGS are quiet while its load figure is not, so every drag runs at the
 cap (dnd-compose 54-56s, dnd-jvm 51s); a pacing that reads the token as the
 quiet it buys would cut those holds by most of their length, if the drags
-still land. (2) The windows dnd legs at 31-33s each under the token
-(20s alone) — the same question one lane over. (3) The iOS save and file
+still land. ~~(2) The windows dnd legs at 31-33s each under the token
+(20s alone) — the same question one lane over.~~ TAKEN 2026-09-24
+(`b23a13d9`), and the answer was not a pacing that reads the token: the
+windows drag spent 3,660ms of sleep per drag that no measurement stood
+behind, and it releases on the app's own answer now — those six legs read
+5-6s each UNDER THE PLAIN MATRIX, against the 31-32s this line recorded,
+with the windows lane still waiting 339s for the token
+(docs/measurements/win-drag-pace-2026-09-24.md). That is ~155s off the
+windows holds; the ANDROID question in (1) is untouched and is now the
+largest of the four. (3) The iOS save and file
 dialog legs at 20-27s each — the dialog settles. (4) A hold that admits
 non-input legs of other lanes at a narrow width, which trades the isolation
 the token was built for and needs the flake families re-measured first.
@@ -14166,7 +14198,8 @@ row the middle column is two lines tall and absorbs a control's height;
 on the Inbox row the line box is one line, so a control taller than it
 grows the row at both ends. That is a hypothesis and not a measurement:
 the bisect is four cross-builds of the WinUI backend and four captures
-through tools/win-shot, about ten minutes, and it has not been run.
+through the review's own windows shot script, about ten
+minutes, and it has not been run.
 
 WHAT THE FIX OWES A GUARD: a row's height against its line box is
 readable from the backend, so this wants an observable rather than
