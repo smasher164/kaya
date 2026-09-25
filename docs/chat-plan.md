@@ -1,7 +1,9 @@
 # The chat app — the design pass
 
-Status: R1, R2, R4 and R5 RULED 2026-09-25 as recommended; R3 (the
-bubble) reopened the same day and awaits the maintainer. The
+Status: R1-R5 RULED 2026-09-25 (R3: a container role draws the bubble).
+OPEN the same day: whether that role is chat-only or a general filled
+container with a tint from a closed set of platform colours, which
+reopens part of docs/styling-plan.md §2's no-colours ceiling. The
 goal was named on 2026-09-24 ("let's have the chat app be the ultimate
 goal", docs/submit-plan.md §8). Both prerequisites exist: the `submitted`
 occurrence (docs/submit-plan.md) and `scroll_to_row`
@@ -106,7 +108,7 @@ row).
   client look, and it scales past a handful. RECOMMENDED: **list-detail**.
   The list's rows then carry the unread badge as a label, since section
   badges belong to sections.
-- **R3 — the bubble (OPEN).** No platform ships a chat bubble: Messages
+- **R3 — the bubble (RULED 2026-09-25: the container role).** No platform ships a chat bubble: Messages
   on macOS and iOS draws its balloons in the private ChatKit framework,
   Google Messages and Fractal draw their own (Android's "Bubbles" API is
   the floating conversation heads, not this), and WinUI has no such
@@ -119,8 +121,15 @@ row).
   as the button and label roles are; a spec change on four backends.
   (2) a canvas per bubble, which loses selection, links, accessibility and
   the platform's text layout. (3) no bubble, messages as plain rows on
-  alternating sides. RECOMMENDED: (1), without a tail. An emoji-only
-  message then takes no role, which is how Messages shows one.
+  alternating sides. RULED: (1), without a tail. An emoji-only message
+  takes no role, which is how Messages shows one. STILL OPEN: the
+  maintainer asked whether the colour ruling should loosen. The proposal
+  on the table is a closed set of TINTS (accent, success, warning,
+  critical, neutral), each lowered to the platform's own fill and
+  foreground pair so contrast holds in dark and high-contrast modes, on
+  a general FILLED CONTAINER role that the bubble uses as accent and
+  neutral; raw data colours (a project dot, an avatar) held until a
+  consumer asks.
 - **R4 — stick to the bottom.** When the user is at the newest message and
   a new one arrives, every chat client keeps the view at the bottom; when
   the user has scrolled up, it does not move them. RECOMMENDED: measure
