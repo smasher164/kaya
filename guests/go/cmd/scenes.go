@@ -14,6 +14,7 @@ import (
 	"dev.kaya/guests/go/assets"
 	"dev.kaya/guests/go/background"
 	"dev.kaya/guests/go/clipboard"
+	"dev.kaya/guests/go/chat"
 	"dev.kaya/guests/go/commands"
 	"dev.kaya/guests/go/confirm"
 	"dev.kaya/guests/go/dirty"
@@ -114,6 +115,7 @@ var scenes = map[string]func() *kaya.App{
 	"save":       save.App,
 	"scroll":     scroll.App,
 	"scrollto":   scrollto.App,
+	"chat":       chat.App,
 	"sections":   sections.App,
 	"search":     search.App,
 	"select":     selectscene.App,

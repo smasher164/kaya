@@ -61,6 +61,12 @@ func (r todoRow) Checkbox(f kaya.Field[bool], onToggle func(*kaya.Tx, int64, boo
 	return r.c.Checkbox(r.t, f, onToggle)
 }
 
+func (r todoRow) Button(f kaya.Field[string], onClick func(*kaya.Tx, int64)) kaya.Node {
+	return r.c.Button(r.t, f, onClick)
+}
+
+func (r todoRow) Spacer() kaya.Node { return r.t.Spacer() }
+
 func (r todoRow) Entry(onChange func(*kaya.Tx, int64, string)) kaya.Node {
 	return r.c.Entry(r.t, onChange)
 }

@@ -106,7 +106,7 @@ DARK_LEGS = (("canvasdark-rust-swiftui", "canvas", "rust"),
 # The apps and depth scenes hand-queued OUTSIDE SCENES/DEPTH_SCENES
 # (each would otherwise derive a cargo --example that does not exist):
 # editor is a GO app by design, portfolio and varied are PYTHON alone.
-HAND_QUEUED = {"editor": "go", "portfolio": "python", "varied": "python",
+HAND_QUEUED = {"editor": "go", "chat": "go", "portfolio": "python", "varied": "python",
                # The task manager's second scene (docs/tasks-s4-plan.md
                # §4): the same rust example under another script, so it
                # derives no --example of its own.
@@ -189,6 +189,10 @@ ORDER = [
     # The text editor: go alone by design, alone between drains (real
     # panels, real keys).
     ("editor", ("go",)),
+    ("drain",),
+    # The chat app: go alone by design (docs/chat-plan.md R1), alone
+    # between drains for the keystrokes its compose field takes.
+    ("chat", ("go",)),
     ("drain",),
     ("portfolio", ("python",)),
     ("drain",),

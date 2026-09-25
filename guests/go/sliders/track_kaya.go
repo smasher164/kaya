@@ -63,6 +63,12 @@ func (r trackRow) Checkbox(f kaya.Field[bool], onToggle func(*kaya.Tx, string, b
 	return r.c.Checkbox(r.t, f, onToggle)
 }
 
+func (r trackRow) Button(f kaya.Field[string], onClick func(*kaya.Tx, string)) kaya.Node {
+	return r.c.Button(r.t, f, onClick)
+}
+
+func (r trackRow) Spacer() kaya.Node { return r.t.Spacer() }
+
 func (r trackRow) Entry(onChange func(*kaya.Tx, string, string)) kaya.Node {
 	return r.c.Entry(r.t, onChange)
 }

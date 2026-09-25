@@ -1808,6 +1808,8 @@ for proto in x11 wayland; do
     # Through a11y-leg.sh: almost every read it makes is an AT-SPI read.
     run "$proto" editor-go env KAYA_SELFTEST=editor \
         tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
+    # THE CHAT APP (docs/chat-plan.md): Go alone by R1.
+    run "$proto" chat-go env KAYA_SELFTEST=chat /tmp/go-guests/kaya-go
     drain
     # THE PORTFOLIO APP (docs/portfolio-plan.md): python alone by design.
     # ALONE BETWEEN DRAINS — 15,000 windowed rows are its own load

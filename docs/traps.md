@@ -12690,3 +12690,15 @@ in dark. A Grid has no `Foreground` of its own to inherit either. What
 works is a per-label style built with `{ThemeResource}` setters
 (`themed_foreground_style`), based on the label's role style, which still
 follows the theme (docs/tints-plan.md §4.1).
+
+## A WinUI element in a list-detail pane has no logical parent chain to the window, so a "presented" walk over `Parent()` never arrives (measured 2026-09-25)
+
+The clipping read counts only labels and buttons it can see presented,
+and refuses a verdict when it saw none (the vacuous-green guard). It
+walked `FrameworkElement.Parent()` up to the window ground, and inside a
+pushed list-detail pane that logical chain breaks at the pane's host: the
+chat app's thread, 44 labels and buttons all drawn, read "none of this
+window's 44 label(s) and button(s) is presented yet" on every poll. The
+walk follows `VisualTreeHelper::GetParent` now, which reaches the ground
+from anywhere on screen; the section badge's template had already hit the
+same break one surface over.

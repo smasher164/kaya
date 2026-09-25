@@ -1,0 +1,26 @@
+# docs/chat-plan.md C0: a conversation opens at its first unread message,
+# a quote jumps to what it quotes, the newest button returns to the end, a
+# message sends on Return, the peer's answer arrives off the socket, and a
+# conversation that is not open counts what it missed.
+expect_title "chat"
+expect label@unread[maya] "4 new"
+expect label@unread[sam] "1 new"
+click button@open[maya]
+expect_scrolled_to column@thread m27
+expect label@unread[maya] ""
+click button@quote[m27]
+expect_scrolled_to column@thread m03
+click button@newest
+expect_scrolled_to column@thread m30
+click entry@compose
+expect_focused entry@compose
+type "On my way"
+press return
+expect label@text[u1] "On my way"
+expect_scrolled_to column@thread u1
+expect entry@compose ""
+expect label@text[p1] "See you soon"
+expect_scrolled_to column@thread p1
+expect label@unread[sam] "2 new"
+expect label@preview[sam] "Are we still on for Friday?"
+expect_no_clipping

@@ -3020,6 +3020,11 @@ if SUITE in ("go", "all"):
                                  BUNDLES / "go-bin"))
     queue_scene_leg("go", "editor", "editor-go", app, "dev.kaya.editorgo",
                     "editor", "editor")
+    # THE CHAT APP (docs/chat-plan.md): Go alone by R1.
+    app = with_dylib(make_bundle("chatgo", "dev.kaya.chatgo",
+                                 BUNDLES / "go-bin"))
+    queue_scene_leg("go", "chat", "chat-go", app, "dev.kaya.chatgo",
+                    "chat", "chat")
     suite_end("go")
 
 # THE PYTHON GUEST SUITE (docs/python-mobile-plan.md): CPython embedded

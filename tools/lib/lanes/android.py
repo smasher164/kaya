@@ -159,7 +159,7 @@ LEGS = {
         "toolbar-go", "identity-go", "listdetail-go",
         "commands-go", "clipboard-go", "background-go",
         "undo-go", "filedialog-go", "save-go",
-        "dirty-go", "ranges-go", "editor-go",
+        "dirty-go", "ranges-go", "editor-go", "chat-go",
         "dnd-go", "pickers-go", "sliders-go", "tooltips-go",
         "sheet-go",
         "format-go", "formatde-go", "formatar-go",

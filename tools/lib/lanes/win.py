@@ -144,7 +144,7 @@ def depth_scenes():
 # A guest that exists in Go and only Go BY DESIGN (docs/editor-plan.md
 # — an editor in Rust would be kaya testing itself). Joins the
 # taskkill sweep and nothing per-language.
-GO_ONLY_SCENES = ["editor"]
+GO_ONLY_SCENES = ["editor", "chat"]
 # Python BY DESIGN: the portfolio (docs/portfolio-plan.md) and the
 # variable-height scene (docs/virtualization-plan.md §5). They join
 # the .py ship and stamp, and no exe family.
@@ -525,6 +525,11 @@ ORDER = [
     # design — an editor in Rust would be kaya testing itself).
     [
      "editor_go",
+    ],
+    # chat_go: OS-global `type` keystrokes into its compose field, the
+    # submit legs' serial reason (docs/chat-plan.md).
+    [
+     "chat_go",
     ],
     # The background scene, pooled between drains: its worker parks
     # until a click releases it, so a binding that ran the work ON the

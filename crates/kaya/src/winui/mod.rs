@@ -3183,17 +3183,24 @@ fn off_screen(
 /// tasksrtl leg, 2026-09-24); a collapsed ancestor's children are the same
 /// class. The off-screen and longest-word clauses skip both.
 #[cfg(feature = "harness")]
+/// Whether `element` is in `ground`'s VISUAL tree with nothing collapsed on
+/// the way. The logical `Parent()` chain breaks at a pane or template host:
+/// the chat app's thread in a list-detail window never reached the ground
+/// by it, and every clipping read answered "none presented yet" (2026-09-25).
 fn presented(element: &FrameworkElement, ground: &FrameworkElement) -> windows_core::Result<bool> {
-    let mut at: Option<FrameworkElement> = Some(element.clone());
-    while let Some(fe) = at {
-        if &fe == ground {
+    use bindings::Microsoft::UI::Xaml::Media::VisualTreeHelper;
+    let ground: bindings::Microsoft::UI::Xaml::DependencyObject = ground.cast()?;
+    let mut at: Option<bindings::Microsoft::UI::Xaml::DependencyObject> = Some(element.cast()?);
+    while let Some(node) = at {
+        if node == ground {
             return Ok(true);
         }
-        let ui: UIElement = fe.cast()?;
-        if ui.Visibility()? == Visibility::Collapsed {
+        if let Ok(ui) = node.cast::<UIElement>()
+            && ui.Visibility()? == Visibility::Collapsed
+        {
             return Ok(false);
         }
-        at = fe.Parent().ok().and_then(|p| windows_core::Interface::cast::<FrameworkElement>(&p).ok());
+        at = VisualTreeHelper::GetParent(&node).ok();
     }
     Ok(false)
 }
