@@ -14247,12 +14247,44 @@ what the task manager's own row does and why no shipped scene shows this. So
 the squeeze wants a BARE label as a flex child of a baseline row — the shape
 an app writes first, before it needs a caption under the title.
 
-The suspicion, unmeasured: a fixed cell is a star column weighted by its
-natural width and floored at its longest word plus chrome (210a1905,
-a34f47d1), and an EMPTY checkbox caption or the baseline row's own
-compensation may be feeding that floor a number it should not have. The verb
-trace of a failing leg returns the measure, which is how the two clipping
-defects before this one were read; nobody has run it for this shape.
+MEASURED 2026-09-24, and it is a HEIGHT, not a width: the clipping clause
+that fires compares `DesiredSize.Height` against `ActualHeight`, and the
+label draws 18.62dip where it needs 25, at 52.36dip wide. It happens ONLY
+under `Align::Baseline` — the same row without it is green — so it is the
+baseline row's own compensation and nothing to do with the star columns.
+
+THE MECHANISM, off an instrumented lane: `baseline_compensate` gives each
+cell its drop as a TOP MARGIN, and a margin is INSIDE the measure. The cell
+was sized before the row knew where to put it, so the arrange that follows
+takes the drop out of the CONTENT rather than moving the box — every dropped
+cell in the row loses exactly its own margin of height. The trace, on a row
+44dip tall with room to spare:
+
+    [h=24.0 want=28.0 top=3.7]   the checkbox, short by its drop
+    [h=18.6 want=25.0 top=6.0]   the label, short by its drop
+    [h=32.0 want=32.0 top=0.0]   the button, not dropped, correct
+
+The passes ALTERNATE — one lays the label at 26dip and the next at 18.6 —
+because the margin set at the end of one pass is only measured on the next,
+and `baseline_compensate` runs again and resets it. The verdict reads
+whichever pass was last. A column-wrapped label hides it: the column is the
+cell that loses the height, and it has slack the label does not, which is
+why no shipped scene shows this and why tools/scenes/listrow.steps carries
+the column form.
+
+TWO FIXES TRIED AND REJECTED, so nobody repeats them: `InvalidateMeasure`
+on the grid after the margins changed nothing (the measure it forces still
+predates the margin on the pass that matters); and flooring each cell with
+`SetMinHeight(desired - margin)` RATCHETS, because the next pass reads a
+`DesiredSize` that already contains the floor and the wanted height climbed
+25 -> 44 in two passes.
+
+THE DIRECTION THAT IS LEFT: the drop must not be a margin. Either it moves
+the cell with a `RenderTransform`, which does not enter the measure, with
+the row's growth handled separately as it already is by `shift`; or the
+compensation must run where it can measure WITH the drop in hand instead of
+setting it after the fact. Both are real changes to that function and want
+doing deliberately rather than at the end of a session.
 
 WHAT IT BLOCKS: nothing shipped — no in-tree guest writes a bare label into a
 baseline row — but it is the shape the list-row scene wanted, and that scene
