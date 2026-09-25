@@ -50,7 +50,7 @@ SCENES = [
 # has not landed — built and run rust-only until their guests arrive,
 # when they move into SCENES.
 DEPTH_SCENES = ["typeface", "windowed", "canvas", "dnd", "tasks", "notify", "notes", "richrows",
-                "format", "flexshrink"]
+                "format", "flexshrink", "listrow"]
 # The C-floor scenes THIS LANE RUNS (guests/c/Makefile keeps the whole
 # list; this is the SCENES= override build_c passes, and check-steps'
 # sweep_c_floor reads it from the other side).
@@ -196,6 +196,9 @@ ORDER = [
     ("drain",),
     # A row wider than its window (docs/flex-shrink-plan.md §6).
     ("flexshrink", ("rust",)),
+    # The common list-row shapes, and the height comparison nothing else
+    # could make (docs/deferred.md's list-row layout scene).
+    ("listrow", ("rust",)),
     # The task manager: a RUST app by design (docs/tasks-plan.md §0).
     ("tasks", ("rust",)),
     # The task manager in Arabic (docs/compliance-plan.md §6): the ar

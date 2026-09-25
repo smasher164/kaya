@@ -18448,6 +18448,44 @@ impl crate::harness::Stage for GtkStage {
         })
     }
 
+    /// Two drawn heights, compared. Every other geometry reader on this
+    /// backend answers about WIDTH, so a row taller than a row with more in
+    /// it passed all of them (docs/deferred.md, 2026-09-24).
+    fn not_taller_than(
+        &self,
+        t: crate::harness::Target,
+        against: crate::harness::Target,
+    ) -> String {
+        Self::on_main(move |core| {
+            use gtk4::prelude::WidgetExt;
+            let read = |spec| {
+                target_widget(core, spec).map(|control| {
+                    let widget = core
+                        .widgets
+                        .values()
+                        .find(|w| w.control() == control)
+                        .map_or(control.clone(), |w| w.widget());
+                    f64::from(widget.allocated_height())
+                })
+            };
+            while glib::MainContext::default().iteration(false) {}
+            let Some(a) = read(t) else {
+                return "<no such target>".to_string();
+            };
+            let Some(b) = read(against) else {
+                return "<no such second target>".to_string();
+            };
+            if a <= 0.0 || b <= 0.0 {
+                return format!("unlaid: {}px against {}px", a.round(), b.round());
+            }
+            if a <= b + 1.0 {
+                String::new()
+            } else {
+                format!("{}px against {}px", a.round(), b.round())
+            }
+        })
+    }
+
     fn widget_spans_breadth(&self, t: crate::harness::Target) -> String {
         Self::on_main(move |core| {
             use gtk4::prelude::{Cast, WidgetExt};

@@ -474,6 +474,10 @@ path = "../../guests/rust/flexshrink.rs"
 name = "submit"
 path = "../../guests/rust/submit.rs"
 
+[[example]]
+name = "listrow"
+path = "../../guests/rust/listrow.rs"
+
 # Android has no native process entry (Zygote forks and an Activity is
 # the way in), so this one is a cdylib exporting the JNI entry, not a bin.
 [[example]]

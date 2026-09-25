@@ -1,0 +1,28 @@
+# docs/deferred.md's list-row layout scene. THE HEIGHT CLAUSE IS THE ONE
+# NOTHING ELSE COULD SEE: every other geometry verb here reads width, and a
+# WinUI row of one line shipped 14px TALLER than the same backend's row of
+# two (2026-09-24). The two rows carry identical chrome and differ only in
+# how much text the middle cell holds, so the comparison needs no platform
+# constant — the same row draws 46pt on the mac and 59px on GTK.
+expect_title "listrow"
+expect label#0 "Buy milk"
+expect label#1 "Draft chapter three"
+# WHAT THIS CLAUSE DOES AND DOES NOT CATCH, measured rather than assumed:
+# it discriminates (the two targets swapped read "37pt against 24pt" on the
+# mac), and it holds the shape a one-line row must keep against a two-line
+# one. It does NOT reproduce the 2026-09-24 WinUI runaway: that fix was cut
+# from a copy and this scene stayed green on the windows lane four times,
+# with and without two intervening resizes. The runaway accumulates over the
+# repeated reindex passes a For inside a scroll provokes, which a scene that
+# builds once and settles never reaches — so the static clause in
+# check-universal-props remains that defect's guard, and a runtime one would
+# have to put these rows inside a collection.
+expect_not_taller row@row_one row@row_two
+# The entry takes its grow track, which is the half of this shape that
+# went wrong before (a SwiftUI entry refusing its grow track).
+expect_fills entry@name
+# A captioned checkbox does not claim the free width. It sits in the
+# COLUMN, whose cross axis IS the width, so the question the verb asks is
+# the one the entry raises; in a row the cross axis would be the height.
+expect_hugs checkbox@remind
+expect_no_clipping

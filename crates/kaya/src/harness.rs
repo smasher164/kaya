@@ -305,6 +305,12 @@ pub enum Step {
     /// The inverse: the target sits short of its container's breadth —
     /// the `fill = false` opt-out's observation (docs/layout-knobs-plan.md §1).
     ExpectHugs(Target),
+    /// Two targets, one comparison: the first's drawn height against the
+    /// second's. RELATIONAL BECAUSE A HEIGHT IS NOT PORTABLE — the same
+    /// list row draws 46pt on the mac, 56 on the phones, 57 on Windows and
+    /// 59 on GTK, so an absolute number would be five numbers and a
+    /// comparison inside one scene is none.
+    ExpectNotTaller(Target, Target),
     /// How many LINES a row's children sit on — the runs of children
     /// whose cross-axis boxes overlap (docs/layout-knobs-plan.md §2, the
     /// `wrap` observation).
@@ -657,6 +663,7 @@ impl Step {
             | Step::ExpectScrolledTo(t, _)
             | Step::ClearSearch(t)
             | Step::ContextOpen(t) => vec![t],
+            Step::ExpectNotTaller(a, b) => vec![a, b],
             Step::Toggle(t, _)
             | Step::SetValue(t, _)
             | Step::SetDate(t, _)
@@ -826,6 +833,7 @@ impl Step {
             Step::ExpectBreadth { .. } => true,
             Step::ExpectNoTarget { .. } => true,
             Step::ExpectHugs { .. } => true,
+            Step::ExpectNotTaller { .. } => true,
             Step::ExpectLines { .. } => true,
             Step::ExpectAligned { .. } => true,
             Step::ExpectAxis { .. } => true,
@@ -1125,6 +1133,13 @@ pub trait Stage: Send + 'static {
     /// until the iOS driver's real pans found a 79pt viewport in a 375pt
     /// window.
     fn widget_spans_breadth(&self, target: Target) -> String;
+    /// Empty when `target`'s drawn height is no greater than `against`'s,
+    /// within one device unit; otherwise the two heights, for the failure
+    /// sentence. THE SHAPE NO OTHER READER HAS: every geometry verb here
+    /// reads WIDTH, so a row that grew taller than a row with more in it
+    /// passed all of them — a WinUI row of one line shipped 14px taller
+    /// than the same backend's row of two (docs/deferred.md, 2026-09-24).
+    fn not_taller_than(&self, target: Target, against: Target) -> String;
     /// The container's cross-axis placement, CLASSIFIED from geometry after
     /// forcing pending layout: "start", "center", "end", "stretch", or
     /// "baseline" when the coincidence holds for every child (within two
@@ -1683,6 +1698,15 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
             }
             "expect_fills" => Step::ExpectFills(parse_target(rest)?),
             "expect_breadth" => Step::ExpectBreadth(parse_target(rest)?),
+            "expect_not_taller" => {
+                let (first, second) = rest.split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("expect_not_taller wants two targets, got {rest:?}")
+                })?;
+                Step::ExpectNotTaller(
+                    parse_target(first.trim())?,
+                    parse_target(second.trim())?,
+                )
+            }
             "expect_no_target" => {
                 let t = parse_target(rest)?;
                 let Some(id) = t.id else {
@@ -4691,6 +4715,25 @@ fn run_with_log(
                     }
                 }))
             }
+            Step::ExpectNotTaller(a, b) => {
+                // A ROW WITH LESS IN IT IS NOT TALLER THAN ONE WITH MORE.
+                // Every other geometry verb here reads width, so the shape
+                // that shipped — a one-line row 14px taller than the same
+                // backend's two-line row — passed all of them
+                // (docs/deferred.md, 2026-09-24).
+                Some(poll(|| {
+                    let off = stage.not_taller_than(*a, *b);
+                    if off.is_empty() {
+                        Ok(format!("{} not taller than {}", target_spec(a), target_spec(b)))
+                    } else {
+                        Err(format!(
+                            "{} is taller than {} ({off})",
+                            target_spec(a),
+                            target_spec(b)
+                        ))
+                    }
+                }))
+            }
             Step::ExpectNoTarget(kind, id, keys) => {
                 let spec = target_spec(&Target { kind: *kind, index: 0, id: Some(id), keys: *keys });
                 Some(poll(|| match stage.resolve_id(*kind, id, *keys) {
@@ -6422,6 +6465,15 @@ mod tests {
                 "spans 79pt of its parent's 375pt breadth".into()
             }
         }
+        /// The MockStage's rule: target index 1 is the tall one, so a
+        /// scene can drive both directions without a toolkit.
+        fn not_taller_than(&self, t: Target, against: Target) -> String {
+            if t.index > against.index {
+                "68pt against 57pt".into()
+            } else {
+                String::new()
+            }
+        }
         fn cross_mode(&self, _: Target) -> String {
             "center".into()
         }
@@ -7257,6 +7309,9 @@ mod tests {
             fn widget_spans_breadth(&self, _: Target) -> String {
                 String::new()
             }
+            fn not_taller_than(&self, _: Target, _: Target) -> String {
+                String::new()
+            }
             fn cross_mode(&self, _: Target) -> String {
                 "start".into()
             }
@@ -7571,6 +7626,9 @@ mod tests {
                 "draws 96pt of a 126pt track".into()
             }
             fn widget_spans_breadth(&self, _: Target) -> String {
+                String::new()
+            }
+            fn not_taller_than(&self, _: Target, _: Target) -> String {
                 String::new()
             }
             fn cross_mode(&self, _: Target) -> String {

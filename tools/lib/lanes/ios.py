@@ -78,6 +78,8 @@ RUST_SCENES = [
     "clock24",
     # A row wider than its window (docs/flex-shrink-plan.md §6).
     "flexshrink", "scrollto",
+    # The common list-row shapes (docs/deferred.md).
+    "listrow",
     # The submit gesture on the three text kinds (docs/submit-plan.md §5).
     "submit",
     # The notification conformance scene: the activation is a REAL tap on

@@ -6307,6 +6307,26 @@ object KayaCompose {
      * "" when the target spans its container's breadth, otherwise the shortfall
      * (a "no ..." sentence when a reader has nothing recorded). UI thread.
      */
+    /// Two drawn HEIGHTS, compared — null when either spec names nothing,
+    /// "" when the first is no taller than the second within a pixel. THE
+    /// READER NO OTHER VERB HAS HERE: every geometry reader on this backend
+    /// answers about width or a cross-axis span, so a row taller than a row
+    /// with more in it passed all of them (docs/deferred.md, 2026-09-24).
+    private fun kayaNotTallerThan(spec: String, against: String): String? {
+        val mine = kayaWidgetTarget(spec) ?: return null
+        val theirs = kayaWidgetTarget(against) ?: return null
+        val a = kayaNodeHeights[mine.id] ?: return "no height recorded — not laid out"
+        val b = kayaNodeHeights[theirs.id] ?: return "no height recorded — not laid out"
+        if (a <= 0f || b <= 0f) {
+            return "unlaid: ${Math.round(a)}px against ${Math.round(b)}px"
+        }
+        return if (a <= b + 1f) {
+            ""
+        } else {
+            "${Math.round(a)}px against ${Math.round(b)}px"
+        }
+    }
+
     private fun kayaBreadthShortfall(spec: String): String? =
         kayaWidgetTarget(spec)?.let { widget ->
             val parent = (KayaSceneModel.columns + KayaSceneModel.rows)
@@ -9683,6 +9703,23 @@ object KayaCompose {
                             observed.add("${parts[1]} spans its breadth")
                         } else {
                             failures.add("${parts[1]} is short of its breadth ($short)")
+                        }
+                    }
+                    "expect_not_taller" -> {
+                        // harness.rs Step::ExpectNotTaller: two targets,
+                        // one comparison, because a height is not portable
+                        // — the same list row draws 56px here and 46pt on
+                        // the mac.
+                        val taller = onUi(activity) {
+                            kayaNotTallerThan(parts[1], parts[2])
+                        }
+                        if (taller == null) {
+                            failures.add("no such target: ${parts[1]} or ${parts[2]}")
+                        } else if (taller.isEmpty()) {
+                            observed.add("${parts[1]} not taller than ${parts[2]}")
+                        } else {
+                            failures.add(
+                                "${parts[1]} is taller than ${parts[2]} ($taller)")
                         }
                     }
                     "expect_no_target" -> {

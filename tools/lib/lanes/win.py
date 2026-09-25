@@ -71,6 +71,7 @@ TEXT_SCALE_LEGS = {"tasksbig_rust": 200, "formatbig_rust": 200}
 # THIS default; the runner calls depth_scenes(), which honours the
 # KAYA_WIN_DEPTH_SCENES override the lane uses for one-off slices.
 DEPTH_SCENES = ["windowed", "canvas", "sizepolicy", "tasks", "notify", "richtext", "flexshrink",
+                "listrow",
                 "ownundo", "richlabel", "notes", "richrows"]
 
 # THE PACKAGED LEGS (docs/packaging-plan.md P3): the SAME Rust guests, run
@@ -288,6 +289,8 @@ ORDER = [
      "windowed_rust",
      # A row wider than its window (docs/flex-shrink-plan.md §6).
      "flexshrink_rust",
+     # The common list-row shapes (docs/deferred.md).
+     "listrow_rust",
      "canvas_rust",
      "canvasdark_rust",
      "sizepolicy_rust",

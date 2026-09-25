@@ -2654,10 +2654,33 @@ unpicked.
   captures), and now spans on all four under docs/tasks-plan.md R7,
   asserted by tasks.steps' `expect_breadth column@inbox_list` on every
   lane (the For's own column was the hugger, not the row);
-  the row's cross-axis centre (R5) rides the same target. The scene of
+  the row's cross-axis centre (R5) rides the same target. ~~The scene of
   the OTHER shapes (grown entry + button, captioned checkbox) stays
-  open. KEY: list-row layout scene, hugging control, grown entry,
-  checkbox MinWidth, fixedSize, stamped row spans, hexpand
+  open.~~ BUILT 2026-09-24: tools/scenes/listrow.steps and
+  guests/rust/listrow.rs on all five lanes — the grown entry holding its
+  track (`expect_fills`), the captioned checkbox not claiming the free
+  width (`expect_hugs`, and it sits in the COLUMN because a column's
+  cross axis IS the width, where a row's would be the height), and a new
+  relational verb beside them.
+  THE VERB IS `expect_not_taller <a> <b>`, two targets and one
+  comparison, in harness.rs and all four backends. RELATIONAL BECAUSE A
+  HEIGHT IS NOT PORTABLE: the same list row draws 46pt on the mac, 56 on
+  the phones, 57 on Windows and 59 on GTK, so an absolute number would be
+  five numbers. It is the first geometry verb here that reads HEIGHT —
+  every other one reads width or a cross-axis span, which is why a WinUI
+  row of one line shipped 14px taller than the same backend's row of two.
+  IT DOES NOT CATCH THAT RUNAWAY, and that is measured rather than
+  assumed: the fix was cut from a copy and this scene stayed GREEN on the
+  windows lane four times, with and without two intervening resizes. The
+  runaway accumulates over the repeated reindex passes a For inside a
+  scroll provokes, and a scene that builds once and settles never reaches
+  it — so check-universal-props' static clause remains that defect's
+  guard, and a runtime one would have to put these rows inside a
+  collection. The verb IS watched discriminating: the two targets swapped
+  read "row@row_two is taller than row@row_one (37pt against 24pt)".
+  KEY: list-row layout scene, hugging control, grown entry,
+  checkbox MinWidth, fixedSize, stamped row spans, hexpand,
+  expect_not_taller, not_taller_than, listrow
 - Horizontal scroll axis: an axis enum prop — decide when a scene
   needs it (the scroll depth ledger's remaining item).
 - Command completion observability (awaitable commands — the Compose
@@ -14206,6 +14229,34 @@ readable from the backend, so this wants an observable rather than
 another capture review — the row pitch, or a cell's box, asserted in the
 shared scene, which is what would have caught it and what would keep the
 other three backends honest at the same time.
+
+## DEFECT — a WinUI baseline row squeezes a BARE label beside a grown spacer (found 2026-09-24 while writing the list-row scene)
+KEY: bare label in a baseline row, star column, longest word floor, listrow, 18.62px, grown spacer squeeze
+
+A row of `checkbox("")`, a BARE `label`, `spacer().grow(1.0)` and a button,
+under `Align::Baseline` in a 420px window, draws the label at 18.62px where
+its own text needs 25px. `expect_no_clipping` catches it and names both
+numbers, which is how it was found: the first draft of tools/scenes/listrow.steps
+had that shape and went red on the windows lane.
+
+IT IS NOT THE ROW-HEIGHT RUNAWAY struck above. The same leg is red with that
+fix in place and with it cut, so the two are independent.
+
+THE ONE DIFFERENCE THAT CLEARS IT: wrapping the label in a `column`, which is
+what the task manager's own row does and why no shipped scene shows this. So
+the squeeze wants a BARE label as a flex child of a baseline row — the shape
+an app writes first, before it needs a caption under the title.
+
+The suspicion, unmeasured: a fixed cell is a star column weighted by its
+natural width and floored at its longest word plus chrome (210a1905,
+a34f47d1), and an EMPTY checkbox caption or the baseline row's own
+compensation may be feeding that floor a number it should not have. The verb
+trace of a failing leg returns the measure, which is how the two clipping
+defects before this one were read; nobody has run it for this shape.
+
+WHAT IT BLOCKS: nothing shipped — no in-tree guest writes a bare label into a
+baseline row — but it is the shape the list-row scene wanted, and that scene
+now carries the column form instead, with this entry as the reason.
 
 ## RULING WANTED — a lost dialog answers the app as a cancel; should the app be able to tell the two apart? (recorded 2026-09-06)
 KEY: lost dialog, KAYA_DIALOG_LOST, file_dialog_result reason, cancelled versus lost, DIALOG_RESULT_BUDGET_MS, dialog occurrence

@@ -21910,6 +21910,41 @@ impl crate::harness::Stage for WinUiStage {
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
+    /// Two drawn heights, compared. THE READER THAT DOES NOT EXIST
+    /// ELSEWHERE: every geometry verb on this backend reads width, and a
+    /// row that grew taller than a row with more in it passed all of them
+    /// (docs/deferred.md's WinUI one-line row entry, 2026-09-24).
+    fn not_taller_than(
+        &self,
+        t: crate::harness::Target,
+        against: crate::harness::Target,
+    ) -> String {
+        Self::on_ui_read(move |core| {
+            let mine: FrameworkElement = match target_element(core, t)? {
+                Some(e) => e.cast()?,
+                None => return Ok("<no such target>".to_owned()),
+            };
+            let theirs: FrameworkElement = match target_element(core, against)? {
+                Some(e) => e.cast()?,
+                None => return Ok("<no such second target>".to_owned()),
+            };
+            let (a, b) = (mine.ActualHeight()?, theirs.ActualHeight()?);
+            if a <= 0.0 || b <= 0.0 {
+                return Ok(format!(
+                    "unlaid: {}dip against {}dip",
+                    a.round() as i64,
+                    b.round() as i64
+                ));
+            }
+            Ok(if a <= b + 1.0 {
+                String::new()
+            } else {
+                format!("{}dip against {}dip", a.round() as i64, b.round() as i64)
+            })
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
+    }
+
     fn widget_spans_breadth(&self, t: crate::harness::Target) -> String {
         Self::on_ui_read(move |core| {
             let element: FrameworkElement = match target_element(core, t)? {

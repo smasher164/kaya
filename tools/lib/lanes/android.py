@@ -64,6 +64,8 @@ LEGS = {
         "windowed-compose", "canvas-compose", "canvasdark-compose",
         # A row wider than its window (docs/flex-shrink-plan.md §6).
         "flexshrink-compose",
+        # The common list-row shapes (docs/deferred.md).
+        "listrow-compose",
         "scrollto-compose",
         "sizepolicy-compose", "adaptive-compose", "feed-compose",
         "grow-compose", "align-compose", "layout-compose",

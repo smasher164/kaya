@@ -9954,6 +9954,23 @@ private func kayaRunScript(_ script: String) {
                 } else {
                     failures.append("\(parts[1]) is short of its breadth (\(short))")
                 }
+            case "expect_not_taller":
+                // harness.rs Step::ExpectNotTaller: two targets, one
+                // comparison, because a height is not portable — the same
+                // list row draws 46pt here and 59 on GTK.
+                let taller = DispatchQueue.main.sync {
+                    kayaNotTallerThan(parts[1], parts[2])
+                }
+                guard let taller else {
+                    failures.append("no such target: \(parts[1]) or \(parts[2])")
+                    break
+                }
+                if taller.isEmpty {
+                    observed.append("\(parts[1]) not taller than \(parts[2])")
+                } else {
+                    failures.append(
+                        "\(parts[1]) is taller than \(parts[2]) (\(taller))")
+                }
             case "expect_no_target":
                 // harness.rs Step::ExpectNoTarget: the pass is a spec that
                 // resolves to nothing, awaited like a control.
@@ -11252,6 +11269,27 @@ private struct KayaBoxReader: View {
 /// expect_breadth's read, shared with expect_hugs: nil for no such target,
 /// "" when the target spans its container's breadth, otherwise the shortfall
 /// (a "no ..." sentence when a reader has nothing recorded). Main thread.
+/// Two drawn HEIGHTS, compared — nil when either spec names nothing, the
+/// empty string when the first is no taller than the second within a point.
+/// THE READER NO OTHER VERB HAS HERE: every geometry reader in this file
+/// answers about width or about a cross-axis span, so a row taller than a
+/// row with more in it passed all of them (docs/deferred.md, 2026-09-24).
+func kayaNotTallerThan(_ spec: Substring, _ against: Substring) -> String? {
+    guard let mine = kayaAnyTarget(spec), let theirs = kayaAnyTarget(against) else {
+        return nil
+    }
+    guard let a = kayaNodeFrames[mine.id], let b = kayaNodeFrames[theirs.id] else {
+        return "no frame recorded — not a flex child"
+    }
+    if a.height <= 0 || b.height <= 0 {
+        return "unlaid: \(Int(a.height.rounded()))pt against \(Int(b.height.rounded()))pt"
+    }
+    if a.height <= b.height + 1 {
+        return ""
+    }
+    return "\(Int(a.height.rounded()))pt against \(Int(b.height.rounded()))pt"
+}
+
 func kayaBreadthShortfall(_ spec: Substring) -> String? {
     guard let widget = kayaAnyTarget(spec) else { return nil }
     guard
