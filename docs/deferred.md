@@ -9,7 +9,7 @@ Landed history lives in git; this file only carries what is still open.
 scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
-## BUILD — tints and the filled container (design pass ruled 2026-09-25)
+## ~~BUILD — tints and the filled container (design pass ruled 2026-09-25)~~ COMPLETE 2026-09-25: depth on the mac and iOS, breadth on GTK, WinUI and Compose, all nine bindings in both zones, the tints scene light and dark on five lanes (4d000f54, matrix ALL PASS), the review page https://claude.ai/artifact/EhjJoWe5B7FZjM54p2DRDn, and Windows' accent as Fluent 2's own pale brand surface
 KEY: filled, Tint, tint, expect_fill, fill_tint, kayaFillRead, tints scene, filled container
 
 docs/tints-plan.md: a closed vocabulary of platform tints on a `filled`
@@ -19,8 +19,9 @@ in both zones, the SwiftUI arm, `expect_fill` reading the pixels, the tints
 scene green in light and dark on both, check-universal-props' fill-read
 clause with two watched negatives. BREADTH LANDED the same day (4d000f54,
 matrix ALL PASS); the review page is
-https://claude.ai/artifact/EhjJoWe5B7FZjM54p2DRDn, with one visual question
-open on it (how pale Windows' accent surface should be). What breadth owed:
+https://claude.ai/artifact/EhjJoWe5B7FZjM54p2DRDn; its one open question
+(how pale Windows' accent surface should be) was answered with Fluent 2's own
+brand background the same day. What breadth owed:
   - ~~**DEPTH STUB: tints on gtk**~~ — LANDED 2026-09-25: libadwaita's
     named `*_bg_color`/`*_fg_color` pairs at the card's 12px radius, neutral
     as libadwaita's own `.card`, the fill read off the container's own
@@ -33,13 +34,10 @@ open on it (how pale Windows' accent surface should be). What breadth owed:
     roles, success and warning harmonized toward primary through
     material-color-utilities, the fill read through PixelCopy; green light
     and dark.
-  - **A branded Windows app's accent surface is the USER's accent.** The
-    pale surface reads `SystemAccentColorLight3` under Light and `Dark3`
-    under Dark, and the brand dictionary overrides only the stops each
-    theme's own fills read (Dark1-3 under Light, Light1-3 under Dark), so a
-    branded app's accent bubble takes the user's accent at that step. The
-    brand needs a pale stop of its own per theme; no in-tree branded scene
-    fills a container yet.
+  - ~~**A branded Windows app's accent surface is the USER's accent.**~~
+    FIXED 2026-09-25: the surface is now the accent in effect blended over a
+    fixed base (docs/tints-plan.md §3), the brand's seed when one is
+    declared, so it no longer reads a stop the brand dictionary leaves alone.
   - ~~The eight other bindings' `filled` sugar in both construction
     zones.~~ LANDED 2026-09-25: Go, C#, Java, Swift, OCaml (a `Tint` module,
     since `Warning` is a symbol), Haskell, Python and JS, both zones and the

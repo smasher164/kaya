@@ -2104,29 +2104,55 @@ fn filled_style(tint: i64) -> windows_core::Result<Style> {
     XamlReader::Load(&HSTRING::from(markup))?.cast()
 }
 
-/// THE ACCENT AS A SURFACE is a pale step of the accent ramp with ordinary
-/// text, as Fluent's chat app draws the user's own messages, not the accent
-/// BUTTON's saturated fill (docs/tints-plan.md §3, ruled 2026-09-25). Fluent
-/// ships no such brush, so kaya installs one, once, per theme.
+/// THE ACCENT AS A SURFACE is a pale accent tint with ordinary text, as
+/// Teams draws your own messages (Fluent 2's `colorBrandBackground2`), not
+/// the accent BUTTON's fill (docs/tints-plan.md §3, ruled 2026-09-25).
+/// WinUI ships no such brush and the SystemAccentColor ramp's palest stops
+/// are TEXT colours, so kaya composites the accent in effect — the brand's
+/// when one is declared, the user's otherwise — over a fixed base: 8% over
+/// white reproduces Fluent 2's shipped brand160, 22% over the dark window
+/// lands beside Teams' brand20 and WinUI's own InfoBar backgrounds
+/// (docs/probes/fluent-surface-2026-09-25.md). Installed once, per theme.
 const ACCENT_SURFACE_KEY: &str = "KayaAccentSurfaceBrush";
+const ACCENT_SURFACE_LIGHT: (u32, f64) = (0xFFFFFF, 0.08);
+const ACCENT_SURFACE_DARK: (u32, f64) = (0x202020, 0.22);
 
 thread_local! {
     static ACCENT_SURFACE: RefCell<bool> = const { RefCell::new(false) };
+    static BRAND_KEY: RefCell<Option<u32>> = const { RefCell::new(None) };
+}
+
+fn blend(base: u32, over: u32, alpha: f64) -> u32 {
+    let ch = |v: u32, shift: u32| f64::from((v >> shift) & 0xFF);
+    [16, 8, 0].iter().fold(0, |acc, &shift| {
+        let c = ch(over, shift) * alpha + ch(base, shift) * (1.0 - alpha);
+        acc | ((c.round() as u32) << shift)
+    })
 }
 
 fn ensure_accent_surface() -> windows_core::Result<()> {
     if ACCENT_SURFACE.with_borrow(|done| *done) {
         return Ok(());
     }
+    let key = match BRAND_KEY.with_borrow(|k| *k) {
+        Some(brand) => brand,
+        None => {
+            let c = windows::UI::ViewManagement::UISettings::new()?
+                .GetColorValue(windows::UI::ViewManagement::UIColorType::Accent)?;
+            (u32::from(c.R) << 16) | (u32::from(c.G) << 8) | u32::from(c.B)
+        }
+    };
+    let light = blend(ACCENT_SURFACE_LIGHT.0, key, ACCENT_SURFACE_LIGHT.1);
+    let dark = blend(ACCENT_SURFACE_DARK.0, key, ACCENT_SURFACE_DARK.1);
     let markup = format!(
         "<ResourceDictionary xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" \
            xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\">\
            <ResourceDictionary.ThemeDictionaries>\
              <ResourceDictionary x:Key=\"Light\">\
-               <SolidColorBrush x:Key=\"{ACCENT_SURFACE_KEY}\" Color=\"{{ThemeResource SystemAccentColorLight3}}\"/>\
+               <SolidColorBrush x:Key=\"{ACCENT_SURFACE_KEY}\" Color=\"#FF{light:06X}\"/>\
              </ResourceDictionary>\
              <ResourceDictionary x:Key=\"Dark\">\
-               <SolidColorBrush x:Key=\"{ACCENT_SURFACE_KEY}\" Color=\"{{ThemeResource SystemAccentColorDark3}}\"/>\
+               <SolidColorBrush x:Key=\"{ACCENT_SURFACE_KEY}\" Color=\"#FF{dark:06X}\"/>\
              </ResourceDictionary>\
            </ResourceDictionary.ThemeDictionaries>\
          </ResourceDictionary>"
@@ -12640,6 +12666,7 @@ fn brand_dictionary(accent: &crate::brand::BrandAccent) -> String {
 /// WIDGET EXISTS: changing a resource VALUE at runtime does NOT refresh a
 /// WinUI tree, so a brand that arrived late would need a visible re-theme.
 fn apply_brand(accent: &crate::brand::BrandAccent) -> windows_core::Result<()> {
+    BRAND_KEY.with_borrow_mut(|k| *k = Some(accent.seed));
     let markup = brand_dictionary(accent);
     let loaded = match bindings::Microsoft::UI::Xaml::Markup::XamlReader::Load(&HSTRING::from(
         markup.as_str(),
@@ -27439,6 +27466,17 @@ mod tests {
     /// size on ONE window and stays green with the opt-out ignored, with
     /// the clamp gone, with a malformed stored line taken at face value,
     /// and with a zero-sized frame written over a good one.
+    /// The accent surface for the default Windows blue lands on Fluent 2's
+    /// shipped brand160 in light (docs/probes/fluent-surface-2026-09-25.md),
+    /// and a dark one far from the SystemAccentColorDark3 navy it replaced.
+    #[test]
+    fn accent_surface_blends_toward_fluents_brand_background() {
+        let (base, alpha) = ACCENT_SURFACE_LIGHT;
+        assert_eq!(blend(base, 0x0078D4, alpha), 0xEBF4FC);
+        let (base, alpha) = ACCENT_SURFACE_DARK;
+        assert_eq!(blend(base, 0x0078D4, alpha), 0x193348);
+    }
+
     #[test]
     fn window_memory_parses_clamps_and_opts_out() {
         // What this backend writes, and what it reads back: physical

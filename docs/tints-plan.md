@@ -21,7 +21,7 @@ exactly as it was while the text around it changes.
 
 | tint | Apple | Material 3 (Compose) | libadwaita | WinUI |
 |---|---|---|---|---|
-| accent | `accentColor`, white text (convention; iOS has no public on-accent token) | `primary` / `onPrimary` | `accent_bg_color` / `accent_fg_color` | a pale accent step (`SystemAccentColorLight3` light, `Dark3` dark) + primary text, ruled 2026-09-25 (§3) |
+| accent | `accentColor`, white text (convention; iOS has no public on-accent token) | `primary` / `onPrimary` | `accent_bg_color` / `accent_fg_color` | the accent in effect blended 8% over white (light) and 22% over #202020 (dark), + primary text, ruled 2026-09-25 (§3) |
 | success | `systemGreen` | none in the scheme: a harmonized custom colour's `accent` / `onAccent` (material-color-utilities, already a dependency) | `success_bg_color` / `success_fg_color` | `SystemFillColorSuccessBackground` + primary text |
 | warning | `systemOrange` | harmonized custom colour, as success | `warning_bg_color` / `warning_fg_color` | `SystemFillColorCautionBackground` + primary text |
 | critical | `systemRed` | `error` / `onError` | `error_bg_color` / `error_fg_color` | `SystemFillColorCriticalBackground` + primary text |
@@ -95,7 +95,19 @@ Two things the table says that the design has to carry:
   (Light3 in light, Dark3 in dark) with primary text, beside the pale
   severity backgrounds, and the four other platforms keep their solid
   accent. Fluent has no brush for it, so the backend installs one per theme
-  (`KayaAccentSurfaceBrush`).
+  (`KayaAccentSurfaceBrush`). THE AMOUNT IS FLUENT'S OWN, researched rather
+  than picked (docs/probes/fluent-surface-2026-09-25.md): Teams' own bubble
+  is Fluent 2's `colorBrandBackground2`, brand160 in light and brand20 in
+  dark, and the accent blended 8% over white reproduces the shipped brand160
+  (#EBF4FC for the default blue) while 22% over the dark window lands beside
+  Teams' brand20 and WinUI's own InfoBar backgrounds. The first cut used
+  `SystemAccentColorLight3`/`Dark3`, which are TEXT stops and read as a
+  bright cyan and a deep navy. The blend takes the accent in effect, the
+  brand's seed when one is declared and the user's otherwise, so a branded
+  app's bubble is its brand. The pale accent sits a few units from the
+  window ground (#EBF4FC against #F3F3F3), so expect_fill's margin between
+  `accent` and `none` is thin on Windows in light; it classifies exactly
+  today.
 - **Label tints come second.** Text in a tint (`success_color`,
   `systemGreen`, Fluent's `SystemFillColorSuccess`) is the same vocabulary
   on a second prop, a slice after the container.
