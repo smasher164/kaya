@@ -266,6 +266,15 @@ from that line's top to one line height down, which scales with the
 text — and sits at the row's top only when no line box can be read. A
 cell taller than the line overhangs it, and the row grows so that
 nothing is placed above its top (CSS's own baseline-alignment growth).
+AND THE HEIGHT IT IS CENTRED ON IS ONE THE ROW DID NOT GIVE IT (amended
+2026-09-24): a cell that STRETCHES to the row has no height of its own,
+so it is left at the row's top and takes no part in the growth. Asking
+such a cell for its height is a loop, not an offset — its height IS the
+row's, so the centring makes the row grow and the row makes the cell
+grow: the task row's grown spacer took the Inbox row from 33 to 62 over
+four passes on WinUI, which reads an ARRANGED height, while SwiftUI
+proposes `height: nil` and takes the ideal and GTK and Compose take the
+measured natural (docs/deferred.md's WinUI one-line row entry).
 The line box is read per backend from the provider's first LABEL, by
 node, never by a guide:
 

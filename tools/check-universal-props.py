@@ -87,8 +87,21 @@ BASELINE_LINKS = (
     (GTK, "if vertical && self.is_main(orientation) {", 600,
      ("return (minimum, natural, bmin, bnat);",)),
     (GTK, "WidgetKind::Column => {", 1200, ("layout.set_baseline_child(0);",)),
+    # A TEXTLESS CELL IS CENTRED ON A HEIGHT THE ROW DID NOT GIVE IT.
+    # WinUI is the one backend that reads an ARRANGED height here
+    # (`ActualHeight`), and for a cell that stretches to the row that IS the
+    # row's height, so centring it produced a negative top, the shift grew by
+    # that much, every margin followed, the row grew and the cell with it:
+    # the Inbox row's grown spacer took it 33 -> 50 -> 58 -> 62 over four
+    # passes and shipped 14px taller than the same backend's TWO-line row
+    # (docs/deferred.md, measured 2026-09-24). The other three ask for a
+    # height the row cannot influence — SwiftUI proposes `height: nil` and
+    # takes the ideal, GTK and Compose take the measured natural — so this
+    # clause has one backend in it on purpose.
     (WINUI, "fn baseline_compensate(", 3500, (
         "_ => None,",
+        "None if element.VerticalAlignment()?",
+        "== bindings::Microsoft::UI::Xaml::VerticalAlignment::Stretch =>",
         "first_text_baseline(core, *child, &element)?",
         "None => centre - element.ActualHeight()? / 2.0,",
         "let centre = deepest + (provider.below - provider.above) / 2.0;",
@@ -500,7 +513,7 @@ def drag_waits(winui_text):
 real = load()
 g = Gate("check-universal-props")
 RAN = 0
-DECLARED = 56
+DECLARED = 57
 for path, pattern, repl in (
     (COMPOSE, r"\ba11y\b", "kayaUnappliedProps"),
     (SWIFTUI, r"\bkayaA11y\b", "kayaUnappliedProps"),
@@ -531,6 +544,20 @@ for label, pattern, repl, want in (
 ):
     doctored = g.doctor(label, real[COMPOSE], pattern, repl, want=want)
     if not census(load({COMPOSE: doctored})):
+        print(f"check-universal-props: self-test failed — {label} still passed")
+        raise SystemExit(1)
+    RAN += 1
+
+# THE STRETCHED CELL'S own: the arm removed puts the runaway back, and it
+# is the shipped state the maintainer saw.
+for label, pattern, repl, want in (
+    ("a stretched cell centred on the height the row gave it (the shipped runaway)",
+     r"            None if element\.VerticalAlignment\(\)\?\n"
+     r"                == bindings::Microsoft::UI::Xaml::VerticalAlignment::Stretch =>\n"
+     r"            \{\n                0\.0\n            \}\n", "", 1),
+):
+    doctored = g.doctor(label, real[WINUI], pattern, repl, want=want)
+    if not census(load({WINUI: doctored})):
         print(f"check-universal-props: self-test failed — {label} still passed")
         raise SystemExit(1)
     RAN += 1

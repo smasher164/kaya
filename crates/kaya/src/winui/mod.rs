@@ -2865,6 +2865,19 @@ fn baseline_compensate(
     for (element, line) in &cells {
         tops.push(match line {
             Some(l) => deepest - l.baseline,
+            // A CELL THAT STRETCHES TO THE ROW HAS NO HEIGHT OF ITS OWN
+            // TO CENTRE, and asking for one feeds back: its ActualHeight
+            // IS the row's height, so centring it gives a negative top,
+            // the shift below grows by that much, every margin follows,
+            // the row grows, and the cell with it. Measured on the Inbox
+            // row, whose grown spacer is exactly this cell: 33 -> 50 ->
+            // 58 -> 62 over four passes (docs/deferred.md's WinUI
+            // one-line row entry, 2026-09-24).
+            None if element.VerticalAlignment()?
+                == bindings::Microsoft::UI::Xaml::VerticalAlignment::Stretch =>
+            {
+                0.0
+            }
             None => centre - element.ActualHeight()? / 2.0,
         });
     }
