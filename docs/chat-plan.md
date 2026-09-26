@@ -130,6 +130,14 @@ row).
   a general FILLED CONTAINER role that the bubble uses as accent and
   neutral; raw data colours (a project dot, an avatar) held until a
   consumer asks.
+- **R4 MEASURED 2026-09-25: no platform follows the end by itself.** The
+  chat scene with the app's own scroll on an arriving reply removed, the
+  view sitting at the end after the user's send, and `expect_at_end` read
+  1.5s after the peer's reply landed: every lane left the view where it was,
+  one row short — mac content bottom 544 against a 500pt viewport, GTK 1646
+  against 1698, WinUI 1647 against 1700, iOS 625 against 577, Compose 1000
+  of 1048. So by R4 the follow is kaya's: a scroll prop, designed in its
+  own pass (C1).
 - **R4 — stick to the bottom.** When the user is at the newest message and
   a new one arrives, every chat client keeps the view at the bottom; when
   the user has scrolled up, it does not move them. RECOMMENDED: measure
@@ -145,7 +153,7 @@ row).
 | stage | builds | forces |
 |---|---|---|
 | C0 | the app on today's surface: guest, scene, five lanes (BUILT 2026-09-25: guests/go/chat, tools/scenes/chat.steps; the app follows every new message with `scroll_to_row` itself, so §3's "does the platform keep the newest row in view" is still unmeasured and is C1's first step) | a Go record row's `Button` and `Spacer` (the generated façade lacked both) |
-| C1 | the thread stays at the bottom as messages arrive | R4's answer (a prop, or nothing) |
+| C1 | the thread stays at the bottom as messages arrive, and stays put when the user has scrolled up | a scroll prop that follows the end (R4 measured: no platform does it by itself) |
 | C1b | a compose field that grows from one line as the message does, up to a few lines, then scrolls | a textarea that sizes to its content between a floor and a cap (SwiftUI's `TextField(axis: .vertical)`, found by C0's first capture: a textarea is several lines tall at rest) |
 | C2 | an unread count on the dock and taskbar | the app badge (tasks has section badges only) |
 | C3 | a notification per message; activating it opens the conversation | nothing new (docs/tasks-s3-plan.md) |
