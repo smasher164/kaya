@@ -157,7 +157,7 @@ row).
 | C1b | a compose field that grows from one line as the message does, up to a few lines, then scrolls (BUILT 2026-09-25: `max_lines`, docs/grow-lines-plan.md) | a textarea that sizes to its content between a floor and a cap (SwiftUI's `TextField(axis: .vertical)`, found by C0's first capture: a textarea is several lines tall at rest) |
 | C2 | an unread count on the dock and taskbar (DESIGN: docs/app-badge-plan.md, R1 wanted) | the app badge (tasks has section badges only) |
 | C3 | a notification per message; activating it opens the conversation (BUILT 2026-09-25: a message to a conversation that is not open posts one keyed by the conversation, opening the conversation withdraws it; the chat leg reads both on five lanes, its steps last so no typing follows a post) | nothing in the API; `kaya_run` never granted the notifications capability, so no binding but Rust could post (docs/traps.md) |
-| C4 | answering from the notification itself | notification reply actions: a text field in the notification, the reply as an occurrence |
+| C4 | answering from the notification itself (DESIGN: docs/notification-reply-plan.md, R1 wanted) | notification reply actions: a text field in the notification, the reply as an occurrence |
 | C5 | an emoji button beside the compose field | the platform emoji picker (GTK EmojiChooser, the mac character palette, WinUI's emoji panel, the phones' keyboards) |
 | C6 | an image attachment shown inline | nothing new for display; the photo picker on the phones |
 | C7 | swipe a conversation to archive it on the phones | swipe actions |
