@@ -1043,6 +1043,20 @@ public final class KayaApp {
         }
     }
 
+    /** What an open dialog offers (docs/photo-attach-plan.md §1): IMAGES
+     * opens the photo library's own picker on the phones and filters to
+     * images on the desktops. */
+    public enum FileContent {
+        ANY(KayaWire.FILE_CONTENT_ANY),
+        IMAGES(KayaWire.FILE_CONTENT_IMAGES);
+
+        final int wire;
+
+        FileContent(int wire) {
+            this.wire = wire;
+        }
+    }
+
     /** One file the picker answered with. localPath is a RE-OPENABLE
      * NAME, empty unless re-opening actually works — the three desktops
      * and neither phone (DESIGN.md, File dialogs). EMPTY IS THIS FIELD'S
@@ -1670,6 +1684,7 @@ public final class KayaApp {
         private final long id;
         private final boolean multiple;
         private long window;
+        private FileContent content = FileContent.ANY;
         private final java.util.List<Object> filters = new java.util.ArrayList<>();
         private BiConsumer<Tx, java.util.List<PickedFile>> onResult;
         private boolean sent;
@@ -1696,6 +1711,12 @@ public final class KayaApp {
             return this;
         }
 
+        /** What the dialog offers (docs/photo-attach-plan.md §1). */
+        public FileDialogRef content(FileContent content) {
+            this.content = content;
+            return this;
+        }
+
         /** Bind the one-shot result handler to THIS request. */
         public FileDialogRef onResult(BiConsumer<Tx, java.util.List<PickedFile>> handler) {
             this.onResult = handler;
@@ -1711,7 +1732,7 @@ public final class KayaApp {
             if (sent) throw new IllegalStateException("kaya: this file request was already sent");
             app.requireFileSlot();
             tx.emit(KayaWire.txShowFileDialog(
-                    window, id, multiple ? 1 : 0, filters.toArray()));
+                    window, id, multiple ? 1 : 0, content.wire, filters.toArray()));
             sent = true;
             app.registerFileDialog(tx, id, handler);
             return id;
@@ -1728,6 +1749,9 @@ public final class KayaApp {
         @Override public FutureFileDialogRef in(long window) { super.in(window); return this; }
         @Override public FutureFileDialogRef filter(String label, String extensions) {
             super.filter(label, extensions); return this;
+        }
+        @Override public FutureFileDialogRef content(FileContent content) {
+            super.content(content); return this;
         }
         public CompletableFuture<java.util.List<PickedFile>> showFuture() { return super.future(); }
     }
@@ -3272,6 +3296,28 @@ public final class KayaApp {
             return this;
         }
 
+        /** This image's bound in points at construction: the picture scales
+         * down to fit, its shape kept, never up (docs/photo-attach-plan.md §2). */
+        public Widget maxWidth(double points) {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: maxWidth on a widget outside its build transaction"
+                    + " — use Tx.setMaxWidth inside a live transaction");
+            }
+            tx.setMaxWidth(this, points);
+            return this;
+        }
+
+        public Widget maxHeight(double points) {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: maxHeight on a widget outside its build transaction"
+                    + " — use Tx.setMaxHeight inside a live transaction");
+            }
+            tx.setMaxHeight(this, points);
+            return this;
+        }
+
         /** This container filled with a platform tint at construction:
          * tx.row(() -> {...}).filled(Tint.ACCENT). */
         public Widget filled(Tint tint) {
@@ -4382,6 +4428,15 @@ public final class KayaApp {
             t.setFilled(n, tint);
         }
 
+        /** This row's copy of that image's bound ({@link Tpl#setMaxWidth}). */
+        public void setMaxWidth(Node n, double points) {
+            t.setMaxWidth(n, points);
+        }
+
+        public void setMaxHeight(Node n, double points) {
+            t.setMaxHeight(n, points);
+        }
+
         /** This row's copy of that grid's auto columns at a floor
          * ({@link Tpl#setColumnsAuto}). */
         public void setColumnsAuto(Node n, double minWidth) {
@@ -5132,6 +5187,15 @@ public final class KayaApp {
          */
         public void setFilled(Widget w, Tint tint) {
             emit(KayaWire.txSetFilled(w.id, tint.wire));
+        }
+
+        /** An image's bound in points (docs/photo-attach-plan.md §2). */
+        public void setMaxWidth(Widget w, double points) {
+            emit(KayaWire.txSetMaxWidth(w.id, points));
+        }
+
+        public void setMaxHeight(Widget w, double points) {
+            emit(KayaWire.txSetMaxHeight(w.id, points));
         }
 
         /** A textarea that grows with its text to {@code lines} lines
@@ -6853,6 +6917,16 @@ public final class KayaApp {
          * bubbles are stamped rows. */
         public void setFilled(Node n, Tint tint) {
             tx.emit(KayaWire.txSetFilled(n.id, tint.wire));
+        }
+
+        /** A stamped image's bound, the blueprint twin of
+         * {@link Tx#setMaxWidth(Widget, double)}. */
+        public void setMaxWidth(Node n, double points) {
+            tx.emit(KayaWire.txSetMaxWidth(n.id, points));
+        }
+
+        public void setMaxHeight(Node n, double points) {
+            tx.emit(KayaWire.txSetMaxHeight(n.id, points));
         }
 
         /** A stamped grid's auto columns at a floor, the blueprint twin

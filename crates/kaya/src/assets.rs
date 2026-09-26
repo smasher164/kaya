@@ -470,3 +470,24 @@ mod tests {
         assert_eq!(names, sorted);
     }
 }
+
+/// `copy_asset`, the scene verb's one body, shared with the interpreters
+/// through the host vtable and JNI so every harness writes a scene's fixture
+/// file the same way (docs/photo-attach-plan.md §5): the asset read through
+/// this module's resolver, the directory created, the bytes written.
+pub(crate) fn copy_asset(name: &str, dest: &str) -> Result<String, String> {
+    if dest.contains('$') {
+        return Err(format!(
+            "copy_asset {name} {dest}: unexpanded substitution — only $TMP and $PID exist"
+        ));
+    }
+    let bytes = read(name).map_err(|why| format!("copy_asset {name}: {why}"))?;
+    let path = std::path::Path::new(dest);
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)
+            .map_err(|e| format!("copy_asset {name}: could not create {}: {e}", dir.display()))?;
+    }
+    std::fs::write(path, &bytes)
+        .map_err(|e| format!("copy_asset {name}: could not write {dest}: {e}"))?;
+    Ok(format!("copied {name}"))
+}

@@ -2127,6 +2127,76 @@ if len(fake) != 9:
                   f"nowhere)")
 
 
+# --- THE PHOTO ATTACHMENT'S TWO SURFACES, in all nine ----------------
+# (docs/photo-attach-plan.md §1, §2): the open dialog's images option and
+# the image bound in both zones. The generated wire forces every binding to
+# pass SOME content, so a binding passing a constant 0 compiles and offers no
+# photo picker; each row reads where the binding names the images value or
+# passes the caller's own. Each pattern is (template, the name `{}` stands
+# for), so the fake census swaps exactly the name.
+PHOTO_SURFACES = [
+    ("rust", "crates/kaya/src/app.rs", [
+        (r"pub fn {}\(mut self, content: crate::FileContent\)", "content"),
+        (r"pub fn {}\(&mut self, widget: WidgetId, points: f64\)", "max_width"),
+        (r"pub fn {}\(&mut self, node: TemplateNodeId, points: f64\)", "max_height")]),
+    ("python", "bindings/python/kaya/__init__.py", [
+        (r"IMAGES = wire\.{}", "FILE_CONTENT_IMAGES"),
+        (r"wire\.{}\(self\.id", "tx_set_max_width")]),
+    ("go", "bindings/go/app.go", [
+        (r"func \(r FileDialogRef\) {}\(content FileContent\)", "Content"),
+        (r"func \(tx \*Tx\) {}\(w Widget", "SetMaxWidth"),
+        (r"func \(t \*Tpl\) {}\(n Node", "SetMaxHeight")]),
+    ("csharp", "bindings/csharp/KayaApp.cs", [
+        (r"Images = KayaWire\.{}", "FileContentImages"),
+        (r"public void {}\(Widget w", "SetMaxWidth"),
+        (r"public void {}\(Node n", "SetMaxHeight")]),
+    ("java", "bindings/java/dev/kaya/KayaApp.java", [
+        (r"IMAGES\(KayaWire\.{}\)", "FILE_CONTENT_IMAGES"),
+        (r"public void {}\(Widget w", "setMaxWidth"),
+        (r"public void {}\(Node n", "setMaxHeight")]),
+    ("swift", "bindings/swift/KayaApp.swift", [
+        (r"multiple \? 1 : 0, {}\.rawValue", "content"),
+        (r"public func {}\(_ w: KayaWidget", "setMaxWidth"),
+        (r"public func {}\(_ n: KayaNodeHandle", "setMaxHeight")]),
+    ("haskell", "bindings/haskell/KayaApp.hs", [
+        (r"W\.{}", "fileContentImages"),
+        (r"{} :: Double -> Attr 'LeafW", "MaxWidth"),
+        (r"{} :: Double -> TplAttr", "TplMaxHeight")]),
+    ("ocaml", "bindings/ocaml/kaya_app.ml", [
+        (r"Kaya_wire\.{}", "file_content_images"),
+        (r"let {} \(Widget id\)", "set_max_width"),
+        (r"let {} \(Node id\)", "set_max_height")]),
+    ("js", "bindings/js/kaya/index.ts", [
+        (r"images: wire\.{}", "FILE_CONTENT_IMAGES"),
+        (r"wire\.{}\(this\.id", "tx_set_max_width")]),
+]
+
+
+def check_photo_surfaces(fake_name=None, findings=None):
+    global status
+    for lang, rel, patterns in PHOTO_SURFACES:
+        for template, name in patterns:
+            pat = template.format(fake_name or name)
+            if not grep_file(pat, rel):
+                msg = (f"check-sugar-surface: {lang} lacks a photo-attachment "
+                       f"surface (wanted /{pat}/ in {rel})")
+                if findings is None:
+                    print(msg)
+                    status = 1
+                else:
+                    findings.append(msg)
+
+
+check_photo_surfaces()
+fake = []
+check_photo_surfaces("KayaFakePhotoSurface", findings=fake)
+want_fake = sum(len(p) for _, _, p in PHOTO_SURFACES)
+print(f"check-sugar-surface: fake photo surfaces fired {len(fake)}/{want_fake}")
+if len(fake) != want_fake:
+    selftest_exit(f"check-sugar-surface: self-test failed ({len(fake)}/{want_fake} "
+                  f"photo-surface patterns fired for names that exist nowhere)")
+
+
 # --- THE SIZE-POLICY SURFACE, in all nine ---------------------------
 # WHAT A CANVAS DOES WITH A TRACK THAT IS NOT ITS VIEWBOX
 # (docs/canvas-plan.md §3.2.1), invisible to every sweep above for the

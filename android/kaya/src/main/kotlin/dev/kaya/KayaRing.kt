@@ -92,6 +92,10 @@ object KayaRing {
      */
     @JvmStatic external fun assetMissSentence(name: ByteArray): ByteArray
 
+    /// The `copy_asset` scene verb, the core's own body
+    /// (docs/photo-attach-plan.md §5): "ok\n" or "no\n" and the sentence.
+    @JvmStatic external fun copyAsset(name: ByteArray, dest: ByteArray): ByteArray
+
     /**
      * The app's own writable directory (docs/tasks-s4-plan.md P1), as
      * UTF-8 bytes; empty before Android's attach has handed it in.

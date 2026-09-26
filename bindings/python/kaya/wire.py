@@ -14,7 +14,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, cast
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0xcad44d3c6e3d9800
+SPEC_HASH = 0xb0dbd639210c2e5a
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -114,6 +114,8 @@ PROP_FILLED = 38
 PROP_FOLLOWS_END = 39
 PROP_MAX_LINES = 40
 PROP_SYMBOL = 41
+PROP_MAX_WIDTH = 42
+PROP_MAX_HEIGHT = 43
 WPROP_TITLE = 1
 WPROP_WIDTH = 2
 WPROP_HEIGHT = 3
@@ -164,6 +166,8 @@ NOTIFICATION_OUTCOME_REFUSED = 1
 FILE_MODE_READ = 0
 FILE_MODE_WRITE = 1
 FILE_MODE_READ_WRITE = 2
+FILE_CONTENT_ANY = 0
+FILE_CONTENT_IMAGES = 1
 PLATFORM_MAC = 1
 PLATFORM_IOS = 2
 PLATFORM_LINUX = 3
@@ -594,9 +598,9 @@ def tx_set_menu_prop(item: int, prop: int, source: int) -> bytes:
     """Bind a menu property (MENU_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — menu items are not collection elements — and icon/primary/ shortcut reject SOURCE_SIGNAL (const-only). label and enabled fan out through the signal-write path; the domain of a signal-bound value is validated on the COMPLETE coalesced value at the transaction barrier."""
     return record(TX_SET_MENU_PROP, struct.pack("<Q", item) + struct.pack("<I", prop) + struct.pack("<I", source))
 
-def tx_show_file_dialog(window: int, dialog: int, multiple: int, filters: Sequence[Value]) -> bytes:
-    """Request the platform's file picker over a live window (0 = primary), on the alert's request/result grammar (DESIGN.md, File dialogs). Dialog ids are guest-chosen; one dialog may be live per process, and the id retires when its result fires. `multiple` is 0 or 1 — every backend supports both, spelled four ways (a flag on SwiftUI and AppKit, a different METHOD on GTK and WinUI, a different CONTRACT on Android). `filters` is advisory and rides as alternating Str values, a label then its space-separated extensions: every platform treats them as a default view rather than a guarantee, so the guest still validates what it got."""
-    return record(TX_SHOW_FILE_DIALOG, struct.pack("<Q", window) + struct.pack("<Q", dialog) + struct.pack("<I", multiple) + struct.pack("<I", 0) + _enc.values(filters))
+def tx_show_file_dialog(window: int, dialog: int, multiple: int, content: int, filters: Sequence[Value]) -> bytes:
+    """Request the platform's file picker over a live window (0 = primary), on the alert's request/result grammar (DESIGN.md, File dialogs). Dialog ids are guest-chosen; one dialog may be live per process, and the id retires when its result fires. `multiple` is 0 or 1 — every backend supports both, spelled four ways (a flag on SwiftUI and AppKit, a different METHOD on GTK and WinUI, a different CONTRACT on Android). `filters` is advisory and rides as alternating Str values, a label then its space-separated extensions: every platform treats them as a default view rather than a guarantee, so the guest still validates what it got. `content` is a file_content: `images` opens the photo library's own picker on the phones and filters to images on the desktops (docs/photo-attach-plan.md §1)."""
+    return record(TX_SHOW_FILE_DIALOG, struct.pack("<Q", window) + struct.pack("<Q", dialog) + struct.pack("<I", multiple) + struct.pack("<I", content) + _enc.values(filters))
 
 def tx_copy(present: int, file_count: int, custom_count: int, reps: Sequence[Value]) -> bytes:
     """Put one clip on the system clipboard, offered in several REPRESENTATIONS at once (DESIGN.md, Clipboard; docs/clipboard-plan.md). A clip is not a string: every platform models it as one item available in several types, and the consumer takes the richest it understands — so an app offers html AND text, and pasting into Pages keeps the formatting while a plain field still works. A RECORD RATHER THAN A LIST, which is what makes at-most-one-per-kind structural instead of a runtime duplicate check. `present` is a mask over the `clip` enum for the single-valued kinds; the two plural ones carry counts. `reps` holds the populated ones in the CANONICAL ORDER, which kaya fixes once because richness is a property of the kind rather than of the app's intent, and the wire's preference order (macOS type order, X11 TARGETS) has to be right whoever wrote the guest. THE ORDER IS DESCENDING CLIP VALUE, which is descending richness, so a backend writes what it is handed in the order it is handed: `custom_count` pairs of Str id and I64 blob, `file_count` I64 handles, I64 image blob, Str html, Str text. Files are the SAME CAPABILITY the picker returns — a handle redeemed with kaya_open_picked — so copying a file and picking one are one currency and the bytes never move through kaya."""
@@ -1324,6 +1328,36 @@ def tx_bind_symbol(widget_id: int, signal_id: int) -> bytes:
 def tx_bind_symbol_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_SYMBOL, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_max_width(widget_id: int, max_width: float) -> bytes:
+    """set_property with a constant max_width value (float)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_MAX_WIDTH, SOURCE_CONST) + _enc.value(max_width))
+
+
+def tx_bind_max_width(widget_id: int, signal_id: int) -> bytes:
+    """set_property with a signal-bound max_width value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_MAX_WIDTH, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_max_width_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_MAX_WIDTH, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_max_height(widget_id: int, max_height: float) -> bytes:
+    """set_property with a constant max_height value (float)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_MAX_HEIGHT, SOURCE_CONST) + _enc.value(max_height))
+
+
+def tx_bind_max_height(widget_id: int, signal_id: int) -> bytes:
+    """set_property with a signal-bound max_height value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_MAX_HEIGHT, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_max_height_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_MAX_HEIGHT, SOURCE_ELEMENT, level, field))
 
 
 def tx_set_window_title(window: int, title: str) -> bytes:

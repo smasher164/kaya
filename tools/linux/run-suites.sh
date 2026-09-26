@@ -1815,9 +1815,13 @@ for proto in x11 wayland; do
     run "$proto" editor-go env KAYA_SELFTEST=editor \
         tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
     # THE CHAT APP (docs/chat-plan.md): Go alone by R1. It posts
-    # notifications (C3), so it runs on the portal's desktop.
-    run "$proto" chat-go env KAYA_SELFTEST=chat \
-        tools/linux/notify-leg.sh portal /tmp/go-guests/kaya-go
+    # notifications (C3), so it runs on the portal's desktop, and it picks a
+    # photo (C6), whose dialog is read over the accessibility bus. GDK keeps
+    # its own chooser: an activatable portal takes the dialog into the
+    # portal's process (tools/linux/Dockerfile's portal note).
+    run "$proto" chat-go env KAYA_SELFTEST=chat GDK_DEBUG=no-portals \
+        tools/linux/notify-leg.sh portal \
+        tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
     drain
     # THE PORTFOLIO APP (docs/portfolio-plan.md): python alone by design.
     # ALONE BETWEEN DRAINS — 15,000 windowed rows are its own load

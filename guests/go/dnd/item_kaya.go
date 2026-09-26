@@ -117,9 +117,11 @@ func (r itemRow) Href(n kaya.Node, f kaya.Field[string]) { r.c.Href(r.t, n, f) }
 
 func (r itemRow) SetAccepts(n kaya.Node, kinds ...string) { r.t.SetAccepts(n, kinds...) }
 
-func (r itemRow) SetFill(n kaya.Node, on bool)          { r.t.SetFill(n, on) }
-func (r itemRow) SetAlign(n kaya.Node, mode kaya.Align) { r.t.SetAlign(n, mode) }
-func (r itemRow) SetFilled(n kaya.Node, tint kaya.Tint) { r.t.SetFilled(n, tint) }
+func (r itemRow) SetFill(n kaya.Node, on bool)             { r.t.SetFill(n, on) }
+func (r itemRow) SetAlign(n kaya.Node, mode kaya.Align)    { r.t.SetAlign(n, mode) }
+func (r itemRow) SetFilled(n kaya.Node, tint kaya.Tint)    { r.t.SetFilled(n, tint) }
+func (r itemRow) SetMaxWidth(n kaya.Node, points float64)  { r.t.SetMaxWidth(n, points) }
+func (r itemRow) SetMaxHeight(n kaya.Node, points float64) { r.t.SetMaxHeight(n, points) }
 
 func (r itemRow) SetColumnsAuto(n kaya.Node, minWidth float64) { r.t.SetColumnsAuto(n, minWidth) }
 

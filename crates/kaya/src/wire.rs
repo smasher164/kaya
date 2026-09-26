@@ -424,6 +424,8 @@ pub(crate) const PROP_FILLED: u32 = 38;
 pub(crate) const PROP_FOLLOWS_END: u32 = 39;
 pub(crate) const PROP_MAX_LINES: u32 = 40;
 pub(crate) const PROP_SYMBOL: u32 = 41;
+pub(crate) const PROP_MAX_WIDTH: u32 = 42;
+pub(crate) const PROP_MAX_HEIGHT: u32 = 43;
 
 /// The clip representation masks (spec enum "clip"). BIT POSITIONS, not
 /// an ordinal: a copy carries several and a widget accepts several, so
@@ -551,6 +553,8 @@ pub(crate) fn notification_outcome_raw(outcome: crate::protocol::NotificationOut
 pub(crate) const FILE_MODE_READ: u32 = 0;
 pub(crate) const FILE_MODE_WRITE: u32 = 1;
 pub(crate) const FILE_MODE_READ_WRITE: u32 = 2;
+pub(crate) const FILE_CONTENT_ANY: u32 = 0;
+pub(crate) const FILE_CONTENT_IMAGES: u32 = 1;
 
 /// The align enum's wire values (spec enum "align").
 // The arrangement axis (docs/adaptive-layout-plan.md D1).
@@ -941,6 +945,8 @@ fn prop(raw: u32) -> Prop {
         PROP_FOLLOWS_END => Prop::FollowsEnd,
         PROP_MAX_LINES => Prop::MaxLines,
         PROP_SYMBOL => Prop::Symbol,
+        PROP_MAX_WIDTH => Prop::MaxWidth,
+        PROP_MAX_HEIGHT => Prop::MaxHeight,
         other => panic!("kaya: unknown property {other}"),
     }
 }
@@ -1695,7 +1701,14 @@ pub fn decode_transaction_with_blobs(
                 let window = WindowId(r.u64());
                 let dialog = crate::protocol::FileDialogId(r.u64());
                 let multiple = r.u32() != 0;
-                let _reserved = r.u32();
+                let content = match r.u32() {
+                    FILE_CONTENT_ANY => crate::protocol::FileContent::Any,
+                    FILE_CONTENT_IMAGES => crate::protocol::FileContent::Images,
+                    other => panic!(
+                        "kaya: show_file_dialog asks for content {other}, which is not a \
+                         file_content (any=0, images=1)"
+                    ),
+                };
                 // Filters ride as one flat Values read IN PAIRS — label
                 // then extensions. Reading in groups is the whole
                 // encoding; a trailing half-pair is a broken binding, so
@@ -1717,6 +1730,7 @@ pub fn decode_transaction_with_blobs(
                     window,
                     dialog,
                     multiple,
+                    content,
                     filters,
                 })
             }
@@ -3113,7 +3127,7 @@ impl Writer {
                     b.extend_from_slice(&spec.window.0.to_le_bytes());
                     b.extend_from_slice(&spec.dialog.0.to_le_bytes());
                     b.extend_from_slice(&u32::from(spec.multiple).to_le_bytes());
-                    b.extend_from_slice(&0u32.to_le_bytes());
+                    b.extend_from_slice(&(spec.content as u32).to_le_bytes());
                     b.extend_from_slice(&((spec.filters.len() * 2) as u32).to_le_bytes());
                     b.extend_from_slice(&0u32.to_le_bytes());
                     for (label, exts) in &spec.filters {
@@ -3632,7 +3646,7 @@ impl Writer {
                 b.extend_from_slice(&spec.window.0.to_le_bytes());
                 b.extend_from_slice(&spec.dialog.0.to_le_bytes());
                 b.extend_from_slice(&u32::from(spec.multiple).to_le_bytes());
-                b.extend_from_slice(&0u32.to_le_bytes());
+                b.extend_from_slice(&(spec.content as u32).to_le_bytes());
                 // Filters ride as alternating Str values, label then
                 // extensions — the Values encoding read in pairs, the
                 // same grouping trick the result uses in threes.
@@ -4343,6 +4357,8 @@ fn prop_raw(prop: Prop) -> u32 {
         Prop::FollowsEnd => PROP_FOLLOWS_END,
         Prop::MaxLines => PROP_MAX_LINES,
         Prop::Symbol => PROP_SYMBOL,
+        Prop::MaxWidth => PROP_MAX_WIDTH,
+        Prop::MaxHeight => PROP_MAX_HEIGHT,
     }
 }
 
@@ -4887,7 +4903,15 @@ mod tests {
                 window: WindowId(0),
                 dialog: FileDialogId(7),
                 multiple: true,
+                content: crate::protocol::FileContent::Any,
                 filters: vec![("Text".into(), "txt md".into())],
+            }),
+            TxOp::ShowFileDialog(FileDialogSpec {
+                window: WindowId(0),
+                dialog: FileDialogId(9),
+                multiple: false,
+                content: crate::protocol::FileContent::Images,
+                filters: vec![],
             }),
             TxOp::ShowSaveDialog(SaveDialogSpec {
                 window: WindowId(3),

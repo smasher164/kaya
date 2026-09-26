@@ -1109,6 +1109,7 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
             WidgetKind::Button | WidgetKind::Label | WidgetKind::Checkbox | WidgetKind::Row
         ),
         Prop::Symbol => kind == WidgetKind::Button,
+        Prop::MaxWidth | Prop::MaxHeight => kind == WidgetKind::Image,
     };
     assert!(ok, "kaya: {kind:?} has no property {prop:?}");
 }
@@ -1609,6 +1610,7 @@ fn prop_value_type(prop: Prop) -> ValueType {
         Prop::Filled => ValueType::I64,
         Prop::FollowsEnd => ValueType::Bool,
         Prop::MaxLines => ValueType::F64,
+        Prop::MaxWidth | Prop::MaxHeight => ValueType::F64,
         Prop::Axis => ValueType::I64,
         Prop::Role => ValueType::I64,
         Prop::Symbol => ValueType::I64,
@@ -2223,6 +2225,12 @@ fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
         assert!(
             lines.is_finite() && *lines >= 1.0 && lines.fract() == 0.0,
             "kaya: max_lines is a whole number of lines, at least 1, got {lines}"
+        );
+    }
+    if let (Prop::MaxWidth | Prop::MaxHeight, Value::F64(bound)) = (prop, value) {
+        assert!(
+            bound.is_finite() && *bound > 0.0,
+            "kaya: {prop:?} is an image's bound in points, a positive number, got {bound}"
         );
     }
     if let (Prop::Filled, Value::I64(tint)) = (prop, value) {
@@ -9633,6 +9641,36 @@ mod tests {
                 widget: WidgetId(1),
                 prop: Prop::Symbol,
                 value: PropValue::Const(Value::I64(25)),
+            },
+        ]);
+    }
+
+    /// The image bound's walls (docs/photo-attach-plan.md §2): an image's,
+    /// and a positive number of points.
+    #[test]
+    #[should_panic(expected = "Label has no property MaxWidth")]
+    fn a_bounded_label_dies_at_declare() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Label },
+            TxOp::SetProperty {
+                widget: WidgetId(1),
+                prop: Prop::MaxWidth,
+                value: PropValue::Const(Value::F64(240.0)),
+            },
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "a positive number, got 0")]
+    fn a_zero_image_bound_dies_at_declare() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Image },
+            TxOp::SetProperty {
+                widget: WidgetId(1),
+                prop: Prop::MaxHeight,
+                value: PropValue::Const(Value::F64(0.0)),
             },
         ]);
     }

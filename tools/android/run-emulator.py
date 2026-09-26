@@ -897,8 +897,51 @@ def assets_prepare(serial):
     return asset_hashes_agree(serial, listing)
 
 
+def photo_library_stage(serial):
+    """docs/photo-attach-plan.md §5: every picture a scene's `copy_asset`
+    names goes into the phone's media library before any leg, since the
+    photo picker shows the library and no folder, and the newest photo is
+    the one a phone's `file_choose` takes. A push to shared storage is
+    indexed by the media provider as it lands; the query afterwards is the
+    proof, not the push's exit."""
+    names = sorted({name for steps in (ROOT / "tools/scenes").glob("*.steps")
+                    for name in re.findall(r"^copy_asset (images/\S+)",
+                                           steps.read_text(encoding="utf-8"), re.M)})
+    for name in names:
+        on_device = f"/sdcard/Pictures/kaya-{pathlib.PurePosixPath(name).name}"
+        adb(serial, "shell", "rm", "-f", on_device,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if adb(serial, "push", str(ASSET_SRC / name), on_device,
+               stdout=subprocess.DEVNULL).returncode != 0:
+            print(f"run-emulator: could not push {name} to {serial}", file=sys.stderr)
+            return False
+        adb(serial, "shell", "am", "broadcast", "-a",
+            "android.intent.action.MEDIA_SCANNER_SCAN_FILE", "-d",
+            f"file://{on_device}", stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        shown = pathlib.PurePosixPath(on_device).name
+        deadline = time.monotonic() + 20
+        while True:
+            listing = out_of(["adb", "-s", serial, "shell", "content", "query",
+                              "--uri", "content://media/external/images/media",
+                              "--projection", "_display_name"],
+                             stderr=subprocess.STDOUT)
+            if shown in listing:
+                break
+            if time.monotonic() > deadline:
+                print(f"run-emulator: {shown} never reached the media library on "
+                      f"{serial}; a photo picker there offers nothing of the scene's",
+                      file=sys.stderr)
+                return False
+            time.sleep(0.5)
+        print(f"run-emulator: added {name} to the photo library on {serial}",
+              file=sys.stderr, flush=True)
+    return True
+
+
 for _serial in SERIALS:
     if not cliphelper_prepare(_serial):
+        sys.exit(1)
+    if not photo_library_stage(_serial):
         sys.exit(1)
     CLIPHELPER_IME_ON.append(_serial)
     if not assets_prepare(_serial):

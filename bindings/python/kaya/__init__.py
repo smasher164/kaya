@@ -668,6 +668,20 @@ class _Handle:
         _records().append(wire.tx_set_role(self.id, _role_value(role)))
         return self
 
+    def max_width(self: H, points: float) -> H:
+        """Bound this image's width in points: the picture scales down to
+        fit, its shape kept, and never up (docs/photo-attach-plan.md §2).
+        ON THE BASE, as `role` is, so a stamped image is bounded too.
+        Returns the handle."""
+        _records().append(wire.tx_set_max_width(self.id, _bound_value("max_width", points)))
+        return self
+
+    def max_height(self: H, points: float) -> H:
+        """Bound this image's height in points, `max_width`'s twin.
+        Returns the handle."""
+        _records().append(wire.tx_set_max_height(self.id, _bound_value("max_height", points)))
+        return self
+
     def on_paste(self: H, fn: Handler) -> H:
         """Take pasted content here: fn(clip), or fn(row, clip) for a
         stamped copy — the copy's `Row` first, as on_change delivers.
@@ -2420,26 +2434,51 @@ class PickedFile:
         return f"PickedFile(name={self.name!r}, local_path={self.local_path!r})"
 
 
+class FileContent(enum.IntEnum):
+    """What an open dialog offers (docs/photo-attach-plan.md §1): IMAGES
+    opens the photo library's own picker on the phones and filters to
+    images on the desktops. Names accepted too."""
+
+    ANY = wire.FILE_CONTENT_ANY
+    IMAGES = wire.FILE_CONTENT_IMAGES
+
+    @classmethod
+    def _missing_(cls, value: object) -> Any:
+        if isinstance(value, str):
+            try:
+                return cls[value.upper()]
+            except KeyError:
+                pass
+        raise KayaValueError(
+            f"kaya: content must be one of {sorted(m.name.lower() for m in cls)}, "
+            f"got {value!r}"
+        )
+
+
 def pick_files(*, filters: Sequence[tuple[str, str | Sequence[str]]] = (),
                on_result: Callable[[list[PickedFile]], object] | None = None,
-               window: int = 0) -> int:
+               window: int = 0,
+               content: FileContent | str = FileContent.ANY) -> int:
     """Ask the platform for files. THE PICK, NOT THE OPEN — the result
     carries handles you redeem later.
 
     `filters` is a sequence of `(label, extensions)` pairs, ADVISORY on
     every platform, so the guest still validates what it got.
     on_result(files) fires exactly once and retires; CANCEL IS THE EMPTY
-    LIST. One dialog may be live per process."""
-    return _pick(True, filters, on_result, window)
+    LIST. One dialog may be live per process. `content="images"` opens the
+    photo library's own picker on the phones and filters to images on the
+    desktops."""
+    return _pick(True, filters, on_result, window, content)
 
 
 def pick_file(*, filters: Sequence[tuple[str, str | Sequence[str]]] = (),
               on_result: Callable[[list[PickedFile]], object] | None = None,
-              window: int = 0) -> int:
+              window: int = 0,
+              content: FileContent | str = FileContent.ANY) -> int:
     """The single-file spelling. The floor always returns a LIST; this
     only asks the platform for one, so the handler receives zero or one
     file."""
-    return _pick(False, filters, on_result, window)
+    return _pick(False, filters, on_result, window, content)
 
 
 def save_file(suggested_name: str,
@@ -2482,16 +2521,24 @@ def _filters(filters: Sequence[tuple[str, str | Sequence[str]]]) -> list[str]:
     return flat
 
 
+def _bound_value(what: str, points: float) -> float:
+    if isinstance(points, bool) or not isinstance(points, (int, float)) or not points > 0:
+        raise KayaTypeError(f"kaya: {what} is a bound in points, a positive number, not {points!r}")
+    return float(points)
+
+
 def _pick(multiple: bool,
           filters: Sequence[tuple[str, str | Sequence[str]]],
           on_result: Callable[[list[PickedFile]], object] | None,
-          window: int) -> int:
+          window: int,
+          content: FileContent | str = FileContent.ANY) -> int:
     app = _app
     dialog_id = app._next("file_dialog")
+    content_value = FileContent(content)
     if on_result is not None:
         app._file_dialog_handlers[dialog_id] = on_result
     _records().append(wire.tx_show_file_dialog(
-        int(window), dialog_id, 1 if multiple else 0, _filters(filters)))
+        int(window), dialog_id, 1 if multiple else 0, int(content_value), _filters(filters)))
     return dialog_id
 
 

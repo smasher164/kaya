@@ -726,6 +726,15 @@ enum Role : long
     Composer = KayaWire.RoleComposer,
 }
 
+/// What an open dialog offers (docs/photo-attach-plan.md §1): Images opens
+/// the photo library's own picker on the phones and filters to images on the
+/// desktops.
+public enum FileContent : uint
+{
+    Any = KayaWire.FileContentAny,
+    Images = KayaWire.FileContentImages,
+}
+
 /// THE SEMANTIC ICON VOCABULARY (docs/styling-plan.md D6, DESIGN.md
 /// "Icons want names, not bytes"). An app names a CONCEPT and each
 /// backend draws its own platform's glyph.
@@ -1618,14 +1627,16 @@ sealed class KayaApp
             title, message, action0, action1, cancel, (_, choice) => resolve(choice), window));
 
     public Task<List<PickedFile>> PickFileAsync(
-        (string Label, string Extensions)[]? filters = null, ulong window = 0) =>
+        (string Label, string Extensions)[]? filters = null, ulong window = 0,
+        FileContent content = FileContent.Any) =>
         RequestAsync<List<PickedFile>>((tx, resolve) => tx.PickFile(
-            filters, (_, files) => resolve(files), window));
+            filters, (_, files) => resolve(files), window, content));
 
     public Task<List<PickedFile>> PickFilesAsync(
-        (string Label, string Extensions)[]? filters = null, ulong window = 0) =>
+        (string Label, string Extensions)[]? filters = null, ulong window = 0,
+        FileContent content = FileContent.Any) =>
         RequestAsync<List<PickedFile>>((tx, resolve) => tx.PickFiles(
-            filters, (_, files) => resolve(files), window));
+            filters, (_, files) => resolve(files), window, content));
 
     public Task<PickedFile?> SaveFileAsync(string suggestedName,
         (string Label, string Extensions)[]? filters = null, ulong window = 0) =>
@@ -2916,6 +2927,14 @@ sealed class Tx : IDisposable
     /// lines, then scrolls (docs/grow-lines-plan.md).
     public void SetMaxLines(Widget w, int lines) =>
         Records.Add(KayaWire.TxSetMaxLines(w.Id, lines));
+
+    /// An image's bound in points: the picture scales down to fit, its shape
+    /// kept, and never up (docs/photo-attach-plan.md §2).
+    public void SetMaxWidth(Widget w, double points) =>
+        Records.Add(KayaWire.TxSetMaxWidth(w.Id, points));
+
+    public void SetMaxHeight(Widget w, double points) =>
+        Records.Add(KayaWire.TxSetMaxHeight(w.Id, points));
 
     /// A scroll that keeps its end in view while its content grows
     /// (docs/follow-end-plan.md).
@@ -4244,8 +4263,9 @@ sealed class Tx : IDisposable
     public ulong PickFiles(
         (string Label, string Extensions)[]? filters = null,
         Action<Tx, List<PickedFile>>? onResult = null,
-        ulong window = 0)
-        => Pick(true, filters, onResult, window);
+        ulong window = 0,
+        FileContent content = FileContent.Any)
+        => Pick(true, filters, onResult, window, content);
 
     /// The single-file spelling. The floor always returns a LIST; this
     /// only asks the platform for one, so the handler receives zero or
@@ -4253,21 +4273,23 @@ sealed class Tx : IDisposable
     public ulong PickFile(
         (string Label, string Extensions)[]? filters = null,
         Action<Tx, List<PickedFile>>? onResult = null,
-        ulong window = 0)
-        => Pick(false, filters, onResult, window);
+        ulong window = 0,
+        FileContent content = FileContent.Any)
+        => Pick(false, filters, onResult, window, content);
 
     ulong Pick(
         bool multiple,
         (string Label, string Extensions)[]? filters,
         Action<Tx, List<PickedFile>>? onResult,
-        ulong window)
+        ulong window,
+        FileContent content)
     {
         Alive();
         if (App.liveFileDialog != 0)
             throw new InvalidOperationException($"kaya: cannot show another file dialog while dialog {App.liveFileDialog} is live");
         ulong id = ++App.nextFileDialog;
         Records.Add(KayaWire.TxShowFileDialog(
-            window, id, multiple ? 1u : 0u, FilterValues(filters)));
+            window, id, multiple ? 1u : 0u, (uint)content, FilterValues(filters)));
         if (onResult != null)
             App.fileDialogs[id] = onResult;
         TrackFileDialog(id);
@@ -4927,6 +4949,13 @@ sealed class Tpl
     /// chat thread's bubbles are stamped rows.
     public void SetFilled(Node n, Tint tint) =>
         tx.Records.Add(KayaWire.TxSetFilled(n.Id, (long)tint));
+
+    /// A stamped image's bound (Tx.SetMaxWidth, Tx.SetMaxHeight).
+    public void SetMaxWidth(Node n, double points) =>
+        tx.Records.Add(KayaWire.TxSetMaxWidth(n.Id, points));
+
+    public void SetMaxHeight(Node n, double points) =>
+        tx.Records.Add(KayaWire.TxSetMaxHeight(n.Id, points));
 
     /// A stamped grid's auto columns at a floor (Tx.SetColumnsAuto).
     public void SetColumnsAuto(Node n, double minWidth)

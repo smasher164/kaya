@@ -306,7 +306,19 @@ pub struct FileDialogSpec {
     pub window: WindowId,
     pub dialog: FileDialogId,
     pub multiple: bool,
+    pub content: FileContent,
     pub filters: Vec<(String, String)>,
+}
+
+/// What an open dialog offers (spec enum `file_content`;
+/// docs/photo-attach-plan.md §1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FileContent {
+    #[default]
+    Any = 0,
+    /// The photo library's own picker on the phones, the open dialog
+    /// filtered to images on the desktops.
+    Images = 1,
 }
 
 /// A save-dialog request. The picker's twin with two differences: there
@@ -1430,6 +1442,10 @@ pub enum Prop {
     MaxLines,
     /// An icon-only button's symbol (docs/composer-plan.md §2).
     Symbol,
+    /// An image's bound in points (F64, positive; docs/photo-attach-plan.md
+    /// §2): the picture scales down inside both, never up.
+    MaxWidth,
+    MaxHeight,
     /// The app owns a rich textarea's undo (Bool-valued; docs/rich-text-plan.md
     /// R6, §14): the native stack is off, the ledger never banks it, and
     /// Edit>Undo/Redo reach the app through the role item's own activation.

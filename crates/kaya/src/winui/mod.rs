@@ -1096,6 +1096,10 @@ fn symbol_icon(value: i64) -> windows_core::Result<Option<IconElement>> {
     Ok(Some(element))
 }
 
+/// The picture types WIC decodes out of the box, which an images request
+/// offers (docs/photo-attach-plan.md §1).
+const IMAGE_EXTENSIONS: &str = "jpg jpeg png gif bmp tif tiff ico heic webp jxr";
+
 /// An icon-only button's glyph (docs/composer-plan.md §2): a FontIcon at a
 /// size the 32px button leaves room around, since SymbolIcon draws at a fixed
 /// 20px and a 20px paper plane touched the accent circle's edge (the
@@ -7619,8 +7623,13 @@ fn file_dialog_show(
             // outlive SetFileTypes, which borrows their pointers.
             let specs: Vec<(HSTRING, HSTRING)> = filters
                 .iter()
-                .map(|(label, suffix)| {
-                    (HSTRING::from(label.as_str()), HSTRING::from(format!("*.{suffix}")))
+                .map(|(label, suffixes)| {
+                    let pattern = suffixes
+                        .split_whitespace()
+                        .map(|suffix| format!("*.{}", suffix.trim_start_matches('.')))
+                        .collect::<Vec<_>>()
+                        .join(";");
+                    (HSTRING::from(label.as_str()), HSTRING::from(pattern))
                 })
                 .collect();
             if !specs.is_empty() {
@@ -7728,8 +7737,13 @@ fn file_save_show(
 
             let specs: Vec<(HSTRING, HSTRING)> = filters
                 .iter()
-                .map(|(label, suffix)| {
-                    (HSTRING::from(label.as_str()), HSTRING::from(format!("*.{suffix}")))
+                .map(|(label, suffixes)| {
+                    let pattern = suffixes
+                        .split_whitespace()
+                        .map(|suffix| format!("*.{}", suffix.trim_start_matches('.')))
+                        .collect::<Vec<_>>()
+                        .join(";");
+                    (HSTRING::from(label.as_str()), HSTRING::from(pattern))
                 })
                 .collect();
             if !specs.is_empty() {
@@ -15750,7 +15764,13 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 kind: DialogKind::Open {
                     multiple: spec.multiple,
                 },
-                filters: spec.filters.clone(),
+                // docs/photo-attach-plan.md §1: Windows has no photo library,
+                // so an images request is the open dialog filtered to images.
+                filters: if spec.content == crate::protocol::FileContent::Images {
+                    vec![("Images".to_owned(), IMAGE_EXTENSIONS.to_owned())]
+                } else {
+                    spec.filters.clone()
+                },
                 folder: core.pending_dialog_dir.borrow_mut().take(),
                 dialog: spec.dialog.0,
                 sink: core.occurrences.clone(),
@@ -16469,6 +16489,15 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         PickerCell::set(&cell.step, step as i64);
                     }
                     picker.SetMinuteIncrement(step as i32)?;
+                }
+                // docs/photo-attach-plan.md §2: the Image's own Uniform stretch
+                // keeps the shape inside its maxima, and a picture already
+                // smaller keeps its size.
+                (NativeWidget::Image(image), Prop::MaxWidth, Value::F64(bound)) => {
+                    image.SetMaxWidth(bound)?;
+                }
+                (NativeWidget::Image(image), Prop::MaxHeight, Value::F64(bound)) => {
+                    image.SetMaxHeight(bound)?;
                 }
                 (NativeWidget::Image(image), Prop::Source, Value::Blob(blob)) => {
                     // Encoded bytes in, native decode. SetSource is the
@@ -21609,6 +21638,21 @@ impl crate::harness::Stage for WinUiStage {
                 Some((w, h)) => format!("{w}x{h}"),
                 None => "0x0".into(),
             })
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
+    }
+
+    fn image_drawn(&self, t: crate::harness::Target) -> String {
+        Self::on_ui_read(move |core| {
+            let Some(i) = crate::harness::try_resolve(t.index, core.images.len()) else {
+                return Ok("<no such target>".to_string());
+            };
+            let image = &core.images[i];
+            Ok(format!(
+                "{}x{}",
+                image.ActualWidth()?.round() as i64,
+                image.ActualHeight()?.round() as i64
+            ))
         })
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }

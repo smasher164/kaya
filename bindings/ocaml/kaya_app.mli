@@ -467,6 +467,10 @@ type align = Start | Center | End | Stretch | Baseline
    (docs/grow-lines-plan.md). *)
 val set_max_lines : widget -> int -> unit
 
+(* An image's bound in points (docs/photo-attach-plan.md §2). *)
+val set_max_width : widget -> float -> unit
+val set_max_height : widget -> float -> unit
+
 (* What a filled container's surface means (docs/tints-plan.md T1). *)
 module Tint : sig
   type t = Accent | Success | Warning | Critical | Neutral
@@ -1151,11 +1155,24 @@ val link_route : app -> pattern:string -> f:((string * string) list -> unit) -> 
 
 val link_opened : app -> int64 -> string -> (string * string) list -> unit
 
+(* What an open dialog offers (docs/photo-attach-plan.md §1). *)
+module File_content : sig
+  type t = Any | Images
+end
+
 val pick_files :
-  ?window:int64 -> ?filters:(string * string) list -> unit -> picked_file list ask
+  ?window:int64 ->
+  ?filters:(string * string) list ->
+  ?content:File_content.t ->
+  unit ->
+  picked_file list ask
 
 val pick_file :
-  ?window:int64 -> ?filters:(string * string) list -> unit -> picked_file list ask
+  ?window:int64 ->
+  ?filters:(string * string) list ->
+  ?content:File_content.t ->
+  unit ->
+  picked_file list ask
 
 val save_file :
   ?window:int64 -> ?filters:(string * string) list -> string -> picked_file option ask
@@ -1392,6 +1409,8 @@ module Tpl : sig
   val set_accepts : node -> string list -> unit
   val set_align : node -> align -> unit
   val set_filled : node -> Tint.t -> unit
+  val set_max_width : node -> float -> unit
+  val set_max_height : node -> float -> unit
   val when_ : bool signal -> (unit -> 'a) -> unit -> node * 'a
 
   val button :

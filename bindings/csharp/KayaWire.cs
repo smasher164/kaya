@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0xcad44d3c6e3d9800;
+    public const ulong SpecHash = 0xb0dbd639210c2e5a;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -112,6 +112,8 @@ static class KayaWire
     public const uint PropFollowsEnd = 39;
     public const uint PropMaxLines = 40;
     public const uint PropSymbol = 41;
+    public const uint PropMaxWidth = 42;
+    public const uint PropMaxHeight = 43;
     public const uint WpropTitle = 1;
     public const uint WpropWidth = 2;
     public const uint WpropHeight = 3;
@@ -162,6 +164,8 @@ static class KayaWire
     public const uint FileModeRead = 0;
     public const uint FileModeWrite = 1;
     public const uint FileModeReadWrite = 2;
+    public const uint FileContentAny = 0;
+    public const uint FileContentImages = 1;
     public const uint PlatformMac = 1;
     public const uint PlatformIos = 2;
     public const uint PlatformLinux = 3;
@@ -775,14 +779,14 @@ static class KayaWire
         return Finish(stream, w, TxKindSetMenuProp);
     }
 
-    /// Request the platform's file picker over a live window (0 = primary), on the alert's request/result grammar (DESIGN.md, File dialogs). Dialog ids are guest-chosen; one dialog may be live per process, and the id retires when its result fires. `multiple` is 0 or 1 — every backend supports both, spelled four ways (a flag on SwiftUI and AppKit, a different METHOD on GTK and WinUI, a different CONTRACT on Android). `filters` is advisory and rides as alternating Str values, a label then its space-separated extensions: every platform treats them as a default view rather than a guarantee, so the guest still validates what it got.
-    public static byte[] TxShowFileDialog(ulong window, ulong dialog, uint multiple, object[] filters)
+    /// Request the platform's file picker over a live window (0 = primary), on the alert's request/result grammar (DESIGN.md, File dialogs). Dialog ids are guest-chosen; one dialog may be live per process, and the id retires when its result fires. `multiple` is 0 or 1 — every backend supports both, spelled four ways (a flag on SwiftUI and AppKit, a different METHOD on GTK and WinUI, a different CONTRACT on Android). `filters` is advisory and rides as alternating Str values, a label then its space-separated extensions: every platform treats them as a default view rather than a guarantee, so the guest still validates what it got. `content` is a file_content: `images` opens the photo library's own picker on the phones and filters to images on the desktops (docs/photo-attach-plan.md §1).
+    public static byte[] TxShowFileDialog(ulong window, ulong dialog, uint multiple, uint content, object[] filters)
     {
         var w = Begin(out var stream);
         w.Write(window);
         w.Write(dialog);
         w.Write(multiple);
-        w.Write(0u);
+        w.Write(content);
         EncodeValues(w, filters);
         return Finish(stream, w, TxKindShowFileDialog);
     }
@@ -2135,6 +2139,56 @@ static class KayaWire
     {
         var w = Begin(out var stream);
         w.Write(widgetId); w.Write(PropSymbol); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a constant max_width value.
+    public static byte[] TxSetMaxWidth(ulong widgetId, double maxWidth)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropMaxWidth); w.Write(SourceConst);
+        EncodeValue(w, maxWidth);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound max_width value.
+    public static byte[] TxBindMaxWidth(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropMaxWidth); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindMaxWidthElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropMaxWidth); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a constant max_height value.
+    public static byte[] TxSetMaxHeight(ulong widgetId, double maxHeight)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropMaxHeight); w.Write(SourceConst);
+        EncodeValue(w, maxHeight);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound max_height value.
+    public static byte[] TxBindMaxHeight(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropMaxHeight); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindMaxHeightElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropMaxHeight); w.Write(SourceElement); w.Write(level); w.Write(field);
         return Finish(stream, w, TxKindSetProperty);
     }
 

@@ -58,6 +58,8 @@ module KayaApp
     askAlert,
     askPickFiles,
     askPickFile,
+    askPickFilesOf,
+    askPickFileOf,
     askSaveFile,
     askReadClipboard,
     build,
@@ -134,6 +136,9 @@ module KayaApp
     openPicked,
     pickFiles,
     pickFile,
+    pickFilesOf,
+    pickFileOf,
+    FileContent (..),
     saveFile,
     clearWidget,
     focusWidget,
@@ -1884,15 +1889,28 @@ setReorderable (Widget w) enabled =
 -- answer; CANCEL IS THE EMPTY LIST, and one dialog may be live per
 -- process.
 pickFiles :: [(Text, Text)] -> ([PickedFile] -> IO ()) -> Build ()
-pickFiles = pick True
+pickFiles = pick True AnyContent
 
 -- | The single-file spelling. The floor always returns a LIST; this
 -- only asks the platform for one, so the handler receives zero or one.
 pickFile :: [(Text, Text)] -> ([PickedFile] -> IO ()) -> Build ()
-pickFile = pick False
+pickFile = pick False AnyContent
 
-pick :: Bool -> [(Text, Text)] -> ([PickedFile] -> IO ()) -> Build ()
-pick multiple filters handler = do
+-- | What an open dialog offers (docs\/photo-attach-plan.md §1): 'Images'
+-- opens the photo library's own picker on the phones and filters to
+-- images on the desktops.
+data FileContent = AnyContent | Images
+  deriving (Eq, Show)
+
+-- | 'pickFiles' and 'pickFile' offering this content.
+pickFilesOf :: FileContent -> [(Text, Text)] -> ([PickedFile] -> IO ()) -> Build ()
+pickFilesOf = pick True
+
+pickFileOf :: FileContent -> [(Text, Text)] -> ([PickedFile] -> IO ()) -> Build ()
+pickFileOf = pick False
+
+pick :: Bool -> FileContent -> [(Text, Text)] -> ([PickedFile] -> IO ()) -> Build ()
+pick multiple content filters handler = do
   n <- state $ \s ->
     let c = s.bCounters
         next = c.cFileDialog + 1
@@ -1903,6 +1921,7 @@ pick multiple filters handler = do
         0
         n
         (if multiple then 1 else 0)
+        (case content of AnyContent -> W.fileContentAny; Images -> W.fileContentImages)
         (filterValues filters)
     )
 
@@ -2731,6 +2750,10 @@ data Attr (c :: WClass) where
   -- never appearance. Any class: 'Composer' is a row's, the rest a leaf's,
   -- and the root refuses a role on a kind it does not fit.
   Role :: Role -> Attr c
+  -- | This image's bound in points: the picture scales down to fit, its
+  -- shape kept, and never up (docs\/photo-attach-plan.md §2). Images only.
+  MaxWidth :: Double -> Attr 'LeafW
+  MaxHeight :: Double -> Attr 'LeafW
   -- | This button draws the platform's glyph in place of its title, which
   -- stays its accessible name (docs\/composer-plan.md §2).
   Symbol :: Symbol -> Attr 'LeafW
@@ -2782,6 +2805,8 @@ applyAttr (Step step) (Widget n) = emitB (W.txSetStep n step)
 applyAttr (TickSpacing spacing) (Widget n) = emitB (W.txSetTickSpacing n spacing)
 applyAttr (Role r) w = setRole w r
 applyAttr (Symbol s) w = setSymbol w s
+applyAttr (MaxWidth points) (Widget w) = emitB (W.txSetMaxWidth w points)
+applyAttr (MaxHeight points) (Widget w) = emitB (W.txSetMaxHeight w points)
 applyAttr (Accepts kinds) w = setAccepts w kinds
 applyAttr (Draggable clip ops) w = setDragSource w clip ops
 applyAttr (DropTarget ops) w = setDropTarget w ops
@@ -3540,6 +3565,10 @@ data TplAttr where
   -- operations; what it TAKES is its 'TplAccepts' list. The landing
   -- arrives at 'onDrop' on the Node, with the copy's keys.
   TplDropTarget :: [Op] -> TplAttr
+  -- | Every stamped copy of this image is bounded in points, the live
+  -- 'MaxWidth' and 'MaxHeight' (docs\/photo-attach-plan.md §2).
+  TplMaxWidth :: Double -> TplAttr
+  TplMaxHeight :: Double -> TplAttr
 
 applyTplAttr :: TplAttr -> Node -> Tpl ()
 applyTplAttr (TplGrow weight) n = setGrow n weight
@@ -3570,6 +3599,8 @@ applyTplAttr (TplHrefField src) n = bindStrSource hrefProp n src
 applyTplAttr (TplRole r) n = setNodeRole n r
 applyTplAttr (TplSubmits on) n = setNodeSubmits n on
 applyTplAttr (TplStep step) (Node n) = emitT (W.txSetStep n step)
+applyTplAttr (TplMaxWidth points) (Node n) = emitT (W.txSetMaxWidth n points)
+applyTplAttr (TplMaxHeight points) (Node n) = emitT (W.txSetMaxHeight n points)
 applyTplAttr (TplTickSpacing spacing) (Node n) = emitT (W.txSetTickSpacing n spacing)
 applyTplAttr (TplAccepts kinds) n = setNodeAccepts n kinds
 applyTplAttr (TplDraggable clip ops) n = setNodeDragSource n clip ops
@@ -4671,6 +4702,12 @@ askPickFiles filters = askWith (pickFiles filters)
 
 askPickFile :: [(Text, Text)] -> Ask [PickedFile]
 askPickFile filters = askWith (pickFile filters)
+
+askPickFilesOf :: FileContent -> [(Text, Text)] -> Ask [PickedFile]
+askPickFilesOf content filters = askWith (pickFilesOf content filters)
+
+askPickFileOf :: FileContent -> [(Text, Text)] -> Ask [PickedFile]
+askPickFileOf content filters = askWith (pickFileOf content filters)
 
 askSaveFile :: Text -> [(Text, Text)] -> Ask (Maybe PickedFile)
 askSaveFile name filters = askWith (saveFile name filters)

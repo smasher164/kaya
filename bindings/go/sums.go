@@ -453,6 +453,11 @@ func (sc SumCase[K, V]) SetAlign(n Node, mode Align) { sc.t.SetAlign(n, mode) }
 // platform tint (Tpl.SetFilled).
 func (sc SumCase[K, V]) SetFilled(n Node, tint Tint) { sc.t.SetFilled(n, tint) }
 
+// SetMaxWidth and SetMaxHeight bound every stamped copy of this arm's image
+// (Tpl.SetMaxWidth, Tpl.SetMaxHeight).
+func (sc SumCase[K, V]) SetMaxWidth(n Node, points float64) { sc.t.SetMaxWidth(n, points) }
+func (sc SumCase[K, V]) SetMaxHeight(n Node, points float64) { sc.t.SetMaxHeight(n, points) }
+
 // SetColumnsAuto gives every stamped grid of this arm as many columns as
 // fit its width at minWidth DIP each (Tpl.SetColumnsAuto;
 // docs/layout-knobs-plan.md §3).

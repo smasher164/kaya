@@ -8,6 +8,7 @@ package chat
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"net"
 	"strings"
 	"sync"
@@ -33,15 +34,18 @@ type Reply struct {
 	Quote string
 	Text  string
 }
+type Photo struct{ Image []byte }
 
 func (Mine) isMessage()    {}
 func (Pending) isMessage() {}
 func (Theirs) isMessage() {}
 func (Reply) isMessage()  {}
+func (Photo) isMessage()  {}
 
 type message struct {
 	key, text, quote string
 	mine, queued     bool
+	photo            []byte
 }
 
 type conversation struct {
@@ -89,6 +93,8 @@ func App() *kaya.App {
 		}
 		insert := func(tx *kaya.Tx, m message) {
 			switch {
+			case m.photo != nil:
+				thread.Insert(tx, m.key, Photo{Image: m.photo})
 			case m.queued:
 				thread.Insert(tx, m.key, Pending{Text: m.text})
 			case m.mine:
@@ -163,6 +169,37 @@ func App() *kaya.App {
 				tx.ScrollToRow(threadList, m.key)
 				tx.SetText(compose, "")
 				refresh(tx, c)
+			}
+			// A photo is the user's own message, shown in the thread; the
+			// scripted peer answers text only (docs/photo-attach-plan.md §5).
+			sendPhoto := func(tx *kaya.Tx, photo []byte) {
+				sent++
+				m := message{key: fmt.Sprintf("u%d", sent), text: "Photo", mine: true, photo: photo}
+				c.messages = append(c.messages, m)
+				insert(tx, m)
+				tx.ScrollToRow(threadList, m.key)
+				refresh(tx, c)
+			}
+			attach := func(tx *kaya.Tx) {
+				tx.PickFile().Content(kaya.FileContentImages).OnResult(func(tx *kaya.Tx, files []kaya.PickedFile) {
+					if len(files) == 0 {
+						return
+					}
+					// Opening a picked file may block while a provider fetches
+					// it, so the read happens off the app thread.
+					go func(file kaya.PickedFile) {
+						f, _, err := file.Open(kaya.FileModeRead)
+						if err != nil {
+							return
+						}
+						photo, err := io.ReadAll(f)
+						f.Close()
+						if err != nil || len(photo) == 0 {
+							return
+						}
+						app.Post(func(tx *kaya.Tx) { sendPhoto(tx, photo) })
+					}(files[0])
+				}).Show()
 			}
 			draft := ""
 			var found []string
@@ -259,6 +296,15 @@ func App() *kaya.App {
 								reply.Spacer()
 							})
 						},
+						func(photo kaya.SumCase[string, Photo]) {
+							photo.Row(func() {
+								photo.Spacer()
+								image := photo.Image(func(m *Photo) *[]byte { return &m.Image })
+								photo.SetA11yID(image, "photo")
+								photo.SetMaxWidth(image, 240)
+								photo.SetMaxHeight(image, 240)
+							})
+						},
 					)
 					tx.SetA11yID(threadList, "thread")
 				}).Grow(1).FollowsEnd()
@@ -266,7 +312,9 @@ func App() *kaya.App {
 					// The compose field: one line at rest, growing with the message
 					// to five (docs/grow-lines-plan.md); Return sends and
 					// Shift+Return breaks the line. The composer draws the field
-					// and its emoji button as one (docs/composer-plan.md).
+					// and its emoji button as one (docs/composer-plan.md), with the
+					// attach button before it, as Messages places its own.
+					tx.Button("Attach", attach).Symbol(kaya.SymbolAttach).A11yID("attach")
 					tx.Row(func() {
 						compose = tx.Textarea(func(tx *kaya.Tx, text string) { draft = text }).
 							Submits().MaxLines(5).Placeholder("Message").A11yID("compose").Grow(1).

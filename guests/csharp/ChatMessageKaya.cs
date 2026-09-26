@@ -317,6 +317,10 @@ sealed class ChatMessageRow
 
     public void SetFilled(Node n, Tint tint) => t.SetFilled(n, tint);
 
+    public void SetMaxWidth(Node n, double points) => t.SetMaxWidth(n, points);
+
+    public void SetMaxHeight(Node n, double points) => t.SetMaxHeight(n, points);
+
     public void SetColumnsAuto(Node n, double minWidth) =>
         t.SetColumnsAuto(n, minWidth);
 

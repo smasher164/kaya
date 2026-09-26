@@ -320,7 +320,7 @@ MODS = {
 # verbs: the scenes that leave the app for DocumentsUI (the
 # accessibility service), and the one that opens a composing region
 # (the helper IME).
-A11Y_SCENES = ["filedialog", "save", "editor"]
+A11Y_SCENES = ["chat", "filedialog", "save", "editor"]
 IME_SCENES = ["ranges", "richtext"]
 
 # A scene is wired on this lane IF AND ONLY IF a suite lists it, or it

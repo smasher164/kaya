@@ -467,6 +467,7 @@ impl AppCtx {
                 window: DEFAULT_WINDOW,
                 dialog: self.alloc_file_dialog(),
                 multiple: true,
+                content: crate::protocol::FileContent::Any,
                 filters: Vec::new(),
             },
         }
@@ -560,6 +561,10 @@ impl FileFutureRef<'_> {
     }
     pub fn filter(mut self, label: impl Into<String>, extensions: impl Into<String>) -> Self {
         self.spec.filters.push((label.into(), extensions.into()));
+        self
+    }
+    pub fn content(mut self, content: crate::FileContent) -> Self {
+        self.spec.content = content;
         self
     }
 }

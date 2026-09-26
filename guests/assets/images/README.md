@@ -1,5 +1,18 @@
 # Scene stand-in pictures
 
+`photo.jpg` — 800x600 JPEG, a sunset over the sea. The chat scene's photo
+attachment (docs/photo-attach-plan.md §5): the harness copies it into the
+open dialog's directory on the desktops and the phone lanes put it in the
+photo library, and the leg reads its 800x600 back, so a wrong photo fails.
+Written by this repo, no upstream and no licence. Regenerate with
+ImageMagick:
+
+    magick -size 800x360 gradient:'#7fb6e6'-'#f6d9a8' \( -size 800x240 \
+      gradient:'#2f6f9a'-'#123b5a' \) -append -fill '#ffd36b' \
+      -draw 'circle 560,330 560,275' -fill '#2f6f9a' \
+      -draw 'rectangle 0,360 800,600' -strip -sampling-factor 4:2:0 \
+      -quality 82 photo.jpg
+
 `a11y-logo.png` — 2x2, 8-bit RGB, 75 bytes. Written by this repo, for
 this repo — where it came from is the a11y guests' own inline TEST_PNG
 byte array, extracted verbatim on 2026-08-19 when those guests moved to

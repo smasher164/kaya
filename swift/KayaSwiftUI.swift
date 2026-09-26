@@ -5,12 +5,15 @@ import CoreText
 import SwiftUI
 import UniformTypeIdentifiers
 import UserNotifications
+#if os(iOS)
+    import PhotosUI
+#endif
 
 // Pinned to the KAYA_APPLY_* / KAYA_KIND_* / KAYA_VALUE_* constants in
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0xcad44d3c6e3d9800
+let kayaSpecHash: UInt64 = 0xb0dbd639210c2e5a
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -238,6 +241,9 @@ private let propFilled: UInt32 = 38
 private let propFollowsEnd: UInt32 = 39
 private let propMaxLines: UInt32 = 40
 private let propSymbol: UInt32 = 41
+private let propMaxWidth: UInt32 = 42
+private let propMaxHeight: UInt32 = 43
+private let fileContentImages: UInt32 = 1
 private let tintAccent: Int64 = 1
 private let tintSuccess: Int64 = 2
 private let tintWarning: Int64 = 3
@@ -650,6 +656,9 @@ final class KayaNode: Identifiable {
     var role: Int64 = 0
     /// An icon-only button's symbol (docs/composer-plan.md §2), 0 = none.
     var symbol: Int64 = 0
+    /// An image's bound in points (docs/photo-attach-plan.md §2), 0 = none.
+    var maxWidth: Double = 0
+    var maxHeight: Double = 0
     /// A container's own padding (docs/styling-plan.md D3): DIP between its
     /// bounds and its children, uniform. 0 = flush, every container's default.
     var inset: Double = 0
@@ -3549,7 +3558,7 @@ func kayaExpandPath(_ path: String) -> String {
 /// IS PATHS on macOS, where a path IS the capability, and the security-scoped
 /// URL on iOS (DESIGN.md, File dialogs). Cancel is an EMPTY list.
 func kayaPresentFileDialog(
-    window: UInt64, dialog: UInt64, allowsMultiple: Bool, extensions: [String]
+    window: UInt64, dialog: UInt64, allowsMultiple: Bool, images: Bool, extensions: [String]
 ) {
     #if os(macOS)
         let panel = NSOpenPanel()
@@ -3563,7 +3572,11 @@ func kayaPresentFileDialog(
             panel.directoryURL = URL(fileURLWithPath: pending)
         }
         panel.allowsMultipleSelection = allowsMultiple
-        if !extensions.isEmpty {
+        if images {
+            // docs/photo-attach-plan.md §1: the panel's sidebar already lists
+            // the Photos library.
+            panel.allowedContentTypes = [.image]
+        } else if !extensions.isEmpty {
             // ADVISORY on every platform: a default view, never a guarantee,
             // so the guest still validates what it got.
             panel.allowedContentTypes = extensions.compactMap {
@@ -3609,8 +3622,14 @@ func kayaPresentFileDialog(
         // the harness reaches it from the host (tools/ios/simdrive,
         // docs/traps.md).
         _ = window
+        if images {
+            kayaPresentPhotoPicker(dialog: dialog, allowsMultiple: allowsMultiple)
+            return
+        }
         let types: [UTType] =
-            extensions.isEmpty
+            images
+            ? [UTType.image]
+            : extensions.isEmpty
             ? [UTType.item]
             : extensions.compactMap { UTType(filenameExtension: $0) }
         let panel = UIDocumentPickerViewController(
@@ -3811,7 +3830,10 @@ func kayaPresentSaveDialog(
     /// live" and sent the reader to the guest, which is why both save-swiftui
     /// sightings' first failure named no cause (docs/deferred.md).
     func kayaSimdriveState() -> ((String, [String])?, String) {
-        let (ok, lines) = KayaSimdrive.ask("state")
+        // An images request presented the photo library's picker, which the
+        // host reads by its own verbs (docs/photo-attach-plan.md §4).
+        let photos = DispatchQueue.main.sync { kayaLivePhotoDelegate != nil }
+        let (ok, lines) = KayaSimdrive.ask(photos ? "photostate" : "state")
         guard ok else {
             return (nil, lines.first ?? "simdrive refused state without saying why")
         }
@@ -3826,6 +3848,13 @@ func kayaPresentSaveDialog(
     /// list, and requires the picker to be gone afterwards, so both guards live
     /// on the host with the eyes.
     func kayaSimdriveDrive(_ argument: String) -> String? {
+        if DispatchQueue.main.sync(execute: { kayaLivePhotoDelegate != nil }) {
+            // A photo grid shows no names: the host chooses the newest photo
+            // and says which, and the scene reads the picture back.
+            let (ok, lines) = KayaSimdrive.ask(argument == "cancel" ? "photocancel" : "photochoose")
+            kayaPickerNote("photo picker drive for \(argument): \(lines.first ?? "")")
+            return ok ? nil : (lines.first ?? "simdrive refused the photo picker without saying why")
+        }
         let verb = argument == "cancel" ? "cancel" : "choose \(argument)"
         let (ok, lines) = KayaSimdrive.ask(verb)
         return ok ? nil : (lines.first ?? "simdrive refused \(verb) without saying why")
@@ -3879,6 +3908,98 @@ func kayaPresentSaveDialog(
     /// silently never arrives.
     var kayaLiveDocumentPicker: UIDocumentPickerViewController?
     var kayaLivePickerDelegate: KayaPickerDelegate?
+    var kayaLivePhotoDelegate: KayaPhotoPickerDelegate?
+
+    /// An images request on the phone (docs/photo-attach-plan.md §1): the photo
+    /// library's own picker, which asks no permission. The file it hands over is
+    /// deleted when its completion handler returns, so the delegate copies it
+    /// inside the handler, and `.compatible` hands over a JPEG rather than HEIC
+    /// so the photo opens on every platform (R3).
+    func kayaPresentPhotoPicker(dialog: UInt64, allowsMultiple: Bool) {
+        var config = PHPickerConfiguration()
+        config.filter = .images
+        config.selectionLimit = allowsMultiple ? 0 : 1
+        config.preferredAssetRepresentationMode = .compatible
+        let picker = PHPickerViewController(configuration: config)
+        let delegate = KayaPhotoPickerDelegate(dialog: dialog)
+        picker.delegate = delegate
+        kayaLivePhotoDelegate = delegate
+        let scenes = UIApplication.shared.connectedScenes
+        let host = scenes.compactMap { $0 as? UIWindowScene }.first?.windows.first?.rootViewController
+        kayaPickerNote("present photo picker dialog=\(dialog) multiple=\(allowsMultiple)")
+        host?.present(picker, animated: false) {
+            kayaPickerNote("presented photo picker dialog=\(dialog)")
+        }
+    }
+
+    final class KayaPhotoPickerDelegate: NSObject, PHPickerViewControllerDelegate {
+        let dialog: UInt64
+        init(dialog: UInt64) {
+            self.dialog = dialog
+            super.init()
+        }
+
+        func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
+            picker.dismiss(animated: false)
+            kayaPickerNote("photo picker finished dialog=\(dialog) with \(results.count) result(s)")
+            let dialog = self.dialog
+            let group = DispatchGroup()
+            let lock = NSLock()
+            var copies: [(Int, URL)] = []
+            for (index, result) in results.enumerated() {
+                group.enter()
+                result.itemProvider.loadFileRepresentation(
+                    forTypeIdentifier: UTType.image.identifier
+                ) { url, error in
+                    defer { group.leave() }
+                    guard let url else {
+                        kayaPickerNote("photo \(index) did not load: \(error.map { "\($0)" } ?? "no file")")
+                        return
+                    }
+                    let dir = FileManager.default.temporaryDirectory
+                        .appendingPathComponent("kaya-photo-\(UUID().uuidString)")
+                    let copy = dir.appendingPathComponent(url.lastPathComponent)
+                    do {
+                        try FileManager.default.createDirectory(
+                            at: dir, withIntermediateDirectories: true)
+                        try FileManager.default.copyItem(at: url, to: copy)
+                        lock.lock()
+                        copies.append((index, copy))
+                        lock.unlock()
+                    } catch {
+                        kayaPickerNote("photo \(index) could not be copied: \(error)")
+                    }
+                }
+            }
+            group.notify(queue: .main) {
+                kayaLivePhotoDelegate = nil
+                let urls = copies.sorted { $0.0 < $1.0 }.map { $0.1 }
+                var locators: [String] = []
+                var names: [String] = []
+                for url in urls {
+                    let key = url.absoluteString
+                    kayaPickedURLs[key] = url
+                    locators.append(key)
+                    names.append(url.lastPathComponent)
+                }
+                let locatorBufs = locators.map { strdup($0) }
+                let nameBufs = names.map { strdup($0) }
+                defer {
+                    for b in locatorBufs { free(b) }
+                    for b in nameBufs { free(b) }
+                }
+                let lp: [UnsafePointer<CChar>?] = locatorBufs.map { $0.map { UnsafePointer($0) } }
+                let np: [UnsafePointer<CChar>?] = nameBufs.map { $0.map { UnsafePointer($0) } }
+                lp.withUnsafeBufferPointer { l in
+                    np.withUnsafeBufferPointer { n in
+                        KayaHost.api.emit_file_dialog_result(
+                            dialog, l.baseAddress, n.baseAddress, UInt(urls.count))
+                    }
+                }
+                kayaPickerNote("emitted photo dialog=\(dialog) \(urls.map { $0.lastPathComponent })")
+            }
+        }
+    }
 
     /// Where the live SAVE dialog's zero-byte export was staged, so the answer
     /// can delete it. Nil for an open picker. Cleared with the delegate.
@@ -5326,6 +5447,9 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 let dialogId = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self)
                 let allowsMultiple =
                     raw.loadUnaligned(fromByteOffset: body + 16, as: UInt32.self) != 0
+                let images =
+                    raw.loadUnaligned(fromByteOffset: body + 20, as: UInt32.self)
+                    == fileContentImages
                 let filterCount = Int(
                     raw.loadUnaligned(fromByteOffset: body + 24, as: UInt32.self))
                 var fat = body + 32
@@ -5350,6 +5474,7 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     window: dialogWindow,
                     dialog: dialogId,
                     allowsMultiple: allowsMultiple,
+                    images: images,
                     extensions: extensions)
             case applySetBrand:
                 // Eleven packed sRGB words in the wire's fixed order: seed,
@@ -5742,6 +5867,12 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 case (propSymbol, valueI64):
                     kayaScene.nodes[id]!.symbol =
                         raw.loadUnaligned(fromByteOffset: body + 24, as: Int64.self)
+                case (propMaxWidth, valueF64):
+                    kayaScene.nodes[id]!.maxWidth =
+                        raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
+                case (propMaxHeight, valueF64):
+                    kayaScene.nodes[id]!.maxHeight =
+                        raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
                 case (propMaxLines, valueF64):
                     kayaScene.nodes[id]!.maxLines =
                         raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
@@ -9355,6 +9486,50 @@ private func kayaRunScript(_ script: String) {
                 #else
                 failures.append("pick_emoji \"\(emoji)\": iOS has no emoji picker to open (docs/emoji-picker-plan.md R2)")
                 #endif
+            case "expect_image_size":
+                // The DRAWN box in points (docs/photo-attach-plan.md §5), read
+                // off the layout, never the bound the app declared.
+                let want = kayaQuoted(Array(parts[2...]))
+                func drawn() -> String? {
+                    DispatchQueue.main.sync {
+                        guard let node = kayaTarget(parts[1], "image", kayaScene.images) else {
+                            return nil
+                        }
+                        let size = kayaLabelFrames[node.id] ?? .zero
+                        return "\(Int(size.width.rounded()))x\(Int(size.height.rounded()))"
+                    }
+                }
+                var got = drawn()
+                let deadline = Date().addingTimeInterval(5)
+                while got != want && Date() < deadline {
+                    Thread.sleep(forTimeInterval: 0.05)
+                    got = drawn()
+                }
+                if let got, got == want {
+                    observed.append("drawn \(got)")
+                } else if let got {
+                    failures.append("\(parts[1]) is drawn \(got), wanted \(want)")
+                } else {
+                    failures.append("no such target \(parts[1])")
+                }
+            case "copy_asset":
+                // The scene's fixture file, written by the core's one resolver
+                // (docs/photo-attach-plan.md §5).
+                let name = parts.count > 1 ? String(parts[1]) : ""
+                let dest = kayaExpandPath(parts.count > 2 ? String(parts[2]) : "")
+                var buffer = [UInt8](repeating: 0, count: 1024)
+                var ok: UInt8 = 0
+                let n = Array(name.utf8).withUnsafeBufferPointer { nameBuf in
+                    Array(dest.utf8).withUnsafeBufferPointer { destBuf in
+                        buffer.withUnsafeMutableBufferPointer { out in
+                            KayaHost.api.copy_asset(
+                                nameBuf.baseAddress, UInt(nameBuf.count), destBuf.baseAddress,
+                                UInt(destBuf.count), out.baseAddress, UInt(out.count), &ok)
+                        }
+                    }
+                }
+                let sentence = String(decoding: buffer.prefix(min(Int(n), buffer.count)), as: UTF8.self)
+                if ok == 1 { observed.append(sentence) } else { failures.append(sentence) }
             case "expect_badge":
                 // docs/app-badge-plan.md §4: the platform's own record, retried
                 // like an expect since the Dock publishes the label later.
@@ -14555,6 +14730,18 @@ struct KayaComposerSurface: ViewModifier {
     }
 }
 
+/// An image's bounded size (docs/photo-attach-plan.md §2): scaled down to fit
+/// inside both bounds with its shape kept, never up; nil when unbounded.
+func kayaImageFit(natural: CGSize, node: KayaNode) -> CGSize? {
+    guard node.maxWidth > 0 || node.maxHeight > 0, natural.width > 0, natural.height > 0 else {
+        return nil
+    }
+    let wide = node.maxWidth > 0 ? node.maxWidth / natural.width : 1
+    let tall = node.maxHeight > 0 ? node.maxHeight / natural.height : 1
+    let scale = min(1, wide, tall)
+    return CGSize(width: natural.width * scale, height: natural.height * scale)
+}
+
 /// A composer's send (docs/composer-plan.md §5): a prominent symbol-only
 /// button inside a composer, or beside one in the same row, whose text field
 /// submits. Return sends there, so the mac draws no button, as Messages does.
@@ -17520,11 +17707,23 @@ struct KayaRender: View {
             // matching the harness's size observation. A FAILED DECODE IS
             // PRESENT AND EMPTY, NOT ABSENT (tools/check-empty-child.py).
             if let image = node.image {
-                #if os(macOS)
-                    Image(nsImage: image)
-                #else
-                    Image(uiImage: image)
-                #endif
+                let fit = kayaImageFit(natural: image.size, node: node)
+                Group {
+                    #if os(macOS)
+                        if let fit {
+                            Image(nsImage: image).resizable().frame(width: fit.width, height: fit.height)
+                        } else {
+                            Image(nsImage: image)
+                        }
+                    #else
+                        if let fit {
+                            Image(uiImage: image).resizable().frame(width: fit.width, height: fit.height)
+                        } else {
+                            Image(uiImage: image)
+                        }
+                    #endif
+                }
+                .background(KayaLabelFrameReader(id: node.id))
             } else {
                 Color.clear.frame(width: 0, height: 0)
             }

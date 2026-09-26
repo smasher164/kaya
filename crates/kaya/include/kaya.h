@@ -433,6 +433,10 @@
 
 #define KAYA_FILE_MODE_READ_WRITE 2
 
+#define KAYA_FILE_CONTENT_ANY 0
+
+#define KAYA_FILE_CONTENT_IMAGES 1
+
 #define KAYA_PLATFORM_MAC 1
 
 #define KAYA_PLATFORM_IOS 2
@@ -903,6 +907,10 @@
  * An icon-only button's symbol (docs/composer-plan.md §2).
  */
 #define KAYA_PROP_SYMBOL 41
+
+#define KAYA_PROP_MAX_WIDTH 42
+
+#define KAYA_PROP_MAX_HEIGHT 43
 
 /**
  * Window properties (spec::WINDOW_PROPS): their own namespace —
@@ -1758,6 +1766,18 @@ typedef struct KayaHostApi {
                          uint8_t);
   uintptr_t (*text_runs)(uint64_t, uint8_t*, uintptr_t);
   uintptr_t (*text_last_edit)(uint64_t, uint8_t*, uintptr_t);
+  /**
+   * The `copy_asset` scene verb (capi::kaya_harness_copy_asset): the
+   * asset name and the expanded destination path, the sentence written
+   * into the buffer, `ok` set to 1 on success.
+   */
+  uintptr_t (*copy_asset)(const uint8_t*,
+                          uintptr_t,
+                          const uint8_t*,
+                          uintptr_t,
+                          uint8_t*,
+                          uintptr_t,
+                          uint8_t*);
 } KayaHostApi;
 
 
@@ -2175,6 +2195,24 @@ uintptr_t kaya_next_occurrence(const uint8_t **record);
  * DO NOT CROSS THIS ABI: all the core owes a posting thread is the wake-up.
  */
 void kaya_wake(void);
+
+/**
+ * The `copy_asset` scene verb for the interpreters' harnesses
+ * (assets::copy_asset): the sentence is written into `out` (up to `cap`
+ * bytes) and its true length returned; `ok` gets 1 on success, 0 on a
+ * refusal.
+ *
+ * # Safety
+ * `name` and `dest` must be valid for their lengths, `out` null or valid for
+ * `cap` bytes, `ok` null or valid for one byte.
+ */
+uintptr_t kaya_harness_copy_asset(const uint8_t *name,
+                                  uintptr_t name_len,
+                                  const uint8_t *dest,
+                                  uintptr_t dest_len,
+                                  uint8_t *out,
+                                  uintptr_t cap,
+                                  uint8_t *ok);
 
 /**
  * How many milliseconds the app thread has been ignoring pending

@@ -316,6 +316,11 @@ pub struct KayaHostApi {
         unsafe extern "C" fn(*const u8, usize, u64, u64, *const u8, usize, *const u8, usize, u8),
     pub text_runs: unsafe extern "C" fn(u64, *mut u8, usize) -> usize,
     pub text_last_edit: unsafe extern "C" fn(u64, *mut u8, usize) -> usize,
+    /// The `copy_asset` scene verb (capi::kaya_harness_copy_asset): the
+    /// asset name and the expanded destination path, the sentence written
+    /// into the buffer, `ok` set to 1 on success.
+    pub copy_asset:
+        unsafe extern "C" fn(*const u8, usize, *const u8, usize, *mut u8, usize, *mut u8) -> usize,
 }
 
 /// # Safety
@@ -486,6 +491,7 @@ pub(crate) fn run() -> i32 {
         text_formatted: crate::capi::kaya_text_formatted,
         text_runs: crate::capi::kaya_text_runs,
         text_last_edit: crate::capi::kaya_text_last_edit,
+        copy_asset: crate::capi::kaya_harness_copy_asset,
     };
     // THIS BACKEND WINDOWS ROWS (docs/deferred.md, the declares-windowing
     // entry), and the declaration has to beat the first transaction rather

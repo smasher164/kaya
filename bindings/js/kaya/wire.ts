@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0xcad44d3c6e3d9800n;
+export const SPEC_HASH = 0xb0dbd639210c2e5an;
 
 export const VALUE_BOOL = 1;
 export const VALUE_I64 = 2;
@@ -107,6 +107,8 @@ export const PROP_FILLED = 38;
 export const PROP_FOLLOWS_END = 39;
 export const PROP_MAX_LINES = 40;
 export const PROP_SYMBOL = 41;
+export const PROP_MAX_WIDTH = 42;
+export const PROP_MAX_HEIGHT = 43;
 export const WPROP_TITLE = 1;
 export const WPROP_WIDTH = 2;
 export const WPROP_HEIGHT = 3;
@@ -157,6 +159,8 @@ export const NOTIFICATION_OUTCOME_REFUSED = 1;
 export const FILE_MODE_READ = 0;
 export const FILE_MODE_WRITE = 1;
 export const FILE_MODE_READ_WRITE = 2;
+export const FILE_CONTENT_ANY = 0;
+export const FILE_CONTENT_IMAGES = 1;
 export const PLATFORM_MAC = 1;
 export const PLATFORM_IOS = 2;
 export const PLATFORM_LINUX = 3;
@@ -790,13 +794,13 @@ export function tx_set_menu_prop(item: number, prop: number, source: number): Ui
   return enc.end(TX_SET_MENU_PROP);
 }
 
-/** Request the platform's file picker over a live window (0 = primary), on the alert's request/result grammar (DESIGN.md, File dialogs). Dialog ids are guest-chosen; one dialog may be live per process, and the id retires when its result fires. `multiple` is 0 or 1 — every backend supports both, spelled four ways (a flag on SwiftUI and AppKit, a different METHOD on GTK and WinUI, a different CONTRACT on Android). `filters` is advisory and rides as alternating Str values, a label then its space-separated extensions: every platform treats them as a default view rather than a guarantee, so the guest still validates what it got. */
-export function tx_show_file_dialog(window: number, dialog: number, multiple: number, filters: readonly WireValue[]): Uint8Array {
+/** Request the platform's file picker over a live window (0 = primary), on the alert's request/result grammar (DESIGN.md, File dialogs). Dialog ids are guest-chosen; one dialog may be live per process, and the id retires when its result fires. `multiple` is 0 or 1 — every backend supports both, spelled four ways (a flag on SwiftUI and AppKit, a different METHOD on GTK and WinUI, a different CONTRACT on Android). `filters` is advisory and rides as alternating Str values, a label then its space-separated extensions: every platform treats them as a default view rather than a guarantee, so the guest still validates what it got. `content` is a file_content: `images` opens the photo library's own picker on the phones and filters to images on the desktops (docs/photo-attach-plan.md §1). */
+export function tx_show_file_dialog(window: number, dialog: number, multiple: number, content: number, filters: readonly WireValue[]): Uint8Array {
   enc.begin();
   enc.u64(window);
   enc.u64(dialog);
   enc.u32(multiple);
-  enc.u32(0);
+  enc.u32(content);
   enc.values(filters);
   return enc.end(TX_SHOW_FILE_DIALOG);
 }
@@ -1830,6 +1834,42 @@ export function tx_bind_symbol(widget_id: number, signal_id: number): Uint8Array
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_symbol_element(widget_id: number, level = 0, field = 0): Uint8Array {
   enc.begin(); enc.u64(widget_id); enc.u32(PROP_SYMBOL); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a constant max_width value. */
+export function tx_set_max_width(widget_id: number, max_width: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_MAX_WIDTH); enc.u32(SOURCE_CONST); enc.value(max_width);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a signal-bound max_width value. */
+export function tx_bind_max_width(widget_id: number, signal_id: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_MAX_WIDTH); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_max_width_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_MAX_WIDTH); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a constant max_height value. */
+export function tx_set_max_height(widget_id: number, max_height: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_MAX_HEIGHT); enc.u32(SOURCE_CONST); enc.value(max_height);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a signal-bound max_height value. */
+export function tx_bind_max_height(widget_id: number, signal_id: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_MAX_HEIGHT); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_max_height_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_MAX_HEIGHT); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
   return enc.end(TX_SET_PROPERTY);
 }
 

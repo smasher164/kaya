@@ -94,6 +94,13 @@ public final class KayaRing {
     public static native byte[] assetMissSentence(byte[] name);
 
     /**
+     * The {@code copy_asset} scene verb, the core's own body, registered on
+     * the shared ring list (docs/photo-attach-plan.md §5): "ok\n" or "no\n"
+     * and the sentence.
+     */
+    public static native byte[] copyAsset(byte[] name, byte[] dest);
+
+    /**
      * The app's own writable directory as UTF-8 bytes; EMPTY means none
      * yet (docs/tasks-s4-plan.md §4).
      */

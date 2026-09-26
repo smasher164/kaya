@@ -1005,6 +1005,37 @@ func (w Widget) FollowsEnd() Widget {
 	return w
 }
 
+// SetMaxWidth bounds an image's width in points: the picture scales down to
+// fit, its shape kept, and never up (docs/photo-attach-plan.md §2).
+func (tx *Tx) SetMaxWidth(w Widget, points float64) {
+	tx.emit(TxSetMaxWidth(w.id, points))
+}
+
+// SetMaxHeight bounds an image's height in points, SetMaxWidth's twin.
+func (tx *Tx) SetMaxHeight(w Widget, points float64) {
+	tx.emit(TxSetMaxHeight(w.id, points))
+}
+
+// MaxWidth bounds this image's width at construction. Same transaction
+// discipline as Grow.
+func (w Widget) MaxWidth(points float64) Widget {
+	if w.tx == nil || w.tx.closed {
+		panic("kaya: MaxWidth on a widget outside its build transaction — use Tx.SetMaxWidth inside a live transaction")
+	}
+	w.tx.SetMaxWidth(w, points)
+	return w
+}
+
+// MaxHeight bounds this image's height at construction. Same transaction
+// discipline as Grow.
+func (w Widget) MaxHeight(points float64) Widget {
+	if w.tx == nil || w.tx.closed {
+		panic("kaya: MaxHeight on a widget outside its build transaction — use Tx.SetMaxHeight inside a live transaction")
+	}
+	w.tx.SetMaxHeight(w, points)
+	return w
+}
+
 // Tint is what a filled container's surface means (TintAccent..TintNeutral;
 // docs/tints-plan.md T1): each backend draws it in the platform's own fill
 // and foreground pair.
@@ -3303,6 +3334,7 @@ type FileDialogRef struct {
 	id       uint64
 	window   uint64
 	multiple bool
+	content  FileContent
 	filters  []string
 	onResult func(*Tx, []PickedFile)
 }
@@ -3328,6 +3360,14 @@ func (r FileDialogRef) OnResult(fn func(*Tx, []PickedFile)) FileDialogRef {
 	return r
 }
 
+// Content says what the dialog offers: FileContentImages opens the photo
+// library's own picker on the phones and filters to images on the desktops
+// (docs/photo-attach-plan.md §1).
+func (r FileDialogRef) Content(content FileContent) FileDialogRef {
+	r.content = content
+	return r
+}
+
 // Show sends the request, returning its id; the one answer arrives at
 // the OnResult handler.
 func (r FileDialogRef) Show() uint64 {
@@ -3342,7 +3382,7 @@ func (r FileDialogRef) Show() uint64 {
 	for _, f := range r.filters {
 		values = append(values, f)
 	}
-	r.tx.emit(TxShowFileDialog(r.window, r.id, multiple, values))
+	r.tx.emit(TxShowFileDialog(r.window, r.id, multiple, uint32(r.content), values))
 	return r.id
 }
 
@@ -3959,6 +3999,10 @@ type NotificationOutcome uint32
 // FileModeReadWrite. crates/kaya/src/spec.rs decides the numbers and
 // tools/check-file-modes.py holds them together.
 type FileMode uint32
+
+// FileContent is what an open dialog offers: FileContentAny or
+// FileContentImages (docs/photo-attach-plan.md §1).
+type FileContent uint32
 
 // SectionsPresentation is a window's ADVISORY sections hint:
 // SectionsPresentationAuto, Bar or Sidebar.
@@ -4731,6 +4775,18 @@ func (t *Tpl) SetAlign(n Node, mode Align) {
 // twin of Tx.SetFilled — a chat thread's bubbles are stamped rows.
 func (t *Tpl) SetFilled(n Node, tint Tint) {
 	t.tx.emit(TxSetFilled(n.id, int64(tint)))
+}
+
+// SetMaxWidth bounds every stamped copy of an image, the blueprint twin of
+// Tx.SetMaxWidth.
+func (t *Tpl) SetMaxWidth(n Node, points float64) {
+	t.tx.emit(TxSetMaxWidth(n.id, points))
+}
+
+// SetMaxHeight bounds every stamped copy of an image, the blueprint twin of
+// Tx.SetMaxHeight.
+func (t *Tpl) SetMaxHeight(n Node, points float64) {
+	t.tx.emit(TxSetMaxHeight(n.id, points))
 }
 
 // SetColumnsAuto gives every stamped grid as many columns as fit its

@@ -52,6 +52,7 @@ import androidx.compose.foundation.gestures.ScrollableState
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.gestures.scrollable
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -280,6 +281,7 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
@@ -601,6 +603,9 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     var maxLines by mutableStateOf(0)
     /** A button's glyph in place of its title (docs/composer-plan.md §2); 0 = none. */
     var symbol by mutableStateOf(0L)
+    /** An image's bound in dp (docs/photo-attach-plan.md §2); 0 = none. */
+    var maxWidth by mutableStateOf(0.0)
+    var maxHeight by mutableStateOf(0.0)
 
     /// The arrangement axis (null = the creation kind's own — row
     /// horizontal, column vertical). One node, two constructor
@@ -1722,6 +1727,10 @@ internal fun kayaClippingReport(presented: Set<Long>): Pair<String, Int> {
 /** Each label's and button's bounds in the root's space (docs/flex-shrink-plan.md §4). */
 internal val kayaTextRects = HashMap<Long, androidx.compose.ui.geometry.Rect>()
 
+/** Each image's drawn box in dp, the layout's own reading, for
+ * `expect_image_size` (docs/photo-attach-plan.md §5). */
+internal val kayaImageDrawn = HashMap<Long, Pair<Float, Float>>()
+
 /**
  * THE SECOND CLAUSE of `expect_no_clipping`: a widget whose bounds leave the
  * root across, or down unless a scroll carries it, is clipped whatever its
@@ -1942,7 +1951,7 @@ object KayaCompose {
     // but only the runtime assert catches a stale compiled APK against
     // a new libkaya. ULong because the fingerprint's high bit is fair
     // game and a Kotlin Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0xcad44d3c6e3d9800uL
+    private const val SPEC_HASH: ULong = 0xb0dbd639210c2e5auL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -2197,6 +2206,9 @@ object KayaCompose {
     private const val PROP_FOLLOWS_END = 39
     private const val PROP_MAX_LINES = 40
     private const val PROP_SYMBOL = 41
+    private const val PROP_MAX_WIDTH = 42
+    private const val PROP_MAX_HEIGHT = 43
+    private const val FILE_CONTENT_IMAGES = 1
     private const val PROP_COLUMNS = 11
     // The accessibility identifier (never spoken) and label (spoken).
     // Universal: every widget kind carries both.
@@ -3070,6 +3082,10 @@ object KayaCompose {
                             KayaSceneModel.nodes[id]!!.maxLines = readF64(b).toInt()
                         PROP_SYMBOL ->
                             KayaSceneModel.nodes[id]!!.symbol = readI64(b)
+                        PROP_MAX_WIDTH ->
+                            KayaSceneModel.nodes[id]!!.maxWidth = readF64(b)
+                        PROP_MAX_HEIGHT ->
+                            KayaSceneModel.nodes[id]!!.maxHeight = readF64(b)
                         // docs/rich-text-plan.md §14: this platform's lever
                         // is `clearHistory()`, so taking ownership drops what
                         // the field had banked.
@@ -3408,7 +3424,7 @@ object KayaCompose {
                     b.long // window: 0, the one surface on this host
                     val dialog = b.long
                     val multiple = b.int != 0
-                    b.int // pad
+                    val images = b.int == FILE_CONTENT_IMAGES
                     val filterValues = b.int
                     b.int // pad
                     // Read IN PAIRS: label then extensions, the grouping
@@ -3424,7 +3440,7 @@ object KayaCompose {
                             if (trimmed.isNotEmpty()) extensions.add(trimmed)
                         }
                     }
-                    kayaPresentFileDialog(dialog, multiple, extensions)
+                    kayaPresentFileDialog(dialog, multiple, extensions, images)
                 }
                 APPLY_PRESENT_SAVE_DIALOG -> {
                     // A STR AND THEN A LIST, a body shape no other apply
@@ -4704,7 +4720,9 @@ object KayaCompose {
     /// Null when the service is not enabled, which FAILS every
     /// expect_file_dialog rather than passing quietly.
     private fun kayaFileDialogState(): Pair<String, List<String>>? =
-        KayaHarnessAccessibility.live?.pickerState()?.also {
+        KayaHarnessAccessibility.live?.let { svc ->
+            if (kayaLivePhotoPicker) svc.photoPickerState() else svc.pickerState()
+        }?.also {
             kayaNoteDialogSeen(DIALOG_KIND_OPEN)
         }
 
@@ -4890,6 +4908,9 @@ object KayaCompose {
     @Volatile
     private var kayaLiveDialog: KayaLiveDialog? = null
     private var kayaLivePickerLauncher: ActivityResultLauncher<Intent>? = null
+    /// Whether the live open dialog is the photo picker, whose drive differs
+    /// from DocumentsUI's (docs/photo-attach-plan.md §4).
+    private var kayaLivePhotoPicker = false
 
     /// The launcher of a dialog the watchdog gave up on, kept REGISTERED
     /// so a result arriving after the loss reaches a line instead of
@@ -4972,7 +4993,10 @@ object KayaCompose {
             return
         }
         live.answered = true
-        if (kayaLiveDialog === live) kayaLiveDialog = null
+        if (kayaLiveDialog === live) {
+            kayaLiveDialog = null
+            kayaLivePhotoPicker = false
+        }
         if (keepRegistered) {
             kayaLostPickerLauncher?.unregister()
             kayaLostPickerLauncher = kayaLivePickerLauncher
@@ -5081,6 +5105,7 @@ object KayaCompose {
     private fun kayaFileDialogDrive(name: String): String? {
         val svc = KayaHarnessAccessibility.live
             ?: return "no harness accessibility service — the runner did not enable it"
+        if (kayaLivePhotoPicker) return kayaPhotoPickerDrive(svc, name)
         if (name == "cancel") return svc.dismiss()
         // ROUNDS, NOT ONE SHOT (2026-08-20): under a loaded matrix the
         // picker can be UP with its list still unreadable — DocumentsUI's
@@ -5116,6 +5141,33 @@ object KayaCompose {
     }
 
     /**
+     * The photo picker's drive (docs/photo-attach-plan.md §4): a photo grid
+     * shows no names, so the newest photo is chosen — the lane put the scene's
+     * photo in the library last, and the leg reads its size back. The picker
+     * being gone is the proof a click landed.
+     */
+    private fun kayaPhotoPickerDrive(svc: KayaHarnessAccessibility, name: String): String? {
+        if (name == "cancel") {
+            svc.photoCancel()
+            return if (svc.waitForPhotoPickerGone()) null else "the photo picker would not cancel"
+        }
+        var chosen: String? = null
+        for (round in 0 until 6) {
+            chosen = svc.photoChoose() ?: chosen
+            if (chosen != null && svc.waitForPhotoPickerGone()) {
+                Log.i("kaya", "KAYA_PICK_PHOTO: chose the newest photo ($chosen) for \"$name\"")
+                return null
+            }
+            Thread.sleep(500)
+        }
+        return if (chosen == null) {
+            "the photo picker showed no photo to choose; ${svc.windowCensus()}"
+        } else {
+            "the photo picker was still up after clicking the newest photo ($chosen)"
+        }
+    }
+
+    /**
      * Present the platform's REAL picker and answer exactly once.
      * ACTION_OPEN_DOCUMENT answers `content://` URIs and NOT paths: the
      * document may not be a file on this device. A single tap answers
@@ -5126,6 +5178,7 @@ object KayaCompose {
         dialog: Long,
         multiple: Boolean,
         extensions: List<String>,
+        images: Boolean = false,
     ) {
         val activity = mountedActivity ?: error("kaya: a picker with no mounted activity")
         check(kayaLiveDialog == null) {
@@ -5146,17 +5199,30 @@ object KayaCompose {
             kayaAnswerFileDialog(activity, dialog, null)
             return
         }
-        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
-            .addCategory(Intent.CATEGORY_OPENABLE)
-            .setType("*/*")
-            // WRITE as well as read: the vocabulary lets a guest reopen
-            // a picked handle for writing, and THE GRANT IS DECIDED
-            // HERE — asking later is not possible.
-            .addFlags(
-                Intent.FLAG_GRANT_READ_URI_PERMISSION or
-                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
-            )
-        if (multiple) {
+        // docs/photo-attach-plan.md §1: an images request opens the photo
+        // picker, which the contract builds (ACTION_PICK_IMAGES where the
+        // platform has it, the document picker otherwise); its answer is the
+        // same read-only content:// URI every picked handle already is.
+        val request = androidx.activity.result.PickVisualMediaRequest(
+            ActivityResultContracts.PickVisualMedia.ImageOnly,
+        )
+        val intent = if (images && multiple) {
+            ActivityResultContracts.PickMultipleVisualMedia().createIntent(activity, request)
+        } else if (images) {
+            ActivityResultContracts.PickVisualMedia().createIntent(activity, request)
+        } else {
+            Intent(Intent.ACTION_OPEN_DOCUMENT)
+                .addCategory(Intent.CATEGORY_OPENABLE)
+                .setType("*/*")
+                // WRITE as well as read: the vocabulary lets a guest reopen
+                // a picked handle for writing, and THE GRANT IS DECIDED
+                // HERE — asking later is not possible.
+                .addFlags(
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                        Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                )
+        }
+        if (multiple && !images) {
             intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
         }
         // The wire carries EXTENSIONS and an intent wants MIME types.
@@ -5165,12 +5231,15 @@ object KayaCompose {
         val mimes = extensions.mapNotNull {
             MimeTypeMap.getSingleton().getMimeTypeFromExtension(it.lowercase())
         }
-        if (mimes.isNotEmpty()) {
+        if (mimes.isNotEmpty() && !images) {
             intent.putExtra(Intent.EXTRA_MIME_TYPES, mimes.toTypedArray())
         }
-        kayaPendingPickerDirectory?.let {
-            intent.putExtra(DocumentsContract.EXTRA_INITIAL_URI, initialUri(it))
+        if (!images) {
+            kayaPendingPickerDirectory?.let {
+                intent.putExtra(DocumentsContract.EXTRA_INITIAL_URI, initialUri(it))
+            }
         }
+        kayaLivePhotoPicker = images
 
         // register() and launch() in the same breath, from a RESUMED
         // activity — measured to work, which is why no lifecycle-scoped
@@ -8021,6 +8090,39 @@ object KayaCompose {
                         if (picked == true) kayaAwaitAnswer(answered)
                         else failures.add("pick_emoji \"$emoji\": no emoji picker is open")
                     }
+                    "expect_image_size" -> {
+                        // The DRAWN box in dp, never the bound the app declared.
+                        val want = quoted(parts.drop(2))
+                        fun drawn(): String? = onUi(activity) {
+                            target(parts[1], "image", KayaSceneModel.images)?.let { node ->
+                                val (w, h) = kayaImageDrawn[node.id] ?: Pair(0f, 0f)
+                                "${Math.round(w)}x${Math.round(h)}"
+                            }
+                        }
+                        var got = drawn()
+                        val deadline = android.os.SystemClock.uptimeMillis() + 5000
+                        while (got != want && android.os.SystemClock.uptimeMillis() < deadline) {
+                            Thread.sleep(50)
+                            got = drawn()
+                        }
+                        when {
+                            got == null -> failures.add("no such target ${parts[1]}")
+                            got == want -> observed.add("drawn $got")
+                            else -> failures.add("${parts[1]} is drawn $got, wanted $want")
+                        }
+                    }
+                    "copy_asset" -> {
+                        // The scene's fixture file, the core's own body
+                        // (docs/photo-attach-plan.md §5).
+                        val name = parts.getOrNull(1) ?: ""
+                        val dest = kayaExpandPath(parts.getOrNull(2) ?: "")
+                        val answer = String(
+                            KayaRing.copyAsset(name.toByteArray(), dest.toByteArray()),
+                            Charsets.UTF_8,
+                        )
+                        val sentence = answer.substringAfter('\n')
+                        if (answer.startsWith("ok\n")) observed.add(sentence) else failures.add(sentence)
+                    }
                     "expect_badge" -> {
                         // docs/app-badge-plan.md §4: the number the platform
                         // holds on the app's showing notifications, which is
@@ -9134,8 +9236,11 @@ object KayaCompose {
                         // already selected — a silent wrong file.
                         val want = parts.getOrNull(1) ?: ""
                         val rows = kayaFileDialogState()?.second
+                        // A photo grid shows no names, so the photo picker's
+                        // drive takes the newest photo instead
+                        // (docs/photo-attach-plan.md §4).
                         if (want.isNotEmpty() && want != "cancel" && rows != null &&
-                            !rows.contains(want)
+                            !rows.contains(want) && !kayaLivePhotoPicker
                         ) {
                             failures.add(
                                 "file_choose $want: the dialog lists $rows — selecting " +
@@ -14027,11 +14132,26 @@ private fun KayaRenderCore(
             // POSITIONALLY reads the wrong one (tools/check-empty-child.py
             // perturbs these two lines verbatim).
             val bitmap = node.imageBitmap
+            val bounded = node.maxWidth > 0 || node.maxHeight > 0
+            // docs/photo-attach-plan.md §2: a bound caps the box in dp, and
+            // the painter keeps the picture's shape inside it; a picture
+            // already smaller keeps its size.
+            val bound = Modifier.sizeIn(
+                maxWidth = if (node.maxWidth > 0) node.maxWidth.dp else Dp.Infinity,
+                maxHeight = if (node.maxHeight > 0) node.maxHeight.dp else Dp.Infinity,
+            )
+            val density = LocalDensity.current.density
             if (bitmap != null) {
                 Image(
                     bitmap = bitmap,
                     contentDescription = node.a11yLabel.ifEmpty { a11yFallback }.ifEmpty { null },
-                    modifier = boxFill.then(a11yTag),
+                    contentScale = if (bounded) ContentScale.Fit else ContentScale.None,
+                    modifier = boxFill.then(bound).then(a11yTag).onGloballyPositioned {
+                        kayaImageDrawn[node.id] = Pair(
+                            it.size.width / density,
+                            it.size.height / density,
+                        )
+                    },
                 )
             } else {
                 Box(modifier = a11yTag)

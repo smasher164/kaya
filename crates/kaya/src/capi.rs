@@ -363,6 +363,10 @@ pub const KAYA_FILE_MODE_READ_WRITE: u32 = 2;
 const _: () = assert!(KAYA_FILE_MODE_READ == wire::FILE_MODE_READ);
 const _: () = assert!(KAYA_FILE_MODE_WRITE == wire::FILE_MODE_WRITE);
 const _: () = assert!(KAYA_FILE_MODE_READ_WRITE == wire::FILE_MODE_READ_WRITE);
+pub const KAYA_FILE_CONTENT_ANY: u32 = 0;
+pub const KAYA_FILE_CONTENT_IMAGES: u32 = 1;
+const _: () = assert!(KAYA_FILE_CONTENT_ANY == wire::FILE_CONTENT_ANY);
+const _: () = assert!(KAYA_FILE_CONTENT_IMAGES == wire::FILE_CONTENT_IMAGES);
 pub const KAYA_PLATFORM_MAC: u32 = 1;
 pub const KAYA_PLATFORM_IOS: u32 = 2;
 pub const KAYA_PLATFORM_LINUX: u32 = 3;
@@ -875,6 +879,8 @@ pub const KAYA_PROP_FOLLOWS_END: u32 = 39;
 pub const KAYA_PROP_MAX_LINES: u32 = 40;
 /// An icon-only button's symbol (docs/composer-plan.md §2).
 pub const KAYA_PROP_SYMBOL: u32 = 41;
+pub const KAYA_PROP_MAX_WIDTH: u32 = 42;
+pub const KAYA_PROP_MAX_HEIGHT: u32 = 43;
 
 /// Window properties (spec::WINDOW_PROPS): their own namespace —
 /// windows are not widgets. Window 0 is the primary surface.
@@ -1095,6 +1101,8 @@ const _: () = assert!(
         && KAYA_PROP_FOLLOWS_END == wire::PROP_FOLLOWS_END
         && KAYA_PROP_MAX_LINES == wire::PROP_MAX_LINES
         && KAYA_PROP_SYMBOL == wire::PROP_SYMBOL
+        && KAYA_PROP_MAX_WIDTH == wire::PROP_MAX_WIDTH
+        && KAYA_PROP_MAX_HEIGHT == wire::PROP_MAX_HEIGHT
         && KAYA_WPROP_TITLE == wire::WPROP_TITLE
         && KAYA_WPROP_WIDTH == wire::WPROP_WIDTH
         && KAYA_WPROP_HEIGHT == wire::WPROP_HEIGHT
@@ -1370,7 +1378,7 @@ const _: () = {
 // Completeness, not just agreement (docs/traps.md): a new spec prop
 // trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::PROPS.len() == 41,
+    crate::spec::PROPS.len() == 43,
     "spec::PROPS grew: export the new KAYA_PROP_* above, extend the pin, and bump this count"
 );
 const _: () = assert!(
@@ -2326,6 +2334,44 @@ pub unsafe extern "C" fn kaya_next_occurrence(record: *mut *const u8) -> usize {
 #[unsafe(no_mangle)]
 pub extern "C" fn kaya_wake() {
     state().ring.wake();
+}
+
+/// The `copy_asset` scene verb for the interpreters' harnesses
+/// (assets::copy_asset): the sentence is written into `out` (up to `cap`
+/// bytes) and its true length returned; `ok` gets 1 on success, 0 on a
+/// refusal.
+///
+/// # Safety
+/// `name` and `dest` must be valid for their lengths, `out` null or valid for
+/// `cap` bytes, `ok` null or valid for one byte.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_harness_copy_asset(
+    name: *const u8,
+    name_len: usize,
+    dest: *const u8,
+    dest_len: usize,
+    out: *mut u8,
+    cap: usize,
+    ok: *mut u8,
+) -> usize {
+    let text = |p: *const u8, n: usize| {
+        if p.is_null() {
+            String::new()
+        } else {
+            String::from_utf8_lossy(unsafe { std::slice::from_raw_parts(p, n) }).into_owned()
+        }
+    };
+    let result = crate::assets::copy_asset(&text(name, name_len), &text(dest, dest_len));
+    if !ok.is_null() {
+        unsafe { *ok = u8::from(result.is_ok()) };
+    }
+    let sentence = result.unwrap_or_else(|why| why);
+    let bytes = sentence.as_bytes();
+    if !out.is_null() && cap > 0 {
+        let n = bytes.len().min(cap);
+        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), out, n) };
+    }
+    bytes.len()
 }
 
 /// How many milliseconds the app thread has been ignoring pending

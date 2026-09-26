@@ -82,6 +82,12 @@ pub(crate) fn register_ring_natives(env: &mut JNIEnv) -> jni::errors::Result<()>
                 sig: "([B)[B".into(),
                 fn_ptr: ring_asset_miss_sentence as *mut _,
             },
+            // The `copy_asset` scene verb (docs/photo-attach-plan.md §5).
+            NativeMethod {
+                name: "copyAsset".into(),
+                sig: "([B[B)[B".into(),
+                fn_ptr: ring_copy_asset as *mut _,
+            },
             // THE PREFERENCE STORE AND THE APP DATA DIRECTORY
             // (docs/tasks-s4-plan.md §4). THE RING LIST, NOT THE DESKTOP
             // ONE: prefs are a floor call on Android too, and
@@ -266,6 +272,29 @@ extern "system" fn ring_occurrence_blob<'a>(
         .expect("kaya: handing over the occurrence blob failed");
     crate::capi::kaya_occurrence_blob_release(handle as u64);
     out
+}
+
+/// The `copy_asset` scene verb for the Compose harness: the sentence, led by
+/// `ok\n` or `no\n`, both halves UTF-8 bytes for the reason ring_asset_open
+/// gives.
+extern "system" fn ring_copy_asset<'a>(
+    env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    name: JByteArray<'a>,
+    dest: JByteArray<'a>,
+) -> JByteArray<'a> {
+    let text = |bytes: &JByteArray<'a>| {
+        String::from_utf8_lossy(
+            &env.convert_byte_array(bytes).expect("kaya: reading a copy_asset argument failed"),
+        )
+        .into_owned()
+    };
+    let out = match crate::assets::copy_asset(&text(&name), &text(&dest)) {
+        Ok(sentence) => format!("ok\n{sentence}"),
+        Err(sentence) => format!("no\n{sentence}"),
+    };
+    env.byte_array_from_slice(out.as_bytes())
+        .expect("kaya: handing over the copy_asset sentence failed")
 }
 
 /// 0 is the MISS, carried across as-is; the binding raises with the

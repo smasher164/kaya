@@ -1268,7 +1268,31 @@ def picker_reseed(udid):
     return _drive_results.get(udid, "").startswith("ready in")
 
 
+def photo_library_stage(udid):
+    """docs/photo-attach-plan.md §5: every picture a scene's `copy_asset`
+    names goes into the phone's photo library before any leg, since the
+    photo picker shows the library and no folder, and the newest photo is
+    the one a phone's `file_choose` takes. Added on every run: a duplicate
+    of the same bytes is still the newest photo, and the pool is never
+    erased (docs/traps.md)."""
+    names = sorted({name for steps in (ROOT / "tools/scenes").glob("*.steps")
+                    for name in re.findall(r"^copy_asset (images/\S+)",
+                                           steps.read_text(encoding="utf-8"), re.M)})
+    for name in names:
+        rc = run(["xcrun", "simctl", "addmedia", udid, str(ASSET_SRC / name)]).returncode
+        if rc != 0:
+            print(f"run-sim: could not add {name} to the photo library on "
+                  f"{udid} (simctl addmedia exited {rc}); a photo picker "
+                  f"there offers only the sample photos", file=sys.stderr)
+            return False
+        print(f"run-sim: added {name} to the photo library on {udid}",
+              file=sys.stderr, flush=True)
+    return True
+
+
 def picker_prepare(udid):
+    if not photo_library_stage(udid):
+        return 1
     if not picker_cleanup(udid):
         return 1
     if not picker_warm(udid):

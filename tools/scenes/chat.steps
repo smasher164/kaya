@@ -81,3 +81,15 @@ expect label@connection ""
 expect_no_target label@state[u3]
 expect label@text[p5] "Perfect"
 expect label@connection ""
+# C6: a photo attached through the open dialog shows in the thread, scaled
+# down inside its 240-point bound with its shape kept. The desktops pick the
+# fixture by name; the phones' photo pickers show no names, so the lanes put
+# it in the library first and the leg reads its size back either way
+# (docs/photo-attach-plan.md §5).
+copy_asset images/photo.jpg $TMP/kaya-photos-$PID/photo.jpg
+file_dialog_goto $TMP/kaya-photos-$PID
+click button@attach
+expect_file_dialog
+file_choose photo.jpg
+expect image@photo[u4] "800x600"
+expect_image_size image@photo[u4] "240x180"

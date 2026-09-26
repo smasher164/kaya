@@ -2231,6 +2231,14 @@ AX_VERB = {
     "highlights": "expect_highlights",
     "selection": "expect_selection",
     "revealed": "expect_revealed",
+    # The file dialogs are read and driven over the same bus: the chat leg
+    # ran without the wrapper and every dialog step answered "no file
+    # dialog live" (2026-09-26).
+    "file_dialog_state": "expect_file_dialog",
+    "choose_file": "file_choose",
+    "save_dialog_state": "expect_save_dialog",
+    "set_save_name": "file_dialog_name",
+    "confirm_save": "file_save",
 }
 
 
@@ -2243,7 +2251,8 @@ def ax_bus(root):
     readers = set()
     for i, line in enumerate(gtk):
         if "atspi_collect(" not in line \
-                and "atspi_range_read(" not in line:
+                and "atspi_range_read(" not in line \
+                and "file_dialog_atspi(" not in line:
             continue
         for j in range(i, -1, -1):
             m = re.match(r"\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?"
@@ -2251,7 +2260,7 @@ def ax_bus(root):
             if m:
                 readers.add(m.group(1))
                 break
-    readers -= {"atspi_collect", "atspi_range_read"}
+    readers -= {"atspi_collect", "atspi_range_read", "file_dialog_atspi"}
     # A reader that read nothing agrees with everything.
     if not readers:
         bad.append("check-steps: no caller of "

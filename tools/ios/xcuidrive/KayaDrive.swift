@@ -179,6 +179,15 @@ final class KayaDrive: XCTestCase {
     func waitForPicker(_ a: XCUIApplication) -> Bool {
         waitFor("the picker") { pickerUp(a) }
     }
+    /// The photo library's picker (docs/photo-attach-plan.md §4), read off the
+    /// tree measured on iOS 26: a navigation bar named Photos over a grid of
+    /// images labelled "Photo, <date>", newest first.
+    func photoCells(_ a: XCUIApplication) -> [XCUIElement] {
+        a.images.matching(identifier: "PXGGridLayout-Info").allElementsBoundByIndex
+    }
+    func photoPickerUp(_ a: XCUIApplication) -> Bool {
+        a.navigationBars["Photos"].exists && !photoCells(a).isEmpty
+    }
     /// Gone means THREE consecutive absent reads, 0.3s apart: one read
     /// answers "absent" for a picker under a menu, and a tap that opened
     /// one instead of dismissing the sheet then reads as success.
@@ -689,6 +698,41 @@ final class KayaDrive: XCTestCase {
         case "cancel":
             guard waitForPicker(a) else { return (false, "no picker is up to cancel") }
             return cancelSheet(a, "picker")
+        case "photostate":
+            guard waitFor("the photo picker", nil, { photoPickerUp(a) }) else { return (true, "") }
+            return (true, (["Photos"] + photoCells(a).map { $0.label }).joined(separator: "\n"))
+        case "photochoose":
+            // A photo grid shows no names, so the newest photo is chosen: the
+            // lane put the scene's photo in the library last, and the leg reads
+            // the picture's size back, so a wrong one fails.
+            guard waitFor("the photo picker", nil, { photoPickerUp(a) }) else {
+                return (false, "no photo picker is up to choose from")
+            }
+            let deadline = Date().addingTimeInterval(budgetNow())
+            var rounds = 0
+            var chosen = ""
+            while rounds < 4 && photoPickerUp(a) && Date() < deadline {
+                rounds += 1
+                guard let newest = photoCells(a).first else { break }
+                chosen = newest.label
+                // The grid's images are covered by the grid's own container, so
+                // XCUITest calls them not hittable (measured): the tap goes to
+                // the image's centre instead.
+                tapCentre(a, newest.frame)
+                _ = waitFor("the photo picker gone", min(3, left(deadline))) { !photoPickerUp(a) }
+            }
+            if photoPickerUp(a) {
+                return (false, "the photo picker was still up after \(rounds) tap(s) on the newest photo (\(chosen)); it shows \(photoCells(a).map { $0.label })")
+            }
+            return (true, "chose the newest photo (\(chosen)) in \(rounds) tap(s)")
+        case "photocancel":
+            guard waitFor("the photo picker", nil, { photoPickerUp(a) }) else {
+                return (false, "no photo picker is up to cancel")
+            }
+            a.navigationBars["Photos"].buttons["Cancel"].tap()
+            return waitFor("the photo picker gone") { !photoPickerUp(a) }
+                ? (true, "cancelled the photo picker")
+                : (false, "the photo picker was still up after Cancel")
         case "savestate":
             guard waitForSaveSheet(a) else { return (true, "") }
             return (true, currentDirectory(a) + "\n" + (nameField(a).value.map { "\($0)" } ?? ""))

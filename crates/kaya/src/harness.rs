@@ -399,6 +399,14 @@ pub enum Step {
     /// The badge the PLATFORM shows on the app's icon reads this text, ""
     /// for none (docs/app-badge-plan.md §4).
     ExpectBadge(String),
+    /// `expect_image_size image@x WxH`: the box the picture is DRAWN in, in
+    /// points, rounded (docs/photo-attach-plan.md §5); `expect image@x` reads
+    /// the decoded picture.
+    ExpectImageSize(Target, String),
+    /// `copy_asset <name> <path>`: a scene's fixture file, the named asset
+    /// written through the core's one resolver to a path ($TMP/$PID
+    /// expanded), its directory created (docs/photo-attach-plan.md §5).
+    CopyAsset(String, String),
     /// Choose this emoji in the picker the app's emoji command opened, the
     /// way the picker's own grid would (docs/emoji-picker-plan.md §5).
     PickEmoji(String),
@@ -688,6 +696,7 @@ impl Step {
             | Step::ExpectSlider(t, _)
             | Step::SetText(t, _)
             | Step::Expect(t, _)
+            | Step::ExpectImageSize(t, _)
             | Step::ExpectOrder(t, _)
             | Step::ExpectColumns(t, _)
             | Step::ExpectRows(t, _)
@@ -758,6 +767,7 @@ impl Step {
             | Step::ExpectAlert(..)
             | Step::FileChoose(..)
             | Step::FileDialogGoto(..)
+            | Step::CopyAsset(..)
             | Step::ExpectSaveDialog(..)
             | Step::FileDialogName(..)
             | Step::FileSave(..)
@@ -873,6 +883,8 @@ impl Step {
             Step::ExpectAlert { .. } => true,
             Step::FileChoose(..) => false,
             Step::FileDialogGoto(..) => false,
+            Step::CopyAsset(..) => false,
+            Step::ExpectImageSize(..) => true,
             Step::ExpectSaveDialog(..) => true,
             Step::FileDialogName(..) => false,
             Step::FileSave(..) => false,
@@ -1014,6 +1026,9 @@ pub trait Stage: Send + 'static {
     /// The decoded size of an image, as "WxH" — a failed decode reads
     /// "0x0", the placeholder class.
     fn image_size(&self, target: Target) -> String;
+    /// The box an image's picture is DRAWN in, in points, as "WxH" rounded
+    /// — the layout's own reading, never the bound the app declared.
+    fn image_drawn(&self, target: Target) -> String;
     /// The texts of the container's label children, in child order, joined
     /// with `|` — the observation expect_order verifies.
     fn child_texts(&self, target: Target) -> String;
@@ -2078,6 +2093,20 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 // fired before the panel exists silently does nothing.
                 let mut words = rest.split_whitespace().map(str::to_owned);
                 Step::ExpectFileDialog(words.next(), words.collect())
+            }
+            "expect_image_size" => {
+                let (target, text) = rest.split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("expect_image_size wants an image and a WxH string: {line:?}")
+                })?;
+                Step::ExpectImageSize(parse_target(target)?, parse_string(text)?)
+            }
+            "copy_asset" => {
+                let mut words = rest.split_whitespace().map(str::to_owned);
+                let (Some(name), Some(path), None) = (words.next(), words.next(), words.next())
+                else {
+                    return Err(format!("copy_asset wants an asset name and a path: {line:?}"));
+                };
+                Step::CopyAsset(name, path)
             }
             "file_dialog_goto" => {
                 let path = rest.trim();
@@ -4080,6 +4109,18 @@ fn run_with_log(
                     Err(why) => Some(Err(format!("pick_emoji {emoji:?}: {why}"))),
                 }
             }
+            Step::ExpectImageSize(t, want) => Some(poll(|| {
+                if t.kind != TargetKind::Image {
+                    return Err(format!("expect_image_size reads images, not {t:?}"));
+                }
+                let got = stage.image_drawn(*t);
+                if got == *want {
+                    Ok(format!("drawn {got}"))
+                } else {
+                    Err(format!("{t:?} is drawn {got}, wanted {want}"))
+                }
+            })),
+            Step::CopyAsset(name, path) => Some(crate::assets::copy_asset(name, &expand_path(path))),
             Step::ExpectBadge(want) => Some(poll(|| {
                 let got = stage.badge();
                 if got == *want {
@@ -6342,6 +6383,9 @@ mod tests {
         fn image_size(&self, _: Target) -> String {
             "2x2".into()
         }
+        fn image_drawn(&self, _: Target) -> String {
+            "2x2".into()
+        }
         fn child_texts(&self, _: Target) -> String {
             "a|b".into()
         }
@@ -7307,6 +7351,9 @@ mod tests {
             fn image_size(&self, _: Target) -> String {
                 String::new()
             }
+            fn image_drawn(&self, _: Target) -> String {
+                String::new()
+            }
             fn child_texts(&self, _: Target) -> String {
                 String::new()
             }
@@ -7636,6 +7683,9 @@ mod tests {
                 false
             }
             fn image_size(&self, _: Target) -> String {
+                String::new()
+            }
+            fn image_drawn(&self, _: Target) -> String {
                 String::new()
             }
             fn child_texts(&self, _: Target) -> String {

@@ -124,6 +124,14 @@ class KayaHarnessAccessibility : AccessibilityService() {
             "com.android.documentsui",
         )
 
+        /** The photo picker's package, both spellings (the media provider
+         * module, google and AOSP builds), and its grid's id. */
+        val PHOTO_PICKER_PACKAGES = listOf(
+            "com.google.android.providers.media.module",
+            "com.android.providers.media.module",
+        )
+        private const val PHOTO_GRID_ID = "/picker_tab_recyclerview"
+
         /** The row's container in the picker's list; its subtree holds the name. */
         private const val ROW_ID = "/item_root"
 
@@ -536,6 +544,55 @@ class KayaHarnessAccessibility : AccessibilityService() {
             Thread.sleep(BACK_SETTLE_MS)
         }
         return seenId?.let { wasRemoved(it) } ?: false
+    }
+
+    /**
+     * THE PHOTO PICKER (docs/photo-attach-plan.md §4), read off the tree
+     * measured on the API 35 image: the media provider's own window, a grid
+     * whose photos are clickable items described "Photo taken on <date>",
+     * newest first, and a Cancel button. Null when none is up.
+     */
+    private fun photoNodes(): List<AccessibilityNodeInfo>? {
+        val pkg = PHOTO_PICKER_PACKAGES.firstOrNull { windowPackages().contains(it) } ?: return null
+        return nodesIn(pkg).takeIf { nodes ->
+            nodes.any { it.viewIdResourceName?.endsWith(PHOTO_GRID_ID) == true }
+        }
+    }
+
+    private fun photos(nodes: List<AccessibilityNodeInfo>): List<AccessibilityNodeInfo> =
+        nodes.filter { it.isClickable && it.contentDescription?.startsWith("Photo") == true }
+
+    fun photoPickerState(): Pair<String, List<String>>? {
+        val nodes = photoNodes() ?: return null
+        return Pair("Photos", photos(nodes).map { it.contentDescription.toString() })
+    }
+
+    /** The newest photo, clicked; its description, or null when none is shown. */
+    fun photoChoose(): String? {
+        val newest = photoNodes()?.let { photos(it) }?.firstOrNull() ?: return null
+        return if (newest.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+            newest.contentDescription.toString()
+        } else {
+            null
+        }
+    }
+
+    fun photoCancel(): Boolean =
+        photoNodes()?.firstOrNull { it.contentDescription?.toString() == "Cancel" && it.isClickable }
+            ?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true
+
+    /** Gone, by two consecutive absent reads (waitForPickerGone's rule). */
+    fun waitForPhotoPickerGone(): Boolean {
+        check(android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
+            "kaya: waiting for the photo picker must not run on the main thread"
+        }
+        var absent = 0
+        for (i in 0 until GONE_TRIES) {
+            absent = if (photoNodes() == null) absent + 1 else 0
+            if (absent >= 2) return true
+            Thread.sleep(BACK_SETTLE_MS)
+        }
+        return false
     }
 
     /** (name, row) for every row the picker lists, in its own order. */

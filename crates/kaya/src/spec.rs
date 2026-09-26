@@ -233,6 +233,11 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     // vocabulary each backend draws in its own glyphs; the title stays the
     // accessible name.
     ("symbol", 41, PropKind::Enum("symbol")),
+    // docs/photo-attach-plan.md §2, §5: an image's bound in points. The
+    // picture scales down to fit inside both with its shape kept and never
+    // scales up. Positive; images only.
+    ("max_width", 42, PropKind::F64),
+    ("max_height", 43, PropKind::F64),
 ];
 
 /// Window properties: the presentation-context twin of PROPS, in its
@@ -849,7 +854,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 f("window", FieldTy::U64),
                 f("dialog", FieldTy::U64),
                 f("multiple", FieldTy::U32),
-                f("reserved", FieldTy::U32),
+                f("content", FieldTy::U32),
                 f("filters", FieldTy::Values),
             ],
             payload: None,
@@ -864,7 +869,10 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   advisory and rides as alternating Str values, a label \
                   then its space-separated extensions: every platform \
                   treats them as a default view rather than a guarantee, \
-                  so the guest still validates what it got.",
+                  so the guest still validates what it got. `content` is a \
+                  file_content: `images` opens the photo library's own \
+                  picker on the phones and filters to images on the \
+                  desktops (docs/photo-attach-plan.md §1).",
         },
         Record {
             kind: 35,
@@ -1927,7 +1935,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 f("window", FieldTy::U64),
                 f("dialog", FieldTy::U64),
                 f("multiple", FieldTy::U32),
-                f("reserved", FieldTy::U32),
+                f("content", FieldTy::U32),
                 f("filters", FieldTy::Values),
             ],
             payload: None,
@@ -3257,6 +3265,8 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("follows_end", 39),
                 ("max_lines", 40),
                 ("symbol", 41),
+                ("max_width", 42),
+                ("max_height", 43),
             ],
         },
         EnumSpec {
@@ -3356,6 +3366,13 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             // in ways the pick is not.
             name: "file_mode",
             variants: &[("read", 0), ("write", 1), ("read_write", 2)],
+        },
+        EnumSpec {
+            // What an open dialog offers (docs/photo-attach-plan.md §1):
+            // `images` opens the photo library's own picker on the phones
+            // and filters to images on the desktops.
+            name: "file_content",
+            variants: &[("any", 0), ("images", 1)],
         },
         EnumSpec {
             // WHICH PLATFORM A PER-PLATFORM BRAND VALUE IS FOR
@@ -4059,6 +4076,8 @@ mod tests {
                     ("prop", "follows_end") => wire::PROP_FOLLOWS_END,
                     ("prop", "max_lines") => wire::PROP_MAX_LINES,
                     ("prop", "symbol") => wire::PROP_SYMBOL,
+                    ("prop", "max_width") => wire::PROP_MAX_WIDTH,
+                    ("prop", "max_height") => wire::PROP_MAX_HEIGHT,
                     ("wprop", "title") => wire::WPROP_TITLE,
                     ("wprop", "width") => wire::WPROP_WIDTH,
                     ("wprop", "height") => wire::WPROP_HEIGHT,
@@ -4177,6 +4196,8 @@ mod tests {
                     ("file_mode", "read") => wire::FILE_MODE_READ,
                     ("file_mode", "write") => wire::FILE_MODE_WRITE,
                     ("file_mode", "read_write") => wire::FILE_MODE_READ_WRITE,
+                    ("file_content", "any") => wire::FILE_CONTENT_ANY,
+                    ("file_content", "images") => wire::FILE_CONTENT_IMAGES,
                     ("platform", "mac") => wire::PLATFORM_MAC,
                     ("platform", "ios") => wire::PLATFORM_IOS,
                     ("platform", "linux") => wire::PLATFORM_LINUX,

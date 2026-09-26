@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0xcad44d3c6e3d9800L;
+    public static final long SPEC_HASH = 0xb0dbd639210c2e5aL;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -113,6 +113,8 @@ public final class KayaWire {
     public static final int PROP_FOLLOWS_END = 39;
     public static final int PROP_MAX_LINES = 40;
     public static final int PROP_SYMBOL = 41;
+    public static final int PROP_MAX_WIDTH = 42;
+    public static final int PROP_MAX_HEIGHT = 43;
     public static final int WPROP_TITLE = 1;
     public static final int WPROP_WIDTH = 2;
     public static final int WPROP_HEIGHT = 3;
@@ -163,6 +165,8 @@ public final class KayaWire {
     public static final int FILE_MODE_READ = 0;
     public static final int FILE_MODE_WRITE = 1;
     public static final int FILE_MODE_READ_WRITE = 2;
+    public static final int FILE_CONTENT_ANY = 0;
+    public static final int FILE_CONTENT_IMAGES = 1;
     public static final int PLATFORM_MAC = 1;
     public static final int PLATFORM_IOS = 2;
     public static final int PLATFORM_LINUX = 3;
@@ -770,13 +774,13 @@ public final class KayaWire {
         return finish(b);
     }
 
-    /** Request the platform's file picker over a live window (0 = primary), on the alert's request/result grammar (DESIGN.md, File dialogs). Dialog ids are guest-chosen; one dialog may be live per process, and the id retires when its result fires. `multiple` is 0 or 1 — every backend supports both, spelled four ways (a flag on SwiftUI and AppKit, a different METHOD on GTK and WinUI, a different CONTRACT on Android). `filters` is advisory and rides as alternating Str values, a label then its space-separated extensions: every platform treats them as a default view rather than a guarantee, so the guest still validates what it got. */
-    public static byte[] txShowFileDialog(long window, long dialog, int multiple, Object[] filters) {
+    /** Request the platform's file picker over a live window (0 = primary), on the alert's request/result grammar (DESIGN.md, File dialogs). Dialog ids are guest-chosen; one dialog may be live per process, and the id retires when its result fires. `multiple` is 0 or 1 — every backend supports both, spelled four ways (a flag on SwiftUI and AppKit, a different METHOD on GTK and WinUI, a different CONTRACT on Android). `filters` is advisory and rides as alternating Str values, a label then its space-separated extensions: every platform treats them as a default view rather than a guarantee, so the guest still validates what it got. `content` is a file_content: `images` opens the photo library's own picker on the phones and filters to images on the desktops (docs/photo-attach-plan.md §1). */
+    public static byte[] txShowFileDialog(long window, long dialog, int multiple, int content, Object[] filters) {
         Enc b = begin(TX_KIND_SHOW_FILE_DIALOG);
         b.putLong(window);
         b.putLong(dialog);
         b.putInt(multiple);
-        b.putInt(0);
+        b.putInt(content);
         encodeValues(b, filters);
         return finish(b);
     }
@@ -2021,6 +2025,52 @@ public final class KayaWire {
     public static byte[] txBindSymbolElement(long widgetId, int level, int field) {
         Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_SYMBOL).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
+    /** set_property with a constant max_width value. */
+    public static byte[] txSetMaxWidth(long widgetId, double maxWidth) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_MAX_WIDTH).putInt(SOURCE_CONST);
+        encodeValue(b, maxWidth);
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound max_width value. */
+    public static byte[] txBindMaxWidth(long widgetId, long signalId) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_MAX_WIDTH).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindMaxWidthElement(long widgetId, int level, int field) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_MAX_WIDTH).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
+    /** set_property with a constant max_height value. */
+    public static byte[] txSetMaxHeight(long widgetId, double maxHeight) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_MAX_HEIGHT).putInt(SOURCE_CONST);
+        encodeValue(b, maxHeight);
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound max_height value. */
+    public static byte[] txBindMaxHeight(long widgetId, long signalId) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_MAX_HEIGHT).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindMaxHeightElement(long widgetId, int level, int field) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_MAX_HEIGHT).putInt(SOURCE_ELEMENT)
                 .putInt(level).putInt(field);
         return finish(b);
     }

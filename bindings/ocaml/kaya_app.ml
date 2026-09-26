@@ -1312,6 +1312,11 @@ let set_filled (Widget id) t = emit (the_tx ()) (Kaya_wire.tx_set_filled id (Tin
 let set_max_lines (Widget id) lines =
   emit (the_tx ()) (Kaya_wire.tx_set_max_lines id (float_of_int lines))
 
+(* An image's bound in points: the picture scales down to fit, its shape
+   kept, and never up (docs/photo-attach-plan.md §2). *)
+let set_max_width (Widget id) points = emit (the_tx ()) (Kaya_wire.tx_set_max_width id points)
+let set_max_height (Widget id) points = emit (the_tx ()) (Kaya_wire.tx_set_max_height id points)
+
 (* A container's ARRANGEMENT AXIS (docs/adaptive-layout-plan.md D1/D2):
    identity is the creation kind, presentation is this prop, so a widget
    built by [row] stays addressable as [row#N] whatever its axis says.
@@ -3093,7 +3098,18 @@ let next_dialog app =
   app.next_file_dialog <- Int64.add app.next_file_dialog 1L;
   app.next_file_dialog
 
-let pick ?(window = 0L) ?(filters = []) ~multiple () k =
+(* What an open dialog offers (docs/photo-attach-plan.md §1): [Images]
+   opens the photo library's own picker on the phones and filters to
+   images on the desktops. *)
+module File_content = struct
+  type t = Any | Images
+
+  let wire = function
+    | Any -> Kaya_wire.file_content_any
+    | Images -> Kaya_wire.file_content_images
+end
+
+let pick ?(window = 0L) ?(filters = []) ?(content = File_content.Any) ~multiple () k =
   let tx = the_tx () in
   let app = tx.app in
   let id = next_dialog app in
@@ -3101,19 +3117,20 @@ let pick ?(window = 0L) ?(filters = []) ~multiple () k =
   emit tx
     (Kaya_wire.tx_show_file_dialog window id
        (if multiple then 1 else 0)
+       (File_content.wire content)
        (filter_values filters))
 
 (* Ask the platform for files. THE PICK, NOT THE OPEN — the result
    carries handles you redeem later (DESIGN.md, File dialogs). [filters]
    is (label, space-separated extensions), ADVISORY everywhere.
    The continuation fires exactly once; CANCEL IS THE EMPTY LIST. *)
-let pick_files ?(window = 0L) ?(filters = []) () k =
-  pick ~window ~filters ~multiple:true () k
+let pick_files ?(window = 0L) ?(filters = []) ?content () k =
+  pick ~window ~filters ?content ~multiple:true () k
 
 (* The single-file spelling. The floor always returns a LIST; this only
    asks the platform for one, so the handler receives zero or one. *)
-let pick_file ?(window = 0L) ?(filters = []) () k =
-  pick ~window ~filters ~multiple:false () k
+let pick_file ?(window = 0L) ?(filters = []) ?content () k =
+  pick ~window ~filters ?content ~multiple:false () k
 
 (* Ask the platform WHERE TO SAVE — the picker's twin on the same grammar
    and out of the same one-live-dialog slot (docs/save-plan.md D2).
@@ -3811,6 +3828,8 @@ module Tpl = struct
 
     (* A stamped container filled with a platform tint (the live [~filled]). *)
     let set_filled (Node id) t = emit (the_tx ()) (Kaya_wire.tx_set_filled id (Tint.wire t))
+    let set_max_width (Node id) points = emit (the_tx ()) (Kaya_wire.tx_set_max_width id points)
+    let set_max_height (Node id) points = emit (the_tx ()) (Kaya_wire.tx_set_max_height id points)
 
     (* A stamped grid's auto columns at a floor (the live
        [set_columns_auto]; docs/layout-knobs-plan.md §3). *)
@@ -4121,6 +4140,8 @@ module Tpl = struct
   let set_accepts n kinds = Floor.set_accepts n kinds
   let set_align n a = Floor.set_align n a
   let set_filled n t = Floor.set_filled n t
+  let set_max_width n points = Floor.set_max_width n points
+  let set_max_height n points = Floor.set_max_height n points
 
   let when_ (s : bool signal) body () =
     let tx = the_tx () in

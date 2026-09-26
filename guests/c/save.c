@@ -302,7 +302,7 @@ static void *app(void *arg) {
             if (id == W_OPEN) {
                 /* No filter: the names here carry no extension. */
                 open_dialog = next_dialog++;
-                kaya_tx_show_file_dialog(&tx, 0, open_dialog, 0, NULL, 0);
+                kaya_tx_show_file_dialog(&tx, 0, open_dialog, 0, KAYA_FILE_CONTENT_ANY, NULL, 0);
                 kaya_submit(tx.buf, tx.len);
             } else if (id == W_SAVE) {
                 if (source == 0) {

@@ -386,6 +386,14 @@ public enum KayaFileMode: UInt32 {
     case readWrite = 2
 }
 
+/// What an open dialog offers (docs/photo-attach-plan.md §1): `.images` opens
+/// the photo library's own picker on the phones and filters to images on the
+/// desktops.
+public enum KayaFileContent: UInt32 {
+    case any = 0
+    case images = 1
+}
+
 /// How a window presents its sections.
 public enum KayaSectionsPresentation: Int64 {
     case auto = 0
@@ -3103,18 +3111,22 @@ public final class KayaApp {
     }
 
     @KayaAppActor public func pickFile(
-        filters: [(String, String)] = [], window: UInt64 = 0
+        filters: [(String, String)] = [], content: KayaFileContent = .any, window: UInt64 = 0
     ) async -> [KayaPickedFile] {
         await requestAsync { tx, resolve in
-            tx.pickFile(filters: filters, window: window) { _, files in resolve(files) }
+            tx.pickFile(filters: filters, content: content, window: window) { _, files in
+                resolve(files)
+            }
         }
     }
 
     @KayaAppActor public func pickFiles(
-        filters: [(String, String)] = [], window: UInt64 = 0
+        filters: [(String, String)] = [], content: KayaFileContent = .any, window: UInt64 = 0
     ) async -> [KayaPickedFile] {
         await requestAsync { tx, resolve in
-            tx.pickFiles(filters: filters, window: window) { _, files in resolve(files) }
+            tx.pickFiles(filters: filters, content: content, window: window) { _, files in
+                resolve(files)
+            }
         }
     }
 
@@ -4022,6 +4034,16 @@ public final class KayaAppTx {
     /// lines, then scrolls (docs/grow-lines-plan.md).
     public func setMaxLines(_ w: KayaWidget, _ lines: Int) {
         tx.setMaxLines(w.id, Double(lines))
+    }
+
+    /// An image's bound in points: the picture scales down to fit, its shape
+    /// kept, and never up (docs/photo-attach-plan.md §2).
+    public func setMaxWidth(_ w: KayaWidget, _ points: Double) {
+        tx.setMaxWidth(w.id, points)
+    }
+
+    public func setMaxHeight(_ w: KayaWidget, _ points: Double) {
+        tx.setMaxHeight(w.id, points)
     }
 
     /// A row or column filled with a platform tint: kaya chooses the fill,
@@ -5137,29 +5159,29 @@ public final class KayaAppTx {
     /// once, and CANCEL IS THE EMPTY LIST.
     @discardableResult
     public func pickFiles(
-        filters: [(String, String)] = [], window: UInt64 = 0,
+        filters: [(String, String)] = [], content: KayaFileContent = .any, window: UInt64 = 0,
         onResult: ((KayaAppTx, [KayaPickedFile]) throws -> Void)? = nil
     ) -> UInt64 {
-        pick(multiple: true, filters: filters, window: window, onResult: onResult)
+        pick(multiple: true, filters: filters, content: content, window: window, onResult: onResult)
     }
 
     /// The single-file spelling. The floor always returns a LIST, so the
     /// handler receives zero or one file.
     @discardableResult
     public func pickFile(
-        filters: [(String, String)] = [], window: UInt64 = 0,
+        filters: [(String, String)] = [], content: KayaFileContent = .any, window: UInt64 = 0,
         onResult: ((KayaAppTx, [KayaPickedFile]) throws -> Void)? = nil
     ) -> UInt64 {
-        pick(multiple: false, filters: filters, window: window, onResult: onResult)
+        pick(multiple: false, filters: filters, content: content, window: window, onResult: onResult)
     }
 
     private func pick(
-        multiple: Bool, filters: [(String, String)], window: UInt64,
+        multiple: Bool, filters: [(String, String)], content: KayaFileContent, window: UInt64,
         onResult: ((KayaAppTx, [KayaPickedFile]) throws -> Void)?
     ) -> UInt64 {
         alive()
         let id = app.allocFileDialog()
-        tx.showFileDialog(window, id, multiple ? 1 : 0, kayaFilterValues(filters))
+        tx.showFileDialog(window, id, multiple ? 1 : 0, content.rawValue, kayaFilterValues(filters))
         app.onFileDialog(id, onResult)
         return id
     }
@@ -5905,6 +5927,15 @@ public final class KayaTpl {
     /// a chat thread's bubbles are stamped rows.
     public func setFilled(_ n: KayaNodeHandle, _ tint: KayaTint) {
         tx.tx.setFilled(n.id, tint.rawValue)
+    }
+
+    /// A stamped image's bound (KayaTx.setMaxWidth, KayaTx.setMaxHeight).
+    public func setMaxWidth(_ n: KayaNodeHandle, _ points: Double) {
+        tx.tx.setMaxWidth(n.id, points)
+    }
+
+    public func setMaxHeight(_ n: KayaNodeHandle, _ points: Double) {
+        tx.tx.setMaxHeight(n.id, points)
     }
 
     /// A stamped grid's auto columns at a floor (KayaTx.setColumnsAuto).

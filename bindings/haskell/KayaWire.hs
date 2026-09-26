@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0xcad44d3c6e3d9800
+specHash = 0xb0dbd639210c2e5a
 
 valueBool :: Word32
 valueBool = 1
@@ -222,6 +222,10 @@ propMaxLines :: Word32
 propMaxLines = 40
 propSymbol :: Word32
 propSymbol = 41
+propMaxWidth :: Word32
+propMaxWidth = 42
+propMaxHeight :: Word32
+propMaxHeight = 43
 wpropTitle :: Word32
 wpropTitle = 1
 wpropWidth :: Word32
@@ -322,6 +326,10 @@ fileModeWrite :: Word32
 fileModeWrite = 1
 fileModeReadWrite :: Word32
 fileModeReadWrite = 2
+fileContentAny :: Word32
+fileContentAny = 0
+fileContentImages :: Word32
+fileContentImages = 1
 platformMac :: Word32
 platformMac = 1
 platformIos :: Word32
@@ -934,9 +942,9 @@ txContextAttachNode node item = wireRecord txKindContextAttachNode (word64LE nod
 txSetMenuProp :: Word64 -> Word32 -> Word32 -> Builder
 txSetMenuProp item prop source = wireRecord txKindSetMenuProp (word64LE item <> word32LE prop <> word32LE source)
 
--- Request the platform's file picker over a live window (0 = primary), on the alert's request/result grammar (DESIGN.md, File dialogs). Dialog ids are guest-chosen; one dialog may be live per process, and the id retires when its result fires. `multiple` is 0 or 1 — every backend supports both, spelled four ways (a flag on SwiftUI and AppKit, a different METHOD on GTK and WinUI, a different CONTRACT on Android). `filters` is advisory and rides as alternating Str values, a label then its space-separated extensions: every platform treats them as a default view rather than a guarantee, so the guest still validates what it got.
-txShowFileDialog :: Word64 -> Word64 -> Word32 -> [Value] -> Builder
-txShowFileDialog window dialog multiple filters = wireRecord txKindShowFileDialog (word64LE window <> word64LE dialog <> word32LE multiple <> word32LE 0 <> encodeValues filters)
+-- Request the platform's file picker over a live window (0 = primary), on the alert's request/result grammar (DESIGN.md, File dialogs). Dialog ids are guest-chosen; one dialog may be live per process, and the id retires when its result fires. `multiple` is 0 or 1 — every backend supports both, spelled four ways (a flag on SwiftUI and AppKit, a different METHOD on GTK and WinUI, a different CONTRACT on Android). `filters` is advisory and rides as alternating Str values, a label then its space-separated extensions: every platform treats them as a default view rather than a guarantee, so the guest still validates what it got. `content` is a file_content: `images` opens the photo library's own picker on the phones and filters to images on the desktops (docs/photo-attach-plan.md §1).
+txShowFileDialog :: Word64 -> Word64 -> Word32 -> Word32 -> [Value] -> Builder
+txShowFileDialog window dialog multiple content filters = wireRecord txKindShowFileDialog (word64LE window <> word64LE dialog <> word32LE multiple <> word32LE content <> encodeValues filters)
 
 -- Put one clip on the system clipboard, offered in several REPRESENTATIONS at once (DESIGN.md, Clipboard; docs/clipboard-plan.md). A clip is not a string: every platform models it as one item available in several types, and the consumer takes the richest it understands — so an app offers html AND text, and pasting into Pages keeps the formatting while a plain field still works. A RECORD RATHER THAN A LIST, which is what makes at-most-one-per-kind structural instead of a runtime duplicate check. `present` is a mask over the `clip` enum for the single-valued kinds; the two plural ones carry counts. `reps` holds the populated ones in the CANONICAL ORDER, which kaya fixes once because richness is a property of the kind rather than of the app's intent, and the wire's preference order (macOS type order, X11 TARGETS) has to be right whoever wrote the guest. THE ORDER IS DESCENDING CLIP VALUE, which is descending richness, so a backend writes what it is handed in the order it is handed: `custom_count` pairs of Str id and I64 blob, `file_count` I64 handles, I64 image blob, Str html, Str text. Files are the SAME CAPABILITY the picker returns — a handle redeemed with kaya_open_picked — so copying a file and picking one are one currency and the bytes never move through kaya.
 txCopy :: Word32 -> Word32 -> Word32 -> [Value] -> Builder
@@ -1847,6 +1855,44 @@ txBindSymbol widgetId signalId = wireRecord txKindSetProperty
 txBindSymbolElement :: Word64 -> Word32 -> Word32 -> Builder
 txBindSymbolElement widgetId level field = wireRecord txKindSetProperty
   (word64LE widgetId <> word32LE propSymbol <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
+-- set_property with a constant max_width value.
+txSetMaxWidth :: Word64 -> Double -> Builder
+txSetMaxWidth widgetId maxWidth = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propMaxWidth <> word32LE sourceConst
+    <> encodeValue (VF64 maxWidth))
+
+-- set_property with a signal-bound max_width value.
+txBindMaxWidth :: Word64 -> Word64 -> Builder
+txBindMaxWidth widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propMaxWidth <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindMaxWidthElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindMaxWidthElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propMaxWidth <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
+-- set_property with a constant max_height value.
+txSetMaxHeight :: Word64 -> Double -> Builder
+txSetMaxHeight widgetId maxHeight = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propMaxHeight <> word32LE sourceConst
+    <> encodeValue (VF64 maxHeight))
+
+-- set_property with a signal-bound max_height value.
+txBindMaxHeight :: Word64 -> Word64 -> Builder
+txBindMaxHeight widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propMaxHeight <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindMaxHeightElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindMaxHeightElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propMaxHeight <> word32LE sourceElement
     <> word32LE level <> word32LE field)
 
 -- set_window_prop with a constant title value (window 0, the primary surface).

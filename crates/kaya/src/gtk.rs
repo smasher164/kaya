@@ -6811,6 +6811,102 @@ const COMPOSER_CSS: &str = "\
 
 const COMPOSER_CLASS: &str = "kaya-composer";
 
+const MAX_WIDTH_KEY: &str = "kaya-max-width";
+const MAX_HEIGHT_KEY: &str = "kaya-max-height";
+
+/// An image's bound (docs/photo-attach-plan.md §2). GtkPicture is final and
+/// its natural size is its paintable's, so a bounded picture shows the decoded
+/// texture through a paintable whose intrinsic size is the one that fits
+/// inside both bounds with its shape kept, never larger than the texture.
+fn fit_picture(picture: &gtk4::Picture, texture: Option<gtk4::gdk::Texture>) {
+    use gtk4::prelude::{ObjectExt, PaintableExt};
+    let Some(texture) = texture else {
+        picture.set_paintable(gtk4::gdk::Paintable::NONE);
+        return;
+    };
+    // SAFETY: the two keys are private to this module and only ever hold an
+    // f64, written by the MaxWidth/MaxHeight arm.
+    let bound = |key: &str| unsafe { picture.data::<f64>(key).map(|p| *p.as_ref()) };
+    let (max_w, max_h) = (bound(MAX_WIDTH_KEY), bound(MAX_HEIGHT_KEY));
+    let (w, h) = (f64::from(texture.intrinsic_width()), f64::from(texture.intrinsic_height()));
+    if (max_w.is_none() && max_h.is_none()) || w <= 0.0 || h <= 0.0 {
+        picture.set_paintable(Some(&texture));
+        return;
+    }
+    let scale = 1f64.min(max_w.map_or(1.0, |m| m / w)).min(max_h.map_or(1.0, |m| m / h));
+    let bounded = bounded_paintable::BoundedPaintable::new(
+        &texture,
+        (w * scale).round() as i32,
+        (h * scale).round() as i32,
+    );
+    picture.set_paintable(Some(&bounded));
+}
+
+/// The decoded picture behind an image, bounded or not.
+fn picture_texture_size(picture: &gtk4::Picture) -> Option<(i32, i32)> {
+    use gtk4::prelude::{Cast, PaintableExt};
+    let paintable = picture.paintable()?;
+    match paintable.downcast::<bounded_paintable::BoundedPaintable>() {
+        Ok(bounded) => bounded.texture().map(|t| (t.intrinsic_width(), t.intrinsic_height())),
+        Err(p) => Some((p.intrinsic_width(), p.intrinsic_height())),
+    }
+}
+
+mod bounded_paintable {
+    use gtk4::gdk;
+    use gtk4::glib;
+    use gtk4::prelude::*;
+    use gtk4::subclass::prelude::*;
+    use std::cell::{Cell, RefCell};
+
+    #[derive(Default)]
+    pub struct BoundedPaintableInner {
+        texture: RefCell<Option<gdk::Texture>>,
+        size: Cell<(i32, i32)>,
+    }
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for BoundedPaintableInner {
+        const NAME: &'static str = "KayaBoundedPaintable";
+        type Type = BoundedPaintable;
+        type Interfaces = (gdk::Paintable,);
+    }
+
+    impl ObjectImpl for BoundedPaintableInner {}
+
+    impl PaintableImpl for BoundedPaintableInner {
+        fn intrinsic_width(&self) -> i32 {
+            self.size.get().0
+        }
+        fn intrinsic_height(&self) -> i32 {
+            self.size.get().1
+        }
+        fn snapshot(&self, snapshot: &gdk::Snapshot, width: f64, height: f64) {
+            if let Some(texture) = self.texture.borrow().as_ref() {
+                texture.snapshot(snapshot, width, height);
+            }
+        }
+    }
+
+    glib::wrapper! {
+        pub struct BoundedPaintable(ObjectSubclass<BoundedPaintableInner>)
+            @implements gdk::Paintable;
+    }
+
+    impl BoundedPaintable {
+        pub fn new(texture: &gdk::Texture, width: i32, height: i32) -> Self {
+            let paintable: Self = glib::Object::new();
+            *paintable.imp().texture.borrow_mut() = Some(texture.clone());
+            paintable.imp().size.set((width, height));
+            paintable
+        }
+
+        pub fn texture(&self) -> Option<gdk::Texture> {
+            self.imp().texture.borrow().clone()
+        }
+    }
+}
+
 /// An icon-only button's classes (docs/composer-plan.md §2, §3): flat unless
 /// its role says otherwise, and a prominent one is the accent circle. Called
 /// from both the symbol's arm and the role's, which arrive in either order.
@@ -12710,9 +12806,18 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 .modal(true)
                 .build();
 
-            // ADVISORY on every platform (DESIGN.md): a default view,
-            // never a guarantee, so a guest still validates what it got.
-            if !spec.filters.is_empty() {
+            // docs/photo-attach-plan.md §1: Linux has no photo library, so an
+            // images request is the open dialog filtered to image types.
+            if spec.content == crate::protocol::FileContent::Images {
+                let filters = gtk4::gio::ListStore::new::<gtk4::FileFilter>();
+                let filter = gtk4::FileFilter::new();
+                filter.set_name(Some("Images"));
+                filter.add_mime_type("image/*");
+                filters.append(&filter);
+                dialog.set_filters(Some(&filters));
+            } else if !spec.filters.is_empty() {
+                // ADVISORY on every platform (DESIGN.md): a default view,
+                // never a guarantee, so a guest still validates what it got.
                 let filters = gtk4::gio::ListStore::new::<gtk4::FileFilter>();
                 for (label, suffix) in &spec.filters {
                     let filter = gtk4::FileFilter::new();
@@ -13640,9 +13745,24 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     // paintable, image_size reads 0x0).
                     let bytes = gtk4::glib::Bytes::from(&blob.0[..]);
                     match gtk4::gdk::Texture::from_bytes(&bytes) {
-                        Ok(texture) => picture.set_paintable(Some(&texture)),
+                        Ok(texture) => fit_picture(picture, Some(texture)),
                         Err(_) => picture.set_paintable(gtk4::gdk::Paintable::NONE),
                     }
+                }
+                (NativeWidget::Image(picture), Prop::MaxWidth | Prop::MaxHeight, Value::F64(bound)) => {
+                    use gtk4::prelude::ObjectExt;
+                    let key = if prop == Prop::MaxWidth { MAX_WIDTH_KEY } else { MAX_HEIGHT_KEY };
+                    // SAFETY: the two keys are private to this module and only
+                    // ever hold an f64, written here and read by fit_picture.
+                    unsafe { picture.set_data(key, bound) }
+                    let texture = match picture.paintable() {
+                        Some(p) => match p.downcast::<bounded_paintable::BoundedPaintable>() {
+                            Ok(bounded) => bounded.texture(),
+                            Err(p) => p.downcast::<gtk4::gdk::Texture>().ok(),
+                        },
+                        None => None,
+                    };
+                    fit_picture(picture, texture);
                 }
                 (_, prop, value) => {
                     panic!("kaya: gtk cannot apply {prop:?} = {value:?} here")
@@ -17841,16 +17961,23 @@ impl crate::harness::Stage for GtkStage {
             let Some(i) = crate::harness::try_resolve(t.index, core.images.len()) else {
                 return "<no such target>".to_string();
             };
-            // The paintable's intrinsic size, in pixels for a texture;
+            // The decoded texture's size, in pixels, whatever bound draws it;
             // no paintable is the placeholder class, "0x0".
-            match core.images[i].paintable() {
-                Some(paintable) => format!(
-                    "{}x{}",
-                    paintable.intrinsic_width(),
-                    paintable.intrinsic_height()
-                ),
+            match picture_texture_size(&core.images[i]) {
+                Some((w, h)) => format!("{w}x{h}"),
                 None => "0x0".into(),
             }
+        })
+    }
+
+    fn image_drawn(&self, t: crate::harness::Target) -> String {
+        Self::on_main(move |core| {
+            use gtk4::prelude::WidgetExt;
+            let Some(i) = crate::harness::try_resolve(t.index, core.images.len()) else {
+                return "<no such target>".to_string();
+            };
+            let picture = &core.images[i];
+            format!("{}x{}", picture.width(), picture.height())
         })
     }
 

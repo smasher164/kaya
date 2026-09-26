@@ -129,7 +129,7 @@ pub use protocol::{
     SheetProp,
     Appearance, MenuProp, NotificationId, NotificationOutcome, Occurrence, Path, Prop,
     SectionProp, SectionsPresentation, SignalId, TemplateNodeId, WindowProp,
-    FileDialogId, FileMode, PickedFile, PickedId, Representation, Time, UndoDelta, UndoText, Value,
+    FileContent, FileDialogId, FileMode, PickedFile, PickedId, Representation, Time, UndoDelta, UndoText, Value,
     ValueType, WidgetId, WidgetKind, WindowId,
 };
 

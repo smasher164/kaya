@@ -9,7 +9,7 @@ import kaya "dev.kaya/bindings/go"
 // constructor, in declaration order — this call is the one
 // spelling of that order.
 func MessageCollection(tx *kaya.Tx) kaya.SumCollection[string, Message] {
-	return kaya.SumOf[string, Message](tx, Mine{}, Pending{}, Theirs{}, Reply{})
+	return kaya.SumOf[string, Message](tx, Mine{}, Pending{}, Theirs{}, Reply{}, Photo{})
 }
 
 // MessageEachSum is the template eliminator: one required arm per
@@ -26,6 +26,7 @@ func MessageEachSum(
 	pending func(kaya.SumCase[string, Pending]),
 	theirs func(kaya.SumCase[string, Theirs]),
 	reply func(kaya.SumCase[string, Reply]),
+	photo func(kaya.SumCase[string, Photo]),
 ) kaya.Widget {
 	rows := tx.Rows(c.Handle())
 	for row := range rows.All() {
@@ -33,6 +34,7 @@ func MessageEachSum(
 		c.Case[Pending](row.Tpl, pending)
 		c.Case[Theirs](row.Tpl, theirs)
 		c.Case[Reply](row.Tpl, reply)
+		c.Case[Photo](row.Tpl, photo)
 	}
 	return rows.Widget()
 }
@@ -135,5 +137,29 @@ func (p messageReplyPatch) Quote(v string) messageReplyPatch {
 
 func (p messageReplyPatch) Text(v string) messageReplyPatch {
 	p.c.UpdateField(p.tx, p.key, func(t *Reply) *string { return &t.Text }, v)
+	return p
+}
+
+// MessageAsPhoto re-eliminates at call time: the comma-ok is the
+// refinement, fresh at write time — a stale occurrence folds into
+// the !ok arm — and each setter's update carries Photo as its
+// witness, asserted again by the scene.
+func MessageAsPhoto(tx *kaya.Tx, c kaya.SumCollection[string, Message], key string) (messagePhotoPatch, bool) {
+	if v, ok := c.Get(tx, key); ok {
+		if _, is := v.(Photo); is {
+			return messagePhotoPatch{tx: tx, c: c, key: key}, true
+		}
+	}
+	return messagePhotoPatch{}, false
+}
+
+type messagePhotoPatch struct {
+	tx  *kaya.Tx
+	c   kaya.SumCollection[string, Message]
+	key string
+}
+
+func (p messagePhotoPatch) Image(v []byte) messagePhotoPatch {
+	p.c.UpdateField(p.tx, p.key, func(t *Photo) *[]byte { return &t.Image }, v)
 	return p
 }

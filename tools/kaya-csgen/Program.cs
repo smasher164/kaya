@@ -470,6 +470,8 @@ static class Program
         Set("SetSubmits", ["Node n", "bool on"], "n, on");
         Set("SetAlign", ["Node n", "Align align"], "n, align");
         Set("SetFilled", ["Node n", "Tint tint"], "n, tint");
+        Set("SetMaxWidth", ["Node n", "double points"], "n, points");
+        Set("SetMaxHeight", ["Node n", "double points"], "n, points");
         Set("SetColumnsAuto", ["Node n", "double minWidth"], "n, minWidth");
         Set("SetWrap", ["Node n", "bool on"], "n, on");
         // Fwd leaves a trailing blank line; the class brace closes on it.

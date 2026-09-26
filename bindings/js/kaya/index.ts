@@ -742,6 +742,19 @@ export class Handle {
 
   /** Declare what this widget MEANS — never how it looks
    * (docs/styling-plan.md D4): kaya.Role.HEADING or its name. Chains. */
+  /** This image's bound in points: the picture scales down to fit, its
+   * shape kept, and never up (docs/photo-attach-plan.md §2). On the base, as
+   * role is, so a stamped image is bounded too. */
+  maxWidth(points: number): this {
+    records().push(wire.tx_set_max_width(this.id, boundValue("maxWidth", points)));
+    return this;
+  }
+
+  maxHeight(points: number): this {
+    records().push(wire.tx_set_max_height(this.id, boundValue("maxHeight", points)));
+    return this;
+  }
+
   role(role: RoleValue | RoleName): this {
     records().push(wire.tx_set_role(this.id, roleValue(role)));
     return this;
@@ -2227,7 +2240,25 @@ function fileMode(mode: unknown): number {
 }
 
 export type Filter = readonly [label: string, extensions: string | readonly string[]];
-export type PickOptions = { filters?: readonly Filter[]; onResult?: (files: PickedFile[]) => void; window?: number };
+
+/** What an open dialog offers (docs/photo-attach-plan.md §1): "images" opens
+ * the photo library's own picker on the phones and filters to images on the
+ * desktops. */
+export type FileContent = "any" | "images";
+
+const FILE_CONTENTS: Record<FileContent, number> = {
+  any: wire.FILE_CONTENT_ANY,
+  images: wire.FILE_CONTENT_IMAGES,
+};
+
+function boundValue(what: string, points: unknown): number {
+  if (typeof points !== "number" || !Number.isFinite(points) || points <= 0) {
+    throw new TypeError(`kaya: ${what} is a bound in points, a positive number, not ${runtime.describe(points)}`);
+  }
+  return points;
+}
+
+export type PickOptions = { filters?: readonly Filter[]; onResult?: (files: PickedFile[]) => void; window?: number; content?: FileContent };
 
 /** Ask the platform for files. THE PICK, NOT THE OPEN. Cancel is the
  * empty list; one dialog may be live per process. */
@@ -2237,7 +2268,7 @@ export function pickFiles(opts: PickOptions = {}): number | Promise<PickedFile[]
   return pick(true, opts);
 }
 
-export type PickOneOptions = { filters?: readonly Filter[]; onResult?: (file: PickedFile | null) => void; window?: number };
+export type PickOneOptions = { filters?: readonly Filter[]; onResult?: (file: PickedFile | null) => void; window?: number; content?: FileContent };
 
 /** The single-file spelling: the handler (or the promise) receives zero
  * or one file. Cancel is null, saveFile's own shape. */
@@ -2299,7 +2330,8 @@ function pick(multiple: boolean, opts: PickOptions): number | Promise<PickedFile
   const a = app();
   if (a._fileDialogHandlers.size !== 0) throw new Error("kaya: a file dialog is already live");
   const dialogId = a._next("file_dialog");
-  const record = wire.tx_show_file_dialog(opts.window ?? 0, dialogId, multiple ? 1 : 0, filters(opts.filters ?? []));
+  const content = vocab(FILE_CONTENTS, "content", opts.content ?? "any", '"images"');
+  const record = wire.tx_show_file_dialog(opts.window ?? 0, dialogId, multiple ? 1 : 0, content, filters(opts.filters ?? []));
   const show = (): void => {
     records().push(record);
   };

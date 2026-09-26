@@ -1753,6 +1753,18 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
         self
     }
 
+    /// This image's bound in points — [`Tx::max_width`] chained.
+    pub fn max_width(self, points: f64) -> Self {
+        self.tx.max_width(self.id, points);
+        self
+    }
+
+    /// This image's bound in points — [`Tx::max_height`] chained.
+    pub fn max_height(self, points: f64) -> Self {
+        self.tx.max_height(self.id, points);
+        self
+    }
+
     /// This container's cross-axis child placement — [`Tx::align`] chained.
     pub fn align(self, align: Align) -> Self {
         self.tx.align(self.id, align);
@@ -2613,6 +2625,7 @@ impl<'a> Tx<'a> {
                 window: DEFAULT_WINDOW,
                 dialog,
                 multiple: true,
+                content: crate::protocol::FileContent::Any,
                 filters: Vec::new(),
             },
         }
@@ -2726,6 +2739,17 @@ impl<'a> Tx<'a> {
     /// foreground of what sits inside (docs/tints-plan.md T2).
     pub fn filled(&mut self, widget: WidgetId, tint: Tint) {
         self.set(widget, Prop::Filled, tint.wire());
+    }
+
+    /// An image's widest in points: the picture scales down to fit, its
+    /// shape kept, and never up (docs/photo-attach-plan.md §2).
+    pub fn max_width(&mut self, widget: WidgetId, points: f64) {
+        self.set(widget, Prop::MaxWidth, points);
+    }
+
+    /// An image's tallest in points, [`Tx::max_width`]'s twin.
+    pub fn max_height(&mut self, widget: WidgetId, points: f64) {
+        self.set(widget, Prop::MaxHeight, points);
     }
 
     /// A container's arrangement axis (the creation kind's own is the
@@ -4518,6 +4542,14 @@ impl<'b> Row<'_, 'b> {
         self.tpl().filled(node, tint)
     }
 
+    pub fn max_width(&mut self, node: TemplateNodeId, points: f64) {
+        self.tpl().max_width(node, points)
+    }
+
+    pub fn max_height(&mut self, node: TemplateNodeId, points: f64) {
+        self.tpl().max_height(node, points)
+    }
+
     pub fn columns_auto(&mut self, node: TemplateNodeId, min_width: f64) {
         self.tpl().columns_auto(node, min_width)
     }
@@ -5667,6 +5699,14 @@ impl FileDialogRef<'_, '_> {
     /// so validate what you actually got.
     pub fn filter(mut self, label: impl Into<String>, extensions: impl Into<String>) -> Self {
         self.spec.filters.push((label.into(), extensions.into()));
+        self
+    }
+
+    /// What the dialog offers: [`FileContent::Images`](crate::FileContent)
+    /// opens the photo library's own picker on the phones and filters to
+    /// images on the desktops (docs/photo-attach-plan.md §1).
+    pub fn content(mut self, content: crate::FileContent) -> Self {
+        self.spec.content = content;
         self
     }
 
@@ -7667,6 +7707,16 @@ impl<'b> Tpl<'_, 'b> {
     /// of [`Tx::filled`] — a chat thread's bubbles are stamped rows.
     pub fn filled(&mut self, node: TemplateNodeId, tint: Tint) {
         self.set(node, Prop::Filled, tint.wire());
+    }
+
+    /// A stamped image's bound, the blueprint twin of [`Tx::max_width`].
+    pub fn max_width(&mut self, node: TemplateNodeId, points: f64) {
+        self.set(node, Prop::MaxWidth, points);
+    }
+
+    /// A stamped image's bound, the blueprint twin of [`Tx::max_height`].
+    pub fn max_height(&mut self, node: TemplateNodeId, points: f64) {
+        self.set(node, Prop::MaxHeight, points);
     }
 
     /// A stamped grid's auto columns at a floor (docs/layout-knobs-plan.md §3).

@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0xcad44d3c6e3d9800
+	SpecHash uint64 = 0xb0dbd639210c2e5a
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -114,6 +114,8 @@ const (
 	PropFollowsEnd = 39
 	PropMaxLines = 40
 	PropSymbol = 41
+	PropMaxWidth = 42
+	PropMaxHeight = 43
 	WpropTitle = 1
 	WpropWidth = 2
 	WpropHeight = 3
@@ -164,6 +166,8 @@ const (
 	FileModeRead FileMode = 0
 	FileModeWrite FileMode = 1
 	FileModeReadWrite FileMode = 2
+	FileContentAny FileContent = 0
+	FileContentImages FileContent = 1
 	PlatformMac = 1
 	PlatformIos = 2
 	PlatformLinux = 3
@@ -456,6 +460,16 @@ func (f FileMode) String() string {
 		return "read_write"
 	}
 	return "FileMode(" + strconv.FormatInt(int64(f), 10) + ")"
+}
+
+func (f FileContent) String() string {
+	switch f {
+	case FileContentAny:
+		return "any"
+	case FileContentImages:
+		return "images"
+	}
+	return "FileContent(" + strconv.FormatInt(int64(f), 10) + ")"
 }
 
 func (a Align) String() string {
@@ -922,13 +936,13 @@ func TxSetMenuProp(item uint64, prop uint32, source uint32) []byte {
 	return endRecord(b)
 }
 
-// TxShowFileDialog: Request the platform's file picker over a live window (0 = primary), on the alert's request/result grammar (DESIGN.md, File dialogs). Dialog ids are guest-chosen; one dialog may be live per process, and the id retires when its result fires. `multiple` is 0 or 1 — every backend supports both, spelled four ways (a flag on SwiftUI and AppKit, a different METHOD on GTK and WinUI, a different CONTRACT on Android). `filters` is advisory and rides as alternating Str values, a label then its space-separated extensions: every platform treats them as a default view rather than a guarantee, so the guest still validates what it got.
-func TxShowFileDialog(window uint64, dialog uint64, multiple uint32, filters []any) []byte {
+// TxShowFileDialog: Request the platform's file picker over a live window (0 = primary), on the alert's request/result grammar (DESIGN.md, File dialogs). Dialog ids are guest-chosen; one dialog may be live per process, and the id retires when its result fires. `multiple` is 0 or 1 — every backend supports both, spelled four ways (a flag on SwiftUI and AppKit, a different METHOD on GTK and WinUI, a different CONTRACT on Android). `filters` is advisory and rides as alternating Str values, a label then its space-separated extensions: every platform treats them as a default view rather than a guarantee, so the guest still validates what it got. `content` is a file_content: `images` opens the photo library's own picker on the phones and filters to images on the desktops (docs/photo-attach-plan.md §1).
+func TxShowFileDialog(window uint64, dialog uint64, multiple uint32, content uint32, filters []any) []byte {
 	b := beginRecord(txShowFileDialog)
 	b = binary.LittleEndian.AppendUint64(b, window)
 	b = binary.LittleEndian.AppendUint64(b, dialog)
 	b = binary.LittleEndian.AppendUint32(b, multiple)
-	b = binary.LittleEndian.AppendUint32(b, 0)
+	b = binary.LittleEndian.AppendUint32(b, content)
 	b = encodeValues(b, filters)
 	return endRecord(b)
 }
@@ -2533,6 +2547,70 @@ func TxBindSymbolElement(widgetID uint64, level uint32, field uint32) []byte {
 	b := beginRecord(txSetProperty)
 	b = binary.LittleEndian.AppendUint64(b, widgetID)
 	b = binary.LittleEndian.AppendUint32(b, PropSymbol)
+	b = binary.LittleEndian.AppendUint32(b, SourceElement)
+	b = binary.LittleEndian.AppendUint32(b, level)
+	b = binary.LittleEndian.AppendUint32(b, field)
+	return endRecord(b)
+}
+
+// TxSetMaxWidth: set_property with a constant max_width value.
+func TxSetMaxWidth(widgetID uint64, maxWidth float64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropMaxWidth)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, maxWidth)
+	return endRecord(b)
+}
+
+// TxBindMaxWidth: set_property with a signal-bound max_width value.
+func TxBindMaxWidth(widgetID uint64, signalID uint64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropMaxWidth)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxBindMaxWidthElement: set_property bound to one field of the element of the
+// enclosing For, `level` Fors up (0 = nearest).
+func TxBindMaxWidthElement(widgetID uint64, level uint32, field uint32) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropMaxWidth)
+	b = binary.LittleEndian.AppendUint32(b, SourceElement)
+	b = binary.LittleEndian.AppendUint32(b, level)
+	b = binary.LittleEndian.AppendUint32(b, field)
+	return endRecord(b)
+}
+
+// TxSetMaxHeight: set_property with a constant max_height value.
+func TxSetMaxHeight(widgetID uint64, maxHeight float64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropMaxHeight)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, maxHeight)
+	return endRecord(b)
+}
+
+// TxBindMaxHeight: set_property with a signal-bound max_height value.
+func TxBindMaxHeight(widgetID uint64, signalID uint64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropMaxHeight)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxBindMaxHeightElement: set_property bound to one field of the element of the
+// enclosing For, `level` Fors up (0 = nearest).
+func TxBindMaxHeightElement(widgetID uint64, level uint32, field uint32) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropMaxHeight)
 	b = binary.LittleEndian.AppendUint32(b, SourceElement)
 	b = binary.LittleEndian.AppendUint32(b, level)
 	b = binary.LittleEndian.AppendUint32(b, field)
