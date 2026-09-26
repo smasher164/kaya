@@ -12766,3 +12766,17 @@ and `4 of 4` on both lanes. Return is sent once and never waited for where it
 submits (gtk.rs `type_text`, KayaCompose.kt `kayaTypeAtFocus`); a plain
 textarea still waits for its newline, since the next `type` depends on it.
 The chat leg is the guard on all five lanes.
+
+## A GtkScrolledWindow on the Automatic policy is at least as tall as its scrollbar, overlay or not (measured 2026-09-25)
+
+The growing textarea (docs/grow-lines-plan.md) sat at 58px at rest on GTK
+while its text view measured 20px, one line: `measure` on the scroller
+answered (58, 58) with `min_content_height` 20. A scrolled window whose
+vertical policy may show a scrollbar takes the scrollbar's minimum length as
+its own floor, and overlay scrolling does not lift it. The C1b captures only
+ever showed a two-line message, which fits in 58px, so nothing looked wrong
+until the chat's search capture showed the field at rest. The growing arm
+keeps the policy External (scrollable, no floor) until the text passes the
+cap, and pads the view as an entry is (7px top and bottom, 8px at the sides,
+the prompt overlay moved with it). check-universal-props holds the policy
+choice, watched red on Automatic.

@@ -29,7 +29,7 @@ message to a few lines, then scrolling inside itself.
 |---|---|
 | SwiftUI | `sizeThatFits` on kaya's own text view (NSTextView, UITextView): the text's used height between one line and `max_lines` of its font; BUILT this way rather than as `TextField(axis: .vertical)`, which would have left the textarea's rich text, undo and submit wiring behind |
 | Compose | the text field with `minLines = 1` and `maxLines = max_lines` and no fixed height |
-| GTK | the text view's scroller with `propagate_natural_height` and a `max_content_height` of `max_lines` lines of the view's font |
+| GTK | the text view's scroller with `propagate_natural_height` and a `max_content_height` of `max_lines` lines of the view's font, its vertical policy External until the text passes the cap (on Automatic the scrollbar's minimum is the floor, 58px against a 20px line, docs/traps.md), and an entry's padding |
 | WinUI | the TextBox measured at its content with a `MaxHeight` of `max_lines` lines of its font, scrolling its own text beyond |
 
 ## §3 — How a leg sees it

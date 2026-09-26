@@ -74,3 +74,4 @@ expect label@state[u3] "Sending…"
 expect label@connection ""
 expect_no_target label@state[u3]
 expect label@text[p5] "Perfect"
+expect label@connection ""

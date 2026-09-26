@@ -1629,6 +1629,8 @@ fn set_scroll_kind(widget: &gtk4::Widget) {
 /// column it fills the width, an input region rather than content
 /// (docs/tasks-plan.md §4, R10).
 const TEXT_FIELD_KEY: &str = "kaya-text-field";
+/// Set on a growing textarea's scroller once its policy follows its text.
+const GROWS_KEY: &str = "kaya-grows";
 fn is_text_field(widget: &gtk4::Widget) -> bool {
     // SAFETY: the key is private to this module and only ever set to
     // `true` by set_text_field below.
@@ -12896,6 +12898,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     let label = core.textarea_prompts.entry(id.0).or_insert_with(|| {
                         let label = gtk4::Label::new(None);
                         label.set_xalign(0.0);
+                        label.set_margin_start(view.left_margin());
                         label.add_css_class("dim-label");
 // IT IS DECORATION: no pointer reaches it, no focus lands on it, and role
 // None keeps it OUT of the accessible tree — the prompt is not part of the
@@ -12946,9 +12949,18 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 // natural height between one line and max_lines lines of the
                 // view's own font, and the fixed 96px goes.
                 (NativeWidget::Textarea(scroller, view), Prop::MaxLines, Value::F64(lines)) => {
-                    use gtk4::prelude::{TextViewExt, WidgetExt};
+                    use gtk4::prelude::{AdjustmentExt, ObjectExt, TextViewExt, WidgetExt};
                     let metrics = view.pango_context().metrics(None, None);
                     let line = f64::from(metrics.height()) / f64::from(gtk4::pango::SCALE);
+                    // An entry's padding, so one line at rest stands as tall as
+                    // an entry beside it.
+                    view.set_top_margin(7);
+                    view.set_bottom_margin(7);
+                    view.set_left_margin(8);
+                    view.set_right_margin(8);
+                    if let Some(prompt) = core.textarea_prompts.get(&id.0) {
+                        prompt.set_margin_start(view.left_margin());
+                    }
                     let margins = f64::from(view.top_margin() + view.bottom_margin());
                     let one = (line + margins).ceil() as i32;
                     let most = (line * lines + margins).ceil() as i32;
@@ -12956,6 +12968,25 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     scroller.set_propagate_natural_height(true);
                     scroller.set_min_content_height(one);
                     scroller.set_max_content_height(most);
+                    // A scrolled window whose vertical policy is Automatic is at
+                    // least as tall as its scrollbar's minimum (58px measured
+                    // against a 20px line, docs/traps.md), so the policy stays
+                    // External until the text passes the cap.
+                    let adj = scroller.vadjustment();
+                    let fit = scroller.clone();
+                    let overflows = move |a: &gtk4::Adjustment| a.upper() > f64::from(most) + 0.5;
+                    let policy = |over: bool| if over {
+                        gtk4::PolicyType::Automatic
+                    } else {
+                        gtk4::PolicyType::External
+                    };
+                    scroller.set_policy(gtk4::PolicyType::Never, policy(overflows(&adj)));
+                    if !unsafe { scroller.data::<bool>(GROWS_KEY).is_some() } {
+                        unsafe { scroller.set_data(GROWS_KEY, true) }
+                        adj.connect_changed(move |a| {
+                            fit.set_policy(gtk4::PolicyType::Never, policy(overflows(a)));
+                        });
+                    }
                 }
                 // docs/follow-end-plan.md §2: `changed` fires after `upper`
                 // grew, so the handler keeps the previous upper and follows only

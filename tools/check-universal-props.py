@@ -561,7 +561,10 @@ def growing_textareas(swiftui_text, compose_text, gtk_text, winui_text):
             "minHeight: grows_lines ? nil : 96")),
         (COMPOSE, compose_text, ("minHeightInLines = 1, maxHeightInLines = node.maxLines",)),
         (GTK, gtk_text, ("scroller.set_max_content_height(most);",
-                         "scroller.set_propagate_natural_height(true);")),
+                         "scroller.set_propagate_natural_height(true);",
+                         "gtk4::PolicyType::Automatic\n                    } else {\n"
+                         "                        gtk4::PolicyType::External\n",
+                         "view.set_top_margin(7);")),
         (WINUI, winui_text, ("field.SetMaxHeight((line * lines + chrome).ceil())?;",
                              "if let Some(lines) = core.max_lines.get(child) {")),
     ):
@@ -672,7 +675,7 @@ def drag_waits(winui_text):
 real = load()
 g = Gate("check-universal-props")
 RAN = 0
-DECLARED = 74
+DECLARED = 75
 for path, pattern, repl in (
     (COMPOSE, r"\ba11y\b", "kayaUnappliedProps"),
     (SWIFTUI, r"\bkayaA11y\b", "kayaUnappliedProps"),
@@ -917,6 +920,9 @@ for label, path, pattern, repl in (
      "minHeightInLines = 3, maxHeightInLines = node.maxLines"),
     ("GTK's growing textarea without its cap", GTK,
      r"scroller\.set_max_content_height\(most\);", "let _ = most;"),
+    ("GTK's growing textarea on Automatic, the scrollbar's 58px floor", GTK,
+     r"                        gtk4::PolicyType::External\n",
+     "                        gtk4::PolicyType::Automatic\n"),
     ("WinUI's reindex resetting a growing textarea to 96", WINUI,
      r"if let Some\(lines\) = core\.max_lines\.get\(child\) \{",
      "if let Some(lines) = None::<&f64> {"),

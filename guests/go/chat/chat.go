@@ -452,10 +452,12 @@ func (p *peer) read(conn net.Conn) {
 	}
 }
 
-// serve answers one connection at a time; a drop closes the listener too,
-// so the app's redials are refused until the peer is back on the same port.
+// serve answers one connection at a time; the one drop closes the listener
+// too, so the app's redials are refused until the peer is back on the same
+// port.
 func serve(listener net.Listener, addr string) {
 	seq := 0
+	away := false
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
@@ -472,8 +474,11 @@ func serve(listener net.Listener, addr string) {
 				delay, _ := time.ParseDuration(answer[2])
 				time.Sleep(delay)
 				if answer[1] == dropLine {
-					dropped = true
-					break
+					if !away {
+						dropped, away = true, true
+						break
+					}
+					continue
 				}
 				seq++
 				fmt.Fprintf(conn, "MSG\t%s\tp%d\t%s\n", answer[0], seq, answer[1])
