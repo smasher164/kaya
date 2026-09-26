@@ -459,6 +459,7 @@ def census(files):
     bad += fill_reads(read(swiftui))
     bad += fill_reads_rust_and_compose(read(gtk), read(winui), read(compose))
     bad += compose_pushed_screen(read(compose))
+    bad += swiftui_pushed_title(read(swiftui))
     return bad
 
 
@@ -512,6 +513,21 @@ def compose_pushed_screen(compose_text):
     if covered not in compose_text:
         bad.append(f"{COMPOSE}: a covered stack no longer wears the top bar")
     return bad
+
+
+# A PUSHED SCREEN'S TITLE IS INLINE ON THE PHONE (docs/deferred.md, the chat
+# C0 captures): a large title collapses away under the screen's own scroll
+# view, and iOS's expect_title reads the model, so a bar showing nothing
+# passed every step.
+def swiftui_pushed_title(swiftui_text):
+    start = swiftui_text.find("struct KayaEntryRoot: View {")
+    if start < 0:
+        return [f"{SWIFTUI}: KayaEntryRoot is missing"]
+    end = swiftui_text.find("\n}\n", start)
+    block = swiftui_text[start:end if end > 0 else len(swiftui_text)]
+    if ".navigationBarTitleDisplayMode(.inline)" not in block:
+        return [f"{SWIFTUI}: a pushed screen's title is no longer inline on iOS"]
+    return []
 
 
 # A FILL IS READ OFF THE PIXELS (docs/tints-plan.md §4). A reader that
@@ -596,7 +612,7 @@ def drag_waits(winui_text):
 real = load()
 g = Gate("check-universal-props")
 RAN = 0
-DECLARED = 66
+DECLARED = 67
 for path, pattern, repl in (
     (COMPOSE, r"\ba11y\b", "kayaUnappliedProps"),
     (SWIFTUI, r"\bkayaA11y\b", "kayaUnappliedProps"),
@@ -823,6 +839,11 @@ for label, path, pattern, repl in (
     ("Compose's pushed screen without its bar", COMPOSE,
      r"if \(KayaSceneModel\.menubar\.isEmpty\(\) && !covered\)",
      "if (KayaSceneModel.menubar.isEmpty())"),
+    ("SwiftUI's pushed screen back on a collapsing large title", SWIFTUI,
+     r"        #if os\(iOS\)\n"
+     r"            \.navigationBarTitleDisplayMode\(\.inline\)\n        #endif\n"
+     r"        \.modifier\(KayaSheetHost\(surface: entryId\)\)",
+     "        .modifier(KayaSheetHost(surface: entryId))"),
     ("WinUI's clipping read agreeing about a window it never read", WINUI,
      r"if candidates > 0 && read == 0 \{", "if false {"),
     ("WinUI's cell never coming back for a measure with its template", WINUI,

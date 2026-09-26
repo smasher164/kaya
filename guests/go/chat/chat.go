@@ -229,7 +229,8 @@ func App() *kaya.App {
 func quoteOf(c *conversation, key string) string {
 	for _, m := range c.messages {
 		if m.key == key {
-			return "↩ " + m.text
+			// U+FE0E asks for the text glyph: iOS draws a bare ↩ as an emoji.
+			return "↩\uFE0E " + m.text
 		}
 	}
 	return "↩ (deleted)"

@@ -22,8 +22,12 @@ of its last frame found what no step reads.
     than handing it to the compose field; and the window resizes for the
     keyboard instead of panning on top of the insets (docs/traps.md).
     check-universal-props holds all three.
-  - iOS: the thread's navigation bar shows the back button but not the
-    conversation's name; the quote's ↩ draws as a colour emoji.
+  - ~~iOS: the thread's navigation bar shows the back button but not the
+    conversation's name; the quote's ↩ draws as a colour emoji.~~ FIXED
+    2026-09-25: a pushed screen's title is inline on the phone (a large title
+    collapsed away under the thread's own scroll view, and iOS's expect_title
+    reads the model, so nothing saw it; check-universal-props holds the mode);
+    the app's arrow carries U+FE0E for the text glyph.
   - WINDOWS: the list pane has no boundary against the thread (no divider,
     no pane ground), where the mac and GTK draw one.
 

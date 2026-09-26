@@ -20702,6 +20702,14 @@ struct KayaEntryRoot: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .modifier(KayaGroupedScreenGround(on: scene.groupedEntries.contains(entryId)))
         .navigationTitle(scene.navEntries[entryId]?.title ?? "")
+        // A PUSHED SCREEN'S TITLE IS INLINE on the phone, as a Messages thread
+        // and a Mail message are: a large title collapses away when the screen's
+        // own scroll view moves, and the chat app's thread, opened at its end,
+        // showed a bar with no title at all (docs/deferred.md, the chat C0
+        // captures). The root keeps its large title.
+        #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+        #endif
         .modifier(KayaSheetHost(surface: entryId))
     }
 }
