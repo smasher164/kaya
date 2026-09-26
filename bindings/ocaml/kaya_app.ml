@@ -1300,6 +1300,11 @@ end
 
 let set_filled (Widget id) t = emit (the_tx ()) (Kaya_wire.tx_set_filled id (Tint.wire t))
 
+(* A textarea one line tall at rest that grows with its text to [lines]
+   lines, then scrolls (docs/grow-lines-plan.md). *)
+let set_max_lines (Widget id) lines =
+  emit (the_tx ()) (Kaya_wire.tx_set_max_lines id (float_of_int lines))
+
 (* A container's ARRANGEMENT AXIS (docs/adaptive-layout-plan.md D1/D2):
    identity is the creation kind, presentation is this prop, so a widget
    built by [row] stays addressable as [row#N] whatever its axis says.

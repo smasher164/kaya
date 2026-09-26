@@ -226,6 +226,9 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     // docs/follow-end-plan.md: a scroll that keeps its end in view while
     // its content grows, until the user scrolls away from the end.
     ("follows_end", 39, PropKind::Bool),
+    // docs/grow-lines-plan.md: a textarea one line tall at rest that grows
+    // with its text to this many lines, then scrolls. Whole, at least 1.
+    ("max_lines", 40, PropKind::F64),
 ];
 
 /// Window properties: the presentation-context twin of PROPS, in its
@@ -3227,6 +3230,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("submits", 37),
                 ("filled", 38),
                 ("follows_end", 39),
+                ("max_lines", 40),
             ],
         },
         EnumSpec {
@@ -4020,6 +4024,7 @@ mod tests {
                     ("prop", "submits") => wire::PROP_SUBMITS,
                     ("prop", "filled") => wire::PROP_FILLED,
                     ("prop", "follows_end") => wire::PROP_FOLLOWS_END,
+                    ("prop", "max_lines") => wire::PROP_MAX_LINES,
                     ("wprop", "title") => wire::WPROP_TITLE,
                     ("wprop", "width") => wire::WPROP_WIDTH,
                     ("wprop", "height") => wire::WPROP_HEIGHT,

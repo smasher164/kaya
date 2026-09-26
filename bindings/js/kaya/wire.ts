@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0x6fef3d923cd4cd3en;
+export const SPEC_HASH = 0x555172b2e7556a6fn;
 
 export const VALUE_BOOL = 1;
 export const VALUE_I64 = 2;
@@ -105,6 +105,7 @@ export const PROP_DOCUMENT = 36;
 export const PROP_SUBMITS = 37;
 export const PROP_FILLED = 38;
 export const PROP_FOLLOWS_END = 39;
+export const PROP_MAX_LINES = 40;
 export const WPROP_TITLE = 1;
 export const WPROP_WIDTH = 2;
 export const WPROP_HEIGHT = 3;
@@ -1776,6 +1777,24 @@ export function tx_bind_follows_end(widget_id: number, signal_id: number): Uint8
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_follows_end_element(widget_id: number, level = 0, field = 0): Uint8Array {
   enc.begin(); enc.u64(widget_id); enc.u32(PROP_FOLLOWS_END); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a constant max_lines value. */
+export function tx_set_max_lines(widget_id: number, max_lines: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_MAX_LINES); enc.u32(SOURCE_CONST); enc.value(max_lines);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a signal-bound max_lines value. */
+export function tx_bind_max_lines(widget_id: number, signal_id: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_MAX_LINES); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_max_lines_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_MAX_LINES); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
   return enc.end(TX_SET_PROPERTY);
 }
 

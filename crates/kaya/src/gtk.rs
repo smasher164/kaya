@@ -12942,6 +12942,21 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                         core.rich_pending.borrow_mut().remove(&id.0);
                     }
                 }
+                // docs/grow-lines-plan.md §2: the scroller takes its child's
+                // natural height between one line and max_lines lines of the
+                // view's own font, and the fixed 96px goes.
+                (NativeWidget::Textarea(scroller, view), Prop::MaxLines, Value::F64(lines)) => {
+                    use gtk4::prelude::{TextViewExt, WidgetExt};
+                    let metrics = view.pango_context().metrics(None, None);
+                    let line = f64::from(metrics.height()) / f64::from(gtk4::pango::SCALE);
+                    let margins = f64::from(view.top_margin() + view.bottom_margin());
+                    let one = (line + margins).ceil() as i32;
+                    let most = (line * lines + margins).ceil() as i32;
+                    scroller.set_size_request(240, -1);
+                    scroller.set_propagate_natural_height(true);
+                    scroller.set_min_content_height(one);
+                    scroller.set_max_content_height(most);
+                }
                 // docs/follow-end-plan.md §2: `changed` fires after `upper`
                 // grew, so the handler keeps the previous upper and follows only
                 // when the view sat within a line of that old end.

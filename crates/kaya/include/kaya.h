@@ -871,6 +871,11 @@
 #define KAYA_PROP_FOLLOWS_END 39
 
 /**
+ * A textarea that grows with its text to this many lines (docs/grow-lines-plan.md).
+ */
+#define KAYA_PROP_MAX_LINES 40
+
+/**
  * Window properties (spec::WINDOW_PROPS): their own namespace —
  * windows are not widgets. Window 0 is the primary surface.
  */

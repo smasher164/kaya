@@ -589,6 +589,9 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     /** A scroll that keeps its end in view while its content grows
      * (docs/follow-end-plan.md). */
     var followsEnd by mutableStateOf(false)
+    /** A textarea one line tall at rest that grows to this many lines
+     * (docs/grow-lines-plan.md); 0 = unset. */
+    var maxLines by mutableStateOf(0)
 
     /// The arrangement axis (null = the creation kind's own — row
     /// horizontal, column vertical). One node, two constructor
@@ -1888,7 +1891,7 @@ object KayaCompose {
     // but only the runtime assert catches a stale compiled APK against
     // a new libkaya. ULong because the fingerprint's high bit is fair
     // game and a Kotlin Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0x6fef3d923cd4cd3euL
+    private const val SPEC_HASH: ULong = 0x555172b2e7556a6fuL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -2139,6 +2142,7 @@ object KayaCompose {
     private const val PROP_SUBMITS = 37
     private const val PROP_FILLED = 38
     private const val PROP_FOLLOWS_END = 39
+    private const val PROP_MAX_LINES = 40
     private const val PROP_COLUMNS = 11
     // The accessibility identifier (never spoken) and label (spoken).
     // Universal: every widget kind carries both.
@@ -2998,6 +3002,8 @@ object KayaCompose {
                             KayaSceneModel.nodes[id]!!.filled = readI64(b)
                         PROP_FOLLOWS_END ->
                             KayaSceneModel.nodes[id]!!.followsEnd = readBool(b)
+                        PROP_MAX_LINES ->
+                            KayaSceneModel.nodes[id]!!.maxLines = readF64(b).toInt()
                         // docs/rich-text-plan.md §14: this platform's lever
                         // is `clearHistory()`, so taking ownership drops what
                         // the field had banked.
@@ -14123,6 +14129,10 @@ fun KayaTextField(
         // which a verticalScroll wrapper would cost.
         lineLimits =
             if (singleLine) TextFieldLineLimits.SingleLine
+            // A GROWING textarea is one line at rest and grows to its own cap
+            // (docs/grow-lines-plan.md).
+            else if (node.maxLines > 0) TextFieldLineLimits.MultiLine(
+                minHeightInLines = 1, maxHeightInLines = node.maxLines)
             else TextFieldLineLimits.MultiLine(
                 minHeightInLines = 3, maxHeightInLines = KAYA_TEXTAREA_LINES),
         // The viewport's REAL state, owned here rather than remembered

@@ -1425,6 +1425,9 @@ pub enum Prop {
     /// A scroll that keeps its end in view while its content grows (Bool;
     /// docs/follow-end-plan.md).
     FollowsEnd,
+    /// A textarea one line tall at rest that grows with its text to this many
+    /// lines, then scrolls (F64, whole, >= 1; docs/grow-lines-plan.md).
+    MaxLines,
     /// The app owns a rich textarea's undo (Bool-valued; docs/rich-text-plan.md
     /// R6, §14): the native stack is off, the ledger never banks it, and
     /// Edit>Undo/Redo reach the app through the role item's own activation.

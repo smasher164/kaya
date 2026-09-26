@@ -4001,6 +4001,12 @@ public final class KayaAppTx {
         tx.setAlign(w.id, align.rawValue)
     }
 
+    /// A textarea one line tall at rest that grows with its text to `lines`
+    /// lines, then scrolls (docs/grow-lines-plan.md).
+    public func setMaxLines(_ w: KayaWidget, _ lines: Int) {
+        tx.setMaxLines(w.id, Double(lines))
+    }
+
     /// A row or column filled with a platform tint: kaya chooses the fill,
     /// the corner radius, the inset (unless one was set) and the foreground
     /// of what sits inside (docs/tints-plan.md T2).

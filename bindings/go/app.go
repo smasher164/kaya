@@ -965,6 +965,22 @@ func (w Widget) Align(mode Align) Widget {
 	return w
 }
 
+// SetMaxLines makes a textarea one line tall at rest, growing with its text
+// to `lines` lines and then scrolling (docs/grow-lines-plan.md).
+func (tx *Tx) SetMaxLines(w Widget, lines int) {
+	tx.emit(TxSetMaxLines(w.id, float64(lines)))
+}
+
+// MaxLines makes this textarea grow with its text to `lines` lines at
+// construction. Same transaction discipline as Grow.
+func (w Widget) MaxLines(lines int) Widget {
+	if w.tx == nil || w.tx.closed {
+		panic("kaya: MaxLines on a widget outside its build transaction — use Tx.SetMaxLines inside a live transaction")
+	}
+	w.tx.SetMaxLines(w, lines)
+	return w
+}
+
 // SetFollowsEnd makes a scroll keep its end in view while its content grows,
 // until the user scrolls away from the end (docs/follow-end-plan.md).
 func (tx *Tx) SetFollowsEnd(w Widget, on bool) {

@@ -1039,6 +1039,7 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         Prop::Axis => matches!(kind, WidgetKind::Column | WidgetKind::Row),
         Prop::Filled => matches!(kind, WidgetKind::Column | WidgetKind::Row),
         Prop::FollowsEnd => kind == WidgetKind::Scroll,
+        Prop::MaxLines => kind == WidgetKind::Textarea,
         // A container's own padding (docs/styling-plan.md D3): spacing's
         // kinds exactly, and for spacing's reason — the prop is about a
         // container's relation to ITS children.
@@ -1587,6 +1588,7 @@ fn prop_value_type(prop: Prop) -> ValueType {
         Prop::Align => ValueType::I64,
         Prop::Filled => ValueType::I64,
         Prop::FollowsEnd => ValueType::Bool,
+        Prop::MaxLines => ValueType::F64,
         Prop::Axis => ValueType::I64,
         Prop::Role => ValueType::I64,
         Prop::Indeterminate | Prop::Fill | Prop::Wrap | Prop::Rich | Prop::Submits => ValueType::Bool,
@@ -2187,6 +2189,12 @@ fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
         assert!(
             !(*mode == 4 && kind == WidgetKind::Column),
             "kaya: baseline alignment applies to rows only"
+        );
+    }
+    if let (Prop::MaxLines, Value::F64(lines)) = (prop, value) {
+        assert!(
+            lines.is_finite() && *lines >= 1.0 && lines.fract() == 0.0,
+            "kaya: max_lines is a whole number of lines, at least 1, got {lines}"
         );
     }
     if let (Prop::Filled, Value::I64(tint)) = (prop, value) {

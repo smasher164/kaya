@@ -420,6 +420,7 @@ pub(crate) const PROP_DOCUMENT: u32 = 36;
 pub(crate) const PROP_SUBMITS: u32 = 37;
 pub(crate) const PROP_FILLED: u32 = 38;
 pub(crate) const PROP_FOLLOWS_END: u32 = 39;
+pub(crate) const PROP_MAX_LINES: u32 = 40;
 
 /// The clip representation masks (spec enum "clip"). BIT POSITIONS, not
 /// an ordinal: a copy carries several and a widget accepts several, so
@@ -923,6 +924,7 @@ fn prop(raw: u32) -> Prop {
         PROP_SUBMITS => Prop::Submits,
         PROP_FILLED => Prop::Filled,
         PROP_FOLLOWS_END => Prop::FollowsEnd,
+        PROP_MAX_LINES => Prop::MaxLines,
         other => panic!("kaya: unknown property {other}"),
     }
 }
@@ -4310,6 +4312,7 @@ fn prop_raw(prop: Prop) -> u32 {
         Prop::Submits => PROP_SUBMITS,
         Prop::Filled => PROP_FILLED,
         Prop::FollowsEnd => PROP_FOLLOWS_END,
+        Prop::MaxLines => PROP_MAX_LINES,
     }
 }
 

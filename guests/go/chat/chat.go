@@ -181,10 +181,11 @@ func App() *kaya.App {
 					tx.SetA11yID(threadList, "thread")
 				}).Grow(1).FollowsEnd()
 				tx.Row(func() {
-					// A single-line field until the growing compose field lands
-					// (docs/chat-plan.md C1b): a textarea is several lines tall.
-					compose = tx.Entry(func(tx *kaya.Tx, text string) { draft = text }).
-						Placeholder("Message").A11yID("compose").Grow(1).
+					// The compose field: one line at rest, growing with the message
+					// to five (docs/grow-lines-plan.md); Return sends and
+					// Shift+Return breaks the line.
+					compose = tx.Textarea(func(tx *kaya.Tx, text string) { draft = text }).
+						Submits().MaxLines(5).Placeholder("Message").A11yID("compose").Grow(1).
 						OnSubmitted(send)
 					tx.Button("Send", func(tx *kaya.Tx) { send(tx, draft) }).A11yID("send")
 				})

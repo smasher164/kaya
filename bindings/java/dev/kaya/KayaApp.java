@@ -3236,6 +3236,18 @@ public final class KayaApp {
             return this;
         }
 
+        /** This textarea is one line tall at rest and grows with its text to
+         * {@code lines} lines, then scrolls (docs/grow-lines-plan.md). */
+        public Widget maxLines(int lines) {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: maxLines on a widget outside its build transaction"
+                    + " — use Tx.setMaxLines inside a live transaction");
+            }
+            tx.setMaxLines(this, lines);
+            return this;
+        }
+
         /** This scroll keeps its end in view while its content grows, until
          * the user scrolls away (docs/follow-end-plan.md):
          * tx.scroll(s -> {...}).followsEnd(). */
@@ -5096,6 +5108,12 @@ public final class KayaApp {
          */
         public void setFilled(Widget w, Tint tint) {
             emit(KayaWire.txSetFilled(w.id, tint.wire));
+        }
+
+        /** A textarea that grows with its text to {@code lines} lines
+         * (docs/grow-lines-plan.md). */
+        public void setMaxLines(Widget w, int lines) {
+            emit(KayaWire.txSetMaxLines(w.id, lines));
         }
 
         /** A scroll that keeps its end in view while its content grows

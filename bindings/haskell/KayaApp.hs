@@ -207,6 +207,7 @@ module KayaApp
     setInset,
     setAlign,
     setFilled,
+    setMaxLines,
     setAxis,
     stackWhen,
     columnsWhen,
@@ -2435,6 +2436,11 @@ tintWire TintNeutral = 5
 -- attr.
 setFilled :: Widget -> Tint -> Build ()
 setFilled (Widget w) t = emitB (W.txSetFilled w (tintWire t))
+
+-- | A textarea one line tall at rest that grows with its text to this many
+-- lines, then scrolls (docs\/grow-lines-plan.md).
+setMaxLines :: Widget -> Int -> Build ()
+setMaxLines (Widget w) n = emitB (W.txSetMaxLines w (fromIntegral n))
 
 -- | A container's arrangement direction: row and column are ONE node
 -- this parameterizes, and the creation kind's own is the default

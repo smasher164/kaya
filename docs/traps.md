@@ -12719,3 +12719,19 @@ leave `windowSoftInputMode` at its default, which dumpsys reads as
 `adjust=pan`: with KayaRoot already padding by `safeDrawing` (which
 includes the IME) the system panned the window as well. The library sets
 `SOFT_INPUT_ADJUST_RESIZE` at mount. check-universal-props holds both.
+
+## A WinUI TwoPaneView can raise ModeChanged inside an apply, and a Windows panic's backtrace resolves to the nearest export without line tables (measured 2026-09-25)
+
+The chat app's compose field became a textarea inside a pushed pane, and the
+windows leg died on the click that opened the thread: "RefCell already
+borrowed", a panic in a function that cannot unwind. The textarea's measure
+ran a layout inside the apply, the TwoPaneView decided its Mode in that
+layout, and its ModeChanged handler borrowed the core the apply was holding.
+An entry in the same place had let the Mode arrive later. The handlers ask
+now (`with_core_now_or_soon`: run if the core is free, else hop the
+dispatcher), the auto grid's rule one event over, and check-universal-props
+holds every ModeChanged handler to it. Finding it needed a readable
+backtrace, and the release dll had none: every frame resolved to the nearest
+export (`kaya_window_moved`). deploy-win builds with
+`CARGO_PROFILE_RELEASE_DEBUG=line-tables-only` and ships `kaya.pdb` beside
+the dll, and the next panic named `refresh_nav`'s closure on its first run.

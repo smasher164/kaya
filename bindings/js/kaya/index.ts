@@ -1110,6 +1110,14 @@ export class Widget extends Handle {
   /** This row or column filled with a platform tint (kaya.Tint or its
    * name): kaya chooses the fill, the corner radius, the inset (unless one
    * was set) and the foreground inside (docs/tints-plan.md T2). */
+  /** This textarea is one line tall at rest and grows with its text to
+   * `lines` lines, then scrolls (docs/grow-lines-plan.md). */
+  maxLines(lines: number): this {
+    this._live("maxLines()");
+    records().push(wire.tx_set_max_lines(this.id, Number(lines)));
+    return this;
+  }
+
   filled(tint: TintValue | TintName): this {
     this._live("filled()");
     records().push(wire.tx_set_filled(this.id, tintValue(tint)));

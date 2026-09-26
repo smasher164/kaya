@@ -1725,6 +1725,13 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
         self
     }
 
+    /// This textarea is one line tall at rest and grows with its text to
+    /// `lines` lines, then scrolls — [`Tx::max_lines`] chained.
+    pub fn max_lines(self, lines: u32) -> Self {
+        self.tx.max_lines(self.id, lines);
+        self
+    }
+
     /// This scroll keeps its end in view while its content grows —
     /// [`Tx::follows_end`] chained.
     pub fn follows_end(self, on: bool) -> Self {
@@ -2684,6 +2691,12 @@ impl<'a> Tx<'a> {
     /// rows-only. See [`Prop::Align`].
     pub fn align(&mut self, widget: WidgetId, align: Align) {
         self.set(widget, Prop::Align, align.wire());
+    }
+
+    /// A textarea ONE LINE TALL AT REST that grows with its text to `lines`
+    /// lines, then scrolls inside itself (docs/grow-lines-plan.md).
+    pub fn max_lines(&mut self, widget: WidgetId, lines: u32) {
+        self.set(widget, Prop::MaxLines, f64::from(lines));
     }
 
     /// A scroll that FOLLOWS ITS END: while the viewport shows the end of its

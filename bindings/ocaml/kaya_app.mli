@@ -458,6 +458,10 @@ val set_inset : widget -> float -> unit
 (* A container's cross-axis child placement. *)
 type align = Start | Center | End | Stretch | Baseline
 
+(* A textarea one line tall at rest that grows to [lines] lines
+   (docs/grow-lines-plan.md). *)
+val set_max_lines : widget -> int -> unit
+
 (* What a filled container's surface means (docs/tints-plan.md T1). *)
 module Tint : sig
   type t = Accent | Success | Warning | Critical | Neutral

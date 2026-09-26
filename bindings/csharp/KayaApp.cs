@@ -2902,6 +2902,11 @@ sealed class Tx : IDisposable
     public void SetFilled(Widget w, Tint tint) =>
         Records.Add(KayaWire.TxSetFilled(w.Id, (long)tint));
 
+    /// A textarea one line tall at rest that grows with its text to `lines`
+    /// lines, then scrolls (docs/grow-lines-plan.md).
+    public void SetMaxLines(Widget w, int lines) =>
+        Records.Add(KayaWire.TxSetMaxLines(w.Id, lines));
+
     /// A scroll that keeps its end in view while its content grows
     /// (docs/follow-end-plan.md).
     public void SetFollowsEnd(Widget w, bool on) =>

@@ -593,6 +593,8 @@ struct CoreState {
     /// Each following scroll's LayoutUpdated registration
     /// (docs/follow-end-plan.md), so turning the prop off removes it.
     follow_tokens: HashMap<WidgetId, i64>,
+    /// Each growing textarea's line cap (docs/grow-lines-plan.md).
+    max_lines: HashMap<WidgetId, f64>,
     /// The INNER TwoPaneView at a ceiling of three — the nest IS the
     /// three-pane construct (the priority is a CHAIN of PanePriority
     /// bits), and the panes reading folds both views' Modes.
@@ -1535,6 +1537,36 @@ fn schedule_window_metrics() {
     let _ = dispatcher.0.TryEnqueue(&handler);
 }
 
+/// Run `f` on the core now if it is free, or on the dispatcher once whoever
+/// holds it has returned. A TwoPaneView decides its Mode during layout, and a
+/// layout run INSIDE an apply (a textarea measured in a pushed pane, the chat
+/// app's compose field) raised ModeChanged while the core was borrowed —
+/// "RefCell already borrowed", a panic that cannot unwind (docs/traps.md).
+fn with_core_now_or_soon(f: impl Fn(&mut CoreState) -> windows_core::Result<()> + Send + 'static) {
+    let ran = CORE.with(|slot| match slot.try_borrow_mut() {
+        Ok(mut core) => {
+            if let Some(core) = core.as_mut() {
+                let _ = f(core);
+            }
+            true
+        }
+        Err(_) => false,
+    });
+    if ran {
+        return;
+    }
+    let Some(dispatcher) = DISPATCHER.get() else { return };
+    let handler = DispatcherQueueHandler::new(move || {
+        CORE.with_borrow_mut(|core| {
+            if let Some(core) = core.as_mut() {
+                let _ = f(core);
+            }
+        });
+        Ok(())
+    });
+    let _ = dispatcher.0.TryEnqueue(&handler);
+}
+
 /// The report, coalesced onto the dispatcher: LayoutUpdated fires once
 /// per canvas per layout PASS, and the report can apply a re-raster,
 /// which must not run inside the pass that provoked it.
@@ -2075,6 +2107,21 @@ fn container_padding(core: &CoreState, id: WidgetId) -> f64 {
         0.0
     };
     own + card + if root { core.inset } else { 0.0 }
+}
+
+/// A GROWING textarea (docs/grow-lines-plan.md §2): its height is its
+/// content's, from the control's own one-line minimum to `lines` lines of its
+/// font (Segoe's 1.33 line height, the 18.62dip measured for 14px text) plus
+/// its padding and border, and it scrolls its own text beyond.
+fn grow_lines(field: &RichEditBox, lines: f64) -> windows_core::Result<()> {
+    let line = field.FontSize()? * 1.33;
+    let pad = field.Padding()?;
+    let border = field.BorderThickness()?;
+    let chrome = pad.Top + pad.Bottom + border.Top + border.Bottom;
+    field.SetHeight(f64::NAN)?;
+    field.SetMinHeight(0.0)?;
+    field.SetMaxHeight((line * lines + chrome).ceil())?;
+    Ok(())
 }
 
 /// How close to its end a scroll counts as AT its end for following: one
@@ -2746,9 +2793,13 @@ fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
         // document asked for 758 pixels and got them — and an explicit Height
         // OUTRANKS the star row's Stretch (docs/traps.md).
         if let NativeWidget::Textarea(field) = widget {
-            let grows = vertical && core.grow.get(child).copied().unwrap_or(0.0) > 0.0;
-            field.SetMinHeight(if grows { 96.0 } else { 0.0 })?;
-            field.SetHeight(if grows { f64::NAN } else { 96.0 })?;
+            if let Some(lines) = core.max_lines.get(child) {
+                grow_lines(field, *lines)?;
+            } else {
+                let grows = vertical && core.grow.get(child).copied().unwrap_or(0.0) > 0.0;
+                field.SetMinHeight(if grows { 96.0 } else { 0.0 })?;
+                field.SetHeight(if grows { f64::NAN } else { 96.0 })?;
+            }
         }
         // Cross placement from the container's align mode. WinUI's own
         // default is Stretch; kaya's normalized default is start, stamped
@@ -5044,17 +5095,13 @@ fn refresh_three_panes(core: &mut CoreState, window: u64) -> windows_core::Resul
     // predate this arrangement (docs/traps.md).
     apply_three_pane_back_bar(core, window)?;
     let handler = TypedEventHandler::new(move |_, _| {
-        CORE.with_borrow_mut(|core| {
-            let Some(core) = core.as_mut() else { return Ok(()) };
-            apply_three_pane_back_bar(core, window)
-        })
+        with_core_now_or_soon(move |core| apply_three_pane_back_bar(core, window));
+        Ok(())
     });
     outer.ModeChanged(&handler)?;
     let handler = TypedEventHandler::new(move |_, _| {
-        CORE.with_borrow_mut(|core| {
-            let Some(core) = core.as_mut() else { return Ok(()) };
-            apply_three_pane_back_bar(core, window)
-        })
+        with_core_now_or_soon(move |core| apply_three_pane_back_bar(core, window));
+        Ok(())
     });
     inner.ModeChanged(&handler)?;
     Ok(true)
@@ -5148,10 +5195,8 @@ fn refresh_nav(core: &mut CoreState, window: u64) -> windows_core::Result<()> {
             // would predate this pane arrangement (docs/traps.md).
             apply_split_back_bar(core, window)?;
             let handler = TypedEventHandler::new(move |_, _| {
-                CORE.with_borrow_mut(|core| {
-                    let Some(core) = core.as_mut() else { return Ok(()) };
-                    apply_split_back_bar(core, window)
-                })
+                with_core_now_or_soon(move |core| apply_split_back_bar(core, window));
+                Ok(())
             });
             view.ModeChanged(&handler)?;
             return Ok(());
@@ -15797,6 +15842,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 // follows only when the view sat within a line of that old end.
                 // Weak and atomic for the caption handler's two reasons: a
                 // strong viewer is a cycle, and the handler must be Send.
+                (NativeWidget::Textarea(field), Prop::MaxLines, Value::F64(lines)) => {
+                    core.max_lines.insert(id, lines);
+                    grow_lines(field, lines)?;
+                }
                 (NativeWidget::Scroll(viewer), Prop::FollowsEnd, Value::Bool(on)) => {
                     if let Some(token) = core.follow_tokens.remove(&id) {
                         viewer.RemoveLayoutUpdated(token)?;
@@ -18311,6 +18360,7 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             split_views: HashMap::new(),
             split_layers: HashMap::new(),
             follow_tokens: HashMap::new(),
+            max_lines: HashMap::new(),
             window_roots: HashMap::new(),
             tree_parent: HashMap::new(),
             dead_roots: std::collections::HashSet::new(),

@@ -1044,6 +1044,13 @@ class Widget(_Handle):
         rejects it anywhere else; baseline is rows-only."""
         _records().append(wire.tx_set_align(self.id, _align_value(mode)))
 
+    def max_lines(self, lines: int) -> None:
+        """Make this textarea one line tall at rest, growing with its text to
+        `lines` lines and then scrolling (docs/grow-lines-plan.md)."""
+        if isinstance(lines, bool) or not isinstance(lines, int) or lines < 1:
+            raise KayaTypeError(f"kaya: max_lines takes a whole number of lines, at least 1, not {lines!r}")
+        _records().append(wire.tx_set_max_lines(self.id, float(lines)))
+
     def filled(self, tint: Tint | str) -> None:
         """Fill this row or column with a platform tint (see kaya.Tint;
         strings accepted): kaya chooses the fill, the corner radius, the

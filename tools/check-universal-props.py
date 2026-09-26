@@ -461,6 +461,8 @@ def census(files):
     bad += compose_pushed_screen(read(compose))
     bad += swiftui_pushed_title(read(swiftui))
     bad += winui_content_layer(read(winui))
+    bad += growing_textareas(read(swiftui), read(compose), read(gtk), read(winui))
+    bad += winui_mode_changed(read(winui))
     return bad
 
 
@@ -546,6 +548,48 @@ def winui_content_layer(winui_text):
     return bad
 
 
+# A GROWING TEXTAREA (docs/grow-lines-plan.md): one line at rest, growing to
+# max_lines, on every backend. No step reads a textarea's height against its
+# own text (heights are not portable and the chat app has no reference row),
+# so each backend's arm is held here and the captures are the rest.
+def growing_textareas(swiftui_text, compose_text, gtk_text, winui_text):
+    bad = []
+    for path, text, needles in (
+        (SWIFTUI, swiftui_text, (
+            "func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSScrollView",
+            "func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView",
+            "minHeight: grows_lines ? nil : 96")),
+        (COMPOSE, compose_text, ("minHeightInLines = 1, maxHeightInLines = node.maxLines",)),
+        (GTK, gtk_text, ("scroller.set_max_content_height(most);",
+                         "scroller.set_propagate_natural_height(true);")),
+        (WINUI, winui_text, ("field.SetMaxHeight((line * lines + chrome).ceil())?;",
+                             "if let Some(lines) = core.max_lines.get(child) {")),
+    ):
+        for needle in needles:
+            if needle not in text:
+                bad.append(f"{path}: a growing textarea lost {needle!r}")
+    return bad
+
+
+# A TWOPANEVIEW'S MODECHANGED MAY FIRE INSIDE AN APPLY (docs/traps.md, the
+# chat app's textarea in a pushed pane): a handler that borrows the core
+# outright panics where nothing can unwind. Every one asks first.
+def winui_mode_changed(winui_text):
+    bad = []
+    handlers = re.findall(
+        r"let handler = TypedEventHandler::new\(move \|_, _\| \{\n(.*?)\n\s*\}\);\n"
+        r"\s*\w+\.ModeChanged",
+        winui_text, re.S)
+    if len(handlers) < 3:
+        bad.append(f"{WINUI}: found {len(handlers)} ModeChanged handlers, wanted at least 3 "
+                   "(the reader lost them)")
+    for body in handlers:
+        if "CORE.with_borrow_mut" in body or "with_core_now_or_soon" not in body:
+            bad.append(f"{WINUI}: a ModeChanged handler borrows the core outright instead "
+                       "of through with_core_now_or_soon")
+    return bad
+
+
 # A FILL IS READ OFF THE PIXELS (docs/tints-plan.md §4). A reader that
 # answered from the node's own `filled` would pass tints.steps with nothing
 # drawn, and no scene could tell. SwiftUI's reader samples the window on
@@ -628,7 +672,7 @@ def drag_waits(winui_text):
 real = load()
 g = Gate("check-universal-props")
 RAN = 0
-DECLARED = 69
+DECLARED = 74
 for path, pattern, repl in (
     (COMPOSE, r"\ba11y\b", "kayaUnappliedProps"),
     (SWIFTUI, r"\bkayaA11y\b", "kayaUnappliedProps"),
@@ -866,6 +910,20 @@ for label, path, pattern, repl in (
     ("WinUI's content layer never released", WINUI,
      r"    if let Some\(layer\) = core\.split_layers\.remove\(&window\) \{",
      "    if let Some(layer) = core.split_layers.get(&window).cloned() {"),
+    ("SwiftUI's growing textarea back on its fixed floor", SWIFTUI,
+     r"minHeight: grows_lines \? nil : 96", "minHeight: 96"),
+    ("Compose's growing textarea at three lines", COMPOSE,
+     r"minHeightInLines = 1, maxHeightInLines = node\.maxLines",
+     "minHeightInLines = 3, maxHeightInLines = node.maxLines"),
+    ("GTK's growing textarea without its cap", GTK,
+     r"scroller\.set_max_content_height\(most\);", "let _ = most;"),
+    ("WinUI's reindex resetting a growing textarea to 96", WINUI,
+     r"if let Some\(lines\) = core\.max_lines\.get\(child\) \{",
+     "if let Some(lines) = None::<&f64> {"),
+    ("WinUI's split ModeChanged borrowing the core outright again", WINUI,
+     r"                with_core_now_or_soon\(move \|core\| "
+     r"apply_split_back_bar\(core, window\)\);",
+     "                CORE.with_borrow_mut(|c| { let _ = c; });"),
     ("WinUI's clipping read agreeing about a window it never read", WINUI,
      r"if candidates > 0 && read == 0 \{", "if false {"),
     ("WinUI's cell never coming back for a measure with its template", WINUI,

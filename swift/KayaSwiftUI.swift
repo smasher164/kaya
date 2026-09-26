@@ -10,7 +10,7 @@ import UserNotifications
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0x6fef3d923cd4cd3e
+let kayaSpecHash: UInt64 = 0x555172b2e7556a6f
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -229,6 +229,7 @@ private let propDocument: UInt32 = 36
 private let propSubmits: UInt32 = 37
 private let propFilled: UInt32 = 38
 private let propFollowsEnd: UInt32 = 39
+private let propMaxLines: UInt32 = 40
 private let tintAccent: Int64 = 1
 private let tintSuccess: Int64 = 2
 private let tintWarning: Int64 = 3
@@ -644,6 +645,9 @@ final class KayaNode: Identifiable {
     /// A scroll that keeps its end in view while its content grows
     /// (docs/follow-end-plan.md).
     var followsEnd = false
+    /// A textarea one line tall at rest that grows to this many lines
+    /// (docs/grow-lines-plan.md); 0 = unset.
+    var maxLines: Double = 0
     /// The widget's accept list, verbatim; empty means it takes nothing.
     var accepts = ""
     /// A `role link` label's destination (docs/tasks-s2-plan.md T3).
@@ -5716,6 +5720,9 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     kayaScene.nodes[id]!.inset =
                         raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
                     kayaScene.nodes[id]!.insetSet = true
+                case (propMaxLines, valueF64):
+                    kayaScene.nodes[id]!.maxLines =
+                        raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
                 case (propFollowsEnd, valueBool):
                     kayaScene.nodes[id]!.followsEnd = raw[body + 24] != 0
                 case (propFilled, valueI64):
@@ -21169,6 +21176,20 @@ struct KayaSearchA11y: ViewModifier {
 
 /// The prompt over an empty multi-line editor (docs/search-plan.md S3): the
 /// text views carry none of their own, so it is drawn over them and never hit.
+/// Where a textarea's placeholder sits: the text's own top inset. A UITextView's
+/// is 8; the mac box's 8 was tuned by eye, and a growing mac field's is its inset.
+func kayaPlaceholderTop(_ node: KayaNode) -> CGFloat {
+    #if os(macOS)
+        return node.maxLines > 0 ? kayaGrowingInset : 8
+    #else
+        return 8
+    #endif
+}
+
+/// A growing textarea's vertical text inset on the mac, which its placeholder
+/// shares so the two sit on one line (docs/grow-lines-plan.md).
+let kayaGrowingInset: CGFloat = 5
+
 struct KayaTextareaPlaceholder: ViewModifier {
     let node: KayaNode
     func body(content: Content) -> some View {
@@ -21177,7 +21198,7 @@ struct KayaTextareaPlaceholder: ViewModifier {
                 Text(node.placeholder)
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 5)
-                    .padding(.vertical, 8)
+                    .padding(.vertical, kayaPlaceholderTop(node))
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
             }
@@ -21190,9 +21211,9 @@ struct KayaTextareaPlaceholder: ViewModifier {
 /// fixed frame refuses the assigned track, so a full-window buffer with grow(1)
 /// got a small box while every share assertion passed.
 extension View {
-    func kayaTextareaFrame(grow: Double, flexVertical: Bool?, stretch: Bool, fill: Bool?)
-        -> some View
-    {
+    func kayaTextareaFrame(
+        grow: Double, flexVertical: Bool?, stretch: Bool, fill: Bool?, maxLines: Double = 0
+    ) -> some View {
         let grows = grow > 0
         // In a column a text area fills the width (docs/tasks-plan.md R10)
         // unless its own `fill` says otherwise (docs/layout-knobs-plan.md §1).
@@ -21200,9 +21221,15 @@ extension View {
             (grows && flexVertical == false) || (flexVertical == true && fill != false)
         let fillsHeight =
             (grows && flexVertical == true) || (flexVertical == false && (fill ?? stretch))
+        // A GROWING textarea (docs/grow-lines-plan.md) takes its height from
+        // its own sizeThatFits, one line to max_lines, and no floor.
+        let grows_lines = maxLines > 0
         return frame(
             minWidth: 240, maxWidth: fillsWidth ? .infinity : 240,
-            minHeight: 96, maxHeight: fillsHeight ? .infinity : 96)
+            minHeight: grows_lines ? nil : 96,
+            maxHeight: grows_lines ? nil : (fillsHeight ? .infinity : 96)
+        )
+        .fixedSize(horizontal: false, vertical: grows_lines)
     }
 }
 
@@ -21247,7 +21274,8 @@ struct KayaTextarea: View {
         )
         .modifier(KayaTextareaPlaceholder(node: node))
         .kayaTextareaFrame(
-            grow: node.grow, flexVertical: flexVertical, stretch: flexStretch, fill: node.fill)
+            grow: node.grow, flexVertical: flexVertical, stretch: flexStretch, fill: node.fill,
+            maxLines: node.maxLines)
         .border(Color.gray.opacity(0.4))
     }
 }
@@ -21586,6 +21614,19 @@ private struct KayaMacTextarea: NSViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
+    /// A GROWING textarea's height (docs/grow-lines-plan.md): its text's own,
+    /// between one line of its font and max_lines of them.
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSScrollView, context: Context) -> CGSize? {
+        guard node.maxLines > 0, let view = nsView.documentView as? NSTextView,
+            let font = view.font, let layout = view.textLayoutManager
+        else { return nil }
+        layout.ensureLayout(for: layout.documentRange)
+        let used = layout.usageBoundsForTextContainer.height
+        let line = ceil(font.ascender - font.descender + font.leading)
+        let text = min(max(used, line), line * CGFloat(node.maxLines))
+        return CGSize(width: proposal.width ?? 240, height: text + 2 * view.textContainerInset.height)
+    }
+
     func makeNSView(context: Context) -> NSScrollView {
         // TextKit 2, assembled by name rather than inherited from a convenience
         // initializer, so what this widget sits on is stated in the source.
@@ -21668,6 +21709,10 @@ private struct KayaMacTextarea: NSViewRepresentable {
         view.nodeId = node.id
         view.rich = rich
         view.allowsUndo = !node.ownUndo
+        // A growing field's one line needs room above and below it, which the
+        // box's 2pt inset gave nothing of (docs/grow-lines-plan.md).
+        let inset = CGSize(width: 2, height: node.maxLines > 0 ? kayaGrowingInset : 2)
+        if view.textContainerInset != inset { view.textContainerInset = inset }
 
         // APPLIED ON EVERY UPDATE, not once at construction: a pin that only ran
         // in makeNSView is lost the day SwiftUI hands back a recycled view or
@@ -22082,7 +22127,8 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
             )
             .modifier(KayaTextareaPlaceholder(node: node))
             .kayaTextareaFrame(
-                grow: node.grow, flexVertical: flexVertical, stretch: flexStretch, fill: node.fill)
+                grow: node.grow, flexVertical: flexVertical, stretch: flexStretch, fill: node.fill,
+                maxLines: node.maxLines)
             .border(Color.gray.opacity(inGroupedCard ? 0 : 0.4))
         }
     }
@@ -22253,6 +22299,20 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
         }
 
         func makeCoordinator() -> Coordinator { Coordinator() }
+
+        /// A GROWING textarea's height (docs/grow-lines-plan.md): its text's
+        /// own, between one line of its font and max_lines of them. Through
+        /// the view's own sizeThatFits — never `.layoutManager`, which would
+        /// downgrade it to TextKit 1.
+        func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
+            guard node.maxLines > 0, let font = uiView.font else { return nil }
+            let width = proposal.width ?? 240
+            let insets = uiView.textContainerInset.top + uiView.textContainerInset.bottom
+            let used = uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude)).height - insets
+            let line = ceil(font.lineHeight)
+            let text = min(max(used, line), line * CGFloat(node.maxLines))
+            return CGSize(width: width, height: text + insets)
+        }
 
         func makeUIView(context: Context) -> UITextView {
             // THE BARE INITIALIZER IS THE TEXTKIT 2 ONE: the no-argument

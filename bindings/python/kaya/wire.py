@@ -14,7 +14,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, cast
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x6fef3d923cd4cd3e
+SPEC_HASH = 0x555172b2e7556a6f
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -112,6 +112,7 @@ PROP_DOCUMENT = 36
 PROP_SUBMITS = 37
 PROP_FILLED = 38
 PROP_FOLLOWS_END = 39
+PROP_MAX_LINES = 40
 WPROP_TITLE = 1
 WPROP_WIDTH = 2
 WPROP_HEIGHT = 3
@@ -1280,6 +1281,21 @@ def tx_bind_follows_end(widget_id: int, signal_id: int) -> bytes:
 def tx_bind_follows_end_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_FOLLOWS_END, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_max_lines(widget_id: int, max_lines: float) -> bytes:
+    """set_property with a constant max_lines value (float)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_MAX_LINES, SOURCE_CONST) + _enc.value(max_lines))
+
+
+def tx_bind_max_lines(widget_id: int, signal_id: int) -> bytes:
+    """set_property with a signal-bound max_lines value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_MAX_LINES, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_max_lines_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_MAX_LINES, SOURCE_ELEMENT, level, field))
 
 
 def tx_set_window_title(window: int, title: str) -> bytes:

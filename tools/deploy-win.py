@@ -445,7 +445,13 @@ for build_args in (
         ["cargo", "xwin", "build", "--locked", "--features", "harness",
          "--release", "--target", "aarch64-pc-windows-msvc",
          *BUILD_EXAMPLES]):
-    if subprocess.run(build_args, cwd=ROOT, check=False).returncode != 0:
+    # LINE TABLES, so a panic on the guest names its frames: without them the
+    # dll's backtrace resolved every frame to the nearest export
+    # (`kaya_window_moved`) and a re-entrant borrow could not be placed
+    # (docs/traps.md, the chat app's textarea in a pushed pane). kaya.pdb
+    # ships beside the dll, where the guest's dbghelp looks for it.
+    build_env = dict(os.environ, CARGO_PROFILE_RELEASE_DEBUG="line-tables-only")
+    if subprocess.run(build_args, cwd=ROOT, check=False, env=build_env).returncode != 0:
         sys.exit(1)
 # Verify BEFORE the deploy: a stale dll that reaches the VM is a stale
 # dll on another machine, where nothing local can see it.
@@ -1059,7 +1065,7 @@ WITNESS_SOURCES = (sorted((ROOT / "tools/win/dragprobe/stock").glob("*"))
 
 def deploy_artifacts():
     return (SCENE_EXES
-            + [TARGET / "kaya.dll", BOOTSTRAP]
+            + [TARGET / "kaya.dll", TARGET / "kaya.pdb", BOOTSTRAP]
             + SCENE_PYS
             + SCENE_TSS
             + [ROOT / "go.mod", ROOT / "crates/kaya/include/kaya.h"]
