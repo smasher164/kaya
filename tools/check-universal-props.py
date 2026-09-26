@@ -460,6 +460,7 @@ def census(files):
     bad += fill_reads_rust_and_compose(read(gtk), read(winui), read(compose))
     bad += compose_pushed_screen(read(compose))
     bad += swiftui_pushed_title(read(swiftui))
+    bad += winui_content_layer(read(winui))
     return bad
 
 
@@ -528,6 +529,21 @@ def swiftui_pushed_title(swiftui_text):
     if ".navigationBarTitleDisplayMode(.inline)" not in block:
         return [f"{SWIFTUI}: a pushed screen's title is no longer inline on iOS"]
     return []
+
+
+# WINUI'S DETAIL PANE SITS ON THE CONTENT LAYER (docs/deferred.md, the chat
+# C0 captures), and the layer gives its child back when the split is
+# released: a child still parented there aborts the process on the next
+# rebuild (release_split's own note).
+def winui_content_layer(winui_text):
+    bad = []
+    if "let detail = content_layer(core, window, &detail)?;" not in winui_text:
+        bad.append(f"{WINUI}: the split's detail pane no longer sits on the content layer")
+    release = winui_text.find("fn release_split(")
+    end = winui_text.find("\n}\n", release)
+    if release < 0 or "core.split_layers.remove(&window)" not in winui_text[release:end]:
+        bad.append(f"{WINUI}: release_split no longer empties the content layer")
+    return bad
 
 
 # A FILL IS READ OFF THE PIXELS (docs/tints-plan.md §4). A reader that
@@ -612,7 +628,7 @@ def drag_waits(winui_text):
 real = load()
 g = Gate("check-universal-props")
 RAN = 0
-DECLARED = 67
+DECLARED = 69
 for path, pattern, repl in (
     (COMPOSE, r"\ba11y\b", "kayaUnappliedProps"),
     (SWIFTUI, r"\bkayaA11y\b", "kayaUnappliedProps"),
@@ -844,6 +860,12 @@ for label, path, pattern, repl in (
      r"            \.navigationBarTitleDisplayMode\(\.inline\)\n        #endif\n"
      r"        \.modifier\(KayaSheetHost\(surface: entryId\)\)",
      "        .modifier(KayaSheetHost(surface: entryId))"),
+    ("WinUI's split detail off the content layer", WINUI,
+     r"            let detail = content_layer\(core, window, &detail\)\?;\n",
+     ""),
+    ("WinUI's content layer never released", WINUI,
+     r"    if let Some\(layer\) = core\.split_layers\.remove\(&window\) \{",
+     "    if let Some(layer) = core.split_layers.get(&window).cloned() {"),
     ("WinUI's clipping read agreeing about a window it never read", WINUI,
      r"if candidates > 0 && read == 0 \{", "if false {"),
     ("WinUI's cell never coming back for a measure with its template", WINUI,

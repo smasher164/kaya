@@ -9,7 +9,7 @@ Landed history lives in git; this file only carries what is still open.
 scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
-## DEFECT — the chat app's C0 captures: Android's pushed thread, iOS's missing title, Windows' unbounded list pane (found 2026-09-25, https://claude.ai/artifact/AJnJYozbyhRN7jvHzEcua3)
+## ~~DEFECT — the chat app's C0 captures: Android's pushed thread, iOS's missing title, Windows' unbounded list pane (found 2026-09-25, https://claude.ai/artifact/AJnJYozbyhRN7jvHzEcua3)~~ FIXED 2026-09-25: all three, below (49d64ec6, b59326e0 and the Windows content layer), each held by check-universal-props
 KEY: chat app, pushed thread, status bar inset, keyboard opens by itself, IME inset, thread title, list pane boundary, chat.steps
 
 Every step of tools/scenes/chat.steps passes on all five lanes; the captures
@@ -28,8 +28,11 @@ of its last frame found what no step reads.
     collapsed away under the thread's own scroll view, and iOS's expect_title
     reads the model, so nothing saw it; check-universal-props holds the mode);
     the app's arrow carries U+FE0E for the text glyph.
-  - WINDOWS: the list pane has no boundary against the thread (no divider,
-    no pane ground), where the mac and GTK draw one.
+  - ~~WINDOWS: the list pane has no boundary against the thread (no divider,
+    no pane ground), where the mac and GTK draw one.~~ FIXED 2026-09-25: the
+    split's detail pane sits on Fluent's content layer, by NavigationView's
+    own resource keys (the layer fill, its hairline, its top-leading corner);
+    check-universal-props holds the layer and its release.
 
 ## ~~BUILD — tints and the filled container (design pass ruled 2026-09-25)~~ COMPLETE 2026-09-25: depth on the mac and iOS, breadth on GTK, WinUI and Compose, all nine bindings in both zones, the tints scene light and dark on five lanes (4d000f54, matrix ALL PASS), the review page https://claude.ai/artifact/EhjJoWe5B7FZjM54p2DRDn, and Windows' accent as Fluent 2's own pale brand surface
 KEY: filled, Tint, tint, expect_fill, fill_tint, kayaFillRead, tints scene, filled container

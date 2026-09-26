@@ -587,6 +587,9 @@ struct CoreState {
     /// The live split view per window, kept so the next render can
     /// release the roots it holds (see release_split).
     split_views: HashMap<u64, TwoPaneView>,
+    /// The content layer each split's detail pane sits on ([`content_layer`]),
+    /// released with the split.
+    split_layers: HashMap<u64, Grid>,
     /// The INNER TwoPaneView at a ceiling of three — the nest IS the
     /// three-pane construct (the priority is a CHAIN of PanePriority
     /// bits), and the panes reading folds both views' Modes.
@@ -5124,6 +5127,7 @@ fn refresh_nav(core: &mut CoreState, window: u64) -> windows_core::Result<()> {
             };
             // The window is still holding the base root at this point.
             detach_window_content(core, window)?;
+            let detail = content_layer(core, window, &detail)?;
             view.SetPane1(&base)?;
             view.SetPane2(&detail)?;
             core.split_views.insert(window, view.clone());
@@ -7847,7 +7851,29 @@ fn release_split(core: &mut CoreState, window: u64) -> windows_core::Result<()> 
         view.SetPane1(None::<&UIElement>)?;
         view.SetPane2(None::<&UIElement>)?;
     }
+    if let Some(layer) = core.split_layers.remove(&window) {
+        layer.Children()?.Clear()?;
+    }
     Ok(())
+}
+
+/// THE DETAIL PANE SITS ON FLUENT'S CONTENT LAYER, as a NavigationView's
+/// content does: the layer fill, its hairline and its top-leading corner,
+/// by NavigationView's own resource keys. Without it the chat app's list and
+/// thread ran together with nothing between them (docs/deferred.md, the chat
+/// C0 captures).
+fn content_layer(core: &mut CoreState, window: u64, child: &UIElement) -> windows_core::Result<UIElement> {
+    let layer: Grid = XamlReader::Load(&HSTRING::from(
+        "<Grid xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" \
+           Background=\"{ThemeResource NavigationViewContentBackground}\" \
+           BorderBrush=\"{ThemeResource NavigationViewContentGridBorderBrush}\" \
+           BorderThickness=\"{ThemeResource NavigationViewContentGridBorderThickness}\" \
+           CornerRadius=\"{ThemeResource NavigationViewContentGridCornerRadius}\"/>",
+    ))?
+    .cast()?;
+    layer.Children()?.Append(child)?;
+    core.split_layers.insert(window, layer.clone());
+    layer.cast()
 }
 
 /// Let go of whatever the WINDOW itself is currently showing. On the FIRST
@@ -18241,6 +18267,7 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             inner_splits: HashMap::new(),
             split_presentation: HashMap::new(),
             split_views: HashMap::new(),
+            split_layers: HashMap::new(),
             window_roots: HashMap::new(),
             tree_parent: HashMap::new(),
             dead_roots: std::collections::HashSet::new(),
