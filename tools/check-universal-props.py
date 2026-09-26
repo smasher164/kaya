@@ -583,7 +583,8 @@ def filled_edges(compose_text, gtk_text):
     bad = []
     for path, text, needles in (
         (COMPOSE, compose_text, ("LocalKayaOnFill provides onFill,",
-                                 "color = kayaCaptionColor(),")),
+                                 "color = kayaCaptionColor(),",
+                                 "android.view.ContextThemeWrapper(context, theme)")),
         (GTK, gtk_text, (".kaya-filled.card { margin: 1px 2px 3px 2px; }",)),
     ):
         for needle in needles:
@@ -693,7 +694,7 @@ def drag_waits(winui_text):
 real = load()
 g = Gate("check-universal-props")
 RAN = 0
-DECLARED = 77
+DECLARED = 78
 for path, pattern, repl in (
     (COMPOSE, r"\ba11y\b", "kayaUnappliedProps"),
     (SWIFTUI, r"\bkayaA11y\b", "kayaUnappliedProps"),
@@ -944,6 +945,8 @@ for label, path, pattern, repl in (
     ("Compose's caption back on the surface's variant colour", COMPOSE,
      r"                    color = kayaCaptionColor\(\),\n",
      "                    color = MaterialTheme.colorScheme.onSurfaceVariant,\n"),
+    ("Compose's emoji picker on the Activity's theme, headings near-white", COMPOSE,
+     r"android\.view\.ContextThemeWrapper\(context, theme\)\)", "context)"),
     ("GTK's neutral card flush against a scroll's edge", GTK,
      r"\.kaya-filled\.card \{ margin: 1px 2px 3px 2px; \}\n", ""),
     ("WinUI's reindex resetting a growing textarea to 96", WINUI,

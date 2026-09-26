@@ -16484,10 +16484,17 @@ fun KayaEmojiPanel() {
         kayaEmojiPick = pick
         onDispose { if (kayaEmojiPick === pick) kayaEmojiPick = null }
     }
+    // The picker is a View and draws its headings from its context's theme;
+    // the Activity's left them near-white on the light sheet, so it gets the
+    // platform's own theme for the appearance Compose is drawing in.
+    val dark = (LocalConfiguration.current.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
+        Configuration.UI_MODE_NIGHT_YES
+    val theme = if (dark) android.R.style.Theme_DeviceDefault else android.R.style.Theme_DeviceDefault_Light
     ModalBottomSheet(onDismissRequest = { KayaSceneModel.emojiPickerFor = null }) {
         androidx.compose.ui.viewinterop.AndroidView(
             factory = { context ->
-                androidx.emoji2.emojipicker.EmojiPickerView(context).apply {
+                androidx.emoji2.emojipicker.EmojiPickerView(
+                    android.view.ContextThemeWrapper(context, theme)).apply {
                     setOnEmojiPickedListener { item -> kayaEmojiPick?.invoke(item.emoji) }
                 }
             },
