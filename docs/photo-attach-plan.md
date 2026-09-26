@@ -1,6 +1,6 @@
 # Attaching a photo and showing it inline — the design pass
 
-Status: DESIGN, three rulings wanted (R1-R3). The chat app's C6
+Status: DESIGN, R1-R3 RULED 2026-09-25 as recommended. The chat app's C6
 (docs/chat-plan.md). Researched 2026-09-25 with sources. The chat plan's
 "nothing new for display" was wrong: see §2.
 
@@ -32,18 +32,18 @@ frame, `ContentScale.Fit`, `GtkPicture`'s contain fit, and
 The chat app adds a `Photo` message case whose row shows the image under
 that bound.
 
-## §3 — Rulings wanted
+## §3 — Rulings (RULED 2026-09-25 as recommended: one dialog, `max_width`/`max_height`, JPEG from iOS)
 
-- **R1 — one dialog or two.** RECOMMENDED: one open dialog with a
+- **R1 — one dialog or two.** RULED: one open dialog with a
   `content: images` choice (the same grammar, handle and one-dialog-at-a-
   time rule), rather than a separate photo request that differs only in
   its lowering.
-- **R2 — the size prop's shape.** RECOMMENDED: `max_width` and
+- **R2 — the size prop's shape.** RULED: `max_width` and
   `max_height` in points, scaling down only. The alternative is a `fit`
   enum working with the layout's own sizes, which is more general and
   larger.
 - **R3 — HEIC.** iPhone photos are HEIC by default, and GTK and Windows may
-  not decode it. RECOMMENDED: iOS hands over a JPEG
+  not decode it. RULED: iOS hands over a JPEG
   (`preferredAssetRepresentationMode = .compatible`), so a photo sent from
   a phone opens everywhere.
 

@@ -1,6 +1,6 @@
 # Swiping a row for its actions — the design pass
 
-Status: DESIGN, three rulings wanted (R1-R3). The chat app's C7
+Status: DESIGN, R1-R3 RULED 2026-09-25 as recommended. The chat app's C7
 (docs/chat-plan.md): swipe a conversation to archive it on the phones.
 Researched 2026-09-25 with sources.
 
@@ -23,20 +23,20 @@ item that is not in the catalog is refused.
 | Windows | `SwipeControl`, Reveal and Execute | touch only; Microsoft calls it "a touch accelerator for context menus" |
 | Linux | none | libadwaita has no row swipe; the GNOME guidelines point to the context menu |
 
-## §3 — Rulings wanted
+## §3 — Rulings (RULED 2026-09-25 as recommended: the menu where there is no swipe, `swipeActionsContainer()` from the 27 SDK and the menu below it, Android's full swipe only)
 
 - **R1 — where there is no swipe (Linux, and Windows with a mouse).**
-  RECOMMENDED: the declaration is accepted and the actions stay in the
+  RULED: the declaration is accepted and the actions stay in the
   context menu, which is already where they are. Honest on both, since
   GNOME and Microsoft both treat the menu as the route.
 - **R2 — Apple below 27.** kaya's collections are not `List`s. The
-  choices: (a) RECOMMENDED: move the pinned SDK to 27 when it ships and
+  choices: (a) RULED: move the pinned SDK to 27 when it ships and
   lower to `swipeActionsContainer()` there, menu-only below 27; (b) lower
   a collection that declares swipe actions to a `List`, which changes its
   layout and scrolling on every Apple lane; (c) draw kaya's own swipe,
   which is not the platform's.
 - **R3 — Android's reveal.** Material's phone library runs one action on
-  a full swipe and reveals nothing. (a) RECOMMENDED: the `full` item
+  a full swipe and reveals nothing. (a) RULED: the `full` item
   swipes, the rest stay in the menu; (b) kaya builds a reveal on
   `anchoredDraggable` to Material's guidance.
 

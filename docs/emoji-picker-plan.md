@@ -1,6 +1,6 @@
 # An emoji button beside a text field — the design pass
 
-Status: DESIGN, two rulings wanted (R1 Android, R2 iOS). The chat app's C5
+Status: DESIGN, R1 and R2 RULED 2026-09-25 as recommended (a). The chat app's C5
 (docs/chat-plan.md). Researched 2026-09-25 with sources; the mac, Windows
 and iOS points marked unmeasured are probed before any arm is built.
 
@@ -23,24 +23,24 @@ opens anything on this platform.
 | Android | none from the system: no app can open the keyboard's emoji panel | see R1 |
 | iOS | none from the system: no call presents an emoji picker | see R2 |
 
-## §3 — R1, a ruling wanted: Android
+## §3 — R1 RULED 2026-09-25: androidx's picker on Android (a)
 
 No app can open the keyboard's emoji panel, and Google Messages and
 WhatsApp both answer with their own panel in the compose bar.
 
-- **(a) RECOMMENDED: androidx's `EmojiPickerView`**, Google's Jetpack
+- **(a) RULED: androidx's `EmojiPickerView`**, Google's Jetpack
   picker (recents, skin tones, and it hides emoji the device cannot draw),
   shown by the command as a panel under the field. It ships inside the app
   rather than being a system surface, which is the idiom on this platform.
 - **(b) the bit false**: the command focuses the field and opens nothing;
   the user reaches emoji through the keyboard.
 
-## §4 — R2, a ruling wanted: iOS
+## §4 — R2 RULED 2026-09-25: no picker on iOS, the bit false (a)
 
 iOS has no picker call, and Messages and WhatsApp have no emoji button:
 the keyboard's own emoji key is the idiom.
 
-- **(a) RECOMMENDED: the bit false**, and the command focuses the field.
+- **(a) RULED: the bit false**, and the command focuses the field.
   An app checks the bit and leaves the button out, as Messages does.
 - **(b) switch the keyboard to emoji** by overriding the text view's
   `textInputMode` to the mode whose `primaryLanguage` is `"emoji"`. Every

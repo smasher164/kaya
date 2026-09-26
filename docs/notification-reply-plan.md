@@ -1,6 +1,6 @@
 # Replying from a notification — the design pass
 
-Status: DESIGN, one ruling wanted (R1, Linux). The chat app's C4
+Status: DESIGN, R1 RULED 2026-09-25 as recommended (a). The chat app's C4
 (docs/chat-plan.md). Researched 2026-09-25 with sources; two macOS points in
 §4 are unmeasured.
 
@@ -31,7 +31,7 @@ distinct from the tap's `activated`, at the same handler the tap reaches
 | Windows | the toast's `<input type="text">` and a button naming it (`hint-inputId`); the text arrives in the COM activator's `NOTIFICATION_USER_INPUT_DATA`, which kaya receives and ignores today, and in `ToastActivatedEventArgs.UserInput` in process (a winui-bindgen filter line). `activationType="background"` is ignored for desktop apps, so not raising a window is kaya's own decision |
 | Linux | the notification portal's version 2 button purpose `im.reply-with-text`, the text arriving as `ActionInvoked`'s response; see R1 |
 
-## §3 — R1, the ruling wanted: Linux
+## §3 — R1 RULED 2026-09-25: Linux asks the portal (a)
 
 The portal's spec has the field, and no shipping desktop draws it: GNOME's
 portal backend forwards to gnome-shell, which has no text input, and KDE
@@ -39,7 +39,7 @@ Plasma's portal backend lists it as a TODO. Plasma's working inline reply is
 on the older freedesktop protocol and needs a process that stays running,
 which the 2026-09-07 ruling on notifications excludes.
 
-- **(a) RECOMMENDED: ask the portal.** kaya reads the portal's
+- **(a) RULED: ask the portal.** kaya reads the portal's
   `SupportedOptions` and posts the reply button only when it lists
   `im.reply-with-text`. Otherwise `notification_reply` reads false and
   `.reply(...)` posts the notification without a field; a click answers
