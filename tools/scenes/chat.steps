@@ -1,7 +1,10 @@
-# docs/chat-plan.md C0: a conversation opens at its first unread message,
+# docs/chat-plan.md C0-C3: a conversation opens at its first unread message,
 # a quote jumps to what it quotes, the newest button returns to the end, a
 # message sends on Return, the peer's answer arrives off the socket, and a
-# conversation that is not open counts what it missed.
+# conversation that is not open counts what it missed and posts a
+# notification that opens it. The notification steps come last: no typing
+# may follow a post (the Windows notification host holds the foreground,
+# docs/deferred.md's phantom notification window).
 expect_title "chat"
 expect label@unread[maya] "4 new"
 expect label@unread[sam] "1 new"
@@ -31,3 +34,11 @@ expect_scrolled_to column@thread m03
 expect label@unread[sam] "2 new"
 expect label@preview[sam] "Are we still on for Friday?"
 expect_no_clipping
+# A message to the open conversation posts nothing; one to another does,
+# and activating it opens that conversation and withdraws it.
+expect_no_notification 7001
+expect_notification 7002 "Sam"
+notification_activate 7002
+expect label@text[p2] "Are we still on for Friday?"
+expect label@unread[sam] ""
+expect_no_notification 7002

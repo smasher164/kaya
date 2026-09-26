@@ -43,6 +43,7 @@ type message struct {
 
 type conversation struct {
 	id, name    string
+	note        uint64
 	messages    []message
 	unread      int
 	firstUnread string
@@ -100,6 +101,7 @@ func App() *kaya.App {
 					c.firstUnread = key
 				}
 				c.unread++
+				tx.ShowNotification(c.note).Title(c.name).Body(text).Show()
 			}
 			refresh(tx, c)
 		}
@@ -200,8 +202,17 @@ func App() *kaya.App {
 				tx.ScrollToRow(threadList, c.messages[len(c.messages)-1].key)
 			}
 			c.unread, c.firstUnread = 0, ""
+			tx.CancelNotification(c.note)
 			refresh(tx, c)
 		}
+
+		app.OnNotificationActivation(func(tx *kaya.Tx, note uint64, outcome kaya.NotificationOutcome) {
+			for _, c := range convs {
+				if c.note == note && outcome == kaya.NotificationOutcomeActivated {
+					openThread(tx, c.id)
+				}
+			}
+		})
 
 		tx.Mount(tx.Column(func() {
 			for row := range ConversationRows(tx, list).All() {
@@ -243,7 +254,7 @@ func quoteOf(c *conversation, key string) string {
 // long enough that its first unread message and the one it quotes sit far
 // apart, which is what the thread's two jumps need.
 func seed() map[string]*conversation {
-	maya := &conversation{id: "maya", name: "Maya"}
+	maya := &conversation{id: "maya", name: "Maya", note: 7001}
 	lines := []string{
 		"Are you around this week?", "Mostly, yes", "Dinner at 7 on Friday?",
 		"Sounds good", "The usual place?", "Yes, the one on Pine",
@@ -260,12 +271,12 @@ func seed() map[string]*conversation {
 		message{key: "m30", text: "Running a little late"},
 	)
 	maya.unread, maya.firstUnread = 4, "m27"
-	sam := &conversation{id: "sam", name: "Sam", messages: []message{
+	sam := &conversation{id: "sam", name: "Sam", note: 7002, messages: []message{
 		{key: "s1", text: "Did the build go out?"},
 		{key: "s2", text: "Yesterday evening", mine: true},
 		{key: "s3", text: "Great, thanks"},
 	}, unread: 1, firstUnread: "s3"}
-	alex := &conversation{id: "alex", name: "Alex", messages: []message{
+	alex := &conversation{id: "alex", name: "Alex", note: 7003, messages: []message{
 		{key: "a1", text: "Photos from the trip"},
 		{key: "a2", text: "These are lovely", mine: true},
 	}}

@@ -1411,20 +1411,7 @@ fn state() -> &'static CState {
 pub extern "C" fn kaya_run() -> i32 {
     // The panic log, for hosts whose stderr is not durable (fault.rs).
     crate::fault::log_panics();
-    // THE LOCALE KNOB, once, here as in lib.rs's run: a guest that formatted
-    // before this call already installed it (fmt.rs); one that did not needs
-    // it before the toolkit's first read (docs/compliance-plan.md §2.2).
-    crate::fmt::install_locale_knob();
-    // BEFORE THE CORE STARTS: the second act's marker is the only source
-    // of the scene in a process the platform started on a tap
-    // (docs/tasks-s9-plan.md R6a).
-    // BEFORE act2::arm, for the reason lib.rs's `run` states: a Windows
-    // activation that is not the single-instance owner redirects and
-    // exits here (docs/app-links-plan.md §4).
-    #[cfg(target_os = "windows")]
-    crate::backend::links_startup();
-    #[cfg(any(feature = "harness", target_os = "macos", target_os = "ios", target_os = "android"))]
-    crate::act2::arm(None);
+    crate::prepare_process();
     // On Apple the SwiftUI interpreter runs its own presentation pump
     // over this same C API, so core_ends stays in place for it to take.
     #[cfg(any(target_os = "macos", target_os = "ios"))]

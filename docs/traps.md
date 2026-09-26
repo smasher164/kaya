@@ -12735,3 +12735,19 @@ backtrace, and the release dll had none: every frame resolved to the nearest
 export (`kaya_window_moved`). deploy-win builds with
 `CARGO_PROFILE_RELEASE_DEBUG=line-tables-only` and ships `kaya.pdb` beside
 the dll, and the next panic named `refresh_nav`'s closure on its first run.
+
+## Only the Rust entry granted the notifications capability, so every other binding read it false (found 2026-09-25)
+
+The chat app (Go) was the first non-Rust guest to post a notification on the
+lanes. `kaya::run`, which a Rust guest enters through, granted
+`KAYA_CAP_NOTIFICATIONS` before the app thread started; `kaya_run`, the C
+entry the eight other bindings call, went straight to the core without it.
+On the mac and iOS the interpreter reads that bit before it posts, so every
+post from Python, Go, C#, Java, Swift, OCaml, Haskell or JS answered
+`refused` and `capabilities().notifications` read false. Every notification
+leg was Rust, so no lane could see it. Both entries call
+`prepare_process()` now (lib.rs), which holds the locale knob, the Windows
+link startup, the second act's marker and the grant in one body. The guard
+is the chat-go leg on every lane: with `kaya_run` skipping the call it fails
+with `the platform holds no delivered notification 7002, wanted "Sam"`
+(watched on the mac 2026-09-25).

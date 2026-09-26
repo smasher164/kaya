@@ -184,7 +184,11 @@ fn bundled_executable() -> bool {
         && contents.join("Info.plist").is_file()
 }
 
-pub fn run(app_main: impl FnOnce(AppCtx) + Send + 'static) -> ! {
+/// What every entry does before the core starts, in this order: `run` for
+/// a Rust guest and `kaya_run` for the eight bindings. One body, so an
+/// entry cannot skip a step (the notification grant was once in `run`
+/// alone, and every other binding read `notifications` false).
+pub(crate) fn prepare_process() {
     // THE LOCALE KNOB FIRST, before any thread formats or any toolkit
     // reads the locale (docs/compliance-plan.md §2.2).
     fmt::install_locale_knob();
@@ -200,17 +204,25 @@ pub fn run(app_main: impl FnOnce(AppCtx) + Send + 'static) -> ! {
     backend::links_startup();
     #[cfg(any(feature = "harness", target_os = "macos", target_os = "ios", target_os = "android"))]
     act2::arm(None);
+    // The runtime capability, granted BEFORE the app thread exists so its
+    // first read is the truth (docs/tasks-s3-plan.md N6): a bundle on the
+    // mac, always on iOS, the backend's own probe on Linux and Windows.
+    #[cfg(target_os = "macos")]
+    let can_post = bundled_executable();
+    #[cfg(target_os = "ios")]
+    let can_post = true;
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    let can_post = backend::can_post_notifications();
+    #[cfg(not(target_os = "android"))]
+    if can_post {
+        capi::kaya_grant_capabilities(capi::KAYA_CAP_NOTIFICATIONS);
+    }
+}
+
+pub fn run(app_main: impl FnOnce(AppCtx) + Send + 'static) -> ! {
+    prepare_process();
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     {
-        // The runtime capability, granted BEFORE the app thread exists so
-        // its first read is the truth (docs/tasks-s3-plan.md N6).
-        #[cfg(target_os = "macos")]
-        let can_post = bundled_executable();
-        #[cfg(target_os = "ios")]
-        let can_post = true;
-        if can_post {
-            capi::kaya_grant_capabilities(capi::KAYA_CAP_NOTIFICATIONS);
-        }
         let (occ_tx, occ_rx) = std::sync::mpsc::channel();
         let ctx = AppCtx::new(occ_rx, capi::presentation_tx_sender(), occ_tx.clone());
         std::thread::Builder::new()
@@ -223,13 +235,6 @@ pub fn run(app_main: impl FnOnce(AppCtx) + Send + 'static) -> ! {
 
     #[cfg(any(target_os = "windows", target_os = "linux"))]
     {
-        // The runtime capability, decided by the backend's own probe (a
-        // registry on the session bus; a registration on Windows) BEFORE the
-        // app thread exists, so its first read is the truth
-        // (docs/tasks-s3-plan.md N6) — the mac arm's shape one platform over.
-        if backend::can_post_notifications() {
-            capi::kaya_grant_capabilities(capi::KAYA_CAP_NOTIFICATIONS);
-        }
         let (occ_tx, occ_rx) = std::sync::mpsc::channel();
         let (tx_tx, tx_rx) = std::sync::mpsc::channel();
         let ctx = AppCtx::new(occ_rx, tx_tx, occ_tx.clone());

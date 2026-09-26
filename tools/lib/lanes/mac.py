@@ -558,6 +558,9 @@ RUST_GUESTS = "target/rust-guests"
 # rest stay bare executables (docs/deferred.md: an unbundled launch walks its
 # siblings, which is why the staging directory is small).
 BUNDLED_SCENES = {"notify", "tasks"}
+# The go scenes that post one: the one kaya-go binary, wrapped per scene.
+BUNDLED_GO_SCENES = {"chat"}
+GO_GUESTS = "target/go-guests"
 
 
 def rust_guest_path(stem):
@@ -842,7 +845,9 @@ def leg_argv(scene, lang, hs_bin):
     if lang == "js":
         return ["node", f"guests/js/{stem}.ts"]
     if lang == "go":
-        return ["target/go-guests/kaya-go"]
+        if scene in BUNDLED_GO_SCENES:
+            return [f"{GO_GUESTS}/{scene}.app/Contents/MacOS/{scene}"]
+        return [f"{GO_GUESTS}/kaya-go"]
     if lang == "csharp":
         return ["dotnet", "exec", CS_GUEST]
     if lang == "ocaml":
@@ -943,8 +948,15 @@ def build_go(root, log=None):
                "dev.kaya/guests/go/cmd"], log, cwd=root)
     if rc.returncode != 0:
         return rc
-    return _run(["go", "build", "-o", "target/go-guests/encodebench",
-                 "dev.kaya/guests/go/encodebench"], log, cwd=root)
+    rc = _run(["go", "build", "-o", "target/go-guests/encodebench",
+               "dev.kaya/guests/go/encodebench"], log, cwd=root)
+    if rc.returncode != 0:
+        return rc
+    from packaging import mac as packaging_mac
+    for scene in sorted(BUNDLED_GO_SCENES):
+        packaging_mac.bundle(root, root / GO_GUESTS / "kaya-go",
+                             root / GO_GUESTS, stem=scene, accessory=True)
+    return rc
 
 
 def build_swift(root, log=None):

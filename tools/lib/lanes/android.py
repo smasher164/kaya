@@ -39,11 +39,11 @@ SUITES = ("compose", "jvm", "go", "python")
 # THE LEGS THAT RUN AS THE ONLY INPUT-DRIVING LEG ON THE HOST (tools/lib/
 # exclusive.py): the emulator drags, twenty-five sightings under a matrix and
 # green alone (docs/deferred.md, the dnd-compose WATCH).
-# notify-compose joins them for the same reason one step further out:
-# its activation is a REAL tap on SystemUI's notification shade, driven
+# notify-compose and chat-go join them for the same reason one step further
+# out: their activation is a REAL tap on SystemUI's notification shade, driven
 # from the host (docs/tasks-s3-plan.md N5).
 EXCLUSIVE = {"dnd-compose", "dnd-jvm", "dnd-go", "tasks-compose",
-             "notify-compose",
+             "notify-compose", "chat-go",
              # The device's own 24-hour setting is every process's
              # (SCENE_SETTINGS), so nothing else runs under it.
              "clock24-compose"}
