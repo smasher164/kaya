@@ -52,7 +52,12 @@ def capture(scene, out, crop, settle, guest=None, go=False):
         binary = target / "debug/examples" / guest
     raw = out.with_name("root.png")
     with open(out.with_name("guest.log"), "wb") as log:
-        guest = subprocess.Popen([str(binary)], cwd=ROOT,
+        # KAYA_SHOT_ACCESSIBILITY=1 (--env): a scene that drives a file dialog reads it
+        # over the accessibility bus, which the lane's legs get from
+        # tools/linux/a11y-leg.sh (tools/check-steps.py's AX_VERB).
+        argv = ([str(ROOT / "tools/linux/a11y-leg.sh"), str(binary)]
+                if os.environ.get("KAYA_SHOT_ACCESSIBILITY") == "1" else [str(binary)])
+        guest = subprocess.Popen(argv, cwd=ROOT,
                                  env=dict(os.environ, KAYA_SELFTEST=scene),
                                  stdout=log, stderr=subprocess.STDOUT)
         try:
