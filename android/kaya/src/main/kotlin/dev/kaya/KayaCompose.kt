@@ -181,6 +181,7 @@ import androidx.compose.material3.adaptive.layout.calculatePaneScaffoldDirective
 import androidx.compose.material3.adaptive.layout.calculateThreePaneScaffoldValue
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -741,13 +742,31 @@ fun kayaFilledSurface(node: KayaNode): Modifier {
         .background(kayaTintPair(node.filled).first, MaterialTheme.shapes.medium)
 }
 
+/** The foreground of the filled container a composable sits in, null outside
+ * one: a caption there is that foreground, dimmed, rather than the surface's
+ * variant colour, which on an accent fill is dark on dark. */
+val LocalKayaOnFill = compositionLocalOf<Color?> { null }
+
+/** The caption role's colour: the fill's own foreground at a caption's
+ * weight inside a filled container, Material's variant colour elsewhere. */
+@Composable
+fun kayaCaptionColor(): Color =
+    LocalKayaOnFill.current?.copy(alpha = KAYA_CAPTION_ON_FILL_ALPHA)
+        ?: MaterialTheme.colorScheme.onSurfaceVariant
+
+const val KAYA_CAPTION_ON_FILL_ALPHA = 0.78f
+
 /** What sits inside a filled container takes the pair's foreground. */
 @Composable
 inline fun KayaFilledContent(node: KayaNode, crossinline content: @Composable () -> Unit) {
     if (node.filled == 0L) {
         content()
     } else {
-        CompositionLocalProvider(LocalContentColor provides kayaTintPair(node.filled).second) {
+        val onFill = kayaTintPair(node.filled).second
+        CompositionLocalProvider(
+            LocalContentColor provides onFill,
+            LocalKayaOnFill provides onFill,
+        ) {
             content()
         }
     }
@@ -13801,7 +13820,7 @@ private fun KayaRenderCore(
                         else -> LocalTextStyle.current
                     },
                     color = if (node.role == KayaCompose.ROLE_CAPTION)
-                        MaterialTheme.colorScheme.onSurfaceVariant else Color.Unspecified,
+                        kayaCaptionColor() else Color.Unspecified,
                     onTextLayout = { kayaLabelLayouts[node.id] = it },
                     modifier = base,
                 )
@@ -13830,7 +13849,7 @@ private fun KayaRenderCore(
                 Text(
                     node.text,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = kayaCaptionColor(),
                     onTextLayout = { kayaTypefaceSites["caption"] = it; kayaLabelLayouts[node.id] = it },
                     modifier = boxFill.then(a11y),
                 )

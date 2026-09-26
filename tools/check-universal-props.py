@@ -463,6 +463,7 @@ def census(files):
     bad += winui_content_layer(read(winui))
     bad += growing_textareas(read(swiftui), read(compose), read(gtk), read(winui))
     bad += winui_mode_changed(read(winui))
+    bad += filled_edges(read(compose), read(gtk))
     return bad
 
 
@@ -574,6 +575,23 @@ def growing_textareas(swiftui_text, compose_text, gtk_text, winui_text):
     return bad
 
 
+# INSIDE A FILLED CONTAINER (docs/tints-plan.md), two defects the chat
+# capture found that no reader sees: Compose's caption on its surface's
+# variant colour, dark on a purple accent, and GTK's neutral card flush
+# against a scroll's edge, its outline clipped away.
+def filled_edges(compose_text, gtk_text):
+    bad = []
+    for path, text, needles in (
+        (COMPOSE, compose_text, ("LocalKayaOnFill provides onFill,",
+                                 "color = kayaCaptionColor(),")),
+        (GTK, gtk_text, (".kaya-filled.card { margin: 1px 2px 3px 2px; }",)),
+    ):
+        for needle in needles:
+            if needle not in text:
+                bad.append(f"{path}: a filled container lost {needle!r}")
+    return bad
+
+
 # A TWOPANEVIEW'S MODECHANGED MAY FIRE INSIDE AN APPLY (docs/traps.md, the
 # chat app's textarea in a pushed pane): a handler that borrows the core
 # outright panics where nothing can unwind. Every one asks first.
@@ -675,7 +693,7 @@ def drag_waits(winui_text):
 real = load()
 g = Gate("check-universal-props")
 RAN = 0
-DECLARED = 75
+DECLARED = 77
 for path, pattern, repl in (
     (COMPOSE, r"\ba11y\b", "kayaUnappliedProps"),
     (SWIFTUI, r"\bkayaA11y\b", "kayaUnappliedProps"),
@@ -923,6 +941,11 @@ for label, path, pattern, repl in (
     ("GTK's growing textarea on Automatic, the scrollbar's 58px floor", GTK,
      r"                        gtk4::PolicyType::External\n",
      "                        gtk4::PolicyType::Automatic\n"),
+    ("Compose's caption back on the surface's variant colour", COMPOSE,
+     r"                    color = kayaCaptionColor\(\),\n",
+     "                    color = MaterialTheme.colorScheme.onSurfaceVariant,\n"),
+    ("GTK's neutral card flush against a scroll's edge", GTK,
+     r"\.kaya-filled\.card \{ margin: 1px 2px 3px 2px; \}\n", ""),
     ("WinUI's reindex resetting a growing textarea to 96", WINUI,
      r"if let Some\(lines\) = core\.max_lines\.get\(child\) \{",
      "if let Some(lines) = None::<&f64> {"),

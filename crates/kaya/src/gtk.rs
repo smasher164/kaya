@@ -6783,6 +6783,7 @@ const BADGE_CLASS: &str = "kaya-badge";
 /// is. The padding class is the default inset, dropped when the app set one.
 const TINT_CSS: &str = "\
 .kaya-filled { border-radius: 12px; }
+.kaya-filled.card { margin: 1px 2px 3px 2px; }
 .kaya-filled-pad { padding: 12px; }
 .kaya-tint-accent { background-color: @accent_bg_color; color: @accent_fg_color; }
 .kaya-tint-success { background-color: @success_bg_color; color: @success_fg_color; }
