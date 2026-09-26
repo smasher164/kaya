@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"sync"
 	"time"
 
 	kaya "dev.kaya/bindings/go"
@@ -26,19 +27,21 @@ type Conversation struct {
 type Message interface{ isMessage() }
 
 type Mine struct{ Text string }
+type Pending struct{ Text string }
 type Theirs struct{ Text string }
 type Reply struct {
 	Quote string
 	Text  string
 }
 
-func (Mine) isMessage()   {}
+func (Mine) isMessage()    {}
+func (Pending) isMessage() {}
 func (Theirs) isMessage() {}
 func (Reply) isMessage()  {}
 
 type message struct {
 	key, text, quote string
-	mine             bool
+	mine, queued     bool
 }
 
 type conversation struct {
@@ -79,12 +82,34 @@ func App() *kaya.App {
 		}
 		insert := func(tx *kaya.Tx, m message) {
 			switch {
+			case m.queued:
+				thread.Insert(tx, m.key, Pending{Text: m.text})
 			case m.mine:
 				thread.Insert(tx, m.key, Mine{Text: m.text})
 			case m.quote != "":
 				thread.Insert(tx, m.key, Reply{Quote: quoteOf(convs[open], m.quote), Text: m.text})
 			default:
 				thread.Insert(tx, m.key, Theirs{Text: m.text})
+			}
+		}
+
+		connection := tx.Signal("")
+		peer.online = func(tx *kaya.Tx, online bool) {
+			if !online {
+				tx.Write(connection, "Offline")
+				return
+			}
+			tx.Write(connection, "")
+			for _, c := range convs {
+				for i := range c.messages {
+					m := &c.messages[i]
+					if m.queued {
+						m.queued = false
+						if c.id == open {
+							thread.Update(tx, m.key, Mine{Text: m.text})
+						}
+					}
+				}
 			}
 		}
 
@@ -124,12 +149,12 @@ func App() *kaya.App {
 				}
 				sent++
 				m := message{key: fmt.Sprintf("u%d", sent), text: text, mine: true}
+				m.queued = !peer.send(id, text)
 				c.messages = append(c.messages, m)
 				insert(tx, m)
 				tx.ScrollToRow(threadList, m.key)
 				tx.SetText(compose, "")
 				refresh(tx, c)
-				peer.send(id, text)
 			}
 			draft := ""
 			var found []string
@@ -164,9 +189,13 @@ func App() *kaya.App {
 						})
 					tx.Label(matches).A11yID("matches")
 				})
-				tx.Button("Newest", func(tx *kaya.Tx) {
-					tx.ScrollToRow(threadList, c.messages[len(c.messages)-1].key)
-				}).Role(kaya.RolePlain).A11yID("newest")
+				tx.Row(func() {
+					tx.Button("Newest", func(tx *kaya.Tx) {
+						tx.ScrollToRow(threadList, c.messages[len(c.messages)-1].key)
+					}).Role(kaya.RolePlain).A11yID("newest")
+					tx.Spacer()
+					tx.Label(connection).A11yID("connection")
+				})
 				tx.Scroll(func() {
 					thread = MessageCollection(tx)
 					threadList = MessageEachSum(tx, thread,
@@ -178,6 +207,18 @@ func App() *kaya.App {
 									mine.SetA11yID(text, "text")
 								})
 								mine.SetFilled(bubble, kaya.TintAccent)
+							})
+						},
+						func(pending kaya.SumCase[string, Pending]) {
+							pending.Row(func() {
+								pending.Spacer()
+								bubble := pending.Column(func() {
+									text := pending.Label(func(m *Pending) *string { return &m.Text })
+									pending.SetA11yID(text, "text")
+									state := pending.CaptionText("Sending…")
+									pending.SetA11yID(state, "state")
+								})
+								pending.SetFilled(bubble, kaya.TintAccent)
 							})
 						},
 						func(theirs kaya.SumCase[string, Theirs]) {
@@ -316,23 +357,44 @@ func seed() map[string]*conversation {
 
 // The scripted peer, served on the loopback interface in this process and
 // reached through the language's own network stack (docs/chat-plan.md §0).
-// The wire is one tab-separated line per message.
+// The wire is one tab-separated line per message. A script line whose text
+// is dropLine closes the connection and keeps the peer away for peerAway
+// (C9): the app shows it is offline, queues what is sent meanwhile, redials
+// and sends the queue once it is back.
 type peer struct {
+	app     *kaya.App
+	addr    string
+	mu      sync.Mutex
 	conn    net.Conn
+	queue   []string
 	receive func(tx *kaya.Tx, conv, key, text string)
+	online  func(tx *kaya.Tx, online bool)
 }
 
+const dropLine = "\x00drop"
+const peerAway = 6 * time.Second
+
 // Each answer is (conversation, text, delay after the one before). Maya's
-// second answer comes late enough for a reader to have scrolled away.
+// second answer comes late enough for a reader to have scrolled away, and
+// Sam's first answer is followed by the connection dropping.
 var script = map[string][][3]string{
 	"maya": {{"maya", "See you soon", "200ms"}, {"sam", "Are we still on for Friday?", "0s"},
 		{"maya", "Also, bring the umbrella", "2500ms"}},
-	"sam":  {{"sam", "Perfect", "200ms"}},
+	"sam":  {{"sam", "Perfect", "200ms"}, {"sam", dropLine, "0s"}},
 	"alex": {{"alex", "Glad you liked them", "200ms"}},
 }
 
-func (p *peer) send(conv, text string) {
-	fmt.Fprintf(p.conn, "SEND\t%s\t%s\n", conv, text)
+// send writes the message, or queues it while the peer is away and says so.
+func (p *peer) send(conv, text string) bool {
+	line := fmt.Sprintf("SEND\t%s\t%s\n", conv, text)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.conn == nil {
+		p.queue = append(p.queue, line)
+		return false
+	}
+	fmt.Fprint(p.conn, line)
+	return true
 }
 
 func dialPeer(app *kaya.App, convs map[string]*conversation, order []string) *peer {
@@ -340,47 +402,92 @@ func dialPeer(app *kaya.App, convs map[string]*conversation, order []string) *pe
 	if err != nil {
 		panic(fmt.Sprintf("chat: the peer could not listen on loopback: %v", err))
 	}
-	go serve(listener)
-	conn, err := net.Dial("tcp", listener.Addr().String())
+	p := &peer{app: app, addr: listener.Addr().String()}
+	go serve(listener, p.addr)
+	conn, err := net.Dial("tcp", p.addr)
 	if err != nil {
-		panic(fmt.Sprintf("chat: could not reach the peer at %s: %v", listener.Addr(), err))
+		panic(fmt.Sprintf("chat: could not reach the peer at %s: %v", p.addr, err))
 	}
-	p := &peer{conn: conn}
-	go func() {
-		lines := bufio.NewScanner(conn)
-		for lines.Scan() {
-			parts := strings.SplitN(lines.Text(), "\t", 4)
-			if len(parts) != 4 || parts[0] != "MSG" {
-				continue
-			}
-			conv, key, text := parts[1], parts[2], parts[3]
-			app.Post(func(tx *kaya.Tx) {
-				if p.receive != nil {
-					p.receive(tx, conv, key, text)
-				}
-			})
-		}
-	}()
+	p.conn = conn
+	go p.read(conn)
 	return p
 }
 
-func serve(listener net.Listener) {
-	conn, err := listener.Accept()
-	if err != nil {
-		return
-	}
-	seq := 0
+// read delivers the peer's messages until the connection ends, then redials
+// until the peer is back and sends what was queued.
+func (p *peer) read(conn net.Conn) {
 	lines := bufio.NewScanner(conn)
 	for lines.Scan() {
-		parts := strings.SplitN(lines.Text(), "\t", 3)
-		if len(parts) != 3 || parts[0] != "SEND" {
+		parts := strings.SplitN(lines.Text(), "\t", 4)
+		if len(parts) != 4 || parts[0] != "MSG" {
 			continue
 		}
-		for _, answer := range script[parts[1]] {
-			delay, _ := time.ParseDuration(answer[2])
-			time.Sleep(delay)
-			seq++
-			fmt.Fprintf(conn, "MSG\t%s\tp%d\t%s\n", answer[0], seq, answer[1])
+		conv, key, text := parts[1], parts[2], parts[3]
+		p.app.Post(func(tx *kaya.Tx) {
+			if p.receive != nil {
+				p.receive(tx, conv, key, text)
+			}
+		})
+	}
+	p.mu.Lock()
+	p.conn = nil
+	p.mu.Unlock()
+	p.app.Post(func(tx *kaya.Tx) { p.online(tx, false) })
+	for {
+		time.Sleep(500 * time.Millisecond)
+		next, err := net.Dial("tcp", p.addr)
+		if err != nil {
+			continue
+		}
+		p.mu.Lock()
+		p.conn = next
+		for _, line := range p.queue {
+			fmt.Fprint(next, line)
+		}
+		p.queue = nil
+		p.mu.Unlock()
+		p.app.Post(func(tx *kaya.Tx) { p.online(tx, true) })
+		go p.read(next)
+		return
+	}
+}
+
+// serve answers one connection at a time; a drop closes the listener too,
+// so the app's redials are refused until the peer is back on the same port.
+func serve(listener net.Listener, addr string) {
+	seq := 0
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		dropped := false
+		lines := bufio.NewScanner(conn)
+		for !dropped && lines.Scan() {
+			parts := strings.SplitN(lines.Text(), "\t", 3)
+			if len(parts) != 3 || parts[0] != "SEND" {
+				continue
+			}
+			for _, answer := range script[parts[1]] {
+				delay, _ := time.ParseDuration(answer[2])
+				time.Sleep(delay)
+				if answer[1] == dropLine {
+					dropped = true
+					break
+				}
+				seq++
+				fmt.Fprintf(conn, "MSG\t%s\tp%d\t%s\n", answer[0], seq, answer[1])
+			}
+		}
+		conn.Close()
+		if !dropped {
+			return
+		}
+		listener.Close()
+		time.Sleep(peerAway)
+		listener, err = net.Listen("tcp", addr)
+		if err != nil {
+			panic(fmt.Sprintf("chat: the peer could not come back on %s: %v", addr, err))
 		}
 	}
 }

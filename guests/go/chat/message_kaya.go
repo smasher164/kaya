@@ -9,7 +9,7 @@ import kaya "dev.kaya/bindings/go"
 // constructor, in declaration order — this call is the one
 // spelling of that order.
 func MessageCollection(tx *kaya.Tx) kaya.SumCollection[string, Message] {
-	return kaya.SumOf[string, Message](tx, Mine{}, Theirs{}, Reply{})
+	return kaya.SumOf[string, Message](tx, Mine{}, Pending{}, Theirs{}, Reply{})
 }
 
 // MessageEachSum is the template eliminator: one required arm per
@@ -23,12 +23,14 @@ func MessageEachSum(
 	tx *kaya.Tx,
 	c kaya.SumCollection[string, Message],
 	mine func(kaya.SumCase[string, Mine]),
+	pending func(kaya.SumCase[string, Pending]),
 	theirs func(kaya.SumCase[string, Theirs]),
 	reply func(kaya.SumCase[string, Reply]),
 ) kaya.Widget {
 	rows := tx.Rows(c.Handle())
 	for row := range rows.All() {
 		c.Case[Mine](row.Tpl, mine)
+		c.Case[Pending](row.Tpl, pending)
 		c.Case[Theirs](row.Tpl, theirs)
 		c.Case[Reply](row.Tpl, reply)
 	}
@@ -56,6 +58,30 @@ type messageMinePatch struct {
 
 func (p messageMinePatch) Text(v string) messageMinePatch {
 	p.c.UpdateField(p.tx, p.key, func(t *Mine) *string { return &t.Text }, v)
+	return p
+}
+
+// MessageAsPending re-eliminates at call time: the comma-ok is the
+// refinement, fresh at write time — a stale occurrence folds into
+// the !ok arm — and each setter's update carries Pending as its
+// witness, asserted again by the scene.
+func MessageAsPending(tx *kaya.Tx, c kaya.SumCollection[string, Message], key string) (messagePendingPatch, bool) {
+	if v, ok := c.Get(tx, key); ok {
+		if _, is := v.(Pending); is {
+			return messagePendingPatch{tx: tx, c: c, key: key}, true
+		}
+	}
+	return messagePendingPatch{}, false
+}
+
+type messagePendingPatch struct {
+	tx  *kaya.Tx
+	c   kaya.SumCollection[string, Message]
+	key string
+}
+
+func (p messagePendingPatch) Text(v string) messagePendingPatch {
+	p.c.UpdateField(p.tx, p.key, func(t *Pending) *string { return &t.Text }, v)
 	return p
 }
 
