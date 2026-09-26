@@ -403,6 +403,13 @@ struct CoreState {
     container_insets: HashMap<WidgetId, f64>,
     /// Each filled container's tint (docs/tints-plan.md T2).
     filled: HashMap<WidgetId, i64>,
+    /// The composers (docs/composer-plan.md §4), for their default inset.
+    composers: HashMap<WidgetId, ()>,
+    /// Icon-only buttons and whether each is prominent (docs/composer-plan.md
+    /// §2, §3): the symbol and the role arrive in either order, and each arm
+    /// restyles from both.
+    symbol_buttons: HashMap<WidgetId, bool>,
+    prominent_buttons: HashMap<WidgetId, ()>,
     /// The minted padding host around a SCROLL mounted as a window's root: a
     /// ScrollViewer's default template ignores Control.Padding (the
     /// retemplated entry ScrollViewer in this file exists for that reason), so
@@ -976,6 +983,10 @@ const fn fluent_icon(symbol: crate::app::Symbol) -> FluentIcon {
         S::Lock => FluentIcon::Glyph("\u{E72E}"),
         S::Person => FluentIcon::Member(Fluent::Contact),
         S::Home => FluentIcon::Member(Fluent::Home),
+        S::Emoji => FluentIcon::Member(Fluent::Emoji2),
+        S::Send => FluentIcon::Member(Fluent::Send),
+        S::Attach => FluentIcon::Member(Fluent::Attach),
+        S::Mic => FluentIcon::Member(Fluent::Microphone),
     }
 }
 
@@ -1004,16 +1015,20 @@ const fn symbol_wire(symbol: crate::app::Symbol) -> u32 {
         S::Lock => crate::wire::SYMBOL_LOCK,
         S::Person => crate::wire::SYMBOL_PERSON,
         S::Home => crate::wire::SYMBOL_HOME,
+        S::Emoji => crate::wire::SYMBOL_EMOJI,
+        S::Send => crate::wire::SYMBOL_SEND,
+        S::Attach => crate::wire::SYMBOL_ATTACH,
+        S::Mic => crate::wire::SYMBOL_MIC,
     }
 }
 
 /// The vocabulary in wire order — the decode side's only list.
-const SYMBOL_ORDER: [crate::app::Symbol; 20] = {
+const SYMBOL_ORDER: [crate::app::Symbol; 24] = {
     use crate::app::Symbol as S;
     [
         S::Add, S::Remove, S::Delete, S::Edit, S::Done, S::Close, S::Search, S::Settings,
         S::Refresh, S::Info, S::Warning, S::Back, S::Forward, S::More, S::Copy, S::Paste, S::Star,
-        S::Lock, S::Person, S::Home,
+        S::Lock, S::Person, S::Home, S::Emoji, S::Send, S::Attach, S::Mic,
     ]
 };
 
@@ -2094,7 +2109,13 @@ fn trace_enabled() -> bool {
 /// is the SUM, and every writer goes through here.
 fn container_padding(core: &CoreState, id: WidgetId) -> f64 {
     let own = core.container_insets.get(&id).copied().unwrap_or(
-        if core.filled.contains_key(&id) { FILLED_DEFAULT_INSET } else { 0.0 },
+        if core.filled.contains_key(&id) {
+            FILLED_DEFAULT_INSET
+        } else if core.composers.contains_key(&id) {
+            COMPOSER_INSET
+        } else {
+            0.0
+        },
     );
     let root = core.mounted_roots.values().any(|&r| r == id);
     // A DECLARED TABLE'S CARD INTERIOR RIDES THIS NUMBER deliberately
@@ -2159,6 +2180,53 @@ fn filled_style(tint: i64) -> windows_core::Result<Style> {
         tint_brush_key(tint)
     );
     XamlReader::Load(&HSTRING::from(markup))?.cast()
+}
+
+/// The composer (docs/composer-plan.md §4): a text field's own chrome, keyed
+/// on the TextBox's resources, around a field and buttons that draw none; the
+/// resources the field's template reads are overridden on the grid, so a
+/// field inside finds them first.
+fn composer_style() -> windows_core::Result<Style> {
+    XamlReader::Load(&HSTRING::from(
+        "<Style xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" TargetType=\"Grid\">\
+         <Setter Property=\"Background\" Value=\"{ThemeResource TextControlBackground}\"/>\
+         <Setter Property=\"BorderBrush\" Value=\"{ThemeResource TextControlBorderBrush}\"/>\
+         <Setter Property=\"BorderThickness\" Value=\"{ThemeResource TextControlBorderThemeThickness}\"/>\
+         <Setter Property=\"CornerRadius\" Value=\"{ThemeResource ControlCornerRadius}\"/></Style>",
+    ))?
+    .cast()
+}
+
+const COMPOSER_INSET: f64 = 2.0;
+
+const COMPOSER_FIELD_KEYS: [&str; 9] = [
+    "TextControlBackground",
+    "TextControlBackgroundPointerOver",
+    "TextControlBackgroundFocused",
+    "TextControlBorderBrush",
+    "TextControlBorderBrushPointerOver",
+    "TextControlBorderBrushFocused",
+    "TextControlButtonBackground",
+    "TextControlButtonBackgroundPointerOver",
+    "TextControlButtonBackgroundPressed",
+];
+
+/// An icon-only button's style (docs/composer-plan.md §2, §3): subtle, or the
+/// accent button drawn as a circle when prominent.
+fn symbol_button_style(prominent: bool) -> windows_core::Result<Style> {
+    let radius = if prominent { "16" } else { "{ThemeResource ControlCornerRadius}" };
+    let style: Style = XamlReader::Load(&HSTRING::from(format!(
+        "<Style xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" TargetType=\"Button\">\
+         <Setter Property=\"Width\" Value=\"32\"/><Setter Property=\"Height\" Value=\"32\"/>\
+         <Setter Property=\"Padding\" Value=\"0\"/><Setter Property=\"CornerRadius\" Value=\"{radius}\"/></Style>"
+    )))?
+    .cast()?;
+    style.SetBasedOn(&theme_resource::<Style>(if prominent {
+        "AccentButtonStyle"
+    } else {
+        "SubtleButtonStyle"
+    })?)?;
+    Ok(style)
 }
 
 /// THE ACCENT AS A SURFACE is a pale accent tint with ordinary text, as
@@ -15844,8 +15912,14 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             }
             let widget = core.widgets.get(&id).expect("scene validated the id");
             match (widget, prop, value) {
-                (NativeWidget::Button { caption, .. }, Prop::Text, Value::Str(s)) => {
+                (NativeWidget::Button { button, caption }, Prop::Text, Value::Str(s)) => {
                     caption.SetText(&HSTRING::from(&s))?;
+                    if core.symbol_buttons.contains_key(&id) {
+                        bindings::Microsoft::UI::Xaml::Automation::AutomationProperties::SetName(
+                            button,
+                            &HSTRING::from(&s),
+                        )?;
+                    }
                     // A BUTTON'S CAPTION MOVES ITS ROW'S COLUMNS TOO: the
                     // label's arm marked and this one did not, so a caption
                     // that grew after its row was indexed kept the old natural.
@@ -16406,14 +16480,78 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     // `AccentFillColorDefaultBrush`, painted by the accent
                     // stops the brand lowering wrote. A brandless app gets
                     // the user's Windows accent.
-                    button.SetStyle(&theme_resource::<Style>("AccentButtonStyle")?)?;
+                    core.prominent_buttons.insert(id, ());
+                    if core.symbol_buttons.contains_key(&id) {
+                        core.symbol_buttons.insert(id, true);
+                        button.SetStyle(&symbol_button_style(true)?)?;
+                    } else {
+                        button.SetStyle(&theme_resource::<Style>("AccentButtonStyle")?)?;
+                    }
+                }
+                // An icon-only button (docs/composer-plan.md §2): the glyph as
+                // its content, the title kept as its accessible name.
+                (NativeWidget::Button { button, caption }, Prop::Symbol, Value::I64(symbol)) => {
+                    let icon = symbol_icon(symbol)?.unwrap_or_else(|| {
+                        panic!("kaya: symbol {symbol} has no Fluent spelling in fluent_icon")
+                    });
+                    button.SetContent(&icon)?;
+                    bindings::Microsoft::UI::Xaml::Automation::AutomationProperties::SetName(
+                        button,
+                        &caption.Text()?,
+                    )?;
+                    let prominent = core.prominent_buttons.contains_key(&id);
+                    core.symbol_buttons.insert(id, prominent);
+                    button.SetStyle(&symbol_button_style(prominent)?)?;
+                }
+                // A composer (docs/composer-plan.md §4): the field's chrome on
+                // the row, its children on the bottom line as the field grows,
+                // and the field's focus drawn by the row.
+                (NativeWidget::Row(grid), Prop::Role, Value::I64(role))
+                    if role == i64::from(crate::wire::ROLE_COMPOSER) =>
+                {
+                    grid.SetStyle(&composer_style()?)?;
+                    let clear = SolidColorBrush::CreateInstanceWithColor(
+                        bindings::Windows::UI::Color { A: 0, R: 0, G: 0, B: 0 },
+                    )?;
+                    let resources = grid.Resources()?;
+                    for key in COMPOSER_FIELD_KEYS {
+                        resources.Insert(&PropertyValue::CreateString(&HSTRING::from(key))?, &clear)?;
+                    }
+                    let focused = theme_resource::<Brush>("TextControlBorderBrushFocused")?;
+                    let weak = grid.downgrade()?;
+                    grid.GotFocus(&RoutedEventHandler::new(move |_, _| {
+                        if let Some(grid) = weak.upgrade() {
+                            grid.SetBorderBrush(&focused)?;
+                            grid.SetBorderThickness(Thickness { Left: 1.0, Top: 1.0, Right: 1.0, Bottom: 2.0 })?;
+                        }
+                        Ok(())
+                    }))?;
+                    let rest = theme_resource::<Brush>("TextControlBorderBrush")?;
+                    let weak = grid.downgrade()?;
+                    grid.LostFocus(&RoutedEventHandler::new(move |_, _| {
+                        if let Some(grid) = weak.upgrade() {
+                            grid.SetBorderBrush(&rest)?;
+                            grid.SetBorderThickness(Thickness { Left: 1.0, Top: 1.0, Right: 1.0, Bottom: 1.0 })?;
+                        }
+                        Ok(())
+                    }))?;
+                    core.composers.insert(id, ());
+                    core.aligns.insert(id, i64::from(crate::wire::ALIGN_END));
+                    core.child_order.mark(id);
+                    stamp_container_padding(core, id)?;
                 }
                 (NativeWidget::Button { button, .. }, Prop::Role, Value::I64(5)) => {
                     // PLAIN (docs/tasks-plan.md §4 R6): Fluent's own keyed
                     // low-emphasis Button style — transparent ground and border
                     // over the primary text fill, hovering to
                     // `SubtleFillColorSecondaryBrush`.
-                    button.SetStyle(&theme_resource::<Style>("SubtleButtonStyle")?)?;
+                    core.prominent_buttons.remove(&id);
+                    if core.symbol_buttons.contains_key(&id) {
+                        core.symbol_buttons.insert(id, false);
+                        button.SetStyle(&symbol_button_style(false)?)?;
+                    } else {
+                        button.SetStyle(&theme_resource::<Style>("SubtleButtonStyle")?)?;
+                    }
                 }
                 (NativeWidget::Button { caption, .. }, Prop::Role, Value::I64(1)) => {
                     // DESTRUCTIVE, AND FLUENT SHIPS NO DESTRUCTIVE BUTTON, so
@@ -18386,6 +18524,9 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             inset: 16.0,
             container_insets: HashMap::new(),
             filled: HashMap::new(),
+            composers: HashMap::new(),
+            symbol_buttons: HashMap::new(),
+            prominent_buttons: HashMap::new(),
             scroll_root_hosts: HashMap::new(),
             transactions: tx_rx,
             // THIS BACKEND WINDOWS ROWS (docs/deferred.md, the
@@ -23076,7 +23217,7 @@ impl crate::harness::Stage for WinUiStage {
                     ));
                 }
             }
-            for widget in core.widgets.values() {
+            for (id, widget) in &core.widgets {
                 if let NativeWidget::Button { button, caption } = widget {
                     let element: FrameworkElement = windows_core::Interface::cast(button)?;
                     let text: String = caption.Text()?.to_string().chars().take(40).collect();
@@ -23098,6 +23239,10 @@ impl crate::harness::Stage for WinUiStage {
                         continue;
                     }
                     read += 1;
+                    // An icon-only button draws its glyph, not its caption.
+                    if core.symbol_buttons.contains_key(id) {
+                        continue;
+                    }
                     let word = longest_word_width(caption)?;
                     let pad = button.Padding()?;
                     let room = element.ActualWidth()? - pad.Left - pad.Right;

@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0xba86c9ec72f15877L;
+    public static final long SPEC_HASH = 0xcad44d3c6e3d9800L;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -112,6 +112,7 @@ public final class KayaWire {
     public static final int PROP_FILLED = 38;
     public static final int PROP_FOLLOWS_END = 39;
     public static final int PROP_MAX_LINES = 40;
+    public static final int PROP_SYMBOL = 41;
     public static final int WPROP_TITLE = 1;
     public static final int WPROP_WIDTH = 2;
     public static final int WPROP_HEIGHT = 3;
@@ -189,6 +190,7 @@ public final class KayaWire {
     public static final int ROLE_PLAIN = 5;
     public static final int ROLE_SWITCH = 6;
     public static final int ROLE_LINK = 7;
+    public static final int ROLE_COMPOSER = 8;
     public static final int SYMBOL_ADD = 1;
     public static final int SYMBOL_REMOVE = 2;
     public static final int SYMBOL_DELETE = 3;
@@ -209,6 +211,10 @@ public final class KayaWire {
     public static final int SYMBOL_LOCK = 18;
     public static final int SYMBOL_PERSON = 19;
     public static final int SYMBOL_HOME = 20;
+    public static final int SYMBOL_EMOJI = 21;
+    public static final int SYMBOL_SEND = 22;
+    public static final int SYMBOL_ATTACH = 23;
+    public static final int SYMBOL_MIC = 24;
     public static final int SOURCE_CONST = 0;
     public static final int SOURCE_SIGNAL = 1;
     public static final int SOURCE_ELEMENT = 2;
@@ -1992,6 +1998,29 @@ public final class KayaWire {
     public static byte[] txBindMaxLinesElement(long widgetId, int level, int field) {
         Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_MAX_LINES).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
+    /** set_property with a constant symbol value. */
+    public static byte[] txSetSymbol(long widgetId, long symbol) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_SYMBOL).putInt(SOURCE_CONST);
+        encodeValue(b, symbol);
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound symbol value. */
+    public static byte[] txBindSymbol(long widgetId, long signalId) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_SYMBOL).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindSymbolElement(long widgetId, int level, int field) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_SYMBOL).putInt(SOURCE_ELEMENT)
                 .putInt(level).putInt(field);
         return finish(b);
     }

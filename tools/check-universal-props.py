@@ -464,6 +464,7 @@ def census(files):
     bad += growing_textareas(read(swiftui), read(compose), read(gtk), read(winui))
     bad += winui_mode_changed(read(winui))
     bad += filled_edges(read(compose), read(gtk))
+    bad += composers(read(swiftui), read(compose), read(gtk), read(winui))
     return bad
 
 
@@ -593,6 +594,49 @@ def filled_edges(compose_text, gtk_text):
     return bad
 
 
+# THE COMPOSER (docs/composer-plan.md §4, §5) is pixels no shared reader
+# sees: the row draws the field's chrome and the field inside draws none,
+# and the mac draws no send where Return sends. And every GTK stylesheet kaya
+# loads is handed to the display: the composer's was loaded and never added
+# on its first build, and nothing but a capture could tell.
+def composers(swiftui_text, compose_text, gtk_text, winui_text):
+    bad = []
+    for path, text, needles in (
+        (SWIFTUI, swiftui_text, (
+            ".modifier(KayaComposerSurface(on: node.role == roleComposer))",
+            "            #if os(macOS)\n                if kayaIsComposerSend(node) {\n"
+            "                    Color.clear.frame(width: 0, height: 0)",
+            "chromeless: inComposer,")),
+        (COMPOSE, compose_text, (
+            "return Modifier.background(MaterialTheme.colorScheme.surfaceVariant, "
+            "KAYA_COMPOSER_SHAPE)",
+            "LocalKayaInComposer provides true,",
+            "colors = if (inComposer) {\n                    TextFieldDefaults.colors(\n"
+            "                        focusedContainerColor = Color.Transparent,",
+            "FilledIconButton(")),
+        (GTK, gtk_text, (
+            "container.add_css_class(COMPOSER_CLASS);",
+            ".kaya-composer scrolledwindow, .kaya-composer textview")),
+        (WINUI, winui_text, (
+            "grid.SetStyle(&composer_style()?)?;",
+            "resources.Insert(&PropertyValue::CreateString(&HSTRING::from(key))?, &clear)?;")),
+    ):
+        for needle in needles:
+            if needle not in text:
+                bad.append(f"{path}: the composer lost {needle!r}")
+    loaded = re.findall(r"load_kaya_css\(&(\w+),", gtk_text)
+    added = set(re.findall(r"style_context_add_provider_for_display\(\s*&display,\s*&(\w+),",
+                           gtk_text))
+    if len(loaded) < 8:
+        bad.append(f"{GTK}: read {len(loaded)} load_kaya_css calls, under the floor of 8 "
+                   "(the reader lost them)")
+    for provider in loaded:
+        if provider not in added:
+            bad.append(f"{GTK}: the stylesheet {provider} is loaded and never added to the "
+                       "display, so none of its rules apply")
+    return bad
+
+
 # A TWOPANEVIEW'S MODECHANGED MAY FIRE INSIDE AN APPLY (docs/traps.md, the
 # chat app's textarea in a pushed pane): a handler that borrows the core
 # outright panics where nothing can unwind. Every one asks first.
@@ -694,7 +738,7 @@ def drag_waits(winui_text):
 real = load()
 g = Gate("check-universal-props")
 RAN = 0
-DECLARED = 78
+DECLARED = 82
 for path, pattern, repl in (
     (COMPOSE, r"\ba11y\b", "kayaUnappliedProps"),
     (SWIFTUI, r"\bkayaA11y\b", "kayaUnappliedProps"),
@@ -980,6 +1024,15 @@ for label, path, pattern, repl in (
      r"layout\.set_baseline_child\(0\);", "layout.set_baseline_child(-1);"),
     ("WinUI's bottom-edge rule for a textless cell", WINUI,
      r"(fn baseline_compensate\([\s\S]*?)_ => None,", r"\1_ => Some(element.ActualHeight()?),"),
+    ("SwiftUI's mac drawing the composer's send", SWIFTUI,
+     r"if kayaIsComposerSend\(node\) \{", "if false {"),
+    ("Compose's field inside a composer keeping its container", COMPOSE,
+     r"colors = if \(inComposer\) \{", "colors = if (false) {"),
+    ("GTK's composer stylesheet loaded and never added", GTK,
+     r"                &composer_css,\n", "                &tint_css,\n"),
+    ("WinUI's field inside a composer keeping its chrome", WINUI,
+     r"resources\.Insert\(&PropertyValue::CreateString\(&HSTRING::from\(key\)\)\?, &clear\)\?;",
+     "let _ = (&resources, key, &clear);"),
     ("WinUI's column answering its bottom", WINUI,
      r"first_text_baseline\(core, \*child, &element\)\?", "Some(element.ActualHeight()?)"),
 ):

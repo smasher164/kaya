@@ -265,16 +265,20 @@ func App() *kaya.App {
 				tx.Row(func() {
 					// The compose field: one line at rest, growing with the message
 					// to five (docs/grow-lines-plan.md); Return sends and
-					// Shift+Return breaks the line.
-					compose = tx.Textarea(func(tx *kaya.Tx, text string) { draft = text }).
-						Submits().MaxLines(5).Placeholder("Message").A11yID("compose").Grow(1).
-						OnSubmitted(send)
-					if kaya.Capabilities().EmojiPicker {
-						tx.Button("😀", func(tx *kaya.Tx) { tx.ShowEmojiPicker(compose) }).
-							Role(kaya.RolePlain).A11yID("emoji").A11yLabel("Emoji")
-					}
-					tx.Button("Send", func(tx *kaya.Tx) { send(tx, draft) }).A11yID("send")
-				})
+					// Shift+Return breaks the line. The composer draws the field
+					// and its emoji button as one (docs/composer-plan.md).
+					tx.Row(func() {
+						compose = tx.Textarea(func(tx *kaya.Tx, text string) { draft = text }).
+							Submits().MaxLines(5).Placeholder("Message").A11yID("compose").Grow(1).
+							OnSubmitted(send)
+						if kaya.Capabilities().EmojiPicker {
+							tx.Button("Emoji", func(tx *kaya.Tx) { tx.ShowEmojiPicker(compose) }).
+								Symbol(kaya.SymbolEmoji).A11yID("emoji")
+						}
+					}).Role(kaya.RoleComposer).Grow(1)
+					tx.Button("Send", func(tx *kaya.Tx) { send(tx, draft) }).
+						Symbol(kaya.SymbolSend).Role(kaya.RoleProminent).A11yID("send")
+				}).Align(kaya.AlignEnd)
 			})
 			tx.MountIn(entry, pane)
 			for _, m := range c.messages {

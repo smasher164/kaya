@@ -14,7 +14,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, cast
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0xba86c9ec72f15877
+SPEC_HASH = 0xcad44d3c6e3d9800
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -113,6 +113,7 @@ PROP_SUBMITS = 37
 PROP_FILLED = 38
 PROP_FOLLOWS_END = 39
 PROP_MAX_LINES = 40
+PROP_SYMBOL = 41
 WPROP_TITLE = 1
 WPROP_WIDTH = 2
 WPROP_HEIGHT = 3
@@ -190,6 +191,7 @@ ROLE_CAPTION = 4
 ROLE_PLAIN = 5
 ROLE_SWITCH = 6
 ROLE_LINK = 7
+ROLE_COMPOSER = 8
 SYMBOL_ADD = 1
 SYMBOL_REMOVE = 2
 SYMBOL_DELETE = 3
@@ -210,6 +212,10 @@ SYMBOL_STAR = 17
 SYMBOL_LOCK = 18
 SYMBOL_PERSON = 19
 SYMBOL_HOME = 20
+SYMBOL_EMOJI = 21
+SYMBOL_SEND = 22
+SYMBOL_ATTACH = 23
+SYMBOL_MIC = 24
 SOURCE_CONST = 0
 SOURCE_SIGNAL = 1
 SOURCE_ELEMENT = 2
@@ -1303,6 +1309,21 @@ def tx_bind_max_lines(widget_id: int, signal_id: int) -> bytes:
 def tx_bind_max_lines_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_MAX_LINES, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_symbol(widget_id: int, symbol: int) -> bytes:
+    """set_property with a constant symbol value (int)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_SYMBOL, SOURCE_CONST) + _enc.value(int(symbol)))
+
+
+def tx_bind_symbol(widget_id: int, signal_id: int) -> bytes:
+    """set_property with a signal-bound symbol value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_SYMBOL, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_symbol_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_SYMBOL, SOURCE_ELEMENT, level, field))
 
 
 def tx_set_window_title(window: int, title: str) -> bytes:

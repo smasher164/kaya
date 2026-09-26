@@ -446,6 +446,9 @@ public enum KayaRole: Int64 {
     /// A label drawn as the platform's LINK, opening its `href` through
     /// the platform's own opener (docs/tasks-s2-plan.md T3).
     case link = 7
+    /// A row drawn as ONE text field in the platform's own style around its
+    /// field and buttons (docs/composer-plan.md §4).
+    case composer = 8
 }
 
 /// WHICH PLATFORM A PER-PLATFORM BRAND VALUE IS FOR (the `platform` spec
@@ -496,6 +499,10 @@ public enum KayaSymbol: Int64 {
     /// A person or account.
     case person = 19
     case home = 20
+    case emoji = 21
+    case send = 22
+    case attach = 23
+    case mic = 24
 }
 
 public struct KayaWidget {
@@ -4036,6 +4043,12 @@ public final class KayaAppTx {
         tx.setRole(w.id, role.rawValue)
     }
 
+    /// An icon-only button: the platform's glyph in place of the title, which
+    /// stays its accessible name (docs/composer-plan.md §2).
+    public func setSymbol(_ w: KayaWidget, _ symbol: KayaSymbol) {
+        tx.setSymbol(w.id, symbol.rawValue)
+    }
+
     public func setGrow(_ w: KayaWidget, _ weight: Double) {
         tx.setGrow(w.id, weight)
     }
@@ -4357,13 +4370,14 @@ public final class KayaAppTx {
     /// `onClick:` does.
     @discardableResult
     public func button(
-        _ text: String? = nil, role: KayaRole? = nil,
+        _ text: String? = nil, role: KayaRole? = nil, symbol: KayaSymbol? = nil,
         onClick: ((KayaAppTx) throws -> Void)? = nil,
         grow: Double? = nil
     ) -> KayaWidget {
         let w = widget(UInt32(KAYA_KIND_BUTTON))
         if let text { setText(w, text) }
         if let role { setRole(w, role) }
+        if let symbol { setSymbol(w, symbol) }
         if let onClick { app.onClick(w, onClick) }
         if let grow { setGrow(w, grow) }
         return w
@@ -4723,13 +4737,18 @@ public final class KayaAppTx {
     }
 
     @discardableResult
+    /// `role: .composer` draws the row as one text field around its field
+    /// and buttons (docs/composer-plan.md §4).
     public func row<R>(
         grow: Double? = nil, spacing: Double? = nil, inset: Double? = nil,
-        align: KayaAlign? = nil, filled: KayaTint? = nil,
+        align: KayaAlign? = nil, filled: KayaTint? = nil, role: KayaRole? = nil,
         _ children: (KayaWidget) throws -> R
     ) rethrows -> R {
         try containerOf(
-            UInt32(KAYA_KIND_ROW), children, grow: grow, spacing: spacing,
+            UInt32(KAYA_KIND_ROW), { w in
+                if let role { setRole(w, role) }
+                return try children(w)
+            }, grow: grow, spacing: spacing,
             inset: inset, align: align, filled: filled)
     }
 

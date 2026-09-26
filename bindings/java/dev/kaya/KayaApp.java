@@ -181,7 +181,10 @@ public final class KayaApp {
         /** A label drawn as the platform's LINK, opening its href
          * through the platform's own opener (docs/tasks-s2-plan.md
          * T3). */
-        LINK(KayaWire.ROLE_LINK);
+        LINK(KayaWire.ROLE_LINK),
+        /** A row drawn as ONE text field in the platform's own style
+         * around its field and buttons (docs/composer-plan.md §4). */
+        COMPOSER(KayaWire.ROLE_COMPOSER);
 
         final long wire;
 
@@ -227,7 +230,11 @@ public final class KayaApp {
         LOCK(KayaWire.SYMBOL_LOCK),
         /** A person or account. */
         PERSON(KayaWire.SYMBOL_PERSON),
-        HOME(KayaWire.SYMBOL_HOME);
+        HOME(KayaWire.SYMBOL_HOME),
+        EMOJI(KayaWire.SYMBOL_EMOJI),
+        SEND(KayaWire.SYMBOL_SEND),
+        ATTACH(KayaWire.SYMBOL_ATTACH),
+        MIC(KayaWire.SYMBOL_MIC);
 
         final long wire;
 
@@ -3293,6 +3300,19 @@ public final class KayaApp {
             return this;
         }
 
+        /** This button draws the platform's glyph for {@code symbol} in
+         * place of its title, which stays its accessible name
+         * (docs/composer-plan.md §2). */
+        public Widget symbol(Symbol symbol) {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: symbol on a widget outside its build transaction"
+                    + " — use Tx.setSymbol inside a live transaction");
+            }
+            tx.setSymbol(this, symbol);
+            return this;
+        }
+
         /** This widget's accessibility identifier at construction:
          * tx.entry().a11yId("name"). */
         public Widget a11yId(String id) {
@@ -5164,6 +5184,11 @@ public final class KayaApp {
          */
         public void setRole(Widget w, Role role) {
             emit(KayaWire.txSetRole(w.id, role.wire));
+        }
+
+        /** An icon-only button (docs/composer-plan.md §2). */
+        public void setSymbol(Widget w, Symbol symbol) {
+            emit(KayaWire.txSetSymbol(w.id, symbol.wire));
         }
 
         /**

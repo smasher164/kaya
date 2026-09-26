@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0xba86c9ec72f15877n;
+export const SPEC_HASH = 0xcad44d3c6e3d9800n;
 
 export const VALUE_BOOL = 1;
 export const VALUE_I64 = 2;
@@ -106,6 +106,7 @@ export const PROP_SUBMITS = 37;
 export const PROP_FILLED = 38;
 export const PROP_FOLLOWS_END = 39;
 export const PROP_MAX_LINES = 40;
+export const PROP_SYMBOL = 41;
 export const WPROP_TITLE = 1;
 export const WPROP_WIDTH = 2;
 export const WPROP_HEIGHT = 3;
@@ -183,6 +184,7 @@ export const ROLE_CAPTION = 4;
 export const ROLE_PLAIN = 5;
 export const ROLE_SWITCH = 6;
 export const ROLE_LINK = 7;
+export const ROLE_COMPOSER = 8;
 export const SYMBOL_ADD = 1;
 export const SYMBOL_REMOVE = 2;
 export const SYMBOL_DELETE = 3;
@@ -203,6 +205,10 @@ export const SYMBOL_STAR = 17;
 export const SYMBOL_LOCK = 18;
 export const SYMBOL_PERSON = 19;
 export const SYMBOL_HOME = 20;
+export const SYMBOL_EMOJI = 21;
+export const SYMBOL_SEND = 22;
+export const SYMBOL_ATTACH = 23;
+export const SYMBOL_MIC = 24;
 export const SOURCE_CONST = 0;
 export const SOURCE_SIGNAL = 1;
 export const SOURCE_ELEMENT = 2;
@@ -1806,6 +1812,24 @@ export function tx_bind_max_lines(widget_id: number, signal_id: number): Uint8Ar
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_max_lines_element(widget_id: number, level = 0, field = 0): Uint8Array {
   enc.begin(); enc.u64(widget_id); enc.u32(PROP_MAX_LINES); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a constant symbol value. */
+export function tx_set_symbol(widget_id: number, symbol: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_SYMBOL); enc.u32(SOURCE_CONST); enc.value(new I64(symbol));
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a signal-bound symbol value. */
+export function tx_bind_symbol(widget_id: number, signal_id: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_SYMBOL); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_symbol_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_SYMBOL); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
   return enc.end(TX_SET_PROPERTY);
 }
 

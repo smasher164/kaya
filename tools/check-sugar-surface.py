@@ -2012,16 +2012,25 @@ def check_role_name(snake, pascal, upper, findings=None, swift=None):
     want("js", "bindings/js/kaya/index.ts", f"^  {upper}: wire.ROLE_{upper},$")
 
 
-for role in (("destructive", "Destructive", "DESTRUCTIVE"),
-             ("prominent", "Prominent", "PROMINENT"),
-             ("heading", "Heading", "HEADING"),
-             ("caption", "Caption", "CAPTION"),
-             ("plain", "Plain", "PLAIN"),
-             ("link", "Link", "LINK")):
-    check_role_name(*role)
+def wire_vocabulary(prefix, floor):
+    """A spec enum's names out of the core's own wire constants, so a value
+    the spec gains is demanded of every binding the day it lands: the role
+    list here was typed by hand and let `composer` through (2026-09-26)."""
+    names = re.findall(rf"^pub\(crate\) const {prefix}_([A-Z_]+): u32 = \d+;$",
+                       read_rel("crates/kaya/src/wire.rs"), re.M)
+    print(f"check-sugar-surface: {prefix.lower()} vocabulary read from wire.rs: "
+          f"{len(names)}")
+    if len(names) < floor:
+        selftest_exit(f"check-sugar-surface: read {len(names)} {prefix} "
+                      f"constants out of crates/kaya/src/wire.rs, under the "
+                      f"floor of {floor}: the reader is broken")
+    return [(n.lower(), "".join(w.title() for w in n.split("_")), n)
+            for n in names]
 
-# The switch role (docs/tasks-s2-plan.md T1), Swift's case backticked.
-check_role_name("switch", "Switch", "SWITCH", swift="`switch`")
+
+for role in wire_vocabulary("ROLE", 8):
+    # `switch` is backticked in Swift (docs/tasks-s2-plan.md T1).
+    check_role_name(*role, swift="`switch`" if role[0] == "switch" else None)
 
 fake = []
 check_role_name("kaya_fake_role", "KayaFakeRole", "KAYA_FAKE_ROLE",
@@ -2032,6 +2041,90 @@ if name_fake != 9:
     selftest_exit(f"check-sugar-surface: self-test failed "
                   f"({name_fake}/9 role-name patterns fired for a role "
                   f"that exists nowhere)")
+
+
+# --- THE SYMBOL VOCABULARY AND THE ICON-ONLY BUTTON, in all nine -----
+# (docs/composer-plan.md §2): every symbol's NAME in each binding's own
+# vocabulary, and the button setter that draws one, since both reach every
+# binding through the generator whether or not an app can spell them.
+def check_symbol_name(snake, pascal, upper, findings=None):
+    def want(lang, rel, pattern):
+        global status
+        if not grep_file(pattern, rel):
+            msg = (f"check-sugar-surface: {lang} does not spell the "
+                   f"'{snake}' symbol (wanted /{pattern}/ in {rel})")
+            if findings is None:
+                print(msg)
+                status = 1
+            else:
+                findings.append(msg)
+    want("rust", "crates/kaya/src/app.rs", f"^    {pascal} = \\d+,$")
+    want("python", "bindings/python/kaya/__init__.py",
+         f"^    {upper} = wire.SYMBOL_{upper}$")
+    want("go", "bindings/go/kaya_wire.go", f"^\\tSymbol{pascal} Symbol = \\d+$")
+    want("csharp", "bindings/csharp/KayaApp.cs",
+         f"^    {pascal} = KayaWire.Symbol{pascal},$")
+    want("java", "bindings/java/dev/kaya/KayaApp.java",
+         f"^        {upper}\\(KayaWire.SYMBOL_{upper}\\)[,;]$")
+    want("swift", "bindings/swift/KayaApp.swift", f"^    case {snake} = \\d+$")
+    want("haskell", "bindings/haskell/KayaApp.hs",
+         f"^  Symbol{pascal} -> W.symbol{pascal}$")
+    want("ocaml", "bindings/ocaml/kaya_app.ml",
+         f"^  \\| {pascal} -> Int64.of_int Kaya_wire.symbol_{snake}$")
+    want("js", "bindings/js/kaya/index.ts", f"^  {upper}: wire.SYMBOL_{upper},$")
+
+
+for sym in wire_vocabulary("SYMBOL", 24):
+    check_symbol_name(*sym)
+
+fake = []
+check_symbol_name("kaya_fake_symbol", "KayaFakeSymbol", "KAYA_FAKE_SYMBOL",
+                  findings=fake)
+sym_fake = sum(1 for m in fake
+               if "does not spell the 'kaya_fake_symbol' symbol" in m)
+print(f"check-sugar-surface: fake symbol fired {sym_fake}/9")
+if sym_fake != 9:
+    selftest_exit(f"check-sugar-surface: self-test failed ({sym_fake}/9 "
+                  f"symbol-name patterns fired for a symbol that exists "
+                  f"nowhere)")
+
+SYMBOL_SETTERS = [
+    ("rust", "crates/kaya/src/app.rs",
+     r"pub fn {n}\(self, symbol: crate::Symbol\) -> Self \{{"
+     r"\s*self\.tx\.set\(self\.id, Prop::Symbol"),
+    ("python", "bindings/python/kaya/__init__.py", r"wire\.tx_set_{n}\("),
+    ("go", "bindings/go/app.go", r"tx\.emit\(TxSet{N}\("),
+    ("csharp", "bindings/csharp/KayaApp.cs", r"KayaWire\.TxSet{N}\("),
+    ("java", "bindings/java/dev/kaya/KayaApp.java", r"KayaWire\.txSet{N}\("),
+    ("swift", "bindings/swift/KayaApp.swift", r"tx\.set{N}\(w\.id"),
+    ("haskell", "bindings/haskell/KayaApp.hs", r"W\.txSet{N} w"),
+    ("ocaml", "bindings/ocaml/kaya_app.ml", r"Kaya_wire\.tx_set_{n} id"),
+    ("js", "bindings/js/kaya/index.ts", r"wire\.tx_set_{n}\(this\.id"),
+]
+
+
+def check_symbol_setter(n, findings=None):
+    global status
+    for lang, rel, pattern in SYMBOL_SETTERS:
+        pat = pattern.format(n=n, N=n[0].upper() + n[1:])
+        if not grep_file(pat, rel):
+            msg = (f"check-sugar-surface: {lang} has no icon-only button "
+                   f"setter (wanted /{pat}/ in {rel})")
+            if findings is None:
+                print(msg)
+                status = 1
+            else:
+                findings.append(msg)
+
+
+check_symbol_setter("symbol")
+fake = []
+check_symbol_setter("kayaFakeSymbol", findings=fake)
+print(f"check-sugar-surface: fake symbol setter fired {len(fake)}/9")
+if len(fake) != 9:
+    selftest_exit(f"check-sugar-surface: self-test failed ({len(fake)}/9 "
+                  f"symbol-setter patterns fired for a setter that exists "
+                  f"nowhere)")
 
 
 # --- THE SIZE-POLICY SURFACE, in all nine ---------------------------

@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0xba86c9ec72f15877;
+    public const ulong SpecHash = 0xcad44d3c6e3d9800;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -111,6 +111,7 @@ static class KayaWire
     public const uint PropFilled = 38;
     public const uint PropFollowsEnd = 39;
     public const uint PropMaxLines = 40;
+    public const uint PropSymbol = 41;
     public const uint WpropTitle = 1;
     public const uint WpropWidth = 2;
     public const uint WpropHeight = 3;
@@ -188,6 +189,7 @@ static class KayaWire
     public const uint RolePlain = 5;
     public const uint RoleSwitch = 6;
     public const uint RoleLink = 7;
+    public const uint RoleComposer = 8;
     public const uint SymbolAdd = 1;
     public const uint SymbolRemove = 2;
     public const uint SymbolDelete = 3;
@@ -208,6 +210,10 @@ static class KayaWire
     public const uint SymbolLock = 18;
     public const uint SymbolPerson = 19;
     public const uint SymbolHome = 20;
+    public const uint SymbolEmoji = 21;
+    public const uint SymbolSend = 22;
+    public const uint SymbolAttach = 23;
+    public const uint SymbolMic = 24;
     public const uint SourceConst = 0;
     public const uint SourceSignal = 1;
     public const uint SourceElement = 2;
@@ -2104,6 +2110,31 @@ static class KayaWire
     {
         var w = Begin(out var stream);
         w.Write(widgetId); w.Write(PropMaxLines); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a constant symbol value.
+    public static byte[] TxSetSymbol(ulong widgetId, long symbol)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropSymbol); w.Write(SourceConst);
+        EncodeValue(w, symbol);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound symbol value.
+    public static byte[] TxBindSymbol(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropSymbol); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindSymbolElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropSymbol); w.Write(SourceElement); w.Write(level); w.Write(field);
         return Finish(stream, w, TxKindSetProperty);
     }
 

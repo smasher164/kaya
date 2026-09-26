@@ -154,6 +154,24 @@ def check(texts):
             bad.append(f'{compose}: the Triple table names {c} "{n}", but '
                        f'the root calls it "{root_by_cname[c][1]}"')
 
+    # --- One glyph per concept on each platform: a harness read maps the
+    # glyph drawn back to its concept, so two concepts sharing a glyph read
+    # back as whichever comes first (docs/composer-plan.md §2, attach). ---
+    def distinct(site, pairs):
+        seen = {}
+        for c, g in pairs:
+            if g in seen:
+                bad.append(f"{site}: {seen[g]} and {c} draw the same glyph "
+                           f"{g} — the read back cannot tell them apart")
+            seen.setdefault(g, c)
+    distinct(gtk, gtk_rows)
+    distinct(winui, re.findall(r"S::(\w+)\s*=>\s*(FluentIcon::\w+\([^)]*\))",
+                               wt2))
+    distinct(swiftui, re.findall(
+        r"\(\s*(symbol\w+),\s*\"[^\"]+\",\s*(\"[^\"]+\")", st))
+    distinct(compose, re.findall(
+        r"Triple\(\s*(SYMBOL_[A-Z0-9_]+),\s*\"[^\"]+\",\s*([\w.]+)\)", kt))
+
     if bad:
         return "bad", bad
     return "ok", f"{len(root)} concepts level across six files"
@@ -205,6 +223,13 @@ selftest("N4", WINUI, r"S::Home => crate::wire::SYMBOL_HOME,", "",
 selftest("N5", CAPI, r"pub const KAYA_SYMBOL_HOME: u32 = 20;",
          "pub const KAYA_SYMBOL_HOME: u32 = 21;",
          "the C floor's copy drifted")
+# N6: two concepts drawing one glyph (attach as a plus, beside add).
+selftest("N6", GTK, r'\(crate::wire::SYMBOL_ATTACH, "mail-attachment-symbolic"\)',
+         '(crate::wire::SYMBOL_ATTACH, "list-add-symbolic")',
+         "draw the same glyph")
+selftest("N7", COMPOSE, r'Triple\(SYMBOL_ATTACH, "attach", Icons.Default.AttachFile\)',
+         'Triple(SYMBOL_ATTACH, "attach", Icons.Default.Add)',
+         "draw the same glyph")
 
 if status == 0:
     print(f"check-symbol-parity: OK ({payload})")

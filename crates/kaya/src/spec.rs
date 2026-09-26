@@ -229,6 +229,10 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     // docs/grow-lines-plan.md: a textarea one line tall at rest that grows
     // with its text to this many lines, then scrolls. Whole, at least 1.
     ("max_lines", 40, PropKind::F64),
+    // An icon-only button (docs/composer-plan.md §2): the closed symbol
+    // vocabulary each backend draws in its own glyphs; the title stays the
+    // accessible name.
+    ("symbol", 41, PropKind::Enum("symbol")),
 ];
 
 /// Window properties: the presentation-context twin of PROPS, in its
@@ -3252,6 +3256,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("filled", 38),
                 ("follows_end", 39),
                 ("max_lines", 40),
+                ("symbol", 41),
             ],
         },
         EnumSpec {
@@ -3419,6 +3424,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("plain", 5),
                 ("switch", 6),
                 ("link", 7),
+                ("composer", 8),
             ],
         },
         EnumSpec {
@@ -3451,6 +3457,10 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("lock", 18),
                 ("person", 19),
                 ("home", 20),
+                ("emoji", 21),
+                ("send", 22),
+                ("attach", 23),
+                ("mic", 24),
             ],
         },
         EnumSpec {
@@ -4048,6 +4058,7 @@ mod tests {
                     ("prop", "filled") => wire::PROP_FILLED,
                     ("prop", "follows_end") => wire::PROP_FOLLOWS_END,
                     ("prop", "max_lines") => wire::PROP_MAX_LINES,
+                    ("prop", "symbol") => wire::PROP_SYMBOL,
                     ("wprop", "title") => wire::WPROP_TITLE,
                     ("wprop", "width") => wire::WPROP_WIDTH,
                     ("wprop", "height") => wire::WPROP_HEIGHT,
@@ -4133,6 +4144,7 @@ mod tests {
                     ("role", "plain") => wire::ROLE_PLAIN,
                     ("role", "switch") => wire::ROLE_SWITCH,
                     ("role", "link") => wire::ROLE_LINK,
+                    ("role", "composer") => wire::ROLE_COMPOSER,
                     ("tint", "accent") => wire::TINT_ACCENT,
                     ("tint", "success") => wire::TINT_SUCCESS,
                     ("tint", "warning") => wire::TINT_WARNING,
@@ -4158,6 +4170,10 @@ mod tests {
                     ("symbol", "lock") => wire::SYMBOL_LOCK,
                     ("symbol", "person") => wire::SYMBOL_PERSON,
                     ("symbol", "home") => wire::SYMBOL_HOME,
+                    ("symbol", "emoji") => wire::SYMBOL_EMOJI,
+                    ("symbol", "send") => wire::SYMBOL_SEND,
+                    ("symbol", "attach") => wire::SYMBOL_ATTACH,
+                    ("symbol", "mic") => wire::SYMBOL_MIC,
                     ("file_mode", "read") => wire::FILE_MODE_READ,
                     ("file_mode", "write") => wire::FILE_MODE_WRITE,
                     ("file_mode", "read_write") => wire::FILE_MODE_READ_WRITE,
@@ -4253,7 +4269,7 @@ mod tests {
         // Nothing outside the table resolves, including the off-by-one
         // neighbours and the negative a signed wire slot can carry.
         assert_eq!(wire::symbol_name(0), None);
-        assert_eq!(wire::symbol_name(21), None);
+        assert_eq!(wire::symbol_name(25), None);
         assert_eq!(wire::symbol_name(-1), None);
     }
 

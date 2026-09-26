@@ -85,6 +85,10 @@ const SYMBOL_ICONS: &[(u32, &str)] = &[
     // The ACTION (`go-home-symbolic`), not the place
     // (`user-home-symbolic`) — §7.
     (crate::wire::SYMBOL_HOME, "go-home-symbolic"),
+    (crate::wire::SYMBOL_EMOJI, "face-smile-symbolic"),
+    (crate::wire::SYMBOL_SEND, "mail-send-symbolic"),
+    (crate::wire::SYMBOL_ATTACH, "mail-attachment-symbolic"),
+    (crate::wire::SYMBOL_MIC, "audio-input-microphone-symbolic"),
 ];
 
 const _: () = assert!(
@@ -6795,6 +6799,40 @@ const TINT_CSS: &str = "\
 /// body line (docs/follow-end-plan.md §1).
 const FOLLOW_SLACK: f64 = 22.0;
 
+/// The composer (docs/composer-plan.md §4): the entry's own chrome, as
+/// Fractal's composer wears it, drawn by the row around a field and buttons
+/// that draw none of their own.
+const COMPOSER_CSS: &str = "\
+.kaya-composer { background-color: alpha(currentColor, 0.1); border-radius: 9px; padding: 0px 2px; }
+.kaya-composer:focus-within { outline: 2px solid alpha(@accent_color, 0.5); outline-offset: -2px; }
+.kaya-composer scrolledwindow, .kaya-composer textview, .kaya-composer textview > text \
+{ background: none; outline: none; box-shadow: none; }
+";
+
+const COMPOSER_CLASS: &str = "kaya-composer";
+
+/// An icon-only button's classes (docs/composer-plan.md §2, §3): flat unless
+/// its role says otherwise, and a prominent one is the accent circle. Called
+/// from both the symbol's arm and the role's, which arrive in either order.
+fn symbol_button_classes(button: &gtk4::Button) {
+    use gtk4::prelude::{ButtonExt, WidgetExt};
+    if button.icon_name().is_none() {
+        return;
+    }
+    let prominent = button.has_css_class("suggested-action");
+    let tinted = prominent || button.has_css_class("destructive-action");
+    if prominent {
+        button.add_css_class("circular");
+    } else {
+        button.remove_css_class("circular");
+    }
+    if tinted {
+        button.remove_css_class("flat");
+    } else {
+        button.add_css_class("flat");
+    }
+}
+
 const FILLED_CLASS: &str = "kaya-filled";
 const FILLED_PAD_CLASS: &str = "kaya-filled-pad";
 const TINT_CLASSES: [&str; 5] =
@@ -12822,7 +12860,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             let widget = core.widgets.get(&id).expect("scene validated the id");
             match (widget, prop, value) {
                 (NativeWidget::Button(button), Prop::Text, Value::Str(s)) => {
-                    button.set_label(&s);
+                    use gtk4::prelude::AccessibleExt;
+                    if button.icon_name().is_some() {
+                        button.update_property(&[gtk4::accessible::Property::Label(&s)]);
+                    } else {
+                        button.set_label(&s);
+                    }
                 }
                 (NativeWidget::Label(label), Prop::Text, Value::Str(s)) => {
                     let label = label.clone();
@@ -13244,6 +13287,35 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                         2 => "suggested-action",
                         _ => "flat",
                     });
+                    symbol_button_classes(button);
+                }
+                // An icon-only button (docs/composer-plan.md §2): the glyph in
+                // place of the title, which stays its accessible name.
+                (NativeWidget::Button(button), Prop::Symbol, Value::I64(symbol)) => {
+                    use gtk4::prelude::{AccessibleExt, ButtonExt};
+                    assert_symbol_icons_resolve(&gtk4::prelude::WidgetExt::display(button));
+                    let title = button.label().map(|l| l.to_string()).unwrap_or_default();
+                    let icon = symbol_icon_name(symbol)
+                        .unwrap_or_else(|| panic!("kaya: symbol {symbol} has no Adwaita name in SYMBOL_ICONS"));
+                    button.set_icon_name(icon);
+                    button.update_property(&[gtk4::accessible::Property::Label(&title)]);
+                    symbol_button_classes(button);
+                }
+                // A composer (docs/composer-plan.md §4): its children sit on the
+                // bottom line as the field grows.
+                (NativeWidget::Row(container), Prop::Role, Value::I64(role))
+                    if role == i64::from(crate::wire::ROLE_COMPOSER) =>
+                {
+                    use gtk4::prelude::WidgetExt;
+                    let container = container.clone().upcast::<gtk4::Widget>();
+                    container.add_css_class(COMPOSER_CLASS);
+                    let end = i64::from(crate::wire::ALIGN_END);
+                    set_container_align(&container, end);
+                    let mut child = container.first_child();
+                    while let Some(widget) = child {
+                        apply_cross_align(&widget, false, end);
+                        child = widget.next_sibling();
+                    }
                 }
                 // THE HEADING ROLE IS TWO FACTS AT ONCE: the platform's
                 // heading TEXT STYLE and its heading ACCESSIBLE role.
@@ -15372,6 +15444,9 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
         let tint_css = gtk4::CssProvider::new();
         watch_css_errors(&tint_css, &css_error);
         load_kaya_css(&tint_css, "tints", TINT_CSS, &css_error);
+        let composer_css = gtk4::CssProvider::new();
+        watch_css_errors(&composer_css, &css_error);
+        load_kaya_css(&composer_css, "composer", COMPOSER_CSS, &css_error);
         // The label weights, at the WISH until a brand font says otherwise
         // (weight_css_for). Kept in CoreState, not handed to the display and
         // forgotten, because a SetTypeface with font bytes rewrites it.
@@ -15443,6 +15518,11 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
             gtk4::style_context_add_provider_for_display(
                 &display,
                 &tint_css,
+                gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
+            );
+            gtk4::style_context_add_provider_for_display(
+                &display,
+                &composer_css,
                 gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
             );
             gtk4::style_context_add_provider_for_display(

@@ -2143,7 +2143,7 @@ with app_style.window(title="styling", width=480.0, height=360.0, inset=0.0):
         if name.isupper()
     }
     check("kaya.Symbol is exactly the generated vocabulary, name for name",
-          authored == generated and len(authored) == 20)
+          authored == generated and len(authored) == 24)
     check("and the name spelling is derived from it, not typed twice",
           kaya._SYMBOL_NAMES == generated)
 
@@ -2239,7 +2239,7 @@ with app_style.window(title="styling", width=480.0, height=360.0, inset=0.0):
         bad_item = kaya.item("Save")
         for what, value, kind, fragment in (
             ("an unknown name", "save", ValueError, "must be one of"),
-            ("a number past the vocabulary", 21, ValueError,
+            ("a number past the vocabulary", 25, ValueError,
              "is not a symbol"),
             ("zero", 0, ValueError, "is not a symbol"),
             ("a bool", True, TypeError, "not bool"),

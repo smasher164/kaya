@@ -1333,7 +1333,7 @@ let set_axis (Widget id) a = emit (the_tx ()) (Kaya_wire.tx_set_axis id (axis_wi
    never how it looks. [Destructive] and [Prominent] are an ACTION's
    emphasis and belong to a button; [Heading] and [Caption] are text
    hierarchy facts and belong to a label. *)
-type role = Destructive | Prominent | Heading | Caption | Plain | Switch | Link
+type role = Destructive | Prominent | Heading | Caption | Plain | Switch | Link | Composer
 
 let role_wire = function
   | Destructive -> Int64.of_int Kaya_wire.role_destructive
@@ -1343,6 +1343,7 @@ let role_wire = function
   | Plain -> Int64.of_int Kaya_wire.role_plain
   | Switch -> Int64.of_int Kaya_wire.role_switch
   | Link -> Int64.of_int Kaya_wire.role_link
+  | Composer -> Int64.of_int Kaya_wire.role_composer
 
 let set_role (Widget id) r = emit (the_tx ()) (Kaya_wire.tx_set_role id (role_wire r))
 
@@ -1379,6 +1380,10 @@ type symbol =
   (* A person or account. *)
   | Person
   | Home
+  | Emoji
+  | Send
+  | Attach
+  | Mic
 
 let symbol_wire = function
   | Add -> Int64.of_int Kaya_wire.symbol_add
@@ -1401,6 +1406,14 @@ let symbol_wire = function
   | Lock -> Int64.of_int Kaya_wire.symbol_lock
   | Person -> Int64.of_int Kaya_wire.symbol_person
   | Home -> Int64.of_int Kaya_wire.symbol_home
+  | Emoji -> Int64.of_int Kaya_wire.symbol_emoji
+  | Send -> Int64.of_int Kaya_wire.symbol_send
+  | Attach -> Int64.of_int Kaya_wire.symbol_attach
+  | Mic -> Int64.of_int Kaya_wire.symbol_mic
+
+(* An icon-only button (docs/composer-plan.md §2): the glyph in place of
+   the title, which stays its accessible name. *)
+let set_symbol (Widget id) s = emit (the_tx ()) (Kaya_wire.tx_set_symbol id (symbol_wire s))
 
 (* WHICH PLATFORM A PER-PLATFORM BRAND VALUE IS FOR (spec enum
    "platform"; docs/styling-plan.md Slice 2b).
@@ -1837,7 +1850,7 @@ let add_child (Widget parent) (Widget child) =
   emit tx (Kaya_wire.tx_add_child parent child)
 
 
-let button ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?a11y_hint ?role ?text ?on_click () =
+let button ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?a11y_hint ?role ?symbol ?text ?on_click () =
   let tx = the_tx () in
   let w = widget Kaya_wire.kind_button in
   Option.iter (fun g -> set_grow w g) grow;
@@ -1847,6 +1860,7 @@ let button ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help
   (* [Destructive] or [Prominent]; a [Heading] or [Caption] button dies
      at the root. *)
   Option.iter (fun r -> set_role w r) role;
+  Option.iter (fun s -> set_symbol w s) symbol;
   Option.iter (fun t -> set_text w t) text;
   (match on_click with
   | Some handler ->
@@ -2340,11 +2354,13 @@ let scroll ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help
    core-evaluated breakpoint (docs/adaptive-layout-plan.md D3). LIVE
    ONLY: [Tpl.row] carries no such label, since a breakpoint's setters
    name live widgets and a template row is stamped per entry. *)
-let row ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?align ?inset ?filled ?stack_when ?wrap children () =
+let row ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?align ?inset ?filled ?role ?stack_when ?wrap children () =
   let parent =
     container ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?align ?inset ?filled Kaya_wire.kind_row
       children ()
   in
+  (* [Composer] (docs/composer-plan.md §4). *)
+  Option.iter (fun r -> set_role parent r) role;
   Option.iter (fun v -> set_wrap parent v) wrap;
   Option.iter
     (fun Compact ->

@@ -1050,6 +1050,13 @@ class Widget(_Handle):
         rejects it anywhere else; baseline is rows-only."""
         _records().append(wire.tx_set_align(self.id, _align_value(mode)))
 
+    def symbol(self, symbol: Symbol | str) -> Widget:
+        """Draw this button as the platform's glyph for `symbol` (see
+        kaya.Symbol; names accepted), the title kept as its accessible name
+        (docs/composer-plan.md §2). Returns the handle."""
+        _records().append(wire.tx_set_symbol(self.id, _symbol_value(symbol)))
+        return self
+
     def max_lines(self, lines: int) -> None:
         """Make this textarea one line tall at rest, growing with its text to
         `lines` lines and then scrolling (docs/grow-lines-plan.md)."""
@@ -4324,6 +4331,7 @@ class Role(enum.IntEnum):
     PLAIN = wire.ROLE_PLAIN
     SWITCH = wire.ROLE_SWITCH
     LINK = wire.ROLE_LINK
+    COMPOSER = wire.ROLE_COMPOSER
 
     @classmethod
     def _missing_(cls, value: object) -> Any:
@@ -4339,7 +4347,7 @@ class Role(enum.IntEnum):
             f"kaya: {value} is not a role — the vocabulary is "
             f"{sorted(m.name.lower() for m in cls)} "
             "(kaya.Role.DESTRUCTIVE/PROMINENT/HEADING/CAPTION/PLAIN/"
-            "SWITCH/LINK)"
+            "SWITCH/LINK/COMPOSER)"
         )
 
 
@@ -4394,6 +4402,10 @@ class Symbol(enum.IntEnum):
     LOCK = wire.SYMBOL_LOCK
     PERSON = wire.SYMBOL_PERSON
     HOME = wire.SYMBOL_HOME
+    EMOJI = wire.SYMBOL_EMOJI
+    SEND = wire.SYMBOL_SEND
+    ATTACH = wire.SYMBOL_ATTACH
+    MIC = wire.SYMBOL_MIC
 
     @classmethod
     def _missing_(cls, value: object) -> Any:
@@ -4562,7 +4574,8 @@ def column(*, grow: float | None = None, spacing: float | None = None,
 
 def button(text: str | None = None, bind: TextSource | None = None, *,
            on_click: Handler | None = None,
-           grow: float | None = None) -> Widget:
+           grow: float | None = None,
+           symbol: Symbol | str | None = None) -> Widget:
     """A button; `text` for a constant caption, `bind` for one the row
     supplies — a Signal, the enclosing For's element, or one of its
     fields (`row.title`).
@@ -4598,6 +4611,8 @@ def button(text: str | None = None, bind: TextSource | None = None, *,
                 f"{type(bind).__name__} — inside a case arm project the "
                 "field: kaya.button(bind=note.text)"
             )
+    if symbol is not None:
+        handle.symbol(symbol)
     if on_click is not None:
         _app._register(handle, wire.OCC_BUTTON_CLICKED, on_click)
     _set_grow(handle, grow)
@@ -4607,7 +4622,8 @@ def button(text: str | None = None, bind: TextSource | None = None, *,
 def row(*, grow: float | None = None, spacing: float | None = None,
         align: Align | str | None = None, inset: float | None = None,
         stack_when: SizeClass | None = None,
-        filled: Tint | str | None = None) -> _Container:
+        filled: Tint | str | None = None,
+        role: Role | str | None = None) -> _Container:
     """A row container: column turned sideways. `grow` is its flex
     weight; `spacing` its inter-child gap (main axis, DIP, default 8);
     `inset` its own padding; `filled` a platform tint (a chat thread's
@@ -4645,6 +4661,8 @@ def row(*, grow: float | None = None, spacing: float | None = None,
     _set_align(handle, align)
     _set_inset(handle, inset)
     _set_filled(handle, filled)
+    if role is not None:
+        handle.role(role)
     return _Container(handle)
 
 

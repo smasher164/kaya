@@ -64,14 +64,17 @@ expect_badge ""
 # C9: the peer answers and drops the connection. The app says it is offline,
 # a message sent meanwhile waits as "Sending…", and the queue goes out when
 # the peer is back (six seconds later), which it answers. Written, not typed,
-# for the reason above.
+# for the reason above, and sent with Return, which every platform has: the
+# mac draws no send button beside a composer (docs/composer-plan.md §5).
+click textarea@compose
+expect_focused textarea@compose
 set_text textarea@compose "Friday works"
-click button@send
+press return
 expect label@text[u2] "Friday works"
 expect label@text[p4] "Perfect"
 expect label@connection "Offline"
 set_text textarea@compose "Still there?"
-click button@send
+press return
 expect label@text[u3] "Still there?"
 expect label@state[u3] "Sending…"
 expect label@connection ""

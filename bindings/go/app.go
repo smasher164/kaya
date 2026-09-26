@@ -1267,6 +1267,22 @@ func (w Widget) Role(role Role) Widget {
 	return w
 }
 
+// SetSymbol makes a button icon-only: the platform's glyph for symbol, the
+// title kept as its accessible name (docs/composer-plan.md §2).
+func (tx *Tx) SetSymbol(w Widget, symbol Symbol) {
+	tx.emit(TxSetSymbol(w.id, int64(symbol)))
+}
+
+// Symbol makes this button icon-only at construction. Same transaction
+// discipline as Role.
+func (w Widget) Symbol(symbol Symbol) Widget {
+	if w.tx == nil || w.tx.closed {
+		panic("kaya: Symbol on a widget outside its build transaction — use Tx.SetSymbol inside a live transaction")
+	}
+	w.tx.SetSymbol(w, symbol)
+	return w
+}
+
 func (tx *Tx) BindChecked(w Widget, s Signal[bool]) {
 	tx.emit(TxBindChecked(w.id, s.id))
 }
@@ -4162,8 +4178,8 @@ func (r SectionRef) Title(title string) SectionRef {
 	return r
 }
 
-// Symbol is the semantic-icon vocabulary (SymbolAdd..SymbolHome),
-// shared by SectionRef.Symbol and MenuItem.Symbol.
+// Symbol is the semantic-icon vocabulary (SymbolAdd..SymbolMic),
+// shared by SectionRef.Symbol, MenuItem.Symbol and Widget.Symbol.
 type Symbol int64
 
 // Symbol sets the switcher item's SEMANTIC ICON, the same closed

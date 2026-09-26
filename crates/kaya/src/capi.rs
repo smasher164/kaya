@@ -873,6 +873,8 @@ pub const KAYA_PROP_FILLED: u32 = 38;
 pub const KAYA_PROP_FOLLOWS_END: u32 = 39;
 /// A textarea that grows with its text to this many lines (docs/grow-lines-plan.md).
 pub const KAYA_PROP_MAX_LINES: u32 = 40;
+/// An icon-only button's symbol (docs/composer-plan.md §2).
+pub const KAYA_PROP_SYMBOL: u32 = 41;
 
 /// Window properties (spec::WINDOW_PROPS): their own namespace —
 /// windows are not widgets. Window 0 is the primary surface.
@@ -1092,6 +1094,7 @@ const _: () = assert!(
         && KAYA_PROP_FILLED == wire::PROP_FILLED
         && KAYA_PROP_FOLLOWS_END == wire::PROP_FOLLOWS_END
         && KAYA_PROP_MAX_LINES == wire::PROP_MAX_LINES
+        && KAYA_PROP_SYMBOL == wire::PROP_SYMBOL
         && KAYA_WPROP_TITLE == wire::WPROP_TITLE
         && KAYA_WPROP_WIDTH == wire::WPROP_WIDTH
         && KAYA_WPROP_HEIGHT == wire::WPROP_HEIGHT
@@ -1187,6 +1190,8 @@ pub const KAYA_ROLE_CAPTION: u32 = 4;
 pub const KAYA_ROLE_PLAIN: u32 = 5;
 pub const KAYA_ROLE_SWITCH: u32 = 6;
 pub const KAYA_ROLE_LINK: u32 = 7;
+/// A row drawn as one text field with its buttons (docs/composer-plan.md §4).
+pub const KAYA_ROLE_COMPOSER: u32 = 8;
 const _: () = assert!(
     KAYA_ROLE_DESTRUCTIVE == wire::ROLE_DESTRUCTIVE
         && KAYA_ROLE_PROMINENT == wire::ROLE_PROMINENT
@@ -1195,6 +1200,7 @@ const _: () = assert!(
         && KAYA_ROLE_PLAIN == wire::ROLE_PLAIN
         && KAYA_ROLE_SWITCH == wire::ROLE_SWITCH
         && KAYA_ROLE_LINK == wire::ROLE_LINK
+        && KAYA_ROLE_COMPOSER == wire::ROLE_COMPOSER
 );
 
 /// The tint enum's values (spec enum "tint"; docs/tints-plan.md T1): what
@@ -1238,6 +1244,10 @@ pub const KAYA_SYMBOL_STAR: u32 = 17;
 pub const KAYA_SYMBOL_LOCK: u32 = 18;
 pub const KAYA_SYMBOL_PERSON: u32 = 19;
 pub const KAYA_SYMBOL_HOME: u32 = 20;
+pub const KAYA_SYMBOL_EMOJI: u32 = 21;
+pub const KAYA_SYMBOL_SEND: u32 = 22;
+pub const KAYA_SYMBOL_ATTACH: u32 = 23;
+pub const KAYA_SYMBOL_MIC: u32 = 24;
 const _: () = assert!(
     KAYA_SYMBOL_ADD == wire::SYMBOL_ADD
         && KAYA_SYMBOL_REMOVE == wire::SYMBOL_REMOVE
@@ -1259,6 +1269,10 @@ const _: () = assert!(
         && KAYA_SYMBOL_LOCK == wire::SYMBOL_LOCK
         && KAYA_SYMBOL_PERSON == wire::SYMBOL_PERSON
         && KAYA_SYMBOL_HOME == wire::SYMBOL_HOME
+        && KAYA_SYMBOL_EMOJI == wire::SYMBOL_EMOJI
+        && KAYA_SYMBOL_SEND == wire::SYMBOL_SEND
+        && KAYA_SYMBOL_ATTACH == wire::SYMBOL_ATTACH
+        && KAYA_SYMBOL_MIC == wire::SYMBOL_MIC
 );
 // Completeness, not just agreement (docs/traps.md): a symbol nobody
 // exported is a concept the C floor and every generated header silently
@@ -1276,7 +1290,7 @@ const _: () = {
         n
     };
     assert!(
-        variants == 20,
+        variants == 24,
         "the spec symbol enum grew: export the new KAYA_SYMBOL_* above, extend the pin, and \
          bump this count"
     );
@@ -1356,7 +1370,7 @@ const _: () = {
 // Completeness, not just agreement (docs/traps.md): a new spec prop
 // trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::PROPS.len() == 40,
+    crate::spec::PROPS.len() == 41,
     "spec::PROPS grew: export the new KAYA_PROP_* above, extend the pin, and bump this count"
 );
 const _: () = assert!(

@@ -10,7 +10,7 @@ import UserNotifications
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0xba86c9ec72f15877
+let kayaSpecHash: UInt64 = 0xcad44d3c6e3d9800
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -183,6 +183,7 @@ private let roleProminent: Int64 = 2
 private let roleHeading: Int64 = 3
 private let roleCaption: Int64 = 4
 private let rolePlain: Int64 = 5
+private let roleComposer: Int64 = 8
 private let roleSwitch: Int64 = 6
 private let roleLink: Int64 = 7
 /// THE SEMANTIC ICON VOCABULARY (spec enum "symbol"). APPEND-ONLY wire
@@ -207,6 +208,10 @@ private let symbolStar: Int64 = 17
 private let symbolLock: Int64 = 18
 private let symbolPerson: Int64 = 19
 private let symbolHome: Int64 = 20
+private let symbolEmoji: Int64 = 21
+private let symbolSend: Int64 = 22
+private let symbolAttach: Int64 = 23
+private let symbolMic: Int64 = 24
 private let propValue: UInt32 = 3
 private let propMin: UInt32 = 4
 private let propMax: UInt32 = 5
@@ -232,6 +237,7 @@ private let propSubmits: UInt32 = 37
 private let propFilled: UInt32 = 38
 private let propFollowsEnd: UInt32 = 39
 private let propMaxLines: UInt32 = 40
+private let propSymbol: UInt32 = 41
 private let tintAccent: Int64 = 1
 private let tintSuccess: Int64 = 2
 private let tintWarning: Int64 = 3
@@ -334,6 +340,10 @@ let kayaSymbolTable: [(value: Int64, name: String, sf: String, rendered: String?
     (symbolLock, "lock", "lock", nil),
     (symbolPerson, "person", "person", nil),
     (symbolHome, "home", "house", nil),
+    (symbolEmoji, "emoji", "face.smiling", nil),
+    (symbolSend, "send", "arrow.up", nil),
+    (symbolAttach, "attach", "paperclip", nil),
+    (symbolMic, "mic", "mic", nil),
 ]
 
 /// The SEMANTIC NAME of a wire symbol value; nil means this interpreter and
@@ -638,6 +648,8 @@ final class KayaNode: Identifiable {
     /// Semantic emphasis (docs/styling-plan.md D4), 0 = none — never a raw
     /// color.
     var role: Int64 = 0
+    /// An icon-only button's symbol (docs/composer-plan.md §2), 0 = none.
+    var symbol: Int64 = 0
     /// A container's own padding (docs/styling-plan.md D3): DIP between its
     /// bounds and its children, uniform. 0 = flush, every container's default.
     var inset: Double = 0
@@ -5718,10 +5730,18 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 case (propRole, valueI64):
                     kayaScene.nodes[id]!.role =
                         raw.loadUnaligned(fromByteOffset: body + 24, as: Int64.self)
+                    // A composer's children sit on the bottom line as its
+                    // field grows (docs/composer-plan.md §4).
+                    if kayaScene.nodes[id]!.role == roleComposer {
+                        kayaScene.nodes[id]!.align = alignEnd
+                    }
                 case (propInset, valueF64):
                     kayaScene.nodes[id]!.inset =
                         raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
                     kayaScene.nodes[id]!.insetSet = true
+                case (propSymbol, valueI64):
+                    kayaScene.nodes[id]!.symbol =
+                        raw.loadUnaligned(fromByteOffset: body + 24, as: Int64.self)
                 case (propMaxLines, valueF64):
                     kayaScene.nodes[id]!.maxLines =
                         raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
@@ -14489,6 +14509,95 @@ extension EnvironmentValues {
         get { self[KayaInGroupedCardKey.self] }
         set { self[KayaInGroupedCardKey.self] = newValue }
     }
+    var kayaInComposer: Bool {
+        get { self[KayaInComposerKey.self] }
+        set { self[KayaInComposerKey.self] = newValue }
+    }
+}
+
+/// Set for a composer's children (docs/composer-plan.md §4): the composer
+/// draws the field's chrome, so the field inside draws none of its own.
+private struct KayaInComposerKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+/// The composer's surface (docs/composer-plan.md §4): the field chrome
+/// Messages draws, a hairline capsule on the phone and a rounded field on the
+/// mac, glass on the 26 releases.
+struct KayaComposerSurface: ViewModifier {
+    let on: Bool
+
+    func body(content: Content) -> some View {
+        if !on {
+            content
+        } else {
+            #if os(macOS)
+                let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+                let fill = Color(nsColor: .textBackgroundColor)
+                let edge = Color(nsColor: .separatorColor)
+            #else
+                let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
+                let fill = Color(uiColor: .systemBackground)
+                let edge = Color(uiColor: .separator)
+            #endif
+            let framed = content
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .environment(\.kayaInComposer, true)
+            if #available(iOS 26, macOS 26, *) {
+                framed.glassEffect(.regular, in: shape)
+            } else {
+                framed
+                    .background(fill, in: shape)
+                    .overlay(shape.strokeBorder(edge, lineWidth: 1))
+            }
+        }
+    }
+}
+
+/// A composer's send (docs/composer-plan.md §5): a prominent symbol-only
+/// button inside a composer, or beside one in the same row, whose text field
+/// submits. Return sends there, so the mac draws no button, as Messages does.
+@MainActor func kayaIsComposerSend(_ button: KayaNode) -> Bool {
+    guard button.kind == kindButton, button.role == roleProminent, button.symbol != 0 else {
+        return false
+    }
+    guard let parent = kayaScene.rows.first(where: { row in row.children.contains { $0.id == button.id } })
+    else { return false }
+    let composer = parent.role == roleComposer
+        ? parent : parent.children.first { $0.kind == kindRow && $0.role == roleComposer }
+    guard let composer else { return false }
+    return composer.children.contains { field in
+        field.kind == kindEntry || field.kind == kindSearch || (field.kind == kindTextarea && field.submits)
+    }
+}
+
+/// An icon-only button (docs/composer-plan.md §2, §3): the platform's glyph,
+/// the title kept as its accessible name; a prominent one is the accent circle.
+struct KayaSymbolButton: View {
+    let node: KayaNode
+
+    var body: some View {
+        let sf = kayaSFSymbol(node.symbol) ?? "questionmark"
+        Button {
+            KayaHost.emit(node.tag)
+        } label: {
+            if node.role == roleProminent {
+                Image(systemName: sf)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(Color.white)
+                    .frame(width: 30, height: 30)
+                    .background(Circle().fill(Color.accentColor))
+            } else {
+                Image(systemName: sf)
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+                    .frame(minWidth: 30, minHeight: 30)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(node.text)
+    }
 }
 
 /// Set for the ONE button that is a run card's whole content: Settings'
@@ -17006,6 +17115,7 @@ struct KayaRender: View {
             .padding(kayaFilledInset(node))
             .background(KayaInsetReader(id: node.id, outer: true))
             .modifier(KayaFilledSurface(tint: node.filled))
+            .modifier(KayaComposerSurface(on: node.role == roleComposer))
         case kindLabeled:
             // THE LABELLED ROW (docs/forms-plan.md §3): the label names the
             // control — LabeledContent is the platform's own pair, and it
@@ -17046,6 +17156,18 @@ struct KayaRender: View {
             } else {
                 EmptyView()
             }
+        case kindButton where node.symbol != 0:
+            #if os(macOS)
+                if kayaIsComposerSend(node) {
+                    Color.clear.frame(width: 0, height: 0)
+                } else {
+                    KayaSymbolButton(node: node)
+                        .background(KayaLabelFrameReader(id: node.id))
+                }
+            #else
+                KayaSymbolButton(node: node)
+                    .background(KayaLabelFrameReader(id: node.id))
+            #endif
         case kindButton:
             // The dressed floor. macOS bridges to NSButton: under a pre-26 SDK
             // stamp SwiftUI's Button lays out at borderless metrics while
@@ -21383,6 +21505,7 @@ extension View {
 /// pinned off in `kayaPinPlainText`, and a breach fails the leg.
 struct KayaTextarea: View {
     let node: KayaNode
+    @Environment(\.kayaInComposer) private var inComposer
     /// The main axis of the flex container this textarea sits in, if it
     /// sits in one — see kayaTextareaFrame.
     var flexVertical: Bool? = nil
@@ -21397,6 +21520,7 @@ struct KayaTextarea: View {
         KayaMacTextarea(
             node: node,
             text: node.text,
+            chromeless: inComposer,
             focused: kayaScene.focusedId == node.id,
             a11yId: node.a11yId,
             a11yLabel: node.a11yLabel,
@@ -21419,7 +21543,7 @@ struct KayaTextarea: View {
         .kayaTextareaFrame(
             grow: node.grow, flexVertical: flexVertical, stretch: flexStretch, fill: node.fill,
             maxLines: node.maxLines)
-        .border(Color.gray.opacity(0.4))
+        .border(Color.gray.opacity(inComposer ? 0 : 0.4))
     }
 }
 
@@ -21597,6 +21721,8 @@ func kayaAuditPlainTextPins(_ view: NSTextView, rich: Bool = false) {
 private struct KayaMacTextarea: NSViewRepresentable {
     let node: KayaNode
     let text: String
+    /// Inside a composer, which draws the field (docs/composer-plan.md §4).
+    let chromeless: Bool
     let focused: Bool
     let a11yId: String
     let a11yLabel: String
@@ -21847,6 +21973,8 @@ private struct KayaMacTextarea: NSViewRepresentable {
     }
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
+        scroll.drawsBackground = !chromeless
+        (scroll.documentView as? NSTextView)?.drawsBackground = !chromeless
         guard let view = scroll.documentView as? KayaTextView else { return }
         context.coordinator.node = node
         view.nodeId = node.id
@@ -22250,6 +22378,7 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
         /// Whether that container aligns `stretch` — the cross axis's half.
         var flexStretch = false
         @Environment(\.kayaInGroupedCard) private var inGroupedCard
+        @Environment(\.kayaInComposer) private var inComposer
 
         var body: some View {
             // EVERY OBSERVATION IS READ HERE, in a SwiftUI body, and handed down
@@ -22272,7 +22401,7 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
             .kayaTextareaFrame(
                 grow: node.grow, flexVertical: flexVertical, stretch: flexStretch, fill: node.fill,
                 maxLines: node.maxLines)
-            .border(Color.gray.opacity(inGroupedCard ? 0 : 0.4))
+            .border(Color.gray.opacity(inGroupedCard || inComposer ? 0 : 0.4))
         }
     }
 

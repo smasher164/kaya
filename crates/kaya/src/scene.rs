@@ -1104,7 +1104,11 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         // is the union of the variants' homes; WHICH variant fits which
         // kind is value-dependent and lives in check_prop_value.
         // The switch role rides the checkbox (docs/tasks-s2-plan.md T1).
-        Prop::Role => matches!(kind, WidgetKind::Button | WidgetKind::Label | WidgetKind::Checkbox),
+        Prop::Role => matches!(
+            kind,
+            WidgetKind::Button | WidgetKind::Label | WidgetKind::Checkbox | WidgetKind::Row
+        ),
+        Prop::Symbol => kind == WidgetKind::Button,
     };
     assert!(ok, "kaya: {kind:?} has no property {prop:?}");
 }
@@ -1607,6 +1611,7 @@ fn prop_value_type(prop: Prop) -> ValueType {
         Prop::MaxLines => ValueType::F64,
         Prop::Axis => ValueType::I64,
         Prop::Role => ValueType::I64,
+        Prop::Symbol => ValueType::I64,
         Prop::Indeterminate | Prop::Fill | Prop::Wrap | Prop::Rich | Prop::Submits => ValueType::Bool,
         Prop::Document => ValueType::Blob,
         Prop::OwnUndo | Prop::CanUndo | Prop::CanRedo => ValueType::Bool,
@@ -2101,9 +2106,12 @@ fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
             // switch and link (docs/tasks-s2-plan.md T1, T3).
             6 => kind == WidgetKind::Checkbox,
             7 => kind == WidgetKind::Label,
+            // composer: a row drawn as one text field with its buttons
+            // (docs/composer-plan.md §4).
+            8 => kind == WidgetKind::Row,
             other => panic!(
                 "kaya: {other} is not a role (destructive=1, prominent=2, \
-                 heading=3, caption=4, plain=5, switch=6, link=7)"
+                 heading=3, caption=4, plain=5, switch=6, link=7, composer=8)"
             ),
         };
         let name = match *role {
@@ -2113,14 +2121,18 @@ fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
             4 => "caption",
             5 => "plain",
             6 => "switch",
-            _ => "link",
+            7 => "link",
+            _ => "composer",
         };
         assert!(
             ok,
             "kaya: role {name} does not fit {kind:?} — destructive, \
              prominent and plain are button emphasis, heading, caption and \
-             link are labels, switch is a checkbox"
+             link are labels, switch is a checkbox, composer is a row"
         );
+    }
+    if let (Prop::Symbol, Value::I64(symbol)) = (prop, value) {
+        check_symbol(*symbol);
     }
     // The accept list's own domain: at least one token, no token twice.
     // The set shape promised "you structurally cannot declare text twice"
@@ -9581,6 +9593,50 @@ mod tests {
         );
     }
 
+    /// The composer's walls (docs/composer-plan.md §4, §2): the role is a
+    /// row's, and a symbol is a button's and one of the vocabulary's.
+    #[test]
+    #[should_panic(expected = "role composer does not fit Button")]
+    fn a_composer_button_dies_at_declare() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Button },
+            TxOp::SetProperty {
+                widget: WidgetId(1),
+                prop: Prop::Role,
+                value: PropValue::Const(Value::I64(crate::wire::ROLE_COMPOSER.into())),
+            },
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "Label has no property Symbol")]
+    fn a_symbol_label_dies_at_declare() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Label },
+            TxOp::SetProperty {
+                widget: WidgetId(1),
+                prop: Prop::Symbol,
+                value: PropValue::Const(Value::I64(crate::wire::SYMBOL_SEND.into())),
+            },
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "25 is not a symbol")]
+    fn a_button_symbol_outside_the_vocabulary_dies_at_declare() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Button },
+            TxOp::SetProperty {
+                widget: WidgetId(1),
+                prop: Prop::Symbol,
+                value: PropValue::Const(Value::I64(25)),
+            },
+        ]);
+    }
+
     #[test]
     #[should_panic(expected = "role heading does not fit Button")]
     fn a_heading_button_dies_at_declare() {
@@ -10830,7 +10886,7 @@ mod tests {
     /// each, and the tab draws with no icon. 21 is the first free id — what a
     /// guest generated against a NEWER spec sends.
     #[test]
-    #[should_panic(expected = "21 is not a symbol")]
+    #[should_panic(expected = "25 is not a symbol")]
     fn section_symbol_rejects_a_value_outside_the_vocabulary() {
         let mut scene = Scene::new();
         scene.apply(vec![
@@ -10838,7 +10894,7 @@ mod tests {
             TxOp::SetSectionProp {
                 section: WindowId(7),
                 prop: SectionProp::Symbol,
-                value: PropValue::Const(Value::I64(21)),
+                value: PropValue::Const(Value::I64(25)),
             },
         ]);
     }
@@ -12771,7 +12827,7 @@ mod tests {
     /// section side, which is the point: one vocabulary, one sentence,
     /// two surfaces that cannot answer differently.
     #[test]
-    #[should_panic(expected = "21 is not a symbol")]
+    #[should_panic(expected = "25 is not a symbol")]
     fn menu_symbol_rejects_a_value_outside_the_vocabulary() {
         let mut scene = Scene::new();
         scene.apply(vec![
@@ -12779,7 +12835,7 @@ mod tests {
             TxOp::SetMenuProp {
                 item: MenuItemId(1),
                 prop: MenuProp::Symbol,
-                value: PropValue::Const(Value::I64(21)),
+                value: PropValue::Const(Value::I64(25)),
             },
         ]);
     }

@@ -220,6 +220,7 @@ module KayaApp
     setPlaceholder,
     setHref,
     setRole,
+    setSymbol,
     Align (..),
     Tint (..),
     Axis (..),
@@ -1212,6 +1213,10 @@ data Symbol
   | -- | A person or account.
     SymbolPerson
   | SymbolHome
+  | SymbolEmoji
+  | SymbolSend
+  | SymbolAttach
+  | SymbolMic
   deriving (Eq, Show)
 
 -- From the generated table, never literals: the discriminants are spec
@@ -1238,6 +1243,10 @@ symbolWire s = fromIntegral $ case s of
   SymbolLock -> W.symbolLock
   SymbolPerson -> W.symbolPerson
   SymbolHome -> W.symbolHome
+  SymbolEmoji -> W.symbolEmoji
+  SymbolSend -> W.symbolSend
+  SymbolAttach -> W.symbolAttach
+  SymbolMic -> W.symbolMic
 
 -- --- Menus: the command vocabulary (DESIGN.md, Menus) ---------------
 
@@ -2550,6 +2559,9 @@ data Role
   | -- | A label drawn as the platform's LINK, opening its 'Href' through
     -- the platform's own opener (docs\/tasks-s2-plan.md T3). Labels only.
     Link
+  | -- | A row drawn as ONE text field in the platform's own style around
+    -- its field and buttons (docs\/composer-plan.md §4). Rows only.
+    Composer
   deriving (Eq, Show)
 
 roleWire :: Role -> Int64
@@ -2560,10 +2572,15 @@ roleWire Caption = 4
 roleWire Plain = 5
 roleWire Switch = 6
 roleWire Link = 7
+roleWire Composer = 8
 
 -- | The dynamic path; the declarative spelling is the 'Role' attr.
 setRole :: Widget -> Role -> Build ()
 setRole (Widget w) r = emitB (W.txSetRole w (roleWire r))
+
+-- | The dynamic path; the declarative spelling is the 'Symbol' attr.
+setSymbol :: Widget -> Symbol -> Build ()
+setSymbol (Widget w) sym = emitB (W.txSetSymbol w (symbolWire sym))
 
 -- | A widget's accessibility IDENTIFIER: a stable authored key that assistive
 -- tooling and UI automation address it by, and which is NEVER spoken.
@@ -2711,8 +2728,12 @@ data Attr (c :: WClass) where
   -- step when one is declared; 0 draws none.
   TickSpacing :: Double -> Attr 'LeafW
   -- | What this widget MEANS (docs/styling-plan.md D4) — semantic emphasis,
-  -- never appearance.
-  Role :: Role -> Attr 'LeafW
+  -- never appearance. Any class: 'Composer' is a row's, the rest a leaf's,
+  -- and the root refuses a role on a kind it does not fit.
+  Role :: Role -> Attr c
+  -- | This button draws the platform's glyph in place of its title, which
+  -- stays its accessible name (docs\/composer-plan.md §2).
+  Symbol :: Symbol -> Attr 'LeafW
   -- | What this widget takes from a paste — the closed kinds by name
   -- ('acceptText' and friends) plus any custom format ids.
   Accepts :: [Text] -> Attr c
@@ -2760,6 +2781,7 @@ applyAttr (MinuteStep minutes) (Widget n) =
 applyAttr (Step step) (Widget n) = emitB (W.txSetStep n step)
 applyAttr (TickSpacing spacing) (Widget n) = emitB (W.txSetTickSpacing n spacing)
 applyAttr (Role r) w = setRole w r
+applyAttr (Symbol s) w = setSymbol w s
 applyAttr (Accepts kinds) w = setAccepts w kinds
 applyAttr (Draggable clip ops) w = setDragSource w clip ops
 applyAttr (DropTarget ops) w = setDropTarget w ops

@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0xba86c9ec72f15877
+	SpecHash uint64 = 0xcad44d3c6e3d9800
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -113,6 +113,7 @@ const (
 	PropFilled = 38
 	PropFollowsEnd = 39
 	PropMaxLines = 40
+	PropSymbol = 41
 	WpropTitle = 1
 	WpropWidth = 2
 	WpropHeight = 3
@@ -190,6 +191,7 @@ const (
 	RolePlain Role = 5
 	RoleSwitch Role = 6
 	RoleLink Role = 7
+	RoleComposer Role = 8
 	SymbolAdd Symbol = 1
 	SymbolRemove Symbol = 2
 	SymbolDelete Symbol = 3
@@ -210,6 +212,10 @@ const (
 	SymbolLock Symbol = 18
 	SymbolPerson Symbol = 19
 	SymbolHome Symbol = 20
+	SymbolEmoji Symbol = 21
+	SymbolSend Symbol = 22
+	SymbolAttach Symbol = 23
+	SymbolMic Symbol = 24
 	SourceConst = 0
 	SourceSignal = 1
 	SourceElement = 2
@@ -494,6 +500,8 @@ func (r Role) String() string {
 		return "switch"
 	case RoleLink:
 		return "link"
+	case RoleComposer:
+		return "composer"
 	}
 	return "Role(" + strconv.FormatInt(int64(r), 10) + ")"
 }
@@ -540,6 +548,14 @@ func (s Symbol) String() string {
 		return "person"
 	case SymbolHome:
 		return "home"
+	case SymbolEmoji:
+		return "emoji"
+	case SymbolSend:
+		return "send"
+	case SymbolAttach:
+		return "attach"
+	case SymbolMic:
+		return "mic"
 	}
 	return "Symbol(" + strconv.FormatInt(int64(s), 10) + ")"
 }
@@ -2485,6 +2501,38 @@ func TxBindMaxLinesElement(widgetID uint64, level uint32, field uint32) []byte {
 	b := beginRecord(txSetProperty)
 	b = binary.LittleEndian.AppendUint64(b, widgetID)
 	b = binary.LittleEndian.AppendUint32(b, PropMaxLines)
+	b = binary.LittleEndian.AppendUint32(b, SourceElement)
+	b = binary.LittleEndian.AppendUint32(b, level)
+	b = binary.LittleEndian.AppendUint32(b, field)
+	return endRecord(b)
+}
+
+// TxSetSymbol: set_property with a constant symbol value.
+func TxSetSymbol(widgetID uint64, symbol int64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropSymbol)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, symbol)
+	return endRecord(b)
+}
+
+// TxBindSymbol: set_property with a signal-bound symbol value.
+func TxBindSymbol(widgetID uint64, signalID uint64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropSymbol)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxBindSymbolElement: set_property bound to one field of the element of the
+// enclosing For, `level` Fors up (0 = nearest).
+func TxBindSymbolElement(widgetID uint64, level uint32, field uint32) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropSymbol)
 	b = binary.LittleEndian.AppendUint32(b, SourceElement)
 	b = binary.LittleEndian.AppendUint32(b, level)
 	b = binary.LittleEndian.AppendUint32(b, field)

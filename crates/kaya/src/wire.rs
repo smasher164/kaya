@@ -423,6 +423,7 @@ pub(crate) const PROP_SUBMITS: u32 = 37;
 pub(crate) const PROP_FILLED: u32 = 38;
 pub(crate) const PROP_FOLLOWS_END: u32 = 39;
 pub(crate) const PROP_MAX_LINES: u32 = 40;
+pub(crate) const PROP_SYMBOL: u32 = 41;
 
 /// The clip representation masks (spec enum "clip"). BIT POSITIONS, not
 /// an ordinal: a copy carries several and a widget accepts several, so
@@ -639,6 +640,7 @@ pub(crate) const ROLE_CAPTION: u32 = 4;
 pub(crate) const ROLE_PLAIN: u32 = 5;
 pub(crate) const ROLE_SWITCH: u32 = 6;
 pub(crate) const ROLE_LINK: u32 = 7;
+pub(crate) const ROLE_COMPOSER: u32 = 8;
 
 pub(crate) const TINT_ACCENT: u32 = 1;
 pub(crate) const TINT_SUCCESS: u32 = 2;
@@ -669,6 +671,10 @@ pub(crate) const SYMBOL_STAR: u32 = 17;
 pub(crate) const SYMBOL_LOCK: u32 = 18;
 pub(crate) const SYMBOL_PERSON: u32 = 19;
 pub(crate) const SYMBOL_HOME: u32 = 20;
+pub(crate) const SYMBOL_EMOJI: u32 = 21;
+pub(crate) const SYMBOL_SEND: u32 = 22;
+pub(crate) const SYMBOL_ATTACH: u32 = 23;
+pub(crate) const SYMBOL_MIC: u32 = 24;
 
 /// The vocabulary as one table, in wire order: `(id, semantic name)`.
 /// The NAME is what a diagnostic prints and what the harness compares —
@@ -694,6 +700,10 @@ pub(crate) const SYMBOLS: &[(u32, &str)] = &[
     (SYMBOL_LOCK, "lock"),
     (SYMBOL_PERSON, "person"),
     (SYMBOL_HOME, "home"),
+    (SYMBOL_EMOJI, "emoji"),
+    (SYMBOL_SEND, "send"),
+    (SYMBOL_ATTACH, "attach"),
+    (SYMBOL_MIC, "mic"),
 ];
 
 /// The semantic name of a wire symbol value, or None if it is outside
@@ -930,6 +940,7 @@ fn prop(raw: u32) -> Prop {
         PROP_FILLED => Prop::Filled,
         PROP_FOLLOWS_END => Prop::FollowsEnd,
         PROP_MAX_LINES => Prop::MaxLines,
+        PROP_SYMBOL => Prop::Symbol,
         other => panic!("kaya: unknown property {other}"),
     }
 }
@@ -4331,6 +4342,7 @@ fn prop_raw(prop: Prop) -> u32 {
         Prop::Filled => PROP_FILLED,
         Prop::FollowsEnd => PROP_FOLLOWS_END,
         Prop::MaxLines => PROP_MAX_LINES,
+        Prop::Symbol => PROP_SYMBOL,
     }
 }
 

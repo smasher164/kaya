@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0xba86c9ec72f15877
+specHash = 0xcad44d3c6e3d9800
 
 valueBool :: Word32
 valueBool = 1
@@ -220,6 +220,8 @@ propFollowsEnd :: Word32
 propFollowsEnd = 39
 propMaxLines :: Word32
 propMaxLines = 40
+propSymbol :: Word32
+propSymbol = 41
 wpropTitle :: Word32
 wpropTitle = 1
 wpropWidth :: Word32
@@ -374,6 +376,8 @@ roleSwitch :: Word32
 roleSwitch = 6
 roleLink :: Word32
 roleLink = 7
+roleComposer :: Word32
+roleComposer = 8
 symbolAdd :: Word32
 symbolAdd = 1
 symbolRemove :: Word32
@@ -414,6 +418,14 @@ symbolPerson :: Word32
 symbolPerson = 19
 symbolHome :: Word32
 symbolHome = 20
+symbolEmoji :: Word32
+symbolEmoji = 21
+symbolSend :: Word32
+symbolSend = 22
+symbolAttach :: Word32
+symbolAttach = 23
+symbolMic :: Word32
+symbolMic = 24
 sourceConst :: Word32
 sourceConst = 0
 sourceSignal :: Word32
@@ -1816,6 +1828,25 @@ txBindMaxLines widgetId signalId = wireRecord txKindSetProperty
 txBindMaxLinesElement :: Word64 -> Word32 -> Word32 -> Builder
 txBindMaxLinesElement widgetId level field = wireRecord txKindSetProperty
   (word64LE widgetId <> word32LE propMaxLines <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
+-- set_property with a constant symbol value.
+txSetSymbol :: Word64 -> Int64 -> Builder
+txSetSymbol widgetId symbol = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propSymbol <> word32LE sourceConst
+    <> encodeValue (VI64 symbol))
+
+-- set_property with a signal-bound symbol value.
+txBindSymbol :: Word64 -> Word64 -> Builder
+txBindSymbol widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propSymbol <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindSymbolElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindSymbolElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propSymbol <> word32LE sourceElement
     <> word32LE level <> word32LE field)
 
 -- set_window_prop with a constant title value (window 0, the primary surface).

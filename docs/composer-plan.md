@@ -1,10 +1,11 @@
 # The compose row — the design pass
 
-Status: DESIGN, the maintainer's direction given 2026-09-26: icon-only
+Status: BUILT 2026-09-26 on all five platforms and in all nine bindings
+(R1 and R2 ruled as recommended the same day). The
+maintainer's direction, given the same day: icon-only
 buttons are generic over the whole symbol vocabulary, each platform keeps
 its own send glyph, the mac shows no send button (Return sends), and no app
-ever asks which platform it is on. Waiting on a look at this pass before
-anything is built. The research behind it (the stock apps' rows, read from
+ever asks which platform it is on. The research behind it (the stock apps' rows, read from
 Signal's and Fractal's source where possible) is summarised in §1.
 
 The chat app's compose row today is a bordered text field, a text button
@@ -37,8 +38,12 @@ name. The vocabulary grows by four:
 |---|---|---|---|---|
 | emoji | face.smiling | Mood | face-smile-symbolic | E76E |
 | send | arrow.up | Send (paper plane) | mail-send-symbolic | E724 |
-| attach | plus | Add | list-add-symbolic | E710 |
+| attach | paperclip | AttachFile | mail-attachment-symbolic | E723 |
 | mic | mic | Mic | audio-input-microphone-symbolic | E720 |
+
+`attach` was ruled as a plus and draws a paperclip: `add` already draws the
+plus on every platform, and the harness reads a symbol back from the glyph
+drawn, so two symbols sharing one glyph cannot be told apart.
 
 A symbol-only button is drawn borderless (the `plain` role's look) unless
 its role says otherwise. Art a symbol cannot name (a brand mark) takes the
@@ -104,16 +109,27 @@ draft, and needs nothing new.
   does), and a gate holds the macOS arm's omission and the other arms'
   circle.
 
+## §6a — As built
+
+- GNOME has no paper plane: Adwaita's `mail-send-symbolic` is a tray with an
+  arrow, and the messaging apps (Fractal among them) ship their own
+  `send-symbolic`. kaya draws Adwaita's own.
+- The guards: check-sugar-surface demands every symbol name and the button
+  setter in all nine bindings, reading the vocabularies out of wire.rs;
+  check-symbol-parity refuses two concepts drawing one glyph on a platform;
+  check-universal-props holds each backend's composer lowering, the mac's
+  undrawn send, and every GTK stylesheet kaya loads being added to the
+  display (the composer's was loaded and never added on its first build).
+
 ## §7 — What cannot be matched
 
 Per-app flourishes (WhatsApp's green, the mic morphing into send) and
 exact paddings. The target is each platform's own messaging look, not one
 look everywhere.
 
-## §8 — Rulings wanted
+## §8 — Rulings (RULED 2026-09-26 as recommended)
 
 - **R1:** `composer` as a new container role, and the rule that a
   prominent symbol-only button in a submitting composer is its send,
-  undrawn on macOS. RECOMMENDED as written.
-- **R2:** the four new symbols and their glyphs (§2). RECOMMENDED as
-  written.
+  undrawn on macOS. RULED.
+- **R2:** the four new symbols and their glyphs (§2). RULED.

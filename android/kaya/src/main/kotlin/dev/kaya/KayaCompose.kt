@@ -51,6 +51,7 @@ import androidx.compose.foundation.gestures.ScrollableDefaults
 import androidx.compose.foundation.gestures.ScrollableState
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.gestures.scrollable
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -88,7 +89,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentPaste
@@ -99,6 +102,8 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Mood
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Refresh
@@ -115,6 +120,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.foundation.clickable
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.NavigationBar
@@ -593,6 +599,8 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     /** A textarea one line tall at rest that grows to this many lines
      * (docs/grow-lines-plan.md); 0 = unset. */
     var maxLines by mutableStateOf(0)
+    /** A button's glyph in place of its title (docs/composer-plan.md §2); 0 = none. */
+    var symbol by mutableStateOf(0L)
 
     /// The arrangement axis (null = the creation kind's own — row
     /// horizontal, column vertical). One node, two constructor
@@ -693,7 +701,14 @@ val KAYA_FOLLOW_SLACK = 22.dp
 const val KAYA_FILLED_DEFAULT_INSET = 12.0
 
 fun kayaFilledInset(node: KayaNode): Double =
-    if (node.filled != 0L && !node.insetSet) KAYA_FILLED_DEFAULT_INSET else node.inset
+    if (node.insetSet) node.inset
+    else if (node.role == KayaCompose.ROLE_COMPOSER) KAYA_COMPOSER_INSET
+    else if (node.filled != 0L) KAYA_FILLED_DEFAULT_INSET else node.inset
+
+/** The composer's pill (docs/composer-plan.md §4, Signal's): surface
+ * variant, a radius of half the one-line height, no outline. */
+const val KAYA_COMPOSER_INSET = 4.0
+val KAYA_COMPOSER_SHAPE = RoundedCornerShape(24.dp)
 
 private val KAYA_SUCCESS_DESIGN = Color(0xFF2E7D32)
 private val KAYA_WARNING_DESIGN = Color(0xFFF9A825)
@@ -731,6 +746,9 @@ fun kayaTintPair(tint: Long): Pair<Color, Color> {
 /** The fill itself, at Material's medium shape, and the box expect_fill crops. */
 @Composable
 fun kayaFilledSurface(node: KayaNode): Modifier {
+    if (node.role == KayaCompose.ROLE_COMPOSER) {
+        return Modifier.background(MaterialTheme.colorScheme.surfaceVariant, KAYA_COMPOSER_SHAPE)
+    }
     if (node.filled == 0L) return Modifier
     kayaTintFills = (1L..5L).map { kayaTintPair(it).first.toArgb() }
     return Modifier
@@ -747,6 +765,10 @@ fun kayaFilledSurface(node: KayaNode): Modifier {
  * variant colour, which on an accent fill is dark on dark. */
 val LocalKayaOnFill = compositionLocalOf<Color?> { null }
 
+/** Set for a composer's children: the composer draws the field's chrome, so
+ * the field inside draws none (docs/composer-plan.md §4). */
+val LocalKayaInComposer = compositionLocalOf { false }
+
 /** The caption role's colour: the fill's own foreground at a caption's
  * weight inside a filled container, Material's variant colour elsewhere. */
 @Composable
@@ -759,7 +781,14 @@ const val KAYA_CAPTION_ON_FILL_ALPHA = 0.78f
 /** What sits inside a filled container takes the pair's foreground. */
 @Composable
 inline fun KayaFilledContent(node: KayaNode, crossinline content: @Composable () -> Unit) {
-    if (node.filled == 0L) {
+    if (node.role == KayaCompose.ROLE_COMPOSER) {
+        CompositionLocalProvider(
+            LocalContentColor provides MaterialTheme.colorScheme.onSurfaceVariant,
+            LocalKayaInComposer provides true,
+        ) {
+            content()
+        }
+    } else if (node.filled == 0L) {
         content()
     } else {
         val onFill = kayaTintPair(node.filled).second
@@ -1913,7 +1942,7 @@ object KayaCompose {
     // but only the runtime assert catches a stale compiled APK against
     // a new libkaya. ULong because the fingerprint's high bit is fair
     // game and a Kotlin Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0xba86c9ec72f15877uL
+    private const val SPEC_HASH: ULong = 0xcad44d3c6e3d9800uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -2167,6 +2196,7 @@ object KayaCompose {
     private const val PROP_FILLED = 38
     private const val PROP_FOLLOWS_END = 39
     private const val PROP_MAX_LINES = 40
+    private const val PROP_SYMBOL = 41
     private const val PROP_COLUMNS = 11
     // The accessibility identifier (never spoken) and label (spoken).
     // Universal: every widget kind carries both.
@@ -2207,6 +2237,7 @@ object KayaCompose {
     const val ROLE_PLAIN = 5L
     const val ROLE_SWITCH = 6L
     const val ROLE_LINK = 7L
+    const val ROLE_COMPOSER = 8L
     // THE SEMANTIC ICON VOCABULARY (spec enum "symbol";
     // docs/styling-plan.md D6). Long, like the role values: the prop
     // rides as an i64 and the model's field is what the render arms
@@ -2231,6 +2262,10 @@ object KayaCompose {
     const val SYMBOL_LOCK = 18L
     const val SYMBOL_PERSON = 19L
     const val SYMBOL_HOME = 20L
+    const val SYMBOL_EMOJI = 21L
+    const val SYMBOL_SEND = 22L
+    const val SYMBOL_ATTACH = 23L
+    const val SYMBOL_MIC = 24L
 
     /**
      * THE MATERIAL COLUMN: (wire value, semantic name, glyph);
@@ -2260,6 +2295,10 @@ object KayaCompose {
         Triple(SYMBOL_LOCK, "lock", Icons.Default.Lock),
         Triple(SYMBOL_PERSON, "person", Icons.Default.Person),
         Triple(SYMBOL_HOME, "home", Icons.Default.Home),
+        Triple(SYMBOL_EMOJI, "emoji", Icons.Default.Mood),
+        Triple(SYMBOL_SEND, "send", Icons.AutoMirrored.Filled.Send),
+        Triple(SYMBOL_ATTACH, "attach", Icons.Default.AttachFile),
+        Triple(SYMBOL_MIC, "mic", Icons.Default.Mic),
     )
 
     /** The SEMANTIC NAME of a wire symbol value, or null for a value
@@ -3029,6 +3068,8 @@ object KayaCompose {
                             KayaSceneModel.nodes[id]!!.followsEnd = readBool(b)
                         PROP_MAX_LINES ->
                             KayaSceneModel.nodes[id]!!.maxLines = readF64(b).toInt()
+                        PROP_SYMBOL ->
+                            KayaSceneModel.nodes[id]!!.symbol = readI64(b)
                         // docs/rich-text-plan.md §14: this platform's lever
                         // is `clearHistory()`, so taking ownership drops what
                         // the field had banked.
@@ -3062,8 +3103,13 @@ object KayaCompose {
                             // still pastes through the platform's own
                             // insertion.
                             KayaSceneModel.nodes[id]!!.accepts = readString(b)
-                        PROP_ROLE ->
-                            KayaSceneModel.nodes[id]!!.role = readI64(b)
+                        // A composer's children sit on its bottom line as
+                        // the field grows (docs/composer-plan.md §4).
+                        PROP_ROLE -> {
+                            val node = KayaSceneModel.nodes[id]!!
+                            node.role = readI64(b)
+                            if (node.role == ROLE_COMPOSER) node.align = ALIGN_END
+                        }
                         PROP_INSET -> {
                             KayaSceneModel.nodes[id]!!.inset = readF64(b)
                             KayaSceneModel.nodes[id]!!.insetSet = true
@@ -13761,7 +13807,27 @@ private fun KayaRenderCore(
             // `prominent` nowhere to go. DESTRUCTIVE takes the error-role
             // CONTAINER, fixed by Material rather than derived from the
             // brand, so red keeps meaning destructive in a red-branded app.
-            when (node.role) {
+            val glyph = if (node.symbol != 0L) KayaCompose.symbolIcon(node.symbol) else null
+            // An icon-only button (docs/composer-plan.md §2, §3): the glyph,
+            // the title as its accessible name; a prominent one is Material's
+            // filled circle.
+            if (glyph != null) {
+                if (node.role == KayaCompose.ROLE_PROMINENT) {
+                    FilledIconButton(
+                        onClick = { KayaPresent.emitClicked(node.tag) },
+                        modifier = boxFill.then(a11y).then(buttonRect),
+                    ) {
+                        Icon(glyph, contentDescription = node.text)
+                    }
+                } else {
+                    IconButton(
+                        onClick = { KayaPresent.emitClicked(node.tag) },
+                        modifier = boxFill.then(a11y).then(buttonRect),
+                    ) {
+                        Icon(glyph, contentDescription = node.text)
+                    }
+                }
+            } else when (node.role) {
                 KayaCompose.ROLE_PROMINENT ->
                     Button(
                         onClick = { KayaPresent.emitClicked(node.tag) },
@@ -14098,6 +14164,7 @@ fun KayaTextField(
     search: Boolean = false,
 ) {
     val focusRequester = remember { FocusRequester() }
+    val inComposer = LocalKayaInComposer.current
     val interaction = remember { MutableInteractionSource() }
     // THE RICH DISPLAY (docs/rich-text-plan.md R7 as amended): the arm's
     // own run table drawn through the field's OutputTransformation, which
@@ -14342,7 +14409,21 @@ fun KayaTextField(
                 placeholder = prompt,
                 leadingIcon = glyph,
                 trailingIcon = clear,
-                contentPadding = TextFieldDefaults.contentPaddingWithoutLabel(),
+                contentPadding = if (inComposer) {
+                    PaddingValues(horizontal = 12.dp, vertical = 12.dp)
+                } else {
+                    TextFieldDefaults.contentPaddingWithoutLabel()
+                },
+                colors = if (inComposer) {
+                    TextFieldDefaults.colors(
+                        focusedContainerColor = Color.Transparent,
+                        unfocusedContainerColor = Color.Transparent,
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent,
+                    )
+                } else {
+                    TextFieldDefaults.colors()
+                },
             )
         },
     )

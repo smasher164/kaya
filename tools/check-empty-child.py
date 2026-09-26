@@ -255,7 +255,7 @@ def negative(label, site, pattern, repl, fragment, what, *, want=1):
 
 
 negative("the SwiftUI EmptyView perturbation", SWIFTUI,
-         r"Color\.clear\.frame\(width: 0, height: 0\)", "EmptyView()",
+         r"(\} else \{\n\s*)Color\.clear\.frame\(width: 0, height: 0\)", r"\1EmptyView()",
          "renders `EmptyView()` when the decode fails",
          "a SwiftUI image arm that renders nothing", want=2)
 

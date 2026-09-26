@@ -1119,6 +1119,12 @@ export class Widget extends Handle {
    * was set) and the foreground inside (docs/tints-plan.md T2). */
   /** This textarea is one line tall at rest and grows with its text to
    * `lines` lines, then scrolls (docs/grow-lines-plan.md). */
+  symbol(symbol: SymbolValue | SymbolName): this {
+    this._live("symbol()");
+    records().push(wire.tx_set_symbol(this.id, symbolValue(symbol)));
+    return this;
+  }
+
   maxLines(lines: number): this {
     this._live("maxLines()");
     records().push(wire.tx_set_max_lines(this.id, Number(lines)));
@@ -3834,9 +3840,10 @@ export const Role = Object.freeze({
   PLAIN: wire.ROLE_PLAIN,
   SWITCH: wire.ROLE_SWITCH,
   LINK: wire.ROLE_LINK,
+  COMPOSER: wire.ROLE_COMPOSER,
 });
 export type RoleValue = (typeof Role)[keyof typeof Role];
-export type RoleName = "destructive" | "prominent" | "heading" | "caption" | "plain" | "switch" | "link";
+export type RoleName = "destructive" | "prominent" | "heading" | "caption" | "plain" | "switch" | "link" | "composer";
 const ROLE_NAMES: Record<string, number> = Object.fromEntries(Object.entries(Role).map(([k, v]) => [k.toLowerCase(), v]));
 
 function roleValue(role: unknown): number {
@@ -3866,6 +3873,10 @@ export const Symbol_ = Object.freeze({
   LOCK: wire.SYMBOL_LOCK,
   PERSON: wire.SYMBOL_PERSON,
   HOME: wire.SYMBOL_HOME,
+  EMOJI: wire.SYMBOL_EMOJI,
+  SEND: wire.SYMBOL_SEND,
+  ATTACH: wire.SYMBOL_ATTACH,
+  MIC: wire.SYMBOL_MIC,
 });
 // `Symbol` is JS's own; the vocabulary exports under kaya's usual name
 // through this alias, so `kaya.Symbol.COPY` reads like every other binding.
@@ -4026,7 +4037,7 @@ export function column<T = void>(optsOrBody?: ContainerOptions | ((column: Widge
   return new Container(handle).run(run);
 }
 
-export type RowOptions = ContainerOptions & { stackWhen?: SizeClass };
+export type RowOptions = ContainerOptions & { stackWhen?: SizeClass; role?: RoleValue | RoleName };
 
 /** A row container: column turned sideways. `stackWhen` stacks the
  * children vertically while the window's SIZE CLASS is the named one —
@@ -4046,6 +4057,7 @@ export function row<T = void>(optsOrBody?: RowOptions | ((row: Widget) => T), bo
     records().push(wire.tx_create_breakpoint(0, new I64(wire.SIZE_CLASS_COMPACT), 1, [new I64(handle.id), new I64(wire.PROP_AXIS), new I64(wire.AXIS_VERTICAL)]));
   }
   setLayout(handle, opts);
+  if (opts.role !== undefined) records().push(wire.tx_set_role(handle.id, roleValue(opts.role)));
   return new Container(handle).run(run);
 }
 
@@ -4071,7 +4083,7 @@ function bindText(what: string, handle: Handle, bind: unknown): void {
   }
 }
 
-export type ButtonOptions = GrowOption & { bind?: Bindable; onClick?: Handler };
+export type ButtonOptions = GrowOption & { bind?: Bindable; onClick?: Handler; symbol?: SymbolValue | SymbolName };
 
 /** A button: a constant caption, or `{bind}` for one the row supplies —
  * template-only, as in all eight other bindings (docs/tpl-props-plan.md F5). */
@@ -4089,6 +4101,7 @@ export function button(a: string | ButtonOptions, b?: ButtonOptions): Widget {
     }
     bindText("button", handle, opts.bind);
   }
+  if (opts.symbol !== undefined) records().push(wire.tx_set_symbol(handle.id, symbolValue(opts.symbol)));
   if (opts.onClick !== undefined) app()._register(handle, wire.OCC_BUTTON_CLICKED, opts.onClick);
   setGrow(handle, opts);
   return handle;

@@ -483,7 +483,7 @@ type size_class = Compact
 
 (* SEMANTIC EMPHASIS (docs/styling-plan.md D4): what a widget MEANS,
    never how it looks. *)
-type role = Destructive | Prominent | Heading | Caption | Plain | Switch | Link
+type role = Destructive | Prominent | Heading | Caption | Plain | Switch | Link | Composer
 
 (* THE SEMANTIC ICON VOCABULARY (docs/styling-plan.md D6). *)
 type symbol =
@@ -507,6 +507,13 @@ type symbol =
   | Lock
   | Person
   | Home
+  | Emoji
+  | Send
+  | Attach
+  | Mic
+
+(* An icon-only button (docs/composer-plan.md §2). *)
+val set_symbol : widget -> symbol -> unit
 
 (* WHICH PLATFORM A PER-PLATFORM BRAND VALUE IS FOR. *)
 type platform = Mac | Ios | Linux | Windows | Android
@@ -599,7 +606,7 @@ val button :
   ?help:string ->
   ?help_bind:string signal ->
   ?a11y_hint:string ->
-  ?role:role -> ?text:string -> ?on_click:(unit -> unit) -> unit -> widget
+  ?role:role -> ?symbol:symbol -> ?text:string -> ?on_click:(unit -> unit) -> unit -> widget
 
 val textarea :
   ?grow:float ->
@@ -896,6 +903,7 @@ val row :
   ?align:align ->
   ?inset:float ->
   ?filled:Tint.t ->
+  ?role:role ->
   ?stack_when:size_class ->
   ?wrap:bool -> (unit -> widget) list -> unit -> widget
 

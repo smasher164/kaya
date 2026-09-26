@@ -1883,6 +1883,13 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
         self
     }
 
+    /// An icon-only button: the platform's glyph for `symbol`, the title
+    /// kept as its accessible name (docs/composer-plan.md §2).
+    pub fn symbol(self, symbol: crate::Symbol) -> Self {
+        self.tx.set(self.id, Prop::Symbol, symbol as i64);
+        self
+    }
+
     /// A date picker's inclusive lower bound (docs/datetime-plan.md D4).
     pub fn min_date(self, date: crate::Date) -> Self {
         self.tx.set(self.id, Prop::MinDate, date);
@@ -6797,6 +6804,10 @@ pub enum Role {
     Switch = 6,
     /// A label drawn as the platform's link to its `href` (docs/tasks-s2-plan.md T3).
     Link = 7,
+    /// A row drawn as ONE text field with its buttons, in the platform's own
+    /// style; a prominent symbol-only button in or beside it is its send,
+    /// undrawn on macOS where Return sends (docs/composer-plan.md §4, §5).
+    Composer = 8,
 }
 
 /// Which platform a per-platform brand value is for (spec enum "platform";
@@ -6847,6 +6858,14 @@ pub enum Symbol {
     /// A person or account.
     Person = 19,
     Home = 20,
+    /// The emoji picker (docs/composer-plan.md §2).
+    Emoji = 21,
+    /// Send: an up arrow on Apple, a paper plane elsewhere.
+    Send = 22,
+    /// Attach something.
+    Attach = 23,
+    /// Record audio.
+    Mic = 24,
 }
 
 /// One entry of an accept list: a closed kind, or a custom format id.

@@ -721,6 +721,9 @@ enum Role : long
     /// A label drawn as the platform's LINK, opening its Href through
     /// the platform's own opener (docs/tasks-s2-plan.md T3).
     Link = KayaWire.RoleLink,
+    /// A row drawn as ONE text field in the platform's own style around its
+    /// field and buttons (docs/composer-plan.md §4).
+    Composer = KayaWire.RoleComposer,
 }
 
 /// THE SEMANTIC ICON VOCABULARY (docs/styling-plan.md D6, DESIGN.md
@@ -761,6 +764,10 @@ enum Symbol : long
     /// A person or account.
     Person = KayaWire.SymbolPerson,
     Home = KayaWire.SymbolHome,
+    Emoji = KayaWire.SymbolEmoji,
+    Send = KayaWire.SymbolSend,
+    Attach = KayaWire.SymbolAttach,
+    Mic = KayaWire.SymbolMic,
 }
 
 /// WHICH PLATFORM A PER-PLATFORM BRAND VALUE IS FOR (the spec's
@@ -2988,6 +2995,11 @@ sealed class Tx : IDisposable
     public void SetRole(Widget w, Role role) =>
         Records.Add(KayaWire.TxSetRole(w.Id, (long)role));
 
+    /// An icon-only button: the platform's glyph in place of the title, which
+    /// stays its accessible name (docs/composer-plan.md §2).
+    public void SetSymbol(Widget w, Symbol symbol) =>
+        Records.Add(KayaWire.TxSetSymbol(w.Id, (long)symbol));
+
     public void BindChecked(Widget w, Signal s) =>
         Records.Add(KayaWire.TxBindChecked(w.Id, s.Id));
 
@@ -3184,13 +3196,14 @@ sealed class Tx : IDisposable
     /// Role.Prominent). It changes nothing about what pressing the
     /// button does.
     public Widget Button(string? text = null, Action<Tx>? onClick = null, double? grow = null,
-        Role? role = null)
+        Role? role = null, Symbol? symbol = null)
     {
         var w = Widget(KayaWire.KindButton);
         if (text != null) SetText(w, text);
         if (onClick != null) App.OnClick(w, onClick);
         if (grow is double g) SetGrow(w, g);
         if (role is Role r) SetRole(w, r);
+        if (symbol is Symbol sym) SetSymbol(w, sym);
         return w;
     }
 
@@ -3493,16 +3506,24 @@ sealed class Tx : IDisposable
     /// window's SIZE CLASS is the named one (SizeClass.Compact, the only
     /// class today) — a core-evaluated breakpoint, reverting on leaving
     /// the class (docs/adaptive-layout-plan.md D3).
+    /// `role: Role.Composer` draws the row as one text field around its field
+    /// and buttons (docs/composer-plan.md §4).
     public void Row(
         Action<Widget> body, double? grow = null, double? spacing = null, Align? align = null,
-        double? inset = null, SizeClass? stackWhen = null, Tint? filled = null) =>
-        ContainerOf<object?>(KayaWire.KindRow, c => { body(c); return null; },
-            grow, spacing, align, inset, stackWhen, filled);
+        double? inset = null, SizeClass? stackWhen = null, Tint? filled = null,
+        Role? role = null) =>
+        Row<object?>(c => { body(c); return null; },
+            grow, spacing, align, inset, stackWhen, filled, role);
 
     public T Row<T>(
         Func<Widget, T> body, double? grow = null, double? spacing = null, Align? align = null,
-        double? inset = null, SizeClass? stackWhen = null, Tint? filled = null) =>
-        ContainerOf(KayaWire.KindRow, body, grow, spacing, align, inset, stackWhen, filled);
+        double? inset = null, SizeClass? stackWhen = null, Tint? filled = null,
+        Role? role = null) =>
+        ContainerOf(KayaWire.KindRow, c =>
+        {
+            if (role is Role r) SetRole(c, r);
+            return body(c);
+        }, grow, spacing, align, inset, stackWhen, filled);
 
     /// A vertical scroll viewport over EXACTLY ONE child. Pass grow: so
     /// the enclosing track CONSTRAINS it — an unconstrained viewport

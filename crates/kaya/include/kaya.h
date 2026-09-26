@@ -900,6 +900,11 @@
 #define KAYA_PROP_MAX_LINES 40
 
 /**
+ * An icon-only button's symbol (docs/composer-plan.md §2).
+ */
+#define KAYA_PROP_SYMBOL 41
+
+/**
  * Window properties (spec::WINDOW_PROPS): their own namespace —
  * windows are not widgets. Window 0 is the primary surface.
  */
@@ -1155,6 +1160,11 @@
 #define KAYA_ROLE_LINK 7
 
 /**
+ * A row drawn as one text field with its buttons (docs/composer-plan.md §4).
+ */
+#define KAYA_ROLE_COMPOSER 8
+
+/**
  * The tint enum's values (spec enum "tint"; docs/tints-plan.md T1): what
  * a filled container's surface MEANS, each backend lowering it to the
  * platform's own fill and foreground pair.
@@ -1215,6 +1225,14 @@
 #define KAYA_SYMBOL_PERSON 19
 
 #define KAYA_SYMBOL_HOME 20
+
+#define KAYA_SYMBOL_EMOJI 21
+
+#define KAYA_SYMBOL_SEND 22
+
+#define KAYA_SYMBOL_ATTACH 23
+
+#define KAYA_SYMBOL_MIC 24
 
 /**
  * The rich text vocabularies (spec enums "rich_attr", "block_kind",

@@ -30,7 +30,7 @@ type drop_values = {
 }
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0xba86c9ec72f15877L
+let spec_hash = 0xcad44d3c6e3d9800L
 
 let value_bool = 1
 let value_i64 = 2
@@ -129,6 +129,7 @@ let prop_submits = 37
 let prop_filled = 38
 let prop_follows_end = 39
 let prop_max_lines = 40
+let prop_symbol = 41
 let wprop_title = 1
 let wprop_width = 2
 let wprop_height = 3
@@ -206,6 +207,7 @@ let role_caption = 4
 let role_plain = 5
 let role_switch = 6
 let role_link = 7
+let role_composer = 8
 let symbol_add = 1
 let symbol_remove = 2
 let symbol_delete = 3
@@ -226,6 +228,10 @@ let symbol_star = 17
 let symbol_lock = 18
 let symbol_person = 19
 let symbol_home = 20
+let symbol_emoji = 21
+let symbol_send = 22
+let symbol_attach = 23
+let symbol_mic = 24
 let source_const = 0
 let source_signal = 1
 let source_element = 2
@@ -1949,6 +1955,32 @@ let tx_bind_max_lines_element ?(level = 0) ?(field = 0) widget_id =
   finish tx_kind_set_property (fun b ->
       Buffer.add_int64_le b widget_id;
       Buffer.add_int32_le b (Int32.of_int prop_max_lines);
+      Buffer.add_int32_le b (Int32.of_int source_element);
+      Buffer.add_int32_le b (Int32.of_int level);
+      Buffer.add_int32_le b (Int32.of_int field))
+
+(* set_property with a constant symbol value. *)
+let tx_set_symbol widget_id symbol =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_symbol);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (I64 symbol))
+
+(* set_property with a signal-bound symbol value. *)
+let tx_bind_symbol widget_id signal_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_symbol);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_property bound to one field of the element of the enclosing
+   For, `level` Fors up (0 = nearest; field 0 for a scalar). *)
+let tx_bind_symbol_element ?(level = 0) ?(field = 0) widget_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_symbol);
       Buffer.add_int32_le b (Int32.of_int source_element);
       Buffer.add_int32_le b (Int32.of_int level);
       Buffer.add_int32_le b (Int32.of_int field))
