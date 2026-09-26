@@ -132,7 +132,38 @@ func App() *kaya.App {
 				peer.send(id, text)
 			}
 			draft := ""
+			var found []string
+			at := -1
+			matches := tx.Signal("")
 			pane := tx.Column(func() {
+				tx.Row(func() {
+					tx.Search(func(tx *kaya.Tx, text string) {
+						query := strings.ToLower(strings.TrimSpace(text))
+						found, at = nil, -1
+						for i := len(c.messages) - 1; i >= 0 && query != ""; i-- {
+							if strings.Contains(strings.ToLower(c.messages[i].text), query) {
+								found = append(found, c.messages[i].key)
+							}
+						}
+						switch {
+						case query == "":
+							tx.Write(matches, "")
+						case len(found) == 1:
+							tx.Write(matches, "1 match")
+						default:
+							tx.Write(matches, fmt.Sprintf("%d matches", len(found)))
+						}
+					}).Placeholder("Search").A11yID("find").Grow(1).
+						OnSubmitted(func(tx *kaya.Tx, text string) {
+							if len(found) == 0 {
+								return
+							}
+							at = (at + 1) % len(found)
+							tx.ScrollToRow(threadList, found[at])
+							tx.Write(matches, fmt.Sprintf("%d of %d", at+1, len(found)))
+						})
+					tx.Label(matches).A11yID("matches")
+				})
 				tx.Button("Newest", func(tx *kaya.Tx) {
 					tx.ScrollToRow(threadList, c.messages[len(c.messages)-1].key)
 				}).Role(kaya.RolePlain).A11yID("newest")

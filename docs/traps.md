@@ -12751,3 +12751,18 @@ link startup, the second act's marker and the grant in one body. The guard
 is the chat-go leg on every lane: with `kaya_run` skipping the call it fails
 with `the platform holds no delivered notification 7002, wanted "Sam"`
 (watched on the mac 2026-09-25).
+
+## `press return` submitted twice on GTK and Compose, and the submit scene could not see it (found 2026-09-25)
+
+Both backends' `press return` is `type "\n"`, and both confirm a typed key by
+the field's text: GTK waits for `before + "\n"` and resends once after 2s if
+the field still reads `before`; Compose resends any key that did not
+lengthen the field, up to ten times. A single-line field's Return and a
+submitting textarea's Return insert nothing, so both resent it and the app
+received a second submit. tools/scenes/submit.steps reads the last submitted
+text into a label, so a second identical submit looks like one. The chat
+scene's search counts its Returns (`1 of 4`, then `2 of 4`) and read `2 of 4`
+and `4 of 4` on both lanes. Return is sent once and never waited for where it
+submits (gtk.rs `type_text`, KayaCompose.kt `kayaTypeAtFocus`); a plain
+textarea still waits for its newline, since the next `type` depends on it.
+The chat leg is the guard on all five lanes.

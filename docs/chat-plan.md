@@ -161,7 +161,7 @@ row).
 | C5 | an emoji button beside the compose field | the platform emoji picker (GTK EmojiChooser, the mac character palette, WinUI's emoji panel, the phones' keyboards) |
 | C6 | an image attachment shown inline | nothing new for display; the photo picker on the phones |
 | C7 | swipe a conversation to archive it on the phones | swipe actions |
-| C8 | a Search field over the thread; a result jumps to its message | nothing new (the search field, `scroll_to_row` into a filtered list) |
+| C8 | a Search field over the thread; a result jumps to its message (BUILT 2026-09-25: the thread keeps every message and each Return jumps to the next older match in place, as Messages does, rather than filtering the list; the count found `press return` submitting twice on GTK and Compose, docs/traps.md) | nothing new (the search field, `scroll_to_row` into a filtered list) |
 | C9 | the connection drops and comes back; messages queue meanwhile | nothing new in kaya; the app's reconnect over `post` |
 
 A LATER REVISION carries emoji and images beyond C5 and C6. Colour emoji

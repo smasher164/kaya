@@ -17355,23 +17355,26 @@ impl crate::harness::Stage for GtkStage {
         // edit and spends no native undo step.
         let target = Self::on_main(move |core| {
             let id = core.clipboard.focused_widget_id().map(WidgetId)?;
-            match core.widgets.get(&id) {
+            let submits = match core.widgets.get(&id) {
                 Some(NativeWidget::Entry(entry)) => {
                     gtk4::prelude::EditableExt::set_position(entry, -1);
+                    true
                 }
                 Some(NativeWidget::Search(search)) => {
                     gtk4::prelude::EditableExt::set_position(search, -1);
+                    true
                 }
                 Some(NativeWidget::Textarea(_, view)) => {
                     let buffer = view.buffer();
                     buffer.place_cursor(&buffer.end_iter());
+                    core.submits.borrow().contains(&id.0)
                 }
                 // Nothing editable focused: the keys still go where the
                 // platform sends them (point 2), and a following
                 // assertion reports the mismatch (point 4's contract).
                 _ => return None,
-            }
-            Some((id, core.text_of(id).unwrap_or_default()))
+            };
+            Some((id, core.text_of(id).unwrap_or_default(), submits))
         });
         let hold = if TYPED_ONCE.swap(true, std::sync::atomic::Ordering::SeqCst) {
             "150"
@@ -17467,8 +17470,16 @@ impl crate::harness::Stage for GtkStage {
         };
         send();
         // Point 4: every character delivered AND processed.
-        let Some((id, before)) = target else { return };
-        let want = format!("{before}{text}");
+        let Some((id, before, submits)) = target else { return };
+        // RETURN IS A KEY, SENT ONCE AND NEVER WAITED FOR: in a single-line
+        // field or a submitting textarea it submits and inserts nothing, so
+        // waiting for a newline resent it two seconds later and the app got
+        // two submits (docs/traps.md, the doubled submit).
+        if submits && text.chars().all(|c| c == '\n') {
+            return;
+        }
+        let lands = if submits { text.replace('\n', "") } else { text.to_owned() };
+        let want = format!("{before}{lands}");
         // THE SEND IS RETRIED ONCE: a GTK dialog's X teardown can reset input
         // focus AFTER the focus-then-keys chain ran, later the more pixels the
         // software renderer pushes (measured 2026-08-20). The retry is taken

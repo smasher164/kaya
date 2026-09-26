@@ -4314,6 +4314,9 @@ object KayaCompose {
         // The text before the first key, so the settle below can tell
         // "landed" from "has not started yet".
         val before = onUi(activity) { kayaFocusedTextNode()?.text }
+        val submitsOnReturn = onUi(activity) {
+            kayaFocusedTextNode()?.let { it.kind != KIND_TEXTAREA || it.submits }
+        } ?: false
         val map = android.view.KeyCharacterMap.load(
             android.view.KeyCharacterMap.VIRTUAL_KEYBOARD)
         for (c in text) {
@@ -4349,8 +4352,11 @@ object KayaCompose {
                     }
                 }
                 // Nothing focused is legitimate under point 2, so there
-                // is nothing to confirm and nothing to retry.
-                if (was == null || kayaKeyLanded(activity, was)) break
+                // is nothing to confirm and nothing to retry. RETURN IS SENT
+                // ONCE: where it submits it inserts nothing, and a resend is
+                // a second submit (docs/traps.md, the doubled submit).
+                if (was == null || (c == '\n' && submitsOnReturn) ||
+                    kayaKeyLanded(activity, was)) break
                 tries += 1
                 if (tries >= 10) {
                     Log.e(

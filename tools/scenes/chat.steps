@@ -1,4 +1,4 @@
-# docs/chat-plan.md C0-C3: a conversation opens at its first unread message,
+# docs/chat-plan.md C0-C3, C8: a conversation opens at its first unread message,
 # a quote jumps to what it quotes, the newest button returns to the end, a
 # message sends on Return, the peer's answer arrives off the socket, and a
 # conversation that is not open counts what it missed and posts a
@@ -15,6 +15,22 @@ click button@quote[m27]
 expect_scrolled_to column@thread m03
 click button@newest
 expect_scrolled_to column@thread m30
+# C8: the thread's search jumps to each match in place, newest first.
+click search@find
+expect_focused search@find
+type "friday"
+expect label@matches "4 matches"
+press return
+expect_scrolled_to column@thread m21
+expect label@matches "1 of 4"
+# iOS ends editing on a single-line field's Return, so the field is clicked
+# again (docs/submit-plan.md S3).
+click search@find
+press return
+expect_scrolled_to column@thread m15
+expect label@matches "2 of 4"
+clear_search search@find
+expect label@matches ""
 click textarea@compose
 expect_focused textarea@compose
 type "On my way"
