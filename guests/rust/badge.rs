@@ -11,6 +11,9 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::<Msg>::new();
     let status = ctx.apply(|tx| {
         tx.window(kaya::DEFAULT_WINDOW).title("badge");
+        // A badge is drawn on the app's icon, so the app declares one: on
+        // the mac that is also what gives it a Dock tile.
+        tx.app_identity();
         let status = tx.signal("ready");
         let root = tx
             .column(|tx| {
