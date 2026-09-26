@@ -14,7 +14,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, cast
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0xc64e96d98712b19b
+SPEC_HASH = 0x6fef3d923cd4cd3e
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -111,6 +111,7 @@ PROP_CAN_REDO = 35
 PROP_DOCUMENT = 36
 PROP_SUBMITS = 37
 PROP_FILLED = 38
+PROP_FOLLOWS_END = 39
 WPROP_TITLE = 1
 WPROP_WIDTH = 2
 WPROP_HEIGHT = 3
@@ -1264,6 +1265,21 @@ def tx_bind_filled(widget_id: int, signal_id: int) -> bytes:
 def tx_bind_filled_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_FILLED, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_follows_end(widget_id: int, follows_end: bool) -> bytes:
+    """set_property with a constant follows_end value (bool)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_FOLLOWS_END, SOURCE_CONST) + _enc.value(follows_end))
+
+
+def tx_bind_follows_end(widget_id: int, signal_id: int) -> bytes:
+    """set_property with a signal-bound follows_end value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_FOLLOWS_END, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_follows_end_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_FOLLOWS_END, SOURCE_ELEMENT, level, field))
 
 
 def tx_set_window_title(window: int, title: str) -> bytes:

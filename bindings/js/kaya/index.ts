@@ -3923,10 +3923,17 @@ function setGrow(handle: Handle, opts: GrowOption): void {
 
 /** A vertical scroll viewport parenting EXACTLY ONE child. Give it `grow`
  * so the enclosing track CONSTRAINS it. */
-export function scroll<T = void>(optsOrBody?: GrowOption | ((scroll: Widget) => T), body?: (scroll: Widget) => T): T {
-  const [opts, run] = optsAndOptionalBody<GrowOption, Widget, T>(optsOrBody, body);
+export type ScrollOptions = GrowOption & {
+  /** Keep the end in view while the content grows, until the user scrolls
+   * away (docs/follow-end-plan.md). */
+  followsEnd?: boolean;
+};
+
+export function scroll<T = void>(optsOrBody?: ScrollOptions | ((scroll: Widget) => T), body?: (scroll: Widget) => T): T {
+  const [opts, run] = optsAndOptionalBody<ScrollOptions, Widget, T>(optsOrBody, body);
   const handle = widget(wire.KIND_SCROLL);
   setGrow(handle, opts);
+  if (opts.followsEnd) records().push(wire.tx_set_follows_end(handle.id, true));
   return new Container(handle).run(run);
 }
 

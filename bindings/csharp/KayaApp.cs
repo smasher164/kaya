@@ -2902,6 +2902,11 @@ sealed class Tx : IDisposable
     public void SetFilled(Widget w, Tint tint) =>
         Records.Add(KayaWire.TxSetFilled(w.Id, (long)tint));
 
+    /// A scroll that keeps its end in view while its content grows
+    /// (docs/follow-end-plan.md).
+    public void SetFollowsEnd(Widget w, bool on) =>
+        Records.Add(KayaWire.TxSetFollowsEnd(w.Id, on));
+
     /// A container's arrangement axis (the creation kind's own is the
     /// default — row horizontal, column vertical). Containers only; the
     /// widget stays addressable by its creation kind whatever this says
@@ -3489,12 +3494,17 @@ sealed class Tx : IDisposable
     /// A vertical scroll viewport over EXACTLY ONE child. Pass grow: so
     /// the enclosing track CONSTRAINS it — an unconstrained viewport
     /// hugs its content and nothing overflows.
-    public void Scroll(Action<Widget> body, double? grow = null) =>
-        ContainerOf<object?>(KayaWire.KindScroll, c => { body(c); return null; },
-            grow, null, null, null);
+    /// `followsEnd:` keeps the end in view while the content grows, until the
+    /// user scrolls away from it (docs/follow-end-plan.md).
+    public void Scroll(Action<Widget> body, double? grow = null, bool followsEnd = false) =>
+        Scroll<object?>(c => { body(c); return null; }, grow, followsEnd);
 
-    public T Scroll<T>(Func<Widget, T> body, double? grow = null) =>
-        ContainerOf(KayaWire.KindScroll, body, grow, null, null, null);
+    public T Scroll<T>(Func<Widget, T> body, double? grow = null, bool followsEnd = false) =>
+        ContainerOf(KayaWire.KindScroll, c =>
+        {
+            if (followsEnd) SetFollowsEnd(c, true);
+            return body(c);
+        }, grow, null, null, null);
 
     /// A grid laying its children out row-major into `columns` columns —
     /// each column takes its NATURAL width, aligned across rows;

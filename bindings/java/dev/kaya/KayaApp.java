@@ -3236,6 +3236,19 @@ public final class KayaApp {
             return this;
         }
 
+        /** This scroll keeps its end in view while its content grows, until
+         * the user scrolls away (docs/follow-end-plan.md):
+         * tx.scroll(s -> {...}).followsEnd(). */
+        public Widget followsEnd() {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: followsEnd on a widget outside its build transaction"
+                    + " — use Tx.setFollowsEnd inside a live transaction");
+            }
+            tx.setFollowsEnd(this, true);
+            return this;
+        }
+
         /** This container filled with a platform tint at construction:
          * tx.row(() -> {...}).filled(Tint.ACCENT). */
         public Widget filled(Tint tint) {
@@ -5083,6 +5096,12 @@ public final class KayaApp {
          */
         public void setFilled(Widget w, Tint tint) {
             emit(KayaWire.txSetFilled(w.id, tint.wire));
+        }
+
+        /** A scroll that keeps its end in view while its content grows
+         * (docs/follow-end-plan.md). */
+        public void setFollowsEnd(Widget w, boolean on) {
+            emit(KayaWire.txSetFollowsEnd(w.id, on));
         }
 
         /**

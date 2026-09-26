@@ -153,7 +153,7 @@ row).
 | stage | builds | forces |
 |---|---|---|
 | C0 | the app on today's surface: guest, scene, five lanes (BUILT 2026-09-25: guests/go/chat, tools/scenes/chat.steps; the app follows every new message with `scroll_to_row` itself, so §3's "does the platform keep the newest row in view" is still unmeasured and is C1's first step) | a Go record row's `Button` and `Spacer` (the generated façade lacked both) |
-| C1 | the thread stays at the bottom as messages arrive, and stays put when the user has scrolled up | a scroll prop that follows the end (R4 measured: no platform does it by itself) |
+| C1 | the thread stays at the bottom as messages arrive, and stays put when the user has scrolled up (BUILT 2026-09-25: `follows_end`, docs/follow-end-plan.md; the app no longer scrolls to an arriving reply itself) | a scroll prop that follows the end (R4 measured: no platform does it by itself) |
 | C1b | a compose field that grows from one line as the message does, up to a few lines, then scrolls | a textarea that sizes to its content between a floor and a cap (SwiftUI's `TextField(axis: .vertical)`, found by C0's first capture: a textarea is several lines tall at rest) |
 | C2 | an unread count on the dock and taskbar | the app badge (tasks has section badges only) |
 | C3 | a notification per message; activating it opens the conversation | nothing new (docs/tasks-s3-plan.md) |

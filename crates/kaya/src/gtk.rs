@@ -4758,6 +4758,9 @@ struct CoreState {
     /// The textareas whose Return submits (docs/submit-plan.md S2), read by
     /// each view's key controller at the keystroke.
     submits: std::rc::Rc<RefCell<std::collections::HashSet<u64>>>,
+    /// Each following scroll's adjustment and its `changed` handler
+    /// (docs/follow-end-plan.md), so turning the prop off disconnects it.
+    follow_handlers: RefCell<HashMap<u64, (gtk4::Adjustment, glib::SignalHandlerId)>>,
     /// The textareas the APP owns the history of (docs/rich-text-plan.md §14);
     /// the buffer's own history is off there, which the typing verb's native
     /// proof has to know.
@@ -6784,6 +6787,10 @@ const TINT_CSS: &str = "\
 .kaya-tint-warning { background-color: @warning_bg_color; color: @warning_fg_color; }
 .kaya-tint-critical { background-color: @error_bg_color; color: @error_fg_color; }
 ";
+
+/// How close to its end a scroll counts as AT its end for following: one
+/// body line (docs/follow-end-plan.md §1).
+const FOLLOW_SLACK: f64 = 22.0;
 
 const FILLED_CLASS: &str = "kaya-filled";
 const FILLED_PAD_CLASS: &str = "kaya-filled-pad";
@@ -12935,6 +12942,26 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                         core.rich_pending.borrow_mut().remove(&id.0);
                     }
                 }
+                // docs/follow-end-plan.md §2: `changed` fires after `upper`
+                // grew, so the handler keeps the previous upper and follows only
+                // when the view sat within a line of that old end.
+                (NativeWidget::Scroll(sw), Prop::FollowsEnd, Value::Bool(on)) => {
+                    use gtk4::prelude::{AdjustmentExt, ObjectExt};
+                    if let Some((adj, handler)) = core.follow_handlers.borrow_mut().remove(&id.0) {
+                        adj.disconnect(handler);
+                    }
+                    if on {
+                        let adj = sw.vadjustment();
+                        let last_upper = std::rc::Rc::new(std::cell::Cell::new(adj.upper()));
+                        let follow = adj.connect_changed(move |a| {
+                            let old = last_upper.replace(a.upper());
+                            if a.upper() > old && a.value() + a.page_size() >= old - FOLLOW_SLACK {
+                                a.set_value(a.upper() - a.page_size());
+                            }
+                        });
+                        core.follow_handlers.borrow_mut().insert(id.0, (adj, follow));
+                    }
+                }
                 (NativeWidget::Column(container), Prop::Filled, Value::I64(tint))
                 | (NativeWidget::Row(container), Prop::Filled, Value::I64(tint)) => {
                     set_filled(&container.clone().upcast::<gtk4::Widget>(), tint);
@@ -15551,6 +15578,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 preedit: std::rc::Rc::new(RefCell::new(HashMap::new())),
                 rich: std::rc::Rc::new(RefCell::new(std::collections::HashSet::new())),
                 submits: std::rc::Rc::new(RefCell::new(std::collections::HashSet::new())),
+                follow_handlers: RefCell::new(HashMap::new()),
                 own_undo: RefCell::new(std::collections::HashSet::new()),
                 rich_links: HashMap::new(),
                 label_runs: HashMap::new(),

@@ -2619,6 +2619,9 @@ data Attr (c :: WClass) where
   Align :: Align -> Attr 'BoxW
   -- | This container filled with a platform tint. Containers only.
   Filled :: Tint -> Attr 'BoxW
+  -- | This scroll keeps its end in view while its content grows, until the
+  -- user scrolls away (docs\/follow-end-plan.md).
+  FollowsEnd :: Attr 'BoxW
   -- | Stack this row's children vertically while the window's size
   -- class is the named one. Containers only, and LIVE ZONE ONLY —
   -- 'TplAttr' has no counterpart.
@@ -2702,6 +2705,7 @@ applyAttr (Spacing gap) w = setSpacing w gap
 applyAttr (Inset pad) w = setInset w pad
 applyAttr (Align a) w = setAlign w a
 applyAttr (Filled t) w = setFilled w t
+applyAttr FollowsEnd (Widget w) = emitB (W.txSetFollowsEnd w True)
 applyAttr (StackWhen when) w = stackWhen w when
 applyAttr (A11yId i) w = setA11yId w i
 applyAttr (A11yIdBound sig) w = bindA11yId w sig

@@ -1038,6 +1038,7 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         // this parameterizes (docs/adaptive-layout-plan.md D1).
         Prop::Axis => matches!(kind, WidgetKind::Column | WidgetKind::Row),
         Prop::Filled => matches!(kind, WidgetKind::Column | WidgetKind::Row),
+        Prop::FollowsEnd => kind == WidgetKind::Scroll,
         // A container's own padding (docs/styling-plan.md D3): spacing's
         // kinds exactly, and for spacing's reason — the prop is about a
         // container's relation to ITS children.
@@ -1585,6 +1586,7 @@ fn prop_value_type(prop: Prop) -> ValueType {
         Prop::Inset => ValueType::F64,
         Prop::Align => ValueType::I64,
         Prop::Filled => ValueType::I64,
+        Prop::FollowsEnd => ValueType::Bool,
         Prop::Axis => ValueType::I64,
         Prop::Role => ValueType::I64,
         Prop::Indeterminate | Prop::Fill | Prop::Wrap | Prop::Rich | Prop::Submits => ValueType::Bool,

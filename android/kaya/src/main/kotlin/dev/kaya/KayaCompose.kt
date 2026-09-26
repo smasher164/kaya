@@ -586,6 +586,9 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     /** A filled container's tint (docs/tints-plan.md T2); 0 = not filled. */
     var filled by mutableStateOf(0L)
     var insetSet by mutableStateOf(false)
+    /** A scroll that keeps its end in view while its content grows
+     * (docs/follow-end-plan.md). */
+    var followsEnd by mutableStateOf(false)
 
     /// The arrangement axis (null = the creation kind's own — row
     /// horizontal, column vertical). One node, two constructor
@@ -677,6 +680,10 @@ val kayaFillBoxes = HashMap<Long, android.graphics.Rect>()
  * candidates (docs/tints-plan.md §4).
  */
 @Volatile var kayaTintFills: List<Int> = emptyList()
+
+/** How close to its end a scroll counts as AT its end for following: one
+ * body line (docs/follow-end-plan.md §1). */
+val KAYA_FOLLOW_SLACK = 22.dp
 
 /** A filled container's inset when the app set none (docs/tints-plan.md §3). */
 const val KAYA_FILLED_DEFAULT_INSET = 12.0
@@ -1881,7 +1888,7 @@ object KayaCompose {
     // but only the runtime assert catches a stale compiled APK against
     // a new libkaya. ULong because the fingerprint's high bit is fair
     // game and a Kotlin Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0xc64e96d98712b19buL
+    private const val SPEC_HASH: ULong = 0x6fef3d923cd4cd3euL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -2131,6 +2138,7 @@ object KayaCompose {
     private const val PROP_DOCUMENT = 36
     private const val PROP_SUBMITS = 37
     private const val PROP_FILLED = 38
+    private const val PROP_FOLLOWS_END = 39
     private const val PROP_COLUMNS = 11
     // The accessibility identifier (never spoken) and label (spoken).
     // Universal: every widget kind carries both.
@@ -2988,6 +2996,8 @@ object KayaCompose {
                             KayaSceneModel.nodes[id]!!.submits = readBool(b)
                         PROP_FILLED ->
                             KayaSceneModel.nodes[id]!!.filled = readI64(b)
+                        PROP_FOLLOWS_END ->
+                            KayaSceneModel.nodes[id]!!.followsEnd = readBool(b)
                         // docs/rich-text-plan.md §14: this platform's lever
                         // is `clearHistory()`, so taking ownership drops what
                         // the field had banked.
@@ -13385,7 +13395,23 @@ private fun KayaRenderCore(
                     modifier = boxFill.then(a11y),
                     progress = { node.value.toFloat() })
             }
-        KayaCompose.KIND_SCROLL ->
+        KayaCompose.KIND_SCROLL -> {
+            // docs/follow-end-plan.md §2: the state's max grows with the content
+            // while its value stays, so growth from within a line of the OLD max
+            // scrolls to the new one — never the animated form.
+            if (node.followsEnd) {
+                val slack = with(LocalDensity.current) { KAYA_FOLLOW_SLACK.toPx() }
+                LaunchedEffect(node.scrollState) {
+                    var last = node.scrollState.maxValue
+                    snapshotFlow { node.scrollState.maxValue }.collect { max ->
+                        val old = last
+                        last = max
+                        if (max > old && node.scrollState.value >= old - slack) {
+                            node.scrollState.scrollTo(max)
+                        }
+                    }
+                }
+            }
             // The vertical scroll viewport over its ONE child (the
             // scene enforces the count): verticalScroll over the
             // node's own ScrollState — the toolkit's real scrolling
@@ -13398,6 +13424,7 @@ private fun KayaRenderCore(
             ) {
                 node.children.firstOrNull()?.let { KayaRender(it) }
             }
+        }
         KayaCompose.KIND_COLUMN, KayaCompose.KIND_ROW -> KayaFilledContent(node) {
             // The app's scroll_to_row lands from an effect, the reveal's
             // reason: a scroll needs the layout (docs/scroll-to-plan.md S4).

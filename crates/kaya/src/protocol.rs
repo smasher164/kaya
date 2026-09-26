@@ -1422,6 +1422,9 @@ pub enum Prop {
     /// A row or column filled with a platform tint (the tint enum, I64;
     /// docs/tints-plan.md T2).
     Filled,
+    /// A scroll that keeps its end in view while its content grows (Bool;
+    /// docs/follow-end-plan.md).
+    FollowsEnd,
     /// The app owns a rich textarea's undo (Bool-valued; docs/rich-text-plan.md
     /// R6, §14): the native stack is off, the ledger never banks it, and
     /// Edit>Undo/Redo reach the app through the role item's own activation.

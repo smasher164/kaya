@@ -20,7 +20,14 @@ expect label@text[u1] "On my way"
 expect_scrolled_to column@thread u1
 expect entry@compose ""
 expect label@text[p1] "See you soon"
-expect_scrolled_to column@thread p1
+# The thread FOLLOWS ITS END (docs/follow-end-plan.md): the reply arrived with
+# the reader at the newest message, and nothing but the scroll moved the view.
+expect_at_end scroll#0
+# A reader who scrolled up is left there when the next message arrives.
+click button@quote[m27]
+expect_scrolled_to column@thread m03
+expect label@text[p3] "Also, bring the umbrella"
+expect_scrolled_to column@thread m03
 expect label@unread[sam] "2 new"
 expect label@preview[sam] "Are we still on for Friday?"
 expect_no_clipping

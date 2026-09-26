@@ -2310,8 +2310,13 @@ let column ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help
    says so; the scene enforces it too). Pass [~grow] so the enclosing
    track CONSTRAINS it — an unconstrained viewport hugs its content
    and nothing overflows. *)
-let scroll ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind children =
-  container ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind Kaya_wire.kind_scroll children
+(* [~follows_end] keeps the end in view while the content grows, until the
+   user scrolls away from it (docs/follow-end-plan.md). *)
+let scroll ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?(follows_end = false) children () =
+  let w = container ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind Kaya_wire.kind_scroll children () in
+  let (Widget id) = w in
+  if follows_end then emit (the_tx ()) (Kaya_wire.tx_set_follows_end id true);
+  w
 
 (* [~stack_when] stacks this row's children vertically while the window's
    SIZE CLASS is the named one, reverting on leaving it — a

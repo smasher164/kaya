@@ -590,6 +590,9 @@ struct CoreState {
     /// The content layer each split's detail pane sits on ([`content_layer`]),
     /// released with the split.
     split_layers: HashMap<u64, Grid>,
+    /// Each following scroll's LayoutUpdated registration
+    /// (docs/follow-end-plan.md), so turning the prop off removes it.
+    follow_tokens: HashMap<WidgetId, i64>,
     /// The INNER TwoPaneView at a ceiling of three — the nest IS the
     /// three-pane construct (the priority is a CHAIN of PanePriority
     /// bits), and the panes reading folds both views' Modes.
@@ -2073,6 +2076,10 @@ fn container_padding(core: &CoreState, id: WidgetId) -> f64 {
     };
     own + card + if root { core.inset } else { 0.0 }
 }
+
+/// How close to its end a scroll counts as AT its end for following: one
+/// body line (docs/follow-end-plan.md §1).
+const FOLLOW_SLACK: f64 = 22.0;
 
 /// A filled container's inset when the app set none (docs/tints-plan.md §3).
 const FILLED_DEFAULT_INSET: f64 = 12.0;
@@ -15785,6 +15792,41 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 // docs/rich-text-plan.md R1: the attributed surface exists only
                 // where the widget asked for it, and the table's own entry is
                 // what says so to every handler below.
+                // docs/follow-end-plan.md §2: LayoutUpdated sees the extent
+                // after it grew; the handler keeps the previous extent and
+                // follows only when the view sat within a line of that old end.
+                // Weak and atomic for the caption handler's two reasons: a
+                // strong viewer is a cycle, and the handler must be Send.
+                (NativeWidget::Scroll(viewer), Prop::FollowsEnd, Value::Bool(on)) => {
+                    if let Some(token) = core.follow_tokens.remove(&id) {
+                        viewer.RemoveLayoutUpdated(token)?;
+                    }
+                    if on {
+                        let weak = viewer.downgrade()?;
+                        let last = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(
+                            viewer.ExtentHeight()?.to_bits(),
+                        ));
+                        let follow = EventHandler::<windows_core::IInspectable>::new(move |_, _| {
+                            let Some(viewer) = weak.upgrade() else { return Ok(()) };
+                            let extent = viewer.ExtentHeight()?;
+                            let old = f64::from_bits(
+                                last.swap(extent.to_bits(), std::sync::atomic::Ordering::Relaxed),
+                            );
+                            let bottom = viewer.VerticalOffset()? + viewer.ViewportHeight()?;
+                            if extent > old && bottom >= old - FOLLOW_SLACK {
+                                viewer.ChangeViewWithOptionalAnimation(
+                                    None::<&IReference<f64>>,
+                                    &offset_ref(viewer.ScrollableHeight()?)?,
+                                    None::<&IReference<f32>>,
+                                    true,
+                                )?;
+                            }
+                            Ok(())
+                        });
+                        let token = viewer.LayoutUpdated(&follow)?;
+                        core.follow_tokens.insert(id, token);
+                    }
+                }
                 (NativeWidget::Column(grid) | NativeWidget::Row(grid), Prop::Filled, Value::I64(tint)) => {
                     ensure_accent_surface()?;
                     grid.SetStyle(&filled_style(tint)?)?;
@@ -18268,6 +18310,7 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             split_presentation: HashMap::new(),
             split_views: HashMap::new(),
             split_layers: HashMap::new(),
+            follow_tokens: HashMap::new(),
             window_roots: HashMap::new(),
             tree_parent: HashMap::new(),
             dead_roots: std::collections::HashSet::new(),

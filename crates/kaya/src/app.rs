@@ -1725,6 +1725,13 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
         self
     }
 
+    /// This scroll keeps its end in view while its content grows —
+    /// [`Tx::follows_end`] chained.
+    pub fn follows_end(self, on: bool) -> Self {
+        self.tx.follows_end(self.id, on);
+        self
+    }
+
     /// This container filled with a platform tint — [`Tx::filled`] chained.
     pub fn filled(self, tint: Tint) -> Self {
         self.tx.filled(self.id, tint);
@@ -2677,6 +2684,13 @@ impl<'a> Tx<'a> {
     /// rows-only. See [`Prop::Align`].
     pub fn align(&mut self, widget: WidgetId, align: Align) {
         self.set(widget, Prop::Align, align.wire());
+    }
+
+    /// A scroll that FOLLOWS ITS END: while the viewport shows the end of its
+    /// content, growth keeps the end in view; once the user scrolls away,
+    /// growth leaves the view where it is (docs/follow-end-plan.md).
+    pub fn follows_end(&mut self, widget: WidgetId, on: bool) {
+        self.set(widget, Prop::FollowsEnd, on);
     }
 
     /// A row or column FILLED with a platform tint: kaya chooses the fill,

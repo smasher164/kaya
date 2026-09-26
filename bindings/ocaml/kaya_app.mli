@@ -865,7 +865,8 @@ val scroll :
   ?a11y_label:string ->
   ?a11y_label_bind:string signal ->
   ?help:string ->
-  ?help_bind:string signal -> (unit -> widget) list -> unit -> widget
+  ?help_bind:string signal ->
+  ?follows_end:bool -> (unit -> widget) list -> unit -> widget
 
 (* [~stack_when] stacks this row's children vertically while the
    window's SIZE CLASS is the named one, reverting on leaving it. *)

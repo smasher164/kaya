@@ -4687,11 +4687,16 @@ public final class KayaAppTx {
     /// the enclosing track CONSTRAINS it — an unconstrained viewport hugs
     /// its content and nothing overflows.
     @discardableResult
+    /// `followsEnd:` keeps the end in view while the content grows, until the
+    /// user scrolls away from it (docs/follow-end-plan.md).
     public func scroll<R>(
-        grow: Double? = nil, _ children: (KayaWidget) throws -> R
+        grow: Double? = nil, followsEnd: Bool = false, _ children: (KayaWidget) throws -> R
     ) rethrows -> R {
         try containerOf(
-            UInt32(KAYA_KIND_SCROLL), children, grow: grow, spacing: nil,
+            UInt32(KAYA_KIND_SCROLL), { w in
+                if followsEnd { tx.setFollowsEnd(w.id, true) }
+                return try children(w)
+            }, grow: grow, spacing: nil,
             inset: nil, align: nil)
     }
 

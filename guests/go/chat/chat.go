@@ -91,8 +91,10 @@ func App() *kaya.App {
 			c := convs[id]
 			c.messages = append(c.messages, message{key: key, text: text})
 			if id == open {
+				// The thread's scroll follows its end (docs/follow-end-plan.md):
+				// the reply shows when the reader was at the newest message and
+				// leaves them where they are when they were not.
 				insert(tx, c.messages[len(c.messages)-1])
-				tx.ScrollToRow(threadList, key)
 			} else {
 				if c.unread == 0 {
 					c.firstUnread = key
@@ -177,7 +179,7 @@ func App() *kaya.App {
 						},
 					)
 					tx.SetA11yID(threadList, "thread")
-				}).Grow(1)
+				}).Grow(1).FollowsEnd()
 				tx.Row(func() {
 					// A single-line field until the growing compose field lands
 					// (docs/chat-plan.md C1b): a textarea is several lines tall.
@@ -277,10 +279,13 @@ type peer struct {
 	receive func(tx *kaya.Tx, conv, key, text string)
 }
 
-var script = map[string][][2]string{
-	"maya": {{"maya", "See you soon"}, {"sam", "Are we still on for Friday?"}},
-	"sam":  {{"sam", "Perfect"}},
-	"alex": {{"alex", "Glad you liked them"}},
+// Each answer is (conversation, text, delay after the one before). Maya's
+// second answer comes late enough for a reader to have scrolled away.
+var script = map[string][][3]string{
+	"maya": {{"maya", "See you soon", "200ms"}, {"sam", "Are we still on for Friday?", "0s"},
+		{"maya", "Also, bring the umbrella", "2500ms"}},
+	"sam":  {{"sam", "Perfect", "200ms"}},
+	"alex": {{"alex", "Glad you liked them", "200ms"}},
 }
 
 func (p *peer) send(conv, text string) {
@@ -328,8 +333,9 @@ func serve(listener net.Listener) {
 		if len(parts) != 3 || parts[0] != "SEND" {
 			continue
 		}
-		time.Sleep(200 * time.Millisecond)
 		for _, answer := range script[parts[1]] {
+			delay, _ := time.ParseDuration(answer[2])
+			time.Sleep(delay)
 			seq++
 			fmt.Fprintf(conn, "MSG\t%s\tp%d\t%s\n", answer[0], seq, answer[1])
 		}

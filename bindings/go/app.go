@@ -965,6 +965,22 @@ func (w Widget) Align(mode Align) Widget {
 	return w
 }
 
+// SetFollowsEnd makes a scroll keep its end in view while its content grows,
+// until the user scrolls away from the end (docs/follow-end-plan.md).
+func (tx *Tx) SetFollowsEnd(w Widget, on bool) {
+	tx.emit(TxSetFollowsEnd(w.id, on))
+}
+
+// FollowsEnd makes this scroll follow its end at construction. Same
+// transaction discipline as Grow.
+func (w Widget) FollowsEnd() Widget {
+	if w.tx == nil || w.tx.closed {
+		panic("kaya: FollowsEnd on a widget outside its build transaction — use Tx.SetFollowsEnd inside a live transaction")
+	}
+	w.tx.SetFollowsEnd(w, true)
+	return w
+}
+
 // Tint is what a filled container's surface means (TintAccent..TintNeutral;
 // docs/tints-plan.md T1): each backend draws it in the platform's own fill
 // and foreground pair.

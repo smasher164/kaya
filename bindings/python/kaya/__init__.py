@@ -4430,12 +4430,16 @@ def _set_grow(handle: _Handle, grow: float | None) -> None:
         _records().append(wire.tx_set_grow(handle.id, float(grow)))
 
 
-def scroll(grow: float | None = None) -> _Container:
+def scroll(grow: float | None = None, *, follows_end: bool = False) -> _Container:
     """A vertical scroll viewport parenting EXACTLY ONE child. Give it
     `grow` so the enclosing track CONSTRAINS it — an unconstrained
-    viewport hugs its content and nothing overflows."""
+    viewport hugs its content and nothing overflows. `follows_end` keeps
+    the end in view while the content grows, until the user scrolls away
+    (docs/follow-end-plan.md)."""
     handle = _widget(wire.KIND_SCROLL)
     _set_grow(handle, grow)
+    if follows_end:
+        _records().append(wire.tx_set_follows_end(handle.id, True))
     return _Container(handle)
 
 

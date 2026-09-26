@@ -866,6 +866,11 @@
 #define KAYA_PROP_FILLED 38
 
 /**
+ * A scroll that keeps its end in view (docs/follow-end-plan.md).
+ */
+#define KAYA_PROP_FOLLOWS_END 39
+
+/**
  * Window properties (spec::WINDOW_PROPS): their own namespace —
  * windows are not widgets. Window 0 is the primary surface.
  */

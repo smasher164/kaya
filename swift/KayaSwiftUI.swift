@@ -10,7 +10,7 @@ import UserNotifications
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0xc64e96d98712b19b
+let kayaSpecHash: UInt64 = 0x6fef3d923cd4cd3e
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -228,6 +228,7 @@ private let propCanRedo: UInt32 = 35
 private let propDocument: UInt32 = 36
 private let propSubmits: UInt32 = 37
 private let propFilled: UInt32 = 38
+private let propFollowsEnd: UInt32 = 39
 private let tintAccent: Int64 = 1
 private let tintSuccess: Int64 = 2
 private let tintWarning: Int64 = 3
@@ -640,6 +641,9 @@ final class KayaNode: Identifiable {
     var insetSet = false
     /// A filled container's tint (docs/tints-plan.md T2); 0 = not filled.
     var filled: Int64 = 0
+    /// A scroll that keeps its end in view while its content grows
+    /// (docs/follow-end-plan.md).
+    var followsEnd = false
     /// The widget's accept list, verbatim; empty means it takes nothing.
     var accepts = ""
     /// A `role link` label's destination (docs/tasks-s2-plan.md T3).
@@ -5712,6 +5716,8 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     kayaScene.nodes[id]!.inset =
                         raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
                     kayaScene.nodes[id]!.insetSet = true
+                case (propFollowsEnd, valueBool):
+                    kayaScene.nodes[id]!.followsEnd = raw[body + 24] != 0
                 case (propFilled, valueI64):
                     kayaScene.nodes[id]!.filled =
                         raw.loadUnaligned(fromByteOffset: body + 24, as: Int64.self)
@@ -14914,6 +14920,10 @@ func kayaRowAlignment(_ mode: Int64) -> VerticalAlignment {
 /// other half of the measured-inset observation.
 @MainActor var kayaOuterSize: CGSize = .zero
 
+/// How close to its end a scroll counts as AT its end for following: one
+/// body line (docs/follow-end-plan.md §1).
+let kayaFollowSlack: Double = 22
+
 // MARK: - Tints (docs/tints-plan.md)
 
 /// The corner radius and the inset a filled container takes when the app set
@@ -17189,10 +17199,22 @@ struct KayaRender: View {
                                             node.scrollContentMaxY =
                                                 g.frame(in: .named("kaya-scroll-\(node.id)")).maxY
                                         }
-                                        .onChange(of: g.frame(in: .named("kaya-scroll-\(node.id)"))) { _, f in
+                                        .onChange(of: g.frame(in: .named("kaya-scroll-\(node.id)"))) { old, f in
                                             node.scrollContentH = f.height
                                             node.scrollContentMaxY = f.maxY
                                             kayaDrainRowScrolls()
+                                            // docs/follow-end-plan.md §1: growth keeps
+                                            // the end in view when the view sat at it
+                                            // BEFORE the growth.
+                                            if node.followsEnd, f.height > old.height + 0.5,
+                                                old.maxY <= node.scrollViewportH + kayaFollowSlack
+                                            {
+                                                var t = Transaction()
+                                                t.disablesAnimations = true
+                                                withTransaction(t) {
+                                                    proxy.scrollTo("kaya-scroll-content-\(node.id)", anchor: .bottom)
+                                                }
+                                            }
                                         }
                                 }
                             )

@@ -223,6 +223,9 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     // tint, kaya choosing the fill, radius, inset and foreground from the
     // platform's own pair. One prop so a tint cannot exist unfilled.
     ("filled", 38, PropKind::Enum("tint")),
+    // docs/follow-end-plan.md: a scroll that keeps its end in view while
+    // its content grows, until the user scrolls away from the end.
+    ("follows_end", 39, PropKind::Bool),
 ];
 
 /// Window properties: the presentation-context twin of PROPS, in its
@@ -3223,6 +3226,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("document", 36),
                 ("submits", 37),
                 ("filled", 38),
+                ("follows_end", 39),
             ],
         },
         EnumSpec {
@@ -4015,6 +4019,7 @@ mod tests {
                     ("prop", "document") => wire::PROP_DOCUMENT,
                     ("prop", "submits") => wire::PROP_SUBMITS,
                     ("prop", "filled") => wire::PROP_FILLED,
+                    ("prop", "follows_end") => wire::PROP_FOLLOWS_END,
                     ("wprop", "title") => wire::WPROP_TITLE,
                     ("wprop", "width") => wire::WPROP_WIDTH,
                     ("wprop", "height") => wire::WPROP_HEIGHT,

@@ -852,6 +852,8 @@ pub const KAYA_PROP_DOCUMENT: u32 = 36;
 pub const KAYA_PROP_SUBMITS: u32 = 37;
 /// A row or column filled with a platform tint (docs/tints-plan.md T2).
 pub const KAYA_PROP_FILLED: u32 = 38;
+/// A scroll that keeps its end in view (docs/follow-end-plan.md).
+pub const KAYA_PROP_FOLLOWS_END: u32 = 39;
 
 /// Window properties (spec::WINDOW_PROPS): their own namespace —
 /// windows are not widgets. Window 0 is the primary surface.
@@ -1069,6 +1071,7 @@ const _: () = assert!(
         && KAYA_PROP_DOCUMENT == wire::PROP_DOCUMENT
         && KAYA_PROP_SUBMITS == wire::PROP_SUBMITS
         && KAYA_PROP_FILLED == wire::PROP_FILLED
+        && KAYA_PROP_FOLLOWS_END == wire::PROP_FOLLOWS_END
         && KAYA_WPROP_TITLE == wire::WPROP_TITLE
         && KAYA_WPROP_WIDTH == wire::WPROP_WIDTH
         && KAYA_WPROP_HEIGHT == wire::WPROP_HEIGHT
@@ -1333,7 +1336,7 @@ const _: () = {
 // Completeness, not just agreement (docs/traps.md): a new spec prop
 // trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::PROPS.len() == 38,
+    crate::spec::PROPS.len() == 39,
     "spec::PROPS grew: export the new KAYA_PROP_* above, extend the pin, and bump this count"
 );
 const _: () = assert!(

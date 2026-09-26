@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0xc64e96d98712b19bn;
+export const SPEC_HASH = 0x6fef3d923cd4cd3en;
 
 export const VALUE_BOOL = 1;
 export const VALUE_I64 = 2;
@@ -104,6 +104,7 @@ export const PROP_CAN_REDO = 35;
 export const PROP_DOCUMENT = 36;
 export const PROP_SUBMITS = 37;
 export const PROP_FILLED = 38;
+export const PROP_FOLLOWS_END = 39;
 export const WPROP_TITLE = 1;
 export const WPROP_WIDTH = 2;
 export const WPROP_HEIGHT = 3;
@@ -1757,6 +1758,24 @@ export function tx_bind_filled(widget_id: number, signal_id: number): Uint8Array
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_filled_element(widget_id: number, level = 0, field = 0): Uint8Array {
   enc.begin(); enc.u64(widget_id); enc.u32(PROP_FILLED); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a constant follows_end value. */
+export function tx_set_follows_end(widget_id: number, follows_end: boolean): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_FOLLOWS_END); enc.u32(SOURCE_CONST); enc.value(follows_end);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a signal-bound follows_end value. */
+export function tx_bind_follows_end(widget_id: number, signal_id: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_FOLLOWS_END); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_follows_end_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_FOLLOWS_END); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
   return enc.end(TX_SET_PROPERTY);
 }
 
