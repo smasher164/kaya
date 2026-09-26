@@ -606,7 +606,9 @@ def composers(swiftui_text, compose_text, gtk_text, winui_text):
             ".modifier(KayaComposerSurface(on: node.role == roleComposer))",
             "            #if os(macOS)\n                if kayaIsComposerSend(node) {\n"
             "                    Color.clear.frame(width: 0, height: 0)",
-            "chromeless: inComposer,")),
+            "chromeless: inComposer,",
+            "func kayaGrowingInset(inComposer: Bool) -> CGFloat { inComposer ? 7 : 5 }",
+            "height: node.maxLines > 0 ? kayaGrowingInset(inComposer: chromeless) : 2)")),
         (COMPOSE, compose_text, (
             "return Modifier.background(MaterialTheme.colorScheme.surfaceVariant, "
             "KAYA_COMPOSER_SHAPE)",
@@ -619,6 +621,8 @@ def composers(swiftui_text, compose_text, gtk_text, winui_text):
             ".kaya-composer scrolledwindow, .kaya-composer textview")),
         (WINUI, winui_text, (
             "grid.SetStyle(&composer_style()?)?;",
+            "const SYMBOL_BUTTON_GLYPH_PROMINENT: f64 = 14.0;",
+            "let icon = button_icon(symbol, prominent)?",
             "resources.Insert(&PropertyValue::CreateString(&HSTRING::from(key))?, &clear)?;")),
     ):
         for needle in needles:

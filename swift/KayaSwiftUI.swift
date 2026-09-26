@@ -21443,9 +21443,9 @@ struct KayaSearchA11y: ViewModifier {
 /// text views carry none of their own, so it is drawn over them and never hit.
 /// Where a textarea's placeholder sits: the text's own top inset. A UITextView's
 /// is 8; the mac box's 8 was tuned by eye, and a growing mac field's is its inset.
-func kayaPlaceholderTop(_ node: KayaNode) -> CGFloat {
+func kayaPlaceholderTop(_ node: KayaNode, inComposer: Bool = false) -> CGFloat {
     #if os(macOS)
-        return node.maxLines > 0 ? kayaGrowingInset : 8
+        return node.maxLines > 0 ? kayaGrowingInset(inComposer: inComposer) : 8
     #else
         return 8
     #endif
@@ -21453,17 +21453,21 @@ func kayaPlaceholderTop(_ node: KayaNode) -> CGFloat {
 
 /// A growing textarea's vertical text inset on the mac, which its placeholder
 /// shares so the two sit on one line (docs/grow-lines-plan.md).
-let kayaGrowingInset: CGFloat = 5
+/// Inside a composer the one line stands as tall as the 30pt symbol buttons
+/// beside it, so a bottom-aligned row still reads centred at rest
+/// (docs/composer-plan.md §6a).
+func kayaGrowingInset(inComposer: Bool) -> CGFloat { inComposer ? 7 : 5 }
 
 struct KayaTextareaPlaceholder: ViewModifier {
     let node: KayaNode
+    @Environment(\.kayaInComposer) private var inComposer
     func body(content: Content) -> some View {
         content.overlay(alignment: .topLeading) {
             if node.text.isEmpty && !node.placeholder.isEmpty {
                 Text(node.placeholder)
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 5)
-                    .padding(.vertical, kayaPlaceholderTop(node))
+                    .padding(.vertical, kayaPlaceholderTop(node, inComposer: inComposer))
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
             }
@@ -21982,7 +21986,8 @@ private struct KayaMacTextarea: NSViewRepresentable {
         view.allowsUndo = !node.ownUndo
         // A growing field's one line needs room above and below it, which the
         // box's 2pt inset gave nothing of (docs/grow-lines-plan.md).
-        let inset = CGSize(width: 2, height: node.maxLines > 0 ? kayaGrowingInset : 2)
+        let inset = CGSize(
+            width: 2, height: node.maxLines > 0 ? kayaGrowingInset(inComposer: chromeless) : 2)
         if view.textContainerInset != inset { view.textContainerInset = inset }
 
         // APPLIED ON EVERY UPDATE, not once at construction: a pin that only ran

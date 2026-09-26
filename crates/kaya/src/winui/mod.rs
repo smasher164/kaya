@@ -409,6 +409,7 @@ struct CoreState {
     /// §2, §3): the symbol and the role arrive in either order, and each arm
     /// restyles from both.
     symbol_buttons: HashMap<WidgetId, bool>,
+    symbol_values: HashMap<WidgetId, i64>,
     prominent_buttons: HashMap<WidgetId, ()>,
     /// The minted padding host around a SCROLL mounted as a window's root: a
     /// ScrollViewer's default template ignores Control.Padding (the
@@ -1094,6 +1095,30 @@ fn symbol_icon(value: i64) -> windows_core::Result<Option<IconElement>> {
     )?;
     Ok(Some(element))
 }
+
+/// An icon-only button's glyph (docs/composer-plan.md §2): a FontIcon at a
+/// size the 32px button leaves room around, since SymbolIcon draws at a fixed
+/// 20px and a 20px paper plane touched the accent circle's edge (the
+/// maintainer's review, 2026-09-26). The Symbol members are codepoints in the
+/// same symbol font, so both routes draw the same glyph.
+fn button_icon(value: i64, prominent: bool) -> windows_core::Result<Option<IconElement>> {
+    let Some(symbol) = symbol_from_wire(value) else {
+        return Ok(None);
+    };
+    let glyph = match fluent_icon(symbol) {
+        FluentIcon::Member(member) => char::from_u32(member.0 as u32)
+            .map(String::from)
+            .unwrap_or_default(),
+        FluentIcon::Glyph(glyph) => glyph.to_owned(),
+    };
+    let icon = FontIcon::new()?;
+    icon.SetGlyph(&HSTRING::from(glyph))?;
+    icon.SetFontSize(if prominent { SYMBOL_BUTTON_GLYPH_PROMINENT } else { SYMBOL_BUTTON_GLYPH })?;
+    Ok(Some(icon.cast()?))
+}
+
+const SYMBOL_BUTTON_GLYPH: f64 = 16.0;
+const SYMBOL_BUTTON_GLYPH_PROMINENT: f64 = 14.0;
 
 /// The controls with an `Icon` slot, as one surface — WinUI puts `Icon`
 /// on each class separately with no common base. The impl list is the
@@ -16481,9 +16506,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     // stops the brand lowering wrote. A brandless app gets
                     // the user's Windows accent.
                     core.prominent_buttons.insert(id, ());
-                    if core.symbol_buttons.contains_key(&id) {
+                    if let Some(&symbol) = core.symbol_values.get(&id) {
                         core.symbol_buttons.insert(id, true);
                         button.SetStyle(&symbol_button_style(true)?)?;
+                        if let Some(icon) = button_icon(symbol, true)? {
+                            button.SetContent(&icon)?;
+                        }
                     } else {
                         button.SetStyle(&theme_resource::<Style>("AccentButtonStyle")?)?;
                     }
@@ -16491,15 +16519,16 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 // An icon-only button (docs/composer-plan.md §2): the glyph as
                 // its content, the title kept as its accessible name.
                 (NativeWidget::Button { button, caption }, Prop::Symbol, Value::I64(symbol)) => {
-                    let icon = symbol_icon(symbol)?.unwrap_or_else(|| {
+                    let prominent = core.prominent_buttons.contains_key(&id);
+                    let icon = button_icon(symbol, prominent)?.unwrap_or_else(|| {
                         panic!("kaya: symbol {symbol} has no Fluent spelling in fluent_icon")
                     });
                     button.SetContent(&icon)?;
+                    core.symbol_values.insert(id, symbol);
                     bindings::Microsoft::UI::Xaml::Automation::AutomationProperties::SetName(
                         button,
                         &caption.Text()?,
                     )?;
-                    let prominent = core.prominent_buttons.contains_key(&id);
                     core.symbol_buttons.insert(id, prominent);
                     button.SetStyle(&symbol_button_style(prominent)?)?;
                 }
@@ -16546,9 +16575,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     // over the primary text fill, hovering to
                     // `SubtleFillColorSecondaryBrush`.
                     core.prominent_buttons.remove(&id);
-                    if core.symbol_buttons.contains_key(&id) {
+                    if let Some(&symbol) = core.symbol_values.get(&id) {
                         core.symbol_buttons.insert(id, false);
                         button.SetStyle(&symbol_button_style(false)?)?;
+                        if let Some(icon) = button_icon(symbol, false)? {
+                            button.SetContent(&icon)?;
+                        }
                     } else {
                         button.SetStyle(&theme_resource::<Style>("SubtleButtonStyle")?)?;
                     }
@@ -18526,6 +18558,7 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             filled: HashMap::new(),
             composers: HashMap::new(),
             symbol_buttons: HashMap::new(),
+            symbol_values: HashMap::new(),
             prominent_buttons: HashMap::new(),
             scroll_root_hosts: HashMap::new(),
             transactions: tx_rx,
