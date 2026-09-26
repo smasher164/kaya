@@ -196,6 +196,7 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.foundation.focusable
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -2558,6 +2559,15 @@ object KayaCompose {
         // `activity.title`), so a re-created one carries the MANIFEST
         // label until the model is written back onto it.
         refreshNavTitle()
+        // THE KEYBOARD IS AN INSET, NEVER A PAN (docs/traps.md, the chat app's
+        // thread): KayaRoot pads by safeDrawing, which includes the IME, and a
+        // window left at the manifest default `adjust=pan` was ALSO panned up
+        // by the system, so the surface lost its top under the status bar and
+        // opened a gap above the keyboard. Resize is Compose's own pairing
+        // for an edge-to-edge window; set here so every host app has it.
+        @Suppress("DEPRECATION")
+        activity.window.setSoftInputMode(
+            android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         // The ONE place this backend's theme is installed: every scene,
         // dialog and dropdown is a sub-composition of this one.
         activity.setContent { KayaAppearance { KayaCompliance { KayaTheme { KayaRoot() } } } }
@@ -15405,7 +15415,13 @@ fun KayaRoot() {
         shouldStartDragAndDrop = { it.toAndroidDragEvent().localState is KayaDragSession },
         target = dragEndTarget,
     )) {
-        if (KayaSceneModel.menubar.isEmpty()) {
+        // A PUSHED SCREEN WEARS THE BAR TOO: its title and back arrow are how
+        // Material presents a covered stack, and without a catalog the chat
+        // app's thread had neither (docs/deferred.md, the chat C0 captures).
+        // Not over a sections scaffold, which draws its own bar.
+        val covered = KayaSceneModel.sections.isEmpty() &&
+            kayaActiveEntries().isNotEmpty() && !kayaSplitArm()
+        if (KayaSceneModel.menubar.isEmpty() && !covered) {
             // No catalog: the surface keeps its exact pre-menus shape (no
             // phantom bar over scenes that declared no commands).
             KayaSceneModel.menuPresentation = "none"
@@ -15416,7 +15432,8 @@ fun KayaRoot() {
             // size class. Android has no menu-bar lowering, so this is
             // `overflow` in BOTH classes — the honest report, which a
             // tablet-width assertion would correctly fail on.
-            KayaSceneModel.menuPresentation = "overflow"
+            KayaSceneModel.menuPresentation =
+                if (KayaSceneModel.menubar.isEmpty()) "none" else "overflow"
             Column(modifier = Modifier.fillMaxSize()) {
                 KayaMenuTopBar()
                 Box(modifier = Modifier.weight(1f)) { KayaSurface() }
@@ -15565,6 +15582,19 @@ internal fun kayaPanePositions(): String {
     return if (positions.isEmpty()) "-" else positions.sorted().joinToString(",")
 }
 
+/** A pane that appears takes the focus ITSELF, not into its content: the
+ * scaffold asks for "focus enter" on the pane it reveals, and Compose
+ * resolves that to the first focusable child, which in a chat thread was
+ * the compose field — the keyboard then opened on a tap that meant "show me
+ * this conversation" (measured 2026-09-25, ThreePaneScaffold.kt:218 in the
+ * focus stack). A focusable pane container is that first child, so the
+ * enter lands on it; cancelling the enter instead also refused a field's
+ * own requestFocus inside the pane (measured the same day). */
+@Composable
+internal fun KayaPaneFocus(content: @Composable () -> Unit) {
+    Box(Modifier.focusable(), propagateMinConstraints = true) { content() }
+}
+
 /** Whether this window is presenting its entry stack as list-detail
  * right now. ONE source, read by the arm that renders AND by the back
  * rule: two copies of this condition drift invisibly, one pane count
@@ -15653,20 +15683,26 @@ private fun KayaSurface() {
                 // root leads.
                 listPane = {
                     AnimatedPane {
-                        KayaSceneModel.root?.let { KayaRender(it, isRoot = true) }
+                        KayaPaneFocus {
+                            KayaSceneModel.root?.let { KayaRender(it, isRoot = true) }
+                        }
                     }
                 },
                 detailPane = {
                     AnimatedPane {
-                        detailEntry?.root?.let { KayaRender(it, isRoot = true) }
+                        KayaPaneFocus {
+                            detailEntry?.root?.let { KayaRender(it, isRoot = true) }
+                        }
                     }
                 },
                 extraPane =
                     if (third) {
                         {
                             AnimatedPane {
-                                if (KayaSceneModel.navEntries.size >= 2) {
-                                    topEntry?.root?.let { KayaRender(it, isRoot = true) }
+                                KayaPaneFocus {
+                                    if (KayaSceneModel.navEntries.size >= 2) {
+                                        topEntry?.root?.let { KayaRender(it, isRoot = true) }
+                                    }
                                 }
                             }
                         }
@@ -15823,7 +15859,8 @@ fun KayaMenuTopBar() {
                     }
                 }
             }
-            KayaOverflowMenu()
+            // A pushed screen's bar with no catalog carries no overflow.
+            if (KayaSceneModel.menubar.isNotEmpty()) KayaOverflowMenu()
         },
     )
 }

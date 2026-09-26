@@ -12702,3 +12702,20 @@ window's 44 label(s) and button(s) is presented yet" on every poll. The
 walk follows `VisualTreeHelper::GetParent` now, which reaches the ground
 from anywhere on screen; the section badge's template had already hit the
 same break one surface over.
+
+## A Compose ListDetailPaneScaffold hands its revealed pane's focus to the first text field, and an edge-to-edge window left at adjust=pan pans for the keyboard on top of the insets (measured 2026-09-25)
+
+Two Android defects behind one symptom in the chat app's thread: the
+keyboard opened on a tap that only opened a conversation, and with it up
+the surface slid under the status bar with a gap above the keyboard.
+First, Material 3's `ThreePaneScaffold` requests focus on the pane it
+reveals (ThreePaneScaffold.kt:218 in the focus stack), and Compose's
+"focus enter" resolves that to the pane's first focusable child — the
+compose field. Cancelling `enter` on a focus group around the pane also
+refused the field's own `requestFocus` (the harness's click could not
+focus it); a `focusable()` container around the pane's content takes the
+enter itself and leaves the field reachable. Second, the host manifests
+leave `windowSoftInputMode` at its default, which dumpsys reads as
+`adjust=pan`: with KayaRoot already padding by `safeDrawing` (which
+includes the IME) the system panned the window as well. The library sets
+`SOFT_INPUT_ADJUST_RESIZE` at mount. check-universal-props holds both.

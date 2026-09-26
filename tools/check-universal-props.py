@@ -458,6 +458,7 @@ def census(files):
     bad += drag_waits(read(winui))
     bad += fill_reads(read(swiftui))
     bad += fill_reads_rust_and_compose(read(gtk), read(winui), read(compose))
+    bad += compose_pushed_screen(read(compose))
     return bad
 
 
@@ -485,6 +486,31 @@ def fill_reads_rust_and_compose(gtk_text, winui_text, compose_text):
         if re.search(forbidden, block):
             bad.append(f"{path}: the fill reader names the model's own fill — the verdict must "
                        "come from the pixels, not the prop it is judging")
+    return bad
+
+
+# ANDROID'S PUSHED SCREEN (docs/deferred.md, the chat C0 captures): no step
+# reads the keyboard, a pan or the top bar, and all three were wrong in the
+# chat app's thread with every step green. The window resizes for the
+# keyboard rather than panning, set before the content is mounted; every
+# scaffold pane takes the reveal's focus itself so a text field inside does
+# not open the keyboard; and a covered stack wears the top bar.
+def compose_pushed_screen(compose_text):
+    bad = []
+    resize = compose_text.find("SOFT_INPUT_ADJUST_RESIZE")
+    content = compose_text.find("activity.setContent {")
+    if resize < 0 or content < 0 or resize > content:
+        bad.append(f"{COMPOSE}: the window no longer resizes for the keyboard before its "
+                   "content mounts (SOFT_INPUT_ADJUST_RESIZE) — it pans instead")
+    panes = compose_text.count("AnimatedPane {")
+    wrapped = len(re.findall(r"AnimatedPane \{\s*KayaPaneFocus \{", compose_text))
+    if panes == 0 or wrapped != panes:
+        bad.append(f"{COMPOSE}: {wrapped} of {panes} scaffold panes take the reveal's focus "
+                   "themselves (KayaPaneFocus); the rest hand it to their first text field")
+    covered = ("kayaActiveEntries().isNotEmpty() && !kayaSplitArm()\n"
+               "        if (KayaSceneModel.menubar.isEmpty() && !covered)")
+    if covered not in compose_text:
+        bad.append(f"{COMPOSE}: a covered stack no longer wears the top bar")
     return bad
 
 
@@ -570,7 +596,7 @@ def drag_waits(winui_text):
 real = load()
 g = Gate("check-universal-props")
 RAN = 0
-DECLARED = 63
+DECLARED = 66
 for path, pattern, repl in (
     (COMPOSE, r"\ba11y\b", "kayaUnappliedProps"),
     (SWIFTUI, r"\bkayaA11y\b", "kayaUnappliedProps"),
@@ -787,6 +813,16 @@ for label, path, pattern, repl in (
      "            val ground = (decor.background as? "
      "android.graphics.drawable.ColorDrawable)?.color\n"
      "            node?.filled\n"),
+    ("Compose's window panning for the keyboard again", COMPOSE,
+     r"android\.view\.WindowManager\.LayoutParams\.SOFT_INPUT_ADJUST_RESIZE",
+     "android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN"),
+    ("Compose's detail pane handing focus to its text field", COMPOSE,
+     r"AnimatedPane \{\n                        KayaPaneFocus \{\n"
+     r"                            detailEntry",
+     "AnimatedPane {\n                        run {\n                            detailEntry"),
+    ("Compose's pushed screen without its bar", COMPOSE,
+     r"if \(KayaSceneModel\.menubar\.isEmpty\(\) && !covered\)",
+     "if (KayaSceneModel.menubar.isEmpty())"),
     ("WinUI's clipping read agreeing about a window it never read", WINUI,
      r"if candidates > 0 && read == 0 \{", "if false {"),
     ("WinUI's cell never coming back for a measure with its template", WINUI,

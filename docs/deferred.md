@@ -14,11 +14,14 @@ KEY: chat app, pushed thread, status bar inset, keyboard opens by itself, IME in
 
 Every step of tools/scenes/chat.steps passes on all five lanes; the captures
 of its last frame found what no step reads.
-  - ANDROID: the pushed thread has no top bar and runs under the status bar;
-    the keyboard opens on its own when the thread is pushed (a capture held
-    before the scene focuses the compose field already shows it); and with
-    it up the message list shrinks to a few rows, a gap opens between the
-    compose row and the keyboard, and the newest messages leave the view.
+  - ~~ANDROID: the pushed thread has no top bar and runs under the status bar;
+    the keyboard opens on its own when the thread is pushed; and with it up
+    the list shrinks and a gap opens above the keyboard.~~ FIXED 2026-09-25:
+    a covered stack wears Material's top bar (title and back arrow, no empty
+    overflow); each scaffold pane takes the reveal's focus itself rather
+    than handing it to the compose field; and the window resizes for the
+    keyboard instead of panning on top of the insets (docs/traps.md).
+    check-universal-props holds all three.
   - iOS: the thread's navigation bar shows the back button but not the
     conversation's name; the quote's ↩ draws as a colour emoji.
   - WINDOWS: the list pane has no boundary against the thread (no divider,
