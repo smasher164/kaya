@@ -356,6 +356,7 @@ static partial class Kaya
     internal const ulong CAP_AUX_WINDOWS = 1;
     internal const ulong CAP_NOTIFICATIONS = 2;
     internal const ulong CAP_BADGE = 4;
+    internal const ulong CAP_EMOJI_PICKER = 8;
 
     internal static ulong CapabilityBits() => kaya_capabilities();
 

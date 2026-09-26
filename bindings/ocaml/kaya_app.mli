@@ -36,7 +36,12 @@ type draw
 (* WHAT THIS HOST CAN DO. [notifications] is a RUNTIME bit: this process
    can post a local notification the desktop will show
    (docs/tasks-s3-plan.md N3). *)
-type capabilities = { aux_windows : bool; notifications : bool; badge : bool }
+type capabilities = {
+  aux_windows : bool;
+  notifications : bool;
+  badge : bool;
+  emoji_picker : bool;
+}
 
 (* This host's capabilities. Constant for the life of the process, so
    asking once and remembering is fine. *)
@@ -508,6 +513,10 @@ type platform = Mac | Ios | Linux | Windows | Android
 
 val clear : widget -> unit
 val focus : widget -> unit
+
+(* Focus a text field and open the platform's emoji picker on it
+   (docs/emoji-picker-plan.md). *)
+val show_emoji_picker : widget -> unit
 val scroll_to_row : widget -> key -> unit
 val highlight_ranges : widget -> (int * int) list -> unit
 val select_range : widget -> int * int -> unit

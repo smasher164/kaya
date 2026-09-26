@@ -90,6 +90,9 @@ RUST_SCENES = [
     "notify",
     # The app's icon badge (docs/app-badge-plan.md), with a notification.
     "badge",
+    # The emoji button (docs/emoji-picker-plan.md): iOS has no picker (R2),
+    # so MODS drops the pick and what it would have written.
+    "emoji",
     # The task manager: a RUST app by design (docs/tasks-plan.md §0).
     "tasks",
     # WHAT SURVIVES A RELAUNCH (docs/tasks-s4-plan.md §4): the same
@@ -166,6 +169,10 @@ MODS = {
     # (docs/submit-plan.md S3, §7.1): SwiftUI's TextField resigns on
     # Return, so the entry publishes and the keyboard goes with the focus;
     # the submitting textarea's Send keeps its focus and that step stays.
+    ("rust-swiftui", "emoji"): {"drop": (("pick_emoji", '"😀"'),
+                                         ("expect", "entry@message"),
+                                         ("expect", "label@echo")),
+                                "keep": "expect_focused"},
     ("rust-swiftui", "submit"): {"drop": ("expect_focused", "entry#0"),
                                  "keep": "expect"},
     ("swift", "submit"): {"drop": ("expect_focused", "entry#0"),

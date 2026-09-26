@@ -1679,6 +1679,9 @@ pub enum CommandKind {
     Clear,
     /// Give the widget the keyboard focus.
     Focus,
+    /// Focus a text field and open the platform's emoji picker on it; a
+    /// chosen emoji arrives as text_changed (docs/emoji-picker-plan.md).
+    EmojiPicker,
 }
 
 /// A span of a text widget's content, in UTF-8 BYTE offsets into the widget's

@@ -99,6 +99,7 @@ if (lib.specHash() !== wire.SPEC_HASH) {
 export const CAP_AUX_WINDOWS = 1;
 export const CAP_NOTIFICATIONS = 2;
 export const CAP_BADGE = 4;
+export const CAP_EMOJI_PICKER = 8;
 
 /** The raw capability word. */
 export function capabilityBits(): number {

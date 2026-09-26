@@ -80,6 +80,9 @@ dependencies {
     // metadata, and 5.0.x additionally demands minCompileSdk 37 against
     // this module's 35. Moving it means moving the Kotlin plugin first.
     implementation("com.materialkolor:material-color-utilities:2.1.1")
+    // androidx's emoji picker, the panel the emoji command opens
+    // (docs/emoji-picker-plan.md R1).
+    implementation("androidx.emoji2:emoji2-emojipicker:1.5.0")
     // KayaColorSchemesTest, the wall check-compose runs so the emulator
     // never proves the brand scheme first.
     testImplementation("junit:junit:4.13.2")

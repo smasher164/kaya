@@ -30,7 +30,12 @@ type draw = { d_viewbox : viewbox; mutable d_ops : Kaya_wire.value list }
    note, which every binding's copy of this surface shortens. *)
 (* [notifications] is a RUNTIME bit: this process can post a local
    notification the desktop will show (docs/tasks-s3-plan.md N3). *)
-type capabilities = { aux_windows : bool; notifications : bool; badge : bool }
+type capabilities = {
+  aux_windows : bool;
+  notifications : bool;
+  badge : bool;
+  emoji_picker : bool;
+}
 
 (* This host's capabilities. Constant for the life of the process, so
    asking once and remembering is fine. *)
@@ -40,6 +45,7 @@ let capabilities () =
     aux_windows = Int64.logand bits Kaya_runtime.cap_aux_windows <> 0L;
     notifications = Int64.logand bits Kaya_runtime.cap_notifications <> 0L;
     badge = Int64.logand bits Kaya_runtime.cap_badge <> 0L;
+    emoji_picker = Int64.logand bits Kaya_runtime.cap_emoji_picker <> 0L;
   }
 
 
@@ -1435,6 +1441,11 @@ let clear (Widget id) = emit (the_tx ()) (Kaya_wire.tx_widget_command id Kaya_wi
 
 (* Give this widget the keyboard focus. *)
 let focus (Widget id) = emit (the_tx ()) (Kaya_wire.tx_widget_command id Kaya_wire.command_focus)
+
+(* Focus a text field and open the platform's emoji picker on it
+   (docs/emoji-picker-plan.md); a chosen emoji arrives as its text change. *)
+let show_emoji_picker (Widget id) =
+  emit (the_tx ()) (Kaya_wire.tx_widget_command id Kaya_wire.command_emoji_picker)
 
 (* Scroll the For mounted in this container to the row keyed [key] (docs/scroll-to-plan.md S1). *)
 let scroll_to_row (Widget id) key =

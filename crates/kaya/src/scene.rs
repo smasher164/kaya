@@ -58,6 +58,11 @@ pub(crate) const CAP_NOTIFICATIONS: u64 = 2;
 /// may draw a dot or nothing (Android, a Linux desktop).
 pub(crate) const CAP_BADGE: u64 = 4;
 
+/// The emoji command opens a picker (docs/emoji-picker-plan.md): the
+/// platform's own on the desktops, androidx's on Android; unset on iOS,
+/// where the command only focuses the field (R2).
+pub(crate) const CAP_EMOJI_PICKER: u64 = 8;
+
 /// The bits the presentation layer granted at startup (CAP_NOTIFICATIONS and
 /// CAP_BADGE; `kaya_grant_capabilities` refuses others).
 pub(crate) static RUNTIME_CAPABILITIES: std::sync::atomic::AtomicU64 =
@@ -618,6 +623,10 @@ fn undo_verdict(op: &TxOp) -> UndoVerdict {
             command: CommandKind::Clear,
             ..
         } => UndoVerdict::Refused("clear"),
+        TxOp::WidgetCommand {
+            command: CommandKind::EmojiPicker,
+            ..
+        } => UndoVerdict::Refused("emoji_picker"),
         TxOp::UndoGroup { .. } => UndoVerdict::Refused("a second undo_group"),
         TxOp::CreateSignal { .. } => UndoVerdict::Refused("create_signal"),
         TxOp::CreateWidget { .. } => UndoVerdict::Refused("create_widget"),
@@ -1106,7 +1115,7 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
 /// target can legitimately vanish under rebuild.)
 fn check_command(kind: WidgetKind, command: CommandKind) {
     let ok = match command {
-        CommandKind::Clear => {
+        CommandKind::Clear | CommandKind::EmojiPicker => {
             matches!(kind, WidgetKind::Entry | WidgetKind::Textarea | WidgetKind::Search)
         }
         CommandKind::Focus => matches!(

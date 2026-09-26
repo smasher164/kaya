@@ -442,6 +442,9 @@ pub const KAYA_CAP_NOTIFICATIONS: u64 = 2;
 /// A number on the app's icon: `set_badge` will show one here, a runtime
 /// fact granted like KAYA_CAP_NOTIFICATIONS (docs/app-badge-plan.md).
 pub const KAYA_CAP_BADGE: u64 = 4;
+/// The emoji command opens a picker here (docs/emoji-picker-plan.md): a
+/// runtime fact granted like the others, unset on iOS, which has none.
+pub const KAYA_CAP_EMOJI_PICKER: u64 = 8;
 
 /// The capability word, which is the SCENE CORE'S const and not a second
 /// copy of its predicate: the wall that refuses `create_window` tests the
@@ -460,7 +463,7 @@ pub extern "C" fn kaya_capabilities() -> u64 {
 #[unsafe(no_mangle)]
 pub extern "C" fn kaya_grant_capabilities(bits: u64) {
     assert!(
-        bits & !(KAYA_CAP_NOTIFICATIONS | KAYA_CAP_BADGE) == 0,
+        bits & !(KAYA_CAP_NOTIFICATIONS | KAYA_CAP_BADGE | KAYA_CAP_EMOJI_PICKER) == 0,
         "kaya: kaya_grant_capabilities({bits:#x}) names a bit that is not runtime-grantable"
     );
     crate::scene::RUNTIME_CAPABILITIES.fetch_or(bits, std::sync::atomic::Ordering::AcqRel);
@@ -469,7 +472,8 @@ pub extern "C" fn kaya_grant_capabilities(bits: u64) {
 const _: () = assert!(
     KAYA_CAP_AUX_WINDOWS == crate::scene::CAP_AUX_WINDOWS
         && KAYA_CAP_NOTIFICATIONS == crate::scene::CAP_NOTIFICATIONS
-        && KAYA_CAP_BADGE == crate::scene::CAP_BADGE,
+        && KAYA_CAP_BADGE == crate::scene::CAP_BADGE
+        && KAYA_CAP_EMOJI_PICKER == crate::scene::CAP_EMOJI_PICKER,
     "kaya: the header's KAYA_CAP_* and the scene core's bits are different numbers"
 );
 
@@ -705,8 +709,11 @@ const _: () = assert!(
 /// vocabulary; each verb is admitted by a real artifact.
 pub const KAYA_COMMAND_CLEAR: u32 = 1;
 pub const KAYA_COMMAND_FOCUS: u32 = 2;
+pub const KAYA_COMMAND_EMOJI_PICKER: u32 = 3;
 const _: () = assert!(
-    KAYA_COMMAND_CLEAR == wire::COMMAND_CLEAR && KAYA_COMMAND_FOCUS == wire::COMMAND_FOCUS
+    KAYA_COMMAND_CLEAR == wire::COMMAND_CLEAR
+        && KAYA_COMMAND_FOCUS == wire::COMMAND_FOCUS
+        && KAYA_COMMAND_EMOJI_PICKER == wire::COMMAND_EMOJI_PICKER
 );
 
 /// Value types.

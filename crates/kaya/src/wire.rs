@@ -713,6 +713,7 @@ pub(crate) const SOURCE_ELEMENT: u32 = 2;
 // One-shot commands.
 pub(crate) const COMMAND_CLEAR: u32 = 1;
 pub(crate) const COMMAND_FOCUS: u32 = 2;
+pub(crate) const COMMAND_EMOJI_PICKER: u32 = 3;
 
 fn pad8(n: usize) -> usize {
     (n + 7) & !7
@@ -849,6 +850,7 @@ fn command_kind(raw: u32) -> CommandKind {
     match raw {
         COMMAND_CLEAR => CommandKind::Clear,
         COMMAND_FOCUS => CommandKind::Focus,
+        COMMAND_EMOJI_PICKER => CommandKind::EmojiPicker,
         other => panic!("kaya: unknown command {other}"),
     }
 }
@@ -857,6 +859,7 @@ fn command_raw(command: CommandKind) -> u32 {
     match command {
         CommandKind::Clear => COMMAND_CLEAR,
         CommandKind::Focus => COMMAND_FOCUS,
+        CommandKind::EmojiPicker => COMMAND_EMOJI_PICKER,
     }
 }
 

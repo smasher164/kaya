@@ -641,6 +641,9 @@ pub struct Capabilities {
     /// Whether [`Tx::set_badge`] will show a number on the app's icon
     /// (docs/app-badge-plan.md).
     pub badge: bool,
+    /// Whether [`Tx::show_emoji_picker`] opens a picker
+    /// (docs/emoji-picker-plan.md).
+    pub emoji_picker: bool,
 }
 
 /// This host's capabilities. See [`Capabilities`].
@@ -652,6 +655,7 @@ pub fn capabilities() -> Capabilities {
         aux_windows: bits & crate::capi::KAYA_CAP_AUX_WINDOWS != 0,
         notifications: bits & crate::capi::KAYA_CAP_NOTIFICATIONS != 0,
         badge: bits & crate::capi::KAYA_CAP_BADGE != 0,
+        emoji_picker: bits & crate::capi::KAYA_CAP_EMOJI_PICKER != 0,
     }
 }
 
@@ -2883,6 +2887,17 @@ impl<'a> Tx<'a> {
         self.ops.push(TxOp::WidgetCommand {
             widget,
             command: CommandKind::Focus,
+        });
+    }
+
+    /// Focus a text field and open the platform's emoji picker on it
+    /// (docs/emoji-picker-plan.md): a chosen emoji arrives as the field's
+    /// `text_changed`, like a typed character. [`Capabilities::emoji_picker`]
+    /// says whether a picker opens; where none does, the field is focused.
+    pub fn show_emoji_picker(&mut self, widget: WidgetId) {
+        self.ops.push(TxOp::WidgetCommand {
+            widget,
+            command: CommandKind::EmojiPicker,
         });
     }
 

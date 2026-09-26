@@ -50,7 +50,7 @@ SCENES = [
 # has not landed — built and run rust-only until their guests arrive,
 # when they move into SCENES.
 DEPTH_SCENES = ["typeface", "windowed", "canvas", "dnd", "tasks", "notify", "notes", "richrows",
-                "format", "flexshrink", "listrow", "tints", "badge"]
+                "format", "flexshrink", "listrow", "tints", "badge", "emoji"]
 # The C-floor scenes THIS LANE RUNS (guests/c/Makefile keeps the whole
 # list; this is the SCENES= override build_c passes, and check-steps'
 # sweep_c_floor reads it from the other side).
@@ -218,6 +218,8 @@ ORDER = [
     # The app's icon badge (docs/app-badge-plan.md), bundled for its
     # notification.
     ("badge", ("rust",)),
+    # The emoji button (docs/emoji-picker-plan.md): the character palette.
+    ("emoji", ("rust",)),
     ("richtext", ("rust", "python", "js", "go", "csharp", "java", "swift",
                   "ocaml", "haskell")),
     ("ownundo", ("rust", "python", "js", "go", "csharp", "java", "swift",
@@ -405,7 +407,12 @@ def wired_scenes():
 # posted while a human holds the foreground is swallowed and AX still
 # reports success (docs/deferred.md, the swallowed-press entry).
 PANEL_SCENES = ("filedialog", "save", "editor")
-EXCLUSIVE = {name for name, scene, _lang in legs() if scene in PANEL_SCENES}
+# And the scenes that open system UI on the host's own screen, which a person
+# at the keyboard would see and could type into: the emoji palette
+# (docs/emoji-picker-plan.md).
+HOST_UI_SCENES = ("emoji",)
+EXCLUSIVE = {name for name, scene, _lang in legs()
+             if scene in PANEL_SCENES or scene in HOST_UI_SCENES}
 
 # The host's own idle clock (HIDIdleTime, nanoseconds since the last key or
 # pointer event), read before such a leg is admitted; the wait never

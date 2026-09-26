@@ -13953,6 +13953,29 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                         *armed.borrow_mut() = Some(handler);
                     }
                 }
+                // docs/emoji-picker-plan.md §2: GtkEmojiChooser, through the
+                // action a text widget installs for Ctrl+. — on an entry or a
+                // search field the action lives on its inner GtkText.
+                CommandKind::EmojiPicker => {
+                    let control = widget.control();
+                    let target = match control.downcast_ref::<gtk4::Editable>() {
+                        Some(editable) => editable.delegate().map(|d| d.upcast()).unwrap_or(control.clone()),
+                        None => control.clone(),
+                    };
+                    // WITHOUT SELECTING: a GtkText's grab_focus selects its
+                    // whole text, and the chosen emoji then replaces it.
+                    match target.downcast_ref::<gtk4::Text>() {
+                        Some(text) => {
+                            text.grab_focus_without_selecting();
+                        }
+                        None => {
+                            target.grab_focus();
+                        }
+                    }
+                    if let Err(e) = target.activate_action("misc.insert-emoji", None) {
+                        eprintln!("KAYA_DIAG emoji_picker: misc.insert-emoji failed on {}: {e}", target.type_().name());
+                    }
+                }
             }
         }
     }
@@ -19174,6 +19197,41 @@ impl crate::harness::Stage for GtkStage {
     /// the `desktop-entry` attribution (measured 2026-09-07). What comes
     /// back is the DAEMON's summary, so a title the desktop mangled reads
     /// as the mangled one.
+    /// The chooser the app's emoji command opened, found in the live widget
+    /// tree, and the choice sent through its own `emoji-picked` signal, the
+    /// one its grid emits (docs/emoji-picker-plan.md §5).
+    fn pick_emoji(&self, emoji: &str) -> Result<(), String> {
+        let emoji = emoji.to_owned();
+        Self::on_main(move |_core| {
+            use gtk4::prelude::{Cast, ObjectExt, WidgetExt};
+            fn find(w: &gtk4::Widget, out: &mut Vec<gtk4::EmojiChooser>) {
+                if let Some(chooser) = w.downcast_ref::<gtk4::EmojiChooser>() {
+                    out.push(chooser.clone());
+                }
+                let mut child = w.first_child();
+                while let Some(c) = child {
+                    find(&c, out);
+                    child = c.next_sibling();
+                }
+            }
+            let mut choosers = Vec::new();
+            for window in gtk4::Window::list_toplevels() {
+                find(window.upcast_ref(), &mut choosers);
+            }
+            let open: Vec<_> = choosers.iter().filter(|c| c.is_visible()).collect();
+            match open.first() {
+                Some(chooser) => {
+                    chooser.emit_by_name::<()>("emoji-picked", &[&emoji]);
+                    Ok(())
+                }
+                None => Err(format!(
+                    "no emoji chooser is open ({} in the widget tree, none visible)",
+                    choosers.len()
+                )),
+            }
+        })
+    }
+
     /// What the session bus delivered on LauncherEntry (docs/app-badge-plan.md
     /// §4): the signal is the platform's record here, since no dock on the
     /// lane draws one.

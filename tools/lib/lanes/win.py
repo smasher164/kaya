@@ -46,6 +46,9 @@ EXCLUSIVE = {"dnd_rust", "dnd_python", "dnd_js", "dnd_go", "dnd_csharp", "dnd_ja
              # red under a matrix, green alone (docs/deferred.md, the
              # PopupHost WATCH's second sighting, 2026-09-15).
              "notes_rust",
+             # The emoji panel holds the keyboard while it is open, and the
+             # pick types into its search (docs/emoji-picker-plan.md §5).
+             "emoji_rust",
              # THE TEXT-SCALE LEGS (docs/compliance-plan.md R5, U3): the
              # setting is the user's, written before and deleted after, so
              # nothing else may be running under it.
@@ -71,7 +74,7 @@ TEXT_SCALE_LEGS = {"tasksbig_rust": 200, "formatbig_rust": 200}
 # THIS default; the runner calls depth_scenes(), which honours the
 # KAYA_WIN_DEPTH_SCENES override the lane uses for one-off slices.
 DEPTH_SCENES = ["windowed", "canvas", "sizepolicy", "tasks", "notify", "richtext", "flexshrink",
-                "listrow", "tints", "badge",
+                "listrow", "tints", "badge", "emoji",
                 "ownundo", "richlabel", "notes", "richrows"]
 
 # THE PACKAGED LEGS (docs/packaging-plan.md P3): the SAME Rust guests, run
@@ -536,6 +539,10 @@ ORDER = [
     # that group, last writer wins (docs/app-badge-plan.md §2).
     [
      "badge_rust",
+    ],
+    # emoji_rust ALONE: it types into the system's emoji panel.
+    [
+     "emoji_rust",
     ],
     # The background scene, pooled between drains: its worker parks
     # until a click releases it, so a binding that ran the work ON the

@@ -1626,6 +1626,10 @@ public struct KayaCapabilities {
     /// `setBadge` will show a number on the app's icon
     /// (docs/app-badge-plan.md). A RUNTIME bit, like `notifications`.
     let badge: Bool
+
+    /// `showEmojiPicker` opens a picker (docs/emoji-picker-plan.md); on iOS
+    /// it only focuses the field.
+    let emojiPicker: Bool
 }
 
 // --- The formatter door and the catalog (docs/compliance-plan.md §1.4) ------
@@ -2374,7 +2378,8 @@ public final class KayaApp {
         return KayaCapabilities(
             auxWindows: bits & UInt64(KAYA_CAP_AUX_WINDOWS) != 0,
             notifications: bits & UInt64(KAYA_CAP_NOTIFICATIONS) != 0,
-            badge: bits & UInt64(KAYA_CAP_BADGE) != 0)
+            badge: bits & UInt64(KAYA_CAP_BADGE) != 0,
+            emojiPicker: bits & UInt64(KAYA_CAP_EMOJI_PICKER) != 0)
     }
 
     private let posted = KayaAppQueue<@KayaAppActor @Sendable (KayaAppTx) throws -> Void>()
@@ -4152,6 +4157,12 @@ public final class KayaAppTx {
     /// Give this widget the keyboard focus.
     public func focus(_ w: KayaWidget) {
         tx.widgetCommand(w.id, UInt32(KAYA_COMMAND_FOCUS))
+    }
+
+    /// Focus a text field and open the platform's emoji picker on it
+    /// (docs/emoji-picker-plan.md); a chosen emoji arrives as its text change.
+    public func showEmojiPicker(_ w: KayaWidget) {
+        tx.widgetCommand(w.id, UInt32(KAYA_COMMAND_EMOJI_PICKER))
     }
 
     /// Scroll the For mounted in `w` so the row keyed `key` tops the

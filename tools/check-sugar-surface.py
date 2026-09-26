@@ -1155,6 +1155,7 @@ def check_cap_flag(snake, pascal, camel, findings=None):
 check_cap_flag("aux_windows", "AuxWindows", "auxWindows")
 check_cap_flag("notifications", "Notifications", "notifications")
 check_cap_flag("badge", "Badge", "badge")
+check_cap_flag("emoji_picker", "EmojiPicker", "emojiPicker")
 
 # THEIR BUILT-IN NEGATIVE TESTS, one per clause and for the same reason
 # the range verbs have one: sixteen patterns that can only pass are
@@ -1251,6 +1252,27 @@ CAP_BITS = {
             "rust": ("crates/kaya/src/app.rs", "KAYA_CAP_BADGE"),
             "go": ("bindings/go/runtime.go", "C.KAYA_CAP_BADGE"),
             "swift": ("bindings/swift/KayaApp.swift", "KAYA_CAP_BADGE"),
+        },
+    },
+    "CAP_EMOJI_PICKER": {
+        "copiers": {
+            "python": ("bindings/python/kaya/runtime.py",
+                       r"^CAP_EMOJI_PICKER = (\d+)$"),
+            "csharp": ("bindings/csharp/Kaya.cs",
+                       r"CAP_EMOJI_PICKER = (\d+);"),
+            "java": ("bindings/java/dev/kaya/KayaApp.java",
+                     r"CAP_EMOJI_PICKER = (\d+);"),
+            "haskell": ("bindings/haskell/KayaRuntime.hs",
+                        r"^capEmojiPicker = (\d+)$"),
+            "ocaml": ("bindings/ocaml/kaya_runtime.ml",
+                      r"^let cap_emoji_picker = (\d+)L$"),
+            "js": ("bindings/js/kaya/runtime.ts",
+                   r"^export const CAP_EMOJI_PICKER = (\d+);$"),
+        },
+        "readers": {
+            "rust": ("crates/kaya/src/app.rs", "KAYA_CAP_EMOJI_PICKER"),
+            "go": ("bindings/go/runtime.go", "C.KAYA_CAP_EMOJI_PICKER"),
+            "swift": ("bindings/swift/KayaApp.swift", "KAYA_CAP_EMOJI_PICKER"),
         },
     },
 }

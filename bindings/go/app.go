@@ -108,6 +108,9 @@ type Caps struct {
 	// Tx.SetBadge will show a number on the app's icon
 	// (docs/app-badge-plan.md). A RUNTIME bit, like Notifications.
 	Badge bool
+	// Tx.ShowEmojiPicker opens a picker (docs/emoji-picker-plan.md); on
+	// iOS it only focuses the field.
+	EmojiPicker bool
 }
 
 // Capabilities answers what this host can do. Constant for the life of
@@ -118,6 +121,7 @@ func Capabilities() Caps {
 		AuxWindows:    bits&capAuxWindows != 0,
 		Notifications: bits&capNotifications != 0,
 		Badge:         bits&capBadge != 0,
+		EmojiPicker:   bits&capEmojiPicker != 0,
 	}
 }
 
@@ -1297,6 +1301,13 @@ func (tx *Tx) Clear(w Widget) {
 // Clear.
 func (tx *Tx) Focus(w Widget) {
 	tx.emit(TxWidgetCommand(w.id, CommandFocus))
+}
+
+// ShowEmojiPicker focuses a text field and opens the platform's emoji
+// picker on it (docs/emoji-picker-plan.md); a chosen emoji arrives as the
+// field's text change. Capabilities().EmojiPicker says whether one opens.
+func (tx *Tx) ShowEmojiPicker(w Widget) {
+	tx.emit(TxWidgetCommand(w.id, CommandEmojiPicker))
 }
 
 // TextRange is a half-open span of a text widget's content: Start and

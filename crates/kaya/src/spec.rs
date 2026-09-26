@@ -3502,7 +3502,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
         },
         EnumSpec {
             name: "command",
-            variants: &[("clear", 1), ("focus", 2)],
+            variants: &[("clear", 1), ("focus", 2), ("emoji_picker", 3)],
         },
     ],
 };
@@ -4109,6 +4109,7 @@ mod tests {
                     ("align", "baseline") => wire::ALIGN_BASELINE,
                     ("command", "clear") => wire::COMMAND_CLEAR,
                     ("command", "focus") => wire::COMMAND_FOCUS,
+                    ("command", "emoji_picker") => wire::COMMAND_EMOJI_PICKER,
                     ("source", "const") => wire::SOURCE_CONST,
                     ("source", "signal") => wire::SOURCE_SIGNAL,
                     ("source", "element") => wire::SOURCE_ELEMENT,

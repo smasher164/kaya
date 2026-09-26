@@ -490,6 +490,12 @@
 #define KAYA_CAP_BADGE 4
 
 /**
+ * The emoji command opens a picker here (docs/emoji-picker-plan.md): a
+ * runtime fact granted like the others, unset on iOS, which has none.
+ */
+#define KAYA_CAP_EMOJI_PICKER 8
+
+/**
  * Apply record kinds (core -> presentation pump, via kaya_next_commands).
  * Layouts after the header:
  *   CREATE:    u64 widget_id, u32 kind, u32 tag_len, then tag_len bytes
@@ -707,6 +713,8 @@
 #define KAYA_COMMAND_CLEAR 1
 
 #define KAYA_COMMAND_FOCUS 2
+
+#define KAYA_COMMAND_EMOJI_PICKER 3
 
 /**
  * Value types.

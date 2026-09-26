@@ -3240,6 +3240,30 @@ fn measured_widths(element: &FrameworkElement) -> windows_core::Result<(f64, f64
 /// a ScrollViewer carries it, is clipped whatever its own height says. The
 /// origin is read in the ground's space and turned back into a left edge
 /// under RightToLeft, the mirror read's lesson.
+/// A character's Unicode name ("GRINNING FACE") from the ICU Windows ships
+/// (icu.dll, Windows 10 1903 and later), loaded at run time so the build
+/// needs no import library of it.
+#[cfg(feature = "harness")]
+fn unicode_name(ch: char) -> Option<String> {
+    type CharName = unsafe extern "C" fn(i32, i32, *mut u8, i32, *mut i32) -> i32;
+    let dll: Vec<u16> = "icu.dll".encode_utf16().chain(std::iter::once(0)).collect();
+    let module = unsafe { LoadLibraryW(dll.as_ptr()) };
+    if module.is_null() {
+        return None;
+    }
+    let symbol = unsafe { GetProcAddress(module, c"u_charName".as_ptr().cast()) };
+    if symbol.is_null() {
+        return None;
+    }
+    let char_name: CharName = unsafe { std::mem::transmute(symbol) };
+    let mut buffer = [0u8; 128];
+    let mut status = 0i32;
+    // U_UNICODE_CHAR_NAME is 0.
+    let len = unsafe { char_name(ch as i32, 0, buffer.as_mut_ptr(), buffer.len() as i32, &mut status) };
+    (status <= 0 && len > 0)
+        .then(|| String::from_utf8_lossy(&buffer[..len as usize]).into_owned())
+}
+
 #[cfg(feature = "harness")]
 fn off_screen(
     element: &FrameworkElement,
@@ -16812,6 +16836,39 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         fe.Loaded(&deferred)?;
                     }
                 }
+                // docs/emoji-picker-plan.md §2: the Win+. panel for the focused
+                // TextBox, opened by the user's own shortcut. CoreInputView's
+                // TryShow(Emoji) answered Ok(true) with the guest in the
+                // foreground and opened nothing for a WinUI TextBox, while it
+                // opened the panel for a Win32 edit (measured 2026-09-26).
+                CommandKind::EmojiPicker => {
+                    let element = widget.identity_element()?;
+                    let _ = element.Focus(FocusState::Programmatic)?;
+                    // A dispatcher turn later, once the focus has settled on
+                    // the field: the panel opens on the focused input.
+                    let show = DispatcherQueueHandler::new(|| {
+                        const KEYEVENTF_KEYUP: u32 = 0x2;
+                        unsafe {
+                            keybd_event(0x5B, 0, 0, 0);
+                            keybd_event(0xBE, 0, 0, 0);
+                            keybd_event(0xBE, 0, KEYEVENTF_KEYUP, 0);
+                            keybd_event(0x5B, 0, KEYEVENTF_KEYUP, 0);
+                        }
+                        #[cfg(feature = "harness")]
+                        {
+                            let foreground = unsafe { GetForegroundWindow() };
+                            let mut pid = 0u32;
+                            unsafe { GetWindowThreadProcessId(foreground, &mut pid) };
+                            crate::vtrace::note("emoji_picker", format_args!(
+                                "Win+. sent; foreground hwnd={foreground:#x} pid={pid} (this process {})",
+                                std::process::id()));
+                        }
+                        Ok(())
+                    });
+                    if let Some(dispatcher) = DISPATCHER.get() {
+                        let _ = dispatcher.0.TryEnqueue(&show);
+                    }
+                }
             }
         }
     }
@@ -17828,6 +17885,10 @@ unsafe extern "system" {
     /// name — `!` and `"` do not live on the same keys everywhere.
     #[cfg(feature = "harness")]
     fn VkKeyScanW(ch: u16) -> i16;
+    /// The emoji panel's window, found by its class and title
+    /// (docs/emoji-picker-plan.md §5).
+    #[cfg(feature = "harness")]
+    fn FindWindowW(class: *const u16, title: *const u16) -> isize;
     fn CallWindowProcW(
         prev: isize,
         hwnd: isize,
@@ -22724,6 +22785,63 @@ impl crate::harness::Stage for WinUiStage {
     /// legal.
     fn notification_title(&self, notification: u64) -> Option<String> {
         on_notify(move || delivered_notification_title(notification)).flatten()
+    }
+
+    /// The panel's own search, the route a person takes (measured
+    /// 2026-09-26, docs/emoji-picker-plan.md §5): while the panel is open it
+    /// holds the keyboard, so the emoji's Unicode name typed as keys filters
+    /// it, the field untouched, and Return inserts the first result. The
+    /// name comes from the system's ICU; the panel's grid itself is not
+    /// reachable through UI Automation from another process (measured).
+    fn pick_emoji(&self, emoji: &str) -> Result<(), String> {
+        let wide = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
+        let (class, title) = (wide("Windows.UI.Core.CoreWindow"), wide("Windows Input Experience"));
+        let panel = unsafe { FindWindowW(class.as_ptr(), title.as_ptr()) };
+        if panel == 0 {
+            return Err("the emoji panel's window does not exist (TextInputHost is not running)".to_owned());
+        }
+        // The panel appears about a second after its shortcut and nothing a
+        // window reports tells open from shut (measured 2026-09-26), so the
+        // pick waits for it; the field check below names a miss.
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+        let before = Self::on_ui_read(|core| {
+            Ok(focused_editable_id(core).and_then(|id| editable_by_id(core, id)).and_then(|f| f.text().ok()).map(lf))
+        })
+        .unwrap_or(None);
+        let first = emoji.chars().next().ok_or("an empty emoji")?;
+        let name = unicode_name(first)
+            .ok_or_else(|| format!("the system ICU has no name for U+{:04X}", first as u32))?;
+        const KEYEVENTF_KEYUP: u32 = 0x2;
+        let tap = |vk: u8| unsafe {
+            keybd_event(vk, 0, 0, 0);
+            keybd_event(vk, 0, KEYEVENTF_KEYUP, 0);
+        };
+        for ch in name.chars() {
+            match ch {
+                ' ' => tap(0x20),
+                c if c.is_ascii_alphanumeric() => tap(c.to_ascii_uppercase() as u8),
+                _ => {}
+            }
+            std::thread::sleep(std::time::Duration::from_millis(15));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(600));
+        // WHAT DISCRIMINATES AN OPEN PANEL (measured 2026-09-26): nothing a
+        // window reports does — the panel's window is visible and cloaked
+        // open or shut, and the keyboard focus stays in the field — but an
+        // open panel takes the keys into its search and the field's text
+        // does not move.
+        let after = Self::on_ui_read(|core| {
+            Ok(focused_editable_id(core).and_then(|id| editable_by_id(core, id)).and_then(|f| f.text().ok()).map(lf))
+        })
+        .unwrap_or(None);
+        if after != before {
+            return Err(format!(
+                "the emoji panel was not open: the name {name:?} reached the field, which now \
+                 reads {after:?}"
+            ));
+        }
+        tap(0x0d);
+        Ok(())
     }
 
     /// The taskbar button's own help text, which the shell fills from the

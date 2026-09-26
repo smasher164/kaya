@@ -269,6 +269,10 @@ func App() *kaya.App {
 					compose = tx.Textarea(func(tx *kaya.Tx, text string) { draft = text }).
 						Submits().MaxLines(5).Placeholder("Message").A11yID("compose").Grow(1).
 						OnSubmitted(send)
+					if kaya.Capabilities().EmojiPicker {
+						tx.Button("😀", func(tx *kaya.Tx) { tx.ShowEmojiPicker(compose) }).
+							Role(kaya.RolePlain).A11yID("emoji").A11yLabel("Emoji")
+					}
 					tx.Button("Send", func(tx *kaya.Tx) { send(tx, draft) }).A11yID("send")
 				})
 			})

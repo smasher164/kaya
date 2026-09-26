@@ -10,7 +10,7 @@ import UserNotifications
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0xbb350b703dbddcf5
+let kayaSpecHash: UInt64 = 0xba86c9ec72f15877
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -133,6 +133,7 @@ private let mpropRole: UInt32 = 8
 private let mpropSymbol: UInt32 = 9
 private let commandClear: UInt32 = 1
 private let commandFocus: UInt32 = 2
+private let commandEmojiPicker: UInt32 = 3
 private let kindColumn: UInt32 = 1
 private let kindButton: UInt32 = 2
 private let kindLabel: UInt32 = 3
@@ -5921,6 +5922,17 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     kayaNoteQuietTextWrite(id, from: previous, to: "")
                 case commandFocus:
                     kayaScene.focusedId = id
+                case commandEmojiPicker:
+                    // docs/emoji-picker-plan.md §2: the palette is an input
+                    // method, inserting into the ACTIVE app's first responder,
+                    // so the field takes the focus a turn before it opens.
+                    kayaScene.focusedId = id
+                    #if os(macOS)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                        NSApp.activate(ignoringOtherApps: true)
+                        NSApp.orderFrontCharacterPalette(nil)
+                    }
+                    #endif
                 default:
                     fatalError("kaya: unknown command \(command)")
                 }
@@ -9290,6 +9302,39 @@ private func kayaRunScript(_ script: String) {
                     failures.append(
                         "the platform holds no delivered notification \(nid), wanted \"\(want)\"")
                 }
+            case "pick_emoji":
+                // docs/emoji-picker-plan.md §5: the palette the app's emoji
+                // command opened must be on screen (read by its owner, the
+                // palette's own process), and the choice travels the palette's
+                // route, NSTextInputClient's insertText into the first
+                // responder, since no test reaches the palette's grid.
+                let emoji = kayaQuoted(Array(parts[1...]))
+                #if os(macOS)
+                kayaAwaitQuiet()
+                let answered = kayaAnswers()
+                var palette = kayaCharacterPaletteOnScreen()
+                let deadline = Date().addingTimeInterval(5)
+                while !palette && Date() < deadline {
+                    Thread.sleep(forTimeInterval: 0.1)
+                    palette = kayaCharacterPaletteOnScreen()
+                }
+                if !palette {
+                    failures.append("pick_emoji \"\(emoji)\": no character palette is on screen, so no emoji picker is open")
+                } else {
+                    let inserted = DispatchQueue.main.sync { () -> Bool in
+                        guard let client = kayaFocusedTextResponder() as? NSTextInputClient else { return false }
+                        client.insertText(emoji, replacementRange: NSRange(location: NSNotFound, length: 0))
+                        return true
+                    }
+                    if inserted {
+                        kayaAwaitAnswer(answered)
+                    } else {
+                        failures.append("pick_emoji \"\(emoji)\": the palette is open and no text field is editing")
+                    }
+                }
+                #else
+                failures.append("pick_emoji \"\(emoji)\": iOS has no emoji picker to open (docs/emoji-picker-plan.md R2)")
+                #endif
             case "expect_badge":
                 // docs/app-badge-plan.md §4: the platform's own record, retried
                 // like an expect since the Dock publishes the label later.
@@ -15851,6 +15896,19 @@ func kayaPostNotification(_ id: UInt64, at: UInt64, title: String, body: String)
         }
     }
 }
+
+#if os(macOS)
+/// Whether the Emoji & Symbols palette has a window on screen, read by the
+/// owner of each window the window server lists, never by what kaya asked for.
+func kayaCharacterPaletteOnScreen() -> Bool {
+    let owners = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.CharacterPaletteIM")
+        .map { $0.processIdentifier }
+    guard !owners.isEmpty,
+          let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]]
+    else { return false }
+    return windows.contains { owners.contains(($0[kCGWindowOwnerPID as String] as? pid_t) ?? -1) }
+}
+#endif
 
 /// The app's icon badge (docs/app-badge-plan.md §2): the Dock tile's label
 /// on the mac, the home screen's badge on iOS. 0 clears.

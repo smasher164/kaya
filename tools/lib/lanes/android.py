@@ -97,6 +97,8 @@ LEGS = {
         # The app's icon badge (docs/app-badge-plan.md): the count rides the
         # showing notification.
         "badge-compose",
+        # The emoji button (docs/emoji-picker-plan.md R1): androidx's picker.
+        "emoji-compose",
         # A URL that opens the app on the thing it names
         # (docs/app-links-plan.md L5): the same tasks guest, warm through
         # the app's own startActivity and cold through `am start -a VIEW`.

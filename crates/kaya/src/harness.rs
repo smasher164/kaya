@@ -399,6 +399,9 @@ pub enum Step {
     /// The badge the PLATFORM shows on the app's icon reads this text, ""
     /// for none (docs/app-badge-plan.md §4).
     ExpectBadge(String),
+    /// Choose this emoji in the picker the app's emoji command opened, the
+    /// way the picker's own grid would (docs/emoji-picker-plan.md §5).
+    PickEmoji(String),
     /// Activate the delivered notification the way the user would where a
     /// test can reach the shade, or through the backend's own activation
     /// path where it cannot (N5). An action, silent like click.
@@ -765,6 +768,7 @@ impl Step {
             | Step::ExpectNotification(..)
             | Step::ExpectNoNotification(..)
             | Step::ExpectBadge(..)
+            | Step::PickEmoji(..)
             | Step::ExpectNoTarget(..)
             | Step::NotificationActivate(..)
             | Step::OpenLink(..)
@@ -879,6 +883,7 @@ impl Step {
             Step::ExpectNotification { .. } => true,
             Step::ExpectNoNotification { .. } => true,
             Step::ExpectBadge { .. } => true,
+            Step::PickEmoji { .. } => false,
             Step::NotificationActivate { .. } => false,
             Step::OpenLink { .. } => false,
             Step::Relaunch(..) => false,
@@ -1237,6 +1242,9 @@ pub trait Stage: Send + 'static {
     /// The badge the PLATFORM shows on the app's icon, "" for none: its own
     /// record, never kaya's copy of the count (docs/app-badge-plan.md §4).
     fn badge(&self) -> String;
+    /// Choose `emoji` in the emoji picker the app's command opened, through
+    /// the picker's own route; Err naming what it found when none is open.
+    fn pick_emoji(&self, emoji: &str) -> Result<(), String>;
     /// Activate a delivered notification: the shade's real tap where a test
     /// reaches it, the backend's own activation path where it cannot.
     fn activate_notification(&self, notification: u64);
@@ -2011,6 +2019,7 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 Step::ExpectNoNotification(id)
             }
             "expect_badge" => Step::ExpectBadge(parse_string(rest)?),
+            "pick_emoji" => Step::PickEmoji(parse_string(rest)?),
             "notification_activate" => {
                 let id = rest.trim().parse::<u64>().map_err(|_| {
                     format!("notification_activate wants a numeric id: {line:?}")
@@ -4060,6 +4069,17 @@ fn run_with_log(
                     )),
                 }
             })),
+            Step::PickEmoji(emoji) => {
+                await_quiet();
+                let answered = crate::scene::answers();
+                match stage.pick_emoji(emoji) {
+                    Ok(()) => {
+                        await_answer(answered);
+                        None
+                    }
+                    Err(why) => Some(Err(format!("pick_emoji {emoji:?}: {why}"))),
+                }
+            }
             Step::ExpectBadge(want) => Some(poll(|| {
                 let got = stage.badge();
                 if got == *want {
@@ -6448,6 +6468,9 @@ mod tests {
         fn badge(&self) -> String {
             String::new()
         }
+        fn pick_emoji(&self, _emoji: &str) -> Result<(), String> {
+            Ok(())
+        }
         fn activate_notification(&self, _notification: u64) {}
         fn open_link(&self, _url: &str) {}
         /// A picker that ANSWERS A FIXED NUMBER OF READS and is then
@@ -7451,6 +7474,9 @@ mod tests {
         fn badge(&self) -> String {
             String::new()
         }
+        fn pick_emoji(&self, _emoji: &str) -> Result<(), String> {
+            Ok(())
+        }
         fn activate_notification(&self, _notification: u64) {}
         fn open_link(&self, _url: &str) {}
         fn file_dialog_state(&self) -> Option<(String, Vec<String>)> {
@@ -7778,6 +7804,9 @@ mod tests {
         }
         fn badge(&self) -> String {
             String::new()
+        }
+        fn pick_emoji(&self, _emoji: &str) -> Result<(), String> {
+            Ok(())
         }
         fn activate_notification(&self, _notification: u64) {}
         fn open_link(&self, _url: &str) {}

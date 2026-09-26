@@ -882,7 +882,7 @@ sealed class KayaInstance
 /// process can post a local notification the desktop will show
 /// (docs/tasks-s3-plan.md N3). Badge: SetBadge will show a number on the
 /// app's icon (docs/app-badge-plan.md).
-readonly record struct Caps(bool AuxWindows, bool Notifications, bool Badge);
+readonly record struct Caps(bool AuxWindows, bool Notifications, bool Badge, bool EmojiPicker);
 
 /// <summary>The header bar's sort indicator (docs/tables-plan.md):
 /// which column shows it, in which direction — the GUEST's
@@ -1147,7 +1147,8 @@ sealed class KayaApp
         return new Caps(
             (bits & Kaya.CAP_AUX_WINDOWS) != 0,
             (bits & Kaya.CAP_NOTIFICATIONS) != 0,
-            (bits & Kaya.CAP_BADGE) != 0);
+            (bits & Kaya.CAP_BADGE) != 0,
+            (bits & Kaya.CAP_EMOJI_PICKER) != 0);
     }
 
     /// The notification_result decision, in a method of its own because
@@ -3013,6 +3014,11 @@ sealed class Tx : IDisposable
     /// transaction like Clear.
     public void Focus(Widget w) =>
         Records.Add(KayaWire.TxWidgetCommand(w.Id, KayaWire.CommandFocus));
+
+    /// Focus a text field and open the platform's emoji picker on it
+    /// (docs/emoji-picker-plan.md); a chosen emoji arrives as its text change.
+    public void ShowEmojiPicker(Widget w) =>
+        Records.Add(KayaWire.TxWidgetCommand(w.Id, KayaWire.CommandEmojiPicker));
 
     /// DECLARE the decorated ranges of a textarea, replacing whatever was
     /// declared before; an empty set is the clear (docs/ranges-plan.md §3).

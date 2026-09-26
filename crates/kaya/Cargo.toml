@@ -299,6 +299,10 @@ name = "badge"
 path = "../../guests/rust/badge.rs"
 
 [[example]]
+name = "emoji"
+path = "../../guests/rust/emoji.rs"
+
+[[example]]
 name = "reorder"
 path = "../../guests/rust/reorder.rs"
 

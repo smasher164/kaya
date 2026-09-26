@@ -137,6 +137,7 @@ module KayaApp
     saveFile,
     clearWidget,
     focusWidget,
+    showEmojiPicker,
     highlightRanges,
     selectRange,
     revealRange,
@@ -449,7 +450,10 @@ data Capabilities = Capabilities
     notifications :: Bool,
     -- | 'setBadge' will show a number on the app's icon
     -- (docs/app-badge-plan.md). A RUNTIME bit, like 'notifications'.
-    badge :: Bool
+    badge :: Bool,
+    -- | 'showEmojiPicker' opens a picker (docs/emoji-picker-plan.md); on
+    -- iOS it only focuses the field.
+    emojiPicker :: Bool
   }
   deriving (Eq, Show)
 
@@ -463,6 +467,7 @@ capabilities = do
         ((bits .&. R.capAuxWindows) /= 0)
         ((bits .&. R.capNotifications) /= 0)
         ((bits .&. R.capBadge) /= 0)
+        ((bits .&. R.capEmojiPicker) /= 0)
     )
 
 -- | The notification_result decision, in a function of its own because
@@ -1926,6 +1931,11 @@ clearWidget (Widget n) = emitB (W.txWidgetCommand n W.commandClear)
 -- | Give this widget the keyboard focus.
 focusWidget :: Widget -> Build ()
 focusWidget (Widget n) = emitB (W.txWidgetCommand n W.commandFocus)
+
+-- | Focus a text field and open the platform's emoji picker on it
+-- (docs/emoji-picker-plan.md); a chosen emoji arrives as its text change.
+showEmojiPicker :: Widget -> Build ()
+showEmojiPicker (Widget n) = emitB (W.txWidgetCommand n W.commandEmojiPicker)
 
 -- The three text-range verbs (docs\/ranges-plan.md D1). Textarea only.
 --

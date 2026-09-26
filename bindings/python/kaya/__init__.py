@@ -829,6 +829,12 @@ class Widget(_Handle):
         """Give this widget the keyboard focus."""
         _records().append(wire.tx_widget_command(self.id, wire.COMMAND_FOCUS))
 
+    def show_emoji_picker(self) -> None:
+        """Focus this text field and open the platform's emoji picker on it
+        (docs/emoji-picker-plan.md); a chosen emoji arrives as its text
+        change."""
+        _records().append(wire.tx_widget_command(self.id, wire.COMMAND_EMOJI_PICKER))
+
     def scroll_to_row(self, key: Key) -> None:
         """Scroll the For mounted in this container so the row keyed
         `key` has its top at the viewport's top, clamped at the content's
@@ -3975,6 +3981,10 @@ class Capabilities:
     #: (docs/app-badge-plan.md). A RUNTIME bit, like `notifications`.
     badge: bool
 
+    #: `show_emoji_picker` opens a picker (docs/emoji-picker-plan.md); on
+    #: iOS it only focuses the field.
+    emoji_picker: bool
+
 
 def capabilities() -> Capabilities:
     """This host's capabilities, constant for the life of the process."""
@@ -3982,7 +3992,8 @@ def capabilities() -> Capabilities:
     return Capabilities(
         aux_windows=bool(bits & runtime.CAP_AUX_WINDOWS),
         notifications=bool(bits & runtime.CAP_NOTIFICATIONS),
-        badge=bool(bits & runtime.CAP_BADGE))
+        badge=bool(bits & runtime.CAP_BADGE),
+        emoji_picker=bool(bits & runtime.CAP_EMOJI_PICKER))
 
 
 def catalog(app: str) -> None:

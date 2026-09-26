@@ -222,6 +222,10 @@ pub(crate) fn prepare_process() {
     // draws. Not Linux, where most desktops draw nothing (docs/app-badge-plan.md).
     #[cfg(any(target_os = "macos", target_os = "ios", target_os = "windows"))]
     capi::kaya_grant_capabilities(capi::KAYA_CAP_BADGE);
+    // The platform's own emoji picker: the character palette, the emoji
+    // panel, GtkEmojiChooser. iOS has none (docs/emoji-picker-plan.md R2).
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+    capi::kaya_grant_capabilities(capi::KAYA_CAP_EMOJI_PICKER);
 }
 
 pub fn run(app_main: impl FnOnce(AppCtx) + Send + 'static) -> ! {

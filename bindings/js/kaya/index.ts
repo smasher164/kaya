@@ -900,6 +900,13 @@ export class Widget extends Handle {
     records().push(wire.tx_widget_command(this.id, wire.COMMAND_FOCUS));
   }
 
+  /** Focus this text field and open the platform's emoji picker on it
+   * (docs/emoji-picker-plan.md); a chosen emoji arrives as its text change. */
+  showEmojiPicker(): void {
+    this._live("showEmojiPicker()");
+    records().push(wire.tx_widget_command(this.id, wire.COMMAND_EMOJI_PICKER));
+  }
+
   /** Put text into a text widget programmatically: ONE write, after
    * which the user owns the text again. Drops declared ranges and the
    * field's native undo history. Chains. */
@@ -3390,6 +3397,7 @@ export type Capabilities = {
   readonly auxWindows: boolean;
   readonly notifications: boolean;
   readonly badge: boolean;
+  readonly emojiPicker: boolean;
 };
 
 /** This host's capabilities, constant for the life of the process. */
@@ -3399,6 +3407,7 @@ export function capabilities(): Capabilities {
     auxWindows: (bits & runtime.CAP_AUX_WINDOWS) !== 0,
     notifications: (bits & runtime.CAP_NOTIFICATIONS) !== 0,
     badge: (bits & runtime.CAP_BADGE) !== 0,
+    emojiPicker: (bits & runtime.CAP_EMOJI_PICKER) !== 0,
   });
 }
 

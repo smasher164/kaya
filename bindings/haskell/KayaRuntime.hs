@@ -44,6 +44,7 @@ module KayaRuntime
     capAuxWindows,
     capNotifications,
     capBadge,
+    capEmojiPicker,
     Key (..),
     textKey,
     intKey,
@@ -136,6 +137,10 @@ capNotifications = 2
 -- | The core's @KAYA_CAP_BADGE@, the same way.
 capBadge :: Word64
 capBadge = 4
+
+-- | The core's @KAYA_CAP_EMOJI_PICKER@, the same way.
+capEmojiPicker :: Word64
+capEmojiPicker = 8
 
 foreign import ccall unsafe "kaya_submit"
   c_kaya_submit :: Ptr Word8 -> CSize -> IO ()

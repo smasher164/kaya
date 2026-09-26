@@ -177,6 +177,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     wl-clipboard xclip wtype wayland-utils \
     && rm -rf /var/lib/apt/lists/*
 
+# A colour emoji face (docs/emoji-picker-plan.md §2): GtkEmojiChooser hides
+# every emoji no installed font draws, so without one the picker the emoji
+# command opens is an empty grid.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    fonts-noto-color-emoji \
+    && rm -rf /var/lib/apt/lists/*
+
 # The undo milestone's typing verb (docs/undo-plan.md A8): a scene that
 # asserts a field's NATIVE undo history has to fill it the way a user
 # does, so `type` delivers real key events and never a text write — a

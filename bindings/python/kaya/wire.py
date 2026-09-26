@@ -14,7 +14,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, cast
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0xbb350b703dbddcf5
+SPEC_HASH = 0xba86c9ec72f15877
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -238,6 +238,7 @@ OCCURRENCE_TOGGLED = 3
 OCCURRENCE_VALUE_CHANGED = 4
 COMMAND_CLEAR = 1
 COMMAND_FOCUS = 2
+COMMAND_EMOJI_PICKER = 3
 
 TX_CREATE_SIGNAL = 1
 TX_WRITE_SIGNAL = 2

@@ -1,6 +1,9 @@
 # An emoji button beside a text field — the design pass
 
-Status: DESIGN, R1 and R2 RULED 2026-09-25 as recommended (a). The chat app's C5
+Status: BUILT 2026-09-26 on all five lanes and in all nine bindings (R1
+and R2 ruled 2026-09-25 as recommended). tools/scenes/emoji.steps (Rust)
+picks through each platform's picker; the chat app shows its emoji button
+where `emoji_picker` is set. What the build measured is in §6. The chat app's C5
 (docs/chat-plan.md). Researched 2026-09-25 with sources; the mac, Windows
 and iOS points marked unmeasured are probed before any arm is built.
 
@@ -54,3 +57,28 @@ own path and chooses one: the in-app picker on Android, GtkEmojiChooser's
 own grid on Linux, and on macOS and Windows the out-of-process palette
 through accessibility (unmeasured on both). The field's text is the
 observation.
+
+## §6 — What the build measured (2026-09-26)
+
+- macOS: the palette, opened a turn after the field takes focus with the
+  app activated, inserts into the field; the leg reads it on screen by its
+  own process (`com.apple.CharacterPaletteIM`) and closes with the guest.
+  The leg waits for an idle host (the mac lane's HOST_UI_SCENES).
+- Windows: `CoreInputView.TryShow(Emoji)` answered true with the guest in
+  the foreground and opened nothing for a WinUI TextBox, though it opened
+  the panel for a Win32 edit. The command sends the user's own shortcut,
+  Win+period, which does. The panel's grid is not reachable through UI
+  Automation from another process, and no window property tells open from
+  shut (visible, cloaked, rect and keyboard focus all the same), so the
+  pick types the emoji's Unicode name (the system ICU's) into the panel's
+  own search and presses Return, after the second the panel takes to
+  appear, and fails naming the field if the keys reached it instead.
+- Linux: `misc.insert-emoji` opens GtkEmojiChooser; the pick emits its
+  own `emoji-picked`. A GtkText's `grab_focus` selects the whole text, so
+  the command uses `grab_focus_without_selecting` (the first leg's emoji
+  replaced "Hi "). The lane image carries fonts-noto-color-emoji, without
+  which the chooser hides every emoji.
+- Android: androidx's EmojiPickerView in a Material sheet; the pick calls
+  the picker's own listener.
+- iOS: the command focuses the field; the lane drops the pick.
+

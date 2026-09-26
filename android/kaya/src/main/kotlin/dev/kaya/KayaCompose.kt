@@ -1081,6 +1081,9 @@ object KayaSceneModel {
     // walks it into the platform focus system, and expect_focused
     // reads it back.
     var focusedId by mutableStateOf<Long?>(null)
+    /** The text field the emoji panel serves, null while it is closed
+     * (docs/emoji-picker-plan.md R1). */
+    var emojiPickerFor by mutableStateOf<KayaNode?>(null)
     /** The field the COMPOSITION has focused, written only by a field's own
      * gain and loss — never by the focus command, which writes [focusedId]
      * before Compose has moved (docs/deferred.md, the android `type` race,
@@ -1910,7 +1913,7 @@ object KayaCompose {
     // but only the runtime assert catches a stale compiled APK against
     // a new libkaya. ULong because the fingerprint's high bit is fair
     // game and a Kotlin Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0xbb350b703dbddcf5uL
+    private const val SPEC_HASH: ULong = 0xba86c9ec72f15877uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -2055,6 +2058,7 @@ object KayaCompose {
     internal const val DETENT_LARGE = 2
     private const val COMMAND_CLEAR = 1
     private const val COMMAND_FOCUS = 2
+    private const val COMMAND_EMOJI_PICKER = 3
     // Menu item kinds (spec enum "menu_kind"; DESIGN.md, Menus): menu
     // and radio_group are the grouping nodes, the rest are leaves.
     const val MENU_KIND_MENU = 1
@@ -2654,7 +2658,8 @@ object KayaCompose {
      */
     @JvmStatic
     fun measuredCapabilities(context: Context): Long =
-        if (kayaCanPostNotifications(context)) KAYA_CAP_NOTIFICATIONS else 0L
+        (if (kayaCanPostNotifications(context)) KAYA_CAP_NOTIFICATIONS else 0L) or
+            KAYA_CAP_EMOJI_PICKER
 
     /** An activation that arrived before the interpreter was mounted (a
      * COLD launch by tap): held here and delivered by [mount]. */
@@ -3762,6 +3767,10 @@ object KayaCompose {
                                 node.tag, "", KayaSceneModel.focusedId == id, false)
                         }
                         COMMAND_FOCUS -> KayaSceneModel.focusedId = id
+                        COMMAND_EMOJI_PICKER -> {
+                            KayaSceneModel.focusedId = id
+                            KayaSceneModel.emojiPickerFor = KayaSceneModel.nodes[id]
+                        }
                         else -> error("kaya: unknown command $command")
                     }
                 }
@@ -7953,6 +7962,18 @@ object KayaCompose {
                             else -> failures.add(
                                 "notification $nid \"$got\", wanted \"$want\"")
                         }
+                    }
+                    "pick_emoji" -> {
+                        // docs/emoji-picker-plan.md §5: the open panel's own
+                        // listener, the route a tap on its grid takes.
+                        val emoji = quoted(parts.drop(1))
+                        kayaAwaitQuiet()
+                        val answered = kayaBatches
+                        val picked = onUi(activity) {
+                            kayaEmojiPick?.let { it(emoji); true } ?: false
+                        }
+                        if (picked == true) kayaAwaitAnswer(answered)
+                        else failures.add("pick_emoji \"$emoji\": no emoji picker is open")
                     }
                     "expect_badge" -> {
                         // docs/app-badge-plan.md §4: the number the platform
@@ -15537,6 +15558,7 @@ fun KayaRoot() {
     // The sheets over the window, an entry or a section; a chain nests
     // inside its parent sheet's content (docs/sheet-plan.md).
     KayaSheetHost(null)
+    KayaEmojiPanel()
 
     KayaSceneModel.alertId?.let { alert ->
         // The platform's REAL modal dialog: M3 AlertDialog. Every
@@ -16438,6 +16460,42 @@ fun kayaTopmostSheet(): KayaSheet? {
     return live.filter { s -> live.none { it.parent == s.id } }.maxByOrNull { it.id }
 }
 
+/** What the open emoji panel does with a choice, null while none is open:
+ * the panel's own listener and the harness's `pick_emoji` both call it. */
+@Volatile internal var kayaEmojiPick: ((String) -> Unit)? = null
+
+/** The chosen emoji replaces the field's selection through its own text
+ * state, so it reaches the app as text_changed, like a typed character. */
+internal fun kayaInsertEmoji(node: KayaNode, emoji: String) {
+    node.textState.edit {
+        replace(selection.min, selection.max, emoji)
+    }
+}
+
+/** Android's emoji panel (docs/emoji-picker-plan.md R1): no app can open
+ * the keyboard's own, so the command opens androidx's picker in a sheet,
+ * as Google Messages opens its own. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+fun KayaEmojiPanel() {
+    val node = KayaSceneModel.emojiPickerFor ?: return
+    DisposableEffect(node.id) {
+        val pick: (String) -> Unit = { emoji -> kayaInsertEmoji(node, emoji) }
+        kayaEmojiPick = pick
+        onDispose { if (kayaEmojiPick === pick) kayaEmojiPick = null }
+    }
+    ModalBottomSheet(onDismissRequest = { KayaSceneModel.emojiPickerFor = null }) {
+        androidx.compose.ui.viewinterop.AndroidView(
+            factory = { context ->
+                androidx.emoji2.emojipicker.EmojiPickerView(context).apply {
+                    setOnEmojiPickedListener { item -> kayaEmojiPick?.invoke(item.emoji) }
+                }
+            },
+            modifier = Modifier.fillMaxWidth().height(360.dp),
+        )
+    }
+}
+
 /** The sheets over `parent` — null for every sheet over a NON-sheet
  * surface (the window, an entry, a section), an id for that sheet's own
  * child — each an M3 ModalBottomSheet, its own window, composed inside
@@ -16529,6 +16587,8 @@ internal const val KAYA_NOTIFICATION_REFUSED = 1
 
 /** KAYA_CAP_NOTIFICATIONS (crates/kaya/src/capi.rs). */
 internal const val KAYA_CAP_NOTIFICATIONS = 2L
+/** KAYA_CAP_EMOJI_PICKER (crates/kaya/src/capi.rs): androidx's picker. */
+internal const val KAYA_CAP_EMOJI_PICKER = 8L
 
 /** The platform's key for a kaya notification: the TAG carries the whole
  * u64, since `notify` takes an int and two ids may share its low bits. */

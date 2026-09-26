@@ -1165,7 +1165,8 @@ public final class KayaApp {
      *     False on Android, whose system owns surface geometry; there
      *     {@code createWindow} aborts at the root.
      */
-    public record Capabilities(boolean auxWindows, boolean notifications, boolean badge) {}
+    public record Capabilities(boolean auxWindows, boolean notifications, boolean badge,
+            boolean emojiPicker) {}
 
     /**
      * The core's number written again — no header on this tier to read
@@ -1175,6 +1176,7 @@ public final class KayaApp {
     private static final long CAP_AUX_WINDOWS = 1;
     private static final long CAP_NOTIFICATIONS = 2;
     private static final long CAP_BADGE = 4;
+    private static final long CAP_EMOJI_PICKER = 8;
 
     /** This host's capabilities; constant for the life of the
      * process. */
@@ -1182,7 +1184,7 @@ public final class KayaApp {
         long bits = KayaRing.capabilities();
         return new Capabilities(
                 (bits & CAP_AUX_WINDOWS) != 0, (bits & CAP_NOTIFICATIONS) != 0,
-                (bits & CAP_BADGE) != 0);
+                (bits & CAP_BADGE) != 0, (bits & CAP_EMOJI_PICKER) != 0);
     }
 
     /**
@@ -5783,6 +5785,13 @@ public final class KayaApp {
          * the transaction like clear. */
         public void focus(Widget w) {
             emit(KayaWire.txWidgetCommand(w.id, KayaWire.COMMAND_FOCUS));
+        }
+
+        /** Focus a text field and open the platform's emoji picker on it
+         * (docs/emoji-picker-plan.md); a chosen emoji arrives as its text
+         * change. */
+        public void showEmojiPicker(Widget w) {
+            emit(KayaWire.txWidgetCommand(w.id, KayaWire.COMMAND_EMOJI_PICKER));
         }
 
         /**

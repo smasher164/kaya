@@ -42,7 +42,7 @@ SCENES="background stall milestone2 entry search gallery todos reorder feed grow
 # waits on the bindings sweep too (docs/tasks-s3-plan.md §6 step 3);
 # `richtext`, `ownundo` and `richlabel` wait on the eight other bindings'
 # Document/Edit/Format spelling (docs/rich-text-plan.md §4 step 3, §14, §15).
-DEPTH_SCENES="windowed canvas sizepolicy dnd tooltips tasks notify richtext ownundo richlabel notes richrows format flexshrink listrow tints badge"
+DEPTH_SCENES="windowed canvas sizepolicy dnd tooltips tasks notify richtext ownundo richlabel notes richrows format flexshrink listrow tints badge emoji"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 
@@ -1354,6 +1354,8 @@ for proto in x11 wayland; do
     # on the leg's own session bus, with a notification beside it.
     run "$proto" badge-rust env KAYA_SELFTEST=badge \
         tools/linux/notify-leg.sh portal "$CARGO_TARGET_DIR/debug/examples/badge"
+    # The emoji button (docs/emoji-picker-plan.md): GtkEmojiChooser.
+    run "$proto" emoji-rust env KAYA_SELFTEST=emoji "$CARGO_TARGET_DIR/debug/examples/emoji"
     # THE FLOOR'S OTHER HALF, which no shared scene can assert: on a bus
     # with a plain freedesktop daemon and no registry at all, kaya posts
     # NOTHING and answers the guest `refused` (docs/tasks-s3-plan.md §0's

@@ -1,0 +1,13 @@
+# The emoji button (docs/emoji-picker-plan.md): the app's command focuses its
+# field and opens the platform's emoji picker, and a chosen emoji reaches the
+# app as the field's text change, like a typed character. iOS has no picker
+# (R2): the command focuses the field, and its lane drops the pick.
+expect_placeholder entry@message "Message"
+click entry@message
+expect_focused entry@message
+type "Hi "
+click button@emoji
+expect_focused entry@message
+pick_emoji "😀"
+expect entry@message "Hi 😀"
+expect label@echo "Hi 😀"

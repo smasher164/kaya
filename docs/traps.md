@@ -12793,3 +12793,20 @@ badge by name. On Windows, `SetOverlayIcon(hwnd, NULL, NULL)` removed the
 overlay and left the taskbar button's help text reading "3"; an EMPTY
 description clears both. The badge leg read "3" after its clear on the lane
 until that changed.
+
+## The Windows emoji panel: TryShow opens nothing for a WinUI TextBox, and nothing reports it open (measured 2026-09-26)
+
+`CoreInputView.GetForCurrentView().TryShow(Emoji)` answered true with the
+kaya guest in the foreground and its TextBox focused, and no panel
+appeared; the same call opened the panel over a Win32 edit in a WinForms
+probe. Win+period, the user's own shortcut, opens it for the WinUI field.
+Once open, nothing a window reports distinguishes it from shut: the
+"Windows Input Experience" CoreWindow is visible and DWM-cloaked (value 2)
+either way, its rect is the screen's, and the keyboard focus stays in the
+app's field. What does move is where typed keys land: into the panel's
+search while it is open, into the field when it is not. Probing it, two
+tools of our own lied first: tools/guest/shot-screen.ps1 opens the action
+centre on purpose (`ms-actioncenter:`, written for notification captures),
+which read as a stuck flyout until the script was read, and a PowerShell
+probe that slept inside a WinForms timer tick blocked its own message loop,
+so injected keys reached nothing. docs/emoji-picker-plan.md §6.

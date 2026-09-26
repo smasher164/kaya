@@ -188,6 +188,7 @@ _lib.kaya_capabilities.restype = ctypes.c_uint64
 CAP_AUX_WINDOWS = 1
 CAP_NOTIFICATIONS = 2
 CAP_BADGE = 4
+CAP_EMOJI_PICKER = 8
 
 
 def capability_bits() -> int:

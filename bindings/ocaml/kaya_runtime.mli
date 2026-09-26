@@ -56,6 +56,7 @@ val open_picked : int64 -> int -> Unix.file_descr * bool
 val cap_aux_windows : int64
 val cap_notifications : int64
 val cap_badge : int64
+val cap_emoji_picker : int64
 val capability_bits : unit -> int64
 
 (* Enter the core's run loop, after asserting the loaded library speaks
