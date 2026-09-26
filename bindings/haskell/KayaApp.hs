@@ -122,6 +122,7 @@ module KayaApp
     NotificationAttr (..),
     showNotification,
     cancelNotification,
+    setBadge,
     onNotificationActivation,
     notificationResult,
     linkRoute,
@@ -445,7 +446,10 @@ data Capabilities = Capabilities
     -- | This process can post a local notification the desktop will
     -- show (docs/tasks-s3-plan.md N3). A RUNTIME bit: the host measures
     -- it at startup.
-    notifications :: Bool
+    notifications :: Bool,
+    -- | 'setBadge' will show a number on the app's icon
+    -- (docs/app-badge-plan.md). A RUNTIME bit, like 'notifications'.
+    badge :: Bool
   }
   deriving (Eq, Show)
 
@@ -458,6 +462,7 @@ capabilities = do
     ( Capabilities
         ((bits .&. R.capAuxWindows) /= 0)
         ((bits .&. R.capNotifications) /= 0)
+        ((bits .&. R.capBadge) /= 0)
     )
 
 -- | The notification_result decision, in a function of its own because
@@ -1552,6 +1557,12 @@ showNotification notification attrs handler = do
 -- cleared). No answer follows; an unknown id is ignored.
 cancelNotification :: Word64 -> Build ()
 cancelNotification notification = emitB (W.txCancelNotification notification)
+
+-- | Ask the platform to show a count on the app's icon, 0 clearing it
+-- (docs/app-badge-plan.md). Never refused: 'badge' says whether a number
+-- will appear.
+setBadge :: Word32 -> Build ()
+setBadge count = emitB (W.txSetBadge count)
 
 -- | Register the PROCESS-LEVEL notification handler
 -- (docs/tasks-s9-plan.md R1): the handler receives every result whose id

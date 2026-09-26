@@ -24,7 +24,7 @@ public enum KayaValue: Hashable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0x555172b2e7556a6f
+let kayaSpecHash: UInt64 = 0xbb350b703dbddcf5
 
 /// A civil date as the wire's I64: year * 10000 + month * 100 + day.
 func kayaPackDate(_ year: Int, _ month: Int, _ day: Int) -> Int64 {
@@ -677,6 +677,14 @@ struct KayaTx {
         let kayaAt = self.begin(UInt16(KAYA_TX_SCROLL_TO_ROW))
         self.u64(widgetId)
         self.value(key)
+        self.end(kayaAt)
+    }
+
+    /// Ask the platform to show `count` on the app's icon, 0 clearing it (docs/app-badge-plan.md). Never refused: what appears is the platform's decision (the Dock tile's label, the home screen's badge, a taskbar overlay kaya draws, a Linux dock's LauncherEntry count, the number on Android's showing notifications), and the `badge` capability says whether a number will. Last write wins.
+    mutating func setBadge(_ count: UInt32) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_BADGE))
+        self.u32(count)
+        self.u32(0)
         self.end(kayaAt)
     }
 

@@ -1622,6 +1622,10 @@ public struct KayaCapabilities {
     /// (docs/tasks-s3-plan.md N3). A RUNTIME bit: the host measures it at
     /// startup, so it is false where no notification service answers.
     let notifications: Bool
+
+    /// `setBadge` will show a number on the app's icon
+    /// (docs/app-badge-plan.md). A RUNTIME bit, like `notifications`.
+    let badge: Bool
 }
 
 // --- The formatter door and the catalog (docs/compliance-plan.md §1.4) ------
@@ -2369,7 +2373,8 @@ public final class KayaApp {
         let bits = kaya_capabilities()
         return KayaCapabilities(
             auxWindows: bits & UInt64(KAYA_CAP_AUX_WINDOWS) != 0,
-            notifications: bits & UInt64(KAYA_CAP_NOTIFICATIONS) != 0)
+            notifications: bits & UInt64(KAYA_CAP_NOTIFICATIONS) != 0,
+            badge: bits & UInt64(KAYA_CAP_BADGE) != 0)
     }
 
     private let posted = KayaAppQueue<@KayaAppActor @Sendable (KayaAppTx) throws -> Void>()
@@ -5087,6 +5092,13 @@ public final class KayaAppTx {
     /// cleared). No answer follows; an unknown id is ignored.
     func cancelNotification(_ notification: UInt64) {
         tx.cancelNotification(notification)
+    }
+
+    /// Ask the platform to show `count` on the app's icon, 0 clearing it
+    /// (docs/app-badge-plan.md). Never refused: `capabilities().badge` says
+    /// whether a number will appear.
+    func setBadge(_ count: UInt32) {
+        tx.setBadge(count)
     }
 
     /// Ask the platform for files. THE PICK, NOT THE OPEN — the result

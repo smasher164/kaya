@@ -14,7 +14,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, cast
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x555172b2e7556a6f
+SPEC_HASH = 0xbb350b703dbddcf5
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -300,6 +300,7 @@ TX_PRESENT_SHEET = 58
 TX_DISMISS_SHEET = 59
 TX_SET_SHEET_PROP = 60
 TX_SCROLL_TO_ROW = 61
+TX_SET_BADGE = 62
 APPLY_CREATE = 1
 APPLY_SET_PROP = 2
 APPLY_ADD_CHILD = 3
@@ -347,6 +348,7 @@ APPLY_PRESENT_SHEET = 46
 APPLY_DISMISS_SHEET = 47
 APPLY_SET_SHEET_PROP = 48
 APPLY_SCROLL_TO_ROW = 49
+APPLY_SET_BADGE = 50
 OCC_BUTTON_CLICKED = 1
 OCC_TEXT_CHANGED = 2
 OCC_TOGGLED = 3
@@ -696,6 +698,10 @@ def tx_set_sheet_prop(sheet: int, prop: int, source: int) -> bytes:
 def tx_scroll_to_row(widget_id: int, key: Value) -> bytes:
     """Scroll the For mounted in `widget_id` so the row keyed `key` has its top at the viewport's top, clamped at the content's end (docs/scroll-to-plan.md S1, S2). THE LIST HALF OF DESIGN.md's scrollTo: its own record rather than a widget_command because the key is a payload that record has no room for. A PURE EFFECT like reveal_range: no state, permitted inside an undo group and not inverted (S5). A container that hosts no For, or a key the collection does not hold, applies NOTHING, silently — an instance-addressed command's rule, since a copy legitimately vanishes under rebuild (S3). Issued before the container's first layout it is held by the backend and lands after it (S4)."""
     return record(TX_SCROLL_TO_ROW, struct.pack("<Q", widget_id) + _enc.value(key))
+
+def tx_set_badge(count: int) -> bytes:
+    """Ask the platform to show `count` on the app's icon, 0 clearing it (docs/app-badge-plan.md). Never refused: what appears is the platform's decision (the Dock tile's label, the home screen's badge, a taskbar overlay kaya draws, a Linux dock's LauncherEntry count, the number on Android's showing notifications), and the `badge` capability says whether a number will. Last write wins."""
+    return record(TX_SET_BADGE, struct.pack("<I", count) + struct.pack("<I", 0))
 
 
 def tx_set_text(widget_id: int, text: str) -> bytes:

@@ -94,6 +94,9 @@ LEGS = {
         # The notification conformance scene: rust-only for now, so it
         # rides the compose suite alone (docs/tasks-s3-plan.md §5).
         "notify-compose",
+        # The app's icon badge (docs/app-badge-plan.md): the count rides the
+        # showing notification.
+        "badge-compose",
         # A URL that opens the app on the thing it names
         # (docs/app-links-plan.md L5): the same tasks guest, warm through
         # the app's own startActivity and cold through `am start -a VIEW`.

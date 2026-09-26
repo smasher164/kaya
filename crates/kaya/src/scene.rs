@@ -52,8 +52,14 @@ pub(crate) const CAP_AUX_WINDOWS: u64 = 1;
 /// the guest's first read; the static word never carries it.
 pub(crate) const CAP_NOTIFICATIONS: u64 = 2;
 
-/// The bits the presentation layer granted at startup (CAP_NOTIFICATIONS is
-/// the only grantable one; `kaya_grant_capabilities` refuses others).
+/// A number on the app's icon: `set_badge` will show one here
+/// (docs/app-badge-plan.md). A RUNTIME fact like CAP_NOTIFICATIONS (a badge
+/// authorization on iOS), granted the same way; unset where the platform
+/// may draw a dot or nothing (Android, a Linux desktop).
+pub(crate) const CAP_BADGE: u64 = 4;
+
+/// The bits the presentation layer granted at startup (CAP_NOTIFICATIONS and
+/// CAP_BADGE; `kaya_grant_capabilities` refuses others).
 pub(crate) static RUNTIME_CAPABILITIES: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(0);
 
@@ -624,6 +630,7 @@ fn undo_verdict(op: &TxOp) -> UndoVerdict {
         TxOp::ShowAlert(_) => UndoVerdict::Refused("show_alert"),
         TxOp::ShowNotification(_) => UndoVerdict::Refused("show_notification"),
         TxOp::CancelNotification(_) => UndoVerdict::Refused("cancel_notification"),
+        TxOp::SetBadge { .. } => UndoVerdict::Refused("set_badge"),
         TxOp::DeclareLinkRoute { .. } => UndoVerdict::Refused("declare_link_route"),
         TxOp::ShowFileDialog(_) => UndoVerdict::Refused("show_file_dialog"),
         TxOp::ShowSaveDialog(_) => UndoVerdict::Refused("show_save_dialog"),
@@ -4192,6 +4199,7 @@ impl Scene {
                         out.push(ApplyOp::ScrollToRow { id: widget, copy, index: index as u32 });
                     }
                 }
+                TxOp::SetBadge { count } => out.push(ApplyOp::SetBadge { count }),
                 TxOp::SetRichText { widget, text, runs } => {
                     self.require_rich(widget, "set_rich_text");
                     self.refuse_block_runs_on_a_label(widget, "set_rich_text", &runs);

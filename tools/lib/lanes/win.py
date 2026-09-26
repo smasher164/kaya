@@ -71,7 +71,7 @@ TEXT_SCALE_LEGS = {"tasksbig_rust": 200, "formatbig_rust": 200}
 # THIS default; the runner calls depth_scenes(), which honours the
 # KAYA_WIN_DEPTH_SCENES override the lane uses for one-off slices.
 DEPTH_SCENES = ["windowed", "canvas", "sizepolicy", "tasks", "notify", "richtext", "flexshrink",
-                "listrow", "tints",
+                "listrow", "tints", "badge",
                 "ownundo", "richlabel", "notes", "richrows"]
 
 # THE PACKAGED LEGS (docs/packaging-plan.md P3): the SAME Rust guests, run
@@ -530,6 +530,12 @@ ORDER = [
     # submit legs' serial reason (docs/chat-plan.md).
     [
      "chat_go",
+    ],
+    # badge_rust ALONE: every unpackaged kaya process groups under the one
+    # declared AUMID, so the taskbar overlay it sets and reads belongs to
+    # that group, last writer wins (docs/app-badge-plan.md §2).
+    [
+     "badge_rust",
     ],
     # The background scene, pooled between drains: its worker parks
     # until a click releases it, so a binding that ran the work ON the

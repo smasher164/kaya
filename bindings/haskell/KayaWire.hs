@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x555172b2e7556a6f
+specHash = 0xbb350b703dbddcf5
 
 valueBool :: Word32
 valueBool = 1
@@ -592,6 +592,8 @@ txKindSetSheetProp :: Word16
 txKindSetSheetProp = 60
 txKindScrollToRow :: Word16
 txKindScrollToRow = 61
+txKindSetBadge :: Word16
+txKindSetBadge = 62
 applyKindCreate :: Word16
 applyKindCreate = 1
 applyKindSetProp :: Word16
@@ -686,6 +688,8 @@ applyKindSetSheetProp :: Word16
 applyKindSetSheetProp = 48
 applyKindScrollToRow :: Word16
 applyKindScrollToRow = 49
+applyKindSetBadge :: Word16
+applyKindSetBadge = 50
 occKindButtonClicked :: Word16
 occKindButtonClicked = 1
 occKindTextChanged :: Word16
@@ -1027,6 +1031,10 @@ txSetSheetProp sheet prop source = wireRecord txKindSetSheetProp (word64LE sheet
 -- Scroll the For mounted in `widget_id` so the row keyed `key` has its top at the viewport's top, clamped at the content's end (docs/scroll-to-plan.md S1, S2). THE LIST HALF OF DESIGN.md's scrollTo: its own record rather than a widget_command because the key is a payload that record has no room for. A PURE EFFECT like reveal_range: no state, permitted inside an undo group and not inverted (S5). A container that hosts no For, or a key the collection does not hold, applies NOTHING, silently — an instance-addressed command's rule, since a copy legitimately vanishes under rebuild (S3). Issued before the container's first layout it is held by the backend and lands after it (S4).
 txScrollToRow :: Word64 -> Value -> Builder
 txScrollToRow widgetId key = wireRecord txKindScrollToRow (word64LE widgetId <> encodeValue key)
+
+-- Ask the platform to show `count` on the app's icon, 0 clearing it (docs/app-badge-plan.md). Never refused: what appears is the platform's decision (the Dock tile's label, the home screen's badge, a taskbar overlay kaya draws, a Linux dock's LauncherEntry count, the number on Android's showing notifications), and the `badge` capability says whether a number will. Last write wins.
+txSetBadge :: Word32 -> Builder
+txSetBadge count = wireRecord txKindSetBadge (word32LE count <> word32LE 0)
 
 -- A civil date as the wire's I64: year * 10000 + month * 100 + day.
 packDate :: Int -> Int -> Int -> Int64

@@ -30,7 +30,7 @@ type drop_values = {
 }
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0x555172b2e7556a6fL
+let spec_hash = 0xbb350b703dbddcf5L
 
 let value_bool = 1
 let value_i64 = 2
@@ -315,6 +315,7 @@ let tx_kind_present_sheet = 58
 let tx_kind_dismiss_sheet = 59
 let tx_kind_set_sheet_prop = 60
 let tx_kind_scroll_to_row = 61
+let tx_kind_set_badge = 62
 let apply_kind_create = 1
 let apply_kind_set_prop = 2
 let apply_kind_add_child = 3
@@ -362,6 +363,7 @@ let apply_kind_present_sheet = 46
 let apply_kind_dismiss_sheet = 47
 let apply_kind_set_sheet_prop = 48
 let apply_kind_scroll_to_row = 49
+let apply_kind_set_badge = 50
 let occ_kind_button_clicked = 1
 let occ_kind_text_changed = 2
 let occ_kind_toggled = 3
@@ -886,6 +888,12 @@ let tx_scroll_to_row widget_id key =
   finish tx_kind_scroll_to_row (fun b ->
       Buffer.add_int64_le b widget_id;
       encode_value b key)
+
+(* Ask the platform to show `count` on the app's icon, 0 clearing it (docs/app-badge-plan.md). Never refused: what appears is the platform's decision (the Dock tile's label, the home screen's badge, a taskbar overlay kaya draws, a Linux dock's LauncherEntry count, the number on Android's showing notifications), and the `badge` capability says whether a number will. Last write wins. *)
+let tx_set_badge count =
+  finish tx_kind_set_badge (fun b ->
+      Buffer.add_int32_le b (Int32.of_int count);
+      Buffer.add_int32_le b 0l)
 
 (* A civil date as the wire's I64: year * 10000 + month * 100 + day. *)
 let pack_date year month day =

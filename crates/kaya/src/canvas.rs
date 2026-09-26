@@ -637,6 +637,36 @@ fn draw(ctx: &mut RenderContext, drawing: &Drawing, track: (f64, f64), p: Presen
 
 }
 
+/// An app-icon badge drawn by kaya where the platform draws none of its own
+/// (the Windows taskbar overlay, docs/app-badge-plan.md §2): a disc of
+/// `fill` (0xRRGGBBAA) `px` across with the count in the built-in face,
+/// white and centred, "99+" past 99. Premultiplied RGBA8, like a raster.
+#[cfg(any(target_os = "windows", test))]
+pub(crate) fn badge_icon(count: u32, fill: u32, px: u16) -> Vec<u8> {
+    use vello_cpu::kurbo::{Circle, Shape};
+    let mut ctx = RenderContext::new_with(px, px, screen_settings(usize::from(px) * usize::from(px)));
+    let r = f64::from(px) / 2.0;
+    let rgba = |c: u32| {
+        AlphaColor::<Srgb>::from_rgba8((c >> 24) as u8, (c >> 16) as u8, (c >> 8) as u8, c as u8)
+    };
+    ctx.set_paint(rgba(fill));
+    ctx.set_fill_rule(Fill::NonZero);
+    ctx.fill_path(&Circle::new((r, r), r).to_path(0.1));
+    let label = if count > 99 { "99+".to_owned() } else { count.to_string() };
+    let size = match label.len() {
+        1 => 0.72,
+        2 => 0.58,
+        _ => 0.42,
+    } * f64::from(px);
+    if let Ok(face) = Face::open("", size, 700.0) {
+        if let Some(line) = face.outline(&label, r, r, wire::TEXT_ALIGN_MIDDLE, wire::TEXT_BASELINE_MIDDLE) {
+            ctx.set_paint(rgba(0xFFFF_FFFF));
+            ctx.fill_path(&line);
+        }
+    }
+    finish(&mut ctx, px, px)
+}
+
 /// The context's picture, as the premultiplied RGBA8 bytes every backend
 /// blits.
 fn finish(ctx: &mut RenderContext, w16: u16, h16: u16) -> Vec<u8> {
@@ -884,6 +914,33 @@ impl OutlinePen for GlyphSink {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn badge_icon_is_a_disc_with_a_white_count() {
+        let px = 32u16;
+        let pixels = super::badge_icon(3, 0x0067_C0FF, px);
+        let at = |x: usize, y: usize| {
+            let i = (y * usize::from(px) + x) * 4;
+            [pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]]
+        };
+        assert_eq!(at(0, 0)[3], 0, "the corner outside the disc is transparent");
+        let mut white = 0;
+        let mut fill = 0;
+        for y in 0..usize::from(px) {
+            for x in 0..usize::from(px) {
+                match at(x, y) {
+                    [255, 255, 255, 255] => white += 1,
+                    [0x00, 0x67, 0xC0, 0xFF] => fill += 1,
+                    _ => {}
+                }
+            }
+        }
+        assert!(white > 20, "the count drew {white} white pixels");
+        assert!(fill > 300, "the disc drew {fill} fill pixels");
+        if let Ok(path) = std::env::var("KAYA_BADGE_DUMP") {
+            std::fs::write(path, &pixels).unwrap();
+        }
+    }
+
 
     /// THE SCREEN RASTER'S THREADS BY SIZE, and the kept context drawing
     /// what a fresh one draws (docs/canvas-gpu-plan.md §11; the crossover

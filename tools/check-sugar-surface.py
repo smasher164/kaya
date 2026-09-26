@@ -1154,6 +1154,7 @@ def check_cap_flag(snake, pascal, camel, findings=None):
 
 check_cap_flag("aux_windows", "AuxWindows", "auxWindows")
 check_cap_flag("notifications", "Notifications", "notifications")
+check_cap_flag("badge", "Badge", "badge")
 
 # THEIR BUILT-IN NEGATIVE TESTS, one per clause and for the same reason
 # the range verbs have one: sixteen patterns that can only pass are
@@ -1229,6 +1230,27 @@ CAP_BITS = {
             "go": ("bindings/go/runtime.go", "C.KAYA_CAP_NOTIFICATIONS"),
             "swift": ("bindings/swift/KayaApp.swift",
                       "KAYA_CAP_NOTIFICATIONS"),
+        },
+    },
+    "CAP_BADGE": {
+        "copiers": {
+            "python": ("bindings/python/kaya/runtime.py",
+                       r"^CAP_BADGE = (\d+)$"),
+            "csharp": ("bindings/csharp/Kaya.cs",
+                       r"CAP_BADGE = (\d+);"),
+            "java": ("bindings/java/dev/kaya/KayaApp.java",
+                     r"CAP_BADGE = (\d+);"),
+            "haskell": ("bindings/haskell/KayaRuntime.hs",
+                        r"^capBadge = (\d+)$"),
+            "ocaml": ("bindings/ocaml/kaya_runtime.ml",
+                      r"^let cap_badge = (\d+)L$"),
+            "js": ("bindings/js/kaya/runtime.ts",
+                   r"^export const CAP_BADGE = (\d+);$"),
+        },
+        "readers": {
+            "rust": ("crates/kaya/src/app.rs", "KAYA_CAP_BADGE"),
+            "go": ("bindings/go/runtime.go", "C.KAYA_CAP_BADGE"),
+            "swift": ("bindings/swift/KayaApp.swift", "KAYA_CAP_BADGE"),
         },
     },
 }

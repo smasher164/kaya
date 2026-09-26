@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0x555172b2e7556a6f;
+    public const ulong SpecHash = 0xbb350b703dbddcf5;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -297,6 +297,7 @@ static class KayaWire
     public const ushort TxKindDismissSheet = 59;
     public const ushort TxKindSetSheetProp = 60;
     public const ushort TxKindScrollToRow = 61;
+    public const ushort TxKindSetBadge = 62;
     public const ushort ApplyKindCreate = 1;
     public const ushort ApplyKindSetProp = 2;
     public const ushort ApplyKindAddChild = 3;
@@ -344,6 +345,7 @@ static class KayaWire
     public const ushort ApplyKindDismissSheet = 47;
     public const ushort ApplyKindSetSheetProp = 48;
     public const ushort ApplyKindScrollToRow = 49;
+    public const ushort ApplyKindSetBadge = 50;
     public const ushort OccKindButtonClicked = 1;
     public const ushort OccKindTextChanged = 2;
     public const ushort OccKindToggled = 3;
@@ -1069,6 +1071,15 @@ static class KayaWire
         w.Write(widgetId);
         EncodeValue(w, key);
         return Finish(stream, w, TxKindScrollToRow);
+    }
+
+    /// Ask the platform to show `count` on the app's icon, 0 clearing it (docs/app-badge-plan.md). Never refused: what appears is the platform's decision (the Dock tile's label, the home screen's badge, a taskbar overlay kaya draws, a Linux dock's LauncherEntry count, the number on Android's showing notifications), and the `badge` capability says whether a number will. Last write wins.
+    public static byte[] TxSetBadge(uint count)
+    {
+        var w = Begin(out var stream);
+        w.Write(count);
+        w.Write(0u);
+        return Finish(stream, w, TxKindSetBadge);
     }
 
     /// A civil date as the wire's I64: year * 10000 + month * 100 + day.

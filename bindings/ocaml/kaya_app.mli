@@ -36,7 +36,7 @@ type draw
 (* WHAT THIS HOST CAN DO. [notifications] is a RUNTIME bit: this process
    can post a local notification the desktop will show
    (docs/tasks-s3-plan.md N3). *)
-type capabilities = { aux_windows : bool; notifications : bool }
+type capabilities = { aux_windows : bool; notifications : bool; badge : bool }
 
 (* This host's capabilities. Constant for the life of the process, so
    asking once and remembering is fine. *)
@@ -1113,6 +1113,10 @@ val show_notification :
 (* Withdraw a pending or delivered notification. No answer follows; an
    unknown id is ignored. *)
 val cancel_notification : int64 -> unit
+
+(* Ask the platform to show a count on the app's icon, 0 clearing it
+   (docs/app-badge-plan.md). Never refused. *)
+val set_badge : int -> unit
 
 (* Answer a notification occurrence: one-shot if a handler is
    registered, the process-level handler otherwise. *)

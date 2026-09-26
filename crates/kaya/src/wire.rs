@@ -48,6 +48,7 @@ pub(crate) const TX_PRESENT_SHEET: u16 = 58;
 pub(crate) const TX_DISMISS_SHEET: u16 = 59;
 pub(crate) const TX_SET_SHEET_PROP: u16 = 60;
 pub(crate) const TX_SCROLL_TO_ROW: u16 = 61;
+pub(crate) const TX_SET_BADGE: u16 = 62;
 pub(crate) const TX_ADD_SECTION: u16 = 25;
 pub(crate) const TX_SELECT_SECTION: u16 = 26;
 pub(crate) const TX_SET_SECTION_PROP: u16 = 27;
@@ -145,6 +146,7 @@ pub(crate) const APPLY_PRESENT_SHEET: u16 = 46;
 pub(crate) const APPLY_DISMISS_SHEET: u16 = 47;
 pub(crate) const APPLY_SET_SHEET_PROP: u16 = 48;
 pub(crate) const APPLY_SCROLL_TO_ROW: u16 = 49;
+pub(crate) const APPLY_SET_BADGE: u16 = 50;
 pub(crate) const APPLY_ADD_SECTION: u16 = 15;
 pub(crate) const APPLY_SELECT_SECTION: u16 = 16;
 pub(crate) const APPLY_SET_SECTION_PROP: u16 = 17;
@@ -1307,6 +1309,11 @@ pub fn decode_transaction_with_blobs(
                 range: TextRange::new(r.u64(), r.u64()),
             },
             TX_SCROLL_TO_ROW => TxOp::ScrollToRow { widget: WidgetId(r.u64()), key: r.value() },
+            TX_SET_BADGE => {
+                let count = r.u32();
+                let _reserved = r.u32();
+                TxOp::SetBadge { count }
+            }
             TX_SET_RICH_TEXT => {
                 let widget = WidgetId(r.u64());
                 let count = r.u32() as usize;
@@ -3264,6 +3271,10 @@ impl Writer {
                 b.extend_from_slice(&range.start.to_le_bytes());
                 b.extend_from_slice(&range.stop.to_le_bytes());
             }),
+            ApplyOp::SetBadge { count } => self.record(APPLY_SET_BADGE, |b, _| {
+                b.extend_from_slice(&count.to_le_bytes());
+                b.extend_from_slice(&0u32.to_le_bytes());
+            }),
             ApplyOp::ScrollToRow { id, copy, index } => self.record(APPLY_SCROLL_TO_ROW, |b, _| {
                 b.extend_from_slice(&id.0.to_le_bytes());
                 b.extend_from_slice(&copy.map_or(0, |c| c.0).to_le_bytes());
@@ -3836,6 +3847,10 @@ impl Writer {
                 b.extend_from_slice(&widget.0.to_le_bytes());
                 b.extend_from_slice(&range.start.to_le_bytes());
                 b.extend_from_slice(&range.stop.to_le_bytes());
+            }),
+            TxOp::SetBadge { count } => self.record(TX_SET_BADGE, |b, _| {
+                b.extend_from_slice(&count.to_le_bytes());
+                b.extend_from_slice(&0u32.to_le_bytes());
             }),
             TxOp::ScrollToRow { widget, key } => self.record(TX_SCROLL_TO_ROW, |b, blobs| {
                 b.extend_from_slice(&widget.0.to_le_bytes());

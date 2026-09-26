@@ -98,6 +98,7 @@ if (lib.specHash() !== wire.SPEC_HASH) {
 // crates/kaya/src/scene.rs.
 export const CAP_AUX_WINDOWS = 1;
 export const CAP_NOTIFICATIONS = 2;
+export const CAP_BADGE = 4;
 
 /** The raw capability word. */
 export function capabilityBits(): number {

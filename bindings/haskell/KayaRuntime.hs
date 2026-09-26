@@ -43,6 +43,7 @@ module KayaRuntime
     capabilityBits,
     capAuxWindows,
     capNotifications,
+    capBadge,
     Key (..),
     textKey,
     intKey,
@@ -131,6 +132,10 @@ capAuxWindows = 1
 -- | The core's @KAYA_CAP_NOTIFICATIONS@, the same way.
 capNotifications :: Word64
 capNotifications = 2
+
+-- | The core's @KAYA_CAP_BADGE@, the same way.
+capBadge :: Word64
+capBadge = 4
 
 foreign import ccall unsafe "kaya_submit"
   c_kaya_submit :: Ptr Word8 -> CSize -> IO ()

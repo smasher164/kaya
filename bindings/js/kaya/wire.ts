@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0x555172b2e7556a6fn;
+export const SPEC_HASH = 0xbb350b703dbddcf5n;
 
 export const VALUE_BOOL = 1;
 export const VALUE_I64 = 2;
@@ -293,6 +293,7 @@ export const TX_PRESENT_SHEET = 58;
 export const TX_DISMISS_SHEET = 59;
 export const TX_SET_SHEET_PROP = 60;
 export const TX_SCROLL_TO_ROW = 61;
+export const TX_SET_BADGE = 62;
 export const APPLY_CREATE = 1;
 export const APPLY_SET_PROP = 2;
 export const APPLY_ADD_CHILD = 3;
@@ -340,6 +341,7 @@ export const APPLY_PRESENT_SHEET = 46;
 export const APPLY_DISMISS_SHEET = 47;
 export const APPLY_SET_SHEET_PROP = 48;
 export const APPLY_SCROLL_TO_ROW = 49;
+export const APPLY_SET_BADGE = 50;
 export const OCC_BUTTON_CLICKED = 1;
 export const OCC_TEXT_CHANGED = 2;
 export const OCC_TOGGLED = 3;
@@ -1056,6 +1058,14 @@ export function tx_scroll_to_row(widget_id: number, key: WireValue): Uint8Array 
   enc.u64(widget_id);
   enc.value(key);
   return enc.end(TX_SCROLL_TO_ROW);
+}
+
+/** Ask the platform to show `count` on the app's icon, 0 clearing it (docs/app-badge-plan.md). Never refused: what appears is the platform's decision (the Dock tile's label, the home screen's badge, a taskbar overlay kaya draws, a Linux dock's LauncherEntry count, the number on Android's showing notifications), and the `badge` capability says whether a number will. Last write wins. */
+export function tx_set_badge(count: number): Uint8Array {
+  enc.begin();
+  enc.u32(count);
+  enc.u32(0);
+  return enc.end(TX_SET_BADGE);
 }
 
 /** A civil date as the wire's I64: year * 10000 + month * 100 + day. */

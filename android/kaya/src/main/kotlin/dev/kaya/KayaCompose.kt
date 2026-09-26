@@ -1891,7 +1891,7 @@ object KayaCompose {
     // but only the runtime assert catches a stale compiled APK against
     // a new libkaya. ULong because the fingerprint's high bit is fair
     // game and a Kotlin Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0x555172b2e7556a6fuL
+    private const val SPEC_HASH: ULong = 0xbb350b703dbddcf5uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -1948,6 +1948,7 @@ object KayaCompose {
     private const val APPLY_SET_REORDERABLE = 40
     private const val APPLY_POST_NOTIFICATION = 41
     private const val APPLY_CANCEL_NOTIFICATION = 42
+    private const val APPLY_SET_BADGE = 50
     /** The rich-text pair (docs/rich-text-plan.md §4); the arm is a depth slice. */
     private const val APPLY_SET_RICH_TEXT = 43
     private const val APPLY_APPLY_EDIT = 44
@@ -3327,6 +3328,12 @@ object KayaCompose {
                     kayaPostNotification(nid, at, title, body)
                 }
                 APPLY_CANCEL_NOTIFICATION -> kayaCancelNotification(b.long)
+                APPLY_SET_BADGE -> {
+                    // { u32 count; u32 reserved } (docs/app-badge-plan.md §3).
+                    val count = b.int
+                    b.int
+                    mountedActivity?.applicationContext?.let { kayaSetBadge(it, count) }
+                }
                 APPLY_PRESENT_FILE_DIALOG -> {
                     b.long // window: 0, the one surface on this host
                     val dialog = b.long
@@ -7927,6 +7934,20 @@ object KayaCompose {
                             else -> failures.add(
                                 "notification $nid \"$got\", wanted \"$want\"")
                         }
+                    }
+                    "expect_badge" -> {
+                        // docs/app-badge-plan.md §4: the number the platform
+                        // holds on the app's showing notifications, which is
+                        // what the launcher's long-press menu reads.
+                        val want = quoted(parts.drop(1))
+                        var got = kayaPlatformBadge(activity)
+                        val deadline = android.os.SystemClock.uptimeMillis() + 5000
+                        while (got != want && android.os.SystemClock.uptimeMillis() < deadline) {
+                            Thread.sleep(50)
+                            got = kayaPlatformBadge(activity)
+                        }
+                        if (got == want) observed.add("badge \"$want\"")
+                        else failures.add("the platform shows badge \"$got\", wanted \"$want\"")
                     }
                     "expect_no_notification" -> {
                         val nid = parts[1].toLongOrNull() ?: 0L
@@ -16494,6 +16515,37 @@ internal const val KAYA_CAP_NOTIFICATIONS = 2L
  * u64, since `notify` takes an int and two ids may share its low bits. */
 private fun kayaNotificationTag(id: Long): String = "kaya-$id"
 
+/** The app's badge count, which rides every kaya notification as its
+ * `number` (docs/app-badge-plan.md §3): Android has no call that puts a
+ * number on the icon, and the launcher reads the showing notifications'. */
+@Volatile internal var kayaBadgeCount: Int = 0
+
+/** Stamp [count] on the showing kaya notifications and keep it for the
+ * ones posted later. `recoverBuilder` rebuilds each from the platform's
+ * own copy, so nothing about the notification is kept here. */
+internal fun kayaSetBadge(context: Context, count: Int) {
+    kayaBadgeCount = count
+    val manager = kayaNotificationManager(context) ?: return
+    for (sbn in manager.activeNotifications) {
+        if (sbn.tag?.startsWith("kaya-") != true) continue
+        val restamped = Notification.Builder.recoverBuilder(context, sbn.notification)
+            .setNumber(count)
+            .setOnlyAlertOnce(true)
+            .build()
+        manager.notify(sbn.tag, sbn.id, restamped)
+    }
+}
+
+/** The badge the platform holds: the largest `number` on the showing kaya
+ * notifications, "" when none carries one. */
+internal fun kayaPlatformBadge(context: Context): String {
+    val manager = kayaNotificationManager(context) ?: return ""
+    val count = manager.activeNotifications
+        .filter { it.tag?.startsWith("kaya-") == true }
+        .maxOfOrNull { it.notification.number } ?: 0
+    return if (count == 0) "" else count.toString()
+}
+
 private fun kayaNotificationSlot(id: Long): Int = (id and 0x7fffffffL).toInt()
 
 private fun kayaNotificationManager(context: Context): NotificationManager? =
@@ -16565,6 +16617,7 @@ internal fun kayaDeliverNotification(
         .setContentText(body)
         .setContentIntent(pending)
         .setAutoCancel(true)
+        .setNumber(kayaBadgeCount)
         .build()
     return try {
         manager.notify(kayaNotificationTag(id), kayaNotificationSlot(id), notification)

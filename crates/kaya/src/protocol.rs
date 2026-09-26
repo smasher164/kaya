@@ -1953,6 +1953,9 @@ pub enum TxOp {
     /// (docs/scroll-to-plan.md). A pure effect; a key the collection does
     /// not hold applies nothing.
     ScrollToRow { widget: WidgetId, key: Value },
+    /// Ask the platform to show `count` on the app's icon, 0 clearing it
+    /// (docs/app-badge-plan.md). Never refused.
+    SetBadge { count: u32 },
     /// Replace a `rich` textarea's whole document: echoes nothing, resets
     /// the native undo history like a text write (docs/undo-plan.md D7).
     SetRichText { widget: WidgetId, text: String, runs: Vec<TextRun> },
@@ -2161,6 +2164,8 @@ pub enum ApplyOp {
     /// `copy`, the row's root widget, to the viewport's top
     /// (docs/scroll-to-plan.md §3).
     ScrollToRow { id: WidgetId, copy: Option<WidgetId>, index: u32 },
+    /// Show `count` on the app's icon, 0 clearing it (docs/app-badge-plan.md §2).
+    SetBadge { count: u32 },
     /// The widget's whole content, runs in native units; the backend draws
     /// the `block` runs with nothing added to the text (rich-text-plan R3).
     SetRichText { id: WidgetId, text: String, runs: Vec<NativeRun> },

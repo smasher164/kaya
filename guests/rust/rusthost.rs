@@ -157,6 +157,7 @@ mod search;
 #[path = "tasks.rs"]
 mod tasks;
 mod notify;
+mod badge;
 
 /// A LEG NEEDS ITS ARM HERE — tools/check-stubs.py and the panic below
 /// hold that.
@@ -235,6 +236,7 @@ fn app(ctx: kaya::AppCtx) {
         // has (docs/app-links-plan.md L4).
         Ok("links") => tasks::app(ctx),
         Ok("notify") => notify::app(ctx),
+        Ok("badge") => badge::app(ctx),
         // WHICH ROUTE THE CORE TAKES IS THE RUNNER'S CHOICE: this leg
         // arrives with a KAYA_ASSET_DIR and resolves through a directory.
         Ok("typeface") => typeface::app(ctx),

@@ -1658,6 +1658,19 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   rebuild (S3). Issued before the container's first layout it \
                   is held by the backend and lands after it (S4).",
         },
+        Record {
+            kind: 62,
+            name: "set_badge",
+            fields: &[f("count", FieldTy::U32), f("reserved", FieldTy::U32)],
+            payload: None,
+            doc: "Ask the platform to show `count` on the app's icon, 0 \
+                  clearing it (docs/app-badge-plan.md). Never refused: what \
+                  appears is the platform's decision (the Dock tile's label, \
+                  the home screen's badge, a taskbar overlay kaya draws, a \
+                  Linux dock's LauncherEntry count, the number on Android's \
+                  showing notifications), and the `badge` capability says \
+                  whether a number will. Last write wins.",
+        },
     ],
     apply: &[
         Record {
@@ -2428,6 +2441,14 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   realized (a realized tier scrolls that widget's top to the \
                   viewport's top). Instant, never animated (S6); held until \
                   the container has laid out (S4).",
+        },
+        Record {
+            kind: 50,
+            name: "set_badge",
+            fields: &[f("count", FieldTy::U32), f("reserved", FieldTy::U32)],
+            payload: None,
+            doc: "Show `count` on the app's icon through the platform's own \
+                  route, 0 clearing it (docs/app-badge-plan.md §2).",
         },
     ],
     occurrence: &[
@@ -3656,6 +3677,7 @@ mod tests {
             ("dismiss_sheet", wire::TX_DISMISS_SHEET),
             ("set_sheet_prop", wire::TX_SET_SHEET_PROP),
             ("scroll_to_row", wire::TX_SCROLL_TO_ROW),
+            ("set_badge", wire::TX_SET_BADGE),
         ];
         assert_eq!(pins.len(), SPEC.tx.len());
         for (name, kind) in pins {
@@ -3716,6 +3738,7 @@ mod tests {
                 ("dismiss_sheet", wire::APPLY_DISMISS_SHEET),
                 ("set_sheet_prop", wire::APPLY_SET_SHEET_PROP),
                 ("scroll_to_row", wire::APPLY_SCROLL_TO_ROW),
+                ("set_badge", wire::APPLY_SET_BADGE),
             ]
         );
         // The WHOLE list, not indexed asserts: an indexed pin says

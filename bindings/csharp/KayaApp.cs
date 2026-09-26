@@ -880,8 +880,9 @@ sealed class KayaInstance
 /// Android, whose systems own surface geometry; there CreateWindow aborts
 /// at the root. Notifications: a RUNTIME bit the host measures — this
 /// process can post a local notification the desktop will show
-/// (docs/tasks-s3-plan.md N3).
-readonly record struct Caps(bool AuxWindows, bool Notifications);
+/// (docs/tasks-s3-plan.md N3). Badge: SetBadge will show a number on the
+/// app's icon (docs/app-badge-plan.md).
+readonly record struct Caps(bool AuxWindows, bool Notifications, bool Badge);
 
 /// <summary>The header bar's sort indicator (docs/tables-plan.md):
 /// which column shows it, in which direction — the GUEST's
@@ -1145,7 +1146,8 @@ sealed class KayaApp
         ulong bits = Kaya.CapabilityBits();
         return new Caps(
             (bits & Kaya.CAP_AUX_WINDOWS) != 0,
-            (bits & Kaya.CAP_NOTIFICATIONS) != 0);
+            (bits & Kaya.CAP_NOTIFICATIONS) != 0,
+            (bits & Kaya.CAP_BADGE) != 0);
     }
 
     /// The notification_result decision, in a method of its own because
@@ -4200,6 +4202,12 @@ sealed class Tx : IDisposable
     /// cleared). No answer follows; an unknown id is ignored.
     public void CancelNotification(ulong notification)
         => Records.Add(KayaWire.TxCancelNotification(notification));
+
+    /// Ask the platform to show `count` on the app's icon, 0 clearing it
+    /// (docs/app-badge-plan.md). Never refused: Caps.Badge says whether a
+    /// number will appear.
+    public void SetBadge(uint count)
+        => Records.Add(KayaWire.TxSetBadge(count));
 
     /// Ask the platform for files. THE PICK, NOT THE OPEN — the result
     /// carries handles you redeem later (DESIGN.md, File dialogs).

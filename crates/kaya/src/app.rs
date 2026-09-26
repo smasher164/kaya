@@ -638,6 +638,9 @@ pub struct Capabilities {
     pub aux_windows: bool,
     /// Whether this process can post a local notification (docs/tasks-s3-plan.md N6).
     pub notifications: bool,
+    /// Whether [`Tx::set_badge`] will show a number on the app's icon
+    /// (docs/app-badge-plan.md).
+    pub badge: bool,
 }
 
 /// This host's capabilities. See [`Capabilities`].
@@ -648,6 +651,7 @@ pub fn capabilities() -> Capabilities {
     Capabilities {
         aux_windows: bits & crate::capi::KAYA_CAP_AUX_WINDOWS != 0,
         notifications: bits & crate::capi::KAYA_CAP_NOTIFICATIONS != 0,
+        badge: bits & crate::capi::KAYA_CAP_BADGE != 0,
     }
 }
 
@@ -3049,6 +3053,13 @@ impl<'a> Tx<'a> {
     /// effect; a key the collection does not hold scrolls nothing.
     pub fn scroll_to_row(&mut self, container: WidgetId, key: impl Into<Value>) {
         self.ops.push(TxOp::ScrollToRow { widget: container, key: key.into() });
+    }
+
+    /// Ask the platform to show `count` on the app's icon, 0 clearing it
+    /// (docs/app-badge-plan.md). Never refused: [`Capabilities::badge`]
+    /// says whether a number will appear.
+    pub fn set_badge(&mut self, count: u32) {
+        self.ops.push(TxOp::SetBadge { count });
     }
 
     /// A container takes its body as a closure and parents everything

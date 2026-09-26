@@ -187,6 +187,7 @@ _lib.kaya_tr.restype = ctypes.c_size_t
 _lib.kaya_capabilities.restype = ctypes.c_uint64
 CAP_AUX_WINDOWS = 1
 CAP_NOTIFICATIONS = 2
+CAP_BADGE = 4
 
 
 def capability_bits() -> int:

@@ -355,6 +355,7 @@ static partial class Kaya
     /// holds it against crates/kaya/src/scene.rs.
     internal const ulong CAP_AUX_WINDOWS = 1;
     internal const ulong CAP_NOTIFICATIONS = 2;
+    internal const ulong CAP_BADGE = 4;
 
     internal static ulong CapabilityBits() => kaya_capabilities();
 

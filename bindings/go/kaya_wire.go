@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x555172b2e7556a6f
+	SpecHash uint64 = 0xbb350b703dbddcf5
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -299,6 +299,7 @@ const (
 	txDismissSheet = 59
 	txSetSheetProp = 60
 	txScrollToRow = 61
+	txSetBadge = 62
 	applyCreate = 1
 	applySetProp = 2
 	applyAddChild = 3
@@ -346,6 +347,7 @@ const (
 	applyDismissSheet = 47
 	applySetSheetProp = 48
 	applyScrollToRow = 49
+	applySetBadge = 50
 	occButtonClicked = 1
 	occTextChanged = 2
 	occToggled = 3
@@ -1177,6 +1179,14 @@ func TxScrollToRow(widgetId uint64, key any) []byte {
 	b := beginRecord(txScrollToRow)
 	b = binary.LittleEndian.AppendUint64(b, widgetId)
 	b = encodeValue(b, key)
+	return endRecord(b)
+}
+
+// TxSetBadge: Ask the platform to show `count` on the app's icon, 0 clearing it (docs/app-badge-plan.md). Never refused: what appears is the platform's decision (the Dock tile's label, the home screen's badge, a taskbar overlay kaya draws, a Linux dock's LauncherEntry count, the number on Android's showing notifications), and the `badge` capability says whether a number will. Last write wins.
+func TxSetBadge(count uint32) []byte {
+	b := beginRecord(txSetBadge)
+	b = binary.LittleEndian.AppendUint32(b, count)
+	b = binary.LittleEndian.AppendUint32(b, 0)
 	return endRecord(b)
 }
 

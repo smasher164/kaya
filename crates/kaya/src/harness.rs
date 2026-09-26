@@ -396,6 +396,9 @@ pub enum Step {
     ExpectNotification(u64, String),
     /// The platform's delivered list does NOT hold this id.
     ExpectNoNotification(u64),
+    /// The badge the PLATFORM shows on the app's icon reads this text, ""
+    /// for none (docs/app-badge-plan.md §4).
+    ExpectBadge(String),
     /// Activate the delivered notification the way the user would where a
     /// test can reach the shade, or through the backend's own activation
     /// path where it cannot (N5). An action, silent like click.
@@ -761,6 +764,7 @@ impl Step {
             | Step::AlertChoose(..)
             | Step::ExpectNotification(..)
             | Step::ExpectNoNotification(..)
+            | Step::ExpectBadge(..)
             | Step::ExpectNoTarget(..)
             | Step::NotificationActivate(..)
             | Step::OpenLink(..)
@@ -874,6 +878,7 @@ impl Step {
             Step::AlertChoose { .. } => false,
             Step::ExpectNotification { .. } => true,
             Step::ExpectNoNotification { .. } => true,
+            Step::ExpectBadge { .. } => true,
             Step::NotificationActivate { .. } => false,
             Step::OpenLink { .. } => false,
             Step::Relaunch(..) => false,
@@ -1229,6 +1234,9 @@ pub trait Stage: Send + 'static {
     /// this id, None when it holds none — the platform's own list
     /// (docs/tasks-s3-plan.md N5), never the request's copy.
     fn notification_title(&self, notification: u64) -> Option<String>;
+    /// The badge the PLATFORM shows on the app's icon, "" for none: its own
+    /// record, never kaya's copy of the count (docs/app-badge-plan.md §4).
+    fn badge(&self) -> String;
     /// Activate a delivered notification: the shade's real tap where a test
     /// reaches it, the backend's own activation path where it cannot.
     fn activate_notification(&self, notification: u64);
@@ -2002,6 +2010,7 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 })?;
                 Step::ExpectNoNotification(id)
             }
+            "expect_badge" => Step::ExpectBadge(parse_string(rest)?),
             "notification_activate" => {
                 let id = rest.trim().parse::<u64>().map_err(|_| {
                     format!("notification_activate wants a numeric id: {line:?}")
@@ -4049,6 +4058,14 @@ fn run_with_log(
                     Some(got) => Err(format!(
                         "the platform still holds notification {id} {got:?}, wanted none"
                     )),
+                }
+            })),
+            Step::ExpectBadge(want) => Some(poll(|| {
+                let got = stage.badge();
+                if got == *want {
+                    Ok(format!("badge {want:?}"))
+                } else {
+                    Err(format!("the platform shows badge {got:?}, wanted {want:?}"))
                 }
             })),
             Step::NotificationActivate(id) => {
@@ -6428,6 +6445,9 @@ mod tests {
         fn notification_title(&self, _notification: u64) -> Option<String> {
             None
         }
+        fn badge(&self) -> String {
+            String::new()
+        }
         fn activate_notification(&self, _notification: u64) {}
         fn open_link(&self, _url: &str) {}
         /// A picker that ANSWERS A FIXED NUMBER OF READS and is then
@@ -7428,6 +7448,9 @@ mod tests {
         fn notification_title(&self, _notification: u64) -> Option<String> {
             None
         }
+        fn badge(&self) -> String {
+            String::new()
+        }
         fn activate_notification(&self, _notification: u64) {}
         fn open_link(&self, _url: &str) {}
         fn file_dialog_state(&self) -> Option<(String, Vec<String>)> {
@@ -7752,6 +7775,9 @@ mod tests {
         fn choose_alert(&self, _choice: u32) {}
         fn notification_title(&self, _notification: u64) -> Option<String> {
             None
+        }
+        fn badge(&self) -> String {
+            String::new()
         }
         fn activate_notification(&self, _notification: u64) {}
         fn open_link(&self, _url: &str) {}

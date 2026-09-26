@@ -1,0 +1,19 @@
+# The app's icon badge (docs/app-badge-plan.md): set_badge asks the platform
+# to show a count, read back from the platform's own record. A notification
+# is posted first because on Android the count rides the showing
+# notifications, and a notification posted later carries the current count.
+expect label#0 "ready"
+click button#0
+expect_notification 21 "Unread messages"
+click button#1
+expect label#0 "badge 3"
+expect_badge "3"
+click button#2
+expect label#0 "badge 0"
+expect_badge ""
+click button#1
+click button#0
+expect label#0 "posted 2"
+expect_badge "3"
+click button#2
+expect_badge ""

@@ -50,7 +50,7 @@ SCENES = [
 # has not landed — built and run rust-only until their guests arrive,
 # when they move into SCENES.
 DEPTH_SCENES = ["typeface", "windowed", "canvas", "dnd", "tasks", "notify", "notes", "richrows",
-                "format", "flexshrink", "listrow", "tints"]
+                "format", "flexshrink", "listrow", "tints", "badge"]
 # The C-floor scenes THIS LANE RUNS (guests/c/Makefile keeps the whole
 # list; this is the SCENES= override build_c passes, and check-steps'
 # sweep_c_floor reads it from the other side).
@@ -215,6 +215,9 @@ ORDER = [
     # The notification scene, bundled (BUNDLED_SCENES); rust-only until the
     # breadth slice (docs/tasks-s3-plan.md §6).
     ("notify", ("rust",)),
+    # The app's icon badge (docs/app-badge-plan.md), bundled for its
+    # notification.
+    ("badge", ("rust",)),
     ("richtext", ("rust", "python", "js", "go", "csharp", "java", "swift",
                   "ocaml", "haskell")),
     ("ownundo", ("rust", "python", "js", "go", "csharp", "java", "swift",
@@ -557,7 +560,7 @@ RUST_GUESTS = "target/rust-guests"
 # only from a bundle with an identifier — the identity manifest's `id`. The
 # rest stay bare executables (docs/deferred.md: an unbundled launch walks its
 # siblings, which is why the staging directory is small).
-BUNDLED_SCENES = {"notify", "tasks"}
+BUNDLED_SCENES = {"notify", "tasks", "badge"}
 # The go scenes that post one: the one kaya-go binary, wrapped per scene.
 BUNDLED_GO_SCENES = {"chat"}
 GO_GUESTS = "target/go-guests"

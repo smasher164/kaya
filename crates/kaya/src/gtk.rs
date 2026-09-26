@@ -12766,6 +12766,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
         }
         ApplyOp::PostNotification(spec) => post_notification(core.occurrences.clone(), spec),
         ApplyOp::CancelNotification(id) => cancel_notification(id.0),
+        ApplyOp::SetBadge { count } => set_badge(count),
         ApplyOp::PresentAlert(spec) => {
             // The platform's REAL modal dialog: gtk::AlertDialog maps the
             // vocabulary 1:1. Answered exactly once through
@@ -14717,6 +14718,63 @@ fn post_notification(sink: OccSink, spec: crate::protocol::NotificationSpec) {
     } else {
         schedule_notification(id, spec.at, sink);
     }
+}
+
+const LAUNCHER_ENTRY: &str = "com.canonical.Unity.LauncherEntry";
+const LAUNCHER_PATH: &str = "/dev/kaya/LauncherEntry";
+
+/// The app's icon badge (docs/app-badge-plan.md §2): the LauncherEntry
+/// `Update` signal KDE Plasma, Ubuntu Dock and Dash-to-Dock draw, keyed by
+/// the declared id's desktop entry. Stock GNOME and sway draw nothing.
+fn set_badge(count: u32) {
+    let Some(conn) = session_bus() else { return };
+    let Some(app) = app_identity_id() else { return };
+    #[cfg(feature = "harness")]
+    listen_for_badge(&conn);
+    let props = glib::VariantDict::new(None);
+    props.insert_value("count", &i64::from(count).to_variant());
+    props.insert_value("count-visible", &(count > 0).to_variant());
+    let params = glib::Variant::tuple_from_iter([
+        format!("application://{app}.desktop").to_variant(),
+        props.end(),
+    ]);
+    if let Err(e) = conn.emit_signal(None, LAUNCHER_PATH, LAUNCHER_ENTRY, "Update", Some(&params)) {
+        eprintln!("KAYA_DIAG set_badge {count}: the session bus refused the Update signal: {e}");
+    }
+}
+
+#[cfg(feature = "harness")]
+thread_local! {
+    static BADGE_HEARD: RefCell<Option<gio::SignalSubscription>> = const { RefCell::new(None) };
+}
+/// What the session bus delivered on LauncherEntry, the harness's read.
+#[cfg(feature = "harness")]
+static BADGE_READ: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+
+/// Subscribed on the connection the signal leaves by, ahead of the first
+/// emit, so the bus's own delivery is what `badge` reads.
+#[cfg(feature = "harness")]
+fn listen_for_badge(conn: &gio::DBusConnection) {
+    if BADGE_HEARD.with_borrow(|slot| slot.is_some()) {
+        return;
+    }
+    let subscription = conn.subscribe_to_signal(
+        None,
+        Some(LAUNCHER_ENTRY),
+        Some("Update"),
+        None,
+        None,
+        gio::DBusSignalFlags::NONE,
+        |signal| {
+            let props = glib::VariantDict::new(Some(&signal.parameters.child_value(1)));
+            let visible = props.lookup::<bool>("count-visible").ok().flatten().unwrap_or(false);
+            let count = props.lookup::<i64>("count").ok().flatten().unwrap_or(0);
+            if let Ok(mut read) = BADGE_READ.lock() {
+                *read = if visible { count.to_string() } else { String::new() };
+            }
+        },
+    );
+    BADGE_HEARD.with_borrow_mut(|slot| *slot = Some(subscription));
 }
 
 fn cancel_notification(id: u64) {
@@ -19115,6 +19173,13 @@ impl crate::harness::Stage for GtkStage {
     /// the `desktop-entry` attribution (measured 2026-09-07). What comes
     /// back is the DAEMON's summary, so a title the desktop mangled reads
     /// as the mangled one.
+    /// What the session bus delivered on LauncherEntry (docs/app-badge-plan.md
+    /// §4): the signal is the platform's record here, since no dock on the
+    /// lane draws one.
+    fn badge(&self) -> String {
+        BADGE_READ.lock().map(|read| read.clone()).unwrap_or_default()
+    }
+
     fn notification_title(&self, notification: u64) -> Option<String> {
         let title = POSTED.lock().ok()?.get(&notification)?.title.clone();
         let ident = notification_id_string(notification);

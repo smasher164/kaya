@@ -76,6 +76,13 @@ func App() *kaya.App {
 			}
 			return fmt.Sprintf("%d new", c.unread)
 		}
+		unreadTotal := func() uint32 {
+			total := 0
+			for _, c := range convs {
+				total += c.unread
+			}
+			return uint32(total)
+		}
 		refresh := func(tx *kaya.Tx, c *conversation) {
 			last := c.messages[len(c.messages)-1]
 			list.Update(tx, c.id, Conversation{Name: c.name, Preview: last.text, Unread: unreadText(c)})
@@ -126,6 +133,7 @@ func App() *kaya.App {
 					c.firstUnread = key
 				}
 				c.unread++
+				tx.SetBadge(unreadTotal())
 				tx.ShowNotification(c.note).Title(c.name).Body(text).Show()
 			}
 			refresh(tx, c)
@@ -274,6 +282,7 @@ func App() *kaya.App {
 				tx.ScrollToRow(threadList, c.messages[len(c.messages)-1].key)
 			}
 			c.unread, c.firstUnread = 0, ""
+			tx.SetBadge(unreadTotal())
 			tx.CancelNotification(c.note)
 			refresh(tx, c)
 		}

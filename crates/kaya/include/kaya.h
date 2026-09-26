@@ -249,6 +249,11 @@
  */
 #define KAYA_TX_SCROLL_TO_ROW 61
 
+/**
+ * SET_BADGE: u32 count, u32 reserved (docs/app-badge-plan.md).
+ */
+#define KAYA_TX_SET_BADGE 62
+
 #define KAYA_TX_ADD_SECTION 25
 
 #define KAYA_TX_SELECT_SECTION 26
@@ -479,6 +484,12 @@
 #define KAYA_CAP_NOTIFICATIONS 2
 
 /**
+ * A number on the app's icon: `set_badge` will show one here, a runtime
+ * fact granted like KAYA_CAP_NOTIFICATIONS (docs/app-badge-plan.md).
+ */
+#define KAYA_CAP_BADGE 4
+
+/**
  * Apply record kinds (core -> presentation pump, via kaya_next_commands).
  * Layouts after the header:
  *   CREATE:    u64 widget_id, u32 kind, u32 tag_len, then tag_len bytes
@@ -556,6 +567,11 @@
  * SCROLL_TO_ROW: u64 container, u64 copy (0 = unrealized), u32 index, u32 pad.
  */
 #define KAYA_APPLY_SCROLL_TO_ROW 49
+
+/**
+ * SET_BADGE: u32 count, u32 reserved (docs/app-badge-plan.md §2).
+ */
+#define KAYA_APPLY_SET_BADGE 50
 
 #define KAYA_APPLY_ADD_SECTION 15
 
@@ -1804,7 +1820,7 @@ uint64_t kaya_capabilities(void);
 /**
  * Presentation side: grant the runtime capability bits this host has
  * measured — before the guest's first read, so the interpreter calls it
- * at startup. Only KAYA_CAP_NOTIFICATIONS is grantable; a static bit
+ * at startup. Only KAYA_CAP_NOTIFICATIONS and KAYA_CAP_BADGE are grantable; a static bit
  * offered here is a programming error.
  */
 void kaya_grant_capabilities(uint64_t bits);

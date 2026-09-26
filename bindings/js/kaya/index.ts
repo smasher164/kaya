@@ -2111,6 +2111,13 @@ export function cancelNotification(notification: number): void {
   records().push(wire.tx_cancel_notification(notification));
 }
 
+/** Ask the platform to show `count` on the app's icon, 0 clearing it
+ * (docs/app-badge-plan.md). Never refused: `capabilities().badge` says
+ * whether a number will appear. */
+export function setBadge(count: number): void {
+  records().push(wire.tx_set_badge(count));
+}
+
 /** Register the PROCESS-LEVEL notification handler
  * (docs/tasks-s9-plan.md R1): f(notification, outcome) receives every
  * result whose id has no one-shot handler bound at the show — which is
@@ -3379,7 +3386,11 @@ export function undoable(label: string, window = 0): void {
 
 /** WHAT THIS HOST CAN DO. Named booleans, never the bits. CAPABILITIES
  * INFORM; WALLS REFUSE. */
-export type Capabilities = { readonly auxWindows: boolean; readonly notifications: boolean };
+export type Capabilities = {
+  readonly auxWindows: boolean;
+  readonly notifications: boolean;
+  readonly badge: boolean;
+};
 
 /** This host's capabilities, constant for the life of the process. */
 export function capabilities(): Capabilities {
@@ -3387,6 +3398,7 @@ export function capabilities(): Capabilities {
   return Object.freeze({
     auxWindows: (bits & runtime.CAP_AUX_WINDOWS) !== 0,
     notifications: (bits & runtime.CAP_NOTIFICATIONS) !== 0,
+    badge: (bits & runtime.CAP_BADGE) !== 0,
   });
 }
 

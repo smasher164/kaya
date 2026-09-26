@@ -214,6 +214,8 @@ pub const KAYA_TX_DISMISS_SHEET: u16 = 59;
 pub const KAYA_TX_SET_SHEET_PROP: u16 = 60;
 /// SCROLL_TO_ROW: u64 container, then the row's key value (docs/scroll-to-plan.md).
 pub const KAYA_TX_SCROLL_TO_ROW: u16 = 61;
+/// SET_BADGE: u32 count, u32 reserved (docs/app-badge-plan.md).
+pub const KAYA_TX_SET_BADGE: u16 = 62;
 pub const KAYA_TX_ADD_SECTION: u16 = 25;
 pub const KAYA_TX_SELECT_SECTION: u16 = 26;
 pub const KAYA_TX_SET_SECTION_PROP: u16 = 27;
@@ -437,6 +439,9 @@ pub const KAYA_CAP_AUX_WINDOWS: u64 = 1;
 /// remember — a RUNTIME fact the presentation layer grants at startup
 /// (docs/tasks-s3-plan.md N6), never part of the static word.
 pub const KAYA_CAP_NOTIFICATIONS: u64 = 2;
+/// A number on the app's icon: `set_badge` will show one here, a runtime
+/// fact granted like KAYA_CAP_NOTIFICATIONS (docs/app-badge-plan.md).
+pub const KAYA_CAP_BADGE: u64 = 4;
 
 /// The capability word, which is the SCENE CORE'S const and not a second
 /// copy of its predicate: the wall that refuses `create_window` tests the
@@ -450,12 +455,12 @@ pub extern "C" fn kaya_capabilities() -> u64 {
 
 /// Presentation side: grant the runtime capability bits this host has
 /// measured — before the guest's first read, so the interpreter calls it
-/// at startup. Only KAYA_CAP_NOTIFICATIONS is grantable; a static bit
+/// at startup. Only KAYA_CAP_NOTIFICATIONS and KAYA_CAP_BADGE are grantable; a static bit
 /// offered here is a programming error.
 #[unsafe(no_mangle)]
 pub extern "C" fn kaya_grant_capabilities(bits: u64) {
     assert!(
-        bits & !KAYA_CAP_NOTIFICATIONS == 0,
+        bits & !(KAYA_CAP_NOTIFICATIONS | KAYA_CAP_BADGE) == 0,
         "kaya: kaya_grant_capabilities({bits:#x}) names a bit that is not runtime-grantable"
     );
     crate::scene::RUNTIME_CAPABILITIES.fetch_or(bits, std::sync::atomic::Ordering::AcqRel);
@@ -463,7 +468,8 @@ pub extern "C" fn kaya_grant_capabilities(bits: u64) {
 
 const _: () = assert!(
     KAYA_CAP_AUX_WINDOWS == crate::scene::CAP_AUX_WINDOWS
-        && KAYA_CAP_NOTIFICATIONS == crate::scene::CAP_NOTIFICATIONS,
+        && KAYA_CAP_NOTIFICATIONS == crate::scene::CAP_NOTIFICATIONS
+        && KAYA_CAP_BADGE == crate::scene::CAP_BADGE,
     "kaya: the header's KAYA_CAP_* and the scene core's bits are different numbers"
 );
 
@@ -496,6 +502,7 @@ const _: () = assert!(
         && KAYA_TX_DISMISS_SHEET == wire::TX_DISMISS_SHEET
         && KAYA_TX_SET_SHEET_PROP == wire::TX_SET_SHEET_PROP
         && KAYA_TX_SCROLL_TO_ROW == wire::TX_SCROLL_TO_ROW
+        && KAYA_TX_SET_BADGE == wire::TX_SET_BADGE
         && KAYA_TX_ADD_SECTION == wire::TX_ADD_SECTION
         && KAYA_TX_SELECT_SECTION == wire::TX_SELECT_SECTION
         && KAYA_TX_SET_SECTION_PROP == wire::TX_SET_SECTION_PROP
@@ -558,6 +565,8 @@ pub const KAYA_APPLY_DISMISS_SHEET: u16 = 47;
 pub const KAYA_APPLY_SET_SHEET_PROP: u16 = 48;
 /// SCROLL_TO_ROW: u64 container, u64 copy (0 = unrealized), u32 index, u32 pad.
 pub const KAYA_APPLY_SCROLL_TO_ROW: u16 = 49;
+/// SET_BADGE: u32 count, u32 reserved (docs/app-badge-plan.md §2).
+pub const KAYA_APPLY_SET_BADGE: u16 = 50;
 pub const KAYA_APPLY_ADD_SECTION: u16 = 15;
 pub const KAYA_APPLY_SELECT_SECTION: u16 = 16;
 pub const KAYA_APPLY_SET_SECTION_PROP: u16 = 17;
@@ -679,6 +688,7 @@ const _: () = assert!(
         && KAYA_APPLY_DISMISS_SHEET == wire::APPLY_DISMISS_SHEET
         && KAYA_APPLY_SET_SHEET_PROP == wire::APPLY_SET_SHEET_PROP
         && KAYA_APPLY_SCROLL_TO_ROW == wire::APPLY_SCROLL_TO_ROW
+        && KAYA_APPLY_SET_BADGE == wire::APPLY_SET_BADGE
         && KAYA_APPLY_ADD_SECTION == wire::APPLY_ADD_SECTION
         && KAYA_APPLY_SELECT_SECTION == wire::APPLY_SELECT_SECTION
         && KAYA_APPLY_SET_SECTION_PROP == wire::APPLY_SET_SECTION_PROP
@@ -5345,6 +5355,7 @@ mod tests {
             ("dismiss_sheet", KAYA_TX_DISMISS_SHEET),
             ("set_sheet_prop", KAYA_TX_SET_SHEET_PROP),
             ("scroll_to_row", KAYA_TX_SCROLL_TO_ROW),
+            ("set_badge", KAYA_TX_SET_BADGE),
         ];
         let apply = [
             ("create", KAYA_APPLY_CREATE),
@@ -5394,6 +5405,7 @@ mod tests {
             ("dismiss_sheet", KAYA_APPLY_DISMISS_SHEET),
             ("set_sheet_prop", KAYA_APPLY_SET_SHEET_PROP),
             ("scroll_to_row", KAYA_APPLY_SCROLL_TO_ROW),
+            ("set_badge", KAYA_APPLY_SET_BADGE),
         ];
         for (spec, consts) in [(crate::spec::SPEC.tx, &tx[..]), (crate::spec::SPEC.apply, &apply[..])] {
             assert_eq!(

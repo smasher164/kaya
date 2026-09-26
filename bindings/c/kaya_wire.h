@@ -199,7 +199,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     }
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0x555172b2e7556a6fULL
+#define KAYA_SPEC_HASH 0xbb350b703dbddcf5ULL
 
 
 /* Create a signal holding `initial`. */
@@ -756,6 +756,14 @@ static inline void kaya_tx_scroll_to_row(KayaTx *tx, uint64_t widget_id, KayaVal
     size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SCROLL_TO_ROW);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_value(tx, key);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* Ask the platform to show `count` on the app's icon, 0 clearing it (docs/app-badge-plan.md). Never refused: what appears is the platform's decision (the Dock tile's label, the home screen's badge, a taskbar overlay kaya draws, a Linux dock's LauncherEntry count, the number on Android's showing notifications), and the `badge` capability says whether a number will. Last write wins. */
+static inline void kaya_tx_set_badge(KayaTx *tx, uint32_t count) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_BADGE);
+    kaya_wire_u32(tx, count);
+    kaya_wire_u32(tx, 0);
     kaya_wire_end(tx, kaya_at);
 }
 

@@ -88,6 +88,8 @@ RUST_SCENES = [
     # SpringBoard's own shade, driven by the xcui driver's notify_tap
     # (docs/tasks-s3-plan.md N5).
     "notify",
+    # The app's icon badge (docs/app-badge-plan.md), with a notification.
+    "badge",
     # The task manager: a RUST app by design (docs/tasks-plan.md §0).
     "tasks",
     # WHAT SURVIVES A RELAUNCH (docs/tasks-s4-plan.md §4): the same

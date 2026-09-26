@@ -1165,7 +1165,7 @@ public final class KayaApp {
      *     False on Android, whose system owns surface geometry; there
      *     {@code createWindow} aborts at the root.
      */
-    public record Capabilities(boolean auxWindows, boolean notifications) {}
+    public record Capabilities(boolean auxWindows, boolean notifications, boolean badge) {}
 
     /**
      * The core's number written again — no header on this tier to read
@@ -1174,13 +1174,15 @@ public final class KayaApp {
      */
     private static final long CAP_AUX_WINDOWS = 1;
     private static final long CAP_NOTIFICATIONS = 2;
+    private static final long CAP_BADGE = 4;
 
     /** This host's capabilities; constant for the life of the
      * process. */
     public static Capabilities capabilities() {
         long bits = KayaRing.capabilities();
         return new Capabilities(
-                (bits & CAP_AUX_WINDOWS) != 0, (bits & CAP_NOTIFICATIONS) != 0);
+                (bits & CAP_AUX_WINDOWS) != 0, (bits & CAP_NOTIFICATIONS) != 0,
+                (bits & CAP_BADGE) != 0);
     }
 
     /**
@@ -6312,6 +6314,15 @@ public final class KayaApp {
          */
         public void cancelNotification(long notification) {
             emit(KayaWire.txCancelNotification(notification));
+        }
+
+        /**
+         * Ask the platform to show {@code count} on the app's icon, 0
+         * clearing it (docs/app-badge-plan.md). Never refused:
+         * {@link Capabilities#badge()} says whether a number will appear.
+         */
+        public void setBadge(int count) {
+            emit(KayaWire.txSetBadge(count));
         }
 
         /**

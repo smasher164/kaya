@@ -2249,6 +2249,13 @@ def cancel_notification(notification: int) -> None:
     _records().append(wire.tx_cancel_notification(int(notification)))
 
 
+def set_badge(count: int) -> None:
+    """Ask the platform to show `count` on the app's icon, 0 clearing it
+    (docs/app-badge-plan.md). Never refused: `capabilities().badge` says
+    whether a number will appear."""
+    _records().append(wire.tx_set_badge(int(count)))
+
+
 def on_notification_activation(
         f: Callable[[int, NotificationOutcome], object]) -> None:
     """Register the PROCESS-LEVEL notification handler
@@ -3964,13 +3971,18 @@ class Capabilities:
     #: (docs/tasks-s3-plan.md N3). A RUNTIME bit: the host measures it.
     notifications: bool
 
+    #: `set_badge` will show a number on the app's icon
+    #: (docs/app-badge-plan.md). A RUNTIME bit, like `notifications`.
+    badge: bool
+
 
 def capabilities() -> Capabilities:
     """This host's capabilities, constant for the life of the process."""
     bits = runtime.capability_bits()
     return Capabilities(
         aux_windows=bool(bits & runtime.CAP_AUX_WINDOWS),
-        notifications=bool(bits & runtime.CAP_NOTIFICATIONS))
+        notifications=bool(bits & runtime.CAP_NOTIFICATIONS),
+        badge=bool(bits & runtime.CAP_BADGE))
 
 
 def catalog(app: str) -> None:

@@ -2189,6 +2189,54 @@ fn blend(base: u32, over: u32, alpha: f64) -> u32 {
     })
 }
 
+/// The app badge on the taskbar (docs/app-badge-plan.md §2): an unpackaged
+/// process has no badge of the platform's own (the Windows App SDK's badge
+/// manager refuses one), so kaya draws the count on the brand or system
+/// accent and sets it as the button's overlay, the count its description.
+fn set_badge(core: &CoreState, count: u32) -> windows_core::Result<()> {
+    use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER};
+    use windows::Win32::UI::Shell::{ITaskbarList3, TaskbarList};
+    use windows::Win32::UI::WindowsAndMessaging::{CreateIcon, DestroyIcon, HICON};
+    let target = winui_window(core, 0)?;
+    let native: IWindowNative = windows_core::Interface::cast(&target)?;
+    let hwnd = windows::Win32::Foundation::HWND(native.window_handle()? as *mut c_void);
+    let list: ITaskbarList3 = unsafe { CoCreateInstance(&TaskbarList, None, CLSCTX_INPROC_SERVER)? };
+    unsafe { list.HrInit()? };
+    if count == 0 {
+        // An EMPTY description, not a null one: the shell keeps the last
+        // description as the button's help text when handed null (measured
+        // 2026-09-25, the badge leg reading "3" after its clear).
+        return unsafe { list.SetOverlayIcon(hwnd, HICON::default(), &HSTRING::new()) };
+    }
+    let accent = match BRAND_KEY.with_borrow(|k| *k) {
+        Some(brand) => brand,
+        None => {
+            let c = windows::UI::ViewManagement::UISettings::new()?
+                .GetColorValue(windows::UI::ViewManagement::UIColorType::Accent)?;
+            (u32::from(c.R) << 16) | (u32::from(c.G) << 8) | u32::from(c.B)
+        }
+    };
+    const PX: u16 = 32;
+    let pixels = crate::canvas::badge_icon(count, (accent << 8) | 0xFF, PX);
+    // Premultiplied RGBA to the straight BGRA a 32-bit icon carries.
+    let mut color = Vec::with_capacity(pixels.len());
+    for px in pixels.chunks_exact(4) {
+        let a = u32::from(px[3]);
+        let straight = |c: u8| if a == 0 { 0 } else { ((u32::from(c) * 255 + a / 2) / a).min(255) as u8 };
+        color.extend_from_slice(&[straight(px[2]), straight(px[1]), straight(px[0]), px[3]]);
+    }
+    let mask = vec![0u8; usize::from(PX) * usize::from(PX) / 8];
+    let icon = unsafe {
+        CreateIcon(None, i32::from(PX), i32::from(PX), 1, 32, mask.as_ptr(), color.as_ptr())?
+    };
+    let label = HSTRING::from(count.to_string());
+    let set = unsafe { list.SetOverlayIcon(hwnd, icon, &label) };
+    unsafe {
+        let _ = DestroyIcon(icon);
+    }
+    set
+}
+
 fn ensure_accent_surface() -> windows_core::Result<()> {
     if ACCENT_SURFACE.with_borrow(|done| *done) {
         return Ok(());
@@ -15615,6 +15663,11 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
         ApplyOp::CancelNotification(notification) => {
             on_notify(move || notification_forget(notification.0));
         }
+        ApplyOp::SetBadge { count } => {
+            if let Err(e) = set_badge(core, count) {
+                eprintln!("KAYA_DIAG set_badge {count}: the taskbar overlay failed: {e}");
+            }
+        }
         ApplyOp::PresentAlert(spec) => {
             // The platform's REAL modal dialog: ContentDialog's three
             // slots ARE the vocabulary (two actions + close). The
@@ -22671,6 +22724,34 @@ impl crate::harness::Stage for WinUiStage {
     /// legal.
     fn notification_title(&self, notification: u64) -> Option<String> {
         on_notify(move || delivered_notification_title(notification)).flatten()
+    }
+
+    /// The taskbar button's own help text, which the shell fills from the
+    /// overlay's description (measured 2026-09-25, docs/app-badge-plan.md
+    /// §4). Read out of process: UI Automation stays out of this library
+    /// (Cargo.toml, the Win32_UI_Accessibility note). The button is found by
+    /// the declared AUMID, or by the window's title while it still groups
+    /// under the exe.
+    fn badge(&self) -> String {
+        let title = self.window_title(0).replace('\'', "''");
+        let aumid = declared_app_id().unwrap_or_default().replace('\'', "''");
+        let out = run_powershell(&format!(
+            "Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes; \
+             $a=[System.Windows.Automation.AutomationElement]; \
+             $tray=$a::RootElement.FindFirst('Children', (New-Object \
+               System.Windows.Automation.PropertyCondition($a::ClassNameProperty,'Shell_TrayWnd'))); \
+             $hit=$null; \
+             foreach ($b in $tray.FindAll('Descendants', \
+                 [System.Windows.Automation.Condition]::TrueCondition)) {{ \
+               if ($b.Current.AutomationId -eq 'Appid: {aumid}' -or \
+                   $b.Current.Name -like '{title} -*') {{ $hit=$b; break }} }}; \
+             if ($hit) {{ Write-Output ('KAYA_BADGE[' + $hit.Current.HelpText + ']') }} \
+             else {{ Write-Output 'KAYA_BADGE_NO_BUTTON' }}"
+        ));
+        match out.split_once("KAYA_BADGE[") {
+            Some((_, rest)) => rest.split(']').next().unwrap_or_default().to_owned(),
+            None => format!("<no taskbar button named {title:?} or appid {aumid:?}: {}>", out.trim()),
+        }
     }
 
     /// N5's Windows carve-out: Windows offers no programmatic tap, so the verb

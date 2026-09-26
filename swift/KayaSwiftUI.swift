@@ -10,7 +10,7 @@ import UserNotifications
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0x555172b2e7556a6f
+let kayaSpecHash: UInt64 = 0xbb350b703dbddcf5
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -64,6 +64,7 @@ private let applyDismissSheet: UInt16 = 47
 private let applySetSheetProp: UInt16 = 48
 /// The app's scroll to a row (docs/scroll-to-plan.md).
 private let applyScrollToRow: UInt16 = 49
+private let applySetBadge: UInt16 = 50
 /// What a drop settles on (the wire's drag_op).
 let kayaDragOpNone: UInt32 = 0
 let kayaDragOpCopy: UInt32 = 1
@@ -6122,6 +6123,9 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 // model drop ends the presentation, no emit (echo doctrine).
                 let sid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
                 kayaForgetSheet(sid)
+            case applySetBadge:
+                // { u32 count; u32 reserved } (docs/app-badge-plan.md §2).
+                kayaSetBadge(raw.loadUnaligned(fromByteOffset: body, as: UInt32.self))
             case applyScrollToRow:
                 // { u64 container; u64 copy (0 = unrealized); u32 index; u32 pad }.
                 // A REQUEST held on the container until its tier can scroll
@@ -9285,6 +9289,30 @@ private func kayaRunScript(_ script: String) {
                 } else {
                     failures.append(
                         "the platform holds no delivered notification \(nid), wanted \"\(want)\"")
+                }
+            case "expect_badge":
+                // docs/app-badge-plan.md §4: the platform's own record, retried
+                // like an expect since the Dock publishes the label later.
+                let want = kayaQuoted(Array(parts[1...]))
+                #if os(iOS)
+                // The permission prompt set_badge raised, answered from the
+                // host, which alone can reach SpringBoard; "nothing to press"
+                // is ordinary once it has been answered.
+                for _ in 0..<3 {
+                    let (pressed, _) = KayaSimdrive.ask("press Allow", timeout: 20)
+                    if !pressed { break }
+                }
+                #endif
+                var got = kayaPlatformBadge()
+                let deadline = Date().addingTimeInterval(5)
+                while got != want && Date() < deadline {
+                    Thread.sleep(forTimeInterval: 0.05)
+                    got = kayaPlatformBadge()
+                }
+                if got == want {
+                    observed.append("badge \"\(want)\"")
+                } else {
+                    failures.append("the platform shows badge \"\(got)\", wanted \"\(want)\"")
                 }
             case "expect_no_notification":
                 let nid = UInt64(parts[1]) ?? 0
@@ -15787,7 +15815,7 @@ func kayaPostNotification(_ id: UInt64, at: UInt64, title: String, body: String)
     // expect_notification reads (measured 2026-09-08, tools/mac/notifyprobe).
     let opts: UNAuthorizationOptions =
         ProcessInfo.processInfo.environment["KAYA_SELFTEST"] != nil
-        ? [.alert, .sound, .provisional] : [.alert, .sound]
+        ? [.alert, .sound, .badge, .provisional] : [.alert, .sound, .badge]
     centre.requestAuthorization(options: opts) { granted, error in
         guard granted else {
             // The refusal's measurement, under the harness only: what the
@@ -15822,6 +15850,63 @@ func kayaPostNotification(_ id: UInt64, at: UInt64, title: String, body: String)
             }
         }
     }
+}
+
+/// The app's icon badge (docs/app-badge-plan.md §2): the Dock tile's label
+/// on the mac, the home screen's badge on iOS. 0 clears.
+func kayaSetBadge(_ count: UInt32) {
+    #if os(macOS)
+    NSApp.dockTile.badgeLabel = count == 0 ? nil : "\(count)"
+    #else
+    // A badge needs the badge permission, asked with the rest of what a first
+    // post asks for, so the user sees one prompt; the count is set once the
+    // answer is in (docs/app-badge-plan.md §2).
+    let centre = UNUserNotificationCenter.current()
+    centre.requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in
+        centre.setBadgeCount(Int(count)) { error in
+            if let error, ProcessInfo.processInfo.environment["KAYA_SELFTEST"] != nil {
+                FileHandle.standardError.write(Data(
+                    "KAYA_DIAG set_badge \(count) refused: \(error)\n".utf8))
+            }
+        }
+    }
+    #endif
+}
+
+/// The harness's read of the badge the PLATFORM holds, never kaya's copy:
+/// on the mac the label LaunchServices publishes for the Dock (answered for
+/// an accessory process too, measured 2026-09-25), on iOS the number the
+/// system keeps for the app. "" when none is shown.
+func kayaPlatformBadge() -> String {
+    #if os(macOS)
+    let probe = Process()
+    probe.executableURL = URL(fileURLWithPath: "/usr/bin/lsappinfo")
+    probe.arguments = ["info", "-only", "StatusLabel", "\(ProcessInfo.processInfo.processIdentifier)"]
+    let pipe = Pipe()
+    probe.standardOutput = pipe
+    guard (try? probe.run()) != nil else { return "<lsappinfo did not start>" }
+    probe.waitUntilExit()
+    let text = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+    guard let open = text.range(of: "\"label\"=\"") else { return "" }
+    let rest = text[open.upperBound...]
+    return String(rest[..<(rest.firstIndex(of: "\"") ?? rest.endIndex)])
+    #else
+    // The stored number reads back whether or not the home screen draws it
+    // (measured 2026-09-25: "3" under a provisional authorization whose badge
+    // setting was disabled), so the setting is read beside it.
+    let asked = DispatchSemaphore(value: 0)
+    var enabled = false
+    var setting = -1
+    UNUserNotificationCenter.current().getNotificationSettings { s in
+        enabled = s.badgeSetting == .enabled
+        setting = s.badgeSetting.rawValue
+        asked.signal()
+    }
+    asked.wait()
+    let number = DispatchQueue.main.sync { UIApplication.shared.applicationIconBadgeNumber }
+    if number == 0 { return "" }
+    return enabled ? "\(number)" : "<\(number) held, but badges are not enabled for this app (setting \(setting))>"
+    #endif
 }
 
 func kayaCancelNotification(_ id: UInt64) {

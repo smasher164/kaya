@@ -105,6 +105,9 @@ type Caps struct {
 	// This process can post a local notification the desktop will show
 	// (docs/tasks-s3-plan.md N3). A RUNTIME bit: the host measures it.
 	Notifications bool
+	// Tx.SetBadge will show a number on the app's icon
+	// (docs/app-badge-plan.md). A RUNTIME bit, like Notifications.
+	Badge bool
 }
 
 // Capabilities answers what this host can do. Constant for the life of
@@ -114,6 +117,7 @@ func Capabilities() Caps {
 	return Caps{
 		AuxWindows:    bits&capAuxWindows != 0,
 		Notifications: bits&capNotifications != 0,
+		Badge:         bits&capBadge != 0,
 	}
 }
 
@@ -3084,6 +3088,13 @@ func (tx *Tx) ShowNotification(notification uint64) NotificationRef {
 // ignored.
 func (tx *Tx) CancelNotification(notification uint64) {
 	tx.emit(TxCancelNotification(notification))
+}
+
+// SetBadge asks the platform to show count on the app's icon, 0 clearing
+// it (docs/app-badge-plan.md). Never refused: Capabilities().Badge says
+// whether a number will appear.
+func (tx *Tx) SetBadge(count uint32) {
+	tx.emit(TxSetBadge(count))
 }
 
 // notificationResult is the notification_result decision, in a method of

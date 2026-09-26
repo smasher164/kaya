@@ -12780,3 +12780,16 @@ keeps the policy External (scrollable, no floor) until the text passes the
 cap, and pads the view as an entry is (7px top and bottom, 8px at the sides,
 the prompt overlay moved with it). check-universal-props holds the policy
 choice, watched red on Automatic.
+
+## iOS reads a badge number back that the home screen does not draw, and Windows keeps a cleared overlay's description (measured 2026-09-25)
+
+Two platforms' own records answered with more than what was shown while
+the app badge was built (docs/app-badge-plan.md). On iOS,
+`applicationIconBadgeNumber` read "3" under a PROVISIONAL authorization
+whose `badgeSetting` was disabled: the system stores the number whether or
+not the icon may carry it, and Apple's own advice is to keep one's own copy.
+The reader reads the setting beside the number and reports a disabled
+badge by name. On Windows, `SetOverlayIcon(hwnd, NULL, NULL)` removed the
+overlay and left the taskbar button's help text reading "3"; an EMPTY
+description clears both. The badge leg read "3" after its clear on the lane
+until that changed.

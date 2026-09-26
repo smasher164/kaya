@@ -1,9 +1,9 @@
 # An unread count on the app's icon — the design pass
 
-Status: DESIGN, R1 RULED 2026-09-25. The chat app's C2
-(docs/chat-plan.md). The platform facts below were researched 2026-09-25
-with sources; the four read-backs in §4 are still to be measured before
-any arm is built.
+Status: BUILT 2026-09-26 on all five lanes and in all nine bindings (R1
+ruled 2026-09-25). The chat app's C2 (docs/chat-plan.md): the badge is the
+unread total. tools/scenes/badge.steps (Rust) and the chat scene read the
+platform back on every lane.
 
 ## §1 — The semantics
 
@@ -26,7 +26,7 @@ app has to.
 |---|---|---|---|
 | macOS | the number | `NSApp.dockTile.badgeLabel` | the app has a Dock tile (a `.regular` app, which a declared identity already is); `.badge` added to the notification authorization request, since an app registered with the notification centre without it loses its Dock badge (reported, measured in §4) |
 | iOS | the number | `UNUserNotificationCenter.setBadgeCount` (iOS 16) | `.badge` authorization; provisional authorization does not badge, so the harness asks for it |
-| Windows, unpackaged | the number, drawn by kaya | `ITaskbarList3::SetOverlayIcon` with a 16x16 icon kaya renders, its description the count as text | the Windows App SDK's `BadgeNotificationManager` refuses an unpackaged process in its own source ("Not applicable for unpackaged applications"); the overlay is per taskbar group and is re-applied on `TaskbarButtonCreated`, since Explorer drops it on a restart |
+| Windows (BUILT for packaged and unpackaged alike) | the number, drawn by kaya (`canvas::badge_icon`, the accent or brand colour, the built-in face) | `ITaskbarList3::SetOverlayIcon` with a 16x16 icon kaya renders, its description the count as text | the Windows App SDK's `BadgeNotificationManager` refuses an unpackaged process in its own source ("Not applicable for unpackaged applications"); the overlay is per taskbar group and is re-applied on `TaskbarButtonCreated`, since Explorer drops it on a restart |
 | Windows, packaged | the number, 1 to 99 then 99+ | `BadgeNotificationManager.SetBadgeAsCount` (Windows App SDK 1.7) | the user's "Show badges on taskbar apps" setting |
 | Linux | the number on KDE Plasma, Ubuntu Dock and Dash-to-Dock; nothing on stock GNOME, sway or an X11 window manager | the `com.canonical.Unity.LauncherEntry` `Update` signal on the session bus, `count` and `count-visible`, keyed by the app's desktop id | no GTK, libadwaita, freedesktop or portal API exists (a portal was proposed in 2024 and never built) |
 | Android | a DOT, and only while the app has an active notification | none | no public API sets a launcher count; Pixel's launcher shows a dot for an app with a notification and the count only in the long-press menu, taken from `setNumber` on that notification |
@@ -51,12 +51,21 @@ on Android, since no number is guaranteed.
 The observation is the platform's own record, never kaya's copy of the
 number:
 
-- macOS: `lsappinfo info -only StatusLabel` for the leg's process, the
-  label LaunchServices publishes for the Dock.
-- iOS: whether SpringBoard's accessibility tree carries the badge on the
-  app's icon, read by the xcui driver.
-- Windows: whether the taskbar button's UI Automation name carries the
-  overlay's description; if not, a picture of the button.
+- macOS: `lsappinfo info -only StatusLabel <pid>`, the label
+  LaunchServices publishes for the Dock. MEASURED 2026-09-25: it answers
+  `"StatusLabel"={ "label"="3" }` for an `.accessory` process with no Dock
+  tile as well as for a `.regular` one, so the lane's guests read back as
+  they are.
+- iOS: the number the system holds for the app, AND its badge setting:
+  MEASURED 2026-09-25, the number reads back "3" under a provisional
+  authorization whose badge setting is disabled, so the reader reports a
+  disabled badge rather than the number (docs/traps.md). `set_badge` asks
+  for alert, sound and badge permission before setting the count, and the
+  harness's `expect_badge` has the host driver press the prompt's Allow.
+- Windows: MEASURED 2026-09-25 on the lane's VM: the Windows 11 taskbar
+  button's UI Automation `HelpText` is the overlay's description exactly
+  (`3 unread`), and its `AutomationId` is `Appid: <the AUMID>`, so a leg
+  finds its own button by the declared id and reads the text.
 - Linux: the `Update` signal itself, read off the leg's own session bus
   (notify-leg.sh already builds one).
 

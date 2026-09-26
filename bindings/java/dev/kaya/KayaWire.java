@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0x555172b2e7556a6fL;
+    public static final long SPEC_HASH = 0xbb350b703dbddcf5L;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -298,6 +298,7 @@ public final class KayaWire {
     public static final short TX_KIND_DISMISS_SHEET = 59;
     public static final short TX_KIND_SET_SHEET_PROP = 60;
     public static final short TX_KIND_SCROLL_TO_ROW = 61;
+    public static final short TX_KIND_SET_BADGE = 62;
     public static final short APPLY_KIND_CREATE = 1;
     public static final short APPLY_KIND_SET_PROP = 2;
     public static final short APPLY_KIND_ADD_CHILD = 3;
@@ -345,6 +346,7 @@ public final class KayaWire {
     public static final short APPLY_KIND_DISMISS_SHEET = 47;
     public static final short APPLY_KIND_SET_SHEET_PROP = 48;
     public static final short APPLY_KIND_SCROLL_TO_ROW = 49;
+    public static final short APPLY_KIND_SET_BADGE = 50;
     public static final short OCC_KIND_BUTTON_CLICKED = 1;
     public static final short OCC_KIND_TEXT_CHANGED = 2;
     public static final short OCC_KIND_TOGGLED = 3;
@@ -1035,6 +1037,14 @@ public final class KayaWire {
         Enc b = begin(TX_KIND_SCROLL_TO_ROW);
         b.putLong(widgetId);
         encodeValue(b, key);
+        return finish(b);
+    }
+
+    /** Ask the platform to show `count` on the app's icon, 0 clearing it (docs/app-badge-plan.md). Never refused: what appears is the platform's decision (the Dock tile's label, the home screen's badge, a taskbar overlay kaya draws, a Linux dock's LauncherEntry count, the number on Android's showing notifications), and the `badge` capability says whether a number will. Last write wins. */
+    public static byte[] txSetBadge(int count) {
+        Enc b = begin(TX_KIND_SET_BADGE);
+        b.putInt(count);
+        b.putInt(0);
         return finish(b);
     }
 

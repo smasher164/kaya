@@ -1338,6 +1338,9 @@ BRIDGE_VERBS = frozenset((
     "expect_clipboard", "drag_file",
     # The sheet's cancel path is the driver's swipe (docs/sheet-plan.md §4).
     "dismiss_sheet",
+    # A badge needs real notification permission, whose prompt only the
+    # driver can answer (docs/app-badge-plan.md §4).
+    "expect_badge",
 ))
 
 
