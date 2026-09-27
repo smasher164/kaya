@@ -617,7 +617,8 @@ def composers(swiftui_text, compose_text, gtk_text, winui_text):
             "colors = if (inComposer) {\n                    TextFieldDefaults.colors(\n"
             "                        focusedContainerColor = Color.Transparent,",
             "FilledIconButton(",
-            "val lifted = Modifier.padding(bottom = lift)")),
+            "val lifted = Modifier.padding(bottom = lift)",
+            "touchPadded.getOrElse(i) { false } || touchPadded.getOrElse(i + 1) { false }")),
         (GTK, gtk_text, (
             "container.add_css_class(COMPOSER_CLASS);",
             ".kaya-composer scrolledwindow, .kaya-composer textview")),
@@ -745,7 +746,7 @@ def drag_waits(winui_text):
 real = load()
 g = Gate("check-universal-props")
 RAN = 0
-DECLARED = 85
+DECLARED = 86
 for path, pattern, repl in (
     (COMPOSE, r"\ba11y\b", "kayaUnappliedProps"),
     (SWIFTUI, r"\bkayaA11y\b", "kayaUnappliedProps"),
@@ -1038,6 +1039,9 @@ for label, path, pattern, repl in (
     ("WinUI's button beside a composer sitting on the row's bottom again", WINUI,
      r"let lift = \(\(COMPOSER_REST_HEIGHT - SYMBOL_BUTTON_SIDE\) / 2\.0\)\.max\(0\.0\);",
      "let lift = 0.0;"),
+    ("Compose's row gap back beside an icon button", COMPOSE,
+     r"touchPadded\.getOrElse\(i\) \{ false \} \|\| touchPadded\.getOrElse\(i \+ 1\) \{ false \}",
+     "false"),
     ("SwiftUI's mac drawing the composer's send", SWIFTUI,
      r"if kayaIsComposerSend\(node\) \{", "if false {"),
     ("Compose's field inside a composer keeping its container", COMPOSE,

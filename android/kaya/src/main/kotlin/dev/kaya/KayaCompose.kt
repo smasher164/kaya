@@ -970,11 +970,21 @@ internal fun KayaFlexRow(
     grows: List<Double>,
     align: Long,
     lineLabels: List<Long?> = emptyList(),
+    touchPadded: List<Boolean> = emptyList(),
     content: @Composable () -> Unit,
 ) {
     Layout(content = content, modifier = modifier) { measurables, constraints ->
         val n = measurables.size
-        val gaps = spacingPx * maxOf(0, n - 1)
+        // AN ICON BUTTON'S TOUCH TARGET IS ITS GAP (docs/composer-plan.md §2,
+        // ruled 2026-09-26): Material's 48dp target already leaves 12dp around
+        // its 24dp glyph and places icon buttons edge to edge, so no row gap
+        // sits beside one.
+        val gapAfter = IntArray(n) { i ->
+            if (i == n - 1) 0
+            else if (touchPadded.getOrElse(i) { false } || touchPadded.getOrElse(i + 1) { false }) 0
+            else spacingPx
+        }
+        val gaps = gapAfter.sum()
         val bounded = constraints.hasBoundedWidth
         val room = if (bounded) constraints.maxWidth - gaps else Int.MAX_VALUE
         val heightHint = if (constraints.hasBoundedHeight) constraints.maxHeight else Int.MAX_VALUE
@@ -1055,7 +1065,7 @@ internal fun KayaFlexRow(
                 }
                 val left = if (rtl) width - x - widths[i] else x
                 p.place(left, y)
-                x += widths[i] + spacingPx
+                x += widths[i] + gapAfter[i]
             }
         }
     }
@@ -13805,6 +13815,9 @@ private fun KayaRenderCore(
                 grows = node.laidOut.map { it.grow },
                 align = node.align,
                 lineLabels = node.laidOut.map { kayaFirstLabel(it) },
+                touchPadded = node.laidOut.map {
+                    it.kind == KayaCompose.KIND_BUTTON && it.symbol != 0L
+                },
             ) {
                 node.laidOut.forEach { child ->
                     var cell = Modifier.onGloballyPositioned {

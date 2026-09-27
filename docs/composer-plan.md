@@ -45,6 +45,11 @@ name. The vocabulary grows by four:
 plus on every platform, and the harness reads a symbol back from the glyph
 drawn, so two symbols sharing one glyph cannot be told apart.
 
+On Android no row gap sits beside an icon-only button (RULED 2026-09-26):
+Material's 48dp touch target already leaves 12dp around its 24dp glyph and
+places icon buttons edge to edge, so the row's gap on top of it doubled the
+space (72dp from the edge to the chat app's field, 20dp from the paperclip).
+
 A symbol-only button is drawn borderless (the `plain` role's look) unless
 its role says otherwise. Art a symbol cannot name (a brand mark) takes the
 button's image bytes, as a section's `icon` already does.
