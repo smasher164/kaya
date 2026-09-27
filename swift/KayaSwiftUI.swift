@@ -135,6 +135,29 @@ private let mpropShortcut: UInt32 = 7
 private let mpropRole: UInt32 = 8
 private let mpropSymbol: UInt32 = 9
 private let mpropSwipe: UInt32 = 10
+private let swipeLeading: Int64 = 1
+private let swipeTrailing: Int64 = 2
+private let swipeLeadingFull: Int64 = 3
+private let swipeTrailingFull: Int64 = 4
+
+/// A row's swipe items as expect_swipe_actions spells them: harness.rs's
+/// `swipe_spec`, the same order and the same `none`.
+func kayaSwipeSpec(_ items: [(Int64, String)]) -> String {
+    func edge(_ swipe: Int64) -> String {
+        switch swipe {
+        case swipeLeading: return "leading"
+        case swipeLeadingFull: return "leading_full"
+        case swipeTrailing: return "trailing"
+        case swipeTrailingFull: return "trailing_full"
+        default: return "unknown"
+        }
+    }
+    if items.isEmpty { return "none" }
+    return items.enumerated()
+        .sorted { (edge($0.element.0), $0.offset) < (edge($1.element.0), $1.offset) }
+        .map { "\(edge($0.element.0)):\($0.element.1)" }
+        .joined(separator: "/")
+}
 private let commandClear: UInt32 = 1
 private let commandFocus: UInt32 = 2
 private let commandEmojiPicker: UInt32 = 3
@@ -11211,6 +11234,45 @@ private func kayaRunScript(_ script: String) {
                     failures.append(failure)
                 } else {
                     kayaAwaitAnswer(answered)
+                }
+            case "expect_swipe_actions":
+                // The row's swipe items (docs/swipe-actions-plan.md §4). Apple
+                // lowers every one to the context menu below the iOS 27 SDK
+                // (R2), so the menu's own model is what it lowered.
+                let restLine = String(line.dropFirst(parts[0].count + 1 + parts[1].count))
+                guard let (want, tail) = kayaQuotedPrefix(restLine), tail.isEmpty else {
+                    failures.append("expect_swipe_actions wants a row and a quoted spec: \(line)")
+                    break
+                }
+                func swipes() -> String? {
+                    DispatchQueue.main.sync {
+                        guard let node = kayaAnyTarget(parts[1]) else { return nil }
+                        guard let roots = kayaScene.contextRoots[node.id] else {
+                            return "<no context menu attached to \(parts[1])>"
+                        }
+                        var items: [(Int64, String)] = []
+                        func walk(_ item: KayaMenuItemModel) {
+                            if item.kind == menuKindAction && item.swipe != 0 {
+                                items.append((item.swipe, item.label))
+                            }
+                            item.children.forEach(walk)
+                        }
+                        roots.forEach(walk)
+                        return kayaSwipeSpec(items)
+                    }
+                }
+                var got = swipes()
+                let deadline = Date().addingTimeInterval(5)
+                while got != want && Date() < deadline {
+                    Thread.sleep(forTimeInterval: 0.05)
+                    got = swipes()
+                }
+                if let got, got == want {
+                    observed.append("swipes \(got)")
+                } else if let got {
+                    failures.append("\(parts[1]) swipes \(got), wanted \(want)")
+                } else {
+                    failures.append("no such target \(parts[1])")
                 }
             case "swipe_action":
                 // The row's context item run through its swipe

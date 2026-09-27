@@ -2081,7 +2081,8 @@ def run_one_suite(name, slot, log):
             f"C:\\kaya\\flightrec\\{name}-fgtext.txt "
             f"C:\\kaya\\flightrec\\{name}-toastwpn.db "
             f"C:\\kaya\\flightrec\\{name}-toastwpn.db-wal "
-            f"C:\\kaya\\flightrec\\{name}-toast.bmp 2>nul & schtasks /create /tn "
+            f"C:\\kaya\\flightrec\\{name}-toast.bmp "
+            f"C:\\kaya\\flightrec\\{name}-gesture.bmp 2>nul & schtasks /create /tn "
             f'kaya_{name} /tr "wscript C:\\kaya\\run-hidden.vbs '
             f'run_{name}.cmd {slot}" /sc once /st 00:00 /it /rl highest /f '
             f">nul && schtasks /run /tn kaya_{name} >nul", log=log)

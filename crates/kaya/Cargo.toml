@@ -138,6 +138,11 @@ windows = { version = "0.62", features = [
     # a method whose parameter types are outside the enabled set: the app
     # badge's taskbar overlay (docs/app-badge-plan.md §2).
     "Win32_UI_WindowsAndMessaging",
+    # A ROW'S TOUCH SWIPE, driven by the harness (docs/swipe-actions-plan.md
+    # §5): SwipeControl answers touch alone, so the lane injects a finger with
+    # InjectTouchInput, which needs no touch screen.
+    "Win32_UI_Input_Pointer",
+    "Win32_Foundation",
     # SHA-1 for the activator's class id, which is a version-5 UUID over the
     # AUMID (winui/mod.rs, activator_clsid). The PLATFORM's own hash, so no
     # crypto is hand-rolled and no crate joins the tree for sixteen bytes.

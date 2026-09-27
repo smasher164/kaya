@@ -2141,6 +2141,8 @@ object KayaCompose {
     private const val MPROP_ROLE = 8
     private const val MPROP_SYMBOL = 9
     private const val MPROP_SWIPE = 10
+    const val SWIPE_LEADING = 1L
+    const val SWIPE_TRAILING = 2L
     const val SWIPE_LEADING_FULL = 3L
     const val SWIPE_TRAILING_FULL = 4L
     /**
@@ -10767,6 +10769,48 @@ object KayaCompose {
                             else kayaAwaitAnswer(answered)
                         }
                     }
+                    "expect_swipe_actions" -> {
+                        // The row's swipe items (docs/swipe-actions-plan.md §4):
+                        // the full ones read from the SwipeToDismissBox that
+                        // laid out, the rest from the context menu Material's
+                        // phone library keeps them in (R3).
+                        val spec = parts.getOrNull(1) ?: ""
+                        val head = quotedHead(line.substring(parts[0].length + 1 + spec.length))
+                        if (head == null || head.second.isNotEmpty()) {
+                            failures.add("expect_swipe_actions wants a row and a quoted spec: $line")
+                        } else {
+                            val want = head.first
+                            fun swipes(): String? = onUi(activity) {
+                                val node = kayaWidgetTarget(spec) ?: return@onUi null
+                                val attachment = KayaSceneModel.contextMenus[node.id]
+                                    ?: return@onUi "<no context menu attached to $spec>"
+                                val items = ArrayList<Pair<Long, String>>()
+                                kayaSwipeLowered[node.id]?.let { items.addAll(it) }
+                                fun walk(item: KayaMenuItem) {
+                                    if (item.kind == KayaCompose.MENU_KIND_ACTION &&
+                                        (item.swipe == KayaCompose.SWIPE_LEADING ||
+                                            item.swipe == KayaCompose.SWIPE_TRAILING)
+                                    ) {
+                                        items.add(item.swipe to item.label)
+                                    }
+                                    item.children.forEach { walk(it) }
+                                }
+                                attachment.roots.forEach { walk(it) }
+                                kayaSwipeSpec(items)
+                            }
+                            var got = swipes()
+                            val deadline = android.os.SystemClock.uptimeMillis() + 5000
+                            while (got != want && android.os.SystemClock.uptimeMillis() < deadline) {
+                                Thread.sleep(50)
+                                got = swipes()
+                            }
+                            when {
+                                got == null -> failures.add("no such target $spec")
+                                got == want -> observed.add("swipes $got")
+                                else -> failures.add("$spec swipes $got, wanted $want")
+                            }
+                        }
+                    }
                     "swipe_action" -> {
                         // The row's context item run through its swipe
                         // (docs/swipe-actions-plan.md §4): a REAL touch
@@ -13318,6 +13362,7 @@ private fun KayaSwipeRow(
 ) {
     val (leading, trailing) = kayaFullSwipes(attachment)
     if (leading == null && trailing == null) {
+        SideEffect { kayaSwipeLowered.remove(node.id) }
         content()
         return
     }
@@ -13333,7 +13378,13 @@ private fun KayaSwipeRow(
     )
     SwipeToDismissBox(
         state = state,
-        modifier = Modifier.onGloballyPositioned { kayaSwipeBounds[node.id] = it.boundsInWindow() },
+        modifier = Modifier.onGloballyPositioned {
+            kayaSwipeBounds[node.id] = it.boundsInWindow()
+            kayaSwipeLowered[node.id] = listOfNotNull(
+                leading?.let { item -> KayaCompose.SWIPE_LEADING_FULL to item.label },
+                trailing?.let { item -> KayaCompose.SWIPE_TRAILING_FULL to item.label },
+            )
+        },
         enableDismissFromStartToEnd = leading != null,
         enableDismissFromEndToStart = trailing != null,
         backgroundContent = {
@@ -13364,6 +13415,23 @@ private fun KayaSwipeRow(
 
 /** Each full-swipe row's bounds in the window, for swipe_action's gesture. */
 internal val kayaSwipeBounds = HashMap<Long, androidx.compose.ui.geometry.Rect>()
+
+/** Each laid-out SwipeToDismissBox's items, for expect_swipe_actions. */
+internal val kayaSwipeLowered = HashMap<Long, List<Pair<Long, String>>>()
+
+/** A row's swipe items as expect_swipe_actions spells them: harness.rs's
+ *  `swipe_spec`, the same order and the same `none`. */
+internal fun kayaSwipeSpec(items: List<Pair<Long, String>>): String {
+    fun edge(swipe: Long): String = when (swipe) {
+        KayaCompose.SWIPE_LEADING -> "leading"
+        KayaCompose.SWIPE_LEADING_FULL -> "leading_full"
+        KayaCompose.SWIPE_TRAILING -> "trailing"
+        KayaCompose.SWIPE_TRAILING_FULL -> "trailing_full"
+        else -> "unknown"
+    }
+    if (items.isEmpty()) return "none"
+    return items.sortedBy { edge(it.first) }.joinToString("/") { "${edge(it.first)}:${it.second}" }
+}
 
 @Composable
 private fun KayaRenderContextAnchor(

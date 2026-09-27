@@ -45,7 +45,7 @@ SECTIONS = {
             "windowserver", "sampler", "sample", "unified-log", "power-history"),
     "windows": ("leg-log", "verb-trace", "shot", "desktop-shot", "desktop",
                 "foreground", "foreground-text", "desktop-live", "notifications",
-                "toast-moment"),
+                "toast-moment", "gesture-moment"),
     "ios": ("leg-log", "verb-trace", "shot", "panic", "app-log", "devices", "binary-stamp"),
     "android": ("leg-log", "verb-trace", "shot", "logcat", "devices",
                 "system-events", "anr-history"),
@@ -905,6 +905,34 @@ class WinRecorder(LaneRecorder):
                    if p.is_file())
         self.mark(bundle, "toast-moment", "ok", size)
 
+    def gesture_moment(self, bundle, leg):
+        """THE SCREEN AT A GESTURE'S DECISIVE MOMENT, taken by the guest:
+        swipe_action photographs the desktop just before it taps a revealed
+        swipe button (crates/kaya/src/winui/mod.rs, `capture_gesture_moment`),
+        since a tap that ran nothing cannot say from the verdict whether the
+        row was open under it."""
+        if bundle is None:
+            return
+        bmp = bundle / "gesture-moment.bmp"
+        got = self._scp_from(f"C:/kaya/flightrec/{leg}-gesture.bmp", bmp)
+        if not (got and bmp.is_file() and bmp.stat().st_size):
+            if bmp.is_file():
+                bmp.unlink()
+            self.skip(bundle, "gesture-moment",
+                      "flightrec: the guest took no gesture picture during this "
+                      f"leg (C:\\kaya\\flightrec\\{leg}-gesture.bmp); only "
+                      "swipe_action's tap on a revealed button takes one")
+            return
+        png = bundle / "gesture-moment.png"
+        rc = subprocess.run(["sips", "-s", "format", "png", str(bmp), "--out", str(png)],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                            check=False).returncode
+        if rc == 0 and png.is_file() and png.stat().st_size:
+            bmp.unlink()
+            self.mark(bundle, "gesture-moment", "ok", png.stat().st_size)
+        else:
+            self.mark(bundle, "gesture-moment", "ok", bmp.stat().st_size)
+
     def win_leg(self, leg, verdict, secs, log, collected_already, t0,
                 out=None):
         """The one per-leg entry point. A PASS RETURNS AFTER ONE spool
@@ -949,6 +977,7 @@ class WinRecorder(LaneRecorder):
                 # by the only reader standing there — the guest's own
                 # foreground wait.
                 self.toast_moment(bundle, leg, t0)
+                self.gesture_moment(bundle, leg)
                 # The Rust verb trace (crates/kaya/src/vtrace.rs), dumped by
                 # the guest on a failed verdict to the file its launcher
                 # names (since 2026-09-07; check-steps holds the line).

@@ -12810,3 +12810,21 @@ centre on purpose (`ms-actioncenter:`, written for notification captures),
 which read as a stuck flyout until the script was read, and a PowerShell
 probe that slept inside a WinForms timer tick blocked its own message loop,
 so injected keys reached nothing. docs/emoji-picker-plan.md §6.
+
+## A touch tap soon after a SwipeControl swipe never reaches the revealed button (measured 2026-09-27)
+
+The Windows swipe_action (winui/mod.rs, `swipe_action`) injects a finger
+across a row, which opens its SwipeControl, then taps the revealed item.
+Tapped 600ms after the swipe, the item never ran, although XAML's own hit
+test at the tap point answered the revealed AppBarButton first and the
+desktop picture showed the row open: the button's IsPressed, read halfway
+through a 300ms held tap, stayed false, so the touch never reached it. A
+mouse click at the same point ran the item, and so did the same touch tap
+2000ms after the swipe. SwipeControl publishes no idle state to wait on
+(its test hooks exist only in debug builds of WinUI), so the verb sleeps.
+Three reasons that were ruled out on the way: the pointer id (rotated per
+contact, no change), a contact with no area or pressure (a full contact, no
+change), and swiping only half the row (the whole row, no change). Pointer
+event counters on the button read 0 for the mouse click as well: a Button
+handles its own pressed and released before an instance handler runs, so
+they cannot tell the two apart and were removed.

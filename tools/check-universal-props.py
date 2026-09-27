@@ -465,7 +465,7 @@ def census(files):
     bad += winui_mode_changed(read(winui))
     bad += filled_edges(read(compose), read(gtk))
     bad += composers(read(swiftui), read(compose), read(gtk), read(winui))
-    bad += swipes(read(compose))
+    bad += swipes(read(compose), read(winui))
     return bad
 
 
@@ -650,12 +650,27 @@ def composers(swiftui_text, compose_text, gtk_text, winui_text):
 # through the context menu's one activation route, and the harness's
 # swipe_action drives a real touch swipe: a verb that activated the item
 # itself would pass with no swipe on screen at all.
-def swipes(compose_text):
+#
+# WINDOWS' SWIPECONTROL (docs/swipe-actions-plan.md §5) the same two ways, and
+# two more no scene separates: the parent must lay out the control rather than
+# the row inside it (element() answers the host), and the wrap must happen
+# before the drain's track re-stamp, which places what element() answers.
+def swipes(compose_text, winui_text):
     bad = []
     for needle in ("}?.let { kayaActivateMenuItem(it, attachment.noun) }",
                    "kayaTouchSwipe(activity, start, end, y)"):
         if needle not in compose_text:
             bad.append(f"{COMPOSE}: the row swipe lost {needle!r}")
+    for needle in ("menu_user_activate(id, MenuAttachment::Context(widget));",
+                   "Ok(swipe_host_of(&inner).unwrap_or(inner))",
+                   "if let Err(sentence) = inject_touch(&path) {"):
+        if needle not in winui_text:
+            bad.append(f"{WINUI}: the row swipe lost {needle!r}")
+    wrap = winui_text.find("if let Err(e) = sync_swipe_hosts(core) {")
+    stamp = winui_text.find("if let Err(e) = flush_tracks(core) {")
+    if wrap < 0 or stamp < 0 or wrap > stamp:
+        bad.append(f"{WINUI}: the row swipes are not wrapped before the drain's track "
+                   "re-stamp, so a new SwipeControl is laid out at the parent's first slot")
     return bad
 
 
@@ -760,7 +775,7 @@ def drag_waits(winui_text):
 real = load()
 g = Gate("check-universal-props")
 RAN = 0
-DECLARED = 87
+DECLARED = 91
 for path, pattern, repl in (
     (COMPOSE, r"\ba11y\b", "kayaUnappliedProps"),
     (SWIFTUI, r"\bkayaA11y\b", "kayaUnappliedProps"),
@@ -1056,6 +1071,15 @@ for label, path, pattern, repl in (
     ("Compose's swipe_action activating the item instead of swiping", COMPOSE,
      r"kayaTouchSwipe\(activity, start, end, y\)",
      "kayaActivateMenuItem(plan.second!!, ByteArray(0))"),
+    ("WinUI's swipe item running nothing", WINUI,
+     r"menu_user_activate\(id, MenuAttachment::Context\(widget\)\);", "let _ = id;"),
+    ("WinUI's parent laying out the row inside its SwipeControl", WINUI,
+     r"Ok\(swipe_host_of\(&inner\)\.unwrap_or\(inner\)\)", "Ok(inner)"),
+    ("WinUI's swipe_action swiping nothing", WINUI,
+     r"if let Err\(sentence\) = inject_touch\(&path\) \{",
+     "if let Err(sentence) = Ok::<(), String>(()) {"),
+    ("WinUI's row swipes wrapped after the re-stamp", WINUI,
+     r"if let Err\(e\) = sync_swipe_hosts\(core\) \{", "if let Err(e) = Ok::<(), String>(()) {"),
     ("Compose's row gap back beside an icon button", COMPOSE,
      r"touchPadded\.getOrElse\(i\) \{ false \} \|\| touchPadded\.getOrElse\(i \+ 1\) \{ false \}",
      "false"),

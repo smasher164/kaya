@@ -7336,6 +7336,10 @@ struct MenuItemState {
     /// activation performs the command on the focused widget, and enablement
     /// folds in role_enabled.
     role: String,
+    /// The row swipe this context action is, 0 = none; the item stays in the
+    /// context menu (docs/swipe-actions-plan.md R1) and `swipe_actions` reads it.
+    #[cfg_attr(not(feature = "harness"), allow(dead_code))]
+    swipe: i64,
     shortcut: String,
     parent: Option<u64>,
     children: Vec<u64>,
@@ -12097,6 +12101,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     primary: false,
                     symbol: 0,
                     role: String::new(),
+                    swipe: 0,
                     shortcut: String::new(),
                     parent: None,
                     children: Vec::new(),
@@ -12287,7 +12292,17 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     refresh_roles(core);
                 }
                 // Desktop: the item stays in the row's context menu (docs/swipe-actions-plan.md R1).
-                MenuProp::Swipe => {}
+                MenuProp::Swipe => {
+                    let Value::I64(swipe) = value else {
+                        unreachable!("kaya: menu swipe wants I64, the root passed {value:?}")
+                    };
+                    core.menus
+                        .borrow_mut()
+                        .items
+                        .get_mut(&item.0)
+                        .expect("scene validated the item id")
+                        .swipe = swipe;
+                }
             }
         }
 
@@ -16529,6 +16544,27 @@ impl crate::harness::Stage for GtkStage {
                 None => {}
             }
         });
+    }
+
+    fn swipe_actions(&self, t: crate::harness::Target) -> String {
+        Self::on_main(move |core| {
+            let anchor = context_anchor_id(core, t);
+            let Some(attachment) = core.context_menus.get(&anchor) else {
+                return format!("<no context menu attached to {t:?}>");
+            };
+            let reg = core.menus.borrow();
+            let items = attachment
+                .roots
+                .iter()
+                .flat_map(|root| menu_preorder(&reg, *root))
+                .filter_map(|id| {
+                    let item = &reg.items[&id];
+                    (item.kind == MenuItemKind::Action && item.swipe != 0)
+                        .then(|| (item.swipe, item.label.clone()))
+                })
+                .collect();
+            crate::harness::swipe_spec(items)
+        })
     }
 
     fn context_open(&self, t: crate::harness::Target) {

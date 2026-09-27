@@ -1284,11 +1284,13 @@ for name, text in (("KayaSwiftUI.swift", swift),
 # scene's prop typing keeps the rest off the pump). ROLE and ALIGN joined
 # 2026-09-05: the `plain` role reached both interpreters by hand with no
 # gate reading either copy (docs/tasks-plan.md R6).
+# SWIPE joined 2026-09-27: expect_swipe_actions spells each edge by name in
+# all three harnesses (docs/swipe-actions-plan.md §4).
 # The entry, section and sheet prop tables and the detent enum joined the
 # alternation with the sheet slice (docs/sheet-plan.md §3): three typed
 # prop tables hand-copied into two interpreters with nothing pinning them.
 rows = re.findall(r"pub(?:\(crate\))? const ((?:APPLY|KIND|PROP|COMMAND|VALUE|"
-                  r"MENU_KIND|MPROP|ROLE|ALIGN|EPROP|SPROP|SHPROP|DETENT)"
+                  r"MENU_KIND|MPROP|ROLE|ALIGN|EPROP|SPROP|SHPROP|DETENT|SWIPE)"
                   r"_[A-Z_0-9]+): u\d+ = (\d+);", wire)
 # THE CANVAS VOCABULARIES ride the op stream as i64 rather than u32, so
 # the sweep above cannot see them by type and their prefixes are not in

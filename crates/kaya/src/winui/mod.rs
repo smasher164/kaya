@@ -42,7 +42,8 @@ use bindings::Microsoft::UI::Xaml::Controls::{
     RichEditBox, RichEditClipboardFormat, RowDefinition,
     RadioButtons, ScrollBarVisibility, ScrollMode, ScrollViewer, SelectionChangedEventHandler,
     SymbolIcon,
-    Slider, TextBlock, TextBox, TextChangedEventHandler, TextCompositionEndedEventArgs,
+    Slider, SwipeBehaviorOnInvoked, SwipeControl, SwipeItem, SwipeItemInvokedEventArgs,
+    SwipeItems, SwipeMode, TextBlock, TextBox, TextChangedEventHandler, TextCompositionEndedEventArgs,
     TextCompositionStartedEventArgs, TextControlPasteEventHandler,
     TimePicker, TimePickerSelectedValueChangedEventArgs,
     TitleBar,
@@ -173,7 +174,14 @@ enum NativeWidget {
 }
 
 impl NativeWidget {
+    /// What the parent lays out: the row's SwipeControl once `sync_swipe_hosts`
+    /// wrapped it, the control itself otherwise.
     fn element(&self) -> windows_core::Result<UIElement> {
+        let inner = self.inner_element()?;
+        Ok(swipe_host_of(&inner).unwrap_or(inner))
+    }
+
+    fn inner_element(&self) -> windows_core::Result<UIElement> {
         use windows_core::Interface;
         match self {
             NativeWidget::Column(panel) => panel.cast(),
@@ -213,12 +221,13 @@ impl NativeWidget {
     /// AutomationId the keyed reads match by, and the focus command. One
     /// widget over: the search field is a Grid wearing a glyph, and an id on
     /// the Grid would name a group where every read wants the TextBox (the
-    /// SwiftUI arm's `leaf` flag, docs/traps.md).
+    /// SwiftUI arm's `leaf` flag, docs/traps.md). A row's SwipeControl is the
+    /// same shape: the control is laid out, the row keeps its identity.
     fn identity_element(&self) -> windows_core::Result<UIElement> {
         use windows_core::Interface;
         match self {
             NativeWidget::Search { field, .. } => field.cast(),
-            other => other.element(),
+            other => other.inner_element(),
         }
     }
 
@@ -874,6 +883,9 @@ struct MenuModel {
     /// `rebuild_menus` builds every native from this model; the harness
     /// reads the materialized item instead (`menu_symbol`).
     symbol: i64,
+    /// The row swipe this context action is (spec enum "swipe"; 0 = none),
+    /// lowered by `sync_swipe_hosts` (docs/swipe-actions-plan.md §5).
+    swipe: i64,
     children: Vec<u64>,
     parent: Option<u64>,
 }
@@ -1700,6 +1712,14 @@ fn drain_transactions() {
                 // already known (docs/canvas-plan.md §3.2.1).
                 for occ in core.scene.take_asks() {
                     core.occurrences.send(occ);
+                }
+            }
+            // BEFORE THE RE-STAMP: a row this wraps in a SwipeControl is
+            // placed by the re-stamp below, which reads `element()`.
+            if core.menus_touched && !failed {
+                if let Err(e) = sync_swipe_hosts(core) {
+                    crate::fault::report(format!("kaya: lowering the row swipes failed: {e}"));
+                    return;
                 }
             }
             // ONE coalesced track re-stamp for the whole drain — the
@@ -8201,6 +8221,143 @@ fn window_ground(window: &Window) -> windows_core::Result<Grid> {
     Ok(ground)
 }
 
+thread_local! {
+    /// Row swipes (docs/swipe-actions-plan.md §5): the SwipeControl wrapping a
+    /// context anchor, keyed by the wrapped control's COM identity so that
+    /// `element()` can answer it, and the anchor's widget id to that key.
+    static SWIPE_HOSTS: RefCell<(HashMap<usize, SwipeControl>, HashMap<u64, usize>)> =
+        RefCell::new((HashMap::new(), HashMap::new()));
+}
+
+fn swipe_key(inner: &UIElement) -> Option<usize> {
+    windows_core::Interface::cast::<windows_core::IUnknown>(inner)
+        .ok()
+        .map(|unknown| windows_core::Interface::as_raw(&unknown) as usize)
+}
+
+fn swipe_host_of(inner: &UIElement) -> Option<UIElement> {
+    SWIPE_HOSTS.with_borrow(|(hosts, _)| {
+        if hosts.is_empty() {
+            return None;
+        }
+        hosts.get(&swipe_key(inner)?)?.cast().ok()
+    })
+}
+
+fn swipe_host_control(widget: u64) -> Option<SwipeControl> {
+    SWIPE_HOSTS.with_borrow(|(hosts, keys)| hosts.get(keys.get(&widget)?).cloned())
+}
+
+fn forget_swipe_host(widget: u64) {
+    SWIPE_HOSTS.with_borrow_mut(|(hosts, keys)| {
+        if let Some(key) = keys.remove(&widget) {
+            hosts.remove(&key);
+        }
+    });
+}
+
+/// A context anchor's swipe items per edge, the way this backend lowers them:
+/// an edge with a full item swipes that one alone (Execute takes exactly one
+/// item), the others on that edge staying in the menu; an edge without one
+/// reveals every item on it. `(leading, trailing, menu_only)`, each in
+/// catalog preorder.
+struct SwipeLowering {
+    leading: (SwipeMode, Vec<u64>),
+    trailing: (SwipeMode, Vec<u64>),
+    #[cfg_attr(not(feature = "harness"), allow(dead_code))]
+    menu_only: Vec<u64>,
+}
+
+fn swipe_lowering(core: &CoreState, roots: &[u64]) -> SwipeLowering {
+    let mut order = Vec::new();
+    menu_preorder(core, roots, &mut order);
+    let declared: Vec<(u64, u32)> = order
+        .into_iter()
+        .filter_map(|id| {
+            let m = &core.menu_models[&id];
+            (m.kind == MenuItemKind::Action && m.swipe != 0)
+                .then(|| (id, u32::try_from(m.swipe).unwrap_or(0)))
+        })
+        .collect();
+    let mut menu_only = Vec::new();
+    let mut edge = |plain: u32, full: u32| -> (SwipeMode, Vec<u64>) {
+        match declared.iter().find(|(_, s)| *s == full) {
+            Some((id, _)) => {
+                menu_only.extend(declared.iter().filter(|(_, s)| *s == plain).map(|(id, _)| *id));
+                (SwipeMode::Execute, vec![*id])
+            }
+            None => (
+                SwipeMode::Reveal,
+                declared.iter().filter(|(_, s)| *s == plain).map(|(id, _)| *id).collect(),
+            ),
+        }
+    };
+    let leading = edge(crate::wire::SWIPE_LEADING, crate::wire::SWIPE_LEADING_FULL);
+    let trailing = edge(crate::wire::SWIPE_TRAILING, crate::wire::SWIPE_TRAILING_FULL);
+    SwipeLowering { leading, trailing, menu_only }
+}
+
+/// Wrap every context anchor that declares a swipe in a SwipeControl, once,
+/// and hand it this drain's items. The item runs through `menu_user_activate`,
+/// the menu's own route, with the anchor's noun. SwipeControl answers touch
+/// alone; a mouse keeps the context menu (docs/swipe-actions-plan.md R1).
+fn sync_swipe_hosts(core: &mut CoreState) -> windows_core::Result<()> {
+    let attaches: Vec<(u64, Vec<u64>)> = core
+        .context_roots
+        .iter()
+        .map(|(w, roots)| (*w, roots.clone()))
+        .collect();
+    for (widget, roots) in attaches {
+        let lowering = swipe_lowering(core, &roots);
+        let wants = !lowering.leading.1.is_empty() || !lowering.trailing.1.is_empty();
+        let control = match swipe_host_control(widget) {
+            Some(control) => control,
+            None if !wants => continue,
+            None => {
+                let inner = core
+                    .widgets
+                    .get(&WidgetId(widget))
+                    .expect("scene validated the context anchor")
+                    .inner_element()?;
+                let control = SwipeControl::new()?;
+                control.SetHorizontalContentAlignment(HorizontalAlignment::Stretch)?;
+                control.SetVerticalContentAlignment(
+                    bindings::Microsoft::UI::Xaml::VerticalAlignment::Stretch,
+                )?;
+                reseat_element(core, WidgetId(widget), &inner, &control.cast()?)?;
+                control.SetContent(&inner)?;
+                let key = swipe_key(&inner).expect("a live control has a COM identity");
+                SWIPE_HOSTS.with_borrow_mut(|(hosts, keys)| {
+                    hosts.insert(key, control.clone());
+                    keys.insert(widget, key);
+                });
+                control
+            }
+        };
+        let items = |(mode, ids): &(SwipeMode, Vec<u64>)| -> windows_core::Result<SwipeItems> {
+            let items = SwipeItems::new()?;
+            items.SetMode(*mode)?;
+            for &id in ids {
+                let item = SwipeItem::new()?;
+                item.SetText(&HSTRING::from(&*core.menu_models[&id].label))?;
+                item.SetBehaviorOnInvoked(SwipeBehaviorOnInvoked::Close)?;
+                item.Invoked(&TypedEventHandler::<SwipeItem, SwipeItemInvokedEventArgs>::new(
+                    move |_, _| {
+                        swipe_invoked();
+                        menu_user_activate(id, MenuAttachment::Context(widget));
+                        Ok(())
+                    },
+                ))?;
+                items.Append(&item)?;
+            }
+            Ok(items)
+        };
+        control.SetLeftItems(&items(&lowering.leading)?)?;
+        control.SetRightItems(&items(&lowering.trailing)?)?;
+    }
+    Ok(())
+}
+
 /// One real MenuFlyout per context anchor, set as the element's ContextFlyout.
 fn ensure_context_flyout(core: &mut CoreState, widget: u64) -> windows_core::Result<()> {
     if core.context_flyouts.contains_key(&widget) {
@@ -9751,9 +9908,12 @@ fn picked_from_storage_items(
 /// rasterization scale. The OLE route hit-tests with it and the `drag`
 /// verb aims real input at it.
 fn widget_screen_rect(core: &CoreState, id: u64) -> Option<(f64, f64, f64, f64)> {
+    element_screen_rect(core, &core.widgets.get(&WidgetId(id))?.element().ok()?)
+}
+
+fn element_screen_rect(core: &CoreState, element: &UIElement) -> Option<(f64, f64, f64, f64)> {
     use bindings::Microsoft::UI::Xaml::{FrameworkElement, UIElement};
     use windows_core::Interface;
-    let element = core.widgets.get(&WidgetId(id))?.element().ok()?;
     let frame: FrameworkElement = element.cast().ok()?;
     let origin = element
         .TransformToVisual(None::<&UIElement>)
@@ -13101,6 +13261,16 @@ fn swap_element(
     new: &UIElement,
 ) -> windows_core::Result<()> {
     carry_identity(old, new)?;
+    reseat_element(core, id, old, new)
+}
+
+/// Put `new` where `old` sits in whatever holds it, carrying nothing.
+fn reseat_element(
+    core: &mut CoreState,
+    id: WidgetId,
+    old: &UIElement,
+    new: &UIElement,
+) -> windows_core::Result<()> {
     if let Some(panel) = core.parents.get(&id).cloned() {
         let children = panel.Children()?;
         let mut at = 0u32;
@@ -15008,7 +15178,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     core.button_controls.remove(i);
                 }
             }
-            if let Ok(element) = widget.element() {
+            if let Ok(element) = widget.inner_element() {
                 core.checkboxes.retain(|c| c.cast::<UIElement>().ok().as_ref() != Some(&element));
                 core.labels.retain(|c| c.cast::<UIElement>().ok().as_ref() != Some(&element));
                 core.images.retain(|c| c.cast::<UIElement>().ok().as_ref() != Some(&element));
@@ -15033,6 +15203,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 }
                 core.child_order.detach(id);
             }
+            forget_swipe_host(id.0);
         }
         ApplyOp::SetWindowProp { window, prop, value } => {
             let target = winui_window(core, window.0)?;
@@ -15463,6 +15634,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     role: String::new(),
                     shortcut: String::new(),
                     symbol: 0,
+                    swipe: 0,
                     children: Vec::new(),
                     parent: None,
                 },
@@ -15544,8 +15716,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     core.roles_armed = true;
                     refresh_role_enablement(core);
                 }
-                // Desktop: the item stays in the row's context menu (docs/swipe-actions-plan.md R1).
-                MenuProp::Swipe => {}
+                MenuProp::Swipe => {
+                    model.swipe = match &value {
+                        Value::I64(v) => *v,
+                        other => unreachable!("kaya: swipe wants I64, the root passed {other:?}"),
+                    }
+                }
             }
             core.menus_touched = true;
         }
@@ -19956,6 +20132,107 @@ fn target_widget_id(core: &CoreState, target: crate::harness::Target) -> Option<
 /// (docs/measurements/win-drag-pace-2026-09-24.md).
 #[cfg(feature = "harness")]
 static DRAGS_STARTED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Swipe items run through their SwipeControl, for swipe_action's wait.
+#[cfg(feature = "harness")]
+static SWIPES_INVOKED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+#[cfg(feature = "harness")]
+fn swipe_invoked() {
+    SWIPES_INVOKED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+
+#[cfg(not(feature = "harness"))]
+fn swipe_invoked() {}
+
+/// One finger along `path` in screen pixels, down at the first point and up
+/// at the last, through InjectTouchInput: SwipeControl reads touch alone
+/// (docs/swipe-actions-plan.md §5), and injection needs no touch screen.
+#[cfg(feature = "harness")]
+fn inject_touch(path: &[(i32, i32)]) -> Result<(), String> {
+    use windows::Win32::Foundation::POINT;
+    use windows::Win32::UI::Input::Pointer::{
+        InitializeTouchInjection, InjectTouchInput, POINTER_FLAGS, POINTER_FLAG_DOWN,
+        POINTER_FLAG_INCONTACT, POINTER_FLAG_INRANGE, POINTER_FLAG_UP, POINTER_FLAG_UPDATE,
+        POINTER_TOUCH_INFO, TOUCH_FEEDBACK_NONE,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::PT_TOUCH;
+    const STEP_MS: u64 = 10;
+    static READY: std::sync::OnceLock<Result<(), String>> = std::sync::OnceLock::new();
+    READY
+        .get_or_init(|| {
+            // SAFETY: one contact, no visual feedback; a plain Win32 call.
+            unsafe { InitializeTouchInjection(1, TOUCH_FEEDBACK_NONE) }
+                .map_err(|e| format!("InitializeTouchInjection refused: {e}"))
+        })
+        .clone()?;
+    let touch = |(x, y): (i32, i32), flags: &[POINTER_FLAGS]| -> Result<(), String> {
+        let mut contact = POINTER_TOUCH_INFO::default();
+        contact.pointerInfo.pointerType = PT_TOUCH;
+        contact.pointerInfo.ptPixelLocation = POINT { x, y };
+        contact.pointerInfo.pointerFlags = POINTER_FLAGS(flags.iter().fold(0, |all, f| all | f.0));
+        // SAFETY: one initialized contact on the stack.
+        unsafe { InjectTouchInput(&[contact]) }
+            .map_err(|e| format!("InjectTouchInput at ({x},{y}) refused: {e}"))
+    };
+    let (Some(&first), Some(&last)) = (path.first(), path.last()) else {
+        return Ok(());
+    };
+    touch(first, &[POINTER_FLAG_DOWN, POINTER_FLAG_INRANGE, POINTER_FLAG_INCONTACT])?;
+    for &point in &path[1..] {
+        std::thread::sleep(std::time::Duration::from_millis(STEP_MS));
+        touch(point, &[POINTER_FLAG_UPDATE, POINTER_FLAG_INRANGE, POINTER_FLAG_INCONTACT])?;
+    }
+    std::thread::sleep(std::time::Duration::from_millis(STEP_MS));
+    touch(last, &[POINTER_FLAG_UP])
+}
+
+/// The desktop at a gesture's decisive moment, written beside the verb trace
+/// where the recorder pulls it as `gesture-moment`; the sentence goes to the
+/// trace. Never fails the gesture.
+#[cfg(feature = "harness")]
+fn capture_gesture_moment(what: &str) {
+    let Some(out) = crate::vtrace::sibling("gesture.bmp") else { return };
+    let said = match grab_desktop_bmp(&out) {
+        Ok(n) => format!("{n} bytes"),
+        Err(e) => format!("NOT WRITTEN: {e}"),
+    };
+    crate::vtrace::line(&format!("kaya: gesture moment, {what}: desktop {said}"));
+}
+
+/// A straight finger path from `from` to `to` in `steps` moves.
+#[cfg(feature = "harness")]
+fn touch_path(from: (f64, f64), to: (f64, f64), steps: u32) -> Vec<(i32, i32)> {
+    (0..=steps)
+        .map(|i| {
+            let at = f64::from(i) / f64::from(steps);
+            (
+                (from.0 + (to.0 - from.0) * at).round() as i32,
+                (from.1 + (to.1 - from.1) * at).round() as i32,
+            )
+        })
+        .collect()
+}
+
+/// The revealed button a SwipeControl drew for `label`: its items are
+/// AppBarButtons in the control's own template.
+#[cfg(feature = "harness")]
+fn find_swipe_button(element: &UIElement, label: &str) -> windows_core::Result<Option<AppBarButton>> {
+    use bindings::Microsoft::UI::Xaml::Media::VisualTreeHelper;
+    if let Ok(button) = element.cast::<AppBarButton>() {
+        if button.Label()?.to_string() == label {
+            return Ok(Some(button));
+        }
+    }
+    for i in 0..VisualTreeHelper::GetChildrenCount(element)? {
+        if let Ok(child) = VisualTreeHelper::GetChild(element, i)?.cast::<UIElement>() {
+            if let Some(found) = find_swipe_button(&child, label)? {
+                return Ok(Some(found));
+            }
+        }
+    }
+    Ok(None)
+}
 #[cfg(feature = "harness")]
 static HOVERS_ANSWERED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
@@ -20276,6 +20553,231 @@ impl crate::harness::Stage for WinUiStage {
                 Ok(())
             });
         }
+    }
+
+    fn swipe_actions(&self, t: crate::harness::Target) -> String {
+        Self::on_ui_read(move |core| {
+            let widget = widget_id_for_target(core, t);
+            let Some(roots) = core.context_roots.get(&widget) else {
+                return Ok(format!("<no context menu attached to {t:?}>"));
+            };
+            // The SwipeControl's own items, then the ones the lowering leaves
+            // in the menu: an item the control lost is missing from the answer.
+            let mut items: Vec<(i64, String)> = Vec::new();
+            if let Some(control) = swipe_host_control(widget) {
+                for (edge, plain, full) in [
+                    (control.LeftItems()?, crate::wire::SWIPE_LEADING, crate::wire::SWIPE_LEADING_FULL),
+                    (control.RightItems()?, crate::wire::SWIPE_TRAILING, crate::wire::SWIPE_TRAILING_FULL),
+                ] {
+                    let swipe = if edge.Mode()? == SwipeMode::Execute { full } else { plain };
+                    for i in 0..edge.Size()? {
+                        items.push((i64::from(swipe), edge.GetAt(i)?.Text()?.to_string()));
+                    }
+                }
+            }
+            for id in &swipe_lowering(core, roots).menu_only {
+                let m = &core.menu_models[id];
+                items.push((m.swipe, m.label.clone()));
+            }
+            Ok(crate::harness::swipe_spec(items))
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
+    }
+
+    fn swipe_action(&self, t: crate::harness::Target, label: &str) -> String {
+        // THE CONTROL'S OWN ROUTE (docs/swipe-actions-plan.md §5): a real
+        // finger across the row's width, then for Reveal a tap on the button
+        // it left open. An item the lowering keeps in the menu takes the menu.
+        #[derive(Clone, Copy, Debug)]
+        enum Route {
+            Menu,
+            Execute { leading: bool },
+            Reveal { leading: bool },
+        }
+        type Plan = Result<(Route, (f64, f64, f64, f64), u64), String>;
+        let wanted = label.to_owned();
+        let plan = Self::on_ui_read(move |core| -> windows_core::Result<Plan> {
+            let widget = widget_id_for_target(core, t);
+            let Some(roots) = core.context_roots.get(&widget) else {
+                return Ok(Err(format!("no context menu attached to {t:?}")));
+            };
+            let lowering = swipe_lowering(core, roots);
+            let named = |ids: &[u64]| ids.iter().any(|id| core.menu_models[id].label == wanted);
+            let on = |(mode, _): &(SwipeMode, Vec<u64>), leading: bool| {
+                if *mode == SwipeMode::Execute {
+                    Route::Execute { leading }
+                } else {
+                    Route::Reveal { leading }
+                }
+            };
+            let route = if named(&lowering.menu_only) {
+                Route::Menu
+            } else if named(&lowering.leading.1) {
+                on(&lowering.leading, true)
+            } else if named(&lowering.trailing.1) {
+                on(&lowering.trailing, false)
+            } else {
+                return Ok(Err(format!("{wanted:?} is not among {t:?}'s swipe items")));
+            };
+            if let Ok(content) = core.window.Content() {
+                let _ = content.UpdateLayout();
+            }
+            match widget_screen_rect(core, widget) {
+                Some(rect) if rect.2 > 0.0 && rect.3 > 0.0 => Ok(Ok((route, rect, widget))),
+                other => Ok(Err(format!("{t:?} has no laid-out box ({other:?})"))),
+            }
+        });
+        let (route, rect, widget) = match plan {
+            Ok(Ok(plan)) => plan,
+            Ok(Err(sentence)) => return sentence,
+            Err(e) => return format!("<unreadable: {e}>"),
+        };
+        if let Route::Menu = route {
+            self.context_open(t);
+            self.menu_activate(label);
+            return String::new();
+        }
+        Self::foreground_guest("swipe_action");
+        use std::sync::atomic::Ordering::Relaxed;
+        const INSET: f64 = 12.0;
+        const STEPS: u32 = 20;
+        const INVOKED_BOUND_MS: u64 = 2000;
+        let rtl = crate::fmt::direction() == crate::fmt::Direction::Rtl;
+        let (left, top, width, height) = rect;
+        let y = top + height / 2.0;
+        let invoked = SWIPES_INVOKED.load(Relaxed);
+        let leading = match route {
+            Route::Execute { leading } | Route::Reveal { leading } => leading,
+            Route::Menu => unreachable!(),
+        };
+        let reach = width - 2.0 * INSET;
+        let from_left = leading != rtl;
+        let (start, end) = if from_left {
+            (left + INSET, left + INSET + reach)
+        } else {
+            (left + width - INSET, left + width - INSET - reach)
+        };
+        let path = touch_path((start, y), (end, y), STEPS);
+        eprintln!("kaya: winui swipe_action {t:?} {route:?} from {:?} to {:?}", path[0], path[path.len() - 1]);
+        if let Err(sentence) = inject_touch(&path) {
+            return sentence;
+        }
+        let mut tap_hits: Option<String> = None;
+        if let Route::Reveal { .. } = route {
+            // OPEN AND AT REST: the button is in the template before the
+            // swipe settles, so it is tapped once two reads 25ms apart agree
+            // and it lies inside the row.
+            let wanted = label.to_owned();
+            let inside = |r: &(f64, f64, f64, f64)| {
+                r.2 > 0.0 && r.3 > 0.0 && r.0 >= left - 1.0 && r.0 + r.2 <= left + width + 1.0
+            };
+            let (mut last, mut settled) = (None, None);
+            for _ in 0..80 {
+                let wanted = wanted.clone();
+                let read = Self::on_ui_read(move |core| {
+                    let Some(control) = swipe_host_control(widget) else { return Ok(None) };
+                    let Some(found) = find_swipe_button(&control.cast()?, &wanted)? else {
+                        return Ok(None);
+                    };
+                    Ok(element_screen_rect(core, &found.cast()?))
+                })
+                .ok()
+                .flatten();
+                if read.is_some() && read == last && read.as_ref().is_some_and(inside) {
+                    settled = read;
+                    break;
+                }
+                last = read;
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+            let Some((bx, by, bw, bh)) = settled else {
+                return format!(
+                    "the touch swipe {:?} -> {:?} across {t:?} left no button labelled {label:?} \
+                     at rest inside the row's {rect:?} within 2s (last read {last:?})",
+                    path[0],
+                    path[path.len() - 1]
+                );
+            };
+            // A SLEEP, because SwipeControl publishes no idle state: a touch
+            // tap 600ms after the swipe never reached the revealed button (its
+            // IsPressed stayed false), one at 2000ms ran the item (docs/traps.md,
+            // the SwipeControl tap entry).
+            const OPENING_MS: u64 = 2000;
+            std::thread::sleep(std::time::Duration::from_millis(OPENING_MS));
+            // WHAT XAML HIT-TESTS UNDER THE BUTTON'S CENTRE, topmost first:
+            // SwipeItem runs only from the button's own Tapped.
+            let wanted = label.to_owned();
+            let hits = Self::on_ui_read(move |core| {
+                use bindings::Microsoft::UI::Xaml::Media::VisualTreeHelper;
+                let Some(control) = swipe_host_control(widget) else {
+                    return Ok("the SwipeControl is gone".to_owned());
+                };
+                let Some(button) = find_swipe_button(&control.cast()?, &wanted)? else {
+                    return Ok("the button is gone".to_owned());
+                };
+                let frame: FrameworkElement = button.cast()?;
+                let root = core.window.Content()?;
+                let centre = button
+                    .cast::<UIElement>()?
+                    .TransformToVisual(&root)?
+                    .TransformPoint(Point {
+                        X: (frame.ActualWidth()? / 2.0) as f32,
+                        Y: (frame.ActualHeight()? / 2.0) as f32,
+                    })?;
+                let mut names = Vec::new();
+                for hit in VisualTreeHelper::FindElementsInHostCoordinatesPoint(centre, &root)? {
+                    let class = hit
+                        .cast::<windows_core::IInspectable>()
+                        .and_then(|i| i.GetRuntimeClassName())
+                        .map(|n| n.to_string())
+                        .unwrap_or_default();
+                    let name = hit.cast::<FrameworkElement>().and_then(|f| f.Name()).map(|n| n.to_string()).unwrap_or_default();
+                    names.push(if name.is_empty() { class } else { format!("{class} {name:?}") });
+                }
+                Ok(format!("at ({}, {}): [{}]", centre.X, centre.Y, names.join(", ")))
+            })
+            .unwrap_or_else(|e| format!("<unreadable: {e}>"));
+            capture_gesture_moment(&format!(
+                "swipe_action {label:?}: tapping ({bx}, {by}, {bw}, {bh}); hit test {hits}"
+            ));
+            tap_hits = Some(hits);
+            let centre = ((bx + bw / 2.0).round() as i32, (by + bh / 2.0).round() as i32);
+            // THE BUTTON'S OWN PRESSED STATE, read halfway through a held tap:
+            // it separates a touch XAML never delivered from a delivered press
+            // that raised no Tapped.
+            let wanted = label.to_owned();
+            let midway = std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(150));
+                Self::on_ui_read(move |_core| {
+                    let Some(control) = swipe_host_control(widget) else {
+                        return Ok("the SwipeControl is gone".to_owned());
+                    };
+                    let Some(button) = find_swipe_button(&control.cast()?, &wanted)? else {
+                        return Ok("the button is gone".to_owned());
+                    };
+                    Ok(format!("pressed {}, pointer over {}", button.IsPressed()?, button.IsPointerOver()?))
+                })
+                .unwrap_or_else(|e| format!("<unreadable: {e}>"))
+            });
+            if let Err(sentence) = inject_touch(&[centre; 30]) {
+                return sentence;
+            }
+            let during = midway.join().unwrap_or_else(|_| "<the reader panicked>".to_owned());
+            if let Some(hits) = tap_hits.as_mut() {
+                hits.push_str(&format!("; midway through the tap the button read {during}"));
+            }
+
+        }
+        let (got, waited) = await_answers(&SWIPES_INVOKED, invoked, 1, INVOKED_BOUND_MS);
+        if got == 0 {
+            return format!(
+                "the touch swipe {:?} -> {:?} across {t:?} ({route:?}) invoked no swipe item in {waited}ms{}",
+                path[0],
+                path[path.len() - 1],
+                tap_hits.as_deref().map(|h| format!("; the tap's hit test {h}")).unwrap_or_default()
+            );
+        }
+        String::new()
     }
 
     fn context_open(&self, t: crate::harness::Target) {

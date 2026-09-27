@@ -354,11 +354,20 @@ func App() *kaya.App {
 			}
 		})
 
-		// C7 (docs/swipe-actions-plan.md): a conversation archives from its
-		// row's context menu everywhere, and a full trailing swipe runs the
-		// same item where the platform swipes rows.
-		archive := tx.ContextCatalog()
-		archive.Item("Archive").Swipe(kaya.SwipeTrailingFull).
+		// C7 (docs/swipe-actions-plan.md): a conversation's actions are in its
+		// row's context menu everywhere, and swipe the row where the platform
+		// swipes rows.
+		rowActions := tx.ContextCatalog()
+		rowActions.Item("Mark unread").Swipe(kaya.SwipeLeading).
+			OnActivateNode(func(tx *kaya.Tx, keys []any) {
+				c := convs[keys[0].(string)]
+				if c.unread == 0 {
+					c.unread, c.firstUnread = 1, c.messages[len(c.messages)-1].key
+					tx.SetBadge(unreadTotal())
+					refresh(tx, c)
+				}
+			})
+		rowActions.Item("Archive").Swipe(kaya.SwipeTrailingFull).
 			OnActivateNode(func(tx *kaya.Tx, keys []any) {
 				id := keys[0].(string)
 				if id == open {
@@ -385,7 +394,7 @@ func App() *kaya.App {
 					row.SetA11yID(unread, "unread")
 				})
 				row.SetA11yID(convo, "convo")
-				row.ContextMenu(convo, archive)
+				row.ContextMenu(convo, rowActions)
 			}
 		}))
 		for _, id := range order {

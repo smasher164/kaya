@@ -347,7 +347,7 @@ def census_toast_files(src):
     capture from a PREVIOUS run of the same leg as this one's."""
     found = []
     pulled = sorted(set(re.findall(
-        r'C:/kaya/flightrec/\{leg\}-(toast[\w.-]*)"', src[LANE_PY])))
+        r'C:/kaya/flightrec/\{leg\}-((?:toast|gesture)[\w.-]*)"', src[LANE_PY])))
     if not pulled:
         return [f"{LANE_PY}: the windows recorder pulls no toast-moment file "
                 f"at all — the section's records are named nowhere this "

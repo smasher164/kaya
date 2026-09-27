@@ -412,6 +412,10 @@ pub enum Step {
     /// own swipe where the backend lowers one, the context menu where it
     /// does not (R1, R2).
     SwipeAction(Target, String),
+    /// `expect_swipe_actions <row> "<edge>:<label>/..."`: the row's swipe
+    /// items read from what the backend lowered each to, `none` for a row
+    /// with none (docs/swipe-actions-plan.md §4; `swipe_spec`'s order).
+    ExpectSwipeActions(Target, String),
     /// Choose this emoji in the picker the app's emoji command opened, the
     /// way the picker's own grid would (docs/emoji-picker-plan.md §5).
     PickEmoji(String),
@@ -703,6 +707,7 @@ impl Step {
             | Step::Expect(t, _)
             | Step::ExpectImageSize(t, _)
             | Step::SwipeAction(t, _)
+            | Step::ExpectSwipeActions(t, _)
             | Step::ExpectOrder(t, _)
             | Step::ExpectColumns(t, _)
             | Step::ExpectRows(t, _)
@@ -891,6 +896,7 @@ impl Step {
             Step::FileDialogGoto(..) => false,
             Step::CopyAsset(..) => false,
             Step::SwipeAction(..) => false,
+            Step::ExpectSwipeActions(..) => true,
             Step::ExpectImageSize(..) => true,
             Step::ExpectSaveDialog(..) => true,
             Step::FileDialogName(..) => false,
@@ -1443,10 +1449,19 @@ pub trait Stage: Send + 'static {
     /// Run the row's context item `label` through its swipe. The default is
     /// the context menu, the route where a backend lowers no swipe
     /// (docs/swipe-actions-plan.md R1).
-    fn swipe_action(&self, target: Target, label: &str) {
+    fn swipe_action(&self, target: Target, label: &str) -> String {
+        let declared = self.swipe_actions(target);
+        if !declared.split('/').any(|entry| entry.split_once(':').is_some_and(|(_, l)| l == label)) {
+            return format!("{label:?} is not among {target:?}'s swipe items ({declared})");
+        }
         self.context_open(target);
         self.menu_activate(label);
+        String::new()
     }
+    /// The row's swipe items as `swipe_spec` spells them, each read from
+    /// what this backend lowered it to: a swipe surface where there is one,
+    /// the context menu's own model where the item stays in the menu.
+    fn swipe_actions(&self, target: Target) -> String;
     /// The top-level catalog count, read from the REAL materialized bar (or
     /// the phone overflow's group list) — never the scene model's copy.
     fn menu_count(&self) -> usize;
@@ -2434,6 +2449,12 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 Step::MenuActivate(path)
             }
             "context_open" => Step::ContextOpen(parse_target(rest.trim())?),
+            "expect_swipe_actions" => {
+                let (target, spec) = rest.split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("expect_swipe_actions wants a row and a quoted spec: {line:?}")
+                })?;
+                Step::ExpectSwipeActions(parse_target(target)?, parse_string(spec)?)
+            }
             "swipe_action" => {
                 let (target, label) = rest.split_once(char::is_whitespace).ok_or_else(|| {
                     format!("swipe_action wants a row and a quoted item label: {line:?}")
@@ -5019,10 +5040,22 @@ fn run_with_log(
                 // the observable.
                 await_quiet();
                 let answered = crate::scene::answers();
-                stage.swipe_action(*t, label);
-                await_answer(answered);
-                None
+                let why = stage.swipe_action(*t, label);
+                if why.is_empty() {
+                    await_answer(answered);
+                    None
+                } else {
+                    Some(Err(format!("swipe_action: {why}")))
+                }
             }
+            Step::ExpectSwipeActions(t, want) => Some(poll(|| {
+                let got = stage.swipe_actions(*t);
+                if got == *want {
+                    Ok(format!("swipes {got}"))
+                } else {
+                    Err(format!("{} swipes {got}, wanted {want}", target_spec(t)))
+                }
+            })),
             Step::ContextOpen(t) => {
                 // v1 rejects context menus on editable text (their native
                 // menus are dress — scene.rs refuses the attach), so
@@ -5357,6 +5390,29 @@ fn run_with_log(
 /// strings that echo their target. One implementation so the pass
 /// observations stay byte-identical; the interpreters emit the same
 /// spelling from their own runners.
+/// A row's swipe items spelled for `expect_swipe_actions`: `<edge>:<label>`
+/// joined by `/`, ordered by edge name (leading, leading_full, trailing,
+/// trailing_full) and by catalog preorder within one edge; `none` for none.
+/// Every harness spells it this way (the interpreters carry their own copy).
+pub(crate) fn swipe_spec(mut items: Vec<(i64, String)>) -> String {
+    let edge = |swipe: i64| match u32::try_from(swipe) {
+        Ok(crate::wire::SWIPE_LEADING) => "leading",
+        Ok(crate::wire::SWIPE_LEADING_FULL) => "leading_full",
+        Ok(crate::wire::SWIPE_TRAILING) => "trailing",
+        Ok(crate::wire::SWIPE_TRAILING_FULL) => "trailing_full",
+        _ => "unknown",
+    };
+    if items.is_empty() {
+        return "none".to_owned();
+    }
+    items.sort_by_key(|(swipe, _)| edge(*swipe));
+    items
+        .iter()
+        .map(|(swipe, label)| format!("{}:{label}", edge(*swipe)))
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
 fn target_spec(t: &Target) -> String {
     let kind = match t.kind {
         TargetKind::Button => "button",
@@ -6687,6 +6743,9 @@ mod tests {
         fn menu_activate(&self, path: &str) {
             self.seen.lock().unwrap().push(format!("menu_activate {path}"));
         }
+        fn swipe_actions(&self, _: Target) -> String {
+            String::new()
+        }
         fn context_open(&self, t: Target) {
             self.seen.lock().unwrap().push(format!("context_open {t:?}"));
         }
@@ -7589,6 +7648,9 @@ mod tests {
         fn select_section(&self, _: usize) {}
         fn menu_activate(&self, _: &str) {}
         fn context_open(&self, _: Target) {}
+        fn swipe_actions(&self, _: Target) -> String {
+            String::new()
+        }
         fn menu_count(&self) -> usize {
             0
         }
@@ -7923,6 +7985,9 @@ mod tests {
         fn select_section(&self, _: usize) {}
         fn menu_activate(&self, _: &str) {}
         fn context_open(&self, _: Target) {}
+        fn swipe_actions(&self, _: Target) -> String {
+            String::new()
+        }
         fn menu_count(&self) -> usize {
             0
         }
@@ -8794,6 +8859,25 @@ mod tests {
     /// there are dress (scene.rs refuses the attach). Parse accepts the
     /// target — the grammar is kind-agnostic — and the run arm holds the
     /// line.
+    /// The spelling all three harnesses share: edges by name, catalog order
+    /// kept within one edge, `none` for a row with none.
+    #[test]
+    fn swipe_spec_orders_by_edge_and_keeps_catalog_order() {
+        use crate::wire::{SWIPE_LEADING, SWIPE_LEADING_FULL, SWIPE_TRAILING, SWIPE_TRAILING_FULL};
+        let item = |swipe: u32, label: &str| (i64::from(swipe), label.to_owned());
+        assert_eq!(super::swipe_spec(Vec::new()), "none");
+        assert_eq!(
+            super::swipe_spec(vec![
+                item(SWIPE_TRAILING_FULL, "Archive"),
+                item(SWIPE_TRAILING, "Mute"),
+                item(SWIPE_LEADING, "Pin"),
+                item(SWIPE_TRAILING, "Flag"),
+                item(SWIPE_LEADING_FULL, "Read"),
+            ]),
+            "leading:Pin/leading_full:Read/trailing:Mute/trailing:Flag/trailing_full:Archive"
+        );
+    }
+
     #[test]
     fn context_open_rejects_editable_text() {
         for bad in ["context_open entry#0", "context_open textarea#0"] {

@@ -1,6 +1,7 @@
 # Swiping a row for its actions — the design pass
 
-Status: BUILT 2026-09-26 (R1-R3 RULED 2026-09-25 as recommended). The chat app's C7
+Status: BUILT 2026-09-26 (R1-R3 RULED 2026-09-25 as recommended; R1 amended
+2026-09-27: Windows draws its SwipeControl too). The chat app's C7
 (docs/chat-plan.md): swipe a conversation to archive it on the phones.
 Researched 2026-09-25 with sources.
 
@@ -28,7 +29,9 @@ item that is not in the catalog is refused.
 - **R1 — where there is no swipe (Linux, and Windows with a mouse).**
   RULED: the declaration is accepted and the actions stay in the
   context menu, which is already where they are. Honest on both, since
-  GNOME and Microsoft both treat the menu as the route.
+  GNOME and Microsoft both treat the menu as the route. AMENDED
+  2026-09-27 (the maintainer): Windows also wraps the row in its
+  `SwipeControl`, so a touch screen swipes it; a mouse still takes the menu.
 - **R2 — Apple below 27.** kaya's collections are not `List`s. The
   choices: (a) RULED: move the pinned SDK to 27 when it ships and
   lower to `swipeActionsContainer()` there, menu-only below 27; (b) lower
@@ -60,12 +63,25 @@ verb reads what each backend lowered (edge, labels, the full item).
   `SwipeToDismissBox`; the item runs through the context menu's own
   activation and the row settles back, the app deciding its fate. Its other
   swipe items stay in the menu (R3).
-- Apple, GTK and WinUI keep every swipe item in the context menu (R1, R2).
-  Windows' touch `SwipeControl` is not built: R1 names the menu for Windows
-  with a mouse, which every lane and the VM are, and touch is not driven.
-- `swipe_action <row> "<item>"` runs the item through its swipe: a real
-  touch swipe across the row on Android, the context menu elsewhere. The
-  interpreters refuse an item with no swipe declared; the Rust harness's
-  menu route (GTK, WinUI) does not read the declaration. `expect_swipe_actions`
-  is not built: every lane but Android lowers to the menu, and a verdict
-  byte-compared across lanes cannot say which.
+- Windows wraps a context anchor that declares a swipe in a `SwipeControl`
+  (winui/mod.rs, `sync_swipe_hosts`), before the drain's track re-stamp so the
+  parent lays out the control. Per edge: a full item alone in an Execute
+  collection, the others on that edge staying in the menu (Execute takes one
+  item); an edge with no full item reveals all of its items. Each SwipeItem
+  runs the context item through the menu's own activation. The items carry no
+  icon yet: SwipeItem takes an IconSource, and the symbol vocabulary is lowered
+  to IconElements only.
+- Apple and GTK keep every swipe item in the context menu (R1, R2).
+- `swipe_action <row> "<item>"` runs the item through its swipe: a real touch
+  swipe across the row on Android, and on Windows an injected finger
+  (`InjectTouchInput`, which needs no touch screen) across the whole row for
+  an Execute item or half of it for a Reveal item, then a tap on the button it
+  revealed. The context menu elsewhere, and for an item the lowering keeps in
+  the menu. Every harness refuses an item with no swipe declared.
+- `expect_swipe_actions <row> "<edge>:<label>/..."` reads each item where the
+  backend lowered it: the SwipeControl's own collections on Windows, the laid-out
+  SwipeToDismissBox on Android, the menu model for the items that stay in the
+  menu. The spelling is one on every lane (harness.rs's `swipe_spec`: edges by
+  name, catalog order within an edge, `none`), so the verdict says which items
+  swipe and from which edge, never how a platform draws them; an item a
+  lowering lost is missing from the answer.

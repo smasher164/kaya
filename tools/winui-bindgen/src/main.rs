@@ -502,6 +502,17 @@ fn main() {
         "Microsoft.UI.Xaml.Controls.AppBar".to_string(),
         "Microsoft.UI.Xaml.Controls.ICommandBarElement".to_string(),
         "Microsoft.UI.Xaml.Controls.AppBarButton".to_string(),
+        // ROW SWIPES (docs/swipe-actions-plan.md §5, the Windows row): the
+        // row wrapped in a SwipeControl, one SwipeItems per edge (Execute for
+        // the full item, Reveal otherwise), each SwipeItem's Invoked running
+        // the context item. The revealed buttons are AppBarButtons (above),
+        // which is how the harness finds the one to tap.
+        "Microsoft.UI.Xaml.Controls.SwipeControl".to_string(),
+        "Microsoft.UI.Xaml.Controls.SwipeItems".to_string(),
+        "Microsoft.UI.Xaml.Controls.SwipeItem".to_string(),
+        "Microsoft.UI.Xaml.Controls.SwipeMode".to_string(),
+        "Microsoft.UI.Xaml.Controls.SwipeBehaviorOnInvoked".to_string(),
+        "Microsoft.UI.Xaml.Controls.SwipeItemInvokedEventArgs".to_string(),
         // THE TITLEBAR THE TOOLBAR MERGES INTO (docs/chrome-plan.md C2's
         // WinUI row): the commands ride IN the caption row. ONE ENTRY IS
         // ENOUGH, measured: every slot this arm uses is typed in
