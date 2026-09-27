@@ -770,6 +770,14 @@ fun kayaFilledSurface(node: KayaNode): Modifier {
  * variant colour, which on an accent fill is dark on dark. */
 val LocalKayaOnFill = compositionLocalOf<Color?> { null }
 
+/** A symbol button in a row that holds a composer, beside it rather than in it. */
+fun kayaIsComposerNeighbour(node: KayaNode): Boolean {
+    if (node.symbol == 0L) return false
+    val parent = KayaSceneModel.parents[node.id]?.let { KayaSceneModel.nodes[it] } ?: return false
+    if (parent.role == KayaCompose.ROLE_COMPOSER) return false
+    return parent.children.any { it.kind == KayaCompose.KIND_ROW && it.role == KayaCompose.ROLE_COMPOSER }
+}
+
 /** Set for a composer's children: the composer draws the field's chrome, so
  * the field inside draws none (docs/composer-plan.md §4). */
 val LocalKayaInComposer = compositionLocalOf { false }
@@ -13917,17 +13925,31 @@ private fun KayaRenderCore(
             // the title as its accessible name; a prominent one is Material's
             // filled circle.
             if (glyph != null) {
+                // Beside a composer the button centres on the field's bottom
+                // line (docs/composer-plan.md §4): the composer's rest height is
+                // its field's one line (the body line and the field's 12dp
+                // above and below) plus the composer's inset.
+                val lift = if (kayaIsComposerNeighbour(node)) {
+                    val line = with(LocalDensity.current) {
+                        MaterialTheme.typography.bodyLarge.lineHeight.toDp()
+                    }
+                    val rest = line + 24.dp + (2 * KAYA_COMPOSER_INSET).dp
+                    ((rest - 48.dp) / 2).coerceAtLeast(0.dp)
+                } else {
+                    0.dp
+                }
+                val lifted = Modifier.padding(bottom = lift)
                 if (node.role == KayaCompose.ROLE_PROMINENT) {
                     FilledIconButton(
                         onClick = { KayaPresent.emitClicked(node.tag) },
-                        modifier = boxFill.then(a11y).then(buttonRect),
+                        modifier = lifted.then(boxFill).then(a11y).then(buttonRect),
                     ) {
                         Icon(glyph, contentDescription = node.text)
                     }
                 } else {
                     IconButton(
                         onClick = { KayaPresent.emitClicked(node.tag) },
-                        modifier = boxFill.then(a11y).then(buttonRect),
+                        modifier = lifted.then(boxFill).then(a11y).then(buttonRect),
                     ) {
                         Icon(glyph, contentDescription = node.text)
                     }

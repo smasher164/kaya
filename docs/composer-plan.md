@@ -71,7 +71,11 @@ the platform's own style:
 | GTK | the entry's own chrome and focus ring (the `entry` CSS name, as Fractal) | no frame | `.flat` icon buttons |
 | WinUI | a Border in the TextBox's own resources (background, border, corner) | borderless | subtle buttons |
 
-Every child sits on the bottom line as the field grows. The app decides
+Every child sits on the bottom line as the field grows. A symbol button
+BESIDE a composer, in the row that holds it, centres on the field's bottom
+line: it lifts by half the difference between the composer's height at rest
+and its own (the maintainer's review, 2026-09-26: the paperclip and the send
+sat 3-7 points low on four platforms; GTK's button already matched). The app decides
 what goes inside and what stays outside by nesting: an iPhone-style row is
 `row[ composer[ textarea, emoji ], send ]`, a Signal-style one
 `row[ composer[ emoji, textarea, camera ], send ]`. Compose's own

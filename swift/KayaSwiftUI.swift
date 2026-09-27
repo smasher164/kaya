@@ -14717,7 +14717,7 @@ struct KayaComposerSurface: ViewModifier {
             #endif
             let framed = content
                 .padding(.horizontal, 6)
-                .padding(.vertical, 3)
+                .padding(.vertical, kayaComposerPadY)
                 .environment(\.kayaInComposer, true)
             if #available(iOS 26, macOS 26, *) {
                 framed.glassEffect(.regular, in: shape)
@@ -14741,6 +14741,40 @@ func kayaImageFit(natural: CGSize, node: KayaNode) -> CGSize? {
     let scale = min(1, wide, tall)
     return CGSize(width: natural.width * scale, height: natural.height * scale)
 }
+
+/// The composer's vertical padding around its field (docs/composer-plan.md §4).
+let kayaComposerPadY: CGFloat = 3
+
+/// The composer's height with its field at one line: the field's own one-line
+/// height (its font's line and insets) plus the composer's padding.
+@MainActor func kayaComposerRestHeight() -> CGFloat {
+    #if os(macOS)
+        let font = kayaPlatformFont(.body) ?? NSFont.preferredFont(forTextStyle: .body)
+        let line = ceil(font.ascender - font.descender + font.leading)
+        return line + 2 * kayaGrowingInset(inComposer: true) + 2 * kayaComposerPadY
+    #else
+        // UITextView's own default inset, 8pt above and below, which the
+        // iOS textarea keeps.
+        let font = kayaPlatformFont(.body) ?? UIFont.preferredFont(forTextStyle: .body)
+        return ceil(font.lineHeight) + 16 + 2 * kayaComposerPadY
+    #endif
+}
+
+/// A symbol button BESIDE a composer, in the row that holds it: bottom-aligned
+/// with the field as it grows, it lifts by half the difference between the
+/// composer's rest height and its own, so it sits on the field's bottom line's
+/// centre (docs/composer-plan.md §4).
+@MainActor func kayaComposerNeighbourLift(_ button: KayaNode) -> CGFloat {
+    guard button.kind == kindButton, button.symbol != 0,
+        let parent = kayaScene.rows.first(where: { row in row.children.contains { $0.id == button.id } }),
+        parent.role != roleComposer,
+        parent.children.contains(where: { $0.kind == kindRow && $0.role == roleComposer })
+    else { return 0 }
+    return max(0, (kayaComposerRestHeight() - kayaSymbolButtonSide) / 2)
+}
+
+/// An icon-only button's side: the glyph's frame and the prominent circle.
+let kayaSymbolButtonSide: CGFloat = 30
 
 /// A composer's send (docs/composer-plan.md §5): a prominent symbol-only
 /// button inside a composer, or beside one in the same row, whose text field
@@ -14773,17 +14807,18 @@ struct KayaSymbolButton: View {
                 Image(systemName: sf)
                     .font(.body.weight(.semibold))
                     .foregroundStyle(Color.white)
-                    .frame(width: 30, height: 30)
+                    .frame(width: kayaSymbolButtonSide, height: kayaSymbolButtonSide)
                     .background(Circle().fill(Color.accentColor))
             } else {
                 Image(systemName: sf)
                     .font(.title3)
                     .foregroundStyle(.secondary)
-                    .frame(minWidth: 30, minHeight: 30)
+                    .frame(minWidth: kayaSymbolButtonSide, minHeight: kayaSymbolButtonSide)
             }
         }
         .buttonStyle(.plain)
         .accessibilityLabel(node.text)
+        .padding(.bottom, kayaComposerNeighbourLift(node))
     }
 }
 

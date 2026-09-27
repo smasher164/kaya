@@ -2228,6 +2228,14 @@ fn composer_style() -> windows_core::Result<Style> {
 
 const COMPOSER_INSET: f64 = 2.0;
 
+/// The composer with its field at one line: the TextBox's own minimum
+/// (TextControlThemeMinHeight), the composer's one-pixel border above and
+/// below, and its inset.
+const COMPOSER_REST_HEIGHT: f64 = 32.0 + 2.0 + 2.0 * COMPOSER_INSET;
+
+/// An icon-only button's side (symbol_button_style).
+const SYMBOL_BUTTON_SIDE: f64 = 32.0;
+
 const COMPOSER_FIELD_KEYS: [&str; 9] = [
     "TextControlBackground",
     "TextControlBackgroundPointerOver",
@@ -2945,6 +2953,16 @@ fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
                 field.SetMinHeight(if grows { 96.0 } else { 0.0 })?;
                 field.SetHeight(if grows { f64::NAN } else { 96.0 })?;
             }
+        }
+        // Beside a composer a symbol button centres on the field's bottom line
+        // (docs/composer-plan.md §4): the row is bottom-aligned, so the button
+        // lifts by half the difference between the composer at rest and itself.
+        if !vertical
+            && core.symbol_buttons.contains_key(child)
+            && order.iter().any(|sibling| core.composers.contains_key(sibling))
+        {
+            let lift = ((COMPOSER_REST_HEIGHT - SYMBOL_BUTTON_SIDE) / 2.0).max(0.0);
+            element.SetMargin(Thickness { Left: 0.0, Top: 0.0, Right: 0.0, Bottom: lift })?;
         }
         // Cross placement from the container's align mode. WinUI's own
         // default is Stretch; kaya's normalized default is start, stamped

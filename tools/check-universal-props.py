@@ -607,6 +607,7 @@ def composers(swiftui_text, compose_text, gtk_text, winui_text):
             "            #if os(macOS)\n                if kayaIsComposerSend(node) {\n"
             "                    Color.clear.frame(width: 0, height: 0)",
             "chromeless: inComposer,",
+            ".padding(.bottom, kayaComposerNeighbourLift(node))",
             "func kayaGrowingInset(inComposer: Bool) -> CGFloat { inComposer ? 7 : 5 }",
             "height: node.maxLines > 0 ? kayaGrowingInset(inComposer: chromeless) : 2)")),
         (COMPOSE, compose_text, (
@@ -615,12 +616,14 @@ def composers(swiftui_text, compose_text, gtk_text, winui_text):
             "LocalKayaInComposer provides true,",
             "colors = if (inComposer) {\n                    TextFieldDefaults.colors(\n"
             "                        focusedContainerColor = Color.Transparent,",
-            "FilledIconButton(")),
+            "FilledIconButton(",
+            "val lifted = Modifier.padding(bottom = lift)")),
         (GTK, gtk_text, (
             "container.add_css_class(COMPOSER_CLASS);",
             ".kaya-composer scrolledwindow, .kaya-composer textview")),
         (WINUI, winui_text, (
             "grid.SetStyle(&composer_style()?)?;",
+            "let lift = ((COMPOSER_REST_HEIGHT - SYMBOL_BUTTON_SIDE) / 2.0).max(0.0);",
             "const SYMBOL_BUTTON_GLYPH_PROMINENT: f64 = 14.0;",
             "let icon = button_icon(symbol, prominent)?",
             "resources.Insert(&PropertyValue::CreateString(&HSTRING::from(key))?, &clear)?;")),
@@ -742,7 +745,7 @@ def drag_waits(winui_text):
 real = load()
 g = Gate("check-universal-props")
 RAN = 0
-DECLARED = 82
+DECLARED = 85
 for path, pattern, repl in (
     (COMPOSE, r"\ba11y\b", "kayaUnappliedProps"),
     (SWIFTUI, r"\bkayaA11y\b", "kayaUnappliedProps"),
@@ -1028,6 +1031,13 @@ for label, path, pattern, repl in (
      r"layout\.set_baseline_child\(0\);", "layout.set_baseline_child(-1);"),
     ("WinUI's bottom-edge rule for a textless cell", WINUI,
      r"(fn baseline_compensate\([\s\S]*?)_ => None,", r"\1_ => Some(element.ActualHeight()?),"),
+    ("SwiftUI's button beside a composer sitting on the row's bottom again", SWIFTUI,
+     r"\.padding\(\.bottom, kayaComposerNeighbourLift\(node\)\)", ""),
+    ("Compose's icon button beside a composer sitting on the row's bottom again", COMPOSE,
+     r"val lifted = Modifier\.padding\(bottom = lift\)", "val lifted = Modifier"),
+    ("WinUI's button beside a composer sitting on the row's bottom again", WINUI,
+     r"let lift = \(\(COMPOSER_REST_HEIGHT - SYMBOL_BUTTON_SIDE\) / 2\.0\)\.max\(0\.0\);",
+     "let lift = 0.0;"),
     ("SwiftUI's mac drawing the composer's send", SWIFTUI,
      r"if kayaIsComposerSend\(node\) \{", "if false {"),
     ("Compose's field inside a composer keeping its container", COMPOSE,
