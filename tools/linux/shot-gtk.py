@@ -136,6 +136,9 @@ def main(argv=None):
                     "name (tasksrtl and tasksbig run the tasks example)")
     ap.add_argument("--env", action="append", default=[], metavar="KEY=VALUE",
                     help="a knob for the guest (KAYA_LOCALE=ar-EG, KAYA_TEXT_SCALE=2)")
+    ap.add_argument("--then", action="append", default=[], metavar="STEP",
+                    help="a step run at the hold point, for a state no scene step "
+                    "leaves showing (a context menu open: context_open row@convo[maya])")
     ap.add_argument("--go", action="store_true",
                     help="the scene is a Go app's (the chat app): build and run the Go guests")
     ap.add_argument("--in-container", action="store_true", help=argparse.SUPPRESS)
@@ -154,7 +157,7 @@ def main(argv=None):
              if line.strip() and not line.startswith("#")]
     if args.hold_after < 0 or args.hold_after > len(lines):
         ap.error(f"--hold-after {args.hold_after} is past the scene's {len(lines)} steps")
-    held = lines[:args.hold_after] + ["settle 20000"]
+    held = lines[:args.hold_after] + args.then + ["settle 20000"]
     if args.hold_after == 0:
         first = next((line for line in lines if line.startswith("expect")), None)
         if first:
