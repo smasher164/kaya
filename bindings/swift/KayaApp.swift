@@ -389,6 +389,16 @@ public enum KayaFileMode: UInt32 {
 /// What an open dialog offers (docs/photo-attach-plan.md §1): `.images` opens
 /// the photo library's own picker on the phones and filters to images on the
 /// desktops.
+/// A context action's swipe on its row: at most one item per edge takes the
+/// full swipe; where a platform has no row swipe the action stays in the
+/// context menu (docs/swipe-actions-plan.md R1-R3).
+public enum KayaSwipe: Int64 {
+    case leading = 1
+    case trailing = 2
+    case leadingFull = 3
+    case trailingFull = 4
+}
+
 public enum KayaFileContent: UInt32 {
     case any = 0
     case images = 1
@@ -5547,12 +5557,13 @@ public final class KayaAppTx {
         _ label: KayaMenuText, shortcut: String? = nil,
         enabled: KayaMenuBool? = nil, icon: Data? = nil,
         symbol: KayaSymbol? = nil, primary: Bool = false,
-        role: KayaMenuRole? = nil,
+        role: KayaMenuRole? = nil, swipe: KayaSwipe? = nil,
         onActivate: ((KayaAppTx) throws -> Void)? = nil
     ) -> KayaMenuItem {
         let m = newMenuItem(KAYA_MENU_KIND_ACTION, label)
         if let shortcut { tx.setMenuShortcut(m.id, shortcut) }
         if let role { tx.setMenuRole(m.id, role.rawValue) }
+        if let swipe { tx.setMenuSwipe(m.id, swipe.rawValue) }
         menuTail(m, enabled, icon, symbol)
         if primary { tx.setMenuPrimary(m.id, true) }
         if let onActivate { app.menuActivated[m.id] = onActivate }
@@ -5563,10 +5574,11 @@ public final class KayaAppTx {
     /// reports the copy's key path, outermost first.
     public func item(
         _ label: KayaMenuText, enabled: KayaMenuBool? = nil, icon: Data? = nil,
-        symbol: KayaSymbol? = nil,
+        symbol: KayaSymbol? = nil, swipe: KayaSwipe? = nil,
         onActivate: @escaping (KayaAppTx, [KayaValue]) throws -> Void
     ) -> KayaMenuItem {
         let m = newMenuItem(KAYA_MENU_KIND_ACTION, label)
+        if let swipe { tx.setMenuSwipe(m.id, swipe.rawValue) }
         menuTail(m, enabled, icon, symbol)
         app.menuActivatedNode[m.id] = onActivate
         return m

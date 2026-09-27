@@ -1355,6 +1355,10 @@ pub enum MenuProp {
     /// it sits BESIDE `Icon` rather than replacing it — a blob is still
     /// the right primitive for app-specific art.
     Symbol,
+    /// The edge of its row this context item is a swipe action on, and
+    /// whether a full swipe runs it (I64, spec enum `swipe`;
+    /// docs/swipe-actions-plan.md §1). Actions in a context catalog only.
+    Swipe,
 }
 
 /// Which materialized attachment a backend's menu native belongs to:

@@ -6658,6 +6658,28 @@ impl menu_sealed::Sealed for AnyAnchor {}
 impl MenuAnchor for AnyAnchor {}
 impl CatalogHome for AnyAnchor {}
 
+/// Which edge of its row a context item's swipe comes from, and whether a
+/// full swipe runs it (docs/swipe-actions-plan.md §1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Swipe {
+    Leading = 1,
+    Trailing = 2,
+    LeadingFull = 3,
+    TrailingFull = 4,
+}
+
+impl ActionRef<'_, '_, ContextAnchor> {
+    /// Make this context action a swipe on its row: at most one item per edge
+    /// takes the full swipe. Where a platform has no row swipe the action
+    /// stays in the context menu, which it always is
+    /// (docs/swipe-actions-plan.md R1-R3). Context actions only, held by the
+    /// type. Const-only.
+    pub fn swipe(self, swipe: Swipe) -> Self {
+        self.tx.set_menu_prop(self.item, MenuProp::Swipe, swipe as i64);
+        self
+    }
+}
+
 /// Where a builder seats the items it creates: under a grouping parent,
 /// attached to a live widget's context anchor, or collected free for a
 /// later template-node attach.

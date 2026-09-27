@@ -122,6 +122,9 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.foundation.clickable
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.NavigationBar
@@ -1418,6 +1421,9 @@ class KayaMenuItem(val id: Long, val kind: Int) {
      * this backend and macOS show the same thing for one declaration.
      */
     var symbol by mutableStateOf(0L)
+    /// The row swipe this context action is, 0 = none
+    /// (docs/swipe-actions-plan.md §1); the FULL ones swipe here (R3).
+    var swipe by mutableStateOf(0L)
     // Single-parent (the root validates); set at append. Bar-level
     // items keep null.
     var parent: KayaMenuItem? = null
@@ -1969,7 +1975,7 @@ object KayaCompose {
     // but only the runtime assert catches a stale compiled APK against
     // a new libkaya. ULong because the fingerprint's high bit is fair
     // game and a Kotlin Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0xb0dbd639210c2e5auL
+    private const val SPEC_HASH: ULong = 0xda99b50dff6ae96auL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -2134,6 +2140,9 @@ object KayaCompose {
     private const val MPROP_SHORTCUT = 7
     private const val MPROP_ROLE = 8
     private const val MPROP_SYMBOL = 9
+    private const val MPROP_SWIPE = 10
+    const val SWIPE_LEADING_FULL = 3L
+    const val SWIPE_TRAILING_FULL = 4L
     /**
      * How many promoted primary actions the top bar carries: k is this
      * PLATFORM's idiom, never computed by kaya (DESIGN.md, Menus). M3
@@ -3673,6 +3682,7 @@ object KayaCompose {
                         // the composed row by expect_menu_symbol
                         // (docs/styling-plan.md D6).
                         MPROP_SYMBOL -> item.symbol = readI64(b)
+                        MPROP_SWIPE -> item.swipe = readI64(b)
                         else -> error("kaya: unknown menu prop $prop")
                     }
                 }
@@ -10757,6 +10767,66 @@ object KayaCompose {
                             else kayaAwaitAnswer(answered)
                         }
                     }
+                    "swipe_action" -> {
+                        // The row's context item run through its swipe
+                        // (docs/swipe-actions-plan.md §4): a REAL touch
+                        // swipe across the row for a full-swipe item, which
+                        // Material's SwipeToDismissBox reads through Compose's
+                        // own pointer input; the context menu for a swipe item
+                        // this library cannot reveal (R3).
+                        val spec = parts.getOrNull(1) ?: ""
+                        val head = quotedHead(line.substring(parts[0].length + 1 + spec.length))
+                        if (head == null || head.second.isNotEmpty()) {
+                            failures.add("swipe_action wants a row and a quoted item label: $line")
+                        } else {
+                            kayaAwaitQuiet()
+                            val answered = kayaBatches
+                            val plan = onUi(activity) {
+                                val node = kayaWidgetTarget(spec)
+                                    ?: return@onUi Triple<String?, KayaMenuItem?, Any?>("no such target $spec", null, null)
+                                val attachment = KayaSceneModel.contextMenus[node.id]
+                                    ?: return@onUi Triple("no context menu attached to $spec", null, null)
+                                val all = ArrayList<KayaMenuItem>()
+                                fun walk(item: KayaMenuItem) {
+                                    all.add(item)
+                                    item.children.forEach { walk(it) }
+                                }
+                                attachment.roots.forEach { walk(it) }
+                                val item = all.firstOrNull { it.label == head.first }
+                                    ?: return@onUi Triple("no such context item ${head.first} on $spec", null, null)
+                                if (item.swipe == 0L) {
+                                    return@onUi Triple(
+                                        "${head.first} on $spec is a context item with no swipe declared",
+                                        null, null)
+                                }
+                                if (item.swipe != KayaCompose.SWIPE_LEADING_FULL &&
+                                    item.swipe != KayaCompose.SWIPE_TRAILING_FULL
+                                ) {
+                                    KayaSceneModel.openContextWidget = null
+                                    kayaActivateMenuItem(item, attachment.noun)
+                                    return@onUi Triple(null, null, null)
+                                }
+                                Triple(null, item, kayaSwipeBounds[node.id])
+                            }
+                            val rect = plan.third as? androidx.compose.ui.geometry.Rect
+                            when {
+                                plan.first != null -> failures.add(plan.first!!)
+                                plan.second == null -> kayaAwaitAnswer(answered)
+                                rect == null -> failures.add("$spec has no swipe row laid out")
+                                else -> {
+                                    val leading = plan.second!!.swipe == KayaCompose.SWIPE_LEADING_FULL
+                                    val rtl = activity.resources.configuration.layoutDirection ==
+                                        android.view.View.LAYOUT_DIRECTION_RTL
+                                    val fromLeft = leading != rtl
+                                    val y = rect.center.y
+                                    val start = if (fromLeft) rect.left + 8f else rect.right - 8f
+                                    val end = if (fromLeft) rect.right - 8f else rect.left + 8f
+                                    kayaTouchSwipe(activity, start, end, y)
+                                    kayaAwaitAnswer(answered)
+                                }
+                            }
+                        }
+                    }
                     "context_open" -> {
                         // Open the attached context menu through the
                         // model state the long-press gesture drives —
@@ -13213,6 +13283,97 @@ private fun KayaRenderAnchored(
         KayaRenderCore(node, isRoot, flexVertical, flexStretch, a11yFallback)
         return
     }
+    KayaSwipeRow(node, attachment) {
+        KayaRenderContextAnchor(node, attachment, isRoot, flexVertical, flexStretch, a11yFallback)
+    }
+}
+
+/** The context items a full swipe on a row runs: leading and trailing. */
+private fun kayaFullSwipes(attachment: KayaContextAttachment): Pair<KayaMenuItem?, KayaMenuItem?> {
+    val all = ArrayList<KayaMenuItem>()
+    fun walk(item: KayaMenuItem) {
+        all.add(item)
+        item.children.forEach { walk(it) }
+    }
+    attachment.roots.forEach { walk(it) }
+    return Pair(
+        all.firstOrNull { it.swipe == KayaCompose.SWIPE_LEADING_FULL },
+        all.firstOrNull { it.swipe == KayaCompose.SWIPE_TRAILING_FULL },
+    )
+}
+
+/**
+ * A ROW'S FULL SWIPE (docs/swipe-actions-plan.md R3): Material's own
+ * SwipeToDismissBox runs the item a full swipe names, through the one
+ * activation route the context menu takes, and the row settles back — the
+ * app decides what becomes of it. Its other swipe items stay in the context
+ * menu, since the phone library reveals nothing. The row's bounds are kept
+ * for the harness's swipe_action, which drives a real gesture.
+ */
+@Composable
+private fun KayaSwipeRow(
+    node: KayaNode,
+    attachment: KayaContextAttachment,
+    content: @Composable () -> Unit,
+) {
+    val (leading, trailing) = kayaFullSwipes(attachment)
+    if (leading == null && trailing == null) {
+        content()
+        return
+    }
+    val state = rememberSwipeToDismissBoxState(
+        confirmValueChange = { value ->
+            when (value) {
+                SwipeToDismissBoxValue.StartToEnd -> leading
+                SwipeToDismissBoxValue.EndToStart -> trailing
+                SwipeToDismissBoxValue.Settled -> null
+            }?.let { kayaActivateMenuItem(it, attachment.noun) }
+            false
+        },
+    )
+    SwipeToDismissBox(
+        state = state,
+        modifier = Modifier.onGloballyPositioned { kayaSwipeBounds[node.id] = it.boundsInWindow() },
+        enableDismissFromStartToEnd = leading != null,
+        enableDismissFromEndToStart = trailing != null,
+        backgroundContent = {
+            val item = if (state.dismissDirection == SwipeToDismissBoxValue.StartToEnd) leading else trailing
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.secondaryContainer)
+                    .padding(horizontal = 20.dp),
+                horizontalArrangement =
+                    if (state.dismissDirection == SwipeToDismissBoxValue.StartToEnd) Arrangement.Start
+                    else Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (item != null) {
+                    KayaCompose.symbolIcon(item.symbol)?.let {
+                        Icon(it, contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSecondaryContainer)
+                    }
+                    Text(" ${item.label}", color = MaterialTheme.colorScheme.onSecondaryContainer)
+                }
+            }
+        },
+    ) {
+        Box(Modifier.background(MaterialTheme.colorScheme.surface)) { content() }
+    }
+}
+
+/** Each full-swipe row's bounds in the window, for swipe_action's gesture. */
+internal val kayaSwipeBounds = HashMap<Long, androidx.compose.ui.geometry.Rect>()
+
+@Composable
+private fun KayaRenderContextAnchor(
+    node: KayaNode,
+    attachment: KayaContextAttachment,
+    isRoot: Boolean,
+    flexVertical: Boolean?,
+    flexStretch: Boolean,
+    a11yFallback: String,
+) {
     Box(
         Modifier.combinedClickable(
             // The wrapper's plain click is inert: the anchored widget
@@ -16443,6 +16604,36 @@ fun kayaMenuEffectivelyEnabled(item: KayaMenuItem): Boolean {
  * the user state as the checkbox nodes do, and the noun rides every
  * emission verbatim.
  */
+/**
+ * A REAL TOUCH SWIPE across the window from `startX` to `endX` at `y`,
+ * dispatched to the activity's own view as the touchscreen would, so the
+ * gesture reaches Compose's pointer input rather than any model state.
+ * Called off the main thread; each event is dispatched on it.
+ */
+fun kayaTouchSwipe(activity: android.app.Activity, startX: Float, endX: Float, y: Float) {
+    val down = android.os.SystemClock.uptimeMillis()
+    val steps = 12
+    fun send(action: Int, x: Float, at: Long) {
+        val latch = java.util.concurrent.CountDownLatch(1)
+        activity.runOnUiThread {
+            val event = android.view.MotionEvent.obtain(down, at, action, x, y, 0)
+            event.source = android.view.InputDevice.SOURCE_TOUCHSCREEN
+            activity.window.decorView.dispatchTouchEvent(event)
+            event.recycle()
+            latch.countDown()
+        }
+        latch.await(2, java.util.concurrent.TimeUnit.SECONDS)
+    }
+    send(android.view.MotionEvent.ACTION_DOWN, startX, down)
+    for (i in 1..steps) {
+        Thread.sleep(16)
+        val x = startX + (endX - startX) * i / steps
+        send(android.view.MotionEvent.ACTION_MOVE, x, down + i * 16L)
+    }
+    Thread.sleep(16)
+    send(android.view.MotionEvent.ACTION_UP, endX, down + (steps + 1) * 16L)
+}
+
 fun kayaActivateMenuItem(item: KayaMenuItem, noun: ByteArray) {
     // A disabled item's row is inert and its chord fires nothing —
     // the native menu behavior, uniform across the routes.

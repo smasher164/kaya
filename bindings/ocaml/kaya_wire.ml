@@ -30,7 +30,7 @@ type drop_values = {
 }
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0xb0dbd639210c2e5aL
+let spec_hash = 0xda99b50dff6ae96aL
 
 let value_bool = 1
 let value_i64 = 2
@@ -168,6 +168,11 @@ let mprop_primary = 6
 let mprop_shortcut = 7
 let mprop_role = 8
 let mprop_symbol = 9
+let mprop_swipe = 10
+let swipe_leading = 1
+let swipe_trailing = 2
+let swipe_leading_full = 3
+let swipe_trailing_full = 4
 let sections_presentation_auto = 0
 let sections_presentation_bar = 1
 let sections_presentation_sidebar = 2
@@ -2505,6 +2510,14 @@ let tx_set_menu_symbol item symbol =
       Buffer.add_int32_le b (Int32.of_int mprop_symbol);
       Buffer.add_int32_le b (Int32.of_int source_const);
       encode_value b (I64 symbol))
+
+(* set_menu_prop with a constant swipe value. *)
+let tx_set_menu_swipe item swipe =
+  finish tx_kind_set_menu_prop (fun b ->
+      Buffer.add_int64_le b item;
+      Buffer.add_int32_le b (Int32.of_int mprop_swipe);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (I64 swipe))
 
 (* Reads assembled from a byte accessor (absolute offset -> byte);
    kaya v1 targets are all little-endian. *)

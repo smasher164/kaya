@@ -485,6 +485,11 @@ pub(crate) const MPROP_PRIMARY: u32 = 6;
 pub(crate) const MPROP_SHORTCUT: u32 = 7;
 pub(crate) const MPROP_ROLE: u32 = 8;
 pub(crate) const MPROP_SYMBOL: u32 = 9;
+pub(crate) const MPROP_SWIPE: u32 = 10;
+pub(crate) const SWIPE_LEADING: u32 = 1;
+pub(crate) const SWIPE_TRAILING: u32 = 2;
+pub(crate) const SWIPE_LEADING_FULL: u32 = 3;
+pub(crate) const SWIPE_TRAILING_FULL: u32 = 4;
 
 /// The sections_presentation enum's wire values (spec enum
 /// "sections_presentation"): ADVISORY, the width/height precedent.
@@ -1035,6 +1040,7 @@ fn menu_prop(raw: u32) -> MenuProp {
         MPROP_SHORTCUT => MenuProp::Shortcut,
         MPROP_ROLE => MenuProp::Role,
         MPROP_SYMBOL => MenuProp::Symbol,
+        MPROP_SWIPE => MenuProp::Swipe,
         other => panic!("kaya: unknown menu property {other}"),
     }
 }
@@ -1050,6 +1056,7 @@ fn menu_prop_raw(p: MenuProp) -> u32 {
         MenuProp::Shortcut => MPROP_SHORTCUT,
         MenuProp::Role => MPROP_ROLE,
         MenuProp::Symbol => MPROP_SYMBOL,
+        MenuProp::Swipe => MPROP_SWIPE,
     }
 }
 

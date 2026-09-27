@@ -15544,6 +15544,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     core.roles_armed = true;
                     refresh_role_enablement(core);
                 }
+                // Desktop: the item stays in the row's context menu (docs/swipe-actions-plan.md R1).
+                MenuProp::Swipe => {}
             }
             core.menus_touched = true;
         }
@@ -24620,8 +24622,8 @@ impl crate::harness::Stage for WinUiStage {
 
 
 /// The widget id behind a harness target, recovered by COM identity from the
-/// creation-ordered registry. Context anchors in the scenes are labels;
-/// other kinds join as scenes demand them — an unwired kind fails loudly.
+/// creation-ordered registry. Context anchors in the scenes are labels and
+/// containers (the chat app's conversation rows); an unwired kind fails loudly.
 // Harness-only, like GTK's context_anchor_id: its sole caller is the
 // Stage impl and it speaks harness types.
 #[cfg(feature = "harness")]
@@ -24638,6 +24640,9 @@ fn widget_id_for_target(core: &CoreState, t: crate::harness::Target) -> u64 {
                 })
                 .expect("registry labels live in the widget table")
         }
+        crate::harness::TargetKind::Column
+        | crate::harness::TargetKind::Row
+        | crate::harness::TargetKind::Labeled => container_id(core, t).unwrap_or(0),
         // ACCESSIBILITY needs every kind, not just the Label this function was
         // written for, so returning 0 makes the caller report "no such
         // target" — a panic here is raised inside the UI closure and surfaces

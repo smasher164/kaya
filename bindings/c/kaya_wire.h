@@ -199,7 +199,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     }
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0xb0dbd639210c2e5aULL
+#define KAYA_SPEC_HASH 0xda99b50dff6ae96aULL
 
 
 /* Create a signal holding `initial`. */
@@ -2299,6 +2299,16 @@ static inline void kaya_tx_set_menu_symbol(KayaTx *tx, uint64_t item, int64_t sy
     kaya_wire_u32(tx, KAYA_MPROP_SYMBOL);
     kaya_wire_u32(tx, KAYA_SOURCE_CONST);
     kaya_wire_value(tx, kaya_i64(symbol));
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_menu_prop with a constant swipe value. */
+static inline void kaya_tx_set_menu_swipe(KayaTx *tx, uint64_t item, int64_t swipe) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);
+    kaya_wire_u64(tx, item);
+    kaya_wire_u32(tx, KAYA_MPROP_SWIPE);
+    kaya_wire_u32(tx, KAYA_SOURCE_CONST);
+    kaya_wire_value(tx, kaya_i64(swipe));
     kaya_wire_end(tx, kaya_at);
 }
 

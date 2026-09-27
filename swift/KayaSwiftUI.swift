@@ -13,7 +13,7 @@ import UserNotifications
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0xb0dbd639210c2e5a
+let kayaSpecHash: UInt64 = 0xda99b50dff6ae96a
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -134,6 +134,7 @@ private let mpropPrimary: UInt32 = 6
 private let mpropShortcut: UInt32 = 7
 private let mpropRole: UInt32 = 8
 private let mpropSymbol: UInt32 = 9
+private let mpropSwipe: UInt32 = 10
 private let commandClear: UInt32 = 1
 private let commandFocus: UInt32 = 2
 private let commandEmojiPicker: UInt32 = 3
@@ -926,6 +927,10 @@ final class KayaMenuItemModel: Identifiable {
     /// is rebuilt from this model on every catalog mutation, and a cached
     /// image would survive a lowering that stopped working.
     var symbol: Int64 = 0
+    /// The row swipe this context action is, 0 = none
+    /// (docs/swipe-actions-plan.md §1). Apple has no row swipe outside a List
+    /// below the iOS 27 SDK, so the action stays in the context menu (R2).
+    var swipe: Int64 = 0
     var children: [KayaMenuItemModel] = []
 
     init(id: UInt64, kind: UInt32) {
@@ -6268,6 +6273,9 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     // materialized.
                     item.symbol =
                         raw.loadUnaligned(fromByteOffset: body + 24, as: Int64.self)
+                case (mpropSwipe, valueI64):
+                    item.swipe =
+                        raw.loadUnaligned(fromByteOffset: body + 24, as: Int64.self)
                 default:
                     fatalError("kaya: bad menu prop \(prop) value type \(mvType)")
                 }
@@ -11198,6 +11206,40 @@ private func kayaRunScript(_ script: String) {
                         kayaMenuUserActivate(item)
                         return nil
                     #endif
+                }
+                if let failure {
+                    failures.append(failure)
+                } else {
+                    kayaAwaitAnswer(answered)
+                }
+            case "swipe_action":
+                // The row's context item run through its swipe
+                // (docs/swipe-actions-plan.md §4). Apple lowers no row swipe
+                // below the iOS 27 SDK (R2), so the route is the context menu,
+                // the same activation context_open and menu_activate take; the
+                // item must be one the app declared a swipe.
+                let restLine = String(line.dropFirst(parts[0].count + 1 + parts[1].count))
+                guard let (label, tail) = kayaQuotedPrefix(restLine), tail.isEmpty else {
+                    failures.append("swipe_action wants a row and a quoted item label: \(line)")
+                    break
+                }
+                kayaAwaitQuiet()
+                let answered = kayaAnswers()
+                let failure = DispatchQueue.main.sync { () -> String? in
+                    guard let node = kayaAnyTarget(parts[1]) else {
+                        return "no such target \(parts[1])"
+                    }
+                    guard let roots = kayaScene.contextRoots[node.id], !roots.isEmpty else {
+                        return "no context menu attached to \(parts[1])"
+                    }
+                    guard let item = kayaResolveMenuPath(label, roots: roots) else {
+                        return "no such context item \(label) on \(parts[1])"
+                    }
+                    guard item.swipe != 0 else {
+                        return "\(label) on \(parts[1]) is a context item with no swipe declared"
+                    }
+                    kayaMenuUserActivate(item, noun: kayaScene.contextNouns[node.id] ?? [])
+                    return nil
                 }
                 if let failure {
                     failures.append(failure)

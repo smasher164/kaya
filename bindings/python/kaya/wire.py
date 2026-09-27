@@ -14,7 +14,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, cast
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0xb0dbd639210c2e5a
+SPEC_HASH = 0xda99b50dff6ae96a
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -152,6 +152,11 @@ MPROP_PRIMARY = 6
 MPROP_SHORTCUT = 7
 MPROP_ROLE = 8
 MPROP_SYMBOL = 9
+MPROP_SWIPE = 10
+SWIPE_LEADING = 1
+SWIPE_TRAILING = 2
+SWIPE_LEADING_FULL = 3
+SWIPE_TRAILING_FULL = 4
 SECTIONS_PRESENTATION_AUTO = 0
 SECTIONS_PRESENTATION_BAR = 1
 SECTIONS_PRESENTATION_SIDEBAR = 2
@@ -1649,6 +1654,11 @@ def tx_set_menu_role(item: int, role: str) -> bytes:
 def tx_set_menu_symbol(item: int, symbol: int) -> bytes:
     """set_menu_prop with a constant symbol value (int)."""
     return record(TX_SET_MENU_PROP, struct.pack("<QII", item, MPROP_SYMBOL, SOURCE_CONST) + _enc.value(int(symbol)))
+
+
+def tx_set_menu_swipe(item: int, swipe: int) -> bytes:
+    """set_menu_prop with a constant swipe value (int)."""
+    return record(TX_SET_MENU_PROP, struct.pack("<QII", item, MPROP_SWIPE, SOURCE_CONST) + _enc.value(int(swipe)))
 
 
 def parse_value(buf: bytes | bytearray, at: int) -> tuple[Value, int]:

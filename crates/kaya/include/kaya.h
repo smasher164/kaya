@@ -1042,6 +1042,20 @@
 #define KAYA_MPROP_SYMBOL 9
 
 /**
+ * The context item's swipe edge (docs/swipe-actions-plan.md §1): a
+ * KAYA_SWIPE_* value. Const-only; actions in a context catalog only.
+ */
+#define KAYA_MPROP_SWIPE 10
+
+#define KAYA_SWIPE_LEADING 1
+
+#define KAYA_SWIPE_TRAILING 2
+
+#define KAYA_SWIPE_LEADING_FULL 3
+
+#define KAYA_SWIPE_TRAILING_FULL 4
+
+/**
  * The window prop naming how sections present, and its enum values
  * (spec enum "sections_presentation") — ADVISORY, the width/height
  * precedent; auto is the default and each platform's dominant idiom.

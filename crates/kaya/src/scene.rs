@@ -500,6 +500,9 @@ struct MenuItem {
     /// item (not only in the app-wide table) so a subtree walk can
     /// reject a role that would land under a context anchor.
     role: Option<String>,
+    /// The swipe this context item runs (docs/swipe-actions-plan.md §1),
+    /// kept for the same subtree walk: a bar is no row to swipe.
+    swipe: Option<i64>,
 }
 
 // --- The undo ledger (docs/undo-plan.md D2, D3, §3) ---------------------
@@ -747,6 +750,12 @@ pub(crate) struct Scene {
     /// Menu items by id — their OWN id space (DESIGN.md, Menus).
     /// Append-only, never removed in v1.
     menu_items: HashMap<MenuItemId, MenuItem>,
+    /// The context roots attached to each anchor, a live widget (false) or
+    /// a template node (true), and each root's anchor back: one anchor's
+    /// roots form its catalog, and at most one of its items takes the full
+    /// swipe on each edge (docs/swipe-actions-plan.md §1).
+    context_anchor_roots: HashMap<(bool, u64), Vec<MenuItemId>>,
+    context_root_anchor: HashMap<MenuItemId, (bool, u64)>,
     /// Per-window top-level catalog (bar) items, in menubar_append
     /// order.
     window_menus: HashMap<WindowId, Vec<MenuItemId>>,
@@ -1772,7 +1781,9 @@ fn check_menu_prop(kind: MenuItemKind, prop: MenuProp) {
         }
         MenuProp::Checked => matches!(kind, MenuItemKind::Toggle),
         MenuProp::Value => matches!(kind, MenuItemKind::RadioGroup),
-        MenuProp::Primary | MenuProp::Role => matches!(kind, MenuItemKind::Action),
+        MenuProp::Primary | MenuProp::Role | MenuProp::Swipe => {
+            matches!(kind, MenuItemKind::Action)
+        }
         MenuProp::Shortcut => kind.takes_shortcut(),
     };
     assert!(ok, "kaya: a {kind:?} menu item has no property {prop:?}");
@@ -1808,6 +1819,7 @@ fn menu_prop_value_type(prop: MenuProp) -> ValueType {
         // The semantic icon vocabulary rides I64 like every other
         // spec enum; check_menu_prop_value walls the domain.
         MenuProp::Symbol => ValueType::I64,
+        MenuProp::Swipe => ValueType::I64,
     }
 }
 
@@ -1840,6 +1852,13 @@ fn check_menu_prop_value(prop: MenuProp, value: &Value) {
     // function, so the two surfaces cannot drift into two answers.
     if let (MenuProp::Symbol, Value::I64(symbol)) = (prop, value) {
         check_symbol(*symbol);
+    }
+    if let (MenuProp::Swipe, Value::I64(edge)) = (prop, value) {
+        assert!(
+            (1..=4).contains(edge),
+            "kaya: {edge} is not a swipe (leading=1, trailing=2, leading_full=3, \
+             trailing_full=4)"
+        );
     }
 }
 
@@ -3575,6 +3594,7 @@ impl Scene {
                                 children: Vec::new(),
                                 shortcut: None,
                                 role: None,
+                                swipe: None,
                             },
                         )
                         .is_some();
@@ -3645,6 +3665,7 @@ impl Scene {
                     );
                     self.validate_context_root(item);
                     self.menu_items.get_mut(&item).unwrap().anchor = Some(MenuAnchor::Context);
+                    self.note_context_root((false, widget.0), item);
                     out.push(ApplyOp::ContextAttach { widget, item });
                 }
                 TxOp::ContextAttachNode { .. } => {
@@ -5968,6 +5989,14 @@ impl Scene {
                  names a standard command in the window catalog"
             );
         }
+        if it.swipe.is_some() {
+            assert!(
+                !is_bar,
+                "kaya: a swipe on menu item {item:?} in a window's menu bar — a \
+                 swipe action belongs to a row's context catalog \
+                 (docs/swipe-actions-plan.md §1)"
+            );
+        }
         for &child in &it.children {
             let child_depth = depth
                 + u32::from(is_menu_group(self.menu_items[&child].kind));
@@ -6112,6 +6141,55 @@ impl Scene {
         self.menu_items.get_mut(&item).unwrap().role = Some(role.clone());
     }
 
+    /// A context item's swipe: never on a bar, and at most one FULL swipe per
+    /// edge among the items sharing its root (docs/swipe-actions-plan.md §1).
+    fn claim_swipe(&mut self, item: MenuItemId, edge: i64) {
+        if let Some(MenuAnchor::Window(_)) = self.anchored_root(item) {
+            panic!(
+                "kaya: a swipe on menu item {item:?} in a window's menu bar — a swipe \
+                 action belongs to a row's context catalog (docs/swipe-actions-plan.md §1)"
+            );
+        }
+        self.menu_items.get_mut(&item).unwrap().swipe = Some(edge);
+        let mut root = item;
+        while let Some(parent) = self.menu_items[&root].parent {
+            root = parent;
+        }
+        match self.context_root_anchor.get(&root).copied() {
+            Some(anchor) => self.check_full_swipes(&self.context_anchor_roots[&anchor]),
+            None => self.check_full_swipes(&[root]),
+        }
+    }
+
+    /// At most one item per edge takes the full swipe among these roots.
+    fn check_full_swipes(&self, roots: &[MenuItemId]) {
+        let mut taken: HashMap<i64, MenuItemId> = HashMap::new();
+        let mut stack: Vec<MenuItemId> = roots.to_vec();
+        while let Some(at) = stack.pop() {
+            let it = &self.menu_items[&at];
+            if let Some(edge) = it.swipe.filter(|e| *e >= 3) {
+                if let Some(held) = taken.insert(edge, at) {
+                    panic!(
+                        "kaya: menu items {held:?} and {at:?} both take the full {} swipe \
+                         of one row — one item per edge runs on a full swipe \
+                         (docs/swipe-actions-plan.md §1)",
+                        if edge == 3 { "leading" } else { "trailing" }
+                    );
+                }
+            }
+            stack.extend(it.children.iter().copied());
+        }
+    }
+
+    /// Record a context root under its anchor and hold the catalog's swipes.
+    fn note_context_root(&mut self, anchor: (bool, u64), item: MenuItemId) {
+        self.context_root_anchor.insert(item, anchor);
+        let roots = self.context_anchor_roots.entry(anchor).or_default();
+        roots.push(item);
+        let roots = roots.clone();
+        self.check_full_swipes(&roots);
+    }
+
     fn set_menu_prop(
         &mut self,
         item: MenuItemId,
@@ -6141,6 +6219,9 @@ impl Scene {
                 if prop == MenuProp::Role {
                     check_menu_role(&v);
                     self.claim_menu_role(item, &v);
+                }
+                if let (MenuProp::Swipe, Value::I64(edge)) = (prop, &v) {
+                    self.claim_swipe(item, *edge);
                 }
                 out.push(ApplyOp::SetMenuProp { item, prop, value: v });
             }
@@ -6520,6 +6601,7 @@ impl Scene {
                 // copy shares this tree; only the noun key path differs.
                 self.validate_context_root(item);
                 self.menu_items.get_mut(&item).unwrap().anchor = Some(MenuAnchor::Context);
+                self.note_context_root((true, node.0), item);
                 top.current.ops.push(TplOp::ContextAttachNode { node: node.0, item });
             }
             TxOp::SetColumnHeaders { widget, sorted, direction, path, titles } => {
@@ -12891,6 +12973,77 @@ mod tests {
                 prop: MenuProp::Symbol,
                 value: PropValue::Const(Value::I64(crate::wire::SYMBOL_COPY.into())),
             },
+        ]);
+    }
+
+    /// The swipe's walls (docs/swipe-actions-plan.md §1): a context
+    /// action's, one of four values, never on a bar, and at most one item
+    /// per edge of one row takes the full swipe.
+    fn swipe(item: u64, edge: u32) -> TxOp {
+        TxOp::SetMenuProp {
+            item: MenuItemId(item),
+            prop: MenuProp::Swipe,
+            value: PropValue::Const(Value::I64(edge.into())),
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "has no property Swipe")]
+    fn swipe_on_a_toggle_rejected() {
+        let mut scene = Scene::new();
+        scene.apply(vec![item(1, MenuItemKind::Toggle), swipe(1, crate::wire::SWIPE_TRAILING)]);
+    }
+
+    #[test]
+    #[should_panic(expected = "5 is not a swipe")]
+    fn swipe_outside_the_vocabulary_rejected() {
+        let mut scene = Scene::new();
+        scene.apply(vec![item(1, MenuItemKind::Action), swipe(1, 5)]);
+    }
+
+    #[test]
+    #[should_panic(expected = "a swipe action belongs to a row's context catalog")]
+    fn swipe_on_a_bar_rejected() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            item(1, MenuItemKind::Menu),
+            item(2, MenuItemKind::Action),
+            swipe(2, crate::wire::SWIPE_TRAILING_FULL),
+            TxOp::MenuItemAppend { parent: MenuItemId(1), child: MenuItemId(2) },
+            TxOp::MenubarAppend { window: DEFAULT_WINDOW, item: MenuItemId(1) },
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "both take the full trailing swipe")]
+    fn two_full_trailing_swipes_on_one_row_rejected() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Label },
+            item(2, MenuItemKind::Action),
+            item(3, MenuItemKind::Action),
+            swipe(2, crate::wire::SWIPE_TRAILING_FULL),
+            swipe(3, crate::wire::SWIPE_TRAILING_FULL),
+            TxOp::ContextAttach { widget: WidgetId(1), item: MenuItemId(2) },
+            TxOp::ContextAttach { widget: WidgetId(1), item: MenuItemId(3) },
+        ]);
+    }
+
+    #[test]
+    fn one_full_swipe_per_edge_accepted() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Label },
+            item(2, MenuItemKind::Action),
+            item(3, MenuItemKind::Action),
+            item(4, MenuItemKind::Action),
+            swipe(2, crate::wire::SWIPE_TRAILING_FULL),
+            swipe(3, crate::wire::SWIPE_LEADING_FULL),
+            swipe(4, crate::wire::SWIPE_TRAILING),
+            TxOp::ContextAttach { widget: WidgetId(1), item: MenuItemId(2) },
+            TxOp::ContextAttach { widget: WidgetId(1), item: MenuItemId(3) },
+            TxOp::ContextAttach { widget: WidgetId(1), item: MenuItemId(4) },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
         ]);
     }
 

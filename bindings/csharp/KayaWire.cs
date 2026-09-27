@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0xb0dbd639210c2e5a;
+    public const ulong SpecHash = 0xda99b50dff6ae96a;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -150,6 +150,11 @@ static class KayaWire
     public const uint MpropShortcut = 7;
     public const uint MpropRole = 8;
     public const uint MpropSymbol = 9;
+    public const uint MpropSwipe = 10;
+    public const uint SwipeLeading = 1;
+    public const uint SwipeTrailing = 2;
+    public const uint SwipeLeadingFull = 3;
+    public const uint SwipeTrailingFull = 4;
     public const uint SectionsPresentationAuto = 0;
     public const uint SectionsPresentationBar = 1;
     public const uint SectionsPresentationSidebar = 2;
@@ -2665,6 +2670,15 @@ static class KayaWire
         var w = Begin(out var stream);
         w.Write(item); w.Write(MpropSymbol); w.Write(SourceConst);
         EncodeValue(w, symbol);
+        return Finish(stream, w, TxKindSetMenuProp);
+    }
+
+    /// set_menu_prop with a constant swipe value.
+    public static byte[] TxSetMenuSwipe(ulong item, long swipe)
+    {
+        var w = Begin(out var stream);
+        w.Write(item); w.Write(MpropSwipe); w.Write(SourceConst);
+        EncodeValue(w, swipe);
         return Finish(stream, w, TxKindSetMenuProp);
     }
 

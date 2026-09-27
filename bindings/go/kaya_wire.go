@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0xb0dbd639210c2e5a
+	SpecHash uint64 = 0xda99b50dff6ae96a
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -152,6 +152,11 @@ const (
 	MpropShortcut = 7
 	MpropRole = 8
 	MpropSymbol = 9
+	MpropSwipe = 10
+	SwipeLeading Swipe = 1
+	SwipeTrailing Swipe = 2
+	SwipeLeadingFull Swipe = 3
+	SwipeTrailingFull Swipe = 4
 	SectionsPresentationAuto SectionsPresentation = 0
 	SectionsPresentationBar SectionsPresentation = 1
 	SectionsPresentationSidebar SectionsPresentation = 2
@@ -402,6 +407,20 @@ func (d Detent) String() string {
 		return "large"
 	}
 	return "Detent(" + strconv.FormatInt(int64(d), 10) + ")"
+}
+
+func (s Swipe) String() string {
+	switch s {
+	case SwipeLeading:
+		return "leading"
+	case SwipeTrailing:
+		return "trailing"
+	case SwipeLeadingFull:
+		return "leading_full"
+	case SwipeTrailingFull:
+		return "trailing_full"
+	}
+	return "Swipe(" + strconv.FormatInt(int64(s), 10) + ")"
 }
 
 func (s SectionsPresentation) String() string {
@@ -3182,6 +3201,16 @@ func TxSetMenuSymbol(item uint64, symbol int64) []byte {
 	b = binary.LittleEndian.AppendUint32(b, MpropSymbol)
 	b = binary.LittleEndian.AppendUint32(b, SourceConst)
 	b = encodeValue(b, symbol)
+	return endRecord(b)
+}
+
+// TxSetMenuSwipe: set_menu_prop with a constant swipe value.
+func TxSetMenuSwipe(item uint64, swipe int64) []byte {
+	b := beginRecord(txSetMenuProp)
+	b = binary.LittleEndian.AppendUint64(b, item)
+	b = binary.LittleEndian.AppendUint32(b, MpropSwipe)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, swipe)
 	return endRecord(b)
 }
 

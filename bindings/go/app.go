@@ -4004,6 +4004,10 @@ type FileMode uint32
 // FileContentImages (docs/photo-attach-plan.md §1).
 type FileContent uint32
 
+// Swipe is a context action's swipe on its row (docs/swipe-actions-plan.md
+// §1): SwipeLeading, SwipeTrailing, SwipeLeadingFull, SwipeTrailingFull.
+type Swipe int64
+
 // SectionsPresentation is a window's ADVISORY sections hint:
 // SectionsPresentationAuto, Bar or Sidebar.
 type SectionsPresentation int64
@@ -4415,6 +4419,16 @@ func (m MenuItem) Icon(data []byte) MenuItem {
 // list, SymbolClose is the ✕. Closed vocabulary, const-only.
 func (m MenuItem) Symbol(symbol Symbol) MenuItem {
 	m.chain().emit(TxSetMenuSymbol(m.id, int64(symbol)))
+	return m
+}
+
+// Swipe makes this context action a swipe on its row: SwipeLeading or
+// SwipeTrailing, and the Full forms that a full swipe runs, at most one per
+// edge. Where a platform has no row swipe the action stays in the context
+// menu, which it always is (docs/swipe-actions-plan.md R1-R3). Context
+// actions only; a menu bar item refuses it. Const-only.
+func (m MenuItem) Swipe(swipe Swipe) MenuItem {
+	m.chain().emit(TxSetMenuSwipe(m.id, int64(swipe)))
 	return m
 }
 

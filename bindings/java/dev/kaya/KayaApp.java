@@ -1046,6 +1046,20 @@ public final class KayaApp {
     /** What an open dialog offers (docs/photo-attach-plan.md §1): IMAGES
      * opens the photo library's own picker on the phones and filters to
      * images on the desktops. */
+    /** A context action's swipe on its row (docs/swipe-actions-plan.md §1). */
+    public enum Swipe {
+        LEADING(KayaWire.SWIPE_LEADING),
+        TRAILING(KayaWire.SWIPE_TRAILING),
+        LEADING_FULL(KayaWire.SWIPE_LEADING_FULL),
+        TRAILING_FULL(KayaWire.SWIPE_TRAILING_FULL);
+
+        final long wire;
+
+        Swipe(long wire) {
+            this.wire = wire;
+        }
+    }
+
     public enum FileContent {
         ANY(KayaWire.FILE_CONTENT_ANY),
         IMAGES(KayaWire.FILE_CONTENT_IMAGES);
@@ -2538,6 +2552,15 @@ public final class KayaApp {
          * art still rides the blob. Const-only. */
         public MenuItem symbol(Symbol symbol) {
             chain().emit(KayaWire.txSetMenuSymbol(id, symbol.wire));
+            return this;
+        }
+
+        /** Make this context action a swipe on its row: at most one item per
+         * edge takes the full swipe. Where a platform has no row swipe the
+         * action stays in the context menu, which it always is
+         * (docs/swipe-actions-plan.md R1-R3). Context actions only. */
+        public MenuItem swipe(Swipe swipe) {
+            chain().emit(KayaWire.txSetMenuSwipe(id, swipe.wire));
             return this;
         }
 

@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0xb0dbd639210c2e5an;
+export const SPEC_HASH = 0xda99b50dff6ae96an;
 
 export const VALUE_BOOL = 1;
 export const VALUE_I64 = 2;
@@ -145,6 +145,11 @@ export const MPROP_PRIMARY = 6;
 export const MPROP_SHORTCUT = 7;
 export const MPROP_ROLE = 8;
 export const MPROP_SYMBOL = 9;
+export const MPROP_SWIPE = 10;
+export const SWIPE_LEADING = 1;
+export const SWIPE_TRAILING = 2;
+export const SWIPE_LEADING_FULL = 3;
+export const SWIPE_TRAILING_FULL = 4;
 export const SECTIONS_PRESENTATION_AUTO = 0;
 export const SECTIONS_PRESENTATION_BAR = 1;
 export const SECTIONS_PRESENTATION_SIDEBAR = 2;
@@ -2205,6 +2210,12 @@ export function tx_set_menu_role(item: number, role: string): Uint8Array {
 /** set_menu_prop with a constant symbol value. */
 export function tx_set_menu_symbol(item: number, symbol: number): Uint8Array {
   enc.begin(); enc.u64(item); enc.u32(MPROP_SYMBOL); enc.u32(SOURCE_CONST); enc.value(new I64(symbol));
+  return enc.end(TX_SET_MENU_PROP);
+}
+
+/** set_menu_prop with a constant swipe value. */
+export function tx_set_menu_swipe(item: number, swipe: number): Uint8Array {
+  enc.begin(); enc.u64(item); enc.u32(MPROP_SWIPE); enc.u32(SOURCE_CONST); enc.value(new I64(swipe));
   return enc.end(TX_SET_MENU_PROP);
 }
 

@@ -985,6 +985,19 @@ pub const KAYA_MPROP_ROLE: u32 = 8;
 /// the KAYA_SYMBOL_* block below. Const-only, beside KAYA_MPROP_ICON —
 /// a name for the standard concepts, a blob for app-specific art.
 pub const KAYA_MPROP_SYMBOL: u32 = 9;
+/// The context item's swipe edge (docs/swipe-actions-plan.md §1): a
+/// KAYA_SWIPE_* value. Const-only; actions in a context catalog only.
+pub const KAYA_MPROP_SWIPE: u32 = 10;
+pub const KAYA_SWIPE_LEADING: u32 = 1;
+pub const KAYA_SWIPE_TRAILING: u32 = 2;
+pub const KAYA_SWIPE_LEADING_FULL: u32 = 3;
+pub const KAYA_SWIPE_TRAILING_FULL: u32 = 4;
+const _: () = assert!(
+    KAYA_SWIPE_LEADING == wire::SWIPE_LEADING
+        && KAYA_SWIPE_TRAILING == wire::SWIPE_TRAILING
+        && KAYA_SWIPE_LEADING_FULL == wire::SWIPE_LEADING_FULL
+        && KAYA_SWIPE_TRAILING_FULL == wire::SWIPE_TRAILING_FULL
+);
 const _: () = assert!(
     KAYA_MPROP_LABEL == wire::MPROP_LABEL
         && KAYA_MPROP_ENABLED == wire::MPROP_ENABLED
@@ -995,11 +1008,12 @@ const _: () = assert!(
         && KAYA_MPROP_SHORTCUT == wire::MPROP_SHORTCUT
         && KAYA_MPROP_ROLE == wire::MPROP_ROLE
         && KAYA_MPROP_SYMBOL == wire::MPROP_SYMBOL
+        && KAYA_MPROP_SWIPE == wire::MPROP_SWIPE
 );
 // Completeness for the menu-prop exports (docs/traps.md): a new
 // MENU_PROPS row trips this count.
 const _: () = assert!(
-    crate::spec::MENU_PROPS.len() == 9,
+    crate::spec::MENU_PROPS.len() == 10,
     "spec::MENU_PROPS grew: export the new KAYA_MPROP_* above, extend the pin, and bump this \
      count"
 );

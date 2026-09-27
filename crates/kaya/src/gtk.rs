@@ -12286,6 +12286,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                         .role = crate::protocol::prop_str(&value).to_owned();
                     refresh_roles(core);
                 }
+                // Desktop: the item stays in the row's context menu (docs/swipe-actions-plan.md R1).
+                MenuProp::Swipe => {}
             }
         }
 

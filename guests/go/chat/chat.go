@@ -128,6 +128,9 @@ func App() *kaya.App {
 
 		peer.receive = func(tx *kaya.Tx, id, key, text string) {
 			c := convs[id]
+			if c == nil {
+				return
+			}
 			c.messages = append(c.messages, message{key: key, text: text})
 			if id == open {
 				// The thread's scroll follows its end (docs/follow-end-plan.md):
@@ -351,9 +354,25 @@ func App() *kaya.App {
 			}
 		})
 
+		// C7 (docs/swipe-actions-plan.md): a conversation archives from its
+		// row's context menu everywhere, and a full trailing swipe runs the
+		// same item where the platform swipes rows.
+		archive := tx.ContextCatalog()
+		archive.Item("Archive").Swipe(kaya.SwipeTrailingFull).
+			OnActivateNode(func(tx *kaya.Tx, keys []any) {
+				id := keys[0].(string)
+				if id == open {
+					tx.PopEntry()
+					open = ""
+				}
+				list.Remove(tx, id)
+				delete(convs, id)
+				tx.SetBadge(unreadTotal())
+			})
+
 		tx.Mount(tx.Column(func() {
 			for row := range ConversationRows(tx, list).All() {
-				row.Row(func() {
+				convo := row.Row(func() {
 					row.Column(func() {
 						name := row.Button(row.Name(), openThread)
 						row.SetA11yID(name, "open")
@@ -365,6 +384,8 @@ func App() *kaya.App {
 					unread := row.Label(row.Unread())
 					row.SetA11yID(unread, "unread")
 				})
+				row.SetA11yID(convo, "convo")
+				row.ContextMenu(convo, archive)
 			}
 		}))
 		for _, id := range order {

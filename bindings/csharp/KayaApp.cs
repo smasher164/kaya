@@ -729,6 +729,17 @@ enum Role : long
 /// What an open dialog offers (docs/photo-attach-plan.md §1): Images opens
 /// the photo library's own picker on the phones and filters to images on the
 /// desktops.
+/// A context action's swipe on its row: at most one item per edge takes the
+/// full swipe; where a platform has no row swipe the action stays in the
+/// context menu (docs/swipe-actions-plan.md R1-R3).
+public enum Swipe : long
+{
+    Leading = KayaWire.SwipeLeading,
+    Trailing = KayaWire.SwipeTrailing,
+    LeadingFull = KayaWire.SwipeLeadingFull,
+    TrailingFull = KayaWire.SwipeTrailingFull,
+}
+
 public enum FileContent : uint
 {
     Any = KayaWire.FileContentAny,
@@ -4628,11 +4639,13 @@ sealed class Tx : IDisposable
     /// anchor (window catalogs only).
     public MenuItem Item(TextSource label, string? shortcut = null,
         BoolSource? enabled = null, byte[]? icon = null, Symbol? symbol = null,
-        bool primary = false, MenuRole? role = null, Action<Tx>? onActivate = null)
+        bool primary = false, MenuRole? role = null, Action<Tx>? onActivate = null,
+        Swipe? swipe = null)
     {
         var m = NewMenuItem(KayaWire.MenuKindAction, label);
         if (shortcut != null) Records.Add(KayaWire.TxSetMenuShortcut(m.Id, shortcut));
         if (role is MenuRole named) Records.Add(KayaWire.TxSetMenuRole(m.Id, named.Name()));
+        if (swipe is Swipe edge) Records.Add(KayaWire.TxSetMenuSwipe(m.Id, (long)edge));
         MenuTail(m, enabled, icon, symbol);
         if (primary) Records.Add(KayaWire.TxSetMenuPrimary(m.Id, true));
         if (onActivate != null) App.menuActivated[m.Id] = onActivate;
@@ -4644,9 +4657,11 @@ sealed class Tx : IDisposable
     /// path, outermost first. Context items take no shortcuts
     /// (root-checked).
     public MenuItem Item(TextSource label, Action<Tx, List<object>> onActivate,
-        BoolSource? enabled = null, byte[]? icon = null, Symbol? symbol = null)
+        BoolSource? enabled = null, byte[]? icon = null, Symbol? symbol = null,
+        Swipe? swipe = null)
     {
         var m = NewMenuItem(KayaWire.MenuKindAction, label);
+        if (swipe is Swipe edge) Records.Add(KayaWire.TxSetMenuSwipe(m.Id, (long)edge));
         MenuTail(m, enabled, icon, symbol);
         App.menuActivatedNode[m.Id] = onActivate;
         return m;

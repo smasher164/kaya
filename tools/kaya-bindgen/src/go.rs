@@ -53,6 +53,7 @@ fn enum_go_type(name: &str) -> Option<&'static str> {
         "notification_outcome" => Some("NotificationOutcome"),
         "file_mode" => Some("FileMode"),
         "file_content" => Some("FileContent"),
+        "swipe" => Some("Swipe"),
         "sections_presentation" => Some("SectionsPresentation"),
         // The sheet's detent (docs/sheet-plan.md §1.4).
         "detent" => Some("Detent"),

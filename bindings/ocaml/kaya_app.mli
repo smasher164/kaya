@@ -1224,6 +1224,11 @@ module Menu_role : sig
   type t = Settings | Cut | Copy | Paste | Undo | Redo
 end
 
+(* A context action's swipe on its row (docs/swipe-actions-plan.md §1). *)
+module Swipe : sig
+  type t = Leading | Trailing | Leading_full | Trailing_full
+end
+
 (* An action — a leaf command firing exactly one menu_activated
    occurrence. [~on_activate_node] is the template-node flavor: the
    copy's key path arrives first. *)
@@ -1235,6 +1240,7 @@ val item :
   ?symbol:symbol ->
   ?primary:bool ->
   ?role:Menu_role.t ->
+  ?swipe:Swipe.t ->
   ?on_activate:(unit -> unit) ->
   ?on_activate_node:(key list -> unit) -> label:string -> unit -> menu_item
 

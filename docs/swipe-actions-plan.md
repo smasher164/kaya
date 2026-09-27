@@ -1,6 +1,6 @@
 # Swiping a row for its actions — the design pass
 
-Status: DESIGN, R1-R3 RULED 2026-09-25 as recommended. The chat app's C7
+Status: BUILT 2026-09-26 (R1-R3 RULED 2026-09-25 as recommended). The chat app's C7
 (docs/chat-plan.md): swipe a conversation to archive it on the phones.
 Researched 2026-09-25 with sources.
 
@@ -47,3 +47,25 @@ through the model and activates it through the same path the gesture
 takes, `context_open`'s shape; on the phones a real gesture beside it
 (the iOS driver's `swipe`, `adb input swipe`). An `expect_swipe_actions`
 verb reads what each backend lowered (edge, labels, the full item).
+
+## §5 — As built
+
+- The declaration is a context item's `swipe` menu prop, one of `leading`,
+  `trailing`, `leading_full`, `trailing_full`, const-only and actions only.
+  The core refuses it on a window's menu bar and refuses a second full swipe
+  on one edge of one row (across every root attached to that row). Rust's
+  `swipe` exists only on a context-anchored action, and Haskell's `ISwipe`
+  only in the context scope, so both refuse a bar item at compile time.
+- Android wraps a row whose catalog holds a full swipe in Material's
+  `SwipeToDismissBox`; the item runs through the context menu's own
+  activation and the row settles back, the app deciding its fate. Its other
+  swipe items stay in the menu (R3).
+- Apple, GTK and WinUI keep every swipe item in the context menu (R1, R2).
+  Windows' touch `SwipeControl` is not built: R1 names the menu for Windows
+  with a mouse, which every lane and the VM are, and touch is not driven.
+- `swipe_action <row> "<item>"` runs the item through its swipe: a real
+  touch swipe across the row on Android, the context menu elsewhere. The
+  interpreters refuse an item with no swipe declared; the Rust harness's
+  menu route (GTK, WinUI) does not read the declaration. `expect_swipe_actions`
+  is not built: every lane but Android lowers to the menu, and a verdict
+  byte-compared across lanes cannot say which.

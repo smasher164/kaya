@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0xb0dbd639210c2e5a
+specHash = 0xda99b50dff6ae96a
 
 valueBool :: Word32
 valueBool = 1
@@ -298,6 +298,16 @@ mpropRole :: Word32
 mpropRole = 8
 mpropSymbol :: Word32
 mpropSymbol = 9
+mpropSwipe :: Word32
+mpropSwipe = 10
+swipeLeading :: Word32
+swipeLeading = 1
+swipeTrailing :: Word32
+swipeTrailing = 2
+swipeLeadingFull :: Word32
+swipeLeadingFull = 3
+swipeTrailingFull :: Word32
+swipeTrailingFull = 4
 sectionsPresentationAuto :: Word32
 sectionsPresentationAuto = 0
 sectionsPresentationBar :: Word32
@@ -2259,6 +2269,12 @@ txSetMenuSymbol :: Word64 -> Int64 -> Builder
 txSetMenuSymbol item symbol = wireRecord txKindSetMenuProp
   (word64LE item <> word32LE mpropSymbol <> word32LE sourceConst
     <> encodeValue (VI64 symbol))
+
+-- set_menu_prop with a constant swipe value.
+txSetMenuSwipe :: Word64 -> Int64 -> Builder
+txSetMenuSwipe item swipe = wireRecord txKindSetMenuProp
+  (word64LE item <> word32LE mpropSwipe <> word32LE sourceConst
+    <> encodeValue (VI64 swipe))
 
 -- Decode one value at offset `at` from the record base; returns the
 -- value and the next offset.

@@ -465,6 +465,7 @@ def census(files):
     bad += winui_mode_changed(read(winui))
     bad += filled_edges(read(compose), read(gtk))
     bad += composers(read(swiftui), read(compose), read(gtk), read(winui))
+    bad += swipes(read(compose))
     return bad
 
 
@@ -645,6 +646,19 @@ def composers(swiftui_text, compose_text, gtk_text, winui_text):
     return bad
 
 
+# A ROW'S FULL SWIPE ON ANDROID (docs/swipe-actions-plan.md R3) runs its item
+# through the context menu's one activation route, and the harness's
+# swipe_action drives a real touch swipe: a verb that activated the item
+# itself would pass with no swipe on screen at all.
+def swipes(compose_text):
+    bad = []
+    for needle in ("}?.let { kayaActivateMenuItem(it, attachment.noun) }",
+                   "kayaTouchSwipe(activity, start, end, y)"):
+        if needle not in compose_text:
+            bad.append(f"{COMPOSE}: the row swipe lost {needle!r}")
+    return bad
+
+
 # A TWOPANEVIEW'S MODECHANGED MAY FIRE INSIDE AN APPLY (docs/traps.md, the
 # chat app's textarea in a pushed pane): a handler that borrows the core
 # outright panics where nothing can unwind. Every one asks first.
@@ -746,7 +760,7 @@ def drag_waits(winui_text):
 real = load()
 g = Gate("check-universal-props")
 RAN = 0
-DECLARED = 86
+DECLARED = 87
 for path, pattern, repl in (
     (COMPOSE, r"\ba11y\b", "kayaUnappliedProps"),
     (SWIFTUI, r"\bkayaA11y\b", "kayaUnappliedProps"),
@@ -1039,6 +1053,9 @@ for label, path, pattern, repl in (
     ("WinUI's button beside a composer sitting on the row's bottom again", WINUI,
      r"let lift = \(\(COMPOSER_REST_HEIGHT - SYMBOL_BUTTON_SIDE\) / 2\.0\)\.max\(0\.0\);",
      "let lift = 0.0;"),
+    ("Compose's swipe_action activating the item instead of swiping", COMPOSE,
+     r"kayaTouchSwipe\(activity, start, end, y\)",
+     "kayaActivateMenuItem(plan.second!!, ByteArray(0))"),
     ("Compose's row gap back beside an icon button", COMPOSE,
      r"touchPadded\.getOrElse\(i\) \{ false \} \|\| touchPadded\.getOrElse\(i \+ 1\) \{ false \}",
      "false"),

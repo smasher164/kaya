@@ -2246,6 +2246,16 @@ export type Filter = readonly [label: string, extensions: string | readonly stri
  * desktops. */
 export type FileContent = "any" | "images";
 
+/** A context action's swipe on its row (docs/swipe-actions-plan.md §1). */
+export type Swipe = "leading" | "trailing" | "leading_full" | "trailing_full";
+
+const SWIPES: Record<Swipe, number> = {
+  leading: wire.SWIPE_LEADING,
+  trailing: wire.SWIPE_TRAILING,
+  leading_full: wire.SWIPE_LEADING_FULL,
+  trailing_full: wire.SWIPE_TRAILING_FULL,
+};
+
 const FILE_CONTENTS: Record<FileContent, number> = {
   any: wire.FILE_CONTENT_ANY,
   images: wire.FILE_CONTENT_IMAGES,
@@ -2949,6 +2959,14 @@ export class MenuItem {
 
   primary(on: boolean): void {
     records().push(wire.tx_set_menu_primary(this.id, Boolean(on)));
+  }
+
+  /** Make this context action a swipe on its row: at most one item per edge
+   * takes the full swipe. Where a platform has no row swipe the action stays
+   * in the context menu, which it always is (docs/swipe-actions-plan.md
+   * R1-R3). Context actions only. Const-only. */
+  swipe(swipe: Swipe): void {
+    records().push(wire.tx_set_menu_swipe(this.id, vocab(SWIPES, "swipe", swipe, '"trailing_full"')));
   }
 
   role(name: MenuRole): void {

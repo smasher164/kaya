@@ -104,7 +104,7 @@ pub mod capi;
 extern crate self as kaya;
 
 pub use app::{
-    Accepts, ActionRef, Align, AnyAnchor, AppCtx, Axis, Asset, BarAnchor, BlobSource, Capabilities, Collection, ContextAnchor, ContextCatalog,
+    Accepts, ActionRef, Swipe, Align, AnyAnchor, AppCtx, Axis, Asset, BarAnchor, BlobSource, Capabilities, Collection, ContextAnchor, ContextCatalog,
     capabilities,
     // The app's own document directory and its settings store
     // (docs/tasks-s4-plan.md P1, P3).

@@ -341,6 +341,7 @@ module KayaApp
     MOption,
     Catalog,
     IAttr (..),
+    Swipe (..),
     item,
     toggle,
     option,
@@ -1339,12 +1340,29 @@ data IAttr (s :: MScope) where
   -- | Window-anchored actions only: a role names a standard command in the
   -- window catalog.
   IRole :: Text -> IAttr 'BarM
+  -- | A context action's swipe on its row (docs\/swipe-actions-plan.md
+  -- §1): at most one item per edge takes the full swipe. Context items
+  -- only, and the type carries that rule.
+  ISwipe :: Swipe -> IAttr 'CtxM
   IOnActivate :: IO () -> IAttr s
   IOnActivateNode :: ([Key] -> IO ()) -> IAttr 'CtxM
   IOnToggle :: (Bool -> IO ()) -> IAttr s
   IOnToggleNode :: ([Key] -> Bool -> IO ()) -> IAttr 'CtxM
   IOnSelect :: (Int -> IO ()) -> IAttr s
   IOnSelectNode :: ([Key] -> Int -> IO ()) -> IAttr 'CtxM
+
+-- | Which edge of its row a context action's swipe comes from, and whether
+-- a full swipe runs it. Where a platform has no row swipe the action stays
+-- in the context menu (docs\/swipe-actions-plan.md R1-R3).
+data Swipe = SwipeLeading | SwipeTrailing | SwipeLeadingFull | SwipeTrailingFull
+  deriving (Eq, Show)
+
+swipeWire :: Swipe -> Int64
+swipeWire edge = fromIntegral $ case edge of
+  SwipeLeading -> W.swipeLeading
+  SwipeTrailing -> W.swipeTrailing
+  SwipeLeadingFull -> W.swipeLeadingFull
+  SwipeTrailingFull -> W.swipeTrailingFull
 
 applyIAttr :: Word64 -> IAttr s -> Build ()
 applyIAttr n attr = case attr of
@@ -1358,6 +1376,7 @@ applyIAttr n attr = case attr of
   IIcon bytes -> emitBIO (W.txSetMenuIcon n <$> registerBlob bytes)
   ISymbol s -> emitB (W.txSetMenuSymbol n (symbolWire s))
   IPrimary v -> emitB (W.txSetMenuPrimary n v)
+  ISwipe edge -> emitB (W.txSetMenuSwipe n (swipeWire edge))
   IShortcut spelling -> emitB (W.txSetMenuShortcut n (T.unpack spelling))
   IRole name -> emitB (W.txSetMenuRole n (T.unpack name))
   IOnActivate handler -> pendB (PMenuActivated n handler)

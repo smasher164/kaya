@@ -2434,6 +2434,27 @@ class PickedFile:
         return f"PickedFile(name={self.name!r}, local_path={self.local_path!r})"
 
 
+class Swipe(enum.IntEnum):
+    """A context action's swipe on its row (docs/swipe-actions-plan.md §1).
+    Names accepted too."""
+
+    LEADING = wire.SWIPE_LEADING
+    TRAILING = wire.SWIPE_TRAILING
+    LEADING_FULL = wire.SWIPE_LEADING_FULL
+    TRAILING_FULL = wire.SWIPE_TRAILING_FULL
+
+    @classmethod
+    def _missing_(cls, value: object) -> Any:
+        if isinstance(value, str):
+            try:
+                return cls[value.upper()]
+            except KeyError:
+                pass
+        raise KayaValueError(
+            f"kaya: swipe must be one of {sorted(m.name.lower() for m in cls)}, got {value!r}"
+        )
+
+
 class FileContent(enum.IntEnum):
     """What an open dialog offers (docs/photo-attach-plan.md §1): IMAGES
     opens the photo library's own picker on the phones and filters to
@@ -3342,6 +3363,14 @@ class MenuItem:
         """The phone-bar promotion hint (actions only — root-checked).
         INERT on desktops. Const-only."""
         _records().append(wire.tx_set_menu_primary(self.id, bool(on)))
+
+    def swipe(self, swipe: Swipe | str) -> None:
+        """Make this context action a swipe on its row (`kaya.Swipe`, or
+        "leading", "trailing", "leading_full", "trailing_full"): at most one
+        item per edge takes the full swipe. Where a platform has no row swipe
+        the action stays in the context menu, which it always is
+        (docs/swipe-actions-plan.md R1-R3). Context actions only. Const-only."""
+        _records().append(wire.tx_set_menu_swipe(self.id, int(Swipe(swipe))))
 
     def role(self, name: MenuRole | str) -> None:
         """Declare this action a standard command (actions only).

@@ -2197,6 +2197,47 @@ if len(fake) != want_fake:
                   f"photo-surface patterns fired for names that exist nowhere)")
 
 
+# --- THE SWIPE ACTION, in all nine (docs/swipe-actions-plan.md §1) ----
+# A context action's swipe reaches every binding through the generated wire
+# whether or not an app can spell it; each row reads the binding's own
+# setter. Same (template, name) shape as the photo surfaces above.
+SWIPE_SURFACES = [
+    ("rust", "crates/kaya/src/app.rs", [(r"pub fn {}\(self, swipe: Swipe\) -> Self", "swipe")]),
+    ("python", "bindings/python/kaya/__init__.py", [(r"wire\.{}\(self\.id", "tx_set_menu_swipe")]),
+    ("go", "bindings/go/app.go", [(r"func \(m MenuItem\) {}\(swipe Swipe\)", "Swipe")]),
+    ("csharp", "bindings/csharp/KayaApp.cs", [(r"KayaWire\.{}\(m\.Id", "TxSetMenuSwipe")]),
+    ("java", "bindings/java/dev/kaya/KayaApp.java", [(r"KayaWire\.{}\(id", "txSetMenuSwipe")]),
+    ("swift", "bindings/swift/KayaApp.swift", [(r"tx\.{}\(m\.id", "setMenuSwipe")]),
+    ("haskell", "bindings/haskell/KayaApp.hs", [(r"W\.{} n", "txSetMenuSwipe")]),
+    ("ocaml", "bindings/ocaml/kaya_app.ml", [(r"Kaya_wire\.{} id", "tx_set_menu_swipe")]),
+    ("js", "bindings/js/kaya/index.ts", [(r"wire\.{}\(this\.id", "tx_set_menu_swipe")]),
+]
+
+
+def check_swipe_surfaces(fake_name=None, findings=None):
+    global status
+    for lang, rel, patterns in SWIPE_SURFACES:
+        for template, name in patterns:
+            pat = template.format(fake_name or name)
+            if not grep_file(pat, rel):
+                msg = (f"check-sugar-surface: {lang} lacks the swipe action "
+                       f"(wanted /{pat}/ in {rel})")
+                if findings is None:
+                    print(msg)
+                    status = 1
+                else:
+                    findings.append(msg)
+
+
+check_swipe_surfaces()
+fake = []
+check_swipe_surfaces("KayaFakeSwipe", findings=fake)
+print(f"check-sugar-surface: fake swipe surfaces fired {len(fake)}/{len(SWIPE_SURFACES)}")
+if len(fake) != len(SWIPE_SURFACES):
+    selftest_exit(f"check-sugar-surface: self-test failed ({len(fake)}/{len(SWIPE_SURFACES)} "
+                  f"swipe patterns fired for a setter that exists nowhere)")
+
+
 # --- THE SIZE-POLICY SURFACE, in all nine ---------------------------
 # WHAT A CANVAS DOES WITH A TRACK THAT IS NOT ITS VIEWBOX
 # (docs/canvas-plan.md §3.2.1), invisible to every sweep above for the

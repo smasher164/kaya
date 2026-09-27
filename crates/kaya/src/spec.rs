@@ -336,6 +336,10 @@ pub const MENU_PROPS: &[(&'static str, u32, PropKind)] = &[
     // The semantic icon name (docs/styling-plan.md D6) — const-only.
     // NOT id 6: these ids are wire facts and APPEND-ONLY.
     ("symbol", 9, PropKind::Enum("symbol")),
+    // A context item a row's swipe runs (docs/swipe-actions-plan.md §1):
+    // the edge, and whether a full swipe runs it. Const-only; actions in a
+    // context catalog only.
+    ("swipe", 10, PropKind::Enum("swipe")),
 ];
 
 /// The variable tail of SET_PROPERTY, after `source`. The one record
@@ -3329,7 +3333,14 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("shortcut", 7),
                 ("role", 8),
                 ("symbol", 9),
+                ("swipe", 10),
             ],
+        },
+        EnumSpec {
+            // Which edge of its row a context item is a swipe action on, and
+            // whether a full swipe runs it (docs/swipe-actions-plan.md §1).
+            name: "swipe",
+            variants: &[("leading", 1), ("trailing", 2), ("leading_full", 3), ("trailing_full", 4)],
         },
         EnumSpec {
             // DESIGN.md, Sections: auto = the platform's dominant
@@ -4114,6 +4125,11 @@ mod tests {
                     ("mprop", "shortcut") => wire::MPROP_SHORTCUT,
                     ("mprop", "role") => wire::MPROP_ROLE,
                     ("mprop", "symbol") => wire::MPROP_SYMBOL,
+                    ("mprop", "swipe") => wire::MPROP_SWIPE,
+                    ("swipe", "leading") => wire::SWIPE_LEADING,
+                    ("swipe", "trailing") => wire::SWIPE_TRAILING,
+                    ("swipe", "leading_full") => wire::SWIPE_LEADING_FULL,
+                    ("swipe", "trailing_full") => wire::SWIPE_TRAILING_FULL,
                     ("sections_presentation", "auto") => wire::SECTIONS_PRESENTATION_AUTO,
                     ("sections_presentation", "bar") => wire::SECTIONS_PRESENTATION_BAR,
                     ("sections_presentation", "sidebar") => {

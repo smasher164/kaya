@@ -98,7 +98,8 @@ func (r trackRow) SetStep(n kaya.Node, step float64) { r.t.SetStep(n, step) }
 
 func (r trackRow) SetTickSpacing(n kaya.Node, spacing float64) { r.t.SetTickSpacing(n, spacing) }
 
-func (r trackRow) SetA11yID(n kaya.Node, id string) { r.t.SetA11yID(n, id) }
+func (r trackRow) SetA11yID(n kaya.Node, id string)                { r.t.SetA11yID(n, id) }
+func (r trackRow) ContextMenu(n kaya.Node, c *kaya.ContextCatalog) { r.t.ContextMenu(n, c) }
 
 func (r trackRow) A11yID(n kaya.Node, f kaya.Field[string]) { r.c.A11yID(r.t, n, f) }
 

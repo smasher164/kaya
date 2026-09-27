@@ -407,6 +407,11 @@ pub enum Step {
     /// written through the core's one resolver to a path ($TMP/$PID
     /// expanded), its directory created (docs/photo-attach-plan.md §5).
     CopyAsset(String, String),
+    /// `swipe_action <row> "<item>"`: run the row's context item through the
+    /// swipe that runs it (docs/swipe-actions-plan.md §4) — the platform's
+    /// own swipe where the backend lowers one, the context menu where it
+    /// does not (R1, R2).
+    SwipeAction(Target, String),
     /// Choose this emoji in the picker the app's emoji command opened, the
     /// way the picker's own grid would (docs/emoji-picker-plan.md §5).
     PickEmoji(String),
@@ -697,6 +702,7 @@ impl Step {
             | Step::SetText(t, _)
             | Step::Expect(t, _)
             | Step::ExpectImageSize(t, _)
+            | Step::SwipeAction(t, _)
             | Step::ExpectOrder(t, _)
             | Step::ExpectColumns(t, _)
             | Step::ExpectRows(t, _)
@@ -884,6 +890,7 @@ impl Step {
             Step::FileChoose(..) => false,
             Step::FileDialogGoto(..) => false,
             Step::CopyAsset(..) => false,
+            Step::SwipeAction(..) => false,
             Step::ExpectImageSize(..) => true,
             Step::ExpectSaveDialog(..) => true,
             Step::FileDialogName(..) => false,
@@ -1433,6 +1440,13 @@ pub trait Stage: Send + 'static {
     /// platform's own gesture route (right-click, long-press), so a
     /// following menu_activate resolves against the OPEN menu.
     fn context_open(&self, target: Target);
+    /// Run the row's context item `label` through its swipe. The default is
+    /// the context menu, the route where a backend lowers no swipe
+    /// (docs/swipe-actions-plan.md R1).
+    fn swipe_action(&self, target: Target, label: &str) {
+        self.context_open(target);
+        self.menu_activate(label);
+    }
     /// The top-level catalog count, read from the REAL materialized bar (or
     /// the phone overflow's group list) — never the scene model's copy.
     fn menu_count(&self) -> usize;
@@ -2420,6 +2434,12 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 Step::MenuActivate(path)
             }
             "context_open" => Step::ContextOpen(parse_target(rest.trim())?),
+            "swipe_action" => {
+                let (target, label) = rest.split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("swipe_action wants a row and a quoted item label: {line:?}")
+                })?;
+                Step::SwipeAction(parse_target(target)?, parse_string(label)?)
+            }
             "expect_menu" => {
                 let (path, tail) = parse_quoted_prefix(rest)
                     .map_err(|e| format!("expect_menu wants a quoted path and a state: {e}"))?;
@@ -4991,6 +5011,15 @@ fn run_with_log(
                 await_quiet();
                 let answered = crate::scene::answers();
                 stage.menu_activate(path);
+                await_answer(answered);
+                None
+            }
+            Step::SwipeAction(t, label) => {
+                // An action, silent like click: the item's own activation is
+                // the observable.
+                await_quiet();
+                let answered = crate::scene::answers();
+                stage.swipe_action(*t, label);
                 await_answer(answered);
                 None
             }

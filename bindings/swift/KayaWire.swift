@@ -24,7 +24,7 @@ public enum KayaValue: Hashable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0xb0dbd639210c2e5a
+let kayaSpecHash: UInt64 = 0xda99b50dff6ae96a
 
 /// A civil date as the wire's I64: year * 10000 + month * 100 + day.
 func kayaPackDate(_ year: Int, _ month: Int, _ day: Int) -> Int64 {
@@ -2572,6 +2572,16 @@ struct KayaTx {
         self.u32(UInt32(KAYA_MPROP_SYMBOL))
         self.u32(UInt32(KAYA_SOURCE_CONST))
         self.value(.i64(symbol))
+        self.end(kayaAt)
+    }
+
+    /// set_menu_prop with a constant swipe value.
+    mutating func setMenuSwipe(_ item: UInt64, _ swipe: Int64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_MENU_PROP))
+        self.u64(item)
+        self.u32(UInt32(KAYA_MPROP_SWIPE))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.i64(swipe))
         self.end(kayaAt)
     }
 

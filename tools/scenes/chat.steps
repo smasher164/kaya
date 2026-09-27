@@ -93,3 +93,10 @@ expect_file_dialog
 file_choose photo.jpg
 expect image@photo[u4] "800x600"
 expect_image_size image@photo[u4] "240x180"
+# C7: a conversation archives from its row. Android runs the item on a full
+# trailing swipe, Material's SwipeToDismissBox; Apple below the iOS 27 SDK,
+# Linux and Windows keep it in the row's context menu, which is where the
+# item always is (docs/swipe-actions-plan.md R1-R3).
+back
+swipe_action row@convo[alex] "Archive"
+expect_no_target button@open[alex]

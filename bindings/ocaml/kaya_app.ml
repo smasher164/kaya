@@ -3405,10 +3405,26 @@ let menu_prop_tail id ?enabled ?bind_enabled ?icon ?symbol () =
    occurrence (menu click OR its shortcut: ONE occurrence, one dispatch
    path). [~on_activate_node] is the template-node flavor: the copy's key
    path arrives first — the keys ARE the noun. *)
-let item ?shortcut ?enabled ?bind_enabled ?icon ?symbol ?primary ?role
+(* A context action's swipe on its row (docs/swipe-actions-plan.md §1): at
+   most one item per edge takes the full swipe; where a platform has no row
+   swipe the action stays in the context menu. *)
+module Swipe = struct
+  type t = Leading | Trailing | Leading_full | Trailing_full
+
+  let wire = function
+    | Leading -> Kaya_wire.swipe_leading
+    | Trailing -> Kaya_wire.swipe_trailing
+    | Leading_full -> Kaya_wire.swipe_leading_full
+    | Trailing_full -> Kaya_wire.swipe_trailing_full
+end
+
+let item ?shortcut ?enabled ?bind_enabled ?icon ?symbol ?primary ?role ?swipe
     ?on_activate ?on_activate_node ~label () =
   let tx = the_tx () in
   let id = alloc_menu_item Kaya_wire.menu_kind_action (Some label) in
+  Option.iter
+    (fun s -> emit tx (Kaya_wire.tx_set_menu_swipe id (Int64.of_int (Swipe.wire s))))
+    swipe;
   Option.iter (fun s -> emit tx (Kaya_wire.tx_set_menu_shortcut id s)) shortcut;
   Option.iter
     (fun (r : Menu_role.t) -> emit tx (Kaya_wire.tx_set_menu_role id (Menu_role.wire r)))

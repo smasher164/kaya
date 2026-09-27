@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0xb0dbd639210c2e5aL;
+    public static final long SPEC_HASH = 0xda99b50dff6ae96aL;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -151,6 +151,11 @@ public final class KayaWire {
     public static final int MPROP_SHORTCUT = 7;
     public static final int MPROP_ROLE = 8;
     public static final int MPROP_SYMBOL = 9;
+    public static final int MPROP_SWIPE = 10;
+    public static final int SWIPE_LEADING = 1;
+    public static final int SWIPE_TRAILING = 2;
+    public static final int SWIPE_LEADING_FULL = 3;
+    public static final int SWIPE_TRAILING_FULL = 4;
     public static final int SECTIONS_PRESENTATION_AUTO = 0;
     public static final int SECTIONS_PRESENTATION_BAR = 1;
     public static final int SECTIONS_PRESENTATION_SIDEBAR = 2;
@@ -2516,6 +2521,14 @@ public final class KayaWire {
         Enc b = begin(TX_KIND_SET_MENU_PROP);
         b.putLong(item).putInt(MPROP_SYMBOL).putInt(SOURCE_CONST);
         encodeValue(b, symbol);
+        return finish(b);
+    }
+
+    /** set_menu_prop with a constant swipe value. */
+    public static byte[] txSetMenuSwipe(long item, long swipe) {
+        Enc b = begin(TX_KIND_SET_MENU_PROP);
+        b.putLong(item).putInt(MPROP_SWIPE).putInt(SOURCE_CONST);
+        encodeValue(b, swipe);
         return finish(b);
     }
 
