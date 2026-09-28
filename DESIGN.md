@@ -1274,8 +1274,10 @@ The known normalization worklist:
   shape. The barrier reads the GUEST-AUTHORED axis (a stacked row's
   growers belong to the fold rule), walks each scroll's live subtree
   and each For's blueprint once, and names the widget, its parent, the
-  scroll and the remedy. Horizontal `grow` inside a row under a scroll
-  stays legal, bounded by the width (the portfolio's detail column).
+  scroll and the remedy. The rule follows the scroll's own `axis`
+  (docs/hscroll-plan.md): under a vertical scroll a row's `grow` stays
+  legal, bounded by the width (the portfolio's detail column), and under
+  a horizontal one a column's does, bounded by the height.
 - Spacing normalized to one default and one prop. Settled: 8 units
   between adjacent children on the main axis unless the container's
   `spacing` prop (F64, DIP, finite non-negative — nonsense dies at the

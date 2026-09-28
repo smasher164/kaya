@@ -1088,8 +1088,9 @@ class Widget(_Handle):
     def axis(self, mode: Axis | str) -> None:
         """Set this container's arrangement direction (see kaya.Axis;
         strings accepted) — the user-driven orientation toggle
-        (docs/adaptive-layout-plan.md D2). Row/column only. The widget
-        stays what its constructor made it."""
+        (docs/adaptive-layout-plan.md D2) — or the direction a scroll
+        scrolls (docs/hscroll-plan.md). The widget stays what its
+        constructor made it."""
         _records().append(wire.tx_set_axis(self.id, _axis_value(mode)))
 
     def spacing(self, gap: float) -> None:
@@ -4567,14 +4568,18 @@ def _set_grow(handle: _Handle, grow: float | None) -> None:
         _records().append(wire.tx_set_grow(handle.id, float(grow)))
 
 
-def scroll(grow: float | None = None, *, follows_end: bool = False) -> _Container:
-    """A vertical scroll viewport parenting EXACTLY ONE child. Give it
-    `grow` so the enclosing track CONSTRAINS it — an unconstrained
-    viewport hugs its content and nothing overflows. `follows_end` keeps
-    the end in view while the content grows, until the user scrolls away
-    (docs/follow-end-plan.md)."""
+def scroll(grow: float | None = None, *, follows_end: bool = False,
+           axis: Axis | str | None = None) -> _Container:
+    """A scroll viewport parenting EXACTLY ONE child. Give it `grow` so
+    the enclosing track CONSTRAINS it — an unconstrained viewport hugs its
+    content and nothing overflows. `axis` is the direction it scrolls,
+    vertical unless set (see kaya.Axis; strings accepted;
+    docs/hscroll-plan.md). `follows_end` keeps the end in view while the
+    content grows, until the user scrolls away (docs/follow-end-plan.md)."""
     handle = _widget(wire.KIND_SCROLL)
     _set_grow(handle, grow)
+    if axis is not None:
+        handle.axis(axis)
     if follows_end:
         _records().append(wire.tx_set_follows_end(handle.id, True))
     return _Container(handle)

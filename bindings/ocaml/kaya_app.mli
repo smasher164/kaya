@@ -892,6 +892,7 @@ val scroll :
   ?a11y_label_bind:string signal ->
   ?help:string ->
   ?help_bind:string signal ->
+  ?axis:axis ->
   ?follows_end:bool -> (unit -> widget) list -> unit -> widget
 
 (* [~stack_when] stacks this row's children vertically while the

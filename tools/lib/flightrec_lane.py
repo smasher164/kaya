@@ -1178,6 +1178,8 @@ class MacRecorder(LaneRecorder):
         """ONE window, the GUEST'S OWN, addressed by pid -> window id.
         No pid or no window means no shot and a sentence saying why —
         never a full-screen grab."""
+        if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+            return False
         if not shutil.which("screencapture"):
             return False
         winlist = self.winlist_bin()

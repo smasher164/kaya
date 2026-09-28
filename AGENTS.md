@@ -576,7 +576,11 @@ in docs/deferred.md.
    Java's and Swift's statics on `KayaApp`), and OCaml's string argument
    spelled `` `Text `` because `` `Str `` is the wire's own constructor and
    the boundary clause above refused it. Twenty-seven fake-stem negatives,
-   counts printed),
+   counts printed.
+   AND `axis` ON A SCROLL SINCE 2026-09-28 (docs/hscroll-plan.md §1): the
+   direction a scroll runs, spelled where each binding's scroll options
+   live in all nine, Haskell's attr `Along` because `Axis` is its Paint
+   constructor; fake-name and rename-in-a-copy negatives, counts printed),
    `tools/check-universal-props.py` (the lowering-side sibling: every
    backend applies the universal a11y props to every kind — Compose
    per-arm, SwiftUI's one wrapper unbypassed, GTK/WinUI's apply arm
@@ -670,7 +674,11 @@ in docs/deferred.md.
    `park_table_row` the command calls, and every `expect_scrolled_to`
    reading the layout's own geometry rather than the request, and a held
    request on GTK and WinUI landing only while it is still its container's
-   latest. 15 watched negatives, counts printed),
+   latest. AND A SIDEWAYS SCROLL'S NATIVE SWITCH since 2026-09-28
+   (docs/hscroll-plan.md §3): no scene sees a backend that keeps the vertical
+   switch, since GTK's vertical-only policy widened the window to the strip
+   and every verb still passed, and a shared scene may not read a window's
+   size; one cut per backend. 19 watched negatives, counts printed),
    `tools/check-search.py` (THE SEARCH FIELD CLEARS ONE WAY AND SAYS WHAT
    IT IS (docs/search-plan.md S5, S7). Clearing is one act: the field's
    affordance, Escape on a desktop and the harness's clear_search empty
@@ -824,7 +832,12 @@ in docs/deferred.md.
    serialization and diagnostic retention. Android's system timeline also retains
    native drag/drop and Kaya's matching events: three renderer cuts hold that
    history, because a missing Kaya callback does not prove Android sent no end.
-   Fifty-seven watched negatives, counts printed),
+   AND A MISSING PID NEVER PHOTOGRAPHS THE FRONTMOST WINDOW, since
+   2026-09-28: the mac window list read a pid of "None" as no filter and
+   shot_pid took the first window it listed, the maintainer's terminal
+   (docs/traps.md). Both halves refuse, the real binary is asked about
+   "None" on every mac run, and two cuts are watched.
+   Fifty-nine watched negatives, counts printed),
    `tools/check-diagnostics.py` (a why-not may not print a sentence it
    cannot NOT print. Any function named `*WhyNot`/`*why_not`/`*Reason`
    is read as a diagnostic by that name alone; one answer, or an answer

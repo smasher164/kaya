@@ -1,9 +1,18 @@
 # A scroll spans its parent's cross axis (DESIGN.md, ruled 2026-09-02);
 # expect_breadth is what holds it.
-expect_breadth scroll#0
-expect_overflow scroll#0
+expect_breadth scroll@rows
+expect_overflow scroll@rows
 expect label#0 "at top"
-scroll_end scroll#0
-expect_at_end scroll#0
+scroll_end scroll@rows
+expect_at_end scroll@rows
 click button#0
 expect label#0 "bottom clicked"
+# A scroll that runs sideways (docs/hscroll-plan.md): the same verbs read
+# its own axis.
+expect_breadth scroll@strip
+expect_overflow scroll@strip
+expect_at_start scroll@strip
+scroll_end scroll@strip
+expect_at_end scroll@strip
+click button@last
+expect label#0 "last card clicked"

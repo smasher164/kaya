@@ -1066,7 +1066,7 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         Prop::Align => matches!(kind, WidgetKind::Column | WidgetKind::Row),
         // The arrangement axis: the two constructor kinds are one node
         // this parameterizes (docs/adaptive-layout-plan.md D1).
-        Prop::Axis => matches!(kind, WidgetKind::Column | WidgetKind::Row),
+        Prop::Axis => matches!(kind, WidgetKind::Column | WidgetKind::Row | WidgetKind::Scroll),
         Prop::Filled => matches!(kind, WidgetKind::Column | WidgetKind::Row),
         Prop::FollowsEnd => kind == WidgetKind::Scroll,
         Prop::MaxLines => kind == WidgetKind::Textarea,
@@ -2384,7 +2384,7 @@ impl Scene {
                     Prop::Axis => {
                         let base = self.authored_axis.get(widget).copied().unwrap_or_else(|| {
                             match self.widgets.get(widget) {
-                                Some(WidgetKind::Column) => 1,
+                                Some(WidgetKind::Column | WidgetKind::Scroll) => 1,
                                 _ => 0,
                             }
                         });
@@ -5646,16 +5646,17 @@ impl Scene {
         false
     }
 
-    /// A live container's axis as the GUEST declared it: the creation kind,
-    /// or the guest's own `axis` write. A breakpoint flip is not read on
+    /// A live container's or scroll's axis as the GUEST declared it (true
+    /// for vertical): the creation kind, or the guest's own `axis` write; None
+    /// for anything that has no axis. A breakpoint flip is not read on
     /// purpose — a stacked row's growers are the fold rule's business (D7).
-    fn authored_vertical(&self, id: WidgetId) -> bool {
+    fn authored_vertical(&self, id: WidgetId) -> Option<bool> {
         let mode = self.authored_axis.get(&id).copied();
         match self.widgets.get(&id) {
-            Some(WidgetKind::Scroll) => true,
-            Some(WidgetKind::Column) => mode.unwrap_or(1) == 1,
-            Some(WidgetKind::Row) => mode.unwrap_or(0) == 1,
-            _ => false,
+            Some(WidgetKind::Scroll) => Some(mode.unwrap_or(1) == 1),
+            Some(WidgetKind::Column) => Some(mode.unwrap_or(1) == 1),
+            Some(WidgetKind::Row) => Some(mode.unwrap_or(0) == 1),
+            _ => None,
         }
     }
 
@@ -5673,15 +5674,16 @@ impl Scene {
             .collect();
         scrolls.sort_by_key(|id| id.0);
         for scroll in scrolls {
+            let along = self.authored_vertical(scroll);
             let mut stack = vec![scroll];
             while let Some(parent) = stack.pop() {
                 let Some(children) = self.children_of.get(&parent) else {
                     continue;
                 };
-                let vertical = self.authored_vertical(parent);
+                let runs_along = self.authored_vertical(parent) == along;
                 for child in children {
                     let weight = self.grow_weights.get(child).copied().unwrap_or(0.0);
-                    if vertical && weight > 0.0 {
+                    if runs_along && weight > 0.0 {
                         return Some(format!(
                             "kaya: grow {weight} on {child:?} ({:?}) has nothing to divide: \
                              its parent {parent:?} ({:?}) runs along the axis of scroll \
@@ -5694,10 +5696,11 @@ impl Scene {
                         ));
                     }
                     // A For's rows are its template bodies' roots, stamped
-                    // into a vertical container; read the blueprint once.
+                    // into its container; read the blueprint once.
                     for site in self.for_sites.values().filter(|s| s.container == *child) {
+                        let axes = (along, self.authored_vertical(*child));
                         for body in &site.bodies {
-                            if let Some(msg) = Self::template_grow_in_scroll(body, scroll, *child) {
+                            if let Some(msg) = Self::template_grow_in_scroll(body, scroll, *child, axes) {
                                 return Some(msg);
                             }
                         }
@@ -5710,10 +5713,15 @@ impl Scene {
     }
 
     /// The template half of `grow_in_scroll_message`: a body's roots are
-    /// children of the (vertical) For container; inside the body, a node's
-    /// parent is its own `AddChild`, and a nested For or When container is
-    /// vertical like the live one.
-    fn template_grow_in_scroll(body: &TplBody, scroll: WidgetId, container: WidgetId) -> Option<String> {
+    /// children of the For container, whose axis `axes.1` is; inside the
+    /// body, a node's parent is its own `AddChild`, and a nested For or When
+    /// container is vertical. `axes.0` is the scroll's own axis.
+    fn template_grow_in_scroll(
+        body: &TplBody,
+        scroll: WidgetId,
+        container: WidgetId,
+        axes: (Option<bool>, Option<bool>),
+    ) -> Option<String> {
         let mut kinds: HashMap<u64, WidgetKind> = HashMap::new();
         let mut axis: HashMap<u64, i64> = HashMap::new();
         let mut grow: HashMap<u64, f64> = HashMap::new();
@@ -5735,14 +5743,14 @@ impl Scene {
                 TplOp::For { node, bodies, .. } => {
                     kinds.insert(*node, WidgetKind::Column);
                     for inner in bodies {
-                        if let Some(msg) = Self::template_grow_in_scroll(inner, scroll, container) {
+                        if let Some(msg) = Self::template_grow_in_scroll(inner, scroll, container, axes) {
                             return Some(msg);
                         }
                     }
                 }
                 TplOp::When { node, body: inner, .. } => {
                     kinds.insert(*node, WidgetKind::Column);
-                    if let Some(msg) = Self::template_grow_in_scroll(inner, scroll, container) {
+                    if let Some(msg) = Self::template_grow_in_scroll(inner, scroll, container, axes) {
                         return Some(msg);
                     }
                 }
@@ -5750,10 +5758,9 @@ impl Scene {
             }
         }
         let vertical_node = |node: u64| match kinds.get(&node) {
-            Some(WidgetKind::Column) => axis.get(&node).copied().unwrap_or(1) == 1,
-            Some(WidgetKind::Row) => axis.get(&node).copied().unwrap_or(0) == 1,
-            Some(WidgetKind::Scroll) => true,
-            _ => false,
+            Some(WidgetKind::Column | WidgetKind::Scroll) => Some(axis.get(&node).copied().unwrap_or(1) == 1),
+            Some(WidgetKind::Row) => Some(axis.get(&node).copied().unwrap_or(0) == 1),
+            _ => None,
         };
         let mut nodes: Vec<u64> = grow.keys().copied().collect();
         nodes.sort();
@@ -5762,11 +5769,11 @@ impl Scene {
             if weight <= 0.0 {
                 continue;
             }
-            let (vertical, parent_desc) = match parent.get(&node) {
+            let (parent_axis, parent_desc) = match parent.get(&node) {
                 Some(p) => (vertical_node(*p), format!("template node {p} ({:?})", kinds[p])),
-                None => (true, format!("the For container {container:?}")),
+                None => (axes.1, format!("the For container {container:?}")),
             };
-            if vertical {
+            if parent_axis == axes.0 {
                 return Some(format!(
                     "kaya: grow {weight} on template node {node} ({:?}) has nothing to \
                      divide: it is stamped under {parent_desc}, which runs along the axis \
@@ -17276,6 +17283,88 @@ Destroy { id: WidgetId(9223372036854775809) }"#;
                 value: PropValue::Const(Value::F64(1.0)),
             },
             TxOp::TemplateEnd,
+            TxOp::AddChild { parent: WidgetId(2), child: WidgetId(3) },
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ]);
+    }
+
+    /// A horizontal scroll (docs/hscroll-plan.md §2): column 1 > scroll 2
+    /// (axis horizontal) > `inner` 3 > label 4 grown.
+    fn sideways(inner: WidgetKind) -> Vec<TxOp> {
+        vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+            TxOp::CreateWidget { id: WidgetId(2), kind: WidgetKind::Scroll },
+            TxOp::SetProperty {
+                widget: WidgetId(2),
+                prop: Prop::Axis,
+                value: PropValue::Const(Value::I64(crate::wire::AXIS_HORIZONTAL as i64)),
+            },
+            TxOp::CreateWidget { id: WidgetId(3), kind: inner },
+            TxOp::CreateWidget { id: WidgetId(4), kind: WidgetKind::Label },
+            TxOp::SetProperty {
+                widget: WidgetId(4),
+                prop: Prop::Grow,
+                value: PropValue::Const(Value::F64(1.0)),
+            },
+            TxOp::AddChild { parent: WidgetId(3), child: WidgetId(4) },
+            TxOp::AddChild { parent: WidgetId(2), child: WidgetId(3) },
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ]
+    }
+
+    #[test]
+    #[should_panic(expected = "has nothing to divide")]
+    fn a_rows_grow_under_a_horizontal_scroll_is_refused() {
+        Scene::new().apply(sideways(WidgetKind::Row));
+    }
+
+    #[test]
+    fn a_columns_grow_under_a_horizontal_scroll_is_legal() {
+        let mut scene = Scene::new();
+        scene.apply(sideways(WidgetKind::Column));
+        assert!(scene.grow_in_scroll_message().is_none());
+    }
+
+    /// A grown child whose parent has no axis at all is never refused, under
+    /// either axis: a label's child does not exist, but a labeled control's
+    /// does, and it is not a container.
+    #[test]
+    fn a_parent_with_no_axis_is_never_along_a_horizontal_scroll() {
+        let mut scene = Scene::new();
+        scene.apply(sideways(WidgetKind::Column));
+        assert_eq!(scene.authored_vertical(WidgetId(4)), None);
+        assert_eq!(scene.authored_vertical(WidgetId(2)), Some(false));
+    }
+
+    #[test]
+    #[should_panic(expected = "stamped under the For container")]
+    fn a_grown_template_root_in_a_row_under_a_horizontal_scroll_is_refused() {
+        Scene::new().apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+            TxOp::CreateWidget { id: WidgetId(2), kind: WidgetKind::Scroll },
+            TxOp::SetProperty {
+                widget: WidgetId(2),
+                prop: Prop::Axis,
+                value: PropValue::Const(Value::I64(crate::wire::AXIS_HORIZONTAL as i64)),
+            },
+            TxOp::CreateWidget { id: WidgetId(3), kind: WidgetKind::Row },
+            TxOp::CreateCollection { id: CollectionId(1), variants: vec![vec![ValueType::Str]] },
+            TxOp::CreateFor { id: 5, collection: CollectionId(1) },
+            TxOp::CreateWidget { id: WidgetId(10), kind: WidgetKind::Label },
+            TxOp::SetProperty {
+                widget: WidgetId(10),
+                prop: Prop::Grow,
+                value: PropValue::Const(Value::F64(1.0)),
+            },
+            TxOp::TemplateEnd,
+            TxOp::SetProperty {
+                widget: WidgetId(5),
+                prop: Prop::Axis,
+                value: PropValue::Const(Value::I64(crate::wire::AXIS_HORIZONTAL as i64)),
+            },
+            TxOp::AddChild { parent: WidgetId(3), child: WidgetId(5) },
             TxOp::AddChild { parent: WidgetId(2), child: WidgetId(3) },
             TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) },
             TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },

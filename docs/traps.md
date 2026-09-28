@@ -12885,3 +12885,50 @@ which a platform-started process reaches with no environment:
 `log stream --level debug --predicate 'subsystem == "dev.kaya"'` shows
 why the pump started and each notification's post, authorization, add and
 response.
+
+## A missing pid photographed the frontmost window (2026-09-28)
+
+`MacRecorder.shot_pid` asks tools/mac/flightrec-winlist.swift for the
+guest's window by pid and grabs that one window. A capture script handed it
+`None` (its guest had not started, because the interpreter failed to build),
+the window list parsed `Int("None")` as nil, which it read as NO FILTER, and
+listed every window; the first layer-0 window was the maintainer's terminal,
+and screencapture took it. The picture was deleted unviewed by anyone else.
+Any lane path that loses a pid would have done the same into a flight
+recorder bundle. The window list now refuses an argument that is not a
+positive pid (exit 2, a sentence), shot_pid refuses a non-int before it
+reaches screencapture, and check-flightrec asks the real binary about
+"None" on every mac run beside two watched cuts.
+
+## A sideways scroll under right to left: four platforms, three conventions (measured 2026-09-28)
+
+The strip starts at its right edge and ends at its left under ar-EG on
+every platform (docs/hscroll-plan.md §4); what each toolkit reports to say
+so differs, and a reader that forgets the direction passes both
+`expect_at_start` and `expect_at_end` at one position, which is what
+`tools/scenes/scrollrtl.steps` exists to catch.
+
+| backend | offset at the start | frames | what the arm does |
+|---|---|---|---|
+| SwiftUI | the content's right edge at the viewport's right | measured from the LEFT in RTL too | mirrors the reads, and `scrollTo`'s UnitPoint anchors are fixed sides: the end is `.leading`, a row is `.trailing` |
+| GTK | `hadjustment` value 0 is the content's LEFT edge; an RTL strip opens at value `upper - page` | left-origin | the verbs, scroll_to_row and follows_end swap which end counts as the start |
+| WinUI | `HorizontalOffset` 0 is the start (the right edge), `ScrollableWidth` the end | a mirrored element's origin is its RIGHT edge | no direction branch in the offsets |
+| Compose | `ScrollState` 0 is the start (right), `maxValue` the end | geometry read in root, mirrored by the layout direction | offsets need no arm; the geometry readers mirror |
+
+Found by the mac depth, where the first build's `scroll_end` did not move
+an Arabic strip and `expect_at_end` passed anyway (the start's right edge
+at the viewport's right edge is what "at end" measured left to right).
+
+## Two bundled legs cancelled each other's notification (2026-09-28)
+
+`tasks-rust-swiftui` failed a matrix with "the platform holds no delivered
+notification 1, wanted "Buy milk"". The unified log in its bundle named the
+cause: its reminder `kaya-1` was scheduled at 11:31:55 and removed pending at
+11:31:57.994 by a second tasks process (pid 84124, the `tasksrtl` leg), with
+`notify` and `badge` also running. Each leg has its own state home, but a
+notification belongs to the BUNDLE IDENTITY and its request id, and every
+.app the mac lane runs declares the one identity, so two bundled legs in the
+pool at once post and cancel each other's reminders. Earlier matrices passed
+on timing; a new leg moved the pool's schedule. validate-mac's leg worker now
+holds one lock around every leg whose argv runs a `.app`, and check-steps
+holds the lock with a watched cut.

@@ -128,6 +128,8 @@ LEGS = {
         # The task manager in Arabic (docs/compliance-plan.md §6): no drag,
         # no notification, so pooled where tasks-compose is exclusive.
         "tasksrtl-compose",
+        # The scroll guest's sideways strip in Arabic (docs/hscroll-plan.md §4).
+        "scrollrtl-compose",
         # And at twice the text size, the tasks screens and the format
         # guest (docs/compliance-plan.md §6; SCENE_TEXT_SCALE).
         "tasksbig-compose", "formatbig-compose",
@@ -177,7 +179,8 @@ LEGS = {
 # The locale a scene runs under, the knob the leg carries as an intent
 # extra (docs/compliance-plan.md §4); the reads ask the platform, never
 # this.
-SCENE_LOCALE = {"formatde": "de-DE", "formatar": "ar-EG", "tasksrtl": "ar-EG"}
+SCENE_LOCALE = {"formatde": "de-DE", "formatar": "ar-EG", "tasksrtl": "ar-EG",
+                "scrollrtl": "ar-EG"}
 
 # The text-scale knob a scene carries (docs/compliance-plan.md §2.1): the
 # forced Configuration's fontScale and the Density every sp reads.

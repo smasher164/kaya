@@ -8,7 +8,7 @@ expect label@count "60 messages"
 # The row of three plain buttons, whose captions a cell measured before its
 # text arrived would cut (docs/deferred.md, the WinUI button clip).
 expect_no_clipping
-expect_at_end scroll#0
+expect_at_end scroll@list
 click button@jump
 expect_scrolled_to column@messages m10
 click button@nowhere
@@ -16,4 +16,14 @@ expect_scrolled_to column@messages m10
 expect label@count "60 messages"
 click button@send
 expect label@count "61 messages"
-expect_at_end scroll#0
+expect_at_end scroll@list
+# A filmstrip that runs sideways (docs/hscroll-plan.md): it opens at its
+# leading end, a handler scrolls it to a frame, and a frame appended while
+# it shows its trailing end keeps that end in view (follows_end).
+expect_at_start scroll@strip
+click button@frame
+expect_scrolled_to column@frames f10
+scroll_end scroll@strip
+expect_at_end scroll@strip
+click button@add_frame
+expect_at_end scroll@strip

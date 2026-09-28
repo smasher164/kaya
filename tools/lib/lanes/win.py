@@ -310,6 +310,8 @@ ORDER = [
      # The task manager in Arabic (docs/compliance-plan.md §6): POOLED,
      # unlike tasks_rust — no drag, no notification, no relaunch.
      "tasksrtl_rust",
+     # The scroll guest's sideways strip in Arabic (docs/hscroll-plan.md §4).
+     "scrollrtl_rust",
      # THE RICH LABEL (docs/rich-text-plan.md §15). POOLED, unlike its
      # richtext neighbour: a label is read-only, so the scene clicks two
      # buttons and reads the runs back — no typed input, no composition, no
@@ -665,7 +667,8 @@ def launcher(leg):
 # GUEST_STEM one platform over): the launcher runs the guest's own file.
 GUEST_STEM = {"listdetail": "split", "formatde": "format", "formatar": "format",
               "taskspersist": "tasks", "links": "tasks", "tasksrtl": "tasks",
-              "tasksbig": "tasks", "formatbig": "format", "clock24": "format"}
+              "tasksbig": "tasks", "formatbig": "format", "clock24": "format",
+              "scrollrtl": "scroll"}
 
 
 def guest_stem(scene):

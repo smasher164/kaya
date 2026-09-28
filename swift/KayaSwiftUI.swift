@@ -746,6 +746,11 @@ final class KayaNode: Identifiable {
     var scrollViewportW = 0.0
     var scrollContentH = 0.0
     var scrollContentMaxY = 0.0
+    /// The horizontal twins (docs/hscroll-plan.md): a sideways scroll's
+    /// verbs read these where a vertical one reads the two above.
+    var scrollContentW = 0.0
+    var scrollContentMaxX = 0.0
+    var scrollContentMinX = 0.0
     /// Progress-only: the platform's activity mode (Value carries the
     /// determinate fraction).
     var indeterminate = false
@@ -1160,6 +1165,50 @@ var kayaPendingRowScrolls: Set<UInt64> = []
 /// nearest scroll ancestor's proxy, instantly (S6). A container with no
 /// scroll ancestor drops the request (S3); one whose tier or copy has not
 /// laid out yet keeps it.
+/// A scroll whose `axis` says horizontal (docs/hscroll-plan.md §1); unset,
+/// a scroll is vertical.
+func kayaScrollHorizontal(_ node: KayaNode) -> Bool {
+    node.kind == kindScroll && node.axis == 0
+}
+
+/// A sideways scroll under a right-to-left layout. SwiftUI measures frames
+/// from the LEFT and reads scrollTo's UnitPoint anchors as fixed sides
+/// either way, so the start is the right edge and the end the left
+/// (docs/hscroll-plan.md §4, measured 2026-09-28).
+func kayaScrollMirrored(_ node: KayaNode) -> Bool {
+    kayaScrollHorizontal(node) && MainActor.assumeIsolated { kayaLayoutDirectionWord() } == "rtl"
+}
+
+/// A scroll's (content extent, how far its content reaches toward the
+/// trailing end, viewport extent) along its own axis, as its readers
+/// recorded them: at the end the second equals the third.
+func kayaScrollAlong(_ node: KayaNode) -> (content: Double, end: Double, viewport: Double) {
+    if !kayaScrollHorizontal(node) {
+        return (node.scrollContentH, node.scrollContentMaxY, node.scrollViewportH)
+    }
+    let end = kayaScrollMirrored(node)
+        ? node.scrollViewportW - node.scrollContentMinX : node.scrollContentMaxX
+    return (node.scrollContentW, end, node.scrollViewportW)
+}
+
+/// How far the content's leading edge sits from the viewport's, along the
+/// scroll's axis and in the layout's direction: 0 at the start.
+func kayaScrollFromStart(_ node: KayaNode) -> Double {
+    if !kayaScrollHorizontal(node) {
+        return node.scrollContentMaxY - node.scrollContentH
+    }
+    return kayaScrollMirrored(node)
+        ? node.scrollViewportW - node.scrollContentMaxX : node.scrollContentMinX
+}
+
+/// Where scrollTo puts the content's trailing end, and a row's leading edge.
+func kayaScrollEndAnchor(_ node: KayaNode) -> UnitPoint {
+    !kayaScrollHorizontal(node) ? .bottom : (kayaScrollMirrored(node) ? .leading : .trailing)
+}
+func kayaScrollRowAnchor(_ node: KayaNode) -> UnitPoint {
+    !kayaScrollHorizontal(node) ? .top : (kayaScrollMirrored(node) ? .trailing : .leading)
+}
+
 func kayaTryScrollRow(_ node: KayaNode) {
     guard let request = node.scrollRowRequest else {
         kayaPendingRowScrolls.remove(node.id)
@@ -1203,7 +1252,7 @@ func kayaTryScrollRow(_ node: KayaNode) {
         kayaPendingRowScrolls.insert(node.id)
         return
     }
-    proxy.scrollTo(request.copy, anchor: .top)
+    proxy.scrollTo(request.copy, anchor: kayaScrollRowAnchor(scroll))
     node.scrollRowRequest = nil
     kayaPendingRowScrolls.remove(node.id)
 }
@@ -1237,12 +1286,22 @@ func kayaScrolledTo(_ node: KayaNode, _ key: String) -> String? {
     guard let scroll else { return "the container has no scroll ancestor" }
     guard let row = kayaNodeFrames[copy.id] else { return "row \"\(key)\" has no frame yet" }
     let viewport = scroll.scrollViewportGlobal
+    let along = kayaScrollAlong(scroll)
+    if kayaScrollHorizontal(scroll) {
+        let lead = kayaScrollMirrored(scroll)
+            ? viewport.maxX - row.maxX : row.minX - viewport.minX
+        if abs(lead) <= 2 { return nil }
+        let atEnd = abs(along.end - along.viewport) <= 2
+        if atEnd, row.minX >= viewport.minX - 2, row.maxX <= viewport.maxX + 2 { return nil }
+        return "row leading edge \(Int(lead))pt from the viewport's; content trailing edge "
+            + "\(Int(along.end)) vs viewport \(Int(along.viewport))"
+    }
     let top = row.minY - viewport.minY
     if abs(top) <= 2 { return nil }
-    let atEnd = abs(scroll.scrollContentMaxY - scroll.scrollViewportH) <= 2
+    let atEnd = abs(along.end - along.viewport) <= 2
     if atEnd, row.minY >= viewport.minY - 2, row.maxY <= viewport.maxY + 2 { return nil }
     return "row top \(Int(top))pt from the viewport's top; content bottom "
-        + "\(Int(scroll.scrollContentMaxY)) vs viewport \(Int(scroll.scrollViewportH))"
+        + "\(Int(along.end)) vs viewport \(Int(along.viewport))"
 }
 /// Grid cell leading edges by child node id, in the grid's own coordinate
 /// space (main actor): geometry, never the model's columns copy.
@@ -9026,7 +9085,7 @@ private func kayaRunScript(_ script: String) {
                         + "content=\(kayaTarget(parts[1], "scroll", kayaScene.scrolls)?.scrollContentH ?? -1) "
                         + "available=\(kayaAvailableSize) root=\(kayaRootSize)")
                     return kayaTarget(parts[1], "scroll", kayaScene.scrolls)
-                        .map { ($0.scrollContentH, $0.scrollViewportH) }
+                        .map { let a = kayaScrollAlong($0); return (a.content, a.viewport) }
                 }
                 // A TABLE TARGET READS ITS COLUMNS' AXIS (docs/tables-plan.md,
                 // ruled 2026-08-29): a table's rows already answer to
@@ -9066,7 +9125,9 @@ private func kayaRunScript(_ script: String) {
                     if let node = kayaTarget(parts[1], "scroll", kayaScene.scrolls),
                         let proxy = kayaScrollProxies[node.id]
                     {
-                        proxy.scrollTo("kaya-scroll-content-\(node.id)", anchor: .bottom)
+                        proxy.scrollTo(
+                            "kaya-scroll-content-\(node.id)",
+                            anchor: kayaScrollEndAnchor(node))
                         return
                     }
                     // The table arm, expect_overflow's rule: the columns.
@@ -9103,13 +9164,28 @@ private func kayaRunScript(_ script: String) {
                 } else {
                     observed.append("\(parts[1]) scrolled to \(key)")
                 }
+            case "expect_at_start":
+                // The twin of expect_at_end (docs/hscroll-plan.md §5), read in
+                // the layout's own direction.
+                let from = DispatchQueue.main.sync { () -> Double? in
+                    kayaTarget(parts[1], "scroll", kayaScene.scrolls).map { kayaScrollFromStart($0) }
+                }
+                if let from {
+                    if abs(from) <= 2 {
+                        observed.append("\(parts[1]) at start")
+                    } else {
+                        failures.append("\(parts[1]) not at start (content's leading edge \(Int(from))pt from the viewport's)")
+                    }
+                } else {
+                    failures.append("no such target \(parts[1])")
+                }
             case "expect_at_end":
                 // The content's bottom edge coincides with the
                 // viewport's (within two units) — read back from the
                 // viewport-space frame, never a model copy.
                 let got = DispatchQueue.main.sync { () -> (Double, Double)? in
                     kayaTarget(parts[1], "scroll", kayaScene.scrolls)
-                        .map { ($0.scrollContentMaxY, $0.scrollViewportH) }
+                        .map { let a = kayaScrollAlong($0); return (a.end, a.viewport) }
                 }
                 let wideEnd = got ?? DispatchQueue.main.sync { () -> (Double, Double)? in
                     guard kayaTarget(parts[1], "column", kayaScene.columns) != nil else { return nil }
@@ -9120,7 +9196,7 @@ private func kayaRunScript(_ script: String) {
                         observed.append("\(parts[1]) at end")
                     } else {
                         failures.append(
-                            "\(parts[1]) short of end (content bottom \(Int(reached)) vs viewport \(Int(edge)))")
+                            "\(parts[1]) short of end (content end \(Int(reached)) vs viewport \(Int(edge)))")
                     }
                 } else {
                     let isTable = DispatchQueue.main.sync {
@@ -16729,17 +16805,19 @@ func kayaPlatformLocaleTag() -> String {
 }
 
 /// THE SECOND CLAUSE (docs/flex-shrink-plan.md §4): the frame must lie
-/// inside the window across, and down unless a scroll carries it — a row
+/// inside the window across and down, except along the axis of a scroll that
+/// carries it (docs/hscroll-plan.md §2) — a row
 /// that placed its last cell past the window's edge is clipped with every
 /// label's height intact (the iOS task manager's Today row, 2026-09-24).
 @MainActor func kayaOffScreen(_ what: String, _ node: KayaNode) -> String? {
     guard let frames = kayaLabelWindowFrames[node.id]?.values.filter({ $0.width > 0 }),
         !frames.isEmpty, let room = kayaWindowRoom()
     else { return nil }
-    let inScroll = kayaInsideScroll(node.id)
+    let downScroll = kayaInsideScroll(node.id, sideways: false)
+    let acrossScroll = kayaInsideScroll(node.id, sideways: true)
     func past(_ frame: CGRect) -> Bool {
-        let across = frame.minX < -1 || frame.maxX > room.width + 1
-        let down = !inScroll && (frame.minY < -1 || frame.maxY > room.height + 1)
+        let across = !acrossScroll && (frame.minX < -1 || frame.maxX > room.width + 1)
+        let down = !downScroll && (frame.minY < -1 || frame.maxY > room.height + 1)
         return across || down
     }
     // One rendering inside the window is the one the user sees.
@@ -16802,11 +16880,11 @@ func kayaLongestWord(_ text: String, _ font: KayaPlatformFont) -> CGFloat {
 }
 
 /// Whether a node sits under one of the scene's scroll containers.
-@MainActor func kayaInsideScroll(_ id: UInt64) -> Bool {
+@MainActor func kayaInsideScroll(_ id: UInt64, sideways: Bool) -> Bool {
     func holds(_ node: KayaNode) -> Bool {
         node.children.contains { $0.id == id || holds($0) }
     }
-    return kayaScene.scrolls.contains { holds($0) }
+    return kayaScene.scrolls.contains { kayaScrollHorizontal($0) == sideways && holds($0) }
 }
 
 /// The font the clipping read measures with: the role's own size and weight
@@ -17894,39 +17972,56 @@ struct KayaRender: View {
             // as wide as its content, which left a 79pt pannable strip in a
             // 375pt window (docs/traps.md).
             let scrollSpans = flexVertical != nil && node.fill != false
+            let sideways = kayaScrollHorizontal(node)
             ScrollViewReader { proxy in
-                ScrollView(.vertical) {
+                ScrollView(sideways ? .horizontal : .vertical) {
                     if let content = node.children.first {
                         KayaRender(node: content)
                             // ON THE CONTENT, not around the ScrollView: a frame
                             // outside it widens only a wrapper, which reads as
                             // spanning while a pan moves nothing (2026-09-02).
-                            // Height stays the content's: it is what scrolls.
+                            // The extent along the axis stays the content's: it
+                            // is what scrolls; a sideways scroll's content spans
+                            // the viewport's height (docs/hscroll-plan.md §2).
                             .frame(
-                                maxWidth: (flexVertical == true && scrollSpans) ? .infinity : nil,
+                                maxWidth: (!sideways && flexVertical == true && scrollSpans) ? .infinity : nil,
+                                maxHeight: sideways ? .infinity : nil,
                                 alignment: .topLeading)
                             .background(
                                 GeometryReader { g in
                                     Color.clear
                                         .onAppear {
-                                            node.scrollContentH = g.size.height
-                                            node.scrollContentMaxY =
-                                                g.frame(in: .named("kaya-scroll-\(node.id)")).maxY
+                                            let f = g.frame(in: .named("kaya-scroll-\(node.id)"))
+                                            node.scrollContentH = f.height
+                                            node.scrollContentMaxY = f.maxY
+                                            node.scrollContentW = f.width
+                                            node.scrollContentMaxX = f.maxX
+                                            node.scrollContentMinX = f.minX
                                         }
                                         .onChange(of: g.frame(in: .named("kaya-scroll-\(node.id)"))) { old, f in
                                             node.scrollContentH = f.height
                                             node.scrollContentMaxY = f.maxY
+                                            node.scrollContentW = f.width
+                                            node.scrollContentMaxX = f.maxX
+                                            node.scrollContentMinX = f.minX
                                             kayaDrainRowScrolls()
                                             // docs/follow-end-plan.md §1: growth keeps
                                             // the end in view when the view sat at it
-                                            // BEFORE the growth.
-                                            if node.followsEnd, f.height > old.height + 0.5,
-                                                old.maxY <= node.scrollViewportH + kayaFollowSlack
-                                            {
+                                            // BEFORE the growth, along the scroll's axis.
+                                            let grew = sideways
+                                                ? f.width > old.width + 0.5 : f.height > old.height + 0.5
+                                            let wasAtEnd = !sideways
+                                                ? old.maxY <= node.scrollViewportH + kayaFollowSlack
+                                                : kayaScrollMirrored(node)
+                                                    ? old.minX >= -kayaFollowSlack
+                                                    : old.maxX <= node.scrollViewportW + kayaFollowSlack
+                                            if node.followsEnd, grew, wasAtEnd {
                                                 var t = Transaction()
                                                 t.disablesAnimations = true
                                                 withTransaction(t) {
-                                                    proxy.scrollTo("kaya-scroll-content-\(node.id)", anchor: .bottom)
+                                                    proxy.scrollTo(
+                                                        "kaya-scroll-content-\(node.id)",
+                                                        anchor: kayaScrollEndAnchor(node))
                                                 }
                                             }
                                         }
@@ -17935,6 +18030,10 @@ struct KayaRender: View {
                             .id("kaya-scroll-content-\(node.id)")
                     }
                 }
+                // A sideways scroll hugs its content's height unless it grows
+                // (docs/hscroll-plan.md §2); a ScrollView otherwise takes all
+                // the height it is offered.
+                .fixedSize(horizontal: false, vertical: sideways && node.grow == 0)
                 .coordinateSpace(name: "kaya-scroll-\(node.id)")
                 .background(
                     GeometryReader { g in

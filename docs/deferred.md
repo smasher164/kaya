@@ -2754,8 +2754,10 @@ unpicked.
   KEY: list-row layout scene, hugging control, grown entry,
   checkbox MinWidth, fixedSize, stamped row spans, hexpand,
   expect_not_taller, not_taller_than, listrow, expect_height_fits, height_fits
-- Horizontal scroll axis: an axis enum prop — decide when a scene
-  needs it (the scroll depth ledger's remaining item).
+- ~~Horizontal scroll axis: an axis enum prop — decide when a scene
+  needs it (the scroll depth ledger's remaining item).~~ CLOSED
+  2026-09-28 (docs/hscroll-plan.md): the `axis` prop a row and a column
+  take is legal on a scroll, on all five platforms and in nine bindings.
 - Command completion observability (awaitable commands — the Compose
   scrollToItem precedent); command payloads (a set_text command awaits
   an autofill-shaped artifact). Admission policy: each verb needs a

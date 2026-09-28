@@ -1010,6 +1010,17 @@ func (w Widget) FollowsEnd() Widget {
 	return w
 }
 
+// Axis sets this container's arrangement axis, or the direction this scroll
+// scrolls (vertical unless set; docs/hscroll-plan.md), at construction. Same
+// transaction discipline as Grow.
+func (w Widget) Axis(axis Axis) Widget {
+	if w.tx == nil || w.tx.closed {
+		panic("kaya: Axis on a widget outside its build transaction — use Tx.SetAxis inside a live transaction")
+	}
+	w.tx.SetAxis(w, axis)
+	return w
+}
+
 // SetMaxWidth bounds an image's width in points: the picture scales down to
 // fit, its shape kept, and never up (docs/photo-attach-plan.md §2).
 func (tx *Tx) SetMaxWidth(w Widget, points float64) {
@@ -1853,9 +1864,10 @@ func (tx *Tx) Row(body func()) Widget {
 	return tx.containerOf(KindRow, body)
 }
 
-// Scroll is a vertical scroll viewport over EXACTLY ONE child (the scene
-// rejects a second). Chain .Grow(1) so the enclosing track CONSTRAINS
-// it — an unconstrained viewport hugs its content and nothing overflows.
+// Scroll is a scroll viewport over EXACTLY ONE child (the scene
+// rejects a second), vertical unless chained .Axis(AxisHorizontal).
+// Chain .Grow(1) so the enclosing track CONSTRAINS it — an unconstrained
+// viewport hugs its content and nothing overflows.
 func (tx *Tx) Scroll(body func()) Widget {
 	return tx.containerOf(KindScroll, body)
 }

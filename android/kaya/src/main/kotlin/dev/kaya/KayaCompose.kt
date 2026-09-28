@@ -64,6 +64,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
@@ -889,15 +890,58 @@ suspend fun kayaScrollRow(node: KayaNode) {
         node.scrollRowRequest = null
         return
     }
+    val sideways = kayaScrollHorizontal(scroll)
     var frames = 0
-    while ((kayaNodeTops[copy] == null || kayaNodeTops[scroll.id] == null) && frames < 120) {
+    while (frames < 120 &&
+        (if (sideways) kayaCellLefts[copy] == null || kayaScrollBoxes[scroll.id] == null
+        else kayaNodeTops[copy] == null || kayaNodeTops[scroll.id] == null)
+    ) {
         withFrameNanos { }
         frames += 1
     }
-    val top = kayaNodeTops[copy] ?: return
-    val boxTop = kayaNodeTops[scroll.id] ?: return
-    scroll.scrollState.scrollTo((top - boxTop + scroll.scrollState.value).roundToInt())
+    val lead = if (sideways) {
+        kayaRowLead(scroll, copy) ?: return
+    } else {
+        val top = kayaNodeTops[copy] ?: return
+        val boxTop = kayaNodeTops[scroll.id] ?: return
+        top - boxTop
+    }
+    scroll.scrollState.scrollTo((lead + scroll.scrollState.value).roundToInt())
     node.scrollRowRequest = null
+}
+
+/** A scroll whose `axis` says horizontal (docs/hscroll-plan.md §1); unset,
+ *  a scroll is vertical. */
+fun kayaScrollHorizontal(node: KayaNode): Boolean =
+    node.kind == KayaCompose.KIND_SCROLL && node.axis == 0L
+
+/** Each scroll's viewport and its content's UNCLIPPED box in the root's
+ *  space, and whether the scroll was laid out right to left, as its render
+ *  arm last reported them (docs/hscroll-plan.md §4). */
+val kayaScrollBoxes = HashMap<Long, androidx.compose.ui.geometry.Rect>()
+val kayaScrollContents = HashMap<Long, androidx.compose.ui.geometry.Rect>()
+val kayaScrollRtl = HashMap<Long, Boolean>()
+
+/** A sideways scroll's hidden content before its viewport's leading edge
+ *  and past its trailing edge, in px along the reading direction: the
+ *  leading edge is the right one under right to left. Null before layout. */
+fun kayaScrollHidden(scroll: KayaNode): Pair<Float, Float>? {
+    val box = kayaScrollBoxes[scroll.id] ?: return null
+    val content = kayaScrollContents[scroll.id] ?: return null
+    return if (kayaScrollRtl[scroll.id] == true) {
+        Pair(content.right - box.right, box.left - content.left)
+    } else {
+        Pair(box.left - content.left, content.right - box.right)
+    }
+}
+
+/** How far a stamped copy's leading edge sits past a sideways scroll's
+ *  leading edge, along the reading direction, in px. */
+fun kayaRowLead(scroll: KayaNode, copy: Long): Float? {
+    val box = kayaScrollBoxes[scroll.id] ?: return null
+    val left = kayaCellLefts[copy]?.toFloat() ?: return null
+    val width = kayaMainExtents[copy]?.toFloat() ?: return null
+    return if (kayaScrollRtl[scroll.id] == true) box.right - (left + width) else left - box.left
 }
 
 /**
@@ -1757,7 +1801,8 @@ internal val kayaImageDrawn = HashMap<Long, Pair<Float, Float>>()
 
 /**
  * THE SECOND CLAUSE of `expect_no_clipping`: a widget whose bounds leave the
- * root across, or down unless a scroll carries it, is clipped whatever its
+ * root across or down, except along the axis of a scroll that carries it
+ * (docs/hscroll-plan.md §2), is clipped whatever its
  * own height says (the iOS task manager's Today row, 2026-09-24).
  */
 internal fun kayaOffScreen(what: String, node: KayaNode): String? {
@@ -1765,14 +1810,17 @@ internal fun kayaOffScreen(what: String, node: KayaNode): String? {
     if (rect.width <= 0f) return null
     val room = kayaContentSize
     if (room.width <= 0 || room.height <= 0) return null
-    val across = rect.left < -1f || rect.right > room.width + 1f
-    var inScroll = false
+    var downScroll = false
+    var acrossScroll = false
     var at: Long? = KayaSceneModel.parents[node.id]
     while (at != null) {
-        if (KayaSceneModel.scrolls.any { it.id == at }) { inScroll = true; break }
+        KayaSceneModel.scrolls.firstOrNull { it.id == at }?.let {
+            if (kayaScrollHorizontal(it)) acrossScroll = true else downScroll = true
+        }
         at = KayaSceneModel.parents[at]
     }
-    val down = !inScroll && (rect.top < -1f || rect.bottom > room.height + 1f)
+    val across = !acrossScroll && (rect.left < -1f || rect.right > room.width + 1f)
+    val down = !downScroll && (rect.top < -1f || rect.bottom > room.height + 1f)
     if (!across && !down) return null
     return "$what ${kayaDebugQuoted(node.text)} spans ${Math.round(rect.left)}...${Math.round(rect.right)}px " +
         "across and ${Math.round(rect.top)}...${Math.round(rect.bottom)}px down, past its " +
@@ -4722,6 +4770,19 @@ object KayaCompose {
         val copy = node.children.firstOrNull { tableStamp(it.tag)?.keys == listOf(key) }
             ?: return "no realized row keyed \"$key\" among ${node.children.size} children"
         val scroll = kayaScrollAncestor(node) ?: return "the container has no scroll ancestor"
+        if (kayaScrollHorizontal(scroll)) {
+            val lead = kayaRowLead(scroll, copy.id) ?: return "row \"$key\" has no placement yet"
+            if (kotlin.math.abs(lead) <= 2f) return null
+            val (_, after) = kayaScrollHidden(scroll)
+                ?: return "the scroll box has no placement yet"
+            val boxWidth = kayaScrollBoxes[scroll.id]?.width ?: 0f
+            val rowWidth = kayaMainExtents[copy.id]?.toFloat() ?: 0f
+            if (kotlin.math.abs(after) <= 2f && lead >= -2f && lead + rowWidth <= boxWidth + 2f) {
+                return null
+            }
+            return "row leading edge ${lead.toInt()}px from the box's; " +
+                "${after.toInt()}px of content past its trailing edge"
+        }
         val rowTop = kayaNodeTops[copy.id] ?: return "row \"$key\" has no placement yet"
         val rowHeight = kayaNodeHeights[copy.id] ?: 0f
         val boxTop = kayaNodeTops[scroll.id] ?: return "the scroll box has no placement yet"
@@ -9716,13 +9777,56 @@ object KayaCompose {
                             observed.add("${parts[1]} scrolled to $key")
                         }
                     }
+                    "expect_at_start" -> {
+                        // The twin of expect_at_end (docs/hscroll-plan.md
+                        // §5): a sideways scroll reads its content's box
+                        // against the viewport's in the layout's direction.
+                        val spec = parts.getOrNull(1) ?: ""
+                        val off = onUi(activity) {
+                            val node = target(spec, "scroll", KayaSceneModel.scrolls)
+                            when {
+                                node == null -> null
+                                !kayaScrollHorizontal(node) -> {
+                                    val st = node.scrollState
+                                    if (st.value <= 2) "" else "offset ${st.value} of ${st.maxValue}"
+                                }
+                                else -> {
+                                    val hidden = kayaScrollHidden(node)
+                                    when {
+                                        hidden == null -> "no placement yet"
+                                        kotlin.math.abs(hidden.first) <= 2f -> ""
+                                        else -> "content's leading edge ${hidden.first.toInt()}px " +
+                                            "past the viewport's; offset ${node.scrollState.value} " +
+                                            "of ${node.scrollState.maxValue}"
+                                    }
+                                }
+                            }
+                        }
+                        when (off) {
+                            null -> failures.add("no such target $spec")
+                            "" -> observed.add("$spec at start")
+                            else -> failures.add("$spec not at start ($off)")
+                        }
+                    }
                     "expect_at_end" -> {
                         val spec = parts.getOrNull(1) ?: ""
-                        val st = onUi(activity) {
-                            target(spec, "scroll", KayaSceneModel.scrolls)?.scrollState
+                        val scroll = onUi(activity) {
+                            target(spec, "scroll", KayaSceneModel.scrolls)
+                                ?.let { Triple(kayaScrollHorizontal(it), kayaScrollHidden(it), it.scrollState) }
                         }
-                        val axis = if (st != null) null else columnsAxis(activity, spec)
+                        val sideways = scroll?.takeIf { it.first }?.let { Pair(it.second, it.third) }
+                        val st = scroll?.takeIf { !it.first }?.third
+                        val axis =
+                            if (st != null || sideways != null) null else columnsAxis(activity, spec)
+                        val after = sideways?.first?.second
                         when {
+                            sideways != null && after != null && kotlin.math.abs(after) <= 2f ->
+                                observed.add("$spec at end")
+                            sideways != null -> failures.add(
+                                "$spec short of end (" +
+                                    (after?.let { "${it.toInt()}px of content past the trailing edge; " }
+                                        ?: "no placement yet; ") +
+                                    "offset ${sideways.second.value} of ${sideways.second.maxValue})")
                             st != null && st.maxValue - st.value <= 2 ->
                                 observed.add("$spec at end")
                             st != null -> failures.add(
@@ -13980,17 +14084,45 @@ private fun KayaRenderCore(
                     }
                 }
             }
-            // The vertical scroll viewport over its ONE child (the
-            // scene enforces the count): verticalScroll over the
-            // node's own ScrollState — the toolkit's real scrolling
-            // machinery, which the runner's verbs read and drive.
+            // The scroll viewport over its ONE child (the scene enforces
+            // the count), along the node's axis over its own ScrollState —
+            // the toolkit's real scrolling machinery, which the runner's
+            // verbs read and drive. Its value counts from the reading
+            // direction's start under right to left too (docs/hscroll-plan.md §4).
+            // A sideways scroll hugs its content's height unless something
+            // gives it one, and then its content spans it
+            // (docs/hscroll-plan.md §2).
+            val sideways = kayaScrollHorizontal(node)
+            val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
+            val viewport = boxFill.then(a11y).onGloballyPositioned {
+                val at = it.positionInRoot()
+                kayaNodeTops[node.id] = at.y
+                kayaNodeHeights[node.id] = it.size.height.toFloat()
+                kayaScrollBoxes[node.id] = androidx.compose.ui.geometry.Rect(
+                    at, androidx.compose.ui.geometry.Size(
+                        it.size.width.toFloat(), it.size.height.toFloat()))
+                kayaScrollRtl[node.id] = rtl
+            }
             Box(
-                boxFill.then(a11y).onGloballyPositioned {
-                    kayaNodeTops[node.id] = it.positionInRoot().y
-                    kayaNodeHeights[node.id] = it.size.height.toFloat()
-                }.verticalScroll(node.scrollState)
+                if (sideways) {
+                    viewport.horizontalScroll(node.scrollState)
+                } else {
+                    viewport.verticalScroll(node.scrollState)
+                },
+                propagateMinConstraints = sideways,
             ) {
-                node.children.firstOrNull()?.let { KayaRender(it) }
+                node.children.firstOrNull()?.let {
+                    Box(
+                        Modifier.onGloballyPositioned { c ->
+                            kayaScrollContents[node.id] = androidx.compose.ui.geometry.Rect(
+                                c.positionInRoot(), androidx.compose.ui.geometry.Size(
+                                    c.size.width.toFloat(), c.size.height.toFloat()))
+                        },
+                        propagateMinConstraints = sideways,
+                    ) {
+                        KayaRender(it)
+                    }
+                }
             }
         }
         KayaCompose.KIND_COLUMN, KayaCompose.KIND_ROW -> KayaFilledContent(node) {

@@ -2377,6 +2377,108 @@ if len(fake) != len(REPLY_SURFACES):
                   f"reply patterns fired for a spelling that exists nowhere)")
 
 
+
+# --- A SCROLL'S AXIS, in all nine (docs/hscroll-plan.md §1, §6) ------
+# Every binding reached `axis` through its dynamic-path setter before the
+# horizontal scroll, so the prop was legal everywhere and spelled where a
+# scroll's own options live nowhere but Rust. Each row reads that site:
+# chained where follows_end is chained, a keyword, argument, labelled
+# argument or option where it is one, an Attr in Haskell, and, where the
+# option is a declaration, the line applying it too. HASKELL'S WORD IS
+# `Along`: its Paint type already holds the constructor `Axis`.
+SCROLL_AXIS_SURFACES = [
+    ("rust", "crates/kaya/src/app.rs", [
+        r"pub fn {0}\(self, axis: Axis\) -> Self"]),
+    ("python", "bindings/python/kaya/__init__.py", [
+        r"^def scroll\([^)]*\b{0}: Axis \| str \| None = None\)",
+        r"handle\.axis\({0}\)"]),
+    ("go", "bindings/go/app.go", [
+        r"func \(w Widget\) {0}\(axis Axis\) Widget"]),
+    ("csharp", "bindings/csharp/KayaApp.cs", [
+        r"public T Scroll<T>\([^)]*Axis\? {0} = null\)",
+        r"if \({0} is Axis a\) SetAxis\(c, a\)"]),
+    ("java", "bindings/java/dev/kaya/KayaApp.java", [
+        r"public Widget {0}\(Axis axis\)"]),
+    ("swift", "bindings/swift/KayaApp.swift", [
+        r"public func scroll<R>\([^)]*\b{0}: KayaAxis\? = nil",
+        r"if let {0} \{{ setAxis\(w, {0}\) \}}"]),
+    ("haskell", "bindings/haskell/KayaApp.hs", [
+        r"{0} :: Axis -> Attr 'BoxW",
+        r"applyAttr \({0} a\) w = setAxis w a"]),
+    ("ocaml", "bindings/ocaml/kaya_app.ml", [
+        r"^let scroll [^=]*\?{0} \?\(follows_end",
+        r"Option\.iter \(fun a -> set_axis w a\) {0};"]),
+    ("js", "bindings/js/kaya/index.ts", [
+        r"type ScrollOptions = GrowOption & \{{[^}}]*\b{0}\?: AxisValue \| AxisName;",
+        r"if \(opts\.{0} !== undefined\) handle\.axis\(opts\.{0}\)"]),
+]
+SCROLL_AXIS_NAMES = {"rust": "axis", "python": "axis", "go": "Axis",
+                     "csharp": "axis", "java": "axis", "swift": "axis",
+                     "haskell": "Along", "ocaml": "axis", "js": "axis"}
+
+
+def check_scroll_axis(fake_name=None, findings=None, text_for=None):
+    global status
+    for lang, rel, templates in SCROLL_AXIS_SURFACES:
+        for template in templates:
+            pat = template.format(fake_name or SCROLL_AXIS_NAMES[lang])
+            text = text_for(lang, rel) if text_for else read_rel(rel)
+            if not grep_e(pat, text):
+                msg = (f"check-sugar-surface: {lang} cannot spell `axis` where "
+                       f"its scroll's options live (wanted /{pat}/ in {rel})")
+                if findings is None:
+                    print(msg)
+                    status = 1
+                else:
+                    findings.append(msg)
+
+
+check_scroll_axis()
+fake = []
+check_scroll_axis("kayaFakeScrollAxis", findings=fake)
+_axis_want = sum(len(ts) for _, _, ts in SCROLL_AXIS_SURFACES)
+print(f"check-sugar-surface: fake scroll-axis spellings fired {len(fake)}/{_axis_want}")
+if len(fake) != _axis_want:
+    selftest_exit(f"check-sugar-surface: self-test failed ({len(fake)}/{_axis_want} "
+                  f"scroll-axis patterns fired for a name that exists nowhere)")
+
+# RENAME-IN-A-COPY, per pattern: the name inside the pattern's own match is
+# mangled in a copy of that one binding's file and exactly one finding is
+# demanded, so a pattern that also matches a second site elsewhere is a
+# failed negative.
+_axis_cuts = 0
+for _lang, _rel, _templates in SCROLL_AXIS_SURFACES:
+    _name = SCROLL_AXIS_NAMES[_lang]
+    for _template in _templates:
+        _real = read_rel(_rel)
+        _pat = _template.format(_name).replace("[[:space:]]", "[ \\t]")
+        _m = re.search(_pat, _real, re.M)
+        if _m is None:
+            selftest_exit(f"check-sugar-surface: scroll-axis cut found no match "
+                          f"for /{_pat}/ in {_rel} to cut")
+        _span = _m.group(0)
+        _mangled, _n = sub_count(rf"\b{re.escape(_name)}\b", "kayaCutAxis", _span)
+        print(f"check-sugar-surface: scroll-axis cut {_lang} /{_template}/: "
+              f"{_n} substitution(s)")
+        if _n == 0:
+            selftest_exit(f"check-sugar-surface: self-test failed (the {_lang} "
+                          f"scroll-axis cut applied nothing)")
+        _copy = _real[:_m.start()] + _mangled + _real[_m.end():]
+        _found = []
+        check_scroll_axis(
+            findings=_found,
+            text_for=lambda lang, rel, _c=_copy, _r=_rel: _c if rel == _r else read_rel(rel))
+        if len(_found) != 1 or _lang not in _found[0]:
+            selftest_exit(f"check-sugar-surface: self-test failed (the {_lang} "
+                          f"scroll-axis cut gave {len(_found)} finding(s), wanted "
+                          f"exactly one naming {_lang})")
+        if read_rel(_rel) != (ROOT / _rel).read_text(encoding="utf-8"):
+            selftest_exit(f"check-sugar-surface: self-test failed ({_rel} "
+                          f"changed on disk under the scroll-axis cut)")
+        _axis_cuts += 1
+print(f"check-sugar-surface: scroll-axis cuts watched red {_axis_cuts}/{_axis_want}")
+
+
 # --- THE SIZE-POLICY SURFACE, in all nine ---------------------------
 # WHAT A CANVAS DOES WITH A TRACK THAT IS NOT ITS VIEWBOX
 # (docs/canvas-plan.md §3.2.1), invisible to every sweep above for the
@@ -6012,7 +6114,7 @@ def csharp_facade_probe():
     run("csharp-twin-reader",
         src.replace("sealed class TableItemRow\n",
                     "sealed class TableItemRowGone\n")
-        if n == 1 else src, n, "typed-row reader found only 10")
+        if n == 1 else src, n, "typed-row reader found only 11")
     return "\n".join(lines)
 
 

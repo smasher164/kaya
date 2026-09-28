@@ -74,6 +74,8 @@ RUST_SCENES = [
     # The task manager in Arabic, and at twice the text size, and the
     # format guest at twice it (docs/compliance-plan.md §6; SCENE_TEXT_SCALE).
     "tasksrtl", "tasksbig", "formatbig",
+    # The scroll guest's sideways strip in Arabic (docs/hscroll-plan.md §4).
+    "scrollrtl",
     # The format guest under the 24-hour clock (SCENE_CLOCK).
     "clock24",
     # A row wider than its window (docs/flex-shrink-plan.md §6).
@@ -277,11 +279,12 @@ def swift_scene(entry):
 RUST_EXAMPLE = {"listdetail": "split", "taskspersist": "tasks",
                 "links": "tasks", "formatde": "format", "formatar": "format",
                 "tasksrtl": "tasks", "tasksbig": "tasks", "formatbig": "format",
-                "clock24": "format"}
+                "clock24": "format", "scrollrtl": "scroll"}
 
 # The locale a scene runs under, the knob the leg carries
 # (docs/compliance-plan.md §4); the reads ask the platform, never this.
-SCENE_LOCALE = {"formatde": "de-DE", "formatar": "ar-EG", "tasksrtl": "ar-EG"}
+SCENE_LOCALE = {"formatde": "de-DE", "formatar": "ar-EG", "tasksrtl": "ar-EG",
+                "scrollrtl": "ar-EG"}
 
 # The text-scale knob a scene carries (docs/compliance-plan.md §2.1): the
 # window's content size category nearest the factor.

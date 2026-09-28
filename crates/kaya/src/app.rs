@@ -1751,6 +1751,13 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
         self
     }
 
+    /// This container's arrangement axis, or the direction this scroll
+    /// scrolls — [`Tx::axis`] chained.
+    pub fn axis(self, axis: Axis) -> Self {
+        self.tx.axis(self.id, axis);
+        self
+    }
+
     /// This container filled with a platform tint — [`Tx::filled`] chained.
     pub fn filled(self, tint: Tint) -> Self {
         self.tx.filled(self.id, tint);
@@ -2758,8 +2765,10 @@ impl<'a> Tx<'a> {
     }
 
     /// A container's arrangement axis (the creation kind's own is the
-    /// default). Containers only, and the widget stays addressable by its
-    /// CREATION kind whatever the axis says today. See [`Prop::Axis`].
+    /// default), or the direction a scroll scrolls (vertical unless set;
+    /// docs/hscroll-plan.md). Containers and scrolls only, and the widget
+    /// stays addressable by its CREATION kind whatever the axis says today.
+    /// See [`Prop::Axis`].
     pub fn axis(&mut self, widget: WidgetId, axis: Axis) {
         self.set(widget, Prop::Axis, axis.wire());
     }

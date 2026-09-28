@@ -544,6 +544,10 @@ pub enum Step {
     /// (within two device units) — read back from the toolkit, never a
     /// model copy.
     ExpectAtEnd(Target),
+    /// The scroll's content starts at its viewport's leading edge, read in
+    /// the layout's own direction (docs/hscroll-plan.md §5): the twin that
+    /// tells a right-to-left start from an end.
+    ExpectAtStart(Target),
     /// Drive the select's REAL selection path to the given option index —
     /// through the toolkit's own change route, so the native handler
     /// emits value_changed. An action, silent like click; `expect
@@ -695,6 +699,7 @@ impl Step {
             | Step::ExpectOverflow(t)
             | Step::ScrollEnd(t)
             | Step::ExpectAtEnd(t)
+            | Step::ExpectAtStart(t)
             | Step::ExpectScrolledTo(t, _)
             | Step::ClearSearch(t)
             | Step::ContextOpen(t)
@@ -937,6 +942,7 @@ impl Step {
             Step::ExpectOverflow { .. } => true,
             Step::ScrollEnd { .. } => false,
             Step::ExpectAtEnd { .. } => true,
+            Step::ExpectAtStart { .. } => true,
             Step::ExpectScrolledTo { .. } => true,
             Step::Choose { .. } => false,
             Step::ExpectGridColumns { .. } => true,
@@ -1411,6 +1417,11 @@ pub trait Stage: Send + 'static {
     /// two device units): the empty string when it does, otherwise a
     /// description (failure text only).
     fn scroll_at_end(&self, target: Target) -> String;
+    /// Whether the content's LEADING edge coincides with the viewport's,
+    /// along the scroll's own axis and in the layout's own direction (the
+    /// right edge under a right-to-left locale): the empty string when it
+    /// does, otherwise a description (failure text only).
+    fn scroll_at_start(&self, target: Target) -> String;
     /// Whether the For in `target` stands scrolled to the row keyed `key`
     /// (docs/scroll-to-plan.md S7): the row's top at the viewport's top
     /// within two device units, or the row wholly inside a viewport at its
@@ -2444,6 +2455,13 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
             "expect_overflow" => Step::ExpectOverflow(parse_target(rest.trim())?),
             "scroll_end" => Step::ScrollEnd(parse_target(rest.trim())?),
             "expect_at_end" => Step::ExpectAtEnd(parse_target(rest.trim())?),
+            "expect_at_start" => {
+                let target = parse_target(rest.trim())?;
+                if target.kind != TargetKind::Scroll {
+                    return Err(format!("expect_at_start wants a scroll target: {line:?}"));
+                }
+                Step::ExpectAtStart(target)
+            }
             "expect_scrolled_to" => {
                 // The row key's grammar is scroll_to_row's: one key, quoted
                 // only when it needs to be.
@@ -4851,6 +4869,14 @@ fn run_with_log(
                     }))
                 }
             }
+            Step::ExpectAtStart(t) => Some(poll(|| {
+                let off = stage.scroll_at_start(*t);
+                if off.is_empty() {
+                    Ok(format!("{} at start", target_spec(t)))
+                } else {
+                    Err(format!("{} not at start ({off})", target_spec(t)))
+                }
+            })),
             Step::ExpectScrolledTo(t, key) => {
                 if !matches!(t.kind, TargetKind::Column | TargetKind::Row) {
                     Some(Err(format!("{t:?} is not a container a For is mounted in")))
@@ -6601,6 +6627,9 @@ mod tests {
         fn scroll_at_end(&self, _: Target) -> String {
             String::new()
         }
+        fn scroll_at_start(&self, _: Target) -> String {
+            String::new()
+        }
         fn scrolled_to(&self, _: Target, _: &str) -> String {
             String::new()
         }
@@ -7552,6 +7581,9 @@ mod tests {
         fn scroll_at_end(&self, _: Target) -> String {
             String::new()
         }
+        fn scroll_at_start(&self, _: Target) -> String {
+            String::new()
+        }
         fn scrolled_to(&self, _: Target, _: &str) -> String {
             String::new()
         }
@@ -7890,6 +7922,9 @@ mod tests {
         }
         fn scroll_end(&self, _: Target) {}
         fn scroll_at_end(&self, _: Target) -> String {
+            String::new()
+        }
+        fn scroll_at_start(&self, _: Target) -> String {
             String::new()
         }
         fn scrolled_to(&self, _: Target, _: &str) -> String {

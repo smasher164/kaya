@@ -3421,17 +3421,19 @@ fn off_screen(
     let x0 = if rtl { room_w - f64::from(origin.X) - w } else { f64::from(origin.X) };
     let y0 = f64::from(origin.Y);
     let (x1, y1) = (x0 + w, y0 + h);
-    let across = x0 < -1.0 || x1 > room_w + 1.0;
-    let mut in_scroll = false;
+    // Excused along the axis of any ScrollViewer that carries it
+    // (docs/hscroll-plan.md §2), read off that viewer's own bars.
+    let (mut carried_across, mut carried_down) = (false, false);
     let mut parent = element.Parent().ok();
     while let Some(p) = parent {
-        if windows_core::Interface::cast::<ScrollViewer>(&p).is_ok() {
-            in_scroll = true;
-            break;
+        if let Ok(viewer) = windows_core::Interface::cast::<ScrollViewer>(&p) {
+            carried_across |= viewer.HorizontalScrollBarVisibility()? != ScrollBarVisibility::Disabled;
+            carried_down |= viewer.VerticalScrollBarVisibility()? != ScrollBarVisibility::Disabled;
         }
         parent = windows_core::Interface::cast::<FrameworkElement>(&p).ok().and_then(|f| f.Parent().ok());
     }
-    let down = !in_scroll && (y0 < -1.0 || y1 > room_h + 1.0);
+    let across = !carried_across && (x0 < -1.0 || x1 > room_w + 1.0);
+    let down = !carried_down && (y0 < -1.0 || y1 > room_h + 1.0);
     Ok((across || down).then(|| {
         format!(
             "{what} {text:?} spans {}...{}px across and {}...{}px down, past its {room_w}x{room_h}px window",
@@ -4205,38 +4207,105 @@ fn scroll_ancestor(element: &UIElement) -> windows_core::Result<Option<ScrollVie
 /// just-inserted row read -1372), while the content's layout is what
 /// UpdateLayout settles. The row's height and the viewer ride along; None
 /// without a scrolled ancestor.
+/// Along a sideways viewer the reading is the row's LEADING edge and its
+/// width, in the content's own flow direction (docs/hscroll-plan.md §2).
 fn row_top_in_content(element: &UIElement) -> windows_core::Result<Option<(f64, f64, ScrollViewer)>> {
     let Some(viewer) = scroll_ancestor(element)? else { return Ok(None) };
     viewer.UpdateLayout()?;
     let content: UIElement = windows_core::Interface::cast(&viewer.Content()?)?;
     let at = element.TransformToVisual(&content)?.TransformPoint(Point { X: 0.0, Y: 0.0 })?;
     let fe: FrameworkElement = windows_core::Interface::cast(element)?;
-    Ok(Some((f64::from(at.Y), fe.ActualHeight()?, viewer)))
+    Ok(Some(if viewer_sideways(&viewer)? {
+        (f64::from(at.X), fe.ActualWidth()?, viewer)
+    } else {
+        (f64::from(at.Y), fe.ActualHeight()?, viewer)
+    }))
+}
+
+/// A scroll whose `axis` is horizontal (docs/hscroll-plan.md §1), read back
+/// off the viewer's own bars rather than a copy of the prop.
+fn viewer_sideways(viewer: &ScrollViewer) -> windows_core::Result<bool> {
+    Ok(viewer.VerticalScrollBarVisibility()? == ScrollBarVisibility::Disabled
+        && viewer.HorizontalScrollBarVisibility()? != ScrollBarVisibility::Disabled)
+}
+
+/// A viewer's (offset, scrollable, viewport, extent) along one axis; the
+/// horizontal offset counts from the reading start under RightToLeft too
+/// (docs/traps.md, a sideways scroll under right to left).
+fn scroll_along(viewer: &ScrollViewer, sideways: bool) -> windows_core::Result<(f64, f64, f64, f64)> {
+    Ok(if sideways {
+        (viewer.HorizontalOffset()?, viewer.ScrollableWidth()?, viewer.ViewportWidth()?, viewer.ExtentWidth()?)
+    } else {
+        (viewer.VerticalOffset()?, viewer.ScrollableHeight()?, viewer.ViewportHeight()?, viewer.ExtentHeight()?)
+    })
+}
+
+/// A scroll's axis (docs/hscroll-plan.md §1): the mode and bar along it
+/// enabled, the cross ones disabled, so the content is arranged at the
+/// viewport's cross extent (§2).
+fn set_scroll_axis(viewer: &ScrollViewer, sideways: bool) -> windows_core::Result<()> {
+    let (along, across) = (
+        (ScrollMode::Enabled, ScrollBarVisibility::Visible),
+        (ScrollMode::Disabled, ScrollBarVisibility::Disabled),
+    );
+    let (h, v) = if sideways { (along, across) } else { (across, along) };
+    viewer.SetHorizontalScrollMode(h.0)?;
+    viewer.SetHorizontalScrollBarVisibility(h.1)?;
+    viewer.SetVerticalScrollMode(v.0)?;
+    viewer.SetVerticalScrollBarVisibility(v.1)
+}
+
+/// ChangeView along one axis, animation off.
+fn change_view_along(viewer: &ScrollViewer, sideways: bool, offset: f64) -> windows_core::Result<bool> {
+    let at = offset_ref(offset)?;
+    if sideways {
+        viewer.ChangeViewWithOptionalAnimation(&at, None::<&IReference<f64>>, None::<&IReference<f32>>, true)
+    } else {
+        viewer.ChangeViewWithOptionalAnimation(None::<&IReference<f64>>, &at, None::<&IReference<f32>>, true)
+    }
 }
 
 /// ChangeView is the REAL scrolling API (scroll_end's rule), animation
-/// off (S6); the viewer clamps at ScrollableHeight, S2's clamp at the end.
+/// off (S6); the viewer clamps at its scrollable extent, S2's clamp at the end.
 fn scroll_element_to_top(element: &UIElement) -> windows_core::Result<()> {
     let Some((top, height, viewer)) = row_top_in_content(element)? else {
         scroll_note(format_args!("no ScrollViewer ancestor: nothing to scroll"));
         return Ok(());
     };
+    let sideways = viewer_sideways(&viewer)?;
+    let (offset, scrollable, viewport, extent) = scroll_along(&viewer, sideways)?;
     let want = top;
     scroll_note(format_args!(
-        "row content top={top} height={height}; viewer offset={} viewport={} scrollable={} extent={} \
-         -> want {want}",
-        viewer.VerticalOffset()?,
-        viewer.ViewportHeight()?,
-        viewer.ScrollableHeight()?,
-        viewer.ExtentHeight()?
+        "row content lead={top} extent={height} sideways={sideways}; viewer offset={offset} \
+         viewport={viewport} scrollable={scrollable} extent={extent} -> want {want}"
     ));
-    let moved = viewer.ChangeViewWithOptionalAnimation(
-        None::<&IReference<f64>>,
-        &offset_ref(want.max(0.0))?,
-        None::<&IReference<f32>>,
-        true,
-    )?;
-    scroll_note(format_args!("ChangeView answered {moved}; offset now {}", viewer.VerticalOffset()?));
+    let moved = change_view_along(&viewer, sideways, want.max(0.0))?;
+    scroll_note(format_args!(
+        "ChangeView answered {moved}; offset now {}",
+        scroll_along(&viewer, sideways)?.0
+    ));
+    Ok(())
+}
+
+/// A scroll verb's reading beside where the viewer's and the content's
+/// origins land in the window's own space (origin x, width), so a red leg's
+/// trace shows which physical edge the offset put in view.
+#[cfg(feature = "harness")]
+fn scroll_reading_note(verb: &str, viewer: &ScrollViewer, sideways: bool) -> windows_core::Result<()> {
+    let (offset, scrollable, viewport, extent) = scroll_along(viewer, sideways)?;
+    let placed = |element: &UIElement| -> windows_core::Result<(f32, f64)> {
+        let fe: FrameworkElement = element.cast()?;
+        let at = element.TransformToVisual(None::<&UIElement>)?.TransformPoint(Point { X: 0.0, Y: 0.0 })?;
+        Ok((at.X, fe.ActualWidth()?))
+    };
+    let content: UIElement = viewer.Content()?.cast()?;
+    scroll_note(format_args!(
+        "{verb}: sideways={sideways} rtl={} offset={offset} scrollable={scrollable} viewport={viewport} \
+         extent={extent}; origin x, width in window: viewer {:?} content {:?}",
+        viewer.FlowDirection()? == FlowDirection::RightToLeft,
+        placed(&viewer.cast()?)?,
+        placed(&content)?
+    ));
     Ok(())
 }
 
@@ -14690,9 +14759,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 }
                 WidgetKind::Scroll => {
                     let viewer = ScrollViewer::new()?;
-                    viewer.SetHorizontalScrollMode(ScrollMode::Disabled)?;
-                    viewer.SetHorizontalScrollBarVisibility(ScrollBarVisibility::Disabled)?;
-                    viewer.SetVerticalScrollMode(ScrollMode::Enabled)?;
+                    set_scroll_axis(&viewer, false)?;
                     core.scrolls.push(viewer.clone());
                     NativeWidget::Scroll(viewer)
                 }
@@ -16244,23 +16311,32 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     }
                     if on {
                         let weak = viewer.downgrade()?;
+                        // Along the viewer's axis as it stands at each pass, so an
+                        // axis written after follows_end is followed too.
+                        // An extent read before the viewer is loaded is no
+                        // baseline (NaN): content that arrives with the first
+                        // layout is where the scroll opens, not growth past an
+                        // empty end (the scrollto strip opens at its start).
+                        let baseline = |viewer: &ScrollViewer| -> windows_core::Result<f64> {
+                            Ok(if viewer.IsLoaded()? {
+                                scroll_along(viewer, viewer_sideways(viewer)?)?.3
+                            } else {
+                                f64::NAN
+                            })
+                        };
                         let last = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(
-                            viewer.ExtentHeight()?.to_bits(),
+                            baseline(viewer)?.to_bits(),
                         ));
                         let follow = EventHandler::<windows_core::IInspectable>::new(move |_, _| {
                             let Some(viewer) = weak.upgrade() else { return Ok(()) };
-                            let extent = viewer.ExtentHeight()?;
+                            let sideways = viewer_sideways(&viewer)?;
+                            let (offset, scrollable, viewport, _) = scroll_along(&viewer, sideways)?;
+                            let extent = baseline(&viewer)?;
                             let old = f64::from_bits(
                                 last.swap(extent.to_bits(), std::sync::atomic::Ordering::Relaxed),
                             );
-                            let bottom = viewer.VerticalOffset()? + viewer.ViewportHeight()?;
-                            if extent > old && bottom >= old - FOLLOW_SLACK {
-                                viewer.ChangeViewWithOptionalAnimation(
-                                    None::<&IReference<f64>>,
-                                    &offset_ref(viewer.ScrollableHeight()?)?,
-                                    None::<&IReference<f32>>,
-                                    true,
-                                )?;
+                            if extent > old && offset + viewport >= old - FOLLOW_SLACK {
+                                change_view_along(&viewer, sideways, scrollable)?;
                             }
                             Ok(())
                         });
@@ -16582,6 +16658,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     // the window inset too.
                     core.container_insets.insert(id, pad);
                     stamp_container_padding(core, id)?;
+                }
+                (NativeWidget::Scroll(viewer), Prop::Axis, Value::I64(v)) => {
+                    set_scroll_axis(viewer, v == 0)?;
                 }
                 (NativeWidget::Column(grid) | NativeWidget::Row(grid), Prop::Axis, Value::I64(v)) => {
                     // The axis-state pass (docs/adaptive-layout-plan.md
@@ -19751,20 +19830,22 @@ fn container_id(core: &CoreState, t: crate::harness::Target) -> Option<u64> {
     })
 }
 
-/// THE AXIS THE THREE SCROLL VERBS DRIVE, decided by the target's KIND: a
-/// `scroll` target's vertical one, a TABLE target's horizontal one, so no
-/// verb needs an axis word (docs/tables-plan.md, the 2026-08-29 overflow
-/// ruling).
+/// THE AXIS THE SCROLL VERBS DRIVE, so no verb needs an axis word: a TABLE
+/// target's horizontal one (docs/tables-plan.md, the 2026-08-29 overflow
+/// ruling), a `scroll` target's own (docs/hscroll-plan.md §2). The answer
+/// is (viewer, sideways, the word a failure names).
 #[cfg(feature = "harness")]
 fn scroll_axis(
     core: &CoreState,
     t: crate::harness::Target,
-) -> Option<(ScrollViewer, bool)> {
+) -> Option<(ScrollViewer, bool, &'static str)> {
     if matches!(t.kind, crate::harness::TargetKind::Column) {
-        return table_of(core, t, |table| (table.host.clone(), true));
+        return table_of(core, t, |table| (table.host.clone(), true, "columns"));
     }
     let i = crate::harness::try_resolve(t.index, core.scrolls.len())?;
-    Some((core.scrolls[i].clone(), false))
+    let viewer = core.scrolls[i].clone();
+    let sideways = viewer_sideways(&viewer).ok()?;
+    Some((viewer, sideways, "content"))
 }
 
 /// A table's stamped rows in the order the TOOLKIT places them — by
@@ -24175,7 +24256,7 @@ impl crate::harness::Stage for WinUiStage {
 
     fn scroll_overflow(&self, t: crate::harness::Target) -> String {
         Self::on_ui_read(move |core| {
-            let Some((viewer, columns)) = scroll_axis(core, t) else {
+            let Some((viewer, sideways, word)) = scroll_axis(core, t) else {
                 return Ok("<no such target>".to_string());
             };
             // Measure/arrange are lazy; force them or the first read
@@ -24184,49 +24265,29 @@ impl crate::harness::Stage for WinUiStage {
             viewer.UpdateLayout()?;
             // The toolkit's own metrics: the scrollable extent IS the
             // overflow (extent minus viewport).
-            if columns {
-                Ok(if viewer.ScrollableWidth()? > 2.0 {
-                    String::new()
-                } else {
-                    format!(
-                        "columns {} in viewport {}",
-                        viewer.ExtentWidth()?,
-                        viewer.ViewportWidth()?
-                    )
-                })
+            let (_, scrollable, viewport, extent) = scroll_along(&viewer, sideways)?;
+            Ok(if scrollable > 2.0 {
+                String::new()
             } else {
-                Ok(if viewer.ScrollableHeight()? > 2.0 {
-                    String::new()
-                } else {
-                    format!(
-                        "content {} in viewport {}",
-                        viewer.ExtentHeight()?,
-                        viewer.ViewportHeight()?
-                    )
-                })
-            }
+                format!("{word} {extent} in viewport {viewport}")
+            })
         })
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
     fn scroll_end(&self, t: crate::harness::Target) {
         Self::on_ui(move |core| {
-            let Some((viewer, columns)) = scroll_axis(core, t) else {
+            let Some((viewer, sideways, _)) = scroll_axis(core, t) else {
                 panic!("kaya: scroll_end on {t:?}, which scrolls nowhere");
             };
             viewer.UpdateLayout()?;
             // The REAL scrolling API: ChangeView is what scrollbars
-            // and touch panning drive. The columns' arm takes the
-            // ANIMATION-FREE overload, because the header travels on
+            // and touch panning drive. The horizontal arm takes the
+            // ANIMATION-FREE overload, because a table's header travels on
             // the layout pass this call causes (`table_columns_track`)
             // and an animated glide would leave it behind per frame.
-            if columns {
-                viewer.ChangeViewWithOptionalAnimation(
-                    &offset_ref(viewer.ScrollableWidth()?)?,
-                    None::<&IReference<f64>>,
-                    None::<&IReference<f32>>,
-                    true,
-                )?;
+            if sideways {
+                change_view_along(&viewer, true, viewer.ScrollableWidth()?)?;
             } else {
                 viewer.ChangeView(
                     None::<&IReference<f64>>,
@@ -24254,22 +24315,22 @@ impl crate::harness::Stage for WinUiStage {
                 return Ok(format!("row {key:?} is not realized"));
             };
             let element = widget.identity_element()?;
-            let Some((content_top, height, viewer)) = row_top_in_content(&element)? else {
+            let Some((content_lead, extent, viewer)) = row_top_in_content(&element)? else {
                 return Ok("the row has no ScrollViewer ancestor".to_string());
             };
-            let top = content_top - viewer.VerticalOffset()?;
-            if top.abs() <= 2.0 {
+            let sideways = viewer_sideways(&viewer)?;
+            let (offset, scrollable, viewport, _) = scroll_along(&viewer, sideways)?;
+            let lead = content_lead - offset;
+            if lead.abs() <= 2.0 {
                 return Ok(String::new());
             }
-            let viewport = viewer.ViewportHeight()?;
-            let at_end = viewer.ScrollableHeight()? - viewer.VerticalOffset()? <= 2.0;
-            if at_end && top >= -2.0 && top + height <= viewport + 2.0 {
+            let at_end = scrollable - offset <= 2.0;
+            if at_end && lead >= -2.0 && lead + extent <= viewport + 2.0 {
                 return Ok(String::new());
             }
             Ok(format!(
-                "row top {top} from the viewport's top (content {content_top}); offset {} of {}",
-                viewer.VerticalOffset()?,
-                viewer.ScrollableHeight()?
+                "row leading edge {lead} from the viewport's (content {content_lead}); offset {offset} \
+                 of {scrollable}"
             ))
         })
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
@@ -24277,31 +24338,36 @@ impl crate::harness::Stage for WinUiStage {
 
     fn scroll_at_end(&self, t: crate::harness::Target) -> String {
         Self::on_ui_read(move |core| {
-            let Some((viewer, columns)) = scroll_axis(core, t) else {
+            let Some((viewer, sideways, word)) = scroll_axis(core, t) else {
                 return Ok("<no such target>".to_string());
             };
             viewer.UpdateLayout()?;
-            if columns {
-                let short = viewer.ScrollableWidth()? - viewer.HorizontalOffset()?;
-                return Ok(if short.abs() <= 2.0 {
-                    String::new()
-                } else {
-                    format!(
-                        "columns stand at {} of {}",
-                        viewer.HorizontalOffset()?,
-                        viewer.ScrollableWidth()?
-                    )
-                });
-            }
-            let short = viewer.ScrollableHeight()? - viewer.VerticalOffset()?;
-            Ok(if short.abs() <= 2.0 {
+            let (offset, scrollable, viewport, extent) = scroll_along(&viewer, sideways)?;
+            scroll_reading_note("at_end", &viewer, sideways)?;
+            Ok(if (scrollable - offset).abs() <= 2.0 {
                 String::new()
             } else {
                 format!(
-                    "content bottom {} vs viewport {}",
-                    viewer.VerticalOffset()? + viewer.ViewportHeight()?,
-                    viewer.ExtentHeight()?
+                    "{word} stands at {offset} of {scrollable}; its trailing edge {} vs extent {extent}",
+                    offset + viewport
                 )
+            })
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
+    }
+
+    fn scroll_at_start(&self, t: crate::harness::Target) -> String {
+        Self::on_ui_read(move |core| {
+            let Some((viewer, sideways, word)) = scroll_axis(core, t) else {
+                return Ok("<no such target>".to_string());
+            };
+            viewer.UpdateLayout()?;
+            let (offset, scrollable, _, _) = scroll_along(&viewer, sideways)?;
+            scroll_reading_note("at_start", &viewer, sideways)?;
+            Ok(if offset.abs() <= 2.0 {
+                String::new()
+            } else {
+                format!("{word} stands at {offset} of {scrollable} from its leading edge")
             })
         })
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))

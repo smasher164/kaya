@@ -2350,14 +2350,16 @@ let column ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help
   container ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?align ?inset ?filled Kaya_wire.kind_column
     children
 
-(* A vertical scroll viewport over EXACTLY ONE child (the signature
-   says so; the scene enforces it too). Pass [~grow] so the enclosing
-   track CONSTRAINS it — an unconstrained viewport hugs its content
-   and nothing overflows. *)
+(* A scroll viewport over EXACTLY ONE child (the signature says so; the
+   scene enforces it too). Pass [~grow] so the enclosing track CONSTRAINS
+   it — an unconstrained viewport hugs its content and nothing overflows.
+   [~axis] is the direction it scrolls, vertical unless set
+   (docs/hscroll-plan.md). *)
 (* [~follows_end] keeps the end in view while the content grows, until the
    user scrolls away from it (docs/follow-end-plan.md). *)
-let scroll ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?(follows_end = false) children () =
+let scroll ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?axis ?(follows_end = false) children () =
   let w = container ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind Kaya_wire.kind_scroll children () in
+  Option.iter (fun a -> set_axis w a) axis;
   let (Widget id) = w in
   if follows_end then emit (the_tx ()) (Kaya_wire.tx_set_follows_end id true);
   w

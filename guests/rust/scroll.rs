@@ -5,6 +5,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     #[derive(Clone, Copy)]
     enum Msg {
         BottomClicked,
+        LastCardClicked,
     }
 
     let msgs = kaya::Messages::<Msg>::new();
@@ -26,7 +27,22 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                         msgs.on_click(bottom, Msg::BottomClicked);
                     });
                 })
-                .grow(1.0);
+                .grow(1.0)
+                .a11y_id("rows");
+                // A strip wider than the window, scrolled sideways
+                // (docs/hscroll-plan.md), addressed as scroll@strip.
+                tx.scroll(|tx| {
+                    tx.row(|tx| {
+                        for i in 1..=19 {
+                            let caption = tx.signal(format!("card {i}"));
+                            tx.label(caption);
+                        }
+                        let last = tx.button("last card").a11y_id("last").id();
+                        msgs.on_click(last, Msg::LastCardClicked);
+                    });
+                })
+                .axis(kaya::Axis::Horizontal)
+                .a11y_id("strip");
             })
             .id();
         tx.mount(root);
@@ -37,6 +53,9 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         match msg {
             Msg::BottomClicked => ctx.apply(|tx| {
                 tx.write(status, "bottom clicked");
+            }),
+            Msg::LastCardClicked => ctx.apply(|tx| {
+                tx.write(status, "last card clicked");
             }),
         }
     }

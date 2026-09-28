@@ -3349,6 +3349,19 @@ public final class KayaApp {
             return this;
         }
 
+        /** This container's arrangement axis, or the direction this scroll
+         * scrolls (vertical unless set; docs/hscroll-plan.md):
+         * tx.scroll(s -> {...}).axis(Axis.HORIZONTAL). */
+        public Widget axis(Axis axis) {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: axis on a widget outside its build transaction"
+                    + " — use Tx.setAxis inside a live transaction");
+            }
+            tx.setAxis(this, axis);
+            return this;
+        }
+
         /** This image's bound in points at construction: the picture scales
          * down to fit, its shape kept, never up (docs/photo-attach-plan.md §2). */
         public Widget maxWidth(double points) {
@@ -5443,8 +5456,9 @@ public final class KayaApp {
             return containerOf(KayaWire.KIND_ROW, body);
         }
 
-        /** A vertical scroll viewport over EXACTLY ONE child (declare
-         * it in the body; the scene rejects a second). Chain .grow(1)
+        /** A scroll viewport over EXACTLY ONE child (declare it in the
+         * body; the scene rejects a second), vertical unless chained
+         * .axis(Axis.HORIZONTAL). Chain .grow(1)
          * so the enclosing track CONSTRAINS it — an unconstrained
          * viewport hugs its content and nothing overflows. */
         public Widget scroll(java.util.function.Consumer<Widget> body) {

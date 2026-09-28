@@ -1152,7 +1152,7 @@ export class Widget extends Handle {
 
   /** This container's arrangement direction (kaya.Axis or its name) —
    * the user-driven orientation toggle (docs/adaptive-layout-plan.md
-   * D2). Row/column only. */
+   * D2) — or the direction a scroll scrolls (docs/hscroll-plan.md). */
   axis(mode: AxisValue | AxisName): this {
     this._live("axis()");
     records().push(wire.tx_set_axis(this.id, axisValue(mode)));
@@ -4019,18 +4019,21 @@ function setGrow(handle: Handle, opts: GrowOption): void {
   if (opts.grow !== undefined) records().push(wire.tx_set_grow(handle.id, Number(opts.grow)));
 }
 
-/** A vertical scroll viewport parenting EXACTLY ONE child. Give it `grow`
- * so the enclosing track CONSTRAINS it. */
+/** A scroll viewport parenting EXACTLY ONE child. Give it `grow` so the
+ * enclosing track CONSTRAINS it. */
 export type ScrollOptions = GrowOption & {
   /** Keep the end in view while the content grows, until the user scrolls
    * away (docs/follow-end-plan.md). */
   followsEnd?: boolean;
+  /** The direction it scrolls, vertical unless set (docs/hscroll-plan.md). */
+  axis?: AxisValue | AxisName;
 };
 
 export function scroll<T = void>(optsOrBody?: ScrollOptions | ((scroll: Widget) => T), body?: (scroll: Widget) => T): T {
   const [opts, run] = optsAndOptionalBody<ScrollOptions, Widget, T>(optsOrBody, body);
   const handle = widget(wire.KIND_SCROLL);
   setGrow(handle, opts);
+  if (opts.axis !== undefined) handle.axis(opts.axis);
   if (opts.followsEnd) records().push(wire.tx_set_follows_end(handle.id, true));
   return new Container(handle).run(run);
 }

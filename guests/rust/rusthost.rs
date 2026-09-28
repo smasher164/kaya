@@ -179,7 +179,8 @@ fn app(ctx: kaya::AppCtx) {
         Ok("split") => split::app(ctx),
         // Two SCRIPTS, one app: this host cannot perform a resize.
         Ok("listdetail") => split::app(ctx),
-        Ok("scroll") => scroll::app(ctx),
+        // And its sideways strip under KAYA_LOCALE=ar-EG (tools/scenes/scrollrtl.steps).
+        Ok("scroll") | Ok("scrollrtl") => scroll::app(ctx),
         Ok("scrollto") => scrollto::app(ctx),
         Ok("progress") => progress::app(ctx),
         Ok("select") => select::app(ctx),

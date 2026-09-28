@@ -61,6 +61,7 @@ WINUI = "crates/kaya/src/winui/mod.rs"
 GUEST_PS1 = "tools/guest/flightrec.ps1"
 FOCUS_RING = "tools/linux/focus-ring.py"
 HAND = "tools/run-leg.py"
+WINLIST = "tools/mac/flightrec-winlist.swift"
 
 # The recorder class whose body IS each python lane's collect path.
 RECORDERS = {"mac": "MacRecorder", "windows": "WinRecorder",
@@ -73,7 +74,7 @@ UNIVERSAL = ("leg-log", "verb-trace", "shot")
 def sources():
     return {rel: gate.read(rel) for rel in
             (LANE_PY, LANE_SH, LINUX, IOS, ANDROID, WIN,
-             STEPS, WINUI, GUEST_PS1, FOCUS_RING, HAND)}
+             STEPS, WINUI, GUEST_PS1, FOCUS_RING, HAND, WINLIST)}
 
 
 def py_block(text, name):
@@ -728,6 +729,42 @@ def windows_recording_diagnostic(src, directory):
     return found
 
 
+def census_frontmost(src):
+    """A MISSING PID NEVER PHOTOGRAPHS THE FRONTMOST WINDOW (docs/traps.md,
+    2026-09-28): the window list read `Int("None")` as no filter and listed
+    every window, and shot_pid took the first, which was the human's
+    terminal. Both halves refuse now, the shot before it reaches
+    screencapture."""
+    found = []
+    shot = py_block(src[LANE_PY], "shot_pid")
+    guard = shot.find("if not isinstance(pid, int)")
+    grab = shot.find('"screencapture"')
+    if guard < 0 or (grab >= 0 and guard > grab):
+        found.append("mac: shot_pid does not refuse a pid that is not a positive "
+                     "integer before it reaches screencapture")
+    if 'is not a pid")' not in src[WINLIST] or "exit(2)" not in src[WINLIST]:
+        found.append("mac: flightrec-winlist does not refuse an argument that is "
+                     "not a pid, so a missing pid lists every window")
+    return found
+
+
+def winlist_refuses_nonsense():
+    """The real binary, asked about "None": it must exit nonzero and list
+    no window. Built by the recorder's own builder (content-hashed)."""
+    import subprocess
+    from flightrec_lane import winlist_bin
+    binary = winlist_bin(pathlib.Path(__file__).resolve().parent.parent)
+    if not binary:
+        return ["mac: the window list did not build, so its refusal is unverified"]
+    got = subprocess.run([binary, "None"], capture_output=True, text=True,
+                         encoding="utf-8", errors="replace", check=False)
+    if got.returncode == 0 or "win=" in got.stdout:
+        return [f"mac: flightrec-winlist None exited {got.returncode} and listed "
+                f"{got.stdout.count('win=')} window(s)"]
+    print(f"check-flightrec: flightrec-winlist None refused: {got.stdout.strip()}")
+    return []
+
+
 def mac_power_checks(src, echo=False):
     scope = {"re": re}
     exec(compile(py_block(src[LANE_PY], "mac_power_history"), LANE_PY, "exec"), scope)
@@ -829,6 +866,7 @@ CENSUSES = (("sections", census_sections), ("skip writers", census_skips),
             ("guest clock", census_guest_clock),
             ("linux focus ring", census_focus_ring),
             ("hand run", census_hand_run), ("iOS SDK stamp", census_ios_stamp),
+            ("no frontmost shot", census_frontmost),
             ("Android history", census_android_history))
 TABLE = declared(REAL)
 gate.counted("lanes declaring a bundle shape", list(TABLE), floor=5)
@@ -839,6 +877,9 @@ for label, fn in CENSUSES:
         gate.finding(line, at=label)
 for line in android_report_checks(REAL, echo=True):
     gate.finding(line, at="Android report renderers")
+if sys.platform == "darwin":
+    for line in winlist_refuses_nonsense():
+        gate.finding(line, at="no frontmost shot")
 for line in mac_power_checks(REAL, echo=True):
     gate.finding(line, at="Mac power history")
 for line in ios_recording_recovery(REAL):
@@ -851,6 +892,18 @@ def doctored(rel, pattern, repl, label, *, flags=re.M, want=1):
                            want=want)
     return src
 
+
+# The frontmost-shot refusals, each removed from a copy.
+nf1 = doctored(LANE_PY,
+               r"^        if not isinstance\(pid, int\) or isinstance\(pid, bool\) "
+               r"or pid <= 0:\n            return False\n",
+               "", "NF1 removed shot_pid's pid refusal")
+gate.negative("NF1 shot_pid taking a missing pid",
+              lambda: census_frontmost(nf1), want="does not refuse a pid")
+nf2 = doctored(WINLIST, r'is not a pid"\)', 'is odd")',
+               "NF2 removed the window list's refusal sentence")
+gate.negative("NF2 the window list reading nonsense as no filter",
+              lambda: census_frontmost(nf2), want="does not refuse an argument")
 
 # N1: a section the collect stops writing.
 n1 = doctored(LANE_PY, r'self\.section\(bundle, "unified-log", \[',
@@ -1137,6 +1190,6 @@ for call in ("xcuidrive_stop_all()", "xcuidrive_launch_all()", "xcuidrive_join()
     gate.negative(f"iOS recording recovery without {call}",
                   lambda: ios_recording_recovery(changed), want="driver lifecycle")
 
-gate.negatives_ran(57)
+gate.negatives_ran(59)
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

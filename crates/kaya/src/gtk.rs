@@ -1399,16 +1399,21 @@ fn off_screen(core: &CoreState, what: &str, text: &str, widget: &gtk4::Widget) -
     let (x0, x1) = (f64::from(bounds.x()), f64::from(bounds.x() + bounds.width()));
     let (y0, y1) = (f64::from(bounds.y()), f64::from(bounds.y() + bounds.height()));
     let across = x0 < -1.0 || x1 > room_w + 1.0;
-    let mut in_scroll = false;
+    // Each carrying scroll excuses its OWN axis (docs/hscroll-plan.md §2).
+    let (mut in_across, mut in_down) = (false, false);
     let mut parent = widget.parent();
     while let Some(p) = parent {
-        if p.is::<gtk4::ScrolledWindow>() {
-            in_scroll = true;
-            break;
+        if let Some(scrolled) = p.downcast_ref::<gtk4::ScrolledWindow>() {
+            if scroll_horizontal(scrolled) {
+                in_across = true;
+            } else {
+                in_down = true;
+            }
         }
         parent = p.parent();
     }
-    let down = !in_scroll && (y0 < -1.0 || y1 > room_h + 1.0);
+    let across = across && !in_across;
+    let down = !in_down && (y0 < -1.0 || y1 > room_h + 1.0);
     (across || down).then(|| {
         format!(
             "{what} {text:?} spans {}...{}px across and {}...{}px down, past its {room_w}x{room_h}px window",
@@ -3840,13 +3845,78 @@ fn table_body_view(column: &gtk4::Box) -> Option<gtk4::ScrolledWindow> {
     None
 }
 
+/// A kaya `scroll` whose `axis` says horizontal (docs/hscroll-plan.md §1);
+/// every other GtkScrolledWindow kaya builds scrolls vertically.
+fn scroll_horizontal(scrolled: &gtk4::ScrolledWindow) -> bool {
+    let widget = scrolled.upcast_ref::<gtk4::Widget>();
+    is_scroll_kind(widget) && container_vertical(widget) == Some(false)
+}
+
+/// A sideways scroll's content takes its NATURAL width: GtkViewport's
+/// default hands a scrollable child its MINIMUM along the axis, and every
+/// wrapping label in the strip then broke at its longest word (measured on
+/// the linux lane 2026-09-28, "frame 1" 39px wide and two lines tall). A
+/// vertical scroll keeps the minimum, since its content must fit its width.
+fn sideways_natural(scrolled: &gtk4::ScrolledWindow) {
+    use gtk4::prelude::ScrollableExt;
+    if let Some(viewport) = scrolled.child().and_then(|c| c.downcast::<gtk4::Viewport>().ok()) {
+        viewport.set_hscroll_policy(if scroll_horizontal(scrolled) {
+            gtk4::ScrollablePolicy::Natural
+        } else {
+            gtk4::ScrollablePolicy::Minimum
+        });
+    }
+}
+
+/// A scroll's own axis: its adjustment, and whether the content's LEADING
+/// edge sits at the adjustment's UPPER end — a sideways scroll under a
+/// right-to-left layout, where GTK keeps value 0 at the content's left
+/// edge and the strip starts at its right (docs/traps.md, the GTK
+/// right-to-left hadjustment).
+struct Along {
+    adj: gtk4::Adjustment,
+    mirrored: bool,
+}
+
+impl Along {
+    fn of(scrolled: &gtk4::ScrolledWindow) -> Along {
+        use gtk4::prelude::WidgetExt;
+        if scroll_horizontal(scrolled) {
+            Along {
+                adj: scrolled.hadjustment(),
+                mirrored: scrolled.direction() == gtk4::TextDirection::Rtl,
+            }
+        } else {
+            Along { adj: scrolled.vadjustment(), mirrored: false }
+        }
+    }
+    fn from_start(&self) -> f64 {
+        let a = &self.adj;
+        if self.mirrored { a.upper() - a.page_size() - a.value() } else { a.value() - a.lower() }
+    }
+    fn to_end(&self) -> f64 {
+        let a = &self.adj;
+        if self.mirrored { a.value() - a.lower() } else { a.upper() - a.page_size() - a.value() }
+    }
+    fn end_value(&self) -> f64 {
+        let a = &self.adj;
+        if self.mirrored { a.lower() } else { a.upper() - a.page_size() }
+    }
+    /// The value that puts a span of the content (its left or top edge and
+    /// its extent, in the content's own coordinates) with its LEADING edge
+    /// at the viewport's.
+    fn park_value(&self, start: f64, extent: f64) -> f64 {
+        if self.mirrored { start + extent - self.adj.page_size() } else { start }
+    }
+}
+
 /// THE AXIS THE THREE SCROLL VERBS DRIVE, decided by the target's KIND: a
-/// `scroll` target's vertical one, a TABLE target's horizontal one. A
+/// `scroll` target's own axis, a TABLE target's horizontal one. A
 /// table's rows already answer expect_window and scroll_to_row, so the
 /// kind is unambiguous and no axis word is needed (docs/tables-plan.md,
 /// the overflow ruling).
 #[cfg(feature = "harness")]
-fn scroll_axis(core: &CoreState, t: crate::harness::Target) -> Option<gtk4::Adjustment> {
+fn scroll_axis(core: &CoreState, t: crate::harness::Target) -> Option<Along> {
     if t.kind == crate::harness::TargetKind::Column {
         let i = crate::harness::try_resolve(t.index, core.columns.len())?;
         // Pending resizes must land before the extents mean anything —
@@ -3854,10 +3924,10 @@ fn scroll_axis(core: &CoreState, t: crate::harness::Target) -> Option<gtk4::Adju
         // read after mount sees a zero page size, and every one of the
         // three verbs then answers about a table nothing laid out.
         while glib::MainContext::default().iteration(false) {}
-        return Some(table_body_view(&core.columns[i])?.hadjustment());
+        return Some(Along { adj: table_body_view(&core.columns[i])?.hadjustment(), mirrored: false });
     }
     let i = crate::harness::try_resolve(t.index, core.scrolls.len())?;
-    Some(core.scrolls[i].vadjustment())
+    Some(Along::of(&core.scrolls[i]))
 }
 
 /// Park a windowed table's band on `index` and scroll the row to the
@@ -3923,7 +3993,7 @@ fn scroll_row(core: &mut CoreState, id: u64, copy: Option<WidgetId>, index: usiz
     // and the pixels stayed at 0), so the scroll runs from an idle after
     // that pass. One-shot, on the scrolled window the root will sit in.
     let Some(scrolled) = scroll_ancestor(&root) else { return };
-    let adj = scrolled.vadjustment();
+    let adj = Along::of(&scrolled).adj;
     let armed = Rc::new(RefCell::new(None));
     let armed2 = armed.clone();
     let weak = glib::WeakRef::<gtk4::Widget>::new();
@@ -3965,34 +4035,43 @@ fn scroll_ancestor(widget: &gtk4::Widget) -> Option<gtk4::ScrolledWindow> {
     widget.ancestor(gtk4::ScrolledWindow::static_type())?.downcast::<gtk4::ScrolledWindow>().ok()
 }
 
-/// The row's top in the scrolled CONTENT's space — `compute_bounds`
-/// against the GtkViewport's own child, never the viewport: bounds against
-/// the viewport carry the scroll transform as the LAST ALLOCATION left it,
-/// which is one pass behind a value just written (measured on the linux
-/// lane 2026-09-24: a click 11ms after the opening scroll read a row at
-/// its unscrolled offset with the value already at the end, and the jump
-/// clamped in place), while the content's layout does not move with the
-/// scroll at all. The row's height and the adjustment ride along; None
-/// while the row has no scrolled ancestor or no bounds yet.
-fn row_top_in_content(root: &gtk4::Widget) -> Option<(f64, f64, gtk4::Adjustment)> {
+/// The row's span along its scroll's axis (its "top" is its leading edge,
+/// the name tools/check-scroll-to.py reads) in the scrolled CONTENT's space —
+/// `compute_bounds` against the GtkViewport's own child, never the
+/// viewport: bounds against the viewport carry the scroll transform as the
+/// LAST ALLOCATION left it, which is one pass behind a value just written
+/// (measured on the linux lane 2026-09-24: a click 11ms after the opening
+/// scroll read a row at its unscrolled offset with the value already at the
+/// end, and the jump clamped in place), while the content's layout does not
+/// move with the scroll at all. The row's left or top edge, its extent and
+/// the scroll's axis; None while the row has no scrolled ancestor or no
+/// bounds yet.
+fn row_top_in_content(root: &gtk4::Widget) -> Option<(f64, f64, Along)> {
     let scrolled = scroll_ancestor(root)?;
     let viewport = scrolled.child()?;
     let content = viewport.downcast_ref::<gtk4::Viewport>().and_then(|v| v.child()).unwrap_or(viewport);
     let bounds = root.compute_bounds(&content)?;
-    Some((f64::from(bounds.y()), f64::from(bounds.height()), scrolled.vadjustment()))
+    Some(if scroll_horizontal(&scrolled) {
+        (f64::from(bounds.x()), f64::from(bounds.width()), Along::of(&scrolled))
+    } else {
+        (f64::from(bounds.y()), f64::from(bounds.height()), Along::of(&scrolled))
+    })
 }
 
 /// The adjustment's value IS the scroll position (scroll_end's rule): the
-/// row's content offset is the value to write, and GTK clamps the write at
-/// `upper - page_size`, which is S2's clamp at the end.
+/// value parking the row's leading edge is the one to write, and GTK clamps
+/// the write at the adjustment's ends, which is S2's clamp at the end.
 fn scroll_root_to_top(root: &gtk4::Widget) {
-    if let Some((top, height, adj)) = row_top_in_content(root) {
+    if let Some((start, extent, along)) = row_top_in_content(root) {
+        let adj = &along.adj;
         scroll_note(format_args!(
-            "root content top={top} height={height}; adjustment value={} page={} upper={} before",
+            "root content start={start} extent={extent} mirrored={}; adjustment value={} page={} upper={} before",
+            along.mirrored,
             adj.value(),
             adj.page_size(),
             adj.upper()
         ));
+        let top = along.park_value(start, extent);
         adj.set_value(top);
         scroll_note(format_args!("adjustment value={} after", adj.value()));
     }
@@ -4766,7 +4845,7 @@ struct CoreState {
     submits: std::rc::Rc<RefCell<std::collections::HashSet<u64>>>,
     /// Each following scroll's adjustment and its `changed` handler
     /// (docs/follow-end-plan.md), so turning the prop off disconnects it.
-    follow_handlers: RefCell<HashMap<u64, (gtk4::Adjustment, glib::SignalHandlerId)>>,
+    follow_handlers: RefCell<HashMap<u64, (gtk4::Adjustment, Vec<glib::SignalHandlerId>)>>,
     /// The textareas the APP owns the history of (docs/rich-text-plan.md §14);
     /// the buffer's own history is off there, which the typing verb's native
     /// proof has to know.
@@ -6798,6 +6877,44 @@ const TINT_CSS: &str = "\
 /// How close to its end a scroll counts as AT its end for following: one
 /// body line (docs/follow-end-plan.md §1).
 const FOLLOW_SLACK: f64 = 22.0;
+
+/// docs/follow-end-plan.md §2, along the scroll's own axis: `changed` fires
+/// after the extent moved, so the handler compares against the reading the
+/// last turn left — the value as well as the extent, because a right-to-left
+/// sideways scroll keeps its distance from the START as it grows and so
+/// moves the value itself, and GTK announces that move BEFORE `changed`
+/// (measured 2026-09-28), so a value arriving with a new extent is not the
+/// reading before the growth. A scroll never laid out has no before.
+fn set_follow(core: &CoreState, id: u64, sw: &gtk4::ScrolledWindow, on: bool) {
+    use gtk4::prelude::ObjectExt;
+    if let Some((adj, handlers)) = core.follow_handlers.borrow_mut().remove(&id) {
+        for handler in handlers {
+            adj.disconnect(handler);
+        }
+    }
+    if !on {
+        return;
+    }
+    let along = Along::of(sw);
+    let mirrored = along.mirrored;
+    let adj = along.adj;
+    let last = std::rc::Rc::new(std::cell::Cell::new((adj.upper(), adj.value(), adj.page_size())));
+    let seen = last.clone();
+    let moved = adj.connect_value_changed(move |a| {
+        let (upper, _, page) = seen.get();
+        if a.upper() == upper && a.page_size() == page {
+            seen.set((upper, a.value(), page));
+        }
+    });
+    let follow = adj.connect_changed(move |a| {
+        let (upper, value, page) = last.replace((a.upper(), a.value(), a.page_size()));
+        let was_short = if mirrored { value - a.lower() } else { upper - page - value };
+        if page > 0.0 && a.upper() > upper && was_short <= FOLLOW_SLACK {
+            a.set_value(if mirrored { a.lower() } else { a.upper() - a.page_size() });
+        }
+    });
+    core.follow_handlers.borrow_mut().insert(id, (adj, vec![moved, follow]));
+}
 
 /// The composer (docs/composer-plan.md §4): the entry's own chrome, as
 /// Fractal's composer wears it, drawn by the row around a field and buttons
@@ -10943,11 +11060,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     NativeWidget::Label(label)
                 }
                 WidgetKind::Scroll => {
-// The vertical scroll viewport over its ONE child: its
-// vadjustment is both the observation source and what
-// scroll_end drives.
+// The scroll viewport over its ONE child, vertical until its `axis`
+// says otherwise (the Prop::Axis arm): the adjustment along that axis is
+// both the observation source and what scroll_end drives.
                     let scrolled = gtk4::ScrolledWindow::new();
-                    // Vertical-only v1: no horizontal bar, ever.
                     scrolled.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
                     // A SCROLL IS A VERTICAL CONTAINER, and saying so is what
                     // makes it SPAN a row's breadth (the 2026-08-22 crossing
@@ -13159,20 +13275,24 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 // grew, so the handler keeps the previous upper and follows only
                 // when the view sat within a line of that old end.
                 (NativeWidget::Scroll(sw), Prop::FollowsEnd, Value::Bool(on)) => {
-                    use gtk4::prelude::{AdjustmentExt, ObjectExt};
-                    if let Some((adj, handler)) = core.follow_handlers.borrow_mut().remove(&id.0) {
-                        adj.disconnect(handler);
+                    let sw = sw.clone();
+                    set_follow(core, id.0, &sw, on);
+                }
+                // THE SCROLL'S OWN AXIS (docs/hscroll-plan.md §1): the policy
+                // pair, the axis key every reader and the breadth rule take
+                // it from, and a follow re-armed on the new adjustment.
+                (NativeWidget::Scroll(sw), Prop::Axis, Value::I64(mode)) => {
+                    let sw = sw.clone();
+                    let horizontal = mode == 0;
+                    set_container_vertical(sw.upcast_ref::<gtk4::Widget>(), !horizontal);
+                    if horizontal {
+                        sw.set_policy(gtk4::PolicyType::Automatic, gtk4::PolicyType::Never);
+                    } else {
+                        sw.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
                     }
-                    if on {
-                        let adj = sw.vadjustment();
-                        let last_upper = std::rc::Rc::new(std::cell::Cell::new(adj.upper()));
-                        let follow = adj.connect_changed(move |a| {
-                            let old = last_upper.replace(a.upper());
-                            if a.upper() > old && a.value() + a.page_size() >= old - FOLLOW_SLACK {
-                                a.set_value(a.upper() - a.page_size());
-                            }
-                        });
-                        core.follow_handlers.borrow_mut().insert(id.0, (adj, follow));
+                    sideways_natural(&sw);
+                    if core.follow_handlers.borrow().contains_key(&id.0) {
+                        set_follow(core, id.0, &sw, true);
                     }
                 }
                 (NativeWidget::Column(container), Prop::Filled, Value::I64(tint))
@@ -13724,16 +13844,23 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     // borrowed" on the second flip, with x11 green (the
                     // connect_dark_notify comment above records the same
                     // rule; the harness's poll absorbs the idle hop).
+                    // An UNMAPPED container has no layout to run, so its
+                    // declared axis applies at once: deferred, a sideways
+                    // strip's For first laid out as a column, as tall as its
+                    // rows, and the flip read as growth to follows_end
+                    // (docs/hscroll-plan.md).
+                    use gtk4::prelude::{OrientableExt, WidgetExt};
                     let container = container.clone();
-                    let mode = mode;
-                    glib::idle_add_local_once(move || {
-                        use gtk4::prelude::OrientableExt;
-                        container.set_orientation(if mode == 1 {
-                            gtk4::Orientation::Vertical
-                        } else {
-                            gtk4::Orientation::Horizontal
-                        });
-                    });
+                    let orientation = if mode == 1 {
+                        gtk4::Orientation::Vertical
+                    } else {
+                        gtk4::Orientation::Horizontal
+                    };
+                    if container.is_mapped() {
+                        glib::idle_add_local_once(move || container.set_orientation(orientation));
+                    } else {
+                        container.set_orientation(orientation);
+                    }
                 }
                 (NativeWidget::Column(container), Prop::Align, Value::I64(mode)) => {
                     use gtk4::prelude::WidgetExt;
@@ -13982,6 +14109,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 NativeWidget::Scroll(scrolled) => {
                     child_widget.set_halign(gtk4::Align::Fill);
                     scrolled.set_child(Some(&child_widget));
+                    sideways_natural(scrolled);
                 }
                 _ => panic!("kaya: add_child parent is not a container"),
             }
@@ -19991,9 +20119,10 @@ impl crate::harness::Stage for GtkStage {
 
     fn scroll_overflow(&self, t: crate::harness::Target) -> String {
         Self::on_main(move |core| {
-            let Some(adj) = scroll_axis(core, t) else {
+            let Some(along) = scroll_axis(core, t) else {
                 return "<no such target>".to_string();
             };
+            let adj = &along.adj;
             // The toolkit's own adjustment: upper is the content
             // extent, page_size the viewport.
             if adj.upper() > adj.page_size() + 2.0 {
@@ -20009,9 +20138,9 @@ impl crate::harness::Stage for GtkStage {
             // The REAL scrolling API: setting the adjustment's value
             // IS how GTK scrolls (scrollbars and kinetic panning both
             // write it).
-            let adj = scroll_axis(core, t)
+            let along = scroll_axis(core, t)
                 .unwrap_or_else(|| panic!("kaya: scroll_end on {t:?}, which scrolls nowhere"));
-            adj.set_value(adj.upper() - adj.page_size());
+            along.adj.set_value(along.end_value());
         })
     }
 
@@ -20144,17 +20273,39 @@ impl crate::harness::Stage for GtkStage {
 
     fn scroll_at_end(&self, t: crate::harness::Target) -> String {
         Self::on_main(move |core| {
-            let Some(adj) = scroll_axis(core, t) else {
+            let Some(along) = scroll_axis(core, t) else {
                 return "<no such target>".to_string();
             };
-            let short = adj.upper() - (adj.value() + adj.page_size());
+            let short = along.to_end();
             if short.abs() <= 2.0 {
                 String::new()
             } else {
                 format!(
-                    "content bottom {} vs viewport {}",
-                    adj.value() + adj.page_size(),
-                    adj.upper()
+                    "{short} short of the trailing end (value {} page {} upper {}{})",
+                    along.adj.value(),
+                    along.adj.page_size(),
+                    along.adj.upper(),
+                    if along.mirrored { ", right to left" } else { "" }
+                )
+            }
+        })
+    }
+
+    fn scroll_at_start(&self, t: crate::harness::Target) -> String {
+        Self::on_main(move |core| {
+            let Some(along) = scroll_axis(core, t) else {
+                return "<no such target>".to_string();
+            };
+            let away = along.from_start();
+            if away.abs() <= 2.0 {
+                String::new()
+            } else {
+                format!(
+                    "{away} past the leading edge (value {} page {} upper {}{})",
+                    along.adj.value(),
+                    along.adj.page_size(),
+                    along.adj.upper(),
+                    if along.mirrored { ", right to left" } else { "" }
                 )
             }
         })
@@ -20189,20 +20340,22 @@ impl crate::harness::Stage for GtkStage {
                 return format!("row {key:?} is not realized");
             };
             while glib::MainContext::default().iteration(false) {}
-            let Some((content_top, height, adj)) = row_top_in_content(&root) else {
+            let Some((start, extent, along)) = row_top_in_content(&root) else {
                 return "the row has no scrolled ancestor or no bounds yet".to_string();
             };
-            let top = content_top - adj.value();
-            if top.abs() <= 2.0 {
+            let adj = &along.adj;
+            let lead = adj.value() - along.park_value(start, extent);
+            if lead.abs() <= 2.0 {
                 return String::new();
             }
-            let at_end = (adj.upper() - (adj.value() + adj.page_size())).abs() <= 2.0;
-            if at_end && top >= -2.0 && top + height <= adj.page_size() + 2.0 {
+            let top = start - adj.value();
+            if along.to_end().abs() <= 2.0 && top >= -2.0 && top + extent <= adj.page_size() + 2.0 {
                 return String::new();
             }
             format!(
-                "row top {top} from the viewport's top (content {content_top}); adjustment value {} \
-                 page {} upper {}",
+                "row leading edge {lead} from the viewport's (content {start}+{extent}{}); \
+                 adjustment value {} page {} upper {}",
+                if along.mirrored { ", right to left" } else { "" },
                 adj.value(),
                 adj.page_size(),
                 adj.upper()

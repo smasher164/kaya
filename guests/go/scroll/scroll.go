@@ -28,7 +28,20 @@ func App() *kaya.App {
 						tx.Write(status, "bottom clicked")
 					})
 				})
-			}).Grow(1)
+			}).Grow(1).A11yID("rows")
+			// A strip wider than the window, scrolled sideways
+			// (docs/hscroll-plan.md), addressed as scroll@strip.
+			tx.Scroll(func() {
+				tx.Row(func() {
+					for i := 1; i <= 19; i++ {
+						caption := tx.Signal(fmt.Sprintf("card %d", i))
+						tx.Label(caption)
+					}
+					tx.Button("last card", func(tx *kaya.Tx) {
+						tx.Write(status, "last card clicked")
+					}).A11yID("last")
+				})
+			}).Axis(kaya.AxisHorizontal).A11yID("strip")
 		}))
 	})
 

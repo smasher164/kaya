@@ -1,0 +1,11 @@
+# The scroll scene's sideways strip under KAYA_LOCALE=ar-EG
+# (docs/hscroll-plan.md §4): the strip starts at its right edge and ends at
+# its left. Before a backend reads the layout's direction, its start already
+# satisfies the right-edge-at-right-edge reading of "at end", so both verbs
+# agree wrongly; expect_at_start is the read that tells them apart.
+expect_overflow scroll@strip
+expect_at_start scroll@strip
+scroll_end scroll@strip
+expect_at_end scroll@strip
+click button@last
+expect label#0 "last card clicked"

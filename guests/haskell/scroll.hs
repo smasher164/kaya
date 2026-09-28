@@ -13,17 +13,34 @@ main = kayaMain $ \app -> do
     let mkRow i = do
           caption <- signalText ("row " <> tshow (i :: Int))
           labelBound caption
+        mkCard i = do
+          caption <- signalText ("card " <> tshow (i :: Int))
+          labelBound caption
     root <-
       column
         []
         [ labelBound s, -- label#0
           scroll
-            [Grow 1]
+            [Grow 1, A11yId "rows"]
             ( column
                 ( map mkRow [1 .. 29]
                     ++ [ buttonOn "bottom" $ -- button#0
                            buildTx app $
                              writeSignal s "bottom clicked"
+                       ]
+                )
+            ),
+          -- A strip wider than the window, scrolled sideways
+          -- (docs/hscroll-plan.md), addressed as scroll@strip.
+          scroll
+            [Along AxisHorizontal, A11yId "strip"]
+            ( row
+                []
+                ( map mkCard [1 .. 19]
+                    ++ [ buttonOn
+                           "last card"
+                           (buildTx app $ writeSignal s "last card clicked")
+                           [A11yId "last"]
                        ]
                 )
             )

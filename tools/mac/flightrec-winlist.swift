@@ -11,7 +11,17 @@
 import CoreGraphics
 import Foundation
 
-let wanted: Int? = CommandLine.arguments.count > 1 ? Int(CommandLine.arguments[1]) : nil
+// AN ARGUMENT THAT IS NOT A PID IS REFUSED, never read as "no filter": a
+// caller passing a missing pid ("None") once got every window and shot the
+// frontmost one, which was the human's (docs/traps.md, 2026-09-28).
+var wanted: Int? = nil
+if CommandLine.arguments.count > 1 {
+    guard let pid = Int(CommandLine.arguments[1]), pid > 0 else {
+        print("flightrec-winlist: \"\(CommandLine.arguments[1])\" is not a pid")
+        exit(2)
+    }
+    wanted = pid
+}
 
 guard
     let windows = CGWindowListCopyWindowInfo(

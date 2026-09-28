@@ -2720,6 +2720,10 @@ data Attr (c :: WClass) where
   -- | This scroll keeps its end in view while its content grows, until the
   -- user scrolls away (docs\/follow-end-plan.md).
   FollowsEnd :: Attr 'BoxW
+  -- | This container's arrangement axis, or the direction this scroll
+  -- scrolls (vertical unless set; docs\/hscroll-plan.md) — 'setAxis' at
+  -- construction. Not spelled @Axis@: 'Paint' holds that constructor.
+  Along :: Axis -> Attr 'BoxW
   -- | Stack this row's children vertically while the window's size
   -- class is the named one. Containers only, and LIVE ZONE ONLY —
   -- 'TplAttr' has no counterpart.
@@ -2812,6 +2816,7 @@ applyAttr (Inset pad) w = setInset w pad
 applyAttr (Align a) w = setAlign w a
 applyAttr (Filled t) w = setFilled w t
 applyAttr FollowsEnd (Widget w) = emitB (W.txSetFollowsEnd w True)
+applyAttr (Along a) w = setAxis w a
 applyAttr (StackWhen when) w = stackWhen w when
 applyAttr (A11yId i) w = setA11yId w i
 applyAttr (A11yIdBound sig) w = bindA11yId w sig
@@ -2887,9 +2892,9 @@ row = rowish W.kindRow
 column :: (RowCol a r) => [a] -> r
 column = rowish W.kindColumn
 
--- | A vertical scroll viewport over EXACTLY ONE child — the signature
--- says so (the scene enforces it too): @scroll [Grow 1] (column
--- [...])@. Give it 'Grow' so the enclosing track CONSTRAINS it — an
+-- | A scroll viewport over EXACTLY ONE child — the signature says so
+-- (the scene enforces it too): @scroll [Grow 1] (column [...])@, vertical
+-- unless @[Along AxisHorizontal]@. Give it 'Grow' so the enclosing track CONSTRAINS it — an
 -- unconstrained viewport hugs its content and nothing overflows.
 scroll :: [Attr 'BoxW] -> Build Widget -> Build Widget
 scroll attrs child = withAttrs attrs (containerOf W.kindScroll [child])

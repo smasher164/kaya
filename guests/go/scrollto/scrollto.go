@@ -15,14 +15,21 @@ type Message struct {
 	Text string
 }
 
+//go:generate go run dev.kaya/cmd/kaya-gen -type Frame -key string
+type Frame struct {
+	Name string
+}
+
 func App() *kaya.App {
 	app := kaya.NewApp()
 
 	app.Build(func(tx *kaya.Tx) {
 		messages := MessageCollection(tx)
+		frames := FrameCollection(tx)
 		count := tx.Signal("60 messages")
-		var list kaya.Widget
+		var list, strip kaya.Widget
 		sent := 60
+		framed := 30
 
 		tx.Mount(tx.Column(func() {
 			tx.Label(count).A11yID("count")
@@ -40,6 +47,13 @@ func App() *kaya.App {
 					tx.Write(count, fmt.Sprintf("%d messages", sent))
 					tx.ScrollToRow(list, key)
 				}).A11yID("send")
+				tx.Button("frame", func(tx *kaya.Tx) {
+					tx.ScrollToRow(strip, "f10")
+				}).A11yID("frame")
+				tx.Button("add frame", func(tx *kaya.Tx) {
+					framed++
+					frames.Insert(tx, fmt.Sprintf("f%d", framed), Frame{Name: fmt.Sprintf("frame %d", framed)})
+				}).A11yID("add_frame")
 			})
 			tx.Scroll(func() {
 				// The For's own container is what a scroll_to_row
@@ -50,8 +64,23 @@ func App() *kaya.App {
 					row.Label(row.Text())
 				}
 				tx.SetA11yID(list, "messages")
-			}).Grow(1)
+			}).Grow(1).A11yID("list")
+			// A filmstrip that runs sideways (docs/hscroll-plan.md): the
+			// same ScrollToRow and FollowsEnd, along its own axis.
+			tx.Scroll(func() {
+				rows := FrameRows(tx, frames)
+				strip = rows.Widget()
+				for row := range rows.All() {
+					row.Label(row.Name())
+				}
+				tx.SetAxis(strip, kaya.AxisHorizontal)
+				tx.SetA11yID(strip, "frames")
+			}).Axis(kaya.AxisHorizontal).FollowsEnd().A11yID("strip")
 		}))
+
+		for i := 1; i <= 30; i++ {
+			frames.Insert(tx, fmt.Sprintf("f%d", i), Frame{Name: fmt.Sprintf("frame %d", i)})
+		}
 
 		for i := 1; i <= 60; i++ {
 			messages.Insert(tx, fmt.Sprintf("m%d", i), Message{Text: fmt.Sprintf("message %d", i)})

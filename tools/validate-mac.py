@@ -598,7 +598,26 @@ if FOREIGN_PASTEBOARD not in (ROOT / "swift/KayaSwiftUI.swift").read_text(encodi
         f"move FOREIGN_PASTEBOARD with it")
 
 
+# ONE BUNDLED APP AT A TIME (docs/traps.md, "Two bundled legs cancelled
+# each other's notification"): every .app this lane runs declares the one
+# identity, and a notification is keyed by that identity and its request id,
+# so two bundled legs overlapping post and cancel each other's reminders.
+_bundle_lock = threading.Lock()
+
+
+def runs_bundle(argv):
+    return any(".app/Contents/MacOS/" in str(a) for a in argv)
+
+
 def _leg_worker(name, argv, env, scene=None):
+    if runs_bundle(argv):
+        with _bundle_lock:
+            _run_leg(name, argv, env, scene)
+    else:
+        _run_leg(name, argv, env, scene)
+
+
+def _run_leg(name, argv, env, scene=None):
     log = LEGS_DIR / f"{name}.log"
     t0 = time.monotonic()
     if os.environ.get("KAYA_RECORD"):

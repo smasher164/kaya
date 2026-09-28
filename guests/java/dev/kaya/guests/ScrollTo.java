@@ -14,13 +14,19 @@ public final class ScrollTo {
     @KayaGen(key = "String")
     record Message(String text) {}
 
+    @KayaGen(key = "String")
+    record Frame(String name) {}
+
     public static void app() {
         KayaApp app = new KayaApp();
         int[] sent = {60};
+        int[] framed = {30};
         KayaApp.Widget[] list = new KayaApp.Widget[1];
+        KayaApp.Widget[] strip = new KayaApp.Widget[1];
 
         app.build(tx -> {
             var messages = MessageKaya.collection(tx);
+            var frames = FrameKaya.collection(tx);
             KayaApp.Signal<String> count = tx.signal("60 messages");
 
             tx.mount(tx.column(col -> {
@@ -37,6 +43,13 @@ public final class ScrollTo {
                         t.write(count, sent[0] + " messages");
                         t.scrollToRow(list[0], "m" + sent[0]);
                     }).a11yId("send"); // button#2
+                    tx.button("frame", t -> t.scrollToRow(strip[0], "f10"))
+                            .a11yId("frame");
+                    tx.button("add frame", t -> {
+                        framed[0]++;
+                        frames.insert(t, "f" + framed[0],
+                                new Frame("frame " + framed[0]));
+                    }).a11yId("add_frame");
                 });
                 tx.scroll(box -> { // scroll#0
                     // The For's own container, which scrollToRow
@@ -47,8 +60,22 @@ public final class ScrollTo {
                         row.label(row.text);
                     }
                     list[0].a11yId("messages");
-                }).grow(1);
+                }).grow(1).a11yId("list");
+                // A filmstrip that runs sideways (docs/hscroll-plan.md): the
+                // same scrollToRow and followsEnd, along its own axis.
+                tx.scroll(box -> {
+                    var rows = FrameKaya.rows(tx, frames);
+                    strip[0] = rows.handle;
+                    for (var row : rows) {
+                        row.label(row.name);
+                    }
+                    strip[0].axis(KayaApp.Axis.HORIZONTAL).a11yId("frames");
+                }).axis(KayaApp.Axis.HORIZONTAL).followsEnd().a11yId("strip");
             }));
+
+            for (int i = 1; i <= 30; i++) {
+                frames.insert(tx, "f" + i, new Frame("frame " + i));
+            }
 
             for (int i = 1; i <= 60; i++) {
                 messages.insert(tx, "m" + i, new Message("message " + i));

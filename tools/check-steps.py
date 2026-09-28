@@ -681,6 +681,7 @@ def target_surfaces(harness_src=None, swift_src=None, kotlin_src=None):
         for verb, stop in [
             ("expect_overflow", "scroll_end"),
             ("scroll_end", "expect_at_end"),
+            ("expect_at_start", "expect_at_end"),
             ("expect_at_end", "expect_selection"),
         ]:
             arm = section(kotlin, f'"{verb}" ->', f'"{stop}" ->',
@@ -689,7 +690,7 @@ def target_surfaces(harness_src=None, swift_src=None, kotlin_src=None):
                 'target(spec, "scroll", KayaSceneModel.scrolls)' in arm)
     if not scroll_ok:
         fail("android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt's "
-             "three scroll arms do not share target()")
+             "four scroll arms do not share target()")
 
     return findings
 
@@ -925,11 +926,11 @@ if not target_out:
         "KayaCompose.kt target kind extraction does not stop at the "
         "earliest #/@")
     target_watch(
-        "Compose shared scroll route", 3, "kotlin", K,
+        "Compose shared scroll route", 4, "kotlin", K,
         'target(spec, "scroll", KayaSceneModel.scrolls)',
         "scrollTarget(spec)",
         "check-steps: android/kaya/src/main/kotlin/dev/kaya/"
-        "KayaCompose.kt's three scroll arms do not share target()")
+        "KayaCompose.kt's four scroll arms do not share target()")
     target_watch(
         "Compose first-draw admission", 1, "kotlin", K,
         "admitSelftestOnFirstDraw(activity)", "startSelftest(activity)",
@@ -5129,6 +5130,34 @@ if cuts_out:
 else:
     print(f"check-steps: {cuts_seen} phone cuts hold (both lane tables, "
           "the runners' own census)")
+
+# ONE BUNDLED APP AT A TIME ON THE MAC (docs/traps.md, "Two bundled legs
+# cancelled each other's notification"): every .app the lane runs declares
+# one identity, so the pool holds a lock around each bundled leg. No scene can
+# see it go: a tasks leg's reminder cancelled by a tasksrtl neighbour showed
+# only when the pool happened to overlap them.
+def bundle_lock_problems(text):
+    worker = text[text.find("def _leg_worker("):text.find("def _run_leg(")]
+    if ('".app/Contents/MacOS/"' not in text or "with _bundle_lock:" not in worker
+            or "if runs_bundle(argv):" not in worker):
+        return ["tools/validate-mac.py's leg worker no longer holds the bundle "
+                "lock around a leg that runs a .app — two bundled legs "
+                "overlapping cancel each other's notifications"]
+    return []
+
+
+_mac_runner = read_rel("tools/validate-mac.py")
+_bundle_found = bundle_lock_problems(_mac_runner)
+for line in _bundle_found:
+    print(f"check-steps: {line}", file=sys.stderr)
+    status = 1
+_bundle_cut, _n = sub_count(r"    if runs_bundle\(argv\):\n        with _bundle_lock:\n"
+                          r"            _run_leg\(name, argv, env, scene\)\n    else:\n"
+                          r"        _run_leg\(name, argv, env, scene\)\n",
+                          "    _run_leg(name, argv, env, scene)\n", _mac_runner)
+print(f"check-steps: bundle-lock self-test applied {_n} substitution(s)")
+if _n != 1 or not bundle_lock_problems(_bundle_cut):
+    selftest_fail("the mac bundle lock cut was not refused")
 
 if status == 0:
     print("check-steps: OK")

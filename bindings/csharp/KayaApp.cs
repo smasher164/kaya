@@ -3574,17 +3574,21 @@ sealed class Tx : IDisposable
             return body(c);
         }, grow, spacing, align, inset, stackWhen, filled);
 
-    /// A vertical scroll viewport over EXACTLY ONE child. Pass grow: so
-    /// the enclosing track CONSTRAINS it — an unconstrained viewport
-    /// hugs its content and nothing overflows.
+    /// A scroll viewport over EXACTLY ONE child. Pass grow: so the
+    /// enclosing track CONSTRAINS it — an unconstrained viewport hugs its
+    /// content and nothing overflows. `axis:` is the direction it scrolls,
+    /// vertical unless set (docs/hscroll-plan.md).
     /// `followsEnd:` keeps the end in view while the content grows, until the
     /// user scrolls away from it (docs/follow-end-plan.md).
-    public void Scroll(Action<Widget> body, double? grow = null, bool followsEnd = false) =>
-        Scroll<object?>(c => { body(c); return null; }, grow, followsEnd);
+    public void Scroll(Action<Widget> body, double? grow = null, bool followsEnd = false,
+        Axis? axis = null) =>
+        Scroll<object?>(c => { body(c); return null; }, grow, followsEnd, axis);
 
-    public T Scroll<T>(Func<Widget, T> body, double? grow = null, bool followsEnd = false) =>
+    public T Scroll<T>(Func<Widget, T> body, double? grow = null, bool followsEnd = false,
+        Axis? axis = null) =>
         ContainerOf(KayaWire.KindScroll, c =>
         {
+            if (axis is Axis a) SetAxis(c, a);
             if (followsEnd) SetFollowsEnd(c, true);
             return body(c);
         }, grow, null, null, null);

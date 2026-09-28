@@ -72,12 +72,13 @@ LANGS = ("rust", "python", "go", "csharp", "ocaml", "haskell", "swift",
 # apps whose launchers already name the right artifact.
 GUEST_STEM = {"listdetail": "split", "taskspersist": "tasks",
               "links": "tasks", "formatde": "format", "formatar": "format",
-              "tasksrtl": "tasks", "clock24": "format"}
+              "tasksrtl": "tasks", "clock24": "format", "scrollrtl": "scroll"}
 
 # THE LOCALE A SCENE RUNS UNDER (docs/compliance-plan.md §4): the knob the
 # leg carries, so the same guest is read under German and Arabic; the
 # platform installs it and the reads ask the platform, never this table.
-SCENE_LOCALE = {"formatde": "de-DE", "formatar": "ar-EG", "tasksrtl": "ar-EG"}
+SCENE_LOCALE = {"formatde": "de-DE", "formatar": "ar-EG", "tasksrtl": "ar-EG",
+                "scrollrtl": "ar-EG"}
 
 # The scenes this lane DECLARES OFF, each with its reason, read by
 # tools/check-steps.py beside the phones' declarations: macOS has no text
@@ -118,6 +119,8 @@ HAND_QUEUED = {"editor": "go", "chat": "go", "portfolio": "python", "varied": "p
                "formatde": "rust", "formatar": "rust",
                # The task manager in Arabic (SCENE_LOCALE).
                "tasksrtl": "rust",
+               # The scroll guest's sideways strip in Arabic (docs/hscroll-plan.md §4).
+               "scrollrtl": "rust",
                # The format guest under the 24-hour clock (SCENE_CLOCK).
                "clock24": "rust"}
 
@@ -212,6 +215,9 @@ ORDER = [
     # The task manager in Arabic (docs/compliance-plan.md §6): the ar
     # catalog's bytes, the platform's dates, the layout mirrored.
     ("tasksrtl", ("rust",)),
+    # The sideways strip in Arabic (docs/hscroll-plan.md §4): starts at its
+    # right edge, ends at its left.
+    ("scrollrtl", ("rust",)),
     # The notification scene, bundled (BUNDLED_SCENES); rust-only until the
     # breadth slice (docs/tasks-s3-plan.md §6).
     ("notify", ("rust",)),

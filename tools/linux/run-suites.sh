@@ -1602,6 +1602,9 @@ for proto in x11 wayland; do
     run "$proto" scrollto-java env KAYA_SELFTEST=scrollto KAYA_LIB="$LIB" \
         java -cp /tmp/java-guests dev.kaya.guests.Main
     run "$proto" scroll-rust env KAYA_SELFTEST=scroll "$CARGO_TARGET_DIR/debug/examples/scroll"
+    # The sideways strip in Arabic (docs/hscroll-plan.md §4).
+    run "$proto" scrollrtl-rust env KAYA_LOCALE=ar-EG KAYA_SELFTEST=scrollrtl \
+        "$CARGO_TARGET_DIR/debug/examples/scroll"
     run "$proto" scroll-python env KAYA_SELFTEST=scroll KAYA_LIB="$LIB" \
         python3 guests/python/scroll.py
     run "$proto" scroll-js env KAYA_SELFTEST=scroll KAYA_LIB="$LIB" \

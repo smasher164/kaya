@@ -56,9 +56,12 @@ def swift_findings(source):
     if not fn:
         out.append(f"{SWIFT}: kayaTryScrollRow is gone — the one place a pending scroll lands")
         return out
-    if "proxy.scrollTo(request.copy, anchor: .top)" not in fn:
+    anchor = block_after(src, "func kayaScrollRowAnchor(_ node: KayaNode)")
+    if ("proxy.scrollTo(request.copy, anchor: kayaScrollRowAnchor(scroll))" not in fn
+            or "!kayaScrollHorizontal(node) ? .top :" not in anchor):
         out.append(f"{SWIFT}: the realized arm no longer scrolls the copy to the top through the "
-                   f"proxy (S2)")
+                   f"proxy (S2), or to its leading edge on a sideways scroll "
+                   f"(docs/hscroll-plan.md §2)")
     if "withAnimation" in fn:
         out.append(f"{SWIFT}: the scroll is wrapped in withAnimation — instant, never animated "
                    f"(S6)")
@@ -132,7 +135,9 @@ def winui_findings(source):
         out.append(f"{WINUI}: a held request lands whether or not it is still the container's "
                    f"latest — two holds releasing out of order put the older row on screen (S4)")
     top = block_after(src, "\nfn scroll_element_to_top(element: &UIElement)")
-    if not re.search(r"ChangeViewWithOptionalAnimation\([\s\S]{0,200}?true,\s*\)", top):
+    along = block_after(src, "\nfn change_view_along(viewer: &ScrollViewer, sideways: bool,")
+    free = re.findall(r"ChangeViewWithOptionalAnimation\([^;]*?, true\)", along)
+    if "change_view_along(&viewer, sideways," not in top or len(free) != 2:
         out.append(f"{WINUI}: the realized arm's ChangeView is not the animation-free overload — "
                    f"instant, never animated (S6)")
     verb = block_after(src, "fn scrolled_to(&self, t: crate::harness::Target, key: &str)")
@@ -173,10 +178,37 @@ ROWS = {SWIFT: swift_findings, GTK: gtk_findings, WINUI: winui_findings,
         COMPOSE: compose_findings}
 
 
+# A SIDEWAYS SCROLL'S NATIVE SWITCH (docs/hscroll-plan.md §3). No scene can
+# see a backend that keeps the vertical switch for a horizontal scroll: GTK's
+# vertical-only policy widened the window to the strip and every verb still
+# passed (the GTK arm's negative, 2026-09-28), and a shared scene may not read
+# a window's size (portfolio.steps' 2026-08-28 ruling).
+AXIS_SWITCH = {
+    SWIFT: ("ScrollView(sideways ? .horizontal : .vertical)",),
+    GTK: ("sw.set_policy(gtk4::PolicyType::Automatic, gtk4::PolicyType::Never);",),
+    WINUI: ("let (h, v) = if sideways { (along, across) } else { (across, along) };",
+            "viewer.SetHorizontalScrollMode(h.0)?;"),
+    COMPOSE: ("viewport.horizontalScroll(node.scrollState)",),
+}
+
+
+def axis_switch(texts):
+    out = []
+    for rel, needles in AXIS_SWITCH.items():
+        src = strip_c(texts[rel])
+        for needle in needles:
+            if needle not in src:
+                out.append(f"{rel}: a sideways scroll's native switch is gone "
+                           f"(`{needle}`), so a horizontal scroll scrolls vertically "
+                           f"or widens its window (docs/hscroll-plan.md §3)")
+    return out
+
+
 def census(texts):
     out = []
     for rel, row in ROWS.items():
         out.extend(row(texts[rel]))
+    out.extend(axis_switch(texts))
     return out
 
 
@@ -188,8 +220,10 @@ def watched(label, texts, want):
 
 
 n1 = gate.doctor("the swift scroll wrapped in withAnimation", REAL[SWIFT],
-                 r"    proxy\.scrollTo\(request\.copy, anchor: \.top\)\n",
-                 "    withAnimation { proxy.scrollTo(request.copy, anchor: .top) }\n")
+                 r"    proxy\.scrollTo\(request\.copy, "
+                 r"anchor: kayaScrollRowAnchor\(scroll\)\)\n",
+                 "    withAnimation { proxy.scrollTo(request.copy, "
+                 "anchor: kayaScrollRowAnchor(scroll)) }\n")
 watched("a SwiftUI scroll that glides", {**REAL, SWIFT: n1}, "never animated")
 n2 = gate.doctor("the swift hold cut", REAL[SWIFT],
                  r"    guard let proxy = kayaScrollProxies\[scroll\.id\], "
@@ -213,8 +247,8 @@ n6 = gate.doctor("the gtk top write cut", REAL[GTK],
                  "        let _ = top;\n")
 watched("a GTK realized arm that moves nothing", {**REAL, GTK: n6}, "no longer sets the adjustment")
 n7 = gate.doctor("the winui animation switched on", REAL[WINUI],
-                 r"(        &offset_ref\(want\.max\(0\.0\)\)\?,\n"
-                 r"        None::<&IReference<f32>>,\n        )true,", r"\1false,")
+                 r"(viewer\.ChangeViewWithOptionalAnimation\(&at, None::<&IReference<f64>>, "
+                 r"None::<&IReference<f32>>, )true\)", r"\1false)")
 watched("a WinUI scroll that glides", {**REAL, WINUI: n7}, "never animated")
 n8 = gate.doctor("the winui hold cut", REAL[WINUI],
                  r"    fe\.Loaded\(&deferred\)\?;\n    Ok\(\(\)\)\n\}\n",
@@ -230,9 +264,7 @@ n10 = gate.doctor("the compose scroll animated", REAL[COMPOSE], r"scroll\.scroll
                   "scroll.scrollState.animateScrollTo(")
 watched("a Compose scroll that glides", {**REAL, COMPOSE: n10}, "never the animated form")
 n11 = gate.doctor("the compose placement wait cut", REAL[COMPOSE],
-                  r"    while \(\(kayaNodeTops\[copy\] == null \|\| "
-                  r"kayaNodeTops\[scroll\.id\] == null\) "
-                  r"&& frames < 120\) \{\n"
+                  r"    while \(frames < 120 &&\n[\s\S]*?\) \{\n"
                   r"        withFrameNanos \{ \}\n        frames \+= 1\n    \}\n", "")
 watched("a Compose request that never waits for layout", {**REAL, COMPOSE: n11}, "dropped")
 n12 = gate.doctor("the compose apply arm no longer bumping the sequence", REAL[COMPOSE],
@@ -254,7 +286,21 @@ n13 = gate.doctor("the compose verb reading the request", REAL[COMPOSE],
                   '?: return "no request"\n')
 watched("a Compose reading off the request", {**REAL, COMPOSE: n13}, "never the request")
 
-gate.negatives_ran(15)
+for n, (rel, needle) in enumerate(((SWIFT, "sideways ? .horizontal : .vertical"),
+                                    (GTK, "PolicyType::Automatic, gtk4::PolicyType::Never);\n"
+                                          "                    } else"),
+                                    (WINUI, "if sideways { (along, across) }"),
+                                    (COMPOSE, "viewport.horizontalScroll(node.scrollState)"))):
+    cut = gate.doctor(f"the {rel} axis switch cut", REAL[rel], re.escape(needle),
+                      {SWIFT: ".vertical",
+                       GTK: "PolicyType::Never, gtk4::PolicyType::Automatic);\n"
+                            "                    } else",
+                       WINUI: "if sideways { (across, along) }",
+                       COMPOSE: "viewport.verticalScroll(node.scrollState)"}[rel])
+    watched(f"a sideways scroll on the vertical switch ({rel})", {**REAL, rel: cut},
+            "native switch is gone")
+
+gate.negatives_ran(19)
 
 for line in census(REAL):
     gate.finding(line)

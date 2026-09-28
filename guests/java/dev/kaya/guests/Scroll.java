@@ -24,7 +24,19 @@ public final class Scroll {
                         tx.button("bottom", inner -> // button#0
                                 inner.write(status, "bottom clicked"));
                     });
-                }).grow(1);
+                }).grow(1).a11yId("rows");
+                // A strip wider than the window, scrolled sideways
+                // (docs/hscroll-plan.md), addressed as scroll@strip.
+                tx.scroll(strip -> {
+                    tx.row(cards -> {
+                        for (int i = 1; i <= 19; i++) {
+                            KayaApp.Signal<String> caption = tx.signal("card " + i);
+                            tx.label(caption);
+                        }
+                        tx.button("last card", inner ->
+                                inner.write(status, "last card clicked")).a11yId("last");
+                    });
+                }).axis(KayaApp.Axis.HORIZONTAL).a11yId("strip");
             }));
             return null;
         });

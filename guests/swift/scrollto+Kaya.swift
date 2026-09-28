@@ -114,3 +114,114 @@ func messageEach(
 ) -> KayaWidget {
     tx.each(c.collection) { t in body(MessageRow(t: t)) }
 }
+
+extension Frame: KayaRecord {
+    /// The prototype Mirror walks for the schema; every field at
+    /// its zero value.
+    static let prototype = Frame(name: "")
+
+    init(values: [KayaValue]) {
+        guard case .str(let name) = values[0] else {
+            preconditionFailure("kaya: Frame fields out of order")
+        }
+        self.init(name: name)
+    }
+}
+
+/// Frame's typed field tokens.
+enum FrameFields {
+    static let name = KayaField<String>(index: 0)
+}
+
+/// The collection factory; the struct is the schema.
+func frameCollection(_ tx: KayaAppTx) -> KayaRecordCollection<Frame> {
+    tx.collection(of: Frame.self)
+}
+
+/// The row surface: the template handle plus one token per wire
+/// field, and the constructors that consume them.
+struct FrameRow {
+    let t: KayaTpl
+    let name = FrameFields.name
+
+    @discardableResult
+    func label(_ f: KayaField<String>) -> KayaNodeHandle {
+        t.label(f)
+    }
+
+    @discardableResult
+    func image(_ f: KayaField<Data>) -> KayaNodeHandle {
+        t.image(f)
+    }
+
+    @discardableResult
+    func textarea(document f: KayaField<KayaDocument>) -> KayaNodeHandle {
+        t.textarea(document: f)
+    }
+
+    @discardableResult
+    func checkbox(
+        _ f: KayaField<Bool>,
+        onToggle: ((KayaAppTx, [KayaValue], Bool) -> Void)? = nil
+    ) -> KayaNodeHandle {
+        t.checkbox(f, onToggle: onToggle)
+    }
+
+    @discardableResult
+    func datePicker(
+        _ f: KayaField<KayaDate>,
+        onDate: ((KayaAppTx, [KayaValue], KayaDate) -> Void)? = nil
+    ) -> KayaNodeHandle {
+        t.datePicker(f, onDate: onDate)
+    }
+
+    @discardableResult
+    func timePicker(
+        _ f: KayaField<KayaTime>,
+        onTime: ((KayaAppTx, [KayaValue], KayaTime) -> Void)? = nil
+    ) -> KayaNodeHandle {
+        t.timePicker(f, onTime: onTime)
+    }
+
+    @discardableResult
+    func slider(
+        min: Double = 0.0, max: Double = 1.0, value f: KayaField<Double>,
+        step: Double? = nil, tickSpacing: Double? = nil,
+        onChange: ((KayaAppTx, [KayaValue], Double) -> Void)? = nil,
+        onCommit: ((KayaAppTx, [KayaValue], Double) -> Void)? = nil
+    ) -> KayaNodeHandle {
+        t.slider(
+            min: min, max: max, value: f, step: step, tickSpacing: tickSpacing,
+            onChange: onChange, onCommit: onCommit)
+    }
+
+    @discardableResult
+    func row(@KayaNodeChildren _ children: () -> Void) -> KayaNodeHandle {
+        t.row(children)
+    }
+
+    @discardableResult
+    func column(@KayaNodeChildren _ children: () -> Void) -> KayaNodeHandle {
+        t.column(children)
+    }
+}
+
+extension KayaRecordCollection where T == Frame {
+    /// The for-statement form: `for row in frames.rows { … }`
+    /// traces the record template — the body runs once, and the
+    /// tracer plants the For in the enclosing container builder.
+    var rows: KayaRowTrace<FrameRow> {
+        KayaRowTrace(collection: collection) { FrameRow(t: $0) }
+    }
+}
+
+/// The record template, expression form: the body runs once,
+/// authoring the blueprint with the typed row surface; stamping is
+/// the core's replay.
+@discardableResult
+func frameEach(
+    _ tx: KayaAppTx, _ c: KayaRecordCollection<Frame>,
+    _ body: @escaping (FrameRow) -> Void
+) -> KayaWidget {
+    tx.each(c.collection) { t in body(FrameRow(t: t)) }
+}
