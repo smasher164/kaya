@@ -1,6 +1,5 @@
 package dev.kaya
 
-import android.app.Activity
 
 /**
  * The way into kaya on Android ([KayaRing.attach] for a JVM guest).
@@ -19,5 +18,5 @@ object Kaya {
      * relaunched process learns its scene there.
      */
     @JvmStatic
-    external fun attach(activity: Activity, stateRoot: String): Int
+    external fun attach(context: android.content.Context, stateRoot: String): Int
 }

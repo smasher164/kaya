@@ -13,7 +13,7 @@ import UserNotifications
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0xda99b50dff6ae96a
+let kayaSpecHash: UInt64 = 0x42e9c3e04bc4f540
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -4669,6 +4669,11 @@ enum KayaHost {
         api.emit_notification_result(notification, outcome)
     }
 
+    static func emitNotificationReply(_ notification: UInt64, _ text: String) {
+        let bytes = Array(text.utf8)
+        bytes.withUnsafeBufferPointer { api.emit_notification_reply(notification, $0.baseAddress, UInt($0.count)) }
+    }
+
     /// A URL the platform handed this app (docs/app-links-plan.md §4).
     /// The interpreter parses NOTHING — the core owns the one matcher.
     static func linkOpened(_ url: String) {
@@ -5463,7 +5468,8 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 }
                 let title = nextStr2()
                 let bodyText = nextStr2()
-                kayaPostNotification(nid, at: at, title: title, body: bodyText)
+                let reply = nextStr2()
+                kayaPostNotification(nid, at: at, title: title, body: bodyText, reply: reply)
             case applyCancelNotification:
                 let nid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
                 kayaCancelNotification(nid)
@@ -9603,6 +9609,16 @@ private func kayaRunScript(_ script: String) {
                 kayaAwaitQuiet()
                 let answered = kayaAnswers()
                 DispatchQueue.main.sync { kayaNotificationActivated(nid) }
+                kayaAwaitAnswer(answered)
+            case "notification_reply":
+                // notification_activate's carve-out, one action over: the
+                // delegate's own reply funnel, with the text a user would type
+                // (docs/notification-reply-plan.md §4).
+                let nid = UInt64(parts[1]) ?? 0
+                let text = kayaQuoted(Array(parts[2...]))
+                kayaAwaitQuiet()
+                let answered = kayaAnswers()
+                DispatchQueue.main.sync { kayaNotificationReplied(nid, text) }
                 kayaAwaitAnswer(answered)
             case "open_link":
                 // ASK THE PLATFORM, FROM INSIDE THIS PROCESS
@@ -16254,6 +16270,38 @@ func kayaNotificationActivated(_ id: UInt64) {
 let kayaNotificationOutcomeActivated: UInt32 = 0
 let kayaNotificationOutcomeRefused: UInt32 = 1
 
+/// A reply from the notification's field (docs/notification-reply-plan.md):
+/// the delegate's text response and the harness's own call land here, and
+/// the delivered copy goes, as it does for a tap.
+func kayaNotificationReplied(_ id: UInt64, _ text: String) {
+    UNUserNotificationCenter.current().removeDeliveredNotifications(
+        withIdentifiers: [kayaNotificationIdentifier(id)])
+    KayaHost.emitNotificationReply(id, text)
+}
+
+let kayaReplyAction = "kaya-reply"
+
+/// One category per distinct placeholder, since the placeholder belongs to
+/// the category and the centre takes the categories as one whole set. The
+/// action has no `.foreground` option, so a reply raises no window.
+var kayaReplyCategories: [String: String] = [:]
+
+func kayaReplyCategory(_ placeholder: String) -> String {
+    if let known = kayaReplyCategories[placeholder] { return known }
+    let name = "kaya-reply-\(kayaReplyCategories.count)"
+    kayaReplyCategories[placeholder] = name
+    let categories = kayaReplyCategories.map { placeholder, name in
+        UNNotificationCategory(
+            identifier: name,
+            actions: [UNTextInputNotificationAction(
+                identifier: kayaReplyAction, title: "Reply", options: [],
+                textInputButtonTitle: "Send", textInputPlaceholder: placeholder)],
+            intentIdentifiers: [], options: [])
+    }
+    UNUserNotificationCenter.current().setNotificationCategories(Set(categories))
+    return name
+}
+
 /// Set on the centre BEFORE the app finishes launching (both entry
 /// delegates), so a launch caused by a tap is delivered too.
 final class KayaNotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
@@ -16271,7 +16319,12 @@ final class KayaNotificationDelegate: NSObject, UNUserNotificationCenterDelegate
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
         if let id = kayaNotificationId(response.notification.request.identifier) {
-            kayaNotificationActivated(id)
+            if let typed = response as? UNTextInputNotificationResponse,
+               response.actionIdentifier == kayaReplyAction {
+                kayaNotificationReplied(id, typed.userText)
+            } else {
+                kayaNotificationActivated(id)
+            }
         }
         completionHandler()
     }
@@ -16282,7 +16335,7 @@ let kayaNotificationDelegate = KayaNotificationDelegate()
 /// Post through the platform's centre: authorization asked at the FIRST
 /// post (N3), a denial answering that post as refused; `at` 0 posts now and
 /// any other `at` is a calendar trigger the OS fires (N2).
-func kayaPostNotification(_ id: UInt64, at: UInt64, title: String, body: String) {
+func kayaPostNotification(_ id: UInt64, at: UInt64, title: String, body: String, reply: String) {
     guard kayaCanPostNotifications() else {
         KayaHost.emitNotificationResult(id, kayaNotificationOutcomeRefused)
         return
@@ -16315,6 +16368,9 @@ func kayaPostNotification(_ id: UInt64, at: UInt64, title: String, body: String)
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
+        if !reply.isEmpty {
+            content.categoryIdentifier = DispatchQueue.main.sync { kayaReplyCategory(reply) }
+        }
         var trigger: UNNotificationTrigger? = nil
         if at != 0 {
             let date = Date(timeIntervalSince1970: TimeInterval(at))

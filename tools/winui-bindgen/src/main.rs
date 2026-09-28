@@ -604,6 +604,11 @@ fn main() {
         "Windows.UI.Notifications.NotificationSetting".to_string(),
         "Windows.UI.Notifications.ToastNotificationHistory".to_string(),
         "Windows.UI.Notifications.ToastNotification".to_string(),
+        // A NOTIFICATION REPLY IN PROCESS (docs/notification-reply-plan.md):
+        // the toast's Activated hands this over, and UserInput is the text
+        // box's value keyed by its input id.
+        "Windows.UI.Notifications.ToastActivatedEventArgs".to_string(),
+        "Windows.Foundation.Collections.ValueSet".to_string(),
         "Windows.Data.Xml.Dom.XmlDocument".to_string(),
         "Windows.Data.Xml.Dom.IXmlDocumentIO".to_string(),
         // APP LINKS (docs/app-links-plan.md §4's Windows row). Every
@@ -666,25 +671,33 @@ fn main() {
 /// list is first-match-wins with the built-ins inserted at the front, so
 /// no --reference override can carve the two observable types out.
 fn fix_observable_vector_paths(path: &str) {
+    // The observable vector's pair, and ValueSet's map interfaces (the toast
+    // reply's UserInput): windows-collections 0.3 has none of them, and the
+    // windows crate's Foundation_Collections has all.
+    const MOVED: [&str; 5] = [
+        "IObservableVector",
+        "VectorChangedEventHandler",
+        "IObservableMap",
+        "MapChangedEventHandler",
+        "IPropertySet",
+    ];
     let src = std::fs::read_to_string(path).expect("bindings.rs was just generated");
-    if !src.contains("windows_collections::IObservableVector")
-        && !src.contains("windows_collections::VectorChangedEventHandler")
-    {
+    if !MOVED.iter().any(|name| src.contains(&format!("windows_collections::{name}")) || src.contains(&format!("windows_collections:: {name}"))) {
         return;
     }
-    let fixed = src
-        .replace(
-            "windows_collections::IObservableVector",
-            "windows::Foundation::Collections::IObservableVector",
-        )
-        .replace(
-            "windows_collections::VectorChangedEventHandler",
-            "windows::Foundation::Collections::VectorChangedEventHandler",
-        );
+    let mut fixed = src;
+    for name in MOVED {
+        // A macro's tokens are printed with a space after the path's `::`.
+        for spelled in [format!("windows_collections::{name}"), format!("windows_collections:: {name}")] {
+            fixed = fixed.replace(&spelled, &format!("windows::Foundation::Collections::{name}"));
+        }
+    }
     assert!(
-        !fixed.contains("windows_collections::IObservableVector")
-            && !fixed.contains("windows_collections::VectorChangedEventHandler"),
-        "observable-vector fixup left references behind; check windows-bindgen output"
+        !MOVED.iter().any(|name| {
+            fixed.contains(&format!("windows_collections::{name}"))
+                || fixed.contains(&format!("windows_collections:: {name}"))
+        }),
+        "collections fixup left references behind; check windows-bindgen output"
     );
     std::fs::write(path, fixed).expect("write bindings.rs");
 }

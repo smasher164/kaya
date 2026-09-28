@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0xda99b50dff6ae96a
+	SpecHash uint64 = 0x42e9c3e04bc4f540
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -168,6 +168,7 @@ const (
 	AlertChoiceCancel AlertChoice = 4294967295
 	NotificationOutcomeActivated NotificationOutcome = 0
 	NotificationOutcomeRefused NotificationOutcome = 1
+	NotificationOutcomeReplied NotificationOutcome = 2
 	FileModeRead FileMode = 0
 	FileModeWrite FileMode = 1
 	FileModeReadWrite FileMode = 2
@@ -397,6 +398,7 @@ const (
 	occSheetDismissed = 31
 	occDismissRequested = 32
 	occSubmitted = 33
+	occNotificationReplied = 34
 )
 
 func (d Detent) String() string {
@@ -465,6 +467,8 @@ func (n NotificationOutcome) String() string {
 		return "activated"
 	case NotificationOutcomeRefused:
 		return "refused"
+	case NotificationOutcomeReplied:
+		return "replied"
 	}
 	return "NotificationOutcome(" + strconv.FormatInt(int64(n), 10) + ")"
 }
@@ -1139,13 +1143,14 @@ func TxSetReorderable(container uint64, enabled uint32) []byte {
 	return endRecord(b)
 }
 
-// TxShowNotification: Post a local notification (docs/tasks-s3-plan.md N1, N2): the alert grammar without a window — the platform shows it outside the app, and the one answer is notification_result when the user activates it or the platform refuses to post. `at` is a UNIX time in seconds handed to the OS scheduler where one exists (0 = now); title and body are Str values. Ids are guest-chosen; many may be live, and an id retires on its result or its cancel.
-func TxShowNotification(notification uint64, at uint64, title any, body any) []byte {
+// TxShowNotification: Post a local notification (docs/tasks-s3-plan.md N1, N2): the alert grammar without a window — the platform shows it outside the app, and the one answer is notification_result when the user activates it or the platform refuses to post. `at` is a UNIX time in seconds handed to the OS scheduler where one exists (0 = now); title and body are Str values. Ids are guest-chosen; many may be live, and an id retires on its result or its cancel. `reply` is a Str placeholder: non-empty puts a text field on the notification where the process can show one (the notification_reply capability), and what the user types answers `replied` with the text (docs/notification-reply-plan.md).
+func TxShowNotification(notification uint64, at uint64, title any, body any, reply any) []byte {
 	b := beginRecord(txShowNotification)
 	b = binary.LittleEndian.AppendUint64(b, notification)
 	b = binary.LittleEndian.AppendUint64(b, at)
 	b = encodeValue(b, title)
 	b = encodeValue(b, body)
+	b = encodeValue(b, reply)
 	return endRecord(b)
 }
 
@@ -3302,7 +3307,7 @@ func parseValue(rec []byte, at int) (any, int) {
 // false for pad/unknown records.
 func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload any, ok bool) {
 	kind = binary.LittleEndian.Uint16(rec[4:])
-	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected && kind != occMenuActivated && kind != occMenuToggled && kind != occMenuValueChanged && kind != occFileDialogResult && kind != occClipboardResult && kind != occPasted && kind != occUndone && kind != occRedone && kind != occSortRequested && kind != occDrawRequested && kind != occTick && kind != occDropped && kind != occDragEnded && kind != occDateChanged && kind != occTimeChanged && kind != occValueCommitted && kind != occNotificationResult && kind != occLinkOpened && kind != occTextEdited && kind != occTextFormatted && kind != occSheetDismissed && kind != occDismissRequested && kind != occSubmitted {
+	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected && kind != occMenuActivated && kind != occMenuToggled && kind != occMenuValueChanged && kind != occFileDialogResult && kind != occClipboardResult && kind != occPasted && kind != occUndone && kind != occRedone && kind != occSortRequested && kind != occDrawRequested && kind != occTick && kind != occDropped && kind != occDragEnded && kind != occDateChanged && kind != occTimeChanged && kind != occValueCommitted && kind != occNotificationResult && kind != occLinkOpened && kind != occTextEdited && kind != occTextFormatted && kind != occSheetDismissed && kind != occDismissRequested && kind != occSubmitted && kind != occNotificationReplied {
 		return 0, 0, nil, nil, false
 	}
 	id = binary.LittleEndian.Uint64(rec[8:])
@@ -3313,6 +3318,11 @@ func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload an
 	if kind == occNotificationResult {
 		// A request's one answer: id + the u32 code.
 		return kind, id, nil, binary.LittleEndian.Uint32(rec[16:]), true
+	}
+	if kind == occNotificationReplied {
+		// An answer carrying one value: id + the Value.
+		value, _ := parseValue(rec, 16)
+		return kind, id, nil, value, true
 	}
 	if kind == occFileDialogResult {
 		// The picker's answer: id, a count, then three Values

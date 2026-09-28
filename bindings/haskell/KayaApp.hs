@@ -127,6 +127,7 @@ module KayaApp
     setBadge,
     onNotificationActivation,
     notificationResult,
+    notificationAnswer,
     linkRoute,
     linkOpened,
     -- appPendingRoutes (the link-route check's own read of the parked
@@ -460,7 +461,10 @@ data Capabilities = Capabilities
     badge :: Bool,
     -- | 'showEmojiPicker' opens a picker (docs/emoji-picker-plan.md); on
     -- iOS it only focuses the field.
-    emojiPicker :: Bool
+    emojiPicker :: Bool,
+    -- | 'NReply' puts a text field on the notification
+    -- (docs\/notification-reply-plan.md).
+    notificationReply :: Bool
   }
   deriving (Eq, Show)
 
@@ -475,6 +479,7 @@ capabilities = do
         ((bits .&. R.capNotifications) /= 0)
         ((bits .&. R.capBadge) /= 0)
         ((bits .&. R.capEmojiPicker) /= 0)
+        ((bits .&. R.capNotificationReply) /= 0)
     )
 
 -- | The notification_result decision, in a function of its own because
@@ -487,12 +492,16 @@ capabilities = do
 -- else the process-level one, which does not; else the drop is
 -- announced.
 notificationResult :: App -> Word64 -> Word32 -> IO ()
-notificationResult app ident wire = do
+notificationResult app ident wire =
+  -- The RING's own word here, the app's typed outcome from here on.
+  notificationAnswer app ident (notificationOutcomeOfWire wire)
+
+-- | The same decision for any outcome, a reply's text included.
+notificationAnswer :: App -> Word64 -> NotificationOutcome -> IO ()
+notificationAnswer app ident outcome = do
   handlers <- readIORef (app.appNotificationHandlers)
   writeIORef (app.appNotificationHandlers) (Map.delete ident handlers)
   activation <- readIORef (app.appNotificationActivation)
-  -- The RING's own word here, the app's typed outcome from here on.
-  let outcome = notificationOutcomeOfWire wire
   case (Map.lookup ident handlers, activation) of
     (Just handler, _) -> dispatch (handler outcome)
     (Nothing, Just act) -> dispatch (act ident outcome)
@@ -500,6 +509,7 @@ notificationResult app ident wire = do
       let word = case outcome of
             NotificationActivated -> "activated"
             NotificationRefused -> "refused"
+            NotificationReplied _ -> "replied"
       hPutStrLn
         stderr
         ( "kaya: notification "
@@ -1565,6 +1575,10 @@ data NotificationAttr
   | -- | When the platform fires it: a UNIX time in seconds, handed to
     -- the OS scheduler where one exists. Absent (0) posts now.
     NAt Word64
+  | -- | A text field on the notification with this placeholder, where the
+    -- platform draws one ('notificationReply'): what the user sends
+    -- answers 'NotificationReplied' (docs\/notification-reply-plan.md).
+    NReply Text
 
 -- | Post a local notification with a GUEST-CHOSEN id
 -- (docs/tasks-s3-plan.md N1, N2): the alert's grammar without a window,
@@ -1577,6 +1591,7 @@ showNotification notification attrs handler = do
   let titles = [t | NTitle t <- attrs]
       bodies = [b | NBody b <- attrs]
       ats = [a | NAt a <- attrs]
+      replies = [r | NReply r <- attrs]
   case () of
     _
       | null titles || any T.null titles ->
@@ -1589,6 +1604,7 @@ showNotification notification attrs handler = do
                 (case ats of a : _ -> a; [] -> 0)
                 (W.VStr (T.unpack (mconcat (take 1 titles))))
                 (W.VStr (T.unpack (mconcat (take 1 bodies))))
+                (W.VStr (T.unpack (mconcat (take 1 replies))))
             )
 
 -- | Withdraw a pending or delivered notification (a reminder that was
@@ -4631,6 +4647,11 @@ dispatchLoop app = do
           notificationResult app ident $ case payload of
             Just (W.VI64 o) -> fromIntegral o :: Word32
             _ -> 0
+          dispatchLoop app
+      | kind == W.occKindNotificationReplied -> do
+          notificationAnswer app ident $ NotificationReplied $ case payload of
+            Just (W.VStr s) -> T.pack s
+            _ -> T.empty
           dispatchLoop app
       -- The undo pair keys the per-WINDOW tables (ident is the window;
       -- the label rides as the payload). NOT one-shot. THE MODEL IS

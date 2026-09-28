@@ -34,6 +34,11 @@
         android:icon="@mipmap/kaya_mark"
         android:label="${kayaAppLabel}"
         android:theme="@style/Theme.Kaya.Launch">
+        <!-- The window-free start a notification reply's receiver runs in a
+             process with no Activity (dev.kaya.KayaGuestStart). -->
+        <meta-data
+            android:name="dev.kaya.guest_start"
+            android:value="dev.kaya.rusthost.GuestStart" />
         <!-- APP LINKS (docs/app-links-plan.md L3, §4). `singleTask` so a
              link tapped while this app runs re-enters the LIVE activity
              through onNewIntent instead of stacking a second one; the

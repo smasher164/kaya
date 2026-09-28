@@ -34,15 +34,19 @@ pub struct NotificationSpec {
     pub at: u64,
     pub title: String,
     pub body: String,
+    /// The reply field's placeholder; empty posts no field
+    /// (docs/notification-reply-plan.md).
+    pub reply: String,
 }
 
-/// A notification's one answer: the user opened it, or the platform would
-/// not post it. Dismissal is deliberately absent (two platforms never
-/// report it).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// A notification's one answer: the user opened it, sent text from its
+/// reply field, or the platform would not post it. Dismissal is
+/// deliberately absent (two platforms never report it).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum NotificationOutcome {
     Activated,
     Refused,
+    Replied(String),
 }
 
 /// A live file dialog, guest-chosen like an alert id, retiring when its
@@ -2428,10 +2432,8 @@ impl OccSink {
                     );
                 }
                 Occurrence::NotificationResult { notification, outcome } => {
-                    ring.push_record(
-                        crate::ring::REC_NOTIFICATION_RESULT,
-                        &crate::wire::notification_result_body(notification, outcome),
-                    );
+                    let (kind, body) = crate::wire::notification_answer(notification, &outcome);
+                    ring.push_record(kind, &body);
                 }
                 Occurrence::LinkOpened { route, url, params } => {
                     ring.push_record(

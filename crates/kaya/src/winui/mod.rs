@@ -23620,6 +23620,35 @@ impl crate::harness::Stage for WinUiStage {
         on_notify(move || notification_activated(notification));
     }
 
+    /// The same carve-out for a reply: the COM activator's own `Activate`,
+    /// handed the Reply action's arguments and the text as the shell hands a
+    /// closed app's (docs/notification-reply-plan.md §4).
+    fn reply_notification(&self, notification: u64, text: &str) -> String {
+        let text = text.to_owned();
+        on_notify(move || {
+            let args = HSTRING::from(format!("{NOTIFICATION_ARG_KEY}={notification};{REPLY_ARG}=1"));
+            let aumid = HSTRING::from(declared_app_id().unwrap_or_default());
+            let key = HSTRING::from(REPLY_INPUT);
+            let value = HSTRING::from(text.as_str());
+            let input = NOTIFICATION_USER_INPUT_DATA {
+                Key: windows_core::PCWSTR(key.as_ptr()),
+                Value: windows_core::PCWSTR(value.as_ptr()),
+            };
+            let activator: INotificationActivationCallback = KayaToastActivator.into();
+            // SAFETY: every pointer above outlives the call.
+            unsafe {
+                activator.Activate(
+                    windows_core::PCWSTR(aumid.as_ptr()),
+                    windows_core::PCWSTR(args.as_ptr()),
+                    &[input],
+                )
+            }
+            .map(|()| String::new())
+            .unwrap_or_else(|e| format!("the toast activator refused the reply: {}", e.message()))
+        })
+        .unwrap_or_else(|| "the notification apartment is not running".to_owned())
+    }
+
     /// THE PLATFORM'S OWN OPEN, FROM INSIDE THE PROCESS (docs/app-links-plan.md
     /// L5): the shell starts a second process for the URL, that process finds
     /// this one holding the single-instance key and redirects its activation
@@ -25730,7 +25759,8 @@ fn winui_picker_reading(core: &CoreState, t: crate::harness::Target) -> String {
 use bindings::Windows::Data::Xml::Dom::XmlDocument;
 use bindings::Windows::Foundation::DateTime;
 use bindings::Windows::UI::Notifications::{
-    ScheduledToastNotification, ToastNotification, ToastNotificationManager, ToastNotifier,
+    ScheduledToastNotification, ToastActivatedEventArgs, ToastNotification,
+    ToastNotificationManager, ToastNotifier,
 };
 
 /// The tag every kaya notification wears in the platform's own history, and
@@ -25741,6 +25771,16 @@ fn notification_tag(id: u64) -> String {
 }
 
 const NOTIFICATION_ARG_KEY: &str = "kaya";
+/// The Reply action's own argument beside the id, and the text box's input
+/// id (docs/notification-reply-plan.md): the toast's `Activated` and the COM
+/// activator both read the text under that id.
+const REPLY_ARG: &str = "kaya-reply";
+const REPLY_INPUT: &str = "kayaReply";
+
+/// Whether a toast's arguments are its Reply action's.
+fn reply_in_argument(argument: &str) -> bool {
+    argument.split(';').any(|pair| pair.split('=').next().map(str::trim) == Some(REPLY_ARG))
+}
 /// Every kaya notification is one group, which is what the history's removal
 /// takes: `RemoveGroupedTagWithId` is the only remove-by-tag that also takes
 /// an application id, and an unpackaged app has to name its own.
@@ -25855,8 +25895,10 @@ fn on_notify<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Optio
 /// on a platform thread that can never touch the UI thread's `CORE`, so the
 /// sink is held here rather than read off the core.
 static NOTIFY_SINK: std::sync::Mutex<Option<OccSink>> = std::sync::Mutex::new(None);
-/// Activations that arrived before the sink was installed.
-static NOTIFY_PENDING: std::sync::Mutex<Vec<u64>> = std::sync::Mutex::new(Vec::new());
+/// Answers that arrived before the sink was installed, each with its own
+/// outcome: a tap, a reply's text, or a refusal.
+static NOTIFY_PENDING: std::sync::Mutex<Vec<(u64, crate::protocol::NotificationOutcome)>> =
+    std::sync::Mutex::new(Vec::new());
 /// The live toast objects, kept because the platform's `Activated` handler is
 /// the only real activation path and a dropped `ToastNotification` takes its
 /// event registration with it. Cleared when the id is answered or cancelled.
@@ -25872,8 +25914,8 @@ fn notification_sink_install(sink: OccSink) {
         *slot = Some(sink);
         std::mem::take(&mut *NOTIFY_PENDING.lock().unwrap())
     };
-    for id in pending {
-        notification_answer(id, crate::protocol::NotificationOutcome::Activated);
+    for (id, outcome) in pending {
+        notification_answer(id, outcome);
     }
 }
 
@@ -25884,7 +25926,7 @@ fn notification_answer(id: u64, outcome: crate::protocol::NotificationOutcome) {
             notification: crate::protocol::NotificationId(id),
             outcome,
         }),
-        None => NOTIFY_PENDING.lock().unwrap().push(id),
+        None => NOTIFY_PENDING.lock().unwrap().push((id, outcome)),
     }
 }
 
@@ -25901,6 +25943,14 @@ fn notification_activated(id: u64) {
     // lose it here too.
     notification_forget(id);
     notification_answer(id, crate::protocol::NotificationOutcome::Activated);
+}
+
+/// A reply from the toast's text box (docs/notification-reply-plan.md), from
+/// the toast's own `Activated` or the COM activator: the toast goes as it
+/// does for a tap, and the guest gets the text.
+fn notification_replied(id: u64, text: String) {
+    notification_forget(id);
+    notification_answer(id, crate::protocol::NotificationOutcome::Replied(text));
 }
 
 /// The declared reverse-DNS id (docs/tasks-s3-plan.md N4), through the CORE's
@@ -26166,9 +26216,23 @@ pub(crate) fn can_post_notifications() -> bool {
 /// carrying the kaya id — every guest string escaped, since the older API has
 /// no builder and this markup is written by hand.
 fn toast_payload(spec: &crate::protocol::NotificationSpec) -> windows_core::Result<XmlDocument> {
+    // THE REPLY FIELD (docs/notification-reply-plan.md): a text box and a
+    // button naming it. `activationType="background"` is ignored for a
+    // desktop app, so raising no window is kaya's decision, not the shell's.
+    let actions = if spec.reply.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "<actions><input id=\"{REPLY_INPUT}\" type=\"text\" placeHolderContent=\"{}\"/>\
+             <action content=\"Reply\" arguments=\"{NOTIFICATION_ARG_KEY}={};{REPLY_ARG}=1\" \
+             hint-inputId=\"{REPLY_INPUT}\" activationType=\"background\"/></actions>",
+            xml_escape(&spec.reply),
+            spec.notification.0,
+        )
+    };
     let payload = format!(
         "<toast launch=\"{}={}\"><visual><binding template=\"ToastGeneric\">\
-         <text>{}</text><text>{}</text></binding></visual></toast>",
+         <text>{}</text><text>{}</text></binding></visual>{actions}</toast>",
         NOTIFICATION_ARG_KEY,
         spec.notification.0,
         xml_escape(&spec.title),
@@ -26189,8 +26253,27 @@ fn notification_show(spec: &crate::protocol::NotificationSpec) -> windows_core::
     // platform calls this when the user clicks the banner or the shade row,
     // and it enters the same funnel the harness verb does.
     let activated = TypedEventHandler::<ToastNotification, windows_core::IInspectable>::new(
-        move |_, _| {
-            notification_activated(id);
+        move |_, args| {
+            // The Reply button's arguments carry its marker, and its text is
+            // the box's value in UserInput.
+            let answered = args
+                .as_ref()
+                .and_then(|args| args.cast::<ToastActivatedEventArgs>().ok())
+                .filter(|args| {
+                    args.Arguments().is_ok_and(|a| reply_in_argument(&a.to_string()))
+                })
+                .map(|args| {
+                    args.UserInput()
+                        .and_then(|input| input.Lookup(&HSTRING::from(REPLY_INPUT)))
+                        .and_then(|value| value.cast::<bindings::Windows::Foundation::IPropertyValue>())
+                        .and_then(|value| value.GetString())
+                        .map(|text| text.to_string())
+                        .unwrap_or_default()
+                });
+            match answered {
+                Some(text) => notification_replied(id, text),
+                None => notification_activated(id),
+            }
             Ok(())
         },
     );
@@ -26499,12 +26582,28 @@ impl INotificationActivationCallback_Impl for KayaToastActivator_Impl {
         &self,
         app_user_model_id: &windows_core::PCWSTR,
         invoked_args: &windows_core::PCWSTR,
-        _data: *const NOTIFICATION_USER_INPUT_DATA,
-        _count: u32,
+        data: *const NOTIFICATION_USER_INPUT_DATA,
+        count: u32,
     ) -> windows_core::Result<()> {
         let args = unsafe { invoked_args.to_string() }.unwrap_or_default();
         let aumid = unsafe { app_user_model_id.to_string() }.unwrap_or_default();
         match notification_id_in_argument(&args) {
+            // THE REPLY'S TEXT RIDES THE INPUT DATA, keyed by the text box's
+            // id (docs/notification-reply-plan.md).
+            Some(id) if reply_in_argument(&args) => {
+                let inputs = if data.is_null() || count == 0 {
+                    &[][..]
+                } else {
+                    // SAFETY: the shell hands `count` entries at `data`.
+                    unsafe { std::slice::from_raw_parts(data, count as usize) }
+                };
+                let text = inputs
+                    .iter()
+                    .find(|input| unsafe { input.Key.to_string() }.ok().as_deref() == Some(REPLY_INPUT))
+                    .and_then(|input| unsafe { input.Value.to_string() }.ok())
+                    .unwrap_or_default();
+                notification_replied(id, text);
+            }
             // ONE ACTIVATION PATH: the funnel the toast's own `Activated`
             // handler and the harness's `notification_activate` also enter.
             // The sink may not exist yet — a process COM started for this

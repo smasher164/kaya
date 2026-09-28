@@ -143,7 +143,7 @@ func App() *kaya.App {
 				}
 				c.unread++
 				tx.SetBadge(unreadTotal())
-				tx.ShowNotification(c.note).Title(c.name).Body(text).Show()
+				tx.ShowNotification(c.note).Title(c.name).Body(text).Reply("Message").Show()
 			}
 			refresh(tx, c)
 		}
@@ -346,10 +346,39 @@ func App() *kaya.App {
 			refresh(tx, c)
 		}
 
-		app.OnNotificationActivation(func(tx *kaya.Tx, note uint64, outcome kaya.NotificationOutcome) {
+		// C4 (docs/notification-reply-plan.md): a reply from the notification
+		// sends the text to that conversation and marks it read, without
+		// opening it. Replies count on their own (r1, r2, ...), so the
+		// messages typed in the app keep their keys whether or not this
+		// platform could reply.
+		replied := 0
+		replyFrom := func(tx *kaya.Tx, c *conversation, text string) {
+			text = strings.TrimSpace(text)
+			if text == "" {
+				return
+			}
+			replied++
+			m := message{key: fmt.Sprintf("r%d", replied), text: text, mine: true}
+			m.queued = !peer.send(c.id, text)
+			c.messages = append(c.messages, m)
+			if c.id == open {
+				insert(tx, m)
+			}
+			c.unread, c.firstUnread = 0, ""
+			tx.SetBadge(unreadTotal())
+			refresh(tx, c)
+		}
+
+		app.OnNotificationActivation(func(tx *kaya.Tx, note uint64, result kaya.NotificationResult) {
 			for _, c := range convs {
-				if c.note == note && outcome == kaya.NotificationOutcomeActivated {
+				if c.note != note {
+					continue
+				}
+				switch result.Outcome {
+				case kaya.NotificationOutcomeActivated:
 					openThread(tx, c.id)
+				case kaya.NotificationOutcomeReplied:
+					replyFrom(tx, c, result.Text)
 				}
 			}
 		})
@@ -467,13 +496,14 @@ type peer struct {
 }
 
 const dropLine = "\x00drop"
-const peerAway = 6 * time.Second
+const peerAway = 10 * time.Second
 
 // Each answer is (conversation, text, delay after the one before). Maya's
 // second answer comes late enough for a reader to have scrolled away, and
 // Sam's first answer is followed by the connection dropping.
 var script = map[string][][3]string{
 	"maya": {{"maya", "See you soon", "200ms"}, {"sam", "Are we still on for Friday?", "0s"},
+		{"alex", "Did the photos come through?", "0s"},
 		{"maya", "Also, bring the umbrella", "2500ms"}},
 	"sam":  {{"sam", "Perfect", "200ms"}, {"sam", dropLine, "0s"}},
 	"alex": {{"alex", "Glad you liked them", "200ms"}},
@@ -550,8 +580,11 @@ func (p *peer) read(conn net.Conn) {
 // serve answers one connection at a time; the one drop closes the listener
 // too, so the app's redials are refused until the peer is back on the same
 // port.
+// Each conversation numbers its peer's messages on its own (p1, p2, ... in
+// every thread), so an answer to one conversation leaves another's keys
+// where the scene expects them.
 func serve(listener net.Listener, addr string) {
-	seq := 0
+	seq := map[string]int{}
 	away := false
 	for {
 		conn, err := listener.Accept()
@@ -575,8 +608,8 @@ func serve(listener net.Listener, addr string) {
 					}
 					continue
 				}
-				seq++
-				fmt.Fprintf(conn, "MSG\t%s\tp%d\t%s\n", answer[0], seq, answer[1])
+				seq[answer[0]]++
+				fmt.Fprintf(conn, "MSG\t%s\tp%d\t%s\n", answer[0], seq[answer[0]], answer[1])
 			}
 		}
 		conn.Close()

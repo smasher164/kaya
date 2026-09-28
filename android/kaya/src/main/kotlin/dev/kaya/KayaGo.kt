@@ -1,6 +1,5 @@
 package dev.kaya
 
-import android.app.Activity
 
 /**
  * The way into a GO guest on Android, implemented in the guest's own
@@ -21,5 +20,5 @@ import android.app.Activity
  */
 object KayaGo {
     @JvmStatic
-    external fun attach(activity: Activity): Int
+    external fun attach(context: android.content.Context): Int
 }

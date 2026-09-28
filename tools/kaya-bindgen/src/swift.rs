@@ -641,6 +641,17 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("            return (kind, id, [], .i64(Int64(code)), [], nil, nil, [])");
         c.line("        }");
     }
+    for name in crate::value_answer_occurrence_names(spec) {
+        c.line(&format!(
+            "        if kind == UInt16(KAYA_OCCURRENCE_{}) {{",
+            name.to_uppercase()
+        ));
+        c.line(&format!("            // {}", crate::VALUE_ANSWER_MARK));
+        c.line("            let valueLen = Int(raw.loadUnaligned(fromByteOffset: 20, as: UInt32.self))");
+        c.line("            let text = String(decoding: raw[24..<(24 + valueLen)], as: UTF8.self)");
+        c.line("            return (kind, id, [], .str(text), [], nil, nil, [])");
+        c.line("        }");
+    }
     // The picker's answer is a LIST OF RECORDS, which no single
     // KayaValue can carry — hence the tuple's `files` member. Its own
     // arm: the generic tail would take the file count for a key-path

@@ -614,6 +614,15 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("            return true;");
         c.line("        }");
     }
+    for name in crate::value_answer_occurrence_names(spec) {
+        c.line(&format!("        if (kind == OccKind{})", pascal(name)));
+        c.line("        {");
+        c.line(&format!("            // {}", crate::VALUE_ANSWER_MARK));
+        c.line("            int valueLen = (int)BitConverter.ToUInt32(rec, 20);");
+        c.line("            payload = Encoding.UTF8.GetString(rec, 24, valueLen);");
+        c.line("            return true;");
+        c.line("        }");
+    }
     // The picker's answer is a LIST OF RECORDS, so it needs its own
     // arm: the generic tail would take the file count for a key-path
     // length and start eight bytes early.

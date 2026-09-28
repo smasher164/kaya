@@ -1,5 +1,6 @@
 package dev.kaya.javahost
 
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.util.Log
@@ -7,28 +8,18 @@ import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import dev.kaya.KayaCompose
+import dev.kaya.KayaGuestStart
 import dev.kaya.KayaEnv
 import dev.kaya.KayaRing
 import dev.kaya.guests.*
 
-class MainActivity : ComponentActivity() {
-    override fun onCreate(savedInstanceState: Bundle?) {
-        // The launch slot's other half: the manifest names
-        // Theme.Kaya.Launch and THIS swaps the activity onto
-        // postSplashScreenTheme. Without it the window background
-        // stays the launch colour for the app's whole life
-        // (docs/tasks-s2-plan.md T4; tools/check-app-identity.py
-        // holds every app module to making the call).
-        installSplashScreen()
-        super.onCreate(savedInstanceState)
-
-        // The KAYA_* extras into the live environment (KayaEnv, which
-        // says why it is called from BOTH doors).
-        KayaEnv.fromIntent(intent)
-
+/** The window-free half of the start, which a notification reply's
+ * receiver runs in a process with no Activity (dev.kaya.KayaGuestStart). */
+object GuestStart : KayaGuestStart {
+    override fun start(context: Context) {
         System.loadLibrary("kaya")
-        KayaRing.attach(this, filesDir.absolutePath)
-        KayaCompose.mount(this)
+        KayaRing.attach(context, context.filesDir.absolutePath)
+        KayaCompose.startHeadless(context)
         // A SCENE IS REGISTERED HERE AS SOON AS ITS GUEST EXISTS, even
         // when no leg runs it yet: whether a leg runs is the Compose
         // arm's question (tools/check-stubs.py reads the backend, not
@@ -106,6 +97,26 @@ class MainActivity : ComponentActivity() {
         // KAYA STARTS THE APP THREAD, not this shell — a configuration
         // change re-runs onCreate in the same process (KayaRing.startGuest).
         KayaRing.startGuest(scene)
+    }
+}
+
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        // The launch slot's other half: the manifest names
+        // Theme.Kaya.Launch and THIS swaps the activity onto
+        // postSplashScreenTheme. Without it the window background
+        // stays the launch colour for the app's whole life
+        // (docs/tasks-s2-plan.md T4; tools/check-app-identity.py
+        // holds every app module to making the call).
+        installSplashScreen()
+        super.onCreate(savedInstanceState)
+
+        // The KAYA_* extras into the live environment (KayaEnv, which
+        // says why it is called from BOTH doors).
+        KayaEnv.fromIntent(intent)
+
+        GuestStart.start(this)
+        KayaCompose.mount(this)
     }
 
     // EVERY WARM ARRIVAL COMES THROUGH HERE, since the activity is

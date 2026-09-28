@@ -111,6 +111,10 @@ type Caps struct {
 	// Tx.ShowEmojiPicker opens a picker (docs/emoji-picker-plan.md); on
 	// iOS it only focuses the field.
 	EmojiPicker bool
+	// NotificationRef.Reply puts a text field on the notification
+	// (docs/notification-reply-plan.md); false on a Linux desktop whose
+	// portal lists no reply purpose.
+	NotificationReply bool
 }
 
 // Capabilities answers what this host can do. Constant for the life of
@@ -122,6 +126,7 @@ func Capabilities() Caps {
 		Notifications: bits&capNotifications != 0,
 		Badge:         bits&capBadge != 0,
 		EmojiPicker:   bits&capEmojiPicker != 0,
+		NotificationReply: bits&capNotificationReply != 0,
 	}
 }
 
@@ -276,11 +281,11 @@ type App struct {
 	alerts         map[uint64]func(*Tx, AlertChoice)
 	// One-shot, keyed by the GUEST's notification id (the alert's
 	// grammar; many may be live at once).
-	notifications  map[uint64]func(*Tx, NotificationOutcome)
+	notifications  map[uint64]func(*Tx, NotificationResult)
 	// NOT one-shot, and not keyed at all: the process-level handler for
 	// a result whose id has none above (docs/tasks-s9-plan.md R1). A
 	// relaunched process never called Show.
-	notificationActivation func(*Tx, uint64, NotificationOutcome)
+	notificationActivation func(*Tx, uint64, NotificationResult)
 	// NOT one-shot either: a route declared by Link answers every URL
 	// that matches it, for the life of the process
 	// (docs/app-links-plan.md §4), and the core owns the pattern table —
@@ -363,7 +368,7 @@ func NewApp() *App {
 		sortHandlers:   make(map[uint64]func(*Tx, uint32)),
 		nodeSorts:      make(map[uint64]func(*Tx, []any, uint32)),
 		alerts:         make(map[uint64]func(*Tx, AlertChoice)),
-		notifications:  make(map[uint64]func(*Tx, NotificationOutcome)),
+		notifications:  make(map[uint64]func(*Tx, NotificationResult)),
 		links:          make(map[uint64]func(*Tx, map[string]string)),
 		fileDialogs:    make(map[uint64]func(*Tx, []PickedFile)),
 		clipboardReads: make(map[uint64]func(*Tx, Representation)),
@@ -3135,8 +3140,9 @@ func (r AlertRef) Show() uint64 {
 // ShowNotification posts a local notification with a GUEST-CHOSEN id
 // (docs/tasks-s3-plan.md N1, N2): the alert's chain without a window,
 // ending in Show. The result handler rides the REQUEST and retires with
-// its one answer — Activated when the user opened it, Refused when the
-// platform would not post it. Many may be live at once.
+// its one answer — Activated when the user opened it, Replied with the
+// text sent from its Reply field, Refused when the platform would not
+// post it. Many may be live at once.
 func (tx *Tx) ShowNotification(notification uint64) NotificationRef {
 	return NotificationRef{tx: tx, id: notification}
 }
@@ -3163,17 +3169,14 @@ func (tx *Tx) SetBadge(count uint32) {
 // out of this body: the one-shot handler bound at Show first, retiring
 // with the result; else the process-level one, which does not; else the
 // drop is announced.
-func (a *App) notificationResult(id uint64, code uint32) {
-	// The wire's number becomes the vocabulary HERE, at the one decode
-	// point — Swift's and Java's arms take it the same way.
-	choice := NotificationOutcome(code)
+func (a *App) notificationResult(id uint64, choice NotificationResult) {
 	if fn := a.notifications[id]; fn != nil {
 		delete(a.notifications, id)
 		a.dispatch(func(tx *Tx) { fn(tx, choice) })
 	} else if act := a.notificationActivation; act != nil {
 		a.dispatch(func(tx *Tx) { act(tx, id, choice) })
 	} else {
-		outcome := choice.String()
+		outcome := choice.Outcome.String()
 		fmt.Fprintf(os.Stderr,
 			"kaya: notification %d outcome %s reached no handler — "+
 				"none was bound at the show and no process-level "+
@@ -3188,7 +3191,7 @@ func (a *App) notificationResult(id uint64, code uint32) {
 // process the platform RELAUNCHED for a tap, since it never called
 // Show. It does not retire, and a one-shot handler for the same id
 // still wins.
-func (a *App) OnNotificationActivation(fn func(*Tx, uint64, NotificationOutcome)) {
+func (a *App) OnNotificationActivation(fn func(*Tx, uint64, NotificationResult)) {
 	a.notificationActivation = fn
 }
 
@@ -3267,7 +3270,8 @@ type NotificationRef struct {
 	at       uint64
 	title    string
 	body     string
-	onResult func(*Tx, NotificationOutcome)
+	reply    string
+	onResult func(*Tx, NotificationResult)
 }
 
 func (r NotificationRef) Title(title string) NotificationRef {
@@ -3287,10 +3291,19 @@ func (r NotificationRef) At(unixSeconds uint64) NotificationRef {
 	return r
 }
 
-// OnResult binds the one-shot result handler to THIS request: outcome
-// is NotificationOutcomeActivated or NotificationOutcomeRefused. The
+// Reply puts a text field on the notification with this placeholder,
+// where the platform draws one (Capabilities().NotificationReply): what the
+// user sends answers NotificationOutcomeReplied with the text. Elsewhere
+// the notification posts without it and a click answers Activated
+// (docs/notification-reply-plan.md).
+func (r NotificationRef) Reply(placeholder string) NotificationRef {
+	r.reply = placeholder
+	return r
+}
+
+// OnResult binds the one-shot result handler to THIS request. The
 // registration retires with the result.
-func (r NotificationRef) OnResult(fn func(*Tx, NotificationOutcome)) NotificationRef {
+func (r NotificationRef) OnResult(fn func(*Tx, NotificationResult)) NotificationRef {
 	r.onResult = fn
 	return r
 }
@@ -3304,7 +3317,7 @@ func (r NotificationRef) Show() uint64 {
 	if r.onResult != nil {
 		r.tx.app.notifications[r.id] = r.onResult
 	}
-	r.tx.emit(TxShowNotification(r.id, r.at, r.title, r.body))
+	r.tx.emit(TxShowNotification(r.id, r.at, r.title, r.body, r.reply))
 	return r.id
 }
 
@@ -3993,6 +4006,14 @@ type AlertChoice uint32
 // opened it, NotificationOutcomeRefused when the platform would not post
 // it. Dismissal is not one of them — two platforms never report it.
 type NotificationOutcome uint32
+
+// NotificationResult is a notification's one answer: its Outcome, and for
+// NotificationOutcomeReplied the Text the user sent from its Reply field
+// (docs/notification-reply-plan.md).
+type NotificationResult struct {
+	Outcome NotificationOutcome
+	Text    string
+}
 
 // FileMode is how a picked file is re-opened: FileModeRead,
 // FileModeWrite (truncates; a save destination only adds the create) or
@@ -6375,7 +6396,10 @@ func (a *App) Serve() {
 		case kind == occLinkOpened:
 			a.linkOpened(id, linkURLOf(payload), linkParamsOf(payload))
 		case kind == occNotificationResult:
-			a.notificationResult(id, choice)
+			a.notificationResult(id, NotificationResult{Outcome: NotificationOutcome(choice)})
+		case kind == occNotificationReplied:
+			text, _ := payload.(string)
+			a.notificationResult(id, NotificationResult{Outcome: NotificationOutcomeReplied, Text: text})
 		case kind == occClipboardResult:
 			// One-shot. EMPTY IS THE UNIVERSAL NO and arrives as a nil
 			// Representation — denied, unfocused, absent and

@@ -404,9 +404,9 @@ NOTIFICATION_ORDER = [
      r"self\.notifications\.borrow_mut\(\)\.remove\(&notification\.0\)",
      r"else if let Some\(f\) = self\.notification_activation\.borrow\(\)"
      r"\.as_ref\(\)",
-     r"notification_dropped\(\*notification, \*outcome\)"),
+     r"notification_dropped\(\*notification, outcome\.clone\(\)\)"),
     ("python", "bindings/python/kaya/__init__.py",
-     r"^            if kind == wire\.OCC_NOTIFICATION_RESULT:",
+     r"^            if kind in \(wire\.OCC_NOTIFICATION_RESULT, wire\.OCC_NOTIFICATION_REPLIED\):",
      r"^            if kind == wire\.OCC_FILE_DIALOG_RESULT:",
      r"self\._notification_handlers\.pop\(ident, None\)",
      r"activation = self\._notification_activation",
@@ -454,7 +454,8 @@ NOTIFICATION_ORDER = [
      r"^  \| None, Some f -> dispatch app",
      r"kaya: notification "),
     ("js", "bindings/js/kaya/index.ts",
-     r"if \(kind === wire\.OCC_NOTIFICATION_RESULT\) \{",
+     r"if \(kind === wire\.OCC_NOTIFICATION_RESULT "
+     r"\|\| kind === wire\.OCC_NOTIFICATION_REPLIED\) \{",
      r"if \(kind === wire\.OCC_FILE_DIALOG_RESULT\) \{",
      r"const handler = this\._notificationHandlers\.get\(ident\);",
      r"const act = this\._notificationActivation;",
@@ -471,8 +472,10 @@ NOTIFICATION_ORDER = [
 ARM_CALLS = [
     ("go", "bindings/go/app.go",
      r"^\t\tcase kind == occNotificationResult:\n"
-     r"\t\t\ta\.notificationResult\(id, choice\)$",
-     r"a\.notificationResult\(id, choice\)", "a.dispatch(func(tx *Tx) {})"),
+     r"\t\t\ta\.notificationResult\(id, "
+     r"NotificationResult\{Outcome: NotificationOutcome\(choice\)\}\)$",
+     r"a\.notificationResult\(id, NotificationResult\{Outcome: NotificationOutcome\(choice\)\}\)",
+     "a.dispatch(func(tx *Tx) {})"),
     ("csharp", "bindings/csharp/KayaApp.cs",
      r"^                case NotificationAnswered notified:\n"
      r"                    NotificationResult\(notified\.Id, notified\.Outcome\);$",
@@ -521,6 +524,72 @@ for _lang, _rel, _pattern, _pat, _repl in ARM_CALLS:
                       f"method still passed ({_n} substitution(s))")
 print("check-sugar-surface: notification arm-call perturbations applied:"
       + "".join(_arm_neg))
+
+# A REPLY REACHES THE SAME DECISION (docs/notification-reply-plan.md): the
+# notification_replied record's arm, in the six bindings that keep the
+# decision in a method, calls it with the reply's text. An arm that dropped
+# replies would pass every scene but the one leg that sends one. Python's and
+# JS's single arm takes both kinds, held by the order table above.
+REPLY_ARMS = [
+    ("go", "bindings/go/app.go",
+     r"^\t\tcase kind == occNotificationReplied:\n"
+     r"\t\t\ttext, _ := payload\.\(string\)\n"
+     r"\t\t\ta\.notificationResult\(id, "
+     r"NotificationResult\{Outcome: NotificationOutcomeReplied, Text: text\}\)$",
+     r"a\.notificationResult\(id, NotificationResult\{Outcome: NotificationOutcomeReplied",
+     "_ = (NotificationResult{Outcome: NotificationOutcomeReplied"),
+    ("csharp", "bindings/csharp/KayaApp.cs",
+     r"^            case KayaWire\.OccKindNotificationReplied:\n"
+     r"                return new NotificationAnswered\(\n"
+     r"                    id, keys, new NotificationOutcome\.Replied\(",
+     r"return new NotificationAnswered\(\n"
+     r"                    id, keys, new NotificationOutcome\.Replied\(",
+     "return null; _ = (\n                    id, keys, new NotificationOutcome.Replied("),
+    ("java", "bindings/java/dev/kaya/KayaApp.java",
+     r"^            \} else if \(occ\.kind == KayaWire\.OCC_KIND_NOTIFICATION_REPLIED\) \{\n"
+     r"                notificationReplied\(occ\.id, \(String\) occ\.payload\);$",
+     r"notificationReplied\(occ\.id, \(String\) occ\.payload\);", "dispatch(tx -> { });"),
+    ("swift", "bindings/swift/KayaApp.swift",
+     r"^            case \(UInt16\(KAYA_OCCURRENCE_NOTIFICATION_REPLIED\), _\):\n"
+     r"                notificationAnswer\(id, \.replied\(text \?\? \"\"\)\)$",
+     r"notificationAnswer\(id, \.replied\(text \?\? \"\"\)\)", "break"),
+    ("ocaml", "bindings/ocaml/kaya_app.ml",
+     r"^         else if kind = Kaya_wire\.occ_kind_notification_replied then\n"
+     r"           notification_result app id\n"
+     r"             \(Notification_outcome\.Replied$",
+     r"           notification_result app id\n             \(Notification_outcome\.Replied",
+     "           ignore app; ignore\n             (Notification_outcome.Replied"),
+    ("haskell", "bindings/haskell/KayaApp.hs",
+     r"^      \| kind == W\.occKindNotificationReplied -> do\n"
+     r"          notificationAnswer app ident \$ NotificationReplied \$",
+     r"notificationAnswer app ident \$ NotificationReplied",
+     "const (pure ()) app $ NotificationReplied"),
+]
+
+
+def reply_arm_reaches_the_method(lang, text):
+    for name, _rel, pattern, _pat, _repl in REPLY_ARMS:
+        if name == lang:
+            return re.search(pattern, text, re.M) is not None
+    raise KeyError(lang)
+
+
+_reply_neg = []
+for _lang, _rel, _pattern, _pat, _repl in REPLY_ARMS:
+    _text = read_rel(_rel)
+    if not reply_arm_reaches_the_method(_lang, _text):
+        print(f"check-sugar-surface: {_lang}'s notification_replied arm does not "
+              f"reach the notification decision with the reply's text — a reply "
+              f"would reach no handler ({_rel})")
+        status = 1
+    _gutted, _n = sub_count(_pat, _repl, _text)
+    _reply_neg.append(f" {_lang}={_n}")
+    if _n < 1 or reply_arm_reaches_the_method(_lang, _gutted):
+        selftest_exit(f"check-sugar-surface: self-test failed — a {_lang} "
+                      f"notification_replied arm that no longer reaches the "
+                      f"decision still passed ({_n} substitution(s))")
+print("check-sugar-surface: notification reply-arm perturbations applied:"
+      + "".join(_reply_neg))
 
 ORDER_STEPS = ("the one-shot handler bound at the show",
                "the process-level handler",
@@ -1156,6 +1225,7 @@ check_cap_flag("aux_windows", "AuxWindows", "auxWindows")
 check_cap_flag("notifications", "Notifications", "notifications")
 check_cap_flag("badge", "Badge", "badge")
 check_cap_flag("emoji_picker", "EmojiPicker", "emojiPicker")
+check_cap_flag("notification_reply", "NotificationReply", "notificationReply")
 
 # THEIR BUILT-IN NEGATIVE TESTS, one per clause and for the same reason
 # the range verbs have one: sixteen patterns that can only pass are
@@ -1273,6 +1343,27 @@ CAP_BITS = {
             "rust": ("crates/kaya/src/app.rs", "KAYA_CAP_EMOJI_PICKER"),
             "go": ("bindings/go/runtime.go", "C.KAYA_CAP_EMOJI_PICKER"),
             "swift": ("bindings/swift/KayaApp.swift", "KAYA_CAP_EMOJI_PICKER"),
+        },
+    },
+    "CAP_NOTIFICATION_REPLY": {
+        "copiers": {
+            "python": ("bindings/python/kaya/runtime.py",
+                       r"^CAP_NOTIFICATION_REPLY = (\d+)$"),
+            "csharp": ("bindings/csharp/Kaya.cs",
+                       r"CAP_NOTIFICATION_REPLY = (\d+);"),
+            "java": ("bindings/java/dev/kaya/KayaApp.java",
+                     r"CAP_NOTIFICATION_REPLY = (\d+);"),
+            "haskell": ("bindings/haskell/KayaRuntime.hs",
+                        r"^capNotificationReply = (\d+)$"),
+            "ocaml": ("bindings/ocaml/kaya_runtime.ml",
+                      r"^let cap_notification_reply = (\d+)L$"),
+            "js": ("bindings/js/kaya/runtime.ts",
+                   r"^export const CAP_NOTIFICATION_REPLY = (\d+);$"),
+        },
+        "readers": {
+            "rust": ("crates/kaya/src/app.rs", "KAYA_CAP_NOTIFICATION_REPLY"),
+            "go": ("bindings/go/runtime.go", "C.KAYA_CAP_NOTIFICATION_REPLY"),
+            "swift": ("bindings/swift/KayaApp.swift", "KAYA_CAP_NOTIFICATION_REPLY"),
         },
     },
 }
@@ -2236,6 +2327,54 @@ print(f"check-sugar-surface: fake swipe surfaces fired {len(fake)}/{len(SWIPE_SU
 if len(fake) != len(SWIPE_SURFACES):
     selftest_exit(f"check-sugar-surface: self-test failed ({len(fake)}/{len(SWIPE_SURFACES)} "
                   f"swipe patterns fired for a setter that exists nowhere)")
+
+
+# --- A NOTIFICATION'S REPLY FIELD, in all nine ----------------------
+# (docs/notification-reply-plan.md §5): the placeholder reaches the show
+# record in each binding's own builder. The wire's field takes an empty
+# Str from a binding that never set it, so a missing spelling is silent.
+REPLY_SURFACES = [
+    ("rust", "crates/kaya/src/app.rs",
+     r"pub fn {}\(mut self, placeholder: &str\) -> Self", "reply"),
+    ("python", "bindings/python/kaya/__init__.py",
+     r"wire\.tx_show_notification\(notification, int\(at\), title, body, {}\)", "reply"),
+    ("go", "bindings/go/app.go",
+     r"TxShowNotification\(r\.id, r\.at, r\.title, r\.body, r\.{}\)", "reply"),
+    ("csharp", "bindings/csharp/KayaApp.cs",
+     r"KayaWire\.TxShowNotification\(notification, at, title, body, {}\)", "reply"),
+    ("java", "bindings/java/dev/kaya/KayaApp.java",
+     r"KayaWire\.txShowNotification\(id, at, title, body, {}\)", "reply"),
+    ("swift", "bindings/swift/KayaApp.swift",
+     r"tx\.showNotification\(notification, at, \.str\(title\), \.str\(body\), "
+     r"\.str\({}\)\)", "reply"),
+    ("haskell", "bindings/haskell/KayaApp.hs", r"\[r \| {} r <- attrs\]", "NReply"),
+    ("ocaml", "bindings/ocaml/kaya_app.ml",
+     r"\(Kaya_wire\.Str body\) \(Kaya_wire\.Str {}\)", "reply"),
+    ("js", "bindings/js/kaya/index.ts", r'opts\.body \?\? "", opts\.{} \?\? ""', "reply"),
+]
+
+
+def check_reply_surfaces(fake_name=None, findings=None):
+    global status
+    for lang, rel, template, name in REPLY_SURFACES:
+        pat = template.format(fake_name or name)
+        if not grep_file(pat, rel):
+            msg = (f"check-sugar-surface: {lang} does not carry a notification's "
+                   f"reply placeholder to the show record (wanted /{pat}/ in {rel})")
+            if findings is None:
+                print(msg)
+                status = 1
+            else:
+                findings.append(msg)
+
+
+check_reply_surfaces()
+fake = []
+check_reply_surfaces("kayaFakeReply", findings=fake)
+print(f"check-sugar-surface: fake reply surfaces fired {len(fake)}/{len(REPLY_SURFACES)}")
+if len(fake) != len(REPLY_SURFACES):
+    selftest_exit(f"check-sugar-surface: self-test failed ({len(fake)}/{len(REPLY_SURFACES)} "
+                  f"reply patterns fired for a spelling that exists nowhere)")
 
 
 # --- THE SIZE-POLICY SURFACE, in all nine ---------------------------

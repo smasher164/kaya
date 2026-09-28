@@ -35,6 +35,7 @@ type capabilities = {
   notifications : bool;
   badge : bool;
   emoji_picker : bool;
+  notification_reply : bool;
 }
 
 (* This host's capabilities. Constant for the life of the process, so
@@ -46,6 +47,8 @@ let capabilities () =
     notifications = Int64.logand bits Kaya_runtime.cap_notifications <> 0L;
     badge = Int64.logand bits Kaya_runtime.cap_badge <> 0L;
     emoji_picker = Int64.logand bits Kaya_runtime.cap_emoji_picker <> 0L;
+    notification_reply =
+      Int64.logand bits Kaya_runtime.cap_notification_reply <> 0L;
   }
 
 
@@ -218,10 +221,12 @@ module Alert_choice = struct
            code)
 end
 
-(* A notification's two outcomes (docs/tasks-s3-plan.md N1). Dismissal is
-   not one of them: two platforms never report it. *)
+(* A notification's outcomes (docs/tasks-s3-plan.md N1): opened, refused,
+   or a reply from its field with the text the user sent
+   (docs/notification-reply-plan.md). Dismissal is not one of them: two
+   platforms never report it. *)
 module Notification_outcome = struct
-  type t = Activated | Refused
+  type t = Activated | Refused | Replied of string
 
   let of_wire code =
     if code = Kaya_wire.notification_outcome_activated then Activated
@@ -233,7 +238,10 @@ module Notification_outcome = struct
             does not know"
            code)
 
-  let name = function Activated -> "activated" | Refused -> "refused"
+  let name = function
+    | Activated -> "activated"
+    | Refused -> "refused"
+    | Replied _ -> "replied"
 end
 
 (* The app's OWN light/dark choice, applied process-wide from the
@@ -2977,8 +2985,8 @@ let show_alert ?(window = 0L) ?(title = "") ?(message = "")
    it and [notification_refused] when the platform would not post it.
    [~at] is a UNIX time in seconds handed to the OS scheduler where one
    exists; 0 posts now. Many may be live at once. *)
-let show_notification ?(title = "") ?(body = "") ?(at = 0L) ?on_result
-    notification =
+let show_notification ?(title = "") ?(body = "") ?(at = 0L) ?(reply = "")
+    ?on_result notification =
   let tx = the_tx () in
   if title = "" then
     invalid_arg "kaya: a notification needs a title — pass ~title";
@@ -2987,7 +2995,7 @@ let show_notification ?(title = "") ?(body = "") ?(at = 0L) ?on_result
     on_result;
   emit tx
     (Kaya_wire.tx_show_notification notification at (Kaya_wire.Str title)
-       (Kaya_wire.Str body));
+       (Kaya_wire.Str body) (Kaya_wire.Str reply));
   notification
 
 (* Withdraw a pending or delivered notification (a reminder that was
@@ -5249,6 +5257,10 @@ let dispatch_loop app =
                 (match payload with
                 | Some (Kaya_wire.I64 o) -> Int64.to_int o
                 | _ -> 0))
+         else if kind = Kaya_wire.occ_kind_notification_replied then
+           notification_result app id
+             (Notification_outcome.Replied
+                (match payload with Some (Kaya_wire.Str s) -> s | _ -> ""))
          else if kind = Kaya_wire.occ_kind_file_dialog_result then
            (* One-shot like the alert, and the id retires with it. The
               parser flattens three values per file into the values

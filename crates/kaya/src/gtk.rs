@@ -14435,6 +14435,10 @@ const GNOME_PATH: &str = "/org/gtk/Notifications";
 /// when the reminder's time comes).
 const ACTION_ACTIVATED: &str = "notify-activated";
 const ACTION_NOTIFY: &str = "notify";
+/// The reply button's portal-scope action and the portal's purpose for a
+/// text field (docs/notification-reply-plan.md R1).
+const ACTION_REPLY: &str = "kaya-notification-reply";
+const REPLY_PURPOSE: &str = "im.reply-with-text";
 /// Every notification call is bounded: the app thread waits on the probe
 /// and the main loop runs the rest.
 const NOTIFY_TIMEOUT_MS: i32 = 5000;
@@ -14530,6 +14534,8 @@ enum NotifyRoute {
 struct Posted {
     title: String,
     body: String,
+    /// The reply field's placeholder, "" for none (docs/notification-reply-plan.md).
+    reply: String,
     /// The transient timer unit a scheduled post asked the session's
     /// manager for, so a cancel can stop it (N2).
     unit: Option<String>,
@@ -14688,6 +14694,59 @@ pub(crate) fn can_post_notifications() -> bool {
     notification_route().is_some()
 }
 
+/// Whether the portal draws a reply field (docs/notification-reply-plan.md
+/// R1): its `SupportedOptions` lists the text purpose among the button
+/// purposes. No shipping desktop's portal does yet, so this reads false and
+/// `.reply(..)` posts the notification without one. Read once, at startup.
+pub(crate) fn can_reply_to_notifications() -> bool {
+    static REPLY: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *REPLY.get_or_init(|| {
+        if notification_route() != Some(NotifyRoute::Portal) {
+            return false;
+        }
+        let Some(conn) = session_bus() else { return false };
+        let answer = conn.call_sync(
+            Some(PORTAL_NAME),
+            PORTAL_PATH,
+            "org.freedesktop.DBus.Properties",
+            "Get",
+            Some(&glib::Variant::tuple_from_iter([
+                PORTAL_NOTIFICATION.to_variant(),
+                "SupportedOptions".to_variant(),
+            ])),
+            None,
+            gio::DBusCallFlags::NONE,
+            NOTIFY_TIMEOUT_MS,
+            gio::Cancellable::NONE,
+        );
+        let purposes: Result<Vec<String>, String> = match &answer {
+            Ok(reply) => Ok(reply
+                .child_value(0)
+                .as_variant()
+                .map(|options| glib::VariantDict::new(Some(&options)))
+                .and_then(|options| options.lookup_value("button-purpose", None))
+                .and_then(|listed| listed.get::<Vec<String>>())
+                .unwrap_or_default()),
+            Err(why) => Err(why.to_string()),
+        };
+        let listed = purposes.as_ref().is_ok_and(|p| p.iter().any(|x| x == REPLY_PURPOSE));
+        if std::env::var_os("KAYA_SELFTEST").is_some() {
+            kaya_diag!(
+                "KAYA_DIAG notification reply: the portal's SupportedOptions button \
+                 purposes {purposes:?} -> reply field {listed}"
+            );
+        }
+        listed
+    })
+}
+
+/// A reply from the portal's text field: the platform's copy goes, as it
+/// does for a click, and the guest gets the text.
+fn notification_replied(id: u64, text: String, sink: &OccSink) {
+    withdraw_notification(id);
+    answer_notification(sink, id, crate::protocol::NotificationOutcome::Replied(text));
+}
+
 fn answer_notification(
     sink: &OccSink,
     id: u64,
@@ -14754,10 +14813,20 @@ fn withdraw_notification(id: u64) {
 /// The record the desktop is asked to hold: the guest's title and body,
 /// and the action a click activates us with — the kaya id as its target,
 /// which is what comes back as `ActivateAction` on both routes.
-fn notification_body(id: u64, title: &str, body: &str) -> glib::Variant {
+fn notification_body(id: u64, title: &str, body: &str, reply: &str) -> glib::Variant {
     let dict = glib::VariantDict::new(None);
     dict.insert("title", title);
     dict.insert("body", body);
+    // THE REPLY FIELD, ONLY WHERE THE PORTAL DRAWS ONE (R1): a button with the
+    // portal's reply purpose, whose text comes back on ActionInvoked.
+    if !reply.is_empty() && can_reply_to_notifications() {
+        let button = glib::VariantDict::new(None);
+        button.insert("label", "Reply");
+        button.insert("action", ACTION_REPLY);
+        button.insert("target", notification_target(id));
+        button.insert("purpose", REPLY_PURPOSE);
+        dict.insert_value("buttons", &glib::Variant::array_from_iter::<glib::VariantDict>([button.end()]));
+    }
     // THE APP'S OWN NAMESPACE ON BOTH ROUTES (docs/tasks-s9-plan.md R4;
     // docs/traps.md, "A bare portal action dies with the connection that
     // posted it"). A bare name here is what made S3 read `Activate` alone.
@@ -14766,13 +14835,13 @@ fn notification_body(id: u64, title: &str, body: &str) -> glib::Variant {
     dict.end()
 }
 
-fn deliver_notification(sink: OccSink, id: u64, title: String, body: String) {
+fn deliver_notification(sink: OccSink, id: u64, title: String, body: String, reply: String) {
     let (Some(route), Some(conn)) = (notification_route(), session_bus()) else {
         answer_notification(&sink, id, crate::protocol::NotificationOutcome::Refused);
         return;
     };
     let ident = notification_id_string(id);
-    let record = notification_body(id, &title, &body);
+    let record = notification_body(id, &title, &body, &reply);
     let (name, path, interface, args) = match route {
         NotifyRoute::Portal => (
             PORTAL_NAME,
@@ -14916,9 +14985,11 @@ fn fire_scheduled(id: u64, sink: &OccSink) {
     let held = POSTED
         .lock()
         .ok()
-        .and_then(|posted| posted.get(&id).map(|p| (p.title.clone(), p.body.clone())));
+        .and_then(|posted| {
+            posted.get(&id).map(|p| (p.title.clone(), p.body.clone(), p.reply.clone()))
+        });
     match held {
-        Some((title, body)) => deliver_notification(sink.clone(), id, title, body),
+        Some((title, body, reply)) => deliver_notification(sink.clone(), id, title, body, reply),
         None => {
             answer_notification(sink, id, crate::protocol::NotificationOutcome::Refused);
         }
@@ -14943,11 +15014,16 @@ fn post_notification(sink: OccSink, spec: crate::protocol::NotificationSpec) {
     if let Ok(mut posted) = POSTED.lock() {
         posted.insert(
             id,
-            Posted { title: spec.title.clone(), body: spec.body.clone(), unit: None },
+            Posted {
+                title: spec.title.clone(),
+                body: spec.body.clone(),
+                reply: spec.reply.clone(),
+                unit: None,
+            },
         );
     }
     if spec.at == 0 {
-        deliver_notification(sink, id, spec.title, spec.body);
+        deliver_notification(sink, id, spec.title, spec.body, spec.reply);
     } else {
         schedule_notification(id, spec.at, sink);
     }
@@ -15071,6 +15147,19 @@ fn install_notification_routes(app: &gtk4::Application, sink: OccSink) {
         move |signal| {
             let ident = signal.parameters.child_value(0);
             let Some(id) = ident.str().and_then(notification_id_of) else { return };
+            // THE REPLY'S TEXT RIDES THE PARAMETER LIST'S LAST ENTRY, after
+            // the button's own target (the portal spec's text purpose).
+            if signal.parameters.child_value(1).str() == Some(ACTION_REPLY) {
+                let parameter = signal.parameters.child_value(2);
+                let count = parameter.n_children();
+                let text = (count > 0)
+                    .then(|| parameter.child_value(count - 1))
+                    .and_then(|last| last.as_variant())
+                    .and_then(|text| text.str().map(str::to_owned))
+                    .unwrap_or_default();
+                notification_replied(id, text, &sink);
+                return;
+            }
             notification_activated(id, &sink);
         },
     );
@@ -19504,6 +19593,17 @@ impl crate::harness::Stage for GtkStage {
     /// box emits when a user taps it, and the answer travels the route the
     /// notification took — the portal hearing the daemon and calling back
     /// into this process, or GNOME's own `ActivateAction`.
+    /// NO LINUX DESKTOP DRAWS A REPLY FIELD (R1), so this lane's chat leg
+    /// drops the step (tools/lib/lanes/linux.py); a leg that still runs it
+    /// is told what the portal answered.
+    fn reply_notification(&self, notification: u64, _text: &str) -> String {
+        format!(
+            "notification {notification} has no reply field to send from: this \
+             portal's reply capability reads {} (docs/notification-reply-plan.md R1)",
+            can_reply_to_notifications()
+        )
+    }
+
     fn activate_notification(&self, notification: u64) {
         let key = match notification_route() {
             Some(NotifyRoute::Gnome) => notification_id_string(notification),

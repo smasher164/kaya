@@ -2219,6 +2219,15 @@ class NotificationOutcome(enum.IntEnum):
                               "kaya.NotificationOutcome.ACTIVATED")
 
 
+@dataclasses.dataclass(frozen=True)
+class NotificationReply:
+    """A reply from the notification's field: the text the user sent
+    (docs/notification-reply-plan.md). It reaches the same handlers as a
+    NotificationOutcome, so `match` tells them apart."""
+
+    text: str
+
+
 def show_alert(title: str = "", *, message: str = "",
                actions: Sequence[str] = (), cancel: str | None = None,
                on_result: Callable[[AlertChoice], object] | None = None,
@@ -2248,8 +2257,9 @@ def show_alert(title: str = "", *, message: str = "",
 
 
 def show_notification(notification: int, *, title: str = "", body: str = "",
-                      at: int = 0,
-                      on_result: Callable[[NotificationOutcome], object] | None = None
+                      at: int = 0, reply: str = "",
+                      on_result: Callable[[NotificationOutcome | NotificationReply], object]
+                      | None = None
                       ) -> int:
     """Post a local notification (docs/tasks-s3-plan.md N1, N2): the
     alert's grammar without a window — the platform shows it outside
@@ -2257,7 +2267,11 @@ def show_notification(notification: int, *, title: str = "", body: str = "",
     NOTIFICATION_ACTIVATED when the user opened it and
     NOTIFICATION_REFUSED when the platform would not post it. `at` is a
     UNIX time in seconds handed to the OS scheduler where one exists;
-    0 posts now. Ids are the GUEST's, and many may be live at once."""
+    0 posts now. `reply` puts a text field on the notification with that
+    placeholder where the platform draws one
+    (`capabilities().notification_reply`); what the user sends answers
+    NotificationReply(text) (docs/notification-reply-plan.md). Ids are the
+    GUEST's, and many may be live at once."""
     if not title:
         raise KayaValueError(
             "a notification needs a title — pass title=")
@@ -2266,7 +2280,7 @@ def show_notification(notification: int, *, title: str = "", body: str = "",
     if on_result is not None:
         app._notification_handlers[notification] = on_result
     _records().append(
-        wire.tx_show_notification(notification, int(at), title, body))
+        wire.tx_show_notification(notification, int(at), title, body, reply))
     return notification
 
 
@@ -2284,7 +2298,7 @@ def set_badge(count: int) -> None:
 
 
 def on_notification_activation(
-        f: Callable[[int, NotificationOutcome], object]) -> None:
+        f: Callable[[int, NotificationOutcome | NotificationReply], object]) -> None:
     """Register the PROCESS-LEVEL notification handler
     (docs/tasks-s9-plan.md R1): f(notification, outcome) receives every
     result whose id has no one-shot handler bound at the show — which is
@@ -4068,6 +4082,10 @@ class Capabilities:
     #: iOS it only focuses the field.
     emoji_picker: bool
 
+    #: `show_notification(reply=...)` puts a text field on the
+    #: notification (docs/notification-reply-plan.md).
+    notification_reply: bool
+
 
 def capabilities() -> Capabilities:
     """This host's capabilities, constant for the life of the process."""
@@ -4076,7 +4094,8 @@ def capabilities() -> Capabilities:
         aux_windows=bool(bits & runtime.CAP_AUX_WINDOWS),
         notifications=bool(bits & runtime.CAP_NOTIFICATIONS),
         badge=bool(bits & runtime.CAP_BADGE),
-        emoji_picker=bool(bits & runtime.CAP_EMOJI_PICKER))
+        emoji_picker=bool(bits & runtime.CAP_EMOJI_PICKER),
+        notification_reply=bool(bits & runtime.CAP_NOTIFICATION_REPLY))
 
 
 def catalog(app: str) -> None:
@@ -5710,12 +5729,12 @@ class App:
         # One-shot, keyed by the GUEST's notification id (the alert's
         # grammar; many may be live at once).
         self._notification_handlers: dict[
-            int, Callable[[NotificationOutcome], object]] = {}
+            int, Callable[[NotificationOutcome | NotificationReply], object]] = {}
         # NOT one-shot, and not keyed at all: the process-level handler
         # for a result whose id has none above (docs/tasks-s9-plan.md
         # R1). A relaunched process never called show.
         self._notification_activation: Callable[
-            [int, NotificationOutcome], object] | None = None
+            [int, NotificationOutcome | NotificationReply], object] | None = None
         # NOT one-shot either: a route declared by link() answers every
         # URL that matches it, for the life of the process
         # (docs/app-links-plan.md §4), and the core owns the pattern
@@ -6330,14 +6349,16 @@ class App:
                         file=sys.stderr,
                     )
                 continue
-            if kind == wire.OCC_NOTIFICATION_RESULT:
+            if kind in (wire.OCC_NOTIFICATION_RESULT, wire.OCC_NOTIFICATION_REPLIED):
                 # THE ORDER IS THE SEMANTICS (docs/tasks-s9-plan.md R1),
                 # and tools/check-sugar-surface.py reads it out of this
                 # arm: the one-shot handler bound at the show first,
                 # retiring with the result; else the process-level one,
                 # which does not; else the drop is announced.
-                # payload is the parsed u32 outcome.
-                answer = NotificationOutcome(payload)
+                # payload is the parsed u32 outcome, or a reply's text.
+                answer: NotificationOutcome | NotificationReply = (
+                    NotificationOutcome(payload) if kind == wire.OCC_NOTIFICATION_RESULT
+                    else NotificationReply(str(payload)))
                 handler = self._notification_handlers.pop(ident, None)
                 if handler is not None:
                     self._dispatch(handler, answer)
@@ -6346,7 +6367,8 @@ class App:
                 if activation is not None:
                     self._dispatch(activation, ident, answer)
                     continue
-                outcome = answer.name.lower()
+                outcome = ("replied" if isinstance(answer, NotificationReply)
+                           else answer.name.lower())
                 print(
                     f"kaya: notification {ident} outcome {outcome} reached "
                     "no handler — none was bound at the show and no "

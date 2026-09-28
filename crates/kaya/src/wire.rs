@@ -536,19 +536,26 @@ pub(crate) const ALERT_CHOICE_CANCEL: u32 = u32::MAX;
 /// "notification_outcome"; docs/tasks-s3-plan.md N1).
 pub(crate) const NOTIFICATION_OUTCOME_ACTIVATED: u32 = 0;
 pub(crate) const NOTIFICATION_OUTCOME_REFUSED: u32 = 1;
+pub(crate) const NOTIFICATION_OUTCOME_REPLIED: u32 = 2;
 
-pub(crate) fn notification_outcome(raw: u32) -> crate::protocol::NotificationOutcome {
+/// The outcome for a raw value and the record's text, which only `replied`
+/// carries.
+pub(crate) fn notification_outcome(raw: u32, text: String) -> crate::protocol::NotificationOutcome {
     match raw {
         NOTIFICATION_OUTCOME_ACTIVATED => crate::protocol::NotificationOutcome::Activated,
         NOTIFICATION_OUTCOME_REFUSED => crate::protocol::NotificationOutcome::Refused,
-        other => panic!("kaya: {other} is not a notification outcome (activated 0, refused 1)"),
+        NOTIFICATION_OUTCOME_REPLIED => crate::protocol::NotificationOutcome::Replied(text),
+        other => panic!(
+            "kaya: {other} is not a notification outcome (activated 0, refused 1, replied 2)"
+        ),
     }
 }
 
-pub(crate) fn notification_outcome_raw(outcome: crate::protocol::NotificationOutcome) -> u32 {
+pub(crate) fn notification_outcome_raw(outcome: &crate::protocol::NotificationOutcome) -> (u32, &str) {
     match outcome {
-        crate::protocol::NotificationOutcome::Activated => NOTIFICATION_OUTCOME_ACTIVATED,
-        crate::protocol::NotificationOutcome::Refused => NOTIFICATION_OUTCOME_REFUSED,
+        crate::protocol::NotificationOutcome::Activated => (NOTIFICATION_OUTCOME_ACTIVATED, ""),
+        crate::protocol::NotificationOutcome::Refused => (NOTIFICATION_OUTCOME_REFUSED, ""),
+        crate::protocol::NotificationOutcome::Replied(text) => (NOTIFICATION_OUTCOME_REPLIED, text),
     }
 }
 
@@ -1689,11 +1696,13 @@ pub fn decode_transaction_with_blobs(
                 let at = r.u64();
                 let title = alert_str(r.value(), "title");
                 let body = alert_str(r.value(), "body");
+                let reply = alert_str(r.value(), "reply");
                 TxOp::ShowNotification(crate::protocol::NotificationSpec {
                     notification,
                     at,
                     title,
                     body,
+                    reply,
                 })
             }
             TX_CANCEL_NOTIFICATION => {
@@ -2036,15 +2045,25 @@ pub(crate) fn alert_result_body(alert: AlertId, choice: AlertChoice) -> [u8; 16]
     b
 }
 
-/// A notification's answer on the wire: id, outcome, reserved.
-pub(crate) fn notification_result_body(
+/// A notification's answer on the wire, as its record kind and body: a
+/// reply is NOTIFICATION_REPLIED { id; Str text }, every other outcome
+/// NOTIFICATION_RESULT { id; outcome; reserved }.
+pub(crate) fn notification_answer(
     notification: crate::protocol::NotificationId,
-    outcome: crate::protocol::NotificationOutcome,
-) -> [u8; 16] {
-    let mut b = [0u8; 16];
-    b[..8].copy_from_slice(&notification.0.to_le_bytes());
-    b[8..12].copy_from_slice(&notification_outcome_raw(outcome).to_le_bytes());
-    b
+    outcome: &crate::protocol::NotificationOutcome,
+) -> (u16, Vec<u8>) {
+    let (raw, text) = notification_outcome_raw(outcome);
+    let mut b = Vec::new();
+    b.extend_from_slice(&notification.0.to_le_bytes());
+    if raw == NOTIFICATION_OUTCOME_REPLIED {
+        let mut blobs = Vec::new();
+        write_value(&mut b, &Value::Str(text.to_owned()), &mut blobs);
+        debug_assert!(blobs.is_empty(), "a reply carries only a string");
+        return (crate::ring::REC_NOTIFICATION_REPLIED, b);
+    }
+    b.extend_from_slice(&raw.to_le_bytes());
+    b.extend_from_slice(&0u32.to_le_bytes());
+    (crate::ring::REC_NOTIFICATION_RESULT, b)
 }
 
 /// A link's arrival on the wire: route id, the URL as one Str value, then
@@ -3123,6 +3142,7 @@ impl Writer {
                 b.extend_from_slice(&spec.at.to_le_bytes());
                 write_value(b, &Value::Str(spec.title.clone()), blobs);
                 write_value(b, &Value::Str(spec.body.clone()), blobs);
+                write_value(b, &Value::Str(spec.reply.clone()), blobs);
             }),
             ApplyOp::CancelNotification(id) => {
                 self.record(APPLY_CANCEL_NOTIFICATION, |b, _blobs| {
@@ -3639,6 +3659,7 @@ impl Writer {
                 b.extend_from_slice(&spec.at.to_le_bytes());
                 write_value(b, &Value::Str(spec.title.clone()), blobs);
                 write_value(b, &Value::Str(spec.body.clone()), blobs);
+                write_value(b, &Value::Str(spec.reply.clone()), blobs);
             }),
             TxOp::CancelNotification(id) => self.record(TX_CANCEL_NOTIFICATION, |b, _blobs| {
                 b.extend_from_slice(&id.0.to_le_bytes());
@@ -4904,6 +4925,7 @@ mod tests {
                 // A body whose length is not a multiple of 8, so the padding
                 // after the Str has to be right rather than accidentally so.
                 body: "Aim for twelve pages.".into(),
+                reply: "Message".into(),
             }),
             TxOp::CancelNotification(crate::protocol::NotificationId(12)),
             TxOp::ShowFileDialog(FileDialogSpec {

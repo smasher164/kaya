@@ -1,10 +1,9 @@
 # Replying from a notification — the design pass
 
-Status: DESIGN, R1 RULED 2026-09-25 as recommended (a). The chat app's C4
-(docs/chat-plan.md). Researched 2026-09-25 with sources. PROBED 2026-09-27
-(docs/measurements/notification-reply-2026-09-27.md): Android runs the guest's
-handler for a reply with no Activity, cold and warm; macOS relaunches a closed
-app for a reply without activating it and hands over the text.
+Status: BUILT 2026-09-27 (R1 RULED 2026-09-25 as recommended (a)). The chat
+app's C4 (docs/chat-plan.md). Researched 2026-09-25 with sources; PROBED
+2026-09-27 (docs/measurements/notification-reply-2026-09-27.md); §6 is the
+as-built record.
 
 ## §1 — The semantics
 
@@ -74,3 +73,51 @@ A new verb, `notification_reply <id> "text"`:
 `.reply(placeholder)` on every binding's notification builder, and the
 outcome gains a `replied` case carrying the text wherever the binding's
 notification handler receives an outcome.
+
+## §6 — As built
+
+- The wire: `show_notification` carries a `reply` Str (empty for none), and a
+  reply arrives as its own occurrence, `notification_replied { id; Str text }`,
+  which every binding hands to the handler `notification_result` reaches, as
+  the `replied` outcome with the text. Its own record rather than a field on
+  `notification_result`, so that record stays the code-answer shape every
+  decoder already reads; the new "id and one value" shape is a derived family
+  in tools/kaya-bindgen, counted in all eight decoders like the code answer.
+  The `notification_reply` capability (16) is granted wherever notifications
+  are, and on Linux only when the portal lists the reply purpose.
+- The outcome in each binding: Rust `NotificationOutcome::Replied(String)`,
+  Swift `.replied(String)`, OCaml `Replied of string`, Haskell
+  `NotificationReplied Text`, Java and C# a sealed `Replied(text)` record, Go
+  `NotificationResult{Outcome, Text}`, Python `NotificationReply(text)` beside
+  `NotificationOutcome`, JS `{ replied: text }` beside the two strings.
+- macOS and iOS: one category per distinct placeholder with a text-input
+  action that has no `.foreground` option; the delegate's text response is the
+  reply. The harness's `notification_reply` enters the delegate's own funnel,
+  the tap's carve-out.
+- Android: a RemoteInput on a Reply action whose MUTABLE PendingIntent is a
+  broadcast into `dev.kaya.KayaNotificationReply`, in the library's manifest.
+  With no kaya in the process, the receiver starts the guest through the app's
+  `dev.kaya.guest_start` (each host's `GuestStart`, the window-free half of its
+  onCreate) and the interpreter's pump with no Activity, then delivers the
+  text and withdraws the notification. Posting, withdrawing and the badge read
+  the application context, so a process a reply started posts too. The
+  harness drives the real shade: the runner taps the row's Reply action, types
+  and sends (tools/android/run-emulator.py, `reply_notification`).
+- Windows: the toast's text box and a Reply button whose arguments carry
+  `kaya-reply`; the text reaches the in-process `Activated` through
+  `ToastActivatedEventArgs.UserInput` and a closed app's COM activator through
+  its input data. The harness calls the activator's own `Activate` with that
+  input. A result that arrives before the app thread exists is queued with its
+  outcome (it used to be replayed as activated whatever it was).
+- Linux: the portal's `SupportedOptions` is read at startup; the Reply button,
+  with the portal's `im.reply-with-text` purpose, is added only when it is
+  listed, and its text is read off `ActionInvoked`. No shipping portal lists
+  it, so on the lane the capability reads false and the chat leg drops the
+  reply block (tools/lib/lanes/linux.py). The button and the ActionInvoked
+  arm have run on no desktop.
+- The chat app replies from a message notification without opening the
+  conversation and marks it read; replies take their own keys (r1, ...), and
+  the peer numbers each conversation's messages separately, so the reply block
+  changes no key the rest of the scene reads.
+- Not measured: whether SwiftUI opens the app's window when macOS relaunches a
+  closed app for a reply, and what a cold Windows reply's process shows.

@@ -494,6 +494,13 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("        request, code = struct.unpack_from(\"<QI\", buf, 8)");
         c.line("        return kind, request, [], code");
     }
+    for name in crate::value_answer_occurrence_names(spec) {
+        c.line(&format!("    if kind == OCC_{}:", name.to_uppercase()));
+        c.line(&format!("        # {}", crate::VALUE_ANSWER_MARK));
+        c.line("        request = struct.unpack_from(\"<Q\", buf, 8)[0]");
+        c.line("        value, _ = parse_value(buf, 16)");
+        c.line("        return kind, request, [], value");
+    }
     // The picker's answer is the one occurrence whose payload is a LIST
     // OF RECORDS rather than a scalar, so it needs its own arm: the
     // generic tail below would take the count for a key-path length and

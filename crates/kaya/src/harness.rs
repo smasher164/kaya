@@ -423,6 +423,10 @@ pub enum Step {
     /// test can reach the shade, or through the backend's own activation
     /// path where it cannot (N5). An action, silent like click.
     NotificationActivate(u64),
+    /// `notification_reply <id> "text"`: send text from the notification's
+    /// reply field, by the route notification_activate takes on each
+    /// platform (docs/notification-reply-plan.md §4). An action.
+    NotificationReply(u64, String),
     /// Ask the PLATFORM to open this URL from inside the process — the
     /// same door a user's tap takes, so the WARM delivery is measured
     /// through the real machinery with no runner involvement
@@ -792,6 +796,7 @@ impl Step {
             | Step::PickEmoji(..)
             | Step::ExpectNoTarget(..)
             | Step::NotificationActivate(..)
+            | Step::NotificationReply(..)
             | Step::OpenLink(..)
             | Step::Relaunch(..)
             | Step::ExpectPref(..)
@@ -910,6 +915,7 @@ impl Step {
             Step::ExpectBadge { .. } => true,
             Step::PickEmoji { .. } => false,
             Step::NotificationActivate { .. } => false,
+            Step::NotificationReply(..) => false,
             Step::OpenLink { .. } => false,
             Step::Relaunch(..) => false,
             Step::ExpectPref { .. } => true,
@@ -1276,6 +1282,10 @@ pub trait Stage: Send + 'static {
     /// Activate a delivered notification: the shade's real tap where a test
     /// reaches it, the backend's own activation path where it cannot.
     fn activate_notification(&self, notification: u64);
+    /// Send `text` from the notification's reply field, through the route
+    /// `activate_notification` takes (docs/notification-reply-plan.md §4).
+    /// "" once the reply went; otherwise why it could not.
+    fn reply_notification(&self, notification: u64, text: &str) -> String;
     /// Ask the PLATFORM to open this URL from inside the process — the
     /// door a user's tap takes, so the warm delivery is measured through
     /// the real machinery (docs/app-links-plan.md L5). NARROW IT TO THIS
@@ -2069,6 +2079,15 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     format!("notification_activate wants a numeric id: {line:?}")
                 })?;
                 Step::NotificationActivate(id)
+            }
+            "notification_reply" => {
+                let (id, text) = rest.trim().split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("notification_reply wants a numeric id and quoted text: {line:?}")
+                })?;
+                let id = id.parse::<u64>().map_err(|_| {
+                    format!("notification_reply wants a numeric id: {line:?}")
+                })?;
+                Step::NotificationReply(id, parse_string(text)?)
             }
             "open_link" => Step::OpenLink(parse_string(rest)?),
             "relaunch" => {
@@ -4179,6 +4198,17 @@ fn run_with_log(
                 stage.activate_notification(*id);
                 await_answer(answered);
                 None
+            }
+            Step::NotificationReply(id, text) => {
+                await_quiet();
+                let answered = crate::scene::answers();
+                let why = stage.reply_notification(*id, text);
+                if why.is_empty() {
+                    await_answer(answered);
+                    None
+                } else {
+                    Some(Err(format!("notification_reply {id}: {why}")))
+                }
             }
             Step::OpenLink(url) => {
                 await_quiet();
@@ -6601,6 +6631,9 @@ mod tests {
             Ok(())
         }
         fn activate_notification(&self, _notification: u64) {}
+        fn reply_notification(&self, _notification: u64, _text: &str) -> String {
+            String::new()
+        }
         fn open_link(&self, _url: &str) {}
         /// A picker that ANSWERS A FIXED NUMBER OF READS and is then
         /// gone: every dialog verb's postcondition is that the panel
@@ -7613,6 +7646,9 @@ mod tests {
             Ok(())
         }
         fn activate_notification(&self, _notification: u64) {}
+        fn reply_notification(&self, _notification: u64, _text: &str) -> String {
+            String::new()
+        }
         fn open_link(&self, _url: &str) {}
         fn file_dialog_state(&self) -> Option<(String, Vec<String>)> {
             None
@@ -7950,6 +7986,9 @@ mod tests {
             Ok(())
         }
         fn activate_notification(&self, _notification: u64) {}
+        fn reply_notification(&self, _notification: u64, _text: &str) -> String {
+            String::new()
+        }
         fn open_link(&self, _url: &str) {}
         fn file_dialog_state(&self) -> Option<(String, Vec<String>)> {
             None

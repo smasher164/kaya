@@ -566,6 +566,13 @@ export function record(kind: number, body: Uint8Array): Uint8Array {
         c.line("    return { kind, id: read_u64(buf, 8), keys: [], payload: read_u32(buf, 16) };");
         c.line("  }");
     }
+    for name in crate::value_answer_occurrence_names(spec) {
+        c.line(&format!("  if (kind === OCC_{}) {{", name.to_uppercase()));
+        c.line(&format!("    // {}", crate::VALUE_ANSWER_MARK));
+        c.line("    const [value] = parse_value(buf, 16);");
+        c.line("    return { kind, id: read_u64(buf, 8), keys: [], payload: value };");
+        c.line("  }");
+    }
     // The picker's answer: its own arm (python.rs carries the reasoning).
     c.line("  if (kind === OCC_FILE_DIALOG_RESULT) {");
     c.line("    const dialog = read_u64(buf, 8);");

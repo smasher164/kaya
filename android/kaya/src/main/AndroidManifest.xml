@@ -17,6 +17,13 @@
         <receiver
             android:name="dev.kaya.KayaNotificationAlarm"
             android:exported="false" />
+        <!-- A NOTIFICATION REPLY'S OWN PROCESS (docs/notification-reply-plan.md):
+             the Reply action's RemoteInput broadcast lands here, in a process
+             with no Activity when the app is not running, and starts the guest
+             through the app's dev.kaya.guest_start. -->
+        <receiver
+            android:name="dev.kaya.KayaNotificationReply"
+            android:exported="false" />
         <provider
             android:name="dev.kaya.KayaClipProvider"
             android:authorities="${applicationId}.clip"

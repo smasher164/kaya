@@ -29,6 +29,11 @@
         android:icon="@mipmap/kaya_mark"
         android:label="${kayaAppLabel}"
         android:theme="@style/Theme.Kaya.Launch">
+        <!-- The window-free start a notification reply's receiver runs in a
+             process with no Activity (dev.kaya.KayaGuestStart). -->
+        <meta-data
+            android:name="dev.kaya.guest_start"
+            android:value="dev.kaya.gohost.GuestStart" />
         <!-- APP LINKS (rusthost's manifest carries the reasoning):
              `singleTask` and the VIEW filter on the declared scheme. -->
         <activity

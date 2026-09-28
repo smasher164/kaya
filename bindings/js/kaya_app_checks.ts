@@ -1107,8 +1107,8 @@ if (isMainThread) {
     kaya.cancelNotification(77);
   });
   const notifyRecords = shipped.flat().map((r) => JSON.stringify([...r]));
-  check("showNotification packs the generated record", notifyRecords.includes(JSON.stringify([...wire.tx_show_notification(12, 1757000000, "Call the plumber", "a reminder")])));
-  check("at is absent by default, which posts now", notifyRecords.includes(JSON.stringify([...wire.tx_show_notification(99, 0, "refused one", "")])));
+  check("showNotification packs the generated record", notifyRecords.includes(JSON.stringify([...wire.tx_show_notification(12, 1757000000, "Call the plumber", "a reminder", "")])));
+  check("at is absent by default, which posts now", notifyRecords.includes(JSON.stringify([...wire.tx_show_notification(99, 0, "refused one", "", "")])));
   check("cancelNotification packs the generated record", notifyRecords.includes(JSON.stringify([...wire.tx_cancel_notification(77)])));
   check("showNotification refuses an empty title", throws(() => kaya.showNotification({ notification: 5, title: "" }), /needs a title/));
 
@@ -1167,6 +1167,31 @@ if (isMainThread) {
   // author that nobody was listening (R1, R5).
   (app as unknown as { _notificationActivation: unknown })._notificationActivation = undefined;
   const droppedSaid = captureStderr(() => { fire(wire.parse_occurrence(notificationBytes(41, 1))); });
+
+  // A REPLY (docs/notification-reply-plan.md): its own record, an id and one
+  // Str, decoded by the value-answer arm and handed to the same handler as
+  // `{ replied: text }`; the placeholder rides the show record.
+  const repliedBytes = (ident: number, text: string): Uint8Array => {
+    const bytes = new TextEncoder().encode(text);
+    const size = 24 + ((bytes.length + 7) & ~7);
+    const b = new Uint8Array(size);
+    const v = new DataView(b.buffer);
+    v.setUint32(0, size, true);
+    v.setUint16(4, wire.OCC_NOTIFICATION_REPLIED, true);
+    v.setBigUint64(8, BigInt(ident), true);
+    v.setUint32(16, wire.VALUE_STR, true);
+    v.setUint32(20, bytes.length, true);
+    b.set(bytes, 24);
+    return b;
+  };
+  const replySeen: K.NotificationOutcome[] = [];
+  shipped.length = 0;
+  app.build(() => {
+    kaya.showNotification({ notification: 31, title: "Maya", reply: "Message", onResult: (o) => replySeen.push(o) });
+  });
+  check("reply rides the show record as its placeholder", shipped.flat().some((r) => JSON.stringify([...r]) === JSON.stringify([...wire.tx_show_notification(31, 0, "Maya", "", "Message")])));
+  fire(wire.parse_occurrence(repliedBytes(31, "On my way")));
+  check("a notification_replied reaches the bound handler with its text", replySeen.length === 1 && typeof replySeen[0] === "object" && replySeen[0].replied === "On my way");
   check("an unclaimed notification_result announces the drop, naming the id", droppedSaid.trim() === "kaya: notification 41 outcome refused reached no handler — none was bound at the show and no process-level handler is registered (kaya.onNotificationActivation)");
 
   // ------------------------------------------------- app links (§4)

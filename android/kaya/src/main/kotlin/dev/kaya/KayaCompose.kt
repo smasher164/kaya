@@ -1975,7 +1975,7 @@ object KayaCompose {
     // but only the runtime assert catches a stale compiled APK against
     // a new libkaya. ULong because the fingerprint's high bit is fair
     // game and a Kotlin Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0xda99b50dff6ae96auL
+    private const val SPEC_HASH: ULong = 0x42e9c3e04bc4f540uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -2488,6 +2488,42 @@ object KayaCompose {
     private var mounted = false
 
     /**
+     * THE APPLICATION CONTEXT, set by the first of [mount] and
+     * [startHeadless]: posting, withdrawing and the badge need a Context
+     * and never a window, so a process a notification reply started with
+     * no Activity posts like any other (docs/notification-reply-plan.md).
+     */
+    @Volatile
+    internal var kayaAppContext: Context? = null
+
+    /** The pump is the process's, started once by whichever door came first. */
+    private var pumpStarted = false
+
+    /**
+     * A PROCESS WITH NO ACTIVITY: a notification reply's receiver starts
+     * the guest here (docs/notification-reply-plan.md, measured in
+     * docs/measurements/notification-reply-2026-09-27.md). The interpreter's
+     * model and pump run without a composition; a later [mount] attaches a
+     * window to the same process and projects the model it already holds.
+     * The app's [KayaGuestStart] calls this before it starts the guest.
+     */
+    @JvmStatic
+    fun startHeadless(context: Context) {
+        if (kayaAppContext == null) kayaAppContext = context.applicationContext
+        ensurePump()
+    }
+
+    private fun ensurePump() {
+        if (pumpStarted) return
+        pumpStarted = true
+        val host = KayaPresent.specHash()
+        check(host.toULong() == SPEC_HASH) {
+            "kaya: stale Compose interpreter — its spec hash " + SPEC_HASH.toString(16).padStart(16, '0') + " does not match the core's " + host.toULong().toString(16).padStart(16, '0') + "; rebuild the APK"
+        }
+        startPump()
+    }
+
+    /**
      * The pump's hop to the UI thread. A main-looper Handler and NOT a
      * captured `activity.runOnUiThread`: the pump outlives every
      * activity, and a captured one posts into a destroyed window's
@@ -2618,6 +2654,7 @@ object KayaCompose {
         val first = !mounted
         mounted = true
         mountedActivity = activity
+        if (kayaAppContext == null) kayaAppContext = activity.applicationContext
         // PER WINDOW, so it runs on every attach: the background half is
         // a window-background write and a new window carries the manifest
         // theme's again (tools/check-appearance.py).
@@ -2665,12 +2702,8 @@ object KayaCompose {
         )
         if (first) {
             KayaSceneModel.windowTitle = activity.title?.toString() ?: ""
-            val host = KayaPresent.specHash()
-            check(host.toULong() == SPEC_HASH) {
-                "kaya: stale Compose interpreter — its spec hash " + SPEC_HASH.toString(16).padStart(16, '0') + " does not match the core's " + host.toULong().toString(16).padStart(16, '0') + "; rebuild the APK"
-            }
-            startPump()
         }
+        ensurePump()
         // THE TITLE IS MATERIALIZED ON THE ACTIVITY (expect_title reads
         // `activity.title`), so a re-created one carries the MANIFEST
         // label until the model is written back onto it.
@@ -2738,8 +2771,8 @@ object KayaCompose {
      */
     @JvmStatic
     fun measuredCapabilities(context: Context): Long =
-        (if (kayaCanPostNotifications(context)) KAYA_CAP_NOTIFICATIONS else 0L) or
-            KAYA_CAP_EMOJI_PICKER
+        (if (kayaCanPostNotifications(context)) KAYA_CAP_NOTIFICATIONS or KAYA_CAP_NOTIFICATION_REPLY
+        else 0L) or KAYA_CAP_EMOJI_PICKER
 
     /** An activation that arrived before the interpreter was mounted (a
      * COLD launch by tap): held here and delivered by [mount]. */
@@ -2757,17 +2790,18 @@ object KayaCompose {
     /** requestPermissions' code; nothing else in this process asks. */
     private const val KAYA_NOTIFICATION_REQUEST = 0x6b61
 
-    internal data class Quadruple(
+    internal data class PendingPost(
         val id: Long,
         val at: Long,
         val title: String,
         val body: String,
+        val reply: String,
     )
 
     /** The post that asked for the permission, answered at the next
      * ON_RESUME — the prompt is another activity, and its dismissal
      * hands this one back whichever way the user answered. */
-    private var kayaPendingPermissionPost: Quadruple? = null
+    private var kayaPendingPermissionPost: PendingPost? = null
 
     private fun kayaAnswerPendingPermissionPost(activity: ComponentActivity) {
         val pending = kayaPendingPermissionPost ?: return
@@ -2782,7 +2816,8 @@ object KayaCompose {
         )
         if (granted) {
             KayaPresent.grantCapabilities(KAYA_CAP_NOTIFICATIONS)
-            kayaPostOrSchedule(context, pending.id, pending.at, pending.title, pending.body)
+            kayaPostOrSchedule(
+                context, pending.id, pending.at, pending.title, pending.body, pending.reply)
         } else {
             KayaPresent.emitNotificationResult(pending.id, KAYA_NOTIFICATION_REFUSED)
         }
@@ -2828,8 +2863,26 @@ object KayaCompose {
     @Volatile
     private var kayaLinksDelivered = 0
 
+    /**
+     * A REPLY FROM A NOTIFICATION'S FIELD (docs/notification-reply-plan.md),
+     * from [KayaNotificationReply] in this process or the one it started.
+     * The notification goes as it does for a tap: Android shows a spinner on
+     * a replied notification until it is updated or withdrawn.
+     */
+    internal fun kayaNotificationReplied(id: Long, text: String) {
+        val context = kayaAppContext
+        if (context != null) kayaWithdrawNotification(context, id)
+        Log.i("kaya", "KAYA_NOTIFICATION_REPLIED: notification=$id")
+        kayaNotificationReplies += 1
+        KayaPresent.emitNotificationReply(id, text)
+    }
+
+    /** Replies delivered to the core, which `notification_reply` waits on. */
+    @Volatile
+    internal var kayaNotificationReplies = 0
+
     private fun kayaNotificationActivated(id: Long) {
-        val context = mountedActivity?.applicationContext
+        val context = kayaAppContext
         if (context != null) kayaWithdrawNotification(context, id)
         Log.i("kaya", "KAYA_NOTIFICATION_ACTIVATED: notification=$id")
         kayaNotificationActivations += 1
@@ -2842,9 +2895,9 @@ object KayaCompose {
      * THAT post `refused`. `at` 0 posts now; any other `at` goes to the
      * OS scheduler (N2). Runs on the UI thread, with the apply.
      */
-    private fun kayaPostNotification(id: Long, at: Long, title: String, body: String) {
+    private fun kayaPostNotification(id: Long, at: Long, title: String, body: String, reply: String) {
         val activity = mountedActivity
-        val context = activity?.applicationContext
+        val context = kayaAppContext
         if (context == null) {
             Log.i(
                 "kaya",
@@ -2858,7 +2911,9 @@ object KayaCompose {
             context.checkSelfPermission("android.permission.POST_NOTIFICATIONS") !=
             PackageManager.PERMISSION_GRANTED
         ) {
-            if (kayaNotificationPermissionAsked) {
+            // No window to ask from (a process a reply started): the
+            // prompt needs an Activity, so the post is refused as a denial.
+            if (kayaNotificationPermissionAsked || activity == null) {
                 KayaPresent.emitNotificationResult(id, KAYA_NOTIFICATION_REFUSED)
                 return
             }
@@ -2871,12 +2926,12 @@ object KayaCompose {
             // family's own measurement, 89338ee6); the grant is
             // PROCESS-WIDE state that any later onResume can read, and
             // mount() re-installs the observer on the new Activity.
-            kayaPendingPermissionPost = Quadruple(id, at, title, body)
+            kayaPendingPermissionPost = PendingPost(id, at, title, body, reply)
             activity.requestPermissions(
                 arrayOf("android.permission.POST_NOTIFICATIONS"), KAYA_NOTIFICATION_REQUEST)
             return
         }
-        kayaPostOrSchedule(context, id, at, title, body)
+        kayaPostOrSchedule(context, id, at, title, body, reply)
     }
 
     private fun kayaPostOrSchedule(
@@ -2885,10 +2940,11 @@ object KayaCompose {
         at: Long,
         title: String,
         body: String,
+        reply: String,
     ) {
         val took =
-            if (at == 0L) kayaDeliverNotification(context, id, title, body)
-            else kayaScheduleNotification(context, id, at, title, body)
+            if (at == 0L) kayaDeliverNotification(context, id, title, body, reply)
+            else kayaScheduleNotification(context, id, at, title, body, reply)
         // WHAT WAS MEASURED: which route this post took and whether the
         // platform accepted it. `at` is the core's — an instant already
         // past arrives as 0 — so a post that is nowhere in the shade
@@ -2904,7 +2960,7 @@ object KayaCompose {
     }
 
     private fun kayaCancelNotification(id: Long) {
-        val context = mountedActivity?.applicationContext ?: return
+        val context = kayaAppContext ?: return
         kayaWithdrawNotification(context, id)
     }
 
@@ -3440,14 +3496,15 @@ object KayaCompose {
                     val at = b.long
                     val title = readString(b)
                     val body = readString(b)
-                    kayaPostNotification(nid, at, title, body)
+                    val reply = readString(b)
+                    kayaPostNotification(nid, at, title, body, reply)
                 }
                 APPLY_CANCEL_NOTIFICATION -> kayaCancelNotification(b.long)
                 APPLY_SET_BADGE -> {
                     // { u32 count; u32 reserved } (docs/app-badge-plan.md §3).
                     val count = b.int
                     b.int
-                    mountedActivity?.applicationContext?.let { kayaSetBadge(it, count) }
+                    kayaAppContext?.let { kayaSetBadge(it, count) }
                 }
                 APPLY_PRESENT_FILE_DIALOG -> {
                     b.long // window: 0, the one surface on this host
@@ -4331,6 +4388,17 @@ object KayaCompose {
      * 20s, the drag's own budget: the runner's poll is half a second and
      * a uiautomator dump takes ~2s of it.
      */
+    private fun kayaAwaitNotificationReply(before: Int): String? {
+        val deadline = System.nanoTime() + 20_000L * 1_000_000
+        while (System.nanoTime() < deadline) {
+            if (kayaNotificationReplies != before) return null
+            Thread.sleep(RETRY_PERIOD_MS)
+        }
+        return "no reply reached this process in 20000ms — the runner expands " +
+            "the shade off the KAYA_REQUEST line, finds the row by its title, taps " +
+            "its Reply action, types the text and sends it; replies=$kayaNotificationReplies"
+    }
+
     private fun kayaAwaitNotificationActivation(before: Int): String? {
         val deadline = System.nanoTime() + 20_000L * 1_000_000
         while (System.nanoTime() < deadline) {
@@ -8206,6 +8274,35 @@ object KayaCompose {
                                 // sent BEFORE the answer wait so a slow
                                 // guest cannot buy another tap.
                                 Log.i("kaya", "KAYA_ACK: notify_tap $seq")
+                                kayaAwaitAnswer(answered)
+                            }
+                        }
+                    }
+                    "notification_reply" -> {
+                        // notification_activate's hand, one action over
+                        // (docs/notification-reply-plan.md §4): the runner
+                        // opens the shade, taps the row's Reply action,
+                        // types the text and sends it, and what comes back
+                        // is the platform's own RemoteInput broadcast into
+                        // KayaNotificationReply.
+                        val nid = parts.getOrNull(1)?.toLongOrNull() ?: 0L
+                        val text = quoted(parts.drop(2))
+                        val title = kayaDeliveredNotificationTitle(activity, nid)
+                        if (title == null) {
+                            failures.add(
+                                "the platform holds no delivered notification $nid to reply to")
+                        } else {
+                            kayaAwaitQuiet()
+                            val answered = kayaBatches
+                            val replies = kayaNotificationReplies
+                            kayaNotifyTaps += 1
+                            val seq = kayaNotifyTaps
+                            Log.i("kaya", "KAYA_REQUEST: notify_reply $seq $title\t$text")
+                            val off = kayaAwaitNotificationReply(replies)
+                            if (off != null) {
+                                failures.add("notification_reply $nid: $off")
+                            } else {
+                                Log.i("kaya", "KAYA_ACK: notify_reply $seq")
                                 kayaAwaitAnswer(answered)
                             }
                         }
@@ -17091,6 +17188,11 @@ internal const val KAYA_NOTIFICATION_REFUSED = 1
 internal const val KAYA_CAP_NOTIFICATIONS = 2L
 /** KAYA_CAP_EMOJI_PICKER (crates/kaya/src/capi.rs): androidx's picker. */
 internal const val KAYA_CAP_EMOJI_PICKER = 8L
+/** KAYA_CAP_NOTIFICATION_REPLY (crates/kaya/src/capi.rs). */
+internal const val KAYA_CAP_NOTIFICATION_REPLY = 16L
+/** The RemoteInput's result key and the reply action's broadcast. */
+private const val KAYA_REPLY_KEY = "dev.kaya.notification.reply"
+private const val KAYA_NOTIFICATION_REPLY_EXTRA = "dev.kaya.notification.placeholder"
 
 /** The platform's key for a kaya notification: the TAG carries the whole
  * u64, since `notify` takes an int and two ids may share its low bits. */
@@ -17171,6 +17273,7 @@ internal fun kayaDeliverNotification(
     id: Long,
     title: String,
     body: String,
+    reply: String,
 ): Boolean {
     val manager = kayaNotificationManager(context) ?: return false
     if (!manager.areNotificationsEnabled()) return false
@@ -17190,7 +17293,7 @@ internal fun kayaDeliverNotification(
         content,
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
-    val notification = Notification.Builder(context, KAYA_NOTIFICATION_CHANNEL)
+    val builder = Notification.Builder(context, KAYA_NOTIFICATION_CHANNEL)
         // The app's declared mark, the same resource the launcher shows
         // (android:icon, written by the identity build).
         .setSmallIcon(context.applicationInfo.icon)
@@ -17199,7 +17302,28 @@ internal fun kayaDeliverNotification(
         .setContentIntent(pending)
         .setAutoCancel(true)
         .setNumber(kayaBadgeCount)
-        .build()
+    // THE REPLY FIELD (docs/notification-reply-plan.md): a RemoteInput on an
+    // action whose intent is a BROADCAST, so sending does not open the
+    // Activity; MUTABLE, since the platform writes the text into it.
+    if (reply.isNotEmpty()) {
+        val fire = Intent(context, KayaNotificationReply::class.java)
+            .putExtra(KAYA_NOTIFICATION_ID_EXTRA, id)
+        val replied = PendingIntent.getBroadcast(
+            context,
+            kayaNotificationSlot(id),
+            fire,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE,
+        )
+        val input = android.app.RemoteInput.Builder(KAYA_REPLY_KEY).setLabel(reply).build()
+        builder.addAction(
+            Notification.Action.Builder(
+                android.graphics.drawable.Icon.createWithResource(context, context.applicationInfo.icon),
+                "Reply",
+                replied,
+            ).addRemoteInput(input).build(),
+        )
+    }
+    val notification = builder.build()
     return try {
         manager.notify(kayaNotificationTag(id), kayaNotificationSlot(id), notification)
         true
@@ -17222,12 +17346,14 @@ private fun kayaScheduleNotification(
     at: Long,
     title: String,
     body: String,
+    reply: String,
 ): Boolean {
     val alarms = context.getSystemService(AlarmManager::class.java) ?: return false
     val fire = Intent(context, KayaNotificationAlarm::class.java)
         .putExtra(KAYA_NOTIFICATION_ID_EXTRA, id)
         .putExtra(KAYA_NOTIFICATION_TITLE_EXTRA, title)
         .putExtra(KAYA_NOTIFICATION_BODY_EXTRA, body)
+        .putExtra(KAYA_NOTIFICATION_REPLY_EXTRA, reply)
     val pending = PendingIntent.getBroadcast(
         context,
         kayaNotificationSlot(id),
@@ -17296,8 +17422,58 @@ class KayaNotificationAlarm : BroadcastReceiver() {
         val id = intent.getLongExtra(KAYA_NOTIFICATION_ID_EXTRA, 0L)
         val title = intent.getStringExtra(KAYA_NOTIFICATION_TITLE_EXTRA) ?: ""
         val body = intent.getStringExtra(KAYA_NOTIFICATION_BODY_EXTRA) ?: ""
+        val reply = intent.getStringExtra(KAYA_NOTIFICATION_REPLY_EXTRA) ?: ""
         Log.i("kaya", "KAYA_NOTIFICATION_ALARM: notification=$id title=\"$title\"")
-        kayaDeliverNotification(context, id, title, body)
+        kayaDeliverNotification(context, id, title, body, reply)
+    }
+}
+
+/**
+ * How a process with no Activity starts THIS app's guest: the part of the
+ * host Activity's onCreate that needs no window (loading the libraries,
+ * the ring, [KayaCompose.startHeadless], the guest's own attach). The app
+ * names its implementation in its manifest's `dev.kaya.guest_start`
+ * meta-data, and [KayaNotificationReply] calls it when a reply arrives in a
+ * process kaya has not started (docs/notification-reply-plan.md).
+ */
+interface KayaGuestStart {
+    fun start(context: Context)
+}
+
+/**
+ * A REPLY FROM A NOTIFICATION'S FIELD (docs/notification-reply-plan.md): the
+ * reply action's broadcast, in whatever process is alive or one the platform
+ * starts for it. Starts the guest with no Activity when kaya is not up, then
+ * delivers the text and holds the broadcast open until the app has answered
+ * it, or for at most eight seconds.
+ */
+class KayaNotificationReply : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        val id = intent.getLongExtra(KAYA_NOTIFICATION_ID_EXTRA, 0L)
+        val text = android.app.RemoteInput.getResultsFromIntent(intent)
+            ?.getCharSequence(KAYA_REPLY_KEY)?.toString() ?: ""
+        if (KayaCompose.kayaAppContext == null) {
+            val named = context.packageManager
+                .getApplicationInfo(context.packageName, PackageManager.GET_META_DATA)
+                .metaData?.getString("dev.kaya.guest_start")
+            if (named == null) {
+                Log.w("kaya", "KAYA_DIAG notification $id replied, and this app names no " +
+                    "dev.kaya.guest_start in its manifest, so no guest can answer it")
+                return
+            }
+            val start = Class.forName(named).getField("INSTANCE").get(null) as KayaGuestStart
+            start.start(context)
+        }
+        val pending = goAsync()
+        val answered = kayaBatches
+        KayaCompose.kayaNotificationReplied(id, text)
+        Thread {
+            val until = android.os.SystemClock.uptimeMillis() + 8000
+            while (kayaBatches == answered && android.os.SystemClock.uptimeMillis() < until) {
+                Thread.sleep(20)
+            }
+            pending.finish()
+        }.start()
     }
 }
 

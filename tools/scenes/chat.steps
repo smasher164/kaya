@@ -45,25 +45,36 @@ expect_at_end scroll#0
 # A reader who scrolled up is left there when the next message arrives.
 click button@quote[m27]
 expect_scrolled_to column@thread m03
-expect label@text[p3] "Also, bring the umbrella"
+expect label@text[p2] "Also, bring the umbrella"
 expect_scrolled_to column@thread m03
 expect label@unread[sam] "2 new"
 expect label@preview[sam] "Are we still on for Friday?"
 expect_no_clipping
-# A message to the open conversation posts nothing; one to another does,
-# and activating it opens that conversation and withdraws it.
+# A message to the open conversation posts nothing; one to another does.
 expect_no_notification 7001
 expect_notification 7002 "Sam"
-# The app's badge is the unread total (docs/app-badge-plan.md): Sam's two.
-expect_badge "2"
+expect_notification 7003 "Alex"
+# The app's badge is the unread total (docs/app-badge-plan.md): Sam's two
+# and Alex's one.
+expect_badge "3"
+# C4 (docs/notification-reply-plan.md): a reply from Alex's notification
+# sends without opening the conversation, and the peer's answer posts again.
+# ONE BLOCK THAT CHANGES NOTHING AFTER IT: the peer numbers each
+# conversation's messages on its own, and Alex's unread count is one either
+# way, so the Linux lane, whose portal draws no reply field (R1), drops the
+# block whole (tools/lib/lanes/linux.py).
+notification_reply 7003 "They did, thanks"
+expect label@preview[alex] "Glad you liked them"
+expect label@unread[alex] "1 new"
+# Activating Sam's notification opens that conversation and withdraws it.
 notification_activate 7002
-expect label@text[p2] "Are we still on for Friday?"
+expect label@text[p1] "Are we still on for Friday?"
 expect label@unread[sam] ""
 expect_no_notification 7002
-expect_badge ""
+expect_badge "1"
 # C9: the peer answers and drops the connection. The app says it is offline,
 # a message sent meanwhile waits as "Sending…", and the queue goes out when
-# the peer is back (six seconds later), which it answers. Written, not typed,
+# the peer is back (ten seconds later), which it answers. Written, not typed,
 # for the reason above, and sent with Return, which every platform has: the
 # mac draws no send button beside a composer (docs/composer-plan.md §5).
 click textarea@compose
@@ -71,7 +82,7 @@ expect_focused textarea@compose
 set_text textarea@compose "Friday works"
 press return
 expect label@text[u2] "Friday works"
-expect label@text[p4] "Perfect"
+expect label@text[p2] "Perfect"
 expect label@connection "Offline"
 set_text textarea@compose "Still there?"
 press return
@@ -79,7 +90,7 @@ expect label@text[u3] "Still there?"
 expect label@state[u3] "Sending…"
 expect label@connection ""
 expect_no_target label@state[u3]
-expect label@text[p5] "Perfect"
+expect label@text[p3] "Perfect"
 expect label@connection ""
 # C6: a photo attached through the open dialog shows in the thread, scaled
 # down inside its 240-point bound with its shape kept. The desktops pick the

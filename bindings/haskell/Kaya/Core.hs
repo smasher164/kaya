@@ -329,8 +329,13 @@ alertChoiceOfWire c
   | c == W.alertChoiceCancel = AlertCancel
   | otherwise = AlertAction (fromIntegral c)
 
--- | WHAT BECAME OF A NOTIFICATION (spec enum @notification_outcome@).
-data NotificationOutcome = NotificationActivated | NotificationRefused
+-- | WHAT BECAME OF A NOTIFICATION (spec enum @notification_outcome@): opened,
+-- refused, or a reply from its field with the text the user sent
+-- (docs\/notification-reply-plan.md).
+data NotificationOutcome
+  = NotificationActivated
+  | NotificationRefused
+  | NotificationReplied Text
   deriving (Eq, Show)
 
 notificationOutcomeOfWire :: Word32 -> NotificationOutcome

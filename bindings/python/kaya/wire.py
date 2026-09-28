@@ -14,7 +14,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, cast
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0xda99b50dff6ae96a
+SPEC_HASH = 0x42e9c3e04bc4f540
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -168,6 +168,7 @@ ALERT_CHOICE_ACTION1 = 1
 ALERT_CHOICE_CANCEL = 4294967295
 NOTIFICATION_OUTCOME_ACTIVATED = 0
 NOTIFICATION_OUTCOME_REFUSED = 1
+NOTIFICATION_OUTCOME_REPLIED = 2
 FILE_MODE_READ = 0
 FILE_MODE_WRITE = 1
 FILE_MODE_READ_WRITE = 2
@@ -398,6 +399,7 @@ OCC_TEXT_FORMATTED = 30
 OCC_SHEET_DISMISSED = 31
 OCC_DISMISS_REQUESTED = 32
 OCC_SUBMITTED = 33
+OCC_NOTIFICATION_REPLIED = 34
 
 
 def _pad(b: bytes) -> bytes:
@@ -675,9 +677,9 @@ def tx_set_reorderable(container: int, enabled: int) -> bytes:
     """Make every stamped row of a live For draggable within its own collection (docs/dnd-plan.md D8): each row is a source whose payload is its key, and a destination that accepts only its own collection's rows. The drop arrives as `dropped` with the ANCHOR — the key of the row it landed on and a before/onto bit — and the app confirms with the collection_move it already has; the core reorders nothing on its own. `enabled` 0 withdraws it."""
     return record(TX_SET_REORDERABLE, struct.pack("<Q", container) + struct.pack("<I", enabled) + struct.pack("<I", 0))
 
-def tx_show_notification(notification: int, at: int, title: Value, body: Value) -> bytes:
-    """Post a local notification (docs/tasks-s3-plan.md N1, N2): the alert grammar without a window — the platform shows it outside the app, and the one answer is notification_result when the user activates it or the platform refuses to post. `at` is a UNIX time in seconds handed to the OS scheduler where one exists (0 = now); title and body are Str values. Ids are guest-chosen; many may be live, and an id retires on its result or its cancel."""
-    return record(TX_SHOW_NOTIFICATION, struct.pack("<Q", notification) + struct.pack("<Q", at) + _enc.value(title) + _enc.value(body))
+def tx_show_notification(notification: int, at: int, title: Value, body: Value, reply: Value) -> bytes:
+    """Post a local notification (docs/tasks-s3-plan.md N1, N2): the alert grammar without a window — the platform shows it outside the app, and the one answer is notification_result when the user activates it or the platform refuses to post. `at` is a UNIX time in seconds handed to the OS scheduler where one exists (0 = now); title and body are Str values. Ids are guest-chosen; many may be live, and an id retires on its result or its cancel. `reply` is a Str placeholder: non-empty puts a text field on the notification where the process can show one (the notification_reply capability), and what the user types answers `replied` with the text (docs/notification-reply-plan.md)."""
+    return record(TX_SHOW_NOTIFICATION, struct.pack("<Q", notification) + struct.pack("<Q", at) + _enc.value(title) + _enc.value(body) + _enc.value(reply))
 
 def tx_cancel_notification(notification: int) -> bytes:
     """Withdraw a pending or delivered notification by id (a reminder that was cleared). No answer follows; an unknown id is ignored."""
@@ -1725,7 +1727,7 @@ def parse_occurrence(buf: bytes | bytearray) -> tuple[int, Any, list[Any], Any]:
     value for OCC_VALUE_CHANGED, None otherwise.
     """
     _size, kind, _flags = struct.unpack_from("<IHH", buf, 0)
-    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED):
+    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED):
         return kind, None, [], None
     if kind == OCC_ALERT_RESULT:
         # A request's one answer: id + the u32 code.
@@ -1735,6 +1737,11 @@ def parse_occurrence(buf: bytes | bytearray) -> tuple[int, Any, list[Any], Any]:
         # A request's one answer: id + the u32 code.
         request, code = struct.unpack_from("<QI", buf, 8)
         return kind, request, [], code
+    if kind == OCC_NOTIFICATION_REPLIED:
+        # An answer carrying one value: id + the Value.
+        request = struct.unpack_from("<Q", buf, 8)[0]
+        value, _ = parse_value(buf, 16)
+        return kind, request, [], value
     if kind == OCC_FILE_DIALOG_RESULT:
         dialog, count = struct.unpack_from("<QI", buf, 8)
         at = 32  # past dialog, count, pad, values count, reserved

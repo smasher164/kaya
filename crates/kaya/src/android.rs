@@ -733,6 +733,11 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 sig: "(JI)V".into(),
                 fn_ptr: present_emit_notification_result as *mut _,
             },
+            NativeMethod {
+                name: "emitNotificationReply".into(),
+                sig: "(JLjava/lang/String;)V".into(),
+                fn_ptr: present_emit_notification_reply as *mut _,
+            },
             // App links (docs/app-links-plan.md §4).
             NativeMethod {
                 name: "linkOpened".into(),
@@ -1574,6 +1579,34 @@ extern "system" fn present_emit_notification_result(
     outcome: jint,
 ) {
     crate::capi::kaya_emit_notification_result(notification as u64, outcome as u32);
+}
+
+/// KayaPresent.emitNotificationReply: the text the user sent from a
+/// notification's reply field (docs/notification-reply-plan.md).
+extern "system" fn present_emit_notification_reply(
+    mut env: JNIEnv,
+    _class: JClass,
+    notification: jlong,
+    text: JString,
+) {
+    let text: String = if text.is_null() {
+        String::new()
+    } else {
+        match env.get_string(&text) {
+            Ok(text) => text.into(),
+            Err(_) => {
+                if env.exception_check().unwrap_or(false) {
+                    let _ = env.exception_clear();
+                }
+                String::new()
+            }
+        }
+    };
+    let bytes = text.as_bytes();
+    // SAFETY: a live slice of `bytes.len()` bytes.
+    unsafe {
+        crate::capi::kaya_emit_notification_reply(notification as u64, bytes.as_ptr(), bytes.len())
+    };
 }
 
 /// KayaPresent.linkOpened: a URL the platform delivered to this app

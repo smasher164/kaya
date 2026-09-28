@@ -251538,6 +251538,270 @@ pub mod Windows {
         }
         unsafe impl Send for Uri {}
         unsafe impl Sync for Uri {}
+        pub mod Collections {
+            #[repr(transparent)]
+            #[derive(Clone, Debug, Eq, PartialEq)]
+            pub struct ValueSet(windows_core::IUnknown);
+            windows_core::imp::interface_hierarchy!(
+                ValueSet,
+                windows_core::IUnknown,
+                windows_core::IInspectable,
+                windows::Foundation::Collections::IPropertySet
+            );
+            windows_core::imp::required_hierarchy ! ( ValueSet , windows_collections:: IIterable < windows_collections:: IKeyValuePair < windows_core::HSTRING , windows_core::IInspectable > > , windows_collections:: IMap < windows_core::HSTRING , windows_core::IInspectable > , windows::Foundation::Collections::IObservableMap < windows_core::HSTRING , windows_core::IInspectable > );
+            impl ValueSet {
+                pub fn new() -> windows_core::Result<Self> {
+                    Self::IActivationFactory(|f| f.ActivateInstance::<Self>())
+                }
+                fn IActivationFactory<
+                    R,
+                    F: FnOnce(&windows_core::imp::IGenericFactory) -> windows_core::Result<R>,
+                >(
+                    callback: F,
+                ) -> windows_core::Result<R> {
+                    static SHARED: windows_core::imp::FactoryCache<
+                        ValueSet,
+                        windows_core::imp::IGenericFactory,
+                    > = windows_core::imp::FactoryCache::new();
+                    SHARED.call(callback)
+                }
+                pub fn First(
+                    &self,
+                ) -> windows_core::Result<
+                    windows_collections::IIterator<
+                        windows_collections::IKeyValuePair<
+                            windows_core::HSTRING,
+                            windows_core::IInspectable,
+                        >,
+                    >,
+                > {
+                    let this = &windows_core::Interface::cast::<
+                        windows_collections::IIterable<
+                            windows_collections::IKeyValuePair<
+                                windows_core::HSTRING,
+                                windows_core::IInspectable,
+                            >,
+                        >,
+                    >(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).First)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
+                pub fn Lookup(
+                    &self,
+                    key: &windows_core::HSTRING,
+                ) -> windows_core::Result<windows_core::IInspectable> {
+                    let this = &windows_core::Interface::cast::<
+                        windows_collections::IMap<
+                            windows_core::HSTRING,
+                            windows_core::IInspectable,
+                        >,
+                    >(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Lookup)(
+                            windows_core::Interface::as_raw(this),
+                            core::mem::transmute_copy(key),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
+                pub fn Size(&self) -> windows_core::Result<u32> {
+                    let this = &windows_core::Interface::cast::<
+                        windows_collections::IMap<
+                            windows_core::HSTRING,
+                            windows_core::IInspectable,
+                        >,
+                    >(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Size)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn HasKey(&self, key: &windows_core::HSTRING) -> windows_core::Result<bool> {
+                    let this = &windows_core::Interface::cast::<
+                        windows_collections::IMap<
+                            windows_core::HSTRING,
+                            windows_core::IInspectable,
+                        >,
+                    >(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).HasKey)(
+                            windows_core::Interface::as_raw(this),
+                            core::mem::transmute_copy(key),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn GetView(
+                    &self,
+                ) -> windows_core::Result<
+                    windows_collections::IMapView<
+                        windows_core::HSTRING,
+                        windows_core::IInspectable,
+                    >,
+                > {
+                    let this = &windows_core::Interface::cast::<
+                        windows_collections::IMap<
+                            windows_core::HSTRING,
+                            windows_core::IInspectable,
+                        >,
+                    >(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).GetView)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
+                pub fn Insert<P1>(
+                    &self,
+                    key: &windows_core::HSTRING,
+                    value: P1,
+                ) -> windows_core::Result<bool>
+                where
+                    P1: windows_core::Param<windows_core::IInspectable>,
+                {
+                    let this = &windows_core::Interface::cast::<
+                        windows_collections::IMap<
+                            windows_core::HSTRING,
+                            windows_core::IInspectable,
+                        >,
+                    >(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Insert)(
+                            windows_core::Interface::as_raw(this),
+                            core::mem::transmute_copy(key),
+                            value.param().abi(),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn Remove(&self, key: &windows_core::HSTRING) -> windows_core::Result<()> {
+                    let this = &windows_core::Interface::cast::<
+                        windows_collections::IMap<
+                            windows_core::HSTRING,
+                            windows_core::IInspectable,
+                        >,
+                    >(self)?;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).Remove)(
+                            windows_core::Interface::as_raw(this),
+                            core::mem::transmute_copy(key),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn Clear(&self) -> windows_core::Result<()> {
+                    let this = &windows_core::Interface::cast::<
+                        windows_collections::IMap<
+                            windows_core::HSTRING,
+                            windows_core::IInspectable,
+                        >,
+                    >(self)?;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).Clear)(
+                            windows_core::Interface::as_raw(this),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn MapChanged<P0>(&self, vhnd: P0) -> windows_core::Result<i64>
+                where
+                    P0: windows_core::Param<
+                        windows::Foundation::Collections::MapChangedEventHandler<
+                            windows_core::HSTRING,
+                            windows_core::IInspectable,
+                        >,
+                    >,
+                {
+                    let this = &windows_core::Interface::cast::<
+                        windows::Foundation::Collections::IObservableMap<
+                            windows_core::HSTRING,
+                            windows_core::IInspectable,
+                        >,
+                    >(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).MapChanged)(
+                            windows_core::Interface::as_raw(this),
+                            vhnd.param().abi(),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn RemoveMapChanged(&self, token: i64) -> windows_core::Result<()> {
+                    let this = &windows_core::Interface::cast::<
+                        windows::Foundation::Collections::IObservableMap<
+                            windows_core::HSTRING,
+                            windows_core::IInspectable,
+                        >,
+                    >(self)?;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).RemoveMapChanged)(
+                            windows_core::Interface::as_raw(this),
+                            token,
+                        )
+                        .ok()
+                    }
+                }
+            }
+            impl windows_core::RuntimeType for ValueSet {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_class::<
+                        Self,
+                        windows::Foundation::Collections::IPropertySet,
+                    >();
+            }
+            unsafe impl windows_core::Interface for ValueSet {
+                type Vtable =
+                    <windows::Foundation::Collections::IPropertySet as windows_core::Interface>::Vtable;
+                const IID: windows_core::GUID =
+                    <windows::Foundation::Collections::IPropertySet as windows_core::Interface>::IID;
+            }
+            impl windows_core::RuntimeName for ValueSet {
+                const NAME: &'static str = "Windows.Foundation.Collections.ValueSet";
+            }
+            unsafe impl Send for ValueSet {}
+            unsafe impl Sync for ValueSet {}
+            impl IntoIterator for ValueSet {
+                type Item = windows_collections::IKeyValuePair<
+                    windows_core::HSTRING,
+                    windows_core::IInspectable,
+                >;
+                type IntoIter = windows_collections::IIterator<Self::Item>;
+                fn into_iter(self) -> Self::IntoIter {
+                    IntoIterator::into_iter(&self)
+                }
+            }
+            impl IntoIterator for &ValueSet {
+                type Item = windows_collections::IKeyValuePair<
+                    windows_core::HSTRING,
+                    windows_core::IInspectable,
+                >;
+                type IntoIter = windows_collections::IIterator<Self::Item>;
+                fn into_iter(self) -> Self::IntoIter {
+                    self.First().unwrap()
+                }
+            }
+        }
     }
     pub mod Graphics {
         #[repr(C)]
@@ -256313,6 +256577,42 @@ pub mod Windows {
                     ) -> windows_core::HRESULT,
             }
             windows_core::imp::define_interface!(
+                IToastActivatedEventArgs,
+                IToastActivatedEventArgs_Vtbl,
+                0xe3bf92f3_c197_436f_8265_0625824f8dac
+            );
+            impl windows_core::RuntimeType for IToastActivatedEventArgs {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IToastActivatedEventArgs_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                pub Arguments: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+            }
+            windows_core::imp::define_interface!(
+                IToastActivatedEventArgs2,
+                IToastActivatedEventArgs2_Vtbl,
+                0xab7da512_cc61_568e_81be_304ac31038fa
+            );
+            impl windows_core::RuntimeType for IToastActivatedEventArgs2 {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IToastActivatedEventArgs2_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                pub UserInput: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+            }
+            windows_core::imp::define_interface!(
                 IToastNotification,
                 IToastNotification_Vtbl,
                 0x997e2675_059e_4e60_8b06_1760917c8b80
@@ -257000,6 +257300,53 @@ pub mod Windows {
             }
             unsafe impl Send for ScheduledToastNotification {}
             unsafe impl Sync for ScheduledToastNotification {}
+            #[repr(transparent)]
+            #[derive(Clone, Debug, Eq, PartialEq)]
+            pub struct ToastActivatedEventArgs(windows_core::IUnknown);
+            windows_core::imp::interface_hierarchy!(
+                ToastActivatedEventArgs,
+                windows_core::IUnknown,
+                windows_core::IInspectable
+            );
+            impl ToastActivatedEventArgs {
+                pub fn Arguments(&self) -> windows_core::Result<windows_core::HSTRING> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Arguments)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| core::mem::transmute(result__))
+                    }
+                }
+                pub fn UserInput(
+                    &self,
+                ) -> windows_core::Result<super::super::Foundation::Collections::ValueSet>
+                {
+                    let this = &windows_core::Interface::cast::<IToastActivatedEventArgs2>(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).UserInput)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
+            }
+            impl windows_core::RuntimeType for ToastActivatedEventArgs {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_class::<Self, IToastActivatedEventArgs>();
+            }
+            unsafe impl windows_core::Interface for ToastActivatedEventArgs {
+                type Vtable = <IToastActivatedEventArgs as windows_core::Interface>::Vtable;
+                const IID: windows_core::GUID =
+                    <IToastActivatedEventArgs as windows_core::Interface>::IID;
+            }
+            impl windows_core::RuntimeName for ToastActivatedEventArgs {
+                const NAME: &'static str = "Windows.UI.Notifications.ToastActivatedEventArgs";
+            }
             #[repr(transparent)]
             #[derive(Clone, Debug, Eq, PartialEq)]
             pub struct ToastNotification(windows_core::IUnknown);

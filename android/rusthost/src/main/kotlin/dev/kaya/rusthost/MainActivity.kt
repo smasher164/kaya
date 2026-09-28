@@ -1,5 +1,6 @@
 package dev.kaya.rusthost
 
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.view.KeyEvent
@@ -8,6 +9,18 @@ import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import dev.kaya.Kaya
 import dev.kaya.KayaCompose
 import dev.kaya.KayaEnv
+import dev.kaya.KayaGuestStart
+
+/** The window-free half of the start, which a notification reply's
+ * receiver runs in a process with no Activity (dev.kaya.KayaGuestStart). */
+object GuestStart : KayaGuestStart {
+    override fun start(context: Context) {
+        System.loadLibrary("rusthost")
+        // The attach registers KayaPresent's natives, which the pump reads.
+        Kaya.attach(context, context.filesDir.absolutePath)
+        KayaCompose.startHeadless(context)
+    }
+}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -24,8 +37,7 @@ class MainActivity : ComponentActivity() {
         // says why it is called from BOTH doors).
         KayaEnv.fromIntent(intent)
 
-        System.loadLibrary("rusthost")
-        Kaya.attach(this, filesDir.absolutePath)
+        GuestStart.start(this)
         KayaCompose.mount(this)
     }
 

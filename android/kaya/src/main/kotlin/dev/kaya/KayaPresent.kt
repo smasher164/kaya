@@ -82,6 +82,11 @@ object KayaPresent {
      * kaya_emit_notification_result's JNI spelling. */
     @JvmStatic external fun emitNotificationResult(notification: Long, outcome: Int)
 
+    /** The text the user sent from a notification's reply field
+     * (docs/notification-reply-plan.md). kaya_emit_notification_reply's JNI
+     * spelling. */
+    @JvmStatic external fun emitNotificationReply(notification: Long, text: String)
+
     /** A URL the platform delivered to this app
      * (docs/app-links-plan.md §4), handed over UNPARSED: the core owns
      * the route matching, the queue for a link that beats the app thread

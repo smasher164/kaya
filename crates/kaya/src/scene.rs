@@ -63,6 +63,11 @@ pub(crate) const CAP_BADGE: u64 = 4;
 /// where the command only focuses the field (R2).
 pub(crate) const CAP_EMOJI_PICKER: u64 = 8;
 
+/// A notification can carry a reply field (docs/notification-reply-plan.md):
+/// a runtime fact, unset on a Linux desktop whose portal lists no reply
+/// purpose (R1).
+pub(crate) const CAP_NOTIFICATION_REPLY: u64 = 16;
+
 /// The bits the presentation layer granted at startup (CAP_NOTIFICATIONS and
 /// CAP_BADGE; `kaya_grant_capabilities` refuses others).
 pub(crate) static RUNTIME_CAPABILITIES: std::sync::atomic::AtomicU64 =
@@ -17324,6 +17329,7 @@ Destroy { id: WidgetId(9223372036854775809) }"#;
             at,
             title: "t".into(),
             body: String::new(),
+            reply: String::new(),
         })
     }
 

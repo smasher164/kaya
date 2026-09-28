@@ -46,6 +46,7 @@ fn main() {
     ];
 
     every_code_answer_is_decoded(&SPEC, &outputs);
+    every_value_answer_is_decoded(&SPEC, &outputs);
 
     let mut stale = false;
     for (rel, content) in &outputs {
@@ -71,6 +72,9 @@ fn main() {
 /// languages' comment syntax stripped to its text. The arms are emitted
 /// from a DERIVED family, so counting the mark counts the arms.
 pub(crate) const CODE_ANSWER_MARK: &str = "A request's one answer: id + the u32 code.";
+
+/// The value-answer arm's comment, counted like [`CODE_ANSWER_MARK`].
+pub(crate) const VALUE_ANSWER_MARK: &str = "An answer carrying one value: id + the Value.";
 
 /// EVERY CODE-ANSWER RECORD IS DECODED BY EVERY BINDING, checked on the
 /// path nobody can avoid: this runs on a regeneration AND on `--check`,
@@ -104,6 +108,33 @@ fn every_code_answer_is_decoded(spec: &ProtocolSpec, outputs: &[(&str, String)])
                  code for a key-path length. The arm is emitted from \
                  code_answer_occurrence_names; anything naming one record is \
                  how this broke before",
+                family.len(),
+                family.join(", ")
+            ));
+        }
+    }
+    assert!(bad.is_empty(), "kaya-bindgen: {}", bad.join("; "));
+}
+
+/// EVERY VALUE-ANSWER RECORD IS DECODED BY EVERY BINDING, the code-answer
+/// rule one family over: `notification_replied` is a request id and one
+/// Str, and a decoder with no arm for it hands it to the click tail, which
+/// takes the value's TYPE word for a key-path length
+/// (docs/notification-reply-plan.md).
+fn every_value_answer_is_decoded(spec: &ProtocolSpec, outputs: &[(&str, String)]) {
+    let family = value_answer_occurrence_names(spec);
+    let mut bad = Vec::new();
+    for (rel, content) in outputs {
+        if rel.ends_with(".h") {
+            continue;
+        }
+        let arms = content.matches(VALUE_ANSWER_MARK).count();
+        println!("kaya-bindgen: {rel}: {arms} value-answer decode arms");
+        if arms != family.len() {
+            bad.push(format!(
+                "{rel} decodes {arms} of the {} value-answer occurrences ({}) — a record \
+                 whose whole body is a request id and one Value is read by the CLICK tail \
+                 otherwise; the arm is emitted from value_answer_occurrence_names",
                 family.len(),
                 family.join(", ")
             ));
@@ -380,6 +411,22 @@ pub(crate) fn code_answer_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static 
                 // `path_len` is the click tag, whose u32 counts KEYS.
                 && r.fields[1].name != "path_len"
                 && r.fields[2].name == "reserved"
+        })
+        .map(|r| r.name)
+        .collect()
+}
+
+/// ONE-SHOT ANSWERS CARRYING A VALUE: a request id and one Value, nothing
+/// else (`notification_replied`'s text). Derived, for the code answers'
+/// reason.
+pub(crate) fn value_answer_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str> {
+    spec.occurrence
+        .iter()
+        .filter(|r| {
+            r.payload.is_none()
+                && r.fields.len() == 2
+                && matches!(r.fields[0].ty, kaya::spec::FieldTy::U64)
+                && matches!(r.fields[1].ty, kaya::spec::FieldTy::Value)
         })
         .map(|r| r.name)
         .collect()

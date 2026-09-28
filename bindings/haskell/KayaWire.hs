@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0xda99b50dff6ae96a
+specHash = 0x42e9c3e04bc4f540
 
 valueBool :: Word32
 valueBool = 1
@@ -330,6 +330,8 @@ notificationOutcomeActivated :: Word32
 notificationOutcomeActivated = 0
 notificationOutcomeRefused :: Word32
 notificationOutcomeRefused = 1
+notificationOutcomeReplied :: Word32
+notificationOutcomeReplied = 2
 fileModeRead :: Word32
 fileModeRead = 0
 fileModeWrite :: Word32
@@ -788,6 +790,8 @@ occKindDismissRequested :: Word16
 occKindDismissRequested = 32
 occKindSubmitted :: Word16
 occKindSubmitted = 33
+occKindNotificationReplied :: Word16
+occKindNotificationReplied = 34
 
 -- Values self-pad to 8: they concatenate inside record bodies.
 encodeValue :: Value -> Builder
@@ -1024,9 +1028,9 @@ txSetDropTarget widget operations pathLen keys = wireRecord txKindSetDropTarget 
 txSetReorderable :: Word64 -> Word32 -> Builder
 txSetReorderable container enabled = wireRecord txKindSetReorderable (word64LE container <> word32LE enabled <> word32LE 0)
 
--- Post a local notification (docs/tasks-s3-plan.md N1, N2): the alert grammar without a window — the platform shows it outside the app, and the one answer is notification_result when the user activates it or the platform refuses to post. `at` is a UNIX time in seconds handed to the OS scheduler where one exists (0 = now); title and body are Str values. Ids are guest-chosen; many may be live, and an id retires on its result or its cancel.
-txShowNotification :: Word64 -> Word64 -> Value -> Value -> Builder
-txShowNotification notification at title body = wireRecord txKindShowNotification (word64LE notification <> word64LE at <> encodeValue title <> encodeValue body)
+-- Post a local notification (docs/tasks-s3-plan.md N1, N2): the alert grammar without a window — the platform shows it outside the app, and the one answer is notification_result when the user activates it or the platform refuses to post. `at` is a UNIX time in seconds handed to the OS scheduler where one exists (0 = now); title and body are Str values. Ids are guest-chosen; many may be live, and an id retires on its result or its cancel. `reply` is a Str placeholder: non-empty puts a text field on the notification where the process can show one (the notification_reply capability), and what the user types answers `replied` with the text (docs/notification-reply-plan.md).
+txShowNotification :: Word64 -> Word64 -> Value -> Value -> Value -> Builder
+txShowNotification notification at title body reply = wireRecord txKindShowNotification (word64LE notification <> word64LE at <> encodeValue title <> encodeValue body <> encodeValue reply)
 
 -- Withdraw a pending or delivered notification by id (a reminder that was cleared). No answer follows; an unknown id is ignored.
 txCancelNotification :: Word64 -> Builder
@@ -2369,7 +2373,7 @@ parseOccurrence ::
   IO (Maybe (Word16, Word64, [Value], Maybe Value, Maybe ClipValues, Maybe DropValues, [Value]))
 parseOccurrence redeem rec = do
   kind <- peekByteOff rec 4 :: IO Word16
-  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult && kind /= occKindClipboardResult && kind /= occKindPasted && kind /= occKindUndone && kind /= occKindRedone && kind /= occKindSortRequested && kind /= occKindDrawRequested && kind /= occKindTick && kind /= occKindDropped && kind /= occKindDragEnded && kind /= occKindDateChanged && kind /= occKindTimeChanged && kind /= occKindValueCommitted && kind /= occKindNotificationResult && kind /= occKindLinkOpened && kind /= occKindTextEdited && kind /= occKindTextFormatted && kind /= occKindSheetDismissed && kind /= occKindDismissRequested && kind /= occKindSubmitted
+  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult && kind /= occKindClipboardResult && kind /= occKindPasted && kind /= occKindUndone && kind /= occKindRedone && kind /= occKindSortRequested && kind /= occKindDrawRequested && kind /= occKindTick && kind /= occKindDropped && kind /= occKindDragEnded && kind /= occKindDateChanged && kind /= occKindTimeChanged && kind /= occKindValueCommitted && kind /= occKindNotificationResult && kind /= occKindLinkOpened && kind /= occKindTextEdited && kind /= occKindTextFormatted && kind /= occKindSheetDismissed && kind /= occKindDismissRequested && kind /= occKindSubmitted && kind /= occKindNotificationReplied
     then return Nothing
     else do
       ident <- peekByteOff rec 8 :: IO Word64
@@ -2383,6 +2387,11 @@ parseOccurrence redeem rec = do
           -- A request's one answer: id + the u32 code.
           code <- peekByteOff rec 16 :: IO Word32
           return (Just (kind, ident, [], Just (VI64 (fromIntegral code)), Nothing, Nothing, []))
+      else if kind == occKindNotificationReplied
+        then do
+          -- An answer carrying one value: id + the Value.
+          (value, _) <- parseValue rec 16
+          return (Just (kind, ident, [], Just value, Nothing, Nothing, []))
       else if kind == occKindFileDialogResult
         then do
           -- id, a count, then three Values per file (handle,

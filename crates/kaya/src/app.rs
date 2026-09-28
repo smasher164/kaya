@@ -644,6 +644,9 @@ pub struct Capabilities {
     /// Whether [`Tx::show_emoji_picker`] opens a picker
     /// (docs/emoji-picker-plan.md).
     pub emoji_picker: bool,
+    /// Whether [`NotificationRef::reply`] puts a text field on the
+    /// notification (docs/notification-reply-plan.md).
+    pub notification_reply: bool,
 }
 
 /// This host's capabilities. See [`Capabilities`].
@@ -656,6 +659,7 @@ pub fn capabilities() -> Capabilities {
         notifications: bits & crate::capi::KAYA_CAP_NOTIFICATIONS != 0,
         badge: bits & crate::capi::KAYA_CAP_BADGE != 0,
         emoji_picker: bits & crate::capi::KAYA_CAP_EMOJI_PICKER != 0,
+        notification_reply: bits & crate::capi::KAYA_CAP_NOTIFICATION_REPLY != 0,
     }
 }
 
@@ -2588,6 +2592,7 @@ impl<'a> Tx<'a> {
                 at: 0,
                 title: String::new(),
                 body: String::new(),
+                reply: String::new(),
             },
         }
     }
@@ -4724,6 +4729,7 @@ fn notification_dropped(
     let outcome = match outcome {
         crate::protocol::NotificationOutcome::Activated => "activated",
         crate::protocol::NotificationOutcome::Refused => "refused",
+        crate::protocol::NotificationOutcome::Replied(_) => "replied",
     };
     let line = format!(
         "kaya: notification {} outcome {outcome} reached no handler — none was \
@@ -5568,11 +5574,11 @@ impl<M> Messages<M> {
                     // (docs/tasks-s9-plan.md R1).
                     let bound = self.notifications.borrow_mut().remove(&notification.0);
                     if let Some(f) = bound {
-                        Some(f(*outcome))
+                        Some(f(outcome.clone()))
                     } else if let Some(f) = self.notification_activation.borrow().as_ref() {
-                        Some(f(*notification, *outcome))
+                        Some(f(*notification, outcome.clone()))
                     } else {
-                        notification_dropped(*notification, *outcome);
+                        notification_dropped(*notification, outcome.clone());
                         None
                     }
                 }
@@ -6136,6 +6142,18 @@ impl NotificationRef<'_, '_> {
 
     pub fn body(mut self, body: &str) -> Self {
         self.spec.body = body.to_owned();
+        self
+    }
+
+    /// A text field on the notification with this placeholder, where the
+    /// process can show one (`Capabilities::notification_reply`): what the
+    /// user sends answers [`NotificationOutcome::Replied`] with the text.
+    /// Elsewhere the notification posts without it, and a click answers
+    /// `Activated` (docs/notification-reply-plan.md).
+    ///
+    /// [`NotificationOutcome::Replied`]: crate::protocol::NotificationOutcome::Replied
+    pub fn reply(mut self, placeholder: &str) -> Self {
+        self.spec.reply = placeholder.to_owned();
         self
     }
 

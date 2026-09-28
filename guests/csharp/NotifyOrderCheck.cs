@@ -36,20 +36,20 @@ static class NotifyOrderCheck
 
         // CASE 1: an id WITH a one-shot handler is answered by it, and the
         // process-level handler is not consulted at all.
-        app.NotificationResult(12, NotificationOutcome.Activated);
-        Check(oneShot.Count == 1 && oneShot[0] == NotificationOutcome.Activated,
+        app.NotificationResult(12, new NotificationOutcome.Activated());
+        Check(oneShot.Count == 1 && oneShot[0] == new NotificationOutcome.Activated(),
             "the one-shot handler did not answer");
         Check(process.Count == 0,
             "the process-level handler answered an id that HAD a one-shot handler");
 
         // CASE 2: an id this process never showed — the relaunch case.
-        app.NotificationResult(77, NotificationOutcome.Activated);
-        Check(process.Count == 1 && process[0] == (77ul, NotificationOutcome.Activated),
+        app.NotificationResult(77, new NotificationOutcome.Activated());
+        Check(process.Count == 1 && process[0] == (77ul, new NotificationOutcome.Activated()),
             "a result with no one-shot handler did not reach the process-level one");
 
         // CASE 3: it does NOT retire.
-        app.NotificationResult(78, NotificationOutcome.Refused);
-        Check(process.Count == 2 && process[1] == (78ul, NotificationOutcome.Refused),
+        app.NotificationResult(78, new NotificationOutcome.Refused());
+        Check(process.Count == 2 && process[1] == (78ul, new NotificationOutcome.Refused()),
             "the process-level handler retired after its first result");
 
         // AND THE DROP IS ANNOUNCED, compared in full: a drop nobody
@@ -61,7 +61,7 @@ static class NotifyOrderCheck
         Console.SetError(said);
         try
         {
-            app.NotificationResult(41, NotificationOutcome.Refused);
+            app.NotificationResult(41, new NotificationOutcome.Refused());
         }
         finally
         {
@@ -72,6 +72,16 @@ static class NotifyOrderCheck
             + "registered (App.OnNotificationActivation)";
         string got = said.ToString().Trim();
         Check(got == want, $"the drop was announced as \"{got}\", wanted \"{want}\"");
+
+        // A REPLY (docs/notification-reply-plan.md) is the same decision with
+        // its text: it reaches the handler bound at the show.
+        var replied = new List<NotificationOutcome>();
+        app.Build(tx => tx.ShowNotification(
+            31, title: "Maya", reply: "Message",
+            onResult: (inner, outcome) => replied.Add(outcome)));
+        app.NotificationResult(31, new NotificationOutcome.Replied("On my way"));
+        Check(replied.Count == 1 && replied[0] is NotificationOutcome.Replied("On my way"),
+            "a reply did not reach the bound handler with its text");
 
         Console.WriteLine("notify-order: OK — the one-shot wins, an unknown id "
             + "reaches the process handler, it does not retire, and an "

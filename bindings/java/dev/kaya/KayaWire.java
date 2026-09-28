@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0xda99b50dff6ae96aL;
+    public static final long SPEC_HASH = 0x42e9c3e04bc4f540L;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -167,6 +167,7 @@ public final class KayaWire {
     public static final int ALERT_CHOICE_CANCEL = -1;
     public static final int NOTIFICATION_OUTCOME_ACTIVATED = 0;
     public static final int NOTIFICATION_OUTCOME_REFUSED = 1;
+    public static final int NOTIFICATION_OUTCOME_REPLIED = 2;
     public static final int FILE_MODE_READ = 0;
     public static final int FILE_MODE_WRITE = 1;
     public static final int FILE_MODE_READ_WRITE = 2;
@@ -396,6 +397,7 @@ public final class KayaWire {
     public static final short OCC_KIND_SHEET_DISMISSED = 31;
     public static final short OCC_KIND_DISMISS_REQUESTED = 32;
     public static final short OCC_KIND_SUBMITTED = 33;
+    public static final short OCC_KIND_NOTIFICATION_REPLIED = 34;
 
     /** A blob value: the u64 handle from kaya_blob_register, consumed
      * by the next submit; the bytes never ride the record stream. */
@@ -963,13 +965,14 @@ public final class KayaWire {
         return finish(b);
     }
 
-    /** Post a local notification (docs/tasks-s3-plan.md N1, N2): the alert grammar without a window — the platform shows it outside the app, and the one answer is notification_result when the user activates it or the platform refuses to post. `at` is a UNIX time in seconds handed to the OS scheduler where one exists (0 = now); title and body are Str values. Ids are guest-chosen; many may be live, and an id retires on its result or its cancel. */
-    public static byte[] txShowNotification(long notification, long at, Object title, Object body) {
+    /** Post a local notification (docs/tasks-s3-plan.md N1, N2): the alert grammar without a window — the platform shows it outside the app, and the one answer is notification_result when the user activates it or the platform refuses to post. `at` is a UNIX time in seconds handed to the OS scheduler where one exists (0 = now); title and body are Str values. Ids are guest-chosen; many may be live, and an id retires on its result or its cancel. `reply` is a Str placeholder: non-empty puts a text field on the notification where the process can show one (the notification_reply capability), and what the user types answers `replied` with the text (docs/notification-reply-plan.md). */
+    public static byte[] txShowNotification(long notification, long at, Object title, Object body, Object reply) {
         Enc b = begin(TX_KIND_SHOW_NOTIFICATION);
         b.putLong(notification);
         b.putLong(at);
         encodeValue(b, title);
         encodeValue(b, body);
+        encodeValue(b, reply);
         return finish(b);
     }
 
@@ -2734,7 +2737,7 @@ public final class KayaWire {
     public static Occ parseOccurrence(byte[] rec) {
         ByteBuffer b = ByteBuffer.wrap(rec).order(ByteOrder.LITTLE_ENDIAN);
         short kind = b.getShort(4);
-        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED && kind != OCC_KIND_FILE_DIALOG_RESULT && kind != OCC_KIND_CLIPBOARD_RESULT && kind != OCC_KIND_PASTED && kind != OCC_KIND_UNDONE && kind != OCC_KIND_REDONE && kind != OCC_KIND_SORT_REQUESTED && kind != OCC_KIND_DRAW_REQUESTED && kind != OCC_KIND_TICK && kind != OCC_KIND_DROPPED && kind != OCC_KIND_DRAG_ENDED && kind != OCC_KIND_DATE_CHANGED && kind != OCC_KIND_TIME_CHANGED && kind != OCC_KIND_VALUE_COMMITTED && kind != OCC_KIND_NOTIFICATION_RESULT && kind != OCC_KIND_LINK_OPENED && kind != OCC_KIND_TEXT_EDITED && kind != OCC_KIND_TEXT_FORMATTED && kind != OCC_KIND_SHEET_DISMISSED && kind != OCC_KIND_DISMISS_REQUESTED && kind != OCC_KIND_SUBMITTED) {
+        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED && kind != OCC_KIND_FILE_DIALOG_RESULT && kind != OCC_KIND_CLIPBOARD_RESULT && kind != OCC_KIND_PASTED && kind != OCC_KIND_UNDONE && kind != OCC_KIND_REDONE && kind != OCC_KIND_SORT_REQUESTED && kind != OCC_KIND_DRAW_REQUESTED && kind != OCC_KIND_TICK && kind != OCC_KIND_DROPPED && kind != OCC_KIND_DRAG_ENDED && kind != OCC_KIND_DATE_CHANGED && kind != OCC_KIND_TIME_CHANGED && kind != OCC_KIND_VALUE_COMMITTED && kind != OCC_KIND_NOTIFICATION_RESULT && kind != OCC_KIND_LINK_OPENED && kind != OCC_KIND_TEXT_EDITED && kind != OCC_KIND_TEXT_FORMATTED && kind != OCC_KIND_SHEET_DISMISSED && kind != OCC_KIND_DISMISS_REQUESTED && kind != OCC_KIND_SUBMITTED && kind != OCC_KIND_NOTIFICATION_REPLIED) {
             return null;
         }
         long id = b.getLong(8);
@@ -2747,6 +2750,10 @@ public final class KayaWire {
             // A request's one answer: id + the u32 code.
             // The alert's cancel sentinel is -1 in java-int terms.
             return new Occ(kind, id, java.util.List.of(), b.getInt(16));
+        }
+        if (kind == OCC_KIND_NOTIFICATION_REPLIED) {
+            // An answer carrying one value: id + the Value.
+            return new Occ(kind, id, java.util.List.of(), parseValue(rec, b, new int[] {16}));
         }
         if (kind == OCC_KIND_FILE_DIALOG_RESULT) {
             // id, a count, then three Values per file

@@ -53,6 +53,18 @@ app.notificationResult(78, UInt32(KAYA_NOTIFICATION_OUTCOME_REFUSED))
 check(process.count == 2 && process[1] == (78, .refused),
       "the process-level handler retired after its first result")
 
+// A REPLY (docs/notification-reply-plan.md) is the same decision with its
+// text: it reaches the handler bound at the show.
+var replied: [KayaNotificationOutcome] = []
+try! app.build { tx in
+    _ = tx.showNotification(
+        31, title: "Maya", reply: "Message",
+        onResult: { _, outcome in replied.append(outcome) })
+}
+app.notificationAnswer(31, .replied("On my way"))
+check(replied == [.replied("On my way")],
+      "a reply did not reach the bound handler with its text: \(replied)")
+
 // AND THE DROP IS ANNOUNCED, compared in full: a drop nobody announced is
 // R5's defect class, and this sentence is the only signal a relaunched
 // process's author gets that nothing listened. The child re-exec is the

@@ -416,6 +416,7 @@ let cap_aux_windows = 1L
 let cap_notifications = 2L
 let cap_badge = 4L
 let cap_emoji_picker = 8L
+let cap_notification_reply = 16L
 let capability_bits () = kaya_capabilities ()
 
 (* The stale-artifact guard: the loaded library must speak the spec

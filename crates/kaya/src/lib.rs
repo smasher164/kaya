@@ -217,6 +217,16 @@ pub(crate) fn prepare_process() {
     if can_post {
         capi::kaya_grant_capabilities(capi::KAYA_CAP_NOTIFICATIONS);
     }
+    // The reply field (docs/notification-reply-plan.md): wherever a post
+    // is, except a Linux desktop whose portal lists no reply purpose (R1).
+    #[cfg(any(target_os = "macos", target_os = "ios", target_os = "windows"))]
+    let can_reply = can_post;
+    #[cfg(target_os = "linux")]
+    let can_reply = can_post && backend::can_reply_to_notifications();
+    #[cfg(not(target_os = "android"))]
+    if can_reply {
+        capi::kaya_grant_capabilities(capi::KAYA_CAP_NOTIFICATION_REPLY);
+    }
     // A number on the icon: the Dock tile, the home screen (under the
     // badge authorization the first post asks for), the taskbar overlay kaya
     // draws. Not Linux, where most desktops draw nothing (docs/app-badge-plan.md).

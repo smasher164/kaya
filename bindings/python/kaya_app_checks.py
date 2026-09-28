@@ -3045,10 +3045,10 @@ with app_notify.window():
 
 check("show_notification packs the generated record",
       kaya.wire.tx_show_notification(12, 1757000000, "Call the plumber",
-                                     "from the checks") in notify_records)
+                                     "from the checks", "") in notify_records)
 check("at defaults to 0, which posts now",
-      kaya.wire.tx_show_notification(13, 0, "t", "") ==
-      kaya.wire.tx_show_notification(13, 0, "t", ""))
+      kaya.wire.tx_show_notification(13, 0, "t", "", "") ==
+      kaya.wire.tx_show_notification(13, 0, "t", "", ""))
 check("cancel_notification packs the generated record",
       kaya.wire.tx_cancel_notification(12) in cancel_records)
 
@@ -3136,6 +3136,38 @@ finally:
     kaya.runtime.next_occurrence = _real_next_n
 check("an id posted again after retirement binds a FRESH handler",
       reused == [kaya.NotificationOutcome.REFUSED])
+
+# A REPLY (docs/notification-reply-plan.md): its own record, an id and one
+# Str, decoded by the value-answer arm and handed to the handler bound at the
+# show as NotificationReply(text); the placeholder rides the show record.
+def _packed_notification_replied(ident, text):
+    raw = text.encode("utf-8")
+    value = struct.pack("<II", kaya.wire.VALUE_STR, len(raw)) + raw
+    value += b"\0" * (-len(value) % 8)
+    body = struct.pack("<Q", ident) + value
+    return struct.pack("<IHH", 8 + len(body),
+                       kaya.wire.OCC_NOTIFICATION_REPLIED, 0) + body
+
+
+reply_seen = []
+app_reply = kaya.App()
+with app_reply.window():
+    before_n = len(kaya._tx)
+    kaya.show_notification(31, title="Maya", reply="Message",
+                           on_result=reply_seen.append)
+    reply_records = kaya._tx[before_n:]
+    kaya.column()
+check("reply rides the show record as its placeholder",
+      kaya.wire.tx_show_notification(31, 0, "Maya", "", "Message") in reply_records)
+_reply_occs = [kaya.wire.parse_occurrence(_packed_notification_replied(31, "On my way"))]
+kaya.runtime.next_occurrence = (
+    lambda: _reply_occs.pop(0) if _reply_occs else None)
+try:
+    app_reply._dispatch_loop()
+finally:
+    kaya.runtime.next_occurrence = _real_next_n
+check("a notification_replied reaches the bound handler with its text",
+      reply_seen == [kaya.NotificationReply("On my way")])
 
 # THE PROCESS-LEVEL HANDLER (docs/tasks-s9-plan.md R1). A tap on a
 # reminder after the app has exited relaunches the process, and THAT

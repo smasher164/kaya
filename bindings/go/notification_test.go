@@ -44,20 +44,20 @@ func saidOnStderr(t *testing.T, body func()) string {
 
 func TestTheOneShotNotificationHandlerWinsOverTheProcessLevelOne(t *testing.T) {
 	app := NewApp()
-	var oneShot []NotificationOutcome
+	var oneShot []NotificationResult
 	var process [][2]uint64
-	app.OnNotificationActivation(func(tx *Tx, id uint64, outcome NotificationOutcome) {
-		process = append(process, [2]uint64{id, uint64(outcome)})
+	app.OnNotificationActivation(func(tx *Tx, id uint64, result NotificationResult) {
+		process = append(process, [2]uint64{id, uint64(result.Outcome)})
 	})
 	app.Build(func(tx *Tx) {
 		tx.ShowNotification(12).Title("bound at the show").
-			OnResult(func(tx *Tx, outcome NotificationOutcome) {
-				oneShot = append(oneShot, outcome)
+			OnResult(func(tx *Tx, result NotificationResult) {
+				oneShot = append(oneShot, result)
 			}).Show()
 	})
 
-	app.notificationResult(12, uint32(NotificationOutcomeActivated))
-	if len(oneShot) != 1 || oneShot[0] != NotificationOutcomeActivated {
+	app.notificationResult(12, NotificationResult{Outcome: NotificationOutcomeActivated})
+	if len(oneShot) != 1 || oneShot[0].Outcome != NotificationOutcomeActivated {
 		t.Fatalf("the one-shot handler did not answer: %v", oneShot)
 	}
 	if len(process) != 0 {
@@ -68,12 +68,12 @@ func TestTheOneShotNotificationHandlerWinsOverTheProcessLevelOne(t *testing.T) {
 func TestAnUnknownNotificationIdReachesTheProcessLevelHandler(t *testing.T) {
 	app := NewApp()
 	var process [][2]uint64
-	app.OnNotificationActivation(func(tx *Tx, id uint64, outcome NotificationOutcome) {
-		process = append(process, [2]uint64{id, uint64(outcome)})
+	app.OnNotificationActivation(func(tx *Tx, id uint64, result NotificationResult) {
+		process = append(process, [2]uint64{id, uint64(result.Outcome)})
 	})
 
 	// 77 was never shown by this process — the relaunch case exactly.
-	app.notificationResult(77, uint32(NotificationOutcomeActivated))
+	app.notificationResult(77, NotificationResult{Outcome: NotificationOutcomeActivated})
 	if len(process) != 1 || process[0] != [2]uint64{77, uint64(NotificationOutcomeActivated)} {
 		t.Fatalf("a result with no one-shot handler did not reach the process-level one: %v", process)
 	}
@@ -82,12 +82,12 @@ func TestAnUnknownNotificationIdReachesTheProcessLevelHandler(t *testing.T) {
 func TestTheProcessLevelNotificationHandlerDoesNotRetire(t *testing.T) {
 	app := NewApp()
 	var process [][2]uint64
-	app.OnNotificationActivation(func(tx *Tx, id uint64, outcome NotificationOutcome) {
-		process = append(process, [2]uint64{id, uint64(outcome)})
+	app.OnNotificationActivation(func(tx *Tx, id uint64, result NotificationResult) {
+		process = append(process, [2]uint64{id, uint64(result.Outcome)})
 	})
 
-	app.notificationResult(77, uint32(NotificationOutcomeActivated))
-	app.notificationResult(78, uint32(NotificationOutcomeRefused))
+	app.notificationResult(77, NotificationResult{Outcome: NotificationOutcomeActivated})
+	app.notificationResult(78, NotificationResult{Outcome: NotificationOutcomeRefused})
 	if len(process) != 2 {
 		t.Fatalf("the process-level handler retired after its first result: %v", process)
 	}
@@ -99,13 +99,32 @@ func TestTheProcessLevelNotificationHandlerDoesNotRetire(t *testing.T) {
 	}
 }
 
+// A REPLY IS THE SAME ANSWER WITH ITS TEXT (docs/notification-reply-plan.md):
+// it reaches the handler bound at the show, and the Reply placeholder rides
+// the show record as its last Str.
+func TestAReplyReachesTheBoundHandlerWithItsText(t *testing.T) {
+	app := NewApp()
+	var got []NotificationResult
+	app.Build(func(tx *Tx) {
+		tx.ShowNotification(5).Title("Maya").Reply("Message").
+			OnResult(func(tx *Tx, result NotificationResult) { got = append(got, result) }).Show()
+	})
+	app.notificationResult(5, NotificationResult{Outcome: NotificationOutcomeReplied, Text: "On my way"})
+	if len(got) != 1 || got[0] != (NotificationResult{Outcome: NotificationOutcomeReplied, Text: "On my way"}) {
+		t.Fatalf("the reply arrived as %v", got)
+	}
+	if !bytes.Contains(TxShowNotification(5, 0, "Maya", "", "Message"), []byte("Message")) {
+		t.Fatal("the show record does not carry the Reply placeholder")
+	}
+}
+
 // The third position: a drop nobody announced is the defect class R5
 // names, and this sentence is the only signal a relaunched process's
 // author gets that nothing was listening.
 func TestAnUnclaimedNotificationResultAnnouncesTheDrop(t *testing.T) {
 	app := NewApp()
 	said := saidOnStderr(t, func() {
-		app.notificationResult(41, uint32(NotificationOutcomeRefused))
+		app.notificationResult(41, NotificationResult{Outcome: NotificationOutcomeRefused})
 	})
 	want := "kaya: notification 41 outcome refused reached no handler — " +
 		"none was bound at the show and no process-level handler is " +

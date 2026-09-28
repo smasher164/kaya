@@ -909,7 +909,8 @@ sealed class KayaInstance
 /// process can post a local notification the desktop will show
 /// (docs/tasks-s3-plan.md N3). Badge: SetBadge will show a number on the
 /// app's icon (docs/app-badge-plan.md).
-readonly record struct Caps(bool AuxWindows, bool Notifications, bool Badge, bool EmojiPicker);
+readonly record struct Caps(
+    bool AuxWindows, bool Notifications, bool Badge, bool EmojiPicker, bool NotificationReply);
 
 /// <summary>The header bar's sort indicator (docs/tables-plan.md):
 /// which column shows it, in which direction — the GUEST's
@@ -1010,21 +1011,36 @@ static class AlertChoices
     };
 }
 
-/// A posted notification's outcome (docs/tasks-s3-plan.md N1, N2).
-enum NotificationOutcome : uint
+/// A posted notification's outcome (docs/tasks-s3-plan.md N1, N2): opened,
+/// refused, or a reply from its field carrying the text the user sent
+/// (docs/notification-reply-plan.md). Compared by value, so
+/// `outcome is NotificationOutcome.Replied(var text)` reads it.
+abstract record NotificationOutcome
 {
-    Activated = KayaWire.NotificationOutcomeActivated,
-    Refused = KayaWire.NotificationOutcomeRefused,
+    public sealed record Activated() : NotificationOutcome
+    {
+        public override string ToString() => "activated";
+    }
+
+    public sealed record Refused() : NotificationOutcome
+    {
+        public override string ToString() => "refused";
+    }
+
+    public sealed record Replied(string Text) : NotificationOutcome
+    {
+        public override string ToString() => "replied";
+    }
 }
 
 static class NotificationOutcomes
 {
     /// The wire's number, refused naming one this build does not know
-    /// (EditSources.FromWire's shape).
+    /// (EditSources.FromWire's shape). A reply arrives as its own record.
     internal static NotificationOutcome FromWire(uint outcome) => outcome switch
     {
-        KayaWire.NotificationOutcomeActivated => NotificationOutcome.Activated,
-        KayaWire.NotificationOutcomeRefused => NotificationOutcome.Refused,
+        KayaWire.NotificationOutcomeActivated => new NotificationOutcome.Activated(),
+        KayaWire.NotificationOutcomeRefused => new NotificationOutcome.Refused(),
         _ => throw new InvalidOperationException(
             $"kaya: notification_result carries outcome {outcome}, which this "
                 + "build does not know"),
@@ -1175,7 +1191,8 @@ sealed class KayaApp
             (bits & Kaya.CAP_AUX_WINDOWS) != 0,
             (bits & Kaya.CAP_NOTIFICATIONS) != 0,
             (bits & Kaya.CAP_BADGE) != 0,
-            (bits & Kaya.CAP_EMOJI_PICKER) != 0);
+            (bits & Kaya.CAP_EMOJI_PICKER) != 0,
+            (bits & Kaya.CAP_NOTIFICATION_REPLY) != 0);
     }
 
     /// The notification_result decision, in a method of its own because
@@ -1195,8 +1212,7 @@ sealed class KayaApp
             Dispatch(tx => act(tx, id, outcome));
         else
         {
-            string word = outcome == NotificationOutcome.Activated
-                ? "activated" : "refused";
+            string word = outcome.ToString();
             Console.Error.WriteLine(
                 $"kaya: notification {id} outcome {word} reached no "
                 + "handler — none was bound at the show and no "
@@ -2304,6 +2320,9 @@ sealed class KayaApp
                 return new LinkArrived(id, keys, LinkUrlOf(payload), LinkParamsOf(payload));
             case KayaWire.OccKindNotificationResult:
                 return new NotificationAnswered(id, keys, NotificationOutcomes.FromWire(code));
+            case KayaWire.OccKindNotificationReplied:
+                return new NotificationAnswered(
+                    id, keys, new NotificationOutcome.Replied(payload as string ?? ""));
             case KayaWire.OccKindFileDialogResult:
                 return new FilesPicked(id, keys,
                     payload as List<PickedFile> ?? new List<PickedFile>());
@@ -4241,17 +4260,21 @@ sealed class Tx : IDisposable
     /// exactly once and retires, with NotificationOutcome.Activated when
     /// the user opened it and .Refused when the platform would not post
     /// it. `at` is a UNIX time in seconds handed to the OS scheduler
-    /// where one exists; 0 posts now. Many may be live at once.
+    /// where one exists; 0 posts now. `reply` puts a text field on the
+    /// notification with that placeholder where the platform draws one
+    /// (Capabilities().NotificationReply), and what the user sends answers
+    /// NotificationOutcome.Replied (docs/notification-reply-plan.md). Many
+    /// may be live at once.
     public ulong ShowNotification(
         ulong notification, string title = "", string body = "",
-        ulong at = 0, Action<Tx, NotificationOutcome>? onResult = null)
+        ulong at = 0, string reply = "", Action<Tx, NotificationOutcome>? onResult = null)
     {
         if (string.IsNullOrEmpty(title))
             throw new ArgumentException(
                 "kaya: a notification needs a title — pass title:");
         if (onResult != null)
             App.notifications[notification] = onResult;
-        Records.Add(KayaWire.TxShowNotification(notification, at, title, body));
+        Records.Add(KayaWire.TxShowNotification(notification, at, title, body, reply));
         return notification;
     }
 

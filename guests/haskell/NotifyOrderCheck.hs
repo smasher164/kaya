@@ -78,6 +78,17 @@ main = do
     check (length seen == 2 && seen !! 1 == (78, NotificationRefused))
       "the process-level handler retired after its first result"
 
+  -- A REPLY (docs/notification-reply-plan.md) is the same decision with its
+  -- text: it reaches the handler bound at the show.
+  replied <- newIORef ([] :: [NotificationOutcome])
+  buildTx app $
+    showNotification 31 [NTitle "Maya", NReply "Message"] $ \o ->
+      modifyIORef' replied (++ [o])
+  notificationAnswer app 31 (NotificationReplied "On my way")
+  readIORef replied >>= \seen ->
+    check (seen == [NotificationReplied "On my way"])
+      ("a reply did not reach the bound handler with its text: " ++ show seen)
+
   -- AND THE DROP IS ANNOUNCED, compared in full: a drop nobody announced
   -- is R5's defect class, and this sentence is the only signal a
   -- relaunched process's author gets that nothing listened.

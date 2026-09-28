@@ -93,6 +93,19 @@ public final class NotifyOrderCheck {
         String got = said.toString(StandardCharsets.UTF_8).trim();
         check(got.equals(want), "the drop was announced as \"" + got + "\", wanted \"" + want + "\"");
 
+        // A REPLY (docs/notification-reply-plan.md) is the same decision with
+        // its text: it reaches the handler bound at the show.
+        List<KayaApp.NotificationOutcome> replied = new ArrayList<>();
+        app.build((java.util.function.Consumer<KayaApp.Tx>) tx ->
+                tx.showNotification(31)
+                        .title("Maya")
+                        .reply("Message")
+                        .onResult((inner, outcome) -> replied.add(outcome))
+                        .show());
+        app.notificationReplied(31, "On my way");
+        check(replied.equals(List.of(new KayaApp.NotificationOutcome.Replied("On my way"))),
+                "a reply did not reach the bound handler with its text: " + replied);
+
         System.out.println("notify-order: OK — the one-shot wins, an unknown id "
                 + "reaches the process handler, it does not retire, and an "
                 + "unclaimed result announces its drop");

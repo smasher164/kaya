@@ -513,6 +513,14 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("      (* A request's one answer: id + the u32 code. *)");
         c.line("      Some (kind, Int64.of_int id, [], Some (I64 (Int64.of_int (u32_at byte 16))), None, None, [])");
     }
+    for name in crate::value_answer_occurrence_names(spec) {
+        c.line(&format!("    else if kind = occ_kind_{name}"));
+        c.line("    then begin");
+        c.line(&format!("      (* {} *)", crate::VALUE_ANSWER_MARK));
+        c.line("      let value, _ = parse_value byte 16 in");
+        c.line("      Some (kind, Int64.of_int id, [], Some value, None, None, [])");
+        c.line("    end");
+    }
     // The picker's answer is a LIST OF RECORDS and no single `value`
     // can carry one, so the three values per file ride the VALUES slot
     // flattened and kaya_app regroups them in threes. Its own arm: the

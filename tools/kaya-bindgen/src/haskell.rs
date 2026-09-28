@@ -534,6 +534,13 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("          code <- peekByteOff rec 16 :: IO Word32");
         c.line("          return (Just (kind, ident, [], Just (VI64 (fromIntegral code)), Nothing, Nothing, []))");
     }
+    for name in crate::value_answer_occurrence_names(spec) {
+        c.line(&format!("      else if kind == occKind{}", pascal(name)));
+        c.line("        then do");
+        c.line(&format!("          -- {}", crate::VALUE_ANSWER_MARK));
+        c.line("          (value, _) <- parseValue rec 16");
+        c.line("          return (Just (kind, ident, [], Just value, Nothing, Nothing, []))");
+    }
     // The picker's answer is a LIST OF RECORDS and no single Value can
     // carry one, so the three values per file ride the VALUES slot
     // flattened and KayaApp regroups them in threes. Its own arm: the

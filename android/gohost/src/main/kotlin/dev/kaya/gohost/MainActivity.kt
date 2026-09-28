@@ -1,5 +1,6 @@
 package dev.kaya.gohost
 
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.view.KeyEvent
@@ -8,6 +9,7 @@ import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import dev.kaya.KayaCompose
 import dev.kaya.KayaEnv
 import dev.kaya.KayaGo
+import dev.kaya.KayaGuestStart
 import dev.kaya.KayaRing
 
 /**
@@ -16,6 +18,22 @@ import dev.kaya.KayaRing
  * [KayaRing.attach] is used rather than `Kaya.attach`, which would
  * replace the ring sink with a channel into a Rust AppCtx.
  */
+/** The window-free half of the start, which a notification reply's
+ * receiver runs in a process with no Activity (dev.kaya.KayaGuestStart). */
+object GuestStart : KayaGuestStart {
+    override fun start(context: Context) {
+        System.loadLibrary("kaya")
+        // Go's ELF constructors run inside this call, so every package
+        // init in the guest has run by the time it returns — which is
+        // what makes kaya.AndroidMain's registration visible to the
+        // attach below.
+        System.loadLibrary("gohost")
+        KayaRing.attach(context, context.filesDir.absolutePath)
+        KayaCompose.startHeadless(context)
+        KayaGo.attach(context)
+    }
+}
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         // The launch slot's other half: the manifest names
@@ -31,15 +49,8 @@ class MainActivity : ComponentActivity() {
         // says why it is called from BOTH doors).
         KayaEnv.fromIntent(intent)
 
-        System.loadLibrary("kaya")
-        // Go's ELF constructors run inside this call, so every package
-        // init in the guest has run by the time it returns — which is
-        // what makes kaya.AndroidMain's registration visible to the
-        // attach below.
-        System.loadLibrary("gohost")
-        KayaRing.attach(this, filesDir.absolutePath)
+        GuestStart.start(this)
         KayaCompose.mount(this)
-        KayaGo.attach(this)
     }
 
     // EVERY WARM ARRIVAL COMES THROUGH HERE, since the activity is

@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0xda99b50dff6ae96an;
+export const SPEC_HASH = 0x42e9c3e04bc4f540n;
 
 export const VALUE_BOOL = 1;
 export const VALUE_I64 = 2;
@@ -161,6 +161,7 @@ export const ALERT_CHOICE_ACTION1 = 1;
 export const ALERT_CHOICE_CANCEL = 4294967295;
 export const NOTIFICATION_OUTCOME_ACTIVATED = 0;
 export const NOTIFICATION_OUTCOME_REFUSED = 1;
+export const NOTIFICATION_OUTCOME_REPLIED = 2;
 export const FILE_MODE_READ = 0;
 export const FILE_MODE_WRITE = 1;
 export const FILE_MODE_READ_WRITE = 2;
@@ -391,6 +392,7 @@ export const OCC_TEXT_FORMATTED = 30;
 export const OCC_SHEET_DISMISSED = 31;
 export const OCC_DISMISS_REQUESTED = 32;
 export const OCC_SUBMITTED = 33;
+export const OCC_NOTIFICATION_REPLIED = 34;
 
 const text_encoder = new TextEncoder();
 const text_decoder = new TextDecoder("utf-8", { fatal: true });
@@ -983,13 +985,14 @@ export function tx_set_reorderable(container: number, enabled: number): Uint8Arr
   return enc.end(TX_SET_REORDERABLE);
 }
 
-/** Post a local notification (docs/tasks-s3-plan.md N1, N2): the alert grammar without a window — the platform shows it outside the app, and the one answer is notification_result when the user activates it or the platform refuses to post. `at` is a UNIX time in seconds handed to the OS scheduler where one exists (0 = now); title and body are Str values. Ids are guest-chosen; many may be live, and an id retires on its result or its cancel. */
-export function tx_show_notification(notification: number, at: number, title: WireValue, body: WireValue): Uint8Array {
+/** Post a local notification (docs/tasks-s3-plan.md N1, N2): the alert grammar without a window — the platform shows it outside the app, and the one answer is notification_result when the user activates it or the platform refuses to post. `at` is a UNIX time in seconds handed to the OS scheduler where one exists (0 = now); title and body are Str values. Ids are guest-chosen; many may be live, and an id retires on its result or its cancel. `reply` is a Str placeholder: non-empty puts a text field on the notification where the process can show one (the notification_reply capability), and what the user types answers `replied` with the text (docs/notification-reply-plan.md). */
+export function tx_show_notification(notification: number, at: number, title: WireValue, body: WireValue, reply: WireValue): Uint8Array {
   enc.begin();
   enc.u64(notification);
   enc.u64(at);
   enc.value(title);
   enc.value(body);
+  enc.value(reply);
   return enc.end(TX_SHOW_NOTIFICATION);
 }
 
@@ -2312,7 +2315,7 @@ export function parse_occurrence(buf: Uint8Array): Occurrence {
   const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   const size = view.getUint32(0, true);
   const kind = view.getUint16(4, true);
-  if (![OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED].includes(kind)) return { kind, id: null, keys: [], payload: null };
+  if (![OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED].includes(kind)) return { kind, id: null, keys: [], payload: null };
   if (kind === OCC_ALERT_RESULT) {
     // A request's one answer: id + the u32 code.
     return { kind, id: read_u64(buf, 8), keys: [], payload: read_u32(buf, 16) };
@@ -2320,6 +2323,11 @@ export function parse_occurrence(buf: Uint8Array): Occurrence {
   if (kind === OCC_NOTIFICATION_RESULT) {
     // A request's one answer: id + the u32 code.
     return { kind, id: read_u64(buf, 8), keys: [], payload: read_u32(buf, 16) };
+  }
+  if (kind === OCC_NOTIFICATION_REPLIED) {
+    // An answer carrying one value: id + the Value.
+    const [value] = parse_value(buf, 16);
+    return { kind, id: read_u64(buf, 8), keys: [], payload: value };
   }
   if (kind === OCC_FILE_DIALOG_RESULT) {
     const dialog = read_u64(buf, 8);

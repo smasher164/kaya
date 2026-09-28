@@ -1819,7 +1819,14 @@ for proto in x11 wayland; do
     # photo (C6), whose dialog is read over the accessibility bus. GDK keeps
     # its own chooser: an activatable portal takes the dialog into the
     # portal's process (tools/linux/Dockerfile's portal note).
-    run "$proto" chat-go env KAYA_SELFTEST=chat GDK_DEBUG=no-portals \
+    # The reply block is this lane's one drop (tools/lib/lanes/linux.py): no
+    # Linux desktop draws a notification's reply field (R1).
+    if ! chat_script="$(python3 tools/linux/scene-mods.py chat)"; then
+        echo "run-suites: the chat scene's Linux drop was refused (above)" >&2
+        exit 1
+    fi
+    run "$proto" chat-go env KAYA_SELFTEST=chat KAYA_SELFTEST_SCRIPT="$chat_script" \
+        GDK_DEBUG=no-portals \
         tools/linux/notify-leg.sh portal \
         tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
     drain

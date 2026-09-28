@@ -141,6 +141,12 @@
 #define KAYA_OCCURRENCE_SUBMITTED 33
 
 /**
+ * NOTIFICATION_REPLIED { u64 notification; Str text } — what the user sent
+ * from a notification's reply field (docs/notification-reply-plan.md).
+ */
+#define KAYA_OCCURRENCE_NOTIFICATION_REPLIED 34
+
+/**
  * Transaction record kinds (guest -> core, via kaya_submit). Layouts,
  * after the common 8-byte header, little-endian, 8-aligned:
  *   CREATE_SIGNAL:     u64 signal_id, value
@@ -498,6 +504,14 @@
  * runtime fact granted like the others, unset on iOS, which has none.
  */
 #define KAYA_CAP_EMOJI_PICKER 8
+
+/**
+ * A notification can carry a reply field here
+ * (docs/notification-reply-plan.md): granted with KAYA_CAP_NOTIFICATIONS
+ * where the platform draws the field, and on Linux only when the portal
+ * lists the reply purpose (R1).
+ */
+#define KAYA_CAP_NOTIFICATION_REPLY 16
 
 /**
  * Apply record kinds (core -> presentation pump, via kaya_next_commands).
@@ -1095,6 +1109,8 @@
 
 #define KAYA_NOTIFICATION_OUTCOME_REFUSED 1
 
+#define KAYA_NOTIFICATION_OUTCOME_REPLIED 2
+
 /**
  * The align enum's values (spec enum "align"); baseline is rows-only.
  */
@@ -1566,6 +1582,11 @@ typedef struct KayaHostApi {
    * activated by the user, or refused by the platform.
    */
   void (*emit_notification_result)(uint64_t, uint32_t);
+  /**
+   * The text the user sent from a notification's reply field
+   * (docs/notification-reply-plan.md): UTF-8 bytes and their length.
+   */
+  void (*emit_notification_reply)(uint64_t, const uint8_t*, uintptr_t);
   /**
    * A URL the platform handed this app (docs/app-links-plan.md §4):
    * the raw kAEGetURL Apple event on macOS, `.onOpenURL` on iOS. The
@@ -2463,6 +2484,14 @@ void kaya_link_opened(const char *url);
  * kaya_emit_alert_result rule.
  */
 void kaya_emit_notification_result(uint64_t notification, uint32_t outcome);
+
+/**
+ * Presentation side: the text the user sent from a notification's reply
+ * field (docs/notification-reply-plan.md), UTF-8 of `len` bytes. The
+ * kaya_emit_notification_result rule: answerable only on the interpreter
+ * platforms.
+ */
+void kaya_emit_notification_reply(uint64_t notification, const uint8_t *text, uintptr_t len);
 
 /**
  * Presentation side: emit a click, exactly as a backend's action handler

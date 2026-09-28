@@ -5,7 +5,7 @@
 pub(crate) fn app(ctx: kaya::AppCtx) {
     use kaya::NotificationOutcome;
 
-    #[derive(Clone, Copy)]
+    #[derive(Clone)]
     enum Msg {
         Post,
         Cancel,
@@ -54,8 +54,9 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             }
             Msg::Answered(id, outcome) => {
                 let word = match outcome {
-                    NotificationOutcome::Activated => "activated",
-                    NotificationOutcome::Refused => "refused",
+                    NotificationOutcome::Activated => "activated".to_owned(),
+                    NotificationOutcome::Refused => "refused".to_owned(),
+                    NotificationOutcome::Replied(text) => format!("replied {text:?}"),
                 };
                 ctx.apply(|tx| tx.write(status, format!("{word} {id}")));
             }

@@ -2038,9 +2038,11 @@ function alertChoice(code: number): AlertChoice {
   return name;
 }
 
-/** A notification's two outcomes (docs/tasks-s3-plan.md N1). Dismissal
- * is not one of them: two platforms never report it. */
-export type NotificationOutcome = "activated" | "refused";
+/** A notification's outcomes (docs/tasks-s3-plan.md N1): opened, refused,
+ * or a reply from its field carrying the text the user sent
+ * (docs/notification-reply-plan.md). Dismissal is not one of them: two
+ * platforms never report it. */
+export type NotificationOutcome = "activated" | "refused" | { readonly replied: string };
 
 const NOTIFICATION_OUTCOMES: ReadonlyMap<number, NotificationOutcome> = new Map([
   [wire.NOTIFICATION_OUTCOME_ACTIVATED, "activated"],
@@ -2101,6 +2103,10 @@ export type NotificationOptions = {
   /** A UNIX time in seconds, handed to the OS scheduler where one
    * exists. Absent (0) posts now. */
   at?: number;
+  /** A text field on the notification with this placeholder, where the
+   * platform draws one (`capabilities().notificationReply`): what the user
+   * sends answers `{ replied: text }` (docs/notification-reply-plan.md). */
+  reply?: string;
   onResult?: (outcome: NotificationOutcome) => void;
 };
 
@@ -2118,7 +2124,7 @@ export function showNotification(opts: NotificationOptions): number | Promise<No
   const a = app();
   const id = opts.notification;
   const show = (): void => {
-    records().push(wire.tx_show_notification(id, opts.at ?? 0, opts.title, opts.body ?? ""));
+    records().push(wire.tx_show_notification(id, opts.at ?? 0, opts.title, opts.body ?? "", opts.reply ?? ""));
   };
   if (opts.onResult !== undefined) {
     a._notificationHandlers.set(id, opts.onResult);
@@ -3454,6 +3460,7 @@ export type Capabilities = {
   readonly notifications: boolean;
   readonly badge: boolean;
   readonly emojiPicker: boolean;
+  readonly notificationReply: boolean;
 };
 
 /** This host's capabilities, constant for the life of the process. */
@@ -3464,6 +3471,7 @@ export function capabilities(): Capabilities {
     notifications: (bits & runtime.CAP_NOTIFICATIONS) !== 0,
     badge: (bits & runtime.CAP_BADGE) !== 0,
     emojiPicker: (bits & runtime.CAP_EMOJI_PICKER) !== 0,
+    notificationReply: (bits & runtime.CAP_NOTIFICATION_REPLY) !== 0,
   });
 }
 
@@ -5256,7 +5264,7 @@ export class App {
       }
       return;
     }
-    if (kind === wire.OCC_NOTIFICATION_RESULT) {
+    if (kind === wire.OCC_NOTIFICATION_RESULT || kind === wire.OCC_NOTIFICATION_REPLIED) {
       // THE ORDER IS THE SEMANTICS (docs/tasks-s9-plan.md R1), and
       // tools/check-sugar-surface.py reads it out of this arm: the
       // one-shot handler bound at the show first, retiring with the
@@ -5264,7 +5272,8 @@ export class App {
       // drop is announced.
       const handler = this._notificationHandlers.get(ident);
       this._notificationHandlers.delete(ident);
-      const outcome = notificationOutcome(payload as number);
+      const outcome: NotificationOutcome =
+        kind === wire.OCC_NOTIFICATION_RESULT ? notificationOutcome(payload as number) : { replied: String(payload) };
       if (handler !== undefined) {
         this._dispatch(handler as Handler, outcome);
         return;
@@ -5274,8 +5283,9 @@ export class App {
         this._dispatch(act as Handler, ident, outcome);
         return;
       }
+      const word = typeof outcome === "string" ? outcome : "replied";
       process.stderr.write(
-        `kaya: notification ${ident} outcome ${outcome} reached no handler — none was bound at the show and no process-level handler is registered (kaya.onNotificationActivation)\n`,
+        `kaya: notification ${ident} outcome ${word} reached no handler — none was bound at the show and no process-level handler is registered (kaya.onNotificationActivation)\n`,
       );
       return;
     }

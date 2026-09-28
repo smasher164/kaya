@@ -781,6 +781,12 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("            return new Occ(kind, id, java.util.List.of(), b.getInt(16));");
         c.line("        }");
     }
+    for name in crate::value_answer_occurrence_names(spec) {
+        c.line(&format!("        if (kind == OCC_KIND_{}) {{", name.to_uppercase()));
+        c.line(&format!("            // {}", crate::VALUE_ANSWER_MARK));
+        c.line("            return new Occ(kind, id, java.util.List.of(), parseValue(rec, b, new int[] {16}));");
+        c.line("        }");
+    }
     // The picker's answer is a LIST OF RECORDS, so it needs its own
     // arm: the generic tail would take the file count for a key-path
     // length and start eight bytes early.

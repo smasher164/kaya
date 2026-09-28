@@ -106,6 +106,9 @@ pub const KAYA_OCCURRENCE_DISMISS_REQUESTED: u16 = 32;
 /// SUBMITTED { tag; Str text } — the field's text at the submit gesture
 /// (docs/submit-plan.md S1), TEXT_CHANGED's body under its own kind.
 pub const KAYA_OCCURRENCE_SUBMITTED: u16 = 33;
+/// NOTIFICATION_REPLIED { u64 notification; Str text } — what the user sent
+/// from a notification's reply field (docs/notification-reply-plan.md).
+pub const KAYA_OCCURRENCE_NOTIFICATION_REPLIED: u16 = 34;
 const _: () = assert!(
     KAYA_OCCURRENCE_PAD == ring::REC_PAD
         && KAYA_OCCURRENCE_BUTTON_CLICKED == ring::REC_BUTTON_CLICKED
@@ -120,6 +123,7 @@ const _: () = assert!(
         && KAYA_OCCURRENCE_SHEET_DISMISSED == ring::REC_SHEET_DISMISSED
         && KAYA_OCCURRENCE_DISMISS_REQUESTED == ring::REC_DISMISS_REQUESTED
         && KAYA_OCCURRENCE_SUBMITTED == ring::REC_SUBMITTED
+        && KAYA_OCCURRENCE_NOTIFICATION_REPLIED == ring::REC_NOTIFICATION_REPLIED
         && KAYA_OCCURRENCE_SECTION_SELECTED == ring::REC_SECTION_SELECTED
         && KAYA_OCCURRENCE_MENU_ACTIVATED == ring::REC_MENU_ACTIVATED
         && KAYA_OCCURRENCE_MENU_TOGGLED == ring::REC_MENU_TOGGLED
@@ -449,6 +453,11 @@ pub const KAYA_CAP_BADGE: u64 = 4;
 /// The emoji command opens a picker here (docs/emoji-picker-plan.md): a
 /// runtime fact granted like the others, unset on iOS, which has none.
 pub const KAYA_CAP_EMOJI_PICKER: u64 = 8;
+/// A notification can carry a reply field here
+/// (docs/notification-reply-plan.md): granted with KAYA_CAP_NOTIFICATIONS
+/// where the platform draws the field, and on Linux only when the portal
+/// lists the reply purpose (R1).
+pub const KAYA_CAP_NOTIFICATION_REPLY: u64 = 16;
 
 /// The capability word, which is the SCENE CORE'S const and not a second
 /// copy of its predicate: the wall that refuses `create_window` tests the
@@ -467,7 +476,11 @@ pub extern "C" fn kaya_capabilities() -> u64 {
 #[unsafe(no_mangle)]
 pub extern "C" fn kaya_grant_capabilities(bits: u64) {
     assert!(
-        bits & !(KAYA_CAP_NOTIFICATIONS | KAYA_CAP_BADGE | KAYA_CAP_EMOJI_PICKER) == 0,
+        bits & !(KAYA_CAP_NOTIFICATIONS
+            | KAYA_CAP_BADGE
+            | KAYA_CAP_EMOJI_PICKER
+            | KAYA_CAP_NOTIFICATION_REPLY)
+            == 0,
         "kaya: kaya_grant_capabilities({bits:#x}) names a bit that is not runtime-grantable"
     );
     crate::scene::RUNTIME_CAPABILITIES.fetch_or(bits, std::sync::atomic::Ordering::AcqRel);
@@ -477,7 +490,8 @@ const _: () = assert!(
     KAYA_CAP_AUX_WINDOWS == crate::scene::CAP_AUX_WINDOWS
         && KAYA_CAP_NOTIFICATIONS == crate::scene::CAP_NOTIFICATIONS
         && KAYA_CAP_BADGE == crate::scene::CAP_BADGE
-        && KAYA_CAP_EMOJI_PICKER == crate::scene::CAP_EMOJI_PICKER,
+        && KAYA_CAP_EMOJI_PICKER == crate::scene::CAP_EMOJI_PICKER
+        && KAYA_CAP_NOTIFICATION_REPLY == crate::scene::CAP_NOTIFICATION_REPLY,
     "kaya: the header's KAYA_CAP_* and the scene core's bits are different numbers"
 );
 
@@ -1045,7 +1059,7 @@ const _: () = assert!(
 // Completeness for the occurrence exports (docs/traps.md): a new spec
 // occurrence trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::SPEC.occurrence.len() == 33,
+    crate::spec::SPEC.occurrence.len() == 34,
     "spec occurrences grew: export the new KAYA_OCCURRENCE_* above, extend the pin, and \
      bump this count"
 );
@@ -1064,9 +1078,11 @@ pub const KAYA_ALERT_CHOICE_CANCEL: u32 = u32::MAX;
 /// The notification_outcome enum (spec enum "notification_outcome").
 pub const KAYA_NOTIFICATION_OUTCOME_ACTIVATED: u32 = 0;
 pub const KAYA_NOTIFICATION_OUTCOME_REFUSED: u32 = 1;
+pub const KAYA_NOTIFICATION_OUTCOME_REPLIED: u32 = 2;
 const _: () = assert!(
     KAYA_NOTIFICATION_OUTCOME_ACTIVATED == wire::NOTIFICATION_OUTCOME_ACTIVATED
         && KAYA_NOTIFICATION_OUTCOME_REFUSED == wire::NOTIFICATION_OUTCOME_REFUSED
+        && KAYA_NOTIFICATION_OUTCOME_REPLIED == wire::NOTIFICATION_OUTCOME_REPLIED
 );
 const _: () = assert!(
     KAYA_ALERT_CHOICE_ACTION0 == wire::ALERT_CHOICE_ACTION0
@@ -3235,7 +3251,7 @@ pub(crate) fn notification_resolved(
 ) {
     let occurrence = crate::protocol::Occurrence::NotificationResult {
         notification: crate::protocol::NotificationId(notification),
-        outcome,
+        outcome: outcome.clone(),
     };
     // R3: the EARLY lock first, then the sink's — set_presentation_sink
     // takes them in the same order.
@@ -3244,13 +3260,14 @@ pub(crate) fn notification_resolved(
         sink.send(occurrence);
         return;
     }
-    early.push((notification, outcome));
+    early.push((notification, outcome.clone()));
+    let (kind, body) = crate::wire::notification_answer(
+        crate::protocol::NotificationId(notification),
+        &outcome,
+    );
     state().ring.push_record(
-        ring::REC_NOTIFICATION_RESULT,
-        &crate::wire::notification_result_body(
-            crate::protocol::NotificationId(notification),
-            outcome,
-        ),
+        kind,
+        &body,
     );
 }
 
@@ -3819,15 +3836,41 @@ pub unsafe extern "C" fn kaya_link_opened(url: *const std::os::raw::c_char) {
 /// kaya_emit_alert_result rule.
 #[unsafe(no_mangle)]
 pub extern "C" fn kaya_emit_notification_result(notification: u64, outcome: u32) {
+    assert!(
+        outcome != wire::NOTIFICATION_OUTCOME_REPLIED,
+        "kaya: a reply carries its text — answer it through kaya_emit_notification_reply"
+    );
     #[cfg(any(target_os = "macos", target_os = "ios", target_os = "android"))]
     {
-        notification_resolved(notification, crate::wire::notification_outcome(outcome));
+        notification_resolved(notification, crate::wire::notification_outcome(outcome, String::new()));
     }
     #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "android")))]
     {
         let _ = (notification, outcome);
         panic!(
             "kaya: kaya_emit_notification_result is the interpreter platforms' entry — \
+             this host's backend answers on its own sink"
+        );
+    }
+}
+
+/// Presentation side: the text the user sent from a notification's reply
+/// field (docs/notification-reply-plan.md), UTF-8 of `len` bytes. The
+/// kaya_emit_notification_result rule: answerable only on the interpreter
+/// platforms.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_emit_notification_reply(notification: u64, text: *const u8, len: usize) {
+    let bytes = if len == 0 { &[][..] } else { unsafe { std::slice::from_raw_parts(text, len) } };
+    let text = String::from_utf8_lossy(bytes).into_owned();
+    #[cfg(any(target_os = "macos", target_os = "ios", target_os = "android"))]
+    {
+        notification_resolved(notification, crate::protocol::NotificationOutcome::Replied(text));
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "android")))]
+    {
+        let _ = (notification, text);
+        panic!(
+            "kaya: kaya_emit_notification_reply is the interpreter platforms' entry — \
              this host's backend answers on its own sink"
         );
     }

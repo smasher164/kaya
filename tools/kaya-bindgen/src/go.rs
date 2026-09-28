@@ -683,6 +683,13 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("\t\treturn kind, id, nil, binary.LittleEndian.Uint32(rec[16:]), true");
         c.line("\t}");
     }
+    for name in crate::value_answer_occurrence_names(spec) {
+        c.line(&format!("\tif kind == occ{} {{", camel(name)));
+        c.line(&format!("\t\t// {}", crate::VALUE_ANSWER_MARK));
+        c.line("\t\tvalue, _ := parseValue(rec, 16)");
+        c.line("\t\treturn kind, id, nil, value, true");
+        c.line("\t}");
+    }
     // The picker's answer is a LIST OF RECORDS, so it needs its own
     // arm: the generic tail would take the file count for a key-path
     // length and start eight bytes early.

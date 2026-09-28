@@ -1401,6 +1401,7 @@ def run_apk_on(serial, name, apk, component, script, extras,
     # The shade taps this leg has served, keyed by the app's own sequence
     # number — the drag's bookkeeping, one verb over.
     tapped = {}
+    replied = {}
     # 240 ROUNDS, roughly 0.7s each: the budget has to outlast a leg that
     # is FAILING, and a failing step costs this backend up to 15s now
     # (KayaCompose.kt's stepDeadline, the core's own POLL_DEADLINE). At
@@ -1425,6 +1426,21 @@ def run_apk_on(serial, name, apk, component, script, extras,
         # a second one after the app answered would open the shade over the
         # next step.
         tap_acked = set(re.findall(r"KAYA_ACK: notify_tap (\d+)", dump))
+        # AND THE REPLY the `notification_reply` verb asks for, the same
+        # bookkeeping one action over (docs/notification-reply-plan.md §4).
+        reply_acked = set(re.findall(r"KAYA_ACK: notify_reply (\d+)", dump))
+        for seq, title, text in re.findall(
+                r"KAYA_REQUEST: notify_reply (\d+) ([^\t\r\n]*)\t([^\r\n]*)", dump):
+            tries, last = replied.get(seq, (0, 0.0))
+            if seq in reply_acked or tries >= NOTIFY_TAP_TRIES:
+                continue
+            if tries and time.monotonic() - last < NOTIFY_TAP_RETRY_S:
+                continue
+            began = time.monotonic()
+            told = reply_notification(serial, title, text, log)
+            replied[seq] = (tries + 1, time.monotonic())
+            print(f"{name}: notify_reply #{seq} try {tries + 1} -> {told} in "
+                  f"{int((time.monotonic() - began) * 1000)}ms", file=log)
         for seq, title in re.findall(r"KAYA_REQUEST: notify_tap (\d+) (.*)",
                                      dump):
             title = title.rstrip("\r")
@@ -1809,117 +1825,17 @@ def scene_script_cut(scene, cut, keep, extra=""):
 
 
 
-def drop_block(lines, specs, keep):
-    """The DROP's decision, over normalized lines and nothing else —
-    (kept, dropped), or a ValueError carrying the sentence. Pure so its
-    refusals can be watched firing at import (drop_block_selftest)."""
-    keeps = keep.split()
-    if not keeps:
-        raise ValueError(
-            f"dropping {list(specs)} with no `keep` verb — say which "
-            f"assertions this drop may not take with it, or the leg can "
-            f"be trimmed until it asserts nothing")
-    at = []
-    for spec in specs:
-        words = spec.split()
-        hits = [i for i, line in enumerate(lines)
-                if line.split()[:len(words)] == words]
-        if len(hits) != 1:
-            raise ValueError(
-                f"the scene has {len(hits)} `{spec}` steps and this lane "
-                f"drops exactly one — it was reshaped and nobody re-read "
-                f"what the phone can express. Fix the leg, do not widen "
-                f"the drop.")
-        at.append(hits[0])
-    at.sort()
-    if at != list(range(at[0], at[0] + len(at))):
-        raise ValueError(
-            f"the dropped steps {[lines[i] for i in at]} are not one "
-            f"block — a drop takes a step and the assertions it feeds, "
-            f"never a step from the top and an assertion from the bottom")
-    gone = set(at)
-    kept = [line for i, line in enumerate(lines) if i not in gone]
-
-    def asserted(seq, verb, target=None):
-        return {line for line in seq
-                if (p := line.split()) and p[0] == verb
-                and (target is None or (len(p) > 1 and p[1] == target))}
-
-    for tok in keeps:
-        verb, _, target = tok.partition("=")
-        whole = asserted(lines, verb, target or None)
-        survived = asserted(kept, verb, target or None)
-        if not survived:
-            raise ValueError(
-                f"dropping {[lines[i] for i in at]} leaves no `{tok}` "
-                f"step at all — the leg would pass without asserting the "
-                f"thing it exists for")
-        if survived != whole:
-            raise ValueError(
-                f"dropping {[lines[i] for i in at]} takes "
-                f"{sorted(whole - survived)} — the drop may not take an "
-                f"assertion of `{tok}` with it")
-    return kept, [lines[i] for i in at]
-
-
-def drop_blocks(lines, blocks):
-    """Every block of a lane's `drop`, in the table's order and each
-    refused on its own terms — the blocks of one scene need not be
-    contiguous with each other (taskspersist's two sit on opposite sides
-    of the `relaunch`). Pure, so the sequencing's own refusal can be
-    watched firing at import."""
-    taken = []
-    for specs, keep, why in blocks:
-        lines, gone = drop_block(lines, specs, keep)
-        taken.append((why, gone))
-    return lines, taken
+drop_block = scene_cut.drop_block
+drop_blocks = scene_cut.drop_blocks
 
 
 def drop_block_selftest():
-    """The refusals above, watched firing on every launch — the runner
-    is the only wall a lane's cut has, and a guard nobody has seen fail
-    is worse than none (CLAUDE.md invariant 3)."""
-    sample = ['drag label#0 to label#1',
-              'expect label#4 "text target got text hello (copy)"',
-              'drag_file "$TMP/f.txt" to label#3',
-              'expect label#4 "files target got f.txt (copy)"',
-              'expect_order column@rows "a|b|c"']
-    good = ('drag_file', 'expect label#4 "files target got f.txt (copy)"')
-    reds = 0
-    for specs, keep, why in (
-            (good, "", "no keep verb"),
-            (("expect",), "expect_order", "a spec matching four steps"),
-            (("scroll_end",), "expect_order", "a spec matching nothing"),
-            (("drag_file", 'expect_order column@rows "a|b|c"'),
-             "expect_order", "two hits that are not one block"),
-            ((good[0], good[1], 'expect_order column@rows "a|b|c"'),
-             "expect_order", "a drop taking a keep's own assertion")):
-        try:
-            drop_block(list(sample), specs, keep)
-        except ValueError:
-            reds += 1
-            continue
-        die(f"run-emulator: SELF-TEST FAIL — drop_block accepted {why}")
-    kept, gone = drop_block(list(sample), good, "expect_order")
-    if len(kept) != 3 or len(gone) != 2:
-        die("run-emulator: SELF-TEST FAIL — drop_block refused the real "
-            f"shape ({len(kept)} kept, {len(gone)} dropped)")
-    # THE SEQUENCE: a second block is read against what the first LEFT, so
-    # one that names a step already taken must be refused rather than
-    # quietly dropping nothing.
-    two = [(good, "expect_order", "the foreign source"),
-           (("drag label#0",), "expect_order", "the local drag")]
-    kept, taken = drop_blocks(list(sample), two)
-    if len(kept) != 2 or len(taken) != 2:
-        die(f"run-emulator: SELF-TEST FAIL — drop_blocks refused two real "
-            f"blocks ({len(kept)} kept, {len(taken)} block(s) taken)")
+    """The shared drop's refusals (tools/lib/scene_cut.py), watched firing
+    on every launch — the runner is the only wall a lane's drop has."""
     try:
-        drop_blocks(list(sample), [two[0], two[0]])
-    except ValueError:
-        reds += 1
-    else:
-        die("run-emulator: SELF-TEST FAIL — drop_blocks accepted a second "
-            "block naming the step the first had already taken")
+        reds = scene_cut.drop_block_selftest()
+    except AssertionError as e:
+        die(f"run-emulator: {e}")
     print(f"run-emulator: drop_block refused {reds} bad drops", flush=True)
 
 
@@ -2080,25 +1996,125 @@ def tap_notification(serial, title, log):
     try:
         # The dump lands on the device and is read back: `uiautomator
         # dump /dev/tty` interleaves with the tool's own chatter.
-        for attempt in range(1, 4):
-            time.sleep(0.5)
+        for attempt in range(1, 5):
+            time.sleep(0.5 if attempt == 1 else 1.5)
             run(["adb", "-s", serial, "shell", "uiautomator", "dump",
                  "/sdcard/kaya-shade.xml"], stdout=log, stderr=log)
             dump = adb_out(serial, "shell", "cat",
                            "/sdcard/kaya-shade.xml").replace("\r", "")
             centre = shade_row_centre(dump, title)
+            # A COLLAPSED GROUP TAKES THE TAP FOR ITSELF: two of an app's
+            # notifications are bundled under its name with a count badge
+            # (the chat app's Sam and Alex, measured 2026-09-27), and a tap on
+            # a title in the bundle's summary expands it and opens nothing.
+            # The bundle is opened first; the row is then tapped across its
+            # middle, where the title's own text node did not activate either.
+            badge = next((n for n in shade_nodes(dump)
+                          if n[2].endswith("expand_button_number")), None)
+            if centre is not None and badge is not None and badge[3][1] < centre[1]:
+                bx = (badge[3][0] + badge[3][2]) // 2
+                by = (badge[3][1] + badge[3][3]) // 2
+                adb(serial, "shell", "input", "tap", str(bx), str(by), stdout=log, stderr=log)
+                print(f"run-emulator: {title!r} sits in a collapsed group; expanded it at "
+                      f"{bx},{by}", file=log)
+                continue
             if centre is not None:
-                adb(serial, "shell", "input", "tap", str(centre[0]),
-                    str(centre[1]), stdout=log, stderr=log)
-                return (f"tapped {title!r} at {centre[0]},{centre[1]} "
+                width = max((n[3][2] for n in shade_nodes(dump)), default=centre[0] * 2)
+                x, y = width // 2, centre[1] + 8
+                adb(serial, "shell", "input", "tap", str(x), str(y), stdout=log, stderr=log)
+                return (f"tapped {title!r}'s row at {x},{y} "
                         f"on dump {attempt}")
             texts = sorted({m for m in re.findall(r'text="([^"]+)"', dump)})
             print(f"run-emulator: the shade dump {attempt} on {serial} "
                   f"carries no row {title!r}; it reads {texts}", file=log)
-        return f"no row reading {title!r} in three shade dumps"
+        return f"no row reading {title!r} in four shade dumps"
     finally:
         adb(serial, "shell", "cmd", "statusbar", "collapse", stdout=log,
             stderr=log)
+
+
+def shade_nodes(dump):
+    """Every node's (text, content-desc, resource-id, bounds) out of a
+    uiautomator dump, attributes unescaped."""
+    import html
+    nodes = []
+    for m in re.finditer(r"<node ([^>]*?)/?>", dump):
+        attrs = dict(re.findall(r'(\w[\w-]*)="([^"]*)"', m.group(1)))
+        box = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", attrs.get("bounds", ""))
+        if not box:
+            continue
+        nodes.append((html.unescape(attrs.get("text", "")),
+                      html.unescape(attrs.get("content-desc", "")),
+                      attrs.get("resource-id", ""),
+                      tuple(int(v) for v in box.groups())))
+    return nodes
+
+
+def reply_notification(serial, title, text, log):
+    """THE `notification_reply` VERB'S HAND (docs/notification-reply-plan.md
+    §4), tap_notification's shape one action over: expand the shade, find
+    the row by its title, open its Reply action (expanding the row first
+    when its actions are folded away), type the text into SystemUI's own
+    field and send it. The shade is collapsed on every path."""
+    import shlex
+    expanded = run(["adb", "-s", serial, "shell", "cmd", "statusbar",
+                    "expand-notifications"], stdout=log, stderr=log)
+    if expanded.returncode != 0:
+        return "the shade refused to expand"
+
+    def dump():
+        run(["adb", "-s", serial, "shell", "uiautomator", "dump",
+             "/sdcard/kaya-shade.xml"], stdout=log, stderr=log)
+        return shade_nodes(adb_out(serial, "shell", "cat",
+                                   "/sdcard/kaya-shade.xml").replace("\r", ""))
+
+    def tap(box):
+        x, y = (box[0] + box[2]) // 2, (box[1] + box[3]) // 2
+        adb(serial, "shell", "input", "tap", str(x), str(y), stdout=log, stderr=log)
+
+    def nearest_below(nodes, row, match):
+        hits = [n for n in nodes if match(n) and n[3][1] >= row[1] - 8]
+        return min(hits, key=lambda n: n[3][1] - row[1], default=None)
+
+    try:
+        for attempt in range(1, 4):
+            time.sleep(0.6)
+            nodes = dump()
+            row = next((n[3] for n in nodes if n[0] == title), None)
+            if row is None:
+                texts = sorted({n[0] for n in nodes if n[0]})
+                print(f"run-emulator: the shade dump {attempt} on {serial} carries no "
+                      f"row {title!r}; it reads {texts}", file=log)
+                continue
+            button = nearest_below(nodes, row, lambda n: "reply" in (n[0].lower(), n[1].lower()))
+            if button is None:
+                chevron = nearest_below(nodes, row, lambda n: n[2].endswith("expand_button"))
+                if chevron is None:
+                    texts = sorted({n[0] or n[1] for n in nodes if n[0] or n[1]})
+                    return (f"the row {title!r} shows no Reply action and no expand "
+                            f"button to reveal one; the shade reads {texts}")
+                tap(chevron[3])
+                continue
+            tap(button[3])
+            time.sleep(0.8)
+            nodes = dump()
+            if not any(n[2].endswith("remote_input_text") for n in nodes):
+                ids = sorted({n[2] for n in nodes if n[2]})
+                return (f"tapping the Reply action under {title!r} opened no reply "
+                        f"field; the shade's ids read {ids}")
+            typed = text.replace("%", "%%").replace(" ", "%s")
+            adb(serial, "shell", "input", "text", shlex.quote(typed), stdout=log, stderr=log)
+            time.sleep(0.4)
+            nodes = dump()
+            send = next((n for n in nodes if n[2].endswith("remote_input_send")), None)
+            if send is None:
+                adb(serial, "shell", "input", "keyevent", "ENTER", stdout=log, stderr=log)
+                return f"typed {text!r} under {title!r} and sent it with Enter (no send button)"
+            tap(send[3])
+            return f"typed {text!r} under {title!r} and pressed its send button"
+        return f"no row reading {title!r} in three shade dumps"
+    finally:
+        adb(serial, "shell", "cmd", "statusbar", "collapse", stdout=log, stderr=log)
 
 
 # ------------------------------------------------------- the second act

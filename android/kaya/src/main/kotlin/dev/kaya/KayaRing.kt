@@ -1,6 +1,5 @@
 package dev.kaya
 
-import android.app.Activity
 
 /**
  * The direct-access tier of the occurrence ring. [attach] from onCreate
@@ -12,7 +11,7 @@ import android.app.Activity
 object KayaRing {
     /** `stateRoot` is `context.filesDir.absolutePath`, which arms the
      * second act (Kaya.attach carries the reasoning). */
-    @JvmStatic external fun attach(activity: Activity, stateRoot: String)
+    @JvmStatic external fun attach(context: android.content.Context, stateRoot: String)
 
     /**
      * START THE JVM GUEST, once per process (docs/deferred.md's mount

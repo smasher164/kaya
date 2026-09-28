@@ -24,7 +24,7 @@ public enum KayaValue: Hashable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0xda99b50dff6ae96a
+let kayaSpecHash: UInt64 = 0x42e9c3e04bc4f540
 
 /// A civil date as the wire's I64: year * 10000 + month * 100 + day.
 func kayaPackDate(_ year: Int, _ month: Int, _ day: Int) -> Int64 {
@@ -587,13 +587,14 @@ struct KayaTx {
         self.end(kayaAt)
     }
 
-    /// Post a local notification (docs/tasks-s3-plan.md N1, N2): the alert grammar without a window — the platform shows it outside the app, and the one answer is notification_result when the user activates it or the platform refuses to post. `at` is a UNIX time in seconds handed to the OS scheduler where one exists (0 = now); title and body are Str values. Ids are guest-chosen; many may be live, and an id retires on its result or its cancel.
-    mutating func showNotification(_ notification: UInt64, _ at: UInt64, _ title: KayaValue, _ body: KayaValue) {
+    /// Post a local notification (docs/tasks-s3-plan.md N1, N2): the alert grammar without a window — the platform shows it outside the app, and the one answer is notification_result when the user activates it or the platform refuses to post. `at` is a UNIX time in seconds handed to the OS scheduler where one exists (0 = now); title and body are Str values. Ids are guest-chosen; many may be live, and an id retires on its result or its cancel. `reply` is a Str placeholder: non-empty puts a text field on the notification where the process can show one (the notification_reply capability), and what the user types answers `replied` with the text (docs/notification-reply-plan.md).
+    mutating func showNotification(_ notification: UInt64, _ at: UInt64, _ title: KayaValue, _ body: KayaValue, _ reply: KayaValue) {
         let kayaAt = self.begin(UInt16(KAYA_TX_SHOW_NOTIFICATION))
         self.u64(notification)
         self.u64(at)
         self.value(title)
         self.value(body)
+        self.value(reply)
         self.end(kayaAt)
     }
 
@@ -2770,6 +2771,7 @@ func kayaParseOccurrence(_ rec: [UInt8]) -> KayaOccurrence? {
             || kind == UInt16(KAYA_OCCURRENCE_SHEET_DISMISSED)
             || kind == UInt16(KAYA_OCCURRENCE_DISMISS_REQUESTED)
             || kind == UInt16(KAYA_OCCURRENCE_SUBMITTED)
+            || kind == UInt16(KAYA_OCCURRENCE_NOTIFICATION_REPLIED)
         else { return nil }
         let id = raw.loadUnaligned(fromByteOffset: 8, as: UInt64.self)
         if kind == UInt16(KAYA_OCCURRENCE_ALERT_RESULT) {
@@ -2781,6 +2783,12 @@ func kayaParseOccurrence(_ rec: [UInt8]) -> KayaOccurrence? {
             // A request's one answer: id + the u32 code.
             let code = raw.loadUnaligned(fromByteOffset: 16, as: UInt32.self)
             return (kind, id, [], .i64(Int64(code)), [], nil, nil, [])
+        }
+        if kind == UInt16(KAYA_OCCURRENCE_NOTIFICATION_REPLIED) {
+            // An answer carrying one value: id + the Value.
+            let valueLen = Int(raw.loadUnaligned(fromByteOffset: 20, as: UInt32.self))
+            let text = String(decoding: raw[24..<(24 + valueLen)], as: UTF8.self)
+            return (kind, id, [], .str(text), [], nil, nil, [])
         }
         if kind == UInt16(KAYA_OCCURRENCE_FILE_DIALOG_RESULT) {
             // id, a count, then three Values per file

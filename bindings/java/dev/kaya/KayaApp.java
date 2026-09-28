@@ -484,28 +484,37 @@ public final class KayaApp {
         void accept(Tx tx, List<Object> keys, int column);
     }
 
-    /** A notification's answer: the wire's two outcomes. */
-    public enum NotificationOutcome {
-        ACTIVATED(KayaWire.NOTIFICATION_OUTCOME_ACTIVATED, "activated"),
-        REFUSED(KayaWire.NOTIFICATION_OUTCOME_REFUSED, "refused");
-
-        final int wire;
-        final String spelling;
-
-        NotificationOutcome(int wire, String spelling) {
-            this.wire = wire;
-            this.spelling = spelling;
+    /** A notification's answer: the user opened it, sent text from its
+     * reply field, or the platform would not post it
+     * (docs/notification-reply-plan.md). */
+    public sealed interface NotificationOutcome {
+        record Activated() implements NotificationOutcome {
+            @Override
+            public String toString() {
+                return "activated";
+            }
         }
 
-        @Override
-        public String toString() {
-            return spelling;
+        record Refused() implements NotificationOutcome {
+            @Override
+            public String toString() {
+                return "refused";
+            }
         }
+
+        /** The text the user sent from the notification's reply field. */
+        record Replied(String text) implements NotificationOutcome {
+            @Override
+            public String toString() {
+                return "replied";
+            }
+        }
+
+        NotificationOutcome ACTIVATED = new Activated();
+        NotificationOutcome REFUSED = new Refused();
 
         /** The wire's number, refused naming one this build does not
-         * know. A SWITCH over the wire's compile-time constants:
-         * {@code values()} clones the backing array on every call, and
-         * this runs once per notification result. */
+         * know. A reply arrives as its own record, carrying its text. */
         static NotificationOutcome fromWire(int number) {
             NotificationOutcome known = switch (number) {
                 case KayaWire.NOTIFICATION_OUTCOME_ACTIVATED -> ACTIVATED;
@@ -874,6 +883,7 @@ public final class KayaApp {
         private long at;
         private String title = "";
         private String body = "";
+        private String reply = "";
         private BiConsumer<Tx, NotificationOutcome> onResult;
 
         NotificationRef(Tx tx, KayaApp app, long id) {
@@ -899,6 +909,16 @@ public final class KayaApp {
             return this;
         }
 
+        /** A text field on the notification with this placeholder, where
+         * the platform draws one ({@code capabilities().notificationReply()}):
+         * what the user sends answers {@link NotificationOutcome.Replied}.
+         * Elsewhere the notification posts without it and a click answers
+         * activated (docs/notification-reply-plan.md). */
+        public NotificationRef reply(String placeholder) {
+            this.reply = placeholder;
+            return this;
+        }
+
         /** Bind the one-shot result handler to THIS request. */
         public NotificationRef onResult(BiConsumer<Tx, NotificationOutcome> handler) {
             this.onResult = handler;
@@ -914,7 +934,7 @@ public final class KayaApp {
             if (onResult != null) {
                 app.notifications.put(id, onResult);
             }
-            tx.emit(KayaWire.txShowNotification(id, at, title, body));
+            tx.emit(KayaWire.txShowNotification(id, at, title, body, reply));
             return id;
         }
     }
@@ -1201,7 +1221,7 @@ public final class KayaApp {
      *     {@code createWindow} aborts at the root.
      */
     public record Capabilities(boolean auxWindows, boolean notifications, boolean badge,
-            boolean emojiPicker) {}
+            boolean emojiPicker, boolean notificationReply) {}
 
     /**
      * The core's number written again — no header on this tier to read
@@ -1212,6 +1232,7 @@ public final class KayaApp {
     private static final long CAP_NOTIFICATIONS = 2;
     private static final long CAP_BADGE = 4;
     private static final long CAP_EMOJI_PICKER = 8;
+    private static final long CAP_NOTIFICATION_REPLY = 16;
 
     /** This host's capabilities; constant for the life of the
      * process. */
@@ -1219,7 +1240,8 @@ public final class KayaApp {
         long bits = KayaRing.capabilities();
         return new Capabilities(
                 (bits & CAP_AUX_WINDOWS) != 0, (bits & CAP_NOTIFICATIONS) != 0,
-                (bits & CAP_BADGE) != 0, (bits & CAP_EMOJI_PICKER) != 0);
+                (bits & CAP_BADGE) != 0, (bits & CAP_EMOJI_PICKER) != 0,
+                (bits & CAP_NOTIFICATION_REPLY) != 0);
     }
 
     /**
@@ -1537,7 +1559,15 @@ public final class KayaApp {
      * not; else the drop is announced.
      */
     void notificationResult(long id, int outcome) {
-        NotificationOutcome result = NotificationOutcome.fromWire(outcome);
+        notificationAnswer(id, NotificationOutcome.fromWire(outcome));
+    }
+
+    /** A reply's text (docs/notification-reply-plan.md), the same decision. */
+    void notificationReplied(long id, String text) {
+        notificationAnswer(id, new NotificationOutcome.Replied(text));
+    }
+
+    void notificationAnswer(long id, NotificationOutcome result) {
         BiConsumer<Tx, NotificationOutcome> handler = notifications.remove(id);
         if (handler != null) {
             dispatch(tx -> handler.accept(tx, result));
@@ -9066,6 +9096,8 @@ public final class KayaApp {
                 linkOpened(occ.id, linkUrlOf(occ.payload), linkParamsOf(occ.payload));
             } else if (occ.kind == KayaWire.OCC_KIND_NOTIFICATION_RESULT) {
                 notificationResult(occ.id, (Integer) occ.payload);
+            } else if (occ.kind == KayaWire.OCC_KIND_NOTIFICATION_REPLIED) {
+                notificationReplied(occ.id, (String) occ.payload);
             } else if (occ.kind == KayaWire.OCC_KIND_FILE_DIALOG_RESULT) {
                 @SuppressWarnings("unchecked")
                 List<PickedFile> files = (List<PickedFile>) occ.payload;

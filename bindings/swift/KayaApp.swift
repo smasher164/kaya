@@ -360,22 +360,33 @@ public enum KayaAlertChoice: UInt32, Sendable {
     }
 }
 
-/// A notification's two outcomes (docs/tasks-s3-plan.md N1). Dismissal
-/// is not one of them: two platforms never report it.
-enum KayaNotificationOutcome: UInt32 {
-    case activated = 0
-    case refused = 1
+/// A notification's outcomes (docs/tasks-s3-plan.md N1): opened, a reply
+/// from its field with the text sent (docs/notification-reply-plan.md), or
+/// refused by the platform. Dismissal is not one of them: two platforms
+/// never report it.
+enum KayaNotificationOutcome: Equatable, Sendable {
+    case activated
+    case refused
+    case replied(String)
 
     static func fromWire(_ code: UInt32) -> KayaNotificationOutcome {
-        guard let known = KayaNotificationOutcome(rawValue: code) else {
+        switch code {
+        case UInt32(KAYA_NOTIFICATION_OUTCOME_ACTIVATED): return .activated
+        case UInt32(KAYA_NOTIFICATION_OUTCOME_REFUSED): return .refused
+        default:
             fatalError(
                 "kaya: a notification result carries outcome \(code), which this build does not know")
         }
-        return known
     }
 
     /// The wire's own word for it, which the drop announcement names.
-    var name: String { self == .activated ? "activated" : "refused" }
+    var name: String {
+        switch self {
+        case .activated: return "activated"
+        case .refused: return "refused"
+        case .replied: return "replied"
+        }
+    }
 }
 
 /// How a picked file is re-opened (crates/kaya/src/spec.rs decides the
@@ -1655,6 +1666,10 @@ public struct KayaCapabilities {
     /// `showEmojiPicker` opens a picker (docs/emoji-picker-plan.md); on iOS
     /// it only focuses the field.
     let emojiPicker: Bool
+
+    /// `showNotification(reply:)` puts a text field on the notification
+    /// (docs/notification-reply-plan.md).
+    let notificationReply: Bool
 }
 
 // --- The formatter door and the catalog (docs/compliance-plan.md §1.4) ------
@@ -2308,7 +2323,10 @@ public final class KayaApp {
     /// result; else the process-level one, which does not; else the drop
     /// is announced.
     func notificationResult(_ id: UInt64, _ choice: UInt32) {
-        let answer = KayaNotificationOutcome.fromWire(choice)
+        notificationAnswer(id, KayaNotificationOutcome.fromWire(choice))
+    }
+
+    func notificationAnswer(_ id: UInt64, _ answer: KayaNotificationOutcome) {
         if let handler = notifications.removeValue(forKey: id) {
             dispatch { try build { tx in try handler(tx, answer) } }
         } else if let act = notificationActivation {
@@ -2404,7 +2422,8 @@ public final class KayaApp {
             auxWindows: bits & UInt64(KAYA_CAP_AUX_WINDOWS) != 0,
             notifications: bits & UInt64(KAYA_CAP_NOTIFICATIONS) != 0,
             badge: bits & UInt64(KAYA_CAP_BADGE) != 0,
-            emojiPicker: bits & UInt64(KAYA_CAP_EMOJI_PICKER) != 0)
+            emojiPicker: bits & UInt64(KAYA_CAP_EMOJI_PICKER) != 0,
+            notificationReply: bits & UInt64(KAYA_CAP_NOTIFICATION_REPLY) != 0)
     }
 
     private let posted = KayaAppQueue<@KayaAppActor @Sendable (KayaAppTx) throws -> Void>()
@@ -3651,6 +3670,8 @@ public final class KayaApp {
                 linkOpened(id, kayaLinkUrl(tail), kayaLinkParams(tail))
             case (UInt16(KAYA_OCCURRENCE_NOTIFICATION_RESULT), _):
                 notificationResult(id, choice)
+            case (UInt16(KAYA_OCCURRENCE_NOTIFICATION_REPLIED), _):
+                notificationAnswer(id, .replied(text ?? ""))
             case (UInt16(KAYA_OCCURRENCE_CLIPBOARD_RESULT), _):
                 clipboardResult(id, kayaRepresentation(clip))
             // A paste rides a click tag verbatim: one record kind, the
@@ -5134,19 +5155,22 @@ public final class KayaAppTx {
     /// exactly once and retires, with KAYA_NOTIFICATION_OUTCOME_ACTIVATED
     /// when the user opened it and KAYA_NOTIFICATION_OUTCOME_REFUSED when
     /// the platform would not post it. `at` is a UNIX time in seconds
-    /// handed to the OS scheduler where one exists; 0 posts now. Many may
-    /// be live at once.
+    /// handed to the OS scheduler where one exists; 0 posts now. `reply`
+    /// puts a text field on the notification with that placeholder where the
+    /// platform draws one (`capabilities().notificationReply`), and what the
+    /// user sends answers `.replied(text)` (docs/notification-reply-plan.md).
+    /// Many may be live at once.
     @discardableResult
     func showNotification(
         _ notification: UInt64, title: String = "", body: String = "",
-        at: UInt64 = 0,
+        at: UInt64 = 0, reply: String = "",
         onResult: ((KayaAppTx, KayaNotificationOutcome) throws -> Void)? = nil
     ) -> UInt64 {
         precondition(
             !title.isEmpty,
             "kaya: a notification needs a title — pass title:")
         if let onResult { app.onNotification(notification, onResult) }
-        tx.showNotification(notification, at, .str(title), .str(body))
+        tx.showNotification(notification, at, .str(title), .str(body), .str(reply))
         return notification
     }
 

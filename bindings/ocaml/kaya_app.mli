@@ -41,6 +41,7 @@ type capabilities = {
   notifications : bool;
   badge : bool;
   emoji_picker : bool;
+  notification_reply : bool;
 }
 
 (* This host's capabilities. Constant for the life of the process, so
@@ -106,10 +107,11 @@ module Alert_choice : sig
   val of_wire : int -> t
 end
 
-(* A notification's two outcomes (docs/tasks-s3-plan.md N1). Dismissal is
-   not one of them: two platforms never report it. *)
+(* A notification's outcomes (docs/tasks-s3-plan.md N1): opened, refused,
+   or a reply from its field with the text the user sent
+   (docs/notification-reply-plan.md). Dismissal is not one of them. *)
 module Notification_outcome : sig
-  type t = Activated | Refused
+  type t = Activated | Refused | Replied of string
 
   val of_wire : int -> t
   val name : t -> string
@@ -1129,7 +1131,12 @@ val show_alert :
 
 val show_notification :
   ?title:string ->
-  ?body:string -> ?at:int64 -> ?on_result:(Notification_outcome.t -> unit) -> int64 -> int64
+  ?body:string ->
+  ?at:int64 ->
+  ?reply:string ->
+  ?on_result:(Notification_outcome.t -> unit) ->
+  int64 ->
+  int64
 
 (* Withdraw a pending or delivered notification. No answer follows; an
    unknown id is ignored. *)

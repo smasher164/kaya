@@ -1506,6 +1506,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 f("at", FieldTy::U64),
                 f("title", FieldTy::Value),
                 f("body", FieldTy::Value),
+                f("reply", FieldTy::Value),
             ],
             payload: None,
             doc: "Post a local notification (docs/tasks-s3-plan.md N1, N2): the \
@@ -1515,7 +1516,11 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   `at` is a UNIX time in seconds handed to the OS scheduler \
                   where one exists (0 = now); title and body are Str values. \
                   Ids are guest-chosen; many may be live, and an id retires \
-                  on its result or its cancel.",
+                  on its result or its cancel. `reply` is a Str placeholder: \
+                  non-empty puts a text field on the notification where the \
+                  process can show one (the notification_reply capability), \
+                  and what the user types answers `replied` with the text \
+                  (docs/notification-reply-plan.md).",
         },
         Record {
             kind: 53,
@@ -2999,8 +3004,10 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   outcome is a NOTIFICATION_OUTCOME value — activated when \
                   the user opened it, refused when the platform would not \
                   post it (permission denied, no identity, no registry to \
-                  remember it). Dismissal is not an outcome: two platforms \
-                  never report it. The id retires here.",
+                  remember it). A reply from its field arrives as \
+                  notification_replied instead, which carries the text. \
+                  Dismissal is not an outcome: two platforms never report \
+                  it. The id retires here.",
         },
         Record {
             kind: 28,
@@ -3111,6 +3118,17 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   textarea that says `submits`. The gesture alone publishes, \
                   never an edit; the field keeps its text and its focus, and \
                   a programmatic write never echoes — text_changed's stance.",
+        },
+        Record {
+            kind: 34,
+            name: "notification_replied",
+            fields: &[f("notification", FieldTy::U64), f("text", FieldTy::Value)],
+            payload: None,
+            doc: "A notification's answer when the user sent text from its \
+                  reply field (docs/notification-reply-plan.md): `text` is a \
+                  Str. The bindings hand it to the same handlers as \
+                  notification_result, as the `replied` outcome, and the id \
+                  retires here as it does there.",
         },
     ],
     enums: &[
@@ -3366,7 +3384,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
         EnumSpec {
             // docs/tasks-s3-plan.md N1: activated or refused, nothing else.
             name: "notification_outcome",
-            variants: &[("activated", 0), ("refused", 1)],
+            variants: &[("activated", 0), ("refused", 1), ("replied", 2)],
         },
         EnumSpec {
             // What kaya_open_picked opens a handle for (Android's
@@ -3819,6 +3837,7 @@ mod tests {
                 ("sheet_dismissed", crate::ring::REC_SHEET_DISMISSED),
                 ("dismiss_requested", crate::ring::REC_DISMISS_REQUESTED),
                 ("submitted", crate::ring::REC_SUBMITTED),
+                ("notification_replied", crate::ring::REC_NOTIFICATION_REPLIED),
             ]
         );
     }
@@ -4143,6 +4162,7 @@ mod tests {
                     ("alert_choice", "cancel") => wire::ALERT_CHOICE_CANCEL,
                     ("notification_outcome", "activated") => wire::NOTIFICATION_OUTCOME_ACTIVATED,
                     ("notification_outcome", "refused") => wire::NOTIFICATION_OUTCOME_REFUSED,
+                    ("notification_outcome", "replied") => wire::NOTIFICATION_OUTCOME_REPLIED,
                     ("axis", "horizontal") => wire::AXIS_HORIZONTAL,
                     ("axis", "vertical") => wire::AXIS_VERTICAL,
                     ("size_class", "none") => wire::SIZE_CLASS_NONE,

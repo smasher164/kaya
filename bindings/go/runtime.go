@@ -112,6 +112,7 @@ const capAuxWindows = uint64(C.KAYA_CAP_AUX_WINDOWS)
 const capNotifications = uint64(C.KAYA_CAP_NOTIFICATIONS)
 const capBadge = uint64(C.KAYA_CAP_BADGE)
 const capEmojiPicker = uint64(C.KAYA_CAP_EMOJI_PICKER)
+const capNotificationReply = uint64(C.KAYA_CAP_NOTIFICATION_REPLY)
 
 // The core's own number, not a copy (check-file-modes' trap class).
 const sortNoneValue = uint32(C.KAYA_SORT_NONE)
