@@ -13816,6 +13816,20 @@ nothing in the commit touches android. Instrument on the next sighting: log
 the back-gate's successive `backState` readings so the record says WHAT
 moved (a recreated picker, a settling animation, or a stale list entry).
 
+SECOND SIGHTING 2026-09-28, the first matrix on the cold-reply fixes
+(c5f21cab's tree, which touches no android file): the same count, 1 back
+then 29 withheld, and the leg green alone and on the next matrix.
+INSTRUMENTED the same day: the gate names each refusal (first read of a
+path, a closing action taken, a path already pressed, the window moved
+since the press, a path no shorter than the pressed one, a path that is not
+its prefix), `dismiss` logs `KAYA_PICKER_BACK: look N withheld: <why>` and
+`look N pressed at <path>` into the leg log, and the failure sentence
+carries the last pressed path and the distinct refusals after it. Every
+refusal is asserted by the gate's own self-test on each dismiss; a forced
+red (every post-press reading refused as a moved window) reproduced the
+matrix's exact count and read back from the bundle. The next sighting's
+verdict names which refusal held the 29 looks.
+
 ## ~~A plain Compose textarea reports marked text through text_changed where the mac never does (found 2026-09-11, invariant 1)~~ CLOSED 2026-09-15 — the collector's composing suppression is keyed on nothing now (every Compose field holds marked text back from text_changed and the mirror), and tools/scenes/ranges.steps D5 is the step that sees it on five lanes: the plain field's live composition is the word "alpha", and a Find re-declared over the mirror reads three where a leak reads four. Android green standalone; the matrix that follows is its record (docs/rich-text-plan.md §18).
 KEY: marked text, composing, text_changed, snapshotFlow, plain textarea compose
 

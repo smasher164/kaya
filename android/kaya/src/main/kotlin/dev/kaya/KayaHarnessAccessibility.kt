@@ -160,6 +160,9 @@ class KayaHarnessAccessibility : AccessibilityService() {
         /** How long the picker is given to leave once it has been answered. */
         private const val GONE_TRIES = 15
 
+        /** The distinct withheld readings a failed dismiss reports. */
+        private const val MAX_READINGS = 8
+
         private data class PickerBackState(
             val windowId: Int,
             val breadcrumbs: List<String>,
@@ -173,8 +176,13 @@ class KayaHarnessAccessibility : AccessibilityService() {
             private val spent = mutableSetOf<PickerBackState>()
             private var candidate: PickerBackState? = null
             private var matchingReads = 0
-            private var lastPressed: PickerBackState? = null
+            var lastPressed: PickerBackState? = null
+                private set
             private var closingAction = false
+
+            /** Why the last [observe] withheld, naming what it read. */
+            var lastRefusal: String = ""
+                private set
 
             @Synchronized
             fun clear() {
@@ -183,6 +191,7 @@ class KayaHarnessAccessibility : AccessibilityService() {
                 matchingReads = 0
                 lastPressed = null
                 closingAction = false
+                lastRefusal = ""
             }
 
             @Synchronized
@@ -190,23 +199,31 @@ class KayaHarnessAccessibility : AccessibilityService() {
                 if (state == null) {
                     candidate = null
                     matchingReads = 0
+                    lastRefusal = "no readable path"
                     return false
                 }
                 if (state != candidate) {
                     candidate = state
                     matchingReads = 1
+                    lastRefusal = "first read of $state"
                     return false
                 }
                 matchingReads += 1
-                if (matchingReads < 2 || closingAction || spent.contains(state)) return false
                 val previous = lastPressed
-                if (previous != null &&
-                    (state.windowId != previous.windowId ||
-                        state.breadcrumbs.size >= previous.breadcrumbs.size ||
-                        previous.breadcrumbs.take(state.breadcrumbs.size) != state.breadcrumbs)
-                ) {
-                    return false
+                lastRefusal = when {
+                    closingAction -> "a closing action was taken at $state"
+                    spent.contains(state) -> "$state was already pressed"
+                    previous != null && state.windowId != previous.windowId ->
+                        "the window moved from ${previous.windowId} to ${state.windowId} " +
+                            "since the press at $previous"
+                    previous != null && state.breadcrumbs.size >= previous.breadcrumbs.size ->
+                        "$state is no shorter than the pressed $previous"
+                    previous != null &&
+                        previous.breadcrumbs.take(state.breadcrumbs.size) != state.breadcrumbs ->
+                        "$state is not a prefix of the pressed $previous"
+                    else -> ""
                 }
+                if (lastRefusal.isNotEmpty()) return false
                 spent.add(state)
                 lastPressed = state
                 return true
@@ -239,6 +256,38 @@ class KayaHarnessAccessibility : AccessibilityService() {
             closing.noteClosingAction(folder)
             check(listOf(documents, documents, root, root).none(closing::observe)) {
                 "kaya: cleanup admitted a BACK while a picker action was closing"
+            }
+            check(closing.lastRefusal.startsWith("a closing action was taken at")) {
+                "kaya: the closing refusal said: ${closing.lastRefusal}"
+            }
+            // Every refusal the failure sentence can carry, made to print.
+            val moved = PickerBackGate()
+            val recreated = PickerBackState(18, listOf("device"))
+            listOf(documents, documents, recreated, recreated).forEach { moved.observe(it) }
+            check(moved.lastRefusal.startsWith("the window moved from 17 to 18")) {
+                "kaya: the moved-window refusal said: ${moved.lastRefusal}"
+            }
+            val longer = PickerBackGate()
+            listOf(documents, documents, folder, folder).forEach { longer.observe(it) }
+            check(longer.lastRefusal.contains("is no shorter than the pressed")) {
+                "kaya: the no-shorter refusal said: ${longer.lastRefusal}"
+            }
+            val sideways = PickerBackGate()
+            val other = PickerBackState(17, listOf("sdcard"))
+            listOf(documents, documents, other, other).forEach { sideways.observe(it) }
+            check(sideways.lastRefusal.contains("is not a prefix of the pressed")) {
+                "kaya: the prefix refusal said: ${sideways.lastRefusal}"
+            }
+            val again = PickerBackGate()
+            listOf(documents, documents, documents).forEach { again.observe(it) }
+            check(again.lastRefusal.endsWith("was already pressed")) {
+                "kaya: the already-pressed refusal said: ${again.lastRefusal}"
+            }
+            check(!again.observe(null) && again.lastRefusal == "no readable path") {
+                "kaya: the unreadable refusal said: ${again.lastRefusal}"
+            }
+            check(!again.observe(root) && again.lastRefusal.startsWith("first read of")) {
+                "kaya: the first-read refusal said: ${again.lastRefusal}"
             }
         }
     }
@@ -467,6 +516,7 @@ class KayaHarnessAccessibility : AccessibilityService() {
         var refused = 0
         var withheld = 0
         var unreadable = 0
+        val readings = mutableListOf<String>()
         while (waits < GONE_TRIES * 2) {
             waits += 1
             val picker = pickerWindow()
@@ -497,9 +547,15 @@ class KayaHarnessAccessibility : AccessibilityService() {
                     unreadable += 1
                 } else if (!pickerBackGate.observe(backState)) {
                     withheld += 1
+                    val reading = pickerBackGate.lastRefusal
+                    if (reading != readings.lastOrNull()) {
+                        android.util.Log.i("kaya", "KAYA_PICKER_BACK: look $waits withheld: $reading")
+                        if (readings.size < MAX_READINGS) readings += reading
+                    }
                 } else {
                     performGlobalAction(GLOBAL_ACTION_BACK)
                     backs += 1
+                    android.util.Log.i("kaya", "KAYA_PICKER_BACK: look $waits pressed at $backState")
                 }
             }
             Thread.sleep(BACK_SETTLE_MS)
@@ -509,6 +565,8 @@ class KayaHarnessAccessibility : AccessibilityService() {
             "($refused refused while the app's own activity was resumed, " +
             "$withheld withheld until a new stable picker path, " +
             "$unreadable with no readable picker path); " +
+            "last pressed at ${pickerBackGate.lastPressed ?: "nothing"}, then withheld: " +
+            (readings.joinToString(" | ").ifEmpty { "nothing" }) + "; " +
             windowCensus()
     }
 
