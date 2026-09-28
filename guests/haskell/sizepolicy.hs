@@ -24,11 +24,11 @@ panel (Viewbox w h) l t r b paint =
 -- The figure the three drawing canvases share. The centre probe point is
 -- opaque, which is what `expect_ink` rests on.
 figure :: Viewbox -> [DrawOp]
-figure b = panel b 0.05 0 0.95 1 Ground ++ panel b 0.25 0 0.75 1 SeriesFill
+figure b = panel b 0.05 0 0.95 1 PaintGround ++ panel b 0.25 0 0.75 1 PaintSeriesFill
 
 -- The bar whose RIGHT EDGE is the frame number; the scene pins exact frames.
 bar :: Viewbox -> Int -> [DrawOp]
-bar b frame = panel b 0.25 0 (0.35 + 0.10 * fromIntegral frame) 1 Axis
+bar b frame = panel b 0.25 0 (0.35 + 0.10 * fromIntegral frame) 1 PaintAxis
 
 -- Seconds back to the frame the harness drove, off the time the guest was
 -- HANDED and never a clock of its own (§15.4).

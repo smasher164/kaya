@@ -78,7 +78,7 @@ main = kayaMain $ \app -> do
               buttonOn "add frame" onAddFrame [A11yId "add_frame"]
             ],
           scroll [Grow 1, A11yId "list"] (pure list),
-          scroll [Along AxisHorizontal, FollowsEnd, A11yId "strip"] (pure strip)
+          scroll [Axis AxisHorizontal, FollowsEnd, A11yId "strip"] (pure strip)
         ]
     mount root
     mapM_ (\i -> insertRecord frames (frameKey i) (frameOf i)) [1 .. 30 :: Int]

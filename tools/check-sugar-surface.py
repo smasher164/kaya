@@ -2384,8 +2384,8 @@ if len(fake) != len(REPLY_SURFACES):
 # scroll's own options live nowhere but Rust. Each row reads that site:
 # chained where follows_end is chained, a keyword, argument, labelled
 # argument or option where it is one, an Attr in Haskell, and, where the
-# option is a declaration, the line applying it too. HASKELL'S WORD IS
-# `Along`: its Paint type already holds the constructor `Axis`.
+# option is a declaration, the line applying it too. Haskell's paint roles
+# are prefixed (`PaintAxis`) so its attr can be `Axis` like everyone's.
 SCROLL_AXIS_SURFACES = [
     ("rust", "crates/kaya/src/app.rs", [
         r"pub fn {0}\(self, axis: Axis\) -> Self"]),
@@ -2414,7 +2414,7 @@ SCROLL_AXIS_SURFACES = [
 ]
 SCROLL_AXIS_NAMES = {"rust": "axis", "python": "axis", "go": "Axis",
                      "csharp": "axis", "java": "axis", "swift": "axis",
-                     "haskell": "Along", "ocaml": "axis", "js": "axis"}
+                     "haskell": "Axis", "ocaml": "axis", "js": "axis"}
 
 
 def check_scroll_axis(fake_name=None, findings=None, text_for=None):

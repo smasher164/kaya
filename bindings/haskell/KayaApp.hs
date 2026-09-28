@@ -2722,8 +2722,8 @@ data Attr (c :: WClass) where
   FollowsEnd :: Attr 'BoxW
   -- | This container's arrangement axis, or the direction this scroll
   -- scrolls (vertical unless set; docs\/hscroll-plan.md) — 'setAxis' at
-  -- construction. Not spelled @Axis@: 'Paint' holds that constructor.
-  Along :: Axis -> Attr 'BoxW
+  -- construction.
+  Axis :: Axis -> Attr 'BoxW
   -- | Stack this row's children vertically while the window's size
   -- class is the named one. Containers only, and LIVE ZONE ONLY —
   -- 'TplAttr' has no counterpart.
@@ -2816,7 +2816,7 @@ applyAttr (Inset pad) w = setInset w pad
 applyAttr (Align a) w = setAlign w a
 applyAttr (Filled t) w = setFilled w t
 applyAttr FollowsEnd (Widget w) = emitB (W.txSetFollowsEnd w True)
-applyAttr (Along a) w = setAxis w a
+applyAttr (Axis a) w = setAxis w a
 applyAttr (StackWhen when) w = stackWhen w when
 applyAttr (A11yId i) w = setA11yId w i
 applyAttr (A11yIdBound sig) w = bindA11yId w sig
@@ -2894,7 +2894,7 @@ column = rowish W.kindColumn
 
 -- | A scroll viewport over EXACTLY ONE child — the signature says so
 -- (the scene enforces it too): @scroll [Grow 1] (column [...])@, vertical
--- unless @[Along AxisHorizontal]@. Give it 'Grow' so the enclosing track CONSTRAINS it — an
+-- unless @[Axis AxisHorizontal]@. Give it 'Grow' so the enclosing track CONSTRAINS it — an
 -- unconstrained viewport hugs its content and nothing overflows.
 scroll :: [Attr 'BoxW] -> Build Widget -> Build Widget
 scroll attrs child = withAttrs attrs (containerOf W.kindScroll [child])
@@ -3237,15 +3237,16 @@ imageBound sig = leafish $ do
 
 -- | The paint ROLE an op names. Never RGB: the roles resolve in the core
 -- per appearance (§3.4).
-data Paint = Series | SeriesFill | Grid | Axis | Ground
+-- Prefixed, as Go spells them, so 'Axis' stays the attr every binding names.
+data Paint = PaintSeries | PaintSeriesFill | PaintGrid | PaintAxis | PaintGround
 
 paintWire :: Paint -> Int64
 paintWire p = fromIntegral $ case p of
-  Series -> W.paintSeries
-  SeriesFill -> W.paintSeriesFill
-  Grid -> W.paintGrid
-  Axis -> W.paintAxis
-  Ground -> W.paintGround
+  PaintSeries -> W.paintSeries
+  PaintSeriesFill -> W.paintSeriesFill
+  PaintGrid -> W.paintGrid
+  PaintAxis -> W.paintAxis
+  PaintGround -> W.paintGround
 
 -- | Which way a fill resolves its own crossings.
 data FillRule = Nonzero | EvenOdd

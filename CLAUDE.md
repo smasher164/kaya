@@ -579,8 +579,9 @@ in docs/deferred.md.
    counts printed.
    AND `axis` ON A SCROLL SINCE 2026-09-28 (docs/hscroll-plan.md §1): the
    direction a scroll runs, spelled where each binding's scroll options
-   live in all nine, Haskell's attr `Along` because `Axis` is its Paint
-   constructor; fake-name and rename-in-a-copy negatives, counts printed),
+   live in all nine, the one word everywhere (Haskell's paint roles are
+   prefixed, `PaintAxis`, to free it); fake-name and rename-in-a-copy
+   negatives, counts printed),
    `tools/check-universal-props.py` (the lowering-side sibling: every
    backend applies the universal a11y props to every kind — Compose
    per-arm, SwiftUI's one wrapper unbypassed, GTK/WinUI's apply arm

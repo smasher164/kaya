@@ -33,7 +33,7 @@ main = kayaMain $ \app -> do
           -- A strip wider than the window, scrolled sideways
           -- (docs/hscroll-plan.md), addressed as scroll@strip.
           scroll
-            [Along AxisHorizontal, A11yId "strip"]
+            [Axis AxisHorizontal, A11yId "strip"]
             ( row
                 []
                 ( map mkCard [1 .. 19]
