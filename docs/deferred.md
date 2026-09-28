@@ -14392,3 +14392,8 @@ kaya's own bound", and the 15s net is a hang guard kaya needs because a
 live dialog holds the slot the next one needs, where those frameworks
 would simply never call back. Putting "lost" on the wire would be a
 concept no platform can produce.
+
+## The WinUI title bar does not mirror under right to left (seen 2026-09-28 on the horizontal-scroll review captures)
+
+Under `KAYA_LOCALE=ar-EG` the window's content mirrors on Windows (the scrollrtl leg is green, and the capture shows the strip starting at the right), but the title bar stays left to right: the title at the left, the caption buttons at the right. The mac and GTK windows flip their chrome under the same locale. A Windows app under Arabic draws its caption mirrored (the frame follows `WS_EX_LAYOUTRTL`, or `AppWindow`'s title bar follows the process layout), so kaya's window is the odd one out. Not measured yet: which of the two levers the WinUI window takes, and whether `expect_direction` should read the frame as well as the content. No scene sees it, because every verb reads content.
+KEY: title bar mirror, WS_EX_LAYOUTRTL, caption buttons, WinUI right to left chrome, scrollrtl
