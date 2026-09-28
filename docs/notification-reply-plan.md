@@ -1,8 +1,10 @@
 # Replying from a notification — the design pass
 
 Status: DESIGN, R1 RULED 2026-09-25 as recommended (a). The chat app's C4
-(docs/chat-plan.md). Researched 2026-09-25 with sources; two macOS points in
-§4 are unmeasured.
+(docs/chat-plan.md). Researched 2026-09-25 with sources. PROBED 2026-09-27
+(docs/measurements/notification-reply-2026-09-27.md): Android runs the guest's
+handler for a reply with no Activity, cold and warm; macOS relaunches a closed
+app for a reply without activating it and hands over the text.
 
 ## §1 — The semantics
 
@@ -55,9 +57,11 @@ A new verb, `notification_reply <id> "text"`:
 
 - macOS, iOS: the in-process shortcut into the delegate's own funnel, the
   existing carve-out for `notification_activate` (neither platform offers a
-  programmatic tap). Unmeasured: whether a provisional authorization (the
-  harness's) shows action buttons, and what a reply does to a closed
-  accessory app on the mac. Both are probed before building.
+  programmatic tap). Measured 2026-09-27: a reply to a closed mac app
+  relaunches it unactivated with the text in `didReceive`; what SwiftUI's
+  WindowGroup does on that launch is checked when the lowering is built.
+  Whether a provisional authorization shows the field was not probed: the
+  leg drives the reply in process and does not depend on it.
 - Android: the real shade, from the host (the Reply button, typed text,
   Send), as `notification_activate` taps the row today.
 - Windows: the COM activator called from a helper process with a
