@@ -119,5 +119,11 @@ notification handler receives an outcome.
   conversation and marks it read; replies take their own keys (r1, ...), and
   the peer numbers each conversation's messages separately, so the reply block
   changes no key the rest of the scene reads.
-- Not measured: whether SwiftUI opens the app's window when macOS relaunches a
-  closed app for a reply, and what a cold Windows reply's process shows.
+- macOS cold reply, measured 2026-09-27 on the Go chat app with a person
+  replying (docs/traps.md, the cold notification reply entry): the relaunched
+  app opens NO window, the reply reaches the handler, and its answer posts,
+  once four faults a platform-started launch exposed were fixed (the bundle
+  carries the interpreter, names its scene, asks for authorization only while
+  undecided, and starts the pump when launching finishes).
+- Not measured: what a cold Windows reply's process shows, and an iOS reply
+  to an app that is not running.

@@ -1882,6 +1882,8 @@ extern void *dlsym(void *handle, const char *symbol);
 
 extern const char *dlerror(void);
 
+extern void syslog(int priority, const char *format, ...);
+
 /**
  * The protocol fingerprint this core was built from. Bindings carry the
  * same value baked in at generation and assert agreement at load, so a

@@ -683,10 +683,13 @@ def open_link_door(root, app, url, act2_env, verdict, lf, seconds=120):
 
     `open` returns as soon as the app is launched, so the verdict FILE is
     what this waits on; a process LaunchServices starts inherits nothing
-    from here, which is what the `--env` flags are for.
+    from here, which is what the `--env` flags are for. NEVER
+    KAYA_SWIFTUI_LIB: this is the lane's one platform-started launch, so
+    it runs the interpreter the BUNDLE carries (docs/traps.md, the cold
+    notification reply of 2026-09-27).
     """
     argv = ["open"]
-    for key in ("XDG_STATE_HOME", "KAYA_SWIFTUI_LIB", "KAYA_LIB",
+    for key in ("XDG_STATE_HOME", "KAYA_LIB",
                 "KAYA_VERB_TRACE", "KAYA_APPEARANCE"):
         if act2_env.get(key):
             argv += ["--env", f"{key}={act2_env[key]}"]
@@ -711,18 +714,31 @@ def open_link_door(root, app, url, act2_env, verdict, lf, seconds=120):
     # `windowserver` diag, `.optionAll` so any Space counts): polling the
     # process table missed a second act that lives a second (matrix #5),
     # and the on-screen list is Space-scoped (docs/traps.md, 2026-09-10).
+    # A PANIC ENDS THE WAIT: `open` routes act two's stderr into this log,
+    # so one read from the door's own marker onward tells a process that
+    # died from one still working (docs/traps.md, 2026-09-27).
+    since = log_path(lf).stat().st_size
     deadline = time.monotonic() + seconds
     line = ""
+    panicked = ""
     while time.monotonic() < deadline:
         if verdict.is_file():
             line = verdict.read_text(encoding="utf-8",
                                      errors="replace").strip()
             if line:
                 break
+        with open(log_path(lf), encoding="utf-8", errors="replace") as tail:
+            tail.seek(since)
+            panicked = next((l for l in tail if "panicked at" in l), "")
+        if panicked:
+            break
         time.sleep(0.1)
     if not line:
-        lf.write(f"act two wrote no verdict within {seconds}s of the link "
-                 f"door\n")
+        waited = seconds - max(0.0, deadline - time.monotonic())
+        lf.write(f"act two panicked {waited:.1f}s after the link door and "
+                 f"wrote no verdict: {panicked.strip()}\n" if panicked else
+                 f"act two wrote no verdict within {seconds}s of the link "
+                 f"door, and printed no panic to this log\n")
         return 1
     lf.flush()
     report = ""
@@ -964,8 +980,28 @@ def build_go(root, log=None):
         return rc
     from packaging import mac as packaging_mac
     for scene in sorted(BUNDLED_GO_SCENES):
-        packaging_mac.bundle(root, root / GO_GUESTS / "kaya-go",
-                             root / GO_GUESTS, stem=scene, accessory=True)
+        app = packaging_mac.bundle(root, root / GO_GUESTS / "kaya-go",
+                                   root / GO_GUESTS, stem=scene,
+                                   accessory=True)
+        # THE PLATFORM'S LAUNCH CARRIES NO KAYA_SELFTEST (docs/traps.md, the
+        # cold notification reply of 2026-09-27): the bundle must name its
+        # scene itself, asked here with that variable removed.
+        bare = {k: v for k, v in os.environ.items() if k != "KAYA_SELFTEST"}
+        asked = subprocess.run(
+            [str(app / "Contents/MacOS" / scene), "--print-scene"],
+            env=bare, capture_output=True, text=True, encoding="utf-8",
+            check=False)
+        said = asked.stdout.strip()
+        if asked.returncode != 0 or said != scene:
+            msg = (f"build_go: {app.name} launched with no KAYA_SELFTEST "
+                   f"runs scene {said!r} (exit {asked.returncode}), not "
+                   f"{scene!r} — guests/go/cmd/main_desktop.go's "
+                   f"bundledScene must name it from the executable\n")
+            if log:
+                with open(log, "a", encoding="utf-8") as f:
+                    f.write(msg)
+            print(msg, end="", file=sys.stderr)
+            return subprocess.CompletedProcess(asked.args, 1)
     return rc
 
 

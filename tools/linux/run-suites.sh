@@ -532,17 +532,25 @@ flightrec_shot_wayland() { # <leg> <xdg-runtime-dir> <leg-start-epoch>
 run_one() {
     local proto="$1" name="$2"
     shift 2
+    # EVERY LEG ITS OWN STATE HOME, emptied first: the harness scratch (the
+    # app's data directory and its preference domain) lives under it, and
+    # two legs of one app sharing it corrupt each other only when the pool
+    # overlaps them (docs/traps.md, the pooled-scratch race; tools/
+    # check-staging.py's linux clause).
+    local kaya_state="$LEGS_DIR/$name-$proto.state"
+    rm -rf "$kaya_state"
+    mkdir -p "$kaya_state"
     if [ -n "${KAYA_RECORD:-}" ]; then
         local dir="/work/target-linux/recordings/$name-$proto"
         rm -rf "$dir"
         case "$proto" in
             x11)
-                KAYA_SELFTEST=1 GDK_BACKEND=x11 timeout 180 \
+                XDG_STATE_HOME="$kaya_state" KAYA_SELFTEST=1 GDK_BACKEND=x11 timeout 180 \
                     xvfb-run -a -s "-screen 0 1600x1000x24" \
                     /work/tools/linux/record-leg.sh x11 "$dir" "$@"
                 ;;
             wayland)
-                KAYA_SELFTEST=1 GDK_BACKEND=wayland timeout 180 \
+                XDG_STATE_HOME="$kaya_state" KAYA_SELFTEST=1 GDK_BACKEND=wayland timeout 180 \
                     xvfb-run -a -s "-screen 0 1600x1000x24" \
                     /work/tools/linux/record-leg.sh wayland "$dir" "$@"
                 ;;
@@ -562,7 +570,7 @@ run_one() {
             done
             local kaya_t0="${EPOCHSECONDS:-0}"
             DISPLAY=":$kaya_display" KAYA_SELFTEST=1 GDK_BACKEND=x11 \
-                KAYA_VERB_TRACE="$LEGS_DIR/$name-$proto.vtrace" timeout 180 "$@"
+                XDG_STATE_HOME="$kaya_state" KAYA_VERB_TRACE="$LEGS_DIR/$name-$proto.vtrace" timeout 180 "$@"
             local kaya_rc=$?
             if [ "$kaya_rc" -ne 0 ]; then
                 # THE PICTURE IS TAKEN HERE, NOT IN drain(): the reboot
@@ -594,7 +602,7 @@ run_one() {
             local kaya_t0="${EPOCHSECONDS:-0}"
             XDG_RUNTIME_DIR="$kaya_wl" WAYLAND_DISPLAY="$(cat "$kaya_wl/socket")" \
                 SWAYSOCK="$(cat "$kaya_wl/ipc")" KAYA_SELFTEST=1 GDK_BACKEND=wayland \
-                KAYA_VERB_TRACE="$LEGS_DIR/$name-$proto.vtrace" timeout 180 "$@"
+                XDG_STATE_HOME="$kaya_state" KAYA_VERB_TRACE="$LEGS_DIR/$name-$proto.vtrace" timeout 180 "$@"
             local kaya_rc=$?
             if [ "$kaya_rc" -ne 0 ]; then
                 # Before the reboot, for the x11 arm's reason above.

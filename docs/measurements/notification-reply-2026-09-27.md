@@ -42,7 +42,9 @@ maintainer replied from the banner twice.
   the action's identifier, 10-20ms after launch.
 - The relaunched app was not activated (`NSApp.isActive` false) and had no
   window; the probe is plain AppKit, so what a SwiftUI WindowGroup does on such
-  a launch is still to be seen when kaya's own lowering is built.
+  a launch is still to be seen when kaya's own lowering is built. Seen
+  2026-09-27 with kaya's own: no window either, and the pump has to start
+  without one (docs/traps.md, the cold notification reply entry).
 - The banner showed the Reply field under full authorization. Whether a
   provisional authorization (the harness's) shows it was not probed: the leg
   drives the reply in process (plan §4), so it does not depend on it.

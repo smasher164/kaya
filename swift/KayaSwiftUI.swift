@@ -2,6 +2,7 @@
 // resolved apply-op records over the presentation-side C ABI.
 
 import CoreText
+import OSLog
 import SwiftUI
 import UniformTypeIdentifiers
 import UserNotifications
@@ -5084,6 +5085,33 @@ enum KayaHost {
         guard let bytes = api.blob_data(handle, &length) else { return nil }
         return Data(bytes: bytes, count: Int(length))
     }
+}
+
+/// The pump starts when launching finishes as well as when the primary root
+/// appears, whichever is first: a launch for a notification reply opens no
+/// window, and every batch it answers with would otherwise sit unapplied
+/// (docs/traps.md, the cold notification reply of 2026-09-27).
+var kayaPumpStarted = false
+
+/// The unified log, which reaches a process the platform started with no
+/// environment: `log stream --level debug --predicate 'subsystem == "dev.kaya"'`
+/// (docs/traps.md, the cold notification reply of 2026-09-27).
+let kayaLog = Logger(subsystem: "dev.kaya", category: "lifecycle")
+
+func kayaStartPumpOnce(_ by: String) {
+    guard !kayaPumpStarted else { return }
+    kayaPumpStarted = true
+    kayaLog.info("pump started by \(by, privacy: .public)")
+    #if os(macOS)
+        // The menu segment's event-driven re-assert hooks — installed
+        // before the pump so the first catalog batch cannot race them.
+        kayaInstallMenuObservers()
+    #else
+        // The same idea, one signal: a clipboard change moves
+        // what the Paste item is allowed to do.
+        kayaInstallClipboardObserver()
+    #endif
+    kayaStartCommandPump()
 }
 
 func kayaStartCommandPump() {
@@ -16274,6 +16302,7 @@ let kayaNotificationOutcomeRefused: UInt32 = 1
 /// the delegate's text response and the harness's own call land here, and
 /// the delivered copy goes, as it does for a tap.
 func kayaNotificationReplied(_ id: UInt64, _ text: String) {
+    kayaLog.info("notification \(id, privacy: .public) replied, \(text.utf8.count, privacy: .public) bytes: \(text, privacy: .private)")
     UNUserNotificationCenter.current().removeDeliveredNotifications(
         withIdentifiers: [kayaNotificationIdentifier(id)])
     KayaHost.emitNotificationReply(id, text)
@@ -16318,6 +16347,7 @@ final class KayaNotificationDelegate: NSObject, UNUserNotificationCenterDelegate
         _ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
+        kayaLog.info("notification response \(response.notification.request.identifier, privacy: .public) action \(response.actionIdentifier, privacy: .public)")
         if let id = kayaNotificationId(response.notification.request.identifier) {
             if let typed = response as? UNTextInputNotificationResponse,
                response.actionIdentifier == kayaReplyAction {
@@ -16332,10 +16362,36 @@ final class KayaNotificationDelegate: NSObject, UNUserNotificationCenterDelegate
 
 let kayaNotificationDelegate = KayaNotificationDelegate()
 
+/// Asks while the status is undecided, or when the grant lacks what this call
+/// `needs`; otherwise the grant is the answer. A post needs only delivery,
+/// which provisional has, and from provisional a request for alerts waits on
+/// a prompt that never comes on the mac (docs/traps.md, the cold notification
+/// reply of 2026-09-27). A badge needs its own setting, which provisional
+/// leaves off.
+func kayaNotificationAuthorization(
+    _ options: UNAuthorizationOptions,
+    needs: @escaping (UNNotificationSettings) -> Bool = { _ in true },
+    _ then: @escaping (Bool, Error?) -> Void
+) {
+    let centre = UNUserNotificationCenter.current()
+    let ask = { centre.requestAuthorization(options: options, completionHandler: then) }
+    centre.getNotificationSettings { settings in
+        switch settings.authorizationStatus {
+        case .notDetermined:
+            ask()
+        case .denied:
+            then(false, nil)
+        default:
+            if needs(settings) { then(true, nil) } else { ask() }
+        }
+    }
+}
+
 /// Post through the platform's centre: authorization asked at the FIRST
 /// post (N3), a denial answering that post as refused; `at` 0 posts now and
 /// any other `at` is a calendar trigger the OS fires (N2).
 func kayaPostNotification(_ id: UInt64, at: UInt64, title: String, body: String, reply: String) {
+    kayaLog.debug("notification \(id, privacy: .public) post, capability \(kayaCanPostNotifications(), privacy: .public)")
     guard kayaCanPostNotifications() else {
         KayaHost.emitNotificationResult(id, kayaNotificationOutcomeRefused)
         return
@@ -16349,7 +16405,8 @@ func kayaPostNotification(_ id: UInt64, at: UInt64, title: String, body: String,
     let opts: UNAuthorizationOptions =
         ProcessInfo.processInfo.environment["KAYA_SELFTEST"] != nil
         ? [.alert, .sound, .badge, .provisional] : [.alert, .sound, .badge]
-    centre.requestAuthorization(options: opts) { granted, error in
+    kayaNotificationAuthorization(opts) { granted, error in
+        kayaLog.debug("notification \(id, privacy: .public) authorization granted=\(granted, privacy: .public) error=\(String(describing: error), privacy: .public)")
         guard granted else {
             // The refusal's measurement, under the harness only: what the
             // centre answered and what it holds for this bundle.
@@ -16381,6 +16438,7 @@ func kayaPostNotification(_ id: UInt64, at: UInt64, title: String, body: String,
         let request = UNNotificationRequest(
             identifier: kayaNotificationIdentifier(id), content: content, trigger: trigger)
         centre.add(request) { error in
+            kayaLog.debug("notification \(id, privacy: .public) added, error=\(String(describing: error), privacy: .public)")
             if error != nil {
                 KayaHost.emitNotificationResult(id, kayaNotificationOutcomeRefused)
             }
@@ -16411,7 +16469,9 @@ func kayaSetBadge(_ count: UInt32) {
     // post asks for, so the user sees one prompt; the count is set once the
     // answer is in (docs/app-badge-plan.md §2).
     let centre = UNUserNotificationCenter.current()
-    centre.requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in
+    kayaNotificationAuthorization(
+        [.alert, .sound, .badge], needs: { $0.badgeSetting == .enabled }
+    ) { _, _ in
         centre.setBadgeCount(Int(count)) { error in
             if let error, ProcessInfo.processInfo.environment["KAYA_SELFTEST"] != nil {
                 FileHandle.standardError.write(Data(
@@ -23949,17 +24009,8 @@ struct KayaRoot: View {
                 kayaEnsureOpen(id) { openWindow(value: $0) }
             }
             kayaPendingOpens.removeAll()
-            #if os(macOS)
-                // The menu segment's event-driven re-assert hooks — installed
-                // before the pump so the first catalog batch cannot race them.
-                kayaInstallMenuObservers()
-            #else
-                // The same idea, one signal: a clipboard change moves
-                // what the Paste item is allowed to do.
-                kayaInstallClipboardObserver()
-            #endif
             kayaPlaceWindow()
-            kayaStartCommandPump()
+            kayaStartPumpOnce("the primary root")
         }
     }
 }

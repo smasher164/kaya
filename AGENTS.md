@@ -1285,7 +1285,14 @@ in docs/deferred.md.
    it, which GTK and WinUI would have read as a parse refusal. The
    census reads each reader's own body plus Compose's KayaAxKind
    stamps, with floors on every set; four watched negatives, counts
-   printed),
+   printed.
+   AND A PLATFORM-STARTED LAUNCH SINCE 2026-09-27 (docs/traps.md, the cold
+   notification reply): the SwiftUI interpreter asks notification
+   authorization only while undecided, since from provisional the request
+   waits on a prompt that never comes, and its pump starts from both app
+   delegates' did-finish-launching as well as the primary root, since a
+   launch for a reply opens no window. No lane can see either; six watched
+   negatives, counts printed),
    `tools/check-file-modes.py` (the file-mode NUMBERS agree with the
    spec's wherever they are written down. `kaya_open_picked` takes an
    integer, crates/kaya/src/spec.rs decides what it means, and five

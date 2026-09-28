@@ -97,6 +97,28 @@ def info_plist(declared, executable, accessory):
             + '</dict>\n</plist>\n')
 
 
+INTERPRETER = "target/swiftui/libkaya_swiftui.dylib"
+
+
+def carry_interpreter(root, macos):
+    """The SwiftUI interpreter beside the executable, where
+    crates/kaya/src/swiftui_host.rs looks when no KAYA_SWIFTUI_LIB is set:
+    a process the PLATFORM starts (a notification reply, a link, the Dock)
+    inherits no environment (docs/traps.md, the cold notification reply
+    of 2026-09-27). Verified first, so a bundle never carries a stale one."""
+    lib = pathlib.Path(root) / INTERPRETER
+    if not lib.is_file():
+        raise SystemExit(
+            f"package mac: {INTERPRETER} does not exist, and a bundle "
+            f"without it dies at launch whenever the platform starts it — "
+            f"build it with tools/swiftui/build-dylib.sh")
+    _run([str(pathlib.Path(root) / "tools/build-id.py"), "--verify",
+          "--component", "swiftui", str(lib)],
+         f"verifying {INTERPRETER} against this tree (stale: run "
+         f"tools/swiftui/build-dylib.sh)")
+    shutil.copy2(lib, macos / lib.name)
+
+
 def bundle(root, executable, out_dir, *, stem=None, accessory=False,
            register=True):
     """Wrap `executable` in a .app under `out_dir` and return its path.
@@ -116,6 +138,7 @@ def bundle(root, executable, out_dir, *, stem=None, accessory=False,
     macos = app / "Contents/MacOS"
     macos.mkdir(parents=True)
     shutil.copy2(executable, macos / name)
+    carry_interpreter(root, macos)
     resources = app / "Contents/Resources"
     resources.mkdir()
     write_icns(declared.icon_path.read_bytes(),

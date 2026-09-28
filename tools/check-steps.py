@@ -536,7 +536,7 @@ def target_surfaces(harness_src=None, swift_src=None, kotlin_src=None):
         fail("swift/KayaSwiftUI.swift has no five-second all-surface "
              "fallback to the unmounted-scene diagnostic")
     if sroot is not None and (
-            sroot.count("kayaStartCommandPump()") != 1
+            sroot.count('kayaStartPumpOnce("the primary root")') != 1
             or "kayaStartSelftest()" in sroot
             or "kayaDriveSelftestAdmission" in sroot):
         swift_admission_shape_ok = False
@@ -800,8 +800,8 @@ if not target_out:
         "does not stop at the earliest #/@")
     target_watch(
         "Swift direct startup admission", 1, "swift", S,
-        "            kayaStartCommandPump()",
-        "            kayaStartCommandPump()\n"
+        '            kayaStartPumpOnce("the primary root")',
+        '            kayaStartPumpOnce("the primary root")\n'
         "            kayaStartSelftest()",
         "check-steps: swift/KayaSwiftUI.swift starts the harness from "
         "primary onAppear before a mounted batch")

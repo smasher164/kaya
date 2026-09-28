@@ -11072,6 +11072,15 @@ and lands in the same suite. The act-two marker moves with it, which is
 also what keeps `tasks` and `taskspersist` — two relaunch scenes of one
 app — from consuming each other's marker in the pool.
 
+The linux lane's claim above was half true: its PLAIN legs, the ones
+run-suites.sh's run_one launches, shared the container's one state home
+until 2026-09-28, and a `validate-all --only tasks` run that started
+`tasks` and `tasksrtl` together gave tasksrtl a database that was not new,
+so its seed never ran and it read `0 في الوارد`. The full matrix's pool
+had never overlapped the two. run_one gives each leg
+`$LEGS_DIR/<leg>-<proto>.state` now, emptied first, and check-staging's
+linux clause holds every launch in it.
+
 ## A bare-Xvfb root grab does not repaint a live `resize_window` (2026-09-09)
 
 In the lane's image with no window manager, after `resize_window 1400x700`
@@ -12828,3 +12837,51 @@ change), and swiping only half the row (the whole row, no change). Pointer
 event counters on the button read 0 for the mouse click as well: a Button
 handles its own pressed and released before an instance handler runs, so
 they cannot tell the two apart and were removed.
+
+## A mac app the platform starts inherits no environment, and the lane's bundles carried no interpreter (measured 2026-09-27)
+
+Replying to the chat app's notification after the app had quit: macOS
+relaunched `target/go-guests/chat.app` (runningboardd, pid 65234) and the
+process was gone 3s later with wait status 512, exit 2, before any window.
+The panic was crates/kaya/src/swiftui_host.rs's "could not load the SwiftUI
+backend": every mac leg is handed KAYA_SWIFTUI_LIB, a process LaunchServices
+starts gets nothing, and tools/lib/packaging/mac.py's `bundle()` never put
+the library beside the executable where the host looks without the
+variable. No leg could see it: the link door, the lane's one platform-started
+launch, passed KAYA_SWIFTUI_LIB through `open --env`. The sentence went to
+stderr, which a relaunched app does not have, so it was found by re-running
+the executable with an empty environment. Now `bundle()` copies a VERIFIED
+interpreter (`carry_interpreter`, refusing an absent or stale one), the link
+door passes no KAYA_SWIFTUI_LIB so the `links` leg runs on the bundle's copy
+(watched red with the copy cut), and the load failure also goes to the
+system log: `log show --last 5m --predicate 'eventMessage BEGINSWITH "kaya:
+could not load"'`. The Go and foreign-language hosts still load
+libkaya.dylib by absolute build-tree path; that is packaging part 2
+(docs/packaging-plan.md). In zsh, `log` is a builtin: call `/usr/bin/log`.
+
+With the interpreter carried, the next cold reply relaunched a process that
+stayed up and did nothing: the lane's Go `chat.app` wraps the one `kaya-go`
+binary, which picks its scene from KAYA_SELFTEST and fell back to milestone
+2. Its delegate took the reply (usernoted logged the app removing the
+delivered copy 120ms in) and no conversation existed to answer it; `lsof`
+showed none of the chat peer's sockets. guests/go/cmd/main_desktop.go now
+names the scene after its executable when the variable is empty, and
+build_go asks every bundle `--print-scene` with KAYA_SELFTEST removed,
+refusing the build otherwise (watched red with the executable reading cut).
+
+Two more stood behind it, found with the relaunched process's stderr
+captured by hand. First, `kayaPostNotification` asked `requestAuthorization`
+for alerts on every post, and every lane run had left this identifier only
+PROVISIONAL (`status=3`, no banners): from provisional that request waits on
+a prompt that never appears (a probe waited 10s for its completion), so the
+answer was never posted. Posts now ask only while `.notDetermined`
+(`kayaNotificationAuthorization`). Second, and last: the interpreter's pump
+was started only by the primary root's `onAppear`, and a launch for a reply
+opens no window, so the Go handler ran, the peer answered, and the post sat
+in a batch nothing applied. `kayaStartPumpOnce` now also starts it from both
+app delegates' did-finish-launching. check-verbs holds both (six watched
+negatives). The interpreter now writes these steps to the unified log,
+which a platform-started process reaches with no environment:
+`log stream --level debug --predicate 'subsystem == "dev.kaya"'` shows
+why the pump started and each notification's post, authorization, add and
+response.

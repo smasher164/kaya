@@ -87,6 +87,7 @@ final class KayaAppDelegate: NSObject, NSApplicationDelegate {
         // arm above): from now on a link reaching this running process is
         // taken before AppKit converts it, so no window is added for it.
         kayaInstallLinkDoor()
+        kayaStartPumpOnce("launch")
         // PIXEL-PROOF RUNS ONLY (KAYA_ACTIVATE=1): AppKit renders an inactive
         // app's chrome grey, and macOS 14's cooperative activation ignores
         // another process's activate call, so the app must ask for itself.
@@ -110,6 +111,14 @@ final class KayaUIAppDelegate: UIResponder, UIApplicationDelegate {
         // R6a): the simulator's shade activates nothing, so the runner
         // starts the app again naming the notification.
         kayaDeliverLaunchNotification()
+        return true
+    }
+
+    func application(
+        _ application: UIApplication,
+        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
+    ) -> Bool {
+        kayaStartPumpOnce("launch")
         return true
     }
 

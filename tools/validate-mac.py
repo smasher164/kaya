@@ -85,26 +85,6 @@ if run([str(ROOT / "tools/build-id.py"), "--verify",
         "target/debug/libkaya.dylib"]).returncode != 0:
     sys.exit(1)
 
-# STAGE THE RUST GUESTS OUT OF THE BUILD DIRECTORY: launching an
-# unbundled executable makes LaunchServices enumerate its CONTAINING
-# directory — 7.7s from a 776,613-entry target/debug/examples against
-# 0.13s from a two-entry one (measured 2026-08-10, docs/deferred.md).
-RUST_GUESTS = ROOT / "target/rust-guests"
-shutil.rmtree(RUST_GUESTS, ignore_errors=True)
-RUST_GUESTS.mkdir(parents=True)
-# ONE COPY of the staging, run-leg's too (tools/lib/lanes/mac.py): the
-# bundled scenes get their .app wrapper here.
-lane.stage_rust(ROOT, [*lane.SCENES, *lane.DEPTH_SCENES])
-_staged = sum(1 for _ in RUST_GUESTS.iterdir()) + 1
-# The measurement above is ~10us an entry, so the cap guards against the
-# build directory, not against a scene more: 128 entries cost ~1ms.
-if _staged > 128:
-    die(f"validate-mac: the rust guest staging directory holds "
-        f"{_staged} entries. It exists to be SMALL — macOS enumerates "
-        f"an unbundled executable's siblings on every launch, and that "
-        f"walk was 7.7s per leg when this was target/debug/examples. "
-        f"Stage somewhere clean.")
-
 # ONE FILE UNDER THE ASSET ROOT IS DERIVED and never committed, so a
 # fresh clone's root is incomplete until this runs. A lane may not
 # depend on the gate sweep having run it: this one can skip the sweep
@@ -186,6 +166,27 @@ else:
     if run([str(ROOT / "tools/gates.py")]).returncode != 0:
         sys.exit(1)
 timing("core-build+gates")
+# STAGE THE RUST GUESTS OUT OF THE BUILD DIRECTORY: launching an
+# unbundled executable makes LaunchServices enumerate its CONTAINING
+# directory — 7.7s from a 776,613-entry target/debug/examples against
+# 0.13s from a two-entry one (measured 2026-08-10, docs/deferred.md).
+RUST_GUESTS = ROOT / "target/rust-guests"
+shutil.rmtree(RUST_GUESTS, ignore_errors=True)
+RUST_GUESTS.mkdir(parents=True)
+# ONE COPY of the staging, run-leg's too (tools/lib/lanes/mac.py): the
+# bundled scenes get their .app wrapper here, AFTER the interpreter is
+# built: a bundle carries a verified copy (tools/lib/packaging/mac.py).
+lane.stage_rust(ROOT, [*lane.SCENES, *lane.DEPTH_SCENES])
+_staged = sum(1 for _ in RUST_GUESTS.iterdir()) + 1
+# The measurement above is ~10us an entry, so the cap guards against the
+# build directory, not against a scene more: 128 entries cost ~1ms.
+if _staged > 128:
+    die(f"validate-mac: the rust guest staging directory holds "
+        f"{_staged} entries. It exists to be SMALL — macOS enumerates "
+        f"an unbundled executable's siblings on every launch, and that "
+        f"walk was 7.7s per leg when this was target/debug/examples. "
+        f"Stage somewhere clean.")
+
 # The library every leg below loads by path, as built above: a relink
 # while the legs run is a dyld death for any guest launched inside it,
 # and a lane with no such launch must still say the lib moved

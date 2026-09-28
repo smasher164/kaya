@@ -20,6 +20,7 @@ g = Gate("check-verbs")
 
 WIRE = "crates/kaya/src/wire.rs"
 SWIFT = "swift/KayaSwiftUI.swift"
+SWIFT_ENTRY = "swift/KayaSwiftUIEntry.swift"
 KOTLIN = "android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt"
 HARNESS = "crates/kaya/src/harness.rs"
 
@@ -525,6 +526,121 @@ def metrics_class(swift_src=None, wire_src=None):
     return bad
 
 
+# --- NOTIFICATION AUTHORIZATION ASKS ONLY FOR WHAT IT LACKS ------------
+# From provisional, a request for alerts waits on a prompt that never comes,
+# so a post behind it is never made (docs/traps.md, the cold notification
+# reply of 2026-09-27). NO LANE CAN SEE IT: the harness asks provisionally
+# and every leg holds that grant; only a launch the platform starts asks
+# for alerts. The one `requestAuthorization(` is the helper's `ask`, called
+# while undecided or when the grant fails the caller's `needs`, and the post
+# passes no `needs` (delivery is all it needs, and provisional has it).
+def notify_auth(swift_src=None):
+    bad = []
+    swift = swift_src if swift_src is not None else real(SWIFT)
+    code = re.sub(r"//[^\n]*", "", swift)
+    calls = [m.start() for m in re.finditer(r"\.requestAuthorization\(",
+                                            code)]
+    m = re.search(r"^func kayaNotificationAuthorization\(", code, re.M)
+    if not m:
+        bad.append("KayaSwiftUI.swift has no kayaNotificationAuthorization "
+                   "helper this clause can read (a finding, never a skip)")
+        return bad
+    end = re.search(r"^\}$", code[m.end():], re.M)
+    body_end = m.end() + (end.start() if end else len(code))
+    body = code[m.start():body_end]
+    outside = [c for c in calls if not m.start() <= c < body_end]
+    if outside:
+        bad.append(f"{len(outside)} requestAuthorization call(s) outside "
+                   f"kayaNotificationAuthorization — a post behind one "
+                   f"waits forever from provisional")
+    inside = len(calls) - len(outside)
+    if inside != 1 or not re.search(
+            r"let ask = \{ centre\.requestAuthorization\(", body):
+        bad.append(f"kayaNotificationAuthorization asks {inside} times, "
+                   f"not once through its `ask`")
+    if not re.search(r"case \.notDetermined:\s*\n\s*ask\(\)", body):
+        bad.append("kayaNotificationAuthorization does not ask in its "
+                   ".notDetermined arm")
+    if not re.search(r"default:\s*\n\s*if needs\(settings\) \{ "
+                     r"then\(true, nil\) \} else \{ ask\(\) \}", body):
+        bad.append("kayaNotificationAuthorization's decided arm does not "
+                   "consult `needs` before asking — a decided grant that "
+                   "has what the call needs is the answer")
+    if not re.search(r"case \.denied:\s*\n\s*then\(false", body):
+        bad.append("kayaNotificationAuthorization does not answer .denied "
+                   "as refused")
+    post = re.search(r"^func kayaPostNotification\(.*?^\}$", code,
+                     re.M | re.S)
+    if not post or not re.search(
+            r"kayaNotificationAuthorization\(opts\) \{", post.group(0)):
+        bad.append("kayaPostNotification does not ask through "
+                   "kayaNotificationAuthorization(opts) with no `needs` — "
+                   "a post that needs alerts asks from provisional")
+    return bad
+    end = re.search(r"^\}$", code[m.end():], re.M)
+    body_end = m.end() + (end.start() if end else len(code))
+    body = code[m.start():body_end]
+    outside = [c for c in calls if not m.start() <= c < body_end]
+    if outside:
+        bad.append(f"{len(outside)} requestAuthorization call(s) outside "
+                   f"kayaNotificationAuthorization — a post behind one "
+                   f"waits forever from provisional")
+    inside = len(calls) - len(outside)
+    if inside != 1:
+        bad.append(f"kayaNotificationAuthorization asks {inside} times, "
+                   f"not once — only the .notDetermined arm may ask")
+    arm = re.search(r"case \.notDetermined:\s*\n\s*centre\."
+                    r"requestAuthorization\(", body)
+    if not arm:
+        bad.append("kayaNotificationAuthorization does not ask only in its "
+                   ".notDetermined arm — a decided status is the answer")
+    if not re.search(r"case \.denied:\s*\n\s*then\(false", body):
+        bad.append("kayaNotificationAuthorization does not answer .denied "
+                   "as refused")
+    return bad
+
+
+# --- THE PUMP STARTS WITHOUT A WINDOW -----------------------------------
+# A launch for a notification reply opens no window, so a pump started only
+# by the primary root's appearance never applies the reply's answer
+# (docs/traps.md, the cold notification reply of 2026-09-27). NO LANE CAN
+# SEE IT: every scripted launch opens a window. The pump starts through
+# kayaStartPumpOnce alone, and both app delegates call it when launching
+# finishes.
+def pump_start(swift_src=None, entry_src=None):
+    bad = []
+    swift = re.sub(r"//[^\n]*", "", swift_src if swift_src is not None
+                   else real(SWIFT))
+    entry = re.sub(r"//[^\n]*", "", entry_src if entry_src is not None
+                   else real(SWIFT_ENTRY))
+    once = re.search(r"^func kayaStartPumpOnce\(_ by: String\) \{(.*?)^\}$",
+                     swift, re.M | re.S)
+    if not once:
+        bad.append("KayaSwiftUI.swift has no kayaStartPumpOnce this clause "
+                   "can read (a finding, never a skip)")
+        return bad
+    if not re.search(r"guard !kayaPumpStarted else \{ return \}\s*\n\s*"
+                     r"kayaPumpStarted = true", once.group(1)):
+        bad.append("kayaStartPumpOnce is not guarded by kayaPumpStarted — "
+                   "a second caller starts a second pump")
+    direct = [m for m in re.finditer(r"(?<!func )\bkayaStartCommandPump\(\)", swift)
+              if not once.start() <= m.start() < once.end()]
+    if direct:
+        bad.append(f"{len(direct)} kayaStartCommandPump() call(s) outside "
+                   f"kayaStartPumpOnce — a pump that bypasses the guard")
+    for name, pattern in (
+            ("macOS applicationDidFinishLaunching",
+             r"func applicationDidFinishLaunching\([^)]*\) \{(.*?)\n    \}"),
+            ("iOS didFinishLaunchingWithOptions",
+             r"didFinishLaunchingWithOptions[^{]*\{(.*?)\n    \}")):
+        m = re.search(pattern, entry, re.S)
+        if not m or "kayaStartPumpOnce(\"launch\")" not in m.group(1):
+            bad.append(f"the {name} delegate does not call "
+                       f"kayaStartPumpOnce — a windowless launch applies "
+                       f"nothing")
+    return bad
+
+
 
 # --- THE VERB TRACE: one ring, three harnesses ------------------------
 # crates/kaya/src/vtrace.rs writes what every verb did ONLY WHEN THE RUN
@@ -820,6 +936,22 @@ if metrics_out:
           file=sys.stderr)
     print("\n".join(metrics_out), file=sys.stderr)
 
+pump_out = pump_start()
+pump_status = 1 if pump_out else 0
+if pump_out:
+    print("check-verbs: the interpreter's pump waits for a window — a "
+          "launch the platform starts for a notification reply applies "
+          "nothing:", file=sys.stderr)
+    print("\n".join(pump_out), file=sys.stderr)
+
+notify_auth_out = notify_auth()
+notify_auth_status = 1 if notify_auth_out else 0
+if notify_auth_out:
+    print("check-verbs: notification authorization asks where a decided "
+          "status must answer — a post made from a platform-started "
+          "launch then never reaches the centre:", file=sys.stderr)
+    print("\n".join(notify_auth_out), file=sys.stderr)
+
 
 # The negatives perturb the REAL files, in both directions and on BOTH
 # mirrors. THE REFUSAL IS SCORED, NOT JUST COUNTED: each half scores what
@@ -1107,6 +1239,56 @@ for slot, pattern, repl, want, label, finding in (
     kwargs = ({"swift_src": drifted} if slot == "swift"
               else {"wire_src": drifted})
     score = introduced(metrics_class(**kwargs), metrics_out, finding)
+    named, total = score.split("/")
+    if named == "0" or named != total:
+        print(f"check-verbs: SELF-TEST FAIL ({label} scored {score} "
+              f"named/introduced findings, want them equal and "
+              f"nonzero)", file=sys.stderr)
+        raise SystemExit(1)
+
+# AND THE PUMP'S OWN, three negatives, each watched.
+for rel, pattern, repl, label, finding in (
+    (SWIFT_ENTRY, r"(        kayaInstallLinkDoor\(\)\n)        "
+     r"kayaStartPumpOnce\(\"launch\"\)\n", "",
+     "the mac delegate's start removed",
+     "macOS applicationDidFinishLaunching"),
+    (SWIFT_ENTRY, r"(didFinishLaunchingWithOptions[^{]*\{\n)        "
+     r"kayaStartPumpOnce\(\"launch\"\)\n", "",
+     "the iOS delegate's start removed",
+     "iOS didFinishLaunchingWithOptions"),
+    (SWIFT, r"(            kayaPlaceWindow\(\)\n            )"
+     r"kayaStartPumpOnce\(\"the primary root\"\)", "kayaStartCommandPump()",
+     "the root starting the pump directly", "outside kayaStartPumpOnce"),
+):
+    drifted = perturb(f"pump-start ({label})", rel, pattern, repl)
+    kwargs = ({"entry_src": drifted} if rel == SWIFT_ENTRY
+              else {"swift_src": drifted})
+    score = introduced(pump_start(**kwargs), pump_out, finding)
+    named, total = score.split("/")
+    if named == "0" or named != total:
+        print(f"check-verbs: SELF-TEST FAIL ({label} scored {score} "
+              f"named/introduced findings, want them equal and "
+              f"nonzero)", file=sys.stderr)
+        raise SystemExit(1)
+
+# AND THE NOTIFICATION AUTHORIZATION'S OWN, four negatives, each watched.
+for pattern, repl, label, finding in (
+    (r"(    )kayaNotificationAuthorization\(opts\)",
+     "centre.requestAuthorization(options: opts)",
+     "the post asking directly",
+     "outside kayaNotificationAuthorization|with no `needs`"),
+    (r"(        default:\n            )if needs\(settings\) \{ "
+     r"then\(true, nil\) \} else \{ ask\(\) \}", "ask()",
+     "a decided grant asking again", "does not consult `needs`"),
+    (r"(        case \.denied:\n            then\()false",
+     "true", "denied answered as granted", "answer .denied"),
+    (r"(    kayaNotificationAuthorization\(opts)\)",
+     ", needs: { $0.alertSetting == .enabled })",
+     "the post needing alerts", "with no `needs`"),
+):
+    drifted = perturb(f"notify-auth ({label})", SWIFT, pattern, repl)
+    score = introduced(notify_auth(swift_src=drifted), notify_auth_out,
+                       finding)
     named, total = score.split("/")
     if named == "0" or named != total:
         print(f"check-verbs: SELF-TEST FAIL ({label} scored {score} "
@@ -2713,7 +2895,8 @@ if (clip_status or window_status or ink_status or ax_status
         or words_status or label_status or polish_status
         or metrics_status or keyed_status or drop_line_status
         or vtrace_status or norm_status or ind_status
-        or answer_status or seed_focus_status):
+        or answer_status or seed_focus_status or notify_auth_status
+        or pump_status):
     raise SystemExit(1)
 g.verdict(f"{len(verbs)} verbs, {len(rows)} constants "
           f"({len(canvas_rows)} of them the canvas vocabularies) + "
@@ -2729,4 +2912,6 @@ g.verdict(f"{len(verbs)} verbs, {len(rows)} constants "
           f"runners + the rich label's refusal sentence and draw on 4 arms "
           f"+ the polish pass's ground and rule per arm "
           f"+ the wayland clipboard seed's focus request "
+          f"+ notification authorization asked only while undecided "
+          f"+ the interpreter's pump started without a window "
           f"+ spec hash against 2 interpreters")

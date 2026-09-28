@@ -353,7 +353,11 @@ unsafe extern "C" {
     fn dlopen(path: *const c_char, flag: c_int) -> *mut c_void;
     fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
     fn dlerror() -> *const c_char;
+    fn syslog(priority: c_int, format: *const c_char, ...);
 }
+
+/// LOG_USER | LOG_ERR.
+const SYSLOG_USER_ERR: c_int = 8 | 3;
 
 const RTLD_NOW: c_int = 2;
 
@@ -402,12 +406,20 @@ pub(crate) fn run() -> i32 {
             Ok(m) => format!("it is on disk, {} bytes", m.len()),
             Err(e) => format!("it is not readable from here ({e})"),
         };
-        panic!(
+        let sentence = format!(
             "could not load the SwiftUI backend from {path:?}: {said} — {seen}. \
              If the file is absent, build it with tools/swiftui/build-dylib.sh \
-             and set KAYA_SWIFTUI_LIB; if it is there, the sentence above is \
-             the loader's and names the real reason."
+             and set KAYA_SWIFTUI_LIB, or package the app with its copy \
+             beside the executable (tools/package.py mac); if it is there, \
+             the sentence above is the loader's and names the real reason."
         );
+        // The system log as well as stderr: a process the platform starts
+        // has nowhere to print (docs/traps.md, the cold notification reply
+        // of 2026-09-27).
+        if let Ok(line) = CString::new(format!("kaya: {sentence}")) {
+            unsafe { syslog(SYSLOG_USER_ERR, c"%s".as_ptr(), line.as_ptr()) };
+        }
+        panic!("{sentence}");
     }
     let symbol = unsafe { dlsym(handle, c"kaya_swiftui_run".as_ptr()) };
     assert!(

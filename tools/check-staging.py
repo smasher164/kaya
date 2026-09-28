@@ -278,6 +278,46 @@ def check(root):
                  f"whichever runs act one empties the other's act-two "
                  f"marker, preferences and database mid-leg")
 
+    # THE LINUX LANE'S OWN, one function over: every leg run_one launches
+    # gets `$LEGS_DIR/<leg>-<proto>.state`, emptied first. Two legs of one
+    # app shared the container's one state home until 2026-09-28, and a
+    # filtered run that started tasks and tasksrtl together gave tasksrtl
+    # tasks' database (docs/traps.md, the pooled-scratch race).
+    suites_rel = "tools/linux/run-suites.sh"
+    suites_path = root / suites_rel
+    suites = (suites_path.read_text(encoding="utf-8")
+              if suites_path.is_file() else "")
+    run_one = re.search(r"^run_one\(\) \{\n(.*?)^\}$", suites, re.M | re.S)
+    if not run_one:
+        fail(f"{suites_rel} has no run_one this census can read — the linux "
+             f"legs' state homes are unverifiable (a finding, never a skip)")
+    else:
+        body = run_one.group(1)
+        state_def = 'local kaya_state="$LEGS_DIR/$name-$proto.state"'
+        if state_def not in body:
+            fail(f"{suites_rel}'s run_one gives its leg no state home of its "
+                 f"own ({state_def!r}) — the legs share the container's one "
+                 f"harness tree")
+        first_launch = body.find("timeout 180")
+        clear = body.find('rm -rf "$kaya_state"')
+        if clear < 0 or (first_launch >= 0 and clear > first_launch):
+            fail(f"{suites_rel}'s run_one does not empty the leg's state "
+                 f"home before it launches — act one reads what the last "
+                 f"run of this leg left")
+        launches = [m.start() for m in re.finditer(r"timeout 180", body)]
+        if len(launches) < 4:
+            fail(f"{suites_rel}'s run_one has {len(launches)} launch(es), "
+                 f"not the 4 this census was written against — read it "
+                 f"again before trusting a green")
+        for at in launches:
+            command = body[body.rfind("\n\n", 0, at) + 1:at]
+            command = command[command.rfind(";;") + 1:]
+            if 'XDG_STATE_HOME="$kaya_state"' not in command[-400:]:
+                line = body[:at].count("\n") + 1
+                fail(f"{suites_rel}'s run_one launch at its line {line} "
+                     f"carries no XDG_STATE_HOME=\"$kaya_state\" — that leg "
+                     f"shares the app's harness tree with every other")
+
     # --- NO VERDICT OVER A LIVE SAMPLER ------------------------------
     # docs/deferred.md's LEAK entry: the windows lane dropped a stop file
     # on its way out and left, and three matrices leaked one polling
@@ -504,6 +544,27 @@ if not any("tools/guest/ghosthelper.ps1 is staged" in f for f in _f7):
     sys.exit(1)
 print("check-staging: self-test — N7 (a guest .ps1 the deploy list does "
       "not know) refused")
+
+negative(
+    "N7e", "took the x11 leg's state home away", "tools/linux/run-suites.sh",
+    r'^(            DISPLAY=":\$kaya_display" KAYA_SELFTEST=1 GDK_BACKEND=x11 '
+    r'\\\n                )XDG_STATE_HOME="\$kaya_state" ',
+    r"\1",
+    "carries no XDG_STATE_HOME",
+    "N7e (a linux leg launched into the shared harness tree)")
+
+negative(
+    "N7f", "shared one state home across legs", "tools/linux/run-suites.sh",
+    r'^    local kaya_state="\$LEGS_DIR/\$name-\$proto\.state"$',
+    '    local kaya_state="$LEGS_DIR/shared.state"',
+    "gives its leg no state home of its own",
+    "N7f (every linux leg handed one state home)")
+
+negative(
+    "N7g", "stopped emptying the leg's state home", "tools/linux/run-suites.sh",
+    r'^    rm -rf "\$kaya_state"\n', "",
+    "does not empty the leg's state home",
+    "N7g (a linux leg starting from the last run's tree)")
 
 negative(
     "N7b", "gave two legs one state home", "tools/guest/run_todos_go.cmd",
