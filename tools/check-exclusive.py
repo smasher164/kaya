@@ -245,9 +245,72 @@ def mac_idle(texts, mod, tools):
         out.append("tools/lib/flightrec_lane.py: no module-level mac_frontmost() — the "
                    "bundle's window census and the verdict line would read the window "
                    "list two ways")
+    # A LEG THAT TAKES THE HOST'S DISPLAY IS EXCLUSIVE: entering fullscreen
+    # switches the maintainer's screen to the guest's own Space and activates
+    # the guest (docs/fullscreen-plan.md §4.1). Read out of the scene scripts,
+    # never a hand list: any leg whose script reads a window fullscreen.
+    for name, scene, _lang in mod.legs():
+        script = mod.scene_script(ROOT, scene)
+        takes = [line for line in script.splitlines()
+                 if re.match(r"(expect_fullscreen|user_fullscreen)\b.*\bon\s*$", line.strip())]
+        if takes and name not in mod.EXCLUSIVE:
+            out.append(f"{MAC_LANE}: {name!r} is not EXCLUSIVE, yet its scene takes a window "
+                       f"fullscreen ({takes[0].strip()!r}), which switches the host's display "
+                       f"to a new Space and activates the guest (docs/fullscreen-plan.md "
+                       f"§4.1)")
+    # AND NEVER WHILE THE MAINTAINER IS ACTIVE (his ruling of 2026-09-28): the
+    # same legs are DISPLAY_LEGS, whose wait refuses on expiry, the funnel and
+    # the hand run each honour the refusal, and the refusal is run, not read.
+    for name, scene, _lang in mod.legs():
+        script = mod.scene_script(ROOT, scene)
+        if any(re.match(r"(expect_fullscreen|user_fullscreen)\b.*\bon\s*$", line.strip())
+               for line in script.splitlines()) \
+                and name not in getattr(mod, "DISPLAY_LEGS", set()):
+            out.append(f"{MAC_LANE}: {name!r} is not a DISPLAY_LEGS leg, so an expired idle "
+                       f"wait runs it anyway and moves a present maintainer's display")
+    if not re.search(r"if refused:\n\s+_not_run\(name, refused\)\n\s+else:\n"
+                     r"\s+_leg_worker\(name", body):
+        out.append(f"{MAC_RUNNER}: queue_leg does not report a leg the idle wait refused "
+                   f"as NOT RUN — it runs it, or loses it without a verdict")
+    hand = texts["tools/run-leg.py"]
+    if not re.search(r"refused = lane\.display_wait\(name\)\n\s+if refused:\n"
+                     r"[\s\S]{0,120}?sys\.exit\(3\)", hand):
+        out.append("tools/run-leg.py: a hand run of a DISPLAY_SCENES leg does not wait for "
+                   "an idle host and stop when refused")
+    out += display_refusal(mod)
     if "_mac.hid_idle_seconds()" not in texts["tools/validate-all.py"]:
         out.append("tools/validate-all.py: the launch line carries no HIDIdleTime — load "
                    "says how busy the machine is, never whether a human is at it")
+    return out
+
+
+def display_refusal(mod):
+    """display_wait run against a doubled clock: a busy host is refused with
+    a sentence, an idle one admitted, and an unreadable clock refused."""
+    import types
+    legs = sorted(getattr(mod, "DISPLAY_LEGS", ()))
+    if not legs:
+        return [f"{MAC_LANE}: DISPLAY_LEGS is empty, so no leg is held off a busy host"]
+    out = []
+    saved = (mod._hid_idle_ns, mod.time)
+    try:
+        for idle_s, want in ((5, "NOT RUN"), (10_000, None), (None, "NOT RUN")):
+            now = [0.0]
+            mod.time = types.SimpleNamespace(
+                monotonic=lambda: now[0],
+                sleep=lambda secs: now.__setitem__(0, now[0] + secs))
+            mod._hid_idle_ns = ((lambda: (None, "doubled")) if idle_s is None
+                                else (lambda v=idle_s: (int(v * 1e9), None)))
+            said = []
+            got = mod.idle_wait(legs[0], say=said.append)
+            if want is None and got is not None:
+                out.append(f"{MAC_LANE}: an idle host ({idle_s}s) refused "
+                           f"{legs[0]!r}: {got!r}")
+            if want is not None and (got is None or want not in got):
+                out.append(f"{MAC_LANE}: HIDIdleTime {idle_s} ran the display leg "
+                           f"{legs[0]!r} on a host nothing says is idle ({got!r})")
+    finally:
+        mod._hid_idle_ns, mod.time = saved
     return out
 
 
@@ -378,7 +441,8 @@ def census(texts, lanes=None, tools=None):
 
 FILES = [r for _, r, _, _ in LANES] + [LINUX, EXCLUSIVE_PY, EXCLUSIVE_SH, "tools/validate-all.py",
                                         "tools/validate-linux.py", "tools/gates.py",
-                                        "tools/lib/flightrec_lane.py", MAC_LANE]
+                                        "tools/lib/flightrec_lane.py", MAC_LANE,
+                                        "tools/run-leg.py"]
 REAL = {rel: gate.read(rel) for rel in FILES}
 MODS = {lane: load_lane(r) for lane, _, _, r in LANES}
 
@@ -468,8 +532,7 @@ watched("a windows pool whose notification leg the exclusive funnel drains", REA
 
 # 10. THE MAC WAIT CUT OUT — the state the tree was in until 2026-09-18.
 _no_idle = gate.doctor("the mac idle wait cut from queue_leg", REAL[MAC_RUNNER],
-                       r"\n *# AND THE HOST'S OWN IDLE CLOCK[\s\S]*?\n *lane\.idle_wait\(name\)\n",
-                       "\n")
+                       r"refused = lane\.idle_wait\(name\)", "refused = None")
 watched("a mac funnel that admits an input-driving leg without asking about the human",
         {**REAL, MAC_RUNNER: _no_idle}, "never calls lane.idle_wait(name)")
 
@@ -479,8 +542,7 @@ _outside = gate.doctor("the mac idle wait lifted above the hold", REAL[MAC_RUNNE
                        r'( *)(with exclusive\.hold\("mac", name\):)',
                        r"\1lane.idle_wait(name)\n\1\2")
 _outside = gate.doctor("the mac idle wait removed from inside the hold", _outside,
-                       r"\n *# AND THE HOST'S OWN IDLE CLOCK[\s\S]*?\n *lane\.idle_wait\(name\)\n",
-                       "\n")
+                       r"refused = lane\.idle_wait\(name\)", "refused = None")
 watched("a mac idle wait outside the token's hold",
         {**REAL, MAC_RUNNER: _outside}, "is not between the token's hold and the leg")
 
@@ -517,7 +579,44 @@ _blind = gate.doctor(
 watched("a red mac leg whose verdict line names no frontmost app",
         {**REAL, MAC_RUNNER: _blind}, "does not read flightrec_lane.mac_frontmost(ROOT)")
 
-gate.negatives_ran(15)
+# 16. A FULLSCREEN LEG BACK IN THE POOL.
+_pooled = gate.doctor("fullscreen taken out of the mac host-UI scenes", REAL[MAC_LANE],
+                      r'HOST_UI_SCENES = \("emoji", "fullscreen"\)', 'HOST_UI_SCENES = ("emoji",)')
+_pooled_mod = gate.scratch() / "mac-fullscreen-pooled.py"
+_pooled_mod.write_text(_pooled, encoding="utf-8")
+watched("a mac fullscreen leg run in the pool", {**REAL, MAC_LANE: _pooled},
+        "'fullscreen-rust-swiftui' is not EXCLUSIVE", lanes={**MODS, "mac": load_lane(_pooled_mod)})
+
+# 17. FULLSCREEN NO LONGER A DISPLAY LEG.
+_ran = gate.doctor("fullscreen taken out of the mac display scenes", REAL[MAC_LANE],
+                   r'DISPLAY_SCENES = \("fullscreen",\)', "DISPLAY_SCENES = ()")
+_ran_mod = gate.scratch() / "mac-fullscreen-not-display.py"
+_ran_mod.write_text(_ran, encoding="utf-8")
+watched("a mac fullscreen leg an expired wait runs anyway", {**REAL, MAC_LANE: _ran},
+        "is not a DISPLAY_LEGS leg", lanes={**MODS, "mac": load_lane(_ran_mod)})
+
+# 18. THE FUNNEL RUNNING A REFUSED LEG.
+_ignored = gate.doctor("queue_leg running a refused leg", REAL[MAC_RUNNER],
+                       r"_not_run\(name, refused\)", "_leg_worker(name, argv, env, scene)")
+watched("a mac funnel that runs a leg its idle wait refused",
+        {**REAL, MAC_RUNNER: _ignored}, "does not report a leg the idle wait refused")
+
+# 19. THE WAIT ADMITTING A BUSY HOST.
+_admits = gate.doctor("display_wait admitting on expiry", REAL[MAC_LANE],
+                      r"(        if waited >= DISPLAY_BOUND_S:\n[\s\S]*?)return refused\n",
+                      r"\1return None\n")
+_admits_mod = gate.scratch() / "mac-display-admits.py"
+_admits_mod.write_text(_admits, encoding="utf-8")
+watched("a display wait that runs its leg on a busy host", {**REAL, MAC_LANE: _admits},
+        "HIDIdleTime 5 ran the display leg", lanes={**MODS, "mac": load_lane(_admits_mod)})
+
+# 20. THE HAND RUN MOVING THE DISPLAY.
+_hand = gate.doctor("run-leg's display wait cut", REAL["tools/run-leg.py"],
+                    r"refused = lane\.display_wait\(name\)", "refused = None")
+watched("a hand run of a display leg that never waits", {**REAL, "tools/run-leg.py": _hand},
+        "a hand run of a DISPLAY_SCENES leg")
+
+gate.negatives_ran(20)
 
 gate.counted("windows legs whose scene posts a notification",
              sorted(MODS["windows"].notification_legs(str(ROOT / "tools/scenes"))), floor=2)

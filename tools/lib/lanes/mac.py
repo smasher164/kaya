@@ -50,7 +50,7 @@ SCENES = [
 # has not landed — built and run rust-only until their guests arrive,
 # when they move into SCENES.
 DEPTH_SCENES = ["typeface", "windowed", "canvas", "dnd", "tasks", "notify", "notes", "richrows",
-                "format", "flexshrink", "listrow", "tints", "badge", "emoji"]
+                "format", "flexshrink", "listrow", "tints", "badge", "emoji", "fullscreen"]
 # The C-floor scenes THIS LANE RUNS (guests/c/Makefile keeps the whole
 # list; this is the SCENES= override build_c passes, and check-steps'
 # sweep_c_floor reads it from the other side).
@@ -202,6 +202,11 @@ ORDER = [
     ("varied", ("python",)),
     ("drain",),
     ("windowed", ("rust",)),
+    ("drain",),
+    # Fullscreen moves the host's display to a new Space and activates the
+    # guest (docs/fullscreen-plan.md §4.1): alone between drains, and
+    # EXCLUSIVE below.
+    ("fullscreen", ("rust",)),
     ("drain",),
     # A row wider than its window (docs/flex-shrink-plan.md §6).
     ("flexshrink", ("rust",)),
@@ -415,10 +420,17 @@ def wired_scenes():
 PANEL_SCENES = ("filedialog", "save", "editor")
 # And the scenes that open system UI on the host's own screen, which a person
 # at the keyboard would see and could type into: the emoji palette
-# (docs/emoji-picker-plan.md).
-HOST_UI_SCENES = ("emoji",)
+# (docs/emoji-picker-plan.md), and fullscreen, which switches the display to
+# the guest's own Space (docs/fullscreen-plan.md §4.1).
+HOST_UI_SCENES = ("emoji", "fullscreen")
 EXCLUSIVE = {name for name, scene, _lang in legs()
              if scene in PANEL_SCENES or scene in HOST_UI_SCENES}
+# The scenes whose legs MOVE THE HOST'S DISPLAY and take its keyboard, which
+# never run while the maintainer is active (his ruling of 2026-09-28): their
+# wait admits an idle host only, and an expired or unreadable wait reports
+# the leg NOT RUN rather than running it anyway.
+DISPLAY_SCENES = ("fullscreen",)
+DISPLAY_LEGS = {name for name, scene, _lang in legs() if scene in DISPLAY_SCENES}
 
 # The host's own idle clock (HIDIdleTime, nanoseconds since the last key or
 # pointer event), read before such a leg is admitted; the wait never
@@ -431,6 +443,11 @@ EXCLUSIVE = {name for name, scene, _lang in legs()
 IDLE_S = 20.0
 IDLE_BOUND_S = 60.0
 IDLE_BUDGET_S = 240.0
+DISPLAY_IDLE_S = 120.0
+DISPLAY_BOUND_S = 120.0
+# What a red leg's whole-desktop picture waits for (tools/lib/flightrec_lane.py's
+# shot_desktop): the screen is the maintainer's while he is at it.
+DESKTOP_SHOT_IDLE_S = 120.0
 IDLE_TELL_S = 30.0
 IDLE_POLL_S = 1.0
 # A SELF-TEST DOOR, and _hid_idle_ns() below is its ONLY reader
@@ -452,6 +469,12 @@ IDLE_SENTENCES = {
              "idle-wait budget (HIDIdleTime {idle}s){door}",
     "unreadable": "mac: {leg} cannot read HIDIdleTime ({why}) — running "
                   "without the idle wait",
+    "held": "mac: {leg} moves the host's display and the host is still in "
+            "use after {waited}s (HIDIdleTime {idle}s, wants {want}s) — NOT "
+            "RUN{door}",
+    "held-unreadable": "mac: {leg} moves the host's display and HIDIdleTime "
+                       "cannot be read ({why}) — NOT RUN, since nothing says "
+                       "the host is idle",
     "summary": "mac: idle waits — {legs} leg(s) waited {secs}s of the "
                "{budget}s budget for an idle host",
 }
@@ -499,22 +522,25 @@ def idle_wait(leg, say=None):
 
     Called INSIDE the exclusive hold (tools/validate-mac.py's queue_leg), so
     no other lane can admit its own input-driving leg into the same busy host
-    while this one waits. It NEVER reddens a lane: an unreadable clock, an
-    expired bound and a spent budget each print one sentence and the leg runs
-    (tools/lib/exclusive.py's rule, one file over). Returns seconds waited.
+    while this one waits. An unreadable clock, an expired bound and a spent
+    budget each print one sentence and the leg runs (tools/lib/exclusive.py's
+    rule, one file over), EXCEPT a DISPLAY_LEGS leg, which display_wait holds.
+    Returns None when the leg may run, or the sentence saying it did not.
     """
     say = say or _idle_say
+    if leg in DISPLAY_LEGS:
+        return display_wait(leg, say)
     door = " (doctored)" if os.environ.get(IDLE_DOOR, "") else ""
     ns, why = _hid_idle_ns()
     if ns is None:
         say(IDLE_SENTENCES["unreadable"].format(leg=leg, why=why))
-        return 0.0
+        return None
     if ns / 1e9 >= IDLE_S:
-        return 0.0
+        return None
     if _idle["spent"] >= IDLE_BUDGET_S:
         say(IDLE_SENTENCES["spent"].format(
             leg=leg, budget=int(IDLE_BUDGET_S), idle=int(ns / 1e9), door=door))
-        return 0.0
+        return None
     bound = min(IDLE_BOUND_S, IDLE_BUDGET_S - _idle["spent"])
     started = time.monotonic()
     told = 0
@@ -522,7 +548,6 @@ def idle_wait(leg, say=None):
     def done(waited):
         _idle["spent"] += waited
         _idle["legs"] += 1
-        return waited
 
     while True:
         time.sleep(IDLE_POLL_S)
@@ -530,23 +555,60 @@ def idle_wait(leg, say=None):
         ns, why = _hid_idle_ns()
         if ns is None:
             say(IDLE_SENTENCES["unreadable"].format(leg=leg, why=why))
-            return done(waited)
+            done(waited)
+            return None
         idle = int(ns / 1e9)
         if ns / 1e9 >= IDLE_S:
             say(IDLE_SENTENCES["cleared"].format(
                 leg=leg, waited=int(waited), idle=idle, door=door))
-            return done(waited)
+            done(waited)
+            return None
         if waited >= bound:
             say(IDLE_SENTENCES["expired"].format(
                 leg=leg, bound=int(bound), idle=idle, want=int(IDLE_S),
                 door=door))
-            return done(waited)
+            done(waited)
+            return None
         if waited >= (told + 1) * IDLE_TELL_S:
             told += 1
             say(IDLE_SENTENCES["waiting"].format(
                 leg=leg, idle=idle, want=int(IDLE_S), waited=int(waited),
                 bound=int(bound), door=door))
 
+
+def display_wait(leg, say=None):
+    """A DISPLAY_LEGS leg's wait: idle for DISPLAY_IDLE_S within DISPLAY_BOUND_S, or
+    the leg does not run. Outside the lane's budget, since a leg that waits
+    and is then refused costs the lane no run. Returns None or the sentence."""
+    say = say or _idle_say
+    door = " (doctored)" if os.environ.get(IDLE_DOOR, "") else ""
+    started = time.monotonic()
+    told = 0
+    while True:
+        waited = time.monotonic() - started
+        ns, why = _hid_idle_ns()
+        if ns is None:
+            refused = IDLE_SENTENCES["held-unreadable"].format(leg=leg, why=why)
+            say(refused)
+            return refused
+        idle = int(ns / 1e9)
+        if ns / 1e9 >= DISPLAY_IDLE_S:
+            if waited >= IDLE_POLL_S:
+                say(IDLE_SENTENCES["cleared"].format(
+                    leg=leg, waited=int(waited), idle=idle, door=door))
+            return None
+        if waited >= DISPLAY_BOUND_S:
+            refused = IDLE_SENTENCES["held"].format(
+                leg=leg, waited=int(waited), idle=idle, want=int(DISPLAY_IDLE_S),
+                door=door)
+            say(refused)
+            return refused
+        if waited >= (told + 1) * IDLE_TELL_S:
+            told += 1
+            say(IDLE_SENTENCES["waiting"].format(
+                leg=leg, idle=idle, want=int(DISPLAY_IDLE_S), waited=int(waited),
+                bound=int(DISPLAY_BOUND_S), door=door))
+        time.sleep(IDLE_POLL_S)
 
 def idle_summary(say=None):
     """What waiting for a quiet host cost this lane, printed on EVERY run —

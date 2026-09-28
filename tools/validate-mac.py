@@ -690,6 +690,14 @@ def _run_leg(name, argv, env, scene=None):
     FR.mac_leg(name, verdict, secs, log, scratch)
 
 
+def _not_run(name, sentence):
+    """A leg the idle wait refused (lane.DISPLAY_LEGS): no process, no
+    bundle, and a verdict that is not PASS, so the lane is not ALL PASS."""
+    (LEGS_DIR / f"{name}.log").write_text(sentence + "\n", encoding="utf-8")
+    (LEGS_DIR / f"{name}.verdict").write_text("NOT RUN\n", encoding="utf-8")
+    (LEGS_DIR / f"{name}.secs").write_text("0\n", encoding="utf-8")
+
+
 _only_selected = 0
 
 
@@ -714,8 +722,11 @@ def queue_leg(name, argv, env, scene=None):
             # AND THE HOST'S OWN IDLE CLOCK, inside the hold so no other
             # lane admits an input-driving leg into the same busy host while
             # this one waits (docs/deferred.md, the swallowed-press entry).
-            lane.idle_wait(name)
-            _leg_worker(name, argv, env, scene)
+            refused = lane.idle_wait(name)
+            if refused:
+                _not_run(name, refused)
+            else:
+                _leg_worker(name, argv, env, scene)
         return
     if JOBS == 1 and not os.environ.get("KAYA_RECORD"):
         # STILL STREAMED — serial mode exists to watch a leg live —
@@ -792,7 +803,7 @@ def drain():
             # block-buffered stdout, so an empty log there means "hung
             # with its trace in the buffer", not "never started" (read
             # the wrong way 2026-07-25; docs/traps.md).
-            if "KAYA_HARNESS" not in log_text:
+            if "KAYA_HARNESS" not in log_text and verdict != "NOT RUN":
                 if secs != "?" and int(secs) >= 115:
                     print(f"{name}: note — NO OUTPUT, and it ran to "
                           f"the 120s timeout. It was KILLED: its "

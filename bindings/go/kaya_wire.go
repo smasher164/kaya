@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x42e9c3e04bc4f540
+	SpecHash uint64 = 0xd05fc1ba6f1042b2
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -126,6 +126,7 @@ const (
 	WpropInset = 8
 	WpropAppearance = 9
 	WpropRememberFrame = 10
+	WpropFullscreen = 11
 	EpropTitle = 1
 	EpropInterceptBack = 2
 	ShpropTitle = 1
@@ -399,6 +400,7 @@ const (
 	occDismissRequested = 32
 	occSubmitted = 33
 	occNotificationReplied = 34
+	occFullscreenChanged = 35
 )
 
 func (d Detent) String() string {
@@ -2841,6 +2843,26 @@ func TxBindWindowRememberFrame(window uint64, signalID uint64) []byte {
 	return endRecord(b)
 }
 
+// TxSetWindowFullscreen: set_window_prop with a constant fullscreen value (window 0, the primary surface).
+func TxSetWindowFullscreen(window uint64, fullscreen bool) []byte {
+	b := beginRecord(txSetWindowProp)
+	b = binary.LittleEndian.AppendUint64(b, window)
+	b = binary.LittleEndian.AppendUint32(b, WpropFullscreen)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, fullscreen)
+	return endRecord(b)
+}
+
+// TxBindWindowFullscreen: set_window_prop with a signal-bound fullscreen value (window 0, the primary surface).
+func TxBindWindowFullscreen(window uint64, signalID uint64) []byte {
+	b := beginRecord(txSetWindowProp)
+	b = binary.LittleEndian.AppendUint64(b, window)
+	b = binary.LittleEndian.AppendUint32(b, WpropFullscreen)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
 // TxSetEntryTitle: set_entry_prop with a constant title value.
 func TxSetEntryTitle(entry uint64, title string) []byte {
 	b := beginRecord(txSetEntryProp)
@@ -3307,7 +3329,7 @@ func parseValue(rec []byte, at int) (any, int) {
 // false for pad/unknown records.
 func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload any, ok bool) {
 	kind = binary.LittleEndian.Uint16(rec[4:])
-	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected && kind != occMenuActivated && kind != occMenuToggled && kind != occMenuValueChanged && kind != occFileDialogResult && kind != occClipboardResult && kind != occPasted && kind != occUndone && kind != occRedone && kind != occSortRequested && kind != occDrawRequested && kind != occTick && kind != occDropped && kind != occDragEnded && kind != occDateChanged && kind != occTimeChanged && kind != occValueCommitted && kind != occNotificationResult && kind != occLinkOpened && kind != occTextEdited && kind != occTextFormatted && kind != occSheetDismissed && kind != occDismissRequested && kind != occSubmitted && kind != occNotificationReplied {
+	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected && kind != occMenuActivated && kind != occMenuToggled && kind != occMenuValueChanged && kind != occFileDialogResult && kind != occClipboardResult && kind != occPasted && kind != occUndone && kind != occRedone && kind != occSortRequested && kind != occDrawRequested && kind != occTick && kind != occDropped && kind != occDragEnded && kind != occDateChanged && kind != occTimeChanged && kind != occValueCommitted && kind != occNotificationResult && kind != occLinkOpened && kind != occTextEdited && kind != occTextFormatted && kind != occSheetDismissed && kind != occDismissRequested && kind != occSubmitted && kind != occNotificationReplied && kind != occFullscreenChanged {
 		return 0, 0, nil, nil, false
 	}
 	id = binary.LittleEndian.Uint64(rec[8:])
@@ -3320,6 +3342,11 @@ func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload an
 		return kind, id, nil, binary.LittleEndian.Uint32(rec[16:]), true
 	}
 	if kind == occNotificationReplied {
+		// An answer carrying one value: id + the Value.
+		value, _ := parseValue(rec, 16)
+		return kind, id, nil, value, true
+	}
+	if kind == occFullscreenChanged {
 		// An answer carrying one value: id + the Value.
 		value, _ := parseValue(rec, 16)
 		return kind, id, nil, value, true

@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0x42e9c3e04bc4f540;
+    public const ulong SpecHash = 0xd05fc1ba6f1042b2;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -124,6 +124,7 @@ static class KayaWire
     public const uint WpropInset = 8;
     public const uint WpropAppearance = 9;
     public const uint WpropRememberFrame = 10;
+    public const uint WpropFullscreen = 11;
     public const uint EpropTitle = 1;
     public const uint EpropInterceptBack = 2;
     public const uint ShpropTitle = 1;
@@ -397,6 +398,7 @@ static class KayaWire
     public const ushort OccKindDismissRequested = 32;
     public const ushort OccKindSubmitted = 33;
     public const ushort OccKindNotificationReplied = 34;
+    public const ushort OccKindFullscreenChanged = 35;
 
     /// A blob value: the u64 handle from kaya_blob_register, consumed
     /// by the next submit; the bytes never ride the record stream.
@@ -2370,6 +2372,23 @@ static class KayaWire
         return Finish(stream, w, TxKindSetWindowProp);
     }
 
+    /// set_window_prop with a constant fullscreen value (window 0, the primary surface).
+    public static byte[] TxSetWindowFullscreen(ulong window, bool fullscreen)
+    {
+        var w = Begin(out var stream);
+        w.Write(window); w.Write(WpropFullscreen); w.Write(SourceConst);
+        EncodeValue(w, fullscreen);
+        return Finish(stream, w, TxKindSetWindowProp);
+    }
+
+    /// set_window_prop with a signal-bound fullscreen value (window 0, the primary surface).
+    public static byte[] TxBindWindowFullscreen(ulong window, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(window); w.Write(WpropFullscreen); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetWindowProp);
+    }
+
     /// set_entry_prop with a constant title value.
     public static byte[] TxSetEntryTitle(ulong entry, string title)
     {
@@ -2755,7 +2774,7 @@ static class KayaWire
         keys = new List<object>();
         payload = null;
         kind = BitConverter.ToUInt16(rec, 4);
-        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged && kind != OccKindFileDialogResult && kind != OccKindClipboardResult && kind != OccKindPasted && kind != OccKindUndone && kind != OccKindRedone && kind != OccKindSortRequested && kind != OccKindDrawRequested && kind != OccKindTick && kind != OccKindDropped && kind != OccKindDragEnded && kind != OccKindDateChanged && kind != OccKindTimeChanged && kind != OccKindValueCommitted && kind != OccKindNotificationResult && kind != OccKindLinkOpened && kind != OccKindTextEdited && kind != OccKindTextFormatted && kind != OccKindSheetDismissed && kind != OccKindDismissRequested && kind != OccKindSubmitted && kind != OccKindNotificationReplied)
+        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged && kind != OccKindFileDialogResult && kind != OccKindClipboardResult && kind != OccKindPasted && kind != OccKindUndone && kind != OccKindRedone && kind != OccKindSortRequested && kind != OccKindDrawRequested && kind != OccKindTick && kind != OccKindDropped && kind != OccKindDragEnded && kind != OccKindDateChanged && kind != OccKindTimeChanged && kind != OccKindValueCommitted && kind != OccKindNotificationResult && kind != OccKindLinkOpened && kind != OccKindTextEdited && kind != OccKindTextFormatted && kind != OccKindSheetDismissed && kind != OccKindDismissRequested && kind != OccKindSubmitted && kind != OccKindNotificationReplied && kind != OccKindFullscreenChanged)
             return false;
         id = BitConverter.ToUInt64(rec, 8);
         if (kind == OccKindAlertResult)
@@ -2771,6 +2790,13 @@ static class KayaWire
             return true;
         }
         if (kind == OccKindNotificationReplied)
+        {
+            // An answer carrying one value: id + the Value.
+            int valueLen = (int)BitConverter.ToUInt32(rec, 20);
+            payload = Encoding.UTF8.GetString(rec, 24, valueLen);
+            return true;
+        }
+        if (kind == OccKindFullscreenChanged)
         {
             // An answer carrying one value: id + the Value.
             int valueLen = (int)BitConverter.ToUInt32(rec, 20);

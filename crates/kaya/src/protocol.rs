@@ -636,6 +636,10 @@ pub enum Occurrence {
     /// informational and post-fact. A programmatic SelectSection is
     /// configuration and stays silent (the echo doctrine).
     SectionSelected { window: WindowId, section: WindowId },
+    /// The user took a window into or out of fullscreen through the
+    /// platform's own door (docs/fullscreen-plan.md): post-fact, and an
+    /// app's own write never echoes.
+    FullscreenChanged { window: WindowId, on: bool },
     /// The user clicked a column header on a live For's table. A
     /// REQUEST: nothing has changed on screen; the guest reorders its
     /// collection by key and re-declares set_columns with the new
@@ -1602,6 +1606,9 @@ pub enum WindowProp {
     /// (Bool-valued; default true; docs/tasks-s4-plan.md P4). Inert on the
     /// phones.
     RememberFrame,
+    /// Whether the window fills its screen (Bool-valued; default false;
+    /// docs/fullscreen-plan.md).
+    Fullscreen,
 }
 
 /// The presentation hint's closed set (spec enum
@@ -2458,6 +2465,12 @@ impl OccSink {
                     body[..8].copy_from_slice(&window.0.to_le_bytes());
                     body[8..].copy_from_slice(&section.0.to_le_bytes());
                     ring.push_record(crate::ring::REC_SECTION_SELECTED, &body);
+                }
+                Occurrence::FullscreenChanged { window, on } => {
+                    ring.push_record(
+                        crate::ring::REC_FULLSCREEN_CHANGED,
+                        &crate::wire::fullscreen_changed_body(window, on),
+                    );
                 }
                 Occurrence::SortRequested { id, column } => {
                     let tag = crate::wire::click_tag(id.0, &[]);

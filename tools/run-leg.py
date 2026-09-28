@@ -152,6 +152,13 @@ atexit.register(kaya_teardown)
 signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
 signal.signal(signal.SIGINT, lambda *_: sys.exit(130))
 
+# A leg that moves the host's display waits for an idle host by hand too
+# (tools/lib/lanes/mac.py's DISPLAY_SCENES, the maintainer's ruling).
+if scene in lane.DISPLAY_SCENES:
+    refused = lane.display_wait(name)
+    if refused:
+        print(f"run-leg: exit 3 — {refused}", flush=True)
+        sys.exit(3)
 print(f"run-leg: {scene}-{lang}: timeout 120 {' '.join(argv)}", flush=True)
 # TEED, ALWAYS: the terminal watches it live and the bundle's `leg-log`
 # section is the file — and the link door reads act one's own

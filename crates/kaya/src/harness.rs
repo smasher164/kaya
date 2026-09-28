@@ -377,6 +377,14 @@ pub enum Step {
     /// which is why this is a verb rather than five platform-flavored
     /// expect_title lines.
     ExpectDirty(Option<u64>, bool),
+    /// Whether the window fills its screen, read from the TOOLKIT (the
+    /// style mask, the toplevel state, the presenter, the status bar),
+    /// never the prop (docs/fullscreen-plan.md §5). None = the primary.
+    ExpectFullscreen(Option<u64>, bool),
+    /// Drive the platform's OWN door into or out of fullscreen (the green
+    /// button on macOS, F11 on GTK and WinUI) — emits fullscreen_changed
+    /// like a user's act. The phones have no door and refuse it.
+    UserFullscreen(Option<u64>, bool),
     /// Drive the window's REAL chrome close (performClose, WM_CLOSE,
     /// gtk close) — the veto grammar's trigger.
     CloseWindow(u64),
@@ -782,6 +790,8 @@ impl Step {
             | Step::SelectSection(..)
             | Step::ExpectWindowSize(..)
             | Step::ExpectDirty(..)
+            | Step::ExpectFullscreen(..)
+            | Step::UserFullscreen(..)
             | Step::CloseWindow(..)
             | Step::ExpectWindows(..)
             | Step::ExpectAlert(..)
@@ -899,6 +909,8 @@ impl Step {
             Step::SelectSection { .. } => false,
             Step::ExpectWindowSize { .. } => true,
             Step::ExpectDirty { .. } => true,
+            Step::ExpectFullscreen { .. } => true,
+            Step::UserFullscreen { .. } => false,
             Step::CloseWindow { .. } => false,
             Step::ExpectWindows { .. } => true,
             Step::ExpectAlert { .. } => true,
@@ -1258,6 +1270,13 @@ pub trait Stage: Send + 'static {
     /// | GTK | the header-bar marker through the existing AT-SPI read |
     /// | SwiftUI (iOS), Compose | the applied window prop, read back through the interpreter — state, not chrome, because these platforms have none (D4). NOT vacuous: it fails if the prop never applied |
     fn window_dirty(&self, window: u64) -> bool;
+    /// Whether the window REALLY fills its screen — the observation
+    /// `expect_fullscreen` verifies, from the toolkit and never from the
+    /// prop (docs/fullscreen-plan.md §5).
+    fn window_fullscreen(&self, window: u64) -> bool;
+    /// Drive the platform's own fullscreen door toward `on`, as the user
+    /// would; it emits fullscreen_changed.
+    fn user_fullscreen(&self, window: u64, on: bool);
     /// Drive the surface's REAL chrome close (performClose, WM_CLOSE,
     /// gtk close) — a veto_close window emits close_requested and
     /// stays; a non-veto auxiliary closes and reports window_closed.
@@ -2032,6 +2051,14 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 })?;
                 Step::ExpectDirty(window, on)
             }
+            "expect_fullscreen" => {
+                let (window, rest) = parse_window_target(rest);
+                Step::ExpectFullscreen(window, parse_on_off(op, rest)?)
+            }
+            "user_fullscreen" => {
+                let (window, rest) = parse_window_target(rest);
+                Step::UserFullscreen(window, parse_on_off(op, rest)?)
+            }
             "close_window" => {
                 let (window, rest) = parse_window_target(rest);
                 if !rest.is_empty() {
@@ -2783,6 +2810,14 @@ fn parse_window_target(rest: &str) -> (Option<u64>, &str) {
         }
     }
     (None, rest)
+}
+
+fn parse_on_off(verb: &str, rest: &str) -> Result<bool, String> {
+    match rest.trim() {
+        "on" => Ok(true),
+        "off" => Ok(false),
+        other => Err(format!("{verb} wants on|off, got {other:?}")),
+    }
 }
 
 fn parse_target(spec: &str) -> Result<Target, String> {
@@ -3854,6 +3889,13 @@ fn run_with_log(
                     Err(format!("section {title:?} badge {got}, wanted {want}"))
                 }
             })),
+            Step::UserFullscreen(window, on) => {
+                await_quiet();
+                let answered = crate::scene::answers();
+                stage.user_fullscreen(window.unwrap_or(0), *on);
+                await_answer(answered);
+                None
+            }
             Step::CloseWindow(window) => {
                 // An action, silent like click: the veto grammar's
                 // observable is what the scene does next. The app is
@@ -4708,6 +4750,22 @@ fn run_with_log(
                         Ok(format!("{prefix}dirty {want}"))
                     } else {
                         Err(format!("{prefix}dirty {got}, wanted {want}"))
+                    }
+                }))
+            }
+            Step::ExpectFullscreen(window, want) => {
+                let id = window.unwrap_or(0);
+                let prefix = match window {
+                    Some(n) => format!("window#{n} "),
+                    None => String::new(),
+                };
+                let word = |on: bool| if on { "on" } else { "off" };
+                Some(poll(|| {
+                    let got = stage.window_fullscreen(id);
+                    if got == *want {
+                        Ok(format!("{prefix}fullscreen {}", word(*want)))
+                    } else {
+                        Err(format!("{prefix}fullscreen {}, wanted {}", word(got), word(*want)))
                     }
                 }))
             }
@@ -6422,6 +6480,15 @@ mod tests {
         );
         // Not a marker, not a title, not a maybe.
         assert!(parse("expect_dirty").is_err());
+        assert_eq!(parse("expect_fullscreen on").unwrap()[0], Step::ExpectFullscreen(None, true));
+        assert_eq!(parse("expect_fullscreen off").unwrap()[0], Step::ExpectFullscreen(None, false));
+        assert_eq!(
+            parse("expect_fullscreen window#1 on").unwrap()[0],
+            Step::ExpectFullscreen(Some(1), true)
+        );
+        assert_eq!(parse("user_fullscreen off").unwrap()[0], Step::UserFullscreen(None, false));
+        assert!(parse("expect_fullscreen true").is_err());
+        assert!(parse("user_fullscreen").is_err());
         assert!(parse("expect_dirty yes").is_err());
         assert!(parse("expect_dirty \"*notes\"").is_err());
     }
@@ -6584,6 +6651,10 @@ mod tests {
         fn window_dirty(&self, window: u64) -> bool {
             window == 1
         }
+        fn window_fullscreen(&self, window: u64) -> bool {
+            window == 1
+        }
+        fn user_fullscreen(&self, _: u64, _: bool) {}
         fn close_window(&self, _: u64) {}
         fn entry_count(&self, _: u64) -> usize {
             0
@@ -7538,6 +7609,10 @@ mod tests {
         fn window_dirty(&self, _: u64) -> bool {
             false
         }
+        fn window_fullscreen(&self, _: u64) -> bool {
+            false
+        }
+        fn user_fullscreen(&self, _: u64, _: bool) {}
         fn close_window(&self, _: u64) {}
         fn entry_count(&self, _: u64) -> usize {
             0
@@ -7881,6 +7956,10 @@ mod tests {
         fn window_dirty(&self, _: u64) -> bool {
             false
         }
+        fn window_fullscreen(&self, _: u64) -> bool {
+            false
+        }
+        fn user_fullscreen(&self, _: u64, _: bool) {}
         fn close_window(&self, _: u64) {}
         fn entry_count(&self, _: u64) -> usize {
             0

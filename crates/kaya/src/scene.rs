@@ -751,6 +751,9 @@ pub(crate) struct Scene {
     /// switcher state, kept for select_section validation and
     /// user-switch reconciliation (the nav_stacks stance).
     selected_section: HashMap<WindowId, WindowId>,
+    /// Per-window fullscreen, the mirror an app write and the user's door
+    /// both move (docs/fullscreen-plan.md §1); absent is false.
+    fullscreen: HashMap<WindowId, bool>,
     section_bindings: HashMap<SignalId, Vec<(WindowId, SectionProp)>>,
     /// Menu items by id — their OWN id space (DESIGN.md, Menus).
     /// Append-only, never removed in v1.
@@ -1659,7 +1662,7 @@ fn check_window_prop_value(prop: WindowProp, value: &Value) {
                  entries — {n} is not one (docs/multicolumn-plan.md)"
             );
         }
-        (WindowProp::Dirty | WindowProp::RememberFrame, Value::Bool(_)) => {}
+        (WindowProp::Dirty | WindowProp::RememberFrame | WindowProp::Fullscreen, Value::Bool(_)) => {}
         (WindowProp::Width | WindowProp::Height, Value::F64(v)) => {
             assert!(
                 v.is_finite() && *v > 0.0,
@@ -2924,6 +2927,7 @@ impl Scene {
                     match value {
                         PropValue::Const(v) => {
                             check_window_prop_value(prop, &v);
+                            self.mirror_window_prop(window, prop, &v);
                             out.push(ApplyOp::SetWindowProp {
                                 window,
                                 prop,
@@ -2939,6 +2943,7 @@ impl Scene {
                                 })
                                 .clone();
                             check_window_prop_value(prop, &current);
+                            self.mirror_window_prop(window, prop, &current);
                             self.window_bindings
                                 .entry(id)
                                 .or_default()
@@ -3006,6 +3011,7 @@ impl Scene {
                         }
                     }
                     self.selected_section.remove(&window);
+                    self.fullscreen.remove(&window);
                     // ... and its sheet chain: parent-bound, it goes with the window.
                     if let Some(child) = self.child_sheet.get(&window).copied() {
                         self.forget_sheet(child);
@@ -4540,11 +4546,12 @@ impl Scene {
                 self.grow_weights.insert(widget, w);
                 self.layout_dirty = true;
             }
-            if let Some(bound) = self.window_bindings.get(&id) {
+            if let Some(bound) = self.window_bindings.get(&id).cloned() {
                 for (window, prop) in bound {
+                    self.mirror_window_prop(window, prop, &value);
                     out.push(ApplyOp::SetWindowProp {
-                        window: *window,
-                        prop: *prop,
+                        window,
+                        prop,
                         value: value.clone(),
                     });
                 }
@@ -5870,6 +5877,29 @@ impl Scene {
             "kaya: user selected {section:?} which is not a section of {window:?}"
         );
         self.selected_section.insert(window, section);
+    }
+
+    fn mirror_window_prop(&mut self, window: WindowId, prop: WindowProp, value: &Value) {
+        if let (WindowProp::Fullscreen, Value::Bool(on)) = (prop, value) {
+            self.fullscreen.insert(window, *on);
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fullscreen(&self, window: WindowId) -> bool {
+        self.fullscreen.get(&window).copied().unwrap_or(false)
+    }
+
+    /// The user took a window into or out of fullscreen through the
+    /// platform's own door — post-fact reconciliation of the mirror (the
+    /// user_selected_section stance). A window that does not exist is a
+    /// backend bug and fails loudly.
+    pub(crate) fn user_fullscreen_changed(&mut self, window: WindowId, on: bool) {
+        assert!(
+            window == crate::protocol::DEFAULT_WINDOW || self.windows.contains(&window),
+            "kaya: user fullscreen change on unknown window {window:?}"
+        );
+        self.fullscreen.insert(window, on);
     }
 
     pub(crate) fn user_popped(&mut self, entry: WindowId) {
@@ -10825,6 +10855,54 @@ mod tests {
         // The user switches back: the mirror reconciles.
         scene.user_selected_section(DEFAULT_WINDOW, WindowId(7));
         assert_eq!(scene.selected_section[&DEFAULT_WINDOW].0, 7);
+    }
+
+    /// docs/fullscreen-plan.md §7: the app's write and the user's door both
+    /// move the mirror, and a destroyed window takes its entry with it.
+    #[test]
+    fn fullscreen_mirror_follows_the_app_and_the_user() {
+        let mut scene = Scene::new();
+        assert!(!scene.fullscreen(DEFAULT_WINDOW));
+        let ops = scene.apply(vec![TxOp::SetWindowProp {
+            window: DEFAULT_WINDOW,
+            prop: WindowProp::Fullscreen,
+            value: PropValue::Const(Value::Bool(true)),
+        }]);
+        assert!(ops.iter().any(|op| matches!(
+            op,
+            ApplyOp::SetWindowProp { prop: WindowProp::Fullscreen, value: Value::Bool(true), .. }
+        )));
+        assert!(scene.fullscreen(DEFAULT_WINDOW));
+        scene.user_fullscreen_changed(DEFAULT_WINDOW, false);
+        assert!(!scene.fullscreen(DEFAULT_WINDOW));
+        scene.apply(vec![
+            TxOp::CreateSignal { id: SignalId(3), initial: Value::Bool(false) },
+            TxOp::SetWindowProp {
+                window: DEFAULT_WINDOW,
+                prop: WindowProp::Fullscreen,
+                value: PropValue::Signal(SignalId(3)),
+            },
+            TxOp::WriteSignal { id: SignalId(3), value: Value::Bool(true) },
+        ]);
+        assert!(scene.fullscreen(DEFAULT_WINDOW));
+    }
+
+    #[test]
+    #[should_panic(expected = "user fullscreen change on unknown window")]
+    fn a_user_fullscreen_change_on_an_unknown_window_fails_loudly() {
+        let mut scene = Scene::new();
+        scene.user_fullscreen_changed(WindowId(41), true);
+    }
+
+    #[test]
+    #[should_panic(expected = "rejects value")]
+    fn fullscreen_is_a_bool() {
+        let mut scene = Scene::new();
+        scene.apply(vec![TxOp::SetWindowProp {
+            window: DEFAULT_WINDOW,
+            prop: WindowProp::Fullscreen,
+            value: PropValue::Const(Value::I64(1)),
+        }]);
     }
 
     #[test]

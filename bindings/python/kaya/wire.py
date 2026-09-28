@@ -14,7 +14,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, cast
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x42e9c3e04bc4f540
+SPEC_HASH = 0xd05fc1ba6f1042b2
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -126,6 +126,7 @@ WPROP_DIRTY = 7
 WPROP_INSET = 8
 WPROP_APPEARANCE = 9
 WPROP_REMEMBER_FRAME = 10
+WPROP_FULLSCREEN = 11
 EPROP_TITLE = 1
 EPROP_INTERCEPT_BACK = 2
 SHPROP_TITLE = 1
@@ -400,6 +401,7 @@ OCC_SHEET_DISMISSED = 31
 OCC_DISMISS_REQUESTED = 32
 OCC_SUBMITTED = 33
 OCC_NOTIFICATION_REPLIED = 34
+OCC_FULLSCREEN_CHANGED = 35
 
 
 def _pad(b: bytes) -> bytes:
@@ -1467,6 +1469,16 @@ def tx_bind_window_remember_frame(window: int, signal_id: int) -> bytes:
     return record(TX_SET_WINDOW_PROP, struct.pack("<QIIQ", window, WPROP_REMEMBER_FRAME, SOURCE_SIGNAL, signal_id))
 
 
+def tx_set_window_fullscreen(window: int, fullscreen: bool) -> bytes:
+    """set_window_prop with a constant fullscreen value (bool); window 0, the primary surface."""
+    return record(TX_SET_WINDOW_PROP, struct.pack("<QII", window, WPROP_FULLSCREEN, SOURCE_CONST) + _enc.value(fullscreen))
+
+
+def tx_bind_window_fullscreen(window: int, signal_id: int) -> bytes:
+    """set_window_prop with a signal-bound fullscreen value; window 0, the primary surface."""
+    return record(TX_SET_WINDOW_PROP, struct.pack("<QIIQ", window, WPROP_FULLSCREEN, SOURCE_SIGNAL, signal_id))
+
+
 def tx_set_entry_title(entry: int, title: str) -> bytes:
     """set_entry_prop with a constant title value (str)."""
     return record(TX_SET_ENTRY_PROP, struct.pack("<QII", entry, EPROP_TITLE, SOURCE_CONST) + _enc.value(title))
@@ -1727,7 +1739,7 @@ def parse_occurrence(buf: bytes | bytearray) -> tuple[int, Any, list[Any], Any]:
     value for OCC_VALUE_CHANGED, None otherwise.
     """
     _size, kind, _flags = struct.unpack_from("<IHH", buf, 0)
-    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED):
+    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED):
         return kind, None, [], None
     if kind == OCC_ALERT_RESULT:
         # A request's one answer: id + the u32 code.
@@ -1738,6 +1750,11 @@ def parse_occurrence(buf: bytes | bytearray) -> tuple[int, Any, list[Any], Any]:
         request, code = struct.unpack_from("<QI", buf, 8)
         return kind, request, [], code
     if kind == OCC_NOTIFICATION_REPLIED:
+        # An answer carrying one value: id + the Value.
+        request = struct.unpack_from("<Q", buf, 8)[0]
+        value, _ = parse_value(buf, 16)
+        return kind, request, [], value
+    if kind == OCC_FULLSCREEN_CHANGED:
         # An answer carrying one value: id + the Value.
         request = struct.unpack_from("<Q", buf, 8)[0]
         value, _ = parse_value(buf, 16)

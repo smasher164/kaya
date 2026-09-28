@@ -10,7 +10,7 @@
 // with the opt-out ignored.
 //
 // Everything below the doubles is the interpreter's own source. The doubles
-// are the five names the cut block reaches outside itself.
+// are the six names the cut block reaches outside itself.
 
 import AppKit
 
@@ -32,6 +32,14 @@ nonisolated(unsafe) let kayaScene = KayaSceneModel()
 nonisolated(unsafe) var kayaNSWindows: [UInt64: NSWindow] = [:]
 
 func kayaInvalidateTableGeometry() {}
+
+/// The interpreter's fullscreen reading (the style mask or a transition in
+/// flight), stood in for: entering fullscreen on the host would switch its
+/// display to a new Space (docs/fullscreen-plan.md §4.1).
+nonisolated(unsafe) var kayaProbeFullscreen: Set<UInt64> = []
+func kayaWindowFillsScreen(_ windowId: UInt64, _ window: NSWindow) -> Bool {
+    kayaProbeFullscreen.contains(windowId)
+}
 func kayaDiag(_ msg: String) {}
 
 /// The core's pref store, stood in for — and COUNTED, since "the frame was
@@ -304,6 +312,19 @@ enum KayaWindowMemoryProbe {
         expect("a frame that DID move is written",
             KayaHost.writes == 2
                 && KayaHost.store[9] == kayaWindowFrameText(live.frame))
+
+        // docs/fullscreen-plan.md §3: the frame to remember is the one the
+        // user will get back, never the screen's.
+        KayaHost.writes = 0
+        kayaProbeFullscreen.insert(9)
+        live.setFrame(NSRect(origin: origin, size: NSSize(width: 660, height: 500)),
+                      display: false)
+        kayaSaveWindowFrame(9)
+        expect("a fullscreen window's frame is not saved", KayaHost.writes == 0)
+        kayaProbeFullscreen.remove(9)
+        kayaSaveWindowFrame(9)
+        expect("the frame it comes back to is", KayaHost.writes == 1
+            && KayaHost.store[9] == kayaWindowFrameText(live.frame))
 
         // ONE WRITE PER WINDOW PER TURN: a drag fires didMove per frame,
         // and the notifications of one turn coalesce into the single save

@@ -25,6 +25,10 @@ dev_shell_or_die()
 #      six by-value cases, both frame spellings and six malformed lines,
 #      the clamp, the coalesced-and-deduplicated save and the opt-out —
 #      then each by-value case is perturbed on the cut and watched failing.
+#   C  RUNTIME, macOS only: the `// MARK: - Fullscreen` block just above
+#      it, cut and compiled with tools/checks/swiftui-fullscreen.swift over a
+#      window double that never reaches the window server — the app's write
+#      wins over a user change it overrode (docs/fullscreen-plan.md §1).
 
 import os
 import platform
@@ -180,6 +184,11 @@ def check(raw):
                        save):
         bad.append("the save is no longer deduplicated against the store: a "
                    "frame that did not move must cost nothing")
+    if save is not None and not re.search(
+            r"!kayaWindowFillsScreen\(windowId, window\)", save):
+        bad.append("the save no longer skips a fullscreen window: the frame to "
+                   "remember is the one the user will get back, never the "
+                   "screen's or a transition's (docs/fullscreen-plan.md §3)")
 
     # --- The restore runs before the first frame is shown. ------------
     restore = braced(block, r"func kayaRestoreWindowFrame\(")
@@ -257,7 +266,12 @@ refuses("a restore that flushes a frame at the declared size",
                     "window.setFrame(clamped, display: true)"),
         want="display: true")
 
-negatives = 5
+refuses("a save that remembers a fullscreen frame",
+        gate.doctor("the fullscreen-skip perturbation", real,
+                    r",\n *!kayaWindowFillsScreen\(windowId, window\)", ""),
+        want="no longer skips a fullscreen window")
+
+negatives = 6
 
 # --- Clause B: the rule, driven, where the toolchain exists. ----------
 if platform.system() != "Darwin":
@@ -286,13 +300,13 @@ def swiftc(*args):
         capture_output=True, text=True, check=False)
 
 
-def drive(name, text):
+def drive(name, text, probe=PROBE):
     """Compile `text` as the interpreter's half and run the probe.
     Returns (returncode, output lines)."""
     src = gate.scratch() / f"KayaWindowMemory-{name}.swift"
     src.write_text("import AppKit\n\n" + text + "\n", encoding="utf-8")
     binary = gate.scratch() / f"swiftui-window-memory-{name}"
-    built = swiftc(src, ROOT / PROBE, "-o", binary)
+    built = swiftc(src, ROOT / probe, "-o", binary)
     if built.returncode != 0:
         print(built.stdout + built.stderr, file=sys.stderr)
         gate.refuse(f"the window-memory probe did not compile ({name})")
@@ -386,6 +400,11 @@ RUNTIME_NEGATIVES = [
      r" *kayaFrameMemory\[windowId\] = clamped\n",
      "",
      "the restored frame goes on the record as the memory"),
+    ("fullscreen",
+     "a fullscreen window's frame saved",
+     r",\n *!kayaWindowFillsScreen\(windowId, window\)",
+     "",
+     "a fullscreen window's frame is not saved"),
     ("opt-out",
      "an opted-out window saved anyway",
      r"guard kayaScene\.windows\[windowId\]\?\.rememberFrame != false,\n"
@@ -407,6 +426,61 @@ for name, label, pattern, repl, want in RUNTIME_NEGATIVES:
         for line in bad_out:
             print(f"  {line}", file=sys.stderr)
 
+# --- Clause C: the fullscreen block beside it, driven the same way ------
+# (docs/fullscreen-plan.md §1): the app's write wins over a user change it
+# overrode, which no scene can drive, since the harness's user door and the
+# app's write cannot be made to land inside one ~550ms transition on demand.
+# The probe's window never reaches the window server.
+FS_PROBE = "tools/checks/swiftui-fullscreen.swift"
+FS_START = "    // MARK: - Fullscreen (docs/fullscreen-plan.md §3, §4.1)"
+if FS_START not in real or real.index(FS_START) > real.index(BLOCK_START):
+    gate.refuse(f"the fullscreen block is not where this gate cuts it "
+                f"({FS_START!r} before the window-memory block)")
+fs_cut = real[real.index(FS_START):real.index(BLOCK_START)]
+gate.counted("lines of the fullscreen block read", len(fs_cut.splitlines()), floor=80)
+rc, out = drive("fullscreen", fs_cut, FS_PROBE)
+for line in out:
+    print(f"  {line}")
+if rc != 0:
+    gate.finding(f"FAIL — the fullscreen probe exited {rc}; the lines above "
+                 f"name the decision that did not hold.")
+    gate.verdict()
+
+FS_NEGATIVES = [
+    ("fs-override-reported",
+     "a user change the app overrode reported anyway",
+     r"if !appWrote \|\| kayaScene\.windows\[windowId\]\?\.fullscreen == on \{",
+     "if true {",
+     "a user change the app overrode before it settled is not reported"),
+    ("fs-write-unmarked",
+     "an app write during the user's transition never marked",
+     r" *kayaFullscreenAppWrote\.insert\(windowId\)\n",
+     "",
+     "the app's write wins"),
+    ("fs-unheld",
+     "a write toggled into a transition in flight",
+     r" *kayaFullscreenInFlight\[windowId\] == nil,\n",
+     "",
+     "a second write during kaya's own transition is held"),
+    ("fs-echo",
+     "kaya's own transition reported as the user's",
+     r"if case \.user\(let was\)\? = transition, on != was \{",
+     "if on != !on {",
+     "the app's own write never echoes"),
+]
+for name, label, pattern, repl, want in FS_NEGATIVES:
+    doctored = gate.doctor(f"the {name} perturbation", fs_cut, pattern, repl)
+    bad_rc, bad_out = drive(name, doctored, FS_PROBE)
+    if bad_rc == 0:
+        bad_out = bad_out + [f"(the probe exited 0: {label} passed)"]
+    negatives += 1
+    if gate.negative(label, lambda lines=bad_out: lines, want=want):
+        print(f"check-window-memory: self-test — {label} was refused ({want})")
+    else:
+        for line in bad_out:
+            print(f"  {line}", file=sys.stderr)
+
 gate.negatives_ran(negatives)
 gate.verdict("6 by-value cases, 2 frame spellings, 6 malformed lines, the "
-             "clamp, the coalesced save and the opt-out")
+             "clamp, the coalesced save and the opt-out; the fullscreen "
+             "block's app-write-wins rule")

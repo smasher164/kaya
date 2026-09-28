@@ -109,6 +109,8 @@ pub const KAYA_OCCURRENCE_SUBMITTED: u16 = 33;
 /// NOTIFICATION_REPLIED { u64 notification; Str text } — what the user sent
 /// from a notification's reply field (docs/notification-reply-plan.md).
 pub const KAYA_OCCURRENCE_NOTIFICATION_REPLIED: u16 = 34;
+/// FULLSCREEN_CHANGED { u64 window; Bool on } (docs/fullscreen-plan.md).
+pub const KAYA_OCCURRENCE_FULLSCREEN_CHANGED: u16 = 35;
 const _: () = assert!(
     KAYA_OCCURRENCE_PAD == ring::REC_PAD
         && KAYA_OCCURRENCE_BUTTON_CLICKED == ring::REC_BUTTON_CLICKED
@@ -124,6 +126,7 @@ const _: () = assert!(
         && KAYA_OCCURRENCE_DISMISS_REQUESTED == ring::REC_DISMISS_REQUESTED
         && KAYA_OCCURRENCE_SUBMITTED == ring::REC_SUBMITTED
         && KAYA_OCCURRENCE_NOTIFICATION_REPLIED == ring::REC_NOTIFICATION_REPLIED
+        && KAYA_OCCURRENCE_FULLSCREEN_CHANGED == ring::REC_FULLSCREEN_CHANGED
         && KAYA_OCCURRENCE_SECTION_SELECTED == ring::REC_SECTION_SELECTED
         && KAYA_OCCURRENCE_MENU_ACTIVATED == ring::REC_MENU_ACTIVATED
         && KAYA_OCCURRENCE_MENU_TOGGLED == ring::REC_MENU_TOGGLED
@@ -922,6 +925,7 @@ pub const KAYA_WPROP_DIRTY: u32 = 7;
 pub const KAYA_WPROP_INSET: u32 = 8;
 pub const KAYA_WPROP_APPEARANCE: u32 = 9;
 pub const KAYA_WPROP_REMEMBER_FRAME: u32 = 10;
+pub const KAYA_WPROP_FULLSCREEN: u32 = 11;
 
 /// Navigation-entry properties (spec::ENTRY_PROPS): their own typed
 /// table (DESIGN.md, Navigation). `intercept_back` is the close-veto
@@ -1059,7 +1063,7 @@ const _: () = assert!(
 // Completeness for the occurrence exports (docs/traps.md): a new spec
 // occurrence trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::SPEC.occurrence.len() == 34,
+    crate::spec::SPEC.occurrence.len() == 35,
     "spec occurrences grew: export the new KAYA_OCCURRENCE_* above, extend the pin, and \
      bump this count"
 );
@@ -1145,6 +1149,7 @@ const _: () = assert!(
         && KAYA_WPROP_INSET == wire::WPROP_INSET
         && KAYA_WPROP_APPEARANCE == wire::WPROP_APPEARANCE
         && KAYA_WPROP_REMEMBER_FRAME == wire::WPROP_REMEMBER_FRAME
+        && KAYA_WPROP_FULLSCREEN == wire::WPROP_FULLSCREEN
         && KAYA_EPROP_TITLE == wire::EPROP_TITLE
         && KAYA_EPROP_INTERCEPT_BACK == wire::EPROP_INTERCEPT_BACK
 );
@@ -1412,7 +1417,7 @@ const _: () = assert!(
     "spec::PROPS grew: export the new KAYA_PROP_* above, extend the pin, and bump this count"
 );
 const _: () = assert!(
-    crate::spec::WINDOW_PROPS.len() == 10,
+    crate::spec::WINDOW_PROPS.len() == 11,
     "spec::WINDOW_PROPS grew: export the new KAYA_WPROP_* above, extend the pin, and bump \
      this count"
 );
@@ -2706,6 +2711,28 @@ pub extern "C" fn kaya_emit_section_selected(window: u64, section: u64) {
     body[..8].copy_from_slice(&window.to_le_bytes());
     body[8..].copy_from_slice(&section.to_le_bytes());
     state().ring.push_record(ring::REC_SECTION_SELECTED, &body);
+}
+
+/// Presentation side: the user took a window into or out of fullscreen
+/// through the platform's own door (docs/fullscreen-plan.md), post-fact.
+/// A transition kaya started for the app's own write never arrives here.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_emit_fullscreen_changed(window: u64, on: u8) {
+    let window = crate::protocol::WindowId(window);
+    let on = on != 0;
+    PRESENTATION_SCENE
+        .lock()
+        .unwrap()
+        .as_mut()
+        .expect("kaya: fullscreen changed before any transaction was applied")
+        .user_fullscreen_changed(window, on);
+    if let Some(sink) = PRESENTATION_SINK.lock().unwrap().as_ref() {
+        sink.send(crate::protocol::Occurrence::FullscreenChanged { window, on });
+        return;
+    }
+    state()
+        .ring
+        .push_record(ring::REC_FULLSCREEN_CHANGED, &crate::wire::fullscreen_changed_body(window, on));
 }
 
 /// Presentation side: the user drove the back affordance on an entry

@@ -1,0 +1,27 @@
+# docs/fullscreen-plan.md §5. expect_fullscreen reads the toolkit, never
+# the prop; label#1 carries every fullscreen_changed the app received.
+expect_title "fullscreen"
+expect label#0 "windowed"
+expect label#1 "no change from the user"
+expect_fullscreen off
+click button#0
+expect label#0 "asked for fullscreen"
+expect_fullscreen on
+# NO ECHO: an occurrence from the app's own write would have been queued
+# before the transition settled, so it reaches the app ahead of this ping.
+click button#1
+expect label#2 "pings 1"
+expect label#1 "no change from the user"
+user_fullscreen off
+expect_fullscreen off
+expect label#1 "the user turned fullscreen off"
+user_fullscreen on
+expect_fullscreen on
+expect label#1 "the user turned fullscreen on"
+# The app's copy followed the user, so its toggle now leaves fullscreen.
+click button#0
+expect label#0 "asked for a window"
+expect_fullscreen off
+click button#1
+expect label#2 "pings 2"
+expect label#1 "the user turned fullscreen on"

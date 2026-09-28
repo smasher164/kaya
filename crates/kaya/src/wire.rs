@@ -457,6 +457,7 @@ pub(crate) const WPROP_DIRTY: u32 = 7;
 pub(crate) const WPROP_INSET: u32 = 8;
 pub(crate) const WPROP_APPEARANCE: u32 = 9;
 pub(crate) const WPROP_REMEMBER_FRAME: u32 = 10;
+pub(crate) const WPROP_FULLSCREEN: u32 = 11;
 
 /// Section property ids (spec::SECTION_PROPS) — the third typed
 /// surface table (see DESIGN.md, Sections).
@@ -975,6 +976,7 @@ fn window_prop(raw: u32) -> WindowProp {
         WPROP_INSET => WindowProp::Inset,
         WPROP_APPEARANCE => WindowProp::Appearance,
         WPROP_REMEMBER_FRAME => WindowProp::RememberFrame,
+        WPROP_FULLSCREEN => WindowProp::Fullscreen,
         other => panic!("kaya: unknown window property {other}"),
     }
 }
@@ -991,6 +993,7 @@ fn window_prop_raw(p: WindowProp) -> u32 {
         WindowProp::Inset => WPROP_INSET,
         WindowProp::Appearance => WPROP_APPEARANCE,
         WindowProp::RememberFrame => WPROP_REMEMBER_FRAME,
+        WindowProp::Fullscreen => WPROP_FULLSCREEN,
     }
 }
 
@@ -2064,6 +2067,15 @@ pub(crate) fn notification_answer(
     b.extend_from_slice(&raw.to_le_bytes());
     b.extend_from_slice(&0u32.to_le_bytes());
     (crate::ring::REC_NOTIFICATION_RESULT, b)
+}
+
+/// FULLSCREEN_CHANGED { u64 window; Bool on }, the id-and-one-value shape.
+pub(crate) fn fullscreen_changed_body(window: WindowId, on: bool) -> Vec<u8> {
+    let mut b = Vec::new();
+    b.extend_from_slice(&window.0.to_le_bytes());
+    let mut blobs = Vec::new();
+    write_value(&mut b, &Value::Bool(on), &mut blobs);
+    b
 }
 
 /// A link's arrival on the wire: route id, the URL as one Str value, then

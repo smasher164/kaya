@@ -324,6 +324,8 @@ pub struct KayaHostApi {
     /// into the buffer, `ok` set to 1 on success.
     pub copy_asset:
         unsafe extern "C" fn(*const u8, usize, *const u8, usize, *mut u8, usize, *mut u8) -> usize,
+    /// docs/fullscreen-plan.md: the user's own door, never kaya's write.
+    pub emit_fullscreen_changed: extern "C" fn(u64, u8),
 }
 
 /// # Safety
@@ -508,6 +510,7 @@ pub(crate) fn run() -> i32 {
         text_runs: crate::capi::kaya_text_runs,
         text_last_edit: crate::capi::kaya_text_last_edit,
         copy_asset: crate::capi::kaya_harness_copy_asset,
+        emit_fullscreen_changed: crate::capi::kaya_emit_fullscreen_changed,
     };
     // THIS BACKEND WINDOWS ROWS (docs/deferred.md, the declares-windowing
     // entry), and the declaration has to beat the first transaction rather

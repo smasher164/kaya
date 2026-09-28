@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x42e9c3e04bc4f540
+specHash = 0xd05fc1ba6f1042b2
 
 valueBool :: Word32
 valueBool = 1
@@ -246,6 +246,8 @@ wpropAppearance :: Word32
 wpropAppearance = 9
 wpropRememberFrame :: Word32
 wpropRememberFrame = 10
+wpropFullscreen :: Word32
+wpropFullscreen = 11
 epropTitle :: Word32
 epropTitle = 1
 epropInterceptBack :: Word32
@@ -792,6 +794,8 @@ occKindSubmitted :: Word16
 occKindSubmitted = 33
 occKindNotificationReplied :: Word16
 occKindNotificationReplied = 34
+occKindFullscreenChanged :: Word16
+occKindFullscreenChanged = 35
 
 -- Values self-pad to 8: they concatenate inside record bodies.
 encodeValue :: Value -> Builder
@@ -2029,6 +2033,18 @@ txBindWindowRememberFrame window signalId = wireRecord txKindSetWindowProp
   (word64LE window <> word32LE wpropRememberFrame <> word32LE sourceSignal
     <> word64LE signalId)
 
+-- set_window_prop with a constant fullscreen value (window 0, the primary surface).
+txSetWindowFullscreen :: Word64 -> Bool -> Builder
+txSetWindowFullscreen window fullscreen = wireRecord txKindSetWindowProp
+  (word64LE window <> word32LE wpropFullscreen <> word32LE sourceConst
+    <> encodeValue (VBool fullscreen))
+
+-- set_window_prop with a signal-bound fullscreen value (window 0, the primary surface).
+txBindWindowFullscreen :: Word64 -> Word64 -> Builder
+txBindWindowFullscreen window signalId = wireRecord txKindSetWindowProp
+  (word64LE window <> word32LE wpropFullscreen <> word32LE sourceSignal
+    <> word64LE signalId)
+
 -- set_entry_prop with a constant title value.
 txSetEntryTitle :: Word64 -> String -> Builder
 txSetEntryTitle entry title = wireRecord txKindSetEntryProp
@@ -2373,7 +2389,7 @@ parseOccurrence ::
   IO (Maybe (Word16, Word64, [Value], Maybe Value, Maybe ClipValues, Maybe DropValues, [Value]))
 parseOccurrence redeem rec = do
   kind <- peekByteOff rec 4 :: IO Word16
-  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult && kind /= occKindClipboardResult && kind /= occKindPasted && kind /= occKindUndone && kind /= occKindRedone && kind /= occKindSortRequested && kind /= occKindDrawRequested && kind /= occKindTick && kind /= occKindDropped && kind /= occKindDragEnded && kind /= occKindDateChanged && kind /= occKindTimeChanged && kind /= occKindValueCommitted && kind /= occKindNotificationResult && kind /= occKindLinkOpened && kind /= occKindTextEdited && kind /= occKindTextFormatted && kind /= occKindSheetDismissed && kind /= occKindDismissRequested && kind /= occKindSubmitted && kind /= occKindNotificationReplied
+  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult && kind /= occKindClipboardResult && kind /= occKindPasted && kind /= occKindUndone && kind /= occKindRedone && kind /= occKindSortRequested && kind /= occKindDrawRequested && kind /= occKindTick && kind /= occKindDropped && kind /= occKindDragEnded && kind /= occKindDateChanged && kind /= occKindTimeChanged && kind /= occKindValueCommitted && kind /= occKindNotificationResult && kind /= occKindLinkOpened && kind /= occKindTextEdited && kind /= occKindTextFormatted && kind /= occKindSheetDismissed && kind /= occKindDismissRequested && kind /= occKindSubmitted && kind /= occKindNotificationReplied && kind /= occKindFullscreenChanged
     then return Nothing
     else do
       ident <- peekByteOff rec 8 :: IO Word64
@@ -2388,6 +2404,11 @@ parseOccurrence redeem rec = do
           code <- peekByteOff rec 16 :: IO Word32
           return (Just (kind, ident, [], Just (VI64 (fromIntegral code)), Nothing, Nothing, []))
       else if kind == occKindNotificationReplied
+        then do
+          -- An answer carrying one value: id + the Value.
+          (value, _) <- parseValue rec 16
+          return (Just (kind, ident, [], Just value, Nothing, Nothing, []))
+      else if kind == occKindFullscreenChanged
         then do
           -- An answer carrying one value: id + the Value.
           (value, _) <- parseValue rec 16

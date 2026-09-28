@@ -15341,6 +15341,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 (WindowProp::VetoClose, Value::Bool(on)) => {
                     core.window_veto.insert(window.0, *on);
                 }
+                (WindowProp::Fullscreen, _) => crate::depth_stub("fullscreen"),
                 // Opting out FORGETS: a window that keeps a frame from
                 // before the prop would still open remembered.
                 (WindowProp::RememberFrame, Value::Bool(on)) => {
@@ -23577,6 +23578,14 @@ impl crate::harness::Stage for WinUiStage {
              an unreadable one is a broken read, not a clean window"
         );
         caption.starts_with(DIRTY_MARK)
+    }
+
+    fn window_fullscreen(&self, _: u64) -> bool {
+        crate::depth_stub("fullscreen")
+    }
+
+    fn user_fullscreen(&self, _: u64, _: bool) {
+        crate::depth_stub("fullscreen")
     }
 
     fn close_window(&self, window: u64) {

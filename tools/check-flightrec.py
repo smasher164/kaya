@@ -748,6 +748,60 @@ def census_frontmost(src):
     return found
 
 
+def desktop_shot_checks(src):
+    """THE DESKTOP IS PHOTOGRAPHED ONLY ON AN IDLE HOST (the maintainer's
+    ruling of 2026-09-28): shot_desktop cut out and run against a doubled
+    idle clock and a doubled screencapture that counts its calls."""
+    import textwrap
+    found = []
+    body = textwrap.dedent(py_block(src[LANE_PY], "shot_desktop"))
+    if not body:
+        return ["mac: shot_desktop is gone, so the idle rule is unread"]
+    for idle, makes, want_shot, want_none in ((5, True, False, False),
+                                              (None, True, False, False),
+                                              (9999, False, True, False),
+                                              (9999, True, True, True)):
+        calls = []
+
+        def run(argv, **_kw):
+            calls.append(argv)
+            if makes:
+                pathlib.Path(argv[-1]).write_bytes(b"png")
+
+        lane = types.ModuleType("lanes.mac")
+        lane.DESKTOP_SHOT_IDLE_S = 120.0
+        lane.hid_idle_seconds = (lambda i=idle: (i, None) if i is not None
+                                 else (None, "doubled unreadable"))
+        pkg = types.ModuleType("lanes")
+        pkg.mac = lane
+        saved = {k: sys.modules.get(k) for k in ("lanes", "lanes.mac")}
+        sys.modules.update({"lanes": pkg, "lanes.mac": lane})
+        scope = {"pathlib": pathlib,
+                 "shutil": types.SimpleNamespace(which=lambda _n: "/usr/sbin/screencapture"),
+                 "subprocess": types.SimpleNamespace(run=run, DEVNULL=None)}
+        try:
+            exec(compile(body, LANE_PY, "exec"), scope)
+            with tempfile.TemporaryDirectory() as tmp:
+                said = scope["shot_desktop"](None, pathlib.Path(tmp) / "d.png")
+        except (TypeError, ValueError, AttributeError, KeyError, OSError) as e:
+            found.append(f"mac: shot_desktop with HIDIdleTime {idle} raised "
+                         f"{type(e).__name__}: {e}")
+            continue
+        finally:
+            for k, v in saved.items():
+                if v is None:
+                    sys.modules.pop(k, None)
+                else:
+                    sys.modules[k] = v
+        if bool(calls) != want_shot:
+            found.append(f"mac: shot_desktop with HIDIdleTime {idle} "
+                         f"{'photographed' if calls else 'did not photograph'} "
+                         f"the desktop")
+        if (said is None) != want_none:
+            found.append(f"mac: shot_desktop with HIDIdleTime {idle} answered {said!r}")
+    return found
+
+
 def winlist_refuses_nonsense():
     """The real binary, asked about "None": it must exit nonzero and list
     no window. Built by the recorder's own builder (content-hashed)."""
@@ -880,6 +934,8 @@ for line in android_report_checks(REAL, echo=True):
 if sys.platform == "darwin":
     for line in winlist_refuses_nonsense():
         gate.finding(line, at="no frontmost shot")
+for line in desktop_shot_checks(REAL):
+    gate.finding(line, at="desktop shot on an idle host")
 for line in mac_power_checks(REAL, echo=True):
     gate.finding(line, at="Mac power history")
 for line in ios_recording_recovery(REAL):
@@ -905,6 +961,18 @@ nf2 = doctored(WINLIST, r'is not a pid"\)', 'is odd")',
 gate.negative("NF2 the window list reading nonsense as no filter",
               lambda: census_frontmost(nf2), want="does not refuse an argument")
 
+# The desktop shot's two idle refusals, each cut from a copy.
+nd1 = doctored(LANE_PY,
+               r"^        if idle < mac_lane\.DESKTOP_SHOT_IDLE_S:\n.*?\n(?=        if )",
+               "", "ND1 cut shot_desktop's in-use refusal", flags=re.M | re.S)
+gate.negative("ND1 a desktop shot of an in-use host",
+              lambda: desktop_shot_checks(nd1), want="HIDIdleTime 5 photographed")
+nd2 = doctored(LANE_PY, r"^        if idle is None:\n.*?\n(?=        if )",
+               "", "ND2 cut shot_desktop's unreadable-clock refusal",
+               flags=re.M | re.S)
+gate.negative("ND2 a desktop shot when the idle clock is unreadable",
+              lambda: desktop_shot_checks(nd2), want="HIDIdleTime None")
+
 # N1: a section the collect stops writing.
 n1 = doctored(LANE_PY, r'self\.section\(bundle, "unified-log", \[',
               'self.section(bundle, "unified-nope", [',
@@ -929,9 +997,8 @@ gate.negative("N3 a lane declaring no picture",
 
 # N4: a skip writer's sentence blanked, in each half.
 n4 = doctored(LANE_PY, r'self\.skip\(bundle, "desktop-shot",\n\s+"flightrec: '
-                       r'the window list would not build AND "\n\s+"`screen'
-                       r'capture -x -o` took no picture — this "\n\s+"bundle '
-                       r'has no image of any kind"\)',
+                       r'the window list would not build, so "\n\s+"this '
+                       r'bundle has no image of any kind — " \+ why_not\)',
               'self.skip(bundle, "desktop-shot", "")',
               "N4 blanked a python skip sentence")
 gate.negative("N4 a python skip with no sentence",
@@ -1190,6 +1257,6 @@ for call in ("xcuidrive_stop_all()", "xcuidrive_launch_all()", "xcuidrive_join()
     gate.negative(f"iOS recording recovery without {call}",
                   lambda: ios_recording_recovery(changed), want="driver lifecycle")
 
-gate.negatives_ran(59)
+gate.negatives_ran(61)
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

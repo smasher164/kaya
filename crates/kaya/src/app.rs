@@ -4679,6 +4679,7 @@ pub struct Messages<M> {
     dismiss_requested: RefCell<HashMap<u64, Box<dyn Fn() -> M>>>,
     sheet_dismissed: RefCell<HashMap<u64, Box<dyn Fn() -> M>>>,
     section_selected: RefCell<HashMap<u64, Box<dyn Fn() -> M>>>,
+    fullscreen_changed: RefCell<HashMap<u64, Box<dyn Fn(bool) -> M>>>,
     alerts: RefCell<HashMap<u64, Box<dyn Fn(AlertChoice) -> M>>>,
     notifications: RefCell<HashMap<u64, Box<dyn Fn(crate::protocol::NotificationOutcome) -> M>>>,
     /// PROCESS-LEVEL and persistent (docs/tasks-s9-plan.md R1): a process
@@ -4828,6 +4829,7 @@ impl<M> Messages<M> {
             dismiss_requested: RefCell::new(HashMap::new()),
             sheet_dismissed: RefCell::new(HashMap::new()),
             section_selected: RefCell::new(HashMap::new()),
+            fullscreen_changed: RefCell::new(HashMap::new()),
             alerts: RefCell::new(HashMap::new()),
             notifications: RefCell::new(HashMap::new()),
             notification_activation: RefCell::new(None),
@@ -5296,6 +5298,14 @@ impl<M> Messages<M> {
             .insert(section.0, Box::new(move || msg.clone()));
     }
 
+    /// Bind the fullscreen handler to one window: fires with the new state
+    /// each time the USER takes it into or out of fullscreen through the
+    /// platform's own door (docs/fullscreen-plan.md). The app's own write
+    /// of [`WindowProp::Fullscreen`] never echoes here.
+    pub fn on_fullscreen_changed(&self, window: WindowId, f: impl Fn(bool) -> M + 'static) {
+        self.fullscreen_changed.borrow_mut().insert(window.0, Box::new(f));
+    }
+
     /// Bind the one-shot result handler to a REQUEST (the id
     /// [`AlertRef::show`] returned): an action index or Cancel. The
     /// registration retires with the result — correlation is the
@@ -5647,6 +5657,9 @@ impl<M> Messages<M> {
                     // return any number of times. Keyed by section —
                     // handlers scope to their creator.
                     self.section_selected.borrow().get(&section.0).map(|f| f())
+                }
+                Occurrence::FullscreenChanged { window, on } => {
+                    self.fullscreen_changed.borrow().get(&window.0).map(|f| f(*on))
                 }
                 // Menu occurrences key the menu-item table — their own id
                 // space. Direct and node-anchored variants share it: an
@@ -6329,6 +6342,15 @@ impl WindowRef<'_, '_> {
     pub fn remember_frame(self, on: bool) -> Self {
         self.tx
             .set_window_prop(self.window, WindowProp::RememberFrame, on);
+        self
+    }
+
+    /// Whether the window fills its screen (docs/fullscreen-plan.md). The
+    /// user can change it through the platform's own door, which reaches
+    /// [`Messages::on_fullscreen_changed`]; a toggle writes `!on` from the
+    /// state the app already holds.
+    pub fn fullscreen(self, on: bool) -> Self {
+        self.tx.set_window_prop(self.window, WindowProp::Fullscreen, on);
         self
     }
 
@@ -9100,6 +9122,7 @@ mod tests {
                     | Occurrence::SheetDismissed { .. }
                     | Occurrence::DismissRequested { .. }
                     | Occurrence::SectionSelected { .. }
+                    | Occurrence::FullscreenChanged { .. }
                     | Occurrence::ValueChanged { .. }
                     | Occurrence::InstanceValueChanged { .. }
                     | Occurrence::ValueCommitted { .. }

@@ -285,6 +285,8 @@ pub const WINDOW_PROPS: &[(&'static str, u32, PropKind)] = &[
     // WHETHER THE DESKTOPS REMEMBER THIS WINDOW'S FRAME across launches
     // (docs/tasks-s4-plan.md P4). Defaults to true; inert on the phones.
     ("remember_frame", 10, PropKind::Bool),
+    // docs/fullscreen-plan.md §1.
+    ("fullscreen", 11, PropKind::Bool),
 ];
 
 /// Navigation-entry properties: their own typed table, deliberately
@@ -3130,6 +3132,17 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   notification_result, as the `replied` outcome, and the id \
                   retires here as it does there.",
         },
+        Record {
+            kind: 35,
+            name: "fullscreen_changed",
+            fields: &[f("window", FieldTy::U64), f("on", FieldTy::Value)],
+            payload: None,
+            doc: "The user took a window into or out of fullscreen through \
+                  the platform's own door (docs/fullscreen-plan.md): `on` \
+                  is a Bool. Post-fact and user-only, section_selected's \
+                  rule: the window has already changed, and an app's own \
+                  write of the fullscreen window prop never echoes.",
+        },
     ],
     enums: &[
         EnumSpec {
@@ -3304,6 +3317,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("inset", 8),
                 ("appearance", 9),
                 ("remember_frame", 10),
+                ("fullscreen", 11),
             ],
         },
         EnumSpec {
@@ -3838,6 +3852,7 @@ mod tests {
                 ("dismiss_requested", crate::ring::REC_DISMISS_REQUESTED),
                 ("submitted", crate::ring::REC_SUBMITTED),
                 ("notification_replied", crate::ring::REC_NOTIFICATION_REPLIED),
+                ("fullscreen_changed", crate::ring::REC_FULLSCREEN_CHANGED),
             ]
         );
     }
@@ -4118,6 +4133,7 @@ mod tests {
                     ("wprop", "sections_presentation") => wire::WPROP_SECTIONS_PRESENTATION,
                     ("wprop", "appearance") => wire::WPROP_APPEARANCE,
                     ("wprop", "remember_frame") => wire::WPROP_REMEMBER_FRAME,
+                    ("wprop", "fullscreen") => wire::WPROP_FULLSCREEN,
                     ("eprop", "title") => wire::EPROP_TITLE,
                     ("eprop", "intercept_back") => wire::EPROP_INTERCEPT_BACK,
                     ("shprop", "title") => wire::SHPROP_TITLE,

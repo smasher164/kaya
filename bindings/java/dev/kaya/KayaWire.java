@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0x42e9c3e04bc4f540L;
+    public static final long SPEC_HASH = 0xd05fc1ba6f1042b2L;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -125,6 +125,7 @@ public final class KayaWire {
     public static final int WPROP_INSET = 8;
     public static final int WPROP_APPEARANCE = 9;
     public static final int WPROP_REMEMBER_FRAME = 10;
+    public static final int WPROP_FULLSCREEN = 11;
     public static final int EPROP_TITLE = 1;
     public static final int EPROP_INTERCEPT_BACK = 2;
     public static final int SHPROP_TITLE = 1;
@@ -398,6 +399,7 @@ public final class KayaWire {
     public static final short OCC_KIND_DISMISS_REQUESTED = 32;
     public static final short OCC_KIND_SUBMITTED = 33;
     public static final short OCC_KIND_NOTIFICATION_REPLIED = 34;
+    public static final short OCC_KIND_FULLSCREEN_CHANGED = 35;
 
     /** A blob value: the u64 handle from kaya_blob_register, consumed
      * by the next submit; the bytes never ride the record stream. */
@@ -2233,6 +2235,21 @@ public final class KayaWire {
         return finish(b);
     }
 
+    /** set_window_prop with a constant fullscreen value (window 0, the primary surface). */
+    public static byte[] txSetWindowFullscreen(long window, boolean fullscreen) {
+        Enc b = begin(TX_KIND_SET_WINDOW_PROP);
+        b.putLong(window).putInt(WPROP_FULLSCREEN).putInt(SOURCE_CONST);
+        encodeValue(b, fullscreen);
+        return finish(b);
+    }
+
+    /** set_window_prop with a signal-bound fullscreen value (window 0, the primary surface). */
+    public static byte[] txBindWindowFullscreen(long window, long signalId) {
+        Enc b = begin(TX_KIND_SET_WINDOW_PROP);
+        b.putLong(window).putInt(WPROP_FULLSCREEN).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
     /** set_entry_prop with a constant title value. */
     public static byte[] txSetEntryTitle(long entry, String title) {
         Enc b = begin(TX_KIND_SET_ENTRY_PROP);
@@ -2737,7 +2754,7 @@ public final class KayaWire {
     public static Occ parseOccurrence(byte[] rec) {
         ByteBuffer b = ByteBuffer.wrap(rec).order(ByteOrder.LITTLE_ENDIAN);
         short kind = b.getShort(4);
-        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED && kind != OCC_KIND_FILE_DIALOG_RESULT && kind != OCC_KIND_CLIPBOARD_RESULT && kind != OCC_KIND_PASTED && kind != OCC_KIND_UNDONE && kind != OCC_KIND_REDONE && kind != OCC_KIND_SORT_REQUESTED && kind != OCC_KIND_DRAW_REQUESTED && kind != OCC_KIND_TICK && kind != OCC_KIND_DROPPED && kind != OCC_KIND_DRAG_ENDED && kind != OCC_KIND_DATE_CHANGED && kind != OCC_KIND_TIME_CHANGED && kind != OCC_KIND_VALUE_COMMITTED && kind != OCC_KIND_NOTIFICATION_RESULT && kind != OCC_KIND_LINK_OPENED && kind != OCC_KIND_TEXT_EDITED && kind != OCC_KIND_TEXT_FORMATTED && kind != OCC_KIND_SHEET_DISMISSED && kind != OCC_KIND_DISMISS_REQUESTED && kind != OCC_KIND_SUBMITTED && kind != OCC_KIND_NOTIFICATION_REPLIED) {
+        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED && kind != OCC_KIND_FILE_DIALOG_RESULT && kind != OCC_KIND_CLIPBOARD_RESULT && kind != OCC_KIND_PASTED && kind != OCC_KIND_UNDONE && kind != OCC_KIND_REDONE && kind != OCC_KIND_SORT_REQUESTED && kind != OCC_KIND_DRAW_REQUESTED && kind != OCC_KIND_TICK && kind != OCC_KIND_DROPPED && kind != OCC_KIND_DRAG_ENDED && kind != OCC_KIND_DATE_CHANGED && kind != OCC_KIND_TIME_CHANGED && kind != OCC_KIND_VALUE_COMMITTED && kind != OCC_KIND_NOTIFICATION_RESULT && kind != OCC_KIND_LINK_OPENED && kind != OCC_KIND_TEXT_EDITED && kind != OCC_KIND_TEXT_FORMATTED && kind != OCC_KIND_SHEET_DISMISSED && kind != OCC_KIND_DISMISS_REQUESTED && kind != OCC_KIND_SUBMITTED && kind != OCC_KIND_NOTIFICATION_REPLIED && kind != OCC_KIND_FULLSCREEN_CHANGED) {
             return null;
         }
         long id = b.getLong(8);
@@ -2752,6 +2769,10 @@ public final class KayaWire {
             return new Occ(kind, id, java.util.List.of(), b.getInt(16));
         }
         if (kind == OCC_KIND_NOTIFICATION_REPLIED) {
+            // An answer carrying one value: id + the Value.
+            return new Occ(kind, id, java.util.List.of(), parseValue(rec, b, new int[] {16}));
+        }
+        if (kind == OCC_KIND_FULLSCREEN_CHANGED) {
             // An answer carrying one value: id + the Value.
             return new Occ(kind, id, java.util.List.of(), parseValue(rec, b, new int[] {16}));
         }

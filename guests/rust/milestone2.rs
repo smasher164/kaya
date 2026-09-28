@@ -124,7 +124,8 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             | Occurrence::BackRequested { .. }
             | Occurrence::SheetDismissed { .. }
             | Occurrence::DismissRequested { .. }
-            | Occurrence::SectionSelected { .. } => {}
+            | Occurrence::SectionSelected { .. }
+            | Occurrence::FullscreenChanged { .. } => {}
             Occurrence::MenuActivated { .. }
             | Occurrence::InstanceMenuActivated { .. }
             | Occurrence::MenuToggled { .. }

@@ -30,7 +30,7 @@ type drop_values = {
 }
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0x42e9c3e04bc4f540L
+let spec_hash = 0xd05fc1ba6f1042b2L
 
 let value_bool = 1
 let value_i64 = 2
@@ -142,6 +142,7 @@ let wprop_dirty = 7
 let wprop_inset = 8
 let wprop_appearance = 9
 let wprop_remember_frame = 10
+let wprop_fullscreen = 11
 let eprop_title = 1
 let eprop_intercept_back = 2
 let shprop_title = 1
@@ -415,6 +416,7 @@ let occ_kind_sheet_dismissed = 31
 let occ_kind_dismiss_requested = 32
 let occ_kind_submitted = 33
 let occ_kind_notification_replied = 34
+let occ_kind_fullscreen_changed = 35
 
 let pad8 b =
   while Buffer.length b mod 8 <> 0 do
@@ -2209,6 +2211,22 @@ let tx_bind_window_remember_frame window signal_id =
       Buffer.add_int32_le b (Int32.of_int source_signal);
       Buffer.add_int64_le b signal_id)
 
+(* set_window_prop with a constant fullscreen value (window 0, the primary surface). *)
+let tx_set_window_fullscreen window fullscreen =
+  finish tx_kind_set_window_prop (fun b ->
+      Buffer.add_int64_le b window;
+      Buffer.add_int32_le b (Int32.of_int wprop_fullscreen);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (Bool fullscreen))
+
+(* set_window_prop with a signal-bound fullscreen value (window 0, the primary surface). *)
+let tx_bind_window_fullscreen window signal_id =
+  finish tx_kind_set_window_prop (fun b ->
+      Buffer.add_int64_le b window;
+      Buffer.add_int32_le b (Int32.of_int wprop_fullscreen);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
 (* set_entry_prop with a constant title value. *)
 let tx_set_entry_title entry title =
   finish tx_kind_set_entry_prop (fun b ->
@@ -2588,7 +2606,7 @@ let parse_clip byte at =
    value), None for clicks. None for pad/unknown kinds. *)
 let parse_occurrence byte =
   let kind = u16_at byte 4 in
-  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed && kind <> occ_kind_toggled && kind <> occ_kind_value_changed && kind <> occ_kind_close_requested && kind <> occ_kind_window_closed && kind <> occ_kind_alert_result && kind <> occ_kind_entry_popped && kind <> occ_kind_back_requested && kind <> occ_kind_section_selected && kind <> occ_kind_menu_activated && kind <> occ_kind_menu_toggled && kind <> occ_kind_menu_value_changed && kind <> occ_kind_file_dialog_result && kind <> occ_kind_clipboard_result && kind <> occ_kind_pasted && kind <> occ_kind_undone && kind <> occ_kind_redone && kind <> occ_kind_sort_requested && kind <> occ_kind_draw_requested && kind <> occ_kind_tick && kind <> occ_kind_dropped && kind <> occ_kind_drag_ended && kind <> occ_kind_date_changed && kind <> occ_kind_time_changed && kind <> occ_kind_value_committed && kind <> occ_kind_notification_result && kind <> occ_kind_link_opened && kind <> occ_kind_text_edited && kind <> occ_kind_text_formatted && kind <> occ_kind_sheet_dismissed && kind <> occ_kind_dismiss_requested && kind <> occ_kind_submitted && kind <> occ_kind_notification_replied then None
+  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed && kind <> occ_kind_toggled && kind <> occ_kind_value_changed && kind <> occ_kind_close_requested && kind <> occ_kind_window_closed && kind <> occ_kind_alert_result && kind <> occ_kind_entry_popped && kind <> occ_kind_back_requested && kind <> occ_kind_section_selected && kind <> occ_kind_menu_activated && kind <> occ_kind_menu_toggled && kind <> occ_kind_menu_value_changed && kind <> occ_kind_file_dialog_result && kind <> occ_kind_clipboard_result && kind <> occ_kind_pasted && kind <> occ_kind_undone && kind <> occ_kind_redone && kind <> occ_kind_sort_requested && kind <> occ_kind_draw_requested && kind <> occ_kind_tick && kind <> occ_kind_dropped && kind <> occ_kind_drag_ended && kind <> occ_kind_date_changed && kind <> occ_kind_time_changed && kind <> occ_kind_value_committed && kind <> occ_kind_notification_result && kind <> occ_kind_link_opened && kind <> occ_kind_text_edited && kind <> occ_kind_text_formatted && kind <> occ_kind_sheet_dismissed && kind <> occ_kind_dismiss_requested && kind <> occ_kind_submitted && kind <> occ_kind_notification_replied && kind <> occ_kind_fullscreen_changed then None
   else begin
     (* ids are guest-allocated and small; the low u32 is the story. *)
     let id = u32_at byte 8 in
@@ -2601,6 +2619,12 @@ let parse_occurrence byte =
       (* A request's one answer: id + the u32 code. *)
       Some (kind, Int64.of_int id, [], Some (I64 (Int64.of_int (u32_at byte 16))), None, None, [])
     else if kind = occ_kind_notification_replied
+    then begin
+      (* An answer carrying one value: id + the Value. *)
+      let value, _ = parse_value byte 16 in
+      Some (kind, Int64.of_int id, [], Some value, None, None, [])
+    end
+    else if kind = occ_kind_fullscreen_changed
     then begin
       (* An answer carrying one value: id + the Value. *)
       let value, _ = parse_value byte 16 in

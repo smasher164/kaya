@@ -68,6 +68,8 @@ pub(crate) const REC_DISMISS_REQUESTED: u16 = 32;
 pub(crate) const REC_SUBMITTED: u16 = 33;
 /// A notification's reply field sent text (docs/notification-reply-plan.md).
 pub(crate) const REC_NOTIFICATION_REPLIED: u16 = 34;
+/// docs/fullscreen-plan.md §1.
+pub(crate) const REC_FULLSCREEN_CHANGED: u16 = 35;
 
 /// Wire framing of every record, exported through the C header so direct
 /// consumers cast a pointer instead of bit-twiddling. Little-endian;

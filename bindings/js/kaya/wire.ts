@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0x42e9c3e04bc4f540n;
+export const SPEC_HASH = 0xd05fc1ba6f1042b2n;
 
 export const VALUE_BOOL = 1;
 export const VALUE_I64 = 2;
@@ -119,6 +119,7 @@ export const WPROP_DIRTY = 7;
 export const WPROP_INSET = 8;
 export const WPROP_APPEARANCE = 9;
 export const WPROP_REMEMBER_FRAME = 10;
+export const WPROP_FULLSCREEN = 11;
 export const EPROP_TITLE = 1;
 export const EPROP_INTERCEPT_BACK = 2;
 export const SHPROP_TITLE = 1;
@@ -393,6 +394,7 @@ export const OCC_SHEET_DISMISSED = 31;
 export const OCC_DISMISS_REQUESTED = 32;
 export const OCC_SUBMITTED = 33;
 export const OCC_NOTIFICATION_REPLIED = 34;
+export const OCC_FULLSCREEN_CHANGED = 35;
 
 const text_encoder = new TextEncoder();
 const text_decoder = new TextDecoder("utf-8", { fatal: true });
@@ -2001,6 +2003,18 @@ export function tx_bind_window_remember_frame(window: number, signal_id: number)
   return enc.end(TX_SET_WINDOW_PROP);
 }
 
+/** set_window_prop with a constant fullscreen value; window 0, the primary surface. */
+export function tx_set_window_fullscreen(window: number, fullscreen: boolean): Uint8Array {
+  enc.begin(); enc.u64(window); enc.u32(WPROP_FULLSCREEN); enc.u32(SOURCE_CONST); enc.value(fullscreen);
+  return enc.end(TX_SET_WINDOW_PROP);
+}
+
+/** set_window_prop with a signal-bound fullscreen value; window 0, the primary surface. */
+export function tx_bind_window_fullscreen(window: number, signal_id: number): Uint8Array {
+  enc.begin(); enc.u64(window); enc.u32(WPROP_FULLSCREEN); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_WINDOW_PROP);
+}
+
 /** set_entry_prop with a constant title value. */
 export function tx_set_entry_title(entry: number, title: string): Uint8Array {
   enc.begin(); enc.u64(entry); enc.u32(EPROP_TITLE); enc.u32(SOURCE_CONST); enc.value(title);
@@ -2315,7 +2329,7 @@ export function parse_occurrence(buf: Uint8Array): Occurrence {
   const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   const size = view.getUint32(0, true);
   const kind = view.getUint16(4, true);
-  if (![OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED].includes(kind)) return { kind, id: null, keys: [], payload: null };
+  if (![OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED].includes(kind)) return { kind, id: null, keys: [], payload: null };
   if (kind === OCC_ALERT_RESULT) {
     // A request's one answer: id + the u32 code.
     return { kind, id: read_u64(buf, 8), keys: [], payload: read_u32(buf, 16) };
@@ -2325,6 +2339,11 @@ export function parse_occurrence(buf: Uint8Array): Occurrence {
     return { kind, id: read_u64(buf, 8), keys: [], payload: read_u32(buf, 16) };
   }
   if (kind === OCC_NOTIFICATION_REPLIED) {
+    // An answer carrying one value: id + the Value.
+    const [value] = parse_value(buf, 16);
+    return { kind, id: read_u64(buf, 8), keys: [], payload: value };
+  }
+  if (kind === OCC_FULLSCREEN_CHANGED) {
     // An answer carrying one value: id + the Value.
     const [value] = parse_value(buf, 16);
     return { kind, id: read_u64(buf, 8), keys: [], payload: value };

@@ -1341,14 +1341,32 @@ class MacRecorder(LaneRecorder):
         covering the guest. Never the `shot` section — that one is the
         guest's own window by id, and a full-screen grab standing in for
         it photographed the wrong thing twice (docs/traps.md). This is
-        its own section, taken only when the guest had no window."""
+        its own section, taken only when the guest had no window, and
+        only on an idle host (the maintainer's ruling of 2026-09-28: the
+        screen is his while he is at it). None when taken, else why not."""
+        from lanes import mac as mac_lane
+        idle, why = mac_lane.hid_idle_seconds()
+        if idle is None:
+            return (f"flightrec: HIDIdleTime could not be read ({why}), so "
+                    f"nothing says the host is idle and the desktop was not "
+                    f"photographed")
+        if idle < mac_lane.DESKTOP_SHOT_IDLE_S:
+            return (f"flightrec: the host was in use (HIDIdleTime {idle}s, "
+                    f"under {int(mac_lane.DESKTOP_SHOT_IDLE_S)}s), so the "
+                    f"desktop was not photographed; the window list beside "
+                    f"this file names what was on screen")
         if not shutil.which("screencapture"):
-            return False
+            return "flightrec: no `screencapture` on this host"
         subprocess.run(["screencapture", "-x", "-o", str(dest)],
                        stdout=subprocess.DEVNULL,
                        stderr=subprocess.DEVNULL, check=False)
         dest = pathlib.Path(dest)
-        return dest.is_file() and dest.stat().st_size > 0
+        if dest.is_file() and dest.stat().st_size > 0:
+            return None
+        dest.unlink(missing_ok=True)
+        return ("flightrec: `screencapture -x -o` took no picture of "
+                "the desktop — the screen recording permission this "
+                "lane's window shots also need was refused")
 
     def _shot(self, bundle, scratch):
         """The fail-time attempt first; the sampler's live shot is
@@ -1405,16 +1423,12 @@ class MacRecorder(LaneRecorder):
         # THE DESKTOP IS THE ANSWER TO "THEN WHAT WAS ON SCREEN?" — the
         # mac's own skip sentence has named that case since the recorder
         # landed and never answered it.
-        if self.shot_desktop(bundle / "desktop-shot.png"):
+        why_not = self.shot_desktop(bundle / "desktop-shot.png")
+        if why_not is None:
             self.mark(bundle, "desktop-shot", "ok",
                       (bundle / "desktop-shot.png").stat().st_size)
         else:
-            (bundle / "desktop-shot.png").unlink(missing_ok=True)
-            self.skip(bundle, "desktop-shot",
-                      "flightrec: `screencapture -x -o` took no picture of "
-                      "the desktop — it is not on this host, or the screen "
-                      "recording permission this lane's window shots also "
-                      "need was refused")
+            self.skip(bundle, "desktop-shot", why_not)
 
     def _capture(self, bundle, log, scratch, out=None):
         scratch = pathlib.Path(scratch)
@@ -1462,15 +1476,14 @@ class MacRecorder(LaneRecorder):
                        "either")
             self.skip(bundle, "windows", no_list)
             self.skip(bundle, "shot", no_list)
-            if self.shot_desktop(bundle / "desktop-shot.png"):
+            why_not = self.shot_desktop(bundle / "desktop-shot.png")
+            if why_not is None:
                 self.mark(bundle, "desktop-shot", "ok",
                           (bundle / "desktop-shot.png").stat().st_size)
             else:
-                (bundle / "desktop-shot.png").unlink(missing_ok=True)
                 self.skip(bundle, "desktop-shot",
-                          "flightrec: the window list would not build AND "
-                          "`screencapture -x -o` took no picture — this "
-                          "bundle has no image of any kind")
+                          "flightrec: the window list would not build, so "
+                          "this bundle has no image of any kind — " + why_not)
         self.section(bundle, "unified-log", [
             "log", "show", "--last", "2m", "--style", "compact",
             "--predicate",

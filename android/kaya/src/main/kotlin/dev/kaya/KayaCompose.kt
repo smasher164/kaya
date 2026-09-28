@@ -2023,7 +2023,7 @@ object KayaCompose {
     // but only the runtime assert catches a stale compiled APK against
     // a new libkaya. ULong because the fingerprint's high bit is fair
     // game and a Kotlin Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0x42e9c3e04bc4f540uL
+    private const val SPEC_HASH: ULong = 0xd05fc1ba6f1042b2uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -2152,6 +2152,7 @@ object KayaCompose {
     private const val WPROP_INSET = 8
     private const val WPROP_APPEARANCE = 9
     private const val WPROP_REMEMBER_FRAME = 10
+    private const val WPROP_FULLSCREEN = 11
     private const val SPROP_TITLE = 1
     private const val SPROP_ICON = 2
     private const val SPROP_SYMBOL = 3
@@ -3326,6 +3327,7 @@ object KayaCompose {
                         // the task label stays the app's own string.
                         WPROP_DIRTY -> KayaSceneModel.windowDirty = readBool(b)
                         WPROP_REMEMBER_FRAME -> readBool(b)
+                        WPROP_FULLSCREEN -> depthStub("fullscreen")
                         WPROP_INSET -> KayaSceneModel.windowInset = readF64(b)
                         // PROCESS-WIDE FROM THE DEFAULT WINDOW
                         // (docs/tasks-s2b-plan.md R1-R3). Both halves,
@@ -9093,6 +9095,8 @@ object KayaCompose {
                         // so no wait (tools/check-verbs.py's REFUSED).
                         failures.add("close_window: this host has no chrome close")
                     }
+                    "expect_fullscreen" -> depthStub("fullscreen")
+                    "user_fullscreen" -> depthStub("fullscreen")
                     "expect_dirty" -> {
                         // THE UNSAVED-WORK MARK (docs/dirty-plan.md D5).
                         // Every other backend reads its CHROME; HERE THE

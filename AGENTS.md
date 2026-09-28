@@ -745,7 +745,13 @@ in docs/deferred.md.
    tools/ script, and a red mac leg's verdict line naming the frontmost
    application AT THE MOMENT OF THE RED (one reader with the bundle's
    window census, tools/lib/flightrec_lane.py's `mac_frontmost`).
-   Fifteen watched negatives, counts printed),
+   AND A LEG THAT MOVES THE HOST'S DISPLAY NEVER RUNS WHILE THE MAINTAINER
+   IS ACTIVE (his ruling, 2026-09-28): fullscreen switches the screen to
+   the guest's own Space and takes the keyboard, so its legs are
+   `DISPLAY_LEGS`, whose wait wants 120s idle within 120s and on expiry or
+   an unreadable clock reports the leg NOT RUN instead of running it; the
+   funnel and tools/run-leg.py both honour the refusal, and the wait is
+   RUN against a doubled clock. Twenty watched negatives, counts printed),
    `tools/check-flightrec.py` (A RED LEG'S BUNDLE NAMES ITS CAUSE ON
    EVERY LANE, or says what it measured instead (the maintainer's
    2026-09-16 ruling): the bundle shape is ONE declaration —
@@ -837,8 +843,11 @@ in docs/deferred.md.
    2026-09-28: the mac window list read a pid of "None" as no filter and
    shot_pid took the first window it listed, the maintainer's terminal
    (docs/traps.md). Both halves refuse, the real binary is asked about
-   "None" on every mac run, and two cuts are watched.
-   Fifty-nine watched negatives, counts printed),
+   "None" on every mac run, and two cuts are watched. AND THE WHOLE
+   DESKTOP IS PHOTOGRAPHED ONLY ON AN IDLE HOST since 2026-09-28 (the
+   maintainer's screen is his while he is at it): shot_desktop is run
+   against a doubled idle clock, two cuts watched.
+   Sixty-one watched negatives, counts printed),
    `tools/check-diagnostics.py` (a why-not may not print a sentence it
    cannot NOT print. Any function named `*WhyNot`/`*why_not`/`*Reason`
    is read as a diagnostic by that name alone; one answer, or an answer

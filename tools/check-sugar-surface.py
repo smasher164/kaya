@@ -7648,6 +7648,9 @@ WH_ML = "bindings/ocaml/kaya_app.ml"
 WH_JS = "bindings/js/kaya/index.ts"
 
 
+SPEC_WINDOW_HANDLERS = ("fullscreen_changed",)
+
+
 def derive_whandlers():
     def snake(name):
         return re.sub(r"(?<!^)([A-Z])", r"_\1", name).lower()
@@ -7675,7 +7678,15 @@ def derive_whandlers():
                       f"this sweep would go vacuous")
     from_ml = re.findall(r"\?on_([a-z_]+)", m.group(0))
 
-    union = sorted(set(from_hs) | set(from_ml))
+    # A WINDOW OCCURRENCE WHOSE DEPTH SLICE LANDED THE RUST HANDLER ALONE:
+    # neither construct above carries it yet, so nothing would demand the
+    # other eight. Each must still be a spec occurrence (docs/fullscreen-plan.md §6).
+    spec_text = read_rel("crates/kaya/src/spec.rs")
+    for h in SPEC_WINDOW_HANDLERS:
+        if f'name: "{h}",' not in spec_text:
+            return None, (f"SPEC_WINDOW_HANDLERS names {h!r}, which is no "
+                          f"occurrence in crates/kaya/src/spec.rs")
+    union = sorted(set(from_hs) | set(from_ml) | set(SPEC_WINDOW_HANDLERS))
     # THE ANTI-VACUITY FLOOR: a derived list that goes empty sweeps
     # nothing and passes everything. If the close pair ever leaves BOTH
     # declarations, this gate is reading the wrong thing.

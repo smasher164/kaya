@@ -147,6 +147,11 @@
 #define KAYA_OCCURRENCE_NOTIFICATION_REPLIED 34
 
 /**
+ * FULLSCREEN_CHANGED { u64 window; Bool on } (docs/fullscreen-plan.md).
+ */
+#define KAYA_OCCURRENCE_FULLSCREEN_CHANGED 35
+
+/**
  * Transaction record kinds (guest -> core, via kaya_submit). Layouts,
  * after the common 8-byte header, little-endian, 8-aligned:
  *   CREATE_SIGNAL:     u64 signal_id, value
@@ -971,6 +976,8 @@
 #define KAYA_WPROP_APPEARANCE 9
 
 #define KAYA_WPROP_REMEMBER_FRAME 10
+
+#define KAYA_WPROP_FULLSCREEN 11
 
 /**
  * Navigation-entry properties (spec::ENTRY_PROPS): their own typed
@@ -1813,6 +1820,10 @@ typedef struct KayaHostApi {
                           uint8_t*,
                           uintptr_t,
                           uint8_t*);
+  /**
+   * docs/fullscreen-plan.md: the user's own door, never kaya's write.
+   */
+  void (*emit_fullscreen_changed)(uint64_t, uint8_t);
 } KayaHostApi;
 
 
@@ -2319,6 +2330,13 @@ void kaya_emit_entry_popped(uint64_t entry);
  * presentation layer exists.
  */
 void kaya_emit_section_selected(uint64_t window, uint64_t section);
+
+/**
+ * Presentation side: the user took a window into or out of fullscreen
+ * through the platform's own door (docs/fullscreen-plan.md), post-fact.
+ * A transition kaya started for the app's own write never arrives here.
+ */
+void kaya_emit_fullscreen_changed(uint64_t window, uint8_t on);
 
 /**
  * Presentation side: the user drove the back affordance on an entry

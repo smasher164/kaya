@@ -24,7 +24,7 @@ public enum KayaValue: Hashable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0x42e9c3e04bc4f540
+let kayaSpecHash: UInt64 = 0xd05fc1ba6f1042b2
 
 /// A civil date as the wire's I64: year * 10000 + month * 100 + day.
 func kayaPackDate(_ year: Int, _ month: Int, _ day: Int) -> Int64 {
@@ -2265,6 +2265,26 @@ struct KayaTx {
         self.end(kayaAt)
     }
 
+    /// set_window_prop with a constant fullscreen value (window 0, the primary surface).
+    mutating func setWindowFullscreen(_ window: UInt64, _ fullscreen: Bool) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
+        self.u64(window)
+        self.u32(UInt32(KAYA_WPROP_FULLSCREEN))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.bool(fullscreen))
+        self.end(kayaAt)
+    }
+
+    /// set_window_prop with a signal-bound fullscreen value (window 0, the primary surface).
+    mutating func bindWindowFullscreen(_ window: UInt64, _ signalId: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
+        self.u64(window)
+        self.u32(UInt32(KAYA_WPROP_FULLSCREEN))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(kayaAt)
+    }
+
     /// set_entry_prop with a constant title value.
     mutating func setEntryTitle(_ entry: UInt64, _ title: String) {
         let kayaAt = self.begin(UInt16(KAYA_TX_SET_ENTRY_PROP))
@@ -2772,6 +2792,7 @@ func kayaParseOccurrence(_ rec: [UInt8]) -> KayaOccurrence? {
             || kind == UInt16(KAYA_OCCURRENCE_DISMISS_REQUESTED)
             || kind == UInt16(KAYA_OCCURRENCE_SUBMITTED)
             || kind == UInt16(KAYA_OCCURRENCE_NOTIFICATION_REPLIED)
+            || kind == UInt16(KAYA_OCCURRENCE_FULLSCREEN_CHANGED)
         else { return nil }
         let id = raw.loadUnaligned(fromByteOffset: 8, as: UInt64.self)
         if kind == UInt16(KAYA_OCCURRENCE_ALERT_RESULT) {
@@ -2785,6 +2806,12 @@ func kayaParseOccurrence(_ rec: [UInt8]) -> KayaOccurrence? {
             return (kind, id, [], .i64(Int64(code)), [], nil, nil, [])
         }
         if kind == UInt16(KAYA_OCCURRENCE_NOTIFICATION_REPLIED) {
+            // An answer carrying one value: id + the Value.
+            let valueLen = Int(raw.loadUnaligned(fromByteOffset: 20, as: UInt32.self))
+            let text = String(decoding: raw[24..<(24 + valueLen)], as: UTF8.self)
+            return (kind, id, [], .str(text), [], nil, nil, [])
+        }
+        if kind == UInt16(KAYA_OCCURRENCE_FULLSCREEN_CHANGED) {
             // An answer carrying one value: id + the Value.
             let valueLen = Int(raw.loadUnaligned(fromByteOffset: 20, as: UInt32.self))
             let text = String(decoding: raw[24..<(24 + valueLen)], as: UTF8.self)

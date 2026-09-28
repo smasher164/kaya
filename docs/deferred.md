@@ -34,6 +34,24 @@ of its last frame found what no step reads.
     own resource keys (the layer fill, its hairline, its top-leading corner);
     check-universal-props holds the layer and its release.
 
+## BUILD — fullscreen (docs/fullscreen-plan.md), depth on the mac
+KEY: fullscreen, fullscreen_changed, expect_fullscreen, user_fullscreen, kayaKeepFullscreenDoor, KayaImmersive, WPROP_FULLSCREEN
+
+The depth slice: the spec prop and occurrence, the core's mirror, the Rust
+binding, the SwiftUI arm on macOS and iOS, and the fullscreen scene green on
+the mac lane (EXCLUSIVE behind the HID-idle wait). What breadth owes:
+  - **DEPTH STUB: fullscreen on gtk** — F11 as dress and
+    `gtk_window_fullscreen`; the legs run on the wayland slots only, since
+    Xvfb with no window manager ignores the request (plan §4.2, measured).
+  - **DEPTH STUB: fullscreen on winui** — F11 as dress and
+    `AppWindow.SetPresenter`; plan §4.3 is measured first.
+  - **DEPTH STUB: fullscreen on compose** — immersive mode through
+    WindowInsetsControllerCompat; plan §4.4's readback is measured first.
+  - The iOS leg (the arm is built; UNWIRED_SCENES in tools/lib/lanes/ios.py
+    until the user half is dropped through the lane table), the other eight
+    bindings' `fullscreen` sugar and `fullscreen_changed` handler (held open by
+    check-sugar-surface), and the C floor's reading of the occurrence.
+
 ## ~~BUILD — tints and the filled container (design pass ruled 2026-09-25)~~ COMPLETE 2026-09-25: depth on the mac and iOS, breadth on GTK, WinUI and Compose, all nine bindings in both zones, the tints scene light and dark on five lanes (4d000f54, matrix ALL PASS), the review page https://claude.ai/artifact/EhjJoWe5B7FZjM54p2DRDn, and Windows' accent as Fluent 2's own pale brand surface
 KEY: filled, Tint, tint, expect_fill, fill_tint, kayaFillRead, tints scene, filled container
 

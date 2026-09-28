@@ -12932,3 +12932,24 @@ pool at once post and cancel each other's reminders. Earlier matrices passed
 on timing; a new leg moved the pool's schedule. validate-mac's leg worker now
 holds one lock around every leg whose argv runs a `.app`, and check-steps
 holds the lock with a watched cut.
+
+## An accessory SwiftUI window has no fullscreen door, and SwiftUI keeps closing it (measured 2026-09-28)
+
+Under the `.accessory` policy every selftest guest runs with, the
+WindowGroup's NSWindow carries `.fullScreenNone` (collectionBehavior 66048:
+`.primary` plus `.fullScreenNone`), so `toggleFullScreen` does nothing at all,
+posting no will, did or fail callback, and the green button zooms instead.
+Inserting `.fullScreenPrimary` once at registration is not enough: SwiftUI
+writes `.fullScreenNone` back on its own updates, and the fullscreen leg read
+66048 again before every one of its actions. Under `.regular` (a shipped
+bundle, or `KAYA_ACTIVATE=1`) the window already has `.fullScreenPrimary` and
+none of this happens. A plain `.accessory` NSWindow with behavior 0 behaves the
+same way (no door); `.regular` with behavior 0 has one. So
+`kayaKeepFullscreenDoor` in swift/KayaSwiftUI.swift reopens the door at every
+accessor update, before every kaya toggle and before the harness clicks the
+green button. Also measured the same day: the style mask carries
+`.fullScreen` from the call itself, about 550 ms before `didEnter`; entering
+activates the accessory app; and a toggle during or just after a transition
+fails, leaving the window in neither state, so writes are held until one turn
+after `did*`. Probes and numbers: docs/fullscreen-plan.md §4.1.
+

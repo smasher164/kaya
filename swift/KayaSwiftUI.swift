@@ -14,7 +14,7 @@ import UserNotifications
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0x42e9c3e04bc4f540
+let kayaSpecHash: UInt64 = 0xd05fc1ba6f1042b2
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -101,6 +101,7 @@ private let wpropDirty: UInt32 = 7
 private let wpropInset: UInt32 = 8
 private let wpropAppearance: UInt32 = 9
 private let wpropRememberFrame: UInt32 = 10
+private let wpropFullscreen: UInt32 = 11
 private let spropTitle: UInt32 = 1
 private let spropIcon: UInt32 = 2
 private let spropSymbol: UInt32 = 3
@@ -879,6 +880,9 @@ final class KayaWindowModel: Identifiable {
     /// lowers it to nothing. The declared title is never rewritten.
     var dirty = false
     var rememberFrame = true
+    /// The app's fullscreen prop (wprop 11; docs/fullscreen-plan.md), moved
+    /// to the user's answer when the user's own door changes it.
+    var fullscreen = false
     /// The window CONTENT INSET (wprop 8; docs/styling-plan.md D3) — LAYOUT,
     /// not appearance: padding inside the mounted root, 16 unless the app says
     /// otherwise, 0 for full bleed. Every render site reads this.
@@ -4342,6 +4346,7 @@ var kayaTearingDown: Set<UInt64> = []
 
         private func register(_ view: NSView) {
             guard let window = view.window else { return }
+            kayaKeepFullscreenDoor(windowId, window)
             if kayaNSWindows[windowId] !== window {
                 kayaDiag("register wid=\(windowId) num=\(window.windowNumber)")
                 kayaNSWindows[windowId] = window
@@ -4366,6 +4371,7 @@ var kayaTearingDown: Set<UInt64> = []
                     windowId: windowId, original: window.delegate)
                 kayaWindowDelegates[windowId] = proxy
                 window.delegate = proxy
+                DispatchQueue.main.async { kayaApplyWindowFullscreen(windowId) }
                 // The advisory size may predate the native window (props
                 // apply while a surface is still hidden); honor it now.
                 kayaApplyWindowSize(windowId)
@@ -4461,6 +4467,120 @@ var kayaTearingDown: Set<UInt64> = []
         // on screen); `listed` alone does not tell, since AppKit registers a
         // window with the server before any order (measured 2026-09-10).
         kayaDiag("windowserver wid=\(wid) num=\(num) vis=\(window.isVisible) listed=\(listed) onscreen=\(onscreen) layer=\(layer)")
+    }
+
+    // MARK: - Fullscreen (docs/fullscreen-plan.md §3, §4.1)
+
+    /// A transition in flight, and whose: kaya's toggle for the app's write,
+    /// or the user's door, `was` being the style mask when the user's began.
+    enum KayaFullscreenTransition {
+        case kaya
+        case user(was: Bool)
+    }
+    nonisolated(unsafe) var kayaFullscreenInFlight: [UInt64: KayaFullscreenTransition] = [:]
+    nonisolated(unsafe) var kayaFullscreenFailures: [UInt64: Int] = [:]
+    /// The windows whose app wrote the prop while the USER's transition was in
+    /// flight: that write wins (docs/fullscreen-plan.md §1).
+    nonisolated(unsafe) var kayaFullscreenAppWrote: Set<UInt64> = []
+
+    /// The apply arm's one door for the prop.
+    func kayaAppWroteFullscreen(_ windowId: UInt64, _ on: Bool) {
+        kayaScene.windows[windowId]?.fullscreen = on
+        if case .user? = kayaFullscreenInFlight[windowId] {
+            kayaFullscreenAppWrote.insert(windowId)
+        }
+        kayaApplyWindowFullscreen(windowId)
+    }
+
+    /// docs/traps.md, "An accessory SwiftUI window has no fullscreen door".
+    func kayaKeepFullscreenDoor(_ windowId: UInt64, _ window: NSWindow) {
+        let before = window.collectionBehavior
+        guard before.contains(.fullScreenNone) || !before.contains(.fullScreenPrimary) else {
+            return
+        }
+        window.collectionBehavior.remove(.fullScreenNone)
+        window.collectionBehavior.insert(.fullScreenPrimary)
+        kayaDiag(
+            "fullscreen wid=\(windowId) door opened: collectionBehavior "
+                + "\(before.rawValue) -> \(window.collectionBehavior.rawValue)")
+    }
+
+    /// The style mask carries `.fullScreen` from the call itself, and a
+    /// transition's frames are neither the fullscreen one nor the one to
+    /// remember.
+    func kayaWindowFillsScreen(_ windowId: UInt64, _ window: NSWindow) -> Bool {
+        window.styleMask.contains(.fullScreen) || kayaFullscreenInFlight[windowId] != nil
+    }
+
+    /// A write during a transition is HELD: a second toggle then fails and
+    /// strands the window in neither state (§4.1). The did/didFail handlers
+    /// reconcile one turn later, which is when a toggle succeeds.
+    func kayaApplyWindowFullscreen(_ windowId: UInt64) {
+        guard let window = kayaNSWindows[windowId],
+            let want = kayaScene.windows[windowId]?.fullscreen,
+            kayaFullscreenInFlight[windowId] == nil,
+            window.styleMask.contains(.fullScreen) != want
+        else { return }
+        kayaKeepFullscreenDoor(windowId, window)
+        kayaFullscreenInFlight[windowId] = .kaya
+        window.toggleFullScreen(nil)
+        if window.styleMask.contains(.fullScreen) != want {
+            kayaFullscreenInFlight[windowId] = nil
+            kayaDiag(
+                "fullscreen wid=\(windowId) toggleFullScreen left the style mask "
+                    + "at \(!want) (collectionBehavior \(window.collectionBehavior.rawValue), "
+                    + "visible \(window.isVisible))")
+        }
+    }
+
+    func kayaFullscreenWillChange(_ windowId: UInt64, _ window: NSWindow) {
+        guard kayaFullscreenInFlight[windowId] == nil else { return }
+        kayaFullscreenInFlight[windowId] = .user(was: window.styleMask.contains(.fullScreen))
+    }
+
+    func kayaFullscreenDidChange(_ windowId: UInt64, _ window: NSWindow) {
+        let transition = kayaFullscreenInFlight.removeValue(forKey: windowId)
+        kayaFullscreenFailures[windowId] = nil
+        let on = window.styleMask.contains(.fullScreen)
+        let appWrote = kayaFullscreenAppWrote.remove(windowId) != nil
+        if case .user(let was)? = transition, on != was {
+            // A user change the app overrode before it settled is not
+            // reported; the reconcile below puts the app's value on.
+            if !appWrote || kayaScene.windows[windowId]?.fullscreen == on {
+                kayaScene.windows[windowId]?.fullscreen = on
+                KayaHost.emitFullscreenChanged(windowId, on)
+            }
+        }
+        DispatchQueue.main.async { kayaApplyWindowFullscreen(windowId) }
+    }
+
+    func kayaFullscreenFailed(_ windowId: UInt64, _ window: NSWindow, entering: Bool) {
+        kayaFullscreenInFlight[windowId] = nil
+        kayaFullscreenAppWrote.remove(windowId)
+        let failures = (kayaFullscreenFailures[windowId] ?? 0) + 1
+        kayaFullscreenFailures[windowId] = failures
+        kayaDiag(
+            "fullscreen wid=\(windowId) failed to \(entering ? "enter" : "exit") "
+                + "(failure \(failures), style mask \(window.styleMask.contains(.fullScreen)))")
+        guard failures <= 3 else { return }
+        DispatchQueue.main.async { kayaApplyWindowFullscreen(windowId) }
+    }
+
+    /// What the window is, for expect_fullscreen: the toolkit's style mask,
+    /// and a transition in flight named as one rather than read as either.
+    func kayaFullscreenReading(_ windowId: UInt64) -> String {
+        guard let window = kayaNSWindows[windowId] else {
+            return "unreadable (window#\(windowId) has no NSWindow)"
+        }
+        if let transition = kayaFullscreenInFlight[windowId] {
+            let whose: String
+            switch transition {
+            case .kaya: whose = "kaya's"
+            case .user: whose = "the user's"
+            }
+            return "in \(whose) transition (style mask \(window.styleMask.contains(.fullScreen) ? "on" : "off"))"
+        }
+        return window.styleMask.contains(.fullScreen) ? "on" : "off"
     }
 
     // MARK: - Window memory (docs/tasks-s4-plan.md P4)
@@ -4609,7 +4729,8 @@ var kayaTearingDown: Set<UInt64> = []
     /// the store holds — a frame that did not move costs nothing.
     func kayaSaveWindowFrame(_ windowId: UInt64) {
         guard kayaScene.windows[windowId]?.rememberFrame != false,
-            let window = kayaNSWindows[windowId]
+            let window = kayaNSWindows[windowId],
+            !kayaWindowFillsScreen(windowId, window)
         else { return }
         let text = kayaWindowFrameText(window.frame)
         guard KayaHost.windowFrame(windowId) != text else { return }
@@ -4658,6 +4779,45 @@ var kayaTearingDown: Set<UInt64> = []
             if let window = notification.object as? NSWindow {
                 kayaNoteWindowFrame(windowId, window)
             }
+        }
+
+        // Forwarded as well: SwiftUI's own delegate may track fullscreen.
+        func windowWillEnterFullScreen(_ notification: Notification) {
+            if let window = notification.object as? NSWindow {
+                kayaFullscreenWillChange(windowId, window)
+            }
+            original?.windowWillEnterFullScreen?(notification)
+        }
+
+        func windowWillExitFullScreen(_ notification: Notification) {
+            if let window = notification.object as? NSWindow {
+                kayaFullscreenWillChange(windowId, window)
+            }
+            original?.windowWillExitFullScreen?(notification)
+        }
+
+        func windowDidEnterFullScreen(_ notification: Notification) {
+            original?.windowDidEnterFullScreen?(notification)
+            if let window = notification.object as? NSWindow {
+                kayaFullscreenDidChange(windowId, window)
+            }
+        }
+
+        func windowDidExitFullScreen(_ notification: Notification) {
+            original?.windowDidExitFullScreen?(notification)
+            if let window = notification.object as? NSWindow {
+                kayaFullscreenDidChange(windowId, window)
+            }
+        }
+
+        func windowDidFailToEnterFullScreen(_ window: NSWindow) {
+            original?.windowDidFailToEnterFullScreen?(window)
+            kayaFullscreenFailed(windowId, window, entering: true)
+        }
+
+        func windowDidFailToExitFullScreen(_ window: NSWindow) {
+            original?.windowDidFailToExitFullScreen?(window)
+            kayaFullscreenFailed(windowId, window, entering: false)
         }
 
         init(windowId: UInt64, original: (any NSWindowDelegate)?) {
@@ -4768,6 +4928,12 @@ enum KayaHost {
     /// Programmatic selection never comes here (echo doctrine).
     static func emitSectionSelected(_ window: UInt64, _ section: UInt64) {
         api.emit_section_selected(window, section)
+    }
+
+    /// The user's own fullscreen door, post-fact (docs/fullscreen-plan.md);
+    /// a transition kaya started for the app's write never comes here.
+    static func emitFullscreenChanged(_ window: UInt64, _ on: Bool) {
+        api.emit_fullscreen_changed(window, on ? 1 : 0)
     }
 
     /// A column-header click: the SET_COLUMNS sort tag verbatim plus
@@ -5356,6 +5522,12 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     kayaApplyWindowDirty(wid)
                 case (wpropRememberFrame, valueBool):
                     model?.rememberFrame = raw[body + 24] != 0
+                case (wpropFullscreen, valueBool):
+                    #if os(macOS)
+                        kayaAppWroteFullscreen(wid, raw[body + 24] != 0)
+                    #else
+                        model?.fullscreen = raw[body + 24] != 0
+                    #endif
                 case (wpropInset, valueF64):
                     model?.inset =
                         raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
@@ -7149,6 +7321,16 @@ private func kayaA11yProps(_ view: some View, _ node: KayaNode) -> some View {
     /// PROP, since iOS lowers `dirty` to nothing (docs/dirty-plan.md D4/D5). NOT
     /// THE SCRIPT AGREEING WITH ITSELF — one line writes it, WATCHED red. nil
     /// means UNREADABLE, never `false`.
+    /// The window scene's status bar, which the immersive arm hides
+    /// (docs/fullscreen-plan.md §3): hidden reads "on".
+    private func kayaStatusBarReading() -> String {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        guard let manager = scenes.first?.statusBarManager else {
+            return "unreadable (\(scenes.count) window scene(s), no status bar manager)"
+        }
+        return manager.isStatusBarHidden ? "on" : "off"
+    }
+
     private func kayaWindowDirtyState(_ windowId: UInt64) -> Bool? {
         DispatchQueue.main.sync { () -> Bool? in
             kayaScene.windows[windowId]?.dirty
@@ -8983,6 +9165,74 @@ private func kayaRunScript(_ script: String) {
                     } else {
                         failures.append("\(prefix)dirty unreadable, wanted \(want)")
                     }
+                #endif
+            case "expect_fullscreen":
+                // The TOOLKIT, never the prop (docs/fullscreen-plan.md §5):
+                // the style mask on macOS, with a transition in flight named
+                // as one; the window scene's status bar on iOS, which is
+                // what the immersive arm hides.
+                let (wid, explicit, rest) = kayaWindowTarget(Array(parts[1...]))
+                let prefix = explicit ? "window#\(wid) " : ""
+                let want = rest.first == "on" ? "on" : "off"
+                #if os(macOS)
+                    if explicit { _ = kayaAwaitWindow(wid) }
+                    let got = DispatchQueue.main.sync { kayaFullscreenReading(wid) }
+                #else
+                    let got = DispatchQueue.main.sync { kayaStatusBarReading() }
+                #endif
+                if got == want {
+                    observed.append("\(prefix)fullscreen \(want)")
+                } else {
+                    failures.append("\(prefix)fullscreen \(got), wanted \(want)")
+                }
+            case "user_fullscreen":
+                // The platform's OWN door: the green button, whose click on
+                // a window with `.fullScreenPrimary` is the fullscreen
+                // toggle (§4.1). An action, silent like click; what the app
+                // answers is the next step's to read.
+                let (wid, _, rest) = kayaWindowTarget(Array(parts[1...]))
+                let want = rest.first == "on"
+                #if os(macOS)
+                    kayaAwaitQuiet()
+                    let answered = kayaAnswers()
+                    guard let target = kayaAwaitWindow(wid) else {
+                        failures.append("user_fullscreen: window#\(wid) never materialized")
+                        break
+                    }
+                    let settleBy = Date().addingTimeInterval(5)
+                    while Date() < settleBy,
+                        DispatchQueue.main.sync(execute: { kayaFullscreenInFlight[wid] != nil })
+                    {
+                        Thread.sleep(forTimeInterval: 0.02)
+                    }
+                    let refusal = DispatchQueue.main.sync { () -> String? in
+                        let before = kayaFullscreenReading(wid)
+                        if before == (want ? "on" : "off") || before.hasPrefix("in ") {
+                            return "window#\(wid) is \(before) before the door was driven"
+                        }
+                        kayaKeepFullscreenDoor(wid, target)
+                        guard let button = target.standardWindowButton(.zoomButton) else {
+                            return "window#\(wid) has no zoom button"
+                        }
+                        button.performClick(nil)
+                        if target.styleMask.contains(.fullScreen) != want {
+                            return "the green button left window#\(wid) "
+                                + "\(kayaFullscreenReading(wid)) "
+                                + "(collectionBehavior \(target.collectionBehavior.rawValue))"
+                        }
+                        return nil
+                    }
+                    if let refusal {
+                        failures.append("user_fullscreen \(want ? "on" : "off"): \(refusal)")
+                    } else {
+                        kayaAwaitAnswer(answered)
+                    }
+                #else
+                    _ = (wid, want)
+                    failures.append(
+                        "user_fullscreen: iOS has no user door into or out of "
+                            + "fullscreen (docs/fullscreen-plan.md §2); the phone "
+                            + "lanes drop the user half of the scene")
                 #endif
             case "close_window":
                 // The REAL chrome path: performClose runs the delegate
@@ -24086,6 +24336,9 @@ struct KayaRoot: View {
         // The canvas's scale and appearance channel, outside the arm
         // chain for the form factor's reason.
         .modifier(KayaPresentationReporter())
+        #if os(iOS)
+            .modifier(KayaImmersive(windowId: 0))
+        #endif
         // The accessor rides OUTSIDE the stack so its view never
         // detaches under a push.
         #if os(macOS)
@@ -24113,6 +24366,21 @@ struct KayaRoot: View {
         }
     }
 }
+
+#if os(iOS)
+    /// Fullscreen on a phone is the platform's immersive mode: the status bar
+    /// and the home indicator go (docs/fullscreen-plan.md §3, §8.2).
+    struct KayaImmersive: ViewModifier {
+        let windowId: UInt64
+
+        func body(content: Content) -> some View {
+            let on = kayaScene.windows[windowId]?.fullscreen ?? false
+            content
+                .statusBarHidden(on)
+                .persistentSystemOverlays(on ? .hidden : .automatic)
+        }
+    }
+#endif
 
 // Recording mode tiles parallel legs so one display-scoped capture sees every
 // window unoccluded: the runner assigns a slot, the window places (and bounds)

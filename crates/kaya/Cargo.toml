@@ -268,6 +268,10 @@ name = "dirty"
 path = "../../guests/rust/dirty.rs"
 
 [[example]]
+name = "fullscreen"
+path = "../../guests/rust/fullscreen.rs"
+
+[[example]]
 name = "confirm"
 path = "../../guests/rust/confirm.rs"
 
